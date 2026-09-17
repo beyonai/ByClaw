@@ -19,7 +19,9 @@ for (const document of documents) {
     document,
     /任何工具调用的参数或 shell 命令文本都不得包含 `requestedDeliveryDir`/,
   );
-  assert.match(document, /第一次允许包含该路径的工具调用必须是正式的 `publish`/);
+  // 交付目标改为 init 阶段绑定后，允许出现裸路径的调用是首次 init 与最终 publish 两处；
+  // 探测禁令本身未放松，仍由下面四条断言逐字锁住。
+  assert.match(document, /除首次 `init` 的 `--delivery-dir` 与最终的 `publish` 之外/);
   assert.match(document, /不得把该路径赋给 shell 变量，也不得 `echo`、记录或打印该路径/);
   assert.match(document, /`mkdir`、`ls`、`find`、`stat`、`test`、`realpath`、`readlink`/);
   assert.match(document, /“检查残留目录”、“确认目录不存在”和“只做只读检查”都不是例外/);
@@ -49,7 +51,10 @@ assert.match(
   /没有完整绝对 Session Root.*下一步必须直接向上游请求该值并结束本轮.*不得为了寻找 Session Root 再调用 `exec`、`read`、`session_status`/s,
 );
 assert.match(skill, /不得用 `ls`、`find`、glob 枚举 `\/by\/\.sessions\/`/);
-assert.match(skill, /`init` 命令不得包含 `--delivery-dir`/);
+// 旧禁令「init 命令不得包含 --delivery-dir」已被绑定流程取代：交付目标在 init 阶段一次性绑定，
+// 之后只以 handle 引用。取代它的是「init 不做任何文件系统访问」这条更强的约束。
+assert.match(skill, /`init` 不对交付目录做任何文件系统访问/);
+assert.doesNotMatch(skill, /`init` 命令不得包含 `--delivery-dir`/);
 assert.match(
   skill,
   /只有.*晋升.*已验证正文.*才能计入.*requestedItemCount/s,

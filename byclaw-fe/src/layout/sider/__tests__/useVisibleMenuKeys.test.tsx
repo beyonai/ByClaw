@@ -46,7 +46,7 @@ describe('useVisibleMenuKeys', () => {
     });
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'skill', 'file', 'model', 'ontology']);
+      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'skill', 'file', 'model']);
     });
   });
 
@@ -61,11 +61,13 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'file', 'model', 'ontology']);
+      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'file', 'model']);
     });
   });
 
-  it('temporarily hides view and object even when remote config enables them', async () => {
+  // 视图/对象已下线：MENU_NAME_TO_KEY_MAP 中不再有「视图」「对象」，因此远端即便下发
+  // 这两个菜单名也翻译不出 key，无法进入可见键集合（此前靠 TEMP_HIDDEN_MENU_KEYS 隐藏，该名单已删除）。
+  it('ignores retired ontology and removed view/object entries even when remote config sends them', async () => {
     mockGetDcSystemConfigListByStandType.mockResolvedValue({
       data: [
         { paramName: '会话', paramValue: 'true', paramSeq: 1 },
@@ -78,7 +80,7 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'ontology', 'automation', 'projectSpace', 'skill', 'file', 'model']);
+      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'skill', 'file', 'model']);
     });
   });
 

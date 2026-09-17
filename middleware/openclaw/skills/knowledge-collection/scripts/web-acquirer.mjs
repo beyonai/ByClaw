@@ -12,6 +12,14 @@ import {
 import { authorizePublicSource } from './discovery-authorization.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
 import { loadSession } from './session.mjs';
+import {
+  authorizationAllowsHttpRedirect,
+  authorizationEquivalentHttpUrl,
+  diagnosticHttpUrl,
+  normalizeAuthorizationUrl,
+} from './url-authorization.mjs';
+
+export { authorizationAllowsHttpRedirect, authorizationEquivalentHttpUrl } from './url-authorization.mjs';
 
 export const ACQUIRE_WEB_TIMEOUT_MS = 45_000;
 export const MAX_WEB_ARTICLE_BYTES = 10 * 1024 * 1024;
@@ -75,20 +83,19 @@ function probeFailure(reasonCode) {
   };
 }
 
-function normalizedHttpUrl(rawUrl, label) {
-  let url;
-  try {
-    url = new URL(requireText(rawUrl, label));
-  } catch {
-    throw new Error(`${label} 必须是有效 HTTP URL`);
-  }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-    throw new Error(`${label} 必须是安全 HTTP URL`);
-  }
-  url.hash = '';
-  url.hostname = url.hostname.toLowerCase();
-  url.searchParams.sort();
-  return url.toString();
+const normalizedHttpUrl = normalizeAuthorizationUrl;
+
+function diagnosticUrl(value) {
+  return diagnosticHttpUrl(value);
+}
+
+function failureDiagnostic(stage, mismatchKind, requestedUrl, resolvedUrl) {
+  return {
+    stage,
+    mismatchKind,
+    requestedUrl: diagnosticUrl(requestedUrl),
+    resolvedUrl: diagnosticUrl(resolvedUrl),
+  };
 }
 
 function resolvedUrlFromOutput(stdout) {
@@ -114,6 +121,13 @@ function baseInventoryUpdate(itemId, sourceUrl, title = '') {
   };
 }
 
+function reportableAcquisitionResult(result) {
+  return {
+    ...result,
+    resolvedUrl: diagnosticHttpUrl(result?.resolvedUrl),
+  };
+}
+
 function existingResult(paths, itemId, requestedUrl) {
   const targetDir = path.join(paths.root, 'raw', 'bycli', 'web', itemId);
   if (!fs.existsSync(targetDir)) return null;
@@ -130,7 +144,11 @@ function existingResult(paths, itemId, requestedUrl) {
     if (fs.existsSync(saved) && fs.statSync(saved).isFile()
       && fs.statSync(saved).size === result.size
       && sha256(fs.readFileSync(saved)) === result.sha256) {
-      return { ...result, executorResult: toPosixRelative(paths.root, resultPath), idempotent: true };
+      return reportableAcquisitionResult({
+        ...result,
+        executorResult: toPosixRelative(paths.root, resultPath),
+        idempotent: true,
+      });
     }
   }
   throw new Error(`ACQUISITION_CONFLICT: ${itemId} 已存在不可覆盖的抓取证据`);
@@ -203,11 +221,17 @@ export async function acquireWebProbe(candidate, options = {}) {
       return probeFailure(outputErrorCode(currentUrl));
     }
     const resolvedUrl = resolvedUrlFromOutput(currentUrl.stdout);
-    const resolved = resolvedUrl ? new URL(resolvedUrl) : null;
-    const trustedWechatRedirect = requested.hostname === 'weixin.sogou.com'
-      && resolved?.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
-    if (!resolvedUrl || (!allowedUrls.has(resolvedUrl) && !trustedWechatRedirect)) {
-      return { status: 'unavailable', reasonCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY' };
+    if (!resolvedUrl || !authorizationAllowsHttpRedirect(requestedUrl, resolvedUrl, [...allowedUrls])) {
+      return {
+        status: 'unavailable',
+        reasonCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY',
+        failureDiagnostic: failureDiagnostic(
+          'resolved-url-authorization',
+          resolvedUrl ? 'redirect-not-authorized' : 'resolved-url-unavailable',
+          requestedUrl,
+          resolvedUrl,
+        ),
+      };
     }
 
     let expectedStart = 0;
@@ -223,8 +247,18 @@ export async function acquireWebProbe(candidate, options = {}) {
         return probeFailure(outputErrorCode(extracted));
       }
       const chunk = parseJson(extracted.stdout);
-      if (!chunk || normalizedHttpUrl(chunk.url, 'extract.url') !== resolvedUrl
-        || chunk.start !== expectedStart || !Number.isInteger(chunk.end) || chunk.end < chunk.start
+      let chunkUrl = null;
+      try { chunkUrl = normalizedHttpUrl(chunk?.url, 'extract.url'); } catch {}
+      if (!chunkUrl || !authorizationEquivalentHttpUrl(chunkUrl, resolvedUrl)) {
+        return {
+          status: 'unavailable',
+          reasonCode: 'EXECUTOR_CHUNK_INVALID',
+          failureDiagnostic: failureDiagnostic(
+            'extract-url-continuity', 'extract-url-changed', resolvedUrl, chunkUrl,
+          ),
+        };
+      }
+      if (chunk.start !== expectedStart || !Number.isInteger(chunk.end) || chunk.end < chunk.start
         || !Number.isInteger(chunk.total_chars) || (totalChars !== null && totalChars !== chunk.total_chars)
         || typeof chunk.content !== 'string') {
         return { status: 'unavailable', reasonCode: 'EXECUTOR_CHUNK_INVALID' };
@@ -313,7 +347,7 @@ export async function runWebAcquire(paths, args, options = {}) {
   const previous = existingResult(paths, itemId, requestedUrl);
   if (previous) return { ok: true, action: 'acquire-web', ...previous };
 
-  recordPendingCollectionItem(paths, baseInventoryUpdate(itemId, requestedUrl));
+  recordPendingCollectionItem(paths, baseInventoryUpdate(itemId, requestedUrl), 'acquire-web');
   const runProcess = options.runProcess || runCli;
   const now = options.now || Date.now;
   const startedAtMs = now();
@@ -351,6 +385,7 @@ export async function runWebAcquire(paths, args, options = {}) {
       finishedAt: new Date(finishedAtMs).toISOString(),
       durationMs: Math.max(0, finishedAtMs - startedAtMs),
       ...(partial.stderr ? { stderr: safeStderr(partial.stderr) } : {}),
+      ...(partial.failureDiagnostic ? { failureDiagnostic: partial.failureDiagnostic } : {}),
     };
     const executorResult = publishArtifacts(paths, itemId, result, article);
     const rawArtifacts = [executorResult, ...(savedRelative ? [savedRelative] : [])];
@@ -359,9 +394,9 @@ export async function runWebAcquire(paths, args, options = {}) {
       rawArtifacts,
       reason: partial.errorCode || (state === 'pending' ? 'awaiting-materialization' : 'acquisition-failed'),
     };
-    if (state === 'failed') recordFailedCollectionItem(paths, update);
-    else recordPendingCollectionItem(paths, update);
-    return { ok: true, action: 'acquire-web', ...result, executorResult };
+    if (state === 'failed') recordFailedCollectionItem(paths, update, 'acquire-web');
+    else recordPendingCollectionItem(paths, update, 'acquire-web');
+    return reportableAcquisitionResult({ ok: true, action: 'acquire-web', ...result, executorResult });
   };
 
   try {
@@ -394,14 +429,20 @@ export async function runWebAcquire(paths, args, options = {}) {
       return finish({ status: 'failed', exitCode: 1, errorCode: 'EXECUTOR_RESOLVED_URL_UNAVAILABLE' });
     }
     try {
-      const resolvedAuthorization = authorizePublicSource(session.task?.discoveryGate, resolvedUrl);
-      if (resolvedAuthorization.candidateId !== requestedAuthorization.candidateId) {
+      if (!authorizationAllowsHttpRedirect(
+        requestedUrl,
+        resolvedUrl,
+        requestedAuthorization.acquisitionUrls || [],
+      )) {
         throw new Error('SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
       }
     } catch (error) {
       return finish({
         status: 'failed', exitCode: 1, errorCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY',
         resolvedUrl, stderr: error.message,
+        failureDiagnostic: failureDiagnostic(
+          'resolved-url-authorization', 'redirect-not-authorized', requestedUrl, resolvedUrl,
+        ),
       });
     }
 
@@ -421,8 +462,17 @@ export async function runWebAcquire(paths, args, options = {}) {
         });
       }
       const chunk = parseJson(extracted.stdout);
-      if (!chunk || normalizedHttpUrl(chunk.url, 'extract.url') !== resolvedUrl
-        || !Number.isInteger(chunk.start) || chunk.start !== expectedStart
+      let chunkUrl = null;
+      try { chunkUrl = normalizedHttpUrl(chunk?.url, 'extract.url'); } catch {}
+      if (!chunkUrl || !authorizationEquivalentHttpUrl(chunkUrl, resolvedUrl)) {
+        return finish({
+          status: 'failed', exitCode: 1, errorCode: 'EXECUTOR_CHUNK_INVALID', resolvedUrl,
+          failureDiagnostic: failureDiagnostic(
+            'extract-url-continuity', 'extract-url-changed', resolvedUrl, chunkUrl,
+          ),
+        });
+      }
+      if (!Number.isInteger(chunk.start) || chunk.start !== expectedStart
         || !Number.isInteger(chunk.end) || chunk.end < chunk.start
         || !Number.isInteger(chunk.total_chars) || (totalChars !== null && totalChars !== chunk.total_chars)
         || typeof chunk.content !== 'string') {

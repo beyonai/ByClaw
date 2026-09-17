@@ -649,7 +649,7 @@ public class ByClawSkillResourceApplicationService {
             resource.setHostType("hosted");
             resource.setCatalogId(catalogId);
             resource.setManOrgId(DEFAULT_MANAGER_ORG_ID);
-            resource.setResourceStatus(ResourceStatus.LIST.getNum());
+            resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
             resource.setResourceDVerid(-1L);
             resource.setResourceRVerid(-1L);
             resource.setAuthStatus("passed");
@@ -666,7 +666,7 @@ public class ByClawSkillResourceApplicationService {
 
         existing.setResourceName(metadata.skillName());
         existing.setResourceDesc(metadata.skillDesc());
-        existing.setResourceStatus(ResourceStatus.LIST.getNum());
+        existing.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         existing.setResourceVersionId("1.0");
         existing.setHostType("hosted");
         existing.setCatalogId(catalogId);

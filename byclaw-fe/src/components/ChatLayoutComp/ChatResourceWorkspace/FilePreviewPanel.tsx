@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Empty, Spin, message } from 'antd';
+import { useIntl } from '@umijs/max';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
 import {
@@ -155,6 +156,8 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   content,
   onOpenRelativeFile,
 }) => {
+  // 预览错误随界面语言显示，保留接口返回的具体错误。
+  const intl = useIntl();
   const [blob, setBlob] = useState<Blob | null>(null);
   const [loading, setLoading] = useState(true);
   const markdownImageCacheRef = useRef<Map<string, Promise<Blob>>>(new Map());
@@ -277,7 +280,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return response.blob();
       }
       if (resourceId && sourcePath) {
-        // 会话、项目文件来自文件空间；本体关联文件仍按知识库文件来源下载。
+        // 会话、项目文件来自文件空间；知识库文件按知识库来源下载。
         let response: any;
         try {
           response =
@@ -302,18 +305,18 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         if (!response.ok) throw new Error(response.statusText);
         return response.blob();
       }
-      throw new Error('Missing file source');
+      throw new Error(intl.formatMessage({ id: 'chatResource.missingFileSource' }));
     };
 
     void loadFile()
       .then((result) => {
         if (isTextPreviewFile(fileName) && result.size > MAX_TEXT_PREVIEW_SIZE) {
-          throw new Error('文件过大，无法在线预览，请下载查看');
+          throw new Error(intl.formatMessage({ id: 'chatResource.previewTooLarge' }));
         }
         if (active) setBlob(result);
       })
       .catch((error: any) => {
-        if (active) message.error(error?.message || '文件预览失败');
+        if (active) message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -324,6 +327,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
     };
     // content 按字段取依赖：调用方常内联该对象，用对象引用会每次渲染都重新构建 Blob。
   }, [
+    intl,
     content?.data,
     content?.binary,
     fileName,

@@ -131,4 +131,37 @@ describe("session-dispatch-gate", () => {
       runSessionDispatchExclusive(sessionKey, async () => "next"),
     ).resolves.toMatchObject({ result: "next" });
   });
+
+  it("cancels a queued lease without letting later requests overtake", async () => {
+    resetSessionDispatchGateForTest();
+    const sessionKey = "agent:main:direct:queued-cancel";
+    const order: string[] = [];
+    const first = await runSessionDispatchExclusiveLeased(sessionKey, async () => {
+      order.push("first");
+      return "first";
+    });
+    const controller = new AbortController();
+    const second = runSessionDispatchExclusiveLeased(
+      sessionKey,
+      async () => {
+        order.push("second");
+        return "second";
+      },
+      { signal: controller.signal },
+    );
+    const secondResult = expect(second).rejects.toThrow("queued request cancelled");
+    const third = runSessionDispatchExclusive(sessionKey, async () => {
+      order.push("third");
+      return "third";
+    });
+
+    controller.abort(new Error("queued request cancelled"));
+    await secondResult;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(order).toEqual(["first"]);
+
+    first.release();
+    await expect(third).resolves.toMatchObject({ result: "third" });
+    expect(order).toEqual(["first", "third"]);
+  });
 });

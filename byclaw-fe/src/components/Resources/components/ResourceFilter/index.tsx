@@ -21,13 +21,14 @@ import {
   PERMISSION_ALL_VALUE,
   PERMISSION_CREATED_BY_ME_VALUE,
   PERMISSION_AUTHORIZED_TO_ME_VALUE,
-  PERMISSION_PENDING_MY_APPROVAL_VALUE,
   PERMISSION_APPLIED_BY_ME_VALUE,
   statusOptions,
   belongOptions,
   resourceBizTypeOptions,
   knowledgeResourceBizTypeOptions,
   permissionOptions,
+  digitalEmployeeStatusOptions,
+  digitalEmployeeTypeOptions,
 } from '../../constants';
 import { isAllResourceBizTypeSelected, normalizeResourceBizTypeList } from '../../utils';
 import styles from './index.module.less';
@@ -37,6 +38,7 @@ export type IOnOkParams = {
   belong?: string;
   deptBelong?: IOrgCache[];
   resourceBizTypeList?: string[];
+  digitalEmployeeType?: string;
   permission?: string;
   orgFilters?: Array<{
     type: string;
@@ -53,11 +55,12 @@ export {
   STATUS_IN_STOCK_VALUE,
   STATUS_CANCELLED_VALUE,
   statusOptions,
+  digitalEmployeeStatusOptions,
+  digitalEmployeeTypeOptions,
   belongOptions,
   PERMISSION_ALL_VALUE,
   PERMISSION_CREATED_BY_ME_VALUE,
   PERMISSION_AUTHORIZED_TO_ME_VALUE,
-  PERMISSION_PENDING_MY_APPROVAL_VALUE,
   PERMISSION_APPLIED_BY_ME_VALUE,
 };
 
@@ -73,6 +76,8 @@ export const getDefaultParams = (defaultParam: Partial<IOnOkParams> = {}) => {
     resourceBizTypeList: [],
     permission: '',
     ...defaultParam,
+    // 数字员工类型默认选择“全部”，兼容调用方未传值或传入 undefined 的情况。
+    digitalEmployeeType: defaultParam.digitalEmployeeType ?? '',
   };
 };
 
@@ -91,12 +96,16 @@ const ResourceFilterForm = ({
   activeTab,
   resourceType,
   showStatusFilter,
+  statusOptionsOverride,
+  digitalEmployeeTypeFilter = false,
 }: {
   onOk: (param: IOnOkParams) => void;
   defaultParam: IOnOkParams;
   resourceType?: string;
   activeTab?: string;
   showStatusFilter?: boolean;
+  statusOptionsOverride?: typeof statusOptions;
+  digitalEmployeeTypeFilter?: boolean;
 }) => {
   const intl = useIntl();
   const [filterParam, setFilterParam] = React.useReducer(filterReducer, getDefaultParams(defaultParam));
@@ -108,28 +117,22 @@ const ResourceFilterForm = ({
     deptBelong: deptSelectValue,
     resourceBizTypeList: filterResourceBizTypeList,
     permission: filterPermission,
+    digitalEmployeeType: filterDigitalEmployeeType,
   } = filterParam;
   const typeOptions = resourceType === 'KG_DOC' ? knowledgeResourceBizTypeOptions : resourceBizTypeOptions;
+  const currentStatusOptions =
+    statusOptionsOverride || (resourceType === 'DIG_EMPLOYEE' ? digitalEmployeeStatusOptions : statusOptions);
   const showTypeFilter = resourceType === 'TOOL' || resourceType === 'KG_DOC';
   const normalizedResourceBizTypeList = normalizeResourceBizTypeList(filterResourceBizTypeList, resourceType);
 
-  // 个人 tab 下不展示"待我审核""我申请中"两个权限选项——这两项语义只在企业 tab 下成立。
-  const visiblePermissionOptions = React.useMemo(
-    () =>
-      activeTab === 'personal'
-        ? permissionOptions.filter(
-          (opt) => opt.value !== PERMISSION_PENDING_MY_APPROVAL_VALUE && opt.value !== PERMISSION_APPLIED_BY_ME_VALUE
-        )
-        : permissionOptions,
-    [activeTab]
-  );
+  const visiblePermissionOptions =
+    activeTab === 'personal'
+      ? permissionOptions.filter((opt) => opt.value !== PERMISSION_APPLIED_BY_ME_VALUE)
+      : permissionOptions;
 
   // 切到 personal tab 时，如果残留 forbidden 权限值，自动复位为 ""，避免 UI 与 state 不一致。
   React.useEffect(() => {
-    if (
-      activeTab === 'personal' &&
-      (filterPermission === PERMISSION_PENDING_MY_APPROVAL_VALUE || filterPermission === PERMISSION_APPLIED_BY_ME_VALUE)
-    ) {
+    if (activeTab === 'personal' && filterPermission === PERMISSION_APPLIED_BY_ME_VALUE) {
       setFilterParam({ type: 'update', item: { permission: '' } });
     }
   }, [activeTab, filterPermission]);
@@ -157,6 +160,7 @@ const ResourceFilterForm = ({
     const baseParams = {
       resourceStatus: filterStatus,
       permission: filterPermission,
+      ...(digitalEmployeeTypeFilter ? { digitalEmployeeType: filterDigitalEmployeeType } : {}),
     };
     const belongParams =
       activeTab === 'personal'
@@ -222,12 +226,30 @@ const ResourceFilterForm = ({
             </div>
           </div>
         )}
+        {digitalEmployeeTypeFilter && (
+          <div className="ub ub-ver gap8">
+            <p className={styles.filterTitle}>{intl.formatMessage({ id: 'resource.type' })}</p>
+            <div className="ub gap8 ub-wrap">
+              {digitalEmployeeTypeOptions.map((item) => (
+                <div
+                  key={item.value}
+                  className={classnames(styles.statusItem, 'ub ub-ac pointer', {
+                    [styles.active]: filterDigitalEmployeeType === item.value,
+                  })}
+                  onClick={() => setFilterParam({ type: 'update', item: { digitalEmployeeType: item.value } })}
+                >
+                  {intl.formatMessage({ id: item.label })}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {/* 筛选-状态 */}
         {showStatusFilter && (
           <div className="ub ub-ver gap8">
             <p className={styles.filterTitle}>{intl.formatMessage({ id: 'common.status' })}</p>
             <div className="ub gap8 ub-wrap">
-              {statusOptions.map((item) => (
+              {currentStatusOptions.map((item) => (
                 <div
                   key={item.value}
                   className={classnames(styles.statusItem, 'ub ub-ac pointer', {
@@ -350,6 +372,7 @@ const ResourceFilterForm = ({
                   type: 'update',
                   item: {
                     resourceStatus: STATUS_IN_STOCK_VALUE,
+                    digitalEmployeeType: '',
                     permission: '',
                   },
                 });
@@ -361,6 +384,7 @@ const ResourceFilterForm = ({
                     belong: BELONG_ALL_VALUE,
                     deptBelong: [],
                     resourceBizTypeList: [],
+                    digitalEmployeeType: '',
                     permission: '',
                   },
                 });
@@ -372,6 +396,7 @@ const ResourceFilterForm = ({
                     belong: BELONG_ALL_VALUE,
                     deptBelong: [],
                     resourceBizTypeList: [],
+                    digitalEmployeeType: '',
                     permission: '',
                   },
                 });
@@ -432,6 +457,9 @@ interface ResourceFilterWithDropdownProps {
   activeTab?: string;
   resourceType?: string;
   alwaysShowStatusFilter?: boolean;
+  hideStatusFilter?: boolean;
+  statusOptionsOverride?: typeof statusOptions;
+  digitalEmployeeTypeFilter?: boolean;
 }
 
 const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
@@ -440,11 +468,17 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
   activeTab,
   resourceType,
   alwaysShowStatusFilter,
+  hideStatusFilter = false,
+  statusOptionsOverride,
+  digitalEmployeeTypeFilter = false,
 }) => {
   const intl = useIntl();
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
   const [brandVersion, setBrandVersion] = React.useState<'commercial' | 'openSource' | null>();
-  const showStatusFilter = alwaysShowStatusFilter || brandVersion === 'openSource' || brandVersion === null;
+  const showStatusFilter =
+    !hideStatusFilter && (alwaysShowStatusFilter || brandVersion === 'openSource' || brandVersion === null);
+  const currentStatusOptions =
+    statusOptionsOverride || (resourceType === 'DIG_EMPLOYEE' ? digitalEmployeeStatusOptions : statusOptions);
 
   React.useEffect(() => {
     getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
@@ -472,6 +506,8 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
           defaultParam={defaultParam}
           activeTab={activeTab}
           showStatusFilter={showStatusFilter}
+          statusOptionsOverride={statusOptionsOverride}
+          digitalEmployeeTypeFilter={digitalEmployeeTypeFilter}
         />
       )}
       getPopupContainer={() => window.document.body}
@@ -501,12 +537,24 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
               })()}
             </div>
           )}
+          {digitalEmployeeTypeFilter && (
+            <div className={styles.selectedItem}>
+              {intl.formatMessage({ id: 'resource.type' })}：
+              {intl.formatMessage({
+                id:
+                  digitalEmployeeTypeOptions.find((item) => item.value === get(defaultParam, 'digitalEmployeeType'))
+                    ?.label || 'common.all',
+              })}
+            </div>
+          )}
           {/* 筛选-状态 */}
           {showStatusFilter && (
             <div className={styles.selectedItem}>
               {intl.formatMessage({ id: 'common.status' })}：
               {(() => {
-                const selectedOption = statusOptions.find((item) => item.value === get(defaultParam, 'resourceStatus'));
+                const selectedOption = currentStatusOptions.find(
+                  (item) => item.value === get(defaultParam, 'resourceStatus')
+                );
                 return selectedOption
                   ? intl.formatMessage({ id: selectedOption.label })
                   : intl.formatMessage({ id: 'resource.statusActive' });
@@ -520,9 +568,7 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
               const currentPermission = get(defaultParam, 'permission');
               // personal tab 下"待我审核 / 我申请中"两个值不展示——若残留按"全部"回显
               const isHiddenInPersonal =
-                activeTab === 'personal' &&
-                (currentPermission === PERMISSION_PENDING_MY_APPROVAL_VALUE ||
-                  currentPermission === PERMISSION_APPLIED_BY_ME_VALUE);
+                activeTab === 'personal' && currentPermission === PERMISSION_APPLIED_BY_ME_VALUE;
               if (isHiddenInPersonal) {
                 return intl.formatMessage({ id: 'common.all' });
               }

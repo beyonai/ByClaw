@@ -26,8 +26,11 @@ export interface ISession {
   avatar?: string;
   theme?: string;
 
-  /** 会话由文件上传等流程在服务端列表可见前本地创建。 */
+  /** 会话历史只保存在 Desktop 本地。 */
   isLocalSession?: boolean;
+
+  /** 服务端已创建，但会话列表接口可能暂时还未返回的乐观会话。 */
+  isPendingRemoteSession?: boolean;
 
   citeMsgIdList?: string[];
   participants?: Array<{

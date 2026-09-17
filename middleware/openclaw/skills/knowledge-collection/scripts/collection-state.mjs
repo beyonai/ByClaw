@@ -16,6 +16,7 @@ import {
   atomicWriteJson,
   isInside,
   loadSession as sessionLoad,
+  persistSession,
   persistCollection,
   withSessionLock,
   markDeliveryStale,
@@ -26,11 +27,14 @@ import {
 import {
   deliveryCompleteForSession, summarizeCrawlDelivery, summarizePromotedDelivery,
 } from './delivery-state.mjs';
-import { summarizeProbeRun } from './probe-state.mjs';
+import { assertSessionWorkflowAllowsCommand, summarizeProbeRun } from './probe-state.mjs';
 import {
+  authorizeAcceptedAcquisitionEvidence,
   authorizeArxivAcquisitionVariant as authorizeArxivVariant,
   authorizePublicSource,
+  registerAcceptedAcquisitionEvidence,
 } from './discovery-authorization.mjs';
+import { authorizationEquivalentHttpUrl } from './url-authorization.mjs';
 import { assessMaterializedTopic } from './topic-relevance.mjs';
 import {
   CONTENT_GRANULARITIES,
@@ -83,8 +87,60 @@ function discoveryCandidateFor(session, source, sourceUrl) {
     };
   }
 
-  const candidate = authorizePublicSource(gate, sourceUrl);
-  return candidate ? { ...candidate, authorizationKind: 'public-discover' } : candidate;
+  try {
+    const candidate = authorizePublicSource(gate, sourceUrl);
+    const authorizationKind = candidate?.origin === 'user-provided'
+      ? 'user-provided' : 'public-discover';
+    return candidate ? { ...candidate, authorizationKind } : candidate;
+  } catch (error) {
+    const matches = (session.task?.acquisitionEvidence || []).filter((entry) => {
+      try {
+        return entry?.status === 'accepted' && entry.scope === 'resolved-only'
+          && authorizationEquivalentHttpUrl(entry.resolvedUrl, sourceUrl);
+      } catch {
+        return false;
+      }
+    });
+    const candidateIds = [...new Set(matches.map((entry) => entry.candidateId))];
+    if (candidateIds.length !== 1) throw error;
+    const candidate = authorizeAcceptedAcquisitionEvidence(session, candidateIds[0], sourceUrl);
+    return {
+      ...candidate,
+      authorizationKind: candidate.origin === 'user-provided' ? 'user-provided' : 'public-discover',
+    };
+  }
+}
+
+export function registerControlledAcquisitionEvidence(paths, evidence, options = {}) {
+  return withSessionLock(paths, 'register-acquisition-evidence', () => {
+    const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    if (!options.internal) {
+      assertSessionWorkflowAllowsCommand(loaded.session, options.command || 'materialize-web');
+    }
+    validateRawArtifacts(paths.root, [evidence?.evidenceArtifact]);
+    const registered = registerAcceptedAcquisitionEvidence(loaded.session, {
+      ...evidence,
+      evidenceArtifactHash: fullTextEvidenceHash(paths, evidence.evidenceArtifact),
+    });
+    if (options.itemId) {
+      const inventory = loaded.metadata.collection.items.find((item) => item.itemId === options.itemId);
+      if (!inventory) throw new Error(`ACQUISITION_EVIDENCE_ITEM_NOT_FOUND: ${options.itemId}`);
+      if (!authorizationEquivalentHttpUrl(inventory.sourceUrl, registered.requestedUrl)
+        && !authorizationEquivalentHttpUrl(inventory.sourceUrl, registered.resolvedUrl)) {
+        throw new Error(`ACQUISITION_EVIDENCE_ITEM_CONFLICT: ${options.itemId}`);
+      }
+      inventory.discoveryCandidateId = registered.candidateId;
+      const candidate = loaded.session.task.discoveryGate.candidates.find(
+        (entry) => entry.candidateId === registered.candidateId,
+      );
+      inventory.provenanceKind = candidate?.origin === 'user-provided'
+        ? 'user-provided' : 'public-discover';
+      loaded.session.collection = loaded.metadata;
+      markDeliveryStale(loaded.session);
+    }
+    persistSession(paths, loaded.session);
+    return clone(registered);
+  });
 }
 
 function assertMaterializedTopic(session, authorization, canonicalItem, sanitizedAbsolute) {
@@ -152,6 +208,13 @@ function normalizeDuplicateUrl(sourceUrl) {
 function normalizeDuplicateGroups(metadata) {
   const representatives = new Map();
   for (const item of metadata.collection.items) {
+    if (item.sourceUrl?.startsWith('cloud-knowledge://') && typeof item.duplicateGroupKey === 'string'
+      && item.duplicateGroupKey) {
+      const representative = representatives.get(item.duplicateGroupKey) || item.itemId;
+      representatives.set(item.duplicateGroupKey, representative);
+      item.duplicateOf = representative === item.itemId ? null : representative;
+      continue;
+    }
     const duplicateGroupKey = normalizeDuplicateUrl(item.sourceUrl)
       || `source:${articleIdentity(item)}`;
     const representative = representatives.get(duplicateGroupKey) || item.itemId;
@@ -273,9 +336,10 @@ function validateFullTextEvidence(paths, session, evidence, { sourceSkill, sourc
   return { schemaVersion: '1.0', executor, artifact };
 }
 
-export function registerFullTextEvidenceReceipt(paths, evidence) {
+export function registerFullTextEvidenceReceipt(paths, evidence, command) {
   return withSessionLock(paths, 'register-full-text-evidence', () => {
     const { session } = sessionLoad(paths, { persistMigration: true });
+    if (command) assertSessionWorkflowAllowsCommand(session, command);
     const executor = requireString(evidence?.executor, 'fullTextEvidence.executor');
     const sourceUrl = requireString(evidence?.sourceUrl, 'fullTextEvidence.sourceUrl');
     const artifact = requireString(evidence?.artifact, 'fullTextEvidence.artifact');
@@ -308,9 +372,10 @@ export function registerFullTextEvidenceReceipt(paths, evidence) {
   });
 }
 
-export function registerArxivAcquisitionVariant(paths, { sourceUrl, acquisitionUrl }) {
+export function registerArxivAcquisitionVariant(paths, { sourceUrl, acquisitionUrl }, command) {
   return withSessionLock(paths, 'register-arxiv-acquisition', () => {
     const { session } = sessionLoad(paths, { persistMigration: true });
+    if (command) assertSessionWorkflowAllowsCommand(session, command);
     const candidate = authorizeArxivVariant(
       session.task?.discoveryGate,
       requireString(sourceUrl, 'sourceUrl'),
@@ -559,9 +624,10 @@ function reconcileCanonicalView(collectionResult, metadata) {
   const seenGroups = new Set();
   const items = [];
   for (const inventory of metadata.collection.items) {
-    if (inventory.materialization.status !== 'materialized'
-      || seenGroups.has(inventory.duplicateGroupKey)) continue;
-    seenGroups.add(inventory.duplicateGroupKey);
+    if (inventory.materialization.status !== 'materialized') continue;
+    const isCloud = inventory.sourceUrl?.startsWith('cloud-knowledge://');
+    if (!isCloud && seenGroups.has(inventory.duplicateGroupKey)) continue;
+    if (!isCloud) seenGroups.add(inventory.duplicateGroupKey);
     const sanitizedPath = inventory.materialization.sanitizedPath;
     items.push(existingByPath.get(sanitizedPath) || canonicalViewItem({
       title: inventory.title,
@@ -595,10 +661,10 @@ function validateCanonicalView(root, collectionResult, metadata) {
     if (!inventory || item.url !== inventory.sourceUrl) {
       throw new Error(`collection-result.json canonical view 未对应 materialized inventory: ${item.fileName}`);
     }
-    if (seenGroups.has(inventory.duplicateGroupKey)) {
+    if (!inventory.sourceUrl?.startsWith('cloud-knowledge://') && seenGroups.has(inventory.duplicateGroupKey)) {
       throw new Error(`collection-result.json canonical view 重复组出现多次: ${item.fileName}`);
     }
-    seenGroups.add(inventory.duplicateGroupKey);
+    if (!inventory.sourceUrl?.startsWith('cloud-knowledge://')) seenGroups.add(inventory.duplicateGroupKey);
     validateMarkdownPath(root, item.fileName, `collection-result.json items[${index}].fileName`, path.join('sanitized', 'items'));
   }
 }
@@ -828,10 +894,11 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
   return { itemId, materialization: inventory.materialization, canonicalItem: canonicalViewItem(update.canonicalItem) };
 }
 
-function recordUnmaterializedCollectionItem(paths, update, targetStatus) {
+function recordUnmaterializedCollectionItem(paths, update, targetStatus, command) {
   const action = targetStatus === 'failed' ? 'record-failed' : 'record-pending';
   return withSessionLock(paths, action, () => {
     const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    if (command) assertSessionWorkflowAllowsCommand(loaded.session, command);
     if (loaded.materializationRecovered) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
@@ -956,12 +1023,12 @@ function reconcileCollectionStatus(metadata) {
   }
 }
 
-export function recordPendingCollectionItem(paths, update) {
-  return recordUnmaterializedCollectionItem(paths, update, 'pending');
+export function recordPendingCollectionItem(paths, update, command) {
+  return recordUnmaterializedCollectionItem(paths, update, 'pending', command);
 }
 
-export function recordFailedCollectionItem(paths, update) {
-  return recordUnmaterializedCollectionItem(paths, update, 'failed');
+export function recordFailedCollectionItem(paths, update, command) {
+  return recordUnmaterializedCollectionItem(paths, update, 'failed', command);
 }
 
 export function cmdCollect(paths, args) {
@@ -970,6 +1037,7 @@ export function cmdCollect(paths, args) {
   if (!items.length) throw new Error('--item-json-file 未提供任何条目');
   return withSessionLock(paths, 'collect', () => {
     const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    assertSessionWorkflowAllowsCommand(loaded.session, 'collect');
     if (loaded.materializationRecovered) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
@@ -1211,19 +1279,35 @@ function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult
   if (!['1.1', '2.0'].includes(gate.schemaVersion)) {
     return { valid: false, warnings: ['公共发现主题相关性授权状态无效'] };
   }
+  let valid = true;
+  for (const item of publicItems) {
+    try {
+      validateStoredAcquisitionEvidence(paths, session, item);
+    } catch (error) {
+      valid = false;
+      warnings.push(`inventory ${item.itemId} 采集授权证据失效: ${error.message}`);
+    }
+  }
   const discoveredItems = publicItems.filter((item) => item.provenanceKind === 'public-discover'
     || (typeof item.discoveryCandidateId === 'string'
       && !['user-provided', 'crawl-frontier'].includes(item.provenanceKind)));
   const canonicalByPath = new Map(collectionResult.items.map((item) => [item.fileName, item]));
-  let valid = true;
   for (const item of discoveredItems) {
     let candidate;
     try {
       candidate = authorizePublicSource(gate, item.sourceUrl);
-    } catch (error) {
-      valid = false;
-      warnings.push(`inventory ${item.itemId} 发现主题授权失效: ${error.message}`);
-      continue;
+    } catch (initialAuthorizationError) {
+      try {
+        candidate = authorizeAcceptedAcquisitionEvidence(
+          session, item.discoveryCandidateId, item.sourceUrl,
+        );
+      } catch {
+        valid = false;
+        warnings.push(
+          `inventory ${item.itemId} 发现主题授权失效: ${initialAuthorizationError.message}`,
+        );
+        continue;
+      }
     }
     if (candidate?.candidateId !== item.discoveryCandidateId) {
       valid = false;
@@ -1251,6 +1335,55 @@ function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult
     }
   }
   return { valid, warnings };
+}
+
+function validateStoredAcquisitionEvidence(paths, session, item) {
+  if (typeof item.discoveryCandidateId !== 'string') return;
+  const entries = (session.task?.acquisitionEvidence || []).filter((entry) => {
+    try {
+      return entry?.schemaVersion === '1.0' && entry.status === 'accepted'
+        && entry.scope === 'resolved-only'
+        && entry.candidateId === item.discoveryCandidateId
+        && (authorizationEquivalentHttpUrl(entry.requestedUrl, item.sourceUrl)
+          || authorizationEquivalentHttpUrl(entry.resolvedUrl, item.sourceUrl));
+    } catch {
+      return false;
+    }
+  });
+  // Sessions created before controlled acquisition evidence was introduced stay
+  // readable. Once a ledger row exists, however, its bound raw artifact is part
+  // of the authorization decision and must remain intact.
+  if (!entries.length) return;
+  const accepted = entries.some((entry) => {
+    try {
+      if (!item.rawArtifacts?.includes(entry.evidenceArtifact)) {
+        throw new Error('证据文件未登记在 inventory rawArtifacts 中');
+      }
+      validateRawArtifacts(paths.root, [entry.evidenceArtifact]);
+      if (entry.evidenceArtifactHash
+        && fullTextEvidenceHash(paths, entry.evidenceArtifact) !== entry.evidenceArtifactHash) {
+        throw new Error('证据文件哈希已变化');
+      }
+      const receipt = readJson(
+        path.join(paths.root, entry.evidenceArtifact),
+        `inventory ${item.itemId} acquisition evidence`,
+      );
+      const result = receipt?.executorResult && typeof receipt.executorResult === 'object'
+        ? receipt.executorResult : receipt;
+      const requestedUrl = result?.requestedUrl ?? result?.source_url;
+      const resolvedUrl = result?.resolvedUrl ?? result?.resolved_url;
+      if (!authorizationEquivalentHttpUrl(requestedUrl, entry.requestedUrl)
+        || !authorizationEquivalentHttpUrl(resolvedUrl, entry.resolvedUrl)
+        || (result?.executor !== undefined && result.executor !== entry.executor)) {
+        throw new Error('证据文件与授权账本不匹配');
+      }
+      authorizeAcceptedAcquisitionEvidence(session, entry.candidateId, entry.resolvedUrl);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!accepted) throw new Error('没有可验证的原始采集证据');
 }
 
 function promotionContentFingerprint(markdown) {
@@ -1381,6 +1514,24 @@ export function collectionStatus(paths) {
     ? items.filter((item) => item.materialization.status === 'materialized'
       && item.materialization.contentGranularity !== 'full-text').length
     : 0;
+  const mailAttachmentWarnings = [];
+  for (const item of items.filter(entry => entry.sourceSkill === 'mail' && entry.attachmentsRequested)) {
+    for (const attachment of item.attachments || []) {
+      try {
+        if (attachment.status !== 'complete') throw new Error('attachment incomplete');
+        const target = validateRelativePath(paths.root, attachment.localPath, 'mail attachment');
+        validatePathPrefix(paths.root, attachment.localPath, 'sanitized/items', 'mail attachment');
+        let cursor = paths.root;
+        for (const segment of path.relative(paths.root, target).split(path.sep)) {
+          cursor = path.join(cursor, segment);
+          if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error('attachment symlink');
+        }
+        const stat = fs.lstatSync(target);
+        if (!stat.isFile() || stat.size !== attachment.size || stat.size > 25 * 1024 * 1024
+          || crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex') !== attachment.sha256) throw new Error('attachment changed');
+      } catch { mailAttachmentWarnings.push(`MAIL_ATTACHMENT_INVALID: ${item.itemId}`); }
+    }
+  }
   const relevance = evaluateStoredTopicRelevance(paths, session, metadata, collectionResult);
   const promotionEvidence = validatePromotionEvidence(paths, session);
   const baseProbeSummary = summarizeProbeRun(session);
@@ -1393,6 +1544,7 @@ export function collectionStatus(paths) {
   } : null;
   return {
     collectionStatus: metadata.collection.status,
+    operationalStatus: probeSummary?.effectiveStatus || metadata.collection.status,
     items: items.length,
     sourceRecords: items.length,
     materialized: count('materialized'),
@@ -1406,13 +1558,13 @@ export function collectionStatus(paths) {
     requiredContentGranularity,
     unmetRequiredGranularity,
     deliveryComplete: deliveryCompleteForSession(session) && relevance.valid
-      && promotionEvidence.remainingCount === 0,
+      && promotionEvidence.remainingCount === 0 && mailAttachmentWarnings.length === 0,
     publicCollectRun: probeSummary,
     crawl: summarizeCrawlDelivery(session),
     canonicalItems: collectionResult.items.length,
     ...(relevance.valid ? { downstreamInput: buildDownstreamInput(paths, collectionResult) } : {}),
     warnings: [...new Set([
-      ...loaded.warnings, ...relevance.warnings, ...promotionEvidence.warnings,
+      ...loaded.warnings, ...relevance.warnings, ...promotionEvidence.warnings, ...mailAttachmentWarnings,
     ])],
   };
 }

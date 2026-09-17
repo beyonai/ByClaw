@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import { cmdCollect, collectionStatus, recordPendingCollectionItem } from './collection-state.mjs';
+import { executeLocalCommand } from './command-router.mjs';
 import { recordDiscoveryResult, reserveDiscoveryAttempt } from './discovery-authorization.mjs';
 import { cmdInit } from './research-state.mjs';
 import { sessionPaths } from './session.mjs';
@@ -32,14 +33,18 @@ function completeArticle() {
   ].join('\n');
 }
 
-async function fixture(markdown = completeArticle(), { discoveryPageType = null } = {}) {
+async function fixture(markdown = completeArticle(), {
+  discoveryPageType = null,
+  requestedUrl = SOURCE_URL,
+  resolvedUrl = requestedUrl,
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'web-materializer-'));
   const initArgs = {
     'session-dir': root,
     query: '采集一篇关于 Example 的文章',
     'required-content-granularity': 'full-text',
   };
-  if (!discoveryPageType) initArgs['direct-urls'] = JSON.stringify([SOURCE_URL]);
+  if (!discoveryPageType) initArgs['direct-urls'] = JSON.stringify([requestedUrl]);
   cmdInit(initArgs);
   if (discoveryPageType) {
     const sessionPath = join(root, 'session.json');
@@ -52,7 +57,7 @@ async function fixture(markdown = completeArticle(), { discoveryPageType = null 
       query: 'Example 深度文章',
       category: 'general',
       candidates: [{
-        url: SOURCE_URL,
+        url: requestedUrl,
         title: 'Example 深度报道',
         pageType: discoveryPageType,
       }],
@@ -67,7 +72,7 @@ async function fixture(markdown = completeArticle(), { discoveryPageType = null 
   await writeFile(join(rawDir, 'images/chart.png'), 'chart-image');
   const executorResultPath = join(rawDir, 'executor-result.json');
   await writeFile(executorResultPath, `${JSON.stringify({
-    schemaVersion: '1.0', executor: 'bycli', requestedUrl: SOURCE_URL, resolvedUrl: SOURCE_URL,
+    schemaVersion: '1.0', executor: 'bycli', requestedUrl, resolvedUrl,
     status: 'saved', exitCode: 0, errorCode: null, timedOut: false, truncated: false,
     saved: 'raw/bycli/web/example-report/article.md', size: Buffer.byteLength(markdown),
     sha256: crypto.createHash('sha256').update(markdown).digest('hex'),
@@ -76,7 +81,7 @@ async function fixture(markdown = completeArticle(), { discoveryPageType = null 
   }, null, 2)}\n`);
   recordPendingCollectionItem(paths, {
     itemId: 'example-report', source: 'public-internet', sourceSkill: 'bycli', backend: 'web',
-    sourceUrl: SOURCE_URL, title: 'Example 深度报道',
+    sourceUrl: requestedUrl, title: 'Example 深度报道',
     rawArtifacts: [
       'raw/bycli/web/example-report/article.md',
       'raw/bycli/web/example-report/executor-result.json',
@@ -146,6 +151,105 @@ test('materializes controlled web output with duplicated safe assets and registe
     assert.equal(cmdCollect(f.paths, { 'item-json-file': result.collectPayloadPath }).ok, true);
     const status = collectionStatus(f.paths);
     assert.equal(status.deliveryComplete, true, JSON.stringify(status, null, 2));
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('manual materialization persists a same-site redirect through collect and repeated status', async () => {
+  const requestedUrl = 'https://m.example.com/article/123';
+  const resolvedUrl = 'https://www.example.com/article/123?source=m_redirect&token=super-secret';
+  const f = await fixture(completeArticle(), { requestedUrl, resolvedUrl });
+  try {
+    const result = await runWebMaterialize(f.paths, {
+      'item-id': 'example-report', 'executor-result-file': f.executorResultPath,
+    });
+    assert.equal(result.materialization.status, 'materialized');
+    const afterMaterialize = JSON.parse(await readFile(join(f.root, 'session.json'), 'utf8'));
+    assert.equal(afterMaterialize.task.acquisitionEvidence.length, 1);
+    assert.equal(afterMaterialize.task.acquisitionEvidence[0].resolvedUrl, resolvedUrl);
+    assert.equal(afterMaterialize.task.discoveryGate.candidates[0].canonicalUrl, requestedUrl);
+    assert.deepEqual(afterMaterialize.task.discoveryGate.candidates[0].acquisitionUrls, [requestedUrl]);
+
+    const payload = JSON.parse(await readFile(result.collectPayloadPath, 'utf8'));
+    const sanitized = await readFile(join(f.root, 'sanitized/items/example-report/index.md'), 'utf8');
+    assert.equal(payload.canonicalItem.url, requestedUrl);
+    assert.equal(sanitized.includes('super-secret'), false);
+    assert.match(sanitized, /source_url: "https:\/\/m\.example\.com\/article\/123"/);
+
+    assert.equal(cmdCollect(f.paths, { 'item-json-file': result.collectPayloadPath }).ok, true);
+    assert.equal(collectionStatus(f.paths).deliveryComplete, true);
+    assert.equal(collectionStatus(sessionPaths(f.root)).deliveryComplete, true);
+    const status = executeLocalCommand('status', { 'session-dir': f.root, full: true });
+    assert.equal(JSON.stringify(status).includes('super-secret'), false);
+    assert.equal(Object.hasOwn(status.task, 'acquisitionEvidence'), false);
+    assert.equal(executeLocalCommand('export-views', { 'session-dir': f.root }).ok, true);
+    const metadata = await readFile(join(f.root, 'sanitized/metadata.json'), 'utf8');
+    const collectionResult = await readFile(join(f.root, 'collection-result.json'), 'utf8');
+    assert.equal(metadata.includes('super-secret'), false);
+    assert.equal(collectionResult.includes('super-secret'), false);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('missing redirect authorization evidence invalidates a completed delivery', async () => {
+  const requestedUrl = 'https://m.example.com/article/123';
+  const resolvedUrl = 'https://www.example.com/article/123?source=m_redirect';
+  const f = await fixture(completeArticle(), { requestedUrl, resolvedUrl });
+  try {
+    const result = await runWebMaterialize(f.paths, {
+      'item-id': 'example-report', 'executor-result-file': f.executorResultPath,
+    });
+    assert.equal(cmdCollect(f.paths, { 'item-json-file': result.collectPayloadPath }).ok, true);
+    assert.equal(collectionStatus(f.paths).deliveryComplete, true);
+
+    await unlink(f.executorResultPath);
+    const status = collectionStatus(sessionPaths(f.root));
+    assert.equal(status.deliveryComplete, false);
+    assert.match(status.warnings.join('\n'), /acquisition evidence|采集授权证据|原始证据/i);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('changed redirect authorization evidence invalidates a completed delivery', async () => {
+  const requestedUrl = 'https://m.example.com/article/123';
+  const resolvedUrl = 'https://www.example.com/article/123?source=m_redirect';
+  const f = await fixture(completeArticle(), { requestedUrl, resolvedUrl });
+  try {
+    const result = await runWebMaterialize(f.paths, {
+      'item-id': 'example-report', 'executor-result-file': f.executorResultPath,
+    });
+    assert.equal(cmdCollect(f.paths, { 'item-json-file': result.collectPayloadPath }).ok, true);
+    const evidence = JSON.parse(await readFile(f.executorResultPath, 'utf8'));
+    evidence.title = 'tampered after registration';
+    await writeFile(f.executorResultPath, `${JSON.stringify(evidence, null, 2)}\n`);
+
+    const status = collectionStatus(sessionPaths(f.root));
+    assert.equal(status.deliveryComplete, false);
+    assert.match(status.warnings.join('\n'), /采集授权证据失效/);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('discovered weak candidate keeps runtime redirect authorization through repeated status', async () => {
+  const requestedUrl = 'https://m.example.com/article/123';
+  const resolvedUrl = 'https://www.example.com/article/123?source=m_redirect';
+  const f = await fixture(completeArticle(), {
+    discoveryPageType: 'weak', requestedUrl, resolvedUrl,
+  });
+  try {
+    const result = await runWebMaterialize(f.paths, {
+      'item-id': 'example-report', 'executor-result-file': f.executorResultPath,
+    });
+    assert.equal(result.materialization.status, 'materialized');
+    assert.equal(cmdCollect(f.paths, { 'item-json-file': result.collectPayloadPath }).ok, true);
+    const firstStatus = collectionStatus(f.paths);
+    const repeatedStatus = collectionStatus(sessionPaths(f.root));
+    assert.equal(firstStatus.deliveryComplete, true, JSON.stringify(firstStatus, null, 2));
+    assert.equal(repeatedStatus.deliveryComplete, true, JSON.stringify(repeatedStatus, null, 2));
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

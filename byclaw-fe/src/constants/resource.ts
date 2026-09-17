@@ -7,6 +7,7 @@ export const ResourceTypeMap = {
   knowledgeBaseTerm: 'KG_TERM', // 知识库问答
   knowledgeFolder: 'KG_DOC_FOLDER', // 知识库文件夹
   knowledgeFile: 'KG_DOC_FILE', // 知识库文件
+  dataSource: 'DATA_SOURCE', // Reusable project data source
   database: 'KG_DB', // chatbi数据库
   doc: 'DOC', // KG_DOC,KG_QA,KG_TERM
 
@@ -14,7 +15,7 @@ export const ResourceTypeMap = {
   MCP: 'MCP',
   TOOL: 'TOOL',
   TOOLKIT: 'TOOLKIT',
-  VIEW: 'VIEW',
+  // 引用元素通用类型：真实资源类型由 resourceBizType 细分（工具/文件/项目云盘等引用均走该类型）
   OBJECT: 'OBJECT',
   SKILL: 'SKILL',
   PROPERTY: 'PROPERTY',

@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.alibaba.fastjson.JSONObject;
@@ -14,7 +15,8 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 维护父会话范围内外部执行器子会话到 ByClaw 子会话的稳定映射。
@@ -44,6 +46,8 @@ public class ExternalChildSessionService {
 
     private final SequenceService sequenceService;
 
+    private final TransactionTemplate bindingTransaction;
+
     private final Map<String, ExternalChildSessionBinding> bindings = new ConcurrentHashMap<>();
 
     private final Map<String, Object> bindingLocks = new ConcurrentHashMap<>();
@@ -51,11 +55,13 @@ public class ExternalChildSessionService {
     public ExternalChildSessionService(
             SessionService sessionService,
             SessionExtService sessionExtService,
-            SequenceService sequenceService
+            SequenceService sequenceService,
+            PlatformTransactionManager transactionManager
     ) {
         this.sessionService = sessionService;
         this.sessionExtService = sessionExtService;
         this.sequenceService = sequenceService;
+        this.bindingTransaction = new TransactionTemplate(transactionManager);
     }
 
     /**
@@ -65,7 +71,6 @@ public class ExternalChildSessionService {
      * @param metadata 通用外部会话事件元数据
      * @return 子会话绑定
      */
-    @Transactional
     public ExternalChildSessionBinding ensureBinding(Long parentSessionId, JSONObject metadata) {
         if (parentSessionId == null) {
             throw new IllegalArgumentException("parentSessionId must not be null");
@@ -89,10 +94,12 @@ public class ExternalChildSessionService {
                 return cached;
             }
 
-            ExternalChildSessionBinding binding = findExisting(parentSessionId, externalSessionId);
-            if (binding == null) {
-                binding = createBinding(parentSessionId, externalSessionId, metadata);
-            }
+            // Only a cache miss needs the database. Publish the binding after commit so rolled-back
+            // child creation can never become the baseline for later stream chunks.
+            ExternalChildSessionBinding binding = Objects.requireNonNull(bindingTransaction.execute(status -> {
+                ExternalChildSessionBinding existing = findExisting(parentSessionId, externalSessionId);
+                return existing == null ? createBinding(parentSessionId, externalSessionId, metadata) : existing;
+            }));
             bindings.put(bindingKey, binding);
             bindingLocks.remove(bindingKey, lock);
             return binding;

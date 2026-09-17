@@ -12,7 +12,12 @@
     {
       "name": "agent-reach",
       "path": "agent-reach.md",
-      "description": "公共互联网来源路由表与 bycli 网页铁律。取内容前必读。"
+      "description": "统一渠道选路、能力协商、执行计划、邮件接口与兼容工作流边界。"
+    },
+    {
+      "name": "public-internet",
+      "path": "sources/public-internet.md",
+      "description": "公共互联网来源执行规则、bycli 网页铁律与原有兜底/STOP 约束。"
     },
     {
       "name": "research-methodology",

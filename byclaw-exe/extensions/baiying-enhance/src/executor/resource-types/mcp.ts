@@ -10,7 +10,7 @@ import type { AuthContext } from "../auth.js";
 import { applyEnvAuthOverrides, ensureMcpIdentityHeaders, mergeAuthHeaders } from "../auth.js";
 import { makeError } from "../errors.js";
 import { extractJsonRpcPayload, postJson } from "../http.js";
-import { buildOntologyMcpHeaders, debugMcpSessionHeaders } from "../ontology-headers.js";
+import { buildResourceMcpHeaders, debugMcpSessionHeaders } from "../resource-headers.js";
 import { resolveChildAction } from "../resolve-action.js";
 import { validateParameters } from "../schema.js";
 import { logBaiyingRequest, type BaiyingEnhanceLogger } from "../debug-channel.js";
@@ -37,14 +37,16 @@ export async function executeMcp(params: {
   session?: string;
   timeoutMs?: number;
   logger?: BaiyingEnhanceLogger;
+  signal?: AbortSignal;
 }): Promise<ExecutorResponse> {
   const { capability } = params;
   const resourceType = String(capability.resource_type ?? "").trim().toUpperCase();
   if (resourceType === "OBJECT" || resourceType === "VIEW") {
-    return executeOntologyResourceViaCallAgent({
+    return executeObjectViewViaCallAgent({
       capability,
       parameters: params.parameters,
       logger: params.logger,
+      signal: params.signal,
     });
   }
 
@@ -84,8 +86,8 @@ export async function executeMcp(params: {
     params: { name: toolInfo.name, arguments: params.parameters },
   };
 
-  const { headers: ontologyHeaders, error: ontologyError } = buildOntologyMcpHeaders(capability);
-  if (ontologyError) return ontologyError;
+  const { headers: resourceHeaders, error: resourceError } = buildResourceMcpHeaders(capability);
+  if (resourceError) return resourceError;
 
   const { headers } = mergeAuthHeaders({
     baseHeaders: {
@@ -96,7 +98,7 @@ export async function executeMcp(params: {
     },
     authContext: params.authContext,
     session: params.session,
-    extraHeaders: { ...ontologyHeaders, ...(params.forwardHeaders ?? {}) },
+    extraHeaders: { ...resourceHeaders, ...(params.forwardHeaders ?? {}) },
   });
   ensureMcpIdentityHeaders(headers);
   applyEnvAuthOverrides(headers);
@@ -109,7 +111,7 @@ export async function executeMcp(params: {
     stage: "mcp_tools_call",
     capability,
     forwardHeaders: params.forwardHeaders,
-    ontologyHeaders,
+    resourceHeaders,
     finalHeaders: headers,
   });
 
@@ -121,7 +123,7 @@ export async function executeMcp(params: {
     payload,
     headers,
     forward_headers: params.forwardHeaders,
-    ontology_headers: ontologyHeaders,
+    resource_headers: resourceHeaders,
   });
 
   const data = await callMcpJsonRpc({
@@ -130,6 +132,7 @@ export async function executeMcp(params: {
     payload,
     headers,
     timeoutMs: params.timeoutMs ?? 30_000,
+    signal: params.signal,
   });
   if ("error" in data) {
     const errorDetail = {
@@ -183,6 +186,7 @@ async function callMcpJsonRpc(params: {
   payload: Dict;
   headers: Record<string, string>;
   timeoutMs: number;
+  signal?: AbortSignal;
 }): Promise<Dict | { error: ExecutorFailure }> {
   if (params.transferType === "sse") {
     try {
@@ -190,6 +194,7 @@ async function callMcpJsonRpc(params: {
         sseUrl: params.serverUrl,
         headers: params.headers,
         timeoutMs: params.timeoutMs,
+        signal: params.signal,
         requests: [
           {
             payload: {
@@ -240,6 +245,7 @@ async function callMcpJsonRpc(params: {
     payload: params.payload,
     headers: params.headers,
     timeoutMs: params.timeoutMs,
+    signal: params.signal,
   });
   if ("error" in result) return {
     error: makeError("MCP_CALL_FAILED", `MCP call failed: ${result.error.error}`, {
@@ -270,10 +276,11 @@ async function callMcpJsonRpc(params: {
   return data;
 }
 
-async function executeOntologyResourceViaCallAgent(input: {
+async function executeObjectViewViaCallAgent(input: {
   capability: Capability;
   parameters: Dict;
   logger?: BaiyingEnhanceLogger;
+  signal?: AbortSignal;
 }): Promise<ExecutorResponse> {
   const resourceType = String(input.capability.resource_type ?? "").trim().toUpperCase();
   const resourceId = String(input.capability.metadata?.resource_id ?? input.capability.name ?? "");
@@ -282,7 +289,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     asString(input.capability.mcp?.resource_code) ||
     resourceId;
   if (!resourceCode) {
-    return makeError("ONTOLOGY_RESOURCE_CODE_NOT_FOUND", `${resourceType} resource_code not found`);
+    return makeError("RESOURCE_CODE_NOT_FOUND", `${resourceType} resource_code not found`);
   }
 
   const sessionId = resolveDocSessionId(input.parameters, resourceId || resourceCode);
@@ -302,7 +309,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     "执行数据资源调用";
   const callKey = resourceType === "OBJECT" ? "call_object_ids" : "call_view_ids";
   const resourceIds = resourceId ? [resourceId] : [];
-  const payload = buildOntologyCallAgentPayload(input.parameters, {
+  const payload = buildResourceCallAgentPayload(input.parameters, {
     resourceType,
     resourceCode,
     resourceId,
@@ -351,18 +358,19 @@ async function executeOntologyResourceViaCallAgent(input: {
     logger: input.logger,
     parentMessageId: toolCallId,
     resourceContext,
+    signal: input.signal,
   });
 }
 
-type OntologyCallAgentResource = {
+type ResourceCallAgentResource = {
   resourceType: string;
   resourceCode: string;
   resourceId: string;
 };
 
-export function buildOntologyCallAgentPayload(
+export function buildResourceCallAgentPayload(
   parameters: Dict,
-  resource?: OntologyCallAgentResource,
+  resource?: ResourceCallAgentResource,
 ): Dict {
   const nested = isRecord(parameters.parameters)
     ? parameters.parameters

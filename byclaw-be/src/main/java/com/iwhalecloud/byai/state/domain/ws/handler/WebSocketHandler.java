@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketService;
 import com.iwhalecloud.byai.state.infrastructure.utils.CloseUtil;
 import com.iwhalecloud.byai.state.infrastructure.utils.NettyResponse;
 import com.iwhalecloud.byai.state.infrastructure.utils.PushUtil;
+import com.iwhalecloud.byai.state.infrastructure.utils.ResumeRoutingTraceLogger;
 import cn.hutool.core.util.IdUtil;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -87,12 +88,13 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
             try {
                 WebSocketI18nSupport.applyLocale(userInfo);
                 ChatMessage chatMessage = JSON.parseObject(message, ChatMessage.class);
+                ResumeRoutingTraceLogger.logWebSocketIngress(chatMessage);
                 WebSocketI18nSupport.applyLocale(chatMessage.getLanguage(), userInfo);
                 chatMessage.setSenderId(userInfo.getUserId());
                 chatMessage.setSenderName(userInfo.getUserName());
                 log.debug("websocket user message :{}", chatMessage);
                 switch (chatMessage.getType()) {
-                    case HEARTBEAT -> handleHeartbeat(ctx);
+                    case HEARTBEAT -> handleHeartbeat(ctx, chatMessage);
                     case LLM_MESSAGE -> chatService.llmChat(ctx, chatMessage);
                     case SSE_STREAM -> chatService.sseStream(ctx, chatMessage);
                     case NOTIFICATION -> notificationService.getRealTimeNotification(ctx, message);
@@ -123,7 +125,11 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         }
     }
 
-    private void handleHeartbeat(ChannelHandlerContext ctx) {
+    private void handleHeartbeat(ChannelHandlerContext ctx, ChatMessage chatMessage) {
+        if (chatMessage.getScopedSessionId() != null) {
+            String scopedSessionId = chatMessage.getScopedSessionId().trim();
+            ctx.channel().attr(Constant.ATT_SCOPED_SESSION_ID).set(scopedSessionId.isEmpty() ? null : scopedSessionId);
+        }
         LoginInfo userInfo = ctx.channel().attr(Constant.ATT_USER_INFO).get();
         if (userInfo != null) {
             try {

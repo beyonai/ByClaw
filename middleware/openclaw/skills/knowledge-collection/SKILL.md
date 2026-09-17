@@ -20,7 +20,7 @@ This orchestration-specific ownership rule overrides any generic byCLI recovery 
 ## 0. 默认落盘位置
 
 在创建任何采集目录或调用 `init` 前，先读取当前 Agent 上下文提供的 **Session Root**。在用户沙箱中，
-本次任务的内部采集文件默认落在 `/by/.sessions/<sessionId>/` 下；没有显式保存路径时，推荐使用
+本次任务的内部采集文件默认落在 `/by/.sessions/<sessionId>/` 下；没有显式保存路径时必须使用
 `/by/.sessions/<sessionId>/collections/<task-name>/` 作为唯一采集会话根。这里的 `<sessionId>` 是当前聊天会话 ID，
 必须来自 Agent 上下文中的 Session Root，不得使用登录 Cookie、`BAIYING_SESSION` 或其他认证会话值推断。
 Agent workspace 和其中的历史 `collections/` 都不是 Session Root。不得扫描、读取或复用 Agent workspace 中的历史采集会话来推断本次 `session-dir`；也不得用 `ls`、`find`、glob 枚举 `/by/.sessions/`，不得读取其他会话的 `session.json`，不得从 `ps`、`/proc`、被截断的 `session_status` 或历史目录名称猜测当前 sessionId。只有上下文明确给出的完整绝对 Session Root 才可使用；当前上下文没有提供时，必须在 `init` 前停止并向上游取得，不得自行选择一个已有或新造的 `/by/.sessions/<value>`。
@@ -33,21 +33,38 @@ Agent workspace 和其中的历史 `collections/` 都不是 Session Root。不�
 没有提供 Session Root，不得猜测 sessionId，应先向上游取得当前会话目录。绝对路径不受 Session Root 成员关系限制，
 但会话内部的 `.collection-inputs/`、`raw/`、`markdown/` 和 `sanitized/items/` 布局仍必须遵守本 Skill 的目录契约。
 
+`collections/<task-name>/` 与 `.collection-runs/<run-id>/` 两种目录布局互斥。前者只用于没有显式保存路径的普通采集，
+后者只用于用户已经明确提供保存路径的交付暂存。不得预先 `mkdir`、探测或枚举 Session Root 来测试可写性；`init` 负责创建
+唯一会话目录及其骨架。`init` 因未知参数或其他参数校验失败时尚未取得该目录的所有权，参数校验失败后不得删除、清空或复用
+目标目录；修正参数后应让 `init` 自行拒绝已存在或非空的路径。
+
+首次 `init` 必须一次性提供完整参数，包括 `--query`、`--session-dir`、`--session-root`、来源范围、物化目标、正文粒度和用户直链；
+禁止执行 `mkdir` 预建采集目录，也禁止执行 `rm`、`rm -rf` 或 `rmdir` 删除或清空任何会话/采集目录。初始化命令失败后，
+禁止改用其他目录名或追加后缀，禁止重新初始化第二个会话；若目标目录已经存在或非空，必须对原目录输出 `status` 并停止，
+如实报告初始化失败，不得通过删除现场继续执行。
+
 用户提供的保存路径是交付目录，不是采集会话目录。只要请求中出现明确的保存文件路径，就把该路径记为
 `requestedDeliveryDir`，并在当前 Session Root 的 `.collection-runs/<run-id>/` 中初始化独立的内部会话；不得把用户目录
-直接传给 `init`，也不得假定以后仍使用 `00-collection/`。相对保存路径按当前 Session Root 解析，绝对路径保持其绝对位置。
+直接传给 `init`，并且必须为 `init` 传 `--delivery-requested true`；没有显式保存路径时不得传该参数，也不得使用
+`.collection-runs/`。不得假定以后仍使用 `00-collection/`。相对保存路径按当前 Session Root 解析，绝对路径保持其绝对位置。
 `requestedDeliveryDir` 在发布前是不可探测的 opaque 值：采集和校验期间只写内部会话；最终通过 `publish`
 非破坏性地发布正文与引用图片。
 
-在正式调用 `publish` 之前，任何工具调用的参数或 shell 命令文本都不得包含 `requestedDeliveryDir`；第一次允许包含该路径的工具调用必须是正式的 `publish`。不得把该路径赋给 shell 变量，也不得 `echo`、记录或打印该路径。禁止用 `mkdir`、`ls`、`find`、`stat`、`test`、`realpath`、`readlink` 或任何等价命令访问它；“检查残留目录”、“确认目录不存在”和“只做只读检查”都不是例外。每次调用工具前先检查：如果参数或命令含有该路径且当前调用不是已经通过交付校验后的 `publish`，删除该路径并改为只操作内部 `session-dir`。当 `status.collection.deliveryComplete=false` 时，该路径不得出现在后续任何工具调用中，只能在最终答复中说明未发布。
+交付路径在首次 `init` 时通过 `init --delivery-dir <path>` 一次性绑定进会话状态，`init` 返回一个 opaque 的 `deliveryTarget.handle`；此后所有命令只引用该 handle，裸路径不再需要出现在任何参数里。`init` 不对交付目录做任何文件系统访问：只做纯路径运算，不 `stat`、不 `realpath`、不创建任何东西；存在性、空目录、冲突与越界判定全部由 `publish` 负责。
+
+`--delivery-dir` 与 `--delivery-requested true` 单向互锁：给了路径就必须同时声明意图，否则 `init` 直接失败。反向不硬性拦截——`--delivery-requested true` 缺 `--delivery-dir` 时 `init` 会在 `warnings` 里提示本会话未绑定交付目标，但仍然成功，因为聚合会话与旧会话只能走 `publish --delivery-dir` 回退形式。只要此刻已知落盘目录，就必须在本次 `init` 就传 `--delivery-dir`；把绑定推迟到 `publish` 会让裸路径重新出现在命令行里。
+
+除首次 `init` 的 `--delivery-dir` 与最终的 `publish` 之外，任何工具调用的参数或 shell 命令文本都不得包含 `requestedDeliveryDir`。不得把该路径赋给 shell 变量，也不得 `echo`、记录或打印该路径。禁止用 `mkdir`、`ls`、`find`、`stat`、`test`、`realpath`、`readlink` 或任何等价命令访问它；“检查残留目录”、“确认目录不存在”和“只做只读检查”都不是例外。每次调用工具前先检查：如果参数或命令含有该路径且当前调用既不是首次 `init` 也不是已通过交付校验后的 `publish`，删除该路径并改为只操作内部 `session-dir` 或 handle。当 `status.collection.deliveryComplete=false` 时，该路径不得出现在后续任何工具调用中，只能在最终答复中说明未发布。
 
 ```bash
 # 错误：即使不创建目录，发布前的只读探测也违反契约
 REQUESTED_DELIVERY_DIR=/by/example-output
 ls "$REQUESTED_DELIVERY_DIR"
 
-# 正确：采集、校验命令只包含内部会话；交付路径首次出现在正式 publish 中
-node scripts/knowledge-collection.mjs publish --session-dir "$SESSION_DIR" --delivery-dir /by/example-output
+# 正确：init 绑定一次，之后只用 handle 引用
+node scripts/knowledge-collection.mjs init --session-dir "$SESSION_DIR" \
+  --delivery-requested true --delivery-dir /by/example-output --session-root "$SESSION_ROOT" ...
+node scripts/knowledge-collection.mjs publish --session-dir "$SESSION_DIR" --delivery-handle delivery-1a2b3c4d
 ```
 
 ## 1. Decide whether to use this skill
@@ -56,9 +73,31 @@ Use it only when the user explicitly asks to collect, crawl, batch-search, archi
 
 Before discovery, state the effective source scope and materialization target in ordinary language. Do not make the user choose technical modes.
 
+### 来源决策优先级（必须先判定，再调用命令）
+
+先按以下顺序确定 `sourceScope`，不得让“默认同时检索”覆盖更具体的来源约束：
+
+1. 用户明确指定来源（例如“在云盘中”“项目资料”“全网”“公开互联网”）时，只使用指定来源。
+2. 用户明确指定数量时，只使用 `public-internet`，走 `public-collect` 的全文闭环。
+3. 用户未指定来源、未指定数量，但当前上下文存在可信 `<project_context>` 且可解析出有效 `cloudResourceId` 时，默认使用 `public-internet` + `cloud-knowledge`，但必须先完成项目上下文和云盘资源解析，再执行统一搜索。
+4. 用户未指定来源，且项目云盘不可用或无法授权时，只使用 `public-internet`，并在状态中记录 `cloud-knowledge` 为 `unavailable` 或 `failed`；不得把云盘失败改写为“没有结果”。
+
+“默认同时检索”是一个有前提的策略，不是无条件命令。`unified-search` 只有在 `sourceScope` 已确认同时包含两个来源、`project_id` 已透传、且 `cloudResourceId/cloudDiscoveryScope` 已成功解析时才允许调用。若用户明确要求云盘，云盘搜索失败后不得静默切换为公网；若用户未限定来源，云盘分支失败可保留公网分支继续，但最终必须分别报告两个来源的状态。
+
+### 网页获取硬门槛（不可被下游 Agent 覆盖）
+
+凡是打开、读取、下载或物化任何 HTTP(S) 网页，必须先加载 `bycli` skill，并由获准的 `bycli`/`knowledge-collection` 执行器完成：
+
+- 微信文章：`bycli weixin download` → `materialize-wechat`；
+- arXiv：`bycli arxiv`/`bycli web read` → `materialize-arxiv`；
+- 其他网页：`acquire-web` → `materialize-web`。
+
+严禁 `web_fetch`、`curl`、`wget`、`requests`、`urllib`、手工 HTTP 客户端或通用浏览器直接下载正文。即使 `bycli` 失败，也只能保留 `pending`/`failed` 并报告，不能换用上述工具补抓。来源 Agent 不得自行选择替代下载器；根 Agent 也不得通过提示词放宽此门槛。
+
 | User intent | `sourceScope` | `materializationTarget` |
 |---|---|---|
-| Public information, no internal context | `public-internet` | `selected` by default |
+| Public information, no internal context, without an explicit result count | `public-internet` + `cloud-knowledge` when project-cloud context is available | `selected` by default |
+| Explicit result count for articles/full text | `public-internet` | `selected` + `full-text` via `public-collect` |
 | Names DingTalk, Feishu, WeCom, or IMA | Add only the named platform(s) | Match the requested result |
 | Explicit internal-material request | Add only the necessary enterprise source(s) | Match the requested result |
 | “Find candidates” | Task-derived scope | `candidates` |
@@ -67,6 +106,8 @@ Before discovery, state the effective source scope and materialization target in
 
 `enterprise search-all` is a low-level batch command. In user-facing orchestration, always pass explicit `--sources` for a narrower scope; omit it only for an explicit all-enterprise request or an auditable organization policy. Every enterprise `search`, `search-all`, or `resource` call must receive the initialized parent session through `--parent-session-dir`; the command rejects sources outside that session's `task.sourceScope`. The `search-all` output root is itself a canonical session and is the status/delivery target.
 
+`cloud-knowledge` is a single-source enterprise connector. When the user supplies cloud-drive or project-cloud paths, initialize with `--source-scope '["cloud-knowledge"]'` and a validated `--cloud-discovery-scope`; run `enterprise search --source cloud-knowledge` with the initialized parent session and let the connector force metadata-only discovery. `search-all` does not accept `cloud-knowledge`; after the user selects candidate IDs, run single-session `enterprise materialize` with the same session for both `--session-dir` and `--output-dir`.
+
 单一企业来源执行 `enterprise search` 时，`--output-dir` 必须等于 `--parent-session-dir`，直接把权威状态、`raw/`、`markdown/` 和 `sanitized/` 发布到已初始化会话根。不得把 `raw/<source>/` 当作第二个会话根；`raw/ima/sanitized/items` 等嵌套交付路径不合规。为兼容旧调用，runner 会把位于父会话 `raw/` 下的 `--output-dir` 自动归一到父会话根。
 
 ## 2. Select one collection workflow
@@ -74,13 +115,17 @@ Before discovery, state the effective source scope and materialization target in
 | Situation | Required reference |
 |---|---|
 | Complex, multi-source, cited research | [research-methodology.md](references/research-methodology.md) |
-| Public URL/source routing | [agent-reach.md](references/agent-reach.md) |
+| All collection channels | [agent-reach.md](references/agent-reach.md) |
+| Public URL/source execution | [public-internet.md](references/sources/public-internet.md) |
+| Mail collection | [mail/SKILL.md](../mail/SKILL.md), then its collection facade |
 | DingTalk, Feishu, WeCom, or IMA | Relevant file in [references/sources/](references/sources/) |
 | Product documentation site or multi-page crawl | [site-crawl/SKILL.md](references/site-crawl/SKILL.md) |
 | Session state and collection artifacts | [collection-contract.md](references/collection-contract.md) |
 | Final validation and handoff | [delivery.md](references/delivery.md) |
 
-Read only the reference that matches the chosen workflow, plus `collection-contract.md` for any collection session and `delivery.md` before handoff. The complete reference index is [manifest.json](references/manifest.json).
+Read agent-reach.md for every collection, then only the reference that matches the chosen workflow, plus `collection-contract.md` for any collection session and `delivery.md` before handoff. The complete reference index is [manifest.json](references/manifest.json).
+
+邮件采集必须显式 `init --source-scope '["mail"]' --mail-bindings '<可信绑定数组>'`，再通过 `route-evaluate` / `route-resolve` / `route-dispatch` 委派 mail 技能级接口。总路由不选择邮箱 provider，不直接调用邮箱后端。普通邮件查询仍属于 mail 技能。邮件正文、附件下载和附件解析分别记账，未完成要求时不能标记交付完成。
 
 ## 3. Execute through validated commands
 
@@ -88,24 +133,54 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 `buildIdSource`。发布系统应通过 `KNOWLEDGE_COLLECTION_BUILD_ID` 注入 commit/build 标识；未注入时 CLI 返回
 运行时 Skill 文件的 `sha256:` 内容指纹，线上与本地指纹一致才可视为同一候选构建。
 
-1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. 用户明确要求“全文”“完整正文”或“PDF 全文”时，还必须传 `--required-content-granularity full-text`；否则使用默认的 `any`。 When the user supplied a save path, use `<Session Root>/.collection-runs/<run-id>/` as `--session-dir` and retain the save path separately as `requestedDeliveryDir`. `init` 命令不得包含 `--delivery-dir`；该路径只保留为编排状态中的 opaque 值，不得传给 `init`，也不得借助 shell 变量或临时文件绕过发布前禁用规则。 When the user already selected direct source URLs, pass those exact URLs through `init --direct-urls '<JSON array>'` and initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable. `--direct-urls` is only for URLs explicitly present in the user's request, never for URLs found or remembered by the Agent.
-2. For candidate-only public URL discovery, run `public-discover`. Its `online-search` channel uses Tencent WSA when credentials are available and WSA is not explicitly disabled; only a channel-level WSA failure falls back to SearXNG. WSA 返回的 passage/content 搜索摘要只是发现证据，不是文章正文，也不保证目标页不会是登录、注册、验证、错误或导航页面。`pageType`、`weak`、`articleCandidateIds` 都只是兼容性分类，不代表正文已经验证；是否可尝试读取由持久化的 `discoveryDisposition=probe` 决定。
+1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. 用户明确要求“全文”“完整正文”或“PDF 全文”，或者要求采集明确数量的文章并将执行 `public-collect` 时，首次 `init` 必须传 `--materialization-target selected` 和 `--required-content-granularity full-text`；只有不走 `public-collect` 且未要求全文的其他工作流才使用默认的 `any`。没有显式保存路径时，必须把 `<Session Root>/collections/<task-name>/` 传给 `--session-dir`，不得使用 `.collection-runs/`。 When the user supplied a save path, use `<Session Root>/.collection-runs/<run-id>/` as `--session-dir`, pass `--delivery-requested true`, and bind the save path in the same call via `init --delivery-dir <path>`（相对路径需同时给出 `--session-root`）。`init` 不对交付目录做任何文件系统访问；它只把该路径记入会话状态并返回 `deliveryTarget.handle`。记下这个 handle 作为后续唯一引用方式，之后不得再把裸路径传给任何命令，也不得借助 shell 变量或临时文件绕过发布前的探测禁令。 When the user already selected direct source URLs, pass those exact URLs through `init --direct-urls '<JSON array>'` and initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable. `--direct-urls` is only for URLs explicitly present in the user's request, never for URLs found or remembered by the Agent.
+当选择 `public-collect` 时，首次 `init` 还必须传 `--workflow public-collect`。
 
-   当用户明确要求一篇或多篇等数量结果时，必须使用 `public-collect`，并传入 `--query`、`--fallback-query` 与 `--requested-count`。该命令拥有两轮发现、high/normal 候选排序、逐条正文获取、页面验证、主题复验、正文去重、原子晋升、暂停恢复和数量收敛的完整状态机。手工串联 `public-discover`、`acquire-web`、`materialize-web`、`collect` 不能复现这一闭环，也不得用这些原子命令绕过 `public-collect` 的单写者所有权。
+   `init` 返回体里的 `warnings` 是必读字段，不是可选诊断。它非空时必须逐条读完并在继续之前处理：这些提示指向的形状在当下都还能免费改正，一旦开始采集就只能靠 `retighten` 补救或根本无法补救。当前会出现三类提示——会话未绑定交付目标（应回到本次 `init` 补 `--delivery-dir`）、`selected + --delivery-requested` 缺 `--workflow`（当前 `init` 已成功创建会话，不能重新运行 `init`；若确实要走 `public-collect`，应在原会话上执行 `retighten --required-content-granularity full-text`，再直接运行 `public-collect`，由该命令建立工作流状态）、存在仅差 `-v2`/`-fulltext`/`-articles` 后缀的兄弟会话目录（应改用 `retighten` 就地修复原会话，不得新建替代会话）。`warnings` 不改变 `init` 的成功与失败，因此忽略它不会报错——但由它引出的死路会在后续命令上以硬失败出现。
+
+2. For candidate-only public URL discovery, run `public-discover`. 路由先看交付物和是否指定数量：用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`；用户要求文章、正文、全文或落盘内容但未指定数量时，默认使用 `unified-search`，并行检索公共互联网与当前项目云盘，再用 `unified-materialize` 物化选中的两类正文；其中“文章”按完整正文处理。执行 `unified-search` 时，必须把可信 `<project_context>` 中的 `project_id` 透传为 `--project-id`，并把 `project-context basic` 返回的 `project.cloudResourceId` 传给首次 `init --cloud-resource-id`（CLI 会自动生成根目录 `cloudDiscoveryScope`），随后再调用 `unified-search --project-id`；不要手工拼接或猜测 scope JSON。用户明确要求数量（如“一篇”“5 篇”“至少 10 篇”）时，改用 `public-collect`，只检索公共互联网并执行数量闭环。用户明确限定来源时服从限定，不自动添加其他来源。Its `online-search` channel uses Tencent WSA when credentials are available and WSA is not explicitly disabled; only a channel-level WSA failure falls back to SearXNG. WSA 返回的 passage/content 搜索摘要只是发现证据，不是文章正文，也不保证目标页不会是登录、注册、验证、错误或导航页面。`pageType`、`weak`、`articleCandidateIds` 都只是兼容性分类，不代表正文已经验证；是否可尝试读取由持久化的 `discoveryDisposition=probe` 决定。
+
+   `public-discover` 输出的 `candidateQuality`（包括 `eligibleArticle`）仅用于候选诊断和排序；`reject` 候选仍拒绝。公共发现最多允许两轮，任何未由用户明确提供或发现状态持久化授权的 URL 都必须以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。不得使用模型记忆中的 URL、DOI、论文 ID 绕过发现授权。`unified-search` 找不到可信项目云盘资源或 `cloudDiscoveryScope` 时，不得猜测资源 ID；应保留公共互联网结果，并在 sources/status 中明确记录 `cloud-knowledge` 不可用。
+
+   当用户明确要求一篇或多篇等数量结果时，必须使用 `public-collect`，并传入 `--query`、`--fallback-query` 与 `--requested-count`。在调用它之前，唯一会话必须已经由首次 `init` 以 `selected + full-text` 初始化；不得先用 `any` 初始化，也不得为修正粒度新建带 `-v2`、`-fulltext` 或其他后缀的替代会话。如果会话已经错误地以 `any` 初始化，唯一被认可的修复是在原会话上执行 `retighten`：
+
+```bash
+node scripts/knowledge-collection.mjs retighten --session-dir <dir> --required-content-granularity full-text
+```
+
+`retighten` 只修正粒度标准这一个字段，不动 inventory、正文证据或交付 receipt。它只允许 `any` → `full-text`；不存在 `full-text` → `any` 的反向操作，任何标志都无法放松已声明的标准。它也无法救活已经产生业务产物的会话：一旦该会话已执行过 `public-discover`、`acquire-*`、`materialize-*`、`collect` 或 `crawl`，`retighten` 会以 `RETIGHTEN_SESSION_NOT_FRESH` 拒绝，此时应如实上报该缺口，而不是新建替代会话。`candidates` 会话不登记正文，`retighten` 对它同样拒绝。该命令拥有两轮发现、high/normal 候选排序、逐条正文获取、页面验证、主题复验、正文去重、原子晋升、暂停恢复和数量收敛的完整状态机。手工串联 `public-discover`、`acquire-web`、`materialize-web`、`collect` 不能复现这一闭环，也不得用这些原子命令绕过 `public-collect` 的单写者所有权。
+
+   直链任务没有独立检索主题时，`--query` 与 `--fallback-query` 都复用首次 `init` 的原始任务描述，允许两者相同；仅当直链候选不足以满足数量时才进入发现。
+
+   用户已经提供直链且要求一篇全文时，首次初始化必须直接采用如下参数形状（替换占位值，不得拆成多次调用或预建目录）：
+
+   ```bash
+   node /app/skills/knowledge-collection/scripts/knowledge-collection.mjs init \
+     --session-dir <Session Root>/collections/<task-name> \
+     --session-root <Session Root> \
+     --query "<用户原始采集要求>" \
+     --source-scope '["public-internet"]' \
+     --materialization-target selected \
+     --required-content-granularity full-text \
+     --workflow public-collect \
+     --direct-urls '["<用户提供的 URL>"]'
+   ```
 
    `public-collect` 最多执行两轮发现、100 次正文探测，并受持久化总时间预算约束。每轮先运行 online-search 并验证其候选，验证正文仍不足时才运行同一 query 的 hot-discovery；首轮完整耗尽后才使用调用者提供的 fallback query。每轮 query 都必须保留初始化时锁定的主题锚点，发现基础设施失败后恢复原 query 与原 channel。普通网页、微信文章和 arXiv 论文分别执行对应的正文净化与结构验证；尚无专用 verifier 的视频、社交平台和 RSS 候选明确记为 unsupported。遇到登录、MFA 或 CAPTCHA 且 manual policy 为 pause 时，只能按返回的 run ID 使用 `--resume` 或 `--skip`，不得另启写会话或手工修改 attempt。WSA 摘要含“登录/注册”只产生警告；只有真实读取到的登录/验证页才暂停或终止该 probe。
 
    只有通过原子晋升的已验证正文才能计入 `requestedItemCount`：条目必须为 materialized full-text，持有匹配的 fullTextEvidence 与 verification receipt，正文主题为 matched/not-required，并按正文指纹去重。搜索摘要、失败 probe、非文章页、未知或不匹配正文、重复镜像、pending 文件和手工登记 inventory 都不计数。最终答复前必须运行 `status`，核对 `publicCollectRun.persistedStatus`、`effectiveStatus`、`requestedItemCount`、`deliverableArticleCount` 与 `remainingCount`；只有 remainingCount 为 0 且 `deliveryComplete=true` 才能报告指定数量已完成。
 
    Public discovery keeps normalized deduplication separate from acquisition URLs. The verifier may use only the persisted canonical/acquisition URL variants and must never reconstruct an acquisition URL from a duplicate key or persist a variant containing credentials or sensitive parameters.
+
+   下方原子来源命令仅适用于未由 `public-collect` 持有的 operator 会话。`public-collect` 持有的会话只能调用编排器内部 verifier，不得由根 Agent 或来源 Agent 手工执行 `public-discover`、`acquire-web`、`materialize-web`、`materialize-wechat`、`materialize-arxiv`、`collect` 或 crawl 编排命令。即使 run 已终止，也不得用这些命令接管该会话。
 3. Delegate retrieval to the selected source executor. Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it. 委派来源执行器时只传内部 `session-dir` 及其 `raw/` 子路径，不得向被委派 Agent 或执行器传递、描述或要求其操作
    `requestedDeliveryDir`。
 
-   已选候选是 `https://mp.weixin.qq.com/s...` 或 `https://weixin.sogou.com/link?...` 时，按 [agent-reach.md](references/agent-reach.md) 委派 `bycli weixin download --url <URL>`，把输出目录和结构化结果都保存在本会话 `raw/bycli/weixin/<item-id>/`。确认返回的 `saved` 文件可读后，运行 `materialize-wechat`，参数为 `--executor-result-file <raw-result.json> --item-id <item-id>`；只有命令返回非空 `collectPayloadPath` 时才把它交给 `collect`。低置信度结果由该命令保留为 pending/unknown，不得手写脚本将其提升为全文。
+   已选候选是 `https://mp.weixin.qq.com/s...` 或 `https://weixin.sogou.com/link?...` 时，按 [public-internet.md](references/sources/public-internet.md) 委派 `bycli weixin download --url <URL>`，把输出目录和结构化结果都保存在本会话 `raw/bycli/weixin/<item-id>/`。确认返回的 `saved` 文件可读后，运行 `materialize-wechat`，参数为 `--executor-result-file <raw-result.json> --item-id <item-id>`；只有命令返回非空 `collectPayloadPath` 时才把它交给 `collect`。低置信度结果由该命令保留为 pending/unknown，不得手写脚本将其提升为全文。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
 
-   其他通用网页必须先运行 `acquire-web --item-id <item-id> --source-url <已授权 URL>`，再把命令返回的 `executorResult` 交给 `materialize-web --item-id <item-id> --executor-result-file <path>`。不得手工重定向 stdout 到 raw，不得手工构造 collect payload；只有 `materialize-web` 返回非空 `collectPayloadPath` 时才能调用 `collect`。执行器返回登录、CAPTCHA、环境验证或其他 requires-user-action 时遵守 byCLI **STOP** 契约：保留 pending/raw 与命令自有 TAB，停止且不降级、不清理、不自动重试。
+   其他通用网页必须先运行 `acquire-web --item-id <item-id> --source-url <已授权 URL>`，再把命令返回的 `executorResult` 交给 `materialize-web --item-id <item-id> --executor-result-file <path>`。不得手工重定向 stdout 到 raw，不得手工构造 collect payload；只有 `materialize-web` 返回非空 `collectPayloadPath` 时才能调用 `collect`。执行器返回登录、CAPTCHA、环境验证或其他 requires-user-action 时遵守 byCLI **STOP** 契约：保留 pending/raw 与命令自有 TAB，停止且不降级、不清理、不自动重试。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
 
-   已授权并选中的 arXiv 候选要求完整正文时，无论候选来自用户通过 `--direct-urls` 提供的直链还是 `public-discover` 的 eligible article，都按 [agent-reach.md](references/agent-reach.md) 获取元数据与全文。全文读取必须使用 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/`，由 byCLI 同时落盘正文和图片。若原始 PDF URL 不能由 `bycli web read` 物化，可仅改用同一官方论文的 `https://arxiv.org/html/<paper-id>`，并保留已授权候选 URL 为 `sourceUrl`、实际读取 URL 为 `acquisitionUrl`；两者必须具有相同论文 ID。把两份执行器原始输出原样保留在 `raw/` 后运行 `materialize-arxiv`。只有该命令返回非空 `collectPayloadPath` 时才交给 `collect`；结构不完整时保持 pending，摘要或节选不能满足全文要求。重试必须写入新的 `raw/bycli/arxiv/<item-id>-<attempt>/`，不得覆盖首次或任何既有执行器输出。不得手工改写 raw 证据，不得手工下载或补抓图片，不得使用 `curl`、`web_fetch`、`wget` 或 `requests` 探测、补抓或转换。
+   已授权并选中的 arXiv 候选要求完整正文时，无论候选来自用户通过 `--direct-urls` 提供的直链还是 `public-discover` 的 eligible article，都按 [public-internet.md](references/sources/public-internet.md) 获取元数据与全文。全文读取必须使用 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/`，由 byCLI 同时落盘正文和图片。若原始 PDF URL 不能由 `bycli web read` 物化，可仅改用同一官方论文的 `https://arxiv.org/html/<paper-id>`，并保留已授权候选 URL 为 `sourceUrl`、实际读取 URL 为 `acquisitionUrl`；两者必须具有相同论文 ID。把两份执行器原始输出原样保留在 `raw/` 后运行 `materialize-arxiv`。只有该命令返回非空 `collectPayloadPath` 时才交给 `collect`；结构不完整时保持 pending，摘要或节选不能满足全文要求。重试必须写入新的 `raw/bycli/arxiv/<item-id>-<attempt>/`，不得覆盖首次或任何既有执行器输出。不得手工改写 raw 证据，不得手工下载或补抓图片，不得使用 `curl`、`web_fetch`、`wget` 或 `requests` 探测、补抓或转换。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
 
    当选用的执行器是 `bycli` 时，初次 `BROWSER_CONNECT` 是桥接恢复信号，不是要求用户操作桌面浏览器的证据。`public-discover` 返回最终 `bridge_unavailable` 表示其内部 Runner 已消费统一 `bridge-bootstrap` 恢复链路；外层 Agent 不得再次直接执行 `start-chrome.sh`，也不得重复运行 `doctor`、daemon restart 或另一套自定义恢复命令。对于未经过该 Runner 的普通 byCLI 命令，若首次返回 `BROWSER_CONNECT`，也只能调用统一 `bridge-bootstrap` 一次，不得直接调用 `start-chrome.sh`；是否执行启动脚本由 bootstrap 根据托管 Chromium 的结构化状态决定。只有结构化桥接诊断明确列出 `browser_start_script` 时，才能声称执行过 `start-chrome.sh`；诊断未列出该 action 时，只能如实报告最终 `bridge_unavailable`，不得猜测启动脚本已执行或未执行。采集编排器不得直接要求用户打开 Chrome，也不得将这次首次失败归类为认证问题。只有最终 `bridge_unavailable`，或明确的登录、MFA、CAPTCHA、认证结果，才可作为需要用户处理的事项对外说明。
 
@@ -113,7 +188,7 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 4. Register only actual artifacts through `collect`; excerpts and abstracts are valid typed artifacts only when their actual `contentGranularity` is recorded, but they must never be treated or described as full text. For a topic-gated public-discovery item, `collect` re-evaluates the canonical title and visible sanitized Markdown; `MATERIALIZED_CONTENT_NOT_RELEVANT` is terminal for that artifact. Agent prose, a relevant search snippet, trusted publication URL shape, or a manually edited payload cannot override it. A public `full-text` item must carry `fullTextEvidence` that points to a matching structured receipt under `raw/`; only an approved source executor or dedicated materializer may create that receipt. Agent-authored Markdown, length checks, or Agent-authored evidence are insufficient. Do not hand-edit inventory metadata, topic relevance, or `fullTextEvidence`.
 5. For research mode, call `report` to generate the requested research report.
 6. Use `status` before delivery. It distinguishes source records, duplicate groups, materialized bodies, pending bodies, failed bodies, content granularity, media coverage, crawl coverage, and `collection.deliveryComplete`. It read-only revalidates materialized topic relevance; failure makes `deliveryComplete=false` and removes `downstreamInput`. `selected` 和 `all` 至少包含一个条目才可能完成；当 `requiredContentGranularity=full-text` 时，每个已物化正文都必须是 `full-text`。摘要或节选不能满足全文要求，此时即使文件存在也不得称为完成。
-7. When the user supplied a save path and `status.collection.deliveryComplete=true`, only the root Agent may run `publish --session-dir <dir> --delivery-dir <path>` (and pass `--session-root <Session Root>` for a relative path). If completion is false, do not run `publish`; report the unmet granularity or coverage gap. Do not publish before validation. Before the root Agent invokes `publish`, treat `requestedDeliveryDir` as opaque: 不得对其执行 `mkdir`、`ls`、`find`、写入、删除、清空、移动或复制，不得做存在性或空目录检查，也不得要求被委派 Agent 执行这些操作。目标是否为空以及冲突目录如何选择只能由 `publish` 判定。
+7. When the user supplied a save path and `status.collection.deliveryComplete=true`, only the root Agent may run `publish --session-dir <dir> --delivery-handle <handle>`，其中 handle 来自首次 `init --delivery-dir`。会话未在 `init` 阶段绑定交付目标时（例如企业 `search-all` 聚合会话，或由旧版本创建的会话），回退形式 `publish --session-dir <dir> --delivery-dir <path>` 仍然有效（相对路径需同时给出 `--session-root <Session Root>`）。 If completion is false, do not run `publish`; report the unmet granularity or coverage gap. Do not publish before validation. Before the root Agent invokes `publish`, treat `requestedDeliveryDir` as opaque: 不得对其执行 `mkdir`、`ls`、`find`、写入、删除、清空、移动或复制，不得做存在性或空目录检查，也不得要求被委派 Agent 执行这些操作。目标是否为空以及冲突目录如何选择只能由 `publish` 判定。
    In the first final response after a successful publish, report `delivery.actualDirectory` and echo the exact `deliveryInput` object in a JSON block; do not report only a path and defer `deliveryInput` to a later turn. Never claim success from an inferred path.
 
 Before `publish`, every artifact for one collection task must remain beneath that task's initialized session directory. If a delegated tool needs a staging path, use the session's `raw/` subtree; then register or materialize the result into `markdown/items/` and `sanitized/items/`. When an approved source record contains article media, preserve the source response as raw evidence. Only an approved source executor may create local media copies. Media failure is reported independently and must not turn a successfully materialized body into a failed article; Markdown may reference only media that actually reached the article's local `assets/` directory. Never insert remote or fictitious local links. Do not manually create a sibling delivery directory such as `<topic>-fulltext/` or `<topic>-articles/`; an explicit user destination is handled only by `publish`. Duplicate records, partial materialization, or a delegated-tool failure do not waive this requirement: retain the raw evidence and mark the affected inventory item `pending` or `failed` in the same session.

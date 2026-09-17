@@ -42,19 +42,21 @@ export interface ISuggestQuestionItem {
   icon?: string;
 }
 
-export type ISandboxesInfo = Partial<{
-  endpoints: string[];
-  instanceEndpoints: {
-    openclaw: string;
-    filebrowser: string;
-  };
-  sandboxId: string;
-  sandboxType: string;
+export type ISandboxesInfo = {
   userCode: string;
-  token: string;
-}>;
+  sandboxType: string;
+  sandboxId: string;
+  endpoints?: string[];
+  instanceEndpoints?: Record<string, string>;
+  token?: string;
+  status?: string;
+  workerId?: string;
+  workerOnline?: boolean;
+  workerLastSeen?: number;
+  workerLeaseTtlSeconds?: number;
+};
 
-export type ISandboxesInfoState = ISandboxesInfo | Promise<ISandboxesInfo>;
+export type ISandboxesInfoState = Array<ISandboxesInfo> | Promise<Array<ISandboxesInfo>>;
 
 export type IState = {
   isSiderCollapsed: boolean;
@@ -209,9 +211,7 @@ const useAppStore = create<IState>()(
               return sandboxesInfo;
             }
 
-            const sandboxesInfoPromise = getSandboxInfo({})
-              .then((res) => lodashGet(res, '0') || {})
-              .catch(() => ({}));
+            const sandboxesInfoPromise = getSandboxInfo({}).catch(() => ({}));
 
             set({ sandboxesInfo: sandboxesInfoPromise });
 

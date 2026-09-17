@@ -199,7 +199,16 @@ public class ConnectorManifestService {
                 .eq(UserPrivateParam::getDeleteFlag, DELETE_FLAG_NORMAL))) {
             if (userId.equals(param.getUserId()) && ownedByConnector(param, connectorCode)
                     && PARAM_SOURCE_CONNECTOR.equals(param.getParamSource())) {
-                requireSingleAffectedRow(userPrivateParamMapper.deleteById(param.getParamId()));
+                if (com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.isPrivateMailParam(param)) {
+                    // Credential-free tombstones make revocation recoverable after a process restart.
+                    param.setStatus(DISABLED);
+                    param.setParamValueCipher("");
+                    param.setParamValueLast4("");
+                    touch(param, userId);
+                    requireSingleAffectedRow(userPrivateParamMapper.updateById(param));
+                } else {
+                    requireSingleAffectedRow(userPrivateParamMapper.deleteById(param.getParamId()));
+                }
                 changed = true;
             }
         }
@@ -244,6 +253,9 @@ public class ConnectorManifestService {
      */
     public List<String> managedEnvironmentKeys(ConnectorInfo connector) {
         requireConnector(connector);
+        if (com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.supports(connector)) {
+            return List.of(com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.key(connector.getConnectorId()));
+        }
         return canonicalizer.extractManagedEnvironmentKeys(connector, connector.getRuntimeManifest());
     }
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { validateMailBindings } from './routing/dispatcher.mjs';
 /**
  * research-state.mjs — 深化研究方法的状态机(deep_research.py 的 JS 等价平替)。
  *
@@ -28,6 +29,8 @@ import {
   ensureSessionSkeleton,
   assertSandboxSessionPath,
   resolveSandboxPath,
+  resolveTrustedSessionRoot,
+  isInside,
 } from './session.mjs';
 import { deliveryCompleteForSession } from './delivery-state.mjs';
 import { createDiscoveryAuthorization } from './discovery-authorization.mjs';
@@ -42,9 +45,10 @@ export const TREE_FILENAME = 'research-tree.md';
 export const REPORT_FILENAME = 'report.md';
 const BRANCH_STATUSES = new Set(['done', 'pending', 'failed']);
 const TASK_MODES = new Set(['research', 'collection']);
-const SOURCE_SCOPES = new Set(['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima']);
+const SOURCE_SCOPES = new Set(['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge', 'mail']);
 const MATERIALIZATION_TARGETS = new Set(['candidates', 'selected', 'all']);
 const REQUIRED_CONTENT_GRANULARITIES = new Set(['any', 'full-text']);
+const WORKFLOWS = new Set(['public-collect']);
 const REQUIRED_REPORT_HEADINGS = ['采集范围', '采集成果', '来源与追溯', '覆盖缺口与局限'];
 
 function parseJsonArg(value, fallback) {
@@ -114,6 +118,117 @@ function asBool(value, label) {
   throw new Error(`${label} 必须是布尔值`);
 }
 
+function validateSessionDirectoryIntent(root, currentSessionRoot, deliveryRequested) {
+  const normalizedRoot = path.resolve(root);
+  const usesDeliveryStaging = normalizedRoot.split(path.sep).includes('.collection-runs');
+  if (!deliveryRequested) {
+    if (usesDeliveryStaging) {
+      throw new Error('只有用户明确提供保存路径时才能使用 .collection-runs；请传 --delivery-requested true，否则使用 collections/<task-name>');
+    }
+    return;
+  }
+
+  if (typeof currentSessionRoot !== 'string' || !currentSessionRoot.trim()) {
+    throw new Error('--delivery-requested true 时必须传入当前 Session Root');
+  }
+  const trustedSessionRoot = resolveSandboxPath('.', '--session-root', {
+    currentSessionRoot,
+  });
+  const relative = path.relative(trustedSessionRoot, normalizedRoot);
+  const parts = relative.split(path.sep).filter(Boolean);
+  if (relative.startsWith('..') || path.isAbsolute(relative)
+    || parts.length !== 2 || parts[0] !== '.collection-runs' || !parts[1]) {
+    throw new Error('--delivery-requested true 时 --session-dir 必须严格匹配 <Session Root>/.collection-runs/<run-id>');
+  }
+}
+
+/**
+ * 把用户给出的最终落盘目录在 init 阶段绑定进会话状态，后续以 handle 引用，
+ * 使裸路径不再需要出现在任何命令参数里。
+ *
+ * 只做纯路径运算:不 stat、不 realpath、不创建任何东西。存在性、空目录、符号链接、
+ * 越界与冲突判定全部留在 publish 的 assertDeliveryDirectory 链路上，一处不动。
+ * 相对路径必须经 resolveTrustedSessionRoot 解析，以保证与 publish 得到逐字节相同的串。
+ */
+function bindDeliveryTarget(root, rawDeliveryDir, currentSessionRoot, deliveryRequested) {
+  if (rawDeliveryDir === undefined || rawDeliveryDir === null || rawDeliveryDir === '') {
+    return null;
+  }
+  const requested = requireString(rawDeliveryDir, '--delivery-dir');
+  if (!deliveryRequested) {
+    throw new Error('--delivery-dir 必须与 --delivery-requested true 同时给出');
+  }
+  const resolved = path.isAbsolute(requested)
+    ? path.resolve(requested)
+    : path.resolve(resolveTrustedSessionRoot(currentSessionRoot, '--delivery-dir'), requested);
+  if (resolved === path.parse(resolved).root) {
+    throw new Error('--delivery-dir 不能是文件系统根目录');
+  }
+  if (isInside(path.resolve(root), resolved)) {
+    throw new Error('--delivery-dir 不能位于内部采集会话目录中');
+  }
+  const handle = `delivery-${crypto.createHash('sha256').update(resolved).digest('hex').slice(0, 8)}`;
+  return { requestedDirectory: resolved, handle };
+}
+
+/**
+ * init 阶段的两条 advisory warning。都只提示,绝不改变任何接受/拒绝结果:
+ *
+ * 1. selected + delivery-requested 但没给 --workflow —— 这正是 §1.1 死路的成因形状,
+ *    在它被创建的当下就点出来,比等到 public-collect 抛错晚一整轮要好。仍然只是提示:
+ *    企业与 crawl 工作流合法地使用同一形状。
+ * 2. 兄弟目录名只差 -v2 / -v<n> / -fulltext / -articles —— 评审把原先的「拒绝」降级为
+ *    警告(§2.4):deepseek 与 deepseek-articles 可能是两个真任务,硬失败会挡住正当工作
+ *    且无从绕过。替代会话的禁令留在 SKILL.md 里,那里才可执行。
+ * 3. --delivery-requested true 但没给 --delivery-dir —— 设计 §2.1 要求两者互为必需,
+ *    但反向硬失败会打死 delivery.md / SKILL.md §3.7 明确保留的回退形式
+ *    (publish --delivery-dir),那是聚合会话与旧会话唯一的交付路径。因此反向只作
+ *    警告:提示本会话没有 handle、publish 时仍需暴露裸路径,而不阻断它。
+ *
+ * 目录扫描只 readdir 兄弟层,且失败即静默返回——警告永远不值得让 init 失败。
+ */
+const SIBLING_SUFFIX_PATTERN = /-(?:v\d+|fulltext|full-text|articles)$/i;
+
+function initAdvisories(root, {
+  materializationTarget: target, deliveryRequested, effectiveWorkflow, deliveryBound,
+}) {
+  const warnings = [];
+  if (deliveryRequested && !deliveryBound) {
+    warnings.push('--delivery-requested true 但未提供 --delivery-dir:本会话没有绑定交付目标,'
+      + '不会得到 deliveryTarget.handle,最终只能以 publish --delivery-dir <path> 交付,'
+      + '裸路径会重新出现在命令行里;若此刻已知落盘目录,请在本次 init 就传 --delivery-dir');
+  }
+  if (target === 'selected' && deliveryRequested && !effectiveWorkflow) {
+    warnings.push('selected + --delivery-requested 通常意味着 public-collect 工作流;'
+      + '本次 init 已成功创建会话,不能重新运行 init;若确实要走 public-collect,请在原会话上执行 '
+      + 'retighten --required-content-granularity full-text,再直接运行 public-collect,由该命令建立工作流状态');
+  }
+
+  const resolvedRoot = path.resolve(root);
+  const parent = path.dirname(resolvedRoot);
+  const base = path.basename(resolvedRoot);
+  const stem = base.replace(SIBLING_SUFFIX_PATTERN, '');
+  try {
+    for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === base) continue;
+      const siblingStem = entry.name.replace(SIBLING_SUFFIX_PATTERN, '');
+      if (siblingStem !== stem) continue;
+      warnings.push(`已存在相似的兄弟会话目录 ${entry.name};`
+        + '如果本次目的是修正粒度标准,请改用 retighten 就地修复,不要新建替代会话');
+      break;
+    }
+  } catch {
+    // 兄弟层不可读时不提示:advisory 不得让 init 失败
+  }
+  return warnings;
+}
+
+/** stdout 侧的 deliveryTarget 投影:只暴露 handle，绝不回显裸路径。 */
+export function reportableDeliveryTarget(deliveryTarget) {
+  if (!deliveryTarget?.handle) return undefined;
+  return { handle: deliveryTarget.handle, bound: true };
+}
+
 function nonEmptyStringList(value, label) {
   const items = asList(value, label);
   for (const item of items) {
@@ -125,7 +240,7 @@ function nonEmptyStringList(value, label) {
 }
 
 function sourceScope(value) {
-  const scopes = nonEmptyStringList(parseJsonArg(value, ['public-internet']), '--source-scope');
+  const scopes = nonEmptyStringList(parseJsonArg(value, ['public-internet', 'cloud-knowledge']), '--source-scope');
   const seen = new Set();
   for (const scope of scopes) {
     if (!SOURCE_SCOPES.has(scope)) {
@@ -137,6 +252,42 @@ function sourceScope(value) {
     seen.add(scope);
   }
   return scopes;
+}
+
+function validateCloudDiscoveryScope(value) {
+  const scope = asDict(parseJsonArg(value, null), '--cloud-discovery-scope');
+  if (scope.schemaVersion !== '1.0' || !Array.isArray(scope.resources) || scope.resources.length === 0) {
+    throw new Error('--cloud-discovery-scope 必须是 schemaVersion=1.0 且包含非空 resources 数组');
+  }
+  const seen = new Set();
+  return {
+    schemaVersion: '1.0',
+    resources: scope.resources.map((resource, index) => {
+      if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
+        throw new Error(`--cloud-discovery-scope.resources[${index}] 必须是对象`);
+      }
+      const resourceId = positiveInt(resource.resourceId, `resources[${index}].resourceId`);
+      const directoryPath = typeof resource.directoryPath === 'string' ? resource.directoryPath : '';
+      const pathParts = directoryPath.split('/');
+      if (!directoryPath.startsWith('/') || directoryPath.includes('\\')
+        || (directoryPath !== '/' && pathParts.slice(1).some((part) => !part || part === '.' || part === '..'))) {
+        throw new Error(`--cloud-discovery-scope.resources[${index}].directoryPath 必须是安全绝对 POSIX 路径`);
+      }
+      if (resource.origin !== 'user-input') {
+        throw new Error(`--cloud-discovery-scope.resources[${index}].origin 必须是 user-input`);
+      }
+      const key = `${resourceId}\n${directoryPath}`;
+      if (seen.has(key)) throw new Error(`--cloud-discovery-scope.resources 不得重复: ${key}`);
+      seen.add(key);
+      return { resourceId, directoryPath, origin: 'user-input' };
+    }),
+  };
+}
+
+function cloudDiscoveryScopeFromResourceId(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const resourceId = positiveInt(value, '--cloud-resource-id');
+  return { schemaVersion: '1.0', resources: [{ resourceId, directoryPath: '/', origin: 'user-input' }] };
 }
 
 function materializationTarget(value) {
@@ -153,6 +304,15 @@ function requiredContentGranularity(value) {
     throw new Error(`--required-content-granularity 必须是 ${[...REQUIRED_CONTENT_GRANULARITIES].join(' | ')}`);
   }
   return required;
+}
+
+function workflow(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!WORKFLOWS.has(normalized)) {
+    throw new Error(`--workflow 仅支持 ${[...WORKFLOWS].join(' | ')}`);
+  }
+  return normalized;
 }
 
 function validateReportSections(reportPath) {
@@ -542,9 +702,33 @@ export function cmdInit(args) {
   const maxSourcesPerBranch = optionalPositiveInt(args['max-sources-per-branch'], '--max-sources-per-branch', { max: 1000 });
   const maxSearchRounds = optionalPositiveInt(args['max-search-rounds'], '--max-search-rounds', { max: 1000 });
   const effectiveSourceScope = sourceScope(args['source-scope']);
+  const mailBindings = effectiveSourceScope.includes('mail')
+    ? validateMailBindings(parseJsonArg(args['mail-bindings'], null)) : null;
+  if (!mailBindings && args['mail-bindings'] !== undefined) throw new Error('--mail-bindings requires mail source scope');
   const effectiveMaterializationTarget = materializationTarget(args['materialization-target']);
   const effectiveRequiredContentGranularity = requiredContentGranularity(
     args['required-content-granularity'],
+  );
+  const effectiveWorkflow = workflow(args.workflow);
+  const deliveryRequested = asBool(args['delivery-requested'], '--delivery-requested');
+  const sourceScopeWasExplicit = args['source-scope'] !== undefined;
+  const cloudDiscoveryScope = effectiveSourceScope.includes('cloud-knowledge')
+    ? (args['cloud-discovery-scope'] !== undefined
+      ? validateCloudDiscoveryScope(args['cloud-discovery-scope'])
+      : cloudDiscoveryScopeFromResourceId(args['cloud-resource-id'])
+        || (args['cloud-discovery-scope'] === undefined && !sourceScopeWasExplicit ? null : null)) : null;
+  if (!effectiveSourceScope.includes('cloud-knowledge') && args['cloud-discovery-scope'] !== undefined) {
+    throw new Error('--cloud-discovery-scope 仅在 sourceScope 包含 cloud-knowledge 时允许');
+  }
+  if (effectiveSourceScope.includes('cloud-knowledge') && effectiveMaterializationTarget !== 'selected') {
+    throw new Error('cloud-knowledge V1 仅支持 materialization-target=selected');
+  }
+  validateSessionDirectoryIntent(root, args['session-root'], deliveryRequested);
+  const deliveryTarget = bindDeliveryTarget(
+    root,
+    args['delivery-dir'],
+    args['session-root'],
+    deliveryRequested,
   );
   const explicitDirectUrls = nonEmptyStringList(
     parseJsonArg(args['direct-urls'], []),
@@ -556,6 +740,24 @@ export function cmdInit(args) {
   if (!Number.isFinite(Date.parse(startedAt))) {
     throw new Error('--started-at 必须是合法时间字符串');
   }
+  if (effectiveWorkflow === 'public-collect') {
+    const publicOnly = effectiveSourceScope.length === 1
+      && effectiveSourceScope[0] === 'public-internet';
+    if (mode !== 'collection' || !publicOnly
+      || effectiveMaterializationTarget !== 'selected'
+      || effectiveRequiredContentGranularity !== 'full-text'
+      || args['collection-result-input-file'] || args['metadata-input-file']) {
+      throw new Error('public-collect workflow 要求 collection、仅 public-internet、selected + full-text 且无预置业务产物');
+    }
+  }
+
+  // 必须在 ensureSessionSkeleton 之前算:兄弟层扫描不应看见本会话自己的目录。
+  const warnings = initAdvisories(root, {
+    materializationTarget: effectiveMaterializationTarget,
+    deliveryRequested,
+    effectiveWorkflow,
+    deliveryBound: Boolean(deliveryTarget),
+  });
 
   const sessionFile = path.join(root, 'session.json');
   if (fs.existsSync(sessionFile)) {
@@ -581,8 +783,13 @@ export function cmdInit(args) {
       maxSourcesPerBranch,
       maxSearchRounds,
       sourceScope: effectiveSourceScope,
+      ...(mailBindings ? { mailBindings } : {}),
       materializationTarget: effectiveMaterializationTarget,
       requiredContentGranularity: effectiveRequiredContentGranularity,
+      ...(effectiveWorkflow ? { workflow: effectiveWorkflow } : {}),
+      deliveryRequested,
+      ...(deliveryTarget ? { deliveryTarget } : {}),
+      ...(cloudDiscoveryScope ? { cloudDiscoveryScope } : {}),
       startedAt,
       initialSearch: [],
       followups: [],
@@ -635,8 +842,12 @@ export function cmdInit(args) {
     ok: true,
     action: 'init',
     sessionDir: root,
-    task: session.task,
+    task: {
+      ...session.task,
+      ...(deliveryTarget ? { deliveryTarget: reportableDeliveryTarget(deliveryTarget) } : {}),
+    },
     collectionItems: session.collection.collection.items.length,
+    warnings,
   };
 }
 
@@ -915,8 +1126,18 @@ export function cmdResearchStatus(args) {
       }
     }
   }
+  const {
+    acquisitionEvidence: _internalAcquisitionEvidence,
+    deliveryTarget: internalDeliveryTarget,
+    ...reportableTask
+  } = session.task;
   return {
-    task: session.task,
+    task: {
+      ...reportableTask,
+      ...(internalDeliveryTarget
+        ? { deliveryTarget: reportableDeliveryTarget(internalDeliveryTarget) }
+        : {}),
+    },
     research: {
       branches: session.research.branches.length,
       learnings: session.research.learnings.length,

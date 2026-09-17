@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -114,7 +115,7 @@ def markdown_section(text, heading):
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
     def test_generic_web_collection_uses_controlled_commands_and_bounded_discovery(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
         online = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
         combined = f"{skill}\n{routing}\n{contract}\n{online}"
@@ -164,7 +165,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_arxiv_full_text_materialization_records_actual_acquisition_url(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
         combined = f"{skill}\n{routing}\n{contract}"
 
@@ -212,6 +213,35 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("用户明确提供的 URL", contract)
         self.assertIn("discoveryCandidateId", contract)
         self.assertIn("不得使用模型记忆中的 URL、DOI、论文 ID", skill)
+
+    def test_article_routing_uses_unified_sources_without_count_and_public_collect_with_count(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
+        combined = f"{skill}\n{routing}"
+
+        self.assertIn("文章、正文、全文或落盘内容但未指定数量时，默认使用 `unified-search`", combined)
+        self.assertIn("并行检索公共互联网与当前项目云盘", combined)
+        self.assertIn("用户明确要求数量", combined)
+        self.assertIn("改用 `public-collect`，只检索公共互联网", combined)
+        self.assertIn("用户明确指定数量时", combined)
+        self.assertIn("使用 `public-collect`，仅检索公共互联网", combined)
+        self.assertIn("用户明确限定来源时服从限定，不自动添加其他来源", combined)
+
+    def test_default_public_article_scope_mentions_project_cloud_context(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("without an explicit result count", skill)
+        self.assertIn("`public-internet` + `cloud-knowledge`", skill)
+        self.assertIn("`public-internet` | `selected` + `full-text` via `public-collect`", skill)
+
+    def test_unified_search_must_forward_project_id_for_cloud_resource_resolution(self):
+        combined = "\n".join([
+            (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8"),
+            ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8")),
+        ])
+        self.assertIn("`project_id` 透传为 `--project-id`", combined)
+        self.assertIn("`project-context basic` 返回的 `project.cloudResourceId`", combined)
+        self.assertIn("首次 `init --cloud-resource-id`", combined)
+        self.assertIn("不要手工拼接或猜测 scope JSON", combined)
 
     def test_knowledge_collection_upgrade_is_isolated_in_v031(self):
         self.assertTrue(V031_DML.is_file(), "knowledge collection migration must be versioned as V0.3.1")
@@ -355,7 +385,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("A normal question, a single fact lookup, opening one page, or login is not collection work", skill)
 
     def test_owned_weixin_backend_collection_routes_directly_to_bycli(self):
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
 
@@ -367,7 +397,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_adaptive_discovery_and_wechat_materialization_are_documented(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         online_search = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
 
@@ -423,11 +453,12 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_agent_reach_enterprise_collection_routes_to_source_bridges(self):
         collection_skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        agent_reach = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        agent_reach = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
 
         self.assertIn("企业来源", agent_reach)
         self.assertIn("采集编排器 `knowledge-collection`", agent_reach)
-        self.assertIn("不得作为公共互联网任务交给 `bycli`", agent_reach)
+        self.assertIn("企业来源按渠道加载", agent_reach)
+        self.assertIn("用户明确来源优先", agent_reach)
 
         bridges = {
             "references/sources/wecom-wecomcli.md": "`wecomcli` skill",
@@ -556,6 +587,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         for phrase in (
             "`.collection-runs/<run-id>/`",
             "用户提供的保存路径是交付目录，不是采集会话目录",
+            "没有显式保存路径时必须",
+            "两种目录布局互斥",
+            "`--delivery-requested true`",
+            "不得预先 `mkdir`",
+            "参数校验失败后不得删除",
             "`status.collection.deliveryComplete=true`",
             "`publish --session-dir <dir> --delivery-dir <path>`",
             "不得覆盖或删除目标目录中已有的未知内容",
@@ -564,6 +600,83 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "不得扫描或猜测交付目录",
         ):
             self.assertIn(phrase, combined)
+
+    def test_public_collect_uses_full_text_on_the_first_init(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "明确数量的文章",
+            "首次 `init`",
+            "`--materialization-target selected`",
+            "`--required-content-granularity full-text`",
+            "不得先用 `any` 初始化",
+            "不得为修正粒度新建",
+        ):
+            self.assertIn(phrase, skill)
+
+    def test_public_routing_is_selected_by_deliverable_without_count_ambiguity(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
+        combined = f"{skill}\n{routing}"
+
+        for phrase in (
+            "只要候选链接",
+            "即使用户指定了链接数量",
+            "使用 `public-discover`",
+            "其中“文章”按完整正文处理",
+            "`--workflow public-collect`",
+            "`--query` 与 `--fallback-query`",
+            "都复用首次 `init` 的原始任务描述",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_public_collect_owned_sessions_do_not_advertise_external_atomic_paths(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{routing}\n{contract}"
+
+        for phrase in (
+            "原子来源命令仅适用于未由 `public-collect` 持有的 operator 会话",
+            "`public-collect` 持有的会话只能调用编排器内部 verifier",
+            "`crawl-next` 虽不写入状态，但会返回外部待执行批次",
+            "因此在 `public-collect` 持有的会话中也必须拒绝",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_each_public_source_path_keeps_its_ownership_boundary_adjacent(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
+
+        for marker in (
+            "已选候选是 `https://mp.weixin.qq.com/s...`",
+            "其他通用网页必须先运行 `acquire-web",
+            "已授权并选中的 arXiv 候选要求完整正文时",
+        ):
+            paragraph = next(part for part in skill.split("\n\n") if marker in part)
+            self.assertIn("operator 会话", paragraph)
+            self.assertIn("内部 verifier", paragraph)
+
+        for marker in (
+            "`mp.weixin.qq.com/s...`",
+            "用户明确提供的 arXiv 论文全文",
+            "通用网页 / URL",
+        ):
+            row = next(line for line in routing.splitlines() if marker in line)
+            self.assertIn("operator", row)
+            self.assertIn("内部 verifier", row)
+
+    def test_init_failure_preserves_the_only_session_directory(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "首次 `init` 必须一次性提供完整参数",
+            "禁止执行 `mkdir`",
+            "禁止执行 `rm`、`rm -rf` 或 `rmdir`",
+            "禁止改用其他目录名或追加后缀",
+            "输出 `status` 并停止",
+        ):
+            self.assertIn(phrase, skill)
 
     def test_skill_main_entry_stops_after_delivery(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -648,6 +761,53 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("封面失败不改变正文的物化状态", ima)
         self.assertNotIn("任一封面下载、校验或写入失败时，该条物化失败", ima)
 
+    def test_ima_collection_contract_uses_only_the_bycli_ima_adapter(self):
+        ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
+        agent_reach = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
+        ima_skill = (SKILLS_ROOT / "ima-skill" / "SKILL.md").read_text(encoding="utf-8")
+        combined = f"{ima}\n{agent_reach}"
+
+        for phrase in (
+            "`bycli ima knowledge-list -f json`",
+            "`bycli ima knowledge <knowledgeBase> -f json`",
+            "逐库",
+            "本地筛选",
+            "部分失败",
+        ):
+            self.assertIn(phrase, combined)
+        for standalone_command in (
+            "ima auth check",
+            "ima note search",
+            "ima wiki search",
+            "ima-openapi-cli",
+        ):
+            self.assertNotIn(standalone_command, combined)
+        self.assertIn(
+            "`knowledge-collection` 的 IMA 采集只能使用 `bycli ima`",
+            ima_skill,
+        )
+        self.assertNotIn(
+            "失败后可由 `knowledge-collection` 调用一次 `ima wiki search`",
+            ima_skill,
+        )
+
+    def test_ima_collection_contract_closes_terminal_batch_and_recovery_paths(self):
+        ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "所有终态失败都必须写出",
+            "`AUTH_REQUIRED`、`INVALID_RESPONSE`、`SOURCE_FAILED`",
+            "继承父会话",
+            "`--query` 必须与父会话 `task.query` 完全一致",
+            "`search-all` 聚合会话与 IMA 子会话都必须继承父会话",
+            "父会话和聚合会话必须使用互不包含的独立会话树",
+            "`source=ima`、`backend=bycli`",
+            "独占会话锁",
+            "`raw/<source>/`",
+            "最多调度 500 个唯一知识库",
+        ):
+            self.assertIn(phrase, ima)
+
     def test_delegated_adapter_candidate_does_not_create_a_second_question(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
         delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
@@ -679,7 +839,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_cross_skill_direct_query_and_explicit_collection_have_distinct_owners(self):
         knowledge = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        agent_reach = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        agent_reach = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
         delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
 
@@ -973,6 +1133,105 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         self.assertNotIn("Any API failure—including", weixin)
         self.assertNotIn("their failed API attempt follows the automatic browser fallback", weixin)
+
+    def test_delivery_target_is_bound_at_init_and_referenced_by_handle(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        for phrase in (
+            "`init --delivery-dir <path>`",
+            "`publish --session-dir <dir> --delivery-handle <handle>`",
+            "`init` 不对交付目录做任何文件系统访问",
+        ):
+            self.assertIn(phrase, combined)
+
+        # 绑定流程取代了旧的「init 不得包含 --delivery-dir」禁令，但探测禁令必须留下
+        self.assertNotIn("`init` 命令不得包含 `--delivery-dir`", combined)
+        for phrase in (
+            "不得预先 `mkdir`",
+            "不得扫描或猜测交付目录",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_init_warnings_are_declared_mandatory_reading(self):
+        """init 的 advisory 只有在被要求读取时才有意义。
+
+        三条 warning 都不改变 init 的成败，忽略它们不会报错，因此若文档不点明
+        「必读」，整块 advisory 等于没做。这里锁住那句要求本身，以及三条 warning
+        各自的处置方式。
+        """
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("`warnings` 是必读字段", skill)
+        for phrase in (
+            "会话未绑定交付目标",
+            "缺 `--workflow`",
+            "不能重新运行 `init`",
+            "在原会话上执行 `retighten --required-content-granularity full-text`",
+            "改用 `retighten` 就地修复原会话",
+        ):
+            self.assertIn(phrase, skill)
+
+    def test_delivery_dir_is_not_marked_deprecated(self):
+        """聚合会话唯一的交付形式不能同时被标为弃用。
+
+        delivery.md 要求企业 search-all 会话必须用 --delivery-dir；若 schema 又把它
+        标成 deprecated，两处文档直接矛盾，下游会据此移除仍在承载硬需求的参数。
+        """
+        schema = json.loads(
+            subprocess.run(
+                [
+                    "node",
+                    str(SKILL_ROOT / "scripts" / "knowledge-collection.mjs"),
+                    "command-schema",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
+        publish = schema["commands"]["publish"]["properties"]
+        self.assertNotIn("deprecated", publish["delivery-dir"])
+        self.assertIn("delivery-handle", publish)
+
+    def test_both_delivery_forms_stay_documented(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        # handle 形式是推荐路径，裸路径形式作为兼容回退保留：两者都不得被后续编辑删掉
+        self.assertIn("`publish --session-dir <dir> --delivery-dir <path>`", combined)
+        self.assertIn("--delivery-handle", combined)
+
+    def test_retighten_is_the_only_sanctioned_granularity_repair(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}"
+
+        for phrase in (
+            "`retighten`",
+            "只允许 `any` → `full-text`",
+            "不得先用 `any` 初始化",
+            "不得为修正粒度新建",
+            "RETIGHTEN_SESSION_NOT_FRESH",
+        ):
+            self.assertIn(phrase, combined)
+
+        # 反向放松必须被写成明确禁令，而不是留白让 Agent 自己猜
+        self.assertIn("不存在 `full-text` → `any`", combined)
+
+    def test_enterprise_aggregate_sessions_deliver_by_path_not_handle(self):
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "`search-all`",
+            "没有绑定交付目标",
+            "必须使用 `--delivery-dir`",
+        ):
+            self.assertIn(phrase, delivery)
 
     def test_candidate_article_requires_user_confirmation_before_download(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")

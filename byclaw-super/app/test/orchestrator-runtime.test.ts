@@ -59,12 +59,13 @@ describe("ByClaw BE orchestrator runtime provider", () => {
         code: "market_research",
         name: "市场调研专家",
         description:
-          "负责市场与竞品调研；技能：project-context、notice、project-cloud-knowledge",
+          "负责市场与竞品调研；技能：project-context、notice、project-cloud-knowledge、project-task-status-update",
         role: "调研分析",
         skills: [
           "project-context",
           "notice",
           "project-cloud-knowledge",
+          "project-task-status-update",
         ],
         execution: {
           connectorId: "openclaw-by-framework",

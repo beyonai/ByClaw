@@ -86,4 +86,16 @@ public class OperationAccountService {
             .orderByDesc(OperationAccount::getCreateTime);
         return operationAccountMapper.selectList(wrapper);
     }
+
+    /** 查询用户级模板账号的全部历史记录，软删除记录也用于阻止默认账号重建。 */
+    public boolean hasGlobalTemplateHistory(Long userId, String connectorCode) {
+        if (userId == null || connectorCode == null || connectorCode.isBlank()) {
+            return false;
+        }
+        LambdaQueryWrapper<OperationAccount> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(OperationAccount::getCreateBy, userId)
+            .isNull(OperationAccount::getProjectId)
+            .eq(OperationAccount::getTemplateConnectorCode, connectorCode);
+        return operationAccountMapper.selectCount(wrapper) > 0;
+    }
 }

@@ -1,12 +1,12 @@
 package com.iwhalecloud.byai.state.application.service.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -45,6 +45,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -68,6 +69,8 @@ class AssistantChatApplicationServiceTest {
 
     @BeforeEach
     void setUp() {
+        sessionRuntimeStateService = mock(com.iwhalecloud.byai.state.domain.chat.service.SessionRuntimeStateService.class);
+        multiDeviceBroadcastService = mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
         gatewayClient = mock(GatewayClient.class);
         runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         runningChatSnapshotService = mock(RunningChatSnapshotService.class);
@@ -80,6 +83,8 @@ class AssistantChatApplicationServiceTest {
         byaiSystemConfigService = mock(ByaiSystemConfigService.class);
 
         assistantChatApplicationService = new AssistantChatApplicationService(gatewayClient);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "sessionRuntimeStateService", sessionRuntimeStateService);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "multiDeviceBroadcastService", multiDeviceBroadcastService);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningOutputStreamRegistry",
             runningOutputStreamRegistry);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningChatSnapshotService",
@@ -105,50 +110,78 @@ class AssistantChatApplicationServiceTest {
         CurrentUserHolder.clearLoginInfo();
     }
 
+    private com.iwhalecloud.byai.state.domain.chat.service.SessionRuntimeStateService sessionRuntimeStateService;
+
+    private com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService multiDeviceBroadcastService;
+
     @Test
     void stopChat_clearsRunningStateAfterCancelSession() {
         StopChatDto stopChatDto = new StopChatDto();
         stopChatDto.setAgentId(30L);
         stopChatDto.setSessionId(10L);
         stopChatDto.setMessageId(20L);
-        TaskPlanSnapshot cancelling = new TaskPlanSnapshot();
-        cancelling.setStatus("CANCELLING");
         TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
         cancelled.setStatus("CANCELLED");
-        when(taskPlanApplicationService.requestCancellation(stopChatDto, "USER_STOPPED", "用户请求停止"))
-            .thenReturn(List.of(cancelling));
-        when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
+        when(taskPlanApplicationService.cancel(stopChatDto, "USER_STOPPED", "用户已停止执行"))
             .thenReturn(List.of(cancelled));
         when(scriptService.flushFromSnapshot(10L, 20L)).thenReturn(true);
 
         assistantChatApplicationService.stopChat(stopChatDto);
 
-        verify(gatewayClient).cancelSession(eq("10"), eq("user cancel task"));
+        InOrder stopOrder = inOrder(taskPlanApplicationService, scriptService, gatewayClient);
+        stopOrder.verify(taskPlanApplicationService).cancel(stopChatDto, "USER_STOPPED", "用户已停止执行");
+        stopOrder.verify(scriptService).flushFromSnapshot(10L, 20L);
+        stopOrder.verify(gatewayClient).cancelSession(eq("10"), eq("user cancel task"));
         verify(runningOutputStreamRegistry).release(10L, 20L);
         verify(runningChatSnapshotService).delete(10L, 20L);
-        verify(taskPlanWebSocketPublisher).broadcast(1L, cancelling, null);
         verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
     }
 
     @Test
-    void stopChat_confirmsPlanCancellationWhenGatewayCancellationFails() {
+    void stopChatKeepsRuntimeListenerForMemberShutdownAndBroadcastsCancelledRuntime() {
+        StopChatDto dto = new StopChatDto();
+        dto.setSessionId(10L);
+        var runtime = new com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState();
+        runtime.setSessionId(10L);
+        runtime.setSource("test-engine");
+        runtime.setTraceId("trace-1");
+        runtime.setStatus("cancelled");
+        when(sessionRuntimeStateService.get(10L)).thenReturn(runtime);
+        when(sessionRuntimeStateService.cancel(10L)).thenReturn(runtime);
+        SessionStreamManager streams = mock(SessionStreamManager.class);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "sessionStreamManager", streams);
+        when(streams.isSessionListenerActive("10")).thenReturn(true);
+
+        assistantChatApplicationService.stopChat(dto);
+
+        verify(gatewayClient).cancelSession("10", "user cancel task");
+        verify(scriptService, never()).flushFromSnapshot(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(streams, never()).stopSessionListener(anyString());
+        verify(multiDeviceBroadcastService).broadcastRawToUser(eq(1L),
+            org.mockito.ArgumentMatchers.argThat(event -> "SESSION_RUNTIME_STATUS".equals(event.getString("type"))
+                && "cancelled".equals(event.getJSONObject("data").getString("status"))),
+            org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    void stopChat_keepsPlanCancelledAndCleansUpWhenGatewayCancellationFails() {
         StopChatDto stopChatDto = new StopChatDto();
         stopChatDto.setSessionId(10L);
         stopChatDto.setMessageId(20L);
         TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
         cancelled.setStatus("CANCELLED");
-        when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
+        when(taskPlanApplicationService.cancel(stopChatDto, "USER_STOPPED", "用户已停止执行"))
             .thenReturn(List.of(cancelled));
         when(scriptService.flushFromSnapshot(10L, 20L)).thenReturn(true);
         doThrow(new IllegalStateException("gateway unavailable"))
             .when(gatewayClient).cancelSession("10", "user cancel task");
 
-        assertThatThrownBy(() -> assistantChatApplicationService.stopChat(stopChatDto))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessage("gateway unavailable");
+        assistantChatApplicationService.stopChat(stopChatDto);
 
-        verify(taskPlanApplicationService).confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行");
+        verify(taskPlanApplicationService).cancel(stopChatDto, "USER_STOPPED", "用户已停止执行");
         verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
+        verify(runningOutputStreamRegistry).release(10L, 20L);
+        verify(runningChatSnapshotService).delete(10L, 20L);
     }
 
     @Test

@@ -12,7 +12,6 @@
 |--------|------|--------|
 | `BE_DOMAINNAME` | 后端服务域名 | `ByaiService` |
 | `QA_DOMAINNAME` | QA 服务域名 | `byclaw-qa-manager` |
-| `DATACLOUD_DOMAINNAME` | DataCloud 域名 | `byclaw-datacloud` |
 
 ## 2. 服务端口配置
 
@@ -22,7 +21,6 @@
 | `BE_SERVER_PORT` | 后端 HTTP 端口 | `8086` |
 | `BE_WS_PORT` | 后端 WebSocket 端口 | `8082` |
 | `BYCLAW_QA_PORT` | QA 服务端口 | `8000` |
-| `DATACLOUD_PORT` | DataCloud 端口 | `8087` |
 
 ## 3. 数据库配置（OpenGauss）
 
@@ -107,16 +105,6 @@ FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file
 | `BYCLAW_QA_CHECKPOINTER_BACKEND` | Checkpointer 后端 | `opengauss` |
 | `BYCLAW_QA_KB_MINIO_BUCKET` | 知识库 Bucket | `knowledge-base` |
 | `BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET` | Markdown 知识库 Bucket | `knowledge-base-markdown` |
-
-## 8. DataCloud 配置
-
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `DATACLOUD_AGENT_LOCALE` | Agent 语言 | `zh_CN` |
-| `DATACLOUD_GATEWAY_WORKER_ID` | Gateway Worker ID | `datacloud` |
-| `DATACLOUD_GATEWAY_WORKSPACE_DIR` | 工作目录 | `/tmp/datacloud` |
-| `DATACLOUD_DISABLE_ASK_USER_TOOL` | 禁用询问用户工具 | `1` |
-| `DATACLOUD_REACT_MAX_ROUNDS` | 最大推理轮数 | `10` |
 
 ## 最小配置示例
 

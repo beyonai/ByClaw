@@ -80,6 +80,20 @@ public class SsResourceRelDetailServiceImpl extends ServiceImpl<SsResourceRelDet
     }
 
     /**
+     * 按资源 ID 仅查询关联目标 ID，用于安装状态等轻量判断。
+     */
+    @Override
+    public List<Long> findRelResourceIdsByResourceId(Long resourceId) {
+        LambdaQueryWrapper<SsResourceRelDetail> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.select(SsResourceRelDetail::getRelResourceId)
+            .eq(SsResourceRelDetail::getResourceId, resourceId);
+        return ssResourceRelDetailMapper.selectList(queryWrapper).stream()
+            .map(SsResourceRelDetail::getRelResourceId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toList());
+    }
+
+    /**
      * 删除以该资源为主或为从的全部关联明细。
      *
      * @param resourceId 资源标识

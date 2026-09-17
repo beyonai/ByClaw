@@ -61,8 +61,8 @@ public class ConnectorCredentialWorkspaceService {
             Path trustedRoot = trustedStorageRoot();
             Path bucketDirectory = secureDirectory(trustedRoot, resolveBucket(userId), trustedRoot, userId);
             Path byDirectory = secureDirectory(bucketDirectory, "by", trustedRoot, userId);
-            Path authDirectory = secureDirectory(byDirectory, ".connector-auth", trustedRoot, userId);
-            Path home = secureDirectory(authDirectory, "." + providerCode, trustedRoot, userId);
+            Path authDirectory = secureDirectory(byDirectory, ".connector-auth", trustedRoot, userId, true);
+            Path home = secureDirectory(authDirectory, "." + providerCode, trustedRoot, userId, true);
             applyPrivatePermissions(authDirectory);
             applyPrivatePermissions(home);
             Path realHome = home.toRealPath();
@@ -93,15 +93,17 @@ public class ConnectorCredentialWorkspaceService {
             Path trustedRoot = trustedStorageRoot();
             Path bucketDirectory = secureDirectory(trustedRoot, resolveBucket(userId), trustedRoot, userId);
             Path byDirectory = secureDirectory(bucketDirectory, "by", trustedRoot, userId);
-            Path authDirectory = secureDirectory(byDirectory, ".connector-auth", trustedRoot, userId);
+            Path authDirectory = secureDirectory(byDirectory, ".connector-auth", trustedRoot, userId, true);
             Path relative = SANDBOX_CONNECTOR_AUTH_ROOT.relativize(sandboxPath);
+            applyPrivatePermissions(authDirectory);
             Path parent = authDirectory;
             for (int index = 0; index < relative.getNameCount() - 1; index++) {
                 String segment = relative.getName(index).toString();
                 if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
                     throw new IllegalArgumentException("projectionPath contains an invalid directory segment");
                 }
-                parent = secureDirectory(parent, segment, trustedRoot, userId);
+                parent = secureDirectory(parent, segment, trustedRoot, userId, true);
+                applyPrivatePermissions(parent);
             }
             Path file = parent.resolve(relative.getFileName().toString()).normalize();
             if (!file.getParent().equals(parent) || !file.startsWith(trustedRoot)) {
@@ -151,6 +153,11 @@ public class ConnectorCredentialWorkspaceService {
     }
 
     private Path secureDirectory(Path parent, String segment, Path trustedRoot, Long userId) throws IOException {
+        return secureDirectory(parent, segment, trustedRoot, userId, false);
+    }
+
+    private Path secureDirectory(Path parent, String segment, Path trustedRoot, Long userId,
+            boolean privateDirectory) throws IOException {
         Path directory = parent.resolve(segment).normalize();
         if (!directory.startsWith(trustedRoot)) {
             throw new IllegalStateException("Credential workspace escapes storage root for userId " + userId);
@@ -161,7 +168,16 @@ public class ConnectorCredentialWorkspaceService {
                 throw new IOException("Credential workspace component is not a directory");
             }
         } else {
-            Files.createDirectory(directory);
+            try {
+                if (privateDirectory && Files.getFileStore(parent).supportsFileAttributeView("posix")) {
+                    Files.createDirectory(directory, java.nio.file.attribute.PosixFilePermissions
+                        .asFileAttribute(PRIVATE_DIRECTORY_PERMISSIONS));
+                } else {
+                    Files.createDirectory(directory);
+                }
+            } catch (java.nio.file.FileAlreadyExistsException concurrentCreation) {
+                if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) throw concurrentCreation;
+            }
         }
         rejectSymlink(directory, userId);
         Path realDirectory = directory.toRealPath();
@@ -183,7 +199,7 @@ public class ConnectorCredentialWorkspaceService {
             PosixFileAttributeView.class,
             LinkOption.NOFOLLOW_LINKS);
         if (posixView != null) {
-            Files.setPosixFilePermissions(directory, PRIVATE_DIRECTORY_PERMISSIONS);
+            posixView.setPermissions(PRIVATE_DIRECTORY_PERMISSIONS);
         }
     }
 

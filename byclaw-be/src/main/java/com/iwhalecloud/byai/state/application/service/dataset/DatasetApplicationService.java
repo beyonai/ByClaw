@@ -33,6 +33,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityDiscovery;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityEnrich;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
@@ -76,6 +77,7 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataUpdateRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
@@ -249,7 +251,7 @@ public class DatasetApplicationService {
         myResource.setResourceCode(resourceCode);
         myResource.setResourceName(resourceName);
         myResource.setResourceDesc(resourceDesc);
-        myResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        myResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         myResource.setOwnerType(ownerType);
         myResource.setCatalogId(datasetDto.getCatalogId());
 
@@ -284,7 +286,14 @@ public class DatasetApplicationService {
      * @param userName 用户名称
      * @return 默认个人知识库资源
      */
-    public SsResource createDefaultPersonalDataset(Long userId, String userCode, String userName) {
+    public Long createDefaultPersonalDataset(Long userId, String userCode, String userName) {
+
+        // 跳过默认个人知识库初始化
+        if (StringUtils.equalsIgnoreCase(datasetSystem, "WHALE_AGENT")) {
+            logger.info("dataset.system=WHALE_AGENT，跳过默认个人知识库初始化，userId={}", userId);
+            return null;
+        }
+
         String safeUserCode = StringUtils.defaultIfBlank(userCode, String.valueOf(userId));
         String safeUserName = StringUtils.defaultIfBlank(userName, safeUserCode);
         String resourceName = ssResourceService.generateAvailableResourceName(safeUserName + "的个人知识库",
@@ -297,7 +306,8 @@ public class DatasetApplicationService {
         datasetDto.setOwnerType(OwnerType.PERSONAL_DEFAULT);
         datasetDto.setCatalogId(0L);
         datasetDto.setType("dataset");
-        return this.createDataset(datasetDto);
+        SsResource ssResource = this.createDataset(datasetDto);
+        return ssResource.getResourceId();
     }
 
     /**
@@ -420,9 +430,9 @@ public class DatasetApplicationService {
         SsResExtDoc extDoc = ssResExtDocService.findById(resourceId);
         String targetContent = extDoc == null ? null : extDoc.getTargetContent();
 
-        // 软删除：把 ss_resource.resource_status 置为 REMOVED(3)，保留主表与扩展表数据，
+        // 软删除：把 ss_resource.resource_status 置为 OFF_SHELF(3)，保留主表与扩展表数据，
         // 让前端"已注销"筛选项可以查询到这些记录；运行期副作用（向量库/注册等）继续清理。
-        ssResource.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        ssResource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
         ssResourceService.updateResourceEntity(ssResource);
@@ -518,7 +528,12 @@ public class DatasetApplicationService {
      */
     public DatasetDetailVo detail(Long resourceId) {
         validateDatasetReadablePermission(loadDatasetResource(resourceId));
-        return ssResourceService.findDatasetDetailById(resourceId);
+        DatasetDetailVo detail = ssResourceService.findDatasetDetailById(resourceId);
+        if (detail != null) {
+            detail.setOperationPermissions(authApplicationService.queryResourceOperationPermissionsBatch(
+                Collections.singletonList(resourceId)).get(resourceId));
+        }
+        return detail;
     }
 
     /***
@@ -703,6 +718,7 @@ public class DatasetApplicationService {
 
         // 获取知识库信息
         SsResource ssResource = loadDatasetResource(resourceId);
+
         validateDatasetReadablePermission(ssResource);
 
         boolean directoryDownload = StringUtils.endsWith(StringUtils.trimToEmpty(directoryPath).replace('\\', '/'),
@@ -984,10 +1000,13 @@ public class DatasetApplicationService {
 
         KbEntityDiscovery qaRequest = new KbEntityDiscovery();
         qaRequest.setKnCode(ssResource.getResourceCode());
-        qaRequest.setDirectoryPath(request.getDirectoryPath());
+        qaRequest.setDirectoryPath(normalizeOptionalKnowledgeDirectoryPath(request.getDirectoryPath()));
         qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setTargetDirectoryPath(
+            normalizeOptionalKnowledgeDirectoryPath(request.getTargetDirectoryPath()));
         qaRequest.setMaxEntities(request.getMaxEntities() == null ? 12 : request.getMaxEntities());
         qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
+        qaRequest.setTags(request.getTags());
         qaRequest.setExtraParams(
             request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
 
@@ -1009,6 +1028,7 @@ public class DatasetApplicationService {
         KbEntityEnrich qaRequest = new KbEntityEnrich();
         qaRequest.setKnCode(ssResource.getResourceCode());
         qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setDirectoryPath(normalizeOptionalKnowledgeDirectoryPath(request.getDirectoryPath()));
         qaRequest.setTopK(request.getTopK() == null ? 20 : request.getTopK());
         qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
         qaRequest.setExtraParams(
@@ -1050,7 +1070,7 @@ public class DatasetApplicationService {
         String knCode = null;
         if (dirAndFileQo.getResourceId() != null) {
             SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
-            validateDatasetReadablePermission(ssResource);
+            // validateDatasetReadablePermission(ssResource);
             knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
         } else {
             // openApi接口查询不做校验
@@ -1266,7 +1286,8 @@ public class DatasetApplicationService {
     private String getLastSplitName(String directoryPath) {
         if (directoryPath != null && directoryPath.contains("/")) {
             String[] splitStr = directoryPath.split("/");
-            return splitStr[splitStr.length - 1];
+            // 根目录拆分后为空，使用空名称回退到知识库名称，避免访问下标 -1。
+            return splitStr.length == 0 ? "" : splitStr[splitStr.length - 1];
         } else {
             return directoryPath;
         }
@@ -1378,7 +1399,7 @@ public class DatasetApplicationService {
 
         /**
          * SsResource ssResource = ssResourceService.createResource(resourceBizType, resourceCode, resourceName,
-         * resourceDesc, ResourceStatus.LIST.getNum(), ownerType, datasetImportDto.getSystemCode(),
+         * resourceDesc, ResourceStatus.ON_SHELF.getNum(), ownerType, datasetImportDto.getSystemCode(),
          * datasetImportDto.getVersion(), datasetImportDto.getCatalogId());
          */
 
@@ -1388,7 +1409,7 @@ public class DatasetApplicationService {
         myResource.setResourceCode(resourceCode);
         myResource.setResourceName(resourceName);
         myResource.setResourceDesc(resourceDesc);
-        myResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        myResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         myResource.setOwnerType(ownerType);
         myResource.setSystemCode(datasetImportDto.getSystemCode());
         myResource.setResourceVersionId(datasetImportDto.getVersion());
@@ -1613,6 +1634,40 @@ public class DatasetApplicationService {
     }
 
     /**
+     * 批量新增、修改或删除知识文件/目录元数据。门户使用 resourceId 校验管理权限，转发 QA 时转换为 knCode。
+     */
+    public Map<String, Object> updateKnowledgeFileMetadata(KnowledgeFileMetadataUpdateRequest request,
+                                                           Map<String, String> headers) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        KbFileMetadataUpdate qaRequest = new KbFileMetadataUpdate();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setFilePath(normalizeKnowledgeFilePath(request.getFilePath()));
+        List<KbFileMetadataUpdate.MetadataOperation> operations = new ArrayList<>();
+        if (request.getOperationList() != null) {
+            for (KnowledgeFileMetadataUpdateRequest.MetadataOperation item : request.getOperationList()) {
+                if (item == null) {
+                    continue;
+                }
+                KbFileMetadataUpdate.MetadataOperation operation = new KbFileMetadataUpdate.MetadataOperation();
+                operation.setPropertyName(item.getPropertyName());
+                operation.setOperation(item.getOperation());
+                operation.setValueType(item.getValueType());
+                operation.setValue(item.getValue());
+                operations.add(operation);
+            }
+        }
+        qaRequest.setOperationList(operations);
+
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
+        PythonBuildResponse<Map<String, Object>> response = feignPythonBuildService
+            .updateKnowledgeFileMetadata(qaRequest, forwardedHeaders);
+        assertPythonBuildSuccess(response, "更新知识库文件元数据");
+        return response.getResultObject() == null ? Collections.emptyMap() : response.getResultObject();
+    }
+
+    /**
      * 执行知识库 chunk 检索。对外使用 ByClaw resourceIdList，内部转为 QA knCodeList。
      */
     public KnowledgeSearchResult searchKnowledgeItems(KnowledgeSearchRequest request) {
@@ -1804,6 +1859,10 @@ public class DatasetApplicationService {
 
     private String normalizeOptionalKnowledgeFilePath(String filePath) {
         return StringUtils.isBlank(filePath) ? null : normalizeKnowledgeFilePath(filePath);
+    }
+
+    private String normalizeOptionalKnowledgeDirectoryPath(String directoryPath) {
+        return StringUtils.isBlank(directoryPath) ? null : normalizeKnowledgeDirectoryPath(directoryPath);
     }
 
     private KnowledgeEntityBatchResult attachEntityBatchResourceId(KnowledgeEntityBatchResult result,

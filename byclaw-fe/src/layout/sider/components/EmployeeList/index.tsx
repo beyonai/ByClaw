@@ -45,6 +45,9 @@ export interface EmployeeListProps {
 
   /** 紧凑员工卡片内容间距，供输入框资源选择面板使用。 */
   compactCard?: boolean;
+
+  /** 在资源选择面板中同时展示数字员工组。 */
+  includeEmployeeGroups?: boolean;
 }
 
 export const isExcludedEmployee = (employee: IAgentCache, excludedAgentIds: string[] = []) => {
@@ -81,6 +84,7 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
 
   const CompRef = useRef<any>({});
   const isFirstRender = useRef(true);
+  const searchDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const SelectItems = React.useMemo(() => getSelectItems(intl), [intl]);
 
@@ -122,6 +126,16 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
     isFirstRender.current = false;
   }, [keyword, selectedKeys]);
 
+  useEffect(
+    () => () => {
+      if (searchDebounceTimerRef.current) {
+        clearTimeout(searchDebounceTimerRef.current);
+        searchDebounceTimerRef.current = null;
+      }
+    },
+    []
+  );
+
   return (
     <div
       className={classNames(styles.employeesSider, styles.list, { [styles.compactCard]: compactCard })}
@@ -152,7 +166,7 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
           </div>
         </div>
       )}
-      <div className="ub-ac gap8 mb-8" style={{ display: keyword ? 'none' : 'flex' }}>
+      <div className="ub-ac gap8 mb-8" style={{ display: 'flex' }}>
         <Input
           value={searchName[selectedKeys]}
           suffix={<SearchOutlined onClick={() => getSearch()} />}
@@ -167,12 +181,24 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
             }
           )}
           onChange={(e) => {
+            const nextSearchName = trim(e.target.value);
             setSearchName((prev) => {
               return {
                 ...prev,
-                [selectedKeys]: trim(e.target.value),
+                [selectedKeys]: nextSearchName,
               };
             });
+            // 用户继续编辑 @ 带入的关键词时自动防抖搜索，避免每次按键都立即请求。
+            if (searchDebounceTimerRef.current) {
+              clearTimeout(searchDebounceTimerRef.current);
+            }
+            searchDebounceTimerRef.current = setTimeout(() => {
+              const comp = CompRef.current?.[selectedKeys];
+              if (comp && typeof comp.getSearch === 'function') {
+                comp.getSearch(nextSearchName);
+              }
+              searchDebounceTimerRef.current = null;
+            }, 400);
           }}
           onPressEnter={() => getSearch()}
         />

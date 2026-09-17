@@ -33,7 +33,6 @@ import {
   QuestionCircleOutlined,
   EyeOutlined,
   ExclamationCircleOutlined,
-  PlusOutlined,
   DownOutlined,
 } from '@ant-design/icons';
 import classnames from 'classnames';
@@ -52,7 +51,6 @@ import AbilityBoundaryModal from './AbilityBoundaryModal';
 import AbilityExampleModal from './AbilityExampleModal';
 import { useFileTookit } from '@/pages/manager/hooks/useFileTookit';
 import ModelPopover from '../../components/ModelPopover';
-import RelResourceInfoModal from './RelResourceInfoModal';
 import ToolSelectorModal from './ToolSelectorModal';
 import { compressImgFileAndUpload } from '@/pages/manager/utils/file';
 import { Image } from '@/pages/manager/components/Image';
@@ -203,70 +201,6 @@ const parseDigitalEmployeeTemplates = (value: any) => {
     }
   }
   return [value];
-};
-
-const parseMaybeArray = (value: any) => {
-  if (Array.isArray(value)) return value;
-  if (!value) return [];
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value || '[]');
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-};
-
-const getOntologyResourceType = (row: any) =>
-  `${row?.grantResourceType || row?.resourceBizType || row?.level || ''}`.toUpperCase();
-
-const getOntologyResourceKey = (row: any) => {
-  const resourceId = row?.resourceId ?? row?.relResourceId ?? row?.id;
-  if (resourceId !== undefined && resourceId !== null && resourceId !== '') {
-    return `${resourceId}`;
-  }
-  return `${getOntologyResourceType(row)}:${row?.resourceCode || row?.viewCode || row?.objectCode || ''}`;
-};
-
-const normalizeOntologySummaryResource = (row: any = {}) => {
-  const resourceBizType = getOntologyResourceType(row);
-  const resourceCode = row?.resourceCode || row?.viewCode || row?.objectCode || row?.code || '';
-  const resourceName = row?.resourceName || row?.viewName || row?.objectName || row?.name || resourceCode;
-  return {
-    ...row,
-    key: getOntologyResourceKey(row),
-    resourceBizType,
-    resourceCode,
-    resourceName,
-    description: row?.description ?? row?.resourceDesc ?? row?.viewDesc ?? row?.objectDesc ?? row?.remark ?? '',
-  };
-};
-
-const buildOntologyConfigSummary = (savedRelOntology: any, ontologyResourcesDirty?: boolean) => {
-  const resourceMap = new Map<string, any>();
-  parseMaybeArray(savedRelOntology)
-    .map(normalizeOntologySummaryResource)
-    .filter((row: any) => ['VIEW', 'OBJECT'].includes(row.resourceBizType))
-    .forEach((row: any) => {
-      resourceMap.set(row.key, row);
-    });
-  const resources = Array.from(resourceMap.values());
-  const totals = resources.reduce(
-    (acc, row) => ({
-      views: acc.views + (row.resourceBizType === 'VIEW' ? 1 : 0),
-      objects: acc.objects + (row.resourceBizType === 'OBJECT' ? 1 : 0),
-    }),
-    { views: 0, objects: 0 }
-  );
-  return {
-    resources,
-    totals,
-    hasBinding: resources.length > 0,
-    hasPending: Boolean(ontologyResourcesDirty),
-    isCleared: Boolean(ontologyResourcesDirty) && resources.length === 0,
-  };
 };
 
 const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, agentType?: string) => {
@@ -640,6 +574,7 @@ const ConfigForm = (props) => {
     robotConfigs = [],
     setRobotConfigs,
     isReadOnly = false,
+    canConfigureResources = true,
     className,
     employeeType,
     onValuesChange,
@@ -657,9 +592,6 @@ const ConfigForm = (props) => {
     initialCoreCompetencies = [],
     ownerType,
     agentType,
-    onOpenOntologyDrawer,
-    savedRelOntology = [],
-    ontologyResourcesDirty = false,
     employeeGroupMembers = [],
     setEmployeeGroupMembers,
     imageModelSelect,
@@ -689,10 +621,6 @@ const ConfigForm = (props) => {
   const [agentTypeOptions, setAgentTypeOptions] = useState([]);
   const [bundledSkillOptions, setBundledSkillOptions] = useState([]);
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
-  const ontologySummary = useMemo(
-    () => buildOntologyConfigSummary(savedRelOntology, ontologyResourcesDirty),
-    [savedRelOntology, ontologyResourcesDirty]
-  );
   const [bundledSkillModalOpen, setBundledSkillModalOpen] = useState(false);
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
   const [bundledSkillPagination, setBundledSkillPagination] = useState({
@@ -861,9 +789,13 @@ const ConfigForm = (props) => {
   }, []);
 
   useEffect(() => {
-    if (!bundledSkillModalOpen) return;
+    if (!canConfigureResources || !bundledSkillModalOpen) return;
     fetchBundledSkills({ pageNum: 1, pageSize: BUNDLED_SKILL_PAGE_SIZE, keyword: '' });
-  }, [bundledSkillModalOpen, fetchBundledSkills]);
+  }, [canConfigureResources, bundledSkillModalOpen, fetchBundledSkills]);
+
+  useEffect(() => {
+    if (!canConfigureResources) setBundledSkillModalOpen(false);
+  }, [canConfigureResources]);
 
   useEffect(() => {
     let mounted = true;
@@ -954,8 +886,6 @@ const ConfigForm = (props) => {
   const internalSyncRef = useRef(false);
   const isOpenSource = brandVersionLoaded && brandVersion !== 'commercial';
 
-  const [relResourceInfoModalOpen, setRelResourceInfoModalOpen] = useState(false);
-  const [selectedToolItem, setSelectedToolItem] = useState(null);
   const [boundaryModalOpen, setBoundaryModalOpen] = useState(false);
   const [editingBoundaryAbilityId, setEditingBoundaryAbilityId] = useState(null);
   const [exampleModalOpen, setExampleModalOpen] = useState(false);
@@ -1036,6 +966,7 @@ const ConfigForm = (props) => {
 
   const handleToolSelectorConfirm = useCallback(
     (selectedRows) => {
+      if (!canConfigureResources) return;
       setSelectedTools((prev) => {
         const existMap = new Map(prev.map((it) => [`${it.resourceId}`, it]));
         selectedRows.forEach((item) => {
@@ -1053,7 +984,7 @@ const ConfigForm = (props) => {
         return Array.from(existMap.values());
       });
     },
-    [setSelectedTools, normalizeSkillType]
+    [canConfigureResources, setSelectedTools, normalizeSkillType]
   );
 
   // 记录上一次的初始岗位职责，用于判断是否需要根据外部变更重新回显
@@ -1454,16 +1385,17 @@ const ConfigForm = (props) => {
 
   const updateBundledSkills = useCallback(
     async (nextSkills = []) => {
+      if (!canConfigureResources) return;
       const normalizedSkills = normalizeBundledSkillItems(nextSkills, bundledSkillOptions);
       form.setFieldsValue({ bundledSkills: normalizedSkills });
       await syncRoleToForm({ bundledSkills: normalizedSkills });
       updateResource();
     },
-    [bundledSkillOptions, form, syncRoleToForm, updateResource]
+    [canConfigureResources, bundledSkillOptions, form, syncRoleToForm, updateResource]
   );
 
   useEffect(() => {
-    if (!bundledSkillOptions.length) {
+    if (!canConfigureResources || !bundledSkillOptions.length) {
       return;
     }
     const currentSkills = form.getFieldValue('bundledSkills') || [];
@@ -1476,9 +1408,10 @@ const ConfigForm = (props) => {
     }
     form.setFieldsValue({ bundledSkills: normalizedSkills });
     syncRoleToForm({ bundledSkills: normalizedSkills });
-  }, [bundledSkillOptions, form, syncRoleToForm]);
+  }, [canConfigureResources, bundledSkillOptions, form, syncRoleToForm]);
 
   useEffect(() => {
+    if (!canConfigureResources) return;
     const currentSkills = Array.isArray(selectedSkills) ? selectedSkills : [];
     const pendingSkills = currentSkills.filter((skill) => {
       if (!needHydrateBundledSkill(skill)) {
@@ -1573,7 +1506,7 @@ const ConfigForm = (props) => {
         pendingKeys.forEach((key) => hydratedBundledSkillKeysRef.current.delete(key));
       }
     };
-  }, [bundledSkillOptions, form, selectedSkills, syncRoleToForm]);
+  }, [canConfigureResources, bundledSkillOptions, form, selectedSkills, syncRoleToForm]);
 
   // 配置技能搜索已改为后端搜索，弹窗只渲染接口当前页返回的数据。
   const filteredBundledSkillOptions = bundledSkillOptions;
@@ -1624,7 +1557,7 @@ const ConfigForm = (props) => {
   );
 
   useEffect(() => {
-    if (!bundledSkillModalOpen || bundledSkillLoading) return;
+    if (!canConfigureResources || !bundledSkillModalOpen || bundledSkillLoading) return;
     if (!bundledSkillPagination.total || bundledSkillOptions.length >= bundledSkillPagination.total) return;
 
     const checkScrollableAndLoadMore = () => {
@@ -1639,6 +1572,7 @@ const ConfigForm = (props) => {
     const rafId = requestAnimationFrame(checkScrollableAndLoadMore);
     return () => cancelAnimationFrame(rafId);
   }, [
+    canConfigureResources,
     bundledSkillLoading,
     bundledSkillModalOpen,
     bundledSkillOptions.length,
@@ -2502,7 +2436,7 @@ const ConfigForm = (props) => {
               </div>
               {!moreModelsOpen && (
                 <button type="button" className={styles.moreModelsButton} onClick={() => setMoreModelsOpen(true)}>
-                  <span>更多模型</span>
+                  <span>{intl.formatMessage({ id: 'employeeDetail.moreModels' })}</span>
                 </button>
               )}
               {moreModelsOpen && (
@@ -2510,7 +2444,7 @@ const ConfigForm = (props) => {
                   {imageModelSelect}
                   {ttsModelSelect}
                   <button type="button" className={styles.moreModelsButton} onClick={() => setMoreModelsOpen(false)}>
-                    <span>收起更多模型</span>
+                    <span>{intl.formatMessage({ id: 'employeeDetail.collapseMoreModels' })}</span>
                   </button>
                 </>
               )}
@@ -2745,7 +2679,7 @@ const ConfigForm = (props) => {
             {/* )} */}
             {/* {digitalType === 'FROM_MANUALLY' && ( */}
             <>
-              {isEmployeeGroup && (
+              {canConfigureResources && isEmployeeGroup && (
                 <EmployeeGroupMembers
                   value={employeeGroupMembers}
                   onChange={setEmployeeGroupMembers}
@@ -2755,7 +2689,7 @@ const ConfigForm = (props) => {
                 />
               )}
               {/* 配置知识 */}
-              {employeeType !== '005' && (
+              {canConfigureResources && employeeType !== '005' && (
                 <div className={styles.knowledgeSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -2833,7 +2767,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置工具 */}
-              {employeeType !== '006' && employeeType !== '005' && (
+              {canConfigureResources && employeeType !== '006' && employeeType !== '005' && (
                 <div className={styles.skillsSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -2864,48 +2798,25 @@ const ConfigForm = (props) => {
                               <div className={styles.skillHeader}>
                                 <span className={styles.skillName}>{tool.resourceName}</span>
                                 <Tag size="small" className={styles.skillTag}>
-                                  {
-                                    {
-                                      AGENT: intl.formatMessage({
-                                        id: 'employeeDetail.skillType.agent',
-                                      }),
-                                      TOOLKIT: intl.formatMessage({
-                                        id: 'employeeDetail.skillType.toolkit',
-                                      }),
-                                      TOOL: intl.formatMessage({
-                                        id: 'employeeDetail.skillType.tool',
-                                      }),
-                                      MCP: 'MCP',
-                                      VIEW: intl.formatMessage({ id: 'employeeDetail.view' }),
-                                      OBJECT: intl.formatMessage({ id: 'employeeDetail.object' }),
-                                    }[tool.grantResourceType]
-                                  }
+                                  {{
+                                    AGENT: intl.formatMessage({
+                                      id: 'employeeDetail.skillType.agent',
+                                    }),
+                                    TOOLKIT: intl.formatMessage({
+                                      id: 'employeeDetail.skillType.toolkit',
+                                    }),
+                                    TOOL: intl.formatMessage({
+                                      id: 'employeeDetail.skillType.tool',
+                                    }),
+                                    MCP: 'MCP',
+                                  }[tool.grantResourceType] || tool.grantResourceType}
                                 </Tag>
                               </div>
                               <div className={styles.skillDescription}>{tool.description}</div>
                             </div>
                             <div className={styles.skillActions}>
-                              {isReadOnly ? (
+                              {!isReadOnly && (
                                 <Space>
-                                  {['VIEW', 'OBJECT'].includes(tool.grantResourceType) && (
-                                    <EyeOutlined
-                                      onClick={() => {
-                                        setSelectedToolItem(tool);
-                                        setRelResourceInfoModalOpen(true);
-                                      }}
-                                    />
-                                  )}
-                                </Space>
-                              ) : (
-                                <Space>
-                                  {['VIEW', 'OBJECT'].includes(tool.grantResourceType) && (
-                                    <FormOutlined
-                                      onClick={() => {
-                                        setSelectedToolItem(tool);
-                                        setRelResourceInfoModalOpen(true);
-                                      }}
-                                    />
-                                  )}
                                   <AntdIcon
                                     type="icon-a-Deleteshanchu"
                                     onClick={() => {
@@ -2923,155 +2834,72 @@ const ConfigForm = (props) => {
                 </div>
               )}
 
-              {/* 配置本体 */}
-              <div className={styles.skillsSection} hidden={isEmployeeGroup}>
-                <div className={styles.sectionHeader}>
-                  <span className={styles.sectionTitle}>
-                    {intl.formatMessage({
-                      id: 'employeeDetail.configureOntology',
-                    })}
-                  </span>
-                  {onOpenOntologyDrawer && (
+              {/* 配置技能 */}
+              {canConfigureResources && (
+                <div className={styles.skillsSection} hidden={isEmployeeGroup}>
+                  <div className={styles.sectionHeader}>
+                    <span className={styles.sectionTitle}>
+                      {intl.formatMessage({ id: 'employeeDetail.configureBundledSkills' })}
+                    </span>
                     <Button
                       type="link"
                       size="small"
-                      icon={<PlusOutlined />}
-                      onClick={onOpenOntologyDrawer}
                       disabled={isReadOnly}
+                      onClick={() => {
+                        setBundledSkillSearchName('');
+                        setBundledSkillPagination((prev) => ({ ...prev, pageNum: 1, current: 1 }));
+                        setBundledSkillModalOpen(true);
+                      }}
                     >
-                      {intl.formatMessage({ id: 'employeeDetail.ontology.addOntology' })}
+                      + {intl.formatMessage({ id: 'common.plus' })}
                     </Button>
-                  )}
-                </div>
-                <Card
-                  className={classnames(styles.configCard, styles.ontologyConfigCard, {
-                    [styles.ontologyEmptyCard]: !ontologySummary.hasBinding,
-                  })}
-                >
-                  <div className={styles.ontologyConfigHeader}>
-                    <div className={styles.ontologyIconBox}>
-                      <AntdIcon type="icon-a-Application-oneyingyong3" />
-                    </div>
-                    <div className={styles.ontologyConfigMain}>
-                      <div className={styles.ontologyConfigTitle}>
-                        {ontologySummary.hasBinding
-                          ? intl.formatMessage(
-                              { id: 'employeeDetail.ontology.boundSummary' },
-                              {
-                                viewCount: ontologySummary.totals.views,
-                                objectCount: ontologySummary.totals.objects,
-                              }
-                            )
-                          : ontologySummary.isCleared
-                          ? intl.formatMessage({ id: 'employeeDetail.ontology.clearedTitle' })
-                          : intl.formatMessage({ id: 'employeeDetail.ontology.emptyTitle' })}
-                        {ontologySummary.hasPending && (
-                          <Tag className={styles.ontologyStatusTag} color="orange">
-                            {intl.formatMessage({ id: 'employeeDetail.ontology.pendingSave' })}
-                          </Tag>
-                        )}
-                      </div>
-                      <div className={styles.ontologyConfigDesc}>
-                        {ontologySummary.hasBinding
-                          ? intl.formatMessage({ id: 'employeeDetail.ontology.boundTip' })
-                          : ontologySummary.isCleared
-                          ? intl.formatMessage({ id: 'employeeDetail.ontology.clearedDesc' })
-                          : intl.formatMessage({ id: 'employeeDetail.ontology.emptyDesc' })}
-                      </div>
-                      <Space size={6} wrap className={styles.ontologyTypeTags}>
-                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.view' })}</Tag>
-                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.object' })}</Tag>
-                      </Space>
-                    </div>
                   </div>
-                  {ontologySummary.hasBinding && (
-                    <div className={styles.ontologyPreviewList}>
-                      {ontologySummary.resources.slice(0, 3).map((resource) => (
-                        <Tooltip
-                          key={resource.key}
-                          title={`${resource.resourceName}${
-                            resource.resourceCode ? `（${resource.resourceCode}）` : ''
-                          }`}
+                  {selectedBundledSkillItems.length > 0 && (
+                    <div className={styles.skillsList}>
+                      {selectedBundledSkillItems.map((item) => (
+                        <Card
+                          key={getBundledSkillPrimaryKey(item)}
+                          className={classnames(styles.configCard, styles.skillCard, styles.selectedBundledSkillCard)}
                         >
-                          <Tag className={styles.ontologyResourcePreviewTag}>
-                            <span>{resource.resourceName}</span>
-                          </Tag>
-                        </Tooltip>
-                      ))}
-                      {ontologySummary.resources.length > 3 && (
-                        <Tag className={styles.ontologyResourcePreviewMore}>
-                          +{ontologySummary.resources.length - 3}
-                        </Tag>
-                      )}
-                    </div>
-                  )}
-                </Card>
-              </div>
-
-              {/* 配置技能 */}
-              <div className={styles.skillsSection} hidden={isEmployeeGroup}>
-                <div className={styles.sectionHeader}>
-                  <span className={styles.sectionTitle}>
-                    {intl.formatMessage({ id: 'employeeDetail.configureBundledSkills' })}
-                  </span>
-                  <Button
-                    type="link"
-                    size="small"
-                    disabled={isReadOnly}
-                    onClick={() => {
-                      setBundledSkillSearchName('');
-                      setBundledSkillPagination((prev) => ({ ...prev, pageNum: 1, current: 1 }));
-                      setBundledSkillModalOpen(true);
-                    }}
-                  >
-                    + {intl.formatMessage({ id: 'common.plus' })}
-                  </Button>
-                </div>
-                {selectedBundledSkillItems.length > 0 && (
-                  <div className={styles.skillsList}>
-                    {selectedBundledSkillItems.map((item) => (
-                      <Card
-                        key={getBundledSkillPrimaryKey(item)}
-                        className={classnames(styles.configCard, styles.skillCard, styles.selectedBundledSkillCard)}
-                      >
-                        <div
-                          className={classnames(
-                            styles.skillContent,
-                            styles.bundledSkillContent,
-                            styles.selectedBundledSkillContent
-                          )}
-                        >
-                          {renderBundledSkillPoster(item, styles.selectedBundledSkillPosterImageWrap)}
-                          <div className={classnames(styles.skillInfo, styles.bundledSkillInfo)}>
-                            <div className={styles.skillHeader}>
-                              <span className={styles.skillName}>
-                                {item.label || item.resourceName || item.skillCode || item.resourceId || '-'}
-                              </span>
-                            </div>
-                            <div className={classnames(styles.skillDescription, styles.selectedBundledSkillDesc)}>
-                              {item.resourceDesc || item.description || '-'}
-                            </div>
-                          </div>
-                          <div className={styles.skillActions}>
-                            {!isReadOnly && (
-                              <Space>
-                                <AntdIcon
-                                  type="icon-a-Deleteshanchu"
-                                  onClick={() => {
-                                    updateBundledSkills(
-                                      selectedSkills.filter((skill) => !isSameBundledSkill(skill, item))
-                                    );
-                                  }}
-                                />
-                              </Space>
+                          <div
+                            className={classnames(
+                              styles.skillContent,
+                              styles.bundledSkillContent,
+                              styles.selectedBundledSkillContent
                             )}
+                          >
+                            {renderBundledSkillPoster(item, styles.selectedBundledSkillPosterImageWrap)}
+                            <div className={classnames(styles.skillInfo, styles.bundledSkillInfo)}>
+                              <div className={styles.skillHeader}>
+                                <span className={styles.skillName}>
+                                  {item.label || item.resourceName || item.skillCode || item.resourceId || '-'}
+                                </span>
+                              </div>
+                              <div className={classnames(styles.skillDescription, styles.selectedBundledSkillDesc)}>
+                                {item.resourceDesc || item.description || '-'}
+                              </div>
+                            </div>
+                            <div className={styles.skillActions}>
+                              {!isReadOnly && (
+                                <Space>
+                                  <AntdIcon
+                                    type="icon-a-Deleteshanchu"
+                                    onClick={() => {
+                                      updateBundledSkills(
+                                        selectedSkills.filter((skill) => !isSameBundledSkill(skill, item))
+                                      );
+                                    }}
+                                  />
+                                </Space>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 配置机器人 */}
               {robotChannelOptions.length > 0 && (
@@ -3656,26 +3484,10 @@ const ConfigForm = (props) => {
         }}
         resourceId={resultDataRef?.current?.resourceId}
       />
-      <RelResourceInfoModal
-        open={relResourceInfoModalOpen}
-        onClose={() => setRelResourceInfoModalOpen(false)}
-        onOk={(item) => {
-          setSelectedTools((prev) => {
-            const target = prev.find((it) => it.resourceId === item.resourceId);
-            if (target) {
-              Object.assign(target, item);
-              return [...prev];
-            }
-            return prev;
-          });
-        }}
-        item={selectedToolItem}
-        isReadOnly={isReadOnly}
-      />
       <Modal
         className={styles.bundledSkillModal}
         wrapClassName={styles.bundledSkillModalWrap}
-        open={bundledSkillModalOpen}
+        open={canConfigureResources && bundledSkillModalOpen}
         width="min(1840px, calc(100vw - 96px))"
         style={{ top: 48, paddingBottom: 0 }}
         onCancel={() => setBundledSkillModalOpen(false)}
@@ -3806,7 +3618,7 @@ const ConfigForm = (props) => {
         </div>
       </Modal>
       <ToolSelectorModal
-        open={toolSelectorOpen}
+        open={canConfigureResources && toolSelectorOpen}
         onClose={() => setToolSelectorOpen(false)}
         onConfirm={handleToolSelectorConfirm}
       />

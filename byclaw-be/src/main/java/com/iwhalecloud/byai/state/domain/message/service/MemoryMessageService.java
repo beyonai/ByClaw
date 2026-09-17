@@ -137,6 +137,7 @@ public class MemoryMessageService {
         ByaiMessageHotDtoDto byaiMessageHotDto = new ByaiMessageHotDtoDto();
         byaiMessageHotDto.setMessageId(messageStruct.getMessageId());
         byaiMessageHotDto.setSessionId(sessionId);
+        byaiMessageHotDto.setComplete(Boolean.TRUE.equals(messageStruct.getComplete()));
         // 设置完整的最终答案消息框架（整合了完整的消息内容）
         setMessageValueByStruct(byaiMessageHotDto, messageStruct, assistantChatDto, usage);
         byaiMessageHotDto.setResComIds(messageStruct.getResComIds());

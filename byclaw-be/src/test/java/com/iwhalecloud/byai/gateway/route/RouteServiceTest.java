@@ -234,7 +234,7 @@ class RouteServiceTest {
         verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        verify(chatStreamRuntimeCoordinator, times(1)).stopIfStarted("3", true);
+        verify(chatStreamRuntimeCoordinator, times(1)).stopIfStarted(ctx, true);
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.alibaba.fastjson.annotation.JSONField;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -13,6 +14,12 @@ import java.util.Date;
 @Setter
 @TableName("byai_project_repo")
 public class ProjectRepo {
+
+    @TableField(exist = false)
+    private String cloneStatus;
+
+    @TableField(exist = false)
+    private String localPath;
 
     @TableId(value = "repo_id", type = IdType.INPUT)
     private Long repoId;

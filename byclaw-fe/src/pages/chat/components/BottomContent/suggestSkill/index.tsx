@@ -10,7 +10,6 @@ import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 import { getFileUrl } from '@/utils/file';
-import { queryResourceOperationPermissions } from '@/pages/manager/service/resources';
 
 import styles from './index.module.less';
 
@@ -81,7 +80,6 @@ interface ISkillItem {
   canUseAuth: boolean | null;
   canDelete: boolean | null;
   canApplyUse: boolean | null;
-  canAuditUse: boolean | null;
 }
 
 type ISkill = {
@@ -181,15 +179,11 @@ export default function SuggestSkill({ agentId }: { agentId?: string }) {
 
     if (userInfo && agentId) {
       setLoading(true);
-      Promise.all([
-        fetchSkills(),
-        getCurAgentInfo(agentId || ''),
-        queryResourceOperationPermissions({ resourceId: agentId || '' }),
-      ])
-        .then(([res1, res2, res3]) => {
+      Promise.all([fetchSkills(), getCurAgentInfo(agentId || '')])
+        .then(([res1, res2]) => {
           let allSkills = res1 || [];
           const skills = JSON.parse(res2?.skills || '[]').map((item: ISkill) => item.resourceId);
-          const { canManageAuth } = res3 || {};
+          const { canManageAuth } = res2?.operationPermissions || {};
 
           if (!canManageAuth) {
             allSkills = allSkills.filter((s: ISkillItem) => skills.includes(s.grantResourceId));

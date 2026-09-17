@@ -12,14 +12,14 @@ describe('digital employee group editor layout', () => {
     expect(resourceSectionEnd).toBeGreaterThan(resourceSectionMarker);
 
     const resourceSection = configFormSource.slice(resourceSectionMarker, resourceSectionEnd);
-    expect(resourceSection).toContain('{isEmployeeGroup && (');
+    expect(resourceSection).toContain('{canConfigureResources && isEmployeeGroup && (');
     expect(resourceSection).toContain('<EmployeeGroupMembers');
     expect(resourceSection.indexOf('<EmployeeGroupMembers')).toBeLessThan(
       resourceSection.indexOf('employeeDetail.configureKnowledge')
     );
     expect(resourceSection).toContain('<div className={styles.knowledgeSection} hidden={isEmployeeGroup}>');
     expect(resourceSection.match(/<div className=\{styles\.skillsSection\} hidden=\{isEmployeeGroup\}>/g)).toHaveLength(
-      3
+      2
     );
     expect(resourceSection).toContain('<div className={styles.robotSection} hidden={isEmployeeGroup}>');
     expect(configFormSource.match(/<EmployeeGroupMembers/g)).toHaveLength(1);

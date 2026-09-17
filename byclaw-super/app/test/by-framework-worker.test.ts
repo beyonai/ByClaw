@@ -1057,7 +1057,7 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(respondToInteraction).not.toHaveBeenCalled();
   });
 
-  it("emits only Delegation status cards and leaves child activity to the child Agent", async () => {
+  it("keeps the Delegation status card and emits its input as a child tool card", async () => {
     const emitEvent = vi.fn(async () => undefined);
     const emitChunk = vi.fn(async () => undefined);
     const worker = createWorker({
@@ -1070,7 +1070,7 @@ describe("ByClawSuperGatewayWorker", () => {
 
     const result = await worker.processCommand(askCommand(), contextMock({ emitChunk }));
 
-    expect(emitEvent).toHaveBeenCalledTimes(2);
+    expect(emitEvent).toHaveBeenCalledTimes(3);
     expect(emitEvent).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -1080,6 +1080,7 @@ describe("ByClawSuperGatewayWorker", () => {
         data: expect.objectContaining({
           orderId: "delegation-1",
           parentOrderId: "-1",
+          contentType: "3009",
           status: "_START_",
           choices: [
             expect.objectContaining({
@@ -1092,12 +1093,41 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(emitEvent).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
+        messageId: "delegation-1:dispatch-input",
+        parentMessageId: "delegation-1",
+        traceId: "trace-1",
+        data: expect.objectContaining({
+          orderId: "delegation-1:dispatch-input",
+          parentOrderId: "delegation-1",
+          contentType: "3015",
+          status: "_DONE_",
+        }),
+      }),
+    );
+    expect(JSON.parse(emitEvent.mock.calls[1]?.[0].data.choices[0].delta.content)).toEqual({
+      title: "发送给数字员工的指令",
+      description: "目标：数据分析助手",
+      input: {
+        agentId: "agent-1",
+        agentName: "数据分析助手",
+        instruction: "请分析销售数据",
+        expectedOutput: "结构化结论",
+        attachments: [
+          { id: "attachment-1", name: "sales.csv", mediaType: "text/csv" },
+        ],
+      },
+      status: "_DONE_",
+    });
+    expect(emitEvent).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
         messageId: "delegation-1",
         parentMessageId: "-1",
         traceId: "trace-1",
         data: expect.objectContaining({
           orderId: "delegation-1",
           parentOrderId: "-1",
+          contentType: "3009",
           status: "_DONE_",
           choices: [
             expect.objectContaining({
@@ -1107,9 +1137,7 @@ describe("ByClawSuperGatewayWorker", () => {
         }),
       }),
     );
-    expect(
-      emitEvent.mock.calls.some((call) => call[0].parentMessageId === "delegation-1"),
-    ).toBe(false);
+    expect(emitEvent.mock.calls.filter((call) => call[0].parentMessageId === "delegation-1")).toHaveLength(1);
     expect(emitChunk).toHaveBeenCalledOnce();
     expect(emitChunk).toHaveBeenCalledWith("汇总答案", EventType.ANSWER_DELTA);
     expect(result.content).toBe("汇总答案");
@@ -1127,14 +1155,15 @@ describe("ByClawSuperGatewayWorker", () => {
     const result = await worker.processCommand(askCommand(), contextMock());
 
     const emitted = emitEvent.mock.calls.map((call) => call[0]);
-    expect(emitted).toHaveLength(2);
+    expect(emitted).toHaveLength(3);
     expect(emitted.map((message) => message.messageId)).toEqual([
       "delegation-flat",
+      "delegation-flat:dispatch-input",
       "delegation-flat",
     ]);
-    expect(emitted.map((message) => message.data?.status)).toEqual(["_START_", "_DONE_"]);
+    expect(emitted.map((message) => message.data?.status)).toEqual(["_START_", "_DONE_", "_DONE_"]);
     expect(emitted.some((message) => message.metadata?.child_call_id)).toBe(false);
-    expect(emitted.some((message) => message.parentMessageId === "delegation-flat")).toBe(false);
+    expect(emitted.filter((message) => message.parentMessageId === "delegation-flat")).toHaveLength(1);
     expect(result.content).toBe("汇总结果");
   });
   it("updates only the Delegation status card when a child Agent fails", async () => {
@@ -1150,7 +1179,7 @@ describe("ByClawSuperGatewayWorker", () => {
       "失败员工 调度失败：下游数字员工不可用",
     );
 
-    expect(emitEvent).toHaveBeenCalledTimes(2);
+    expect(emitEvent).toHaveBeenCalledTimes(3);
     expect(emitEvent).toHaveBeenLastCalledWith(
       expect.objectContaining({
         messageId: "delegation-failed",

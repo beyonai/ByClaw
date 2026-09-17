@@ -66,7 +66,7 @@ interface IResourceItem {
 }
 
 interface Props {
-  resourceType: 'TOOL' | 'VIEW' | 'OBJECT' | 'KNOWLEDGE' | 'SPACE' | 'SKILL';
+  resourceType: 'TOOL' | 'OBJECT' | 'KNOWLEDGE' | 'SPACE' | 'SKILL';
   onSelect?: (item: IResourceItem) => void;
   style?: React.CSSProperties;
   showDefaultTools?: boolean;
@@ -469,8 +469,6 @@ const ResourceList = (props: Props) => {
       case 'TOOL':
       case 'SKILL':
         return 'icon-chajiantubiao';
-      case 'VIEW':
-        return 'icon-chuangjianfangshi-shujuku';
       case 'OBJECT':
         return 'icon-chuangjianfangshi-shujuku';
       case 'SPACE':
@@ -944,7 +942,7 @@ const ResourceList = (props: Props) => {
 
   // 渲染卡片/列表项的操作下拉菜单
   const renderActionDropdown = (item: IResourceItem, variant: 'grid' | 'list' = 'grid'): React.ReactNode => {
-    if (resourceType !== 'OBJECT' && resourceType !== 'VIEW' && resourceType !== 'SPACE' && resourceType !== 'SKILL') {
+    if (resourceType !== 'OBJECT' && resourceType !== 'SPACE' && resourceType !== 'SKILL') {
       return null;
     }
     return (
@@ -955,7 +953,7 @@ const ResourceList = (props: Props) => {
             domEvent.stopPropagation();
           },
           items: [
-            ...(resourceType === 'OBJECT' || resourceType === 'VIEW'
+            ...(resourceType === 'OBJECT'
               ? [
                 {
                   key: 'detail',

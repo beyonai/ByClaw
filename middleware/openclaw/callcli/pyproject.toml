@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "byclaw-callcli"
+version = "0.1.0"
+description = "Service-discovered capability runtime for ByClaw skills"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx==0.28.1",
+  "jsonschema==4.26.0",
+  "redis==6.4.0",
+]
+
+[project.scripts]
+callcli = "callcli.cli:entrypoint"
+
+[tool.setuptools.packages.find]
+where = ["src"]

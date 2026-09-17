@@ -14,7 +14,6 @@ Options:
   --fe             Stop frontend only.
   --be             Stop backend only.
   --qa             Stop QA services only.
-  --data           Stop data gateway only.
   --help           Show this message.
 
 Examples:
@@ -27,15 +26,13 @@ EOF
 STOP_FE=0
 STOP_BE=0
 STOP_QA=0
-STOP_DATA=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --all)  STOP_FE=1; STOP_BE=1; STOP_QA=1; STOP_DATA=1; shift ;;
+    --all)  STOP_FE=1; STOP_BE=1; STOP_QA=1; shift ;;
     --fe)   STOP_FE=1;   shift ;;
     --be)   STOP_BE=1;   shift ;;
     --qa)   STOP_QA=1;   shift ;;
-    --data) STOP_DATA=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -44,8 +41,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ $STOP_FE -eq 0 && $STOP_BE -eq 0 && $STOP_QA -eq 0 && $STOP_DATA -eq 0 ]]; then
-  STOP_FE=1; STOP_BE=1; STOP_QA=1; STOP_DATA=1
+if [[ $STOP_FE -eq 0 && $STOP_BE -eq 0 && $STOP_QA -eq 0 ]]; then
+  STOP_FE=1; STOP_BE=1; STOP_QA=1
 fi
 
 should_stop() {
@@ -55,7 +52,6 @@ should_stop() {
     be)        [[ $STOP_BE -eq 1 ]] ;;
     qa-api)    [[ $STOP_QA -eq 1 ]] ;;
     qa-worker) [[ $STOP_QA -eq 1 ]] ;;
-    data)      [[ $STOP_DATA -eq 1 ]] ;;
     *)         return 0 ;;
   esac
 }
@@ -130,17 +126,6 @@ else
     fi
   fi
 
-  if [[ $STOP_DATA -eq 1 ]]; then
-    data_pids="$(pgrep -f 'byclaw-data' 2>/dev/null || true)"
-    if [[ -z "$data_pids" ]]; then
-      data_pids="$(lsof -ti :8087 2>/dev/null || true)"
-    fi
-    if [[ -n "$data_pids" ]]; then
-      echo "$data_pids" | xargs kill -TERM 2>/dev/null || true
-      echo "[stop] data terminated (pids: $(echo $data_pids | tr '\n' ' '))."
-      stopped=$((stopped + 1))
-    fi
-  fi
 fi
 
 if [[ $stopped -eq 0 ]]; then

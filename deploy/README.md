@@ -148,14 +148,12 @@ sh start-super.sh           # Super
 sh start-fe.sh              # 前端（会自动从模板生成 nginx 配置）
 sh start-qa-manager.sh      # QA Manager
 sh start-qa-worker.sh       # QA Worker（后台进程，无端口）
-sh start-data.sh            # DataCloud
 
 sh stop-be.sh
 sh stop-super.sh
 sh stop-fe.sh
 sh stop-qa-manager.sh
 sh stop-qa-worker.sh
-sh stop-data.sh
 ```
 
 ### 按需启动服务
@@ -177,7 +175,6 @@ STANDALONE_MODULES=fe,be,super
 | Super | `super` | 3000 | `BYCLAW_SUPER_PORT` |
 | QA Manager | `qa-manager` | 8090 | `BYCLAW_QA_PORT` |
 | QA Worker | `qa-worker` | 无（后台进程） | - |
-| DataCloud | `data` | 8087 | `DATACLOUD_PORT` |
 
 ### Nginx 配置模板
 

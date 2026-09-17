@@ -259,6 +259,10 @@ public class WorkspaceArchiveApplicationService {
         }
     }
 
+    /**
+     * 校验入参，并强制请求 userCode 与当前登录用户一致。
+     * ArchiveFS 按 CurrentUserHolder.userCode 路由用户桶；若允许任意 userCode，将形成跨用户读写越权。
+     */
     private static void validateUserAndResource(String userCode, Long resourceId) {
         if (StringUtils.isBlank(userCode)) {
             throw new IllegalArgumentException("userCode不能为空");
@@ -266,13 +270,18 @@ public class WorkspaceArchiveApplicationService {
         if (resourceId == null || resourceId <= 0) {
             throw new IllegalArgumentException("resourceId必须为正整数");
         }
+        String currentUserCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(currentUserCode) || !currentUserCode.equals(userCode.trim())) {
+            throw new IllegalArgumentException("无权访问该用户的 workspace archive");
+        }
     }
 
     private static <T> T withUserContext(String userCode, Callable<T> callable) {
+        // 已通过 validateUserAndResource，此处仅保证 ArchiveFS 桶路由使用同一 userCode
         LoginInfo originalLoginInfo = CurrentUserHolder.getLoginInfo();
-        LoginInfo loginInfo = new LoginInfo();
-        loginInfo.setUserCode(userCode.trim());
-        CurrentUserHolder.setLoginInfo(loginInfo);
+        LoginInfo scoped = originalLoginInfo == null ? new LoginInfo() : copyLoginInfo(originalLoginInfo);
+        scoped.setUserCode(userCode.trim());
+        CurrentUserHolder.setLoginInfo(scoped);
         try {
             return callable.call();
         }
@@ -285,6 +294,15 @@ public class WorkspaceArchiveApplicationService {
         finally {
             restoreLoginInfo(originalLoginInfo);
         }
+    }
+
+    private static LoginInfo copyLoginInfo(LoginInfo source) {
+        LoginInfo copy = new LoginInfo();
+        copy.setUserId(source.getUserId());
+        copy.setUserCode(source.getUserCode());
+        copy.setUserName(source.getUserName());
+        copy.setEnterpriseId(source.getEnterpriseId());
+        return copy;
     }
 
     private static void restoreLoginInfo(LoginInfo originalLoginInfo) {

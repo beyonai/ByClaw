@@ -1,10 +1,11 @@
-import { Button, Dropdown, Empty, Input, Modal, Skeleton, Switch, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, Spin, Switch, message } from 'antd';
 import {
   CheckOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
   DownOutlined,
   EllipsisOutlined,
+  LoadingOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -281,14 +282,14 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
     const relativeTimeText = relativeTime
       ? intl.formatMessage({ id: `automation.time.${relativeTime.unit}` }, { count: relativeTime.count })
       : '';
-    const rightText =
-      group === 'running'
-        ? intl.formatMessage({ id: 'automation.running' })
-        : group === 'paused'
-          ? intl.formatMessage({ id: 'automation.paused' })
-          : enabled && nextRun
-            ? intl.formatMessage({ id: 'automation.nextRunAt' }, { time: relativeTimeText })
-            : intl.formatMessage({ id: 'automation.noNextRun' });
+    let rightText = intl.formatMessage({ id: 'automation.noNextRun' });
+    if (group === 'running') {
+      rightText = intl.formatMessage({ id: 'automation.running' });
+    } else if (group === 'paused') {
+      rightText = intl.formatMessage({ id: 'automation.paused' });
+    } else if (enabled && nextRun) {
+      rightText = intl.formatMessage({ id: 'automation.nextRunAt' }, { time: relativeTimeText });
+    }
     const automationConfig = parseAutomationConfig(source.config);
     const taskDescription = resolveAutomationPromptDisplayText(
       automationConfig.chatContent.trim(),
@@ -452,10 +453,9 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
       </div>
       <div className={styles.listContent}>
         {loading && !sources.length ? (
-          <div className={styles.automationSkeleton}>
-            {Array.from({ length: 6 }, (_, index) => (
-              <Skeleton key={index} active title={false} paragraph={{ rows: 1, width: '100%' }} />
-            ))}
+          // 页签切换时使用统一 loading 图，避免骨架屏造成内容高度跳变。
+          <div className={styles.automationLoading}>
+            <Spin indicator={<LoadingOutlined spin />} />
           </div>
         ) : !sources.length ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'automation.empty' })} />

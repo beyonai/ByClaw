@@ -5,6 +5,7 @@ import java.util.List;
 import com.iwhalecloud.byai.manager.application.service.user.UserMailAccountApplicationService;
 import com.iwhalecloud.byai.manager.dto.users.UserMailAccountDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.manager.vo.users.MailProviderVO;
 import com.iwhalecloud.byai.manager.vo.users.UserMailAccountVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,6 +31,11 @@ public class UserMailAccountController {
         return ResponseUtil.successResponse("邮箱账号查询成功", userMailAccountApplicationService.list());
     }
 
+    @GetMapping("/providers")
+    public ResponseUtil<List<MailProviderVO>> providers() {
+        return ResponseUtil.successResponse("邮箱服务商查询成功", userMailAccountApplicationService.providers());
+    }
+
     @PostMapping("/save")
     public ResponseUtil<UserMailAccountVO> save(@RequestBody UserMailAccountDTO request) {
         return ResponseUtil.successResponse("邮箱账号保存成功", userMailAccountApplicationService.save(request));
@@ -40,8 +46,4 @@ public class UserMailAccountController {
         return ResponseUtil.successResponse("邮箱账号删除成功", userMailAccountApplicationService.delete(request));
     }
 
-    @PostMapping("/setDefault")
-    public ResponseUtil<UserMailAccountVO> setDefault(@RequestBody UserMailAccountDTO request) {
-        return ResponseUtil.successResponse("默认邮箱账号设置成功", userMailAccountApplicationService.setDefault(request));
-    }
 }

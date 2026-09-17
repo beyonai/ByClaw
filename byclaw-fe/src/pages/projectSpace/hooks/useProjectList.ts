@@ -4,11 +4,13 @@ import { useIntl } from '@umijs/max';
 import { listProjects } from '../service';
 import type { ProjectSpace } from '../types';
 import { getArrayData, normalizeProject } from '../utils';
+import useGlobal from '@/hooks/useGlobal';
 
 const PROJECT_PAGE_SIZE = 30;
 
 export const useProjectList = () => {
   const intl = useIntl();
+  const { EventEmitter } = useGlobal();
   const [projects, setProjects] = useState<ProjectSpace[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -27,6 +29,25 @@ export const useProjectList = () => {
       const requestId = ++latestProjectRequestIdRef.current;
       setLoading(true);
       try {
+        if (typeof window !== 'undefined' && window.byclawDesktop?.isDesktop) {
+          const localProjects = (await window.byclawDesktop.projects?.listLocal?.())?.projects || [];
+          const nextProjects = localProjects
+            .filter(
+              (project) =>
+                !searchKeyword.trim() ||
+                `${project.projectName || ''}`.toLowerCase().includes(searchKeyword.trim().toLowerCase())
+            )
+            .map((project) =>
+              normalizeProject({
+                projectId: project.projectId,
+                projectName: project.projectName || project.projectId,
+              })
+            );
+          if (requestId !== latestProjectRequestIdRef.current) return nextProjects;
+          setProjects(nextProjects);
+          setPageInfo({ pageNum: 1, total: nextProjects.length });
+          return nextProjects;
+        }
         // 项目下拉每页固定请求 30 条，名称搜索交给后端，避免只过滤当前缓存页。
         const res = await listProjects(
           {
@@ -78,6 +99,14 @@ export const useProjectList = () => {
     }, 300);
     return () => window.clearTimeout(timer);
   }, [fetchProjects, keyword]);
+
+  useEffect(() => {
+    const refreshProjectList = () => {
+      void fetchProjects(keyword);
+    };
+    EventEmitter.on('projectSpace-list-refresh', refreshProjectList);
+    return () => EventEmitter.off('projectSpace-list-refresh', refreshProjectList);
+  }, [EventEmitter, fetchProjects, keyword]);
 
   const hasMore = projects.length < pageInfo.total;
 

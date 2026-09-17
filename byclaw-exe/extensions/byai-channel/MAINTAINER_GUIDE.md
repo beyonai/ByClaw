@@ -90,6 +90,12 @@ SDK 消息树的 root parent 继承当前 Gateway command 的 `header.parentMess
 
 停止时调用 `runner.stop({ cancelActiveExecutions: true })`，先终止在途 OpenClaw dispatch 并等待 `handleMessage` 收敛，再由 runner 停 heartbeat、释放 worker lock 和关闭阻塞 reader；最后才关闭 emitter 使用的 Redis 连接。
 
+用户主动停止单个任务时，worker control stream 先触发 `onCancelTask`。取消必须沿两条路径同时收敛：framework execution signal 桥接到该 lane 的 OpenClaw `AbortController`，而 `onCancelTask` 按 trace 清理已经注册的 `ActiveSdkRequest` 并释放 session gate。取消是独立终态，不再等待 delegated/native/outbound 等正常完成门，也不得发送 `FINAL_ANSWER` 或 `APP_STREAM_RESPONSE`。
+
+`lifecycle/error` 与 `agent_end` 是独立通道，取消时可能出现以下竞态：completion check 已开始等待 agent-end promise，而 `onCancelTask` 随后删除该 promise 的 resolver。因此 `completeActiveSdkRequest` 等待 agent-end 时必须同时监听 request abort，取消后返回且不输出正常完成终态。callAgent 已经登记到 remote-task log 的同步任务也必须追加删除事件，避免 watcher 在用户停止后再次向原会话回灌结果。
+
+ActiveSdkRequest 注册之前的等待同样必须兼容 signal：managed agent 配置轮询、同 session FIFO gate 排队、group context endpoint/load、session model patch 和入站媒体准备都应在取消后立即停止等待。某些上游 API 不接收 AbortSignal 时可以用 abort race 释放 channel 调用栈，但底层操作可能仍在自身的有界超时内完成；不得因此继续进入 dispatch。
+
 ## 一次 SDK 业务会话
 
 ### 1. 建立路由和 ActiveSdkRequest
@@ -263,6 +269,17 @@ npx vitest run \
 
 ```bash
 npx vitest run src/sdk-message-processor.test.ts src/sdk-app.test.ts
+```
+
+如果改了取消链路，再加：
+
+```bash
+npx vitest run \
+  src/session-context.abort.test.ts \
+  src/session-dispatch-gate.test.ts \
+  src/managed-agent-config-wait.test.ts \
+  src/group-chat-context.test.ts \
+  src/sdk-app.test.ts
 ```
 
 如果改了 remote task，再加：

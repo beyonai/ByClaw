@@ -6,6 +6,7 @@
     "test": "node --test *.test.mjs"
   },
   "dependencies": {
-    "tencentcloud-sdk-nodejs": "4.1.304"
+    "tencentcloud-sdk-nodejs": "4.1.304",
+    "tldts": "7.4.11"
   }
 }

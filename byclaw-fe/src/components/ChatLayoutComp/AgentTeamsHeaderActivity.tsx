@@ -1,5 +1,6 @@
+// 用户可见提示在使用时读取当前语言，接口值与用户内容保持原样。
 import React from 'react';
-import { useDispatch, useIntl } from '@umijs/max';
+import { getIntl, useDispatch, useIntl } from '@umijs/max';
 import { Drawer, Pagination, Progress } from 'antd';
 import { ArrowRightOutlined, CheckCircleFilled, ClockCircleOutlined, TeamOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
@@ -19,18 +20,21 @@ import styles from './ChatTitle.module.less';
 const TASK_PAGE_SIZE = 5;
 
 const activityLabel = (member: AgentTeamsMember) => {
-  if (member.activity === 'working') return '执行中';
-  if (member.status === 'completed') return '已完成';
-  return '待命';
+  if (member.activity === 'working') return getIntl().formatMessage({ id: 'ui.team.running' });
+  if (member.status === 'cancelled') return getIntl().formatMessage({ id: 'ui.team.stopped' });
+  if (member.status === 'completed') return getIntl().formatMessage({ id: 'ui.team.completed' });
+  return getIntl().formatMessage({ id: 'ui.team.idle' });
 };
 
 const taskStateLabel = (task: AgentTeamsTask) => {
-  if (task.state === 'completed' || task.status === 'completed') return '已完成';
-  if (task.state === 'running' || task.status === 'in_progress' || task.status === 'claimed') return '进行中';
-  if (task.state === 'blocked') return '阻塞';
-  if (task.status === 'failed') return '失败';
-  if (task.status === 'cancelled') return '已取消';
-  return '待处理';
+  if (task.status === 'cancelled') return getIntl().formatMessage({ id: 'ui.team.cancelled' });
+  if (task.status === 'failed') return getIntl().formatMessage({ id: 'ui.team.failed' });
+  if (task.state === 'completed' || task.status === 'completed')
+    return getIntl().formatMessage({ id: 'ui.team.completed' });
+  if (task.state === 'running' || task.status === 'in_progress' || task.status === 'claimed')
+    return getIntl().formatMessage({ id: 'ui.team.inProgress' });
+  if (task.state === 'blocked') return getIntl().formatMessage({ id: 'ui.team.blocked' });
+  return getIntl().formatMessage({ id: 'ui.team.pending' });
 };
 
 interface Props {
@@ -54,7 +58,11 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
       applyAgentTeamsChildProjection(rootSessionId, projection, message?.streamId);
     };
     webSocketManager.onMessage('NEW_MESSAGE', handleNewMessage);
-    return () => webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
+    webSocketManager.onMessage('SCOPED_SESSION_STATUS', handleNewMessage);
+    return () => {
+      webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
+      webSocketManager.offMessage('SCOPED_SESSION_STATUS', handleNewMessage);
+    };
   }, [rootSessionId]);
   if (!snapshot) return null;
 
@@ -70,7 +78,7 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
       ...currentSession,
       sessionId: `${member.byclawSessionId}`,
       parentSessionId: rootSessionId,
-      sessionName: member.name || '子 Agent',
+      sessionName: member.name || intl.formatMessage({ id: 'ui.team.childAgent' }),
       sessionContent: member.currentTask,
       sessionExts: [
         { extParamName: '外部会话标识', extParamCode: 'external_session_id', extParamValue: member.id },
@@ -95,7 +103,7 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
         onClick={() => setOpen(true)}
       >
         <TeamOutlined />
-        团队活动
+        {intl.formatMessage({ id: 'ui.team.activity' })}
         <span>{members.length}</span>
       </button>
       <Drawer
@@ -108,23 +116,23 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
       >
         <div className={activityStyles.panelHero}>
           <h2>{teamName}</h2>
-          <p>{snapshot.team.description || '统一查看团队成员与任务进展'}</p>
+          <p>{snapshot.team.description || intl.formatMessage({ id: 'ui.team.description' })}</p>
           <div className={activityStyles.heroStats}>
             <span>
-              <strong>{members.length}</strong> 成员
+              <strong>{members.length}</strong> {intl.formatMessage({ id: 'ui.team.members' })}
             </span>
             <span>
-              <strong>{tasks.length}</strong> 任务
+              <strong>{tasks.length}</strong> {intl.formatMessage({ id: 'ui.team.tasks' })}
             </span>
             <span>
-              <strong>{snapshot.team.messageCount || 0}</strong> 消息
+              <strong>{snapshot.team.messageCount || 0}</strong> {intl.formatMessage({ id: 'ui.team.messages' })}
             </span>
           </div>
         </div>
 
         <section className={activityStyles.panelSection}>
           <div className={activityStyles.sectionHeading}>
-            <span>成员动态</span>
+            <span>{intl.formatMessage({ id: 'ui.team.memberActivity' })}</span>
             <span className={activityStyles.sectionCount}>{members.length}</span>
           </div>
           <div className={activityStyles.memberList}>
@@ -134,7 +142,11 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
                 key={member.id}
                 className={activityStyles.memberRow}
                 disabled={!member.byclawSessionId}
-                aria-label={member.byclawSessionId ? `打开${member.name}子会话` : `${member.name}子会话尚未就绪`}
+                aria-label={
+                  member.byclawSessionId
+                    ? intl.formatMessage({ id: 'ui.team.openChild' }, { name: member.name })
+                    : intl.formatMessage({ id: 'ui.team.childNotReady' }, { name: member.name })
+                }
                 onClick={() => openChildSession(member)}
               >
                 <span className={activityStyles.avatar}>{member.name.trim().slice(0, 1) || 'A'}</span>
@@ -149,7 +161,9 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
                       {activityLabel(member)}
                     </span>
                   </span>
-                  <span className={activityStyles.memberRole}>{member.role || 'AgentTeams 成员'}</span>
+                  <span className={activityStyles.memberRole}>
+                    {member.role || intl.formatMessage({ id: 'ui.team.member' })}
+                  </span>
                   {member.currentTask && <span className={activityStyles.currentTask}>{member.currentTask}</span>}
                   <span className={activityStyles.progressLine}>
                     <Progress percent={member.progress || 0} showInfo={false} size="small" />
@@ -164,7 +178,7 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
 
         <section className={activityStyles.panelSection}>
           <div className={activityStyles.sectionHeading}>
-            <span>任务列表</span>
+            <span>{intl.formatMessage({ id: 'ui.team.taskList' })}</span>
             <span className={activityStyles.sectionCount}>{tasks.length}</span>
           </div>
           <div className={activityStyles.taskList}>
@@ -177,7 +191,7 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
                   </span>
                   <span className={activityStyles.taskCopy}>
                     <strong>{task.subject}</strong>
-                    <span>{task.assignee || '待分配'}</span>
+                    <span>{task.assignee || intl.formatMessage({ id: 'ui.team.unassigned' })}</span>
                   </span>
                   <span className={classnames(activityStyles.taskState, { [activityStyles.taskStateDone]: completed })}>
                     {taskStateLabel(task)}

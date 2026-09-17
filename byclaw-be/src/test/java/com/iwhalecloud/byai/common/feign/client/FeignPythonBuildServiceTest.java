@@ -27,6 +27,13 @@ class FeignPythonBuildServiceTest {
     }
 
     @Test
+    void updateKnowledgeFileMetadata_usesCanonicalOperationAndPath() {
+        assertThat(KnowledgeServiceOperation.UPDATE_FILE_METADATA.getOperationId()).isEqualTo("updateFileMetadata");
+        assertThat(KnowledgeServiceOperation.UPDATE_FILE_METADATA.getLocalPath())
+            .isEqualTo("/api/v1/knowledgeItems/metadata/update");
+    }
+
+    @Test
     void buildHeaders_addsResourceContextOnlyWhenProvided() {
         FeignPythonBuildService service = new FeignPythonBuildService();
 

@@ -6,6 +6,7 @@ import { useIntl, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { deleteProject, updateProject } from '@/service/devloop';
+import { removeDesktopProject, renameDesktopProject } from '@/service/common/desktopLocal';
 import styles from './index.module.less';
 
 interface WorkspaceProjectActionsProps {
@@ -29,12 +30,14 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
   const [renameValue, setRenameValue] = useState('');
   const [renameLoading, setRenameLoading] = useState(false);
   const currentUserId = userInfo.userId ?? userInfo.id;
+  const isDesktop = typeof window !== 'undefined' && window.byclawDesktop?.isDesktop === true;
   const canManage =
-    project.createBy !== undefined &&
-    project.createBy !== null &&
-    currentUserId !== undefined &&
-    currentUserId !== null &&
-    `${project.createBy}` === `${currentUserId}`;
+    isDesktop ||
+    (project.createBy !== undefined &&
+      project.createBy !== null &&
+      currentUserId !== undefined &&
+      currentUserId !== null &&
+      `${project.createBy}` === `${currentUserId}`);
 
   const handleRename = async () => {
     const projectName = renameValue.trim();
@@ -46,6 +49,7 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
     setRenameLoading(true);
     try {
       await updateProject({ projectId: Number(project.projectId), projectName });
+      if (isDesktop) await renameDesktopProject(project.projectId, projectName);
       message.success(intl.formatMessage({ id: 'projectSpace.message.updateSuccess' }));
       setRenameOpen(false);
       await onProjectChanged(project, 'rename');
@@ -69,6 +73,7 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
       onOk: async () => {
         try {
           await deleteProject(Number(project.projectId));
+          if (isDesktop) await removeDesktopProject(project.projectId);
           message.success(intl.formatMessage({ id: 'projectSpace.message.deleteSuccess' }));
           await onProjectChanged(project, 'delete');
         } catch (error: any) {

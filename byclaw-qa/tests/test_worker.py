@@ -1,8 +1,11 @@
+import gc
 import sys
 import uuid
-import pytest
+import weakref
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 # Set up NodeNames mock values before importing worker
@@ -753,6 +756,75 @@ async def test_process_command_uses_async_context_for_engine_and_stream():
     assert lifecycle == {"entered": True, "exited": True}
     assert stream.closed is True
     fake_engine.stream_search.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_search_releases_unconsumed_search_result_chunks():
+    worker = InstantSearchWorker()
+    retained_after_next_event = []
+
+    class _ChunkPayload:
+        pass
+
+    class _ManagedEngine:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def stream_search(self, input_data):
+            chunk_payload = _ChunkPayload()
+            chunk_ref = weakref.ref(chunk_payload)
+            yield SimpleNamespace(
+                type=SimpleNamespace(value="search_result_chunks"),
+                role="retriever",
+                data={"chunks": [chunk_payload]},
+                instance_id="retriever-node",
+                parent_ids=[],
+            )
+            del chunk_payload
+            yield SimpleNamespace(
+                type=SimpleNamespace(value="node_end"),
+                role="retriever",
+                data={},
+                instance_id="retriever-node",
+                parent_ids=[],
+            )
+            gc.collect()
+            retained_after_next_event.append(chunk_ref() is not None)
+            yield SimpleNamespace(
+                type=SimpleNamespace(value="answer"),
+                role=_node_names_mock.FINAL_ANSWER.value,
+                data={"content": "final answer"},
+                instance_id="final-node",
+                parent_ids=[],
+            )
+
+    context = SimpleNamespace(redis=AsyncMock(), emit_chunk=AsyncMock())
+    with (
+        patch.object(worker_module, "InstantQAEngine", return_value=_ManagedEngine()),
+        patch.object(
+            worker_module,
+            "generate_report_filename",
+            AsyncMock(return_value="test_file"),
+        ),
+        patch.object(worker_module, "upload_report", AsyncMock(return_value=True)),
+        patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
+    ):
+        result = await worker._run_search(
+            {},
+            SimpleNamespace(),
+            context,
+            agent_id="agent-1",
+            session_id="session-1",
+            user_code="user-1",
+            parent_message_id="parent-1",
+            root_message_id="root-1",
+        )
+
+    assert retained_after_next_event == [False]
+    assert result.startswith("final answer")
 
 
 @pytest.mark.asyncio

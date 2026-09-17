@@ -17,7 +17,7 @@
  * For OBJECT / VIEW we therefore OVERRIDE whatever URL the resource metadata
  * suggested (same precedence as `byclaw-tool`). The MCP protocol headers
  * (`X-Object-Id`, `X-View-Id`, `x-tool-list-mode=per_object`) are already
- * built by `buildOntologyMcpHeaders` in `ontology-headers.ts`.
+ * built by `buildResourceMcpHeaders` in `resource-headers.ts`.
  */
 
 import { isRecord } from "./types.js";

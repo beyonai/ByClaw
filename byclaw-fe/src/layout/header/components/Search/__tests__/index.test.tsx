@@ -3,11 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import Search from '..';
 import { getSearchList } from '@/service/layout';
-import {
-  listResourceUseAuth,
-  queryDigEmployeeRelResourceAuth,
-  queryResourceMembers,
-} from '@/pages/manager/service/resources';
+import { listResourceUseAuth, queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
 import { message } from 'antd';
 
 let mockVisibleMenuKeys: string[] = [];
@@ -40,15 +36,6 @@ const mockIntl = {
     }
     if (id === 'headerSearch.enterpriseTool') {
       return '企业工具';
-    }
-    if (id === 'headerSearch.currentView') {
-      return '当前视图';
-    }
-    if (id === 'headerSearch.personalView') {
-      return '个人视图';
-    }
-    if (id === 'headerSearch.enterpriseView') {
-      return '企业视图';
     }
     return id;
   }),
@@ -88,7 +75,6 @@ jest.mock('@/service/layout', () => ({
 jest.mock('@/pages/manager/service/resources', () => ({
   listResourceUseAuth: jest.fn(),
   queryDigEmployeeRelResourceAuth: jest.fn(),
-  queryResourceMembers: jest.fn(),
 }));
 
 jest.mock('@/layout/sider/useVisibleMenuKeys', () => ({
@@ -147,12 +133,11 @@ jest.mock('@/layout/sider/components/ResourceSiderPanel/ResourceSiderListItem', 
   return {
     __esModule: true,
     ...actual,
-    default: ({ item, resourceType, drillable, renderName, renderDescription, onClick, onDoubleClick }: any) => (
+    default: ({ item, resourceType, renderName, renderDescription, onClick, onDoubleClick }: any) => (
       <button
         data-testid={`resource-sider-list-item-${resourceType}`}
         type="button"
-        data-drillable={drillable ? 'true' : 'false'}
-        onClick={() => onClick?.(item, drillable)}
+        onClick={() => onClick?.(item)}
         onDoubleClick={() => onDoubleClick?.(item)}
       >
         <span>{renderName ? renderName(item) : item.resourceName}</span>
@@ -202,7 +187,6 @@ const mockListResourceUseAuth = listResourceUseAuth as jest.MockedFunction<typeo
 const mockQueryDigEmployeeRelResourceAuth = queryDigEmployeeRelResourceAuth as jest.MockedFunction<
   typeof queryDigEmployeeRelResourceAuth
 >;
-const mockQueryResourceMembers = queryResourceMembers as jest.MockedFunction<typeof queryResourceMembers>;
 const mockMessageSuccess = message.success as jest.MockedFunction<typeof message.success>;
 
 beforeEach(() => {
@@ -219,8 +203,6 @@ beforeEach(() => {
   mockQueryDigEmployeeRelResourceAuth.mockResolvedValue({ rows: [] });
   mockListResourceUseAuth.mockReset();
   mockListResourceUseAuth.mockResolvedValue({ data: { rows: [] } });
-  mockQueryResourceMembers.mockReset();
-  mockQueryResourceMembers.mockResolvedValue({});
   mockEventEmitter.emit.mockClear();
   mockMessageSuccess.mockClear();
   mockIntl.formatMessage.mockClear();
@@ -830,111 +812,6 @@ describe('Header Search', () => {
     });
 
     fireEvent.doubleClick(screen.getByTestId('knowledge-detail-node'));
-
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-    expect(mockMessageSuccess).not.toHaveBeenCalled();
-  });
-
-  it('drills into view resource items on click like the sider list', async () => {
-    mockVisibleMenuKeys = ['view'];
-    mockActiveSiderAgent = { resourceId: 'agent-1', name: 'Agent One' };
-    mockQueryDigEmployeeRelResourceAuth.mockResolvedValue({
-      rows: [
-        {
-          resourceId: 'view-resource-1',
-          resourceName: 'View Result',
-          resourceDesc: 'View Desc',
-          resourceBizType: 'VIEW',
-        },
-      ],
-    });
-    mockQueryResourceMembers.mockResolvedValue({
-      extInfo: {
-        targetContent: JSON.stringify({
-          objects: [
-            {
-              resourceId: 'object-resource-1',
-              resourceName: 'Object Result',
-              resourceCode: 'object_code',
-              resourceDesc: 'Object Desc',
-            },
-          ],
-          fields: [
-            {
-              propertyCode: 'field_code',
-              propertyName: 'Field Result',
-            },
-          ],
-        }),
-      },
-    });
-
-    render(<Search showSearch setShowSearch={jest.fn()} />);
-
-    await flushSearch();
-
-    const viewListItem = await screen.findByTestId('resource-sider-list-item-VIEW');
-    expect(viewListItem).toHaveAttribute('data-drillable', 'true');
-
-    fireEvent.click(viewListItem);
-
-    await waitFor(() => {
-      expect(mockQueryResourceMembers).toHaveBeenCalledWith({ resourceId: 'view-resource-1' });
-      expect(screen.getByText('Object Result')).toBeInTheDocument();
-      expect(screen.getByText('Field Result')).toBeInTheDocument();
-    });
-  });
-
-  it('does not quote resource center view drill items', async () => {
-    mockVisibleMenuKeys = ['view'];
-    mockActiveSiderAgent = { resourceId: 'agent-1', name: 'Agent One' };
-    mockQueryDigEmployeeRelResourceAuth.mockResolvedValue({ rows: [] });
-    mockListResourceUseAuth.mockImplementation(({ ownerType }: any) => {
-      if (ownerType === 'personal') {
-        return Promise.resolve({
-          data: {
-            rows: [
-              {
-                resourceId: 'personal-view-1',
-                resourceName: 'Personal View',
-                resourceDesc: 'Personal View Desc',
-                resourceBizType: 'VIEW',
-              },
-            ],
-          },
-        } as any);
-      }
-
-      return Promise.resolve({ data: { rows: [] } } as any);
-    });
-    mockQueryResourceMembers.mockResolvedValue({
-      extInfo: {
-        targetContent: JSON.stringify({
-          objects: [
-            {
-              resourceId: 'object-resource-1',
-              resourceName: 'Object From Personal View',
-              resourceCode: 'object_code',
-              resourceDesc: 'Object Desc',
-            },
-          ],
-        }),
-      },
-    });
-
-    render(<Search showSearch setShowSearch={jest.fn()} />);
-
-    await flushSearch();
-
-    fireEvent.click(await screen.findByText('个人视图'));
-    fireEvent.click(await screen.findByText('Personal View'));
-
-    await waitFor(() => {
-      expect(mockQueryResourceMembers).toHaveBeenCalledWith({ resourceId: 'personal-view-1' });
-      expect(screen.getByText('Object From Personal View')).toBeInTheDocument();
-    });
-
-    fireEvent.doubleClick(screen.getByText('Object From Personal View'));
 
     expect(mockEventEmitter.emit).not.toHaveBeenCalled();
     expect(mockMessageSuccess).not.toHaveBeenCalled();

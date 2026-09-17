@@ -58,6 +58,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
+import com.iwhalecloud.byai.state.infrastructure.utils.ResumeRoutingTraceLogger;
 
 import static com.iwhalecloud.byai.gateway.sandbox.service.SandboxService.WORKER_READY_TIMEOUT_MS;
 
@@ -250,7 +251,7 @@ public class RouteService {
                     laneRoutes.size(), response.getMessageId(), response.getTargetWorkerId(), sessionId);
             }
         } catch (Exception e) {
-            chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+            chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
             throw e;
         }
 
@@ -283,7 +284,7 @@ public class RouteService {
                         ctx.messageContext.setComplete(true);
                     }
                     log.info("收到停止哨兵，退出事件循环并落库已堆积消息, sessionId: {}", sessionId);
-                    chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                    chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
                     break;
                 }
 
@@ -316,7 +317,7 @@ public class RouteService {
                     log.error("收到 Gateway error 事件, sessionId: {}, traceId: {}", sessionId,
                         dataJson.getString("trace_id"));
                     if (ctx.markTraceComplete(dataJson.getString("trace_id"))) {
-                        chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                        chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
                         break;
                     }
                     continue;
@@ -344,14 +345,14 @@ public class RouteService {
                             ctx.messageContext.setComplete(true);
                         }
                         log.info("收到 appStreamResponse，退出事件循环, sessionId: {}", sessionId);
-                        chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                        chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
                         break;
                     }
                 }
             }
         } finally {
             // 无论正常/超时/异常，当前请求如果启动了监听，则负责停止并清理上下文。
-            chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+            chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
         }
     }
 
@@ -659,9 +660,16 @@ public class RouteService {
         int retryAttemptsAfterWorkerReady = 0;
 
         String currentUserName = CurrentUserHolder.getCurrentUserName();
-        Map<String, Object> metadata = reqMetadata == null
-            ? new HashMap<>()
-            : JSON.parseObject(reqMetadata, Map.class);
+        Map<String, Object> metadata;
+        try {
+            metadata = reqMetadata == null
+                ? new HashMap<>()
+                : JSON.parseObject(reqMetadata, Map.class);
+        }
+        catch (RuntimeException error) {
+            ResumeRoutingTraceLogger.logGatewayMetadataParseFailure(chatDto, sessionId, traceId, reqMetadata, error);
+            throw error;
+        }
         metadata.put("language", ChatUtils.getLanguage());
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
         if (loginInfo != null) {
@@ -701,6 +709,7 @@ public class RouteService {
         }
 
         String actionType = chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType();
+        String parentMessageId = "-1";
         Map<String, Object> gatewayParams = params == null ? new HashMap<>() : new HashMap<>(params);
         gatewayParams.put("cwd", workspace);
         if (ActionType.ASK_AGENT.equals(actionType)
@@ -716,6 +725,8 @@ public class RouteService {
         }
 
         while (true) {
+            ResumeRoutingTraceLogger.logGatewayEgress(chatDto, sessionId, traceId, targetAgentType, answerMessageId,
+                parentMessageId, messageContent, gatewayParams, metadata, retryAttemptsAfterWorkerReady + 1);
             GatewayClient.SendResponse response = gatewayClient.sendMessage(
                 targetAgentType,
                 sessionId,
@@ -723,7 +734,7 @@ public class RouteService {
                 userCode,
                 currentUserName,
                 actionType,
-                "-1",
+                parentMessageId,
                 answerMessageId,
                 traceId,
                 gatewayParams,

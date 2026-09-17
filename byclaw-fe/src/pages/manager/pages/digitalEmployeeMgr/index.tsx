@@ -10,6 +10,7 @@ import { useSelector, history, useDispatch, useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
 import { trim, uniqBy, head, get } from 'lodash';
 
+import { refreshEmployeeRow, employeeRowId } from '@/hooks/useEmployeeRowRefresh';
 import CardList from '@/pages/manager/components/CardList';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
 import commonStyles from '@/pages/manager/styles/commonTabList.less';
@@ -25,12 +26,11 @@ import TreeFilter from '@/pages/manager/components/TreeFilter';
 import FieldFilter from '@/pages/manager/components/TreeFilter/FieldFilter';
 // import SourceFilter from '@/pages/manager/components/TreeFilter/SourceFilter';
 import { getAvatarUrl } from '@/pages/manager/utils/agent';
-import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
-import { applyResourceUse, queryResourceOperationPermissions } from '@/pages/manager/service/resources';
+import { applyResourceUse } from '@/pages/manager/service/resources';
 
 const initPagination = {
   pageIndex: 1,
-  pageSize: 12,
+  pageSize: 20,
   total: 0,
 };
 
@@ -102,7 +102,6 @@ const DigitalEmployeeMgr = () => {
   const [activeType, setActiveType] = useState(-1);
   const [selectRecord, setSelectRecord] = useState();
   const [authType, setAuthType] = useState();
-  const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
   const [resultData, setResultData] = useState(initResultData());
   const [operationPermissionMap, setOperationPermissionMap] = useState({});
   const [searchValue, setSearchValue] = useState('');
@@ -172,6 +171,13 @@ const DigitalEmployeeMgr = () => {
         success: (res) => {
           const { list = [], rows = [], pageNum: newPageIndex, pageSize, total } = res || {};
           const dataList = list?.length ? list : rows;
+          const nextOperationPermissionMap = {};
+          (dataList || []).forEach((item) => {
+            if (item?.resourceId) {
+              nextOperationPermissionMap[item.resourceId] = item;
+            }
+          });
+          setOperationPermissionMap(nextOperationPermissionMap);
           setResultData({
             list: uniqBy(dataList || [], 'resourceId'),
             pagination: { pageIndex: newPageIndex, pageSize, total },
@@ -237,42 +243,6 @@ const DigitalEmployeeMgr = () => {
     });
   }, [activeKey, activeType, sourceValue, fieldValue, appliedSearchValue, getList, getNum, pagination.pageSize]);
 
-  useEffect(() => {
-    if (!list.length) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    const resourceIds = list.map((item) => item?.resourceId).filter(Boolean);
-
-    // 旧数字员工管理页也统一复用后端操作权限口径，避免前端本地判断和资源中心卡片分叉。
-    Promise.all(
-      resourceIds.map(async (resourceId) => {
-        try {
-          const res = await queryResourceOperationPermissions({ resourceId });
-          return [resourceId, res?.data || res];
-        } catch {
-          return [resourceId, null];
-        }
-      })
-    ).then((entries) => {
-      if (cancelled) {
-        return;
-      }
-      setOperationPermissionMap((prev) => {
-        const next = { ...prev };
-        entries.forEach(([resourceId, permissions]) => {
-          next[resourceId] = permissions;
-        });
-        return next;
-      });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [list]);
-
   const onSearch = useCallback(
     (params = {}) => {
       const shouldUseAppliedKeyword = params?.pageNum !== undefined || params?.pageSize !== undefined;
@@ -300,6 +270,20 @@ const DigitalEmployeeMgr = () => {
       keyword: appliedSearchValue,
     });
   }, [appliedSearchValue, onSearch, pagination.pageIndex, pagination.pageSize]);
+
+  const refreshCurrentEmployee = useCallback(async (record) => {
+    const resourceId = employeeRowId(record);
+    if (!resourceId) return;
+    const row = await refreshEmployeeRow(resourceId);
+    if (!row) return;
+    setOperationPermissionMap((current) => ({ ...current, [resourceId]: row }));
+    setResultData((current) => ({
+      ...current,
+      list: current.list.map((employee) =>
+        employeeRowId(employee) === resourceId ? { ...employee, ...row } : employee
+      ),
+    }));
+  }, []);
 
   const getActionList = useCallback(
     (record) => {
@@ -370,7 +354,7 @@ const DigitalEmployeeMgr = () => {
                   id: 'common.deleteSuccess',
                 })
               );
-              refreshCurrentView();
+              void refreshCurrentEmployee(record).catch(console.error);
             },
           });
         },
@@ -460,18 +444,11 @@ const DigitalEmployeeMgr = () => {
         onClick: async () => {
           await applyResourceUse({ resourceId });
           message.success(intl.formatMessage({ id: 'resource.applyUseSuccess' }));
-          refreshCurrentView();
+          void refreshCurrentEmployee(record).catch(console.error);
         },
       };
 
-      const auditUse = {
-        type: 'auditUse',
-        name: intl.formatMessage({ id: 'resource.auditUse' }),
-        onClick: () => {
-          setSelectRecord(record);
-          setUseApplyAuditOpen(true);
-        },
-      };
+      // 旧管理页不再提供使用审核入口，统一由我的员工审核中心处理。
 
       // const publish = {
       //   type: 'publish',
@@ -563,9 +540,6 @@ const DigitalEmployeeMgr = () => {
       if (operationPermissions?.canApplyUse) {
         actionList.push(applyUse);
       }
-      if (operationPermissions?.canAuditUse) {
-        actionList.push(auditUse);
-      }
       if (operationPermissions?.canDelete) {
         actionList.push(del);
       }
@@ -630,7 +604,7 @@ const DigitalEmployeeMgr = () => {
       dispatch,
       pushLoading,
       unPushLoading,
-      refreshCurrentView,
+      refreshCurrentEmployee,
       ENABLE_APPROVE,
       intl,
       operationPermissionMap,
@@ -947,9 +921,20 @@ const DigitalEmployeeMgr = () => {
           </div>
         </div>
       </Spin>
-      <EmployFormModal {...modalState} onCancel={modalAction.onCancel} reload={refreshCurrentView} />
+      <EmployFormModal
+        {...modalState}
+        onCancel={modalAction.onCancel}
+        reload={() => {
+          if (employeeRowId(modalState.data)) void refreshCurrentEmployee(modalState.data).catch(console.error);
+          else refreshCurrentView();
+        }}
+      />
       {publishState.open && (
-        <PublishModal {...publishState} onCancel={publishAction.onCancel} reload={refreshCurrentView} />
+        <PublishModal
+          {...publishState}
+          onCancel={publishAction.onCancel}
+          reload={() => void refreshCurrentEmployee(publishState.data).catch(console.error)}
+        />
       )}
       {drawerState.open && (
         <AuthListDrawer
@@ -963,7 +948,7 @@ const DigitalEmployeeMgr = () => {
           authApiPath={`/byaiService/auth/privilegeGrant/${
             authType === 'useAuth' ? 'setResourceUsers' : 'setResourceManagers'
           }`}
-          onSuccess={refreshCurrentView}
+          onSuccess={() => void refreshCurrentEmployee(selectRecord).catch(console.error)}
           headerInfo={{
             title: selectRecord.resourceName,
             content: selectRecord.resourceDesc,
@@ -981,15 +966,6 @@ const DigitalEmployeeMgr = () => {
           }}
         />
       )}
-      <UseApplyAuditDrawer
-        open={useApplyAuditOpen}
-        record={selectRecord}
-        onCancel={() => {
-          setUseApplyAuditOpen(false);
-          setSelectRecord(null);
-        }}
-        onSuccess={refreshCurrentView}
-      />
       {employeeState.open && (
         <EmployeesDrawer {...employeeState} onClose={employeeAction.onCancel} agentInfo={employeeState.data} />
       )}
@@ -1011,7 +987,7 @@ const DigitalEmployeeMgr = () => {
               approvalContent: approvalTaskContent, //审批内容
             },
             success: () => {
-              refreshCurrentView();
+              void refreshCurrentEmployee(approvalTaskState.data).catch(console.error);
               setApprovalTaskLoading(false);
               approvalTaskAction.onCancel();
             },

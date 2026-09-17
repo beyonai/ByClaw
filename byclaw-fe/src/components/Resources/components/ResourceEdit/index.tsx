@@ -65,10 +65,6 @@ const ResourceEdit: React.FC<ResourceEditProps> = ({ visible, item, resourceType
     switch ((type || '').toUpperCase()) {
       case 'TOOL':
         return intl.formatMessage({ id: 'common.tool' });
-      case 'OBJECT':
-        return intl.formatMessage({ id: 'common.object' });
-      case 'VIEW':
-        return intl.formatMessage({ id: 'common.viewName' });
       default:
         return intl.formatMessage({ id: 'common.resource' });
     }

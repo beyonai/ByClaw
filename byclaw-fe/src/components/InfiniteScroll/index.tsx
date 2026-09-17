@@ -36,6 +36,9 @@ export interface Props {
   appendItemsAutoScrollBottom?: boolean;
   lowestPageNum?: number;
   onRectSizeChange?: () => void;
+  // 仅列表页启用：内容不足一屏时继续分页加载。
+  autoFill?: boolean;
+  isLoading?: boolean;
 }
 
 interface State {
@@ -62,6 +65,14 @@ export default class InfiniteScroll extends Component<Props, State> {
 
   private actionTriggered = false;
 
+  private autoFillPending = false;
+
+  private autoFillFrame = 0;
+
+  private autoFillLength: number | undefined;
+
+  private unmounted = false;
+
   private loading = false;
 
   private loadedScrollTop = 0;
@@ -86,6 +97,7 @@ export default class InfiniteScroll extends Component<Props, State> {
   }
 
   componentDidMount() {
+    this.unmounted = false;
     if (typeof this.props.dataLength === 'undefined') {
       throw new Error(
         'mandatory prop "dataLength" is missing. The prop is needed' +
@@ -109,12 +121,18 @@ export default class InfiniteScroll extends Component<Props, State> {
       this.el.scrollTo(0, this.props.initialScrollY);
     }
     this.observeRect();
+    this.checkAutoFill();
   }
 
   componentDidUpdate(prevProps: Props) {
     const { appendItemsAutoScrollBottom = true } = this.props;
     if (this.props.onRectSizeChange !== prevProps.onRectSizeChange) {
       this.observeRect();
+    }
+    if (this.props.autoFill) {
+      if (this.props.dataLength !== prevProps.dataLength) this.autoFillLength = undefined;
+      this.checkAutoFill();
+      return;
     }
     // 数据有变化，顶部和底部数据变化才更新滚动条位置
     if (this.props.dataLength > prevProps.dataLength) {
@@ -161,6 +179,8 @@ export default class InfiniteScroll extends Component<Props, State> {
   }
 
   componentWillUnmount() {
+    this.unmounted = true;
+    cancelAnimationFrame(this.autoFillFrame);
     if (this.el) {
       this.el.removeEventListener('scroll', this.bindScroll as EventListenerOrEventListenerObject);
     }
@@ -189,6 +209,7 @@ export default class InfiniteScroll extends Component<Props, State> {
         if (this._scrollableNode) {
           this.lastScrollTop = this._scrollableNode.scrollTop;
         }
+        this.checkAutoFill();
         if (this.props.onRectSizeChange) {
           this.props.onRectSizeChange();
         }
@@ -198,8 +219,41 @@ export default class InfiniteScroll extends Component<Props, State> {
       }
       const resizeObserver = new ResizeObserver(onResize);
       resizeObserver.observe(this._infScroll);
+      if (this.props.autoFill && this.el instanceof HTMLElement) resizeObserver.observe(this.el);
       this.resizeObserver = resizeObserver;
     }
+  };
+
+  checkAutoFill = () => {
+    if (
+      this.unmounted ||
+      !this.props.autoFill ||
+      this.props.isLoading ||
+      !this.props.hasMore ||
+      this.autoFillPending ||
+      this.autoFillLength === this.props.dataLength
+    ) return;
+    const target = this.el instanceof HTMLElement ? this.el : document.documentElement;
+    if (target.clientHeight <= 0 || target.scrollHeight > target.clientHeight + 1) return;
+    this.loadAutoFillPage();
+  };
+
+  loadAutoFillPage = () => {
+    const previousLength = this.props.dataLength;
+    this.autoFillPending = true;
+    this.autoFillLength = previousLength;
+    this.setState({ showLoader: true });
+    Promise.resolve()
+      .then(() => !this.unmounted && this.props.next())
+      .finally(() => {
+        this.autoFillPending = false;
+        if (this.unmounted) return;
+        this.setState({ showLoader: false });
+        this.autoFillFrame = requestAnimationFrame(() => {
+          if (this.props.dataLength !== previousLength) this.checkAutoFill();
+        });
+      })
+      .catch(() => undefined);
   };
 
   bindScroll = (e: MouseEvent) => {
@@ -255,11 +309,25 @@ export default class InfiniteScroll extends Component<Props, State> {
     } else {
       target = document.documentElement.scrollTop ? document.documentElement : document.body;
     }
+    if (this.props.autoFill) {
+      if (
+        event.isTrusted &&
+        !this.props.isLoading &&
+        !this.autoFillPending &&
+        this.props.hasMore &&
+        target.clientHeight > 0 &&
+        target.scrollHeight > target.clientHeight &&
+        this.isElementAtBottom(target, this.props.scrollThreshold)
+      ) {
+        this.loadAutoFillPage();
+      }
+      return;
+    }
     if (target.clientHeight === target.scrollHeight) {
       return;
     }
 
-    if (!event.isTrusted || this.loading || this.state.showLoader) {
+    if (!event.isTrusted || this.props.isLoading || this.autoFillPending || this.loading || this.state.showLoader) {
       // @MODIFY: 避免用户滚动到顶部时的滚动缓冲动作导致scrollTop改变
       if (this.loadedScrollTop && target.scrollTop < 0) {
         target.scrollTop = this.loadedScrollTop;

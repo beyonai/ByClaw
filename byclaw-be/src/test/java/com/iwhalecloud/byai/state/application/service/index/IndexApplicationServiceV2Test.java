@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.qo.index.DiscoverQo;
@@ -40,6 +41,7 @@ class IndexApplicationServiceV2Test {
         indexService = mock(IndexService.class);
 
         ResourceAuthContextService resourceAuthContextService = mock(ResourceAuthContextService.class);
+        AuthApplicationService authApplicationService = mock(AuthApplicationService.class);
         SandboxService sandboxService = mock(SandboxService.class);
         SsResourceCatalogService ssResourceCatalogService = mock(SsResourceCatalogService.class);
         SuasSuperassistService suasSuperassistService = mock(SuasSuperassistService.class);
@@ -54,10 +56,13 @@ class IndexApplicationServiceV2Test {
 
         service = new IndexApplicationServiceV2();
         ReflectionTestUtils.setField(service, "indexService", indexService);
+        ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
         ReflectionTestUtils.setField(service, "sandboxService", sandboxService);
         ReflectionTestUtils.setField(service, "ssResourceCatalogService", ssResourceCatalogService);
         ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
+        when(authApplicationService.queryResourceOperationPermissionsBatch(any()))
+            .thenReturn(Collections.emptyMap());
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);
@@ -142,16 +147,30 @@ class IndexApplicationServiceV2Test {
 
         assertThat(selectBody(mapperXml, "selectAuthDigitEmploy"))
             .contains("a.resource_biz_type = 'DIG_EMPLOYEE'")
+            .contains("resourceStatus != null")
+            .contains("a.resource_status = #{resourceStatus}")
+            .contains("a.resource_status = 2")
             .doesNotContain("coalesce(b.agent_type, '') != '017'");
         assertThat(selectBody(mapperXml, "queryMyUsual"))
             .contains("a.resource_biz_type = 'DIG_EMPLOYEE'")
+            .contains("resourceStatus != null")
+            .contains("a.resource_status = #{resourceStatus}")
             .doesNotContain("coalesce(b.agent_type, '') != '017'");
         assertThat(selectBody(mapperXml, "queryRecentlyAdded"))
             .contains("a.resource_biz_type = 'DIG_EMPLOYEE'")
+            .contains("resourceStatus != null")
+            .contains("a.resource_status = #{resourceStatus}")
             .doesNotContain("coalesce(b.agent_type, '') != '017'");
-
-        // 管理端的普通数字员工列表仍保持分类，不把员工组混入原列表。
-        assertThat(selectBody(mapperXml, "queryMyCreated")).contains("coalesce(b.agent_type, '') != '017'");
+        assertThat(selectBody(mapperXml, "queryMyCreated"))
+            .contains("resourceStatus != null")
+            .contains("a.resource_status = #{resourceStatus}")
+            .contains("coalesce(b.agent_type, '') != '017'");
+        assertThat(selectBody(mapperXml, "queryAuthDoc"))
+            .contains("and a.resource_status = 2")
+            .doesNotContain("resourceStatus != null");
+        assertThat(selectBody(mapperXml, "queryAuthTools"))
+            .contains("and a.resource_status = 2")
+            .doesNotContain("resourceStatus != null");
     }
 
     private String selectBody(String mapperXml, String statementId) {

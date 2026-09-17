@@ -40,6 +40,15 @@
       line-height: 22px;
     }
 
+    // 虚拟列表的行容器需要显式保持表格行的横向布局，避免 rc-virtual-list 默认块布局导致列换行。
+    .virtualRow {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-height: 56px;
+      padding: 12px 0;
+    }
+
     :global(.@{antPrefix}-list-item) {
       &:hover {
         background-color: #fafafa;

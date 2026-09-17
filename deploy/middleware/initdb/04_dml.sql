@@ -2903,7 +2903,7 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
     "ownerType": "personal",
     "agentType": "001",
     "relTools": ["*"],
-    "relSkills": ["dws","by-skill-installer"],
+    "relSkills": ["dws"],
     "skillPath": "",
     "prompts": [
       {
@@ -2938,7 +2938,7 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
     "ownerType": "enterprise",
     "agentType": "001",
     "relTools": ["*"],
-    "relSkills": ["by-skill-installer"],
+    "relSkills": [],
     "skillPath": "",
     "prompts": [
       {
@@ -4163,7 +4163,6 @@ INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template
     '{"mcp": {"servers": {"env": {"GBRAIN_HOME": "/by/.openclaw/gbrain"}, "gbrain": {"args": ["serve"], "command": "gbrain"}}}, "meta": {"lastTouchedAt": "2026-03-27T08:46:51.148Z", "lastTouchedVersion": "2026.3.28"}, "hooks": {"internal": {"enabled": true, "entries": {"boot-md": {"enabled": false}, "session-memory": {"enabled": true}}}}, "tools": {"web": {"search": {"enabled": false}}, "profile": "full"}, "agents": {"list": [{"id": "main", "skills": [], "default": true, "workspace": "${OPENCLAW_STATE_DIR}/workspace"}, {"id": "ui-skill-tester", "name": "UI技能测试", "identity": {"name": "UI技能测试"}, "workspace": "/by/.openclaw/workspace-ui-skill-tester"}, {"id": "ui-skill-creator", "name": "UI技能创建", "model": {"primary": "byclaw/kimi-k2.6"}, "tools": {"deny": ["image", "image_generate", "music_generate", "video_generate", "tts", "canvas", "browser", "agents_list", "update_plan", "code_execution", "cron", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "sessions_yield", "subagents", "session_status", "exec", "x_search", "process", "nodes", "gateway", "message", "write", "edit", "memory_search", "memory_get"], "profile": "full", "alsoAllow": ["ui-skill-modeler", "jarvis_run_flow", "read"]}, "identity": {"name": "UI技能创建"}, "workspace": "/by/.openclaw/workspace-ui-skill-creator"}], "defaults": {"model": {"primary": "byclaw/${MODEL_ID}"}, "models": {"byclaw/kimi-k2.5": {"alias": "kimi-k2.5"}}, "subagents": {"maxConcurrent": 8}, "compaction": {"mode": "safeguard"}, "maxConcurrent": 4, "skipBootstrap": true, "verboseDefault": "full", "thinkingDefault": "high", "bootstrapMaxChars": 15000, "blockStreamingBreak": "text_end", "blockStreamingDefault": "on"}}, "models": {"providers": {"byclaw": {"api": "openai-completions", "apiKey": "${MODEL_API_KEY}", "models": [{"id": "${MODEL_ID}", "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "name": "${MODEL_NAME}", "input": ["text"], "maxTokens": 8192, "reasoning": true, "contextWindow": 128000}, {"id": "kimi-k2.5", "api": "openai-completions", "cost": {"input": 4, "output": 21, "cacheRead": 0.7, "cacheWrite": 0}, "name": "kimi-k2.5", "input": ["text", "image"], "maxTokens": 32000, "reasoning": true, "contextWindow": 256000}], "baseUrl": "${MODEL_BASE_URL}"}}}, "skills": {"load": {"watch": true, "watchDebounceMs": 5000}, "install": {"nodeManager": "pnpm"}}, "wizard": {"lastRunAt": "2026-02-03T07:41:55.092Z", "lastRunMode": "local", "lastRunCommand": "configure", "lastRunVersion": "2026.1.30"}, "browser": {"enabled": true, "headless": false, "profiles": {"work": {"color": "#0066CC", "cdpPort": 18801}, "chrome": {"color": "#00AA00", "cdpUrl": "http://127.0.0.1:18792"}, "openclaw": {"color": "#FF4500", "cdpUrl": "http://localhost:9222"}}, "attachOnly": false, "ssrfPolicy": {"dangerouslyAllowPrivateNetwork": true}, "defaultProfile": "openclaw", "executablePath": "/usr/bin/google-chrome"}, "gateway": {"auth": {"mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}"}, "bind": "lan", "mode": "local", "port": 8080, "nodes": {"browser": {"mode": "off"}}, "controlUi": {"allowedOrigins": ["*"], "allowInsecureAuth": true, "dangerouslyDisableDeviceAuth": true, "dangerouslyAllowHostHeaderOriginFallback": true}, "tailscale": {"mode": "off", "resetOnExit": false}}, "plugins": {"load": {"paths": ["/app/dist-runtime/extensions/baiying-enhance", "/app/dist-runtime/extensions/byai-channel", "/app/dist-runtime/extensions/byclaw-sqlite", "/app/custom-plugins/foundry", "/app/custom-plugins/runtime"]}, "allow": ["browser", "byai-channel", "baiying-enhance", "byclaw-sqlite", "diagnostics-otel", "memory-core", "ui-skill-foundry", "pincer-runtime"], "slots": {"memory": "none", "contextEngine": "modeler-image-cleaner"}, "enabled": true, "entries": {"xai": {"enabled": false}, "browser": {"enabled": true}, "byai-channel": {"enabled": true}, "byclaw-sqlite": {"enabled": true}, "pincer-runtime": {"config": {"identifyPageUrl": "http://127.0.0.1:8005"}, "enabled": true}, "baiying-enhance": {"config": {"watchDebounceMs": 500, "mainParentAgentId": "main", "workspaceAutoSeed": true, "embedApiKeysFromJson": true, "mergeAllowSpawnForMain": true}, "enabled": true}, "diagnostics-otel": {"enabled": true}, "ui-skill-foundry": {"config": {"identifyPageUrl": "http://127.0.0.1:8005"}, "enabled": true}}}, "channels": {"byai-channel": {"enabled": true, "dmPolicy": "open", "allowFrom": ["*"], "webhookPath": "/webhook/byai-channel", "streamEnabled": true, "blockStreaming": true, "sessionKeyPerSessionId": true}}, "commands": {"native": "auto", "restart": true, "nativeSkills": "auto", "ownerDisplay": "raw"}, "diagnostics": {"otel": {"logs": false, "traces": true, "enabled": true, "headers": {"Authorization": "Basic cGstbGYtMmVlYzQ2YTUtMWZiZi00MDNiLWI0NzAtMTlkMjdlZmZlNDRlOnNrLWxmLTc3MDc4MjE1LTg5YmQtNDViNy1hZmIyLWUyYjEzZjc5YWYxMw==", "x-langfuse-ingestion-version": "4"}, "metrics": false, "endpoint": "https://us.cloud.langfuse.com/api/public/otel", "protocol": "http/protobuf", "sampleRate": 1, "serviceName": "openclaw-gateway", "captureContent": {"enabled": true, "toolInputs": true, "toolOutputs": true, "systemPrompt": true, "inputMessages": true, "outputMessages": true, "toolDefinitions": true}, "flushIntervalMs": 5000}, "enabled": true}}',
     '2026-06-17 17:57:57.666');
 
--- 重建全新环境的 OpenClaw 内置 Skill 清单，并纳入 knowledge-collection、By-Reach（技术代码 agent-reach）与独立 bycli。
 delete from byai.byai_system_config where param_code in('OPENCLAW_BUNDLED_SKILLS');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), 'text', 'OPENCLAW_BUNDLED_SKILLS', 'OpenClaw内置Skill清单', 'OPENCLAW_BUNDLED_SKILLS', '[{
 		"skillName": "1password",
@@ -4490,22 +4489,10 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 		"skillDescEn": "Provide AI agents with persistent long-term memory, knowledge graph construction and hybrid search, supporting knowledge storage, correlation analysis and intelligent query."
 	},
 	{
-		"skillName": "knowledge-collection",
-		"skillCode": "knowledge-collection",
-		"skillDescZh": "编排跨互联网与企业平台的知识采集，统一采集产物协议、后处理及知识库入库或知识整理。",
-		"skillDescEn": "Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization."
-	},
-	{
-		"skillName": "By-Reach",
-		"skillCode": "agent-reach",
-		"skillDescZh": "路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。",
-		"skillDescEn": "Route public-internet channels and select approved By-Reach v2 executors."
-	},
-	{
 		"skillName": "bycli",
 		"skillCode": "bycli",
-		"skillDescZh": "通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。",
-		"skillDescEn": "Execute website operations through the browser and adapters, reuse or maintain adapters, and return collected results."
+		"skillDescZh": "bycli 是一个全能力技能，把任意网站、桌面应用或外部 CLI 统一成 bycli <site>无需爬页面就能执行命令、驱动浏览器、修复或编写适配器、并将采集内容入库",
+		"skillDescEn": "bycli is an all-in-one skill that unifies any website, desktop app, or external CLI into a single bycli ‹ site> <command> interface, letting an agent run commands, drive the browser, fix or author adapters, and ingest collected content into a knowledge base without"
 	}
 ]', 'OpenClaw 仓库 skills/ 目录下内置（随安装分发）的 Agent Skill 元数据 JSON 数组');
 
@@ -4552,9 +4539,8 @@ VALUES(12,'BYAI','SKILL','ATOM','浩鲸百应技能市场浏览','技能市场�
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 VALUES(13,'BYAI','SKILL','ATOM','知识记忆管理','知识记忆管理技能。输入需要记录的项目背景、决策过程或人物关系，输出结构化的长期记忆资产，支持全文检索和智能关联。适用于项目经验沉淀、历史决策追溯、团队知识传承、个人知识库建设。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'gbrain',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
 
--- 知识采集资源改为绑定编排 Skill，不再直接绑定 bycli 执行器。
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
-VALUES(14,'BYAI','SKILL','ATOM','知识采集','网络内容采集技能。输入任意网站链接或应用名称，输出结构化的采集内容，支持网页信息抓取、应用数据提取和内容归档入库。适用于竞品信息收集、行业动态追踪、资料批量采集、内容聚合。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'knowledge-collection',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+VALUES(14,'BYAI','SKILL','ATOM','知识采集','网络内容采集技能。输入任意网站链接或应用名称，输出结构化的采集内容，支持网页信息抓取、应用数据提取和内容归档入库。适用于竞品信息收集、行业动态追踪、资料批量采集、内容聚合。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
 
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 VALUES(15,'BYAI','SKILL','ATOM','钉钉连接器','钉钉协同办公技能。输入办公事务指令，输出钉钉平台上的待办、审批、日程、文档等协同操作结果。适用于待办同步、会议安排、审批流程、团队文档协作、考勤管理。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'dws',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
@@ -4562,11 +4548,7 @@ VALUES(15,'BYAI','SKILL','ATOM','钉钉连接器','钉钉协同办公技能。�
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 VALUES(16,'BYAI','SKILL','ATOM','可视化报告生成','数据可视化报告技能。输入各类经营数据（表格、文本、API数据），输出专业的交互式数据分析报告，包含智能图表、地图点位展示、KPI看板和经营建议，支持导出PDF。适用于经营分析、选址评估、竞品对比、数据汇报、商圈研究。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'amap-visual-report-generator',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
 
--- 为 byCLI 单独创建执行 Skill 资源，保留 knowledge-collection 作为上层编排入口。
-INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
-VALUES(25,'BYAI','SKILL','ATOM','byCLI','通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
-
--- 重建 inner 来源技能扩展记录，并包含新拆分的 byCLI 资源 25。
+-- inner来源技能(1~16)
 DELETE from byai.ss_res_ext_skill WHERE skill_type in('inner');
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(1,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(2,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
@@ -4584,8 +4566,6 @@ INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,ski
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(14,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(15,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(16,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
--- 新增资源 25 对应独立 byCLI 内置 Skill 扩展记录。
-INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(25,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 
 -- 第四步：更新已存在的扩展表记录（直接关联主表获取种子数据，避免 CTE 作用域问题）
 UPDATE byai.ss_res_ext_skill e
@@ -4625,7 +4605,7 @@ FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_biz_type = 'SKILL'
   AND r.owner_type = 'enterprise'
-  AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','knowledge-collection','bycli','dws','amap-visual-report-generator');
+  AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','bycli','dws','amap-visual-report-generator');
 
 -- 沙箱健康检测-默认水位模型初始化
 INSERT INTO byai.sandbox_health_watermark_model (
@@ -4831,20 +4811,14 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 	}
 }', 'monthlyQuotaLimit: 每用户每月公共模型Token上限; tokenSaver: 登录时自动分配模型配置');
 
--- ========== V0.3.0 (synchronized from version source) ==========
-INSERT INTO byai.byai_project (project_id, project_name, description, resource_id, create_by, create_time, update_by, update_time, delete_flag, project_type, is_share)
-SELECT -1, '我的默认项目', '未分类会话和历史文件', null, 10001, '2099-12-28 10:55:49.000000', 10001, '2026-07-16 19:38:40.736000', '0', 'default', 'N'
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.byai_project WHERE project_id = -1
-);
+-- ========== V0.3.0 (merged at 2026-07-28 18:10:57) ==========
+INSERT INTO byai.byai_project (project_id, project_name, description, resource_id, create_by, create_time, update_by, update_time, delete_flag, project_type, is_share) VALUES (-1, '我的默认项目', '未分类会话和历史文件', null, 10001, '2099-12-28 10:55:49.000000', 10001, '2026-07-16 19:38:40.736000', '0', 'default', 'N');
 
 
 -- 研发闭环：任务启动提示词模板
 -- 存于 byai_system_config，param_code=DEVLOOP_TASK_START_PROMPT，可在线调整
 -- 占位符：${projectName} ${repoFullName} ${branchName} ${taskType} ${title} ${description}
-DO $$
-BEGIN
-IF NOT EXISTS (SELECT 1 FROM byai.byai_system_config WHERE param_code = 'DEVLOOP_TASK_START_PROMPT') THEN
+delete from byai.byai_system_config where param_code in ('DEVLOOP_TASK_START_PROMPT');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
 VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_TASK_START_PROMPT', '研发任务启动提示词', 'DEVLOOP_TASK_START_PROMPT', '你是 ByClaw 开发助手，负责在指定代码仓库中自主完成开发任务。
 
@@ -4880,31 +4854,17 @@ ${description}
 标记须独占一行、按真实进展实时输出，正常叙述照常进行。
 
 请开始处理。', '研发闭环任务启动提示词模板，占位符 ${projectName} ${repoFullName} ${branchName} ${taskType} ${title} ${description}');
-END IF;
-END;
-$$;
 
 
-INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq)
-SELECT nextval('byai.seq_any_table'), 'PROJECT_TYPE', '项目类型', '普通项目', 'normal', 'normal', '普通项目', 1
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.byai_system_config_list
-    WHERE param_group_code = 'PROJECT_TYPE' AND param_value = 'normal'
-);
-INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq)
-SELECT nextval('byai.seq_any_table'), 'PROJECT_TYPE', '项目类型', '研发项目', 'develop', 'develop', '研发项目', 2
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.byai_system_config_list
-    WHERE param_group_code = 'PROJECT_TYPE' AND param_value = 'develop'
-);
+delete from byai.byai_system_config_list where param_group_code in('PROJECT_TYPE');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'PROJECT_TYPE', '项目类型', '普通项目', 'normal', 'normal', '普通项目', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'PROJECT_TYPE', '项目类型', '研发项目', 'develop', 'develop', '研发项目', 2);
 
 
 -- 研发闭环：需求评分提示词模板
 -- 存于 byai_system_config，param_code=DEVLOOP_REQUIREMENT_SCORE_PROMPT，可在线调整
 -- 占位符：${title} ${content}
-DO $$
-BEGIN
-IF NOT EXISTS (SELECT 1 FROM byai.byai_system_config WHERE param_code = 'DEVLOOP_REQUIREMENT_SCORE_PROMPT') THEN
+delete from byai.byai_system_config where param_code in ('DEVLOOP_REQUIREMENT_SCORE_PROMPT');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
 VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_REQUIREMENT_SCORE_PROMPT', '研发需求评分提示词', 'DEVLOOP_REQUIREMENT_SCORE_PROMPT', '你是资深产品与研发评审专家。请对下面这条候选需求进行多维度打分，用于研发优先级排序。
 
@@ -4928,17 +4888,12 @@ VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_REQUIREMENT_SCORE_PROMPT'
 - 严格用如下字段：
 
 {"businessValue":0,"userImpact":0,"urgency":0,"strategyFit":0,"feasibility":0,"reuseValue":0,"risk":0,"summary":""}', '研发闭环需求评分提示词，占位符 ${title} ${content}，要求模型返回各维度得分JSON');
-END IF;
-END;
-$$;
 
 
 -- 研发闭环：环节抽取提示词模板（LLM 兜底，仅当会话无 [PHASE] 打点标记时使用）
 -- 存于 byai_system_config，param_code=DEVLOOP_PHASE_EXTRACT_PROMPT，可在线调整
 -- 占位符：${transcript}
-DO $$
-BEGIN
-IF NOT EXISTS (SELECT 1 FROM byai.byai_system_config WHERE param_code = 'DEVLOOP_PHASE_EXTRACT_PROMPT') THEN
+delete from byai.byai_system_config where param_code in ('DEVLOOP_PHASE_EXTRACT_PROMPT');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
 VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_PHASE_EXTRACT_PROMPT', '研发任务环节抽取提示词', 'DEVLOOP_PHASE_EXTRACT_PROMPT', '你是研发流程分析助手。下面是一个开发任务的会话转录，请判断该任务在标准研发流水线上的进展。
 
@@ -4960,30 +4915,20 @@ ${transcript}
 - 严格用如下结构：
 
 {"currentPhase":"coder","round":1,"phases":[{"key":"issue","status":"done"},{"key":"req","status":"done"},{"key":"design","status":"done"},{"key":"coder","status":"running"},{"key":"reviewer","status":"pending"},{"key":"tester","status":"pending"},{"key":"pr","status":"pending"}],"kickbacks":[]}', '研发闭环环节抽取提示词，占位符 ${transcript}，要求模型返回环节状态JSON');
-END IF;
-END;
-$$;
 
 
 -- 研发闭环：单个数字员工并发运行任务上限（负载均衡自动派发用）
 -- 存于 byai_system_config，param_code=DEVLOOP_AGENT_MAX_CONCURRENT，默认 1
 -- 某 agent 在跑任务数达到该值则本轮不再接新任务，避免一股脑丢给 codeagent 导致 OOM
-DO $$
-BEGIN
-IF NOT EXISTS (SELECT 1 FROM byai.byai_system_config WHERE param_code = 'DEVLOOP_AGENT_MAX_CONCURRENT') THEN
+delete from byai.byai_system_config where param_code in ('DEVLOOP_AGENT_MAX_CONCURRENT');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
 VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_AGENT_MAX_CONCURRENT', '数字员工并发任务上限', 'DEVLOOP_AGENT_MAX_CONCURRENT', '1', '研发闭环自动派发时，单个数字员工同时进行中的任务数上限，默认1，超过则本轮跳过该员工');
-END IF;
-END;
-$$;
 
 
 -- 研发闭环：需求「拆分+评分」合并提示词（一次 LLM 调用完成拆分与打分）
 -- 存于 byai_system_config，param_code=DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT，可在线调整
 -- 占位符：${title} ${content}；模型须返回 {"requirements":[{title,content,各维度分,summary}]}
-DO $$
-BEGIN
-IF NOT EXISTS (SELECT 1 FROM byai.byai_system_config WHERE param_code = 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT') THEN
+delete from byai.byai_system_config where param_code in ('DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
 VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT', '研发需求拆分+评分提示词', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT', '你是资深产品与研发评审专家。下面是一条从群消息/Issue 收集到的候选需求，可能包含多个相互独立的需求，也可能只是一个需求。请先判断是否需要拆分，再对每个独立需求多维度打分。
 
@@ -5012,332 +4957,22 @@ VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_P
 - 严格用如下结构：
 
 {"requirements":[{"title":"","content":"","businessValue":0,"userImpact":0,"urgency":0,"strategyFit":0,"feasibility":0,"reuseValue":0,"risk":0,"summary":""}]}', '研发闭环拆分+评分提示词，占位符 ${title} ${content}，要求模型返回 requirements 数组');
-END IF;
-END;
-$$;
 
 --
 
-DO $$
-BEGIN
-IF NOT EXISTS (SELECT 1 FROM byai.sandbox_service_spec WHERE service_key = 'openclaw') THEN
+DELETE FROM "byai"."sandbox_service_spec"  WHERE "service_key" IN ('openclaw');
 INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template_json", "updated_at") VALUES (
     'openclaw',
-    '{"env": {"TZ": "Asia/Shanghai","LANG": "zh_CN","MODEL_ID": "${MODEL_ID}","NODE_ENV": "production","USER_CODE": "${user_code}","MODEL_NAME": "${MODEL_NAME}","REDIS_HOST": "${REDIS_HOST}","REDIS_PORT": "${REDIS_PORT}","REDIS_CLUSTER_HOST": "${REDIS_CLUSTER_HOST}","REDIS_KEY_SCHEMA_VERSION": "${REDIS_KEY_SCHEMA_VERSION}","DEMO_SCHEMA": "${DEMO_SCHEMA}","GBRAIN_HOME": "/by/.openclaw/gbrain","MODEL_ALIAS": "${MODEL_ALIAS}","OPENCLAW_TZ": "Asia/Shanghai","BEYOND_TOKEN": "${BEYOND_TOKEN}","GBRAIN_MODEL": "openai:qwen-turbo","BE_DOMAINNAME": "${BE_DOMAINNAME}","QA_DOMAINNAME": "${QA_DOMAINNAME}","DATACLOUD_DOMAINNAME": "${DATACLOUD_DOMAINNAME}","MODEL_API_KEY": "${MODEL_API_KEY}","DWS_CONFIG_DIR": "/by/.openclaw/.dws","MODEL_BASE_URL": "${MODEL_BASE_URL}","REDIS_DATABASE": "${REDIS_DATABASE}","REDIS_PASSWORD": "${REDIS_PASSWORD}","REDIS_USERNAME": "${REDIS_USERNAME}","BAIYING_SESSION": "${BAIYING_SESSION}","FILEBROWSER_ROOT": "/by","DATACLOUD_DB_HOST": "${DB_HOST}","DATACLOUD_DB_PASS": "${DB_PASS}","DATACLOUD_DB_PORT": "${DB_PORT}","DATACLOUD_DB_TYPE": "${DB_TYPE}","DATACLOUD_DB_USER": "${DB_USER}","LANGFUSE_BASE_URL": "${LANGFUSE_BASE_URL}","BAIYING_AGENT_AUTH": "${BAIYING_AGENT_AUTH}","OPENCLAW_STATE_DIR": "/by/.openclaw","DATACLOUD_DB_SCHEMA": "${DB_SCHEMA}","LANGFUSE_PUBLIC_KEY": "${LANGFUSE_PUBLIC_KEY}","LANGFUSE_SECRET_KEY": "${LANGFUSE_SECRET_KEY}","DATACLOUD_DB_DATABASE": "${DB_DATABASE}","DATACLOUD_DB_PASSWORD": "${DB_PASS}","GBRAIN_EMBEDDING_MODEL": "openai:text-embedding-v4","OPENCLAW_GATEWAY_TOKEN": "${OPENCLAW_GATEWAY_TOKEN}","LANGFUSE_OTEL_AUTH_SECRET": "${LANGFUSE_OTEL_AUTH_SECRET}","GBRAIN_EMBEDDING_DIMENSIONS": "1024","BYCLAW_SANDBOX_FILE_VOLUME_ROOT": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}","DEFAULT_LLM_IDLE_TIMEOUT_SECONDS": 360},"image": "ghcr.io/beyonai/byclaw/byclaw-openclaw:latest","ports": [{"port": 8080,"instance": "openclaw","protocol": "http"},{"port": 8081,"instance": "vnc","protocol": "http"},{"port": 8082,"instance": "filebrowser","protocol": "http"},{"port": 9222,"protocol": "http"},{"port": 19825,"instance": "bycli","protocol": "http"}],"startup": {"entrypoint": ["/bin/sh","-c","umask 0000; mkdir -p /by/.sessions /by/.openclaw /by/.claude /by/.byclaw ; chmod 777 /by /by/.sessions /by/.openclaw /by/.claude /by/.byclaw 2>/dev/null || true; exec /usr/local/bin/startAll.sh"]},"timeout": 3000,"volumes": [{"key": "base","scope": "PRIVATE","subPath": "byclaw-${user_code}/by","hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}","readOnly": false,"mountPath": "/by"}],"bootstrap": {"copyTemplate": {"copyIfMissing": true,"targetVolumeKey": "base"}},"sandboxType": "byclaw","servicePort": 8080,"resourceLimits": {"cpu": "0.5","memory": "1Gi"}}',
+    '{"env": {"TZ": "Asia/Shanghai","LANG": "zh_CN","MODEL_ID": "${MODEL_ID}","NODE_ENV": "production","USER_CODE": "${user_code}","MODEL_NAME": "${MODEL_NAME}","REDIS_HOST": "${REDIS_HOST}","REDIS_PORT": "${REDIS_PORT}","REDIS_CLUSTER_HOST": "${REDIS_CLUSTER_HOST}","REDIS_KEY_SCHEMA_VERSION": "${REDIS_KEY_SCHEMA_VERSION}","DEMO_SCHEMA": "${DEMO_SCHEMA}","GBRAIN_HOME": "/by/.openclaw/gbrain","MODEL_ALIAS": "${MODEL_ALIAS}","OPENCLAW_TZ": "Asia/Shanghai","BEYOND_TOKEN": "${BEYOND_TOKEN}","GBRAIN_MODEL": "openai:qwen-turbo","BE_DOMAINNAME": "${BE_DOMAINNAME}","QA_DOMAINNAME": "${QA_DOMAINNAME}","DATACLOUD_DOMAINNAME": "${DATACLOUD_DOMAINNAME}","MODEL_API_KEY": "${MODEL_API_KEY}","DWS_CONFIG_DIR": "/by/.openclaw/.dws","MODEL_BASE_URL": "${MODEL_BASE_URL}","REDIS_DATABASE": "${REDIS_DATABASE}","REDIS_PASSWORD": "${REDIS_PASSWORD}","REDIS_USERNAME": "${REDIS_USERNAME}","BAIYING_SESSION": "${BAIYING_SESSION}","FILEBROWSER_ROOT": "/by","DATACLOUD_DB_HOST": "${DB_HOST}","DATACLOUD_DB_PASS": "${DB_PASS}","DATACLOUD_DB_PORT": "${DB_PORT}","DATACLOUD_DB_TYPE": "${DB_TYPE}","DATACLOUD_DB_USER": "${DB_USER}","LANGFUSE_BASE_URL": "${LANGFUSE_BASE_URL}","BAIYING_AGENT_AUTH": "${BAIYING_AGENT_AUTH}","OPENCLAW_STATE_DIR": "/by/.openclaw","DATACLOUD_DB_SCHEMA": "${DB_SCHEMA}","LANGFUSE_PUBLIC_KEY": "${LANGFUSE_PUBLIC_KEY}","LANGFUSE_SECRET_KEY": "${LANGFUSE_SECRET_KEY}","DATACLOUD_DB_DATABASE": "${DB_DATABASE}","DATACLOUD_DB_PASSWORD": "${DB_PASS}","GBRAIN_EMBEDDING_MODEL": "openai:text-embedding-v4","OPENCLAW_GATEWAY_TOKEN": "${OPENCLAW_GATEWAY_TOKEN}","LANGFUSE_OTEL_AUTH_SECRET": "${LANGFUSE_OTEL_AUTH_SECRET}","GBRAIN_EMBEDDING_DIMENSIONS": "1024","BYCLAW_SANDBOX_FILE_VOLUME_ROOT": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}","DEFAULT_LLM_IDLE_TIMEOUT_SECONDS": 360},"image": "ghcr.io/beyonai/byclaw/byclaw-openclaw:latest","ports": [{"port": 8080,"instance": "openclaw","protocol": "http"},{"port": 8081,"instance": "vnc","protocol": "http"},{"port": 8082,"instance": "filebrowser","protocol": "http"},{"port": 9222,"protocol": "http"},{"port": 19825,"instance": "bycil","protocol": "http"}],"startup": {"entrypoint": ["/bin/sh","-c","umask 0000; mkdir -p /by/.sessions /by/.openclaw /by/.claude /by/.byclaw ; chmod 777 /by /by/.sessions /by/.openclaw /by/.claude /by/.byclaw 2>/dev/null || true; exec /usr/local/bin/startAll.sh"]},"timeout": 3000,"volumes": [{"key": "base","scope": "PRIVATE","subPath": "byclaw-${user_code}/by","hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}","readOnly": false,"mountPath": "/by"}],"bootstrap": {"copyTemplate": {"copyIfMissing": true,"targetVolumeKey": "base"}},"sandboxType": "byclaw","servicePort": 8080,"resourceLimits": {"cpu": "0.5","memory": "1Gi"}}',
     '{"mcp": {"servers": {"env": {"GBRAIN_HOME": "/by/.openclaw/gbrain"},"gbrain": {"args": ["serve"],"command": "gbrain"}}},"meta": {"lastTouchedAt": "2026-07-17T09:07:17.583Z","lastTouchedVersion": "2026.6.6"},"hooks": {"internal": {"enabled": true,"entries": {"boot-md": {"enabled": false},"session-memory": {"enabled": true}}}},"tools": {"web": {"search": {"enabled": false}},"profile": "full"},"agents": {"list": [{"id": "main","skills": [],"default": true,"workspace": "${OPENCLAW_STATE_DIR}/workspace"}],"defaults": {"model": {},"models": {},"subagents": {"maxConcurrent": 8},"compaction": {"mode": "safeguard","memoryFlush": {"enabled": true},"postIndexSync": "await"},"memorySearch": {"store": {"fts": {"tokenizer": "trigram"}},"sources": ["memory","sessions"],"provider": "none","experimental": {"sessionMemory": true}},"maxConcurrent": 4,"skipBootstrap": true,"verboseDefault": "full","thinkingDefault": "high","blockStreamingBreak": "text_end","blockStreamingDefault": "on"}},"models": {"providers": {}},"skills": {"load": {"watch": true,"watchDebounceMs": 5000},"install": {"nodeManager": "pnpm"},"workshop": {"approvalPolicy": "auto"}},"wizard": {"lastRunAt": "2026-02-03T07:41:55.092Z","lastRunMode": "local","lastRunCommand": "configure","lastRunVersion": "2026.1.30"},"browser": {"enabled": true,"headless": false,"profiles": {"openclaw": {"color": "#1677FF","driver": "openclaw","cdpPort": 9222,"headless": false,"executablePath": "/usr/bin/chromium"}},"extraArgs": ["--load-extension=/opt/opencli/extension","--disable-extensions-except=/opt/opencli/extension","--disable-dev-shm-usage","--window-size=1365,768","--display=:99"],"noSandbox": true,"ssrfPolicy": {"allowedHostnames": ["localhost","127.0.0.1"]},"defaultProfile": "openclaw","executablePath": "/usr/bin/chromium","localLaunchTimeoutMs": 60000,"localCdpReadyTimeoutMs": 60000},"gateway": {"auth": {"mode": "token","token": "${OPENCLAW_GATEWAY_TOKEN}"},"bind": "lan","mode": "local","port": 18789,"controlUi": {"allowedOrigins": ["*"],"allowInsecureAuth": true,"dangerouslyDisableDeviceAuth": true,"dangerouslyAllowHostHeaderOriginFallback": true},"tailscale": {"mode": "off","resetOnExit": false}},"logging": {"file": "/by/.openclaw/logs/openclaw-yyyy-MM-dd.log","level": "info","maxFileBytes": 104857600},"plugins": {"load": {"paths": ["/app/dist-runtime/extensions/baiying-enhance","/app/dist-runtime/extensions/byai-channel","/app/dist-runtime/extensions/byclaw-acp-adapter"]},"allow": ["browser","byai-channel","baiying-enhance","diagnostics-otel","byclaw-acp-adapter","memory-core"],"slots": {"memory": "memory-core"},"enabled": true,"entries": {"xai": {"enabled": false},"browser": {"enabled": true},"memory-core": {"enabled": true},"byai-channel": {"hooks": {"allowConversationAccess": true},"enabled": true},"baiying-enhance": {"hooks": {"allowConversationAccess": true},"config": {"watchDebounceMs": 500,"mainParentAgentId": "main","workspaceAutoSeed": true,"embedApiKeysFromJson": true,"mergeAllowSpawnForMain": true},"enabled": true},"diagnostics-otel": {"enabled": false},"byclaw-acp-adapter": {"config": {"acpMode": "callAgent"},"enabled": true}}},"secrets": {"providers": {"baiying-aimodel-redis": {"env": {"BAIYING_AIMODEL_CONFIG_REDIS_KEY": "byai:aimodel:config","BAIYING_AIMODEL_TYPELIST_REDIS_KEY": "byai:aimodel:typelist"},"args": ["/app/dist-runtime/extensions/baiying-enhance/dist/aimodel-secret-resolver-cli.js"],"source": "exec","command": "/usr/local/bin/node","passEnv": ["REDIS_HOST","REDIS_PORT","REDIS_USERNAME","REDIS_PASSWORD","REDIS_DATABASE","BAIYING_ENV_FILE","OPENCLAW_STATE_DIR","BAIYING_REDIS_JSON_CONNECT_TIMEOUT_MS","BAIYING_REDIS_JSON_RETRY_DELAY_MS"],"jsonOnly": true,"timeoutMs": 30000,"allowInsecurePath": true,"noOutputTimeoutMs": 30000}}},"channels": {"byai-channel": {"enabled": true,"dmPolicy": "open","allowFrom": ["*"],"webhookPath": "/webhook/byai-channel","streamEnabled": true,"blockStreaming": true,"sessionKeyPerSessionId": true}},"commands": {"native": "auto","restart": true,"nativeSkills": "auto","ownerDisplay": "raw"},"diagnostics": {"otel": {"logs": false,"traces": true,"enabled": true,"headers": {"Authorization": "Basic ${LANGFUSE_OTEL_AUTH_SECRET}","x-langfuse-ingestion-version": "4"},"metrics": false,"endpoint": "${LANGFUSE_BASE_URL}/api/public/otel","protocol": "http/protobuf","sampleRate": 1,"serviceName": "openclaw-gateway","captureContent": {"enabled": true,"toolInputs": true,"toolOutputs": true,"systemPrompt": true,"inputMessages": true,"outputMessages": true,"toolDefinitions": true},"flushIntervalMs": 5000},"enabled": true}}',
     '2026-07-22 17:57:57.666');
-END IF;
-END;
-$$;
 
-/**删除文档打标技能：先清理依赖，再按业务编码删除资源。**/
-DELETE FROM byai.au_privilege_grant
-WHERE grant_obj_id IN (
-    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'doc-tagger'
-);
-DELETE FROM byai.ss_res_ext_skill
-WHERE resource_id IN (
-    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'doc-tagger'
-);
-DELETE FROM byai.ss_resource
-WHERE resource_code = 'doc-tagger';
+/**删除文档打标技能**/
+delete from ss_resource where resource_biz_type in('SKILL') and  resource_id in(24);
+delete from ss_res_ext_skill where skill_type in('inner') and resource_id in(24);
+delete from au_privilege_grant where grant_obj_type in('SKILL') and grant_obj_id in(24);
 
--- ========== V0.3.1 增量数据（合并到全新初始化脚本） ==========
--- 以下语句与 V0.3.1 增量 DML 保持一致，用于兼容已有种子数据并确保脚本可重复执行。
--- 知识采集默认绑定迁移到编排 Skill；仅迁移仍使用旧 bycli 绑定的内置资源。
-UPDATE byai.ss_resource
-SET resource_code = 'knowledge-collection',
-    update_time = CURRENT_TIMESTAMP
-WHERE resource_name = '知识采集'
-  AND resource_code = 'bycli';
-
--- 同步修正运行期技能快照中的 resourceCode，保留其余 JSON 字段。
-UPDATE byai.ss_res_ext_skill e
-SET target_content = jsonb_set(
-        target_content::jsonb,
-        '{resourceCode}',
-        '"knowledge-collection"'::jsonb,
-        false
-    )::text
-FROM byai.ss_resource r
-WHERE e.resource_id = r.resource_id
-  AND r.resource_name = '知识采集'
-  AND r.resource_code = 'knowledge-collection'
-  AND target_content IS NOT NULL
-  AND target_content::jsonb ->> 'resourceCode' = 'bycli'
-;
-
--- 修复 V0.2.0 种子中 coding-agent 描述的双重反斜杠，恢复 OPENCLAW_BUNDLED_SKILLS 为合法 JSON。
-UPDATE byai.byai_system_config c
-SET param_value = replace(
-        c.param_value,
-        chr(92) || chr(92) || chr(34) || 'acp' || chr(92) || chr(92) || chr(34),
-        chr(92) || chr(34) || 'acp' || chr(92) || chr(34)
-    )
-WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND position(
-        (chr(92) || chr(92) || chr(34) || 'acp' || chr(92) || chr(92) || chr(34))
-        IN c.param_value
-      ) > 0;
-
--- openGauss 缺少 JSONB 聚合函数；逐项补齐内置 Skill，避免已有一项时跳过其他项。
-UPDATE byai.byai_system_config c
-SET param_value = CASE
-        WHEN rtrim(c.param_value) = '[]' THEN '['
-        ELSE left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1) || ','
-    END
-    || '{"skillName":"knowledge-collection","skillCode":"knowledge-collection","skillDescZh":"编排跨互联网与企业平台的知识采集，统一采集产物协议、后处理及知识库入库或知识整理。","skillDescEn":"Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization."}]'
-WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND regexp_replace(c.param_value, '\s', '', 'g')
-      NOT LIKE '%"skillCode":"knowledge-collection"%';
-
--- 补充公开互联网渠道路由 Skill，已存在同名 skillCode 时不重复追加。
-UPDATE byai.byai_system_config c
-SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
-    || ',{"skillName":"By-Reach","skillCode":"agent-reach","skillDescZh":"路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。","skillDescEn":"Route public-internet channels and select approved By-Reach v2 executors."}]'
-WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND regexp_replace(c.param_value, '\s', '', 'g')
-      NOT LIKE '%"skillCode":"agent-reach"%';
-
--- 补充独立 byCLI 执行 Skill，避免继续把 bycli 与知识采集编排能力混为一体。
-UPDATE byai.byai_system_config c
-SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
-    || ',{"skillName":"bycli","skillCode":"bycli","skillDescZh":"通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。","skillDescEn":"Execute website operations through the browser and adapters, reuse or maintain adapters, and return collected results."}]'
-WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND regexp_replace(c.param_value, '\s', '', 'g')
-      NOT LIKE '%"skillCode":"bycli"%';
-
--- 初始化独立 bycli 执行 Skill 资源，保留 knowledge-collection 作为默认编排资源。
--- resource_id 由序列生成，避免与既有资源（例如 add-related-docs）发生固定 ID 冲突。
-INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
-SELECT nextval('byai.seq_any_table'),'BYAI','SKILL','ATOM','byCLI','通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE'
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM byai.ss_resource
-    WHERE resource_code = 'bycli'
-);
-
--- 为新增的 byCLI 资源补齐内置 Skill 扩展记录；按 resource_code 获取真实 resource_id。
-INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
-SELECT r.resource_id,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP
-FROM byai.ss_resource r
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
-)
-  AND r.resource_code = 'bycli';
-
--- 修正 bycli 运行期技能快照，避免资源 ID 曾被其他技能复用时残留错误 target_content。
-UPDATE byai.ss_res_ext_skill e
-SET target_content = json_build_object(
-        'resourceId', r.resource_id,
-        'resourceCode', r.resource_code,
-        'resourceName', r.resource_name,
-        'resourceDesc', r.resource_desc,
-        'resourceBizType', r.resource_biz_type,
-        'resourceType', r.resource_type,
-        'ownerType', r.owner_type,
-        'sourceType', e.source_type,
-        'skillType', e.skill_type,
-        'skillUrl', e.skill_url,
-        'version', e.version,
-        'skillPackageFormat', e.skill_package_format,
-        'skillOriginalFilename', e.skill_original_filename,
-        'skillPackageSize', e.skill_package_size,
-        'skillPackageHash', e.skill_package_hash,
-        'syncStatus', e.sync_status,
-        'syncError', e.sync_error,
-        'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
-    )::text
-FROM byai.ss_resource r
-WHERE e.resource_id = r.resource_id
-  AND r.resource_code = 'bycli';
-
--- 复制知识采集 Skill 的可用授权，使未传 ownerType 的技能列表也能发现 bycli。
--- 清理历史重复授权，保留同一业务授权键的最新记录，保证脚本重放不会累积重复数据。
-DELETE FROM byai.au_privilege_grant
-WHERE privilege_grant_id IN (
-    SELECT privilege_grant_id
-    FROM (
-        SELECT g.privilege_grant_id,
-               ROW_NUMBER() OVER (
-                   PARTITION BY g.grant_obj_id, g.grant_type, g.grant_to_type,
-                                g.grant_to_obj_id, g.grant_to_obj_type
-                   ORDER BY g.privilege_grant_id DESC
-               ) AS row_num
-        FROM byai.au_privilege_grant g
-        WHERE g.grant_obj_id = (SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'bycli')
-    ) ranked
-    WHERE ranked.row_num > 1
-);
-
-INSERT INTO byai.au_privilege_grant (
-    privilege_grant_id,
-    grant_type,
-    oper_type,
-    grant_obj_type,
-    grant_obj_id,
-    eff_date,
-    exp_date,
-    status_cd,
-    create_staff,
-    create_date,
-    update_staff,
-    update_date,
-    grant_to_type,
-    grant_to_obj_id,
-    grant_to_obj_type,
-    allow_unsubscribe
-)
-SELECT
-    nextval('byai.seq_any_table'),
-    g.grant_type,
-    g.oper_type,
-    g.grant_obj_type,
-    bycli.resource_id,
-    g.eff_date,
-    g.exp_date,
-    g.status_cd,
-    g.create_staff,
-    g.create_date,
-    g.update_staff,
-    g.update_date,
-    g.grant_to_type,
-    g.grant_to_obj_id,
-    g.grant_to_obj_type,
-    g.allow_unsubscribe
-FROM byai.au_privilege_grant g
-CROSS JOIN (
-    SELECT resource_id
-    FROM byai.ss_resource
-    WHERE resource_code = 'bycli'
-) bycli
-CROSS JOIN (
-    SELECT resource_id
-    FROM byai.ss_resource
-    WHERE resource_code = 'knowledge-collection'
-) knowledge_collection
-WHERE g.grant_obj_id = knowledge_collection.resource_id
-  AND NOT EXISTS (
-      SELECT 1
-      FROM byai.au_privilege_grant existing
-      WHERE existing.grant_obj_id = bycli.resource_id
-        AND existing.grant_type = g.grant_type
-        AND existing.grant_to_type = g.grant_to_type
-        AND existing.grant_to_obj_id = g.grant_to_obj_id
-        AND existing.grant_to_obj_type = g.grant_to_obj_type
-  );
-
--- 注册技术代码为 agent-reach、对用户展示为 By-Reach 的内置 Skill。
--- resource_id 由序列生成，避免依赖固定 ID；各步骤均按 resource_code 幂等执行。
-INSERT INTO byai.ss_resource (
-    resource_id, system_code, resource_biz_type, resource_type, resource_name,
-    resource_desc, resource_version_id, host_type, catalog_id, man_org_id,
-    man_user_id, create_by, create_time, update_by, update_time, com_acct_id,
-    resource_status, resource_d_verid, resource_r_verid, resource_code,
-    publish_time, auth_status, publish_portal, parent_resource_id, publish_type,
-    owner_type, impl_type, worker_agent_type
-)
-SELECT
-    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', 'By-Reach',
-    '路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。',
-    '1.0', 'hosted', 10, -1, '10001', 10001, CURRENT_TIMESTAMP,
-    10001, CURRENT_TIMESTAMP, 1, 2, -1, -1, 'agent-reach',
-    CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.ss_resource
-    WHERE resource_code = 'agent-reach'
-);
-
-INSERT INTO byai.ss_res_ext_skill (
-    resource_id, skill_type, source_type, version, skill_url,
-    skill_package_format, skill_original_filename, skill_package_size,
-    skill_package_hash, sync_status, sync_error, last_sync_time
-)
-SELECT
-    r.resource_id, 'inner', 'SYSTEM_BUILTIN', 'v0.1', '', 'zip', NULL, NULL, NULL,
-    'SUCCESS', NULL, CURRENT_TIMESTAMP
-FROM byai.ss_resource r
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
-)
-  AND r.resource_code = 'agent-reach';
-
-UPDATE byai.ss_res_ext_skill e
-SET target_content = json_build_object(
-    'resourceId', r.resource_id,
-    'resourceCode', r.resource_code,
-    'resourceName', r.resource_name,
-    'resourceDesc', r.resource_desc,
-    'resourceBizType', r.resource_biz_type,
-    'resourceType', r.resource_type,
-    'ownerType', r.owner_type,
-    'sourceType', e.source_type,
-    'skillType', e.skill_type,
-    'skillUrl', e.skill_url,
-    'version', e.version,
-    'skillPackageFormat', e.skill_package_format,
-    'skillOriginalFilename', e.skill_original_filename,
-    'skillPackageSize', e.skill_package_size,
-    'skillPackageHash', e.skill_package_hash,
-    'syncStatus', e.sync_status,
-    'syncError', e.sync_error,
-    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
-)::text
-FROM byai.ss_resource r
-WHERE e.resource_id = r.resource_id
-  AND r.resource_code = 'agent-reach';
-
--- 复制 knowledge-collection 的可用授权，使未传 ownerType 的技能列表也能发现 agent-reach。
-DELETE FROM byai.au_privilege_grant
-WHERE privilege_grant_id IN (
-    SELECT privilege_grant_id
-    FROM (
-        SELECT g.privilege_grant_id,
-               ROW_NUMBER() OVER (
-                   PARTITION BY g.grant_obj_id, g.grant_type, g.grant_to_type,
-                                g.grant_to_obj_id, g.grant_to_obj_type
-                   ORDER BY g.privilege_grant_id DESC
-               ) AS row_num
-        FROM byai.au_privilege_grant g
-        WHERE g.grant_obj_id = (SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach')
-    ) ranked
-    WHERE ranked.row_num > 1
-);
-
-INSERT INTO byai.au_privilege_grant (
-    privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
-    eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
-    update_date, grant_to_type, grant_to_obj_id, grant_to_obj_type,
-    allow_unsubscribe
-)
-SELECT
-    nextval('byai.seq_any_table'),
-    g.grant_type, g.oper_type, g.grant_obj_type, agent_reach.resource_id,
-    g.eff_date, g.exp_date, g.status_cd, g.create_staff, g.create_date,
-    g.update_staff, g.update_date, g.grant_to_type, g.grant_to_obj_id,
-    g.grant_to_obj_type, g.allow_unsubscribe
-FROM byai.au_privilege_grant g
-CROSS JOIN (
-    SELECT resource_id
-    FROM byai.ss_resource
-    WHERE resource_code = 'agent-reach'
-) agent_reach
-CROSS JOIN (
-    SELECT resource_id
-    FROM byai.ss_resource
-    WHERE resource_code = 'knowledge-collection'
-) knowledge_collection
-WHERE g.grant_obj_id = knowledge_collection.resource_id
-  AND NOT EXISTS (
-      SELECT 1 FROM byai.au_privilege_grant existing
-      WHERE existing.grant_obj_id = agent_reach.resource_id
-        AND existing.grant_type = g.grant_type
-        AND existing.grant_to_type = g.grant_to_type
-        AND existing.grant_to_obj_id = g.grant_to_obj_id
-        AND existing.grant_to_obj_type = g.grant_to_obj_type
-  );
-
--- ========== V0.3.1 (merged at 2026-08-18 16:19:56) ==========
+-- ========== V0.3.1 (merged at 2026-09-17 17:16:18) ==========
 -- V0.3.1 增量 DML：补齐连接器模板、内置 Skill 拆分及 Runtime Manifest。
 -- INSERT/UPDATE 均带业务条件或存在性判断，避免重复执行时产生重复数据。
 
@@ -5766,7 +5401,6 @@ SET runtime_manifest = jsonb_set(
 WHERE connector_code = 'lark'
   AND runtime_manifest IS NOT NULL;
 
--- ========== V0.3.1 ByClaw Super 版本数据（同步已应用版本） ==========
 -- 记录 ByClaw Super 内部结构版本。表结构由本版本 DDL 创建，版本数据归入 DML。
 INSERT INTO byai.byai_super_schema_migrations(version, name)
 SELECT migration.version, migration.name
@@ -5787,8 +5421,8 @@ WHERE NOT EXISTS (
     WHERE applied.version = migration.version
 );
 
--- ========== V0.3.2 (synchronized from version source) ==========
--- V0.3.2 增量数据：补齐历史环境缺失的配置，并修复内置 Skill 资源状态
+-- ========== V0.3.2 (merged at 2026-09-17 17:16:18) ==========
+-- V0.3.2 增量数据：回填连接器凭证生命周期、补齐历史配置，并修复内置 Skill 资源状态
 --
 -- 背景：V0.3.1 把「知识采集」资源从执行器 bycli 改名为编排 Skill knowledge-collection，
 -- 并另建独立的 byCLI 执行器资源。部分环境只执行了该版本的配置段（OPENCLAW_BUNDLED_SKILLS），
@@ -5811,6 +5445,7 @@ WHERE NOT EXISTS (
 
 SET search_path TO byai;
 
+-- 1. 回填连接器授权生命周期数据。DDL 已为新增状态字段提供非空默认值。
 UPDATE byai.byai_connector_auth
 SET access_expire_time = expire_time
 WHERE access_expire_time IS NULL
@@ -6089,21 +5724,103 @@ SET target_content = json_build_object(
 FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_code IN ('knowledge-collection','bycli');
--- ========== V0.4.0 增量数据（合并到全新初始化脚本） ==========
--- IMA OpenAPI 连接器。凭据仅由后续用户私有参数流程写入，初始化仅声明前端表单与受管环境白名单。
+
+-- ========== V0.4.0 (merged at 2026-09-17 17:16:18) ==========
+-- GitHub OAuth2 连接器。仅记录部署环境变量名，Client Secret 不进入数据库或 Runtime Manifest。
+DELETE FROM byai.byai_connector_info WHERE connector_code = 'github';
+
 INSERT INTO byai.byai_connector_info (
     connector_id, connector_code, connector_name, description, connector_type,
     provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+VALUES (nextval('byai.seq_any_table'), 'github', 'GitHub', '通过 OAuth2 连接 GitHub 用户账号', 'SYSTEM',
+       'github-oauth2', 'github', 'OAUTH2',
+       '{"clientIdEnv":"GITHUB_OAUTH_CLIENT_ID","clientSecretEnv":"GITHUB_OAUTH_CLIENT_SECRET","redirectUriEnv":"GITHUB_OAUTH_REDIRECT_URI","scope":"read:user repo"}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"github","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"shared-volume-projection","projectionPath":"/by/.connector-auth/.github/credential.json","environment":{}},"skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       40);
+
+-- IMA OpenAPI 连接器。凭据仅由后续用户私有参数流程写入，迁移仅声明前端表单与受管环境白名单。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort, status_cd
 )
 SELECT nextval('byai.seq_any_table'), 'ima-openapi', 'IMA', '通过 IMA OpenAPI 连接 IMA 服务', 'SYSTEM',
        'ima-openapi', 'ima-skill', 'AK_SK',
        '{"credentialForm":{"helpUrl":"https://ima.qq.com/agent-interface","helpLinkText":"前往 IMA 获取 API 凭据","helpText":"连接器作用：安全保存 IMA OpenAPI 的 Client ID 和 API Key，供数字员工访问 IMA 笔记和知识库。\n\n获取步骤：\n1. 点击下方链接进入 IMA 智能体接口页面并登录。\n2. 创建或选择需要连接的应用。\n3. 复制 Client ID 和 API Key。\n4. 返回本页填写凭据，点击“保存并连接”。\n\n安全提示：API Key 相当于账号密码，请勿发送到聊天、截图、工单或代码仓库。重新生成后旧值可能失效，需要重新连接。","fields":[{"key":"clientId","label":"Client ID","inputType":"text","maxLength":256},{"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048}]}}',
        '{}',
        '{"schemaVersion":"1.0","id":"ima-openapi","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["ima","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["IMA_OPENAPI_CLIENTID","IMA_OPENAPI_APIKEY"],"environment":{}},"skill":{"code":"ima-skill","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
-       50
+       50, '00X'
 WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi'
 );
+
+-- 微信公众号 API 连接器。迁移只声明表单和受管环境变量；access_token 不落库。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort, status_cd
+)
+SELECT nextval('byai.seq_any_table'), 'weixin-official-api', '微信公众号 API',
+       '安全保存公众号 AppID/AppSecret，供 byCLI 通过官方 API 创建草稿', 'SYSTEM',
+       'weixin-official-api', 'wechat-api', 'AK_SK',
+       '{"credentialForm":{"helpUrl":"https://developers.weixin.qq.com/platform","helpLinkText":"前往微信开发者平台获取凭据","helpText":"连接器作用：安全保存公众号 AppID 和 AppSecret，并在启用时提供给数字员工。使用 bycli weixin create-draft 时会优先调用公众号官方 API 上传封面和正文图片、创建草稿；不会直接群发或正式发布文章，也不保存 access_token。\n\n获取步骤：\n1. 点击下方链接登录微信公众平台，使用公众号管理员或有开发权限的微信扫码。\n2. 登录后选择要连接的目标公众号，进入公众号后台。\n3. 打开“设置与开发” → “开发接口管理” → “基本配置”，找到公众号开发信息。\n4. 在开发者 ID 区域复制 AppID。\n5. 在 AppSecret 区域点击“查看”或“重置”，由管理员扫码确认后复制新值。\n6. 将 ByClaw 后端和任务沙箱出口 IP 加入 IP 白名单，避免 40164。\n7. 返回本页填写 AppID、AppSecret，点击“保存并连接”。\n\n安全提示：AppSecret 相当于 API 密码，请勿发送到聊天、截图、工单或代码仓库。重置后旧值失效，需要重新连接。","fields":[{"key":"appId","label":"AppID","inputType":"text","maxLength":256},{"key":"appSecret","label":"AppSecret","inputType":"password","maxLength":2048}]}}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"weixin-official-api","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["bycli","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["WECHAT_APPID","WECHAT_APPSECRET"],"environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       55, '00X'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-api'
+);
+
+-- 微信开放平台第三方平台连接器。平台级密钥仅从后端部署环境读取，不投影到用户沙箱。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'weixin-open-platform', '微信开放平台第三方平台',
+       '由公众号管理员扫码授权并读取公众号账号资料', 'SYSTEM',
+       'weixin-open-platform', 'wechat-api', 'OAUTH2',
+       '{"componentAppidEnv":"WECHAT_COMPONENT_APPID","componentAppsecretEnv":"WECHAT_COMPONENT_APPSECRET","callbackTokenEnv":"WECHAT_COMPONENT_CALLBACK_TOKEN","encodingAesKeyEnv":"WECHAT_COMPONENT_ENCODING_AES_KEY","redirectUriEnv":"WECHAT_COMPONENT_REDIRECT_URI"}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"weixin-open-platform","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       56
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-open-platform'
+);
+
+-- 微信公众号网页登录账号模板。仅用于初始化用户级运营账号，不作为普通连接器展示或授权。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'weixin-official-web', '微信公众号',
+       '登录微信公众平台网页后台', 'ACCOUNT_TEMPLATE',
+       NULL, NULL, 'NONE', '{}',
+       '{"operationAccount":{"platformCode":"CustomLink","accountName":"微信公众号","accountCode":"","customUrl":"https://mp.weixin.qq.com/"}}',
+       NULL, 57
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-web'
+);
+
+-- IMA 网页账号模板。仅用于初始化用户级运营账号，不作为普通连接器展示或授权。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'ima-web', 'IMA',
+       '登录 IMA 网页端', 'ACCOUNT_TEMPLATE',
+       NULL, NULL, 'NONE', '{}',
+       '{"operationAccount":{"platformCode":"CustomLink","accountName":"IMA","accountCode":"","customUrl":"https://ima.qq.com/"}}',
+       NULL, 58
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-web'
+);
+
+-- 将旧版通过 config 标记的模板账号迁移到专用来源字段；软删除历史同样回填，以阻止再次初始化。
+UPDATE byai.byai_project_account
+SET template_connector_code = 'weixin-official-web'
+WHERE project_id IS NULL
+  AND template_connector_code IS NULL
+  AND config LIKE '%"connectorCode":"weixin-official-web"%';
 
 -- IMA OpenAPI 内置 Skill 注册
 -- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。
@@ -6138,40 +5855,35 @@ WHERE NOT EXISTS (
 INSERT INTO byai.ss_res_ext_skill (
     resource_id, skill_type, source_type, version, skill_url,
     skill_package_format, skill_original_filename, skill_package_size,
-    skill_package_hash, sync_status, sync_error, last_sync_time
+    skill_package_hash, sync_status, sync_error, last_sync_time, target_content
 )
 SELECT
     r.resource_id, 'inner', 'SYSTEM_BUILTIN', '0.1.3', '', 'zip', NULL, NULL, NULL,
-    'SUCCESS', NULL, CURRENT_TIMESTAMP
+    'SUCCESS', NULL, CURRENT_TIMESTAMP,
+    json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', 'SYSTEM_BUILTIN',
+        'skillType', 'inner',
+        'skillUrl', '',
+        'version', '0.1.3',
+        'skillPackageFormat', 'zip',
+        'skillOriginalFilename', NULL,
+        'skillPackageSize', NULL,
+        'skillPackageHash', NULL,
+        'syncStatus', 'SUCCESS',
+        'syncError', NULL,
+        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+    )::text
 FROM byai.ss_resource r
 WHERE NOT EXISTS (
     SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
 )
-  AND r.resource_code = 'ima-skill';
-
-UPDATE byai.ss_res_ext_skill e
-SET target_content = json_build_object(
-    'resourceId', r.resource_id,
-    'resourceCode', r.resource_code,
-    'resourceName', r.resource_name,
-    'resourceDesc', r.resource_desc,
-    'resourceBizType', r.resource_biz_type,
-    'resourceType', r.resource_type,
-    'ownerType', r.owner_type,
-    'sourceType', e.source_type,
-    'skillType', e.skill_type,
-    'skillUrl', e.skill_url,
-    'version', e.version,
-    'skillPackageFormat', e.skill_package_format,
-    'skillOriginalFilename', e.skill_original_filename,
-    'skillPackageSize', e.skill_package_size,
-    'skillPackageHash', e.skill_package_hash,
-    'syncStatus', e.sync_status,
-    'syncError', e.sync_error,
-    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
-)::text
-FROM byai.ss_resource r
-WHERE e.resource_id = r.resource_id
   AND r.resource_code = 'ima-skill';
 
 INSERT INTO byai.au_privilege_grant (
@@ -6228,7 +5940,855 @@ WHERE NOT EXISTS (
 );
 -- IMA OpenAPI 内置 Skill 注册结束
 
--- ========== V0.4.0 knowledge-collection 纯采集交付 ==========
+/**百应运营渠道**/
+-- 运营闭环：按运营需求类型配置独立启动提示词，避免不同类型任务携带无关字段。
+-- 后端按 operationType 分别读取采集、知识整理、对象发现、发布和分析提示词，避免不同任务类型混用字段。
+delete from byai.byai_system_config where param_code in (
+    'OPLOOP_TASK_START_PROMPT',
+    'OPLOOP_COLLECT_TASK_START_PROMPT',
+    'OPLOOP_PUBLISH_TASK_START_PROMPT',
+    'OPLOOP_ANALYZE_TASK_START_PROMPT',
+    'OPLOOP_TASK_START_PROMPT_COLLECT',
+    'OPLOOP_TASK_START_PROMPT_KNOWLEDGE',
+    'OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY',
+    'OPLOOP_TASK_START_PROMPT_PUBLISH',
+    'OPLOOP_TASK_START_PROMPT_ANALYZE'
+);
+
+-- 运营提示词与研发提示词统一进入 byai_ai_prompt，脚本可重复执行而不会产生重复模板。
+delete from byai.byai_ai_prompt where prompt_code in (
+    'OPLOOP_TASK_START_PROMPT',
+    'OPLOOP_COLLECT_TASK_START_PROMPT',
+    'OPLOOP_PUBLISH_TASK_START_PROMPT',
+    'OPLOOP_ANALYZE_TASK_START_PROMPT',
+    'OPLOOP_TASK_START_PROMPT_COLLECT',
+    'OPLOOP_TASK_START_PROMPT_KNOWLEDGE',
+    'OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY',
+    'OPLOOP_TASK_START_PROMPT_PUBLISH',
+    'OPLOOP_TASK_START_PROMPT_ANALYZE'
+);
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_COLLECT', '运营任务启动提示词-资料采集与整理',
+'运营资料采集与整理任务启动提示词，占位符 ${projectName} ${title} ${description} ${requirementName} ${requirementDescription} ${sourceMode} ${sourceValue} ${storageMode} ${storageTarget} ${runMode} ${executionTime}',
+'OPLOOP_TASK_START_PROMPT_COLLECT',
+'请处理以下资料采集与整理任务：
+
+## 运营任务信息
+- 运营项目：${projectName}
+- 任务名称：${title}
+- 任务描述：${description}
+
+## 资料采集配置
+- 采集方式：${sourceMode}
+- 采集来源：${sourceValue}
+- 入库方式：${storageMode}
+- 入库位置：${storageTarget}
+- 执行方式：${runMode}
+- 执行时间：${executionTime}
+
+## 执行要求
+1. 必须使用 knowledge-collection 技能进行采集。
+2. 严格依据关联需求、任务描述和资料采集配置开展工作。
+3. 将采集结果归档到配置的入库位置，并同步关键进度、产出结果和异常情况。
+4. 涉及登录或对外访问时，先核对对应连接器和平台配置。
+',
+'Process the following material collection and organization task:
+
+## Related requirement
+- Requirement name: ${requirementName}
+- Requirement description: ${requirementDescription}
+
+## Operation task information
+- Operation project: ${projectName}
+- Task name: ${title}
+- Task description: ${description}
+
+## Material collection configuration
+- Collection method: ${sourceMode}
+- Collection source: ${sourceValue}
+- Storage method: ${storageMode}
+- Storage destination: ${storageTarget}
+- Execution method: ${runMode}
+- Execution time: ${executionTime}
+
+## Execution requirements
+1. Execute strictly according to the related requirement, task description, and material collection configuration.
+2. Archive the collected results to the configured destination and report key progress, results, and exceptions.
+3. Before logging in or accessing external services, verify the related connector and platform configuration.
+',
+10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_KNOWLEDGE', '运营任务启动提示词-知识整理',
+'运营知识整理任务启动提示词，占位符 ${projectName} ${title} ${description} ${sourceMode} ${storageMode} ${runMode} ${executionTime}',
+'OPLOOP_TASK_START_PROMPT_KNOWLEDGE',
+'请执行以下任务：
+
+# 运营任务信息
+运营项目：${projectName}
+任务名称：${title}
+任务描述：${description}
+来源本体：${sourceMode}
+目标本体：${storageMode}
+
+# 任务配置
+执行方式：${runMode}
+执行时间：${executionTime}
+',
+'Process the following knowledge organization task:
+
+## Operation task information
+- Operation project: ${projectName}
+- Task name: ${title}
+- Task description: ${description}
+
+## Knowledge organization configuration
+- Source ontology: ${sourceMode}
+- Target ontology: ${storageMode}
+- Execution method: ${runMode}
+- Execution time: ${executionTime}
+
+## Execution requirements
+1. Confirm the knowledge structure, clean the content, and ingest the result according to the task description and configuration.
+2. Preserve source accuracy and traceability, and report key progress, results, and exceptions.
+',
+10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY', '运营任务启动提示词-对象发现',
+'运营对象发现任务启动提示词，占位符 ${projectName} ${title} ${description} ${sourceMode} ${storageMode} ${runMode} ${executionTime}',
+'OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY',
+'请处理以下对象发现任务：
+
+## 运营任务信息
+- 运营项目：${projectName}
+- 任务名称：${title}
+- 任务描述：${description}
+
+## 对象发现配置
+- 来源本体：${sourceMode}
+- 发现对象本体：${storageMode}
+- 执行方式：${runMode}
+- 执行时间：${executionTime}
+
+## 执行要求
+1. 根据采集文档和本体对象定义识别并提取对象实例。
+2. 按照对象字段定义补充实例属性，保留来源依据。
+3. 将发现结果保存到目标本体，并同步关键进度、产出结果和异常情况。
+',
+'Process the following object discovery task:
+
+## Operation task information
+- Operation project: ${projectName}
+- Task name: ${title}
+- Task description: ${description}
+
+## Object discovery configuration
+- Source ontology: ${sourceMode}
+- Discovery target ontology: ${storageMode}
+- Execution method: ${runMode}
+- Execution time: ${executionTime}
+
+## Execution requirements
+1. Identify and extract object instances from collected documents according to ontology definitions.
+2. Complete instance attributes according to object fields and preserve source evidence.
+3. Save discovery results to the target ontology and report key progress, results, and exceptions.
+',
+10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_PUBLISH', '运营任务启动提示词-内容创作', '运营内容创作与发布任务启动提示词，占位符 ${projectName} ${title} ${requirementName} ${requirementDescription} ${contentType} ${publishChannel} ${publishAccount} ${publishTopic} ${publishSchedule}', 'OPLOOP_TASK_START_PROMPT_PUBLISH', '请处理以下内容创作与发布任务：
+
+## 运营任务信息
+- 运营项目：${projectName}
+- 任务名称：${title}
+- 任务描述：${description}
+
+## 内容创作与发布配置
+- 内容类型：${contentType}
+- 发布渠道：${publishChannel}
+- 发布账号：${publishAccount}
+- 创作主题：${publishTopic}
+- 发布时间或计划：${publishSchedule}
+
+## 执行要求
+1. 严格依据关联需求和内容创作配置完成内容生产。
+2. 涉及发布或登录时，先核对发布账号和平台配置，再执行对外操作。
+3. 及时同步关键进度、发布结果和异常情况。
+', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_ANALYZE', '运营任务启动提示词-数据分析', '运营数据分析与优化任务启动提示词，占位符 ${projectName} ${title} ${requirementName} ${requirementDescription} ${analysisPlatform} ${analysisAccount} ${analysisScope} ${analysisWorks}', 'OPLOOP_TASK_START_PROMPT_ANALYZE', '请处理以下数据分析与优化任务：
+
+## 运营任务信息
+- 运营项目：${projectName}
+- 任务名称：${title}
+- 任务描述：${description}
+
+## 数据分析配置
+- 分析平台：${analysisPlatform}
+- 分析账号：${analysisAccount}
+- 分析范围：${analysisScope}
+- 指定作品：${analysisWorks}
+
+## 执行要求
+1. 严格依据关联需求和数据分析配置开展分析与优化。
+2. 分析范围为指定作品时，仅处理列出的作品；未指定时按账号范围处理。
+3. 及时同步关键进度、分析结论、优化建议和异常情况。
+', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+delete from byai.byai_system_config_list where param_group_code in('OPERATION_CHANNEL');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'OPERATION_CHANNEL', '项目运营渠道', '微信公众号', 'WeChatAccount', 'WeChatAccount', '微信公众号', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'OPERATION_CHANNEL', '项目运营渠道', '小红书', 'Xiaohongshu', 'Xiaohongshu', '小红书', 2);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'OPERATION_CHANNEL', '项目运营渠道', '视频号', 'WeChatChannels', 'WeChatChannels', '视频号', 3);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'OPERATION_CHANNEL', '项目运营渠道', '互联网', 'Internet', 'Internet', '互联网', 4);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'OPERATION_CHANNEL', '项目运营渠道', 'GitHub', 'GitHub', 'GitHub', 'GitHub', 5);
+
+/**百应运营需求类型**/
+delete from byai.byai_system_config_list where param_group_code in('OPERATION_REQUIRE_TYPE');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'OPERATION_REQUIRE_TYPE', '项目运营需求类型', '素材采集与整理', 'collect', 'collect', '素材采集与整理', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'OPERATION_REQUIRE_TYPE', '项目运营需求类型', '内容创作与发布', 'publish', 'publish', '内容创作与发布', 2);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'OPERATION_REQUIRE_TYPE', '项目运营需求类型', '数据分析与优化', 'analyze', 'analyze', '数据分析与优化', 3);
+
+-- 运营项目类型由项目空间前端动态读取，补齐后新环境才会显示“运营项目”创建入口。
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq)
+SELECT nextval('byai.seq_any_table'), 'PROJECT_TYPE', '项目类型', '运营项目', 'operation', 'operation', '运营项目', 3
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_system_config_list
+    WHERE param_group_code = 'PROJECT_TYPE' AND param_value = 'operation'
+);
+
+
+
+-- 研发闭环提示词迁移：从 byai_system_config 移到 byai_ai_prompt（分组 DEVLOOP_PROMPT）。
+-- TASK_START / REQUIREMENT_SCORE / REQUIREMENT_SPLIT_SCORE 迁移；PHASE_EXTRACT 环节抽取已废弃，仅删不迁。
+delete from byai.byai_system_config where param_code in ('DEVLOOP_TASK_START_PROMPT');
+delete from byai.byai_system_config where param_code in ('DEVLOOP_REQUIREMENT_SCORE_PROMPT');
+delete from byai.byai_system_config where param_code in ('DEVLOOP_PHASE_EXTRACT_PROMPT');
+delete from byai.byai_system_config where param_code in ('DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT');
+
+-- 幂等：先按 prompt_code 清掉旧行再插入当前模板。
+delete from byai.byai_ai_prompt where prompt_code in
+    ('DEVLOOP_TASK_START_PROMPT', 'DEVLOOP_REQUIREMENT_SCORE_PROMPT', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT');
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_TASK_START_PROMPT', '研发任务启动提示词', '研发闭环任务启动提示词模板，占位符 ${projectName} ${repoFullName} ${branchName} ${taskType} ${title} ${description} ${repoCloneHint}(后端按代码平台生成安全克隆说明)', 'DEVLOOP_TASK_START_PROMPT', '请处理以下任务：
+## 任务信息
+- 项目：${projectName}
+- 代码仓库：${repoFullName}
+- 目标分支：${branchName}（尚未创建，需你新建）
+- 任务类型：${taskType}
+- 任务标题：${title}
+
+## 需求详情
+${description}
+
+## 仓库访问说明
+${repoCloneHint}
+
+## 代码仓库
+任务的代码克隆仓库路径需要遵循/by/.sessions/{sessionId}/{repoName}/
+
+## 强制要求
+acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;
+研发流程的输出文档如：需求文档、设计文档、测试文档保存在/by/.sessions/{sessionId}/下面', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_REQUIREMENT_SCORE_PROMPT', '研发需求评分提示词', '研发闭环需求评分提示词，占位符 ${title} ${content}，要求模型返回各维度得分JSON', 'DEVLOOP_REQUIREMENT_SCORE_PROMPT', '你是资深产品与研发评审专家。请对下面这条候选需求进行多维度打分，用于研发优先级排序。
+
+## 待评估需求
+标题：${title}
+内容：${content}
+
+## 评分维度与分值上限
+- businessValue 业务价值（0-30）：对业务目标、营收或核心指标的贡献
+- userImpact 用户影响（0-20）：影响的用户范围与体验提升程度
+- urgency 紧迫度（0-15）：时间敏感性，是否阻塞或有明确截止
+- strategyFit 战略匹配（0-15）：与产品/公司战略方向的契合度
+- feasibility 实现可行性（0-10）：技术实现难度，越可行分越高
+- reuseValue 复用价值（0-10）：能力沉淀与跨场景复用潜力
+- risk 风险与冲突（-10-0）：与现有功能冲突、合规或稳定性风险，作为负分扣减
+
+## 输出要求
+- 只输出一个 JSON 对象，不要任何解释、不要 markdown 代码块。
+- 各维度取整数，不得超过上限；risk 为 0 到 -10 的整数。
+- summary 为一句话「AI 整理的产品需求」，凝练该需求要交付的能力。
+- 严格用如下字段：
+
+{"businessValue":0,"userImpact":0,"urgency":0,"strategyFit":0,"feasibility":0,"reuseValue":0,"risk":0,"summary":""}', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT', '研发需求拆分+评分提示词', '研发闭环拆分+评分提示词，占位符 ${title} ${content}，要求模型返回 requirements 数组', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT', '你是资深产品与研发评审专家。下面是一条从群消息/Issue 收集到的候选需求，可能包含多个相互独立的需求，也可能只是一个需求。请先判断是否需要拆分，再对每个独立需求多维度打分。
+
+## 待评估内容
+标题：${title}
+内容：${content}
+
+## 拆分规则
+- 仅当内容里确实包含多个「相互独立、可分别交付」的需求时才拆分；一个需求的多个步骤/细节不要拆开。
+- 最多拆 5 个；无法明确拆分时按 1 个处理（原样返回一条）。
+- 每个子需求给出清晰的 title（简短）和 content（自包含、不依赖其它子需求也能理解）。
+
+## 评分维度与分值上限（对每个子需求分别打分）
+- businessValue 业务价值（0-30）
+- userImpact 用户影响（0-20）
+- urgency 紧迫度（0-15）
+- strategyFit 战略匹配（0-15）
+- feasibility 实现可行性（0-10）
+- reuseValue 复用价值（0-10）
+- risk 风险与冲突（-10-0，负分扣减）
+
+## 输出要求
+- 只输出一个 JSON 对象，不要任何解释、不要 markdown 代码块。
+- requirements 为数组，每个元素含 title、content 及各维度整数分与 summary（一句话概括该需求要交付的能力）。
+- 不拆分时 requirements 只含 1 个元素。
+- 严格用如下结构：
+
+{"requirements":[{"title":"","content":"","businessValue":0,"userImpact":0,"urgency":0,"strategyFit":0,"feasibility":0,"reuseValue":0,"risk":0,"summary":""}]}', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+
+-- 回填研发子任务:历史需求为 1:1(scan_log_item.session_id 直连一个会话),各生成一条子任务,
+-- 让存量数据具备需求级批量集成的就绪聚合能力。project_id 与 repo_id 均经 scan_source 派生(item.source_id 直连)。
+-- 幂等:仅对尚无有效子任务的已启动需求插入。
+INSERT INTO byai.byai_scan_item_task (task_id, requirement_id, project_id, repo_id, session_id, status, create_time, delete_flag)
+SELECT nextval('byai.seq_any_table'), i.item_id, s.project_id, s.repo_id, i.session_id, 'running', CURRENT_TIMESTAMP, '0'
+FROM byai.byai_scan_log_item i
+JOIN byai.byai_scan_source s ON s.source_id = i.source_id
+WHERE i.session_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM byai.byai_scan_item_task t
+      WHERE t.requirement_id = i.item_id AND t.delete_flag = '0'
+  );
+
+-- 内置运营任务模板采用固定负数 ID，重复执行迁移时不会重复插入。
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2001, 'collect', '素材采集任务模板', '从知识库、连接器或互联网采集素材并归档',
+       '{"title":"采集 AI Agent 行业案例","description":"采集近期企业级 AI Agent 的落地案例，提炼来源、核心场景和可复用亮点。","sourceMode":"knowledge","storageMode":"knowledge","executorType":"agent","runMode":"once"}',
+       10, '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2001);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2002, 'knowledge', '知识整理任务模板', '使用《知识整理》技能，针对采集到的 会议纪要，进行对象实例提取。',
+       '{"title":"整理采集素材并沉淀知识","description":"对素材去重、摘要并提炼文章亮点、写法和可复用结构。","materialSource":"本体数据","sourceMode":"会议纪要","storageMode":"产品,方法论,操作说明,特性,场景,能力,事件","executorType":"agent","runMode":"once"}',
+       20, '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2002);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2006, 'object_discovery', '对象发现任务模板', '根据采集的文档和本体对象定义进行对象实例发现',
+       '{"title":"对象发现任务模板","description":"根据采集的文档，根据本体对象定义，进行对象实例发现。","sourceMode":"会议纪要","storageMode":"产品,方法论,操作说明,特性,场景,能力,事件","executorType":"agent","runMode":"once"}',
+       25, '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2006);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2003, 'content', '内容创作任务模板', '结构化描述主题、内容形态、受众与表达要求',
+       '{"title":"创作 BeyondAI 实验室公众号文章","description":"围绕企业 AI Agent 实践创作一篇面向企业管理者的深度文章，包含案例与行动建议。","contentType":"公众号文章","audience":"企业管理者与 AI 产品负责人","executorType":"agent","runMode":"once"}',
+       30, '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2003);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2004, 'publish', '内容发布任务模板', '选择账号、发布时间与审核规则完成发布',
+       '{"title":"发布已审核内容","description":"将已审核内容发布到指定账号，发布前再次检查标题、封面和品牌口径。","platform":"微信公众号","executorType":"agent","runMode":"once"}',
+       40, '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2004);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2005, 'analyze', '数据分析任务模板', '围绕账号或作品数据生成复盘与优化建议',
+       '{"title":"运营数据分析与优化","description":"分析近 30 天账号与作品表现，识别高表现内容并输出下一周期优化建议。","analysisScope":"账号整体分析","range":"近 30 天","executorType":"agent","runMode":"once"}',
+       50, '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2005);
+
+-- 用例来源回填:存量环境行加列后为 NULL,按既有行为(用例已在环境机上)显式落 on_env。
+-- 只回填 NULL,保证本段可重跑而不会把新建的 workspace 环境倒回 on_env。
+UPDATE byai.byai_integration_env SET case_source = 'on_env' WHERE case_source IS NULL;
+
+-- 工作区初始化提示词：初始化从后端 Java 流程（ProjectInitService）改为下发架构助理会话，
+-- 由它在沙箱内完成克隆/骨架/技能包/push，并按 self-developed-rules 契约写状态文件，
+-- 后端定时任务读该文件收口。提示词是这条链路的唯一指令来源，故入库为可运营模板。
+-- 正文简化为 /trellis-spec-bootstrap 斜杠命令：初始化步骤由该命令自己定义，提示词不再复述克隆/技能包/commit/push
+-- 五步，避免两处各写一套且互相漂移。ACP 那行必须留：完成状态靠 self-developed-rules 写会话状态文件，
+-- 不调这个 skill 平台读不到 completed，项目会一直卡在「初始化中」。
+-- 幂等：先按 prompt_code 清掉旧行再插入当前模板。
+delete from byai.byai_ai_prompt where prompt_code in ('DEVLOOP_WORKSPACE_INIT_PROMPT');
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_WORKSPACE_INIT_PROMPT', '工作区初始化提示词', '架构数字员工初始化研发项目工作区的提示词，正文为 /trellis-spec-bootstrap 斜杠命令加 ACP 强制要求；占位符 ${projectName} ${repoFullName} ${repoUrl} ${defaultBranch} ${sessionId} ${skillPackageSection} ${repoCloneHint} 仍可用，当前模板不再使用', 'DEVLOOP_WORKSPACE_INIT_PROMPT', '/trellis-spec-bootstrap 按照逻辑要求初始化trellis项目spec，过程你不需要询问我的意见，按照你推荐的方式进行
+
+acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+-- 需求澄清提示词：需求列表「启动」的第二个入口，把需求交给需求数字员工在聊天里聊完成。
+-- 正文就是一条斜杠命令 + 需求内容，澄清步骤由该命令自己定义，提示词不复述。
+-- ACP 那行与初始化提示词同源：启动时必须调用 self-developed-rules，否则完成状态没人写。
+-- 幂等：先按 prompt_code 清掉旧行再插入当前模板。
+delete from byai.byai_ai_prompt where prompt_code in ('DEVLOOP_REQUIREMENT_CLARIFY_PROMPT');
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '需求澄清提示词', '需求数字员工澄清需求的提示词，占位符 ${requirementContent} 替换为原始需求内容；正文为 /byclaw-requirement-clarification 斜杠命令加需求内容，再加 ACP 强制要求', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '/byclaw-requirement-clarification ${requirementContent}
+
+acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+
+-- 数字员工组类型字典（OpenGauss，可重复执行）。
+delete from byai.byai_system_config_list where param_group_code in('DIG_EMPLOYEE_AGENT_TYPE');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '助手', 'Assistant', '001', '助手', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '问答', 'QA', '006', '问答', 2);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '问数', 'DataQuery', '005', '问数', 3);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '调试', 'Debug', '010', '调试', 4);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '编码', 'Coding', '011', '编码', 5);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '数字员工组', 'Digital Employee Group', '017', '数字员工组', 6);
+
+delete from byai.byai_ai_prompt where prompt_group_code in('SUMMARY_CHAT_CONTENT') and prompt_code in('SUMMARY_CHAT_CONTENT');
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code) VALUES (nextval('byai.seq_any_table'), 'SUMMARY_CHAT_CONTENT', 'SUMMARY_CHAT_CONTENT', '会话总结提示词', '会话总结提示词模板，占位符 ${chatContent}', 'chatContent', '基于下面用户输入内容生成会话标题
+用户输入原文：${chatContent}
+要求：
+1. 标题长度2-30字，直观体现本次会话核心主题
+2. 提炼核心需求、问题或讨论对象，避免空话
+3. 禁止加多余说明、序号、引号、表情，只输出标题文本
+4. 优先名词+动作结构，适合作为聊天会话列表标题
+5. 【强制】禁止输出标签、禁止输出任何内部思考/推理过程，只返回最终标题
+', 'Generate a conversation title based on the user input below
+Original user input: ${chatContent}
+Requirements:
+1. The title should be 2–30 characters long and directly reflect the core topic of this conversation
+2. Extract the core requirement, question or discussion subject; avoid vague content
+3. No extra explanations, serial numbers, quotation marks or emojis. Output only the title text
+4. Prefer noun + verb structure, suitable for chat conversation list titles
+5. [Mandatory] Do not output tags, internal thinking or reasoning. Return only the final title', 10001, '2026-08-07 11:15:33', '2026-08-07 11:15:33', null);
+
+-- ============================================================================
+-- agent-reach 技能下线迁移（合并到 knowledge-collection 内置路由层）
+-- 2026-08-18: agent-reach skill 已合并为 knowledge-collection/references/source-routing.md
+-- ============================================================================
+
+-- 1. 从 OPENCLAW_BUNDLED_SKILLS 配置中移除 agent-reach 条目。
+--    先按空白归一化再整体替换，避免依赖交替分组等复杂正则特性。
+UPDATE byai.byai_system_config
+SET param_value = regexp_replace(
+    regexp_replace(param_value, '\s', '', 'g'),
+    ',?\{"skillName":"[^"]*","skillCode":"agent-reach","skillDescZh":"[^"]*","skillDescEn":"[^"]*"\}',
+    '',
+    'g'
+)
+WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(param_value, '\s', '', 'g') LIKE '%"skillCode":"agent-reach"%';
+
+-- 2. 清理配置 JSON 可能出现的语法问题（数组首尾多余逗号）
+UPDATE byai.byai_system_config
+SET param_value = regexp_replace(
+    regexp_replace(param_value, '\[,', '[', 'g'),
+    ',\]', ']', 'g'
+)
+WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS';
+
+-- 3. 删除 agent-reach 资源的所有授权记录
+DELETE FROM byai.au_privilege_grant
+WHERE grant_obj_id IN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
+);
+
+-- 4. 删除 agent-reach 的资源扩展记录（skill 元数据）
+DELETE FROM byai.ss_res_ext_skill
+WHERE resource_id IN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
+);
+
+-- 5. 删除 agent-reach 资源本体
+DELETE FROM byai.ss_resource
+WHERE resource_code = 'agent-reach';
+
+-- 验证查询（migration 执行后应各返回 0 行）
+-- SELECT * FROM byai.ss_resource WHERE resource_code = 'agent-reach';
+-- SELECT * FROM byai.byai_system_config WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS' AND param_value LIKE '%agent-reach%';
+-- SELECT g.* FROM byai.au_privilege_grant g JOIN byai.ss_resource r ON r.resource_id = g.grant_obj_id WHERE r.resource_code = 'agent-reach';
+-- SELECT e.* FROM byai.ss_res_ext_skill e JOIN byai.ss_resource r ON r.resource_id = e.resource_id WHERE r.resource_code = 'agent-reach';
+
+-- ============================================================================
+-- by-skill-installer 内置技能注册
+-- 2026-08-18: 按 skillCode 查平台内置技能并绑定到数字员工，让 agent 能使用该技能
+-- 各步骤均按 resource_code 幂等执行，resource_id 由序列生成避免固定 ID 冲突
+-- ============================================================================
+
+-- 1. 追加到 OPENCLAW_BUNDLED_SKILLS，已存在同名 skillCode 时不重复追加
+UPDATE byai.byai_system_config c
+SET param_value = CASE
+        WHEN rtrim(c.param_value) = '[]' THEN '['
+        ELSE left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1) || ','
+    END
+    || '{"skillName":"by-skill-installer","skillCode":"by-skill-installer","skillDescZh":"按 skillCode 在平台查找内置技能并绑定到数字员工，让 agent 能使用该技能。","skillDescEn":"Look up built-in skills by skillCode and bind them to a digital employee so the agent can use them."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(c.param_value, '\s', '', 'g')
+      NOT LIKE '%"skillCode":"by-skill-installer"%';
+
+-- 2. 注册资源本体
+INSERT INTO byai.ss_resource (
+    resource_id, system_code, resource_biz_type, resource_type, resource_name,
+    resource_desc, resource_version_id, host_type, catalog_id, man_org_id,
+    man_user_id, create_by, create_time, update_by, update_time, com_acct_id,
+    resource_status, resource_d_verid, resource_r_verid, resource_code,
+    publish_time, auth_status, publish_portal, parent_resource_id, publish_type,
+    owner_type, impl_type, worker_agent_type
+)
+SELECT
+    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', '技能安装器',
+    '按 skillCode 在平台查找内置技能并绑定到数字员工，让 agent 能使用该技能。',
+    '1.0', 'hosted', 10, -1, '10001', 10001, CURRENT_TIMESTAMP,
+    10001, CURRENT_TIMESTAMP, 1, 2, -1, -1, 'by-skill-installer',
+    CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_resource
+    WHERE resource_code = 'by-skill-installer'
+);
+
+-- 3. 补齐内置 Skill 扩展记录；skill_type=inner 表示随运行时镜像提供，无需下载
+INSERT INTO byai.ss_res_ext_skill (
+    resource_id, skill_type, source_type, version, skill_url,
+    skill_package_format, skill_original_filename, skill_package_size,
+    skill_package_hash, sync_status, sync_error, last_sync_time, target_content
+)
+SELECT
+    r.resource_id, 'inner', 'SYSTEM_BUILTIN', 'v0.1', '', 'zip', NULL, NULL, NULL,
+    'SUCCESS', NULL, CURRENT_TIMESTAMP,
+    json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', 'SYSTEM_BUILTIN',
+        'skillType', 'inner',
+        'skillUrl', '',
+        'version', 'v0.1',
+        'skillPackageFormat', 'zip',
+        'skillOriginalFilename', NULL,
+        'skillPackageSize', NULL,
+        'skillPackageHash', NULL,
+        'syncStatus', 'SUCCESS',
+        'syncError', NULL,
+        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+    )::text
+FROM byai.ss_resource r
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
+)
+  AND r.resource_code = 'by-skill-installer';
+
+-- 4. 清理历史重复授权，保证脚本重放不会累积重复数据
+DELETE FROM byai.au_privilege_grant
+WHERE privilege_grant_id IN (
+    SELECT privilege_grant_id
+    FROM (
+        SELECT g.privilege_grant_id,
+               ROW_NUMBER() OVER (
+                   PARTITION BY g.grant_obj_id, g.grant_type, g.grant_to_type,
+                                g.grant_to_obj_id, g.grant_to_obj_type
+                   ORDER BY g.privilege_grant_id DESC
+               ) AS row_num
+        FROM byai.au_privilege_grant g
+        WHERE g.grant_obj_id = (
+            SELECT resource_id FROM byai.ss_resource
+            WHERE resource_code = 'by-skill-installer'
+        )
+    ) ranked
+    WHERE ranked.row_num > 1
+);
+
+-- 5. 复制 knowledge-collection 的可用授权，使未传 ownerType 的技能列表也能发现该技能
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+    eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
+    update_date, grant_to_type, grant_to_obj_id, grant_to_obj_type, allow_unsubscribe
+)
+SELECT
+    nextval('byai.seq_any_table'),
+    g.grant_type, g.oper_type, g.grant_obj_type, installer.resource_id,
+    g.eff_date, g.exp_date, g.status_cd, g.create_staff, g.create_date,
+    g.update_staff, g.update_date, g.grant_to_type, g.grant_to_obj_id,
+    g.grant_to_obj_type, g.allow_unsubscribe
+FROM byai.au_privilege_grant g
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource
+    WHERE resource_code = 'by-skill-installer'
+) installer
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource
+    WHERE resource_code = 'knowledge-collection'
+) knowledge_collection
+WHERE g.grant_obj_id = knowledge_collection.resource_id
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.au_privilege_grant existing
+      WHERE existing.grant_obj_id = installer.resource_id
+        AND existing.grant_type = g.grant_type
+        AND existing.grant_to_type = g.grant_to_type
+        AND existing.grant_to_obj_id = g.grant_to_obj_id
+        AND existing.grant_to_obj_type = g.grant_to_obj_type
+  );
+
+-- 验证查询（migration 执行后应各返回 1 行）
+-- SELECT * FROM byai.ss_resource WHERE resource_code = 'by-skill-installer';
+-- SELECT e.* FROM byai.ss_res_ext_skill e JOIN byai.ss_resource r ON r.resource_id = e.resource_id WHERE r.resource_code = 'by-skill-installer';
+
+
+-- 更新 TEMPLATE_DIGITAL_EMPLOYEE 配置，为个人助理和助手添加 by-skill-installer 技能
+UPDATE byai.byai_system_config
+SET param_value = '[
+  {
+    "name": "个人助理",
+    "key": "BYCLAW_ASSISTANT",
+    "ownerType": "personal",
+    "agentType": "001",
+    "relTools": ["*"],
+    "relSkills": ["dws","by-skill-installer"],
+    "skillPath": "",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": ""
+      },
+      {
+        "name": "人格定义",
+        "key": "soul",
+        "enName": "Personality Definition",
+        "defaultValue": ""
+      },
+      {
+        "name": "工具规范",
+        "key": "tools",
+        "enName": "Tool Specification",
+        "defaultValue": ""
+      },
+      {
+        "name": "记忆规范",
+        "key": "memory",
+        "enName": "Memory Specification",
+        "defaultValue": ""
+      }
+    ]
+  },
+  {
+    "name": "助手",
+    "key": "BYCLAW_EXE",
+    "ownerType": "enterprise",
+    "agentType": "001",
+    "relTools": ["*"],
+    "relSkills": ["by-skill-installer"],
+    "skillPath": "",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": ""
+      },
+      {
+        "name": "人格定义",
+        "key": "soul",
+        "enName": "",
+        "defaultValue": ""
+      },
+      {
+        "name": "工具规范",
+        "key": "tools",
+        "enName": "Tool Specification",
+        "defaultValue": ""
+      },
+      {
+        "name": "记忆规范",
+        "key": "memory",
+        "enName": "Memory Specification",
+        "defaultValue": ""
+      }
+    ]
+  },
+  {
+    "name": "问答",
+    "key": "BYCLAW_QA",
+    "ownerType": "enterprise",
+    "agentType": "006",
+    "relTools": [],
+    "relSkills": [],
+    "skillPath": "/.ByKC/{userCode}/agent_{resourceId}/skills",
+    "prompts": [
+      {
+        "name": "问题分解",
+        "key": "questionDecompose",
+        "enName": "Question Decomposition",
+        "defaultValue": "将用户的自然语言问题拆解为一个或多个独立的子查询,并标注每个子查询的推理跳数(hop count),用于后续并行调度检索。"
+      },
+      {
+        "name": "单跳问题处理",
+        "key": "singleHop",
+        "enName": "Single Hop Processing",
+        "defaultValue": "指导单跳检索代理通过多轮检索收集充分证据,生成有据可查且无引用标记的自然语言回答。"
+      },
+      {
+        "name": "多跳问题信息检索",
+        "key": "multiHopSearch",
+        "enName": "Multi-hop Search",
+        "defaultValue": "指导多跳检索代理逐跳推理、逐跳检索,通过调用 next_hop 或 finalize 链接各步结论,最终完成链式问答。"
+      },
+      {
+        "name": "多跳问题回答",
+        "key": "multiHopSummary",
+        "enName": "Multi-hop Summary",
+        "defaultValue": "将多跳推理代理的逐跳结果(子问题、证据、结论)合成为一份结构完整、证据可追溯的最终报告。"
+      },
+      {
+        "name": "复合问题回答",
+        "key": "subanswerAggregator",
+        "enName": "Composite Answer Aggregation",
+        "defaultValue": "将多个子查询的回答整合为一份逻辑连贯、无引用标记的 Markdown 格式综合回答,直接回应用户的原始问题。"
+      }
+    ]
+  },
+  {
+    "name": "问数",
+    "key": "BYCLAW_DATA",
+    "ownerType": "enterprise",
+    "agentType": "005",
+    "relTools": [],
+    "relSkills": [],
+    "skillPath": "/.ByDC/{userCode}/agent_{resourceId}/skills",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": "请依据已有的工具进行数据查询、数据分析、数据操作。"
+      }
+    ]
+  },
+  {
+    "name": "调试",
+    "key": "BYCLAW_DEBUG",
+    "ownerType": "enterprise",
+    "agentType": "010",
+    "relTools": [],
+    "relSkills": [],
+    "skillPath": "",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": ""
+      }
+    ]
+  },
+  {
+    "name": "编码",
+    "key": "BYCLAW_CODE",
+    "ownerType": "enterprise",
+    "agentType": "011",
+    "relTools": [],
+    "relSkills": [],
+    "skillPath": "",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": ""
+      }
+    ]
+  }
+]',
+    update_time = CURRENT_TIMESTAMP
+WHERE param_code = 'TEMPLATE_DIGITAL_EMPLOYEE';
+
+-- 设置默认值为 personal
+update ss_resource set owner_type ='personal' where owner_type is null;
+
+delete from byai.byai_system_config_list where param_group_code in('SYSTEM_MODEL_TYPE');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_TYPE', '模型类型', '大语言模型(LLM)', 'LLM', 'LLM', '大语言模型(LLM)', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_TYPE', '模型类型', '重排模型(RERANK)', 'RERANK', 'RERANK', '重排模型(RERANK)', 2);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_TYPE', '模型类型', '向量模型(EMBEDDING)', 'EMBEDDING', 'EMBEDDING', '向量模型(EMBEDDING)', 3);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_TYPE', '模型类型', '文生图(IMAGE_GENERATION)', 'IMAGE_GENERATION', 'IMAGE_GENERATION', '文生图(IMAGE_GENERATION)', 4);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_TYPE', '模型类型', '语音模型(TTS)', 'TTS', 'TTS', '语音模型(TTS)', 5);
+
+delete from byai.byai_system_config_list where param_group_code in('SYSTEM_MODEL_PROVIDER_NAME');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_PROVIDER_NAME', '通用模型提供商(LLM|RERANK|EMBEDDING|TTS)', 'OpenAI', 'OpenAI', 'OpenAI', 'OpenAI', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_PROVIDER_NAME', '通用模型提供商(LLM|RERANK|EMBEDDING|TTS)', 'Anthropic', 'Anthropic', 'Anthropic', 'Anthropic', 2);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_PROVIDER_NAME', '通用模型提供商(LLM|RERANK|EMBEDDING|TTS)', 'Qwen', 'Qwen', 'Qwen', 'Qwen', 3);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_PROVIDER_NAME', '通用模型提供商(LLM|RERANK|EMBEDDING|TTS)', 'DeepSeek', 'DeepSeek', 'DeepSeek', 'DeepSeek', 4);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_PROVIDER_NAME', '通用模型提供商(LLM|RERANK|EMBEDDING|TTS)', 'OpenRouter', 'OpenRouter', 'OpenRouter', 'OpenRouter', 5);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_PROVIDER_NAME', '通用模型提供商(LLM|RERANK|EMBEDDING|TTS)', 'Together', 'Together', 'Together', 'Together', 6);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_PROVIDER_NAME', '通用模型提供商(LLM|RERANK|EMBEDDING|TTS)', 'ZAI', 'ZAI', 'ZAI', 'ZAI', 7);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_PROVIDER_NAME', '通用模型提供商(LLM|RERANK|EMBEDDING|TTS)', 'MINIMAX', 'MINIMAX', 'MINIMAX', 'MINIMAX', 8);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_PROVIDER_NAME', '通用模型提供商(LLM|RERANK|EMBEDDING|TTS)', 'Volcengine Ark', 'Volcengine Ark', 'VOLCENGINE', 'Volcengine Ark', 9);
+
+delete  from byai.byai_system_config_list where param_group_code in('SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'ComfyUI', 'ComfyUI', 'COMFYUI', 'ComfyUI', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'DeepInfra', 'DeepInfra', 'DEEPINFRA', 'DeepInfra', 2);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'fal', 'fal', 'FAL', 'fal', 3);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'Google', 'Google', 'GOOGLE', 'Google', 4);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'LiteLLM', 'LiteLLM', 'LITELLM', 'LiteLLM', 5);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'OpenAI', 'OpenAI', 'OPENAI', 'OpenAI', 6);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'Microsoft Foundry', 'Microsoft Foundry', 'MICROSOFT_FOUNDRY', 'Microsoft Foundry', 7);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'OpenRouter', 'OpenRouter', 'OPENROUTER', 'OpenRouter', 8);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'MiniMax', 'MiniMax', 'MINIMAX', 'MiniMax', 9);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'Vydra', 'Vydra', 'VYDRA', 'Vydra', 10);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'xAI', 'xAI', 'XAI', 'xAI', 11);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'Volcengine Ark', 'Volcengine Ark', 'VOLCENGINE', 'Volcengine Ark', 12);
+
+/**更新技能描述以及添加技能**/
+update ss_resource set resource_desc ='将本地资料导入 ByClaw 知识库或项目云盘，并按需发现或补全 KnowledgeEntity。用于用户要求知识整理、资料入库、知识实体发现、知识丰富或知识构建时。' where resource_code in('knowledge-organizer');
+
+delete from byai.ss_resource where resource_id in(25);
+delete from byai.ss_res_ext_skill where resource_id in(25);
+INSERT INTO byai.ss_resource (resource_id, system_code, resource_source_pk_id, resource_biz_type, resource_type, resource_name, resource_desc, avatar, sample, tags, resource_version_id, host_type, catalog_id, man_org_id, man_user_id, index_list, create_by, create_time, update_by, update_time, com_acct_id, resource_status, resource_d_verid, resource_r_verid, resource_code, publish_time, shelf_time, unshelf_time, auth_status, publish_portal, parent_resource_id, publish_type, owner_type, impl_type, worker_agent_type) VALUES (25, 'BYAI', null, 'SKILL', 'ATOM', '知识库文档收集', '将本地资料导入 ByClaw 知识库或项目云盘，并按需发现或补全 KnowledgeEntity。用于用户要求知识整理、资料入库、知识实体发现、知识丰富或知识构建时。', null, null, null, '1.0', 'hosted', 10, -1, '10001', null, 10001, '2026-06-29 08:38:43.079632', 10001, '2026-06-29 08:38:43.079632', 1, 2, -1, -1, 'collect-knowledge-documents', '2026-06-29 08:38:43.079632', null, null, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE');
+INSERT INTO byai.ss_res_ext_skill (resource_id, skill_type, source_type, version, skill_url, skill_package_format, skill_original_filename, skill_package_size, skill_package_hash, target_content, sync_status, sync_error, last_sync_time) VALUES (25, 'inner', 'SYSTEM_BUILTIN', 'v0.1', null, 'zip', null, null, null, '{"resourceId" : 23, "resourceCode" : "by-doc-to-markdown", "resourceName" : "文档转markdown", "resourceDesc" : "通过 by‑doc‑to‑markdown 命令行工具将文档转为 Markdown 文件。适用于智能体或用户需要把本地文档转换成 Markdown 的场景：支持 PDF、doc、docx、xls、xlsx、ppt、pptx 格式文件作为输入；借助服务发现调用后端 fileToMarkdown 接口，并将转换完成后的 Markdown 内容保存至本地文件。", "resourceBizType" : "SKILL", "resourceType" : "ATOM", "ownerType" : "enterprise", "sourceType" : "SYSTEM_BUILTIN", "skillType" : "inner", "skillUrl" : null, "version" : "v0.1", "skillPackageFormat" : "zip", "skillOriginalFilename" : null, "skillPackageSize" : null, "skillPackageHash" : null, "syncStatus" : "SUCCESS", "syncError" : null, "lastSyncTime" : "2026-07-20 09:08:24"}', 'SUCCESS', null, '2026-07-20 09:08:24.086339');
+
+UPDATE byai.ss_res_ext_skill e
+SET
+    skill_type = 'inner',
+    source_type = 'SYSTEM_BUILTIN',
+    version = COALESCE(NULLIF(e.version, ''), 'v0.1'),
+    skill_url = '',
+    skill_package_format = 'zip',
+    skill_original_filename = NULL,
+    skill_package_size = NULL,
+    skill_package_hash = NULL,
+    target_content = json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', 'SYSTEM_BUILTIN',
+        'skillType', 'inner',
+        'skillUrl', '',
+        'version', COALESCE(NULLIF(e.version, ''), 'v0.1'),
+        'skillPackageFormat', 'zip',
+        'skillOriginalFilename', NULL,
+        'skillPackageSize', NULL,
+        'skillPackageHash', NULL,
+        'syncStatus', 'SUCCESS',
+        'syncError', NULL,
+        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+                     )::text,
+    sync_status = 'SUCCESS',
+    sync_error = NULL,
+    last_sync_time = CURRENT_TIMESTAMP
+FROM byai.ss_resource r
+WHERE e.resource_id = r.resource_id
+  AND r.resource_biz_type = 'SKILL'
+  AND r.owner_type = 'enterprise'
+  AND r.resource_code IN ('knowledge-organizer','collect-knowledge-documents');
+
+-- V0.4.0 增量数据：将 knowledge-collection 收敛为纯采集与规范化正文交付 Skill。
 
 SET search_path TO byai;
 
@@ -6237,6 +6797,7 @@ SET resource_desc = '跨互联网与企业平台采集、归档资料，并完�
     update_time = CURRENT_TIMESTAMP
 WHERE resource_code = 'knowledge-collection';
 
+-- 同时兼容紧凑 JSON 与带缩进的 JSON；仅替换 knowledge-collection 目录项。
 UPDATE byai_system_config
 SET param_value = regexp_replace(
         param_value,
@@ -6248,6 +6809,7 @@ WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS'
   AND regexp_replace(param_value, '\s', '', 'g')
       LIKE '%"skillCode":"knowledge-collection"%';
 
+-- 从资源表刷新运行期 Skill 快照，使已安装实例同步新的纯采集描述。
 UPDATE ss_res_ext_skill e
 SET target_content = json_build_object(
         'resourceId', r.resource_id,
@@ -6272,3 +6834,170 @@ SET target_content = json_build_object(
 FROM ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_code = 'knowledge-collection';
+
+
+DELETE FROM byai.byai_system_config WHERE param_code IN('INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE');
+INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), null, 'INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE', '初始化项目专家组数字员工模板', 'INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE', e'{
+	"zh_CN": [{
+			"projectName": "${userName}的百应运营项目",
+			"projectCode": "operation_${userCode}",
+			"projectType": "operation",
+			"description": "百应运营项目.初始化",
+			"isShare": "Y"
+		},
+		{
+			"projectName": "${userName}的百应研发项目",
+			"projectCode": "development_${userCode}",
+			"projectType": "development",
+			"description": "百应研发项目.初始化",
+			"isShare": "Y"
+		}
+	],
+	"en_US": [{
+			"projectName": "${userName} is Baiying Operation Project",
+			"projectCode": "operation_${userCode}",
+			"projectType": "operation",
+			"description": "Baiying Operation Project. Initialization",
+			"isShare": "Y"
+		},
+		{
+			"projectName": "${userName} is Baiying Development Project",
+			"projectCode": "development_${userCode}",
+			"projectType": "development",
+			"description": "Baiying Development Project. Initialization",
+			"isShare": "Y"
+		}
+	]
+}
+', '初始化项目专家组数字员工模板');
+
+DELETE FROM byai.byai_system_config WHERE param_code IN('INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE');
+INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), 'json', 'INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE', '用户登陆初始数字员工助手模板', 'INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE', e'{
+	"zh_CN": [{
+			"resourceName": "${userName}的超级助手",
+			"resourceCode": "${userCode}_main",
+			"resourceDesc": "${userName}的超级助手，通用全能型数字员工，覆盖日常问答、资料处理、代码辅助、知识检索、本体建模全场景通用支撑",
+			"systemCode": "BYAI",
+			"resourceType": "COMBIN",
+			"catalogId": 0,
+			"publishingPortal": 1,
+			"publishingType": "publish",
+			"ownerType": "personal",
+			"implType": "ASK_AGENT",
+			"workerAgentType": "BYCLAW_EXE",
+			"agentType": "001",
+			"agentDevType": "byai",
+			"modelProtocol": "OpenAI",
+			"createType": "FROM_MANUALLY",
+			"integrationType": "NONE",
+			"terminal": "ALL",
+			"tagName": "知识库,知识开发,文档整理,故障排查",
+			"coreCompetencies": "[{\\"coreCompetency\\":\\"通用全能支撑\\",\\"description\\":\\"全业务场景无边界辅助，兼容知识、技能、本体开发各类任务\\",\\"acceptBoundary\\":[\\"全部业务咨询\\",\\"文档处理\\",\\"代码调试\\",\\"知识库搭建\\",\\"本体建模\\"],\\"rejectBoundary\\":[],\\"example\\":[\\"日常业务问答\\",\\"多类型文档解析\\",\\"多场景工具调用辅助\\"]}]",
+			"openSuperHelper": "T",
+			"corePersonaDefinition": "[{\\"name\\":\\"工作规范\\",\\"key\\":\\"agent\\",\\"value\\":\\"${userName}的超级助手\\",\\"nameEn\\":\\"agent\\"},{\\"name\\":\\"人格定义\\",\\"key\\":\\"soul\\",\\"value\\":\\"全能通用助手，响应各类需求，无场景限制\\",\\"nameEn\\":\\"soul\\"},{\\"name\\":\\"工具规范\\",\\"key\\":\\"tools\\",\\"value\\":\\"兼容平台全部内置工具接口\\",\\"nameEn\\":\\"tools\\"},{\\"name\\":\\"记忆规范\\",\\"key\\":\\"memory\\",\\"value\\":\\"关联个人全量知识库会话记忆\\",\\"nameEn\\":\\"memory\\"}]"
+		},
+		{
+			"resourceName": "${userName}的知识开发助手",
+			"resourceCode": "${userCode}_KwDevAsst",
+			"resourceDesc": "知识开发助手，面向个人知识建设与数字员工知识调试的专属助手，负责协助用户规划知识库结构、整理上传文档、生成FAQ/术语、诊断知识库上传与构建问题，并把零散资料逐步沉淀成可被数字员工稳定调用的高质量知识资产",
+			"agentType": "001",
+			"agentDevType": "byai",
+			"modelProtocol": "OpenAI",
+			"prologue": "{\\"background\\":\\"杜甫的知识开发助手，面向个人知识建设与数字员工知识调试的专属助手，负责协助用户规划知识库结构、整理上传文档、生成FAQ/术语、诊断知识库上传与构建问题，并把零散资料逐步沉淀成可被数字员工稳定调用的高质量知识资产\\",\\"descText\\":\\"您好，我是知识开发助手，面向个人知识建设与数字员工知识调试的专属助手，负责协助用户规划知识库结构、整理上传文档、生成FAQ/术语、诊断知识库上传与构建问题，并把零散资料逐步沉淀成可被数字员工稳定调用的高质量知识资产\\",\\"openingQuestion\\":\\"[\\\\\\"帮我采集网页内容草稿整理成适合知识库导入的结构？\\\\\\",\\\\\\"帮我文档中提炼摘要、FAQ、术语、元数据字段、目录规划和测试问题？\\\\\\"]\\"}",
+			"createType": "FROM_MANUALLY",
+			"integrationType": "NONE",
+			"tagName": "知识库,知识开发,文档整理,故障排查",
+			"coreCompetencies": "[{\\"coreCompetency\\":\\"帮用户设计知识库，根据业务场景建议用户如何搭建知识库\\",\\"description\\":\\"提供知识库规划、资料整理、知识生成、上传构建、检索调试、故障排查全流程服务\\",\\"acceptBoundary\\":[\\"知识库结构规划\\",\\"原始文档标准化整理\\",\\"FAQ/术语/元数据提取\\",\\"上传/构建/检索异常排查\\",\\"知识库权限与资源管理\\"],\\"rejectBoundary\\":[\\"技能代码开发\\",\\"本体图谱建模\\",\\"非知识库相关业务咨询\\"],\\"example\\":[\\"根据业务场景搭建知识库目录\\",\\"解析Markdown/网页生成导入素材\\",\\"解决MinIO/QA服务上传报错\\",\\"优化知识库检索召回精度\\"]},{\\"coreCompetency\\":\\"帮用户整理资料，将原始文档、网页内容、Markdown、FAQ 草稿整理成适合知识库导入的结构。\\",\\"description\\":\\"\\",\\"acceptBoundary\\":[],\\"rejectBoundary\\":[],\\"example\\":[]},{\\"coreCompetency\\":\\"帮用户生成知识内容，从文档中提炼摘要、FAQ、术语、元数据字段、目录规划和测试问题\\",\\"description\\":\\"\\",\\"acceptBoundary\\":[],\\"rejectBoundary\\":[],\\"example\\":[]},{\\"coreCompetency\\":\\"帮用户排查问题，分析上传失败、构建失败、检索不到、召回不准、权限不足、MinIO/QA 服务异常等问题\\",\\"description\\":\\"\\",\\"acceptBoundary\\":[],\\"rejectBoundary\\":[],\\"example\\":[]},{\\"coreCompetency\\":\\"帮用户优化效果，根据问答表现提出切片、标题、术语、FAQ、补充资料和知识库拆分建议\\",\\"description\\":\\"\\",\\"acceptBoundary\\":[],\\"rejectBoundary\\":[],\\"example\\":[]},{\\"coreCompetency\\":\\"帮用户形成规范，沉淀个人或团队的知识开发流程、命名规则、文档模板和验收清单\\",\\"description\\":\\"\\",\\"acceptBoundary\\":[],\\"rejectBoundary\\":[],\\"example\\":[]}]",
+			"openSuperHelper": "N",
+			"corePersonaDefinition": "[{\\"name\\":\\"工作规范\\",\\"key\\":\\"agent\\",\\"value\\":\\"1.回复前先判断用户是在做“知识规划、资料整理、上传构建、检索调试、效果优化、故障排查”中的哪一类任务。\\\\n2.对知识库建设问题，优先给出可执行步骤，不只给概念解释。\\\\n3.涉及上传、构建、删除、权限、资源关联等操作时，要提醒用户确认目标知识库、目录、资源归属和影响范围。\\\\n4.发现文档中存在非法 front matter、未定义 metadata 字段、重复标题、目录混乱、无语义文件名等问题时，要主动指出并给出修复建议。\\\\n5.对无法确认的故障，不臆测结论，要按链路排查：前端请求、BE datasetController、QA 知识服务、FsOperation/MinIO、资源表与权限。\\\\n6.输出 FAQ、术语、metadata schema、目录结构时，优先使用结构化 Markdown，便于用户直接复制使用。\\\\n7.不直接承诺已经完成系统操作，除非工具返回明确成功结果。\\\\n8.对删除、覆盖、批量导入、重新构建这类可能影响已有知识资产的动作，必须先提示风险和确认点。\\",\\"nameEn\\":\\"Work Specification\\"},{\\"name\\":\\"人格定义\\",\\"key\\":\\"soul\\",\\"value\\":\\"\\",\\"nameEn\\":\\"soul\\"},{\\"name\\":\\"工具规范\\",\\"key\\":\\"tools\\",\\"value\\":\\"\\",\\"nameEn\\":\\"Tool Specification\\"},{\\"name\\":\\"记忆规范\\",\\"key\\":\\"memory\\",\\"value\\":\\"\\",\\"nameEn\\":\\"Memory Specification\\"}]",
+			"systemCode": "BYAI",
+			"resourceBizType": "DIG_EMPLOYEE",
+			"resourceType": "COMBIN",
+			"tags": "[\\"采集\\",\\"知识整理\\"]",
+			"hostType": "hosted",
+			"ownerType": "personal",
+			"implType": "ASK_AGENT",
+			"workerAgentType": "BYCLAW_EXE",
+			"catalogId": 0,
+			"relToolCodes": null,
+			"relSkillCodes": "bycli,gbrain",
+			"isRelDefaultDataset": "Y",
+			"workStandard": "1.回复前先判断用户是在做“知识规划、资料整理、上传构建、检索调试、效果优化、故障排查”中的哪一类任务。\\n2.对知识库建设问题，优先给出可执行步骤，不只给概念解释。\\n3.涉及上传、构建、删除、权限、资源关联等操作时，要提醒用户确认目标知识库、目录、资源归属和影响范围。\\n4.发现文档中存在非法 front matter、未定义 metadata 字段、重复标题、目录混乱、无语义文件名等问题时，要主动指出并给出修复建议。\\n5.对无法确认的故障，不臆测结论，要按链路排查：前端请求、BE datasetController、QA 知识服务、FsOperation/MinIO、资源表与权限。\\n6.输出 FAQ、术语、metadata schema、目录结构时，优先使用结构化 Markdown，便于用户直接复制使用。\\n7.不直接承诺已经完成系统操作，除非工具返回明确成功结果。\\n8.对删除、覆盖、批量导入、重新构建这类可能影响已有知识资产的动作，必须先提示风险和确认点。"
+		},
+		{
+			"resourceName": "${userName}的代码生成助手",
+			"resourceCode": "${userCode}_CodeDevAsst",
+			"resourceDesc": "代码生成助手code agent，基于Anthropic模型，专注技能代码编写、脚本调试、接口开发、Agent工具函数开发、代码报错排查、技能流程编排",
+			"systemCode": "BYAI",
+			"agentType": "011",
+			"agentDevType": "byai",
+			"modelProtocol": "Anthropic",
+			"prologue": "{\\"background\\":\\"代码生成助手code agent，基于Anthropic模型，专注技能代码编写、脚本调试、接口开发、Agent工具函数开发、代码报错排查、技能流程编排\\",\\"descText\\":\\"您好，我是代码生成助手，专注于各类代码编写、功能开发、代码优化与问题调试。无需复杂操作，直接告诉我你的开发需求，我即可快速生成规范、可直接使用的代码，同时支持代码注释优化、逻辑重构、bug修复，高效帮你解决各类开发问题。\\",\\"openingQuestion\\":\\"[\\\\\\"帮我java写一段jdbc代码？\\\\\\",\\\\\\"你目前使用的是什么开发语言和场景？\\\\\\"]\\"}",
+			"createType": "FROM_MANUALLY",
+			"integrationType": "NONE",
+			"tagName": "codeAgent,技能开发,代码编写,脚本调试,Anthropic",
+			"coreCompetencies": "[{\\"coreCompetency\\":\\"代码编写，根据需求完成脚本、接口、Agent 工具函数开发，统一代码规范并补充注释\\",\\"description\\":\\"基于Anthropic模型提供代码编写、脚本调试、工具接口封装、技能排错、流程编排服务\\",\\"acceptBoundary\\":[\\"多语言脚本编写\\",\\"Agent自定义技能开发\\",\\"编译/运行报错排查\\",\\"API接口对接调试\\",\\"Docker构建配置优化\\"],\\"rejectBoundary\\":[\\"知识库文档整理\\",\\"本体图谱建模\\",\\"非代码类业务咨询\\"],\\"example\\":[\\"编写OpenClaw自定义工具脚本\\",\\"修复Rust/Tauri编译异常\\",\\"封装嘉朗知识库调用接口\\"]},{\\"coreCompetency\\":\\"代码调试排错，解析运行/编译报错，定位根因并输出可直接运行的修复代码。\\",\\"description\\":\\"\\",\\"acceptBoundary\\":[],\\"rejectBoundary\\":[],\\"example\\":[]},{\\"coreCompetency\\":\\"流程编排，拆分业务节点、配置联动逻辑、补充异常分支，搭建完整自动化流程\\",\\"description\\":\\"\\",\\"acceptBoundary\\":[],\\"rejectBoundary\\":[],\\"example\\":[]},{\\"coreCompetency\\":\\"发使用指导，结合实操演示讲解代码调用、工具函数、接口对接、流程配置等使用方法\\",\\"description\\":\\"\\",\\"acceptBoundary\\":[],\\"rejectBoundary\\":[],\\"example\\":[]}]",
+			"openSuperHelper": "N",
+			"corePersonaDefinition": "[{\\"name\\":\\"工作规范\\",\\"key\\":\\"agent\\",\\"value\\":\\"# CodeAgent技能开发助手工作规范\\\\n## 一、定位\\\\n基于Anthropic模型，负责技能代码编写、脚本调试、接口开发、Agent工具函数开发、代码报错排查、技能流程编排。\\\\n\\\\n## 二、工作准则\\\\n1. 需求优先，需求模糊处主动确认，不主观臆造逻辑；\\\\n2. 代码规范统一，添加必要注释，具备可复用性、可维护性；\\\\n3. 开发、调试、排错需覆盖异常场景，做好容错与参数校验；\\\\n4. 工具函数职责单一，标注入参、出参与调用方式；\\\\n5. 流程编排逻辑清晰，补充异常分支，保障自动化稳定运行；\\\\n6. 输出可直接运行代码，报错问题附根因分析与完整修复方案；\\\\n7. 严守安全规范，禁止生成高危、违规代码。\\\\n\\\\n## 三、交付要求\\\\n代码完整可执行、逻辑闭环、附带简短使用说明，简洁无冗余。\\",\\"nameEn\\":\\"agent\\"},{\\"name\\":\\"人格定义\\",\\"key\\":\\"soul\\",\\"value\\":\\"\\",\\"nameEn\\":\\"soul\\"},{\\"name\\":\\"工具规范\\",\\"key\\":\\"tools\\",\\"value\\":\\"\\",\\"nameEn\\":\\"tools\\"},{\\"name\\":\\"记忆规范\\",\\"key\\":\\"memory\\",\\"value\\":\\"\\",\\"nameEn\\":\\"memory\\"}]",
+			"tags": "[\\"编码\\",\\"代码生成\\"]",
+			"hostType": "hosted",
+			"ownerType": "personal",
+			"implType": "ASK_AGENT",
+			"workerAgentType": "BYCLAW_CODE",
+			"catalogId": 0,
+			"relToolCodes": null,
+			"relSkillCodes": null,
+			"isRelDefaultDataset": "N",
+			"workStandard": "# CodeAgent技能开发助手工作规范\\n## 一、定位\\n基于Anthropic模型，负责技能代码编写、脚本调试、接口开发、Agent工具函数开发、代码报错排查、技能流程编排。\\n\\n## 二、工作准则\\n1. 需求优先，需求模糊处主动确认，不主观臆造逻辑；\\n2. 代码规范统一，添加必要注释，具备可复用性、可维护性；\\n3. 开发、调试、排错需覆盖异常场景，做好容错与参数校验；\\n4. 工具函数职责单一，标注入参、出参与调用方式；\\n5. 流程编排逻辑清晰，补充异常分支，保障自动化稳定运行；\\n6. 输出可直接运行代码，报错问题附根因分析与完整修复方案；\\n7. 严守安全规范，禁止生成高危、违规代码。\\n\\n## 三、交付要求\\n代码完整可执行、逻辑闭环、附带简短使用说明，简洁无冗余。"
+		}
+	],
+	"en_US": []
+}', '用户登陆初始数字员工助手模板');
+
+
+UPDATE byai.byai_super_delegations
+   SET last_activity_at = updated_at
+ WHERE started_at IS NOT NULL;
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 10, 'delegation_last_activity'
+WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 10
+);
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 11, 'delegation_callback_deadline'
+    WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 11
+);
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 12, 'delegation_task_position'
+    WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 12
+);
+
+-- 更新代码代理沙箱规格，确保迁移重复执行时不会保留旧配置。
+DELETE FROM "byai"."sandbox_service_spec"
+WHERE "service_key" IN ('byclaw-code-agent');
+
+INSERT INTO "byai"."sandbox_service_spec"
+("service_key", "spec_json", "template_json", "updated_at")
+VALUES (
+           'byclaw-code-agent',
+           '{"env": {"TZ": "Asia/Shanghai", "GH_TOKEN": "${GH_TOKEN}", "USER_CODE": "${USER_CODE}", "MODEL_NAME": "${MODEL_NAME}", "REDIS_HOST": "${REDIS_HOST}", "BEYOND_TOKEN": "${BEYOND_TOKEN}", "WEB_BASE_URL": "${WEB_BASE_URL}", "BE_DOMAINNAME": "ByaiService", "MODEL_API_KEY": "${MODEL_API_KEY}", "BYAI_WORKER_ID": "${USER_CODE}", "MODEL_BASE_URL": "${MODEL_BASE_URL}", "REDIS_PASSWORD": "${REDIS_PASSWORD}", "REDIS_USERNAME": "${REDIS_USERNAME}", "CLAUDE_AGENT_CWD": "/by/workspace", "CLAUDE_MAX_TURNS": "500", "CLAUDE_CODE_SKIP_ROOTALERT": true, "BYCLAW_SANDBOX_FILE_VOLUME_ROOT": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "BYCLAW_DIGITAL_EMPLOYEE_STARTUP_TIMEOUT_SECONDS": "600"}, "image": "192.168.0.81:8080/byclaw/byclaw-code-agent:dev", "ports": [{"port": 8080, "protocol": "http"}], "startup": {"entrypoint": ["/app/entrypoint.sh"]}, "volumes": [{"gid": 1001, "key": "base", "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "byclaw-${user_code}/by", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/by"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "byclaw-code-agent/byclaw-${user_code}/home", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/home"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": ".m2", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/home/byclaw/.m2"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "repos", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/by/repos"}], "resourceLimits": {"cpu": "2", "memory": "6Gi"}}',
+           '',
+           CURRENT_TIMESTAMP
+       );
+-- 新增项目编码字段
+UPDATE byai_project set project_code =concat('project_',project_id) where project_code is null;
+
+-- ========== V0.4.1 (merged at 2026-09-17 17:16:18) ==========
+-- 本版无 DML
+

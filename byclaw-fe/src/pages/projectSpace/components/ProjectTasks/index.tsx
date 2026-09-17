@@ -6,8 +6,8 @@ import {
   Empty,
   Input,
   Modal,
-  Segmented,
   Select,
+  Segmented,
   Spin,
   Tag,
   Tooltip,
@@ -22,7 +22,6 @@ import dayjs from 'dayjs';
 import {
   deleteOperationTask,
   executeOperationTask,
-  getOperationTask,
   listOperationTasks,
   listProjectMembers,
   listTasks,
@@ -34,7 +33,6 @@ import type { ProjectSession, ProjectSpace } from '../../types';
 import { getArrayData, getPageTotal } from '../../utils';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import styles from '../../index.module.less';
-import SessionOverviewDrawer from '@/layout/sider/components/ProjectSpaceList/SessionOverviewDrawer';
 import {
   getDevloopTaskTypeIcon,
   getDevloopTaskTypeLabelId,
@@ -47,7 +45,8 @@ import { isCurrentUserTaskAssignee } from '@/layout/sider/components/ProjectSpac
 interface Props {
   project: ProjectSpace;
   keyword?: string;
-  /** 项目大详情固定使用看板时由外层指定，普通项目也可展示看板。 */
+
+  /** 保留旧调用方参数，任务区统一使用卡片列表。 */
   viewMode?: 'list' | 'board';
   onOpenSession?: (session: ProjectSession) => void;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
@@ -170,7 +169,9 @@ const getTaskEditTime = (task: DevloopTaskItem) => {
 
 const formatTaskCreateTime = (task: DevloopTaskItem) => {
   const timestamp = getTaskCreateTime(task);
-  return timestamp ? dayjs(timestamp).format('YYYY-MM-DD HH:mm') : '-';
+  if (!timestamp) return '-';
+  const date = dayjs(timestamp);
+  return date.year() === dayjs().year() ? date.format('MM-DD HH:mm') : date.format('YYYY-MM-DD HH:mm');
 };
 
 const sortTasks = (items: DevloopTaskItem[]) =>
@@ -187,7 +188,6 @@ const sortTasks = (items: DevloopTaskItem[]) =>
 const ProjectTasks: React.FC<Props> = ({
   project,
   keyword = '',
-  viewMode,
   onOpenSession,
   onToolbarChange,
   onRefreshToolbarChange,
@@ -200,16 +200,17 @@ const ProjectTasks: React.FC<Props> = ({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  // 任务支持列表和看板两种模式；项目大详情可显式指定看板，普通项目同样适用。
-  const [taskViewMode, setTaskViewMode] = useState<'list' | 'board'>(
-    viewMode || (project.projectType === 'develop' || project.projectType === 'operation' ? 'board' : 'list')
-  );
+  // 任务统一使用普通卡片列表；保留 viewMode 参数兼容旧调用方。
   const requestingRef = useRef(false);
-  const taskDetailRequestIdRef = useRef(0);
   const initialLoadKeyRef = useRef<string | null>(null);
   const [templateTask, setTemplateTask] = useState<DevloopTaskItem | null>(null);
   // 研发项目和运营项目都支持按当前登录用户筛选任务，默认保持只看我的视图。
   const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop' || project.projectType === 'operation');
+  const [datePreset, setDatePreset] = useState<'today' | 'week' | 'month'>('week');
+  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([
+    dayjs().startOf('week'),
+    dayjs().endOf('week'),
+  ]);
   const [detailTask, setDetailTask] = useState<DevloopTaskItem | null>(null);
   const [editingTask, setEditingTask] = useState<DevloopTaskItem | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -219,10 +220,6 @@ const ProjectTasks: React.FC<Props> = ({
   const [taskSaving, setTaskSaving] = useState(false);
   const [memberOptions, setMemberOptions] = useState<Array<{ label: string; value: string | number }>>([]);
   const currentUserId = userInfo.userId ?? userInfo.id;
-  useEffect(() => {
-    if (viewMode) setTaskViewMode(viewMode);
-  }, [viewMode]);
-
   useEffect(() => {
     // 切换项目类型时同步筛选开关，避免沿用上一个项目的任务筛选状态。
     setOnlyMine(project.projectType === 'develop' || project.projectType === 'operation');
@@ -242,35 +239,6 @@ const ProjectTasks: React.FC<Props> = ({
       value: resource.resourceId,
       label: resource.resourceName || `${resource.resourceId}`,
     }));
-  const projectOntologyOptions = (project.resources || project.boundResources || [])
-    .filter((resource) => resource.resourceType === 'ontology')
-    .map((resource) => {
-      const resourceDetail = resource as typeof resource & Record<string, any>;
-      const code = resourceDetail.objectCode || resourceDetail.resourceCode || resourceDetail.code || '';
-      const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
-      const description = resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
-      return {
-        value: resource.resourceId,
-        label: name,
-        // 项目绑定记录可能只保留 ID、名称；先补齐标准字段，模板提交时还会统一归一化别名。
-        raw: {
-          ...resourceDetail,
-          id: resourceDetail.id,
-          objectId: resourceDetail.objectId,
-          resourceId: resource.resourceId,
-          baseId: resourceDetail.baseId,
-          code,
-          objectCode: resourceDetail.objectCode || code,
-          resourceCode: resourceDetail.resourceCode || code,
-          name,
-          objectName: resourceDetail.objectName || name,
-          resourceName: resource.resourceName || name,
-          description,
-          objectDesc: resourceDetail.objectDesc || description,
-          resourceDesc: resourceDetail.resourceDesc || description,
-        },
-      };
-    });
   const projectAgentOptions = (project.resources || project.boundResources || [])
     .filter((resource) => resource.resourceType === 'digital_employee')
     .map((resource) => ({
@@ -291,6 +259,8 @@ const ProjectTasks: React.FC<Props> = ({
           response = await listOperationTasks({
             projectId: Number(project.projectId),
             keyword: keyword.trim() || undefined,
+            createTimeStart: dateRange[0].startOf('day').format('YYYY-MM-DD HH:mm:ss'),
+            createTimeEnd: dateRange[1].endOf('day').format('YYYY-MM-DD HH:mm:ss'),
             onlyMine,
             pageNum: nextPage,
             pageSize: PAGE_SIZE,
@@ -300,7 +270,9 @@ const ProjectTasks: React.FC<Props> = ({
             projectId: Number(project.projectId),
             pageNum: nextPage,
             pageSize: PAGE_SIZE,
-            onlyMine: project.projectType === 'develop' ? onlyMine : false,
+            onlyMine,
+            createTimeStart: dateRange[0].startOf('day').format('YYYY-MM-DD HH:mm:ss'),
+            createTimeEnd: dateRange[1].endOf('day').format('YYYY-MM-DD HH:mm:ss'),
             taskName: keyword.trim() || undefined,
           });
         }
@@ -319,7 +291,7 @@ const ProjectTasks: React.FC<Props> = ({
         else setLoadingMore(false);
       }
     },
-    [intl, keyword, onlyMine, project.projectId, project.projectType]
+    [dateRange, intl, keyword, onlyMine, project.projectId, project.projectType]
   );
   const loadTasksRef = useRef(loadTasks);
 
@@ -330,7 +302,9 @@ const ProjectTasks: React.FC<Props> = ({
   useEffect(() => {
     setPage(0);
     setTotal(0);
-    const loadKey = `${project.projectId}:${project.projectType}:${keyword}:${onlyMine}`;
+    const loadKey = `${project.projectId}:${
+      project.projectType
+    }:${keyword}:${onlyMine}:${dateRange[0].valueOf()}:${dateRange[1].valueOf()}`;
     // React 严格模式会重复执行 effect，同一筛选条件只加载一次首屏任务数据。
     if (initialLoadKeyRef.current === loadKey) return undefined;
     const timer = window.setTimeout(() => {
@@ -339,40 +313,17 @@ const ProjectTasks: React.FC<Props> = ({
     }, 250);
     // 项目或顶部搜索条件变化时重置分页，避免把旧查询结果追加到当前列表。
     return () => window.clearTimeout(timer);
-  }, [keyword, onlyMine, project.projectId, project.projectType]);
+  }, [dateRange, keyword, onlyMine, project.projectId, project.projectType]);
 
   useEffect(() => {
-    onToolbarChange?.(
-      <div className={styles.headerActions}>
-        {/* 看板自带一份「只看我的」，两处同时出现会让人以为要一起勾，所以列表模式才显示这个。 */}
-        {taskViewMode === 'list' && (project.projectType === 'develop' || project.projectType === 'operation') && (
-          <Checkbox checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)}>
-            {intl.formatMessage({ id: 'projectSpace.tasks.onlyMine' })}
-          </Checkbox>
-        )}
-        {(project.projectType === 'develop' || project.projectType === 'operation') && (
-          <Segmented
-            size="small"
-            value={taskViewMode}
-            options={[
-              { label: intl.formatMessage({ id: 'projectSpace.tasks.mode.list' }), value: 'list' },
-              { label: intl.formatMessage({ id: 'projectSpace.tasks.mode.board' }), value: 'board' },
-            ]}
-            onChange={(value) => setTaskViewMode(value as 'list' | 'board')}
-          />
-        )}
-      </div>
-    );
+    onToolbarChange?.(null);
     onRefreshToolbarChange?.(
       <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void loadTasks(1)}>
         {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
       </Button>
     );
-    return () => {
-      onToolbarChange?.(null);
-      onRefreshToolbarChange?.(null);
-    };
-  }, [intl, loadTasks, loading, onRefreshToolbarChange, onToolbarChange, onlyMine, project.projectType, taskViewMode]);
+    return () => onRefreshToolbarChange?.(null);
+  }, [intl, loadTasks, loading, onRefreshToolbarChange, onToolbarChange]);
 
   const hasMore = total > tasks.length || (total === 0 && tasks.length === PAGE_SIZE);
   const sentinelRef = useInfiniteScroll(() => {
@@ -417,43 +368,12 @@ const ProjectTasks: React.FC<Props> = ({
     });
   };
 
-  const openTaskDetail = (task: DevloopTaskItem) => {
-    setDetailTask(task);
-    if (project.projectType !== 'operation') return;
-
-    const taskId = Number(task.taskId || task.sessionId);
-    if (!Number.isFinite(taskId)) return;
-    const requestId = ++taskDetailRequestIdRef.current;
-    // 运营任务列表只返回摘要，打开抽屉后补查完整配置，并防止快速切换时旧请求覆盖新任务。
-    void getOperationTask(taskId)
-      .then((response: any) => {
-        if (requestId !== taskDetailRequestIdRef.current) return;
-        const detail = response?.data ?? response;
-        if (detail) setDetailTask({ ...task, ...detail });
-      })
-      .catch(() => undefined);
-  };
-
-  const handleTaskCardOpen = (task: DevloopTaskItem) => {
-    // 普通/默认项目先查看会话任务详情；结构化项目仅允许当前负责人直接进入自己的任务会话。
-    if (project.projectType === 'normal' || project.projectType === 'default') {
-      openTaskDetail(task);
-      return;
-    }
-    if (isCurrentUserTaskAssignee(task, userInfo)) {
-      openTaskSession(task);
-      return;
-    }
-    openTaskDetail(task);
-  };
-
-  const openReadonlyTaskSession = (task: DevloopTaskItem) => {
+  function openReadonlyTaskSession(task: DevloopTaskItem) {
     if (!task.sessionId) {
       message.warning(intl.formatMessage({ id: 'projectSpace.detail.task.noSession' }));
       return;
     }
     const sessionName = task.title || intl.formatMessage({ id: 'projectSpace.tasks.unnamed' });
-    // 非负责人沿用小详情的只读会话抽屉，不切换当前聊天上下文。
     EventEmitter.emit('beyond-fullabsolute-driver-open-type', {
       drawerType: 'readonlysession',
       canClose: true,
@@ -462,6 +382,15 @@ const ProjectTasks: React.FC<Props> = ({
     EventEmitter.emit('beyond-fullabsolute-driver-message', {
       sessionInfo: { sessionId: `${task.sessionId}`, sessionName },
     });
+  }
+
+  const handleTaskCardOpen = (task: DevloopTaskItem) => {
+    // 当前用户负责的任务进入可继续聊天的会话；其他人的任务直接打开右侧只读会话抽屉。
+    if (isCurrentUserTaskAssignee(task, userInfo)) {
+      openTaskSession(task);
+      return;
+    }
+    openReadonlyTaskSession(task);
   };
 
   const openTaskEdit = (task: DevloopTaskItem) => {
@@ -537,35 +466,77 @@ const ProjectTasks: React.FC<Props> = ({
     });
   };
 
-  // 看板模式整块替掉列表：它自带筛选、分页和任务详情，列表的 Spin/无限滚动都不参与。
-  if (taskViewMode === 'board') {
-    return (
-      <div className={styles.dataPanel}>
-        <SessionOverviewDrawer
-          embedded
-          open
-          projectId={project.projectId}
-          operationProject={project.projectType === 'operation'}
-          // 与列表模式的 TaskDetailDrawer 判断保持一致：普通项目按会话存在放行，
-          // 研发/运营项目只有处理人能进可对话会话，非处理人走 onViewSession 只读。
-          canEnterSession={(task) =>
-            project.projectType === 'normal' || project.projectType === 'default'
-              ? Boolean(task.sessionId)
-              : isCurrentUserTaskAssignee(task, userInfo)
-          }
-          onEnterSession={(task) => {
-            if (task.sessionId) openTaskSession(task);
-          }}
-          onViewSession={(task) => {
-            if (task.sessionId) openReadonlyTaskSession(task);
-          }}
-        />
-      </div>
-    );
-  }
-
   return (
     <div className={styles.dataPanel}>
+      <div className={styles.taskFilterBar}>
+        <Segmented
+          value={datePreset}
+          options={[
+            { label: intl.formatMessage({ id: 'projectSpace.tasks.date.today' }), value: 'today' },
+            { label: intl.formatMessage({ id: 'projectSpace.tasks.date.week' }), value: 'week' },
+            { label: intl.formatMessage({ id: 'projectSpace.tasks.date.month' }), value: 'month' },
+          ]}
+          onChange={(value) => {
+            const preset = value as 'today' | 'week' | 'month';
+            setDatePreset(preset);
+            const date = dayjs();
+            const nextRange =
+              preset === 'today'
+                ? [date.startOf('day'), date.endOf('day')]
+                : preset === 'month'
+                  ? [date.startOf('month'), date.endOf('month')]
+                  : [date.startOf('week'), date.endOf('week')];
+            setDateRange(nextRange as [dayjs.Dayjs, dayjs.Dayjs]);
+          }}
+        />
+        <DatePicker.RangePicker
+          value={dateRange}
+          allowClear={false}
+          presets={[
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.today' }),
+              value: [dayjs().startOf('day'), dayjs().endOf('day')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.last7Days' }),
+              value: [dayjs().subtract(6, 'day').startOf('day'), dayjs().endOf('day')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.last14Days' }),
+              value: [dayjs().subtract(13, 'day').startOf('day'), dayjs().endOf('day')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.last30Days' }),
+              value: [dayjs().subtract(29, 'day').startOf('day'), dayjs().endOf('day')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.week' }),
+              value: [dayjs().startOf('week'), dayjs().endOf('week')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.month' }),
+              value: [dayjs().startOf('month'), dayjs().endOf('month')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.quarter' }),
+              value: [dayjs().startOf('quarter'), dayjs().endOf('quarter')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.year' }),
+              value: [dayjs().startOf('year'), dayjs().endOf('year')],
+            },
+          ]}
+          onChange={(value) => value?.[0] && value?.[1] && setDateRange([value[0], value[1]])}
+        />
+        <Checkbox checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)}>
+          {intl.formatMessage({ id: 'projectSpace.tasks.onlyMine' })}
+        </Checkbox>
+        <Input.Search
+          placeholder={intl.formatMessage({ id: 'projectSpace.tasks.keywordPlaceholder' })}
+          value={keyword}
+          readOnly
+        />
+      </div>
       <Spin spinning={loading}>
         {tasks.length ? (
           <div className={styles.dataCardGrid}>
@@ -658,7 +629,6 @@ const ProjectTasks: React.FC<Props> = ({
                         task.statusLabel ||
                         '-'}
                   </Typography.Paragraph>
-                  {/* 卡片底部只放负责人与创建时间：查看会话入口收到任务详情抽屉里，卡片本身整块可点即进详情。 */}
                   <div className={styles.taskMeta}>
                     <Typography.Text type="secondary" ellipsis={{ tooltip: task.assignee || '-' }}>
                       {task.assignee || '-'}
@@ -703,8 +673,6 @@ const ProjectTasks: React.FC<Props> = ({
         initialDescription={(templateTask as any)?.description || templateTask?.requirementTitle}
         knowledgeOptions={projectKnowledgeOptions}
         knowledgeOptionsOnly
-        ontologyOptions={projectOntologyOptions}
-        ontologyOptionsOnly
         applyText={intl.formatMessage({ id: 'common.confirm' })}
         onCancel={() => setTemplateTask(null)}
         onApply={async (result: TaskTemplateApplyResult) => {

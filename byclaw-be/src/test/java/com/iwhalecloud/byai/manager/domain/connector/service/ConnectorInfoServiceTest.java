@@ -10,6 +10,36 @@ import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
 class ConnectorInfoServiceTest {
 
     @Test
+    void exposesOAuthHelpWithoutCredentialsOrRawOAuthConfiguration() {
+        ConnectorListDto dto = new ConnectorListDto();
+        dto.setAuthMode("OAUTH2");
+        dto.setAuthConfig("""
+            {"clientSecretEnv":"PRIVATE_ENV_NAME","credentialForm":{
+              "helpUrl":"https://support.google.com/accounts/answer/14012355",
+              "helpText":"连接器作用：读取邮件。\\n\\n获取步骤：\\n1. 前往 Google 授权。",
+              "helpLinkText":"查看授权说明","fields":[]}}
+            """);
+        ConnectorInfoService.sanitizeCredentialForm(dto);
+        assertThat(dto.getCredentialForm()).isNotNull();
+        assertThat(dto.getCredentialForm().getFields()).isEmpty();
+        assertThat(dto.getCredentialForm().getHelpText()).contains("连接器作用", "获取步骤");
+        assertThat(JSON.toJSONString(dto)).doesNotContain("PRIVATE_ENV_NAME", "authConfig");
+    }
+
+    @Test
+    void rejectsOAuthHelpThatRequestsCredentialInput() {
+        ConnectorListDto dto = new ConnectorListDto();
+        dto.setAuthMode("OAUTH2");
+        dto.setAuthConfig("""
+            {"credentialForm":{"helpUrl":"https://support.google.com/","helpText":"授权说明",
+              "fields":[{"key":"password","label":"密码","inputType":"password","maxLength":256}]}}
+            """);
+        ConnectorInfoService.sanitizeCredentialForm(dto);
+        assertThat(dto.getCredentialForm()).isNull();
+        assertThat(dto.getAuthConfig()).isNull();
+    }
+
+    @Test
     void exposesOnlyWhitelistedImaCredentialFormMetadata() {
         ConnectorListDto dto = new ConnectorListDto();
         dto.setAuthMode("AK_SK");

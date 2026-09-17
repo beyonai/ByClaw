@@ -39,7 +39,7 @@ public class ConnectorInfo {
     /** 连接器功能简介 */
     private String description;
 
-    /** 连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器 */
+    /** 连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器，ACCOUNT_TEMPLATE=运营账号初始化模板 */
     private String connectorType;
 
     /** 授权方式：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空 */

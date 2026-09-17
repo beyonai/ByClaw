@@ -5,6 +5,9 @@ import java.util.Map;
 import com.iwhalecloud.byai.common.constants.env.EnvConfigKey;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 public final class ChatUtils {
     private ChatUtils() {
@@ -26,19 +29,18 @@ public final class ChatUtils {
     }
 
     /**
-     * 获取语言配置
+     * 获取语言配置，优先使用 HTTP 请求属性，缺失时使用当前 Locale 上下文（包括 WebSocket 入口设置的语言）。
      *
      * @return 语言字符串
      */
     public static String getLanguage() {
-        String language = I18nUtil.CHINSES;
-        try {
-            language = ApplicationContextUtil.getRequest().getAttribute(I18nUtil.LANGUAGE).toString();
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            Object language = attributes.getRequest().getAttribute(I18nUtil.LANGUAGE);
+            if (language != null) {
+                return language.toString();
+            }
         }
-        catch (Exception e) {
-            // 默认中文
-        }
-        return language;
+        return LocaleContextHolder.getLocale().toString();
     }
 
     /**

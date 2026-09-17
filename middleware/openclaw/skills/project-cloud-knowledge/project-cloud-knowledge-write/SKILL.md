@@ -1,6 +1,6 @@
 ---
 name: project-cloud-knowledge-write
-description: "变更 ByClaw 知识库或项目云盘目录和文件。用于创建、重命名或删除目录，检查上传冲突，上传或更新文件与 ZIP，触发构建，以及删除文件。"
+description: "变更 ByClaw 知识库或项目云盘目录和文件。用于移动文件或目录，创建、重命名或删除目录，检查上传冲突，上传或更新文件与 ZIP，触发单文件、目录递归批量或全库构建，以及删除文件。"
 ---
 
 # 变更知识库内容
@@ -18,7 +18,7 @@ description: "变更 ByClaw 知识库或项目云盘目录和文件。用于创�
 
 ## 保护系统实体目录
 
-禁止通过目录创建或重命名、文件上传或更新、ZIP 批量导入，把任何目录或文件保存到 `/KnowledgeEntity` 或其子目录。这个目录只存在系统整理出来的知识实体文件，普通资料和用户创建的目录不能混入。
+禁止通过移动、目录创建或重命名、文件上传或更新、ZIP 批量导入，把任何目录或文件保存到 `/KnowledgeEntity` 或其子目录。这个目录只存在系统整理出来的知识实体文件，普通资料和用户创建的目录不能混入。
 
 Python CLI 会在请求后端前强制校验最终路径和 ZIP 内部条目，`--dry-run` 也不能绕过。校验失败时更换目标目录；不得绕过 CLI 调用其他接口写入。
 
@@ -52,6 +52,23 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py delet
   --resource-id RESOURCE_ID \
   --directory-path /产品手册
 ```
+
+## 移动文件或目录
+
+使用 `move` 在同一知识库内移动一个或多个文件、目录。重复传入 `--source-path` 指定多个源，使用 `--target-directory-path` 指定接收它们的目录：
+
+```bash
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py move \
+  --session-id SESSION_ID \
+  --resource-id RESOURCE_ID \
+  --source-path /产品资料/a.md \
+  --source-path /产品资料/旧手册 \
+  --target-directory-path /归档
+```
+
+需要指定单个源的完整目标路径时，改用 `--target-file-path /归档/新名称.md`；两个目标参数必须且只能选一个。源和目标都使用资源内绝对路径，不支持跨知识库移动、移动根目录或覆盖已存在的目标。不得移动 `/KnowledgeEntity` 及其内容，也不得移入该目录。
+
+执行前查看源和目标目录；执行后核对目标及源目录。批量操作可能部分成功：按返回的 `result.data` 中每项的 `sourcePath`、`targetPath`、`success`、`error` 和 `result.summary` 汇报成功与失败，不能把请求成功当作全部移动成功。结果为空时需查询目录核实，不能声称全部完成。重试前重新核对路径，仅处理尚未成功的项目。
 
 ## 上传新文件
 
@@ -87,7 +104,7 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py uploa
   --file-path /tmp/docs.zip
 ```
 
-上传成功后 CLI 会对后端返回的每个文件触发构建。
+上传成功后，CLI 只构建这次成功上传且位于目标目录下一层的内容：直属文件逐个构建；每个新产生的一级目录只提交一次目录递归构建。一级目录内更深的文件由该目录批次覆盖，不再逐文件重复提交。
 
 ## 更新已有文件
 
@@ -103,9 +120,9 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py updat
 
 更新成功后 CLI 会重新触发构建。
 
-## 构建或删除文件
+## 构建文件或目录
 
-触发构建：
+单文件构建：
 
 ```bash
 python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build \
@@ -113,6 +130,21 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md
 ```
+
+目录递归批量构建，复用 `--file-path`，一次请求即可：
+
+```bash
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build \
+  --session-id SESSION_ID \
+  --resource-id RESOURCE_ID \
+  --file-path /产品资料
+```
+
+全库构建使用 `--file-path /`，仅在用户要求全库范围时使用。无需枚举目录逐文件提交，也无需新增 `--directory-path`。服务端按路径识别文件或目录；目录包含全部子目录，范围固定为受理时的文件快照，之后新增或移入的文件不加入本批次。路径不存在时受理失败。
+
+构建请求成功只表示已受理，不表示构建完成。返回结果为空时也不能声称构建完成或虚构批次 ID。需要确认具体文件就绪时读取只读子 Skill 并查询 `build-status`；该命令仍只接受文件，不能把目录路径当作批次状态查询，也不能用单个文件的状态代表整个目录。
+
+## 删除文件
 
 删除文件：
 
@@ -122,5 +154,3 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py remov
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md
 ```
-
-构建请求成功只表示异步任务已受理，不表示构建完成。需要确认就绪时读取只读子 Skill 并查询 `build-status`。

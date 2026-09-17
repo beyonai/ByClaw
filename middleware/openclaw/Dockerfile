@@ -1,4 +1,4 @@
-ARG OPENCLAW_VERSION=2026.6.6
+ARG OPENCLAW_VERSION=2026.7.1
 
 FROM node:22-slim AS ext-builder
 
@@ -97,8 +97,6 @@ ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG ZREAD_CLI_VERSION=0.2.13
 ARG CHATLAB_CLI_VERSION=0.37.0
-ARG IMA_OPENAPI_CLI_VERSION=0.1.3
-ARG IMA_OPENAPI_CLI_INTEGRITY=sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==
 ARG INSTALL_BROWSER_STACK=true
 ARG SEARXNG_CLI_VERSION=0.1.0
 
@@ -132,24 +130,16 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set fetch-retry-mintimeout 20000 --global \
     && npm config set fetch-retry-maxtimeout 120000 --global \
     && cd /tmp \
-    && npm pack "ima-openapi-cli@${IMA_OPENAPI_CLI_VERSION}" \
-    && node -e 'const fs=require("fs"); const crypto=require("crypto"); const [expected,file]=process.argv.slice(1); const actual="sha512-"+crypto.createHash("sha512").update(fs.readFileSync(file)).digest("base64"); if (actual !== expected) throw new Error("IMA CLI integrity mismatch");' "${IMA_OPENAPI_CLI_INTEGRITY}" "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
     && npm install -g \
         "hyperframes@${HYPERFRAMES_VERSION}" \
         "@remotion/cli@${REMOTION_VERSION}" \
         "@byclaw/by-framework@${BY_FRAMEWORK_TS_VERSION}" \
         "zread_cli@${ZREAD_CLI_VERSION}" \
         "chatlab-cli@${CHATLAB_CLI_VERSION}" \
-        "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
-    && test "$(ima --version)" = "${IMA_OPENAPI_CLI_VERSION}" \
-    && ima auth --help >/dev/null \
-    && ima note --help >/dev/null \
-    && ima wiki --help >/dev/null \
-    && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null \
-    && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
+    && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null
 
-ARG OPENCLI_VERSION=2.1.56
-ARG OPENCLI_EXTENSION_VERSION=2.1.21
+ARG OPENCLI_VERSION=2.1.61
+ARG OPENCLI_EXTENSION_VERSION=2.1.23
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
@@ -218,6 +208,9 @@ RUN set -eux; \
         ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${tmp_mp3}"; \
         rm -f "${tmp_mp3}"; \
         npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
+        bycli iwhalecloud list --help >/dev/null; \
+        bycli iwhalecloud read --help >/dev/null; \
+        bycli iwhalecloud download --help >/dev/null; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
             "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
@@ -265,6 +258,26 @@ RUN set -eux; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
+
+# Install the repository-owned Python CLIs into the image's global Python 3.12
+# environment. Copy only package metadata and source so local venvs, tests, and
+# build artifacts never enter the image.
+COPY middleware/openclaw/callcli/pyproject.toml /tmp/byclaw-python-clis/callcli/pyproject.toml
+COPY middleware/openclaw/callcli/src/ /tmp/byclaw-python-clis/callcli/src/
+COPY middleware/openclaw/dbcli/pyproject.toml /tmp/byclaw-python-clis/dbcli/pyproject.toml
+COPY middleware/openclaw/dbcli/src/ /tmp/byclaw-python-clis/dbcli/src/
+COPY middleware/openclaw/kbcli/pyproject.toml /tmp/byclaw-python-clis/kbcli/pyproject.toml
+COPY middleware/openclaw/kbcli/src/ /tmp/byclaw-python-clis/kbcli/src/
+
+RUN set -eux; \
+    python3 -m pip install --no-cache-dir \
+        /tmp/byclaw-python-clis/callcli \
+        "/tmp/byclaw-python-clis/dbcli[all]" \
+        /tmp/byclaw-python-clis/kbcli; \
+    callcli --help >/dev/null; \
+    dbcli --help >/dev/null; \
+    kbcli --help >/dev/null; \
+    rm -rf /tmp/byclaw-python-clis
 
 # searxng-cli is installed from the published PyPI wheel into an isolated
 # venv.  The settings file is still mounted as an override so ByClaw can
@@ -315,6 +328,8 @@ RUN ln -s /app /app/node_modules/openclaw
 
 
 COPY middleware/openclaw/skills/ /app/skills/
+RUN python3 /app/skills/mail/scripts/mailctl.py --help >/dev/null \
+    && python3 -m compileall -q /app/skills/mail/scripts
 COPY middleware/openclaw/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
 
 RUN cd /app/skills/knowledge-collection/scripts \

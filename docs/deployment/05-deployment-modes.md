@@ -51,7 +51,6 @@ ByClaw 支持两种部署模式，您可以根据实际需求选择最适合的�
 - BE（后端）
 - QA Manager
 - QA Worker（后台进程）
-- Data（DataCloud）
 
 **优点：**
 - 可以独立扩缩容某个模块

@@ -6,6 +6,12 @@ import {
   isEligibleArticle,
 } from './topic-relevance.mjs';
 import { classifyCandidates } from './candidate-quality.mjs';
+import {
+  authorizationAllowsHttpRedirect,
+  authorizationEquivalentHttpUrl,
+  diagnosticHttpUrl,
+  normalizeAuthorizationUrl,
+} from './url-authorization.mjs';
 
 export const AUTHORIZATION_SCHEMA_VERSION = '2.0';
 const LEGACY_AUTHORIZATION_SCHEMA_VERSION = '1.1';
@@ -13,21 +19,14 @@ const MAX_DISCOVERY_ATTEMPTS = 2;
 const MAX_OBSERVATIONS = 200;
 const MAX_TITLE_CHARS = 1_000;
 const MAX_SUMMARY_CHARS = 20_000;
+const MAX_ACQUISITION_EVIDENCE = 200;
 
 function normalizedHttpUrl(raw) {
-  let url;
   try {
-    url = new URL(raw);
+    return normalizeAuthorizationUrl(raw);
   } catch {
-    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: URL 无效: ${raw}`);
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: URL 无效或不安全: ${diagnosticHttpUrl(raw)}`);
   }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: URL 不安全: ${raw}`);
-  }
-  url.hash = '';
-  url.hostname = url.hostname.toLowerCase();
-  url.searchParams.sort();
-  return url.toString();
 }
 
 function candidateId(origin, canonicalUrl) {
@@ -58,15 +57,15 @@ function arxivRepresentation(rawUrl) {
   const normalized = normalizedHttpUrl(rawUrl);
   const url = new URL(normalized);
   if (url.hostname !== 'arxiv.org' || url.search) {
-    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: 不是可信 arXiv 表示: ${normalized}`);
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: 不是可信 arXiv 表示: ${diagnosticHttpUrl(normalized)}`);
   }
   const match = /^\/(abs|pdf|html)\/(.+?)(?:\.pdf)?\/?$/i.exec(url.pathname);
   if (!match) {
-    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: 不是可信 arXiv 论文路径: ${normalized}`);
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: 不是可信 arXiv 论文路径: ${diagnosticHttpUrl(normalized)}`);
   }
   const versionlessId = match[2].replace(/v\d+$/i, '');
   if (!/^(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})$/i.test(versionlessId)) {
-    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: arXiv 论文 ID 无效: ${normalized}`);
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: arXiv 论文 ID 无效: ${diagnosticHttpUrl(normalized)}`);
   }
   return { normalized, paperId: versionlessId.toLowerCase(), representation: match[1].toLowerCase() };
 }
@@ -383,19 +382,19 @@ export function authorizePublicSource(state, rawUrl) {
   const candidate = state.candidates.find((entry) =>
     entry.canonicalUrl === normalized || entry.acquisitionUrls.includes(normalized));
   if (!candidate) {
-    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${normalized} 不在本次授权候选中`);
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${diagnosticHttpUrl(normalized)} 不在本次授权候选中`);
   }
   const allowedTopics = state.schemaVersion === AUTHORIZATION_SCHEMA_VERSION
     ? ['matched', 'not-required', 'unknown'] : ['matched', 'not-required'];
   if (candidate.origin === 'public-discover'
     && !allowedTopics.includes(candidate.topicRelevance?.status)) {
-    throw new Error(`SOURCE_NOT_RELEVANT_TO_TASK: ${normalized} topicRelevance=${candidate.topicRelevance?.status || 'missing'}`);
+    throw new Error(`SOURCE_NOT_RELEVANT_TO_TASK: ${diagnosticHttpUrl(normalized)} topicRelevance=${candidate.topicRelevance?.status || 'missing'}`);
   }
   if (state.schemaVersion === AUTHORIZATION_SCHEMA_VERSION && candidate.discoveryDisposition !== 'probe') {
-    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${normalized} pageType=${candidate.pageType}`);
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${diagnosticHttpUrl(normalized)} pageType=${candidate.pageType}`);
   }
   if (state.schemaVersion === LEGACY_AUTHORIZATION_SCHEMA_VERSION && !['article', 'weak'].includes(candidate.pageType)) {
-    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${normalized} pageType=${candidate.pageType}`);
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${diagnosticHttpUrl(normalized)} pageType=${candidate.pageType}`);
   }
   return candidate;
 }
@@ -405,10 +404,112 @@ export function authorizeArxivAcquisitionVariant(state, sourceUrl, acquisitionUr
   const source = arxivRepresentation(sourceUrl);
   const acquisition = arxivRepresentation(acquisitionUrl);
   if (source.paperId !== acquisition.paperId) {
-    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: arXiv acquisition 论文 ID 不一致: ${acquisition.normalized}`);
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: arXiv acquisition 论文 ID 不一致: ${diagnosticHttpUrl(acquisition.normalized)}`);
   }
   if (!candidate.acquisitionUrls.includes(acquisition.normalized)) {
     candidate.acquisitionUrls.push(acquisition.normalized);
+  }
+  return candidate;
+}
+
+export function registerAcceptedAcquisitionEvidence(session, rawEvidence) {
+  const gate = session?.task?.discoveryGate;
+  const candidateIdValue = String(rawEvidence?.candidateId || '');
+  const candidate = gate?.candidates?.find((entry) => entry.candidateId === candidateIdValue);
+  if (!candidate) throw new Error(`ACQUISITION_EVIDENCE_CANDIDATE_NOT_FOUND: ${candidateIdValue}`);
+  const requested = authorizePublicSource(gate, rawEvidence?.requestedUrl);
+  if (requested?.candidateId !== candidate.candidateId) {
+    throw new Error('ACQUISITION_EVIDENCE_CANDIDATE_CONFLICT: requestedUrl');
+  }
+  const requestedUrl = normalizedHttpUrl(rawEvidence.requestedUrl);
+  const resolvedUrl = normalizedHttpUrl(rawEvidence.resolvedUrl);
+  const entries = Array.isArray(session.task.acquisitionEvidence)
+    ? session.task.acquisitionEvidence : [];
+  const currentUrls = [candidate.canonicalUrl, ...(candidate.acquisitionUrls || [])];
+  const belongsOnlyToAnother = gate.candidates.some((entry) => entry.candidateId !== candidate.candidateId
+    && [entry.canonicalUrl, ...(entry.acquisitionUrls || [])]
+      .some((url) => authorizationEquivalentHttpUrl(url, resolvedUrl)))
+    || entries.some((entry) => entry?.status === 'accepted'
+      && entry.scope === 'resolved-only' && entry.candidateId !== candidate.candidateId
+      && authorizationEquivalentHttpUrl(entry.resolvedUrl, resolvedUrl));
+  if (belongsOnlyToAnother) {
+    throw new Error('ACQUISITION_EVIDENCE_CANDIDATE_CONFLICT: resolvedUrl');
+  }
+  if (!authorizationAllowsHttpRedirect(requestedUrl, resolvedUrl, currentUrls)) {
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${diagnosticHttpUrl(resolvedUrl)}`);
+  }
+  const executor = String(rawEvidence?.executor || '').trim();
+  const evidenceArtifact = String(rawEvidence?.evidenceArtifact || '').trim();
+  const evidenceArtifactHash = String(rawEvidence?.evidenceArtifactHash || '').trim();
+  if (!executor || !evidenceArtifact.startsWith('raw/')
+    || evidenceArtifact.split(/[\\/]/u).includes('..')) {
+    throw new Error('ACQUISITION_EVIDENCE_INVALID: executor/evidenceArtifact');
+  }
+  if (evidenceArtifactHash && !/^sha256:[a-f0-9]{64}$/u.test(evidenceArtifactHash)) {
+    throw new Error('ACQUISITION_EVIDENCE_INVALID: evidenceArtifactHash');
+  }
+  const existing = entries.find((entry) => entry.candidateId === candidate.candidateId
+    && entry.requestedUrl === requestedUrl && entry.resolvedUrl === resolvedUrl
+    && entry.executor === executor && entry.evidenceArtifact === evidenceArtifact);
+  if (existing) {
+    if (existing.evidenceArtifactHash && evidenceArtifactHash
+      && existing.evidenceArtifactHash !== evidenceArtifactHash) {
+      throw new Error('ACQUISITION_EVIDENCE_CONFLICT: evidenceArtifactHash');
+    }
+    if (!existing.evidenceArtifactHash && evidenceArtifactHash) {
+      existing.evidenceArtifactHash = evidenceArtifactHash;
+    }
+    return existing;
+  }
+  if (entries.length >= MAX_ACQUISITION_EVIDENCE) {
+    throw new Error('ACQUISITION_EVIDENCE_LIMIT_REACHED');
+  }
+  const entry = {
+    schemaVersion: '1.0',
+    candidateId: candidate.candidateId,
+    requestedUrl,
+    resolvedUrl,
+    executor,
+    evidenceArtifact,
+    ...(evidenceArtifactHash ? { evidenceArtifactHash } : {}),
+    status: 'accepted',
+    scope: 'resolved-only',
+    redirectChainObserved: false,
+    recordedAt: new Date().toISOString(),
+  };
+  session.task.acquisitionEvidence = [...entries, entry];
+  return entry;
+}
+
+export function authorizeAcceptedAcquisitionEvidence(session, candidateIdValue, rawUrl) {
+  const normalized = normalizedHttpUrl(rawUrl);
+  const candidate = session?.task?.discoveryGate?.candidates?.find(
+    (entry) => entry.candidateId === candidateIdValue,
+  );
+  const matches = (session?.task?.acquisitionEvidence || []).filter((entry) => {
+    try {
+      return entry?.schemaVersion === '1.0' && entry.status === 'accepted'
+        && entry.scope === 'resolved-only'
+        && authorizationEquivalentHttpUrl(entry.resolvedUrl, normalized);
+    } catch {
+      return false;
+    }
+  });
+  const candidateIds = [...new Set(matches.map((entry) => entry.candidateId))];
+  const currentUrls = candidate
+    ? [candidate.canonicalUrl, ...(candidate.acquisitionUrls || [])] : [];
+  const validMatches = Boolean(candidate) && matches.length > 0 && matches.every((entry) => {
+    try {
+      const requested = authorizePublicSource(session.task.discoveryGate, entry.requestedUrl);
+      return requested?.candidateId === candidateIdValue
+        && entry.candidateId === candidateIdValue
+        && authorizationAllowsHttpRedirect(entry.requestedUrl, entry.resolvedUrl, currentUrls);
+    } catch {
+      return false;
+    }
+  });
+  if (!validMatches || candidateIds.length !== 1 || candidateIds[0] !== candidateIdValue) {
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${diagnosticHttpUrl(normalized)}`);
   }
   return candidate;
 }

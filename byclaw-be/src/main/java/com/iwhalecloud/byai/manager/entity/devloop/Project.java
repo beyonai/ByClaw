@@ -19,6 +19,9 @@ public class Project {
 
     private String projectName;
 
+    /** 项目编码 */
+    private String projectCode;
+
     private String description;
 
     private Long resourceId;

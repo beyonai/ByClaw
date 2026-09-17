@@ -30,10 +30,19 @@ public class MyAuthEmployQo extends AuthQo {
      */
     private String agentType;
 
+    /** 数字员工归属类型：personal 或 enterprise。 */
+    private String ownerType;
+
     /**
      * 是否排除数字员工组。true 时排除 agentType=017。
      */
     private Boolean excludeEmployeeGroup;
 
     private String machineChannel;
+
+    /**
+     * 资源状态筛选。有值时按该状态过滤；未传时 SQL 默认查 resource_status = 2（已上架）。
+     */
+    private Integer resourceStatus;
+
 }

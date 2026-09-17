@@ -1,3 +1,4 @@
+import type { ProjectContext } from "../domain/project-context.js";
 import type { AgentProfile, CallerPrincipal } from "../domain/types.js";
 import type { ExpertTeamRuntimeSnapshotV1 } from "../domain/orchestrator.js";
 import type { SessionContextV1 } from "../domain/session-context.js";
@@ -10,6 +11,8 @@ export interface ContextBuildInput {
   baseSystemPrompt: string;
   /** by-framework 入站会话 ID；存在时声明用户可见的规范会话空间。 */
   externalSessionId?: string;
+  /** 本轮 BE 项目信息快照。 */
+  projectContext?: ProjectContext;
   /** 当前 Run 冻结的授权 Agent 快照。 */
   authorizedAgents: readonly AgentProfile[];
   /** Agent 目录回源失败；此时授权快照为空不代表用户确实没有可用数字员工。 */

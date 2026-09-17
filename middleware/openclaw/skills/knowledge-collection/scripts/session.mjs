@@ -86,7 +86,12 @@ export function isInside(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function resolveTrustedSessionRoot(currentSessionRoot, label) {
+/**
+ * 只做「可信 Session Root 选择」这一半:含环境变量优先级与 Session Root 自身的校验，
+ * 不触碰任何目标路径。需要按同一优先级解析相对路径、但不得探测目标的调用方（例如 init
+ * 绑定交付目标）必须复用此函数，不要重新实现优先级，也不要落到 resolveSandboxPath。
+ */
+export function resolveTrustedSessionRoot(currentSessionRoot, label) {
   const configuredRoot = process.env.KNOWLEDGE_COLLECTION_SESSION_ROOT?.trim();
   const configuredSessionsRoot = process.env.KNOWLEDGE_COLLECTION_SESSIONS_ROOT?.trim();
   const sessionsRoot = configuredSessionsRoot
@@ -567,18 +572,23 @@ export function acquireSessionLock(paths, command) {
 }
 
 export function withSessionLock(paths, command, callback) {
-  const { descriptor, ownerId } = acquireSessionLock(paths, command);
+  const lock = acquireSessionLock(paths, command);
   try {
     return callback();
   } finally {
-    try { fs.closeSync(descriptor); } catch {}
-    try {
-      const current = readLock(paths);
-      if (current?.ownerId === ownerId) {
-        fs.unlinkSync(paths.lock);
-      }
-    } catch {}
+    releaseSessionLock(paths, lock);
   }
+}
+
+export function releaseSessionLock(paths, lock) {
+  if (!lock) return;
+  try { fs.closeSync(lock.descriptor); } catch {}
+  try {
+    const current = readLock(paths);
+    if (current?.ownerId === lock.ownerId) {
+      fs.unlinkSync(paths.lock);
+    }
+  } catch {}
 }
 
 /** 会话目录骨架(init 使用)。 */

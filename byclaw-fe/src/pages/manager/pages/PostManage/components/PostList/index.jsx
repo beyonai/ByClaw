@@ -10,8 +10,6 @@ import styles from './index.module.less';
 import KnowledgeBaseAuthor from '@/pages/manager/components/KnowledgeBaseAuthor';
 import DigitalEmployeeAuthor from '@/pages/manager/components/DigitalEmployeeAuthor';
 import PostResource from '../PostResource';
-import { getDcSystemConfigListByStandType } from '@/service/auth';
-import { getVisibleMenuKeysFromConfig } from '@/constants/system';
 
 const filterKeyToParamKeyMap = {
   // positionName: 'positionId',
@@ -48,7 +46,6 @@ const PostList = ({ selectedPost, record }) => {
   const [employeeVisible, setEmployeeVisible] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const [activeTab, setActiveTab] = useState('postMember');
-  const [visibleKeys, setVisibleKeys] = useState([]);
   const tableWrapRef = useRef(null);
   const [tableScrollY, setTableScrollY] = useState(240);
 
@@ -70,29 +67,8 @@ const PostList = ({ selectedPost, record }) => {
         key: 'tool',
         label: intl.formatMessage({ id: 'orgMgr.tabs.tool' }),
       },
-      {
-        key: 'view',
-        label: intl.formatMessage({ id: 'orgMgr.tabs.view' }),
-      },
-      {
-        key: 'object',
-        label: intl.formatMessage({ id: 'orgMgr.tabs.object' }),
-      },
-    ].filter((item) => !['view', 'object'].includes(item.key) || visibleKeys.includes(item.key));
-  }, [intl, visibleKeys]);
-
-  useEffect(() => {
-    getDcSystemConfigListByStandType({
-      standType: 'MENU_ICON_SHOW_TAB',
-    })
-      .then((res) => {
-        const configData = res?.data || res;
-        if (Array.isArray(configData) && configData.length > 0) {
-          setVisibleKeys(getVisibleMenuKeysFromConfig(configData));
-        }
-      })
-      .catch(() => {});
-  }, []);
+    ];
+  }, [intl]);
 
   useEffect(() => {
     if (tabItems.length && !tabItems.some((item) => item.key === activeTab)) {

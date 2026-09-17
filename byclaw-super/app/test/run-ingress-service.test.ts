@@ -81,6 +81,25 @@ function makeIngress(
 }
 
 describe("RunIngressService self-exclusion", () => {
+  it("snapshots project metadata on create and append without carrying it into unrelated runs", async () => {
+    const { ingress, runService } = makeIngress([], "creator");
+    const project = {
+      project_id: 42,
+      project_name: "项目甲",
+      workspace: "/by/projects/project-42",
+      project_resources: [{ resourceId: 7, resourceName: "需求", resourceCode: "REQ", resourceType: "DOCUMENT" }],
+    };
+    const metadata = { project_info: { ...project, "Beyond-Token": "must-not-enter-prompt" } };
+    await ingress.createSessionRun({ beyondToken: PRINCIPAL_TOKEN, message: "first", metadata });
+    expect(runService.createSessionRun.mock.calls[0][0].ingressContext.projectContext).toEqual(project);
+    await ingress.createRun({ beyondToken: PRINCIPAL_TOKEN, sessionId: "session-1", message: "next", metadata });
+    expect(runService.createRun.mock.calls[0][0].ingressContext.projectContext).toEqual(project);
+    project.project_name = "changed after ingress";
+    expect(runService.createRun.mock.calls[0][0].ingressContext.projectContext.project_name).toBe("项目甲");
+    await ingress.createRun({ beyondToken: PRINCIPAL_TOKEN, sessionId: "session-1", message: "ordinary" });
+    expect(runService.createRun.mock.calls[1][0].ingressContext).toBeUndefined();
+  });
+
   it("persists by-framework session and parent message IDs in the Run", async () => {
     const { ingress, runService } = makeIngress([], "creator");
 

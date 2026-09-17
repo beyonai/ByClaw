@@ -2,6 +2,6 @@
 export const supportsProjectRepositories = () => true;
 
 /** 资源页卡片数量用于保持同一行等宽布局。 */
-export const getProjectResourceCategoryCount = (_projectType?: ProjectType | string) => {
+export const getProjectResourceCategoryCount = () => {
   return 2;
 };

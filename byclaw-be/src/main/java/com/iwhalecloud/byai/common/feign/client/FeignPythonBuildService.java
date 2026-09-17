@@ -42,6 +42,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
@@ -305,6 +306,14 @@ public class FeignPythonBuildService {
         return post(KnowledgeServiceOperation.GET_FILE_METADATA, request,
             new TypeReference<PythonBuildResponse<KbFileMetadataResult>>() {
             }, resourceId);
+    }
+
+    /** 更新知识库文件或目录元数据；headers 透传门户请求头，无则传空 Map。 */
+    public PythonBuildResponse<Map<String, Object>> updateKnowledgeFileMetadata(KbFileMetadataUpdate request,
+                                                                                Map<String, String> headers) {
+        return post(KnowledgeServiceOperation.UPDATE_FILE_METADATA, request,
+            new TypeReference<PythonBuildResponse<Map<String, Object>>>() {
+            }, headers);
     }
 
 

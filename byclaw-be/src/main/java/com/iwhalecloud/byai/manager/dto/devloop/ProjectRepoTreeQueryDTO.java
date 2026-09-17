@@ -13,6 +13,9 @@ public class ProjectRepoTreeQueryDTO {
 
     private Long repoId;
 
+    /** 项目空间相对路径；repoId 为空时用它定位本地发现但未登记的 Git 仓库。 */
+    private String repositoryPath;
+
     /** 当前会话；存在时优先读取该会话的 .worktree。 */
     private Long sessionId;
 

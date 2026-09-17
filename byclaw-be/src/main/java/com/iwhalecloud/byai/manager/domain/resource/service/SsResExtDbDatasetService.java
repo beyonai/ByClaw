@@ -4,12 +4,9 @@ import com.google.common.collect.Lists;
 
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.iwhalecloud.byai.manager.application.service.ontology.OntologyApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceTypeEnum;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
-import com.iwhalecloud.byai.manager.dto.ontology.OntologyActionSaveRequest;
-import com.iwhalecloud.byai.manager.dto.ontology.OntologyBatchSaveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.DBDatasetSaveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetExecuteRequest;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetParamQueryResponse;
@@ -70,9 +67,6 @@ public class SsResExtDbDatasetService {
 
     @Autowired
     private SsResExtAttributeMapper ssResExtAttributeMapper;
-
-    @Autowired
-    private OntologyApplicationService ontologyApplicationService;
 
     @Autowired
     private SsResourceRelDetailMapper ssResourceRelDetailMapper;
@@ -408,43 +402,7 @@ public class SsResExtDbDatasetService {
         // 批量插入
         if (!CollectionUtils.isEmpty(ssResExtAttributes)) {
             ssResExtAttributeMapper.insertBatch(ssResExtAttributes);
-            // 保存动作的属性(为动作使用)
-            saveParamsAction(attributeList, ssResource);
         }
-    }
-
-    private void saveParamsAction(List<SsResExtAttributeVo> attributeList, SsResource ssResource) {
-        OntologyActionSaveRequest actionSaveRequest = new OntologyActionSaveRequest();
-        actionSaveRequest.setResourceId(ssResource.getResourceId());
-        actionSaveRequest.setName(ssResource.getResourceName());
-        actionSaveRequest.setDesc(ssResource.getResourceDesc());
-        actionSaveRequest.setAttributes(null);
-        OntologyBatchSaveRequest.ActionInfo actionInfo = new OntologyBatchSaveRequest.ActionInfo();
-        actionInfo.setResourceId(null);
-        actionInfo.setName(ssResource.getResourceName() + "_ACTION");
-        actionInfo.setDesc(ssResource.getResourceDesc() + "_ACTION");
-        actionInfo.setCode(ssResource.getResourceCode() + "_ACTION");
-        actionInfo.setAttributes(Lists.newArrayList());
-        List<OntologyBatchSaveRequest.ActionAttribute> actionAttributes = new ArrayList<>();
-        for (SsResExtAttributeVo attribute : attributeList) {
-            OntologyBatchSaveRequest.ActionAttribute actionAttribute = new OntologyBatchSaveRequest.ActionAttribute();
-            BeanUtils.copyProperties(attribute, actionAttribute);
-            actionAttribute.setExtAttributeId(SequenceService.nextVal());
-            actionAttribute.setSourceTableCode(attribute.getSourceTableCode());
-            actionAttribute.setAttributeCode(
-                StringUtil.isNotEmpty(attribute.getAlias()) ? attribute.getAlias() : attribute.getAttributeCode());
-            // 术语相关属性填充
-            actionAttribute.setTermField(attribute.getTermField());
-            actionAttribute.setTermDataType(attribute.getTermDataType());
-            actionAttribute.setTermTypeName(attribute.getTermTypeName());
-            actionAttribute.setDatasetId(attribute.getDatasetId());
-            actionAttribute.setTermTypeCode(attribute.getTermTypeCode());
-            actionAttribute.setPerDataScopeType(attribute.getPerDataScopeType());
-            actionAttributes.add(actionAttribute);
-        }
-        actionInfo.setAttributes(actionAttributes);
-        actionSaveRequest.setActions(List.of(actionInfo));
-        ontologyApplicationService.saveOntologyActionInfos(actionSaveRequest);
     }
 
     /**

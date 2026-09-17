@@ -1,6 +1,8 @@
 package com.iwhalecloud.byai.manager.vo.users;
 
 import java.util.Date;
+import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.iwhalecloud.byai.manager.dto.users.MailServerConfigDTO;
@@ -22,15 +24,26 @@ public class UserMailAccountVO {
 
     private String email;
 
+    private String providerCode;
+
+    private String authType;
+
+    private List<String> capabilities;
+
+    private Map<String, String> capabilityStatus;
+
+    private List<String> setupRequirements;
+
+    private String connectionState;
+
+    private Date lastCheckTime;
+
     private String displayName;
 
     @JsonProperty("display_name")
     public String getDisplayNameSnake() {
         return displayName;
     }
-
-    @JsonProperty("default")
-    private Boolean defaultAccount;
 
     private MailServerConfigDTO imap;
 

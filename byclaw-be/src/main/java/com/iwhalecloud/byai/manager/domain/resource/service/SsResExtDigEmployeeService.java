@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import java.util.stream.Collectors;
+import org.springframework.beans.BeanUtils;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.cache.ShareBfmUser;
@@ -12,6 +14,7 @@ import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetVo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -81,16 +84,35 @@ public class SsResExtDigEmployeeService {
     }
 
     /**
+     * 分页查询资源安装目标数字员工。
+     */
+    public PageInfo<DigitalEmployeeInstallTargetVo> selectInstallTargetEmployees(
+        DigitalEmployeeQo digitalEmployeeQo) {
+        Page<DigitalEmployeeInstallTargetVo> page = PageHelper.startPage(digitalEmployeeQo.getPageNum(),
+            digitalEmployeeQo.getPageSize());
+        ssResExtDigEmployeeMapper.selectInstallTargetEmployees(digitalEmployeeQo);
+        return PageHelperUtil.toPageInfo(page);
+    }
+
+    /**
      * 无权限上下文的分页查询。 给“查询全部有效数字员工”这类通用场景使用，不注入当前登录人的 owner / authorize / manager 权限条件。
      */
     public PageInfo<DigitalEmployeeVo> selectAllDigitalEmployeeByQo(DigitalEmployeeQo digitalEmployeeQo) {
         int pageNum = digitalEmployeeQo.getPageNum();
         int pageSize = digitalEmployeeQo.getPageSize();
-        Page<DigitalEmployeeVo> page = PageHelper.startPage(pageNum, pageSize);
+        Page<DigitalEmployeePageVo> page = PageHelper.startPage(pageNum, pageSize);
 
         ssResExtDigEmployeeMapper.selectDigitalEmployeeByQo(digitalEmployeeQo);
 
-        return PageHelperUtil.toPageInfo(page);
+        PageInfo<DigitalEmployeePageVo> sourcePage = PageHelperUtil.toPageInfo(page);
+        PageInfo<DigitalEmployeeVo> result = new PageInfo<>();
+        BeanUtils.copyProperties(sourcePage, result, "list");
+        result.setList(page.stream().map(row -> {
+            DigitalEmployeeVo employee = new DigitalEmployeeVo();
+            BeanUtils.copyProperties(row, employee);
+            return employee;
+        }).collect(Collectors.toList()));
+        return result;
     }
 
     /**

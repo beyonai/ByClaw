@@ -5,7 +5,7 @@ import { ResourceTypeMap } from '@/constants/resource';
 import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 
-export type ResourceSiderType = 'TOOL' | 'VIEW' | 'OBJECT' | 'SKILL';
+export type ResourceSiderType = 'TOOL' | 'SKILL';
 
 export interface ResourceItem {
   resourceId: string | number;
@@ -79,12 +79,11 @@ export const getResourceImageUrl = (item?: ResourceItem) => {
 interface ResourceSiderListItemProps {
   item: ResourceItem;
   resourceType: ResourceSiderType;
-  drillable?: boolean;
   actions?: React.ReactNode[];
   renderSkillSourceTag?: (item: ResourceItem) => React.ReactNode;
   renderName?: (item: ResourceItem) => React.ReactNode;
   renderDescription?: (item: ResourceItem) => React.ReactNode;
-  onClick?: (item: ResourceItem, drillable: boolean) => void;
+  onClick?: (item: ResourceItem) => void;
   onDoubleClick?: (item: ResourceItem) => void;
 }
 
@@ -101,7 +100,6 @@ const getResourceIcon = (resourceType: ResourceSiderType, item: ResourceItem) =>
 const ResourceSiderListItem: React.FC<ResourceSiderListItemProps> = ({
   item,
   resourceType,
-  drillable = false,
   actions,
   renderSkillSourceTag,
   renderName,
@@ -122,14 +120,13 @@ const ResourceSiderListItem: React.FC<ResourceSiderListItemProps> = ({
     <List.Item
       key={item.resourceId}
       className={styles.resourceItem}
-      onClick={() => onClick?.(item, drillable)}
+      onClick={() => onClick?.(item)}
       onDoubleClick={() => onDoubleClick?.(item)}
       actions={actions}
     >
       <List.Item.Meta
         avatar={
           <span className={styles.resourceAvatar}>
-            {drillable && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
             {resourceType === 'SKILL' && resourceImageUrl && !imageLoadFailed ? (
               <img
                 key={resourceImageUrl}

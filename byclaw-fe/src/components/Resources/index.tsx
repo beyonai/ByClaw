@@ -17,13 +17,12 @@ import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
 import CommonTabs from '@/components/CommonTabs';
 import { getRuntimeActualUrl } from '@/utils';
-import { getTopLevelCatalogs, normalizeCatalogTree } from '@/utils/catalog';
+import { getLocalizedCatalogName, getTopLevelCatalogs, normalizeCatalogTree } from '@/utils/catalog';
 import { queryCatalogTree, updateResource } from '@/service/digitalEmployees';
 import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/knowledgeCenter';
 import {
   applyResourceUse,
   queryFixedEntryOperationCapability,
-  queryResourceOperationPermissions,
   type FixedEntryOperationCapability,
 } from '@/pages/manager/service/resources';
 import type { SkillGroup } from '@/pages/manager/service/resources';
@@ -69,7 +68,6 @@ interface IResourceItem {
   canManageAuth?: boolean;
   canDelete?: boolean;
   canApplyUse?: boolean;
-  canAuditUse?: boolean;
   skillType?: string;
   sourceType?: string;
   version?: string;
@@ -122,8 +120,6 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
   const getResourceName = () => {
     if (resourceType === 'KG_DOC') return intl.formatMessage({ id: 'resource.knowledge' });
     if (resourceType === 'TOOL') return intl.formatMessage({ id: 'common.tool' });
-    if (resourceType === 'OBJECT') return intl.formatMessage({ id: 'common.object' });
-    if (resourceType === 'VIEW') return intl.formatMessage({ id: 'common.viewName' });
     if (resourceType === 'SKILL') return intl.formatMessage({ id: 'common.skill' });
     return intl.formatMessage({ id: 'resource.default' }); // 默认值
   };
@@ -412,12 +408,6 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
     if (resourceType === 'TOOL') {
       return fixedEntryCapability.canImportEnterpriseToolkit;
     }
-    if (resourceType === 'VIEW') {
-      return fixedEntryCapability.canImportEnterpriseView;
-    }
-    if (resourceType === 'OBJECT') {
-      return fixedEntryCapability.canImportEnterpriseObject;
-    }
     if (resourceType === 'SKILL') {
       return fixedEntryCapability.canImportEnterpriseSkill === true;
     }
@@ -477,25 +467,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
           message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
           return;
         }
-        try {
-          const res: any = await queryResourceOperationPermissions({ resourceId });
-          const permissions = res?.data || res || {};
-          const canViewDetail =
-            permissions?.canViewDetail ??
-            permissions?.hasManagePermission ??
-            permissions?.hasUsePermission ??
-            permissions?.canEdit ??
-            permissions?.canManageAuth ??
-            permissions?.canDelete ??
-            false;
-          if (!canViewDetail) {
-            message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
-            return;
-          }
-        } catch (error: any) {
-          message.error(error?.msg || error?.message || intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
-          return;
-        }
+        // 列表权限可能缺失或已过期，进入详情后由后端校验实际的使用/管理权限。
         const params = new URLSearchParams();
         if (resourceId) {
           params.set('resourceId', resourceId);
@@ -792,16 +764,6 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
         ? [intl.formatMessage({ id: 'resource.banner.personalTool' }), '个人工具']
         : [intl.formatMessage({ id: 'resource.banner.enterpriseTool' }), '企业工具'];
     }
-    if (resourceType === 'VIEW') {
-      return activeTab === 'personal'
-        ? [intl.formatMessage({ id: 'resource.banner.personalView' }), '个人视图']
-        : [intl.formatMessage({ id: 'resource.banner.enterpriseView' }), '企业视图'];
-    }
-    if (resourceType === 'OBJECT') {
-      return activeTab === 'personal'
-        ? [intl.formatMessage({ id: 'resource.banner.personalObject' }), '个人对象']
-        : [intl.formatMessage({ id: 'resource.banner.enterpriseObject' }), '企业对象'];
-    }
     return [];
   }, [activeTab, intl, resourceType]);
   const customBannerUrl = getBannerUrl(bannerList, bannerLabel);
@@ -896,7 +858,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
                 items={[
                   { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
                   ...topLevelCatalogList.map((item) => ({
-                    label: item.catalogName,
+                    label: getLocalizedCatalogName(item, intl.locale),
                     key: `${item?.catalogId}`,
                   })),
                 ]}

@@ -70,6 +70,32 @@ class AccessTokenVerifyInterceptorTest {
         }
     }
 
+    @Test
+    void externalSessionResourceQueryStillRequiresValidAuthentication() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        interceptor.init();
+        String path = "/byaiService/open/api/v1/sessionResources/query";
+        assertFalse(interceptor.preHandle(request("POST", path, "/byaiService"),
+            new MockHttpServletResponse(), new Object()));
+        MockHttpServletRequest invalid = request("POST", path, "/byaiService");
+        invalid.addHeader("beyond-token", "invalid-token");
+        when(jwt.doFilter(null, "invalid-token")).thenReturn(false);
+        assertFalse(interceptor.preHandle(invalid, new MockHttpServletResponse(), new Object()));
+        verify(jwt).doFilter(null, "invalid-token");
+        MockHttpServletRequest valid = request("POST", path, "/byaiService");
+        valid.addHeader("beyond-token", "valid-token");
+        when(jwt.doFilter(null, "valid-token")).thenAnswer(invocation -> {
+            LoginInfo user = new LoginInfo();
+            user.setUserId(7L);
+            CurrentUserHolder.setLoginInfo(user);
+            return true;
+        });
+        assertTrue(interceptor.preHandle(valid, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(7L);
+    }
+
     private MockHttpServletRequest request(String method, String uri, String contextPath) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
         request.setContextPath(contextPath);

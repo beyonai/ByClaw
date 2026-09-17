@@ -145,8 +145,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
           await deleteProjectRepo(repo.repoId);
           message.success(t('repo.deleteSuccess'));
           await refreshRepos(projectId);
-        } catch {
-          message.error(t('repo.deleteFailed'));
+        } catch (error: any) {
+          message.error(typeof error === 'string' ? error : error?.message || t('repo.deleteFailed'));
         }
       },
     });

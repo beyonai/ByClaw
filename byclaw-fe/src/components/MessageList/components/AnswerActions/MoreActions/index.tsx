@@ -1,5 +1,6 @@
 import type { IMessage } from '@/typescript/message';
-import { BugOutlined, DeleteOutlined, LinkOutlined } from '@ant-design/icons';
+// import { BugOutlined } from '@ant-design/icons';
+import { DeleteOutlined, LinkOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
 import { Button, Popconfirm, Tooltip } from 'antd';
@@ -161,6 +162,12 @@ function MoreActions(porps: {
   // 用户提问的操作区只保留调用链图标，数字员工回答才显示国际化文案，避免提问操作区过宽。
   const showTraceLabel = msg.fromBeyond;
 
+  // 运维入口暂时注释下线，保留相关状态和处理逻辑，避免恢复时丢失原实现。
+  void troubleshootActionLoading;
+  void troubleshootLoading;
+  void handleTroubleshoot;
+  void canShowTroubleshoot;
+
   const handleOpenTraceDrawer = React.useCallback(() => {
     // Always seed with the latest known traceId; if the message carried no traceId
     // (typical for older / streamed-in history messages), fall back to the
@@ -194,6 +201,7 @@ function MoreActions(porps: {
           </Tooltip>
         </div>
       ) : null}
+      {/* 运维入口暂时下线，保留原实现便于后续恢复；任何情况下都不渲染该按钮。
       {canShowTroubleshoot ? (
         <div className={btnStyles.actionsBarItem} role="presentation">
           <Tooltip title={intl.formatMessage({ id: 'messageList.troubleshootTooltip' })}>
@@ -208,7 +216,7 @@ function MoreActions(porps: {
             </Button>
           </Tooltip>
         </div>
-      ) : null}
+      ) : null} */}
       {afterActions}
       {canDelete ? (
         <div className={btnStyles.actionsBarItem} role="presentation">

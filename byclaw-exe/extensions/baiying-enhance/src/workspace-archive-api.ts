@@ -36,13 +36,38 @@ function archiveFetchTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 5000;
 }
 
+function archiveAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const beyondToken = (
+    process.env["Beyond-Token"] ??
+    process.env.BEYOND_TOKEN ??
+    ""
+  ).trim();
+  if (beyondToken) {
+    headers["Beyond-Token"] = beyondToken;
+  }
+  return headers;
+}
+
 async function fetchArchive(url: string | URL, init?: RequestInit & { duplex?: "half" }): Promise<Response> {
   const timeoutMs = archiveFetchTimeoutMs();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const authHeaders = archiveAuthHeaders();
+    const initHeaders = init?.headers;
+    const mergedHeaders =
+      initHeaders instanceof Headers
+        ? Object.fromEntries(initHeaders.entries())
+        : Array.isArray(initHeaders)
+          ? Object.fromEntries(initHeaders)
+          : ((initHeaders as Record<string, string> | undefined) ?? {});
     return await fetch(url, {
       ...(init ?? {}),
+      headers: {
+        ...authHeaders,
+        ...mergedHeaders,
+      },
       signal: controller.signal,
     });
   } catch (err) {

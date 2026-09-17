@@ -130,8 +130,8 @@ class V032BaselineCompensationMigrationTest {
         String dml = readMigration();
 
         assertThat(ddl).contains(
-            "'credential_state', 'varchar(32) default ''unknown'' not null'",
-            "'renewal_mode', 'varchar(32) default ''none'' not null'"
+            "alter table byai.byai_connector_auth add column credential_state varchar(32) default 'unknown' not null;",
+            "alter table byai.byai_connector_auth add column renewal_mode varchar(32) default 'none' not null;"
         );
         assertThat(dml).contains(
             "set access_expire_time = expire_time",
@@ -149,8 +149,8 @@ class V032BaselineCompensationMigrationTest {
             "create table if not exists byai_super_sessions",
             "create table if not exists byai_super_runs",
             "create table if not exists byai_super_agent_capability_cards",
-            "'access_expire_time', 'timestamp'",
-            "'credential_state', 'varchar(32) default ''unknown'' not null'"
+            "alter table byai.byai_connector_auth add column access_expire_time timestamp;",
+            "alter table byai.byai_connector_auth add column credential_state varchar(32) default 'unknown' not null;"
         );
         assertThat(dml).contains(
             "insert into byai.byai_super_schema_migrations",

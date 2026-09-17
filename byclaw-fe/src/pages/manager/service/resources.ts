@@ -287,6 +287,9 @@ export interface ResourceUseApplyAuditItem {
   userId: string; // 用户ID
   userName: string; // 用户名称
   applyTime: string; // 申请时间
+  auditTime?: string; // 审核通过或驳回的处理时间
+  auditUserId?: string; // 审核人ID
+  auditUserName?: string; // 审核人名称
   applyStatus: string; // 申请状态（如：pending/approved/rejected）
 }
 
@@ -300,8 +303,8 @@ export interface ApproveResourceUseApplyParams {
 
 /**
  * 资源导入函数
- * 支持导入知识库(KG_DOC)、工具(TOOL)、视图(VIEW)、对象(OBJECT)、技能(SKILL)等资源类型
- * @param resourceType 资源类型（如：KG_DOC、TOOL、VIEW、OBJECT、SKILL）
+ * 支持导入知识库(KG_DOC)、工具(TOOL)、技能(SKILL)等资源类型
+ * @param resourceType 资源类型（如：KG_DOC、TOOL、SKILL）
  * @param fileType 文件类型（zip 或 json）
  * @param data FormData格式的导入文件数据
  * @returns Promise<ResourceImportResult> 导入结果
@@ -311,8 +314,6 @@ export function importResource(resourceType: string, fileType: string, data: For
   const resourceMap: Record<string, string> = {
     KG_DOC: 'Dataset',
     TOOL: 'Tool',
-    VIEW: 'View',
-    OBJECT: 'Object',
     SKILL: 'Skill',
   };
 
@@ -424,6 +425,15 @@ export function queryUseApplyList(params: ResourceUseApplyParams) {
     responseCfg: {
       customHandle: true,
     },
+  });
+}
+
+/**
+ * 聚合查询数字员工审核数据；false 或不传返回待审核，true 返回历史审核。
+ */
+export function queryDigitalEmployeeUseApplyAudit(params: { history?: boolean } = {}) {
+  return POST<any[]>('/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit', params, {
+    responseCfg: { customHandle: true },
   });
 }
 
@@ -595,20 +605,12 @@ export interface ResourceOperationPermissions {
   canUseAuth: boolean; // 是否可设置使用授权
   canDelete: boolean; // 是否有删除权限
   canApplyUse: boolean; // 是否可以申请使用
-  canAuditUse: boolean; // 是否有审核权限
   canSetDefault: boolean; // 是否有设为默认权限
   canRestore: boolean; // 是否有恢复权限
+  canOnShelf?: boolean; // 是否可上架
+  canOffShelf?: boolean; // 是否可下架
   useApplyPending?: boolean; // 使用申请是否待审核
 }
-
-/**
- * 查询资源操作权限
- * 获取当前用户对指定资源的详细操作权限
- * @param params 查询参数（包含resourceId资源ID）
- * @returns Promise<ResourceOperationPermissions> 资源操作权限对象
- */
-export const queryResourceOperationPermissions = (params: { resourceId: string | number }) =>
-  POST<ResourceOperationPermissions>('/byaiService/auth/privilegeGrant/queryResourceOperationPermissions', params);
 
 /**
  * 文件/文件夹项

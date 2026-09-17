@@ -152,6 +152,31 @@ class SignAntiReplayFilterTest {
         assertThat(filterChain.getRequest()).isSameAs(request);
     }
 
+    @Test
+    void letsExternalSessionResourceQueryReachLoginAuthenticationWithoutPortalSignature() throws Exception {
+        SignAntiReplayFilter filter = enabledFilter();
+        MockHttpServletRequest request = request("POST", "/byaiService/open/api/v1/sessionResources/query", "/byaiService");
+        request.addHeader("beyond-token", "test-token");
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+        assertThat(chain.getRequest()).isSameAs(request);
+    }
+
+    @Test
+    void keepsSignatureCheckForInternalAndLookalikeSessionResourcePaths() {
+        SignAntiReplayFilter filter = enabledFilter();
+        for (MockHttpServletRequest request : java.util.List.of(
+            request("POST", "/byaiService/api/v1/sessionResources/query", "/byaiService"),
+            request("GET", "/byaiService/open/api/v1/sessionResources/query", "/byaiService"),
+            request("POST", "/byaiService/open/api/v1/sessionResources/query/other", "/byaiService"),
+            request("POST", "/other/open/api/v1/sessionResources/query", "/byaiService"))) {
+            MockFilterChain chain = new MockFilterChain();
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> filter.doFilter(request, new MockHttpServletResponse(), chain)).isInstanceOf(RuntimeException.class);
+            assertThat(chain.getRequest()).isNull();
+        }
+    }
+
     private SignAntiReplayFilter enabledFilter() {
         SignAntiReplayFilter filter = new SignAntiReplayFilter();
         SignAntiReplayConfig config = new SignAntiReplayConfig();

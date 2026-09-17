@@ -46,6 +46,7 @@ describe('File Service', () => {
       });
 
       expect(mockPOST).toHaveBeenCalledWith('/byaiService/chat/uploadFiles', formData, {
+        responseCfg: { hideErrorTips: true },
         timeout: 480000,
         headers: {
           'Content-Type': 'multipart/form-data; charset=utf-8',

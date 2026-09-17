@@ -29,7 +29,6 @@ export interface OperationRequirementStartModalProps {
   agentOptions?: OperationSelectOption[];
   agentGroupOptions?: OperationSelectOption[];
   knowledgeOptions?: OperationSelectOption[];
-  ontologyOptions?: OperationSelectOption[];
   accountOptions?: OperationSelectOption[];
   loading?: boolean;
   onCancel: () => void;
@@ -48,7 +47,6 @@ const OperationRequirementStartModal: React.FC<OperationRequirementStartModalPro
   agentOptions = [],
   agentGroupOptions = [],
   knowledgeOptions = [],
-  ontologyOptions = [],
   accountOptions = [],
   loading = false,
   onCancel,
@@ -95,8 +93,6 @@ const OperationRequirementStartModal: React.FC<OperationRequirementStartModalPro
       initialDescription={requirement?.description || requirement?.sourceDescription}
       knowledgeOptions={knowledgeOptions}
       knowledgeOptionsOnly
-      ontologyOptions={ontologyOptions}
-      ontologyOptionsOnly
       accountOptions={accountOptions}
       applyText="确定并启动任务"
       applying={loading}

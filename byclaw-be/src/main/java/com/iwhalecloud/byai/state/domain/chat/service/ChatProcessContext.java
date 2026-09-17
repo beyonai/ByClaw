@@ -141,6 +141,9 @@ public class ChatProcessContext {
      */
     public boolean continueRunningTrace = false;
 
+    /** 独立用户追问与同一会话的后台团队共享 listener，但拥有独立 trace 和输出上下文。 */
+    public boolean concurrentGatewayTurn = false;
+
     /**
      * 是否异步完成响应。WebSocket 场景只负责发送 Gateway 消息，后续 Redis 流由事件路由服务推送和落库。
      */

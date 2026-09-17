@@ -7,7 +7,6 @@ SCRIPTS="$ROOT/scripts"
 START_FE=0
 START_BE=0
 START_QA=0
-START_DATA=0
 SKIP_CHECKS=0
 
 usage() {
@@ -16,11 +15,10 @@ Usage:
   ./scripts/start.sh [options]
 
 Options:
-  --all            Start all modules (fe, be, qa, data).
+  --all            Start all modules (fe, be, qa).
   --fe             Start frontend (byclaw-fe).
   --be             Start backend (byclaw-be).
   --qa             Start QA services (byclaw-qa, api + worker).
-  --data           Start data gateway (byclaw-data).
   --skip-checks    Skip preflight environment checks.
   --help           Show this message.
 
@@ -48,7 +46,6 @@ Local dev runner for:
   byclaw-fe   (frontend)
   byclaw-be   (Java backend)
   byclaw-qa   (knowledge base QA)
-  byclaw-data (data gateway)
 
 Quick commands:
   ./scripts/start.sh --all
@@ -65,12 +62,11 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --all)
-      START_FE=1; START_BE=1; START_QA=1; START_DATA=1
+      START_FE=1; START_BE=1; START_QA=1
       shift ;;
     --fe)   START_FE=1;   shift ;;
     --be)   START_BE=1;   shift ;;
     --qa)   START_QA=1;   shift ;;
-    --data) START_DATA=1; shift ;;
     --skip-checks) SKIP_CHECKS=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *)
@@ -81,8 +77,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Default: start everything.
-if [[ $START_FE -eq 0 && $START_BE -eq 0 && $START_QA -eq 0 && $START_DATA -eq 0 ]]; then
-  START_FE=1; START_BE=1; START_QA=1; START_DATA=1
+if [[ $START_FE -eq 0 && $START_BE -eq 0 && $START_QA -eq 0 ]]; then
+  START_FE=1; START_BE=1; START_QA=1
 fi
 
 print_welcome
@@ -90,7 +86,7 @@ print_welcome
 # --- Preflight environment checks ---
 if [[ $SKIP_CHECKS -eq 0 ]]; then
   source "$SCRIPTS/preflight.sh"
-  run_preflight "$START_FE" "$START_BE" "$START_QA" "$START_DATA"
+  run_preflight "$START_FE" "$START_BE" "$START_QA"
 fi
 
 mkdir -p "$ROOT/logs"
@@ -135,7 +131,6 @@ if [[ $START_QA -eq 1 ]]; then
   launch "qa-api" "$SCRIPTS/start-qa.sh" api
   launch "qa-worker" "$SCRIPTS/start-qa.sh" worker
 fi
-[[ $START_DATA -eq 1 ]] && launch "data" "$SCRIPTS/start-data.sh"
 
 # Write PID file for stop.sh
 : > "$PID_FILE"

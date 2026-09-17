@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.digitemploy;
 
+import java.util.Collections;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.io.OutputStream;
 import java.util.List;
 import java.util.Map;
@@ -24,7 +27,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -34,6 +36,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeBatchInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
@@ -46,6 +49,8 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeBatchInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetVo;
 
 /**
  * 数字员工的查询，编辑，创建，对话的控制器
@@ -53,6 +58,9 @@ import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 @RestController
 @RequestMapping("/digitalEmployeeController")
 public class DigitalEmployeeController {
+
+    @Autowired
+    private AuthApplicationService authApplicationService;
 
     private static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeController.class);
 
@@ -72,6 +80,21 @@ public class DigitalEmployeeController {
     public ResponseUtil<PageInfo<DigitalEmployeePageVo>> selectDigitalEmployeeByQo(@RequestBody DigitalEmployeeQo qo) {
         PageInfo<DigitalEmployeePageVo> pageVO = digitalEmployeeApplicationService.selectDigitalEmployeeByQo(qo);
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.list.query.success"), pageVO);
+    }
+
+    /** 查询当前用户可管理的个人及企业数字员工，供安装资源时选择。 */
+    @PostMapping("/queryInstallTargetEmployees")
+    public ResponseUtil<PageInfo<DigitalEmployeeInstallTargetVo>> queryInstallTargetEmployees(
+        @RequestBody DigitalEmployeeQo qo) {
+        return ResponseUtil.successResponse(
+            digitalEmployeeApplicationService.queryInstallTargetEmployees(qo));
+    }
+
+    /** 查询当前用户可管理数字员工的已安装资源 ID。 */
+    @PostMapping("/queryInstalledResourceIds")
+    public ResponseUtil<List<Long>> queryInstalledResourceIds(@RequestBody EmployeeIdDTO employeeIdDTO) {
+        return ResponseUtil.successResponse(
+            digitalEmployeeApplicationService.queryInstalledResourceIds(employeeIdDTO));
     }
 
     /**
@@ -149,6 +172,16 @@ public class DigitalEmployeeController {
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.update.success"), details);
     }
 
+    /** 批量向多个数字员工安装同一批知识或资源。 */
+    @ManageLogAnnotation(name = "数字员工", description = "批量安装知识或资源")
+    @PostMapping("/installRelResourcesBatch")
+    public ResponseUtil<DigitalEmployeeBatchInstallResultVo> installRelResourcesBatch(
+        @RequestBody DigitalEmployeeBatchInstallResourceDTO installResourceDTO) {
+        return ResponseUtil.successResponse(
+            I18nUtil.get("digemployee.update.success"),
+            digitalEmployeeApplicationService.batchInstallDigitalEmployeeRelResources(installResourceDTO));
+    }
+
     /**
      * 从数字员工卸载知识或资源。
      *
@@ -194,6 +227,32 @@ public class DigitalEmployeeController {
     }
 
     /**
+     * 上架数字员工。
+     *
+     * @param employeeIdDTO 资源标识
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "数字员工", description = "上架数字员工")
+    @RequestMapping(value = "/shelfDigitalEmployee", method = RequestMethod.POST)
+    public ResponseUtil<String> shelfDigitalEmployee(@RequestBody EmployeeIdDTO employeeIdDTO) {
+        digitalEmployeeApplicationService.shelfDigitalEmployee(employeeIdDTO);
+        return ResponseUtil.success(I18nUtil.get("digemployee.shelf.success"));
+    }
+
+    /**
+     * 下架数字员工。
+     *
+     * @param employeeIdDTO 资源标识
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "数字员工", description = "下架数字员工")
+    @RequestMapping(value = "/unShelfDigitalEmployee", method = RequestMethod.POST)
+    public ResponseUtil<String> unShelfDigitalEmployee(@RequestBody EmployeeIdDTO employeeIdDTO) {
+        digitalEmployeeApplicationService.unShelfDigitalEmployee(employeeIdDTO);
+        return ResponseUtil.success(I18nUtil.get("digemployee.unshelf.success"));
+    }
+
+    /**
      * 检查数字员工
      *
      * @param digitalEmployeeDTO 数字员工
@@ -215,6 +274,10 @@ public class DigitalEmployeeController {
     @RequestMapping(value = "/findDetailsById", method = RequestMethod.POST)
     public ResponseUtil findDetailsById(@RequestBody EmployeeIdDTO employeeIdDTO) {
         DigitalEmployeeDetailsDTO digEmployeeDetails = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
+        if (digEmployeeDetails != null) {
+            digEmployeeDetails.setOperationPermissions(authApplicationService.queryResourceOperationPermissionsBatch(
+                Collections.singletonList(employeeIdDTO.getResourceId())).get(employeeIdDTO.getResourceId()));
+        }
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.detail.query.success"), digEmployeeDetails);
     }
 

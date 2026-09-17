@@ -45,8 +45,15 @@ const ImageModelSelect = ({
   configurationLabel,
 }: ImageModelSelectProps) => {
   const intl = useIntl();
-  const globalDefaultLabel = intl.formatMessage({ id: 'employeeDetail.imageModelGlobalDefault' });
-  const displayLabel = label || intl.formatMessage({ id: 'employeeDetail.imageModel' });
+  const isTtsModel = `${modelType}`.trim().toUpperCase() === 'TTS';
+  const globalDefaultLabel = intl.formatMessage({
+    id: isTtsModel ? 'employeeDetail.ttsModelGlobalDefault' : 'employeeDetail.imageModelGlobalDefault',
+  });
+  const displayLabel =
+    label ||
+    intl.formatMessage({
+      id: isTtsModel ? 'employeeDetail.ttsModel' : 'employeeDetail.imageModel',
+    });
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -101,7 +108,10 @@ const ImageModelSelect = ({
   const popoverContent = (
     <div className={styles.modelPopover}>
       <div className={styles.popoverTitle}>
-        {configurationLabel || intl.formatMessage({ id: 'employeeDetail.imageModelConfiguration' })}
+        {configurationLabel ||
+          intl.formatMessage({
+            id: isTtsModel ? 'employeeDetail.ttsModelConfiguration' : 'employeeDetail.imageModelConfiguration',
+          })}
       </div>
       <Tabs
         activeKey={activeScope}
@@ -173,11 +183,15 @@ const ImageModelSelect = ({
         <Alert
           action={
             <Button size="small" onClick={loadModels}>
-              {intl.formatMessage({ id: 'employeeDetail.imageModelRetry' })}
+              {intl.formatMessage({
+                id: isTtsModel ? 'employeeDetail.ttsModelRetry' : 'employeeDetail.imageModelRetry',
+              })}
             </Button>
           }
           className={styles.loadError}
-          message={intl.formatMessage({ id: 'employeeDetail.imageModelLoadError' })}
+          message={intl.formatMessage({
+            id: isTtsModel ? 'employeeDetail.ttsModelLoadError' : 'employeeDetail.imageModelLoadError',
+          })}
           showIcon
           type="error"
         />

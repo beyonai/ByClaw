@@ -51,7 +51,6 @@ export default {
   'common.deleteTips': '确定删除吗？',
   'common.plus': '添加',
   'common.tool': '工具',
-  'common.object': '对象',
   'common.agent': '智能体',
   'common.toolkit': '工具集',
   'common.mcpService': 'MCP',
@@ -208,8 +207,6 @@ export default {
   'orgMgr.tabs.employee': '数字员工',
   'orgMgr.tabs.knowledge': '知识资产',
   'orgMgr.tabs.tool': '工具资产',
-  'orgMgr.tabs.view': '视图资产',
-  'orgMgr.tabs.object': '对象资产',
 
   // 表格列（额外）
   'orgMgr.table.type': '类型',
@@ -312,6 +309,16 @@ export default {
   'resourceStatus.notPassed': '审核不通过',
   'resourceStatus.published': '已上架',
   'resourceStatus.unpublished': '已下架',
+  'resourceStatus.deleted': '已删除',
+  'resourceStatus.pendingShelf': '待上架',
+  'resource.shelf': '上架',
+  'resource.unShelf': '下架',
+  'resource.unShelfData': '下架数据',
+  'resource.shelfData': '上架数据',
+  'resource.shelfDataConfirm': '确定要上架该数据吗？',
+  'resource.unShelfDataConfirm': '确定要下架该数据吗？',
+  'resource.deleteData': '删除数据',
+  'resource.deleteDataConfirm': '确定删除该数据吗？',
 
   // 资源类型
   'resourceAction.push': '上架',
@@ -552,4 +559,11 @@ export default {
   'employeeDetail.imageModelPlaceholder': '请选择文生图模型',
   'employeeDetail.imageModelLoadError': '文生图模型加载失败',
   'employeeDetail.imageModelRetry': '重试',
+  'employeeDetail.ttsModel': '语音模型',
+  'employeeDetail.ttsModelConfiguration': '语音模型配置',
+  'employeeDetail.ttsModelGlobalDefault': '跟随全局默认',
+  'employeeDetail.ttsModelLoadError': '语音模型加载失败',
+  'employeeDetail.ttsModelRetry': '重试',
+  'employeeDetail.moreModels': '更多模型',
+  'employeeDetail.collapseMoreModels': '收起更多模型',
 };

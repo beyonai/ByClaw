@@ -1,5 +1,6 @@
 import {
   addSessionHandler,
+  createPendingRemoteSession,
   formatByUpdateTime,
   getSessionObjectTypeMap,
   getSessionsCreatedDuringRequest,
@@ -138,13 +139,21 @@ describe('utils/session', () => {
     expect(createdSessions).toEqual([]);
   });
 
-  it('keeps a locally created upload session when the server response is temporarily stale', () => {
+  it('marks an uploaded server session as pending remote rather than desktop-local', () => {
+    expect(createPendingRemoteSession({ sessionId: 'upload-session' })).toEqual({
+      sessionId: 'upload-session',
+      isPendingRemoteSession: true,
+    });
+    expect(createPendingRemoteSession({ sessionId: 'upload-session' })).not.toHaveProperty('isLocalSession');
+  });
+
+  it('keeps a pending remote upload session when the server response is temporarily stale', () => {
     const createdSessions = getSessionsCreatedDuringRequest(
-      [{ sessionId: 'upload-session', isLocalSession: true }] as any,
-      [{ sessionId: 'upload-session', isLocalSession: true }, { sessionId: 'old' }] as any,
+      [{ sessionId: 'upload-session', isPendingRemoteSession: true }] as any,
+      [{ sessionId: 'upload-session', isPendingRemoteSession: true }, { sessionId: 'old' }] as any,
       [{ sessionId: 'old' }] as any
     );
 
-    expect(createdSessions).toEqual([{ sessionId: 'upload-session', isLocalSession: true }]);
+    expect(createdSessions).toEqual([{ sessionId: 'upload-session', isPendingRemoteSession: true }]);
   });
 });

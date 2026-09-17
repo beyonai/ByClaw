@@ -30,13 +30,10 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
     const typeMap = {
       toolset: ['TOOLKIT', 'TOOL'], // 工具集
       employee: ['DIG_EMPLOYEE'], // 数字员工
-      businessOntology: [], // 业务本体（待确认）
       knowledge: ['KG_DOC', 'KG_QA', 'KG_TERM'], // 知识资产
       tool: ['AGENT', 'MCP', 'TOOLKIT'], // 工具资产
       MCP: ['MCP'], // MCP服务
       dataset: [], // 数据集（待确认）
-      view: ['VIEW'], // 视图
-      object: ['OBJECT'], // 对象
     };
     return typeMap[type] || [];
   };

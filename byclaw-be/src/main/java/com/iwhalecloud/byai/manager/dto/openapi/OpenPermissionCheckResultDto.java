@@ -37,11 +37,6 @@ public class OpenPermissionCheckResultDto {
 
         private String resourceBizType;
 
-        /**
-         * 所属本体库编码。
-         */
-        private String ontologyBaseCode;
-
         private boolean exists;
 
         private boolean hasPermission;

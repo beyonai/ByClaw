@@ -12,7 +12,7 @@ public class Params {
 
     private Long sessionId;
 
-    /** 本体对象编码 */
+    /** 对象编码 */
     private String objectCode;
 
     /** 动作编码，如 write_xxx、search_xxx */

@@ -79,6 +79,30 @@ class ConnectorManifestServiceTest {
     }
 
     @Test
+    void mailCredentialsAreEncryptedAndIsolatedPerConnector() {
+        ConnectorInfo qq = new ConnectorInfo();
+        qq.setConnectorId(11L);
+        qq.setConnectorCode("qq-mail");
+        qq.setProviderCode("mail-form");
+        ConnectorInfo netease = new ConnectorInfo();
+        netease.setConnectorId(12L);
+        netease.setConnectorCode("netease-163-mail");
+        netease.setProviderCode("mail-form");
+        when(mapper.selectList(any())).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(9001L, 9002L);
+        service.upsertAndEnable(USER_ID, qq, Map.of("MAIL_CONNECTOR_11", "qq-secret-config"));
+        service.upsertAndEnable(USER_ID, netease, Map.of("MAIL_CONNECTOR_12", "163-secret-config"));
+        ArgumentCaptor<UserPrivateParam> rows = ArgumentCaptor.forClass(UserPrivateParam.class);
+        verify(mapper, times(2)).insertConnectorParamIgnoreConflict(rows.capture());
+        assertThat(rows.getAllValues()).extracting(UserPrivateParam::getParamKey)
+            .containsExactly("MAIL_CONNECTOR_11", "MAIL_CONNECTOR_12");
+        assertThat(rows.getAllValues()).extracting(p -> Sm4Util.decrypt(p.getParamValueCipher()))
+            .containsExactly("qq-secret-config", "163-secret-config");
+        assertThat(rows.getAllValues()).allSatisfy(p ->
+            assertThat(p.getParamValueCipher()).doesNotContain("secret-config"));
+    }
+
+    @Test
     void upsertAndEnableSkipsEquivalentActiveParameters() {
         List<UserPrivateParam> existing = List.of(
             existing("DWS_CONFIG_DIR", "/by/.connector-auth/.dws/config", "CONNECTOR", "dingtalk", "NORMAL"),

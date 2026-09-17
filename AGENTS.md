@@ -20,7 +20,6 @@ This is the canonical contract for automated agents working in this repository:
 | `byclaw-fe/` | Web frontend (React / Umi Max, `pnpm`) |
 | `byclaw-be/` | Java backend (Maven) |
 | `byclaw-exe/` | Python CLIs and tooling (`pyproject.toml` when initialized) |
-| `byclaw-data/` | Data assets, schemas, pipeline notes |
 | `byclaw-qa/` | Cross-cutting QA, e2e, performance |
 | `docs/` | Top-level docs: `architecture/`, `api/`, `quick-start/` |
 | `examples/` | Standalone examples, decoupled from production config |
@@ -71,6 +70,16 @@ SQL files under `deploy/middleware/initdb/`.
 - If a version is provided, use that exact version and follow the existing migration
   naming/layout conventions. Do not create an additional version merely because the
   requested version already has other work unless the user explicitly directs that.
+- For ordinary migration development, `deploy/migrations/versions/` is the only
+  writable migration location. An explicitly approved version authorizes changes only
+  in that exact `versions/<version>/` directory; it does not authorize changes under
+  `deploy/middleware/initdb/`.
+- Keep DDL and DML strictly separated. Schema statements such as `CREATE`, `ALTER`,
+  `DROP`, `TRUNCATE`, `COMMENT ON`, `GRANT`, and `REVOKE` belong only in
+  `__ddl.sql`; data statements such as `INSERT`, `UPDATE`, `DELETE`, and `MERGE`
+  belong only in `__dml.sql`. Never mix the two categories, even when their execution
+  order is related. Run `python3 deploy/migrations/merge_migrations.py --dry-run`
+  after editing a migration and fix every placement error before considering it ready.
 - Do not run `deploy/migrations/merge_migrations.py`, manually merge migration files,
   or otherwise modify `deploy/middleware/initdb/` as part of ordinary development work
   unless the user explicitly authorizes that release operation. The repository's
@@ -78,6 +87,13 @@ SQL files under `deploy/middleware/initdb/`.
   creating a release tag, the version administrator runs
   `deploy/migrations/merge_migrations.py` to merge versioned migrations into
   `deploy/middleware/initdb/`.
+- Never manually copy, append, rewrite, synchronize, repair, or deduplicate SQL under
+  `deploy/middleware/initdb/`, including `01_init.sql`, `02_ddl.sql`, `03_grant.sql`,
+  and `04_dml.sql`. Do not manually add or edit version marker blocks there, and do
+  not edit `deploy/migrations/.applied`. During an explicitly authorized release
+  operation, these generated artifacts may be changed only by
+  `deploy/migrations/merge_migrations.py`; review the generated diff and confirm each
+  pending version was appended exactly once.
 - Keep development changes in the appropriate version directory. Never treat a
   migration merge as a routine cleanup or as an implicit final step.
 

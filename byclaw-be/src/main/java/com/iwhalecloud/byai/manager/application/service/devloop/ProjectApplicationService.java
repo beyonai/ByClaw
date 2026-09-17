@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
+import com.iwhalecloud.byai.common.constants.devloop.ProjectResourceType;
+import com.iwhalecloud.byai.common.constants.devloop.ProjectType;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.constants.files.FileStatus;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -14,10 +16,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
-import com.iwhalecloud.byai.common.util.ListUtil;
-import com.iwhalecloud.byai.common.util.MapParamUtil;
-import com.iwhalecloud.byai.common.util.PageHelperUtil;
-import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.common.util.*;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectWorkspaceManifestService;
@@ -66,6 +65,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
@@ -77,17 +77,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 /**
  * 项目管理应用服务。
@@ -180,6 +170,9 @@ public class ProjectApplicationService {
     @Autowired
     private DatasetApplicationService datasetApplicationService;
 
+    @Value("${dataset.system:}")
+    private String datasetSystem;
+
     /**
      * 分页查询用户可见项目
      *
@@ -210,12 +203,12 @@ public class ProjectApplicationService {
 
         Project project = new Project();
         project.setProjectId(sequenceService.nextVal());
+        project.setProjectCode(UUID.randomUUID().toString());
         project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
         // 项目类型字段已废弃，所有新项目统一按普通项目处理。
-        String projectType = "normal";
-        project.setProjectType(projectType);
+        project.setProjectType(ProjectType.NORMAL);
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : Constants.NO_VALUE_N);
         project.setInitStatus("ready");
         project.setBuildIndex(Constants.NO_VALUE_N);
@@ -235,8 +228,8 @@ public class ProjectApplicationService {
             MemberRole.OWNER);
 
         // 创建云盘知识库并回写项目关联
-        SsResource cloudResource = this.createCloudResource(project, false);
-        project.setCloudResourceId(cloudResource.getResourceId());
+        Long cloudResourceId = this.createCloudResource(project);
+        project.setCloudResourceId(cloudResourceId);
         projectService.update(project);
 
         // 工作目录属于项目创建结果的一部分，初始化失败时由事务回滚项目数据库记录。
@@ -253,19 +246,27 @@ public class ProjectApplicationService {
      * @param project 项目实体
      * @return 新建的云盘知识库资源
      */
-    public SsResource createCloudResource(Project project, boolean isInitDirTemplate) {
+    public Long createCloudResource(Project project) {
+
+        if (StringUtils.equalsIgnoreCase(datasetSystem, "WHALE_AGENT")) {
+            logger.info("dataset.system=WHALE_AGENT，智能体不支持云盘创建");
+            return null;
+        }
+
         String projectName = project.getProjectName();
         DatasetDto datasetDto = new DatasetDto();
-        datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName));
+        datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName) + DateUtils.getFormatedDate(new Date()));
         datasetDto.setResourceDesc(I18nUtil.get("project.cloud.resource.desc", projectName));
         datasetDto.setSystemCode("BYAI");
         datasetDto.setResourceBizType("KG_CLOUD");
         datasetDto.setType("dataset");
         SsResource ssResource = datasetApplicationService.createDataset(datasetDto);
-        if (isInitDirTemplate) {
+
+        if (ProjectType.OPERATION.equalsIgnoreCase(project.getProjectType())) {
             this.uploadKnowledgeDirTemplate(ssResource.getResourceId());
         }
-        return ssResource;
+
+        return ssResource.getResourceId();
     }
 
     /**
@@ -341,8 +342,8 @@ public class ProjectApplicationService {
         //如果没有初始化云盘，创建云盘知识库
         Long cloudResourceId = project.getCloudResourceId();
         if (cloudResourceId == null) {
-            SsResource cloudResource = this.createCloudResource(project, false);
-            project.setCloudResourceId(cloudResource.getResourceId());
+             cloudResourceId = this.createCloudResource(project);
+            project.setCloudResourceId(cloudResourceId);
         }
 
         if (dto.getProjectName() != null) {
@@ -749,11 +750,18 @@ public class ProjectApplicationService {
         }
         LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
         repoWrapper.eq(ProjectRepo::getProjectId, projectId);
-        return projectRepoMapper.selectList(repoWrapper);
+        List<ProjectRepo> repos = projectRepoMapper.selectList(repoWrapper);
+        repos.forEach(repo -> {
+            if (projectInitService != null) repo.setCloneStatus(projectInitService.getCloneStatus(repo));
+            if (projectInitService != null && "ready".equals(repo.getCloneStatus())) {
+                repo.setLocalPath(projectInitService.getProjectRepositoryPath(repo).toString());
+            }
+        });
+        return repos;
     }
 
     /**
-     * 查询项目绑定的知识库、数字员工和本体资源。
+     * 查询项目绑定的知识库、数字员工资源。
      *
      * @param projectId 项目 ID
      * @return 绑定资源列表
@@ -780,7 +788,7 @@ public class ProjectApplicationService {
         for (ProjectResourceDTO dto : resources) {
             String resourceType = StringUtils.trimToEmpty(dto.getResourceType()).toLowerCase(Locale.ROOT);
             Long resourceId = dto.getResourceId();
-            if (!Set.of("knowledge", "digital_employee", "ontology").contains(resourceType)
+            if (!Set.of("knowledge", "digital_employee").contains(resourceType)
                 || resourceId == null) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.resource.invalid");
             }
@@ -861,14 +869,15 @@ public class ProjectApplicationService {
         repo.setRepoId(sequenceService.nextVal());
         repo.setProjectId(projectId);
         repo.setRepoFullName(repoDto.getRepoFullName().trim());
-        repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
+        String provider = normalizeProvider(repoDto.getProvider());
+        repo.setRepoUrl(normalizeRepoUrl(repoDto.getRepoUrl(), repo.getRepoFullName(), provider));
         repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
         // 描述可选,空串归一成 null,避免预拆提示词里出现空的 description= 行。
         repo.setDescription(StringUtils.trimToNull(repoDto.getDescription()));
         // 仅接受受支持的仓库类型,其余(含空)按代码仓库处理;工作区唯一性由应用层/前端保证。
         String repoType = "workspace".equals(repoDto.getRepoType()) ? "workspace" : "code";
         repo.setRepoType(repoType);
-        repo.setProvider(normalizeProvider(repoDto.getProvider()));
+        repo.setProvider(provider);
         repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         repo.setCreateTime(new Date());
         projectRepoMapper.insert(repo);
@@ -890,7 +899,8 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.name.required");
         }
         ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
-        projectWorkspaceManifestService.syncProjectGitmodules(dto.getProjectId());
+        // 新增仓库只负责保存配置并异步克隆，不触发项目初始化、.gitmodules 同步或架构会话流程。
+        projectInitService.cloneProjectRepositoryAsync(repo);
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("repoFullName", repo.getRepoFullName());
@@ -925,15 +935,22 @@ public class ProjectApplicationService {
         if (repo == null || !dto.getProjectId().equals(repo.getProjectId())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.not.found");
         }
+        String previousRepoType = repo.getRepoType();
         repo.setRepoFullName(dto.getRepoFullName().trim());
-        repo.setRepoUrl(StringUtils.trimToNull(dto.getRepoUrl()));
+        String provider = normalizeProvider(dto.getProvider());
+        repo.setRepoUrl(normalizeRepoUrl(dto.getRepoUrl(), repo.getRepoFullName(), provider));
         String defaultBranch = dto.getDefaultBranch() == null ? "" : dto.getDefaultBranch().trim();
         repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
         repo.setDescription(StringUtils.trimToNull(dto.getDescription()));
         repo.setRepoType("workspace".equals(dto.getRepoType()) ? "workspace" : "code");
-        repo.setProvider(normalizeProvider(dto.getProvider()));
+        repo.setProvider(provider);
         projectRepoMapper.updateById(repo);
-        projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
+        if ("workspace".equals(repo.getRepoType()) || "workspace".equals(previousRepoType)) {
+            projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
+        }
+        if (projectInitService != null && !"ready".equals(projectInitService.getCloneStatus(repo))) {
+            projectInitService.cloneProjectRepositoryAsync(repo);
+        }
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("projectId", repo.getProjectId());
@@ -960,26 +977,31 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 删除项目仓库，已被扫描源或手工需求关联时拒绝删除。
-     *
-     * @param repoId 仓库 ID
+     * GitHub 表单允许只填写 owner/repository；持久化时补齐 clone URL，避免异步 clone 因 repoUrl 为空失败。
+     * 显式填写的 URL 始终优先，其他代码平台不做推断。
      */
+    private static String normalizeRepoUrl(String repoUrl, String repoFullName, String provider) {
+        String explicitUrl = StringUtils.trimToNull(repoUrl);
+        if (explicitUrl != null) {
+            return explicitUrl;
+        }
+        if (!"github".equals(provider) || repoFullName == null) {
+            return null;
+        }
+        String fullName = repoFullName.trim().replaceAll("\\.git$", "");
+        if (fullName.matches("[^/\\s]+/[^/\\s]+")) {
+            return "https://github.com/" + fullName + ".git";
+        }
+        return null;
+    }
+
+    /** 删除项目仓库；扫描源关联不再阻断删除。 */
     @Transactional
     public void deleteProjectRepo(Long repoId) {
         if (repoId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
         }
-        Long boundCount = scanSourceService.countByRepoId(repoId);
-        if (boundCount != null && boundCount > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("project.repo.bound", boundCount));
-        }
         ProjectRepo repo = projectRepoMapper.selectById(repoId);
-        long manualRequirementBoundCount = repo == null ? 0
-            : countManualRequirementRepoBindings(repo.getProjectId(), repoId);
-        if (manualRequirementBoundCount > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                I18nUtil.get("project.repo.manualRequirement.bound", manualRequirementBoundCount));
-        }
         projectRepoMapper.deleteById(repoId);
         if (repo != null) {
             projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());

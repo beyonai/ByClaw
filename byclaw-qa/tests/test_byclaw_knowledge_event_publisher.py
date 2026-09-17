@@ -353,6 +353,7 @@ async def test_batch_event_notifies_requesting_user(
     publisher = ByClawKnowledgeEventPublisher(
         post_json=post_json,
         get_json=get_json,
+        batch_details_resolver=lambda _: {"kb_name": "研发知识库", "files": []},
         user_id_resolver=lambda _: "10000077",
         beyond_token_resolver=lambda _: "token-1",
         batch_context_resolver=lambda *_: {
@@ -389,25 +390,18 @@ async def test_batch_event_notifies_requesting_user(
     await publisher.publish(event)
 
     post_json.assert_not_called()
-    assert calls == [
-        (
-            DINGTALK_TEST_SEND_PATH,
-            {
-                "senderUserId": "10000077",
-                "receiverUserId": "10000077",
-                "content": (
-                    f"【{task_name}】任务已完成，部分文件处理失败\n"
-                    "知识库资源 ID：42\n"
-                    "批次：batch-1\n"
-                    "总计：5 个文件\n"
-                    "成功：4 个\n"
-                    "失败：1 个\n"
-                    "跳过：0 个"
-                ),
-            },
-            {"Beyond-Token": "token-1"},
-        )
-    ]
+    path, params, headers = calls[0]
+    assert path == DINGTALK_TEST_SEND_PATH
+    assert params["senderUserId"] == params["receiverUserId"] == "10000077"
+    assert headers == {"Beyond-Token": "token-1"}
+    content = params["content"]
+    assert f"【{task_name}】处理结束，有文件失败" in content
+    assert "知识库：研发知识库（编码：kb-1）" in content
+    assert "来源会话 ID：session-1" in content
+    assert "成功 4 · 失败 1 · 跳过 0" in content
+    assert "\r\n" in content
+    assert "\n" not in content.replace("\r\n", "")
+
 
 
 @pytest.mark.asyncio

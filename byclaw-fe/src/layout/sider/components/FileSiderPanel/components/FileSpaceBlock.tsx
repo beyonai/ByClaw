@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState, type Key } from 'react';
 import { Empty, Segmented, Tooltip, type MenuProps } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
+import { useIntl } from '@umijs/max';
 import type { FileBrowserItem } from '@/service/fileBrowser';
 import type { FileTreeItem } from '../constants';
 import { isDirectory } from '../utils';
@@ -58,6 +59,10 @@ interface FileSpaceBlockProps {
   onNodeDoubleClick?: (item: FileTreeItem) => void;
   getActionItems?: (item: FileBrowserItem) => MenuProps['items'];
   onAction?: (key: Key, item: FileBrowserItem) => void;
+
+  /** 项目代码可通过接口 URL 覆盖文件悬浮提示路径。 */
+  getTooltipPath?: (item: FileBrowserItem) => string | undefined;
+  getNodeExtra?: (item: FileTreeItem) => React.ReactNode;
 }
 
 export const getFileSpaceFileCount = (items: FileBrowserItem[] = []) =>
@@ -99,8 +104,12 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   onNodeDoubleClick,
   getActionItems,
   onAction,
+  getTooltipPath,
+  getNodeExtra,
   style,
 }) => {
+  // 分组文件数量使用语言包处理英文单复数。
+  const intl = useIntl();
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
   const groupKeySignature = (groups || []).map((group) => `${group.key}`).join('\n');
   const noopActionItems = useCallback(() => [], []);
@@ -167,6 +176,8 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         onNodeDoubleClick={onNodeDoubleClick || noopNodeDoubleClick}
         getActionItems={getActionItems || noopActionItems}
         onAction={onAction || noopAction}
+        getTooltipPath={getTooltipPath}
+        getNodeExtra={getNodeExtra}
       />
     </div>
   );
@@ -232,7 +243,9 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
                         <span className={styles.fileSpaceGroupTitle}>{group.title}</span>
                       </Tooltip>
                       {typeof group.count === 'number' && (
-                        <span className={styles.fileSpaceGroupCount}>{group.count} 个文件</span>
+                        <span className={styles.fileSpaceGroupCount}>
+                          {intl.formatMessage({ id: 'chatResource.fileCount' }, { count: group.count })}
+                        </span>
                       )}
                     </div>
                     {!isCollapsed && renderTree(group.items, group.currentPath, !!group.loading, group.emptyText)}

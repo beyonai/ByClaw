@@ -63,6 +63,32 @@ class MemoryMessageServiceTest {
     }
 
     @Test
+    void generateMessage_preservesCompletedState() {
+        MessageContext messageContext = new MessageContext();
+        messageContext.setMessageId(21L);
+        messageContext.setTaskId(22L);
+        messageContext.setComplete(true);
+
+        ByaiMessageHotDtoDto message = memoryMessageService.generateMessage(3L,
+            ChatUseageEnum.SYSTEM_RESPONSE.getCode(), messageContext, new AssistantChatDto());
+
+        assertThat(message.isComplete()).isTrue();
+    }
+
+    @Test
+    void generateMessage_treatsMissingCompletedStateAsIncomplete() {
+        MessageContext messageContext = new MessageContext();
+        messageContext.setMessageId(21L);
+        messageContext.setTaskId(22L);
+        messageContext.setComplete(null);
+
+        ByaiMessageHotDtoDto message = memoryMessageService.generateMessage(3L,
+            ChatUseageEnum.SYSTEM_RESPONSE.getCode(), messageContext, new AssistantChatDto());
+
+        assertThat(message.isComplete()).isFalse();
+    }
+
+    @Test
     void saveOrUpdate_usesIdempotentMessagePersistence() {
         MessageContext messageContext = new MessageContext();
         messageContext.setMessageId(21L);

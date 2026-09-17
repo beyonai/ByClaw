@@ -85,16 +85,11 @@ public class ConnectorAuthService {
         }
         Map<String, Boolean> states = new LinkedHashMap<>();
         for (ConnectorEnableStateDto state : connectorAuthMapper.selectConnectorEnableStates(String.valueOf(userId))) {
-            states.merge(resolveSkillCode(state), Boolean.TRUE.equals(state.getEnabled()), Boolean::logicalOr);
+            if (StringUtils.hasText(state.getSkillCode())) {
+                states.merge(state.getSkillCode().trim(), Boolean.TRUE.equals(state.getEnabled()), Boolean::logicalOr);
+            }
         }
         return states;
-    }
-
-    private String resolveSkillCode(ConnectorEnableStateDto state) {
-        if (StringUtils.hasText(state.getSkillCode())) {
-            return state.getSkillCode().trim();
-        }
-        return state.getConnectorCode();
     }
 
     /** 更新当前用户指定连接器的全局启用状态。 */

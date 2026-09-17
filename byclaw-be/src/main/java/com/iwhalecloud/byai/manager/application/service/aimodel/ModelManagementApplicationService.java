@@ -9,8 +9,10 @@ import com.iwhalecloud.byai.common.feign.request.token.TokenSaveRequest;
 import com.iwhalecloud.byai.common.feign.response.token.TokenApiResponse;
 import com.iwhalecloud.byai.common.feign.response.token.TokenDto;
 import com.iwhalecloud.byai.common.feign.response.token.TokenPageResult;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelSourceType;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelStatusEnum;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.ByaiAimodelDomainService;
@@ -34,6 +36,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper;
+
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -43,6 +46,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+
 import com.iwhalecloud.byai.manager.entity.tag.ByaiTagRelation;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import lombok.extern.slf4j.Slf4j;
@@ -105,6 +109,9 @@ public class ModelManagementApplicationService {
 
     /**
      * 分页列表（列表仅返回 apiTokenMasked，不返回明文 apiToken）
+     *
+     * @param request 分页查询条件
+     * @return 分页列表响应
      */
     public ModelListResponse getModelListByPage(ModelListRequest request) {
         PageInfo<ByaiAimodel> page = byaiAimodelDomainService.listByCondition(request);
@@ -120,6 +127,9 @@ public class ModelManagementApplicationService {
 
     /**
      * 模型详情（详情可返回 apiToken 供编辑回显；按安全策略可改为仅返回 apiTokenMasked + hasApiToken）
+     *
+     * @param id 模型 ID 字符串
+     * @return 模型详情
      */
     public ModelVO getModelDetail(String id) {
         Long modelId = parseModelId(id);
@@ -132,27 +142,20 @@ public class ModelManagementApplicationService {
 
     /**
      * 新增/更新模型；apiToken 加密存储；敏感数据编辑建议由调用方记录审计日志
+     *
+     * @param request 新增/更新请求
+     * @param currentUserId 当前用户 ID
+     * @return 含模型 id 的结果
      */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, String> upsertModel(ModelUpsertRequest request, Long currentUserId) {
-        validateUpsertRequest(request);
-        // 模型名称唯一性校验：新增时名称已存在则拒绝；修改时新名称已被其他记录占用则拒绝
-        String displayName = request.getDisplayName() != null ? request.getDisplayName().trim() : "";
-        if (StringUtil.isNotEmpty(displayName)) {
-            if (StringUtil.isEmpty(request.getId())) {
-                if (!"PERSONAL".equalsIgnoreCase(request.getOwnerType())
-                    && byaiAimodelDomainService.existsByModelNameExcludeId(displayName, null)) {
-                    throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
-                }
-            }
-            else {
-                Long modelId = parseModelId(request.getId());
-                if (byaiAimodelDomainService.existsByModelNameExcludeId(displayName, modelId)
-                    && !"PERSONAL".equalsIgnoreCase(request.getOwnerType())) {
-                    throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
-                }
-            }
-        }
+
+        //校验参数是否合法
+        this.validateUpsertRequest(request);
+
+        //校验名称是否重复
+        this.checkDuplicateName(request);
+
         // 敏感数据编辑可在此记录审计日志（如调用 AuditApplicationService）
         ByaiAimodel entity;
         if (StringUtil.isNotEmpty(request.getId())) {
@@ -170,8 +173,7 @@ public class ModelManagementApplicationService {
 
             // 更新TokenSaver模型名称
             this.updateTokenSaverModelName(existing);
-        }
-        else {
+        } else {
             entity = requestToEntity(request, currentUserId);
         }
         Long modelId = byaiAimodelDomainService.upsert(entity);
@@ -187,10 +189,54 @@ public class ModelManagementApplicationService {
         return data;
     }
 
+
+    /**
+     * 校验模型名称是否重复。
+     *
+     * @param request 新增/更新请求
+     */
+    private void checkDuplicateName(ModelUpsertRequest request) {
+
+        // 模型名称唯一性校验：新增时名称已存在则拒绝；修改时新名称已被其他记录占用则拒绝
+        String displayName = request.getDisplayName();
+        String ownerType = request.getOwnerType();
+        Long userId = CurrentUserHolder.getCurrentUserId();
+
+        // 新增
+        if (StringUtil.isEmpty(request.getId())) {
+            if (ModelOwnerType.PERSONAL.equalsIgnoreCase(ownerType)) {
+                long count = byaiAimodelDomainService.countModel(displayName, ownerType, userId, null);
+                if (count > 0) {
+                    throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
+                }
+            } else {
+                long count = byaiAimodelDomainService.countModel(displayName, ownerType, null, null);
+                if (count > 0) {
+                    throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
+                }
+            }
+        } else {
+            //编辑
+            Long modelId = this.parseModelId(request.getId());
+            if (ModelOwnerType.PERSONAL.equalsIgnoreCase(ownerType)) {
+                long count = byaiAimodelDomainService.countModel(displayName, ownerType, userId, modelId);
+                if (count > 0) {
+                    throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
+                }
+            } else {
+
+                long count = byaiAimodelDomainService.countModel(displayName, ownerType, null, modelId);
+                if (count > 0) {
+                    throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
+                }
+            }
+        }
+    }
+
     /**
      * 根据旧的名称去TokenSaver系统更新
      *
-     * @param existing 存在
+     * @param existing 已有模型实体
      */
     private void updateTokenSaverModelName(ByaiAimodel existing) {
 
@@ -224,6 +270,9 @@ public class ModelManagementApplicationService {
 
     /**
      * 删除模型；启用中的模型不允许删除，需先停用后再删。
+     *
+     * @param id 模型 ID 字符串
+     * @return 是否删除成功
      */
     @Transactional(rollbackFor = Exception.class)
     public Boolean deleteModel(String id) {
@@ -260,6 +309,10 @@ public class ModelManagementApplicationService {
 
     /**
      * 设置状态（ENABLED/DISABLED）
+     *
+     * @param id 模型 ID 字符串
+     * @param status 目标状态
+     * @return 是否更新成功
      */
     @Transactional(rollbackFor = Exception.class)
     public Boolean setModelStatus(String id, String status) {
@@ -282,6 +335,12 @@ public class ModelManagementApplicationService {
         return Boolean.TRUE;
     }
 
+    /**
+     * 校验模型未被启用中的数字员工引用。
+     *
+     * @param modelId 模型 ID
+     * @param messageKey 冲突时的 i18n 文案 key
+     */
     private void validateModelNotUsedByActiveDigitalEmployee(Long modelId, String messageKey) {
         List<String> employeeNames = ssResExtDigEmployeeMapper.selectDigitalEmployeeNamesByModelId(modelId);
         if (CollectionUtils.isEmpty(employeeNames)) {
@@ -317,8 +376,7 @@ public class ModelManagementApplicationService {
         try {
             long v = Long.parseLong(idStr.trim());
             return v > 0 ? v : null;
-        }
-        catch (NumberFormatException e) {
+        } catch (NumberFormatException e) {
             return null;
         }
     }
@@ -336,25 +394,34 @@ public class ModelManagementApplicationService {
         try {
             String apiStatus = success ? ModelStatusEnum.ENABLED.name() : ModelStatusEnum.TESTING.name();
             byaiAimodelDomainService.setStatus(modelId, apiStatus);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.warn("aimodel debug status update fail, modelId={}, success={}", modelId, success, e);
         }
     }
 
+    /**
+     * 解析模型 ID 字符串为 Long。
+     *
+     * @param id 模型 ID 字符串
+     * @return 模型 ID
+     */
     private Long parseModelId(String id) {
         if (StringUtil.isEmpty(id)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.id.required");
         }
         try {
             return Long.parseLong(id);
-        }
-        catch (NumberFormatException e) {
+        } catch (NumberFormatException e) {
             log.error("aimodel id parse fail, message={}", e.getMessage(), e);
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.id.invalid");
         }
     }
 
+    /**
+     * 校验新增/更新模型请求参数。
+     *
+     * @param request 新增/更新请求
+     */
     private void validateUpsertRequest(ModelUpsertRequest request) {
         if (request == null || StringUtil.isEmpty(request.getDisplayName())
             || StringUtil.isEmpty(request.getModelCode()) || StringUtil.isEmpty(request.getApiEndpoint())
@@ -369,6 +436,12 @@ public class ModelManagementApplicationService {
         validateReasoningConfig(request.getReasoningConfig(), request.getMaxTokens());
     }
 
+    /**
+     * 校验推理配置参数合法性。
+     *
+     * @param config 推理配置
+     * @param maxTokens 最大输出 token 数
+     */
     private void validateReasoningConfig(ModelReasoningConfig config, Integer maxTokens) {
         if (config == null) {
             return;
@@ -396,6 +469,10 @@ public class ModelManagementApplicationService {
     /**
      * Entity 转 ModelVO；forList=true 仅返回 apiTokenMasked，不返回 apiToken。 规范要求：详情与列表接口均须从实体 in_params
      * 解析并组装扩展字段（providerName、abilities、systems、headers、超时/重试/高级参数、updatedAt）到响应，供前端编辑回显与展示。
+     *
+     * @param entity 模型实体
+     * @param forList 是否列表场景（列表脱敏 Token）
+     * @return 模型 VO
      */
     private ModelVO entityToModelVO(ByaiAimodel entity, boolean forList) {
         ModelVO vo = new ModelVO();
@@ -408,7 +485,13 @@ public class ModelManagementApplicationService {
         return vo;
     }
 
-    /** 填充 ModelVO 基础字段（id、displayName、modelCode、status、token 等） */
+    /**
+     * 填充 ModelVO 基础字段（id、displayName、modelCode、status、token 等）
+     *
+     * @param vo 模型 VO
+     * @param entity 模型实体
+     * @param forList 是否列表场景
+     */
     private void fillModelVOBasic(ModelVO vo, ByaiAimodel entity, boolean forList) {
         vo.setId(entity.getModelId());
         vo.setDisplayName(entity.getModelName());
@@ -427,7 +510,12 @@ public class ModelManagementApplicationService {
         vo.setInparamTemplate(entity.getInparamTemplate());
     }
 
-    /** 从 in_params JSON 解析并填充 ModelVO 扩展字段；解析失败仅打日志不抛异常 */
+    /**
+     * 从 in_params JSON 解析并填充 ModelVO 扩展字段；解析失败仅打日志不抛异常
+     *
+     * @param vo 模型 VO
+     * @param inParamsJson in_params JSON
+     */
     private void fillModelVOFromInParams(ModelVO vo, String inParamsJson) {
         try {
             Map<String, Object> inParams = JSONObject.parseObject(inParamsJson);
@@ -438,13 +526,17 @@ public class ModelManagementApplicationService {
             setVoInParamsNumbers(vo, inParams);
             setVoInParamsUpdatedAt(vo, inParams);
             setVoReasoningConfig(vo, inParams);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.error("inParams to ModelVO fail, inParams={}", inParamsJson, e);
         }
     }
 
-    /** 从 inParams 填充字符串/列表类字段：providerName、abilities、systems、headers */
+    /**
+     * 从 inParams 填充字符串/列表类字段：providerName、abilities、systems、headers
+     *
+     * @param vo 模型 VO
+     * @param inParams in_params 解析结果
+     */
     private void setVoInParamsStrings(ModelVO vo, Map<String, Object> inParams) {
         if (inParams.get("providerName") != null) {
             vo.setProviderName(String.valueOf(inParams.get("providerName")));
@@ -466,6 +558,12 @@ public class ModelManagementApplicationService {
         }
     }
 
+    /**
+     * 将推理配置写入返回 VO。
+     *
+     * @param vo 模型 VO
+     * @param inParams 模型 in_params 解析结果
+     */
     private void setVoReasoningConfig(ModelVO vo, Map<String, Object> inParams) {
         if (inParams.get("reasoningConfig") == null) {
             return;
@@ -474,7 +572,13 @@ public class ModelManagementApplicationService {
             JSON.parseObject(JSON.toJSONString(inParams.get("reasoningConfig")), ModelReasoningConfig.class));
     }
 
-    /** abilities 来源仍是 in_params；默认对话模型标签来源于 byai_tag_relation，列表返回时动态合成。 */
+    /**
+     * abilities 来源仍是 in_params；默认对话模型标签来源于 byai_tag_relation，列表返回时动态合成。
+     *
+     * @param vo 模型 VO
+     * @param abilitiesValue 原始 abilities
+     * @return 能力标签列表
+     */
     private List<String> buildResponseAbilities(ModelVO vo, Object abilitiesValue) {
         List<String> abilities = abilitiesValue == null ? null
             : JSON.parseArray(JSON.toJSONString(abilitiesValue), String.class);
@@ -486,19 +590,34 @@ public class ModelManagementApplicationService {
         return responseAbilities;
     }
 
-    /** tag_id=1 还承载 EMBEDDING 默认模型关系，只有 LLM 默认模型才展示为“默认对话模型”能力。 */
+    /**
+     * tag_id=1 还承载 EMBEDDING 默认模型关系，只有 LLM 默认模型才展示为“默认对话模型”能力。
+     *
+     * @param vo 模型 VO
+     * @return 是否为默认对话模型
+     */
     private boolean isDefaultDialogModel(ModelVO vo) {
         return vo != null && vo.getIsDefault() != null && vo.getIsDefault() == 1
             && DEFAULT_MODEL_TYPE_LLM.equals(normalizeModelType(vo.getModelType(), DEFAULT_MODEL_TYPE_LLM));
     }
 
-    /** 从 inParams 填充数值类字段：超时、重试、采样参数等 */
+    /**
+     * 从 inParams 填充数值类字段：超时、重试、采样参数等
+     *
+     * @param vo 模型 VO
+     * @param inParams in_params 解析结果
+     */
     private void setVoInParamsNumbers(ModelVO vo, Map<String, Object> inParams) {
         setVoInParamsInts(vo, inParams);
         setVoInParamsDoubles(vo, inParams);
     }
 
-    /** 从 inParams 填充整型：超时、重试、maxTokens */
+    /**
+     * 从 inParams 填充整型：超时、重试、maxTokens
+     *
+     * @param vo 模型 VO
+     * @param inParams in_params 解析结果
+     */
     private void setVoInParamsInts(ModelVO vo, Map<String, Object> inParams) {
         if (inParams.get("connectTimeoutSec") != null) {
             vo.setConnectTimeoutSec(((Number) inParams.get("connectTimeoutSec")).intValue());
@@ -517,7 +636,12 @@ public class ModelManagementApplicationService {
         }
     }
 
-    /** 从 inParams 填充浮点型：temperature、topP、frequencyPenalty、presencePenalty */
+    /**
+     * 从 inParams 填充浮点型：temperature、topP、frequencyPenalty、presencePenalty
+     *
+     * @param vo 模型 VO
+     * @param inParams in_params 解析结果
+     */
     private void setVoInParamsDoubles(ModelVO vo, Map<String, Object> inParams) {
         if (inParams.get("temperature") != null) {
             vo.setTemperature(((Number) inParams.get("temperature")).doubleValue());
@@ -533,13 +657,24 @@ public class ModelManagementApplicationService {
         }
     }
 
-    /** 从 inParams 填充 updatedAt */
+    /**
+     * 从 inParams 填充 updatedAt
+     *
+     * @param vo 模型 VO
+     * @param inParams in_params 解析结果
+     */
     private void setVoInParamsUpdatedAt(ModelVO vo, Map<String, Object> inParams) {
         if (inParams.get("updatedAt") != null) {
             vo.setUpdatedAt(String.valueOf(inParams.get("updatedAt")));
         }
     }
 
+    /**
+     * 解析请求头配置列表。
+     *
+     * @param headersObj 原始请求头配置
+     * @return 请求头列表
+     */
     private List<Map<String, String>> parseHeaders(Object headersObj) {
         if (headersObj == null) {
             return null;
@@ -562,6 +697,12 @@ public class ModelManagementApplicationService {
         return result;
     }
 
+    /**
+     * 格式化模型更新时间。
+     *
+     * @param date 更新时间
+     * @return 格式化后的时间字符串
+     */
     private String formatUpdatedAt(Date date) {
         if (date == null) {
             return null;
@@ -569,6 +710,12 @@ public class ModelManagementApplicationService {
         return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).format(date);
     }
 
+    /**
+     * 对 API Token 做脱敏展示。
+     *
+     * @param token 原始 Token
+     * @return 脱敏后的 Token
+     */
     private String maskToken(String token) {
         if (token == null || token.length() <= MASK_PREFIX_LEN + MASK_SUFFIX_LEN) {
             return token != null && token.length() > 0 ? "****" : null;
@@ -579,6 +726,9 @@ public class ModelManagementApplicationService {
 
     /**
      * 解密 Token（存储为加密）；解密失败时返回原值（兼容历史未加密数据）
+     *
+     * @param encrypted 库中加密 Token
+     * @return 解密后的 Token
      */
     private String decryptTokenSafely(String encrypted) {
         if (encrypted == null || encrypted.isEmpty()) {
@@ -586,8 +736,7 @@ public class ModelManagementApplicationService {
         }
         try {
             return Sm4Util.decrypt(encrypted);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.debug("aimodel token decrypt fail, use original");
             return encrypted;
         }
@@ -595,6 +744,10 @@ public class ModelManagementApplicationService {
 
     /**
      * ModelUpsertRequest 转 ByaiAimodel；abilities、systems、headers、超时等写入 inParams JSON
+     *
+     * @param request 新增/更新请求
+     * @param currentUserId 当前用户 ID
+     * @return 模型实体
      */
     private ByaiAimodel requestToEntity(ModelUpsertRequest request, Long currentUserId) {
         ByaiAimodel entity = new ByaiAimodel();
@@ -610,20 +763,30 @@ public class ModelManagementApplicationService {
         return entity;
     }
 
-    /** 解析请求中的模型ID，无效或为空则返回 null（表示新增）；不抛异常 */
+    /**
+     * 解析请求中的模型ID，无效或为空则返回 null（表示新增）；不抛异常
+     *
+     * @param id 模型 ID 字符串
+     * @return 模型 ID，无效则 null
+     */
     private Long parseModelIdOrNull(String id) {
         if (StringUtil.isEmpty(id)) {
             return null;
         }
         try {
             return Long.parseLong(id);
-        }
-        catch (NumberFormatException ignored) {
+        } catch (NumberFormatException ignored) {
             return null;
         }
     }
 
-    /** 填充实体基本字段（表字段及 Token 加密）；providerName/abilities 等由 buildInParamsFromRequest 写入 in_params */
+    /**
+     * 填充实体基本字段（表字段及 Token 加密）；providerName/abilities 等由 buildInParamsFromRequest 写入 in_params
+     *
+     * @param entity 模型实体
+     * @param request 新增/更新请求
+     * @param modelId 模型 ID，新增时可为 null
+     */
     private void fillEntityBasicFields(ByaiAimodel entity, ModelUpsertRequest request, Long modelId) {
         entity.setModelId(modelId);
         entity.setModelName(request.getDisplayName());
@@ -639,7 +802,13 @@ public class ModelManagementApplicationService {
         entity.setOwnerType(request.getOwnerType() != null ? request.getOwnerType() : "PUBLIC");
     }
 
-    /** 构建 in_params Map：providerName、abilities、systems、headers、超时/重试/采样参数及 updatedAt */
+    /**
+     * 构建 in_params Map：providerName、abilities、systems、headers、超时/重试/采样参数及 updatedAt
+     *
+     * @param request 请求参数
+     * @param modelId 模型 ID，新增时可为 null
+     * @return in_params Map
+     */
     private Map<String, Object> buildInParamsFromRequest(ModelUpsertRequest request, Long modelId) {
         Map<String, Object> inParams = new HashMap<>();
         putIfNonEmpty(inParams, "providerName", request.getProviderName());
@@ -664,6 +833,12 @@ public class ModelManagementApplicationService {
         return inParams;
     }
 
+    /**
+     * 规范化推理配置以便入库。
+     *
+     * @param config 推理配置
+     * @return 规范化后的配置对象
+     */
     private ModelReasoningConfig normalizeReasoningConfigForStorage(ModelReasoningConfig config) {
         if (config == null) {
             return null;
@@ -681,6 +856,13 @@ public class ModelManagementApplicationService {
         return normalized;
     }
 
+    /**
+     * 规范化推理相关字符串。
+     *
+     * @param value 原始字符串
+     * @param fallback 空值时的默认值
+     * @return 规范化后的字符串
+     */
     private String normalizeReasoningString(String value, String fallback) {
         if (value == null || value.trim().isEmpty()) {
             return fallback;
@@ -688,38 +870,82 @@ public class ModelManagementApplicationService {
         return value.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
+    /**
+     * 字符串非空时写入 Map。
+     *
+     * @param map 目标 Map
+     * @param key 键
+     * @param value 字符串值
+     */
     private void putIfNonEmpty(Map<String, Object> map, String key, String value) {
         if (value != null && !value.isEmpty()) {
             map.put(key, value);
         }
     }
 
+    /**
+     * 集合非空时写入 Map。
+     *
+     * @param map 目标 Map
+     * @param key 键
+     * @param value 集合值
+     */
     private void putIfNonEmptyCollection(Map<String, Object> map, String key, Object value) {
         if (value != null && (value instanceof List ? !((List<?>) value).isEmpty() : true)) {
             map.put(key, value);
         }
     }
 
+    /**
+     * 值非空时写入 Map。
+     *
+     * @param map 目标 Map
+     * @param key 键
+     * @param value 任意值
+     */
     private void putIfNonNull(Map<String, Object> map, String key, Object value) {
         if (value != null) {
             map.put(key, value);
         }
     }
 
+    /**
+     * 填充实体创建人与创建时间。
+     *
+     * @param entity 模型实体
+     * @param currentUserId 当前用户 ID
+     */
     private void setEntityCreateInfo(ByaiAimodel entity, Long currentUserId) {
         entity.setCreateBy(currentUserId);
         entity.setCreateTime(new Date());
     }
 
+    /**
+     * 按条件查询模型列表。
+     *
+     * @param request 查询条件
+     * @return 模型列表
+     */
     public List<ByaiAimodel> listModel(ModelRequest request) {
         request.setStatus(Constants.STATUS_ENABLED);
         return byaiAimodelDomainService.listModel(request);
     }
 
+    /**
+     * 获取默认 LLM 模型 ID。
+     *
+     * @return 默认模型 ID
+     */
     public String getDefaultModelId() {
         return getDefaultModelId(DEFAULT_MODEL_TYPE_LLM);
     }
 
+    /**
+     * 获取指定类型的默认模型 ID。
+     *
+     * @param modelType 模型类型，空则按 LLM
+     * @return 默认模型 ID
+     */
     public String getDefaultModelId(String modelType) {
         String normalizedModelType = normalizeModelType(modelType, DEFAULT_MODEL_TYPE_LLM);
         ModelRequest request = new ModelRequest();
@@ -767,6 +993,11 @@ public class ModelManagementApplicationService {
         assignDefaultModelForType(target, modelType);
     }
 
+    /**
+     * 某类型缺少默认模型时自动补齐。
+     *
+     * @param modelId 候选模型 ID
+     */
     private void ensureDefaultModelForTypeIfMissing(Long modelId) {
         ByaiAimodel entity = byaiAimodelDomainService.getById(modelId);
         if (entity == null || !ModelStatusEnum.isEnabledDb(entity.getStatus())) {
@@ -779,6 +1010,12 @@ public class ModelManagementApplicationService {
         assignDefaultModelForType(entity, modelType);
     }
 
+    /**
+     * 将指定模型设为该类型的默认模型。
+     *
+     * @param target 待设为默认的模型
+     * @param modelType 模型类型
+     */
     private void assignDefaultModelForType(ByaiAimodel target, String modelType) {
         List<ByaiTagRelation> defaultRelations = byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL,
             DEFAULT_MODEL_TAG_ID);
@@ -811,6 +1048,11 @@ public class ModelManagementApplicationService {
         affectedModelIds.stream().distinct().forEach(this::refreshModelRedisCache);
     }
 
+    /**
+     * 按状态刷新模型 Redis 缓存。
+     *
+     * @param modelId 模型 ID
+     */
     private void refreshModelRedisCache(Long modelId) {
         ByaiAimodel entity = byaiAimodelDomainService.getById(modelId);
         if (entity == null) {
@@ -819,12 +1061,17 @@ public class ModelManagementApplicationService {
         }
         if (ModelStatusEnum.isEnabledDb(entity.getStatus())) {
             byaiAimodelDomainService.syncToRedis(entity);
-        }
-        else {
+        } else {
             byaiAimodelDomainService.removeFromRedis(modelId);
         }
     }
 
+    /**
+     * 校验模型不是当前必需的默认模型。
+     *
+     * @param entity 模型实体
+     * @param messageKey 冲突时的 i18n 文案 key
+     */
     private void validateModelNotCurrentRequiredDefault(ByaiAimodel entity, String messageKey) {
         String modelType = normalizeModelType(entity.getModelType(), DEFAULT_MODEL_TYPE_LLM);
         if (!REQUIRED_DEFAULT_MODEL_TYPES.contains(modelType) || !isDefaultModel(entity.getModelId())) {
@@ -833,6 +1080,12 @@ public class ModelManagementApplicationService {
         throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, I18nUtil.get(messageKey, modelType));
     }
 
+    /**
+     * 判断指定类型是否已有启用的默认模型。
+     *
+     * @param modelType 模型类型
+     * @return 是否已有启用的默认模型
+     */
     private boolean hasEnabledDefaultModelForType(String modelType) {
         return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID).stream()
             .map(ByaiTagRelation::getObjId).distinct().map(byaiAimodelDomainService::getById)
@@ -841,6 +1094,12 @@ public class ModelManagementApplicationService {
                 && ModelStatusEnum.isEnabledDb(model.getStatus()));
     }
 
+    /**
+     * 判断模型是否为默认模型。
+     *
+     * @param modelId 模型 ID
+     * @return 是否为默认模型
+     */
     private boolean isDefaultModel(Long modelId) {
         if (modelId == null) {
             return false;
@@ -849,12 +1108,24 @@ public class ModelManagementApplicationService {
             .anyMatch(relation -> modelId.equals(relation.getObjId()));
     }
 
+    /**
+     * 校验默认模型类型是否合法。
+     *
+     * @param modelType 模型类型
+     */
     private void validateDefaultModelType(String modelType) {
         if (!REQUIRED_DEFAULT_MODEL_TYPES.contains(modelType)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.type.invalid");
         }
     }
 
+    /**
+     * 规范化模型类型字符串。
+     *
+     * @param modelType 原始模型类型
+     * @param fallback 空值时的默认类型
+     * @return 规范化后的模型类型
+     */
     private String normalizeModelType(String modelType, String fallback) {
         if (StringUtil.isEmpty(modelType)) {
             return fallback;

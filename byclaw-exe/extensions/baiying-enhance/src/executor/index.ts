@@ -64,7 +64,7 @@ export async function runBaiyingExecutor(params: {
    * and for non-DOC resources.
    */
   onDelta?: DocDeltaCallback;
-  /** Cancellation signal, propagated to DOC polling. */
+  /** Cancellation signal, propagated to the selected resource executor. */
   signal?: AbortSignal;
   /** Host logger; used for request logs emitted by resource executors. */
   logger?: BaiyingEnhanceLogger;

@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityDiscovery;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityEnrich;
@@ -44,6 +45,7 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataUpdateRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
@@ -56,6 +58,7 @@ import java.util.*;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -64,6 +67,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.mock.web.MockMultipartFile;
@@ -80,6 +84,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class DatasetApplicationServiceTest {
 
+    private static final Locale TEST_LOCALE = new Locale("zh", "CN");
+
     @Mock
     private SsResourceService ssResourceService;
 
@@ -94,18 +100,18 @@ class DatasetApplicationServiceTest {
     @BeforeAll
     static void initI18n() {
         StaticMessageSource messageSource = new StaticMessageSource();
-        messageSource.addMessage("dataset.default.personal.delete.not.allowed", Locale.getDefault(),
+        messageSource.addMessage("dataset.default.personal.delete.not.allowed", TEST_LOCALE,
             "dataset.default.personal.delete.not.allowed");
-        messageSource.addMessage("dataset.metadata.search.resource.id.list.notempty", Locale.getDefault(),
+        messageSource.addMessage("dataset.metadata.search.resource.id.list.notempty", TEST_LOCALE,
             "Knowledge base resource identifier list cannot be empty");
-        messageSource.addMessage("dataset.metadata.search.resource.id.notnull", Locale.getDefault(),
+        messageSource.addMessage("dataset.metadata.search.resource.id.notnull", TEST_LOCALE,
             "Knowledge base resource identifier cannot be empty");
-        messageSource.addMessage("dataset.metadata.search.operation", Locale.getDefault(),
+        messageSource.addMessage("dataset.metadata.search.operation", TEST_LOCALE,
             "Search knowledge base file metadata");
-        messageSource.addMessage("dataset.pythonbuild.operation.failed", Locale.getDefault(), "{0} failed: {1}");
-        messageSource.addMessage("dataset.pythonbuild.operation.response.empty", Locale.getDefault(),
+        messageSource.addMessage("dataset.pythonbuild.operation.failed", TEST_LOCALE, "{0} failed: {1}");
+        messageSource.addMessage("dataset.pythonbuild.operation.response.empty", TEST_LOCALE,
             "{0} failed: knowledge base service returned an empty response");
-        messageSource.addMessage("user.permission.nopermission", Locale.getDefault(),
+        messageSource.addMessage("user.permission.nopermission", TEST_LOCALE,
             "No permission to manage this resource");
         ApplicationContext applicationContext = org.mockito.Mockito.mock(ApplicationContext.class);
         org.mockito.Mockito.when(applicationContext.getBean(org.springframework.context.MessageSource.class))
@@ -116,11 +122,17 @@ class DatasetApplicationServiceTest {
 
     @BeforeEach
     void setUp() {
+        LocaleContextHolder.setLocale(TEST_LOCALE);
         service = new DatasetApplicationService();
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         ReflectionTestUtils.setField(service, "feignPythonBuildService", feignPythonBuildService);
         ReflectionTestUtils.setField(service, "datasetSystem", "");
+    }
+
+    @AfterEach
+    void tearDown() {
+        LocaleContextHolder.resetLocaleContext();
     }
 
     @Test
@@ -511,6 +523,55 @@ class DatasetApplicationServiceTest {
     }
 
     @Test
+    void updateKnowledgeFileMetadata_mapsResourceIdToKnCodeAndForwardsOperations() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        PythonBuildResponse<Map<String, Object>> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(Collections.emptyMap());
+
+        Map<String, String> headers = new HashMap<>();
+        headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(100L));
+        when(feignPythonBuildService.updateKnowledgeFileMetadata(any(), eq(headers))).thenReturn(response);
+
+        KnowledgeFileMetadataUpdateRequest.MetadataOperation setStatus =
+            new KnowledgeFileMetadataUpdateRequest.MetadataOperation();
+        setStatus.setPropertyName("status");
+        setStatus.setOperation("set");
+        setStatus.setValueType("string");
+        setStatus.setValue("active");
+
+        KnowledgeFileMetadataUpdateRequest.MetadataOperation appendTags =
+            new KnowledgeFileMetadataUpdateRequest.MetadataOperation();
+        appendTags.setPropertyName("tags");
+        appendTags.setOperation("append");
+        appendTags.setValue(List.of("contract", "renewal"));
+
+        KnowledgeFileMetadataUpdateRequest request = new KnowledgeFileMetadataUpdateRequest();
+        request.setResourceId(100L);
+        request.setFilePath("制度/人事/续签流程.md");
+        request.setOperationList(List.of(setStatus, appendTags));
+
+        Map<String, Object> result = service.updateKnowledgeFileMetadata(request, Collections.emptyMap());
+
+        ArgumentCaptor<KbFileMetadataUpdate> captor = ArgumentCaptor.forClass(KbFileMetadataUpdate.class);
+        verify(feignPythonBuildService).updateKnowledgeFileMetadata(captor.capture(), eq(headers));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+        assertThat(captor.getValue().getFilePath()).isEqualTo("/制度/人事/续签流程.md");
+        assertThat(captor.getValue().getOperationList()).hasSize(2);
+        assertThat(captor.getValue().getOperationList().get(0).getPropertyName()).isEqualTo("status");
+        assertThat(captor.getValue().getOperationList().get(0).getOperation()).isEqualTo("set");
+        assertThat(captor.getValue().getOperationList().get(0).getValueType()).isEqualTo("string");
+        assertThat(captor.getValue().getOperationList().get(0).getValue()).isEqualTo("active");
+        assertThat(captor.getValue().getOperationList().get(1).getPropertyName()).isEqualTo("tags");
+        assertThat(captor.getValue().getOperationList().get(1).getOperation()).isEqualTo("append");
+        assertThat(captor.getValue().getOperationList().get(1).getValue()).isEqualTo(List.of("contract", "renewal"));
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     void searchKnowledgeItems_forwardsLatestFilteringFields() {
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
@@ -590,6 +651,7 @@ class DatasetApplicationServiceTest {
         request.setResourceId(100L);
         request.setMaxEntities(12);
         request.setForce(true);
+        request.setTags(List.of("organization", "ai"));
         request.setExtraParams(Map.of("source", "portal"));
 
         KnowledgeEntityBatchResult result = service.entityDiscovery(request, Collections.emptyMap());
@@ -598,11 +660,37 @@ class DatasetApplicationServiceTest {
         verify(feignPythonBuildService).entityDiscovery(captor.capture(), eq(headers));
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isNull();
+        assertThat(captor.getValue().getDirectoryPath()).isNull();
+        assertThat(captor.getValue().getTargetDirectoryPath()).isNull();
         assertThat(captor.getValue().getMaxEntities()).isEqualTo(12);
         assertThat(captor.getValue().getForce()).isTrue();
+        assertThat(captor.getValue().getTags()).containsExactly("organization", "ai");
         assertThat(captor.getValue().getExtraParams()).containsEntry("source", "portal");
         assertThat(result.getResourceId()).isEqualTo(100L);
         assertThat(result.getBatchId()).isEqualTo("ed-20260817-0001");
+    }
+
+    @Test
+    void entityDiscovery_forwardsNormalizedInputAndOutputDirectories() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(new KnowledgeEntityBatchResult());
+        when(feignPythonBuildService.entityDiscovery(any(), any())).thenReturn(response);
+
+        KnowledgeEntityDiscoveryRequest request = new KnowledgeEntityDiscoveryRequest();
+        request.setResourceId(100L);
+        request.setDirectoryPath("原始文档//人力资源/");
+        request.setTargetDirectoryPath("领域知识//组织/");
+
+        service.entityDiscovery(request, Collections.emptyMap());
+
+        ArgumentCaptor<KbEntityDiscovery> captor = ArgumentCaptor.forClass(KbEntityDiscovery.class);
+        verify(feignPythonBuildService).entityDiscovery(captor.capture(), any());
+        assertThat(captor.getValue().getDirectoryPath()).isEqualTo("/原始文档/人力资源");
+        assertThat(captor.getValue().getTargetDirectoryPath()).isEqualTo("/领域知识/组织");
     }
 
     @Test
@@ -635,6 +723,40 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getFilePath()).isEqualTo("/KnowledgeEntity/OSOT.md");
         assertThat(captor.getValue().getTopK()).isEqualTo(20);
         assertThat(result.getResourceId()).isEqualTo(100L);
+    }
+
+    @Test
+    void entityEnrich_forwardsNormalizedDirectoryScope() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        KnowledgeEntityBatchResult qaResult = new KnowledgeEntityBatchResult();
+        qaResult.setBatchId("ee-20260817-0002");
+        qaResult.setScope("DIRECTORY");
+        qaResult.setTargetPath("/领域知识/组织");
+        qaResult.setCandidateCount(3);
+        qaResult.setReturnedTaskCount(2);
+        qaResult.setTasksTruncated(false);
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.entityEnrich(any(), any())).thenReturn(response);
+
+        KnowledgeEntityEnrichRequest request = new KnowledgeEntityEnrichRequest();
+        request.setResourceId(100L);
+        request.setDirectoryPath("领域知识//组织/");
+
+        KnowledgeEntityBatchResult result = service.entityEnrich(request, Collections.emptyMap());
+
+        ArgumentCaptor<KbEntityEnrich> captor = ArgumentCaptor.forClass(KbEntityEnrich.class);
+        verify(feignPythonBuildService).entityEnrich(captor.capture(), any());
+        assertThat(captor.getValue().getFilePath()).isNull();
+        assertThat(captor.getValue().getDirectoryPath()).isEqualTo("/领域知识/组织");
+        assertThat(result.getScope()).isEqualTo("DIRECTORY");
+        assertThat(result.getTargetPath()).isEqualTo("/领域知识/组织");
+        assertThat(result.getCandidateCount()).isEqualTo(3);
+        assertThat(result.getReturnedTaskCount()).isEqualTo(2);
+        assertThat(result.getTasksTruncated()).isFalse();
     }
 
     @Test

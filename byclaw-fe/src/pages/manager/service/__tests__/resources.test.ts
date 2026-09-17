@@ -100,7 +100,7 @@ describe('manager resources service', () => {
   });
 
   it('should call listResourceUseAuth with the original endpoint', () => {
-    const payload = { resourceBizTypeList: ['VIEW'], keyword: '分析' };
+    const payload = { resourceBizTypeList: ['SKILL'], keyword: '分析' };
     listResourceUseAuth(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/auth/privilegeGrant/listResourceUseAuth', payload);
   });

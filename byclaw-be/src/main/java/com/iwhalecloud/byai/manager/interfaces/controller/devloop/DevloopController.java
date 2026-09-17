@@ -1,16 +1,13 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
 import com.iwhalecloud.byai.common.feign.request.datacloud.Params;
-import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
 import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
-import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
-import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
@@ -735,13 +732,6 @@ public class DevloopController {
             MapParamUtil.getStringValue(params, "sandboxId"));
     }
 
-    /** 根据知识库资源 ID 分页查询对象基本信息，可选按知识库目录列表和对象名称进一步过滤。返回结果不包含对象的 properties 和 actions。 */
-    @PostMapping("/operation/queryObjectsByKnowledge")
-    public ResponseUtil<QueryByKnowledgeResp> queryObjectsByKnowledge(@RequestBody QueryByKnowledgeReq paramReq) {
-        QueryByKnowledgeResp queryByKnowledgeResp = applicationService.queryObjectsByKnowledge(paramReq);
-        return ResponseUtil.successResponse(queryByKnowledgeResp);
-    }
-
     /**
      * 保存对象实例到知识库
      *
@@ -786,19 +776,6 @@ public class DevloopController {
     public ResponseUtil<Collection<ObjectFileGroupDTO>> listProjectObjectFiles(
         @RequestBody ListObjectFileDto listObjectFileDto) {
         Collection<ObjectFileGroupDTO> resultList = applicationService.listProjectObjectFiles(listObjectFileDto);
-        return ResponseUtil.successResponse(resultList);
-    }
-
-    /**
-     * 查询运营任务对象信息
-     *
-     * @param listObjectFilePkIdDto 查询入参
-     * @return ResponseUtil
-     */
-    @PostMapping("/operation/listObjectById")
-    public ResponseUtil<List<Map<String, Object>>> listObjectById(
-        @RequestBody ListObjectFilePkIdDto listObjectFilePkIdDto) {
-        List<Map<String, Object>> resultList = applicationService.listObjectById(listObjectFilePkIdDto);
         return ResponseUtil.successResponse(resultList);
     }
 

@@ -24,7 +24,8 @@ export type IAgent = {
   code_type: string;
   agentType?: IAgentType;
   status: string;
-  // metaStatus?: string; // 0=草稿箱，1,4=待上架，2=已上架，3=已下架
+  metaStatus?: string | number; // 0=草稿箱，1,4=待上架，2=已上架，3=已下架
+  resourceStatus?: string | number;
 
   // 标签相关
   tagId?: number;
@@ -115,13 +116,22 @@ export type IAgentCache = IAgent & {
   usesPermissions?: boolean;
   canApply?: boolean;
 
+  // 列表接口一次性回填的操作权限
+  operationPermissionsLoaded?: boolean;
+  hasManagePermission?: boolean;
+  hasUsePermission?: boolean;
+  canViewDetail?: boolean;
+
   // 操作权限标志（后端统一计算返回）
   canEdit?: boolean;
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canDelete?: boolean;
   canApplyUse?: boolean;
-  canAuditUse?: boolean;
+  canOnShelf?: boolean;
+  canOffShelf?: boolean;
+  canRestore?: boolean;
+  useApplyPending?: boolean;
 
   isDefault: boolean;
   canSetDefault: boolean;

@@ -7,20 +7,40 @@ import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationServ
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLoginAutoStartService;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class LoginApplicationServiceTest {
+
+    @Test
+    void logoutDoesNotCreateSessionWhenRequestHasNoSession() {
+        LoginApplicationService service = new LoginApplicationService();
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        StaticMessageSource messageSource = new StaticMessageSource();
+        messageSource.setUseCodeAsDefaultMessage(true);
+        ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
+        when(request.getSession(false)).thenReturn(null);
+
+        service.logout(request);
+
+        verify(request).getSession(false);
+        verify(request, never()).getSession();
+    }
 
     @Test
     void getLoginInfo_populatesDefaultDigEmployeeIdFromSuperassist() {

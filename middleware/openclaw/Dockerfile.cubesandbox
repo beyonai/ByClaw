@@ -98,6 +98,8 @@ COPY --from=ext-builder /build/out/ /app/extensions/
 # add openclaw skills (overwrite same-name files with project content)
 COPY middleware/openclaw/skills/ /app/skills/
 COPY middleware/openclaw/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
+RUN cd /app/skills/knowledge-collection/scripts \
+    && npm ci --omit=dev --prefer-offline
 
 # add filebrowser
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
@@ -169,5 +171,7 @@ RUN set -eux; \
 # Keep the default image command template-friendly: cube-entrypoint starts envd
 # for CubeSandbox's 49983 /health probe, then starts OpenClaw and filebrowser.
 EXPOSE 49983 18789 8082
+HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
+  CMD node -e "const ports=[process.env.OPENCLAW_GATEWAY_PORT,'8080','18789'].filter((port,index,all)=>port&&all.indexOf(port)===index);Promise.any(ports.map(async(port)=>{const response=await fetch('http://127.0.0.1:'+port+'/healthz');if(!response.ok)throw new Error('unhealthy')})).then(()=>process.exit(0)).catch(()=>process.exit(1))"
 ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
 CMD ["/usr/local/bin/startAll.sh"]

@@ -228,27 +228,6 @@ const Sidebar = () => {
   }, [EventEmitter, navigate, setSiderCollapsed]);
 
   React.useEffect(() => {
-    const handleOntologyBindSaved = (event: Event) => {
-      const detail = (event as CustomEvent)?.detail || {};
-      if (!detail.openSider) return;
-      const refreshDetail = { ...detail, receivedAt: Date.now() };
-      (window as any).__latestOntologyBindSaved = refreshDetail;
-      setActiveKey('ontology');
-      setManualSiderOpenKey(undefined);
-      setSiderCollapsed(false);
-      setSiderContentWidth(0);
-      // 绑定完成后进入本体大页面；若事件来自右侧资源面板，也保留该面板。
-      navigate('/ontologyCenter', { state: { preserveDetailPanel: true } });
-      window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('ontologySiderRefresh', { detail: refreshDetail }));
-      }, 0);
-    };
-
-    window.addEventListener('ontologyBindSaved', handleOntologyBindSaved);
-    return () => window.removeEventListener('ontologyBindSaved', handleOntologyBindSaved);
-  }, [navigate, setSiderCollapsed]);
-
-  React.useEffect(() => {
     setSiderContentWidth(shouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
     if (!preserveDetailPanel) {
       clearDetailPanel?.();

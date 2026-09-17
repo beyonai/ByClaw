@@ -39,11 +39,6 @@ public class OpenPermissionCheckDto {
      */
     private String resourceBizType;
 
-    /**
-     * 所属本体库编码。可选，传入时用于缩小本体资源匹配范围。
-     */
-    private String ontologyBaseCode;
-
     @Getter
     @Setter
     public static class ResourceCodeRef {
@@ -57,10 +52,5 @@ public class OpenPermissionCheckDto {
          * 资源编码。
          */
         private String resourceCode;
-
-        /**
-         * 所属本体库编码。可选，传入时用于缩小本体资源匹配范围。
-         */
-        private String ontologyBaseCode;
     }
 }

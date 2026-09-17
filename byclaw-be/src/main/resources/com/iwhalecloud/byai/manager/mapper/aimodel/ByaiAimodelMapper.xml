@@ -92,27 +92,6 @@
         ORDER BY a.create_time DESC
     </select>
 
-    <select id="countByCondition" resultType="long">
-        SELECT COUNT(1)
-        FROM byai_aimodel a
-        LEFT JOIN (
-            SELECT obj_id FROM byai_tag_relation
-            WHERE obj_type = 'AI_MODEL'
-            GROUP BY obj_id
-        ) d ON a.model_id = d.obj_id
-        <include refid="Condition_Where_WithTag"/>
-    </select>
-
-    <!-- 按 model_name 精确匹配统计条数；excludeModelId 不为空时排除该 id -->
-    <select id="countByModelNameExcludeId" resultType="long">
-        SELECT COUNT(1) FROM byai_aimodel
-        WHERE model_name = #{modelName}
-        <if test="excludeModelId != null">
-            AND model_id != #{excludeModelId}
-        </if>
-    </select>
-
-
     <select id="listModel" resultMap="BaseResultMap">
         select
         model_id,
@@ -138,52 +117,6 @@
             d.obj_type = 'AI_MODEL'
         and
             d.tag_id = 1
-        <where>
-            and b.obj_type = 'AI_MODEL'
-            <if test="status != null and status != ''">
-                AND a.status = #{status}
-            </if>
-            <if test="modelType != null and modelType != ''">
-                AND a.model_type = #{modelType}
-            </if>
-            <if test="tagId != null and tagId != ''">
-                AND b.tag_id = #{tagId}
-            </if>
-            <if test="ownerType != null and ownerType != ''">
-                AND a.owner_type = #{ownerType}
-            </if>
-        </where>
-
-    </select>
-
-
-    <select id="listModelInner" resultMap="BaseResultMap">
-        select
-        model_id,
-        model_type,
-        model_name,
-        model_no,
-        url,
-        auth_token,
-        status,
-        is_support_chart,
-        is_deepthink,
-        max_content_token,
-        in_params,
-        CASE WHEN d.obj_id IS NOT NULL THEN 1 ELSE 0 END AS is_default
-        from byai_aimodel a
-        inner join
-        byai_tag_relation b
-        on
-        a.model_id = b.obj_id
-        left join
-        byai_tag_relation d
-        on
-        a.model_id = d.obj_id
-        and
-        d.obj_type = 'AI_MODEL'
-        and
-        d.tag_id = 1
         <where>
             and b.obj_type = 'AI_MODEL'
             <if test="status != null and status != ''">

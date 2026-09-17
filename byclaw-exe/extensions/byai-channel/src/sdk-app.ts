@@ -699,6 +699,8 @@ export class ByaiSdkApp {
 
   private runner: WorkerRunner | null = null;
   private runnerTask: Promise<void> | null = null;
+  private runnerStartTask: Promise<void> | null = null;
+  private runnerStartAbortController: AbortController | null = null;
   private redis: RedisClient | null = null;
 
   constructor(opts: ByaiSdkAppOptions) {
@@ -789,52 +791,74 @@ export class ByaiSdkApp {
 
     registerSdkEmitter(this.account.accountId, emitter);
 
-    if (isBaiyingEnhanceConfigured(getRuntimeConfig())) {
-      const rawWaitMs = Number.parseInt(
-        process.env.BAIYING_ENHANCE_COLD_START_WAIT_MS || "60000",
-        10,
-      );
-      const waitMs = Number.isFinite(rawWaitMs) ? Math.max(0, rawWaitMs) : 60000;
-      info?.(
-        `[${this.account.accountId}] waiting for baiying-enhance cold-start readiness before consuming, waitMs=${waitMs}`,
-      );
-      const readiness = await waitForBaiyingEnhanceColdStartReady(waitMs);
-      if (readiness.ready) {
+    // OpenClaw starts channels before plugin services. Keep the consumer gate in
+    // the background so baiying-enhance can start and publish its readiness.
+    const abortController = new AbortController();
+    this.runnerStartAbortController = abortController;
+    const runnerStartTask = (async () => {
+      if (isBaiyingEnhanceConfigured(getRuntimeConfig())) {
+        const rawWaitMs = Number.parseInt(
+          process.env.BAIYING_ENHANCE_COLD_START_WAIT_MS || "60000",
+          10,
+        );
+        const waitMs = Number.isFinite(rawWaitMs) ? Math.max(1000, rawWaitMs) : 60000;
         info?.(
-          `[${
-            this.account.accountId
-          }] baiying-enhance cold-start readiness complete before consuming, waitedMs=${
-            readiness.waitedMs
-          }, reason=${readiness.reason ?? "ready"}`,
+          `[${this.account.accountId}] waiting for baiying-enhance cold-start readiness before consuming, waitMs=${waitMs}`,
         );
-      } else {
-        error?.(
-          `[${
-            this.account.accountId
-          }] baiying-enhance cold-start readiness not complete before consuming, waitedMs=${
-            readiness.waitedMs
-          }, reason=${readiness.reason ?? "timeout"}; continuing`,
-        );
+        while (this.runner === runner && !abortController.signal.aborted) {
+          const readiness = await waitForBaiyingEnhanceColdStartReady(
+            waitMs,
+            abortController.signal,
+          );
+          if (this.runner !== runner || abortController.signal.aborted) {
+            return;
+          }
+          if (readiness.ready) {
+            info?.(
+              `[${
+                this.account.accountId
+              }] baiying-enhance cold-start readiness complete before consuming, waitedMs=${
+                readiness.waitedMs
+              }, reason=${readiness.reason ?? "ready"}`,
+            );
+            break;
+          }
+          error?.(
+            `[${
+              this.account.accountId
+            }] baiying-enhance cold-start readiness not complete before consuming, waitedMs=${
+              readiness.waitedMs
+            }, reason=${readiness.reason ?? "timeout"}; consumer remains stopped`,
+          );
+        }
       }
-    }
 
-    if (this.runner !== runner) {
-      return;
-    }
-    const runnerTask = runner.start({ initialize: false });
-    this.runnerTask = runnerTask;
-    void runnerTask.catch((err) => {
+      if (this.runner !== runner || abortController.signal.aborted) {
+        return;
+      }
+      const runnerTask = runner.start({ initialize: false });
+      this.runnerTask = runnerTask;
+      void runnerTask.catch((err) => {
+        error?.(
+          `[${this.account.accountId}] byai-channel SDK runner stopped with error: ${String(err)}`,
+        );
+      });
+      info?.(`[${this.account.accountId}] byai-channel SDK app started`);
+    })();
+    this.runnerStartTask = runnerStartTask;
+    void runnerStartTask.catch((err) => {
       error?.(
-        `[${this.account.accountId}] byai-channel SDK runner stopped with error: ${String(err)}`,
+        `[${this.account.accountId}] byai-channel SDK runner start failed: ${String(err)}`,
       );
     });
-
-    info?.(`[${this.account.accountId}] byai-channel SDK app started`);
   }
 
   async stop(): Promise<void> {
     const { info, error } = this.logger();
     const runner = this.runner;
+    this.runner = null;
+    this.runnerStartAbortController?.abort();
+    await this.runnerStartTask?.catch(() => undefined);
     const runnerTask = this.runnerTask;
 
     try {
@@ -859,8 +883,9 @@ export class ByaiSdkApp {
       );
     }
 
-    this.runner = null;
     this.runnerTask = null;
+    this.runnerStartTask = null;
+    this.runnerStartAbortController = null;
     this.redis = null;
 
     info?.(`[${this.account.accountId}] byai-channel SDK app stopped`);

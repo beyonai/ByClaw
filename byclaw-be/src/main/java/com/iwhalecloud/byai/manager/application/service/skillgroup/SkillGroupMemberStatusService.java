@@ -71,7 +71,7 @@ public class SkillGroupMemberStatusService {
             boolean installed = memberId != null && installedIds.contains(memberId);
             boolean systemBuiltIn = SsResExtSkillService.INNER_SKILL_TYPE.equalsIgnoreCase(member.getSkillType());
             boolean hasUsePermission = systemBuiltIn || permissions != null
-                    && Boolean.TRUE.equals(permissions.getHasUsePermission());
+                    && permissions.isHasUsePermission();
 
             member.setInstalled(installed);
             member.setHasUsePermission(hasUsePermission);
@@ -80,9 +80,9 @@ public class SkillGroupMemberStatusService {
                 member.setMemberStatus(installed
                         ? SkillGroupMemberStatus.INSTALLED
                         : SkillGroupMemberStatus.INSTALLABLE);
-            } else if (permissions != null && Boolean.TRUE.equals(permissions.getUseApplyPending())) {
+            } else if (permissions != null && permissions.isUseApplyPending()) {
                 member.setMemberStatus(SkillGroupMemberStatus.APPLY_PENDING);
-            } else if (permissions != null && Boolean.TRUE.equals(permissions.getCanApplyUse())) {
+            } else if (permissions != null && permissions.isCanApplyUse()) {
                 member.setMemberStatus(SkillGroupMemberStatus.APPLY_REQUIRED);
             } else {
                 member.setMemberStatus(SkillGroupMemberStatus.APPLY_UNAVAILABLE);

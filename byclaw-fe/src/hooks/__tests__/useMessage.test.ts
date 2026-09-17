@@ -7,6 +7,21 @@ jest.mock('@/service/message', () => ({
   delMessage: jest.fn(),
 }));
 
+jest.mock('@/service/common/desktopLocal', () => ({
+  readDesktopLocalHistory: jest.fn(),
+}));
+
+jest.mock('@/utils/localSessionHistory', () => ({
+  projectLocalHistoryPage: jest.fn((page: any) =>
+    page.list.map((message: any) => ({
+      ...message,
+      msgId: message.id,
+      messageId: message.id,
+      createTime: `${Date.parse(message.createdAt)}`,
+    }))
+  ),
+}));
+
 jest.mock('@/utils/messgae', () => ({
   getMsgId: jest.fn(() => 'new-msg-id'),
   hasVisibleMessageContent: jest.fn((message: any) =>
@@ -26,6 +41,7 @@ jest.mock('@/utils/session', () => ({
 import { renderHook, act } from '@testing-library/react';
 import { useDispatch, useSelector } from '@umijs/max';
 import { delMessage } from '@/service/message';
+import { readDesktopLocalHistory } from '@/service/common/desktopLocal';
 import useGlobal from '../useGlobal';
 import { getSessionObjectTypeMap } from '@/utils/session';
 import { IMessageState } from '@/constants/message';
@@ -35,6 +51,7 @@ const mockUseDispatch = useDispatch as jest.Mock;
 const mockUseSelector = useSelector as jest.Mock;
 const mockUseGlobal = useGlobal as jest.MockedFunction<typeof useGlobal>;
 const mockGetSessionObjectTypeMap = getSessionObjectTypeMap as jest.MockedFunction<typeof getSessionObjectTypeMap>;
+const mockReadDesktopLocalHistory = readDesktopLocalHistory as jest.MockedFunction<typeof readDesktopLocalHistory>;
 
 describe('hooks/useChat/useMessage', () => {
   let dispatch: jest.Mock;
@@ -61,6 +78,10 @@ describe('hooks/useChat/useMessage', () => {
       ],
     ]);
     dispatch = jest.fn((action: any) => {
+      if (action.type === 'messageStore/setSessionMessage') {
+        sessionListMap.set(action.payload.sessionId, action.payload.messageListInfo);
+        return Promise.resolve(undefined);
+      }
       if (action.type === 'messageStore/updateSessionMessageList') {
         const { sessionId, messageList, allowCreateSession } = action.payload;
         const prevInfo = sessionListMap.get(sessionId);
@@ -142,6 +163,14 @@ describe('hooks/useChat/useMessage', () => {
       EventEmitter: eventEmitter,
     } as any);
     mockGetSessionObjectTypeMap.mockReturnValue(undefined as any);
+    mockReadDesktopLocalHistory.mockResolvedValue({
+      list: [],
+      total: 0,
+      pageNum: 1,
+      pageSize: 20,
+      totalPages: 0,
+      hasMore: false,
+    });
     (globalThis as any).requestIdleCallback = (cb: () => void) => {
       cb();
       return 1;
@@ -179,6 +208,80 @@ describe('hooks/useChat/useMessage', () => {
       sessionId: 's1',
       targetMessageId: 'm2',
     });
+  });
+
+  it('loads local history with page parameters and never dispatches the cloud history effect', async () => {
+    mockUseSelector.mockImplementation((selector: any) =>
+      selector({
+        messageStore: { sessionListMap },
+        session: { sessionList: [{ sessionId: 'local-1', isLocalSession: true }] },
+      })
+    );
+    mockReadDesktopLocalHistory.mockResolvedValue({
+      list: [{ id: 'local-user', role: 'user', createdAt: '2026-01-01T00:00:00.000Z', text: '本地问题' }],
+      total: 1,
+      pageNum: 1,
+      pageSize: 20,
+      totalPages: 1,
+      hasMore: false,
+    });
+
+    renderHook(() => useMessage({ sessionId: 'local-1' }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockReadDesktopLocalHistory).toHaveBeenCalledWith({ sessionId: 'local-1', pageNum: 1, pageSize: 20 });
+    expect(dispatch.mock.calls.some(([action]) => action.type === 'messageStore/getSessionMessage')).toBe(false);
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'messageStore/setSessionMessage',
+        payload: expect.objectContaining({ sessionId: 'local-1' }),
+      })
+    );
+  });
+
+  it('loads the next local page and prepends its older messages', async () => {
+    mockUseSelector.mockImplementation((selector: any) =>
+      selector({
+        messageStore: { sessionListMap },
+        session: { sessionList: [{ sessionId: 'local-pages', isLocalSession: true }] },
+      })
+    );
+    mockReadDesktopLocalHistory.mockImplementation(async ({ pageNum }) => {
+      const firstIndex = pageNum === 1 ? 20 : 0;
+      return {
+        list: Array.from({ length: 20 }, (_, offset) => ({
+          id: `message-${firstIndex + offset}`,
+          role: 'user' as const,
+          createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, firstIndex + offset)).toISOString(),
+          text: `${firstIndex + offset}`,
+        })),
+        total: 40,
+        pageNum,
+        pageSize: 20,
+        totalPages: 2,
+        hasMore: pageNum === 1,
+      };
+    });
+
+    const { result } = renderHook(() => useMessage({ sessionId: 'local-pages' }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await result.current.getMoreSessionMessage('local-pages');
+    });
+
+    expect(mockReadDesktopLocalHistory).toHaveBeenLastCalledWith({
+      sessionId: 'local-pages',
+      pageNum: 2,
+      pageSize: 20,
+    });
+    expect(sessionListMap.get('local-pages').list).toHaveLength(40);
+    expect(sessionListMap.get('local-pages').list[0].messageId).toBe('message-0');
   });
 
   it('exposes a deduplicated loading state until the target session messages are ready', async () => {

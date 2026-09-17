@@ -233,39 +233,4 @@ describe("ByClaw BE task plan gateway", () => {
     ).rejects.toThrow("owned by another execution");
   });
 
-  it("cancels the plan with the same trusted execution identity", async () => {
-    const fetchImpl = vi.fn(async () =>
-      Response.json({ code: 0, success: true, data: snapshot(3) }),
-    );
-    const gateway = new ByClawBeTaskPlanGateway({
-      baseUrl: "http://127.0.0.1:8086",
-      timeoutMs: 1_000,
-      fetchImpl: fetchImpl as typeof fetch,
-    });
-
-    await gateway.cancel({
-      context: {
-        beyondToken: "secret-token",
-        sessionId: "2001",
-        messageId: "3001",
-        traceId: "trace-1",
-        sourceRuntime: "BYCLAW_SUPER",
-        sourceRunId: "run-1",
-      },
-      reason: "user stopped",
-    });
-
-    const [url, init] = fetchImpl.mock.calls[0] ?? [];
-    expect(String(url)).toBe(
-      "http://127.0.0.1:8086/byaiService/internal/api/v1/task-plan/cancel",
-    );
-    expect(JSON.parse(String(init?.body))).toEqual({
-      sessionId: "2001",
-      messageId: "3001",
-      traceId: "trace-1",
-      sourceRuntime: "BYCLAW_SUPER",
-      sourceRunId: "run-1",
-      reason: "user stopped",
-    });
-  });
 });

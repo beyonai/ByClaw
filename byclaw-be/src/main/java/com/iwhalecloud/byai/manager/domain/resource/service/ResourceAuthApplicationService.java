@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import org.springframework.beans.BeanUtils;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -95,8 +97,26 @@ public class ResourceAuthApplicationService {
         fillCatalogIds(resourceUseAuthQo);
 
         PageInfo<ResourceAuthVo> pageInfo = privilegeGrantService.listResourceAuth(resourceUseAuthQo);
+        fillOperationPermissions(pageInfo.getList());
         return pageInfo;
 
+    }
+
+    private void fillOperationPermissions(List<ResourceAuthVo> rows) {
+        if (CollectionUtils.isEmpty(rows)) {
+            return;
+        }
+        Map<Long, ResourceOperationPermissionsVo> permissions =
+            authApplicationService.queryResourceOperationPermissionsBatch(
+                rows.stream().map(ResourceAuthVo::getResourceId).collect(Collectors.toList()));
+        for (ResourceAuthVo row : rows) {
+            ResourceOperationPermissionsVo permission =
+                permissions.get(row.getResourceId());
+            if (permission != null) {
+                BeanUtils.copyProperties(permission, row, "resourceId", "ownerType");
+            }
+            row.setOperationPermissionsLoaded(permission != null);
+        }
     }
 
     private void fillPublishOrgIds(ResourceUseAuthQo resourceUseAuthQo) {
@@ -147,6 +167,7 @@ public class ResourceAuthApplicationService {
             ssResourceMapper.queryDigEmployeeRelResourceAuthList(qo);
         }
         PageInfo<ResourceAuthVo> pageInfo = PageHelperUtil.toPageInfo(page);
+        fillOperationPermissions(pageInfo.getList());
         return pageInfo;
     }
 
@@ -230,6 +251,7 @@ public class ResourceAuthApplicationService {
         pageInfo.setTotal(total);
         pageInfo.setTotalPages((int) Math.ceil((double) total / safePageSize));
         pageInfo.setList(resources.subList(fromIndex, toIndex));
+        fillOperationPermissions(pageInfo.getList());
         return pageInfo;
     }
 
@@ -250,7 +272,9 @@ public class ResourceAuthApplicationService {
         // 添加用户权限上下文信息
         resourceAuthContextService.setCurrentUserAuthQo(resourceAuthQo);
 
-        return privilegeGrantService.listResource(resourceAuthQo);
+        PageInfo<ResourceAuthVo> pageInfo = privilegeGrantService.listResource(resourceAuthQo);
+        fillOperationPermissions(pageInfo.getList());
+        return pageInfo;
     }
 
     /**

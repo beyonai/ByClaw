@@ -59,6 +59,9 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   const [createdProjectOption, setCreatedProjectOption] = useState<ProjectOption>();
   const [selectedProjectOverride, setSelectedProjectOverride] = useState<string>();
   const createdProjectNameRef = useRef('');
+  // 从会话详情切换到新任务时，父级项目上下文会在同一轮渲染后清空；保留初始显式项目，
+  // 避免项目列表请求完成前把侧边栏刚选中的项目作用域重置为列表第一项。
+  const initialProjectIdRef = useRef(projectId);
   const [selectedProjectId, updateProjectScopeId] = useProjectScopeId();
   const { projects, loading: projectsLoading, fetchProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
@@ -102,16 +105,38 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   }, [onProjectChange, projectOptions, selectedProjectValue, sessionId]);
 
   useEffect(() => {
-    if (!projectOptions.length) return;
+    if (!projectOptions.length) {
+      // 项目列表首次请求尚未返回时，保留侧边栏新建任务传入的项目作用域。
+      // 此时直接清空共享项目会让请求完成后误选列表第一项（通常是默认项目）。
+      if (
+        !projectListReady &&
+        (projectsLoading || projectRequestStartedRef.current || initialProjectIdRef.current !== undefined)
+      ) {
+        return;
+      }
+      if (selectedProjectOverride) setSelectedProjectOverride(undefined);
+      if (selectedProjectValue) updateProjectScopeId(undefined);
+      return;
+    }
 
     const storedProject = selectedProjectValue
       ? projectOptions.find((project) => `${project.projectId}` === `${selectedProjectValue}`)
       : undefined;
     const nextProject = storedProject || projectOptions[0];
+    if (!storedProject && selectedProjectOverride) {
+      setSelectedProjectOverride(undefined);
+    }
     if (nextProject && `${nextProject.projectId}` !== `${selectedProjectValue || ''}`) {
       updateProjectScopeId(nextProject.projectId);
     }
-  }, [projectOptions, selectedProjectValue, updateProjectScopeId]);
+  }, [
+    projectListReady,
+    projectOptions,
+    projectsLoading,
+    selectedProjectOverride,
+    selectedProjectValue,
+    updateProjectScopeId,
+  ]);
 
   // 任务模板使用会话、项目模块共用的当前项目；项目选择器负责首次默认和本地恢复。
   const sharedProjectId = Number(selectedProjectValue);
@@ -171,16 +196,6 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
     () =>
       projectResources
         .filter((resource) => resource.resourceType === 'knowledge')
-        .map((resource) => ({
-          value: resource.resourceId,
-          label: resource.resourceName || `${resource.resourceId}`,
-        })),
-    [projectResources]
-  );
-  const projectOntologyOptions = useMemo(
-    () =>
-      projectResources
-        .filter((resource) => resource.resourceType === 'ontology')
         .map((resource) => ({
           value: resource.resourceId,
           label: resource.resourceName || `${resource.resourceId}`,
@@ -361,8 +376,6 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
           agentOptionsOnly
           knowledgeOptions={projectKnowledgeOptions}
           knowledgeOptionsOnly
-          ontologyOptions={projectOntologyOptions}
-          ontologyOptionsOnly
           categoryLabel="运营项目"
           onCancel={() => setVisible(false)}
           onApply={(result) => applyPrompt(result.prompt)}

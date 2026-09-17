@@ -119,6 +119,49 @@ test('complete topic-matched body is promoted with a deterministic receipt', asy
   assert.equal(replay.itemId, result.itemId);
 });
 
+test('candidate verification accepts a resolved URL that only adds a trailing slash', async () => {
+  const { paths, run } = setup();
+  const url = 'https://example.com/article/deepseek-harness-slash';
+  const candidate = addCandidate(paths, 'candidate-trailing-slash', url);
+  const attempt = reserveProbeAttempt(paths, run.runId, candidate, { expectedRevision: 1 });
+
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({
+      status: 'saved',
+      requestedUrl: url,
+      resolvedUrl: `${url}/`,
+      title: 'DeepSeek Harness 工程实践',
+      markdown: articleMarkdown(),
+      executor: 'fixture-web',
+    }),
+  });
+
+  assert.equal(result.promotionStatus, 'promoted');
+  assert.equal(loadSession(paths).session.collection.collection.items.length, 1);
+});
+
+test('candidate verification accepts an acquired same-site URL with a changed host and path', async () => {
+  const { paths, run } = setup();
+  const url = 'https://m.example.com/article/deepseek-harness';
+  const resolvedUrl = 'https://www.example.com/news/deepseek-harness?from=mobile';
+  const candidate = addCandidate(paths, 'candidate-same-site', url);
+  const attempt = reserveProbeAttempt(paths, run.runId, candidate, { expectedRevision: 1 });
+
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({
+      status: 'saved',
+      requestedUrl: url,
+      resolvedUrl,
+      title: 'DeepSeek Harness 工程实践',
+      markdown: articleMarkdown(),
+      executor: 'fixture-web',
+    }),
+  });
+
+  assert.equal(result.promotionStatus, 'promoted');
+  assert.equal(loadSession(paths).session.collection.collection.items.length, 1);
+});
+
 test('WeChat candidates use dedicated sanitization before promotion', async () => {
   const { paths, run } = setup();
   const url = 'https://mp.weixin.qq.com/s/deepseek-harness-fixture';
@@ -134,6 +177,27 @@ test('WeChat candidates use dedicated sanitization before promotion', async () =
   assert.equal(result.promotionStatus, 'promoted');
   const item = loadSession(paths).session.collection.collection.items[0];
   assert.equal(item.sourceUrl, url);
+});
+
+test('Sogou WeChat candidates retain trusted cross-site authorization through evidence registration', async () => {
+  const { paths, run } = setup();
+  const requestedUrl = 'https://weixin.sogou.com/link?url=deepseek-harness-fixture';
+  const resolvedUrl = 'https://mp.weixin.qq.com/s/deepseek-harness-fixture';
+  const selected = addCandidate(paths, 'candidate-sogou-wechat', requestedUrl);
+  const attempt = reserveProbeAttempt(paths, run.runId, selected, { expectedRevision: 1 });
+
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({
+      status: 'saved', requestedUrl, resolvedUrl,
+      title: 'DeepSeek Harness 微信工程实践', markdown: `${articleMarkdown()}\n\n赞赏\n`,
+      executor: 'fixture-wechat',
+    }),
+  });
+
+  assert.equal(result.promotionStatus, 'promoted');
+  const session = loadSession(paths).session;
+  assert.equal(session.collection.collection.items[0].sourceUrl, requestedUrl);
+  assert.equal(session.task.acquisitionEvidence[0].resolvedUrl, resolvedUrl);
 });
 
 test('arXiv candidates prefer an authorized HTML representation and require paper structure', async () => {
@@ -210,6 +274,58 @@ test('challenge pause persists verifier-owned browser cleanup state', async () =
   const persisted = loadSession(paths).session.task.publicCollectRun;
   assert.equal(persisted.pause.ownedSession.sessionId, 'kc-probe-fixture-challenge');
   assert.equal(persisted.ownedSessionCleanupPending.length, 1);
+});
+
+test('unavailable acquisition persists structured redirect authorization diagnostics', async () => {
+  const { paths, run } = setup();
+  const requestedUrl = 'https://example.com/article/authorized';
+  const resolvedUrl = 'https://example.com/article/other';
+  const selected = addCandidate(paths, 'candidate-redirect-diagnostic', requestedUrl);
+  const attempt = reserveProbeAttempt(paths, run.runId, selected, { expectedRevision: 1 });
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({
+      status: 'unavailable',
+      reasonCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY',
+      failureDiagnostic: {
+        stage: 'resolved-url-authorization',
+        mismatchKind: 'redirect-not-authorized',
+        requestedUrl,
+        resolvedUrl,
+      },
+    }),
+  });
+
+  assert.deepEqual(result.failureDiagnostic, {
+    stage: 'resolved-url-authorization',
+    mismatchKind: 'redirect-not-authorized',
+    requestedUrl,
+    resolvedUrl,
+  });
+  const persisted = loadSession(paths).session.task.publicCollectRun.attempts[0];
+  assert.deepEqual(persisted.failureDiagnostic, result.failureDiagnostic);
+});
+
+test('saved unauthorized acquisition redacts sensitive resolved URL values', async () => {
+  const { paths, run } = setup();
+  const selected = addCandidate(paths, 'candidate-sensitive-redirect', 'https://example.com/article/authorized');
+  const attempt = reserveProbeAttempt(paths, run.runId, selected, { expectedRevision: 1 });
+  await assert.rejects(verifyCandidate(paths, {
+    runId: run.runId, attemptId: attempt.attemptId,
+  }, {
+    acquire: async () => ({
+      status: 'saved',
+      requestedUrl: selected.canonicalUrl,
+      resolvedUrl: 'https://evil.example.net/login?token=super-secret',
+      title: 'redirect',
+      markdown: articleMarkdown(),
+      executor: 'fixture-web',
+    }),
+  }), (error) => {
+    assert.match(error.message, /PROBE_ACQUISITION_URL_NOT_AUTHORIZED/);
+    assert.equal(error.message.includes('super-secret'), false);
+    assert.match(error.message, /REDACTED/);
+    return true;
+  });
 });
 
 test('damaged verification receipt invalidates requested-count delivery', async () => {

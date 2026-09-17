@@ -6,8 +6,7 @@ import { getLocale, useDispatch, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
-import { queryResourceOperationPermissions, restoreResource } from '@/pages/manager/service/resources';
-import { installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
+import { restoreResource } from '@/pages/manager/service/resources';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
 import { useRequest } from '@/hooks/useRequest';
@@ -20,6 +19,8 @@ import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentB
 import { useWorkspaceSkillActions } from '../../workspaceSkill/useWorkspaceSkillActions';
 import WorkspaceSkillShareAuthModal from '../../workspaceSkill/WorkspaceSkillShareAuthModal';
 import type { WorkspaceSkillItem } from '../../workspaceSkill/utils';
+import ResourceInstallDialog from '../ResourceInstallDialog';
+import type { ResourceInstallTargetContext } from '../../resourceInstallContext';
 import styles from './index.module.less';
 
 const { Paragraph } = Typography;
@@ -58,13 +59,17 @@ export interface IResourceCardItem {
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canApplyUse?: boolean;
-  canAuditUse?: boolean;
   canDelete?: boolean;
+  canOnShelf?: boolean;
+  canOffShelf?: boolean;
+  canUnShelf?: boolean;
+  canDeleteData?: boolean;
   canSetDefault?: boolean;
   canRestore?: boolean;
   approveStatus?: string;
   useApplyPending?: boolean;
   resourceStatus?: number | string;
+  metaStatus?: number | string;
   ownerType?: string;
   agentType?: string;
   isDefault?: boolean | string;
@@ -83,11 +88,16 @@ export interface IResourceCardItem {
   syncStatus?: string;
   syncError?: string;
   lastSyncTime?: string;
+
+  /** 列表接口已一次性回填当前用户操作权限时为 true。 */
+  operationPermissionsLoaded?: boolean;
 }
 
 type ResourceCardActionConfig = {
   scene?: ResourceCardActionScene;
   installedResourceIds?: ReadonlySet<string>;
+  canInstallToTarget?: boolean;
+  installTargetContext?: ResourceInstallTargetContext;
 
   /** 当前用户对该数字员工是否有管理权限，无则隐藏工作空间技能的删除入口。 */
   canManageWorkspaceSkill?: boolean;
@@ -105,6 +115,12 @@ type ResourceCardActionConfig = {
   onApplyUse?: () => void;
   onAuditUse?: () => void;
   onDelete?: () => void;
+  onDeleteData?: () => void;
+  onShelf?: () => void;
+  onUnShelf?: () => void;
+  enableDigitalEmployeeLifecycle?: boolean;
+  enableDigitalEmployeeDelete?: boolean;
+  showDigitalEmployeeTypeTag?: boolean;
   onRestore?: () => void;
   onAuth?: (authType: 'useAuth' | 'mgrAuth') => void;
   onEdit?: () => void;
@@ -253,8 +269,6 @@ const InstallingOverlay = () => {
 const getInstallLabelId = (resource: IResourceCardItem, resourceType?: string) => {
   const bizType = resource?.resourceBizType || resourceType;
   if (['KG_DOC', 'KG_QA', 'KG_TERM'].includes(bizType || '')) return 'resource.installKnowledge';
-  if (bizType === 'VIEW' || resourceType === 'VIEW') return 'resource.installView';
-  if (bizType === 'OBJECT' || resourceType === 'OBJECT') return 'resource.installObject';
   if (bizType === 'SKILL' || resourceType === 'SKILL') return 'resource.installSkill';
   return 'resource.installTool';
 };
@@ -264,7 +278,7 @@ const canInstallResource = (resource: IResourceCardItem, resourceType?: string) 
   if (bizType === 'SKILL' || resourceType === 'SKILL') {
     return Boolean(resource?.resourceId && resource?.hasUsePermission);
   }
-  // 本体库走"按粒度安装"选择器（库/场景/对象/视图），不提供内建的整库快装入口。
+  // 阻止历史已下线资源再次安装。
   if (bizType === 'ONTOLOGY_BASE' || resourceType === 'ONTOLOGY_BASE') {
     return false;
   }
@@ -314,21 +328,37 @@ const RenderContent = (props: ResourceCardProps) => {
     digitalEmployeeActionMode = false,
   } = props;
   const { ownerType } = resource || {};
+  const isDeletedDigitalEmployee =
+    (resource?.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE ||
+      resourceType === resourceBizTypeMap.DIG_EMPLOYEE) &&
+    `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` === '-1';
+  const canApplyUseForStatus =
+    `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` !== '3' &&
+    `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` !== '-1';
   const {
     onEdit = noop,
     onAuth = noop,
     onApplyUse = noop,
-    onAuditUse = noop,
     onRestore = noop,
     onDelete = noop,
+    onDeleteData = noop,
+    onShelf = noop,
+    onUnShelf = noop,
     onSetDefault = noop,
     onChat = noop,
   } = actionConfig || {};
+  const enableDigitalEmployeeLifecycle = actionConfig?.enableDigitalEmployeeLifecycle !== false;
+  const enableDigitalEmployeeDelete = actionConfig?.enableDigitalEmployeeDelete === true;
+  // Standalone cards keep the descriptive employee-type tag by default; list
+  // views can explicitly opt into lifecycle status tags when needed.
+  const showDigitalEmployeeTypeTag = actionConfig?.showDigitalEmployeeTypeTag ?? true;
 
   const intl = useIntl();
   const dispatch = useDispatch();
   const { agentId, agentInfo, EventEmitter } = useGlobal();
   const [digitalEmployeeMenuOpen, setDigitalEmployeeMenuOpen] = useState(false);
+  const [installDialogOpen, setInstallDialogOpen] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -369,33 +399,7 @@ const RenderContent = (props: ResourceCardProps) => {
       // message.error(intl.formatMessage({ id: 'common.operationFailed' }));
     },
   });
-  const { mutate: handleInstall, isLoading: installing } = useRequest({
-    mutationFn: async () => {
-      // installRelResources 走 customHandle，业务失败（如无管理权限 code!==0）也会 resolve，
-      // 这里必须显式校验 code，否则 onSuccess 会把“没权限”当成“安装成功”。
-      const res: any = await installDigitalEmployeeRelResources({
-        digitalEmployeeId: `${activeDigitalEmployeeId}`,
-        relIds: [`${resource.resourceId}`],
-      });
-      if (res && res.code !== 0) {
-        throw res.msg || intl.formatMessage({ id: 'common.operationFailed' });
-      }
-      return res;
-    },
-    onSuccess: () => {
-      message.success(intl.formatMessage({ id: 'resource.installSuccess' }));
-      window.dispatchEvent(
-        new CustomEvent('digitalEmployeeResourceInstalled', { detail: { resourceId: resource?.resourceId } })
-      );
-      if (isSkillResource(resource, resourceType)) {
-        EventEmitter?.emit('beyond-resourceList-resourceType-reload', {
-          resourceType: 'SKILL',
-          resetSkillFilters: false,
-          skipResourceCenterRefresh: true,
-        });
-      }
-    },
-  });
+  const installTargetContext = actionConfig?.installTargetContext || { mode: 'select' as const };
 
   const displayTitle = resource.resourceName || resource.name || intl.formatMessage({ id: 'common.none' });
   const displayDescription =
@@ -430,6 +434,12 @@ const RenderContent = (props: ResourceCardProps) => {
 
   const isDigitalEmployeeResource =
     resource.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE || resourceType === resourceBizTypeMap.DIG_EMPLOYEE;
+  const isPublishedDigitalEmployee =
+    !isDigitalEmployeeResource || `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` === '2';
+  const isPendingUseApproval =
+    isPublishedDigitalEmployee && (resource.approveStatus === 'S' || isTruthyFlag(resource.useApplyPending));
+  const canApplyForUse =
+    isPublishedDigitalEmployee && !isTruthyFlag(resource.hasUsePermission) && isTruthyFlag(resource.canApplyUse);
   const resourceIdentity = `${resource.resourceId ?? resource.id ?? ''}`;
   const defaultEmployeeIdentity = `${defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`;
   const isDefaultDigitalEmployee =
@@ -454,6 +464,22 @@ const RenderContent = (props: ResourceCardProps) => {
   };
 
   const getDisplayTopRightTag = () => {
+    // 数字员工状态由后端 resourceStatus 返回，统一映射为卡片右上角状态标签。
+    if (isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) {
+      const statusLabelMap: Record<string, string> = {
+        '-1': 'resourceStatus.deleted',
+        '0': 'resourceStatus.draft',
+        '1': 'resourceStatus.pendingShelf',
+        '2': 'resourceStatus.published',
+        '3': 'resourceStatus.unpublished',
+      };
+      // 员工组与数字员工接口的状态字段可能不同，统一按同一组回退字段取值。
+      const statusMessageId =
+        statusLabelMap[
+          `${resource.resourceStatus ?? resource.metaStatus ?? resource.publishStatus ?? resource.status ?? ''}`
+        ];
+      if (statusMessageId) return intl.formatMessage({ id: statusMessageId });
+    }
     const digitalEmployeeTypeTag = getDigitalEmployeeTypeTag();
     if (digitalEmployeeTypeTag) {
       return digitalEmployeeTypeTag;
@@ -497,12 +523,47 @@ const RenderContent = (props: ResourceCardProps) => {
     return undefined;
   };
   const displayTopRightTag = getDisplayTopRightTag();
-  const isCancelledResource = `${resource?.resourceStatus ?? ''}` === '3';
-  const topRightTag = isCancelledResource ? intl.formatMessage({ id: 'resource.statusCancelled' }) : displayTopRightTag;
+  const digitalEmployeeStatus = `${
+    resource?.resourceStatus ?? resource?.metaStatus ?? resource?.publishStatus ?? resource?.status ?? ''
+  }`;
+  const isCancelledResource = isDigitalEmployeeResource && digitalEmployeeStatus === '-1';
+  const statusTagTextMap: Record<string, string> = {
+    已上架: '2',
+    Published: '2',
+    已下架: '3',
+    Unpublished: '3',
+    草稿: '0',
+    草稿箱: '0',
+    Draft: '0',
+    待上架: '1',
+    'Pending publication': '1',
+    已删除: '-1',
+    Deleted: '-1',
+    ON_SHELF: '2',
+    OFF_SHELF: '3',
+    PUBLISHED: '2',
+    UNPUBLISHED: '3',
+    DRAFT: '0',
+    PENDING_SHELF: '1',
+  };
+  // 部分旧接口仅返回状态标签文本，按文本补齐状态样式，避免同一状态出现不同颜色。
+  const rawStatusKey = `${digitalEmployeeStatus || ''}`.trim();
+  const normalizedStatus =
+    statusTagTextMap[rawStatusKey] ||
+    statusTagTextMap[rawStatusKey.toUpperCase()] ||
+    statusTagTextMap[`${displayTopRightTag || ''}`] ||
+    '';
+  const digitalEmployeeStatusClass =
+    isDigitalEmployeeResource && !showDigitalEmployeeTypeTag
+      ? normalizedStatus === '-1'
+        ? 'digitalEmployeeStatusDeleted'
+        : `digitalEmployeeStatus${normalizedStatus}`
+      : '';
+  const topRightTag = displayTopRightTag;
   const isInnerSkill = isInnerSkillResource(resource, resourceType);
-  const isInstalledSkill =
-    isSkillResource(resource, resourceType) &&
-    Boolean(resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`));
+  const isInstalledResource = Boolean(
+    resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`)
+  );
   const isCardClickDisabled =
     typeof cardClickDisabled === 'function' ? cardClickDisabled(resource) : !!cardClickDisabled;
 
@@ -569,12 +630,30 @@ const RenderContent = (props: ResourceCardProps) => {
   useEffect(() => () => handleSetDefaultDebounced.cancel(), [handleSetDefaultDebounced]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
-    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canSetDefault, canRestore } =
-      resource || {};
+    const {
+      canEdit,
+      canManageAuth,
+      canUseAuth,
+      canApplyUse,
+      canDelete,
+      canOnShelf,
+      canOffShelf,
+      canSetDefault,
+      canRestore,
+    } = resource || {};
     const items: NonNullable<MenuProps['items']> = [];
+    // 企业数字员工的操作权限接口以 canEdit 表示管理权限；兼容部分旧返回未带 canOffShelf 的情况。
+    const canManageEnterpriseDigitalEmployee =
+      isDigitalEmployeeResource && `${ownerType || ''}`.toLowerCase() === 'enterprise' && canEdit === true;
+    const digitalEmployeeStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
 
-    // 后端按当前用户权限和默认员工关系返回 canSetDefault。
-    if (isDigitalEmployeeResource && canSetDefault === true && !isDefaultDigitalEmployee) {
+    // 设为默认必须同时具备使用权限，避免待申请员工因 canSetDefault 返回不一致而显示入口。
+    if (
+      isDigitalEmployeeResource &&
+      isTruthyFlag(resource.hasUsePermission) &&
+      canSetDefault === true &&
+      !isDefaultDigitalEmployee
+    ) {
       items.push({
         key: 'setDefaultAssistant',
         label: (
@@ -636,8 +715,8 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 使用申请与其他权限操作并列展示，由后端返回的权限字段决定其他操作是否出现。
-    if (canApplyUse) {
+    // 数字员工和员工组统一使用卡片上的加号申请；其他资源保留菜单申请入口。
+    if (!isDigitalEmployeeResource && canApplyUse && canApplyUseForStatus) {
       items.push({
         key: 'applyUse',
         label: (
@@ -651,65 +730,107 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 使用审核
-    if (canAuditUse) {
-      items.push({
-        key: 'auditUse',
-        label: <BuildMenuLabel icon="icon-a-Listliebiao" text={intl.formatMessage({ id: 'resource.auditUse' })} />,
-        onClick: () => {
-          onAuditUse?.();
-        },
-      });
-    }
+    // 使用审核统一由审核中心承载，卡片不再返回或消费审核按钮权限。
 
-    // 安装到当前默认数字员工
-    if (canInstallResource(resource, resourceType) && !isInstalledSkill) {
-      const disabled = !activeDigitalEmployeeId;
+    // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
+    if (
+      canInstallResource(resource, resourceType) &&
+      actionConfig?.canInstallToTarget !== false &&
+      !isInstalledResource
+    ) {
       items.push({
         key: 'install',
         label: (
+          <BuildMenuLabel
+            icon="icon-a-Addtianjia"
+            text={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
+            loading={installing}
+          />
+        ),
+        disabled: installing,
+        onClick: () => setInstallDialogOpen(true),
+      });
+    }
+
+    // 数字员工下架使用“编辑信息”权限；我可用列表通过生命周期开关整体隐藏该操作。
+    const canUnShelfDigitalEmployee =
+      isDigitalEmployeeResource &&
+      (canOffShelf === true || (canManageEnterpriseDigitalEmployee && digitalEmployeeStatus === '2'));
+    if (enableDigitalEmployeeLifecycle && ((!isDigitalEmployeeResource && canDelete) || canUnShelfDigitalEmployee)) {
+      items.push({
+        key: isDigitalEmployeeResource ? 'unShelfData' : 'delete',
+        label: (
           <ConfirmMenuLabel
-            disabled={disabled || installing}
-            title={intl.formatMessage({ id: 'resource.installConfirm' })}
-            onConfirm={() => handleInstall(undefined)}
+            title={intl.formatMessage({
+              id: isDigitalEmployeeResource ? 'resource.unShelfDataConfirm' : 'common.deactivateConfirm',
+            })}
+            onConfirm={() => (isDigitalEmployeeResource ? onUnShelf() : onDelete())}
           >
             <BuildMenuLabel
-              icon="icon-a-Addtianjia"
-              text={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
-              disabled={disabled}
-              disabledTip={intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' })}
-              loading={installing}
+              icon={isDigitalEmployeeResource ? 'icon-a-Downloadxiazai' : 'icon-a-Deleteshanchu'}
+              text={
+                isDigitalEmployeeResource
+                  ? intl.formatMessage({ id: 'resource.unShelfData' })
+                  : intl.formatMessage({ id: 'common.deleteResource' })
+              }
             />
           </ConfirmMenuLabel>
         ),
       });
     }
 
-    // 注销数据
-    if (canDelete && !isInnerSkill) {
+    // 已下架数字员工始终提供“上架数据”，不再依赖恢复权限字段。
+    if (
+      enableDigitalEmployeeLifecycle &&
+      isDigitalEmployeeResource &&
+      (canOnShelf === true || (canManageEnterpriseDigitalEmployee && ['0', '3'].includes(digitalEmployeeStatus)))
+    ) {
       items.push({
-        key: 'delete',
+        key: 'shelfData',
         label: (
-          <ConfirmMenuLabel title={intl.formatMessage({ id: 'common.deactivateConfirm' })} onConfirm={() => onDelete()}>
-            <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
+          <ConfirmMenuLabel title={intl.formatMessage({ id: 'resource.shelfDataConfirm' })} onConfirm={() => onShelf()}>
+            <BuildMenuLabel icon="icon-a-Uploadshangchuan" text={intl.formatMessage({ id: 'resource.shelfData' })} />
           </ConfirmMenuLabel>
         ),
       });
     }
 
-    // 恢复数据
-    if (canRestore) {
+    // 我创建的已下架数字员工允许永久删除数据，操作与上下架生命周期菜单分开控制。
+    if (isDigitalEmployeeResource && enableDigitalEmployeeDelete && canDelete === true) {
+      items.push({
+        key: 'deleteData',
+        label: (
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'resource.deleteDataConfirm' })}
+            onConfirm={() => onDeleteData()}
+          >
+            <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'resource.deleteData' })} />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
+
+    // 其他资源继续使用原有恢复逻辑。
+    if (canRestore && !isDigitalEmployeeResource) {
       items.push({
         key: 'restore',
         label: (
           <ConfirmMenuLabel
             disabled={restoring}
-            title={intl.formatMessage({ id: 'common.restoreConfirm' })}
-            onConfirm={() => handleRestore({ resourceId: resource?.resourceId })}
+            title={intl.formatMessage({
+              id: isDigitalEmployeeResource ? 'resource.shelfDataConfirm' : 'common.restoreConfirm',
+            })}
+            onConfirm={() =>
+              isDigitalEmployeeResource ? onShelf() : handleRestore({ resourceId: resource?.resourceId })
+            }
           >
             <BuildMenuLabel
               icon="icon-a-Returnfanhui"
-              text={intl.formatMessage({ id: 'common.restoreResource' })}
+              text={
+                isDigitalEmployeeResource
+                  ? intl.formatMessage({ id: 'resource.shelfData' })
+                  : intl.formatMessage({ id: 'common.restoreResource' })
+              }
               loading={restoring}
             />
           </ConfirmMenuLabel>
@@ -717,7 +838,7 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 额外操作（如本体的「绑定本体」）：调用方可按当前资源权限控制展示。
+    // 额外操作：调用方可按当前资源权限控制展示。
     if (actionConfig?.extraMenuItems?.length) {
       items.push(
         ...actionConfig.extraMenuItems.filter((item: ExtraResourceMenuItem) => {
@@ -735,14 +856,20 @@ const RenderContent = (props: ResourceCardProps) => {
     dispatch,
     EventEmitter,
     handleSetDefaultDebounced,
-    handleInstall,
     intl,
     isDefaultDigitalEmployee,
     isDigitalEmployeeResource,
+    isDeletedDigitalEmployee,
+    isPublishedDigitalEmployee,
     onApplyUse,
-    onAuditUse,
     onAuth,
     onDelete,
+    onDeleteData,
+    onShelf,
+    onUnShelf,
+    enableDigitalEmployeeLifecycle,
+    enableDigitalEmployeeDelete,
+    showDigitalEmployeeTypeTag,
     onEdit,
     onRestore,
     onSetDefault,
@@ -750,9 +877,13 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canManageAuth,
     resource?.canUseAuth,
     resource?.canApplyUse,
+    canApplyUseForStatus,
     resource?.canSetDefault,
-    resource?.canAuditUse,
     resource?.canDelete,
+    resource?.canOnShelf,
+    resource?.canOffShelf,
+    resource?.canUnShelf,
+    resource?.canDeleteData,
     resource?.canRestore,
     resource?.hasUsePermission,
     resource?.ownerType,
@@ -762,7 +893,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.skillType,
     resourceType,
     isInnerSkill,
-    isInstalledSkill,
+    isInstalledResource,
     installing,
     restoring,
     settingDefault,
@@ -813,14 +944,31 @@ const RenderContent = (props: ResourceCardProps) => {
         onSuccess={notifySkillListReload}
       />
     ) : null;
+  const installDialog =
+    resource.resourceId && installDialogOpen ? (
+      <ResourceInstallDialog
+        open={installDialogOpen}
+        resourceId={resource.resourceId}
+        resourceType={resourceType || resource.resourceBizType}
+        targetContext={installTargetContext}
+        onClose={() => setInstallDialogOpen(false)}
+        onInstallingChange={setInstalling}
+        onSuccess={() => {
+          if (isSkillResource(resource, resourceType)) {
+            EventEmitter?.emit('beyond-resourceList-resourceType-reload', {
+              resourceType: 'SKILL',
+              resetSkillFilters: false,
+              skipResourceCenterRefresh: true,
+            });
+          }
+        }}
+      />
+    ) : null;
 
   const getDefaultIcon = () => {
     switch (resourceType) {
       case 'KG_DOC':
         return 'icon-chuangjianfangshi-wendangku';
-      case 'OBJECT':
-      case 'VIEW':
-        return 'icon-chuangjianfangshi-shujuku';
       default:
         return 'icon-chajiantubiao';
     }
@@ -835,6 +983,7 @@ const RenderContent = (props: ResourceCardProps) => {
           [styles.disabledClickContent]: isCardClickDisabled,
         })}
         onClick={() => {
+          if (installDialogOpen) return;
           if (isCancelledResource) return;
           if (isCardClickDisabled) {
             onCardClickDisabled?.(resource);
@@ -914,6 +1063,7 @@ const RenderContent = (props: ResourceCardProps) => {
             {workspaceShareModal}
           </div>
         )}
+        {installDialog}
       </div>
     );
   }
@@ -926,6 +1076,7 @@ const RenderContent = (props: ResourceCardProps) => {
         [styles.disabledClickContent]: isCardClickDisabled,
       })}
       onClick={() => {
+        if (installDialogOpen) return;
         if (isCancelledResource) return;
         if (isCardClickDisabled) {
           onCardClickDisabled?.(resource);
@@ -982,9 +1133,35 @@ const RenderContent = (props: ResourceCardProps) => {
               {effectiveTopRightTag ? (
                 <span
                   className={classnames(styles.tag, {
-                    [styles.digitalEmployeePersonalTag]: isPersonalDigitalEmployee,
-                    [styles.digitalEmployeeTag]: isDigitalEmployeeResource && !isPersonalDigitalEmployee,
+                    // 我可用列表按个人/企业及员工/员工组区分标签颜色；官方推荐仍沿用状态标签样式。
+                    [styles.digitalEmployeePersonalTag]:
+                      isDigitalEmployeeResource &&
+                      showDigitalEmployeeTypeTag &&
+                      isPersonalDigitalEmployee &&
+                      !isDigitalEmployeeGroup,
+                    [styles.digitalEmployeePersonalGroupTag]:
+                      isDigitalEmployeeResource &&
+                      showDigitalEmployeeTypeTag &&
+                      isPersonalDigitalEmployee &&
+                      isDigitalEmployeeGroup,
+                    [styles.digitalEmployeeEnterpriseTag]:
+                      isDigitalEmployeeResource &&
+                      showDigitalEmployeeTypeTag &&
+                      !isPersonalDigitalEmployee &&
+                      !isDigitalEmployeeGroup,
+                    [styles.digitalEmployeeEnterpriseGroupTag]:
+                      isDigitalEmployeeResource &&
+                      showDigitalEmployeeTypeTag &&
+                      !isPersonalDigitalEmployee &&
+                      isDigitalEmployeeGroup,
+                    [styles.digitalEmployeeTag]:
+                      isDigitalEmployeeResource &&
+                      !isPersonalDigitalEmployee &&
+                      !isDigitalEmployeeGroup &&
+                      !showDigitalEmployeeTypeTag,
+                    [styles.digitalEmployeeStatusTag]: isDigitalEmployeeResource && !showDigitalEmployeeTypeTag,
                     [styles.digitalEmployeeTopRightTag]: isDigitalEmployeeResource,
+                    [styles[digitalEmployeeStatusClass]]: Boolean(digitalEmployeeStatusClass),
                     [styles.cancelledTag]: isCancelledResource,
                   })}
                 >
@@ -1012,45 +1189,62 @@ const RenderContent = (props: ResourceCardProps) => {
 
             {digitalEmployeeActionMode && (
               <div className={styles.digitalEmployeeActions} onClick={(event) => event.stopPropagation()}>
-                {resource.approveStatus === 'S' || isTruthyFlag(resource.useApplyPending) ? (
+                {isPendingUseApproval ? (
                   <div className={styles.applyActionWrap}>
                     <Button disabled shape="circle" icon={<PlusOutlined className={styles.cardActionBtnIcon} />} />
-                    <span className={styles.pendingApplyText}>待授权通过</span>
+                    <span className={styles.pendingApplyText}>
+                      {intl.formatMessage({ id: 'resource.pendingAuthorization' })}
+                    </span>
                   </div>
-                ) : !isTruthyFlag(resource.hasUsePermission) && isTruthyFlag(resource.canApplyUse) ? (
-                  <Tooltip title="使用申请">
-                    <Popconfirm
-                      title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
-                      okText={intl.formatMessage({ id: 'common.confirm' })}
-                      cancelText={intl.formatMessage({ id: 'common.cancel' })}
-                      onConfirm={(event) => {
-                        event?.stopPropagation();
-                        onApplyUse?.();
-                      }}
-                      onCancel={(event) => event?.stopPropagation()}
-                    >
-                      <Button
-                        shape="circle"
-                        icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
+                ) : canApplyForUse ? (
+                  <>
+                    <Tooltip title={intl.formatMessage({ id: 'resource.applyUse' })}>
+                      <Popconfirm
+                        title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
+                        okText={intl.formatMessage({ id: 'common.confirm' })}
+                        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+                        onConfirm={(event) => {
+                          event?.stopPropagation();
+                          onApplyUse?.();
                         }}
-                      />
-                    </Popconfirm>
-                  </Tooltip>
+                        onCancel={(event) => event?.stopPropagation()}
+                      >
+                        <Button
+                          shape="circle"
+                          icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                          }}
+                        />
+                      </Popconfirm>
+                    </Tooltip>
+                    {!!effectiveMenuItems?.length ? (
+                      <Dropdown
+                        menu={{ items: effectiveMenuItems }}
+                        placement="bottomRight"
+                        trigger={['click']}
+                        open={digitalEmployeeMenuOpen}
+                        onOpenChange={setDigitalEmployeeMenuOpen}
+                      >
+                        <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
+                      </Dropdown>
+                    ) : null}
+                  </>
                 ) : (
                   <>
-                    <Tooltip title="进入会话">
-                      <Button
-                        shape="circle"
-                        icon={<MessageOutlined className={styles.cardActionBtnIcon} />}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onChat?.();
-                        }}
-                      />
-                    </Tooltip>
+                    {!isDeletedDigitalEmployee && isPublishedDigitalEmployee && (
+                      <Tooltip title={intl.formatMessage({ id: 'resource.enterConversation' })}>
+                        <Button
+                          shape="circle"
+                          icon={<MessageOutlined className={styles.cardActionBtnIcon} />}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onChat?.();
+                          }}
+                        />
+                      </Tooltip>
+                    )}
                     {!!effectiveMenuItems?.length ? (
                       <Dropdown
                         menu={{ items: effectiveMenuItems }}
@@ -1107,6 +1301,7 @@ const RenderContent = (props: ResourceCardProps) => {
           </div>
         </div>
       </div>
+      {installDialog}
     </div>
   );
 };
@@ -1114,98 +1309,11 @@ const RenderContent = (props: ResourceCardProps) => {
 function ResourceCard(props: ResourceCardProps) {
   const { resource, variant = 'default' } = props;
   const resourceCardRef = useRef<HTMLDivElement>(null);
-  const fetchedPermissionKeyRef = useRef<string | undefined>(undefined);
-  const [operationPermissions, setOperationPermissions] = useState<Partial<IResourceCardItem> | null>(null);
-  const defaultDigEmployeeId = useSelector(
-    ({ employees, user }: any) => employees?.defaultDigEmployeeId || user?.userInfo?.defaultDigEmployeeId
-  );
-  const operationResourceId = resource.resourceId ?? resource.id ?? resource.agentId;
-  const permissionQueryKey = `${operationResourceId ?? ''}:${defaultDigEmployeeId ?? ''}:${
-    resource.approveStatus ?? ''
-  }`;
-
-  useEffect(() => {
-    // 工作空间(用户开发)技能没有真实 resourceId，跳过资源权限查询，避免无效请求。
-    if (!operationResourceId || isWorkspaceSkill(resource) || fetchedPermissionKeyRef.current === permissionQueryKey) {
-      return noop;
-    }
-
-    let observer: IntersectionObserver | undefined;
-    let cancelled = false;
-
-    const loadOperationPermissions = async () => {
-      if (cancelled || fetchedPermissionKeyRef.current === permissionQueryKey) return;
-      fetchedPermissionKeyRef.current = permissionQueryKey;
-      try {
-        const res: any = await queryResourceOperationPermissions({ resourceId: operationResourceId });
-        const permissions = res?.data || res;
-        if (!cancelled && permissions) {
-          const {
-            canEdit,
-            canManageAuth,
-            canUseAuth,
-            canDelete,
-            canApplyUse,
-            canAuditUse,
-            canSetDefault,
-            canRestore,
-            hasManagePermission,
-            hasUsePermission,
-            canViewDetail,
-            useApplyPending,
-          } = permissions;
-          setOperationPermissions({
-            hasManagePermission,
-            hasUsePermission,
-            canViewDetail,
-            canEdit,
-            canManageAuth,
-            canUseAuth,
-            canDelete,
-            canApplyUse,
-            canAuditUse,
-            canSetDefault,
-            canRestore,
-            useApplyPending,
-            ...(useApplyPending ? { approveStatus: 'S' } : {}),
-          });
-        }
-      } catch {
-        if (fetchedPermissionKeyRef.current === permissionQueryKey) {
-          fetchedPermissionKeyRef.current = undefined;
-        }
-      }
-    };
-
-    // 数字员工操作区需要立即展示完整菜单，不再等待 IntersectionObserver 触发。
-    if (props.digitalEmployeeActionMode) {
-      void loadOperationPermissions();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (!resourceCardRef.current) return noop;
-    const callback = debounce((entries: IntersectionObserverEntry[]) => {
-      for (const entry of entries) {
-        if (entry.intersectionRatio > 0) {
-          void loadOperationPermissions();
-          observer?.disconnect();
-          break;
-        }
-      }
-    }, 100);
-
-    observer = new IntersectionObserver(callback);
-    observer.observe(resourceCardRef.current);
-    return () => {
-      cancelled = true;
-      observer?.disconnect();
-    };
-  }, [operationResourceId, permissionQueryKey, props.digitalEmployeeActionMode, resource]);
-
-  const displayResource = operationPermissions ? { ...resource, ...operationPermissions } : resource;
-  const isCancelledResource = `${displayResource?.resourceStatus ?? ''}` === '3';
+  const displayResource = resource;
+  const isCancelledResource =
+    displayResource?.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE
+      ? `${displayResource?.resourceStatus ?? displayResource?.metaStatus ?? ''}` === '-1'
+      : `${displayResource?.resourceStatus ?? ''}` === '3';
   const isCardClickDisabled =
     typeof props.cardClickDisabled === 'function'
       ? props.cardClickDisabled(displayResource)

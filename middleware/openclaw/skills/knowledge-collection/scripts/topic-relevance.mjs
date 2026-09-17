@@ -20,6 +20,8 @@ const ORCHESTRATION = [
   /(?:请|帮我|帮忙|需要|我要|我想)?(?:采集|收集|抓取|获取|保存|下载|整理)/giu,
   /(?:一|两|三|四|五|六|七|八|九|十|\d+)\s*(?:篇|个|条|份)/giu,
   /(?:最终|完成后|采集完成|并把|并将|然后|文件|正文|本地图片|图片文件夹|当前会话(?:下空间)?|根目录)/giu,
+  /(?:并)?(?:落盘|完整全文|完整正文|全文|原文)/giu,
+  /(?:这|该|指定|上述)?(?:一)?篇?(?:头条)?文章/giu,
   /\b(?:collect|fetch|download|save|gather|find|please|final|file|files|markdown|local|images?)\b/giu,
 ];
 
@@ -160,13 +162,23 @@ function latinAnchor(anchor) {
   return /^[\p{Script=Latin}\p{N}\s\-_.+]+$/u.test(anchor);
 }
 
+function normalizeLexicalBoundaries(value) {
+  return value
+    .replace(/(\p{Script=Han})([\p{Script=Latin}\p{N}])/gu, '$1 $2')
+    .replace(/([\p{Script=Latin}\p{N}])(\p{Script=Han})/gu, '$1 $2')
+    .replace(/(\p{Script=Latin})(\p{N})/gu, '$1 $2')
+    .replace(/(\p{N})(\p{Script=Latin})/gu, '$1 $2');
+}
+
 function anchorPattern(anchor) {
   const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[\s\-_.+]+/gu, '[\\s\\-_.+]+');
   return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
 }
 
 function matchesAnchor(normalized, anchor) {
-  return latinAnchor(anchor) ? anchorPattern(anchor).test(normalized) : normalized.includes(anchor);
+  return latinAnchor(anchor)
+    ? anchorPattern(normalizeLexicalBoundaries(anchor)).test(normalizeLexicalBoundaries(normalized))
+    : normalized.includes(anchor);
 }
 
 function matchedAnchors(contract, normalized) {

@@ -11,20 +11,25 @@ ROUTING_REFERENCE = (
     / "references"
     / "agent-reach.md"
 )
+PUBLIC_REFERENCE = ROUTING_REFERENCE.parent / "sources" / "public-internet.md"
 BYCLI_SKILL = Path(__file__).parents[1] / "skills" / "bycli" / "SKILL.md"
 
 
 class ByReachSkillContractTest(unittest.TestCase):
-    def test_agent_reach_is_the_embedded_public_internet_router(self):
+    def test_agent_reach_is_the_unified_skill_channel_router(self):
         routing = ROUTING_REFERENCE.read_text(encoding="utf-8")
 
-        self.assertIn("# 公共互联网来源路由（原 By-Reach 路由器）", routing)
-        self.assertIn("内置公共互联网路由器 `agent-reach`", routing)
-        self.assertIn("by-reach doctor --json", routing)
-        self.assertIn("~/.by-reach/", routing)
+        self.assertIn("# 统一数据渠道分发", routing)
+        self.assertIn("scripts/routing/channels.mjs", routing)
+        self.assertIn("route-resolve", routing)
+        self.assertIn("| mail | mail 技能级采集接口", routing)
+        self.assertNotIn("iwhalecloud", routing)
+        self.assertIn("内置路由器 `agent-reach`", routing)
+        self.assertIn("by-reach doctor --json", PUBLIC_REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("~/.by-reach/", PUBLIC_REFERENCE.read_text(encoding="utf-8"))
 
     def test_webpages_use_bycli_before_any_acquisition(self):
-        skill = ROUTING_REFERENCE.read_text(encoding="utf-8")
+        skill = PUBLIC_REFERENCE.read_text(encoding="utf-8")
         plain_skill = skill.replace("**", "")
 
         for phrase in (
@@ -38,7 +43,7 @@ class ByReachSkillContractTest(unittest.TestCase):
         self.assertNotRegex(skill, re.compile(r"(?i)jina|web reader|opencli"))
 
     def test_platform_channels_keep_only_approved_executor_and_bycli_fallback_paths(self):
-        skill = ROUTING_REFERENCE.read_text(encoding="utf-8")
+        skill = PUBLIC_REFERENCE.read_text(encoding="utf-8")
 
         for phrase in (
             "`twitter-cli`",

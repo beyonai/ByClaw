@@ -9,7 +9,7 @@ import lombok.Setter;
 import java.util.Date;
 
 /**
- * 项目与知识库、数字员工、本体之间的多态绑定关系。
+ * 项目与知识库、数字员工之间的多态绑定关系。
  */
 @Getter
 @Setter
@@ -19,7 +19,7 @@ public class ProjectResource {
     private Long id;
     private Long projectId;
     /**
-     * knowledge / digital_employee / ontology。
+     * knowledge / digital_employee。
      */
     private String resourceType;
     /**

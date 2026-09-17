@@ -32,9 +32,4 @@ public class MountResourceDto {
      */
     private String relResourceBizType;
 
-    /**
-     * 所属本体库编码。可选，传入时用于兼容旧调用并缩小本体资源匹配范围。
-     */
-    private String ontologyBaseCode;
-
 }

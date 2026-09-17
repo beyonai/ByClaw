@@ -22,8 +22,6 @@ type ITrackerData = {
     | 'KG_DB'
     | 'KG_TERM'
     | 'KG_QA'
-    | 'VIEW'
-    | 'OBJECT'
     | 'ACTION';
   pagePath: string;
   pageTitle: string;

@@ -81,6 +81,24 @@ class UserPrivateParamApplicationServiceTest {
     }
 
     @Test
+    void mailConfigurationNeverEntersGenericRuntimeEnvironmentCache() {
+        UserPrivateParam mail = managedParam();
+        mail.setParamKey("MAIL_CONNECTOR_11");
+        mail.setSourceRef("qq-mail");
+        mail.setParamValueCipher(Sm4Util.encrypt("mail-secret-configuration"));
+        when(mapper.selectList(any())).thenReturn(List.of(mail));
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        ReflectionTestUtils.setField(service, "stringRedisTemplate", redis);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        assertThat(service.refreshPrivateParamCacheNow(1001L, "tester", 9001L)).isTrue();
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(values).set(eq("byai:user:private_params:tester"), payload.capture());
+        assertThat(payload.getValue()).doesNotContain("MAIL_CONNECTOR_11", "mail-secret-configuration");
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void listMarksConnectorParamAsManagedAndNonMutable() {
         UserPrivateParam managed = managedParam();

@@ -2,12 +2,21 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { promoteProbeMaterialization } from './collection-state.mjs';
+import { promoteProbeMaterialization, registerControlledAcquisitionEvidence } from './collection-state.mjs';
 import { commitProbeAttempt, pauseProbeRun, readProbeRun } from './probe-state.mjs';
 import { loadSession } from './session.mjs';
 import { assessMaterializedTopic } from './topic-relevance.mjs';
 import { analyzeWebMarkdown } from './web-content-analysis.mjs';
-import { acquireArxivProbe, acquireWechatProbe, acquireWebProbe } from './web-acquirer.mjs';
+import {
+  acquireArxivProbe,
+  acquireWechatProbe,
+  acquireWebProbe,
+} from './web-acquirer.mjs';
+import {
+  authorizationAllowsHttpRedirect,
+  authorizationEquivalentHttpUrl,
+  diagnosticHttpUrl,
+} from './url-authorization.mjs';
 import { sanitizeWechatMarkdown } from './wechat-materializer.mjs';
 
 function sha256(value) {
@@ -38,6 +47,7 @@ function terminal(paths, runId, attemptId, result) {
     reasonCode: result.reasonCode,
     ...(result.contentFingerprint ? { contentFingerprint: result.contentFingerprint } : {}),
     ...(result.duplicateOf ? { duplicateOf: result.duplicateOf } : {}),
+    ...(result.failureDiagnostic ? { failureDiagnostic: result.failureDiagnostic } : {}),
   });
 }
 
@@ -219,18 +229,22 @@ function candidateAndAttempt(paths, runId, attemptId) {
 }
 
 function validateAcquiredUrl(candidate, acquired) {
-  const allowed = new Set(candidate.acquisitionUrls || []);
-  allowed.add(candidate.canonicalUrl);
-  let trustedWechatRedirect = false;
+  const allowed = [...new Set([candidate.canonicalUrl, ...(candidate.acquisitionUrls || [])])];
+  const isAllowed = (value) => {
+    try { return allowed.some((url) => authorizationEquivalentHttpUrl(url, value)); } catch { return false; }
+  };
+  let allowedRedirect = false;
   try {
-    const requested = new URL(acquired.requestedUrl);
-    const resolved = new URL(acquired.resolvedUrl);
-    trustedWechatRedirect = requested.hostname === 'weixin.sogou.com'
-      && resolved.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
+    allowedRedirect = authorizationAllowsHttpRedirect(
+      acquired.requestedUrl,
+      acquired.resolvedUrl,
+      allowed,
+    );
   } catch {}
-  if (!allowed.has(acquired.requestedUrl)
-    || (!allowed.has(acquired.resolvedUrl) && !trustedWechatRedirect)) {
-    throw new Error(`PROBE_ACQUISITION_URL_NOT_AUTHORIZED: ${acquired.resolvedUrl || acquired.requestedUrl}`);
+  if (!isAllowed(acquired.requestedUrl) || !allowedRedirect) {
+    throw new Error(
+      `PROBE_ACQUISITION_URL_NOT_AUTHORIZED: ${diagnosticHttpUrl(acquired.resolvedUrl || acquired.requestedUrl)}`,
+    );
   }
 }
 
@@ -298,6 +312,7 @@ export async function verifyCandidate(paths, { runId, attemptId }, options = {})
     return terminal(paths, runId, attemptId, {
       acquisitionOutcome: acquired?.status === 'unsupported' ? 'unsupported' : 'unavailable',
       reasonCode: acquired?.reasonCode || 'ACQUISITION_UNAVAILABLE',
+      ...(acquired?.failureDiagnostic ? { failureDiagnostic: acquired.failureDiagnostic } : {}),
     });
   }
 
@@ -306,6 +321,13 @@ export async function verifyCandidate(paths, { runId, attemptId }, options = {})
     persistAcquisition(paths.root, evidenceBase, acquired);
     if (options.afterPersistAcquisition) await options.afterPersistAcquisition();
   }
+  registerControlledAcquisitionEvidence(paths, {
+    candidateId: candidate.candidateId,
+    requestedUrl: acquired.requestedUrl,
+    resolvedUrl: acquired.resolvedUrl,
+    executor: String(acquired.executor || 'web'),
+    evidenceArtifact: `${evidenceBase}/acquisition/executor-result.json`,
+  }, { internal: true });
   const kind = sourceKind(candidate);
   const wechat = kind === 'wechat' ? sanitizeWechatMarkdown(acquired.markdown, acquired) : null;
   const analysis = analyzeWebMarkdown(wechat?.markdown || acquired.markdown, acquired);

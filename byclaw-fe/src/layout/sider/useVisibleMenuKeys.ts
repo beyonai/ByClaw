@@ -5,12 +5,8 @@ import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 
 const defaultVisibleKeys = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG);
-// 视图/对象入口暂时保留中心页代码但不展示；项目空间已恢复为独立主菜单入口。
-const TEMP_HIDDEN_MENU_KEYS = new Set(['view', 'object']);
 // 新增菜单在旧配置未下发时也要可见。
-const NEW_DEFAULT_VISIBLE_KEYS = ['automation', 'projectSpace', 'skill', 'file', 'model', 'ontology'];
-
-const hideTemporaryMenuKeys = (visibleKeys: string[]) => visibleKeys.filter((key) => !TEMP_HIDDEN_MENU_KEYS.has(key));
+const NEW_DEFAULT_VISIBLE_KEYS = ['automation', 'projectSpace', 'skill', 'file', 'model'];
 
 const appendMissingNewDefaultKeys = (visibleKeys: string[], configData: any[] = []) => {
   const configuredKeySet = new Set(
@@ -24,7 +20,7 @@ const appendMissingNewDefaultKeys = (visibleKeys: string[], configData: any[] = 
     }
   });
 
-  return hideTemporaryMenuKeys(nextVisibleKeys);
+  return nextVisibleKeys;
 };
 
 const useVisibleMenuKeys = (userInfo: any) => {
@@ -60,12 +56,12 @@ const useVisibleMenuKeys = (userInfo: any) => {
           const visibleMenuKeys = getVisibleMenuKeysFromConfig(configData);
           setVisibleKeys(appendMissingNewDefaultKeys(visibleMenuKeys, configData));
         } else {
-          setVisibleKeys(hideTemporaryMenuKeys(defaultVisibleKeys));
+          setVisibleKeys(defaultVisibleKeys);
         }
       })
       .catch(() => {
         if (active) {
-          setVisibleKeys(hideTemporaryMenuKeys(defaultVisibleKeys));
+          setVisibleKeys(defaultVisibleKeys);
         }
       });
 

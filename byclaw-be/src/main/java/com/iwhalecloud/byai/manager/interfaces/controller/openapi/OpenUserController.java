@@ -4,10 +4,8 @@ import com.iwhalecloud.byai.common.annotation.Add;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.common.annotation.Mod;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.qo.QueryObject;
-import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.openapi.OpenUserApiApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
 import com.iwhalecloud.byai.manager.dto.openapi.OpenDelUserDTO;
@@ -16,11 +14,9 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.users.UsersByOrgIdQo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
@@ -38,9 +34,6 @@ public class OpenUserController {
 
     @Autowired
     private OpenUserApiApplicationService openUserApiApplicationService;
-
-    @Autowired
-    private LoginApplicationService loginApplicationService;
 
     /**
      * 查询员工基本信息
@@ -104,19 +97,6 @@ public class OpenUserController {
     @RequestMapping(value = "/getUsersByOrgId", method = RequestMethod.POST)
     public ResponseUtil getUsersByOrgId(@RequestBody UsersByOrgIdQo usersByOrgIdQo) {
         return ResponseUtil.successResponse(userApplicationService.getUsersByOrgId(usersByOrgIdQo));
-    }
-
-    /**
-     * 获取所有用户信息
-     *
-     * @param userCode 用户编码
-     * @return ResponseUtil
-     */
-    @GetMapping("/getAllUserInfoByUserCode")
-    @ManageLogAnnotation(name = "获取用户信息", description = "获取用户信息")
-    public ResponseUtil<LoginInfo> getAllUserInfoByUserCode(@RequestParam("userCode") String userCode) {
-        LoginInfo loginInfo = loginApplicationService.getLoginInfo(userCode);
-        return ResponseUtil.successResponse(loginInfo);
     }
 
 }

@@ -86,6 +86,11 @@ export default [
             name: 'managerNotification',
             component: './manager/pages/NotificationMgr',
           },
+          {
+            path: '/manager/admin-console',
+            name: 'managerAdminConsole',
+            component: './manager/pages/AdminConsole',
+          },
         ],
       },
       {
@@ -183,29 +188,9 @@ export default [
             component: './models',
           },
           {
-            path: '/objectCenter',
-            name: 'objectCenter',
-            component: './objectCenter',
-          },
-          {
-            path: '/ontologyCenter',
-            name: 'ontologyCenter',
-            component: './ontologyCenter',
-          },
-          {
-            path: '/ontologyBaseDetail',
-            name: 'ontologyBaseDetail',
-            component: './ontologyBaseDetail',
-          },
-          {
             path: '/skillCenter',
             name: 'skillCenter',
             component: './skillCenter',
-          },
-          {
-            path: '/viewCenter',
-            name: 'viewCenter',
-            component: './viewCenter',
           },
           {
             path: '/toolCenter',

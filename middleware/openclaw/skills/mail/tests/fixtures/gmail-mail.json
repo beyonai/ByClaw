@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "connectorCode": "gmail-mail",
+  "account": {
+    "accountId": "3",
+    "provider": "gmail",
+    "email": "fixture@example.invalid",
+    "displayName": "Fixture",
+    "status": "NORMAL",
+    "locatorKey": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+    "capabilities": [
+      "list",
+      "get",
+      "search",
+      "downloadAttachment",
+      "send",
+      "reply",
+      "delete"
+    ],
+    "capabilityStatus": {
+      "list": "YES",
+      "get": "YES",
+      "search": "YES",
+      "downloadAttachment": "YES",
+      "send": "YES",
+      "reply": "YES",
+      "delete": "YES"
+    },
+    "setupRequirements": [
+      "AUTHORIZE_OAUTH2"
+    ],
+    "auth": {
+      "type": "OAUTH2",
+      "accessToken": "fixture-only"
+    },
+    "server": {
+      "imap": {
+        "host": "imap.example.invalid",
+        "port": 993,
+        "encryption": "SSL"
+      },
+      "smtp": {
+        "host": "smtp.example.invalid",
+        "port": 465,
+        "encryption": "SSL"
+      }
+    }
+  }
+}

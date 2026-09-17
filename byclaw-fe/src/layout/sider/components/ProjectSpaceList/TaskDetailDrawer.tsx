@@ -290,7 +290,6 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     internet: '互联网采集',
   };
   const storageModeLabelMap: Record<string, string> = {
-    ontology: '本体',
     knowledge: '知识库',
   };
   const executorTypeLabelMap: Record<string, string> = { agent: '数字员工', group: '员工组' };
@@ -325,10 +324,6 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     { label: '任务模板', value: operationConfig.templateName || task?.templateName },
     { label: '素材来源', value: operationConfig.materialSource },
     {
-      label: '来源本体',
-      value: operationConfig.sourceOntologyName || operationConfig.sourceOntology || operationConfig.sourceModeName,
-    },
-    {
       label: '采集方式',
       value:
         sourceModeLabelMap[operationConfig.sourceMode] || operationConfig.collectMethod || operationConfig.sourceMode,
@@ -339,10 +334,6 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     {
       label: '入库方式',
       value: storageModeLabelMap[operationConfig.storageMode] || operationConfig.storageMode,
-    },
-    {
-      label: '目标本体',
-      value: operationConfig.targetOntologyName || operationConfig.ontology || operationConfig.storageOntology,
     },
     { label: '目标知识库', value: operationConfig.targetKnowledgeName || operationConfig.targetKnowledge },
     { label: '内容类型', value: operationConfig.contentType },

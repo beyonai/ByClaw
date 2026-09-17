@@ -27,7 +27,6 @@
 用户确认后执行：
 
 1. baiying_call 查询 `查询金融行业的客户数据`（[01-data-query](../demos/01-data-query.md) 第 1 步）——秒级返回
-2. 执行 [05-structured-ontology](../demos/05-structured-ontology.md) 创建 product_order_view 并挂载，baiying_call 查询视图——跨表秒级返回
 
 > 演示过程中展示每一步的查询结果数据。
 

@@ -429,8 +429,6 @@ const ResourceTabsCompact: React.FC<Props> = ({
     const visible: string[] = isOpenSource ? ['skill'] : [];
     if (visibleKeys.includes('knowledge')) visible.push('knowledge');
     if (visibleKeys.includes('tool')) visible.push('tool');
-    if (visibleKeys.includes('view')) visible.push('view');
-    if (visibleKeys.includes('object')) visible.push('object');
     visible.push('space');
     if (isOpenSource) visible.push('file');
     if (!visible.length) return;
@@ -487,26 +485,6 @@ const ResourceTabsCompact: React.FC<Props> = ({
       ),
     });
     items.push({
-      key: 'object',
-      label: intl.formatMessage({ id: 'common.object' }),
-      children: (
-        <div className={styles.listContainer}>
-          <ResourceCitation
-            key={`object-${openRefreshKey}`}
-            resourceType="OBJECT"
-            layout="list"
-            onSelect={onSelectObject}
-            keyword={queryKeyword}
-            agentId={agentId}
-            agentIds={agentIds}
-            resourceBizTypeList={[ResourceTypeMap.OBJECT]}
-            resources={shouldUseSharedResourceQuery ? getSharedTabResources([ResourceTypeMap.OBJECT]) : undefined}
-            loadingOverride={shouldUseSharedResourceQuery ? sharedLoading : undefined}
-          />
-        </div>
-      ),
-    });
-    items.push({
       key: 'tool',
       label: intl.formatMessage({ id: 'common.tool' }),
       children: (
@@ -522,26 +500,6 @@ const ResourceTabsCompact: React.FC<Props> = ({
             agentIds={agentIds}
             resourceBizTypeList={[...TOOL_TAB_BIZ_TYPES]}
             resources={shouldUseSharedResourceQuery ? getSharedTabResources(TOOL_TAB_BIZ_TYPES) : undefined}
-            loadingOverride={shouldUseSharedResourceQuery ? sharedLoading : undefined}
-          />
-        </div>
-      ),
-    });
-    items.push({
-      key: 'view',
-      label: intl.formatMessage({ id: 'common.viewName' }),
-      children: (
-        <div className={styles.listContainer}>
-          <ResourceCitation
-            key={`view-${openRefreshKey}`}
-            resourceType="VIEW"
-            layout="list"
-            onSelect={onSelectObject}
-            keyword={queryKeyword}
-            agentId={agentId}
-            agentIds={agentIds}
-            resourceBizTypeList={[ResourceTypeMap.VIEW]}
-            resources={shouldUseSharedResourceQuery ? getSharedTabResources([ResourceTypeMap.VIEW]) : undefined}
             loadingOverride={shouldUseSharedResourceQuery ? sharedLoading : undefined}
           />
         </div>
@@ -679,14 +637,6 @@ const ResourceTabsCompact: React.FC<Props> = ({
         key: 'tool',
         label: intl.formatMessage({ id: 'common.tool' }),
       },
-      {
-        key: 'view',
-        label: intl.formatMessage({ id: 'common.viewName' }),
-      },
-      {
-        key: 'object',
-        label: intl.formatMessage({ id: 'common.object' }),
-      },
     ];
 
     const skillTab = {
@@ -704,7 +654,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
         return !['knowledge', 'tool'].includes(tab.key);
       }
       if (agentType === '006') {
-        return !['tool', 'view', 'object'].includes(tab.key);
+        return !['tool'].includes(tab.key);
       }
       return visibleKeys.includes(tab.key);
     });
@@ -732,7 +682,6 @@ const ResourceTabsCompact: React.FC<Props> = ({
       <div className={styles.searchRow}>
         <Input
           allowClear
-          disabled={!!keyword}
           placeholder={intl.formatMessage({ id: 'selectMember.searchPlaceholder' })}
           className={styles.searchInput}
           suffix={<SearchOutlined />}

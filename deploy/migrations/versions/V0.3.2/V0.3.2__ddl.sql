@@ -6,39 +6,11 @@ SET search_path TO byai;
 ALTER TABLE byai.ss_res_ext_dig_employee
     ALTER COLUMN machine_channel TYPE text;
 
-CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
-    p_schema_name TEXT,
-    p_table_name TEXT,
-    p_column_name TEXT,
-    p_column_definition TEXT
-) RETURNS VOID AS $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = p_schema_name
-          AND table_name = p_table_name
-          AND column_name = p_column_name
-    ) THEN
-        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
-            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'access_expire_time', 'TIMESTAMP');
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'refresh_expire_time', 'TIMESTAMP');
-SELECT byai.add_column_if_missing(
-    'byai', 'byai_connector_auth', 'credential_state',
-    'VARCHAR(32) DEFAULT ''UNKNOWN'' NOT NULL'
-);
-SELECT byai.add_column_if_missing(
-    'byai', 'byai_connector_auth', 'renewal_mode',
-    'VARCHAR(32) DEFAULT ''NONE'' NOT NULL'
-);
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'last_verified_at', 'TIMESTAMP');
-
-DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
+ALTER TABLE byai.byai_connector_auth ADD COLUMN access_expire_time TIMESTAMP;
+ALTER TABLE byai.byai_connector_auth ADD COLUMN refresh_expire_time TIMESTAMP;
+ALTER TABLE byai.byai_connector_auth ADD COLUMN credential_state VARCHAR(32) DEFAULT 'UNKNOWN' NOT NULL;
+ALTER TABLE byai.byai_connector_auth ADD COLUMN renewal_mode VARCHAR(32) DEFAULT 'NONE' NOT NULL;
+ALTER TABLE byai.byai_connector_auth ADD COLUMN last_verified_at TIMESTAMP;
 
 -- 说明：凭证状态回填（access_expire_time / credential_state / renewal_mode）已迁至 V0.3.2__dml.sql。
 -- 新增列自带 DEFAULT，已有行在 ADD COLUMN 时即被填充，因此下方 SET NOT NULL 不依赖回填顺序。

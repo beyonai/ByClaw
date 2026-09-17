@@ -35,24 +35,12 @@ public interface ByaiAimodelMapper extends BaseMapper<ByaiAimodel> {
         @Param("ownerType") String ownerType);
 
     /**
-     * 统计符合条件的总数
-     */
-    long countByCondition(@Param("status") String status, @Param("ability") String ability,
-        @Param("system") String system, @Param("modelId") Long modelId, @Param("modelName") String modelName,
-        @Param("keyword") String keyword);
-
-    /**
-     * 按模型名称统计条数；excludeModelId 不为空时排除该 id（用于修改时校验其他记录是否占用名称）
+     * 按标签等条件查询模型列表。
      *
-     * @param modelName 模型名称（displayName 对应 model_name），精确匹配
-     * @param excludeModelId 排除的模型 ID，为 null 时统计所有同名（用于新增校验）
-     * @return 同名记录数
+     * @param request 查询条件
+     * @return 模型列表
      */
-    long countByModelNameExcludeId(@Param("modelName") String modelName, @Param("excludeModelId") Long excludeModelId);
-
     List<ByaiAimodel> listModel(ModelRequest request);
-
-    List<ByaiAimodel> listModelInner(ModelRequest request);
 
     /**
      * 查询默认模型

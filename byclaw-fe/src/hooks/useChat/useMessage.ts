@@ -7,12 +7,14 @@
  */
 import { delMessage } from '@/service/message';
 import { useDispatch, useSelector } from '@umijs/max';
-import { assign, merge, size } from 'lodash';
+import { assign, merge, size, uniqBy } from 'lodash';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SetStateAction } from 'react';
 
-import type { IMessageInfo } from '@/models/useMessageStore';
+import { sortMessagesByTimeline, type IMessageInfo } from '@/models/useMessageStore';
 import type { IMessage } from '@/typescript/message';
+import { readDesktopLocalHistory } from '@/service/common/desktopLocal';
+import { projectLocalHistoryPage } from '@/utils/localSessionHistory';
 import { shouldApplyScopedChildRun, type ScopedChildRunState } from '@/utils/scopedSession';
 import { getMsgId, hasVisibleMessageContent } from '@/utils/messgae';
 import { getSessionObjectTypeMap } from '@/utils/session';
@@ -46,6 +48,7 @@ const shouldDropCompletedEmptyAnswer = (message: IMessage) =>
 export default function useMessage({ sessionId }: { sessionId?: string }) {
   const dispatch = useDispatch();
   const { sessionListMap } = useSelector((state: any) => state.messageStore);
+  const sessionList = useSelector((state: any) => state.session?.sessionList || EMPTY_ARRAY);
   const { EventEmitter } = useGlobal();
 
   const [optimisticSessionId, setOptimisticSessionId] = useState('');
@@ -64,6 +67,26 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
   }, [messageInfo]);
 
   const messageListRef = useRef<IMessage[]>(messageList);
+  const localSessionIds = useMemo(
+    () =>
+      new Set<string>(sessionList.filter((item: any) => item?.isLocalSession).map((item: any) => `${item.sessionId}`)),
+    [sessionList]
+  );
+  const localSessionIdsRef = useRef(localSessionIds);
+  localSessionIdsRef.current = localSessionIds;
+  const isLocalSessionId = useCallback(
+    (targetSessionId: string) => localSessionIdsRef.current.has(`${targetSessionId}`),
+    []
+  );
+
+  const fetchLocalHistoryPage = useCallback(async (targetSessionId: string, pageNum: number, pageSize: number) => {
+    const page = await readDesktopLocalHistory({ sessionId: targetSessionId, pageNum, pageSize });
+    return {
+      ...page,
+      list: projectLocalHistoryPage(page, targetSessionId),
+      pageRange: [page.pageNum, page.pageNum] as [number, number],
+    };
+  }, []);
 
   const getTargetSessionId = useCallback(
     (msg?: Partial<IMessage>) => `${msg?.sessionId || curSessionId.current || activeSessionId}`,
@@ -214,7 +237,33 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
 
   // isPrev ==== 是否翻上一页（pageNum减少）
   const getMoreSessionMessage = useCallback(
-    (targetSessionId: string, isPrev?: boolean) => {
+    async (targetSessionId: string, isPrev?: boolean) => {
+      if (isLocalSessionId(targetSessionId)) {
+        const cache = sessionListMap.get(targetSessionId) as IMessageInfo | undefined;
+        const current = cache || {
+          list: [],
+          pageNum: 1,
+          pageSize: 20,
+          total: 0,
+          pageRange: [1, 1] as [number, number],
+        };
+        if (current.list.length >= current.total || (isPrev && current.pageNum <= 1)) return current;
+        const pageNum = isPrev ? current.pageNum - 1 : current.pageNum + 1;
+        const page = await fetchLocalHistoryPage(targetSessionId, pageNum, current.pageSize || 20);
+        const pageRange = current.pageRange || ([1, 1] as [number, number]);
+        const merged = {
+          ...page,
+          list: sortMessagesByTimeline(
+            uniqBy(isPrev ? [...current.list, ...page.list] : [...page.list, ...current.list], 'messageId')
+          ),
+          pageRange: [Math.max(pageRange[0] || 1, pageNum), Math.min(pageRange[1] || 1, pageNum)] as [number, number],
+        };
+        dispatch({
+          type: 'messageStore/setSessionMessage',
+          payload: { sessionId: targetSessionId, messageListInfo: merged },
+        });
+        return merged;
+      }
       return dispatch({
         type: 'messageStore/getMoreSessionMessage',
         payload: {
@@ -223,17 +272,28 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         },
       });
     },
-    [dispatch]
+    [dispatch, fetchLocalHistoryPage, isLocalSessionId, sessionListMap]
   );
 
   const reloadLatestMessageList = useCallback(() => {
     return new Promise<void>((resolve) => {
-      dispatch({
-        type: 'messageStore/getLatestSessionMessage',
-        payload: {
-          sessionId: curSessionId.current,
-        },
-      }).then((listInfo?: IMessageInfo) => {
+      const targetSessionId = curSessionId.current;
+      let request: Promise<IMessageInfo | undefined>;
+      if (isLocalSessionId(targetSessionId)) {
+        request = fetchLocalHistoryPage(targetSessionId, 1, 20).then((listInfo) => {
+          dispatch({
+            type: 'messageStore/setSessionMessage',
+            payload: { sessionId: targetSessionId, messageListInfo: listInfo },
+          });
+          return listInfo;
+        });
+      } else {
+        request = dispatch({
+          type: 'messageStore/getLatestSessionMessage',
+          payload: { sessionId: targetSessionId },
+        });
+      }
+      request.then((listInfo?: IMessageInfo) => {
         if (!listInfo) {
           resolve();
           return;
@@ -242,7 +302,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         requestIdleCallback(() => resolve());
       });
     });
-  }, [dispatch]);
+  }, [dispatch, fetchLocalHistoryPage, isLocalSessionId]);
 
   const getSessionMessageLoadState = useCallback(
     (targetSessionId = activeSessionId): SessionMessageLoadState =>
@@ -261,23 +321,25 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
       if (`${targetSessionId}` !== `${curSessionId.current}`) return;
       const { list, targetMessageId } = listInfo || {};
 
-      dispatch({
-        type: 'session/myBatchReadMessages',
-        payload: {
-          sessionId: targetSessionId,
-          messageIds: (list || []).map((item) => item.messageId),
-        },
-      });
+      if (!isLocalSessionId(targetSessionId)) {
+        dispatch({
+          type: 'session/myBatchReadMessages',
+          payload: {
+            sessionId: targetSessionId,
+            messageIds: (list || []).map((item) => item.messageId),
+          },
+        });
+      }
 
       if (list?.length) {
         for (let i = list.length - 1; i >= 0; i -= 1) {
           const msg = list[i];
           if (msg.fromBeyond) {
             const queryMessage = msg.queryMsgId
-              ? list.find(
-                (item) =>
-                  !item.fromBeyond && [`${item.msgId || ''}`, `${item.messageId || ''}`].includes(`${msg.queryMsgId}`)
-              )
+              ? list.find((item) => {
+                const candidateIds = [`${item.msgId || ''}`, `${item.messageId || ''}`];
+                return !item.fromBeyond && candidateIds.includes(`${msg.queryMsgId}`);
+              })
               : undefined;
             EventEmitter.emit(
               'RECEIVE_SESSION_RECORDS_LAST_METADATA',
@@ -293,7 +355,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         targetMessageId,
       });
     },
-    [dispatch, EventEmitter]
+    [dispatch, EventEmitter, isLocalSessionId]
   );
 
   const startSessionMessageLoad = useCallback(
@@ -303,12 +365,22 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
       if (existing) return existing;
 
       setSessionMessageLoadState(key, 'loading');
-      const loadPromise = Promise.resolve(
-        dispatch({
+      let request: Promise<IMessageInfo | undefined>;
+      if (isLocalSessionId(key)) {
+        request = fetchLocalHistoryPage(key, 1, 20).then((listInfo) => {
+          dispatch({
+            type: 'messageStore/setSessionMessage',
+            payload: { sessionId: key, messageListInfo: listInfo },
+          });
+          return listInfo;
+        });
+      } else {
+        request = dispatch({
           type: 'messageStore/getSessionMessage',
           payload: { sessionId: key },
-        })
-      )
+        });
+      }
+      const loadPromise = Promise.resolve(request)
         .then((listInfo?: IMessageInfo) => {
           if (!listInfo) throw new Error(`Session messages unavailable: ${key}`);
           applyLoadedSessionMessages(key, listInfo);
@@ -327,7 +399,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
       sessionMessageLoadPromiseRef.current[key] = loadPromise;
       return loadPromise;
     },
-    [applyLoadedSessionMessages, dispatch, setSessionMessageLoadState]
+    [applyLoadedSessionMessages, dispatch, fetchLocalHistoryPage, isLocalSessionId, setSessionMessageLoadState]
   );
 
   const retrySessionMessageLoad = useCallback(

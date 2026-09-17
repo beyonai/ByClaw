@@ -191,20 +191,18 @@ public class TaskPlanApplicationService {
         }
     }
 
-    @Transactional
-    public List<TaskPlanSnapshot> requestCancellation(StopChatDto stopChatDto, String reasonCode,
+    public List<TaskPlanSnapshot> cancel(StopChatDto stopChatDto, String reasonCode,
         String reasonMessage) {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
             return List.of();
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
-        return findActiveForSession(userId, stopChatDto.getSessionId(), true).stream()
-            .map(plan -> requestCancellation(plan, userId, reasonCode, reasonMessage))
+        return findActiveForSession(userId, stopChatDto.getSessionId(), false).stream()
+            .map(plan -> cancel(plan, userId, reasonCode, reasonMessage))
             .toList();
     }
 
-    @Transactional
-    public TaskPlanSnapshot requestCancellation(TaskPlanLookupRequest request, String reasonCode,
+    public TaskPlanSnapshot cancel(TaskPlanLookupRequest request, String reasonCode,
         String reasonMessage) {
         if (request == null) {
             return null;
@@ -216,76 +214,12 @@ public class TaskPlanApplicationService {
         String sourceRunId = requiredText(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSession(sessionId, userId);
         ByaiAgentTaskPlan plan = findActiveForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId,
-            true);
-        return plan == null ? null : requestCancellation(plan, userId, reasonCode, reasonMessage);
+            false);
+        return plan == null ? null : cancel(plan, userId, reasonCode, reasonMessage);
     }
 
-    private TaskPlanSnapshot requestCancellation(ByaiAgentTaskPlan plan, Long userId, String reasonCode,
+    private TaskPlanSnapshot cancel(ByaiAgentTaskPlan plan, Long userId, String reasonCode,
         String reasonMessage) {
-        if ("CANCELLED".equals(plan.getStatus()) || "CANCELLING".equals(plan.getStatus())) {
-            return snapshot(plan);
-        }
-        Date now = new Date();
-        int nextVersion = plan.getVersion() + 1;
-        int changed = planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
-            .eq(ByaiAgentTaskPlan::getPlanId, plan.getPlanId())
-            .eq(ByaiAgentTaskPlan::getUserId, userId)
-            .eq(ByaiAgentTaskPlan::getSessionId, plan.getSessionId())
-            .eq(ByaiAgentTaskPlan::getMessageId, plan.getMessageId())
-            .eq(ByaiAgentTaskPlan::getSourceRuntime, plan.getSourceRuntime())
-            .eq(ByaiAgentTaskPlan::getSourceRunId, plan.getSourceRunId())
-            .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
-            .eq(ByaiAgentTaskPlan::getStatus, "ACTIVE")
-            .set(ByaiAgentTaskPlan::getStatus, "CANCELLING")
-            .set(ByaiAgentTaskPlan::getStatusReasonCode, reasonCode)
-            .set(ByaiAgentTaskPlan::getStatusReasonMessage, reasonMessage)
-            .set(ByaiAgentTaskPlan::getVersion, nextVersion)
-            .set(ByaiAgentTaskPlan::getUpdatedAt, now));
-        if (changed == 0) {
-            throw conflict("Task plan changed while cancellation was requested");
-        }
-        plan.setStatus("CANCELLING");
-        plan.setStatusReasonCode(reasonCode);
-        plan.setStatusReasonMessage(reasonMessage);
-        plan.setVersion(nextVersion);
-        plan.setUpdatedAt(now);
-        return snapshot(plan);
-    }
-
-    @Transactional
-    public List<TaskPlanSnapshot> confirmCancellation(StopChatDto stopChatDto, String reasonCode,
-        String reasonMessage) {
-        if (stopChatDto == null || stopChatDto.getSessionId() == null) {
-            return List.of();
-        }
-        Long userId = CurrentUserHolder.getCurrentUserId();
-        return findActiveForSession(userId, stopChatDto.getSessionId(), true).stream()
-            .map(plan -> confirmCancellation(plan, userId, reasonCode, reasonMessage))
-            .toList();
-    }
-
-    @Transactional
-    public TaskPlanSnapshot confirmCancellation(TaskPlanLookupRequest request, String reasonCode,
-        String reasonMessage) {
-        if (request == null) {
-            return null;
-        }
-        Long userId = CurrentUserHolder.getCurrentUserId();
-        Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
-        String messageId = requiredText(request.getMessageId(), "messageId", 128);
-        String sourceRuntime = normalizeRuntime(request.getSourceRuntime());
-        String sourceRunId = requiredText(request.getSourceRunId(), "sourceRunId", 128);
-        requireOwnedSession(sessionId, userId);
-        ByaiAgentTaskPlan plan = findActiveForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId,
-            true);
-        return plan == null ? null : confirmCancellation(plan, userId, reasonCode, reasonMessage);
-    }
-
-    private TaskPlanSnapshot confirmCancellation(ByaiAgentTaskPlan plan, Long userId, String reasonCode,
-        String reasonMessage) {
-        if ("CANCELLED".equals(plan.getStatus())) {
-            return snapshot(plan);
-        }
         Date now = new Date();
         List<TaskPlanSnapshot.TaskSnapshot> tasks = tasks(plan);
         tasks.stream().filter(task -> !TERMINAL_TASK_STATUSES.contains(task.getStatus())).forEach(task -> {
@@ -304,7 +238,7 @@ public class TaskPlanApplicationService {
             .eq(ByaiAgentTaskPlan::getSourceRuntime, plan.getSourceRuntime())
             .eq(ByaiAgentTaskPlan::getSourceRunId, plan.getSourceRunId())
             .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
-            .in(ByaiAgentTaskPlan::getStatus, ACTIVE_PLAN_STATUSES)
+            .eq(ByaiAgentTaskPlan::getStatus, "ACTIVE")
             .set(ByaiAgentTaskPlan::getTasksPayload, tasksPayload)
             .set(ByaiAgentTaskPlan::getStatus, "CANCELLED")
             .set(ByaiAgentTaskPlan::getStatusReasonCode, reasonCode)
@@ -313,7 +247,7 @@ public class TaskPlanApplicationService {
             .set(ByaiAgentTaskPlan::getUpdatedAt, now)
             .set(ByaiAgentTaskPlan::getCompletedAt, now));
         if (changed == 0) {
-            throw conflict("Task plan changed while cancellation was confirmed");
+            throw conflict("Active task plan changed while it was cancelled");
         }
         plan.setTasksPayload(tasksPayload);
         plan.setStatus("CANCELLED");

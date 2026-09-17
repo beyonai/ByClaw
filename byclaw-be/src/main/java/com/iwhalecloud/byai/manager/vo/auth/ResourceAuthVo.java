@@ -304,9 +304,22 @@ public class ResourceAuthVo extends AuthVo {
      */
     private Boolean canApplyUse;
 
-    /**
-     * 是否可审核使用申请
-     */
-    private Boolean canAuditUse;
+    private Boolean operationPermissionsLoaded;
+
+    private Boolean hasManagePermission;
+
+    private Boolean hasUsePermission;
+
+    private Boolean canViewDetail;
+
+    private Boolean useApplyPending;
+
+    private Boolean canRestore;
+
+    private Boolean canSetDefault;
+
+    private Boolean canOnShelf;
+
+    private Boolean canOffShelf;
 
 }

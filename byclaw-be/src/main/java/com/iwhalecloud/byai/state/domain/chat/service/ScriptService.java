@@ -63,6 +63,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
+import com.iwhalecloud.byai.state.infrastructure.utils.ResumeRoutingTraceLogger;
 import com.iwhalecloud.byai.common.log.exception.PythonRuntimeException;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.SYSTEM_RESPONSE;
@@ -301,17 +302,29 @@ public class ScriptService extends AbstractChatProcess {
     }
 
     private void resolveRunningTraceState(ChatProcessContext ctx) {
-        if (ctx == null || ctx.sessionId == null) {
+        if (ctx == null) {
+            return;
+        }
+
+        if (ctx.sessionId == null) {
+            ResumeRoutingTraceLogger.logRunningState(ctx.assistantChatDto, null);
             return;
         }
 
         RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(ctx.sessionId);
+        ResumeRoutingTraceLogger.logRunningState(ctx.assistantChatDto, runningInfo);
         if (!Boolean.TRUE.equals(runningInfo.getRunning())) {
             return;
         }
 
         String requestTraceId = ctx.assistantChatDto.getTraceId();
         String runningTraceId = runningInfo.getTraceId();
+        if (StringUtils.isBlank(requestTraceId)
+            && Boolean.FALSE.equals(runningInfo.getRootActive())
+            && Boolean.TRUE.equals(runningInfo.getAcceptingInput())) {
+            ctx.concurrentGatewayTurn = true;
+            return;
+        }
         if (StringUtils.isBlank(requestTraceId) || !requestTraceId.equals(runningTraceId)) {
             throw new BdpRuntimeException("当前会话仍在运行中，请等待完成或停止后再发送");
         }
@@ -432,6 +445,7 @@ public class ScriptService extends AbstractChatProcess {
         }
         else if (ctx.recoveryOnly || ctx.res == null) {
             ctx.chatResponse = resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
+            broadcastAppStreamResponse(ctx);
         }
         else {
             // 原始路径：持久化 + 向前端写 appStreamResponse
@@ -707,7 +721,7 @@ public class ScriptService extends AbstractChatProcess {
     public boolean completeAsyncGatewayContext(ChatProcessContext ctx) {
         boolean persisted = persistAsyncGatewayContext(ctx);
         if (persisted && ctx != null && ctx.sessionId != null) {
-            sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
+            sessionStreamManager.completeSessionTurn(ctx);
         }
         return persisted;
     }
@@ -753,6 +767,7 @@ public class ScriptService extends AbstractChatProcess {
         }
         // 按正常完成状态落库，保持与同 pod 路径一致。
         snapshot.setMsgStatus(com.iwhalecloud.byai.state.domain.message.enums.MsgStatus.FINISH.getCode());
+        snapshot.setComplete(true);
         byaiMessageHotService.updateSelective(snapshot);
         log.info("stopChat 跨 pod 从快照落库完成, sessionId: {}, messageId: {}", sessionId, snapshot.getMessageId());
         return true;

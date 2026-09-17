@@ -48,6 +48,7 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
             WHERE row_num = 1
         ) auth ON auth.connector_id = info.connector_id
         WHERE info.status_cd = '00A'
+          AND info.connector_type <> 'ACCOUNT_TEMPLATE'
         ORDER BY info.sort ASC, info.connector_id ASC
         """)
     List<ConnectorEnableStateDto> selectConnectorEnableStates(@Param("userId") String userId);

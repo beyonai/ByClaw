@@ -5,6 +5,7 @@
     <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.devloop.Project">
         <id column="project_id" property="projectId"/>
         <result column="project_name" property="projectName"/>
+        <result column="project_code" property="projectCode"/>
         <result column="description" property="description"/>
         <result column="resource_id" property="resourceId"/>
         <result column="cloud_resource_id" property="cloudResourceId"/>
@@ -30,6 +31,7 @@
     <select id="selectProjectsByQo" resultMap="ProjectListDtoResultMap">
         SELECT a.project_id,
                a.project_name,
+               a.project_code,
                a.description,
                a.resource_id,
                a.cloud_resource_id,

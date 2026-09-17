@@ -133,8 +133,11 @@ export function getPathDepth(path: string) {
 }
 
 export function sortFileBrowserItems(items: FileBrowserItem[]) {
-  const dirs = items.filter((item) => isDirectory(item));
-  const files = items.filter((item) => !isDirectory(item));
+  // 后端未返回排序结果时，前端按同一规则兜底，保证目录优先且名称稳定升序。
+  const byName = (left: FileBrowserItem, right: FileBrowserItem) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true });
+  const dirs = items.filter((item) => isDirectory(item)).sort(byName);
+  const files = items.filter((item) => !isDirectory(item)).sort(byName);
   return [...dirs, ...files];
 }
 

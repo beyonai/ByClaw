@@ -10,21 +10,13 @@ import Pagination from '@/pages/manager/components/Pagination';
 import styles from './index.module.less';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import ItemCard from './ItemCard';
-import ItemCard2 from './ItemCard2';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
-import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
-import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 
 const EXTERNAL_TOOLS_TAB = 'EXTERNAL';
 const BUILTIN_TOOLS_TAB = 'BUILTIN';
 
 const { DirectoryTree } = Tree;
-const defaultVisibleMenuKeys = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG);
-const menuKeyByTabKey = {
-  VIEW: 'view',
-  OBJECT: 'object',
-};
 
 function BaseListModal(props) {
   const {
@@ -37,7 +29,6 @@ function BaseListModal(props) {
     skills,
     knowledgeBases,
     handleRemove,
-    handleUpdateItem,
     enableTabs,
     agentType,
   } = props;
@@ -62,23 +53,9 @@ function BaseListModal(props) {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [catalogId, setCatalogId] = useState(['']);
   const [catalogList, setCatalogList] = useState([]);
-  const [visibleMenuKeys, setVisibleMenuKeys] = useState(defaultVisibleMenuKeys);
   const [bundledTools, setBundledTools] = useState([]);
   const [bundledToolLoading, setBundledToolLoading] = useState(false);
   const [toolSubTab, setToolSubTab] = useState(EXTERNAL_TOOLS_TAB);
-
-  useEffect(() => {
-    getDcSystemConfigListByStandType({
-      standType: 'MENU_ICON_SHOW_TAB',
-    })
-      .then((res) => {
-        const configData = res?.data || res;
-        if (Array.isArray(configData) && configData.length > 0) {
-          setVisibleMenuKeys(getVisibleMenuKeysFromConfig(configData));
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   const filteredCatalogList = useMemo(() => {
     const keyword = (searchName || '').trim().toLowerCase();
@@ -147,16 +124,11 @@ function BaseListModal(props) {
   }, [isAskNumber, intl]);
 
   const displayTabs = useMemo(() => {
-    const menuFilteredTabs = tabs.filter((tab) => {
-      const menuKey = menuKeyByTabKey[tab.key];
-      return !menuKey || visibleMenuKeys.includes(menuKey);
-    });
-
     if (Array.isArray(enableTabs)) {
-      return menuFilteredTabs.filter((tab) => enableTabs.includes(tab.key));
+      return tabs.filter((tab) => enableTabs.includes(tab.key));
     }
-    return menuFilteredTabs;
-  }, [enableTabs, tabs, visibleMenuKeys]);
+    return tabs;
+  }, [enableTabs, tabs]);
 
   const toolSubOptions = useMemo(() => {
     return [
@@ -323,18 +295,6 @@ function BaseListModal(props) {
       }
     },
     [pagination, isPlugin, isDataset, searchKeyword, catalogId, activeTab]
-  );
-
-  const onUpdateItem = useCallback(
-    (item) => {
-      setResultData((prev) => ({
-        ...prev,
-        list: prev.list.map((it) => (it.resourceId === item.resourceId ? item : it)),
-      }));
-
-      handleUpdateItem(item);
-    },
-    [isPlugin, handleUpdateItem]
   );
 
   useEffect(() => {
@@ -518,29 +478,6 @@ function BaseListModal(props) {
                   <div className={styles.cardListWrap}>
                     <div className={styles.cardList}>
                       {displayList.map((item) => {
-                        let isSelected = false;
-                        if (isPlugin) {
-                          isSelected = !!skills.find((it) => `${it.resourceId}` === `${item.resourceId}`);
-                        } else {
-                          isSelected = !!knowledgeBases.find(
-                            (it) => !!it.items?.find((i) => `${i.resourceId}` === `${item.resourceId}`)
-                          );
-                        }
-
-                        if (['VIEW', 'OBJECT'].includes(activeTab)) {
-                          return (
-                            <ItemCard2
-                              key={item.id}
-                              item={item}
-                              isPlugin={isPlugin}
-                              isSelected={isSelected}
-                              isDataset={isDataset}
-                              handleSelect={handleSelect}
-                              handleRemove={handleRemove}
-                              onUpdateItem={onUpdateItem}
-                            />
-                          );
-                        }
                         if (isBuiltinMode) {
                           return (
                             <ItemCard

@@ -1,12 +1,26 @@
 import React from 'react';
-import { useDispatch } from '@umijs/max';
+import { useIntl, useDispatch } from '@umijs/max';
 import { Dropdown } from 'antd';
-import { ArrowLeftOutlined, DownOutlined, TeamOutlined } from '@ant-design/icons';
+import {
+  ArrowLeftOutlined,
+  CheckCircleFilled,
+  ClockCircleOutlined,
+  DownOutlined,
+  LoadingOutlined,
+  StopOutlined,
+  TeamOutlined,
+} from '@ant-design/icons';
 
 import useGlobal from '@/hooks/useGlobal';
 import { qryConversations } from '@/service/layout';
 import type { ISession } from '@/typescript/session';
-import { getExternalSessionExt, isScopedChildProjection } from '@/utils/scopedSession';
+import {
+  getExternalSessionExt,
+  getScopedChildRunState,
+  isScopedChildProjection,
+  shouldApplyScopedChildRun,
+  type ScopedChildRunState,
+} from '@/utils/scopedSession';
 import webSocketManager from '@/utils/websocket';
 import { useAgentTeamsSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 
@@ -18,11 +32,14 @@ interface ChildSessionNavigatorProps {
 }
 
 function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNavigatorProps) {
+  // 界面文案随当前语言更新，业务名称与接口数据保持原值。
+  const intl = useIntl();
   const dispatch = useDispatch();
   const { setSessionId } = useGlobal();
   const [children, setChildren] = React.useState<ISession[]>([]);
   const [parent, setParent] = React.useState<ISession>();
-  const knownChildSessionIdsRef = React.useRef(new Set<string>());
+  const childSessionsRef = React.useRef(new Map<string, ISession>());
+  const childRunsRef = React.useRef(new Map<string, ScopedChildRunState>());
   const reloadChildrenRef = React.useRef<(() => Promise<void>) | undefined>();
   const currentSessionRef = React.useRef(currentSession);
   const isChild = Boolean(currentSession?.parentSessionId);
@@ -34,7 +51,8 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
   }, [currentSession]);
 
   React.useEffect(() => {
-    knownChildSessionIdsRef.current.clear();
+    childSessionsRef.current.clear();
+    childRunsRef.current.clear();
     setChildren([]);
   }, [rootSessionId]);
 
@@ -44,15 +62,24 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
     let loadingChildren: Promise<void> | undefined;
     const loadChildren = () => {
       if (loadingChildren) return loadingChildren;
+      const runsAtRequest = new Map(childRunsRef.current);
       loadingChildren = (async () => {
         try {
           const response = await qryConversations({ parentSessionId: rootSessionId, pageNum: 1, pageSize: 100 });
           if (cancelled) return;
-          const childSessions = (response?.list || []).map((item: ISession) => ({
+          const fetchedChildren = (response?.list || []).map((item: ISession) => ({
             ...item,
             sessionId: `${item.sessionId}`,
           }));
-          knownChildSessionIdsRef.current = new Set(childSessions.map((child) => `${child.sessionId}`));
+          const merged = new Map<string, ISession>(
+            fetchedChildren.map((child: ISession) => [`${child.sessionId}`, child])
+          );
+          childRunsRef.current.forEach((run, id) => {
+            const liveChild = childSessionsRef.current.get(id);
+            if (liveChild && run !== runsAtRequest.get(id)) merged.set(id, liveChild);
+          });
+          childSessionsRef.current = merged;
+          const childSessions = Array.from(merged.values());
           setChildren(childSessions);
           childSessions.forEach((child: ISession) => dispatch({ type: 'session/addSession', payload: child }));
         } catch {
@@ -116,9 +143,12 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
       if (`${metadata.external_parent_session_id || ''}` !== rootSessionId) return;
 
       const childSessionId = `${message?.sessionId || projection?.sessionId || ''}`;
-      if (!childSessionId || knownChildSessionIdsRef.current.has(childSessionId)) return;
+      if (!childSessionId) return;
+      const childRun = getScopedChildRunState(projection, message?.streamId);
+      if (!shouldApplyScopedChildRun(childRunsRef.current.get(childSessionId), childRun)) return;
 
-      const baseSession = currentSessionRef.current;
+      const previousChild = childSessionsRef.current.get(childSessionId);
+      const baseSession = previousChild || currentSessionRef.current;
       const extValues: Record<string, unknown> = {
         external_session_id: metadata.external_session_id,
         external_root_session_id: metadata.external_root_session_id,
@@ -127,29 +157,46 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
         external_session_status: metadata.session_status,
         event_source: metadata.event_source,
       };
-      const sessionExts = Object.entries(extValues)
+      const updates = Object.entries(extValues)
         .filter(([, value]) => value !== undefined && value !== null && `${value}` !== '')
         .map(([code, value]) => ({ extParamCode: code, extParamName: code, extParamValue: `${value}` }));
+      const sessionExts = [
+        ...(previousChild?.sessionExts || []).filter(
+          (ext) => !updates.some((item) => item.extParamCode === ext.extParamCode)
+        ),
+        ...updates,
+      ];
       const now = new Date().toISOString();
       const child: ISession = {
         ...baseSession,
         sessionId: childSessionId,
         parentSessionId: rootSessionId,
-        sessionName: `${metadata.child_name || '子 Agent'}`,
-        sessionContent: `${metadata.child_task || ''}`,
+        sessionName: `${
+          metadata.child_name || previousChild?.sessionName || intl.formatMessage({ id: 'ui.team.childAgent' })
+        }`,
+        sessionContent: `${
+          message?.type === 'SCOPED_SESSION_STATUS'
+            ? previousChild?.sessionContent || ''
+            : metadata.child_task || previousChild?.sessionContent || ''
+        }`,
         createTime: baseSession?.createTime || now,
         updateTime: now,
         sessionExts,
       };
 
-      knownChildSessionIdsRef.current.add(childSessionId);
-      setChildren((current) => [child, ...current.filter((item) => `${item.sessionId}` !== childSessionId)]);
+      childRunsRef.current.set(childSessionId, childRun);
+      childSessionsRef.current.set(childSessionId, child);
+      setChildren(Array.from(childSessionsRef.current.values()));
       dispatch({ type: 'session/addSession', payload: child });
     };
 
     webSocketManager.onMessage('NEW_MESSAGE', handleNewMessage);
-    return () => webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
-  }, [dispatch, rootSessionId]);
+    webSocketManager.onMessage('SCOPED_SESSION_STATUS', handleNewMessage);
+    return () => {
+      webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
+      webSocketManager.offMessage('SCOPED_SESSION_STATUS', handleNewMessage);
+    };
+  }, [dispatch, intl, rootSessionId]);
 
   const navigateTo = (target: ISession) => {
     dispatch({ type: 'session/addSession', payload: target });
@@ -165,18 +212,57 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
 
   if (!isChild && visibleChildren.length === 0) return null;
 
-  const menuItems = visibleChildren.map((child) => ({
-    key: `${child.sessionId}`,
-    label: (
-      <span className={styles.childSessionMenuItem}>
-        <span className={styles.childSessionMenuAvatar}>{child.sessionName?.slice(0, 1) || 'A'}</span>
-        <span className={styles.childSessionMenuCopy}>
-          <strong>{child.sessionName || '子 Agent'}</strong>
-          <span>{getExternalSessionExt(child, 'external_session_status') || '已同步'}</span>
+  const menuItems = visibleChildren.map((child) => {
+    const member = teamSnapshot?.team.members?.find(
+      (item) =>
+        `${item.byclawSessionId || ''}` === `${child.sessionId}` ||
+        item.id === getExternalSessionExt(child, 'external_session_id')
+    );
+    let rawStatus = member?.status || getExternalSessionExt(child, 'external_session_status') || 'ready';
+    if (member?.activity === 'working') rawStatus = 'running';
+    else if (member?.activity === 'idle' && rawStatus === 'running') rawStatus = 'idle';
+    const lastTask = teamSnapshot?.team.tasks?.filter((task) => task.assignee === member?.name).slice(-1)[0];
+    if (member?.activity !== 'working' && lastTask?.status === 'cancelled') rawStatus = 'cancelled';
+    let status: 'idle' | 'running' | 'completed' | 'failed' | 'waiting' | 'cancelled' = 'idle';
+    if (rawStatus === 'running' || rawStatus === 'completed' || rawStatus === 'cancelled') status = rawStatus;
+    else if (['failed', 'error'].includes(rawStatus)) status = 'failed';
+    else if (['waiting', 'waiting_user', 'blocked'].includes(rawStatus)) status = 'waiting';
+    const label = {
+      running: intl.formatMessage({ id: 'ui.team.running' }),
+      completed: intl.formatMessage({ id: 'ui.team.completed' }),
+      failed: intl.formatMessage({ id: 'ui.team.failed' }),
+      waiting: intl.formatMessage({ id: 'ui.team.waiting' }),
+      idle: intl.formatMessage({ id: 'ui.team.idle' }),
+      cancelled: intl.formatMessage({ id: 'ui.team.stopped' }),
+    }[status];
+    const detail = lastTask?.subject || member?.role || getExternalSessionExt(child, 'child_role');
+    return {
+      key: `${child.sessionId}`,
+      label: (
+        <span className={styles.childSessionMenuItem} data-status={status}>
+          <span className={styles.childSessionMenuAvatar}>{child.sessionName?.slice(0, 1) || 'A'}</span>
+          <span className={styles.childSessionMenuCopy}>
+            <strong title={child.sessionName}>
+              {child.sessionName || intl.formatMessage({ id: 'ui.team.childAgent' })}
+            </strong>
+            {detail && <span title={detail}>{detail}</span>}
+          </span>
+          <span className={styles.childSessionStatus}>
+            {status === 'running' ? (
+              <LoadingOutlined />
+            ) : status === 'cancelled' ? (
+              <StopOutlined />
+            ) : status === 'completed' ? (
+              <CheckCircleFilled />
+            ) : (
+              <ClockCircleOutlined />
+            )}
+            {label}
+          </span>
         </span>
-      </span>
-    ),
-  }));
+      ),
+    };
+  });
 
   return (
     <div className={styles.childSessionNavigator}>
@@ -184,11 +270,12 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
       {isChild && parent && (
         <button type="button" className={styles.parentSessionButton} onClick={() => navigateTo(parent)}>
           <ArrowLeftOutlined />
-          {parent.sessionName || '主会话'}
+          {parent.sessionName || intl.formatMessage({ id: 'ui.team.parent' })}
         </button>
       )}
       <Dropdown
         trigger={['click']}
+        overlayClassName={styles.childSessionDropdown}
         menu={{
           items: menuItems,
           selectedKeys: isChild ? [`${sessionId}`] : [],
@@ -198,9 +285,13 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
           },
         }}
       >
-        <button type="button" className={styles.childSessionsButton} aria-label="打开子会话列表">
+        <button
+          type="button"
+          className={styles.childSessionsButton}
+          aria-label={intl.formatMessage({ id: 'ui.team.openChildren' })}
+        >
           <TeamOutlined />
-          {visibleChildren.length} 个子代理
+          {intl.formatMessage({ id: 'ui.team.childCount' }, { count: visibleChildren.length })}
           <DownOutlined />
         </button>
       </Dropdown>

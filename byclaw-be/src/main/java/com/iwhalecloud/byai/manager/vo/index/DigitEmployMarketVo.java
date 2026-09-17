@@ -210,11 +210,6 @@ public class DigitEmployMarketVo {
     private Boolean canApplyUse;
 
     /**
-     * 是否可审核使用申请
-     */
-    private Boolean canAuditUse;
-
-    /**
      * 资源标签：数字员工创建/设默认时按个人/默认助理写入；
      * 前端 ResourceCard 直接展示在卡片右上角。
      */
@@ -224,5 +219,29 @@ public class DigitEmployMarketVo {
      * 关联技能标识列表，JSON字符串格式。
      */
     private String skills;
+
+    /**
+     * 是否已由列表接口批量回填当前用户的操作权限。
+     */
+    private Boolean operationPermissionsLoaded;
+
+    /**
+     * 当前用户对该数字员工的操作权限。
+     */
+    private Boolean hasManagePermission;
+
+    private Boolean hasUsePermission;
+
+    private Boolean canViewDetail;
+
+    private Boolean useApplyPending;
+
+    private Boolean canSetDefault;
+
+    private Boolean canRestore;
+
+    private Boolean canOnShelf;
+
+    private Boolean canOffShelf;
 
 }

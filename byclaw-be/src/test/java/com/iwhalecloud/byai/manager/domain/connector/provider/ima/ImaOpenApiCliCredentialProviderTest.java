@@ -15,8 +15,12 @@ import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorManifestSe
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import java.time.Duration;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 
 class ImaOpenApiCliCredentialProviderTest {
@@ -88,18 +92,54 @@ class ImaOpenApiCliCredentialProviderTest {
     }
 
     @Test
-    void enforcesCredentialBoundsAndDoesNotExposeCliFailureOutput() {
+    void enforcesCredentialBounds() {
         assertThatThrownBy(() -> provider.verify("1001", connector(), Map.of(
             "clientId", "x".repeat(257), "apiKey", "key"))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> provider.verify("1001", connector(), Map.of(
             "clientId", "client", "apiKey", "x".repeat(2049)))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("classifiedProbeFailures")
+    void classifiesStructuredProbeFailuresWithoutEchoingOutput(
+            String name, String message, String expectedErrorCode) {
+        String output = """
+            {"status":"error","checks":{"client_id_present":true,"api_key_present":true,"token_fetch":false},
+             "message":"%s"}
+            """.formatted(message);
         when(cliRunner.run(any(), any(), eq(null), any(Duration.class)))
-            .thenReturn(new ConnectorCliRunner.CliResult(7, "client-id api-key raw-cli-output"));
+            .thenReturn(new ConnectorCliRunner.CliResult(1, output));
 
         CredentialFormVerification result = provider.verify("1001", connector(), credentials());
 
-        assertThat(result.status().errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
-        assertThat(result.status().errorMessage()).doesNotContain("client-id", "api-key", "raw-cli-output");
+        assertThat(result.status().errorCode()).isEqualTo(expectedErrorCode);
+        assertThat(result.status().errorMessage()).doesNotContain(
+            "client-id", "api-key", message, "20002", "20004", "100005", "110030");
+    }
+
+    @Test
+    void givesRateLimitClassificationPrecedenceOverGenericAuthenticationWords() {
+        String output = """
+            {"status":"error","checks":{"client_id_present":true,"api_key_present":true,"token_fetch":false},
+             "message":"HTTP 429 unauthorized: too many requests"}
+            """;
+        when(cliRunner.run(any(), any(), eq(null), any(Duration.class)))
+            .thenReturn(new ConnectorCliRunner.CliResult(1, output));
+
+        assertThat(provider.verify("1001", connector(), credentials()).status().errorCode())
+            .isEqualTo("IMA_RATE_LIMITED");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidFailurePayloads")
+    void mapsMalformedNonzeroExitPayloadsToProtocolError(
+            String name, ConnectorCliRunner.CliResult cliResult) {
+        when(cliRunner.run(any(), any(), eq(null), any(Duration.class))).thenReturn(cliResult);
+
+        CredentialFormVerification result = provider.verify("1001", connector(), credentials());
+
+        assertThat(result.status().errorCode()).isEqualTo("PROVIDER_PROTOCOL_ERROR");
+        assertThat(result.status().errorMessage()).doesNotContain("client-id", "api-key", "secret");
     }
 
     @Test
@@ -233,5 +273,38 @@ class ImaOpenApiCliCredentialProviderTest {
 
     private Map<String, String> credentialsEnvironment() {
         return Map.of("IMA_OPENAPI_CLIENTID", "client-id", "IMA_OPENAPI_APIKEY", "api-key");
+    }
+
+    private static Stream<Arguments> classifiedProbeFailures() {
+        return Stream.of(
+            Arguments.of("IMA rate code", "20002 apiKey超过最大限频", "IMA_RATE_LIMITED"),
+            Arguments.of("HTTP rate limit", "HTTP 429: Too Many Requests", "IMA_RATE_LIMITED"),
+            Arguments.of("note permission", "100005 无权限", "IMA_PERMISSION_DENIED"),
+            Arguments.of("wiki permission", "110030 permission denied", "IMA_PERMISSION_DENIED"),
+            Arguments.of("IMA auth code", "20004 apikey鉴权失败", "CONNECTOR_CREDENTIAL_INVALID"),
+            Arguments.of("English auth failure", "invalid credential", "CONNECTOR_CREDENTIAL_INVALID"),
+            Arguments.of("network failure", "fetch failed: ENOTFOUND ima.qq.com", "IMA_SERVICE_UNAVAILABLE"),
+            Arguments.of("TLS failure", "certificate verify failed", "IMA_SERVICE_UNAVAILABLE"),
+            Arguments.of("upstream failure", "HTTP 503: Service Unavailable", "IMA_SERVICE_UNAVAILABLE"),
+            Arguments.of("unknown valid failure", "unexpected upstream rejection", "CONNECTOR_VERIFICATION_FAILED")
+        );
+    }
+
+    private static Stream<Arguments> invalidFailurePayloads() {
+        return Stream.of(
+            Arguments.of("truncated", new ConnectorCliRunner.CliResult(1, "{\"status\":\"error\"}", true)),
+            Arguments.of("malformed", new ConnectorCliRunner.CliResult(1, "{bad secret")),
+            Arguments.of("trailing JSON", new ConnectorCliRunner.CliResult(1,
+                "{\"status\":\"error\",\"checks\":{\"client_id_present\":true,\"api_key_present\":true,"
+                    + "\"token_fetch\":false},\"message\":\"secret\"} {}")),
+            Arguments.of("missing checks", new ConnectorCliRunner.CliResult(1,
+                "{\"status\":\"error\",\"message\":\"secret\"}")),
+            Arguments.of("credentials reported absent", new ConnectorCliRunner.CliResult(1,
+                "{\"status\":\"error\",\"checks\":{\"client_id_present\":false,\"api_key_present\":true,"
+                    + "\"token_fetch\":false},\"message\":\"secret\"}")),
+            Arguments.of("token fetch not boolean", new ConnectorCliRunner.CliResult(1,
+                "{\"status\":\"error\",\"checks\":{\"client_id_present\":true,\"api_key_present\":true,"
+                    + "\"token_fetch\":null},\"message\":\"secret\"}"))
+        );
     }
 }

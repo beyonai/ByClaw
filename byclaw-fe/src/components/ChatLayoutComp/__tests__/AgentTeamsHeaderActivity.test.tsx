@@ -3,28 +3,39 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import {
   clearAgentTeamsSnapshots,
+  applyAgentTeamsChildProjection,
+  getAgentTeamsSnapshot,
   publishAgentTeamsSnapshot,
 } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import AgentTeamsHeaderActivity from '../AgentTeamsHeaderActivity';
 
 const mockDispatch = jest.fn();
 const mockSetSessionId = jest.fn();
-let newMessageHandler: ((message: any) => void) | undefined;
+const mockMessageHandlers = new Map<string, (message: any) => void>();
 const messages: Record<string, string> = {
   'agentTeamsActivity.openPanel': '打开专家团活动面板',
   'agentTeamsActivity.panelTitle': '专家团活动面板',
+  'ui.team.running': '执行中',
+  'ui.team.stopped': '已停止',
+  'ui.team.completed': '已完成',
+  'ui.team.idle': '待命',
+  'ui.team.openChild': '打开{name}子会话',
 };
+const formatMessage = ({ id }: { id: string }, values?: Record<string, unknown>) =>
+  (messages[id] || id).replace(/\{(\w+)\}/g, (_, key) => `${values?.[key] ?? ''}`);
+const mockIntl = { formatMessage };
 
 jest.mock('@umijs/max', () => ({
   useDispatch: () => mockDispatch,
-  useIntl: () => ({ formatMessage: ({ id }: { id: string }) => messages[id] || id }),
+  useIntl: () => mockIntl,
+  getIntl: () => mockIntl,
 }));
 jest.mock('@/hooks/useGlobal', () => () => ({ setSessionId: mockSetSessionId }));
 jest.mock('@/utils/websocket', () => ({
   __esModule: true,
   default: {
-    onMessage: jest.fn((_type: string, handler: (message: any) => void) => {
-      newMessageHandler = handler;
+    onMessage: jest.fn((type: string, handler: (message: any) => void) => {
+      mockMessageHandlers.set(type, handler);
     }),
     offMessage: jest.fn(),
   },
@@ -70,8 +81,41 @@ describe('AgentTeamsHeaderActivity', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     clearAgentTeamsSnapshots();
-    newMessageHandler = undefined;
+    mockMessageHandlers.clear();
     publishAgentTeamsSnapshot('100', snapshot as any);
+  });
+
+  it('keeps stopped members terminal until a new team snapshot reopens them', () => {
+    const stopped = {
+      ...snapshot,
+      team: {
+        ...snapshot.team,
+        members: [{ id: 'member-1', name: '架构舵手', activity: 'idle', status: 'cancelled' }],
+      },
+    } as any;
+    publishAgentTeamsSnapshot('100', stopped);
+    const projection = (status: string) => ({
+      sessionId: '201',
+      running: status === 'running',
+      metadata: {
+        session_scope: 'child',
+        external_parent_session_id: '100',
+        external_session_id: 'member-1',
+        session_status: status,
+        child_run_id: 'member-1:2',
+        child_turn: 2,
+      },
+    });
+    expect(applyAgentTeamsChildProjection('100', projection('idle'), '20-0')).toBe(false);
+    expect(applyAgentTeamsChildProjection('100', projection('running'), '21-0')).toBe(false);
+    expect(getAgentTeamsSnapshot('100')?.team.members?.[0].status).toBe('cancelled');
+    publishAgentTeamsSnapshot('100', {
+      ...stopped,
+      capturedAt: '2026-08-31T08:01:00Z',
+      team: { ...stopped.team, members: [{ ...stopped.team.members[0], status: 'idle' }] },
+    });
+    expect(applyAgentTeamsChildProjection('100', projection('running'), '22-0')).toBe(true);
+    expect(getAgentTeamsSnapshot('100')?.team.members?.[0].activity).toBe('working');
   });
 
   it('renders in the title, paginates tasks by five, and opens a member child session', () => {
@@ -81,7 +125,7 @@ describe('AgentTeamsHeaderActivity', () => {
     const panel = screen.getByRole('dialog', { name: '专家团活动面板' });
     expect(within(panel).queryByText(/DSH|TEAM RUNTIME/i)).not.toBeInTheDocument();
     expect(within(panel).getByText('待命')).toBeInTheDocument();
-    expect(within(panel).getByText('进行中')).toBeInTheDocument();
+    expect(within(panel).getByText('执行中')).toBeInTheDocument();
     expect(within(panel).getByText('任务 1')).toBeInTheDocument();
     expect(within(panel).queryByText('任务 6')).not.toBeInTheDocument();
     fireEvent.click(within(panel).getByRole('button', { name: '下一页' }));
@@ -115,7 +159,7 @@ describe('AgentTeamsHeaderActivity', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开专家团活动面板' }));
 
     act(() => {
-      newMessageHandler?.({
+      mockMessageHandlers.get('NEW_MESSAGE')?.({
         sessionId: '201',
         streamId: '20-0',
         data: {
@@ -135,7 +179,7 @@ describe('AgentTeamsHeaderActivity', () => {
     expect(screen.getByText('执行中')).toBeInTheDocument();
 
     act(() => {
-      newMessageHandler?.({
+      mockMessageHandlers.get('NEW_MESSAGE')?.({
         sessionId: '201',
         streamId: '21-0',
         data: {
@@ -153,5 +197,34 @@ describe('AgentTeamsHeaderActivity', () => {
       });
     });
     expect(screen.getByText('执行中')).toBeInTheDocument();
+  });
+
+  it('updates member activity from a lightweight status event without consuming child content', () => {
+    render(<AgentTeamsHeaderActivity rootSessionId="100" currentSession={{ sessionId: '100' } as any} />);
+    fireEvent.click(screen.getByRole('button', { name: '打开专家团活动面板' }));
+
+    act(() => {
+      mockMessageHandlers.get('SCOPED_SESSION_STATUS')?.({
+        type: 'SCOPED_SESSION_STATUS',
+        sessionId: '202',
+        streamId: '30-0',
+        data: {
+          sessionId: '202',
+          running: true,
+          metadata: JSON.stringify({
+            session_scope: 'child',
+            external_parent_session_id: '100',
+            external_session_id: 'member-2',
+            session_status: 'running',
+            child_task: '后台处理',
+          }),
+        },
+      });
+    });
+
+    expect(screen.getAllByText('执行中')).toHaveLength(2);
+    expect(screen.queryByText('后台处理')).not.toBeInTheDocument();
+    expect(getAgentTeamsSnapshot('100')?.team.members?.[1].currentTask).toBeUndefined();
+    expect(screen.queryByText('private child message')).not.toBeInTheDocument();
   });
 });

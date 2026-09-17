@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DatePicker, Form, Input, InputNumber, Modal, Radio, Select, Switch, TimePicker, message } from 'antd';
+import { DatePicker, Form, Input, InputNumber, Modal, Radio, Select, TimePicker, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
 import type {
@@ -124,7 +124,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   const isSimpleRequirement = entityLabel === 'requirement' && simpleRequirement;
   const collectMode = Form.useWatch(['collectConfig', 'mode'], form);
   const collectPeriodType = Form.useWatch(['collectConfig', 'periodType'], form);
-  const collectOrganize = Form.useWatch(['collectConfig', 'organize'], form);
   const collectChannel = Form.useWatch(['collectConfig', 'channel'], form);
   const collectKnowledgeBaseId = Form.useWatch(['collectConfig', 'knowledgeBaseId'], form);
   const contentType = Form.useWatch(['contentConfig', 'contentType'], form);
@@ -397,15 +396,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
     setSubmitting(true);
     try {
       const values = await form.validateFields();
-      if (
-        values.taskType === 'collect' &&
-        values.collectConfig?.organize &&
-        !values.collectConfig.knowledgeOrganization
-      ) {
-        // 开启整理但未选择本地本体时不允许提交，避免后端收到无法执行的空整理配置。
-        message.error(t('validation.organizeTemplateRequired'));
-        return;
-      }
       // 只提交当前任务类型的业务配置，避免表单切换后把其它类型的残留字段带给后端。
       const collectConfig =
         values.taskType === 'collect'
@@ -420,17 +410,19 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
                 periodMonthDays: values.collectConfig?.periodMonthDays,
                 // 年度周期使用一个月日时分选择器，提交时同时展开为后端 Cron 生成所需字段。
                 periodMonth:
-                  values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
-                    ? values.collectConfig.periodYearDateTime.month() + 1
-                    : values.collectConfig?.periodMonth,
+                      values.collectConfig?.periodType === 'yearly' &&
+                      values.collectConfig.periodYearDateTime?.isValid()
+                        ? values.collectConfig.periodYearDateTime.month() + 1
+                        : values.collectConfig?.periodMonth,
                 periodDay:
-                  values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
-                    ? values.collectConfig.periodYearDateTime.date()
-                    : values.collectConfig?.periodDay,
+                      values.collectConfig?.periodType === 'yearly' &&
+                      values.collectConfig.periodYearDateTime?.isValid()
+                        ? values.collectConfig.periodYearDateTime.date()
+                        : values.collectConfig?.periodDay,
                 periodTime:
-                  values.collectConfig?.periodType === 'yearly'
-                    ? values.collectConfig.periodYearDateTime
-                    : values.collectConfig?.periodTime,
+                      values.collectConfig?.periodType === 'yearly'
+                        ? values.collectConfig.periodYearDateTime
+                        : values.collectConfig?.periodTime,
                 periodYearDateTime: values.collectConfig?.periodYearDateTime,
                 intervalHours: values.collectConfig?.intervalHours,
                 intervalWeekdays: values.collectConfig?.intervalWeekdays,
@@ -439,17 +431,19 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
               : {
                 ...values.collectConfig,
                 periodMonth:
-                    values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
-                      ? values.collectConfig.periodYearDateTime.month() + 1
-                      : values.collectConfig?.periodMonth,
+                      values.collectConfig?.periodType === 'yearly' &&
+                      values.collectConfig.periodYearDateTime?.isValid()
+                        ? values.collectConfig.periodYearDateTime.month() + 1
+                        : values.collectConfig?.periodMonth,
                 periodDay:
-                    values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
-                      ? values.collectConfig.periodYearDateTime.date()
-                      : values.collectConfig?.periodDay,
+                      values.collectConfig?.periodType === 'yearly' &&
+                      values.collectConfig.periodYearDateTime?.isValid()
+                        ? values.collectConfig.periodYearDateTime.date()
+                        : values.collectConfig?.periodDay,
                 periodTime:
-                    values.collectConfig?.periodType === 'yearly'
-                      ? values.collectConfig.periodYearDateTime
-                      : values.collectConfig?.periodTime,
+                      values.collectConfig?.periodType === 'yearly'
+                        ? values.collectConfig.periodYearDateTime
+                        : values.collectConfig?.periodTime,
               }),
             cronExpr: buildOperationCollectionCron(values.collectConfig),
           }
@@ -473,38 +467,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   const handleCancel = useCallback(() => {
     if (!isSubmitting) onCancel();
   }, [isSubmitting, onCancel]);
-
-  const organizeTemplates = useMemo(() => options.organizeTemplates || [], [options.organizeTemplates]);
-  useEffect(() => {
-    if (!open || !collectOrganize || !organizeTemplates.length) return;
-    const currentTemplateId = form.getFieldValue(['collectConfig', 'organizeTemplateId']);
-    if (hasIdentifier(currentTemplateId)) return;
-    const firstTemplate = organizeTemplates[0];
-    // 本体列表异步加载完成后默认选中第一项，避免打开知识整理后还要再次弹窗选择。
-    form.setFieldsValue({
-      collectConfig: {
-        ...(form.getFieldValue('collectConfig') || {}),
-        organizeTemplateId: firstTemplate.value,
-        knowledgeOrganization: {
-          mode: 'existing',
-          templateId: firstTemplate.value,
-          templateName: firstTemplate.label,
-        },
-      },
-    });
-  }, [collectOrganize, form, open, organizeTemplates]);
-
-  const handleKnowledgeTemplateChange = useCallback(
-    (templateId: OperationIdentifier) => {
-      const selectedTemplate = organizeTemplates.find((template) => `${template.value}` === `${templateId}`);
-      form.setFieldValue(['collectConfig', 'knowledgeOrganization'], {
-        mode: 'existing',
-        templateId,
-        templateName: selectedTemplate?.label,
-      });
-    },
-    [form, organizeTemplates]
-  );
 
   const renderCollectFields = () => (
     <section className={styles.operationTaskSection}>
@@ -744,71 +706,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
               <DatePicker.RangePicker className={styles.operationFullControl} />
             </Form.Item>
           </>
-        )}
-        {!isSimpleRequirement && (
-          <div className={styles.operationKnowledgeOrganizationRow}>
-            <Form.Item label={t('field.organize')} name={['collectConfig', 'organize']} valuePropName="checked">
-              <Switch
-                checkedChildren={t('common.yes')}
-                unCheckedChildren={t('common.no')}
-                onChange={(checked) => {
-                  if (checked) {
-                    const currentCollectConfig = form.getFieldValue('collectConfig') || {};
-                    const selectedTemplateId = currentCollectConfig.organizeTemplateId ?? organizeTemplates[0]?.value;
-                    const selectedTemplate = organizeTemplates.find(
-                      (template) => `${template.value}` === `${selectedTemplateId}`
-                    );
-                    // 开启知识整理后直接使用当前页面的本地本体列表，不再额外打开配置弹窗。
-                    form.setFieldsValue({
-                      collectConfig: {
-                        ...currentCollectConfig,
-                        organize: true,
-                        organizeTemplateId: selectedTemplateId,
-                        knowledgeOrganization: selectedTemplateId
-                          ? {
-                            mode: 'existing',
-                            templateId: selectedTemplateId,
-                            templateName: selectedTemplate?.label,
-                          }
-                          : undefined,
-                      },
-                    });
-                    return;
-                  }
-                  form.setFieldsValue({
-                    collectConfig: {
-                      ...(form.getFieldValue('collectConfig') || {}),
-                      organize: false,
-                      organizeTemplateId: undefined,
-                      knowledgeOrganization: undefined,
-                    },
-                  });
-                }}
-              />
-            </Form.Item>
-            {collectOrganize && (
-              <Form.Item
-                label={t('field.organizeTemplate')}
-                name={['collectConfig', 'organizeTemplateId']}
-                rules={[{ required: true, message: t('validation.organizeTemplateRequired') }]}
-              >
-                <Select
-                  options={organizeTemplates}
-                  loading={optionLoading}
-                  disabled={isSubmitting}
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder={t('placeholder.organizeTemplate')}
-                  notFoundContent={null}
-                  onChange={handleKnowledgeTemplateChange}
-                />
-              </Form.Item>
-            )}
-            {/*
-              暂停“新增本体”能力，知识整理当前只允许直接选择本地已有本体。
-              后续恢复时应重新设计本体创建和列表刷新流程，避免在需求表单中嵌套弹窗。
-            */}
-          </div>
         )}
       </div>
     </section>

@@ -135,70 +135,11 @@
   gap: 16px;
 }
 
-.projectSkeletonCard {
-  min-width: 0;
-  min-height: 80px;
-  padding: 14px 18px;
-  border: 1px solid #e5e5e5;
-  border-radius: 12px;
+.projectListLoading {
+  min-height: 320px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  box-sizing: border-box;
-  background: #fff;
-}
-
-.projectSkeletonIcon,
-.projectSkeletonTitle,
-.projectSkeletonDescription {
-  background: linear-gradient(90deg, #f1f1f1 25%, #e5e5e5 37%, #f1f1f1 63%);
-  background-size: 400% 100%;
-  animation: projectSkeletonShimmer 1.4s ease infinite;
-}
-
-.projectSkeletonIcon {
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
-  border-radius: 10px;
-}
-
-.projectSkeletonBody {
-  min-width: 0;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.projectSkeletonTitle {
-  width: 42%;
-  height: 14px;
-  border-radius: 7px;
-}
-
-.projectSkeletonDescription {
-  width: 72%;
-  height: 12px;
-  border-radius: 6px;
-}
-
-@keyframes projectSkeletonShimmer {
-  0% {
-    background-position: 100% 0;
-  }
-
-  100% {
-    background-position: 0 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .projectSkeletonIcon,
-  .projectSkeletonTitle,
-  .projectSkeletonDescription {
-    animation: none;
-  }
+  justify-content: center;
 }
 
 .projectListCard {
@@ -990,6 +931,34 @@
 }
 
 // 项目详情 Tab 统一使用响应式卡片网格，避免长列表内容挤在单行中。
+.taskFilterBar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+  min-height: 52px;
+  box-sizing: border-box;
+  margin-bottom: 16px;
+  padding: 10px 0;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
+
+  :global {
+    .@{antPrefix}-picker {
+      height: 32px;
+    }
+  }
+}
+
+.taskFilterBar :global(.@{antPrefix}-input-search) {
+  width: 180px;
+  margin-left: auto;
+  flex: 0 0 180px;
+}
+
 .dataCardGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -1907,7 +1876,7 @@
   }
 }
 
-// 列表头像先定义统一尺寸，后面的知识库、数字员工、本体样式再覆盖各自配色。
+// 列表头像先定义统一尺寸，后面的知识库、数字员工样式再覆盖各自配色。
 .resourceSimpleIcon {
   width: 34px;
   height: 34px;
@@ -1939,13 +1908,7 @@
   background: linear-gradient(145deg, #faf7ff 0%, #eee7ff 100%);
 }
 
-.resourceOntologyIcon {
-  border-color: #cceee8;
-  color: #0d9488;
-  background: linear-gradient(145deg, #f3fcfa 0%, #ddf6f1 100%);
-}
-
-// 数字员工优先展示员工模块真实头像，圆形描边与知识库、本体的分类图标形成明确区分。
+// 数字员工优先展示员工模块真实头像，圆形描边与知识库的分类图标形成明确区分。
 .resourceEmployeeAvatar {
   padding: 2px;
   overflow: hidden;

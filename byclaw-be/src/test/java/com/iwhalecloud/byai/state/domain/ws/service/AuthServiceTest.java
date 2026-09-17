@@ -54,7 +54,7 @@ class AuthServiceTest {
         EmbeddedChannel channel = embeddedChannel();
         ChannelHandlerContext ctx = channel.pipeline().firstContext();
         FullHttpRequest request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET,
-            "/byaiService/ws?beyond-token=token-1&language=en-US");
+            "/byaiService/ws?beyond-token=token-1&language=en-US&scoped-delta-version=1");
 
         authService.auth(ctx, request);
 
@@ -62,6 +62,7 @@ class AuthServiceTest {
         assertThat(request.headers().get("sso-token")).isEqualTo("sso-1");
         assertThat(channel.attr(Constant.ATT_USER_INFO).get()).isSameAs(loginInfo);
         assertThat(loginInfo.getParamMap()).containsEntry("language", "en-US");
+        assertThat(loginInfo.getParamMap()).containsEntry("scoped-delta-version", "1");
         assertThat(LocaleContextHolder.getLocale()).isEqualTo(Locale.US);
         verify(channelManager).addChannel(10L, channel);
     }

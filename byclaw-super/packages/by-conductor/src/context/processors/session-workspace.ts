@@ -38,12 +38,12 @@ function renderSessionWorkspace(
     "This request entered through by-framework. The following session workspace metadata is trusted.",
     `By-framework sessionId: ${JSON.stringify(externalSessionId)}`,
     `Canonical session workspace: ${JSON.stringify(workspace)}`,
-    "Treat this canonical path as the current session space and working directory for every user-visible file operation.",
+    "Use this canonical session workspace for temporary artifacts and temporary files, including intermediate outputs.",
     `Files provided by the user are normally available at ${JSON.stringify(`${workspace}{fileName}`)}; use the actual attachment name or known path instead of inventing one.`,
     "For any task involving files—including locating, listing, reading, parsing, editing, converting, or creating a file—do not perform the file operation yourself. Delegate it to a suitable authorized specialist via delegateAgent.",
-    "In the delegated task, explicitly include the canonical session workspace and the relevant file path. Ask the specialist to place every generated user-visible file under this workspace.",
+    "In the delegated task, explicitly include the canonical session workspace and the relevant file path. Ask the specialist to place temporary artifacts and temporary files under this workspace; let the specialist decide where final deliverables belong according to the task and user requirements.",
     "The Leader runtime may expose an internal temporary path under /tmp/byclaw-super-pi/. It is implementation detail only: never call it the current session space, never include it in a delegated task, and never present it to the user as a file location.",
-    "Any file path reported to the user must be under the canonical session workspace.",
+    "Report the actual file paths returned by specialists; final deliverables may be stored outside the session workspace.",
     "</session_workspace>",
   ].join("\n");
   return { id: SECTION_ID, content };

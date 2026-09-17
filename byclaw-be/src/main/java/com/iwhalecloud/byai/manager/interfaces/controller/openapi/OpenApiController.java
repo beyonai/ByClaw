@@ -2,18 +2,12 @@ package com.iwhalecloud.byai.manager.interfaces.controller.openapi;
 
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.application.service.openapi.OpenApiApplicationService;
-import com.iwhalecloud.byai.manager.application.service.ontology.OntologyResourceSyncApplicationService;
-import com.iwhalecloud.byai.manager.domain.resource.service.OntologyOpenService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.men.Notices;
-import com.iwhalecloud.byai.manager.dto.ontology.OntologyActionSaveRequest;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.manager.dto.openapi.MountResourceDto;
-import com.iwhalecloud.byai.manager.dto.openapi.OntologyResourceDeleteRequest;
-import com.iwhalecloud.byai.manager.dto.openapi.OntologyResourceSyncRequest;
-import com.iwhalecloud.byai.manager.dto.openapi.OntologyResourceSyncResultDto;
 import com.iwhalecloud.byai.manager.dto.openapi.OpenPermissionCheckDto;
 import com.iwhalecloud.byai.manager.dto.openapi.OpenPermissionCheckResultDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceCatalog;
@@ -39,31 +33,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class OpenApiController {
 
     @Autowired
-    private OntologyOpenService ontologyOpenService;
-
-    @Autowired
     private OpenApiApplicationService openApiApplicationService;
-
-    @Autowired
-    private OntologyResourceSyncApplicationService ontologyResourceSyncApplicationService;
 
     @Autowired
     private SsResourceCatalogService ssResourceCatalogService;
 
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
-
-    /**
-     * 保存对象的动作相关内容 包括：动作和动作属性
-     *
-     * @param request 动作保存请求
-     * @return ResponseUtil
-     */
-    @PostMapping("/createOrUpdateOntology")
-    @ManageLogAnnotation(name = "保存对象动作", description = "保存对象的动作相关内容，包括动作和动作属性")
-    public ResponseUtil<Map<String, Object>> saveBatchOpen(@Valid @RequestBody OntologyActionSaveRequest request) {
-        return ResponseUtil.successRes(ontologyOpenService.saveBatchOpen(request));
-    }
 
     /**
      * 创建通知
@@ -114,42 +90,6 @@ public class OpenApiController {
     public ResponseUtil<OpenPermissionCheckResultDto> checkResourceUsePermission(
         @RequestBody OpenPermissionCheckDto checkDto) {
         return ResponseUtil.successResponse(openApiApplicationService.checkResourceUsePermission(checkDto));
-    }
-
-    /**
-     * datacloud 主动新增本体资源索引。
-     *
-     * @return ResponseUtil
-     */
-    @ManageLogAnnotation(name = "API调用", description = "datacloud新增本体资源索引")
-    @PostMapping("/v1/ontology/resource/create")
-    public ResponseUtil<OntologyResourceSyncResultDto> createOntologyResource(
-        @RequestBody @Valid OntologyResourceSyncRequest request) {
-        return ResponseUtil.successResponse(ontologyResourceSyncApplicationService.createOntologyResource(request));
-    }
-
-    /**
-     * datacloud 主动更新本体资源索引。
-     *
-     * @return ResponseUtil
-     */
-    @ManageLogAnnotation(name = "API调用", description = "datacloud更新本体资源索引")
-    @PostMapping("/v1/ontology/resource/update")
-    public ResponseUtil<OntologyResourceSyncResultDto> updateOntologyResource(
-        @RequestBody @Valid OntologyResourceSyncRequest request) {
-        return ResponseUtil.successResponse(ontologyResourceSyncApplicationService.updateOntologyResource(request));
-    }
-
-    /**
-     * datacloud 主动删除本体资源索引。
-     *
-     * @return ResponseUtil
-     */
-    @ManageLogAnnotation(name = "API调用", description = "datacloud删除本体资源索引")
-    @PostMapping("/v1/ontology/resource/delete")
-    public ResponseUtil<OntologyResourceSyncResultDto> deleteOntologyResource(
-        @RequestBody @Valid OntologyResourceDeleteRequest request) {
-        return ResponseUtil.successResponse(ontologyResourceSyncApplicationService.deleteOntologyResource(request));
     }
 
     /**

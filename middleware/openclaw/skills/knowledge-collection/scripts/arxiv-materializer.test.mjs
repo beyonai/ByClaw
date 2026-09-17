@@ -15,6 +15,7 @@ import test from 'node:test';
 import { runArxivMaterialize } from './arxiv-materializer.mjs';
 import { cmdCollect, collectionStatus } from './collection-state.mjs';
 import { cmdPublish } from './publish-delivery.mjs';
+import { createProbeRun } from './probe-state.mjs';
 import { cmdInit } from './research-state.mjs';
 import { sessionPaths } from './session.mjs';
 
@@ -81,12 +82,25 @@ function args(f) {
   };
 }
 
+async function markPublicCollectOwned(root) {
+  const sessionPath = join(root, 'session.json');
+  const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+  session.task.workflow = 'public-collect';
+  await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+}
+
 test('materializes verified arXiv HTML as registered full text', async () => {
   const f = await fixture();
   try {
     const result = await runArxivMaterialize(f.paths, args(f));
     assert.equal(result.materialization.status, 'materialized');
     assert.equal(result.materialization.contentGranularity, 'full-text');
+    assert.throws(() => createProbeRun(f.paths, {
+      query: 'DeepSeek-R1 PDF 全文', fallbackQuery: 'DeepSeek-R1 PDF 全文', requestedCount: 1,
+      category: 'science', language: 'zh-CN', manualPolicy: 'pause',
+    }), /SESSION_NOT_FRESH/);
+    const externallyOwnedSession = JSON.parse(await readFile(join(f.root, 'session.json'), 'utf8'));
+    assert.equal(externallyOwnedSession.task.workflow, undefined);
 
     const payload = JSON.parse(await readFile(result.collectPayloadPath, 'utf8'));
     assert.equal(payload.contentGranularity, 'full-text');
@@ -128,6 +142,26 @@ test('materializes verified arXiv HTML as registered full text', async () => {
       ACQUISITION_URL,
     ]);
     assert.match(session.task.fullTextEvidenceReceipts[0].artifactHash, /^sha256:[a-f0-9]{64}$/);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('direct arXiv materialization cannot write into a public-collect-owned session', async () => {
+  const f = await fixture();
+  try {
+    await markPublicCollectOwned(f.root);
+    await assert.rejects(
+      runArxivMaterialize(f.paths, args(f)),
+      /SESSION_OWNED_BY_PUBLIC_COLLECT/,
+    );
+    await assert.rejects(
+      readFile(join(f.root, 'raw/materialization/deepseek-r1-2501-12948.json'), 'utf8'),
+      { code: 'ENOENT' },
+    );
+    const session = JSON.parse(await readFile(join(f.root, 'session.json'), 'utf8'));
+    assert.deepEqual(session.collection.collection.items, []);
+    assert.deepEqual(session.task.discoveryGate.candidates[0].acquisitionUrls, [SOURCE_URL]);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

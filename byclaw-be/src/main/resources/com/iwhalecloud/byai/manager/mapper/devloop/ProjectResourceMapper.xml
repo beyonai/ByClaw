@@ -19,6 +19,7 @@
         FROM ss_resource a
                  JOIN byai_project_resource b ON a.resource_id = b.resource_id
         WHERE b.project_id = #{projectId}
+          AND b.resource_type IN ('knowledge', 'digital_employee')
           AND (b.delete_flag IS NULL OR b.delete_flag &lt;&gt; '1')
         ORDER BY b.resource_type ASC,
                  b.sort_no ASC,

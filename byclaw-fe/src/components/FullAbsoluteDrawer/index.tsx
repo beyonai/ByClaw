@@ -38,6 +38,10 @@ function FullAbsoluteDrawer(props: IProps) {
   } = useActionEffect();
 
   const { canClose, title } = drawerCfg;
+  // 保留关闭前的类型，避免关闭动画开始后 drawerType 清空导致宽度从 70% 瞬间跳回 96%。
+  const drawerTypeRef = useRef(drawerType);
+  if (drawerType) drawerTypeRef.current = drawerType;
+  const effectiveDrawerType = drawerType || drawerTypeRef.current;
 
   // 各内容组件 props 各异(iframe 要 url、会话类要 sessionInfo),这里按 drawerType 动态选组件并统一透传,
   // 用 ComponentType<any> 消除联合 props 的交叉类型冲突。
@@ -63,7 +67,7 @@ function FullAbsoluteDrawer(props: IProps) {
       getContainer={() => getContainer?.() || document.body}
       destroyOnHidden
       open={!!drawerType}
-      width="96%"
+      width={effectiveDrawerType === 'readonlysession' ? '70%' : '96%'}
       placement="right"
       footer={null}
       mask

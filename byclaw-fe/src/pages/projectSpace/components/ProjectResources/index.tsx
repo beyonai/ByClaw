@@ -1,6 +1,5 @@
 import { Button, Drawer, Dropdown, Empty, Modal, Select, Spin, Switch, Typography, message } from 'antd';
 import {
-  ApartmentOutlined,
   BranchesOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -17,7 +16,8 @@ import {
   RobotOutlined,
 } from '@ant-design/icons';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useIntl } from '@umijs/max';
+import ProjectDataSources from '@/components/ProjectDataSources';
+import { useIntl, useSelector } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import AntdIcon from '@/components/AntdIcon';
 import { getFileIconType } from '@/constants/icon';
@@ -50,7 +50,6 @@ import {
   type ProjectResourceType,
 } from '@/service/devloop';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
-import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { deleteFolder, removeFile } from '@/service/knowledgeCenter';
 import { ResourceTypeMap } from '@/constants/resource';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
@@ -81,7 +80,6 @@ type RepoFileItem = { name: string; path: string; isDir: boolean; size?: number 
 const EMPTY_SELECTION: ResourceSelection = {
   knowledge: [],
   digital_employee: [],
-  ontology: [],
 };
 
 const toFileBrowserItem = (node: ProjectRepoTreeNode): RepoFileItem => ({
@@ -110,6 +108,14 @@ const ProjectResources: React.FC<Props> = ({
   repositoryRefreshVersion = 0,
 }) => {
   const intl = useIntl();
+  const currentUser = useSelector(
+    (state: { user?: { userInfo?: { userId?: string | number; id?: string | number; userCode?: string } } }) =>
+      state.user?.userInfo
+  );
+  const canManageDataSources = [currentUser?.userId, currentUser?.id, currentUser?.userCode].some(
+    (id) => id !== undefined && `${id}` === `${project.createBy}`
+  );
+  const [dataSourceRefreshKey, setDataSourceRefreshKey] = useState(0);
   const siderContentContext = useContext(SiderContentContext);
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
   const [cloudPath, setCloudPath] = useState('/');
@@ -143,7 +149,6 @@ const ProjectResources: React.FC<Props> = ({
   } | null>(null);
   const requestSeqRef = useRef(0);
   const [knowledgeOptions, setKnowledgeOptions] = useState<ResourceOption[]>([]);
-  const [ontologyOptions, setOntologyOptions] = useState<ResourceOption[]>([]);
   const [selectedResources, setSelectedResources] = useState<ResourceSelection>(EMPTY_SELECTION);
   const { options: agentOptions, loading: agentOptionsLoading } = useDigitalEmployeeOptions(
     project.projectType === 'operation'
@@ -157,7 +162,7 @@ const ProjectResources: React.FC<Props> = ({
   const isOperationProject = project.projectType === 'operation';
   const repositoryProject = supportsProjectRepositories(project.projectType);
   // 资源分类始终在同一行等宽铺满：研发 2 类、运营 5 类，默认和普通项目仅展示共享文件。
-  const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType);
+  const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType) + 1;
 
   const loadFiles = useCallback(async () => {
     const cloudResourceId = project.cloudResourceId;
@@ -203,7 +208,8 @@ const ProjectResources: React.FC<Props> = ({
     try {
       const response = await listScanSources({
         projectId: Number(project.projectId),
-        onlyMine: false,
+        // 项目详情仅展示当前登录用户创建的定时任务，避免混入项目内其他成员的任务。
+        onlyMine: true,
         pageNum: 1,
         pageSize: 100,
       });
@@ -218,7 +224,8 @@ const ProjectResources: React.FC<Props> = ({
     if (!repositoryProject) return;
     setLoadingRepos(true);
     try {
-      setRepos((await listProjectRepos(Number(project.projectId))) || []);
+      const nextRepos = (await listProjectRepos(Number(project.projectId))) || [];
+      setRepos(nextRepos);
     } catch (error: any) {
       setRepos([]);
       message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.loadReposFailed' }));
@@ -226,6 +233,12 @@ const ProjectResources: React.FC<Props> = ({
       setLoadingRepos(false);
     }
   }, [intl, project.projectId, repositoryProject]);
+
+  useEffect(() => {
+    if (!repos.some((repo) => repo.cloneStatus === 'cloning')) return undefined;
+    const timer = window.setTimeout(() => void loadRepos(), 1500);
+    return () => window.clearTimeout(timer);
+  }, [loadRepos, repos]);
 
   const loadBoundResources = useCallback(async () => {
     if (!isOperationProject) return;
@@ -239,9 +252,6 @@ const ProjectResources: React.FC<Props> = ({
           .map((resource) => `${resource.resourceId}`),
         digital_employee: rows
           .filter((resource) => resource.resourceType === 'digital_employee')
-          .map((resource) => `${resource.resourceId}`),
-        ontology: rows
-          .filter((resource) => resource.resourceType === 'ontology')
           .map((resource) => `${resource.resourceId}`),
       });
     } catch (error: any) {
@@ -278,32 +288,9 @@ const ProjectResources: React.FC<Props> = ({
         ],
         resourceStatus: '2',
       };
-      const [
-        knowledgePersonal,
-        knowledgeEnterprise,
-        ontologyPersonal,
-        ontologyEnterprise,
-        ontologyResourcePersonal,
-        ontologyResourceEnterprise,
-      ] = await Promise.all([
+      const [knowledgePersonal, knowledgeEnterprise] = await Promise.all([
         listResourceUseAuth({ ...knowledgeQuery, ownerType: 'personal', permission: '' }),
         listResourceUseAuth({ ...knowledgeQuery, ownerType: 'enterprise', permission: '', belong: 'ALL' }),
-        listOntologyBases({ ownerType: 'personal' }),
-        listOntologyBases({ ownerType: 'enterprise' }),
-        pageOntologyResources({
-          ownerType: 'personal',
-          resourceBizTypeList: ['VIEW', 'OBJECT'],
-          statusList: [0, 1, 2, 3, 4, 5],
-          pageNum: 1,
-          pageSize: 1000,
-        }),
-        pageOntologyResources({
-          ownerType: 'enterprise',
-          resourceBizTypeList: ['VIEW', 'OBJECT'],
-          statusList: [0, 1, 2, 3, 4, 5],
-          pageNum: 1,
-          pageSize: 1000,
-        }),
       ]);
 
       const knowledgeMap = new Map<string, ResourceOption>();
@@ -316,25 +303,10 @@ const ProjectResources: React.FC<Props> = ({
         }
       });
 
-      const ontologyMap = new Map<string, ResourceOption>();
-      [ontologyPersonal, ontologyEnterprise, ontologyResourcePersonal, ontologyResourceEnterprise]
-        .flatMap(getResourceRows)
-        .forEach((item: any) => {
-          const value = item.baseId ?? item.resourceId ?? item.id;
-          const label = item.displayName || item.resourceName || item.name;
-          const description =
-            item.resourceDesc || item.baseDesc || item.objectDesc || item.description || item.desc || '';
-          if (value !== undefined && value !== null && label) {
-            ontologyMap.set(`${value}`, { value: `${value}`, label, description });
-          }
-        });
-
       setKnowledgeOptions(Array.from(knowledgeMap.values()));
-      setOntologyOptions(Array.from(ontologyMap.values()));
     } catch (error) {
       console.error('Failed to load project resource options:', error);
       setKnowledgeOptions([]);
-      setOntologyOptions([]);
     } finally {
       setResourceOptionsLoading(false);
     }
@@ -353,6 +325,7 @@ const ProjectResources: React.FC<Props> = ({
         icon={<ReloadOutlined />}
         loading={loadingFiles || loadingRepos || loadingBoundResources}
         onClick={() => {
+          setDataSourceRefreshKey((value) => value + 1);
           void loadFiles();
           void loadRepos();
           void loadBoundResources();
@@ -381,9 +354,6 @@ const ProjectResources: React.FC<Props> = ({
       digital_employee: boundResources
         .filter((resource) => resource.resourceType === 'digital_employee')
         .map((resource) => `${resource.resourceId}`),
-      ontology: boundResources
-        .filter((resource) => resource.resourceType === 'ontology')
-        .map((resource) => `${resource.resourceId}`),
     });
     setResourceModalOpen(true);
   };
@@ -393,7 +363,7 @@ const ProjectResources: React.FC<Props> = ({
     setResourceSaving(true);
     try {
       const optionLabelMap = new Map<string, string>(
-        [...knowledgeOptions, ...ontologyOptions, ...agentOptions].map((option) => [`${option.value}`, option.label])
+        [...knowledgeOptions, ...agentOptions].map((option) => [`${option.value}`, option.label])
       );
       const previousNameMap = new Map(
         boundResources.map((resource) => [`${resource.resourceType}:${resource.resourceId}`, resource.resourceName])
@@ -434,7 +404,11 @@ const ProjectResources: React.FC<Props> = ({
           message.success(intl.formatMessage({ id: 'projectSpace.resources.deleteRepoSuccess' }));
           await loadRepos();
         } catch (error: any) {
-          message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.deleteRepoFailed' }));
+          message.error(
+            typeof error === 'string'
+              ? error
+              : error?.message || intl.formatMessage({ id: 'projectSpace.resources.deleteRepoFailed' })
+          );
         }
       },
     });
@@ -471,7 +445,11 @@ const ProjectResources: React.FC<Props> = ({
   const loadRepoBranches = useCallback(async (repo: DevloopProjectRepo) => {
     try {
       const branchList = await listProjectRepoBranches(repo.repoId);
-      const defaultBranch = repo.defaultBranch || branchList?.[0]?.name || 'main';
+      const defaultBranch =
+        branchList?.find((item) => item.name === repo.defaultBranch)?.name ||
+        branchList?.[0]?.name ||
+        repo.defaultBranch ||
+        'main';
       setBranches(branchList || []);
       setSelectedBranch(defaultBranch);
       return defaultBranch;
@@ -624,14 +602,12 @@ const ProjectResources: React.FC<Props> = ({
     const iconClassName = {
       knowledge: styles.resourceKnowledgeIcon,
       digital_employee: styles.resourceEmployeeIcon,
-      ontology: styles.resourceOntologyIcon,
     }[resourceType];
 
     const descriptionMap = new Map<string, string>(
       [
         ...knowledgeOptions.map((option) => [`knowledge:${option.value}`, option.description]),
         ...agentOptions.map((option) => [`digital_employee:${option.value}`, option.description]),
-        ...ontologyOptions.map((option) => [`ontology:${option.value}`, option.description]),
       ].filter((item): item is [string, string] => Boolean(item[1]))
     );
     const resourceItems = items.map((resource) => {
@@ -675,7 +651,6 @@ const ProjectResources: React.FC<Props> = ({
 
   const boundKnowledge = boundResources.filter((resource) => resource.resourceType === 'knowledge');
   const boundEmployees = boundResources.filter((resource) => resource.resourceType === 'digital_employee');
-  const boundOntologies = boundResources.filter((resource) => resource.resourceType === 'ontology');
 
   const renderSharedFile = (file: DevloopProjectSpaceFile) => {
     const metadata = [
@@ -835,7 +810,7 @@ const ProjectResources: React.FC<Props> = ({
             !cloudResourceId || (!loadingFiles && !files.length) ? styles.resourceCategoryCardEmpty : ''
           } ${expandedCard === 'cloudDrive' ? styles.resourceCategoryCardExpanded : ''}`}
         >
-          {renderCardHeader('项目云盘', 'cloudDrive', undefined)}
+          {renderCardHeader(intl.formatMessage({ id: 'projectSpace.resources.cloudDrive' }), 'cloudDrive', undefined)}
           <FileResourcePanel
             scope="project"
             sessionId=""
@@ -915,17 +890,20 @@ const ProjectResources: React.FC<Props> = ({
                           if (key === 'run') {
                             try {
                               await triggerScan(Number(task.sourceId));
-                              message.success('定时任务已开始执行');
+                              message.success(intl.formatMessage({ id: 'projectSpace.resources.scheduleStarted' }));
                               await loadScheduleTasks();
                             } catch (error: any) {
-                              message.error(error?.message || '定时任务执行失败');
+                              message.error(
+                                error?.message || intl.formatMessage({ id: 'projectSpace.resources.scheduleFailed' })
+                              );
                             }
                           }
                           if (key === 'edit') onEditScheduleTask?.(task);
                           if (key === 'delete') {
                             Modal.confirm({
-                              title: '确认删除定时任务？',
-                              content: task.sourceName || '该定时任务',
+                              title: intl.formatMessage({ id: 'projectSpace.resources.scheduleDeleteConfirm' }),
+                              content:
+                                task.sourceName || intl.formatMessage({ id: 'projectSpace.resources.scheduleTask' }),
                               okButtonProps: { danger: true },
                               onOk: async () => {
                                 await deleteScanSource(Number(task.sourceId));
@@ -947,6 +925,22 @@ const ProjectResources: React.FC<Props> = ({
               </div>
             )}
           </div>
+        </section>
+
+        <section
+          className={`${styles.resourceCategoryCard} ${
+            expandedCard === 'dataSources' ? styles.resourceCategoryCardExpanded : ''
+          }`}
+        >
+          <ProjectDataSources
+            key={project.projectId}
+            projectId={Number(project.projectId)}
+            canManage={canManageDataSources}
+            renderHeader={(actions) =>
+              renderCardHeader(intl.formatMessage({ id: 'dataSource.title' }), 'dataSources', undefined, actions)
+            }
+            refreshKey={dataSourceRefreshKey}
+          />
         </section>
 
         {repositoryProject && (
@@ -1011,21 +1005,6 @@ const ProjectResources: React.FC<Props> = ({
             {renderBoundResources(boundEmployees, 'digital_employee', <RobotOutlined />)}
           </section>
         )}
-
-        {isOperationProject && (
-          <section
-            className={`${styles.resourceCategoryCard} ${
-              expandedCard === 'ontology' ? styles.resourceCategoryCardExpanded : ''
-            }`}
-          >
-            {renderCardHeader(
-              intl.formatMessage({ id: 'projectSpace.resources.sharedOntology' }),
-              'ontology',
-              openResourceModal
-            )}
-            {renderBoundResources(boundOntologies, 'ontology', <ApartmentOutlined />)}
-          </section>
-        )}
       </div>
 
       {isOperationProject && (
@@ -1069,21 +1048,6 @@ const ProjectResources: React.FC<Props> = ({
                   optionFilterProp="label"
                   placeholder={intl.formatMessage({ id: 'projectSpace.resources.employeePlaceholder' })}
                   onChange={(value) => setSelectedResources((current) => ({ ...current, digital_employee: value }))}
-                />
-              </div>
-              <div>
-                <Typography.Text strong>
-                  {intl.formatMessage({ id: 'projectSpace.resources.ontology' })}
-                </Typography.Text>
-                <Select
-                  mode="multiple"
-                  value={selectedResources.ontology}
-                  options={ontologyOptions}
-                  loading={resourceOptionsLoading}
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder={intl.formatMessage({ id: 'projectSpace.resources.ontologyPlaceholder' })}
-                  onChange={(value) => setSelectedResources((current) => ({ ...current, ontology: value }))}
                 />
               </div>
             </div>

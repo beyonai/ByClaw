@@ -129,10 +129,12 @@ class AuthApplicationServiceTest {
     @ValueSource(strings = {
         UserType.PLAT_MAN,
         UserType.PLAT_DEVOPS,
-        UserType.BUSINESS_MAN
+        UserType.BUSINESS_MAN,
+        UserType.ORG_MAN,
+        UserType.ORD_USER
     })
-    void hasResourceManagePermission_allowsGlobalAdministratorRoles(String userType) {
-        AuthApplicationService service = new AuthApplicationService();
+    void hasResourceManagePermission_rejectsRoleOnlyAccess(String userType) {
+        AuthApplicationService service = newExplicitUserPermissionService(List.of());
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
         loginInfo.setUserCode("manager");
@@ -140,10 +142,10 @@ class AuthApplicationServiceTest {
         administratorRole.setUserType(userType);
         loginInfo.setUsersOrganizations(List.of(administratorRole));
         CurrentUserHolder.setLoginInfo(loginInfo);
-        SsResource resource = new SsResource();
-        resource.setCreateBy(1L);
+        SsResource resource = enterpriseResource(501L, 1L);
 
-        assertThat(service.hasResourceManagePermission(resource)).isTrue();
+        // 单条资源管理权限不能仅凭角色身份放行。
+        assertThat(service.hasResourceManagePermission(resource)).isFalse();
     }
 
     @Test
@@ -160,8 +162,8 @@ class AuthApplicationServiceTest {
     }
 
     @Test
-    void hasResourceManagePermission_allowsOrganizationAdminForManagedResourceOrganization() {
-        AuthApplicationService service = new AuthApplicationService();
+    void hasResourceManagePermission_rejectsOrganizationRoleEvenForManagedResourceOrganization() {
+        AuthApplicationService service = newExplicitUserPermissionService(List.of());
         OrganizationService organizationService = mock(OrganizationService.class);
         ReflectionTestUtils.setField(service, "organizationService", organizationService);
         LoginInfo loginInfo = new LoginInfo();
@@ -170,12 +172,12 @@ class AuthApplicationServiceTest {
         organizationAdministrator.setUserType(UserType.ORG_MAN);
         loginInfo.setUsersOrganizations(List.of(organizationAdministrator));
         CurrentUserHolder.setLoginInfo(loginInfo);
-        SsResource resource = new SsResource();
-        resource.setCreateBy(1L);
+        SsResource resource = enterpriseResource(502L, 1L);
         resource.setManOrgId(100L);
         when(organizationService.isOrganizationManManager(100L)).thenReturn(true);
 
-        assertThat(service.hasResourceManagePermission(resource)).isTrue();
+        // 组织负责人身份不再派生资源管理权限。
+        assertThat(service.hasResourceManagePermission(resource)).isFalse();
     }
 
     @Test
@@ -209,6 +211,43 @@ class AuthApplicationServiceTest {
         assertThat(service.hasResourceManagePermission(resource)).isFalse();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+        UserType.PLAT_MAN,
+        UserType.PLAT_DEVOPS,
+        UserType.BUSINESS_MAN,
+        UserType.ORG_MAN
+    })
+    void hasResourceInstallTargetManagePermission_doesNotAllowAdministratorRoles(String userType) {
+        AuthApplicationService service = newExplicitUserPermissionService(List.of());
+        LoginInfo loginInfo = loginInfo(2L);
+        loginInfo.setUserCode("manager");
+        UsersOrganization administratorRole = new UsersOrganization();
+        administratorRole.setUserType(userType);
+        loginInfo.setUsersOrganizations(List.of(administratorRole));
+        CurrentUserHolder.setLoginInfo(loginInfo);
+
+        assertThat(service.hasResourceInstallTargetManagePermission(enterpriseResource(500L, 1L))).isFalse();
+    }
+
+    @Test
+    void hasResourceInstallTargetManagePermission_allowsCreatorAdminVipAndExplicitGrant() {
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        AuthApplicationService creatorService = new AuthApplicationService();
+        assertThat(creatorService.hasResourceInstallTargetManagePermission(enterpriseResource(500L, 2L))).isTrue();
+
+        LoginInfo adminVip = loginInfo(3L);
+        adminVip.setUserCode("adminvip");
+        CurrentUserHolder.setLoginInfo(adminVip);
+        AuthApplicationService adminVipService = new AuthApplicationService();
+        assertThat(adminVipService.hasResourceInstallTargetManagePermission(enterpriseResource(501L, 1L))).isTrue();
+
+        CurrentUserHolder.setLoginInfo(loginInfo(4L));
+        AuthApplicationService grantedService = newExplicitUserPermissionService(
+            List.of(manageGrant(502L, 4L, GrantToObjType.USER, Color.RED, "A")));
+        assertThat(grantedService.hasResourceInstallTargetManagePermission(enterpriseResource(502L, 1L))).isTrue();
+    }
+
     /**
      * 个人助理不对外开放管理授权、使用申请和申请审核；即使当前用户具备平台管理员能力，也要由资源类型兜底压住。
      */
@@ -221,9 +260,8 @@ class AuthApplicationServiceTest {
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
-        UsersOrganization platformManager = new UsersOrganization();
-        platformManager.setUserType(UserType.PLAT_MAN);
-        loginInfo.setUsersOrganizations(List.of(platformManager));
+        // 此用例验证业务规则，使用仍保留管理权限的 adminvip 账号。
+        loginInfo.setUserCode("adminvip");
         CurrentUserHolder.setLoginInfo(loginInfo);
 
         SsResource personalAssistant = new SsResource();
@@ -236,9 +274,8 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(200L);
 
-        assertThat(vo.getCanManageAuth()).isFalse();
-        assertThat(vo.getCanAuditUse()).isFalse();
-        assertThat(vo.getCanApplyUse()).isFalse();
+        assertThat(vo.isCanManageAuth()).isFalse();
+        assertThat(vo.isCanApplyUse()).isFalse();
     }
 
     /**
@@ -267,8 +304,33 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(205L);
 
-        assertThat(vo.getCanEdit()).isTrue();
-        assertThat(vo.getCanDelete()).isFalse();
+        assertThat(vo.isCanEdit()).isTrue();
+        assertThat(vo.isCanDelete()).isFalse();
+    }
+
+    @Test
+    void queryResourceOperationPermissions_exposesShelfFlagsByDigitalEmployeeStatus() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        mockEmptyUsePermissionDependencies(service);
+        CurrentUserHolder.setLoginInfo(loginInfo(1L));
+
+        SsResource onShelf = enterpriseResource(220L, 1L);
+        onShelf.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        onShelf.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(220L)).thenReturn(onShelf);
+        ResourceOperationPermissionsVo onShelfVo = service.queryResourceOperationPermissions(220L);
+        assertThat(onShelfVo.isCanOnShelf()).isFalse();
+        assertThat(onShelfVo.isCanOffShelf()).isTrue();
+
+        SsResource offShelf = enterpriseResource(221L, 1L);
+        offShelf.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        offShelf.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        when(ssResourceService.findById(221L)).thenReturn(offShelf);
+        ResourceOperationPermissionsVo offShelfVo = service.queryResourceOperationPermissions(221L);
+        assertThat(offShelfVo.isCanOnShelf()).isTrue();
+        assertThat(offShelfVo.isCanOffShelf()).isFalse();
     }
 
     /**
@@ -283,9 +345,8 @@ class AuthApplicationServiceTest {
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
-        UsersOrganization platformManager = new UsersOrganization();
-        platformManager.setUserType(UserType.PLAT_MAN);
-        loginInfo.setUsersOrganizations(List.of(platformManager));
+        // 此用例验证业务规则，使用仍保留管理权限的 adminvip 账号。
+        loginInfo.setUserCode("adminvip");
         CurrentUserHolder.setLoginInfo(loginInfo);
 
         SsResource personalKnowledge = new SsResource();
@@ -298,10 +359,9 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(201L);
 
-        assertThat(vo.getCanManageAuth()).isTrue();
-        assertThat(vo.getCanUseAuth()).isTrue();
-        assertThat(vo.getCanAuditUse()).isFalse();
-        assertThat(vo.getCanApplyUse()).isFalse();
+        assertThat(vo.isCanManageAuth()).isTrue();
+        assertThat(vo.isCanUseAuth()).isTrue();
+        assertThat(vo.isCanApplyUse()).isFalse();
     }
 
     /**
@@ -329,10 +389,10 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(202L);
 
-        assertThat(vo.getCanEdit()).isFalse();
-        assertThat(vo.getCanDelete()).isFalse();
-        assertThat(vo.getCanManageAuth()).isTrue();
-        assertThat(vo.getCanUseAuth()).isTrue();
+        assertThat(vo.isCanEdit()).isFalse();
+        assertThat(vo.isCanDelete()).isFalse();
+        assertThat(vo.isCanManageAuth()).isTrue();
+        assertThat(vo.isCanUseAuth()).isTrue();
     }
 
     /**
@@ -396,9 +456,8 @@ class AuthApplicationServiceTest {
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
-        UsersOrganization platformManager = new UsersOrganization();
-        platformManager.setUserType(UserType.PLAT_MAN);
-        loginInfo.setUsersOrganizations(List.of(platformManager));
+        // 此用例验证业务规则，使用仍保留管理权限的 adminvip 账号。
+        loginInfo.setUserCode("adminvip");
         CurrentUserHolder.setLoginInfo(loginInfo);
 
         SsResource resource = new SsResource();
@@ -825,7 +884,7 @@ class AuthApplicationServiceTest {
 
         AuthDetailQo qo = new AuthDetailQo();
         qo.setGrantType(GrantType.FORCE_USE);
-        qo.setGrantObjType(ResourceBizTypeEnum.ONTOLOGY_BASE.name());
+        qo.setGrantObjType(ResourceBizTypeEnum.OBJECT.name());
         qo.setGrantObjId(501L);
 
         ResponseUtil response = service.listAuthDetail(qo);
@@ -853,9 +912,8 @@ class AuthApplicationServiceTest {
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
-        UsersOrganization platformManager = new UsersOrganization();
-        platformManager.setUserType(UserType.PLAT_MAN);
-        loginInfo.setUsersOrganizations(List.of(platformManager));
+        // 此用例验证业务规则，使用仍保留管理权限的 adminvip 账号。
+        loginInfo.setUserCode("adminvip");
         CurrentUserHolder.setLoginInfo(loginInfo);
 
         SsResource resource = new SsResource();
@@ -904,9 +962,9 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo result = service.queryResourceOperationPermissions(600L);
 
-        assertThat(result.getUseApplyPending()).isTrue();
-        assertThat(result.getCanApplyUse()).isFalse();
-        assertThat(result.getHasUsePermission()).isFalse();
+        assertThat(result.isUseApplyPending()).isTrue();
+        assertThat(result.isCanApplyUse()).isFalse();
+        assertThat(result.isHasUsePermission()).isFalse();
     }
 
     @Test
@@ -928,11 +986,66 @@ class AuthApplicationServiceTest {
         Map<Long, ResourceOperationPermissionsVo> result =
             service.queryResourceOperationPermissionsBatch(List.of(601L, 602L));
 
-        assertThat(result.get(601L).getUseApplyPending()).isTrue();
-        assertThat(result.get(601L).getCanApplyUse()).isFalse();
-        assertThat(result.get(602L).getUseApplyPending()).isFalse();
-        assertThat(result.get(602L).getCanApplyUse()).isFalse();
+        assertThat(result.get(601L).isUseApplyPending()).isTrue();
+        assertThat(result.get(601L).isCanApplyUse()).isFalse();
+        assertThat(result.get(602L).isUseApplyPending()).isFalse();
+        assertThat(result.get(602L).isCanApplyUse()).isFalse();
         verify(privilegeGrantMapper, times(1)).selectList(any());
+    }
+
+    /** 所有角色在数字员工和资源中心均不能替代授权；批量与单条接口保持一致。 */
+    @ParameterizedTest
+    @ValueSource(strings = {UserType.PLAT_MAN, UserType.PLAT_DEVOPS, UserType.BUSINESS_MAN,
+        UserType.ORG_MAN, UserType.ORD_USER, "TECH_DEV", "ASSET_OPERATOR", "adminvip"})
+    void operationPermissions_onlyAdminVipHasImplicitManagePermission(String identity) {
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        SsResourceMapper mapper = mock(SsResourceMapper.class);
+        SsResourceService resourceService = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "ssResourceService", resourceService);
+        LoginInfo login = loginInfo(2L);
+        login.setUserCode(identity);
+        UsersOrganization role = new UsersOrganization();
+        role.setUserType(identity);
+        role.setOrgId(100L);
+        role.setPathCode("-1.100");
+        login.setUsersOrganizations(List.of(role));
+        CurrentUserHolder.setLoginInfo(login);
+        boolean adminVip = "adminvip".equals(identity);
+
+        for (String bizType : List.of("DIG_EMPLOYEE", "AGENT", "KG_DOC", "TOOLKIT")) {
+            SsResource resource = enterpriseResource(601L, 1L);
+            resource.setResourceBizType(bizType);
+            resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+            resource.setManOrgId(100L);
+            when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
+            when(resourceService.findById(601L)).thenReturn(resource);
+            ResourceOperationPermissionsVo single = service.queryResourceOperationPermissions(601L);
+            ResourceOperationPermissionsVo batch = service.queryResourceOperationPermissionsBatch(List.of(601L))
+                .get(601L);
+            for (ResourceOperationPermissionsVo permissions : List.of(single, batch)) {
+                assertThat(permissions.isHasManagePermission()).isEqualTo(adminVip);
+                assertThat(permissions.isCanEdit()).isEqualTo(adminVip);
+                assertThat(permissions.isCanManageAuth()).isEqualTo(adminVip);
+                assertThat(permissions.isCanUseAuth()).isEqualTo(adminVip);
+                // 无显式授权时，只有 adminvip 的数字员工可设为默认，单条与批量均不能凭角色放行。
+                assertThat(permissions.isCanSetDefault()).isEqualTo(adminVip && "DIG_EMPLOYEE".equals(bizType));
+                // 管理账号特判不额外授予使用权限。
+                assertThat(permissions.isHasUsePermission()).isFalse();
+            }
+        }
+    }
+
+    /** 保留创建者及显式管理授权，不能因去掉角色而取消正常资源权限。 */
+    @Test
+    void hasResourceManagePermission_preservesCreatorAndExplicitGrant() {
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        assertThat(newExplicitUserPermissionService(List.of())
+            .hasResourceManagePermission(enterpriseResource(601L, 2L))).isTrue();
+        AuthApplicationService granted = newExplicitUserPermissionService(List.of(
+            manageGrant(602L, 2L, GrantToObjType.USER, Color.RED, "A")));
+        assertThat(granted.hasResourceManagePermission(enterpriseResource(602L, 1L))).isTrue();
     }
 
     @Test
@@ -1232,7 +1345,7 @@ class AuthApplicationServiceTest {
         parentOrgGrant.setGrantToType(Color.RED);
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(any())).thenReturn(List.of(activeResource));
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
             PrivilegeGrantQo qo = invocation.getArgument(0);
@@ -1278,7 +1391,7 @@ class AuthApplicationServiceTest {
         childOrgBlacklist.setGrantToType(Color.BLACK);
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(any())).thenReturn(List.of(activeResource));
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
             PrivilegeGrantQo qo = invocation.getArgument(0);
@@ -1322,7 +1435,7 @@ class AuthApplicationServiceTest {
 
         SsResource removedResource = new SsResource();
         removedResource.setResourceId(500L);
-        removedResource.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        removedResource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(removedResource));
 
         assertThat(service.buildUserAuthResources(1001L)).doesNotContainKey("500");
@@ -1364,7 +1477,7 @@ class AuthApplicationServiceTest {
         });
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(activeResource));
 
         Map<String, String> resources = service.buildUserManageResources(1001L);
@@ -1416,7 +1529,7 @@ class AuthApplicationServiceTest {
         });
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(activeResource));
 
         assertThat(service.buildUserManageResources(1001L)).doesNotContainKey("500");
@@ -1448,7 +1561,7 @@ class AuthApplicationServiceTest {
         createdResource.setResourceId(600L);
         createdResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
         createdResource.setCreateBy(1001L);
-        createdResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        createdResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceMapper.selectList(argThat(qw -> qw != null))).thenReturn(List.of(createdResource));
 
         assertThat(service.buildUserManageResources(1001L)).containsEntry("600",
@@ -1488,7 +1601,7 @@ class AuthApplicationServiceTest {
         orgResource.setResourceId(700L);
         orgResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
         orgResource.setManOrgId(11L);
-        orgResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        orgResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         // First selectList call resolves the creator-dimension query (empty), second resolves org resources.
         when(ssResourceMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of(orgResource));
 
@@ -1614,6 +1727,76 @@ class AuthApplicationServiceTest {
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(userId);
         return loginInfo;
+    }
+
+    /** 批量与原单条结果逐字段一致，同时约束本页范围和请求内身份读取次数。 */
+    @Test
+    void batchPermissions_reusesSubjectsAndBoundsGrantsWithoutChangingResults() {
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        PrivilegeGrantService grants = (PrivilegeGrantService) ReflectionTestUtils.getField(service, "privilegeGrantService");
+        OrganizationService orgs = (OrganizationService) ReflectionTestUtils.getField(service, "organizationService");
+        PositionService positions = (PositionService) ReflectionTestUtils.getField(service, "positionService");
+        StationService stations = (StationService) ReflectionTestUtils.getField(service, "stationService");
+        when(orgs.findEffectiveOrganizationIdsByUserId(2L)).thenReturn(Set.of(10L, 11L));
+        PositionDTO position = new PositionDTO();
+        position.setPositionId(20L);
+        when(positions.findPositionByUserId(2L)).thenReturn(List.of(position));
+        Station station = new Station();
+        station.setStationIdPath("-1.30.31");
+        when(stations.getStationByUserId(2L)).thenReturn(station);
+        PrivilegeGrant forced = useGrant(602L, 30L, GrantToObjType.STATION, Color.RED, "A");
+        forced.setGrantType(GrantType.FORCE_USE);
+        List<PrivilegeGrant> allGrants = List.of(
+            manageGrant(601L, 10L, GrantToObjType.ORG, Color.RED, "A"),
+            manageGrant(601L, 20L, GrantToObjType.POST, Color.BLACK, "A"),
+            useGrant(601L, 2L, GrantToObjType.USER, Color.RED, "A"),
+            useGrant(601L, 31L, GrantToObjType.STATION, Color.BLACK, "A"),
+            manageGrant(602L, 11L, GrantToObjType.ORG, Color.RED, "A"), forced,
+            useGrant(603L, 2L, GrantToObjType.USER, Color.RED, "X"),
+            useGrant(999L, 2L, GrantToObjType.USER, Color.RED, "A"));
+        // 模拟既有 SQL 的授权类型、对象、资源范围过滤，兼容单条接口作为结果基线。
+        when(grants.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return allGrants.stream().filter(g ->
+                (qo.getGrantTypes() != null ? qo.getGrantTypes().contains(g.getGrantType())
+                    : g.getGrantType().equals(qo.getGrantType()))
+                && g.getGrantToObjType().equals(qo.getGrantToObjType())
+                && (qo.getGrantToObjIds() != null ? qo.getGrantToObjIds().contains(g.getGrantToObjId())
+                    : g.getGrantToObjId().equals(qo.getGrantToObjId()))
+                && (qo.getGrantObjIds() == null || qo.getGrantObjIds().contains(g.getGrantObjId()))
+                && "A".equals(g.getStatusCd())).collect(java.util.stream.Collectors.toList());
+        });
+        List<SsResource> resources = List.of(enterpriseResource(601L, 1L), enterpriseResource(602L, 1L),
+            enterpriseResource(603L, 1L));
+        SsResourceMapper mapper = mock(SsResourceMapper.class);
+        SsResourceService resourceService = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "ssResourceService", resourceService);
+        when(mapper.selectBatchIds(any())).thenReturn(resources);
+        Map<Long, ResourceOperationPermissionsVo> result = service.queryResourceOperationPermissionsBatch(
+            List.of(601L, 602L, 603L, 601L));
+        verify(orgs, times(1)).findEffectiveOrganizationIdsByUserId(2L);
+        verify(positions, times(1)).findPositionByUserId(2L);
+        verify(stations, times(1)).getStationByUserId(2L);
+        ArgumentCaptor<PrivilegeGrantQo> captor = ArgumentCaptor.forClass(PrivilegeGrantQo.class);
+        verify(grants, times(4)).findPrivilegeByQo(captor.capture());
+        for (PrivilegeGrantQo qo : captor.getAllValues()) {
+            assertThat(qo.getGrantObjIds()).containsExactlyInAnyOrder(601L, 602L, 603L);
+            assertThat(qo.getGrantTypes()).containsExactlyInAnyOrder(
+                GrantType.ALLOW_MANAGE, GrantType.AVAILABLE_USE, GrantType.FORCE_USE);
+        }
+        assertThat(result.get(601L).isHasManagePermission()).isFalse();
+        assertThat(result.get(601L).isHasUsePermission()).isFalse();
+        assertThat(result.get(602L).isHasManagePermission()).isTrue();
+        assertThat(result.get(602L).isHasUsePermission()).isTrue();
+        assertThat(result.get(603L).isHasUsePermission()).isFalse();
+        for (SsResource resource : resources) {
+            when(resourceService.findById(resource.getResourceId())).thenReturn(resource);
+            assertThat(result.get(resource.getResourceId())).usingRecursiveComparison()
+                .isEqualTo(service.queryResourceOperationPermissions(resource.getResourceId()));
+        }
     }
 
     private SsResource enterpriseResource(Long resourceId, Long createBy) {

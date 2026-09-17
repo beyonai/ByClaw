@@ -19,14 +19,12 @@ if ($env:STANDALONE_MODULES -eq "NONE") {
 $nginxPort = if ($env:NGINX_PORT) { $env:NGINX_PORT } else { "8080" }
 $bePort = if ($env:BE_SERVER_PORT) { $env:BE_SERVER_PORT } else { "8086" }
 $qaPort = if ($env:BYCLAW_QA_PORT) { $env:BYCLAW_QA_PORT } else { "8090" }
-$dataPort = if ($env:DATACLOUD_PORT) { $env:DATACLOUD_PORT } else { "8087" }
 
 Write-Host ""
 Write-Host "==================== 部署完成 ===================="
 Write-Host "前端: http://localhost:$nginxPort"
 Write-Host "后端: http://localhost:$bePort"
 Write-Host "QA:   http://localhost:$qaPort"
-Write-Host "Data: http://localhost:$dataPort"
 Write-Host ""
 Invoke-Compose @("ps")
 Pop-Location

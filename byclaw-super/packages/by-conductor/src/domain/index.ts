@@ -4,6 +4,7 @@ export * from "./execution-credentials.js";
 export * from "./group-chat-context.js";
 export * from "./orchestrator.js";
 export * from "./run-ingress-context.js";
+export * from "./project-context.js";
 export * from "./session-context.js";
 export * from "./types.js";
 export * from "./task-plan.js";

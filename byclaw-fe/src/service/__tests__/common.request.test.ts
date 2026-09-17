@@ -137,6 +137,31 @@ describe('Service Common Request', () => {
     expect(loginRedirect).toHaveBeenCalledWith({ openLoginModal: '1' });
   });
 
+  it('globalLogout reuses the in-flight logout request', async () => {
+    let resolveLogout: (() => void) | undefined;
+    (getModelState as jest.Mock).mockReturnValue({
+      userInfo: {
+        userId: 'u1',
+      },
+    });
+    (logout as jest.Mock).mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveLogout = resolve;
+      })
+    );
+
+    const firstLogout = globalLogout(true);
+    const secondLogout = globalLogout(true);
+
+    expect(secondLogout).toBe(firstLogout);
+    expect(logout).toHaveBeenCalledTimes(1);
+    expect(clearToken).toHaveBeenCalledTimes(1);
+    expect(loginRedirect).toHaveBeenCalledTimes(1);
+
+    resolveLogout?.();
+    await firstLogout;
+  });
+
   it('globalLogout ignores an auth error that belongs to an old session', async () => {
     (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(false);
 

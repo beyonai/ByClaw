@@ -14,7 +14,6 @@
 | FE | `ghcr.io/beyonai/byclaw/byclaw-fe:main` | 前端服务 |
 | BE | `ghcr.io/beyonai/byclaw/byclaw-be:main` | 后端服务 |
 | QA | `ghcr.io/beyonai/byclaw/byclaw-qa:main` | 问答服务 |
-| Data | `ghcr.io/beyonai/byclaw/byclaw-data:main` | DataCloud 服务 |
 
 ### 2. 其他外网镜像
 
@@ -37,7 +36,6 @@
    docker pull ghcr.io/beyonai/byclaw/byclaw-fe:main
    docker pull ghcr.io/beyonai/byclaw/byclaw-be:main
    docker pull ghcr.io/beyonai/byclaw/byclaw-qa:main
-   docker pull ghcr.io/beyonai/byclaw/byclaw-data:main
    docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9
    ```
 
@@ -55,7 +53,6 @@
        ghcr.io/beyonai/byclaw/byclaw-fe:main \
        ghcr.io/beyonai/byclaw/byclaw-be:main \
        ghcr.io/beyonai/byclaw/byclaw-qa:main \
-       ghcr.io/beyonai/byclaw/byclaw-data:main \
        sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9
    do
        filename=$(echo $image | sed 's/\//_/g' | sed 's/:/-/g').tar
@@ -117,7 +114,6 @@ docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v
 docker pull ghcr.io/beyonai/byclaw/byclaw-fe:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-be:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-qa:main
-docker pull ghcr.io/beyonai/byclaw/byclaw-data:main
 ```
 
 ### 方法 3：批量拉取脚本（外网环境）
@@ -139,7 +135,6 @@ echo "拉取应用镜像..."
 docker pull ghcr.io/beyonai/byclaw/byclaw-fe:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-be:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-qa:main
-docker pull ghcr.io/beyonai/byclaw/byclaw-data:main
 
 echo "✅ 所有镜像拉取完成！"
 ```

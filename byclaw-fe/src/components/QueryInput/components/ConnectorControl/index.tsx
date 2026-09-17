@@ -14,15 +14,16 @@ import {
   ReloadOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { Avatar, Button, Drawer, Dropdown, Empty, Form, Input, Modal, Spin, Switch, Tooltip, message } from 'antd';
+import { Avatar, Button, Drawer, Dropdown, Empty, Form, Modal, Spin, Switch, Tooltip, message } from 'antd';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
-import { useSelector } from '@umijs/max';
+import { getIntl, useIntl, useSelector } from '@umijs/max';
 
 import AntdIcon from '@/components/AntdIcon';
+import { OVERLAY_DRAWER_WIDTH } from '@/components/MainDrawer/constants';
 import {
   getConnectorAuthorization,
   cancelConnectorAuthorization,
@@ -42,6 +43,7 @@ import {
 
 import styles from './index.module.less';
 import CredentialHelpCard from './CredentialHelpCard';
+import CredentialFields from './CredentialFields';
 import GlobalAccountSection from './GlobalAccountSection';
 
 dayjs.extend(customParseFormat);
@@ -275,7 +277,30 @@ const hasValidCredentialForm = (
   });
 };
 
-const getCredentialAuthorizationError = (connector: Connector, errorCode?: string) => {
+// 延迟翻译，避免模块加载时固定语言。
+const getImaCredentialErrorMessages = (): Record<string, string> => ({
+  CONNECTOR_CREDENTIAL_INVALID: getIntl().formatMessage({ id: 'ui.connector.invalidCredentials' }),
+  IMA_RATE_LIMITED: getIntl().formatMessage({ id: 'ui.connector.rateLimited' }),
+  IMA_PERMISSION_DENIED: getIntl().formatMessage({ id: 'ui.connector.permissionDenied' }),
+  IMA_SERVICE_UNAVAILABLE: getIntl().formatMessage({ id: 'ui.connector.unavailable' }),
+  CONNECTOR_VERIFICATION_TIMEOUT: getIntl().formatMessage({ id: 'ui.connector.timeout' }),
+  CONNECTOR_CLI_UNAVAILABLE: getIntl().formatMessage({ id: 'ui.connector.cliUnavailable' }),
+  PROVIDER_PROTOCOL_ERROR: getIntl().formatMessage({ id: 'ui.connector.protocolError' }),
+  CONNECTOR_VERIFICATION_BUSY: getIntl().formatMessage({ id: 'ui.connector.busy' }),
+  SESSION_ALREADY_ACTIVE: getIntl().formatMessage({ id: 'ui.connector.busy' }),
+  AUTH_BINDING_FAILED: getIntl().formatMessage({ id: 'ui.connector.bindingFailed' }),
+  CONNECTOR_MANIFEST_INVALID: getIntl().formatMessage({ id: 'ui.connector.invalidManifest' }),
+  PROVIDER_NOT_CONFIGURED: getIntl().formatMessage({ id: 'ui.connector.notConfigured' }),
+  CONNECTOR_VERIFICATION_FAILED: getIntl().formatMessage({ id: 'ui.connector.verificationFailed' }),
+});
+
+export const getCredentialAuthorizationError = (connector: Connector, errorCode?: string) => {
+  if (connector.code === 'ima-openapi') {
+    return (
+      (errorCode && getImaCredentialErrorMessages()[errorCode]) ||
+      getIntl().formatMessage({ id: 'ui.connector.credentialsFailed' })
+    );
+  }
   if (connector.code === 'weixin-official-api') {
     if (errorCode === 'CONNECTOR_CREDENTIAL_INVALID') {
       return 'AppID 或 AppSecret 无效，请检查后重试';
@@ -295,7 +320,7 @@ const ConnectorIcon = ({ connector }: { connector: Connector }) => (
   <span className={styles.connectorIcon}>{connector.icon}</span>
 );
 
-const ConnectorSelection = ({
+export const ConnectorSelection = ({
   value,
   onOpen,
   interactive = true,
@@ -304,6 +329,9 @@ const ConnectorSelection = ({
   onOpen?: () => void;
   interactive?: boolean;
 }) => {
+  // 提示与无障碍标签使用当前语言，切换语言时同步更新。
+  const intl = useIntl();
+  const viewLabel = intl.formatMessage({ id: 'connector.view' });
   if (!value.length) return null;
 
   // 工具栏空间有限，最多回显三个官方图标，其余连接器用数量汇总。
@@ -321,13 +349,16 @@ const ConnectorSelection = ({
   );
 
   return (
-    <Tooltip title={interactive ? '查看连接器' : undefined}>
+    <Tooltip title={interactive ? viewLabel : undefined}>
       {interactive ? (
-        <button className={styles.selection} type="button" aria-label="查看连接器" onClick={onOpen}>
+        <button className={styles.selection} type="button" aria-label={viewLabel} onClick={onOpen}>
           {avatarGroup}
         </button>
       ) : (
-        <span className={classNames(styles.selection, styles.selectionStatic)} aria-label="已连接连接器">
+        <span
+          className={classNames(styles.selection, styles.selectionStatic)}
+          aria-label={intl.formatMessage({ id: 'connector.connected' })}
+        >
           {avatarGroup}
         </span>
       )}
@@ -342,6 +373,7 @@ const ConnectorControl = ({
   userInfo: userInfoProp,
   onOpenResourcePicker,
 }: ConnectorControlProps) => {
+  const intl = useIntl();
   const storeUserInfo = useSelector((state: any) => state.user?.userInfo);
   const userInfo = userInfoProp || storeUserInfo;
 
@@ -822,7 +854,11 @@ const ConnectorControl = ({
     } catch {
       if (!cancelToken.signal.aborted && startAuthorizationGenerationRef.current === requestGeneration) {
         // 不展示后端原始错误，避免错误内容意外回显用户提交的凭据。
-        message.error(getCredentialAuthorizationError(authorizingConnector));
+        const requestFailureMessage =
+          authorizingConnector.code === 'ima-openapi'
+            ? intl.formatMessage({ id: 'ui.connector.networkFailed' })
+            : getCredentialAuthorizationError(authorizingConnector);
+        message.error(requestFailureMessage);
       }
     } finally {
       if (credentialAbortControllerRef.current === cancelToken) {
@@ -850,6 +886,13 @@ const ConnectorControl = ({
   const credentialSchema = hasValidCredentialForm(authorizingConnector)
     ? authorizingConnector.credentialForm
     : undefined;
+  const oauthHelp =
+    authorizingConnector?.authMode === 'OAUTH2' &&
+    authorizingConnector.credentialForm?.helpText &&
+    authorizingConnector.credentialForm.helpText.length <= 500 &&
+    isSafeCredentialHelpUrl(authorizingConnector.credentialForm.helpUrl)
+      ? authorizingConnector.credentialForm
+      : undefined;
 
   const renderConnectorAction = (connector: Connector) => {
     if (catalogRefreshing) {
@@ -876,8 +919,17 @@ const ConnectorControl = ({
           <Dropdown
             menu={{
               items: [
-                { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新授权' },
-                { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
+                {
+                  key: 'reauthorize',
+                  icon: <ReloadOutlined />,
+                  label: intl.formatMessage({ id: 'connector.reauthorize' }),
+                },
+                {
+                  key: 'revoke',
+                  danger: true,
+                  icon: <DisconnectOutlined />,
+                  label: intl.formatMessage({ id: 'connector.revoke' }),
+                },
               ],
               onClick: ({ key }) => {
                 if (key === 'reauthorize') void beginAuthorization(connector);
@@ -913,7 +965,7 @@ const ConnectorControl = ({
           }}
           style={{ color: 'var(--beyond-color-primary)' }}
         >
-          连接
+          {intl.formatMessage({ id: 'connector.connect' })}
         </Button>
       );
     }
@@ -984,13 +1036,16 @@ const ConnectorControl = ({
       {/* 内嵌模式展示连接器卡片；授权弹窗和配置抽屉仍复用下面的统一渲染。 */}
       {inline ? (
         !canAuthorize ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="登录后即可使用连接器" />
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={intl.formatMessage({ id: 'connector.loginRequired' })}
+          />
         ) : (
           <div className={classNames(styles.connectorList, styles.connectorListInline)}>
             {loadingConnectors ? (
               <div className={styles.connectorLoading}>
                 <Spin size="small" />
-                <span>正在加载连接器…</span>
+                <span>{intl.formatMessage({ id: 'connector.loading' })}</span>
               </div>
             ) : connectors.length ? (
               connectors.map((connector) => renderConnectorItem(connector))
@@ -999,13 +1054,13 @@ const ConnectorControl = ({
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description={
                   <Button type="link" onClick={openSettings}>
-                    管理连接器
+                    {intl.formatMessage({ id: 'connector.manage' })}
                   </Button>
                 }
               />
             )}
             <Button type="link" className={styles.viewAllInlineButton} onClick={openAllConnectors}>
-              查看全部连接器
+              {intl.formatMessage({ id: 'connector.viewAll' })}
             </Button>
           </div>
         )
@@ -1075,7 +1130,7 @@ const ConnectorControl = ({
         footer={null}
         open={!!authorizingConnector && !authorizationSession && !credentialSchema}
         zIndex={2000}
-        width={570}
+        width={oauthHelp ? 680 : 570}
         onCancel={() => void cancelAuthorization()}
       >
         {authorizingConnector && (
@@ -1085,25 +1140,42 @@ const ConnectorControl = ({
               <span>›</span>
               <ConnectorIcon connector={authorizingConnector} />
             </div>
-            <h2>连接 {authorizingConnector.name} 作为 AI 知识库</h2>
-            <p>授权后，助手将能读取你有权限访问的内容，为你提供总结、智能问答和检索服务。</p>
-            <div className={styles.permissionBlock}>
-              <strong>即将获取以下权限</strong>
-              <div>
-                <GlobalOutlined />
-                <span>
-                  <b>读取知识库与内容</b>
-                  <small>读取你有权限访问的内容</small>
-                </span>
-              </div>
-              <div>
-                <FileTextOutlined />
-                <span>
-                  <b>编辑与管理内容</b>
-                  <small>用于整理、创建和管理授权范围内的内容</small>
-                </span>
-              </div>
-            </div>
+            {oauthHelp ? (
+              <>
+                <h2>连接 {authorizingConnector.name}</h2>
+                <CredentialHelpCard helpText={oauthHelp.helpText!} />
+                <a
+                  className={styles.credentialHelpLink}
+                  href={oauthHelp.helpUrl}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  {oauthHelp.helpLinkText || '查看授权说明'}
+                </a>
+              </>
+            ) : (
+              <>
+                <h2>连接 {authorizingConnector.name} 作为 AI 知识库</h2>
+                <p>授权后，助手将能读取你有权限访问的内容，为你提供总结、智能问答和检索服务。</p>
+                <div className={styles.permissionBlock}>
+                  <strong>即将获取以下权限</strong>
+                  <div>
+                    <GlobalOutlined />
+                    <span>
+                      <b>读取知识库与内容</b>
+                      <small>读取你有权限访问的内容</small>
+                    </span>
+                  </div>
+                  <div>
+                    <FileTextOutlined />
+                    <span>
+                      <b>编辑与管理内容</b>
+                      <small>用于整理、创建和管理授权范围内的内容</small>
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
             <Button type="primary" block loading={startingAuthorization} size="large" onClick={startAuthorization}>
               立即前往授权
             </Button>
@@ -1116,14 +1188,15 @@ const ConnectorControl = ({
 
       <Modal
         centered
-        className={classNames(styles.credentialModal, credentialSchema?.helpText && styles.credentialModalWithHelp)}
+        className={styles.credentialModal}
+        styles={{ content: { padding: 0, overflow: 'hidden', borderRadius: 16 }, body: { padding: 0 } }}
         closable={!startingAuthorization}
         footer={null}
         keyboard={!startingAuthorization}
         maskClosable={!startingAuthorization}
         open={!!authorizingConnector && !!credentialSchema && !authorizationSession}
         zIndex={2000}
-        width={credentialSchema?.helpText ? '80vw' : 480}
+        width={authorizingConnector?.code === 'custom-imap-mail' || credentialSchema?.helpText ? 680 : 520}
         onCancel={() => {
           if (!startingAuthorization) {
             void cancelAuthorization();
@@ -1131,15 +1204,14 @@ const ConnectorControl = ({
         }}
       >
         {authorizingConnector && credentialSchema && (
-          <div
-            className={classNames(
-              styles.credentialContent,
-              credentialSchema.helpText && styles.credentialContentWithHelp
-            )}
-          >
-            <ConnectorIcon connector={authorizingConnector} />
-            <h2>连接 {authorizingConnector.name}</h2>
-            <p>请输入所需凭据。验证通过后将加密保存，仅在连接器启用时使用。</p>
+          <div className={styles.credentialContent}>
+            <header className={styles.credentialHeader}>
+              <ConnectorIcon connector={authorizingConnector} />
+              <div>
+                <h2>连接 {authorizingConnector.name}</h2>
+                <p>凭据将加密保存，仅在连接器启用时使用。</p>
+              </div>
+            </header>
             <Form<CredentialValues>
               autoComplete="off"
               className={styles.credentialForm}
@@ -1160,23 +1232,16 @@ const ConnectorControl = ({
                     {credentialSchema.helpLinkText?.trim() || `前往${authorizingConnector.name}获取凭据`}
                   </a>
                 )}
-                {credentialSchema.fields.map((field) => (
-                  <Form.Item
-                    key={field.key}
-                    label={field.label}
-                    name={field.key}
-                    rules={[{ required: true, whitespace: true, message: `请输入${field.label}` }]}
-                  >
-                    {field.inputType === 'password' ? (
-                      <Input.Password autoComplete="off" maxLength={field.maxLength} />
-                    ) : (
-                      <Input autoComplete="off" maxLength={field.maxLength} />
-                    )}
-                  </Form.Item>
-                ))}
+                <CredentialFields
+                  fields={credentialSchema.fields}
+                  customImap={authorizingConnector.code === 'custom-imap-mail'}
+                />
               </div>
               <div className={styles.credentialActions}>
-                <Button block htmlType="submit" loading={startingAuthorization} size="large" type="primary">
+                <Button disabled={startingAuthorization} onClick={() => void cancelAuthorization()}>
+                  取消
+                </Button>
+                <Button htmlType="submit" loading={startingAuthorization} type="primary">
                   保存并连接
                 </Button>
               </div>
@@ -1242,9 +1307,10 @@ const ConnectorControl = ({
       <Drawer
         className={styles.configurationDrawer}
         open={configurationOpen}
-        title="连接器配置"
+        title={intl.formatMessage({ id: 'connector.configuration' })}
         extra={accountToolbar}
-        width={Math.min(980, window.innerWidth - 24)}
+        width={OVERLAY_DRAWER_WIDTH}
+        mask
         maskClosable={!revokeConfirmationOpen && revokingConnectorIds.size === 0}
         onClose={() => setConfigurationOpen(false)}
       >
@@ -1252,7 +1318,12 @@ const ConnectorControl = ({
           <div className={styles.configurationGrid}>
             {connectors.length
               ? connectors.map((connector) => renderConnectorItem(connector, true))
-              : !loadingConnectors && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />}
+              : !loadingConnectors && (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={intl.formatMessage({ id: 'connector.empty' })}
+                />
+              )}
             <GlobalAccountSection onToolbarChange={setAccountToolbar} />
           </div>
         </Spin>

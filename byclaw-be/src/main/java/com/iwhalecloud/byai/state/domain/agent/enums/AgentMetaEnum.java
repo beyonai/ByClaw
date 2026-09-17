@@ -77,6 +77,9 @@ public enum AgentMetaEnum {
      */
     KG_DB("KG_DB", "数据库"),
 
+    /** 项目中可复用的数据源配置引用，仅携带标识，不包含连接凭据。 */
+    DATA_SOURCE("DATA_SOURCE", "项目数据源"),
+
     /**
      * 数据库文件夹
      */

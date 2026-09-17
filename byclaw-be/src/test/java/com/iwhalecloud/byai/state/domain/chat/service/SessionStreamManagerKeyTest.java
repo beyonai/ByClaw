@@ -13,8 +13,6 @@ class SessionStreamManagerKeyTest {
 
     private static final String KEY_SCHEMA_VERSION = "REDIS_KEY_SCHEMA_VERSION";
 
-    private final SessionStreamManager sessionStreamManager = new SessionStreamManager();
-
     private String originalKeySchemaVersion;
 
     @BeforeEach
@@ -37,7 +35,7 @@ class SessionStreamManagerKeyTest {
         System.setProperty(KEY_SCHEMA_VERSION, "v1");
 
         assertEquals("byai_gateway:session:session-10:data_stream",
-            sessionStreamManager.buildStreamKey("session-10"));
+            new SessionStreamManager().buildStreamKey("session-10"));
     }
 
     @Test
@@ -45,6 +43,6 @@ class SessionStreamManagerKeyTest {
         System.setProperty(KEY_SCHEMA_VERSION, "v2");
 
         assertEquals("byai_gateway:v2:session:{session-10}:data_stream",
-            sessionStreamManager.buildStreamKey("session-10"));
+            new SessionStreamManager().buildStreamKey("session-10"));
     }
 }

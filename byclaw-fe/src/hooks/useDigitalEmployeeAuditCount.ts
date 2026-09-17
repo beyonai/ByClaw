@@ -1,46 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
-import { queryManagedEnterpriseEmployees, queryMyCreated } from '@/service/digitalEmployees';
-import { queryUseApplyList } from '@/pages/manager/service/resources';
+import { queryDigitalEmployeeUseApplyAudit, type ResourceUseApplyAuditItem } from '@/pages/manager/service/resources';
 
-const getResourceList = (value: any) => value?.list || value?.data?.list || [];
+export type DigitalEmployeeAuditItem = ResourceUseApplyAuditItem & {
+  resourceId: string;
+  resourceName: string;
+  agentType?: string;
+  avatar?: string;
+};
 
-export const queryDigitalEmployeeAuditCount = async () => {
-  const queryResources = async (request: typeof queryMyCreated, agentType?: string) => {
-    const response = await request({
-      pageNum: 1,
-      pageSize: 200,
-      permission: 'PENDING_MY_APPROVAL',
-      agentType,
-    });
-    return getResourceList(response);
-  };
-
-  const resources = (
-    await Promise.all([
-      queryResources(queryMyCreated),
-      queryResources(queryMyCreated, '017'),
-      queryResources(queryManagedEnterpriseEmployees),
-      queryResources(queryManagedEnterpriseEmployees, '017'),
-    ])
-  ).flat();
-
-  const uniqueResourceIds = Array.from(
-    new Set(resources.map((item: any) => `${item.resourceId || item.id || item.agentId || ''}`).filter(Boolean))
-  );
-  const applyLists = await Promise.all(
-    uniqueResourceIds.map((resourceId) => queryUseApplyList({ resourceId }).catch(() => []))
-  );
-  return applyLists.reduce((total, response: any) => total + (response?.data || response || []).length, 0);
+export const queryDigitalEmployeeAuditList = async (): Promise<DigitalEmployeeAuditItem[]> => {
+  // 数字员工首页仅查询待审核数据，用于“我的员工”和审核中心角标。
+  const response: any = await queryDigitalEmployeeUseApplyAudit({ history: false });
+  const auditItems = response?.data || response || [];
+  return Array.isArray(auditItems) ? auditItems : auditItems.list || [];
 };
 
 export default function useDigitalEmployeeAuditCount() {
-  const [count, setCount] = useState(0);
+  const [rows, setRows] = useState<DigitalEmployeeAuditItem[]>([]);
 
   const refresh = useCallback(async () => {
     try {
-      setCount(await queryDigitalEmployeeAuditCount());
+      setRows(await queryDigitalEmployeeAuditList());
     } catch {
-      setCount(0);
+      setRows([]);
     }
   }, []);
 
@@ -48,5 +30,5 @@ export default function useDigitalEmployeeAuditCount() {
     refresh();
   }, [refresh]);
 
-  return { count, refresh };
+  return { count: rows.length, rows, refresh };
 }

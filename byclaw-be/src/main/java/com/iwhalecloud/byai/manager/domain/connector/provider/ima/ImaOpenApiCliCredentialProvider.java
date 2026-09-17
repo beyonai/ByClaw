@@ -4,8 +4,10 @@ import java.time.Duration;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -39,6 +41,12 @@ public class ImaOpenApiCliCredentialProvider implements ConnectorCredentialFormP
     private static final Duration RUNTIME_COMMAND_TIMEOUT = Duration.ofSeconds(120);
     private static final int RUNTIME_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
     private static final List<String> MANAGED_KEYS = List.of(CLIENT_ID, API_KEY);
+    private static final String CREDENTIAL_INVALID = "CONNECTOR_CREDENTIAL_INVALID";
+    private static final String VERIFICATION_FAILED = "CONNECTOR_VERIFICATION_FAILED";
+    private static final String IMA_RATE_LIMITED = "IMA_RATE_LIMITED";
+    private static final String IMA_PERMISSION_DENIED = "IMA_PERMISSION_DENIED";
+    private static final String IMA_SERVICE_UNAVAILABLE = "IMA_SERVICE_UNAVAILABLE";
+    private static final Pattern HTTP_SERVER_ERROR = Pattern.compile("(?:^|\\s)http\\s+5\\d{2}(?:\\D|$)");
     private static final Set<String> SENSITIVE_OUTPUT_FIELDS = Set.of(
         "apikey", "authorization", "coscredential", "secretid", "secretkey", "securitytoken",
         "sessiontoken", "signature", "token");
@@ -142,16 +150,16 @@ public class ImaOpenApiCliCredentialProvider implements ConnectorCredentialFormP
         try {
             result = cliRunner.run(CHECK_COMMAND, environment, null, CHECK_TIMEOUT);
         } catch (RuntimeException e) {
-            return unavailable(e) ? failed("CONNECTOR_CLI_UNAVAILABLE") : failed("CONNECTOR_CREDENTIAL_INVALID");
+            return unavailable(e) ? failed("CONNECTOR_CLI_UNAVAILABLE") : failed(CREDENTIAL_INVALID);
         }
         if (result == null) {
-            return failed("CONNECTOR_CREDENTIAL_INVALID");
+            return failed(CREDENTIAL_INVALID);
         }
         if (result.exitCode() == 124) {
             return failed("CONNECTOR_VERIFICATION_TIMEOUT");
         }
         if (result.exitCode() != 0) {
-            return failed("CONNECTOR_CREDENTIAL_INVALID");
+            return failed(classifyFailedProbe(result.output(), result.truncated()));
         }
         if (result.truncated() || !validSuccessPayload(result.output())) {
             return failed("PROVIDER_PROTOCOL_ERROR");
@@ -175,6 +183,60 @@ public class ImaOpenApiCliCredentialProvider implements ConnectorCredentialFormP
         } catch (RuntimeException | java.io.IOException e) {
             return false;
         }
+    }
+
+    private String classifyFailedProbe(String output, boolean truncated) {
+        if (truncated || output == null || output.isBlank()) {
+            return "PROVIDER_PROTOCOL_ERROR";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(output);
+            JsonNode checks = root == null ? null : root.get("checks");
+            JsonNode messageNode = root == null ? null : root.get("message");
+            if (root == null || !root.isObject() || !"error".equals(root.path("status").textValue())
+                    || checks == null || !checks.isObject()
+                    || !checks.path("client_id_present").isBoolean()
+                    || !checks.path("client_id_present").booleanValue()
+                    || !checks.path("api_key_present").isBoolean()
+                    || !checks.path("api_key_present").booleanValue()
+                    || !checks.path("token_fetch").isBoolean()
+                    || checks.path("token_fetch").booleanValue()
+                    || messageNode == null || !messageNode.isTextual()
+                    || messageNode.textValue().isBlank()) {
+                return "PROVIDER_PROTOCOL_ERROR";
+            }
+            return classifyFailureMessage(messageNode.textValue());
+        } catch (RuntimeException | java.io.IOException e) {
+            return "PROVIDER_PROTOCOL_ERROR";
+        }
+    }
+
+    private String classifyFailureMessage(String message) {
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (containsAny(normalized, "20002", "超过最大限频", "rate limit", "too many requests", "http 429")) {
+            return IMA_RATE_LIMITED;
+        }
+        if (containsAny(normalized, "100005", "110030", "无权限", "permission denied", "forbidden", "http 403")) {
+            return IMA_PERMISSION_DENIED;
+        }
+        if (containsAny(normalized, "20004", "apikey鉴权失败", "unauthorized", "invalid credential",
+                "authentication failed")) {
+            return CREDENTIAL_INVALID;
+        }
+        if (containsAny(normalized, "fetch failed", "enotfound", "econn", "socket", "network", "dns", "tls",
+                "certificate") || HTTP_SERVER_ERROR.matcher(normalized).find()) {
+            return IMA_SERVICE_UNAVAILABLE;
+        }
+        return VERIFICATION_FAILED;
+    }
+
+    private boolean containsAny(String value, String... candidates) {
+        for (String candidate : candidates) {
+            if (value.contains(candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<String> runtimeCommand(List<String> argv) {
@@ -297,7 +359,7 @@ public class ImaOpenApiCliCredentialProvider implements ConnectorCredentialFormP
     }
 
     private AuthorizationStatusResult invalid() {
-        return failed("CONNECTOR_CREDENTIAL_INVALID");
+        return failed(CREDENTIAL_INVALID);
     }
 
     private AuthorizationStatusResult failed(String errorCode) {

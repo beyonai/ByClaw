@@ -18,6 +18,31 @@ class ConnectorStatusQueryTest {
         assertThat(sql).contains("else 'n' end as enable_flag");
     }
 
+    @Test
+    void accountTemplatesStayOutOfConnectorPresentationAndRuntimeState() throws Exception {
+        String catalogSql = read(
+            "byclaw-be/src/main/resources/com/iwhalecloud/byai/manager/mapper/connector/ConnectorInfoMapper.xml");
+        String stateSql = read(
+            "byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
+
+        assertThat(catalogSql).contains("connector_type &lt;&gt; 'account_template'");
+        assertThat(stateSql).contains("info.connector_type <> 'account_template'");
+    }
+
+    @Test
+    void activeAccountTemplatesCanBeLockedInStableOrder() throws Exception {
+        String sql = read(
+            "byclaw-be/src/main/resources/com/iwhalecloud/byai/manager/mapper/connector/ConnectorInfoMapper.xml");
+
+        assertThat(sql).contains(
+            "selectaccounttemplatesforupdate",
+            "connector_type = 'account_template'",
+            "status_cd = '00a'",
+            "order by sort asc, connector_id asc",
+            "for update"
+        );
+    }
+
     private String read(String relativePath) throws Exception {
         Path repoRoot = Path.of("").toAbsolutePath();
         while (repoRoot != null && !Files.exists(repoRoot.resolve("deploy/migrations/versions"))) {

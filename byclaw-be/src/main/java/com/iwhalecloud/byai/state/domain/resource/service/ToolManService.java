@@ -267,7 +267,7 @@ public class ToolManService {
         ssResource.setPublishPortal(1);
         ssResource.setParentResourceId(-1L);
         ssResource.setPublishType("publish");
-        ssResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        ssResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         ssResource.setCreateTime(new Date());
         ssResource.setUpdateTime(new Date());
         ssResource.setPublishTime(new Date());
@@ -723,9 +723,9 @@ public class ToolManService {
             validateResourceCanDelete(resourceId, resource, resourceBizType);
         }
 
-        // 5. 软删除：仅把 ss_resource.resource_status 置为 REMOVED(3)，保留主表、扩展表与资源关系，
+        // 5. 软删除：仅把 ss_resource.resource_status 置为 OFF_SHELF(3)，保留主表、扩展表与资源关系，
         // 让前端"已注销"筛选项可以查询到这些记录；运行期副作用（产物/缓存/注册等）继续清理。
-        resource.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         resource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         resource.setUpdateTime(new Date());
         ssResourceService.updateResourceEntity(resource);
@@ -861,7 +861,7 @@ public class ToolManService {
         }
 
         // 5. 恢复：将资源状态从已注销（3）改为已上架（2）。
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         resource.setUpdateTime(new Date());
         ssResourceService.updateResourceEntity(resource);
@@ -896,7 +896,7 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("tool.resource.restore.type.unsupported"));
         }
         // 校验资源状态必须是已注销（3），否则不能恢复。
-        if (!Objects.equals(resource.getResourceStatus(), ResourceStatus.REMOVED.getNum())) {
+        if (!Objects.equals(resource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())) {
             throw new IllegalArgumentException(I18nUtil.get("tool.resource.restore.status.invalid"));
         }
     }
@@ -1207,7 +1207,7 @@ public class ToolManService {
         // 3. 批量查询主资源，并过滤出 resourceBizType = DIG_EMPLOYEE 且未删除的数字员工。
         List<SsResource> relResources = ssResourceService.findByIdList(digEmployeeIds);
         List<String> digEmployeeNames = relResources.stream().filter(Objects::nonNull)
-            .filter(item -> !Objects.equals(item.getResourceStatus(), ResourceStatus.REMOVED.getNum()))
+            .filter(item -> !Objects.equals(item.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum()))
             .filter(item -> StringUtils.equals(item.getResourceBizType(), ResourceBizType.DIG_EMPLOYEE.getCode()))
             .map(SsResource::getResourceName).filter(StringUtils::isNotBlank).distinct().collect(Collectors.toList());
         if (CollectionUtils.isEmpty(digEmployeeNames)) {
@@ -1431,7 +1431,7 @@ public class ToolManService {
             myResource.setResourceCode(resourceCode);
             myResource.setResourceName(resourceName);
             myResource.setResourceDesc(resourceDesc);
-            myResource.setResourceStatus(ResourceStatus.LIST.getNum());
+            myResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
             myResource.setOwnerType(ownerType);
             myResource.setSystemCode(systemCode);
             myResource.setResourceVersionId(version);
@@ -1917,7 +1917,7 @@ public class ToolManService {
         r.setUpdateBy(userId);
         r.setUpdateTime(now);
         r.setComAcctId(comAcctId);
-        r.setResourceStatus(ResourceStatus.LIST.getNum());
+        r.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         r.setResourceDVerid(null);
         r.setResourceRVerid(null);
         r.setResourceCode(resourceCode);
@@ -2065,7 +2065,7 @@ public class ToolManService {
         r.setUpdateBy(userId);
         r.setUpdateTime(now);
         r.setComAcctId(comAcctId);
-        r.setResourceStatus(ResourceStatus.LIST.getNum());
+        r.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         r.setResourceDVerid(null);
         r.setResourceRVerid(null);
         r.setResourceCode(resourceCode);

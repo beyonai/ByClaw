@@ -31,6 +31,9 @@ public class AuthResourceVo {
 
     private String resourceBizType;
 
+    /** 资源状态 */
+    private Integer resourceStatus;
+
     private Long createBy;
 
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")

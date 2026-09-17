@@ -3,23 +3,33 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Date;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -170,11 +180,12 @@ class ChatRuntimeStateServiceTest {
         indexMembers.add("11");
         indexMembers.add("12");
         indexMembers.add("13");
-        when(setOperations.members("byai:chat:runtime:index")).thenReturn(indexMembers);
-        when(valueOperations.get("byai:chat:runtime:10")).thenReturn(JSON.toJSONString(running));
-        when(valueOperations.get("byai:chat:runtime:11")).thenReturn(JSON.toJSONString(finished));
-        when(valueOperations.get("byai:chat:runtime:12")).thenReturn(null);
-        when(valueOperations.get("byai:chat:runtime:13")).thenReturn(JSON.toJSONString(handoff));
+        Cursor<Object> indexCursor = cursor(indexMembers);
+        when(setOperations.scan(eq("byai:chat:runtime:index"), any(ScanOptions.class)))
+            .thenReturn(indexCursor);
+        when(valueOperations.multiGet(List.of("byai:chat:runtime:10", "byai:chat:runtime:11",
+            "byai:chat:runtime:12", "byai:chat:runtime:13"))).thenReturn(Arrays.asList(
+                JSON.toJSONString(running), JSON.toJSONString(finished), null, JSON.toJSONString(handoff)));
 
         List<ChatRuntimeState> states = service.listRunningStates();
 
@@ -183,6 +194,8 @@ class ChatRuntimeStateServiceTest {
         assertEquals(13L, states.get(1).getSessionId());
         verify(setOperations).remove("byai:chat:runtime:index", "11");
         verify(setOperations).remove("byai:chat:runtime:index", "12");
+        verify(setOperations, never()).members(anyString());
+        verify(valueOperations, never()).get(anyString());
     }
 
     /**
@@ -200,14 +213,107 @@ class ChatRuntimeStateServiceTest {
 
         Set<Object> indexMembers = new LinkedHashSet<>();
         indexMembers.add("10");
-        when(setOperations.members("byai:chat:runtime:index")).thenReturn(indexMembers);
-        when(valueOperations.get("byai:chat:runtime:10")).thenReturn("not-a-json");
-        when(redisTemplate.hasKey("byai:chat:runtime:10")).thenReturn(true);
+        Cursor<Object> indexCursor = cursor(indexMembers);
+        when(setOperations.scan(eq("byai:chat:runtime:index"), any(ScanOptions.class)))
+            .thenReturn(indexCursor);
+        when(valueOperations.multiGet(List.of("byai:chat:runtime:10"))).thenReturn(List.of("not-a-json"));
 
         List<ChatRuntimeState> states = service.listRunningStates();
 
         assertEquals(0, states.size());
         verify(setOperations, never()).remove(anyString(), any(Object.class));
+    }
+
+    @Test
+    void listRunningStatesBoundsBulkReadsEvenWhenScanReturnsMoreThanItsCountHint() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
+        SetOperations<String, Object> setOperations = mock(SetOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+        List<Object> indexMembers = new ArrayList<>();
+        for (long sessionId = 1; sessionId <= 205; sessionId++) {
+            indexMembers.add(String.valueOf(sessionId));
+        }
+        Cursor<Object> indexCursor = cursor(indexMembers);
+        when(setOperations.scan(eq("byai:chat:runtime:index"), any(ScanOptions.class)))
+            .thenReturn(indexCursor);
+        when(valueOperations.multiGet(any())).thenAnswer(call -> {
+            List<String> keys = call.getArgument(0);
+            List<Object> values = new ArrayList<>();
+            for (String key : keys) {
+                ChatRuntimeState running = runtimeState(null);
+                running.setSessionId(Long.valueOf(key.substring(key.lastIndexOf(':') + 1)));
+                running.setStatus(ChatRuntimeState.STATUS_RUNNING);
+                values.add(JSON.toJSONString(running));
+            }
+            return values;
+        });
+
+        List<ChatRuntimeState> states = service.listRunningStates();
+
+        assertEquals(205, states.size());
+        ArgumentCaptor<List<String>> batches = ArgumentCaptor.forClass(List.class);
+        verify(valueOperations, times(3)).multiGet(batches.capture());
+        for (List<String> batch : batches.getAllValues()) {
+            org.assertj.core.api.Assertions.assertThat(batch).hasSizeLessThanOrEqualTo(100);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void concurrentTurnRemainsDiscoverableAndRecoverableAlongsideItsBackgroundOwner() {
+        RedisTemplate<String, Object> redis = mock(RedisTemplate.class);
+        ValueOperations<String, Object> values = mock(ValueOperations.class);
+        SetOperations<String, Object> sets = mock(SetOperations.class);
+        ChatRuntimeInstance instance = mock(ChatRuntimeInstance.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(redis.opsForSet()).thenReturn(sets);
+        when(instance.getInstanceId()).thenReturn("backend-a");
+        ReflectionTestUtils.setField(service, "redisTemplate", redis);
+        ReflectionTestUtils.setField(service, "chatRuntimeInstance", instance);
+        java.util.Map<String, Object> records = new java.util.HashMap<>();
+        java.util.Map<String, Set<Object>> indexes = new java.util.HashMap<>();
+        org.mockito.Mockito.doAnswer(call -> {
+            records.put(call.getArgument(0), call.getArgument(1));
+            return null;
+        }).when(values).set(anyString(), any(), any(Long.class), any(TimeUnit.class));
+        when(values.get(anyString())).thenAnswer(call -> records.get(call.getArgument(0)));
+        when(sets.add(anyString(), any(Object.class))).thenAnswer(call -> {
+            indexes.computeIfAbsent(call.getArgument(0), key -> new LinkedHashSet<>()).add(call.getArgument(1));
+            return 1L;
+        });
+        when(sets.scan(anyString(), any(ScanOptions.class))).thenAnswer(call ->
+            cursor(indexes.getOrDefault(call.getArgument(0), Set.of())));
+        when(sets.members(anyString())).thenAnswer(call -> indexes.get(call.getArgument(0)));
+        when(values.multiGet(any())).thenAnswer(call -> {
+            List<String> keys = call.getArgument(0);
+            return keys.stream().map(records::get).toList();
+        });
+
+        ChatProcessContext owner = new ChatProcessContext(null, assistantChatDto());
+        owner.sessionId = 10L;
+        owner.traceId = "background";
+        owner.modelAnswerMessageId = 101L;
+        service.save(owner, "owner-token");
+        ChatProcessContext followup = new ChatProcessContext(null, assistantChatDto());
+        followup.sessionId = 10L;
+        followup.traceId = "followup";
+        followup.userMessageId = 102L;
+        followup.modelAnswerMessageId = 103L;
+        followup.concurrentGatewayTurn = true;
+        service.saveConcurrent(followup);
+
+        assertEquals("background", service.get(10L).getTraceId());
+        ChatRuntimeState savedFollowup = service.get("10", "followup");
+        assertEquals(103L, savedFollowup.getModelAnswerMessageId());
+        assertEquals(2, service.getSessionTurns(10L).size());
+        assertEquals(2, service.listRunningStates().size());
+        ChatProcessContext recovered = service.buildRecoveryContext(savedFollowup, snapshotService);
+        org.junit.jupiter.api.Assertions.assertTrue(recovered.concurrentGatewayTurn);
+        assertEquals(followup.runningOutputStreamToken, recovered.runningOutputStreamToken);
+        assertEquals("followup", recovered.traceId);
     }
 
     private ChatRuntimeState runtimeState(ByaiMessageHotDtoDto askMsg) {
@@ -229,5 +335,107 @@ class ChatRuntimeStateServiceTest {
         assistantChatDto.setAgentType("001");
         assistantChatDto.setChatContent("hello");
         return assistantChatDto;
+    }
+
+    /**
+     * 运行态 key 与两个索引 key 分属不同 hash slot，一旦被合进同一条 Lua 脚本，
+     * Redis Cluster 会在客户端直接拒绝（Keys must belong to same hashslot），
+     * 整条终结清理链路随之中断，listener 与租约续期泄漏到进程重启。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteKeepsTheOwnershipScriptSingleKeyedSoItWorksOnACluster() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(1L);
+
+        service.delete(fixture.ctx);
+
+        ArgumentCaptor<List<String>> keys = ArgumentCaptor.forClass(List.class);
+        verify(fixture.redis).execute(any(DefaultRedisScript.class), keys.capture(), any(), any());
+        assertEquals(List.of("byai:chat:runtime:10"), keys.getValue());
+    }
+
+    @Test
+    void deleteRemovesBothIndexEntriesOutsideTheScript() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(1L);
+
+        service.delete(fixture.ctx);
+
+        verify(fixture.sets).remove("byai:chat:runtime:index", "10");
+        verify(fixture.sets).remove("byai:chat:runtime:10:turns", "10");
+    }
+
+    /**
+     * token 不匹配说明该 identifier 已被后续轮次接管，索引条目属于新的持有者。
+     * 原子脚本靠 early return 保证这一点，拆开后必须由调用侧维持同样的语义。
+     */
+    @Test
+    void deleteLeavesIndexEntriesAloneWhenTheOwnershipTokenNoLongerMatches() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(0L);
+
+        service.delete(fixture.ctx);
+
+        verifyNoInteractions(fixture.sets);
+    }
+
+    /**
+     * 索引残留是自愈的（扫描读到空值即摘除），但异常上抛会中断调用方的终结清理，
+     * 代价远高于一条残留条目，因此索引摘除失败必须被吞掉且不影响后续步骤。
+     */
+    @Test
+    void deleteSurvivesIndexRemovalFailureAndStillClearsTheOtherIndex() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(1L);
+        when(fixture.sets.remove("byai:chat:runtime:index", "10"))
+            .thenThrow(new QueryTimeoutException("redis down"));
+
+        service.delete(fixture.ctx);
+
+        verify(fixture.sets).remove("byai:chat:runtime:10:turns", "10");
+    }
+
+    /**
+     * 运行态没删掉却继续往下走，恢复逻辑会把一轮已结束的对话当作仍在运行，因此这一步的异常必须上抛。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deletePropagatesFailuresOfTheOwnershipCheckedRemoval() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(1L);
+        when(fixture.redis.execute(any(DefaultRedisScript.class), any(List.class), any(), any()))
+            .thenThrow(new QueryTimeoutException("redis down"));
+
+        assertThrows(QueryTimeoutException.class, () -> service.delete(fixture.ctx));
+    }
+
+    /** 组装 deleteTurn 所需的最小依赖，scriptResult 为脚本返回值。 */
+    private final class DeleteTurnFixture {
+
+        private final RedisTemplate<String, Object> redis = mock(RedisTemplate.class);
+        private final SetOperations<String, Object> sets = mock(SetOperations.class);
+        private final ChatProcessContext ctx;
+
+        @SuppressWarnings("unchecked")
+        private DeleteTurnFixture(Long scriptResult) {
+            ChatRuntimeInstance instance = mock(ChatRuntimeInstance.class);
+            when(redis.opsForSet()).thenReturn(sets);
+            when(instance.getInstanceId()).thenReturn("instance-1");
+            when(redis.execute(any(DefaultRedisScript.class), any(List.class), any(), any()))
+                .thenReturn(scriptResult);
+            ReflectionTestUtils.setField(service, "redisTemplate", redis);
+            ReflectionTestUtils.setField(service, "chatRuntimeInstance", instance);
+
+            ctx = new ChatProcessContext(null, assistantChatDto());
+            ctx.sessionId = 10L;
+            ctx.runningOutputStreamToken = "token-1";
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Cursor<Object> cursor(Iterable<?> values) {
+        List<Object> copy = new ArrayList<>();
+        values.forEach(copy::add);
+        AtomicInteger offset = new AtomicInteger();
+        Cursor<Object> cursor = mock(Cursor.class);
+        when(cursor.hasNext()).thenAnswer(call -> offset.get() < copy.size());
+        when(cursor.next()).thenAnswer(call -> copy.get(offset.getAndIncrement()));
+        return cursor;
     }
 }

@@ -1,0 +1,5 @@
+interface:
+  display_name: "调用百应能力"
+  short_description: "通过 callcli 安全调用已授权的百应平台业务能力"
+  default_prompt: "Use $invoke-baiying-capability to invoke the configured authorized capability."
+

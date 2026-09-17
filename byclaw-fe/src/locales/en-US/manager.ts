@@ -50,8 +50,6 @@ export default {
   'common.deleteTips': 'Confirm deletion?',
   'common.plus': 'Add',
   'common.tool': 'Tools',
-  'common.object': 'Object',
-  'common.viewName': 'View',
   'common.agent': 'Agent',
   'common.toolkit': 'Toolkit',
   'common.mcpService': 'MCP Servive',
@@ -209,8 +207,6 @@ export default {
   'orgMgr.tabs.employee': 'Digital Employee',
   'orgMgr.tabs.knowledge': 'Knowledge Assets',
   'orgMgr.tabs.tool': 'Tool Assets',
-  'orgMgr.tabs.view': 'View Assets',
-  'orgMgr.tabs.object': 'Object Assets',
 
   // Table Columns (Extra)
   'orgMgr.table.type': 'Type',
@@ -309,6 +305,16 @@ export default {
   'resourceStatus.notPassed': 'Not Passed',
   'resourceStatus.published': 'Published',
   'resourceStatus.unpublished': 'Unpublished',
+  'resourceStatus.deleted': 'Deleted',
+  'resourceStatus.pendingShelf': 'Pending publication',
+  'resource.shelf': 'Publish',
+  'resource.unShelf': 'Unpublish',
+  'resource.unShelfData': 'Unpublish data',
+  'resource.shelfData': 'Publish data',
+  'resource.shelfDataConfirm': 'Are you sure you want to publish this data?',
+  'resource.unShelfDataConfirm': 'Are you sure you want to unpublish this data?',
+  'resource.deleteData': 'Delete data',
+  'resource.deleteDataConfirm': 'Delete this data?',
 
   // Resource Type
   'resourceAction.push': 'Publish',
@@ -566,4 +572,11 @@ export default {
   'employeeDetail.imageModelPlaceholder': 'Select an image generation model',
   'employeeDetail.imageModelLoadError': 'Failed to load image generation models',
   'employeeDetail.imageModelRetry': 'Retry',
+  'employeeDetail.ttsModel': 'Voice model',
+  'employeeDetail.ttsModelConfiguration': 'Voice model configuration',
+  'employeeDetail.ttsModelGlobalDefault': 'Use global default',
+  'employeeDetail.ttsModelLoadError': 'Failed to load voice models',
+  'employeeDetail.ttsModelRetry': 'Retry',
+  'employeeDetail.moreModels': 'More models',
+  'employeeDetail.collapseMoreModels': 'Collapse more models',
 };

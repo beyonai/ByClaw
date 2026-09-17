@@ -67,7 +67,7 @@ def run_script(script_rel_path: str, args: list[str] | None = None) -> dict[str,
     """通过虚拟环境 Python 执行 skill 脚本。
 
     Args:
-        script_rel_path: 相对于 skill 根目录的脚本路径，如 "scripts/ontology/structured/list_mounted_resources.py"
+        script_rel_path: 相对于 skill 根目录的脚本路径，如 "scripts/resources/list_mounted_resources.py"
         args: 命令行参数列表（含 JSON 字符串）
 
     Returns:

@@ -4,7 +4,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { recordPendingCollectionItem, registerFullTextEvidenceReceipt } from './collection-state.mjs';
+import {
+  recordPendingCollectionItem,
+  registerControlledAcquisitionEvidence,
+  registerFullTextEvidenceReceipt,
+} from './collection-state.mjs';
 import { authorizePublicSource } from './discovery-authorization.mjs';
 import { atomicWriteJson, isInside, loadSession, readJson } from './session.mjs';
 
@@ -242,7 +246,7 @@ export async function runWechatMaterialize(paths, args, options = {}) {
   if (!resolvedUrl) throw new Error('resolved_url 必须是可信 mp.weixin.qq.com/s 文章 URL');
   const requestedUrl = normalizedHttpUrl(executorResult.source_url, 'source_url');
   const { session } = loadSession(paths, { persistMigration: false });
-  authorizePublicSource(session.task?.discoveryGate, requestedUrl);
+  const requested = authorizePublicSource(session.task?.discoveryGate, requestedUrl);
   const savedArtifact = resolveRawArtifact(paths, executorResult.saved, 'executorResult.saved');
   if (!Number.isInteger(executorResult.size) || executorResult.size <= 0
     || executorResult.size !== savedArtifact.size) {
@@ -254,10 +258,34 @@ export async function runWechatMaterialize(paths, args, options = {}) {
   const sanitizeStartedAt = now();
   const sanitized = sanitizeWechatMarkdown(rawMarkdown, executorResult);
   const sanitizeMs = elapsedMilliseconds(sanitizeStartedAt, now());
-  const rawMaterializationDir = ensureSafeDirectory(paths.root, ['raw', 'materialization'], '物化诊断目录');
+  const rawMaterializationDir = path.join(paths.root, 'raw', 'materialization');
   const diagnosticsPath = path.join(rawMaterializationDir, `${itemId}.json`);
   const diagnosticsRelative = toPosixRelative(paths.root, diagnosticsPath);
   const rawArtifacts = [executorArtifact.relative, savedArtifact.relative, diagnosticsRelative];
+  recordPendingCollectionItem(paths, {
+    itemId,
+    source: 'public-internet',
+    sourceSkill: 'bycli',
+    backend: 'bycli',
+    sourceUrl: requestedUrl,
+    title: String(executorResult.title || ''),
+    rawArtifacts: [executorArtifact.relative, savedArtifact.relative],
+    media: {
+      coverStatus: 'unknown',
+      coverCount: 0,
+      materializedCoverCount: 0,
+      reason: 'wechat-download-cover-not-classified',
+    },
+    reason: 'awaiting-wechat-materialization',
+  }, 'materialize-wechat');
+  registerControlledAcquisitionEvidence(paths, {
+    candidateId: requested.candidateId,
+    requestedUrl,
+    resolvedUrl,
+    executor: 'bycli',
+    evidenceArtifact: executorArtifact.relative,
+  }, { command: 'materialize-wechat', itemId });
+  ensureSafeDirectory(paths.root, ['raw', 'materialization'], '物化诊断目录');
   const baseDiagnostics = {
     schemaVersion: '1.0',
     action: 'materialize-wechat',
@@ -351,7 +379,7 @@ export async function runWechatMaterialize(paths, args, options = {}) {
         reason: 'wechat-download-cover-not-classified',
       },
       reason: 'wechat-materialization-low-confidence',
-    });
+    }, 'materialize-wechat');
     materialization = pending.materialization;
   }
   const writeMs = elapsedMilliseconds(writeStartedAt, now());
@@ -367,7 +395,7 @@ export async function runWechatMaterialize(paths, args, options = {}) {
       executor: 'bycli',
       sourceUrl: requestedUrl,
       artifact: diagnosticsRelative,
-    });
+    }, 'materialize-wechat');
   }
   return {
     ok: true,

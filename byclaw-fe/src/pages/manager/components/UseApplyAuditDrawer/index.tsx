@@ -44,12 +44,6 @@ const UseApplyAuditDrawer: React.FC<UseApplyAuditDrawerProps> = ({ open, record,
     if (['TOOL', 'TOOLKIT', 'MCP', 'AGENT'].includes(resourceBizType || '')) {
       return intl.formatMessage({ id: 'resource.tool' });
     }
-    if (resourceBizType === 'OBJECT') {
-      return intl.formatMessage({ id: 'resource.object' });
-    }
-    if (resourceBizType === 'VIEW') {
-      return intl.formatMessage({ id: 'resource.view' });
-    }
     return intl.formatMessage({ id: 'resource.default' });
   })();
 

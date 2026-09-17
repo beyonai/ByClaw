@@ -26,6 +26,7 @@ public enum ResourceBizType {
     VIEW("VIEW", "视图"),
     ACTION("ACTION", "动作"),
     OBJECT("OBJECT", "对象"),
+    // 仅保留历史数据类型兼容，不提供业务入口。
     ONTOLOGY_BASE("ONTOLOGY_BASE", "本体库"),
     SCENE("SCENE", "场景"),
     DB_DATASET("DB_DATASET", "数据集"),

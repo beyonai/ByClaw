@@ -63,6 +63,8 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   const { trackerEmployeeClick } = useTracker();
   const intl = useIntl();
   const popoverRef = useRef<TooltipRef>(null);
+  // 下拉菜单、确认浮层通过 Portal 渲染到资源弹窗外部，操作期间禁止 Popover 自动关闭。
+  const ignoreOutsideCloseRef = useRef<number>(0);
   const open = !!popoverPos;
   const { width } = popoverPos || {};
   const isAtPopover = type === '@';
@@ -97,10 +99,13 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       // 连接器授权、凭据配置等通过 Portal 渲染到 body，操作这些浮层时不能被资源弹窗的外部点击关闭逻辑卸载。
       if (
         target.closest(
-          `.${styles.popover}, [data-resource-tool-menu], .connectorItem, .connectorAction, .ant-modal-root, .ant-drawer, .ant-dropdown, .ant-popover`
+          `.${styles.popover}, [data-resource-tool-menu], .connectorItem, .connectorAction, .ant-modal-root, .ant-drawer, .ant-dropdown, .ant-dropdown-menu-item, .ant-popover, .ant-popover-content, .ant-popover-inner, .ant-popover-buttons, .ant-popconfirm`
         )
-      )
+      ) {
+        // Portal 浮层的关闭事件可能晚于 mousedown 到达，保留短暂保护窗口覆盖整个确认操作。
+        ignoreOutsideCloseRef.current = Date.now() + 1000;
         return;
+      }
       onClose();
     };
 
@@ -238,6 +243,9 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       arrow={false}
       onOpenChange={(v) => {
         if (!v) {
+          if (ignoreOutsideCloseRef.current > Date.now()) {
+            return;
+          }
           onClose();
         }
       }}

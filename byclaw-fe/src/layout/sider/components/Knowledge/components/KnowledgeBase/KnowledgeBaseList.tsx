@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
-import { Input, Dropdown, message } from 'antd';
+import { Input, Dropdown, message, Modal } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { trim, get, isEmpty, intersection, debounce } from 'lodash';
 import { useIntl, useSelector } from '@umijs/max';
@@ -11,6 +11,9 @@ import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal
 import withDrag, { DragType, IDragType } from '@/components/QueryInput/withDrag';
 import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
 import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
+import { uninstallDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
+import { useDigitalEmployeeManagePermission } from '@/components/Resources/workspaceSkill/useDigitalEmployeeManagePermission';
+import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import { IKnowledgeBaseItem } from './types';
 import InfiniteScrollAntdList from '../../../InfiniteScrollAntdList';
 import commonStyles from '../common.module.less';
@@ -83,6 +86,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   const [shareAuthList, setShareAuthList] = useState<any[]>([]);
   const [shareBlackList, setShareBlackList] = useState<any[]>([]);
   const { EventEmitter } = useGlobal();
+  const activeSiderAgent = useActiveSiderAgent();
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user.userInfo,
@@ -92,6 +96,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   const isUser = isEmpty(intersection(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']));
 
   const intl = useIntl();
+  const canManageActiveEmployee = useDigitalEmployeeManagePermission(activeAgentResourceId);
   // const {
   //   token: { colorPrimary },
   // } = theme.useToken();
@@ -174,15 +179,33 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   }, [EventEmitter, loadKnowledgeBases]);
 
   useEffect(() => {
-    const handleResourceInstalled = () => {
+    const handleResourceChanged = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          digitalEmployeeId?: string | number;
+          digitalEmployeeIds?: Array<string | number>;
+        }>
+      ).detail;
+      const digitalEmployeeId = detail?.digitalEmployeeId;
+      if (digitalEmployeeId !== undefined && `${digitalEmployeeId}` !== `${activeAgentResourceId || ''}`) {
+        return;
+      }
+      if (
+        detail?.digitalEmployeeIds?.length &&
+        !detail.digitalEmployeeIds.some((employeeId) => `${employeeId}` === `${activeAgentResourceId || ''}`)
+      ) {
+        return;
+      }
       loadKnowledgeBases(true);
     };
 
-    window.addEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+    window.addEventListener('digitalEmployeeResourceInstalled', handleResourceChanged);
+    window.addEventListener('digitalEmployeeResourceUninstalled', handleResourceChanged);
     return () => {
-      window.removeEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+      window.removeEventListener('digitalEmployeeResourceInstalled', handleResourceChanged);
+      window.removeEventListener('digitalEmployeeResourceUninstalled', handleResourceChanged);
     };
-  }, [loadKnowledgeBases]);
+  }, [activeAgentResourceId, loadKnowledgeBases]);
 
   const onKeywordChanged = debounce((keyword: string) => {
     searchValue.current = keyword;
@@ -356,6 +379,53 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     [handleShareCancel, intl, loadKnowledgeBases, moduleEventEmitter, shareBlackList, shareRecord]
   );
 
+  const handleUninstall = useCallback(
+    (item: IKnowledgeBaseItem) => {
+      if (!activeAgentResourceId || !item.resourceId) {
+        message.error(intl.formatMessage({ id: 'resource.currentEmployeeUnavailable' }));
+        return;
+      }
+      const employeeName = activeSiderAgent.name || intl.formatMessage({ id: 'resource.currentDigitalEmployee' });
+      Modal.confirm({
+        title: intl.formatMessage({ id: 'resource.uninstall' }),
+        content: intl.formatMessage(
+          { id: 'resource.uninstallConfirm' },
+          { employeeName, resourceName: item.resourceName }
+        ),
+        okText: intl.formatMessage({ id: 'common.confirm' }),
+        cancelText: intl.formatMessage({ id: 'common.cancel' }),
+        async onOk() {
+          try {
+            const res: any = await uninstallDigitalEmployeeRelResources({
+              digitalEmployeeId: activeAgentResourceId,
+              relIds: [item.resourceId],
+            });
+            if (res?.code !== undefined && ![0, 200].includes(Number(res.code))) {
+              message.error(res.msg || res.message || intl.formatMessage({ id: 'common.operationFailed' }));
+              return;
+            }
+            setKnowledgeBases((prev) => prev.filter((resource) => `${resource.resourceId}` !== `${item.resourceId}`));
+            window.dispatchEvent(
+              new CustomEvent('digitalEmployeeResourceUninstalled', {
+                detail: {
+                  resourceId: item.resourceId,
+                  resourceType: item.resourceBizType,
+                  digitalEmployeeId: activeAgentResourceId,
+                },
+              })
+            );
+            EventEmitter.emit('beyond-resourceList-resourceType-reload', 'KG_DOC');
+            moduleEventEmitter.emit('REFRESH_KNOWLEDGE_BASE');
+            message.success(intl.formatMessage({ id: 'resource.uninstallSuccess' }));
+          } catch (error: any) {
+            message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
+          }
+        },
+      });
+    },
+    [activeAgentResourceId, activeSiderAgent.name, EventEmitter, intl, moduleEventEmitter]
+  );
+
   return (
     <div className={commonStyles.container}>
       {/* 搜索区域 */}
@@ -410,38 +480,43 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
           />
         }
         renderItem={(item) => {
+          const menuItems = [
+            {
+              key: 'quote',
+              label: (
+                <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.quote' })}</div>
+              ),
+            },
+            {
+              key: 'detail',
+              label: (
+                <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>
+              ),
+            },
+            {
+              key: 'share',
+              label: (
+                <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.share' })}</div>
+              ),
+            },
+          ];
+          if (canManageActiveEmployee) {
+            menuItems.push({
+              key: 'uninstall',
+              label: (
+                <div className={employeeStyles.dropdownMenuItem}>
+                  {intl.formatMessage({ id: 'resource.uninstall' })}
+                </div>
+              ),
+            });
+          }
           const actions = [
             <Dropdown
               key={`detail-${item.resourceId}`}
               trigger={['hover']}
               overlayClassName={employeeStyles.mydropdown}
               menu={{
-                items: [
-                  {
-                    key: 'quote',
-                    label: (
-                      <div className={employeeStyles.dropdownMenuItem}>
-                        {intl.formatMessage({ id: 'common.quote' })}
-                      </div>
-                    ),
-                  },
-                  {
-                    key: 'detail',
-                    label: (
-                      <div className={employeeStyles.dropdownMenuItem}>
-                        {intl.formatMessage({ id: 'common.detail' })}
-                      </div>
-                    ),
-                  },
-                  {
-                    key: 'share',
-                    label: (
-                      <div className={employeeStyles.dropdownMenuItem}>
-                        {intl.formatMessage({ id: 'common.share' })}
-                      </div>
-                    ),
-                  },
-                ],
+                items: menuItems,
                 onClick: ({ key, domEvent }) => {
                   domEvent.preventDefault();
                   domEvent.stopPropagation();
@@ -451,6 +526,10 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
                   }
                   if (key === 'share') {
                     void handleShare(item);
+                    return;
+                  }
+                  if (key === 'uninstall') {
+                    handleUninstall(item);
                     return;
                   }
                   handleDetail(item);

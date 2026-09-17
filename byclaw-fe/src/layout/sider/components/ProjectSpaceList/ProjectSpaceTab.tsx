@@ -1,0 +1,542 @@
+import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
+import { Button, Drawer, Input, Modal, Spin, Tooltip, Tree, Upload, message, type MenuProps } from 'antd';
+import { FolderAddOutlined, GithubOutlined, UploadOutlined } from '@ant-design/icons';
+import { useIntl } from '@umijs/max';
+import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
+import { DragType } from '@/components/QueryInput/withDrag';
+import useGlobal from '@/hooks/useGlobal';
+import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
+import CodesTab from './CodesTab';
+import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
+import {
+  canPreviewFile,
+  ensureDirectoryPath,
+  isDirectory,
+  normalizeReferenceItem,
+  sortFileBrowserItems,
+  unwrapListResponse,
+} from '@/layout/sider/components/FileSiderPanel/utils';
+import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
+import {
+  createProjectSpaceFolder,
+  listProjectSpaceTree,
+  uploadProjectSpaceFiles,
+  type AvailableProjectRepo,
+  type GitSourceType,
+  type ProjectSpaceTreeNode,
+} from '@/service/devloop';
+import { deleteFiles, downloadFile, downloadFolder, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
+import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
+import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
+import styles from './index.module.less';
+
+const toItems = (nodes: ProjectSpaceTreeNode[], rootPath = '/by/projects/') =>
+  nodes.map((node) => ({
+    name: node.name,
+    path: node.type === 'directory' ? ensureDirectoryPath(`${rootPath}${node.path}`) : `${rootPath}${node.path}`,
+    isDir: node.type === 'directory',
+    size: node.size,
+    lastModified: node.lastModified,
+    gitRepository: node.gitRepository,
+    repoId: node.repoId,
+    defaultBranch: node.defaultBranch,
+    changesSupported: node.changesSupported,
+    remoteUrl: node.remoteUrl,
+    sourceType: node.sourceType,
+  })) as FileBrowserItem[];
+
+type SpaceItem = FileBrowserItem & {
+  gitRepository?: boolean;
+  repoId?: number;
+  defaultBranch?: string;
+  changesSupported?: boolean;
+  remoteUrl?: string;
+  sourceType?: GitSourceType;
+};
+
+/**
+ * 把项目空间节点转成 CodesTab 的数据源描述。已登记仓库带 repoId，本地发现的仓库只带
+ * repositoryPath，两者在 CodesTab 内走同一套渲染与请求分支。
+ */
+const toGitSource = (item: SpaceItem, projectId: number): AvailableProjectRepo => {
+  const repositoryPath = `${item.path}`.replace(/^\/by\/projects\/\d+\//, '').replace(/^\/+|\/+$/g, '');
+  return {
+    projectId,
+    repoFullName: item.name,
+    repoUrl: item.remoteUrl,
+    defaultBranch: item.defaultBranch,
+    path: ensureDirectoryPath(`${item.path}`),
+    repoId: item.repoId,
+    repositoryPath,
+    sourceType: item.sourceType || (item.repoId ? 'project-repo' : 'project-space-git'),
+    changesSupported: item.changesSupported,
+  };
+};
+
+interface Props {
+  projectId: number;
+  resourceId?: string | number;
+  projectCloudResourceId?: string | number;
+  sessionId?: string | number;
+  refreshKey?: number;
+  onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
+}
+
+const ProjectSpaceTab: React.FC<Props> = ({
+  projectId,
+  resourceId,
+  projectCloudResourceId,
+  sessionId,
+  refreshKey = 0,
+  onOpenDetail,
+}) => {
+  const intl = useIntl();
+  const { EventEmitter } = useGlobal();
+  const [items, setItems] = useState<FileBrowserItem[]>([]);
+  const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
+  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [gitDrawerItem, setGitDrawerItem] = useState<SpaceItem | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [createFolderName, setCreateFolderName] = useState('');
+  const [renameTarget, setRenameTarget] = useState<SpaceItem | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [saveTarget, setSaveTarget] = useState<SpaceItem | null>(null);
+  const [savePath, setSavePath] = useState('/');
+  const [saveFolders, setSaveFolders] = useState<{ title: string; key: string; isLeaf: boolean }[]>([]);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const clickTimer = useRef<number | null>(null);
+  const rootPath = `/by/projects/${projectId}/`;
+
+  const load = useCallback(
+    async (relativePath?: string) => {
+      setLoading(true);
+      try {
+        const response = await listProjectSpaceTree({ projectId, path: relativePath });
+        const next = sortFileBrowserItems(toItems(unwrapListResponse<ProjectSpaceTreeNode>(response), rootPath));
+        const key = relativePath ? ensureDirectoryPath(`${rootPath}${relativePath}`) : rootPath;
+        if (relativePath) setChildrenByPath((current) => ({ ...current, [key]: next }));
+        else setItems(next);
+      } catch (error) {
+        console.error('Failed to load project space:', error);
+        if (!relativePath) setItems([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [projectId, rootPath]
+  );
+
+  useEffect(() => {
+    setItems([]);
+    setChildrenByPath({});
+    setExpandedKeys([]);
+    setGitDrawerItem(null);
+    void load();
+  }, [load, refreshKey]);
+
+  const loadNode = useCallback(
+    async (node: FileTreeItem) => {
+      if (!isDirectory(node)) return;
+      const path = ensureDirectoryPath(node.path);
+      if (childrenByPath[path]) return;
+      const relative = path.slice(rootPath.length).replace(/\/$/, '');
+      await load(relative);
+    },
+    [childrenByPath, load, rootPath]
+  );
+
+  const getNodeExtra = useCallback(
+    (raw: FileTreeItem) => {
+      const item = raw as SpaceItem;
+      if (!item.gitRepository) return null;
+      return (
+        <span
+          className={styles.repoNodeGitActions}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          <button
+            type="button"
+            className={styles.repoGithubButton}
+            aria-label="GitHub"
+            title={intl.formatMessage({ id: 'projectSpace.detail.repo.showFiles' })}
+            onClick={() => setGitDrawerItem(item)}
+          >
+            <GithubOutlined />
+          </button>
+        </span>
+      );
+    },
+    [intl]
+  );
+
+  const refreshSpace = useCallback(() => {
+    setChildrenByPath({});
+    setExpandedKeys([]);
+    void load();
+  }, [load]);
+
+  const handleUpload = useCallback(
+    async (files: File[]) => {
+      if (!projectId || !files.length || uploading) return;
+      setUploading(true);
+      try {
+        await uploadProjectSpaceFiles(projectId, '', files);
+        message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
+        refreshSpace();
+      } catch (error: any) {
+        message.error(error?.message || error?.msg || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+      } finally {
+        setUploading(false);
+      }
+    },
+    [intl, projectId, refreshSpace, uploading]
+  );
+
+  const handleCreateFolder = useCallback(async () => {
+    const name = createFolderName.trim();
+    if (!projectId || !name) return;
+    try {
+      await createProjectSpaceFolder({ projectId, path: name });
+      message.success(intl.formatMessage({ id: 'fileBrowser.createFolder.success' }));
+      setCreateFolderOpen(false);
+      setCreateFolderName('');
+      refreshSpace();
+    } catch (error: any) {
+      message.error(error?.message || error?.msg || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
+    }
+  }, [createFolderName, intl, projectId, refreshSpace]);
+
+  const openPreview = useCallback(
+    (item: FileTreeItem) => {
+      if (!onOpenDetail || !resourceId || !canPreviewFile(item)) return;
+      onOpenDetail(
+        <FilePreviewPanel fileName={item.name} resourceId={`${resourceId}`} path={item.path} source="fileBrowser" />,
+        {
+          tabKey: `project-space-file:${item.path}`,
+          title: item.name,
+        }
+      );
+    },
+    [onOpenDetail, resourceId]
+  );
+
+  const quote = useCallback(
+    (item: FileTreeItem) => {
+      if (!resourceId || /^https?:\/\//i.test(item.path)) return;
+      EventEmitter.emit('queryInput-insert-item', {
+        item: normalizeReferenceItem(item, `${resourceId}`),
+        type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
+      });
+    },
+    [EventEmitter, resourceId]
+  );
+
+  const download = useCallback(
+    async (item: SpaceItem) => {
+      if (!resourceId) return;
+      try {
+        const response: any = item.isDir
+          ? await downloadFolder(resourceId, ensureDirectoryPath(item.path))
+          : await downloadFile(resourceId, item.path);
+        const blob = response?.file instanceof Blob ? response.file : new Blob([response?.file || response]);
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = response?.fileName || (item.isDir ? `${item.name}.zip` : item.name);
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      } catch (error: any) {
+        message.error(error?.message || error?.msg || intl.formatMessage({ id: 'fileBrowser.download.failed' }));
+      }
+    },
+    [intl, resourceId]
+  );
+
+  const remove = useCallback(
+    (item: SpaceItem) => {
+      if (!resourceId) return;
+      Modal.confirm({
+        title: intl.formatMessage({ id: 'common.delete' }),
+        content: intl.formatMessage({ id: 'fileBrowser.delete.confirmName' }, { name: item.name }),
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          await deleteFiles({ resourceId, paths: [item.path] });
+          message.success(intl.formatMessage({ id: 'fileBrowser.delete.success' }));
+          refreshSpace();
+        },
+      });
+    },
+    [intl, refreshSpace, resourceId]
+  );
+
+  const rename = useCallback(async () => {
+    if (!renameTarget || !resourceId || !renameName.trim()) return;
+    setRenameLoading(true);
+    try {
+      await renameFile({ resourceId, sourcePath: renameTarget.path, newName: renameName.trim() });
+      message.success(intl.formatMessage({ id: 'fileBrowser.rename.success' }));
+      setRenameTarget(null);
+      refreshSpace();
+    } catch (error: any) {
+      message.error(error?.message || error?.msg || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
+    } finally {
+      setRenameLoading(false);
+    }
+  }, [intl, refreshSpace, renameName, renameTarget, resourceId]);
+
+  const openSaveToProject = useCallback(
+    async (item: SpaceItem) => {
+      if (!projectCloudResourceId || !resourceId || item.isDir) return;
+      setSaveTarget(item);
+      setSavePath('/');
+      setSaveLoading(true);
+      try {
+        const folders = await queryProjectCloudDrive(projectCloudResourceId, '/');
+        setSaveFolders(
+          folders
+            .filter((folder) => folder.isDir)
+            .map((folder) => ({ title: folder.name, key: ensureDirectoryPath(folder.path), isLeaf: false }))
+        );
+      } catch (error: any) {
+        setSaveFolders([]);
+        message.error(
+          error?.message || error?.msg || intl.formatMessage({ id: 'projectSpace.projectDrive.loadFailed' })
+        );
+      } finally {
+        setSaveLoading(false);
+      }
+    },
+    [intl, projectCloudResourceId, resourceId]
+  );
+
+  const saveToProject = useCallback(async () => {
+    if (!saveTarget || !projectCloudResourceId || !resourceId) return;
+    setSaving(true);
+    try {
+      const response: any = await downloadFile(resourceId, saveTarget.path);
+      const blob = response?.file instanceof Blob ? response.file : response;
+      if (!(blob instanceof Blob)) throw new Error(intl.formatMessage({ id: 'fileBrowser.download.failed' }));
+      const formData = new FormData();
+      formData.append('resourceId', String(projectCloudResourceId));
+      formData.append('directoryPath', ensureDirectoryPath(savePath));
+      formData.append('files', blob, response?.fileName || saveTarget.name);
+      await uploadKnowledgeFiles(formData, { responseCfg: { hideErrorTips: true } });
+      message.success(
+        intl.formatMessage(
+          { id: 'fileBrowser.save.success' },
+          { target: intl.formatMessage({ id: 'chatResource.projectCloudDrive' }) }
+        )
+      );
+      setSaveTarget(null);
+    } catch (error: any) {
+      message.error(
+        error?.message ||
+          error?.msg ||
+          intl.formatMessage(
+            { id: 'fileBrowser.save.failed' },
+            { target: intl.formatMessage({ id: 'chatResource.projectCloudDrive' }) }
+          )
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [intl, projectCloudResourceId, resourceId, savePath, saveTarget]);
+
+  const onNodeClick = useCallback(
+    (event: React.MouseEvent, node: FileTreeItem) => {
+      event.stopPropagation();
+      if (clickTimer.current !== null) window.clearTimeout(clickTimer.current);
+      clickTimer.current = window.setTimeout(() => {
+        clickTimer.current = null;
+        if (!isDirectory(node)) openPreview(node);
+      }, 220);
+    },
+    [openPreview]
+  );
+
+  const actions = useCallback(
+    (item: FileBrowserItem): MenuProps['items'] => [
+      ...(resourceId ? [{ key: 'quote', label: intl.formatMessage({ id: 'common.quote' }) }] : []),
+      ...(canPreviewFile(item)
+        ? [{ key: 'preview', label: intl.formatMessage({ id: 'fileBrowser.action.preview' }) }]
+        : []),
+      { key: 'download', label: intl.formatMessage({ id: 'fileBrowser.action.download' }) },
+      ...(projectCloudResourceId && !isDirectory(item)
+        ? [{ key: 'saveToProject', label: intl.formatMessage({ id: 'projectSpace.projectDrive.save' }) }]
+        : []),
+      { key: 'rename', label: intl.formatMessage({ id: 'fileBrowser.action.rename' }) },
+      { key: 'delete', label: intl.formatMessage({ id: 'fileBrowser.action.delete' }), danger: true },
+    ],
+    [intl, projectCloudResourceId, resourceId]
+  );
+
+  const handleAction = useCallback(
+    (key: React.Key, rawItem: FileBrowserItem) => {
+      const item = rawItem as SpaceItem;
+      if (key === 'quote') quote(item as FileTreeItem);
+      if (key === 'preview') openPreview(item as FileTreeItem);
+      if (key === 'download') void download(item);
+      if (key === 'saveToProject') void openSaveToProject(item);
+      if (key === 'rename') {
+        setRenameTarget(item);
+        setRenameName(item.name);
+      }
+      if (key === 'delete') remove(item);
+    },
+    [download, openPreview, openSaveToProject, quote, remove]
+  );
+  return (
+    <div className={styles.detailResourcePanel}>
+      <div className={styles.projectSpaceToolbar}>
+        <Upload
+          multiple
+          showUploadList={false}
+          beforeUpload={(file, fileList) => {
+            if (file === fileList[fileList.length - 1]) void handleUpload(fileList as File[]);
+            return false;
+          }}
+        >
+          <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}>
+            <Button
+              size="small"
+              aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+              icon={<UploadOutlined />}
+              loading={uploading}
+            />
+          </Tooltip>
+        </Upload>
+        <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}>
+          <Button
+            size="small"
+            aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
+            icon={<FolderAddOutlined />}
+            onClick={(event) => {
+              event.stopPropagation();
+              setCreateFolderOpen(true);
+            }}
+          />
+        </Tooltip>
+      </div>
+      <FileSpaceBlock
+        title={intl.formatMessage({ id: 'chatResource.projectSpace' })}
+        hideHeader
+        fillContainer
+        loading={loading}
+        items={items}
+        currentPath={rootPath}
+        emptyText={intl.formatMessage({ id: 'projectSpace.detail.repo.emptyFiles' })}
+        resourceEmptyStyle
+        childrenByPath={childrenByPath}
+        expandedKeys={expandedKeys}
+        onExpand={setExpandedKeys}
+        onLoadData={loadNode}
+        onNodeClick={onNodeClick}
+        onNodeDoubleClick={quote}
+        showActions={!!resourceId}
+        getActionItems={actions}
+        onAction={handleAction}
+        getNodeExtra={getNodeExtra}
+      />
+      <Modal
+        title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
+        open={createFolderOpen}
+        okText={intl.formatMessage({ id: 'common.create' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        onCancel={() => setCreateFolderOpen(false)}
+        onOk={() => void handleCreateFolder()}
+      >
+        <Input
+          autoFocus
+          value={createFolderName}
+          placeholder={intl.formatMessage({ id: 'fileBrowser.createFolder.prompt' })}
+          onChange={(event) => setCreateFolderName(event.target.value)}
+          onPressEnter={() => void handleCreateFolder()}
+        />
+      </Modal>
+      <Modal
+        title={intl.formatMessage({ id: 'fileBrowser.rename.title' })}
+        open={!!renameTarget}
+        okText={intl.formatMessage({ id: 'common.save' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        confirmLoading={renameLoading}
+        onCancel={() => !renameLoading && setRenameTarget(null)}
+        onOk={() => void rename()}
+        destroyOnClose
+      >
+        <Input
+          autoFocus
+          value={renameName}
+          onChange={(event) => setRenameName(event.target.value)}
+          onPressEnter={() => void rename()}
+        />
+      </Modal>
+      <Modal
+        title={intl.formatMessage({ id: 'projectSpace.projectDrive.save' })}
+        open={!!saveTarget}
+        okText={intl.formatMessage({ id: 'common.save' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        confirmLoading={saving}
+        onCancel={() => !saving && setSaveTarget(null)}
+        onOk={() => void saveToProject()}
+        destroyOnClose
+      >
+        <Spin spinning={saveLoading}>
+          <Tree
+            treeData={[
+              {
+                title: intl.formatMessage({ id: 'fileBrowser.root' }),
+                key: '/',
+                children: saveFolders,
+                isLeaf: !saveFolders.length,
+              },
+            ]}
+            expandedKeys={['/']}
+            selectedKeys={[savePath]}
+            onSelect={(keys) => keys.length && setSavePath(String(keys[0]))}
+          />
+        </Spin>
+      </Modal>
+      <Drawer
+        open={!!gitDrawerItem}
+        width={760}
+        placement="right"
+        title={gitDrawerItem?.name || intl.formatMessage({ id: 'projectSpace.gitRepository' })}
+        onClose={() => setGitDrawerItem(null)}
+        destroyOnClose
+      >
+        {gitDrawerItem ? (
+          <CodesTab
+            projectId={projectId}
+            resourceId={resourceId}
+            sessionId={sessionId}
+            refreshKey={refreshKey}
+            initialRepoId={gitDrawerItem.repoId}
+            showBranchSelector
+            codeChangesEnabled={!!sessionId && gitDrawerItem.changesSupported !== false}
+            injectedRepos={[toGitSource(gitDrawerItem, projectId)]}
+            onOpenDetail={onOpenDetail}
+          />
+        ) : null}
+      </Drawer>
+    </div>
+  );
+};
+
+export default ProjectSpaceTab;

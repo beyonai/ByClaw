@@ -17,6 +17,8 @@ import org.springframework.transaction.interceptor.RollbackRuleAttribute;
 import org.springframework.transaction.interceptor.RuleBasedTransactionAttribute;
 import org.springframework.transaction.interceptor.TransactionAttribute;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.util.ClassUtils;
+import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -119,11 +121,43 @@ public class TransactionAdviceConfig {
         txMap.put("*", requiredTx);
 
         /* 事务管理规则，声明具备事务管理的方法名 **/
-        NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource();
+        NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
+            @Override
+            public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                // Stream projections use memory/Redis and must not borrow a JDBC connection for each chunk.
+                // Match the owning class as well as the method so ordinary business writes keep their transactions.
+                if (isStreamProjectionMethod(method, targetClass)) {
+                    return notSurpportedTx;
+                }
+                return super.getTransactionAttribute(method, targetClass);
+            }
+        };
         source.setNameMap(txMap);
         TransactionInterceptor txAdvice = new TransactionInterceptor(transactionManager, source);
         logger.info("Transaction advice configured successfully.");
         return txAdvice;
+    }
+
+    private static boolean isStreamProjectionMethod(Method method, Class<?> targetClass) {
+        if (targetClass == null) {
+            return false;
+        }
+        String owner = ClassUtils.getUserClass(targetClass).getName();
+        return switch (owner) {
+            case "com.iwhalecloud.byai.state.domain.chat.service.SessionRuntimeStateService",
+                 "com.iwhalecloud.byai.state.domain.chat.service.ScopedSessionEventService",
+                 "com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService",
+                 "com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService" -> true;
+            case "com.iwhalecloud.byai.state.domain.chat.service.PythonSseService" ->
+                "accumulateEvent".equals(method.getName());
+            case "com.iwhalecloud.byai.state.domain.chat.service.CronService" ->
+                "isCronChangedEvent".equals(method.getName());
+            case "com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService" ->
+                "generateMessage".equals(method.getName());
+            case "com.iwhalecloud.byai.state.domain.chat.service.ExternalChildSessionService" ->
+                "ensureBinding".equals(method.getName());
+            default -> false;
+        };
     }
 
     @Bean

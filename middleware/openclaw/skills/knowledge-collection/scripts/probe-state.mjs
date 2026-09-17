@@ -15,6 +15,14 @@ const ACQUISITION_OUTCOMES = new Set(['saved', 'unavailable', 'unsupported', 'sk
 const PAGE_VERIFICATIONS = new Set(['verified-article', 'verified-non-article', 'not-evaluated']);
 const TOPIC_STATUSES = new Set(['matched', 'not-required', 'unmatched', 'unknown', 'not-evaluated']);
 const PROMOTION_STATUSES = new Set(['not-eligible', 'eligible', 'promoted', 'duplicate']);
+const FAILURE_DIAGNOSTIC_STAGES = new Set(['resolved-url-authorization', 'extract-url-continuity']);
+const FAILURE_DIAGNOSTIC_KINDS = new Set([
+  'redirect-not-authorized', 'resolved-url-unavailable', 'extract-url-changed',
+]);
+const PUBLIC_COLLECT_BLOCKED_EXTERNAL_COMMANDS = new Set([
+  'public-discover', 'acquire-web', 'materialize-web', 'materialize-wechat',
+  'materialize-arxiv', 'collect', 'crawl-seed', 'crawl-next', 'crawl-mark',
+]);
 
 function inputValue(input) {
   const requestedCount = Number(input?.requestedCount);
@@ -49,7 +57,11 @@ function activeRun(session) {
   return session?.task?.publicCollectRun || null;
 }
 
-function hasBusinessArtifacts(session) {
+/**
+ * public-collect 的「新鲜度」判定。retighten 必须复用本函数而非重新实现：
+ * 只有两者用同一谓词，retighten 才能保证「报告成功」等价于「public-collect 真的能开跑」。
+ */
+export function hasBusinessArtifacts(session) {
   const gate = session?.task?.discoveryGate;
   const inventory = session?.collection?.collection?.items;
   return Boolean(
@@ -119,6 +131,7 @@ export function createProbeRun(paths, rawInput) {
     if (session.task.activeOrchestrationRunId) {
       throw new Error(`ORCHESTRATION_IN_PROGRESS: run=${session.task.activeOrchestrationRunId}`);
     }
+    session.task.workflow = 'public-collect';
     const now = new Date().toISOString();
     const runId = `public-collect-${crypto.randomUUID()}`;
     const orchestrationEpoch = crypto.randomUUID();
@@ -403,6 +416,17 @@ function validateAttemptResult(result) {
     || typeof result?.reasonCode !== 'string' || !result.reasonCode) {
     throw new Error('PROBE_RESULT_INVALID: terminal probe result 不完整');
   }
+  const diagnostic = result.failureDiagnostic;
+  if (diagnostic !== undefined && (
+    !diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic)
+    || !FAILURE_DIAGNOSTIC_STAGES.has(diagnostic.stage)
+    || !FAILURE_DIAGNOSTIC_KINDS.has(diagnostic.mismatchKind)
+    || typeof diagnostic.requestedUrl !== 'string' || diagnostic.requestedUrl.length > 2_000
+    || (diagnostic.resolvedUrl !== null
+      && (typeof diagnostic.resolvedUrl !== 'string' || diagnostic.resolvedUrl.length > 2_000))
+  )) {
+    throw new Error('PROBE_RESULT_INVALID: failureDiagnostic 无效');
+  }
 }
 
 export function commitProbeAttempt(paths, runId, attemptId, result) {
@@ -451,10 +475,18 @@ export function finishProbeRun(paths, runId, status, detail = {}) {
 }
 
 export function assertExternalSessionWriteAllowed(paths, command) {
-  if (command === 'status') return;
   const session = loadSession(paths, { persistMigration: false }).session;
+  assertSessionWorkflowAllowsCommand(session, command);
+  if (['status', 'inspect', 'crawl-status'].includes(command)) return;
   if (session.task?.activeOrchestrationRunId) {
     throw new Error(`ORCHESTRATION_IN_PROGRESS: run=${session.task.activeOrchestrationRunId}`);
+  }
+}
+
+export function assertSessionWorkflowAllowsCommand(session, command) {
+  if (session?.task?.workflow === 'public-collect'
+    && PUBLIC_COLLECT_BLOCKED_EXTERNAL_COMMANDS.has(command)) {
+    throw new Error(`SESSION_OWNED_BY_PUBLIC_COLLECT: command=${command}`);
   }
 }
 
@@ -463,6 +495,7 @@ export function summarizeProbeRun(session) {
   if (!run) return null;
   const delivery = summarizePromotedDelivery(session);
   const attempts = Array.isArray(run.attempts) ? run.attempts : [];
+  const reservation = run.discoveryReservation;
   return {
     runId: run.runId,
     persistedStatus: run.status,
@@ -477,5 +510,13 @@ export function summarizeProbeRun(session) {
       paused: attempts.filter((attempt) => attempt.attemptState === 'paused-user-action').length,
       blocked: attempts.filter((attempt) => attempt.attemptState === 'infrastructure-blocked').length,
     },
+    ...(reservation ? {
+      discoveryReservation: {
+        round: reservation.round,
+        query: reservation.query,
+        channel: reservation.channel,
+        phase: reservation.phase,
+      },
+    } : {}),
   };
 }

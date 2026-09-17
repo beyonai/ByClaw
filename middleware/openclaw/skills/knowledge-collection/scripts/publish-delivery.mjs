@@ -348,7 +348,7 @@ function outputAssetRelative(sourceRoot, sourceMarkdown, sourceAsset, markdownOu
   return slashPath(path.join(`${stem}-assets`, path.relative(assetsRoot, sourceAsset)));
 }
 
-function materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOutputs) {
+function materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOutputs, mailAttachments = []) {
   assertRegularFile(sourceMarkdown, 'downstreamInput Markdown');
   const canonicalRoot = fs.realpathSync(sourceRoot);
   assertNoSymlinkComponents(sourceRoot, sourceMarkdown, 'downstreamInput Markdown');
@@ -407,6 +407,14 @@ function materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOu
   markdown = replaceVisibleMarkdown(markdown, /!\[([^\]]*)\]\((<[^>]+>|[^\s)]+)([^)]*)\)/g,
     (_match, alt, target, suffix) => `![${alt}](${rewriteTarget(target)}${suffix})`);
   markdown = rewriteHtmlMedia(markdown, rewriteTarget);
+  // Only skill-registered mail attachments are added; ordinary document links
+  // retain their old behavior and cannot authorize arbitrary local files.
+  for (const [index, attachment] of mailAttachments.entries()) {
+    if (attachment.status !== 'complete' || typeof attachment.absolute !== 'string'
+      || sha256File(attachment.absolute) !== attachment.sha256) throw new Error('MAIL_ATTACHMENT_INVALID');
+    const target = rewriteTarget(attachment.absolute);
+    markdown += `\n[附件 ${index + 1}](${target})\n`;
+  }
   return markdown;
 }
 
@@ -484,7 +492,12 @@ function buildPublishPlan(paths, downstreamInput, session, previousReceipt) {
   for (const { sourceMarkdown, outputRelative } of candidates) {
     markdownOutputs.set(outputRelative, {
       source: sourceMarkdown,
-      content: materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOutputs),
+      content: materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOutputs,
+        (session.collection?.collection?.items || []).filter(item => item.sourceSkill === 'mail'
+          && path.resolve(canonicalSessionRoot, item.materialization?.sanitizedPath || '') === sourceMarkdown)
+          .flatMap(item => (item.attachments || []).filter(attachment => attachment.localPath).map(attachment => ({
+            ...attachment, absolute: path.resolve(canonicalSessionRoot, attachment.localPath),
+          })))),
     });
   }
   for (const relative of markdownOutputs.keys()) {
@@ -940,13 +953,50 @@ export function inspectDelivery(paths) {
   };
 }
 
+/**
+ * 解析交付目标:优先使用 init 阶段绑定的 handle，其次保留原有 --delivery-dir 形式。
+ * 两者同时给出时必须解析到同一绝对路径，否则报错——requestedDirectory 的逐字节一致性
+ * 是 receipt 复用、中断恢复、交付目标锁与 planHash 四处行为的前提。
+ */
+function resolveRequestedDirectory(session, args) {
+  const rawHandle = args['delivery-handle'];
+  const rawDir = args['delivery-dir'];
+  if (rawHandle === undefined && rawDir === undefined) {
+    throw new Error('publish 必须给出 --delivery-handle(init 绑定)或 --delivery-dir 之一');
+  }
+
+  let fromHandle = null;
+  if (rawHandle !== undefined) {
+    const handle = requireString(rawHandle, '--delivery-handle');
+    const bound = session?.task?.deliveryTarget;
+    if (!bound?.handle || typeof bound.requestedDirectory !== 'string') {
+      throw new Error('DELIVERY_TARGET_NOT_BOUND: 该会话未在 init 阶段绑定交付目标；'
+        + '请改用 --delivery-dir，或在新会话 init 时传 --delivery-dir');
+    }
+    if (bound.handle !== handle) {
+      throw new Error(`DELIVERY_HANDLE_UNKNOWN: 会话绑定的交付 handle 与 ${handle} 不匹配`);
+    }
+    fromHandle = assertDeliveryDirectory(bound.requestedDirectory, args['session-root']);
+  }
+
+  let fromDir = null;
+  if (rawDir !== undefined) {
+    fromDir = assertDeliveryDirectory(
+      requireString(rawDir, '--delivery-dir'),
+      args['session-root'],
+    );
+  }
+
+  if (fromHandle && fromDir && fromHandle !== fromDir) {
+    throw new Error('--delivery-handle 与 --delivery-dir 解析出的交付目录不一致');
+  }
+  return fromHandle || fromDir;
+}
+
 export function cmdPublish(paths, args) {
   return withSessionLock(paths, 'publish', () => {
     const { session } = loadSession(paths, { persistMigration: true });
-    const requestedDirectory = assertDeliveryDirectory(
-      requireString(args['delivery-dir'], '--delivery-dir'),
-      args['session-root'],
-    );
+    const requestedDirectory = resolveRequestedDirectory(session, args);
     if (isInside(paths.root, requestedDirectory)) {
       throw new Error('--delivery-dir 不能位于内部采集会话目录中');
     }

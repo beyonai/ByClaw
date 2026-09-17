@@ -89,4 +89,28 @@ class OperationAccountServiceVisibilityTest {
 
         verifyNoInteractions(operationAccountMapper);
     }
+
+    @Test
+    void findsUserLevelTemplateHistoryIncludingSoftDeletedRows() {
+        when(operationAccountMapper.selectCount(any())).thenReturn(1L);
+
+        assertThat(service.hasGlobalTemplateHistory(10L, "weixin-official-web")).isTrue();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Wrapper<OperationAccount>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(operationAccountMapper).selectCount(captor.capture());
+        LambdaQueryWrapper<OperationAccount> query = (LambdaQueryWrapper<OperationAccount>) captor.getValue();
+        assertThat(query.getSqlSegment())
+            .contains("create_by =", "project_id IS NULL", "template_connector_code =")
+            .doesNotContain("status_cd", "config");
+        assertThat(query.getParamNameValuePairs().values())
+            .containsExactlyInAnyOrder(10L, "weixin-official-web");
+    }
+
+    @Test
+    void ignoresOrdinaryCustomLinksWhenFindingTemplateHistory() {
+        when(operationAccountMapper.selectCount(any())).thenReturn(0L);
+
+        assertThat(service.hasGlobalTemplateHistory(10L, "weixin-official-web")).isFalse();
+    }
 }

@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.resource.service;
 
+import java.util.Collections;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import org.springframework.beans.factory.annotation.Autowired;
 import static com.iwhalecloud.byai.state.domain.men.enums.SystemCodeEnum.SANDBOX;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -17,7 +20,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import com.alibaba.fastjson.JSONObject;
@@ -53,6 +55,9 @@ import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 
 @Service
 public class ResourceApplicationService {
+
+    @Autowired
+    private AuthApplicationService authApplicationService;
 
     public static final Logger LOGGER = LoggerFactory.getLogger(ResourceApplicationService.class);
 
@@ -186,6 +191,8 @@ public class ResourceApplicationService {
             }
         }
 
+        resourceDetailVo.setOperationPermissions(authApplicationService.queryResourceOperationPermissionsBatch(
+            Collections.singletonList(ssResource.getResourceId())).get(ssResource.getResourceId()));
         return resourceDetailVo;
 
     }
@@ -653,10 +660,10 @@ public class ResourceApplicationService {
         return levels;
     }
 
-    // ==================== 数字员工 OpenAPI（免登录） ====================
+    // ==================== 数字员工 OpenAPI（需登录鉴权） ====================
 
     /**
-     * 数字员工列表查询（免登录） 根据数字员工类型和名称模糊查询已上架的数字员工列表
+     * 数字员工列表查询（需登录鉴权） 根据数字员工类型和名称模糊查询已上架的数字员工列表
      *
      * @param agentType 数字员工类型（001-助手、005-问答、006-问数），可空
      * @param resourceName 数字员工名称（模糊查询），可空
@@ -669,7 +676,7 @@ public class ResourceApplicationService {
     }
 
     /**
-     * 数字员工详情查询（免登录） 根据数字员工ID查询详情信息
+     * 数字员工详情查询（需登录鉴权） 根据数字员工ID查询详情信息
      *
      * @param resourceId 数字员工ID
      * @return 数字员工详情
@@ -682,7 +689,7 @@ public class ResourceApplicationService {
     }
 
     /**
-     * 数字员工技能查询（免登录） 根据数字员工ID查询其关联的技能列表，可按技能类型过滤 根据 relResourceBizType 填充对应子表扩展数据
+     * 数字员工技能查询（需登录鉴权） 根据数字员工ID查询其关联的技能列表，可按技能类型过滤 根据 relResourceBizType 填充对应子表扩展数据
      *
      * @param resourceId 数字员工ID
      * @param resourceBizType 技能类型（可空），如 TOOLKIT、TOOL、KG_DOC、KG_DB、KG_TERM、KG_QA 等

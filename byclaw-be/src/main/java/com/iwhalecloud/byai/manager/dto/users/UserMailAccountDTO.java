@@ -19,13 +19,14 @@ public class UserMailAccountDTO {
 
     private String email;
 
+    private String providerCode;
+
+    private String authType;
+
     private String displayName;
 
     @JsonProperty("display_name")
     private String displayNameSnake;
-
-    @JsonProperty("default")
-    private Boolean defaultAccount;
 
     private MailServerConfigDTO imap;
 

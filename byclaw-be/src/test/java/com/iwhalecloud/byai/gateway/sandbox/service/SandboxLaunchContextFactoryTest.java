@@ -135,6 +135,7 @@ class SandboxLaunchContextFactoryTest {
         resource.setWorkerAgentType(WorkerAgentType.HARNESS.getCode() + "_user001");
         when(ssResourceService.findById(105L)).thenReturn(resource);
 
-        assertThat(factory.resolveRouting(105L).getSandboxType()).isEqualTo("byclaw-dsh");
+        assertThat(factory.resolveRouting(105L).getSandboxType())
+            .isEqualTo(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
     }
 }

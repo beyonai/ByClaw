@@ -14,7 +14,6 @@ body:
         - byclaw-fe
         - byclaw-be
         - byclaw-exe
-        - byclaw-data
         - byclaw-qa
         - other / unsure
     validations:

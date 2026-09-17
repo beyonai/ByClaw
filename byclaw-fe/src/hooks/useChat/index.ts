@@ -36,8 +36,10 @@ import useHandler from './useHandler';
 import useMessage from './useMessage';
 import useGlobal from '@/hooks/useGlobal';
 import webSocketManager from '@/utils/websocket';
+import { applyScopedProjectionDelta, type ScopedProjectionState } from '@/utils/scopedProjectionDelta';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
 import {
+  applyProjectedRootState,
   flushRestoredChatStreamBuffer,
   getRestoredStreamKey,
   registerPendingChatContext,
@@ -206,6 +208,7 @@ function useChat(props: IProps) {
   const pendingProjectIdByClientRequestRef = useRef(new Map<string, string>());
   const boundProjectSessionKeysRef = useRef(new Set<string>());
   const scopedChildWatermarksRef = useRef(new Map<string, string>());
+  const scopedProjectionBasesRef = useRef(new Map<string, ScopedProjectionState>());
   const [runtimeVersion, setRuntimeVersion] = useState(0);
 
   const { userInfo, extParamsBySessionId, sessionList } = useSelector((state: ConnectState) => ({
@@ -295,6 +298,12 @@ function useChat(props: IProps) {
       const clientRequestId = params.clientRequestId || '';
       const projectId = clientRequestId ? pendingProjectIdByClientRequestRef.current.get(clientRequestId) : undefined;
       if (!projectId) {
+        // Desktop 的无项目会话同样需要进入 WorkspaceSider 的本地会话分组。
+        EventEmitter.emit('projectSpace-session-bound', {
+          sessionId: params.sessionId,
+          clientRequestId,
+          session: params.session,
+        });
         return;
       }
 
@@ -521,11 +530,20 @@ function useChat(props: IProps) {
     return answerMsg;
   });
 
+  const restoreAnswerState = (answerMsg: IMessage, terminal = false) => {
+    set(answerMsg, 'messageState', terminal ? IMessageState.Done : IMessageState.Answer);
+    set(answerMsg, 'thinkDone', terminal);
+    if (!terminal) {
+      // 团队仍在运行不代表主 Agent 正在回答；恢复和实时事件使用同一份主会话状态。
+      applyProjectedRootState({ answerMsg }, chatSessionRuntimeManager.getSessionRuntime(answerMsg.sessionId));
+    }
+  };
+
   const stopRestoredRunningSession = usePersistFn((answerMsg: IMessage, runningInfo: RunningChatInfo) => {
     if (answerMsg.messageState === IMessageState.Cancel) return Promise.resolve();
     set(answerMsg, 'messageState', IMessageState.Cancel);
     updateMessage(answerMsg);
-    chatSessionRuntimeManager.complete(runningInfo.clientRequestId);
+    chatSessionRuntimeManager.cancel(runningInfo.clientRequestId, answerMsg.sessionId || sessionId);
 
     return webSocketManager
       .sendMessageWhenReady({
@@ -551,7 +569,10 @@ function useChat(props: IProps) {
     if (!projectionSessionId || projectionSessionId !== `${sessionId}`) return false;
 
     await waitForSessionMessageLoaded(projectionSessionId);
-    const streamId = projection?.snapshotStreamId || projection?.streamId || envelopeStreamId;
+    const streamId = envelopeStreamId || projection?.snapshotStreamId || projection?.streamId;
+    const projectionKey = `${projectionSessionId}:${projection?.messageId || ''}`;
+    const cached = scopedProjectionBasesRef.current.get(projectionKey);
+    if (cached?.streamId && streamId && compareStreamId(streamId, cached.streamId) <= 0) return true;
     if (
       !applyScopedChildProjectionMessage &&
       !isScopedStreamNewer(scopedChildWatermarksRef.current, projectionSessionId, streamId)
@@ -575,6 +596,10 @@ function useChat(props: IProps) {
       updateMessage(message, { isAssign: true, allowCreateSession: false });
       commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
     }
+    scopedProjectionBasesRef.current.set(projectionKey, {
+      projection: cloneDeep({ ...projection, sessionId: projectionSessionId }),
+      streamId,
+    });
     return true;
   });
 
@@ -659,7 +684,7 @@ function useChat(props: IProps) {
         const snapshotAnswerMessage = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
         assign(answerMessage, snapshotAnswerMessage);
         const snapshotTerminal = snapshot.running === false;
-        set(answerMessage, 'messageState', snapshotTerminal ? IMessageState.Done : IMessageState.Answer);
+        restoreAnswerState(answerMessage, snapshotTerminal);
         updateMessage(answerMessage, { isAssign: true });
         if (snapshotTerminal) {
           // Redis 终态可能早于数据库落库完成，先用终态快照结束 loading 并保留完整回答。
@@ -745,6 +770,37 @@ function useChat(props: IProps) {
   ]);
 
   useEffect(() => {
+    const handler = async (message: any) => {
+      const payload = get(message, 'data');
+      const projectionSessionId = `${get(payload, 'sessionId') || get(message, 'sessionId') || ''}`;
+      const messageId = `${get(payload, 'messageId') || ''}`;
+      if (!projectionSessionId || projectionSessionId !== `${sessionId}` || !messageId) return;
+      const projectionKey = `${projectionSessionId}:${messageId}`;
+      const base = scopedProjectionBasesRef.current.get(projectionKey);
+      const streamId = get(payload, 'streamId') || get(message, 'streamId');
+      if (base?.streamId && streamId && compareStreamId(streamId, base.streamId) <= 0) return;
+      const next = base ? applyScopedProjectionDelta(base, message) : null;
+      if (!next) {
+        await reconcileScopedChildProjection();
+        return;
+      }
+      await applyScopedChildProjection(next.projection, next.streamId);
+    };
+
+    webSocketManager.onMessage('SCOPED_MESSAGE_DELTA', handler);
+    return () => {
+      webSocketManager.offMessage('SCOPED_MESSAGE_DELTA', handler);
+    };
+  }, [applyScopedChildProjection, reconcileScopedChildProjection, sessionId]);
+
+  useEffect(() => {
+    webSocketManager.setScopedSessionId(isCurrentExternalChildSession ? `${sessionId}` : undefined);
+    return () => {
+      if (isCurrentExternalChildSession) webSocketManager.setScopedSessionId(undefined);
+    };
+  }, [isCurrentExternalChildSession, sessionId]);
+
+  useEffect(() => {
     if (!isCurrentExternalChildSession) return;
     void reconcileScopedChildProjection();
   }, [isCurrentExternalChildSession, reconcileScopedChildProjection, sessionId]);
@@ -791,9 +847,9 @@ function useChat(props: IProps) {
             answerMsg = createRestoredAnswerMessage(runningInfo, sessionId);
           }
           answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
-          set(answerMsg, 'messageState', IMessageState.Answer);
-          answerMsg = updateMessage(answerMsg, { isAssign: true });
           chatSessionRuntimeManager.hydrateRunning(runningInfo, () => answerMsg?.cancelSSE?.());
+          restoreAnswerState(answerMsg);
+          answerMsg = updateMessage(answerMsg, { isAssign: true });
 
           const runtimeInfo =
             chatSessionRuntimeManager.getByClientRequest(runningInfo.clientRequestId) ||
@@ -856,7 +912,7 @@ function useChat(props: IProps) {
               answerMsg.cancelSSE = snapshotTerminal
                 ? undefined
                 : debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
-              set(answerMsg, 'messageState', snapshotTerminal ? IMessageState.Done : IMessageState.Answer);
+              restoreAnswerState(answerMsg, snapshotTerminal);
               answerMsg = updateMessage(answerMsg, { isAssign: true });
               if (snapshotTerminal) {
                 chatSessionRuntimeManager.complete(latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId);
@@ -1214,6 +1270,13 @@ function useChat(props: IProps) {
       bindSessionToProject(projectId, sessionId);
     }
 
+    const currentSession = sessionList?.find((item) => `${item.sessionId}` === `${sessionId}`);
+    // 上传附件可能先创建会话 ID；显式告诉 Desktop 这仍是本地会话的首轮。
+    const desktopNewSession =
+      typeof window !== 'undefined' && window.byclawDesktop?.isDesktop && (!sessionId || currentSession?.isLocalSession)
+        ? true
+        : undefined;
+
     // 发送请求并处理SSE响应
     const sendResult = send(_queryQuestion, {
       sessionId,
@@ -1225,6 +1288,7 @@ function useChat(props: IProps) {
       agentId: isMultiAgentSend ? primaryEntry.lane.agentId : Number(_agentId) ? _agentId : null,
       agentCode: isMultiAgentSend ? primaryEntry.lane.agentCode : Number(_agentId) ? null : _agentId,
       agentType: _agentType,
+      ...(desktopNewSession ? { desktopNewSession } : {}),
     });
     const cancel = () => {
       if (!isContinuingRunningTrace) {
@@ -1244,7 +1308,7 @@ function useChat(props: IProps) {
 
         updateMessage(entry.answerMsg);
 
-        chatSessionRuntimeManager.complete(entry.lane.clientRequestId);
+        chatSessionRuntimeManager.cancel(entry.lane.clientRequestId, entry.answerMsg.sessionId || sessionId);
         unregisterPendingChatContext(entry.lane.clientRequestId);
         unregisterSessionChatContext(entry.answerMsg.sessionId || sessionId, entry.lane.clientRequestId);
 

@@ -1,0 +1,159 @@
+.panel {
+  padding: 12px;
+  min-width: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.headerAction {
+  color: #667085;
+
+  &:hover {
+    color: #246bfe;
+    background: #f1f5fb;
+  }
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 8px;
+  border-radius: 6px;
+
+  &:hover {
+    background: #f5f7fa;
+  }
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #344054;
+
+  > span[role='button'] {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid #246bfe;
+      outline-offset: 2px;
+    }
+  }
+}
+
+.select {
+  width: 100%;
+}
+
+.modal {
+  :global(.beyond-modal-body) {
+    max-height: calc(100vh - 160px);
+    overflow-y: auto;
+    padding-top: 8px;
+  }
+
+  :global(.beyond-modal-footer) {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #e8edf4;
+  }
+
+  :global(.beyond-descriptions-item-content) {
+    color: #344054;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+}
+
+.section {
+  padding: 12px 0 0;
+
+  + .section {
+    margin-top: 4px;
+    border-top: 1px solid #e8edf4;
+  }
+}
+
+.sectionTitle {
+  margin: 0 0 12px;
+  color: #344054;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 20px;
+}
+
+.form {
+  :global(.beyond-form-item) {
+    margin-bottom: 12px;
+  }
+
+  :global(.beyond-form-item-extra) {
+    margin-top: 4px;
+    font-size: 12px;
+  }
+}
+
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid #e8edf4;
+  border-radius: 8px;
+}
+
+.summaryIcon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  color: #246bfe;
+  font-size: 22px;
+  background: #eaf1ff;
+  border-radius: 10px;
+}
+
+.summaryText {
+  min-width: 0;
+}
+
+.summaryName {
+  margin-bottom: 6px;
+  color: #101828;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.bindingHint {
+  margin: 12px 0 16px;
+  color: #667085;
+  line-height: 1.6;
+}
+
+@media (max-width: 575px) {
+  .formGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

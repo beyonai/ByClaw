@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,6 +26,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 
 @ExtendWith(MockitoExtension.class)
 class ExternalChildSessionServiceTest {
@@ -37,11 +41,14 @@ class ExternalChildSessionServiceTest {
     @Mock
     private SequenceService sequenceService;
 
+    @Mock
+    private PlatformTransactionManager transactionManager;
+
     private ExternalChildSessionService service;
 
     @BeforeEach
     void setUp() {
-        service = new ExternalChildSessionService(sessionService, sessionExtService, sequenceService);
+        service = new ExternalChildSessionService(sessionService, sessionExtService, sequenceService, transactionManager);
     }
 
     @Test
@@ -99,6 +106,27 @@ class ExternalChildSessionServiceTest {
         assertThat(first.messageId()).isEqualTo(301L);
         assertThat(second).isSameAs(first);
         verify(sessionService, never()).save(any(ByaiSession.class));
+        verify(transactionManager, times(1)).getTransaction(any());
+        verify(transactionManager, times(1)).commit(any());
+    }
+
+    @Test
+    void failedCommitDoesNotCacheTheChildBinding() {
+        when(sessionExtService.selectListByParamCodeAndValue("external_session_id", "worker-child-1"))
+            .thenReturn(Collections.emptyList());
+        when(sessionService.findById(100L)).thenReturn(parentSession(100L, 900L));
+        when(sequenceService.nextVal()).thenReturn(200L);
+        TransactionStatus status = mock(TransactionStatus.class);
+        when(transactionManager.getTransaction(any())).thenReturn(status);
+        doThrow(new IllegalStateException("commit failed")).doNothing().when(transactionManager).commit(status);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.ensureBinding(100L, childMetadata("worker-child-1")))
+            .hasMessage("commit failed");
+        service.ensureBinding(100L, childMetadata("worker-child-1"));
+
+        verify(transactionManager, times(2)).getTransaction(any());
+        verify(sessionService, times(2)).save(any(ByaiSession.class));
     }
 
     @Test

@@ -389,7 +389,7 @@ wait_service_ready() {
         "service workloads" \
         "${BYCLAW_K3S_SERVICE_WAIT_TIMEOUT_SECONDS:-600}" \
         "${BYCLAW_K3S_SERVICE_WAIT_INTERVAL_SECONDS:-10}" \
-        "byclaw-be byclaw-super byclaw-fe ${QA_DOMAINNAME:-byclaw-qa-manager} ${QA_WORKER_NAME:-byclaw-qa-worker} ${DATACLOUD_DOMAINNAME:-byclaw-datacloud}" \
+        "byclaw-be byclaw-super byclaw-fe ${QA_DOMAINNAME:-byclaw-qa-manager} ${QA_WORKER_NAME:-byclaw-qa-worker}" \
         "" \
         ""
 }
@@ -507,7 +507,7 @@ apply_runtime_env_config() {
     kubectl_cmd -n "$ns" create configmap byclaw-runtime-env \
         --from-env-file="$runtime_env" \
         --dry-run=client -o yaml | kubectl_cmd apply -f -
-    for name in byclaw-be byclaw-super byclaw-qa byclaw-qa-worker byclaw-data; do
+    for name in byclaw-be byclaw-super byclaw-qa byclaw-qa-worker; do
         file="$GENERATED_DIR/40-service/.${name}-runtime.env"
         if [ ! -f "$file" ]; then
             echo "Error: workload runtime env file not found: $file" >&2
@@ -582,7 +582,6 @@ rollout_restart_workloads() {
     kubectl_cmd -n "${NS_SERVICE:-by-service}" rollout restart deploy/byclaw-fe 2>/dev/null || true
     kubectl_cmd -n "${NS_SERVICE:-by-service}" rollout restart "deploy/${QA_DOMAINNAME:-byclaw-qa-manager}" 2>/dev/null || true
     kubectl_cmd -n "${NS_SERVICE:-by-service}" rollout restart "deploy/${QA_WORKER_NAME:-byclaw-qa-worker}" 2>/dev/null || true
-    kubectl_cmd -n "${NS_SERVICE:-by-service}" rollout restart "deploy/${DATACLOUD_DOMAINNAME:-byclaw-datacloud}" 2>/dev/null || true
 }
 
 cleanup_bad_pods_in_namespace() {

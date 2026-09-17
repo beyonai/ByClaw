@@ -105,25 +105,6 @@ services:
       - byclaw-network
     restart: unless-stopped
 
-  data:
-    image: ${IMAGE_DATA:-ghcr.io/beyonai/byclaw/byclaw-data:main}
-    container_name: byclaw-data-${CONTAINER_SUFFIX:-standalone}
-    user: "1001:1001"
-    ports:
-      - "${DATACLOUD_PORT:-8087}:${DATACLOUD_PORT:-8087}"
-    env_file:
-      - ../../.env
-    environment:
-      - JAVA_OPTS=-Xms256m -Xmx1g -XX:TieredStopAtLevel=1 -XX:+UseParallelGC -Dspring.jmx.enabled=false
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
-      - ../config:/app/config
-      - ./logs/data:/app/logs
-      - ${FILE_STORAGE_MINIO_MOUNT_PATH:-/data/byclaw}:${FILE_STORAGE_MINIO_MOUNT_PATH:-/data/byclaw}
-    networks:
-      - byclaw-network
-    restart: unless-stopped
-
   demo:
     image: ${IMAGE_DEMO:-ghcr.io/beyonai/byclaw-middleware/byclaw-demo:main}
     container_name: byclaw-demo-${CONTAINER_SUFFIX:-standalone}

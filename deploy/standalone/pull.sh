@@ -33,8 +33,6 @@ pull "${IMAGE_FE:-ghcr.io/beyonai/byclaw/byclaw-fe:main}"
 pull "${IMAGE_BE:-ghcr.io/beyonai/byclaw/byclaw-be:main}"
 pull "${IMAGE_SUPER:-ghcr.io/beyonai/byclaw/byclaw-super:main}"
 pull "${IMAGE_QA:-ghcr.io/beyonai/byclaw/byclaw-qa:main}"
-pull "${IMAGE_DATA:-ghcr.io/beyonai/byclaw/byclaw-data:main}"
-
 pull "${IMAGE_DEMO:-ghcr.io/beyonai/byclaw-middleware/byclaw-demo:main}"
 
 if [ "$FAILED" -gt 0 ]; then

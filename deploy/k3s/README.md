@@ -170,7 +170,7 @@ BYCLAW_DEFAULT_LANGUAGE=zh-CN
 
 运行时变量采用黑名单机制，不再维护业务白名单。默认会排除 `K3S_`、镜像、Longhorn、OpenSandbox 安装、监控安装等部署控制变量，避免 SSH、集群节点、镜像仓库等部署信息进入业务 Pod。新增业务变量只要写入 `env.k3s`，且没有命中黑名单，就会自动同步给业务 Pod。变量名包含 `PASSWORD`、`PASS`、`SECRET`、`TOKEN`、`API_KEY`、`ACCESS_KEY`、`PRIVATE_KEY` 或以 `_KEY` 结尾时，会自动进入 Secret。
 
-`HOST` 是当前工作负载注册到服务发现里的地址，不再放入通用 runtime env。部署脚本会为 BE、QA API、QA worker、DataCloud 分别生成工作负载专属 ConfigMap，确保服务注册地址分别指向自己的集群 DNS，例如 `byclaw-be.by-service.svc.cluster.local`、`byclaw-qa-manager.by-service.svc.cluster.local`、`byclaw-qa-worker.by-service.svc.cluster.local`。QA API 与 QA worker 的 `SERVICE_NAME` 也会严格区分，分别使用 `QA_DOMAINNAME` 和 `QA_WORKER_NAME`。
+`HOST` 是当前工作负载注册到服务发现里的地址，不再放入通用 runtime env。部署脚本会为 BE、QA API 和 QA worker 分别生成工作负载专属 ConfigMap，确保服务注册地址分别指向自己的集群 DNS，例如 `byclaw-be.by-service.svc.cluster.local`、`byclaw-qa-manager.by-service.svc.cluster.local`、`byclaw-qa-worker.by-service.svc.cluster.local`。QA API 与 QA worker 的 `SERVICE_NAME` 也会严格区分，分别使用 `QA_DOMAINNAME` 和 `QA_WORKER_NAME`。
 
 如需额外排除变量，可在私有 `env.k3s` 中配置：
 
@@ -193,7 +193,7 @@ BYCLAW_RUNTIME_ENV_EXTRA_BLACKLIST_KEYS=FOO_PASSWORD,BAR_TOKEN
 - Longhorn RWX workspace PVC
 - Redis / openGauss
 - OpenSandbox server / RBAC / ConfigMap / Secret
-- ByClaw BE / FE / QA / DataCloud / Demo
+- ByClaw BE / FE / QA / Demo
 - ByClaw ingress
 - OpenSandbox HPA
 

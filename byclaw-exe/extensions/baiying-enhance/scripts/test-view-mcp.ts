@@ -10,7 +10,7 @@
  *      local snapshot file — i.e. it has to fall through to
  *      `buildDirectCapabilityStub` and then pick up the MCP URL from the
  *      datacloud service-discovery key `byai_gateway:sd:instances:byclaw-datacloud`.
- *   2. Ontology headers (`x-tool-list-mode=per_object`, `x-view-id=<code>`).
+ *   2. Resource headers (`x-tool-list-mode=per_object`, `x-view-id=<code>`).
  *   3. The live MCP handshake: `initialize` → `notifications/initialized` →
  *      `tools/list` → `tools/call` (typically the tool is
  *      `unified_data_query`, see `byclaw-data/tests/test_mcp_tools_list_headers.py`).
@@ -35,7 +35,7 @@ const VIEW_RESOURCE_CODE = "scene_enterprise_analysis21";
 const VIEW_NAME = "ads分析联合视图2";
 const QUERY = "亦庄各类级别企业的分布情况";
 
-// Identity headers the ontology layer sets via env (mirrors how the runtime
+// Identity headers the resource layer sets via env (mirrors how the runtime
 // agent is configured). USER_CODE / BAIYING_SESSION feed X-User-Id / X-Session-Id.
 if (!process.env.USER_CODE) process.env.USER_CODE = "0027024710";
 if (!process.env.BAIYING_SESSION) process.env.BAIYING_SESSION = "view-mcp-smoke";
@@ -83,7 +83,7 @@ async function runOnce(action?: string): Promise<void> {
       },
       // Inject the resourceCode into selected_resource so that
       // buildDirectCapabilityStub can populate mcp.resource_code →
-      // buildOntologyMcpHeaders() → header `x-view-id` = <code>.
+      // buildResourceMcpHeaders() → header `x-view-id` = <code>.
       resource_context: {
         selected_resource: {
           resourceId: VIEW_ID,

@@ -1,3 +1,6 @@
+import { assertNoActiveRoute } from './routing/plan-store.mjs';
+import { executeRouteCommand } from './routing/cli.mjs';
+import { legacyChannel, registeredChannel } from './routing/channels.mjs';
 import {
   cmdInit, cmdPlan, cmdBranch, cmdAggregate, cmdReport, cmdResearchStatus,
 } from './research-state.mjs';
@@ -14,6 +17,8 @@ import { runArxivMaterialize } from './arxiv-materializer.mjs';
 import { runWebAcquire } from './web-acquirer.mjs';
 import { runWebMaterialize } from './web-materializer.mjs';
 import { cmdPublish, inspectDelivery } from './publish-delivery.mjs';
+import { cmdRetighten } from './granularity-repair.mjs';
+import { runUnifiedMaterialize, runUnifiedSearch } from './unified-search.mjs';
 import { assertExternalSessionWriteAllowed } from './probe-state.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
 
@@ -43,6 +48,12 @@ const SESSION_HANDLERS = {
   'unlock-stale': (paths) => cmdUnlockStale(paths),
   'export-views': (paths) => cmdExportViews(paths),
   publish: (paths, args) => cmdPublish(paths, args),
+  retighten: (paths, args) => cmdRetighten(paths, args),
+  'unified-search': (paths, args) => runUnifiedSearch(paths, args),
+  'unified-materialize': (paths, args) => runUnifiedMaterialize(paths, args, {
+    runWebAcquire: (target, options) => runWebAcquire(target, options),
+    runWebMaterialize: (target, options) => runWebMaterialize(target, options),
+  }),
 };
 
 function status(paths, args) {
@@ -85,6 +96,18 @@ function status(paths, args) {
 }
 
 export function executeLocalCommand(command, args) {
+  if (command.startsWith('route-')) return executeRouteCommand(command, args);
+  if (!['status', 'inspect', 'crawl-status', 'init'].includes(command)) {
+    const root = resolveSandboxPath(args['session-dir'], '--session-dir', { currentSessionRoot: args['session-root'] });
+    assertNoActiveRoute({ root, session: `${root}/session.json` });
+  }
+  // Shared selection only: legacy workflows retain their original arguments and owner.
+  const channel = legacyChannel(command);
+  return channel ? registeredChannel(channel).executeLegacy(command, args, executeWorkflowCommand)
+    : executeWorkflowCommand(command, args);
+}
+
+export function executeWorkflowCommand(command, args) {
   const normalizedArgs = {
     ...args,
     'session-dir': resolveSandboxPath(args['session-dir'], '--session-dir', {

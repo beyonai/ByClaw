@@ -62,12 +62,6 @@ curl http://localhost:8086/byaiService/actuator/health
 curl http://localhost:8090/health
 ```
 
-#### DataCloud
-
-```bash
-curl http://localhost:8087/health
-```
-
 ## 常见问题排查
 
 ### 问题 1：容器不断重启

@@ -1,0 +1,163 @@
+.desktopCreateModal {
+  :global {
+    .ant-modal-content {
+      padding: 28px 32px 30px;
+      border-radius: 20px;
+    }
+
+    .ant-modal-header {
+      margin-bottom: 28px;
+    }
+
+    .ant-modal-title {
+      font-size: 26px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .ant-modal-footer {
+      margin-top: 28px;
+    }
+  }
+}
+
+.projectNameInput {
+  height: 48px;
+  border-radius: 12px;
+
+  :global(.ant-input-prefix) {
+    padding-right: 12px;
+    margin-right: 12px;
+    border-right: 1px solid #e8e8e8;
+    color: #1f2329;
+  }
+}
+
+.sourceFolderLabel {
+  margin: 4px 0 12px;
+  color: #1f2329;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.emptyPicker,
+.directoryList {
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid #e5e6eb;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.emptyPicker {
+  display: flex;
+  min-height: 128px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  color: #1f2329;
+  cursor: pointer;
+
+  :global(.anticon) {
+    color: #8f959e;
+    font-size: 25px;
+  }
+
+  span:last-child {
+    font-size: 16px;
+    font-weight: 500;
+  }
+}
+
+.emptyPicker:hover,
+.emptyPicker:focus-visible {
+  border-color: #8f959e;
+  outline: none;
+}
+
+.directoryRow,
+.addFolderButton {
+  display: flex;
+  width: 100%;
+  height: 58px;
+  align-items: center;
+  padding: 0 18px;
+  border: 0;
+  background: #fff;
+}
+
+.directoryRow + .directoryRow,
+.addFolderButton {
+  border-top: 1px solid #eef0f2;
+}
+
+.directoryIcon {
+  flex: 0 0 auto;
+  color: #8f959e;
+  font-size: 21px;
+}
+
+.directoryName {
+  min-width: 0;
+  flex: 1;
+  margin-left: 12px;
+  overflow: hidden;
+  color: #1f2329;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.primaryBadge,
+.setPrimaryButton {
+  flex: 0 0 auto;
+  padding: 5px 13px;
+  border: 1px solid #e5e6eb;
+  border-radius: 10px;
+  background: #fff;
+  color: #646a73;
+  font-size: 14px;
+}
+
+.setPrimaryButton {
+  cursor: pointer;
+}
+
+.setPrimaryButton:hover,
+.setPrimaryButton:focus-visible {
+  border-color: #8f959e;
+  color: #1f2329;
+  outline: none;
+}
+
+.removeButton {
+  flex: 0 0 auto;
+  padding: 8px;
+  border: 0;
+  margin-left: 10px;
+  background: transparent;
+  color: #8f959e;
+  cursor: pointer;
+}
+
+.removeButton:hover,
+.removeButton:focus-visible {
+  color: #1f2329;
+  outline: none;
+}
+
+.addFolderButton {
+  gap: 12px;
+  color: #1f2329;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.addFolderButton:hover,
+.addFolderButton:focus-visible {
+  background: #f7f8fa;
+  outline: none;
+}

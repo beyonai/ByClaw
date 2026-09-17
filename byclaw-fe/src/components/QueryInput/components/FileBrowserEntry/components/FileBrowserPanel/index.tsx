@@ -754,6 +754,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
           endMessage={null}
           scrollDivId="fileBrowserTable"
           loading={loading}
+          virtual
         />
       </div>
 

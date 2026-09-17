@@ -21,6 +21,7 @@ import {
   message,
   type MenuProps,
 } from 'antd';
+import { get, concat } from 'lodash';
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -105,8 +106,8 @@ import {
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
 import { queryAuthDoc as listAccessibleKnowledgeBases } from '@/service/knowledgeCenter';
-import { listOntologyBases } from '@/service/ontology';
-import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser, type SandboxInfo } from '@/service/sandbox';
+import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
+import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import MarkdownField from './components/MarkdownField';
 import TaskDetailDrawer from './TaskDetailDrawer';
@@ -406,6 +407,8 @@ type OperationProjectDetailData = {
   accounts?: unknown[];
 };
 
+const EmptyArr: ISandboxesInfo[] = [];
+
 // 个别服务版本会在返回值外包一层 data，统一优先取第一个非空数组，避免表单选项因响应形态不同丢失。
 const getFirstOperationArray = (...candidates: unknown[]): any[] => {
   const arrayCandidates = candidates.filter(Array.isArray);
@@ -539,10 +542,10 @@ const getOperationTaskConfig = (task: any, taskType: OperationTaskType): Record<
     taskType === 'collect'
       ? 'collectConfig'
       : taskType === 'content'
-      ? 'contentConfig'
-      : taskType === 'analyze'
-      ? 'analyzeConfig'
-      : 'knowledgeConfig';
+        ? 'contentConfig'
+        : taskType === 'analyze'
+          ? 'analyzeConfig'
+          : 'knowledgeConfig';
   return parseOperationConfig(task?.[configKey] || rootConfig[configKey] || rootConfig);
 };
 
@@ -574,27 +577,27 @@ const getOperationTaskInitialValues = (task: any): Partial<OperationTaskFormValu
   const cronTime =
     /^\d+$/.test(cronHour || '') && /^\d+$/.test(cronMinute || '')
       ? toValidDate(
-          `${collectionDateCarrierYear}-01-01 ${(cronHour || '').padStart(2, '0')}:${(cronMinute || '').padStart(
-            2,
-            '0'
-          )}:00`
-        )
+        `${collectionDateCarrierYear}-01-01 ${(cronHour || '').padStart(2, '0')}:${(cronMinute || '').padStart(
+          2,
+          '0'
+        )}:00`
+      )
       : null;
   const cronNumberList = (value?: string) =>
     value && value !== '*'
       ? value
-          .split(',')
-          .map(Number)
-          .filter((item) => Number.isInteger(item))
+        .split(',')
+        .map(Number)
+        .filter((item) => Number.isInteger(item))
       : [];
   const inferredPeriodType =
     cronMonth && cronMonth !== '*'
       ? 'yearly'
       : cronDay && cronDay !== '*'
-      ? 'monthly'
-      : cronWeekday && cronWeekday !== '*'
-      ? 'weekly'
-      : 'daily';
+        ? 'monthly'
+        : cronWeekday && cronWeekday !== '*'
+          ? 'weekly'
+          : 'daily';
   const legacyIntervalHours =
     config.intervalUnit === 'minute'
       ? Math.max(1, Math.ceil(Number(config.intervalValue || config.interval || 60) / 60))
@@ -603,18 +606,18 @@ const getOperationTaskInitialValues = (task: any): Partial<OperationTaskFormValu
   const periodDay = Number(config.periodDay || (cronDay !== '*' ? cronDay : 0)) || undefined;
   const periodTime = config.periodTime
     ? toValidDate(
-        `${collectionDateCarrierYear}-01-01 ${
-          String(config.periodTime).length === 5 ? `${config.periodTime}:00` : config.periodTime
-        }`
-      )
+      `${collectionDateCarrierYear}-01-01 ${
+        String(config.periodTime).length === 5 ? `${config.periodTime}:00` : config.periodTime
+      }`
+    )
     : cronTime;
   // 年度周期在页面合并选择月、日和时分，年份只作为日期组件的当前年承载值。
   const periodYearDateTime =
     periodMonth && periodDay && periodTime
       ? periodTime
-          .year(collectionDateCarrierYear)
-          .month(periodMonth - 1)
-          .date(periodDay)
+        .year(collectionDateCarrierYear)
+        .month(periodMonth - 1)
+        .date(periodDay)
       : null;
 
   return {
@@ -626,56 +629,44 @@ const getOperationTaskInitialValues = (task: any): Partial<OperationTaskFormValu
     collectConfig:
       taskType === 'collect'
         ? {
-            ...config,
-            channel: config.channel ?? config.collectSource,
-            accountOrAddress: config.accountOrAddress ?? config.collectAccount,
-            topic: config.topic ?? config.collectTopic,
-            mode: config.mode ?? config.collectMethod,
-            onceTime: toValidDate(config.onceTime ?? config.startTime ?? config.collectStart),
-            periodType: config.periodType ?? inferredPeriodType,
-            periodWeekdays: toNumberList(config.periodWeekdays, cronNumberList(cronWeekday)),
-            periodMonthDays: toNumberList(config.periodMonthDays, cronNumberList(cronDay)),
-            periodMonth,
-            periodDay,
-            periodTime,
-            periodYearDateTime,
-            intervalHours: Number(config.intervalHours || legacyIntervalHours),
-            intervalWeekdays: toNumberList(
-              config.intervalWeekdays,
-              cronNumberList(cronWeekday).length ? cronNumberList(cronWeekday) : [1, 2, 3, 4, 5, 6, 7]
-            ),
-            effectiveDateRange: toDateRange(config.effectiveStartDate, config.effectiveEndDate),
-            cronExpr: config.cronExpr ?? config.schedule ?? config.collectSchedule,
-            organize: Boolean(config.organize ?? config.knowledgeOrganization),
-            organizeTemplateId: config.organizeTemplateId ?? config.knowledgeOrganization?.templateId,
-            knowledgeOrganization: config.knowledgeOrganization
-              ? {
-                  ...config.knowledgeOrganization,
-                  // 旧数据只有 templateId，新版弹窗需要显式模式才能正确回显为已有本体。
-                  mode: config.knowledgeOrganization.mode || 'existing',
-                  templateId: config.knowledgeOrganization.templateId ?? config.organizeTemplateId,
-                }
-              : config.organizeTemplateId
-              ? { mode: 'existing', templateId: config.organizeTemplateId }
-              : undefined,
-          }
+          ...config,
+          channel: config.channel ?? config.collectSource,
+          accountOrAddress: config.accountOrAddress ?? config.collectAccount,
+          topic: config.topic ?? config.collectTopic,
+          mode: config.mode ?? config.collectMethod,
+          onceTime: toValidDate(config.onceTime ?? config.startTime ?? config.collectStart),
+          periodType: config.periodType ?? inferredPeriodType,
+          periodWeekdays: toNumberList(config.periodWeekdays, cronNumberList(cronWeekday)),
+          periodMonthDays: toNumberList(config.periodMonthDays, cronNumberList(cronDay)),
+          periodMonth,
+          periodDay,
+          periodTime,
+          periodYearDateTime,
+          intervalHours: Number(config.intervalHours || legacyIntervalHours),
+          intervalWeekdays: toNumberList(
+            config.intervalWeekdays,
+            cronNumberList(cronWeekday).length ? cronNumberList(cronWeekday) : [1, 2, 3, 4, 5, 6, 7]
+          ),
+          effectiveDateRange: toDateRange(config.effectiveStartDate, config.effectiveEndDate),
+          cronExpr: config.cronExpr ?? config.schedule ?? config.collectSchedule,
+        }
         : undefined,
     contentConfig:
       taskType === 'content'
         ? {
-            ...config,
-            topic: config.topic ?? config.publishTopic,
-          }
+          ...config,
+          topic: config.topic ?? config.publishTopic,
+        }
         : undefined,
     analyzeConfig:
       taskType === 'analyze'
         ? {
-            ...config,
-            platformId: config.platformId ?? config.analysisChannel,
-            accountId: config.accountId ?? config.analysisAccountId,
-            scope: config.scope ?? config.analysisType,
-            workIds: config.workIds ?? config.selectedWorks ?? config.selectedWorkIds,
-          }
+          ...config,
+          platformId: config.platformId ?? config.analysisChannel,
+          accountId: config.accountId ?? config.analysisAccountId,
+          scope: config.scope ?? config.analysisType,
+          workIds: config.workIds ?? config.selectedWorks ?? config.selectedWorkIds,
+        }
         : undefined,
   };
 };
@@ -1055,40 +1046,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         })),
     [project?.boundResources, project?.resources]
   );
-  const boundProjectOntologies = useMemo<OperationSelectOption[]>(
-    () =>
-      (project?.resources || project?.boundResources || [])
-        .filter((resource) => resource.resourceType === 'ontology')
-        .map((resource) => {
-          const resourceDetail = resource as typeof resource & Record<string, any>;
-          const code = resourceDetail.objectCode || resourceDetail.resourceCode || resourceDetail.code || '';
-          const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
-          const description =
-            resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
-          return {
-            value: resource.resourceId,
-            label: name,
-            // 绑定资源接口有时只返回 ID/名称，保留标准字段，避免提交时 code 退化为 resourceId。
-            raw: {
-              ...resourceDetail,
-              id: resourceDetail.id,
-              objectId: resourceDetail.objectId,
-              resourceId: resource.resourceId,
-              baseId: resourceDetail.baseId,
-              code,
-              objectCode: resourceDetail.objectCode || code,
-              resourceCode: resourceDetail.resourceCode || code,
-              name,
-              objectName: resourceDetail.objectName || name,
-              resourceName: resource.resourceName || name,
-              description,
-              objectDesc: resourceDetail.objectDesc || description,
-              resourceDesc: resourceDetail.resourceDesc || description,
-            },
-          };
-        }),
-    [project?.boundResources, project?.resources]
-  );
   const boundProjectAgents = useMemo<OperationSelectOption[]>(
     () =>
       (project?.resources || project?.boundResources || [])
@@ -1099,7 +1056,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         })),
     [project?.boundResources, project?.resources]
   );
-  const [operationOrganizeTemplates, setOperationOrganizeTemplates] = useState<OperationSelectOption[]>([]);
   const [operationAgents, setOperationAgents] = useState<OperationAgentOption[]>([]);
   const [operationOptionsLoading, setOperationOptionsLoading] = useState(false);
   const [operationAccountSaving, setOperationAccountSaving] = useState(false);
@@ -1630,19 +1586,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
         // 运营任务只查询带 oploop_source_id 的会话；研发与普通项目仍沿用既有任务接口。
         const taskPage = isOperationProject
           ? await listOperationTasks({
-              projectId,
-              pageNum: queryState.pageNum,
-              pageSize: queryState.pageSize,
-              keyword: queryState.taskName || undefined,
-              onlyMine: false,
-            })
+            projectId,
+            pageNum: queryState.pageNum,
+            pageSize: queryState.pageSize,
+            keyword: queryState.taskName || undefined,
+            onlyMine: false,
+          })
           : await listTasks({
-              projectId,
-              pageNum: queryState.pageNum,
-              pageSize: queryState.pageSize,
-              taskName: queryState.taskName || undefined,
-              onlyMine: queryState.onlyMine || undefined,
-            });
+            projectId,
+            pageNum: queryState.pageNum,
+            pageSize: queryState.pageSize,
+            taskName: queryState.taskName || undefined,
+            onlyMine: queryState.onlyMine || undefined,
+          });
         // 筛选重置列表，触底请求只追加未出现过的任务，避免滚动事件重复触发产生重复卡片。
         if (queryVersion !== taskQueryVersionRef.current) return;
 
@@ -1854,44 +1810,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
   }, []);
 
-  const fetchOperationOrganizeTemplates = useCallback(async () => {
-    try {
-      const [personalRes, enterpriseRes] = await Promise.all([
-        listOntologyBases({ ownerType: 'personal' }),
-        listOntologyBases({ ownerType: 'enterprise' }),
-      ]);
-      // 个人本体和企业本体接口可能使用不同分页包装，统一提取后按本体 ID 合并去重。
-      const getOntologyOptions = (res: any): OperationSelectOption[] =>
-        getFirstOperationArray(
-          res,
-          res?.list,
-          res?.records,
-          res?.rows,
-          res?.data,
-          res?.data?.list,
-          res?.data?.records,
-          res?.data?.rows
-        )
-          .map((ontology: any) => ({
-            value: ontology.baseId ?? ontology.resourceId ?? ontology.id,
-            label: ontology.displayName || ontology.resourceName || ontology.name || '',
-          }))
-          .filter(
-            (ontology: OperationSelectOption) =>
-              ontology.value !== undefined && ontology.value !== null && `${ontology.value}` !== '' && !!ontology.label
-          );
-      const mergedOntologyMap = new Map<string, OperationSelectOption>();
-      [...getOntologyOptions(personalRes), ...getOntologyOptions(enterpriseRes)].forEach((ontology) => {
-        const ontologyKey = `${ontology.value}`;
-        if (!mergedOntologyMap.has(ontologyKey)) mergedOntologyMap.set(ontologyKey, ontology);
-      });
-      setOperationOrganizeTemplates(Array.from(mergedOntologyMap.values()));
-    } catch (error) {
-      console.error('Failed to load operation organize templates:', error);
-      setOperationOrganizeTemplates([]);
-    }
-  }, []);
-
   const handleMembersChange = useCallback(
     (memberList: any[]) => {
       setMembers(memberList);
@@ -1938,11 +1856,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
     () => ({
       assignees: operationAssigneeOptions,
       knowledgeBases: operationKnowledgeBases,
-      organizeTemplates: operationOrganizeTemplates,
       accounts: operationAccounts,
       works: operationWorks,
     }),
-    [operationAccounts, operationAssigneeOptions, operationKnowledgeBases, operationOrganizeTemplates, operationWorks]
+    [operationAccounts, operationAssigneeOptions, operationKnowledgeBases, operationWorks]
   );
 
   const operationTemplateAccountOptions = useMemo<OperationSelectOption[]>(
@@ -2044,24 +1961,27 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   // 优先复用采集流程已经启动的沙箱；首次使用尚无沙箱时按当前用户启动默认 openclaw 沙箱。
-  const resolveOperationAccountSandbox = useCallback(async (): Promise<SandboxInfo> => {
-    const currentSandboxes = await getSandboxInfo({});
+  const resolveOperationAccountSandbox = useCallback(async (): Promise<ISandboxesInfo> => {
+    const currentSandboxes = (await getSandboxInfo({})) || EmptyArr;
     const runningSandbox =
-      currentSandboxes.find((sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId) ||
-      currentSandboxes.find((sandbox) => !!sandbox.sandboxId);
+      currentSandboxes?.find(
+        (sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc')
+      ) || currentSandboxes?.find((sandbox) => !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc'));
     if (runningSandbox) {
-      useAppStore.setState({ sandboxesInfo: runningSandbox });
       return runningSandbox;
     }
+
+    useAppStore.setState({ sandboxesInfo: currentSandboxes });
+
     if (!userInfo?.userCode) throw new Error('missing_user_code');
     const launchedSandbox = await launchSandboxByUserCode({ userCode: userInfo.userCode, serviceKey: 'openclaw' });
-    const sandboxInfo: SandboxInfo = {
+    const sandboxInfo: ISandboxesInfo = {
       ...launchedSandbox,
       userCode: userInfo.userCode,
       sandboxType: 'byclaw',
       status: 'RUNNING',
     };
-    useAppStore.setState({ sandboxesInfo: sandboxInfo });
+    useAppStore.setState({ sandboxesInfo: [...currentSandboxes, sandboxInfo] });
     return sandboxInfo;
   }, [userInfo?.userCode]);
 
@@ -2086,7 +2006,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           width: '50vw',
         });
         EventEmitter.emit('beyond-main-driver-message', {
-          url: getVNCUrl(sandboxInfo),
+          url: getVNCUrl(concat([], sandboxInfo)),
         });
         try {
           await navigateSandboxBrowser({
@@ -2137,19 +2057,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setEditingOperationTask(null);
     setOperationTaskModalOpen(true);
     // 数字员工改到任务执行阶段选择，需求表单只刷新当前原型要求的关联资源。
-    void Promise.allSettled([
-      fetchRepos(),
-      fetchOperationAccounts(),
-      fetchOperationKnowledgeBases(),
-      fetchOperationOrganizeTemplates(),
-    ]);
-  }, [
-    fetchRepos,
-    fetchOperationAccounts,
-    fetchOperationKnowledgeBases,
-    fetchOperationOrganizeTemplates,
-    isOperationProject,
-  ]);
+    void Promise.allSettled([fetchRepos(), fetchOperationAccounts(), fetchOperationKnowledgeBases()]);
+  }, [fetchRepos, fetchOperationAccounts, fetchOperationKnowledgeBases, isOperationProject]);
 
   // 只有尚未启动的运营需求可以编辑；任务已拆解后需求配置需保持稳定以便追溯。
   const handleOpenEditOperationTaskModal = useCallback(
@@ -2158,10 +2067,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setDetailTask(null);
       setEditingOperationTask(task);
       setOperationTaskModalOpen(true);
-      // 编辑旧需求时也重新读取已有本体，确保整理模板名称能正确回显。
-      void fetchOperationOrganizeTemplates();
     },
-    [fetchOperationOrganizeTemplates, isOperationProject]
+    [isOperationProject]
   );
 
   // 运营需求只保存目标信息，执行方式和业务资源由后续任务模板统一补充。
@@ -2184,23 +2091,23 @@ const ProjectDetailPanel: React.FC<Props> = ({
           // 周期/间隔执行配置需要保留完整结构，并将表单态 Dayjs 转成接口可持久化的字符串。
           config: values.collectConfig
             ? {
-                ...values.collectConfig,
-                onceTime: values.collectConfig.onceTime?.isValid()
-                  ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
-                  : undefined,
-                periodTime: values.collectConfig.periodTime?.isValid()
-                  ? values.collectConfig.periodTime.format('HH:mm:ss')
-                  : undefined,
-                periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
-                  ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
-                  : undefined,
-                effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
-                  ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
-                  : undefined,
-                effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
-                  ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
-                  : undefined,
-              }
+              ...values.collectConfig,
+              onceTime: values.collectConfig.onceTime?.isValid()
+                ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
+                : undefined,
+              periodTime: values.collectConfig.periodTime?.isValid()
+                ? values.collectConfig.periodTime.format('HH:mm:ss')
+                : undefined,
+              periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
+                ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
+                : undefined,
+              effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
+                ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
+                : undefined,
+              effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
+                ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
+                : undefined,
+            }
             : undefined,
         };
         if (isEditingOperationTask) {
@@ -2289,17 +2196,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
     (): OperationRequirementStartTask[] =>
       operationRequirementStartTarget
         ? [
-            {
-              title: operationRequirementStartTarget.title || operationRequirementStartTarget.requirementName || '',
-              description:
+          {
+            title: operationRequirementStartTarget.title || operationRequirementStartTarget.requirementName || '',
+            description:
                 operationRequirementStartTarget.description || operationRequirementStartTarget.sourceDescription,
-              assignee:
+            assignee:
                 operationRequirementStartTarget.assigneeId ??
                 operationRequirementStartTarget.assignee ??
                 defaultProjectAssigneeId,
-              dueTime: operationRequirementStartTarget.dueTime,
-            },
-          ]
+            dueTime: operationRequirementStartTarget.dueTime,
+          },
+        ]
         : [],
     [defaultProjectAssigneeId, operationRequirementStartTarget]
   );
@@ -2309,14 +2216,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
     (requirement: any) => {
       if (requirement?.status !== 'todo') return;
       setOperationRequirementStartTarget(requirement);
-      void Promise.allSettled([
-        fetchOperationAgents(),
-        fetchOperationKnowledgeBases(),
-        fetchOperationOrganizeTemplates(),
-        fetchOperationAccounts(),
-      ]);
+      void Promise.allSettled([fetchOperationAgents(), fetchOperationKnowledgeBases(), fetchOperationAccounts()]);
     },
-    [fetchOperationAccounts, fetchOperationAgents, fetchOperationKnowledgeBases, fetchOperationOrganizeTemplates]
+    [fetchOperationAccounts, fetchOperationAgents, fetchOperationKnowledgeBases]
   );
 
   const closeOperationRequirementDetail = useCallback(() => {
@@ -2612,8 +2514,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       resourceFileScope === 'all'
         ? projectSessions.map((session) => `${session.sessionId}`).filter(Boolean)
         : currentResourceSession?.sessionId
-        ? [`${currentResourceSession.sessionId}`]
-        : [];
+          ? [`${currentResourceSession.sessionId}`]
+          : [];
     Array.from(new Set(sessionIds)).forEach((id) => {
       void fetchSessionResourceFiles(id);
     });
@@ -3020,8 +2922,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     const requirementPromise = isOperationProject
       ? fetchOperationRequirements('')
       : showRequirementsTab
-      ? fetchSources().then((sourceList) => fetchRequirements(sourceList, ''))
-      : Promise.resolve();
+        ? fetchSources().then((sourceList) => fetchRequirements(sourceList, ''))
+        : Promise.resolve();
     const memberPromise = showMembersTab ? fetchMembers() : Promise.resolve();
     const [, initialTasks] = await Promise.all([
       requirementPromise,
@@ -3743,7 +3645,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           }
           await fetchRepos();
         } catch (error: any) {
-          message.error(error?.message || t('repository.deleteFailed'));
+          message.error(typeof error === 'string' ? error : error?.message || t('repository.deleteFailed'));
         }
       },
     });
@@ -4990,18 +4892,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 const isActionOpen = openManualRequirementActionId === `operation-${requirement.itemId}`;
                 const actionItems: MenuProps['items'] = isTodo
                   ? [
-                      {
-                        key: 'edit',
-                        icon: <EditOutlined />,
-                        label: intl.formatMessage({ id: 'projectSpace.operation.requirement.edit' }),
-                      },
-                      {
-                        key: 'delete',
-                        icon: <DeleteOutlined />,
-                        label: intl.formatMessage({ id: 'projectSpace.operation.requirement.delete' }),
-                        danger: true,
-                      },
-                    ]
+                    {
+                      key: 'edit',
+                      icon: <EditOutlined />,
+                      label: intl.formatMessage({ id: 'projectSpace.operation.requirement.edit' }),
+                    },
+                    {
+                      key: 'delete',
+                      icon: <DeleteOutlined />,
+                      label: intl.formatMessage({ id: 'projectSpace.operation.requirement.delete' }),
+                      danger: true,
+                    },
+                  ]
                   : [];
                 const dueTime =
                   requirement.dueTime && dayjs(requirement.dueTime).isValid()
@@ -5130,7 +5032,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         assignees={operationAssigneeOptions}
         agentOptions={boundProjectAgents}
         knowledgeOptions={boundProjectKnowledgeBases}
-        ontologyOptions={boundProjectOntologies}
         accountOptions={operationTemplateAccountOptions}
         loading={operationRequirementStarting}
         onCancel={() => setOperationRequirementStartTarget(null)}
@@ -5214,13 +5115,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   },
                   ...(isProjectCreator
                     ? [
-                        {
-                          key: 'delete',
-                          icon: <DeleteOutlined />,
-                          label: t('manualRequirement.action.delete'),
-                          danger: true,
-                        },
-                      ]
+                      {
+                        key: 'delete',
+                        icon: <DeleteOutlined />,
+                        label: t('manualRequirement.action.delete'),
+                        danger: true,
+                      },
+                    ]
                     : []),
                 ];
 
@@ -5505,10 +5406,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 line.type === 'add'
                   ? styles.diffLineAdd
                   : line.type === 'del'
-                  ? styles.diffLineDel
-                  : line.type === 'hunk'
-                  ? styles.diffLineHunk
-                  : styles.diffLineContext;
+                    ? styles.diffLineDel
+                    : line.type === 'hunk'
+                      ? styles.diffLineHunk
+                      : styles.diffLineContext;
               return (
                 <div className={`${styles.diffLine} ${cls}`} key={idx}>
                   {line.text || ' '}
@@ -5580,8 +5481,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       resourceView === 'shared'
         ? sharedFilesLoading
         : isSessionResourceView
-        ? Object.values(sessionFilesLoadingMap).some(Boolean)
-        : taskChangesLoading;
+          ? Object.values(sessionFilesLoadingMap).some(Boolean)
+          : taskChangesLoading;
     const handleResourceViewRefresh = () => {
       if (resourceView === 'shared') {
         void fetchSharedResourceFiles();
@@ -5961,8 +5862,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   const taskDescription = isDevelopProject
                     ? `${taskAssignee} · ${taskCreateTime}`
                     : isOperationProject
-                    ? `${taskAssignee} · ${taskDueTime}`
-                    : `${task.sessionContent || ''}`;
+                      ? `${taskAssignee} · ${taskDueTime}`
+                      : `${task.sessionContent || ''}`;
                   const rawTaskStatusLabel = `${task.statusLabel || ''}`.trim().toLowerCase();
                   // 后端兼容字段可能同时存在，已翻译的状态标签优先于历史 status 编码。
                   const taskStatusValue =
@@ -6328,8 +6229,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
               {sourceForm.confirmMode === 'auto'
                 ? t('source.confirm.autoHint')
                 : sourceForm.confirmMode === 'score'
-                ? t('source.confirm.scoreHint')
-                : t('source.confirm.manualHint')}
+                  ? t('source.confirm.scoreHint')
+                  : t('source.confirm.manualHint')}
             </div>
           </div>
         </div>
@@ -6707,25 +6608,25 @@ const ProjectDetailPanel: React.FC<Props> = ({
               const initAction = showInitAction
                 ? initInProgress
                   ? [
-                      <span key="init-progress" className={styles.repoInitProgress}>
-                        <LoadingOutlined spin />
-                        {t('repository.initializing')}
-                      </span>,
-                      <Button key="init" type="link" size="small" onClick={openInitModal}>
-                        {t('repository.reinitWorkspace')}
-                      </Button>,
-                    ]
+                    <span key="init-progress" className={styles.repoInitProgress}>
+                      <LoadingOutlined spin />
+                      {t('repository.initializing')}
+                    </span>,
+                    <Button key="init" type="link" size="small" onClick={openInitModal}>
+                      {t('repository.reinitWorkspace')}
+                    </Button>,
+                  ]
                   : [
-                      <Button
-                        key="init"
-                        type="link"
-                        size="small"
-                        icon={<ThunderboltOutlined />}
-                        onClick={openInitModal}
-                      >
-                        {developInitInitialized ? t('repository.reinitWorkspace') : t('repository.initWorkspace')}
-                      </Button>,
-                    ]
+                    <Button
+                      key="init"
+                      type="link"
+                      size="small"
+                      icon={<ThunderboltOutlined />}
+                      onClick={openInitModal}
+                    >
+                      {developInitInitialized ? t('repository.reinitWorkspace') : t('repository.initWorkspace')}
+                    </Button>,
+                  ]
                 : [];
               return (
                 <List.Item
@@ -6912,8 +6813,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
                           log.status === 'success'
                             ? 'log.status.success'
                             : log.status === 'failed'
-                            ? 'log.status.failed'
-                            : 'log.status.running'
+                              ? 'log.status.failed'
+                              : 'log.status.running'
                         )}
                       </Tag>
                     </span>
@@ -6939,15 +6840,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
     // 运营项目的常用新增入口集中到详情右上角更多菜单，和需求页内入口使用同一套打开逻辑。
     ...(isOperationProject
       ? [
-          {
-            key: 'add-operation-account',
-            label: intl.formatMessage({ id: 'projectSpace.operation.account.add' }),
-          },
-          {
-            key: 'add-operation-requirement',
-            label: intl.formatMessage({ id: 'projectSpace.operation.requirement.new' }),
-          },
-        ]
+        {
+          key: 'add-operation-account',
+          label: intl.formatMessage({ id: 'projectSpace.operation.account.add' }),
+        },
+        {
+          key: 'add-operation-requirement',
+          label: intl.formatMessage({ id: 'projectSpace.operation.requirement.new' }),
+        },
+      ]
       : []),
     // 研发项目一个项目挂多个仓库,提供独立的仓库管理入口(列表 + 新增,复用仓库弹窗)。
     ...(isDevelopProject ? [{ key: 'manage-repos', label: t('repository.manageTitle') }] : []),
@@ -7041,10 +6942,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 {developInitPending
                   ? t('initGuard.bannerPending')
                   : developInitWaitingChat
-                  ? t('initGuard.bannerInitialized')
-                  : architectChatting
-                  ? t('initGuard.banner')
-                  : t('initGuard.bannerInitializing')}
+                    ? t('initGuard.bannerInitialized')
+                    : architectChatting
+                      ? t('initGuard.banner')
+                      : t('initGuard.bannerInitializing')}
               </span>
               {developInitWaitingChat && (
                 <Button type="primary" size="small" loading={architectChatStarting} onClick={handleEnterArchitectChat}>
@@ -7079,8 +6980,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         agentOptionsOnly
         knowledgeOptions={boundProjectKnowledgeBases}
         knowledgeOptionsOnly
-        ontologyOptions={boundProjectOntologies}
-        ontologyOptionsOnly
         applyText="确定"
         onCancel={() => setOperationTaskTemplateTarget(null)}
         onApply={async (result: TaskTemplateApplyResult) => {
@@ -7129,11 +7028,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
         requirement={
           splitRequirement || operationTaskSplitTarget
             ? {
-                title: (splitRequirement || operationTaskSplitTarget).title,
-                description: splitRequirement
-                  ? getRequirementDetailText(splitRequirement, t)
-                  : operationTaskSplitTarget.description,
-              }
+              title: (splitRequirement || operationTaskSplitTarget).title,
+              description: splitRequirement
+                ? getRequirementDetailText(splitRequirement, t)
+                : operationTaskSplitTarget.description,
+            }
             : null
         }
         // 只有需求拆分走后端 AI 预拆;运营任务拆分没有需求ID,弹窗内自动退化为每仓库一行。
@@ -7151,8 +7050,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
           operationTaskSplitTarget
             ? operationTaskExecuting
             : splitRequirement
-            ? startingRequirementIds.has(splitRequirement.itemId)
-            : false
+              ? startingRequirementIds.has(splitRequirement.itemId)
+              : false
         }
         onCancel={() => {
           if (operationTaskSplitTarget) {

@@ -4,6 +4,11 @@ import { size, omit } from 'lodash';
 import type { ISessionState } from '@/models/session';
 import type { ISession } from '@/typescript/session';
 
+export const createPendingRemoteSession = <T extends object>(session: T): T & { isPendingRemoteSession: true } => ({
+  ...session,
+  isPendingRemoteSession: true,
+});
+
 export const formatByUpdateTime = (sessionList: ISession[]) => {
   return sessionList.sort((a, b) => {
     return Number(b.updateTime) - Number(a.updateTime);
@@ -153,9 +158,12 @@ export const getSessionsCreatedDuringRequest = (
 
   return currentSessions.filter((session) => {
     const sessionId = `${session.sessionId}`;
-    // 上传文件会先创建临时会话，随后发送消息可能触发列表查询；此时
+    // 上传文件会先在服务端创建会话，随后发送消息可能触发列表查询；此时
     // 请求开始前它已经在本地列表中，但后端列表仍可能暂时查不到。
-    // 标记为本地临时会话的记录也必须保留，避免短暂出现后又消失。
-    return !responseSessionIds.has(sessionId) && (session.isLocalSession || !initialSessionIds.has(sessionId));
+    // 标记为待同步的远端会话必须保留；Desktop 本地会话也不会出现在远端响应中。
+    return (
+      !responseSessionIds.has(sessionId) &&
+      (session.isPendingRemoteSession || session.isLocalSession || !initialSessionIds.has(sessionId))
+    );
   });
 };

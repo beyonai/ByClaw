@@ -63,7 +63,7 @@ ByClaw 围绕“数字员工执行任务、组织资源支撑执行、企业平�
 
 ## 架构总览
 
-ByClaw 采用“统一接入、集中治理、分布执行、资源隔离”的整体架构。平台把 Web、钉钉等入口统一收敛到安全网关和后端服务，由后端完成认证、会话、资源、权限、路由与编排，再把智能体任务分发给 DataCloud、QA、OpenClaw、OpenSandbox 等执行与能力服务。业务数据、知识文件、会话状态、执行结果分别落在数据库、Redis、MinIO 与个人沙箱中，形成可审计、可扩展、可隔离的企业级智能体运行底座。
+ByClaw 采用“统一接入、集中治理、分布执行、资源隔离”的整体架构。平台把 Web、钉钉等入口统一收敛到安全网关和后端服务，由后端完成认证、会话、资源、权限、路由与编排，再把智能体任务分发给 QA、OpenClaw、OpenSandbox 等执行与能力服务。业务数据、知识文件、会话状态、执行结果分别落在数据库、Redis、MinIO 与个人沙箱中，形成可审计、可扩展、可隔离的企业级智能体运行底座。
 
 ```
 用户 / 业务系统 / 钉钉 / Web
@@ -76,10 +76,10 @@ byclaw-fe ── REST / WebSocket / SSE ── byclaw-be
                                           │
               ┌───────────────────────────┼───────────────────────────┐
               ▼                           ▼                           ▼
-        byclaw-qa                   byclaw-data                  byclaw-exe
-   知识库 / QA Worker          DataCloud / MCP Worker          Skills / Extensions
-              │                           │                           │
-              └───────────────┬───────────┴───────────┬───────────────┘
+        byclaw-qa                                             byclaw-exe
+   知识库 / QA Worker                                     Skills / Extensions
+              │                                                   │
+              └───────────────────────┬───────────────────────────┘
                               ▼                       ▼
                      OpenClaw / OpenSandbox       业务 API / 外部系统
                               │
@@ -118,7 +118,7 @@ flowchart LR
 
 ### 应用架构
 
-应用层按职责拆分为前端、后端、数据云、QA、扩展执行和中间件服务。
+应用层按职责拆分为前端、后端、QA、扩展执行和中间件服务。
 
 ```mermaid
 flowchart TB
@@ -127,16 +127,13 @@ flowchart TB
     fe --> be["byclaw-be<br/>核心 API / 认证授权 / 资源治理 / 网关路由"]
     be --> ws["WebSocket / SSE<br/>流式会话"]
     be --> qa["byclaw-qa<br/>知识库管理 / QA Worker"]
-    be --> data["byclaw-data<br/>DataCloud MCP / Gateway Worker"]
     be --> super["byclaw-super<br/>多智能体主管 / 授权委派 / 持久运行"]
     be --> exe["byclaw-exe<br/>Skills / Extensions"]
     be --> sandbox["OpenSandbox<br/>隔离执行环境"]
     sandbox --> sandboxRuntime["沙箱容器<br/>byclaw-openclaw / Agent Runtime"]
     super --> sandboxRuntime
-    data --> sandboxRuntime
     exe --> sandboxRuntime
     qa --> infra["Redis / OpenGauss / MinIO"]
-    data --> infra
     be --> infra
 ```
 
@@ -145,10 +142,9 @@ flowchart TB
 | 1 | `byclaw-fe` | Web 门户与管理控制台 | 对话、知识中心、数字员工、工作中心、工具中心、沙箱页面、移动端适配 |
 | 2 | `byclaw-be` | 核心业务后端与统一网关 | 认证授权、会话管理、资源管理、数字员工管理、文件管理、Feign 调用、WebSocket |
 | 3 | `byclaw-qa` | 知识库与问答服务 | 知识导入、索引构建、检索问答、QA Worker、知识资源映射 |
-| 4 | `byclaw-data` | 数据云与智能体执行服务 | DataCloud MCP、Gateway Worker、数据查询分析、工具调用、结果文件存储 |
-| 5 | `byclaw-super` | 多智能体主管与持久运行服务 | 任务规划、授权委派、用户交互、Run 状态、SSE、恢复与故障接管 |
-| 6 | `byclaw-exe` | 扩展插件与技能脚本 | Skills、Extensions、业务脚本、能力扩展 |
-| 7 | `middleware` | 基础运行组件 | Redis、MinIO、OpenGauss、OpenSandbox 等运行依赖 |
+| 4 | `byclaw-super` | 多智能体主管与持久运行服务 | 任务规划、授权委派、用户交互、Run 状态、SSE、恢复与故障接管 |
+| 5 | `byclaw-exe` | 扩展插件与技能脚本 | Skills、Extensions、业务脚本、能力扩展 |
+| 6 | `middleware` | 基础运行组件 | Redis、MinIO、OpenGauss、OpenSandbox 等运行依赖 |
 
 同步链路以 REST、WebSocket、SSE 和 Feign 为主，异步链路以 Redis Pub/Sub、Redis Stream、Worker 消费和后台任务为主。控制流由后端统一编排，数据流按资源类型进入数据库、对象存储、缓存、沙箱或外部业务系统。
 
@@ -159,7 +155,7 @@ ByClaw 将数据分为业务元数据、会话状态、知识文件、执行结�
 - **OpenGauss / PostgreSQL**：存储用户、组织、权限、数字员工、资源元数据、知识库索引任务、系统配置等结构化数据。
 - **Redis**：承载登录会话、缓存、分布式锁、数字员工配置快照、Pub/Sub 通知和 Worker 消息通道。
 - **MinIO / OSS / SFTP**：保存上传文件、知识库原始文件、Markdown 转换结果、附件和大结果文件。
-- **向量与检索数据**：由 QA / DataCloud 服务负责知识切分、索引构建、检索投影和召回，服务于 RAG 与问答场景。
+- **向量与检索数据**：由 QA 服务负责知识切分、索引构建、检索投影和召回，服务于 RAG 与问答场景。
 - **个人数据空间**：为员工或智能体提供独立文件空间和沙箱挂载路径，实现“数随人走、多智能体共享、敏感数据少落盘”。
 
 数据访问遵循“元数据进库、文件进对象存储、热状态进缓存、执行隔离进沙箱”的原则，便于扩展、审计和故障恢复。
@@ -172,7 +168,7 @@ ByClaw 采用多语言、多运行时的组合架构：Java 负责核心业务�
 flowchart TB
     ui["前端体验层<br/>React / Umi Max / TypeScript / Ant Design"] --> api["企业治理层<br/>Java 21 / Spring Boot / Spring Security / MyBatis"]
     api --> agent["智能体能力层<br/>Spring AI / LangChain4j / MCP / OpenClaw / by-framework"]
-    agent --> py["Python 执行层<br/>by-qa / by-datacloud / Skills / Workers"]
+    agent --> py["Python 执行层<br/>by-qa / Skills / Workers"]
     api --> comm["通信层<br/>REST / WebSocket / SSE / Feign / Redis PubSub"]
     py --> comm
     comm --> storage["存储与状态层<br/>OpenGauss / Redis / MinIO / 文件挂载"]
@@ -187,7 +183,7 @@ flowchart TB
 |:---:|------|----------|------|
 | 1 | 前端 | React 18、Umi Max 4、TypeScript、Ant Design 5 | 企业级 Web 控制台与对话体验 |
 | 2 | 后端 | Java 21、Spring Boot 3.4、Spring Security、Spring Session、MyBatis | 核心 API、认证授权、资源治理、服务编排 |
-| 3 | AI / Agent | Spring AI、LangChain4j、MCP、OpenClaw、by-framework、by-qa、by-datacloud | 模型接入、智能体执行、知识问答、数据分析 |
+| 3 | AI / Agent | Spring AI、LangChain4j、MCP、OpenClaw、by-framework、by-qa | 模型接入、智能体执行、知识问答、数据分析 |
 | 4 | 通信 | REST、WebSocket、SSE、OpenFeign、Redis Pub/Sub | 同步请求、流式响应、服务间调用和异步通知 |
 | 5 | 存储 | OpenGauss / PostgreSQL、Redis、MinIO、文件挂载 | 结构化数据、缓存消息、对象文件和沙箱数据 |
 | 6 | 工程化 | Docker Compose、pnpm、Maven、uv、GitHub Actions | 本地开发、镜像构建、依赖管理和 CI/CD |
@@ -203,7 +199,6 @@ flowchart TB
     feC --> beC["byclaw-be<br/>HTTP 8086 / WS 8082"]
     beC --> qaApi["byclaw-qa-manager<br/>API 8000"]
     beC --> qaWorker["byclaw-qa-worker<br/>后台消费"]
-    beC --> dataC["byclaw-data<br/>DataCloud 8087 / Worker"]
     beC --> sandboxC["OpenSandbox<br/>沙箱调度 / 租约管理"]
     sandboxC --> sandboxContainer["沙箱容器<br/>按需拉起 / 自动回收"]
     sandboxContainer --> openclawC["byclaw-openclaw<br/>Agent Runtime"]
@@ -219,19 +214,17 @@ flowchart TB
     qaApi --> dbC
     qaApi --> minioC
     qaWorker --> redisC
-    dataC --> redisC
-    dataC --> minioC
     sandboxContainer --> mount["文件挂载 / 个人数据空间"]
     minioC --> mount
 ```
 
 - **中间件层**：先启动 Redis、MinIO、OpenGauss、OpenSandbox 等基础组件；OpenSandbox 负责按需拉起沙箱容器。
-- **应用层**：启动 `byclaw-fe`、`byclaw-be`、`byclaw-qa-manager`、`byclaw-qa-worker`、`byclaw-data`。
+- **应用层**：启动 `byclaw-fe`、`byclaw-be`、`byclaw-qa-manager`、`byclaw-qa-worker`。
 - **接入层**：前端容器内置 Nginx，统一暴露 HTTP / HTTPS 入口，并转发后端 API、WebSocket、文件浏览和沙箱相关请求。
 - **配置层**：通过根目录 `.env` 和 `deploy/config` 注入数据库、Redis、MinIO、模型、沙箱、端口和域名配置。
 - **执行层**：`byclaw-openclaw` 运行在 OpenSandbox 拉起的沙箱容器中，Skills、Extensions 和外部业务 API 通过沙箱执行环境按需加载。
 
-在生产环境中，可以将数据库、缓存、对象存储、QA Worker、DataCloud Worker 和 OpenSandbox 分别扩容；前端与后端保持无状态或弱状态部署，通过 Redis 和数据库共享状态。
+在生产环境中，可以将数据库、缓存、对象存储、QA Worker 和 OpenSandbox 分别扩容；前端与后端保持无状态或弱状态部署，通过 Redis 和数据库共享状态。
 
 ### 安全架构
 
@@ -352,7 +345,6 @@ scripts/stop.sh --fe       # 仅停止前端
 ByClaw/
 ├── byclaw-fe/          # Web 前端（React, Umi Max, TypeScript）
 ├── byclaw-be/          # 后端服务（Spring Boot 3.4, Java 21）
-├── byclaw-data/        # 数据云服务（Python 3.12, uv）
 ├── byclaw-qa/          # QA 与 Agent 服务（Python 3.12, uv）
 ├── byclaw-super/       # 多智能体主管与持久运行服务（TypeScript, pnpm）
 ├── byclaw-exe/         # 扩展插件与技能脚本
@@ -372,11 +364,10 @@ ByClaw/
 | 2 | 后端 HTTP | 8086 |
 | 3 | 后端 WebSocket | 8082 |
 | 4 | QA Manager | 8000 |
-| 5 | DataCloud | 8087 |
-| 6 | Redis | 6379 |
-| 7 | MinIO API / Console | 9000 / 9001 |
-| 8 | OpenGauss | 5432 |
-| 9 | OpenSandbox | 9005 |
+| 5 | Redis | 6379 |
+| 6 | MinIO API / Console | 9000 / 9001 |
+| 7 | OpenGauss | 5432 |
+| 8 | OpenSandbox | 9005 |
 
 ---
 

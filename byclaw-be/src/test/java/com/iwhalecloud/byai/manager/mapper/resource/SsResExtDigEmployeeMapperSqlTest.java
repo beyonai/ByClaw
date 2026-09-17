@@ -4,9 +4,44 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
+import org.apache.ibatis.scripting.xmltags.XMLLanguageDriver;
+import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
 class SsResExtDigEmployeeMapperSqlTest {
+
+    /** 真实展开个人列表 SQL，确保历史授权、默认绑定和角色分支不能绕过创建者限定。 */
+    @Test
+    void personalOwnerQuery_alwaysRestrictsCreatorRegardlessOfRoleAndDefaultBinding() throws IOException {
+        String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
+        try (var input = getClass().getResourceAsStream(resourcePath)) {
+            assertThat(input).isNotNull();
+            String xml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            String query = selectBody(xml, "selectPersonalDigitalEmployeeByQo");
+            String script = "<script>" + query.substring(query.indexOf('>') + 1) + "</script>";
+            var source = new XMLLanguageDriver().createSqlSource(new Configuration(), script, DigitalEmployeeQo.class);
+            DigitalEmployeeQo qo = new DigitalEmployeeQo();
+            qo.setUserId(2L);
+            qo.setType("owner");
+            qo.setIncludeAllResourceStatus(true);
+            qo.setDefaultDigEmployeeId(100L);
+            qo.setDefaultSuperAssistantResourceCode("someone_main");
+            qo.setManagerOrgPathCodes(List.of("-1.100"));
+            for (boolean platformManager : List.of(false, true)) {
+                qo.setPlatformManager(platformManager);
+                String sql = source.getBoundSql(qo).getSql().replaceAll("\\s+", " ");
+                assertThat(sql).contains("and a.create_by = ?")
+                    .contains("a.resource_status != -1")
+                    .doesNotContain("or 1 = 1")
+                    .doesNotContain("org.path_code");
+            }
+            // 只收窄 owner 查询，其他调用方的 manageable 语义保持不变。
+            qo.setType("manageable");
+            assertThat(source.getBoundSql(qo).getSql()).contains("or 1 = 1");
+        }
+    }
 
     @Test
     void memberCandidateQuery_avoidsEmptyStringComparisonInOpenGauss() throws IOException {
@@ -27,5 +62,68 @@ class SsResExtDigEmployeeMapperSqlTest {
                 .doesNotContain("trim(a.resource_name) != ''")
                 .doesNotContain("trim(a.worker_agent_type) != ''");
         }
+    }
+
+    @Test
+    void installTargetQuery_limitsManagePermissionToCreatorExplicitGrantAndAdminVip() throws IOException {
+        String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
+        try (var input = getClass().getResourceAsStream(resourcePath)) {
+            assertThat(input).isNotNull();
+            String mapperXml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            int queryStart = mapperXml.indexOf("<select id=\"selectInstallTargetEmployees\"");
+            int queryEnd = mapperXml.indexOf("</select>", queryStart);
+            assertThat(queryStart).isGreaterThanOrEqualTo(0);
+            assertThat(queryEnd).isGreaterThan(queryStart);
+            String query = mapperXml.substring(queryStart, queryEnd);
+
+            assertThat(query).contains("a.owner_type = 'enterprise'")
+                .contains("a.owner_type = 'personal'")
+                .contains("a.owner_type = 'personal_default'")
+                .contains("grant_type = 'ALLOW_MANAGE'")
+                .contains("a.create_by = #{userId}")
+                .contains("installTargetAdminVip == true")
+                .contains("manage_auth.allow_manage_count > 0")
+                .contains("manage_auth.black_count = 0")
+                .contains("upper(a.resource_name)")
+                .contains("upper(a.resource_desc)")
+                .contains("coalesce(e.agent_type, '') != '017'")
+                .doesNotContain("memberCandidateGlobalManager == true")
+                .doesNotContain("managerOrgPathCodes")
+                .doesNotContain("grant_type in ('AVAILABLE_USE', 'FORCE_USE'");
+        }
+    }
+
+    @Test
+    void personalAndManageListQueries_mapResourceStatus() throws IOException {
+        String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
+        try (var input = getClass().getResourceAsStream(resourcePath)) {
+            assertThat(input).isNotNull();
+            String mapperXml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+
+            assertThat(selectBody(mapperXml, "selectDigitalEmployeeByQo")).contains("a.resource_status");
+            assertThat(selectBody(mapperXml, "selectPersonalDigitalEmployeeByQo")).contains("a.resource_status");
+            assertThat(resultMapBody(mapperXml, "digitalEmployeePageVoResultMap"))
+                .contains("column=\"resource_status\" property=\"resourceStatus\"");
+            assertThat(resultMapBody(mapperXml, "digitalEmployeeVoResultMap"))
+                .contains("column=\"resource_status\" property=\"resourceStatus\"");
+        }
+    }
+
+    private static String selectBody(String mapperXml, String statementId) {
+        String startTag = "<select id=\"" + statementId + "\"";
+        int start = mapperXml.indexOf(startTag);
+        assertThat(start).as(statementId + " start").isGreaterThanOrEqualTo(0);
+        int end = mapperXml.indexOf("</select>", start);
+        assertThat(end).as(statementId + " end").isGreaterThan(start);
+        return mapperXml.substring(start, end);
+    }
+
+    private static String resultMapBody(String mapperXml, String resultMapId) {
+        String startTag = "<resultMap id=\"" + resultMapId + "\"";
+        int start = mapperXml.indexOf(startTag);
+        assertThat(start).as(resultMapId + " start").isGreaterThanOrEqualTo(0);
+        int end = mapperXml.indexOf("</resultMap>", start);
+        assertThat(end).as(resultMapId + " end").isGreaterThan(start);
+        return mapperXml.substring(start, end);
     }
 }

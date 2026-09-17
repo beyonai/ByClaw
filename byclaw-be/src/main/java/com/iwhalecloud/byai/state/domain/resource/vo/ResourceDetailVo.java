@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.resource.vo;
 
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import lombok.Getter;
 import lombok.Setter;
@@ -12,6 +13,8 @@ import lombok.Setter;
 @Getter
 @Setter
 public class ResourceDetailVo extends SsResource {
+
+    private ResourceOperationPermissionsVo operationPermissions;
 
     private Object param;
 }

@@ -67,4 +67,6 @@ fi
 . "$_DEPLOY_DIR/storage-profile.sh"
 
 _CALLER_DIR="$(basename "$(pwd)")"
-export COMPOSE_PROJECT_NAME="${_CALLER_DIR}"
+# 允许 .env 覆盖：同一台机器上跑多套 standalone 时，basename 都是
+# standalone，compose 会按 project 标签把别人的容器当成自己的重建。
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$_CALLER_DIR}"

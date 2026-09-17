@@ -19,6 +19,6 @@ public class ProjectBoundResourceDto {
     /** 资源编码（来自 ss_resource.resource_code） */
     private String resourceCode;
 
-    /** 项目绑定类型：knowledge / digital_employee / ontology */
+    /** 项目绑定类型：knowledge / digital_employee */
     private String resourceType;
 }

@@ -14,6 +14,7 @@ import { ResourceTypeMap } from '@/constants/resource';
 
 import UploadFile from '../components/UploadFile';
 import ConnectorControl from '../components/ConnectorControl';
+import ModelSelect from '../components/ModelSelect';
 
 import type { UserInfo } from '@/models/common/user';
 import type { IFile } from '@/typescript/file';
@@ -23,6 +24,7 @@ import styles from './index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
 import { IChatSettingValue } from '@/typescript/cloud';
 import { agentTypeMap } from '@/constants/agent';
+import { createPendingRemoteSession } from '@/utils/session';
 
 type IState = {
   deepThink: boolean;
@@ -32,6 +34,7 @@ type IState = {
 
   beyondSmartModePopoverOpen: boolean;
   selectedResourceAgentIds: string;
+  selectedModelId?: string;
 } & pIState;
 
 type IProps = {
@@ -61,6 +64,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       resourceList: [],
       beyondSmartModePopoverOpen: false,
       selectedResourceAgentIds: '',
+      selectedModelId: undefined,
     };
   }
 
@@ -132,6 +136,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         mode,
         agentType: myAgentType,
         agentId,
+        ...(this.state.selectedModelId ? { relModelId: this.state.selectedModelId } : {}),
         ...chatSettings,
       },
       msgOpt: {
@@ -324,6 +329,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             chatMode={chatModeMap.expert}
             agentId={agentId}
             sessionId={sessionId}
+            resourceAgentIds={this.getResourceAgentIds()}
             excludedAgentIds={(this.state.resourceList || [])
               .filter((resource) => `${resource.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
               .flatMap((resource) =>
@@ -360,9 +366,9 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
             onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
           >
-            <Tooltip title="选择技能">
+            <Tooltip title={getIntl().formatMessage({ id: 'queryInput.tools.selectSkill' })}>
               <span
-                aria-label="技能"
+                aria-label={getIntl().formatMessage({ id: 'queryInput.tools.skill' })}
                 className={styles.attachment}
                 onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '#' }))}
               >
@@ -395,36 +401,39 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                 setSessionId?.(mySessionId);
                 dispatch({
                   type: 'session/addSession',
-                  payload: {
+                  payload: createPendingRemoteSession({
                     sessionId: mySessionId,
                     sessionName,
-                    isLocalSession: true,
                     projectName: this.props.selectedProject?.projectName,
                     projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
                     objectId: agentId,
                     objectType: agentId ? 'DigEmployee' : undefined,
                     agentType: this.props.myAgentType,
-                  },
+                  }),
                 });
                 const projectId = this.props.projectId ?? this.props.selectedProject?.projectId;
                 if (projectId !== undefined && projectId !== null) {
                   this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
                     projectId,
                     projectName: this.props.selectedProject?.projectName,
-                    session: {
+                    session: createPendingRemoteSession({
                       sessionId: mySessionId,
                       sessionName,
                       projectId,
                       projectName: this.props.selectedProject?.projectName,
                       updateTime: new Date().toISOString(),
                       createTime: new Date().toISOString(),
-                      isLocalSession: true,
-                    },
+                    }),
                   });
                 }
               }}
             />
           )}
+          <ModelSelect
+            key={`desktop-model-${this.props.sessionId || 'new'}`}
+            value={this.state.selectedModelId}
+            onChange={(selectedModelId) => this.setState({ selectedModelId })}
+          />
           {this.STTRender()}
         </Space>
       </>
@@ -445,7 +454,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       ...prevState,
       inputValue: persistentMentionDraft.text,
       fileList: [],
-      resourceList: persistentMentionDraft.resourceList,
+      resourceList: persistentMentionDraft.resourceList || [],
     }));
     this.props.onInputDraftChange?.(persistentMentionDraft);
 
@@ -457,6 +466,7 @@ export default connect(
   ({ user, employees }: any) => {
     return {
       userInfo: get(user, 'userInfo'),
+      defaultDigEmployeeId: get(employees, 'defaultDigEmployeeId') || get(user, 'userInfo.defaultDigEmployeeId'),
       // @ts-ignore
       employeesList: get(employees, 'employeesList') || [],
     };
