@@ -13,7 +13,7 @@ MAILCTL = SKILL_ROOT / 'scripts' / 'mailctl.py'
 DOCKERFILE = OPENCLAW_ROOT / 'Dockerfile'
 BYCLAW_DOCKERFILE = OPENCLAW_ROOT / 'Dockerfile.byclaw'
 START_OPENCLI = OPENCLAW_ROOT / 'start-opencli.sh'
-DML = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'versions' / 'V0.4.0' / 'V0.4.0__dml.sql'
+DML = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'versions' / 'V0.5.0' / 'V0.5.0__dml.sql'
 MIGRATION_WORKFLOW = REPOSITORY_ROOT / '.github' / 'workflows' / 'mail-migration-opengauss.yml'
 MIGRATION_MERGER = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'merge_migrations.py'
 K3S_DEPLOY = REPOSITORY_ROOT / 'deploy' / 'k3s' / 'deploy.sh'
@@ -180,7 +180,7 @@ class MailSkillContractTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             assert_docker_mail_contract(self, broken_check)
 
-    def test_v040_registers_one_idempotent_system_builtin_mail_skill(self):
+    def test_v050_registers_one_idempotent_system_builtin_mail_skill(self):
         dml = DML.read_text(encoding='utf-8')
         block_match = re.search(
             r'-- Mail 内置 Skill 注册开始\n(.*?)-- Mail 内置 Skill 注册结束',
@@ -196,13 +196,18 @@ class MailSkillContractTest(unittest.TestCase):
         merger = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(merger)
         statements = merger.split_sql_statements(block)
-        self.assertEqual(1, len(statements), 'gsql autocommit must see mail convergence as one statement')
-        statement = statements[0].strip()
-        self.assertRegex(statement, r'(?s)^--.*?DO \$mail\$\s*BEGIN\b')
-        self.assertRegex(statement, r'(?s)END;\s*\$mail\$$')
+        self.assertGreater(len(statements), 3)
+        lock_key = "hashtext('byclaw'), hashtext('V0.4.0:mail-skill')"
+        self.assertTrue(statements[0].endswith(f'SELECT pg_advisory_lock({lock_key})'))
+        self.assertEqual(statements[1], f'SELECT pg_advisory_xact_lock({lock_key})')
+        self.assertEqual(statements[-1], f'SELECT pg_advisory_unlock({lock_key})')
+        self.assertNotRegex(dml, r'(?im)^\s*(?:DO|PERFORM|BEGIN)\b')
+        self.assertNotRegex(dml, r'\$[A-Za-z_]*\$')
+        for statement in statements[2:-1]:
+            sql = re.sub(r'(?m)^\s*--[^\n]*', '', statement).strip()
+            self.assertRegex(sql, r'^(?:INSERT INTO|UPDATE|DELETE FROM)\b')
         self.assertNotIn('\\set', block)
         self.assertNotRegex(block, r'(?im)^\s*(?:COMMIT|ROLLBACK|START TRANSACTION)\b')
-        self.assertIn("PERFORM pg_advisory_xact_lock(hashtext('byclaw'), hashtext('V0.4.0:mail-skill'))", block)
         self.assertRegex(block, r"(?s)WHERE NOT EXISTS\s*\(.*?resource_code = 'mail'.*?\)")
         self.assertIn("'SYSTEM_BUILTIN'", block)
         self.assertIn('INSERT INTO byai.ss_res_ext_skill', block)
@@ -212,9 +217,9 @@ class MailSkillContractTest(unittest.TestCase):
         self.assertNotIn('jsonb_build_object', block)
         self.assertNotIn('jsonb_build_array', block)
         self.assertIn('json_build_object', block)
-        self.assertIn('json_build_array', block)
+        self.assertIn('jsonb_insert', block)
         self.assertIsNotNone(re.search(
-            r'json_build_array\s*\(\s*json_build_object\(.*?\)\s*\)::jsonb',
+            r"jsonb_insert\s*\(c\.param_value::jsonb, '\{999999\}', json_build_object\(.*?\)::jsonb",
             block,
             flags=re.DOTALL,
         ))
@@ -241,6 +246,17 @@ class MailSkillContractTest(unittest.TestCase):
                 rf'existing\.{key}\s+IS NOT DISTINCT FROM\s+(?:g\.{key}|fallback\.{key}|[^\n]+)',
                 f'nullable grant key {key} must use null-safe comparison',
             )
+
+    def test_mail_dml_is_owned_only_by_v050(self):
+        previous = DML.parent.parent / 'V0.4.0' / 'V0.4.0__dml.sql'
+        old_sql = previous.read_text(encoding='utf-8')
+        new_sql = DML.read_text(encoding='utf-8')
+        self.assertNotIn('-- Mail 内置 Skill 注册开始', old_sql)
+        self.assertEqual(new_sql.count('-- Mail 内置 Skill 注册开始'), 1)
+        for code in ('gmail-mail', 'microsoft-mail', 'fastmail-mail', 'qq-mail',
+                     'netease-163-mail', 'aliyun-mail', 'custom-imap-mail'):
+            self.assertNotIn(f"'{code}'", old_sql)
+            self.assertEqual(len(re.findall(r"(?m)^\s*\('" + re.escape(code) + r"'\s*,", new_sql)), 1)
 
     def test_opengauss_migration_is_mandatory_in_ci_and_uses_file_execution(self):
         workflow = MIGRATION_WORKFLOW.read_text(encoding='utf-8')

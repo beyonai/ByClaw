@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-DML = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'versions' / 'V0.4.0' / 'V0.4.0__dml.sql'
+DML = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'versions' / 'V0.5.0' / 'V0.5.0__dml.sql'
 DSN = os.environ.get('MAIL_MIGRATION_TEST_DSN')
 SQL_RUNNER = os.environ.get('MAIL_MIGRATION_TEST_SQL_RUNNER')
 FILE_RUNNER = os.environ.get('MAIL_MIGRATION_TEST_FILE_RUNNER')
@@ -194,7 +194,7 @@ class MailMigrationOpenGaussTest(unittest.TestCase):
             "(SELECT count(*) FROM byai.au_privilege_grant g JOIN byai.ss_resource r ON r.resource_id=g.grant_obj_id "
             "WHERE r.resource_code='mail')"))
 
-    def test_psycopg_outer_transaction_can_roll_back_the_exact_statement(self):
+    def test_psycopg_outer_transaction_can_roll_back_plain_sql_statements(self):
         if not PSYCOPG_DSN:
             if REQUIRED:
                 self.fail('MAIL_MIGRATION_TEST_PSYCOPG_DSN is required in CI')
