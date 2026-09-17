@@ -17,7 +17,7 @@ import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
 import CommonTabs from '@/components/CommonTabs';
 import { getRuntimeActualUrl } from '@/utils';
-import { getTopLevelCatalogs, normalizeCatalogTree } from '@/utils/catalog';
+import { getLocalizedCatalogName, getTopLevelCatalogs, normalizeCatalogTree } from '@/utils/catalog';
 import { queryCatalogTree, updateResource } from '@/service/digitalEmployees';
 import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/knowledgeCenter';
 import {
@@ -858,7 +858,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
                 items={[
                   { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
                   ...topLevelCatalogList.map((item) => ({
-                    label: item.catalogName,
+                    label: getLocalizedCatalogName(item, intl.locale),
                     key: `${item?.catalogId}`,
                   })),
                 ]}

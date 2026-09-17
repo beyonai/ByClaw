@@ -195,6 +195,7 @@ jest.mock('@/hooks/useGlobal', () => ({
   default: () => ({ EventEmitter: mockEventEmitter }),
 }));
 jest.mock('@/utils/catalog', () => ({
+  getLocalizedCatalogName: (catalog: { catalogName?: string }) => catalog.catalogName || '',
   getTopLevelCatalogs: () => [{ catalogId: 'catalog-1', catalogName: 'Sales' }],
   normalizeCatalogTree: (value: any) => value,
 }));
