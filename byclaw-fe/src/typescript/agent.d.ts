@@ -128,7 +128,6 @@ export type IAgentCache = IAgent & {
   canUseAuth?: boolean;
   canDelete?: boolean;
   canApplyUse?: boolean;
-  canAuditUse?: boolean;
   canOnShelf?: boolean;
   canOffShelf?: boolean;
   canRestore?: boolean;

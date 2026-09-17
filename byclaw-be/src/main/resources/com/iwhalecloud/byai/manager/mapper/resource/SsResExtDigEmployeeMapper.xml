@@ -817,6 +817,10 @@
                     #{item}
                 </foreach>
             </if>
+            <!-- 个人页签按创建者收敛；历史授权、默认绑定或管理员角色均不能带入他人员工。 -->
+            <if test="type != null and type == 'owner'">
+                and a.create_by = #{userId}
+            </if>
             <if test="type != null and type == 'manageable'">
                 and (
                     a.create_by = #{userId}

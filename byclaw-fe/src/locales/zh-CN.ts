@@ -905,6 +905,8 @@ export default {
   'myEmployees.applicant': '申请用户',
   'myEmployees.applicationTime': '申请时间',
   'myEmployees.processedTime': '处理时间',
+  'myEmployees.auditResult': '审核结果',
+  'myEmployees.auditor': '审核人',
   'myEmployees.status': '状态',
   'myEmployees.actions': '操作',
   'myEmployees.unreviewed': '未审核',

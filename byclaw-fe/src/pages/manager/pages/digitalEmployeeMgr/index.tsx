@@ -26,7 +26,6 @@ import TreeFilter from '@/pages/manager/components/TreeFilter';
 import FieldFilter from '@/pages/manager/components/TreeFilter/FieldFilter';
 // import SourceFilter from '@/pages/manager/components/TreeFilter/SourceFilter';
 import { getAvatarUrl } from '@/pages/manager/utils/agent';
-import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import { applyResourceUse } from '@/pages/manager/service/resources';
 
 const initPagination = {
@@ -103,7 +102,6 @@ const DigitalEmployeeMgr = () => {
   const [activeType, setActiveType] = useState(-1);
   const [selectRecord, setSelectRecord] = useState();
   const [authType, setAuthType] = useState();
-  const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
   const [resultData, setResultData] = useState(initResultData());
   const [operationPermissionMap, setOperationPermissionMap] = useState({});
   const [searchValue, setSearchValue] = useState('');
@@ -450,14 +448,7 @@ const DigitalEmployeeMgr = () => {
         },
       };
 
-      const auditUse = {
-        type: 'auditUse',
-        name: intl.formatMessage({ id: 'resource.auditUse' }),
-        onClick: () => {
-          setSelectRecord(record);
-          setUseApplyAuditOpen(true);
-        },
-      };
+      // 旧管理页不再提供使用审核入口，统一由我的员工审核中心处理。
 
       // const publish = {
       //   type: 'publish',
@@ -548,9 +539,6 @@ const DigitalEmployeeMgr = () => {
       }
       if (operationPermissions?.canApplyUse) {
         actionList.push(applyUse);
-      }
-      if (operationPermissions?.canAuditUse) {
-        actionList.push(auditUse);
       }
       if (operationPermissions?.canDelete) {
         actionList.push(del);
@@ -978,15 +966,6 @@ const DigitalEmployeeMgr = () => {
           }}
         />
       )}
-      <UseApplyAuditDrawer
-        open={useApplyAuditOpen}
-        record={selectRecord}
-        onCancel={() => {
-          setUseApplyAuditOpen(false);
-          setSelectRecord(null);
-        }}
-        onSuccess={() => void refreshCurrentEmployee(selectRecord).catch(console.error)}
-      />
       {employeeState.open && (
         <EmployeesDrawer {...employeeState} onClose={employeeAction.onCancel} agentInfo={employeeState.data} />
       )}

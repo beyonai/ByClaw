@@ -909,6 +909,8 @@ export default {
   'myEmployees.applicant': 'Applicant',
   'myEmployees.applicationTime': 'Application time',
   'myEmployees.processedTime': 'Processed time',
+  'myEmployees.auditResult': 'Audit result',
+  'myEmployees.auditor': 'Auditor',
   'myEmployees.status': 'Status',
   'myEmployees.actions': 'Actions',
   'myEmployees.unreviewed': 'Pending review',

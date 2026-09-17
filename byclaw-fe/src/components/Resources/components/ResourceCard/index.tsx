@@ -59,7 +59,6 @@ export interface IResourceCardItem {
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canApplyUse?: boolean;
-  canAuditUse?: boolean;
   canDelete?: boolean;
   canOnShelf?: boolean;
   canOffShelf?: boolean;
@@ -648,8 +647,13 @@ const RenderContent = (props: ResourceCardProps) => {
       isDigitalEmployeeResource && `${ownerType || ''}`.toLowerCase() === 'enterprise' && canEdit === true;
     const digitalEmployeeStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
 
-    // 后端按当前用户权限和默认员工关系返回 canSetDefault。
-    if (isDigitalEmployeeResource && canSetDefault === true && !isDefaultDigitalEmployee) {
+    // 设为默认必须同时具备使用权限，避免待申请员工因 canSetDefault 返回不一致而显示入口。
+    if (
+      isDigitalEmployeeResource &&
+      isTruthyFlag(resource.hasUsePermission) &&
+      canSetDefault === true &&
+      !isDefaultDigitalEmployee
+    ) {
       items.push({
         key: 'setDefaultAssistant',
         label: (
@@ -711,8 +715,8 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 使用申请与其他权限操作并列展示，由后端返回的权限字段决定其他操作是否出现。
-    if (canApplyUse && canApplyUseForStatus) {
+    // 数字员工和员工组统一使用卡片上的加号申请；其他资源保留菜单申请入口。
+    if (!isDigitalEmployeeResource && canApplyUse && canApplyUseForStatus) {
       items.push({
         key: 'applyUse',
         label: (
@@ -726,16 +730,7 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 使用审核入口暂时由审核中心统一承载，保留原逻辑注释以便后续恢复。
-    // if (canAuditUse) {
-    //   items.push({
-    //     key: 'auditUse',
-    //     label: <BuildMenuLabel icon="icon-a-Listliebiao" text={intl.formatMessage({ id: 'resource.auditUse' })} />,
-    //     onClick: () => {
-    //       onAuditUse?.();
-    //     },
-    //   });
-    // }
+    // 使用审核统一由审核中心承载，卡片不再返回或消费审核按钮权限。
 
     // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
     if (

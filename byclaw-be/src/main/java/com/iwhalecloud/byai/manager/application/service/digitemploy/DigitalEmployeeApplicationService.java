@@ -552,7 +552,6 @@ public class DigitalEmployeeApplicationService {
         employee.setCanDelete(permissions.isCanDelete());
         employee.setCanApplyUse(permissions.isCanApplyUse());
         employee.setUseApplyPending(permissions.isUseApplyPending());
-        employee.setCanAuditUse(permissions.isCanAuditUse());
         employee.setCanSetDefault(permissions.isCanSetDefault());
         employee.setCanRestore(permissions.isCanRestore());
         employee.setCanOnShelf(permissions.isCanOnShelf());
@@ -577,7 +576,6 @@ public class DigitalEmployeeApplicationService {
         employee.setCanDelete(permissions.isCanDelete());
         employee.setCanApplyUse(permissions.isCanApplyUse());
         employee.setUseApplyPending(permissions.isUseApplyPending());
-        employee.setCanAuditUse(permissions.isCanAuditUse());
         employee.setCanSetDefault(permissions.isCanSetDefault());
         employee.setCanRestore(permissions.isCanRestore());
         employee.setCanOnShelf(permissions.isCanOnShelf());

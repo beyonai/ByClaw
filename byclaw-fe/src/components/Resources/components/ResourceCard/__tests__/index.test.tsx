@@ -54,7 +54,7 @@ jest.mock('@/components/AntdIcon', () => ({
 }));
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceCard from '..';
 
@@ -70,6 +70,42 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
 };
 
 describe('ResourceCard', () => {
+  // 个人和企业删除入口均尊重后端权限，并在确认后调用专用删除回调。
+  it.each(['personal', 'enterprise'])('confirms delete data for an allowed %s employee', async (ownerType) => {
+    const onDeleteData = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{
+          resourceId: 'employee-delete',
+          resourceName: 'Deletable Employee',
+          ownerType,
+          resourceStatus: '3',
+          canDelete: true,
+        }}
+        actionConfig={{ enableDigitalEmployeeDelete: true, onDeleteData }}
+      />
+    );
+    fireEvent.click(screen.getByText('resource.deleteData'));
+    expect(onDeleteData).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    expect(onDeleteData).toHaveBeenCalledTimes(1);
+  });
+
+  // 页面开启入口也不能绕过后端 canDelete=false。
+  it('hides delete data when the employee has no delete permission', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{ resourceId: 'employee-no-delete', resourceStatus: '3', canDelete: false }}
+        actionConfig={{ enableDigitalEmployeeDelete: true, onDeleteData: jest.fn() }}
+      />
+    );
+    expect(screen.queryByText('resource.deleteData')).toBeNull();
+  });
+
   beforeEach(() => {
     class MockIntersectionObserver {
       observe = jest.fn();
@@ -209,14 +245,19 @@ describe('ResourceCard', () => {
     expect(screen.getByText('resource.defaultDigitalEmployee')).toHaveClass('defaultDigitalEmployeeBadge');
   });
 
-  it('keeps permission-based actions alongside apply use for a digital employee', () => {
+  // 员工卡片保留独立申请按钮和管理操作，不重复展示申请菜单或无使用权限的设为默认。
+  it('keeps the apply button and management actions without apply or default menu entries', () => {
     renderWithQueryClient(
       <ResourceCard
+        digitalEmployeeActionMode
         resource={{
           resourceId: 'employee-apply',
           resourceName: 'Apply Employee',
           resourceBizType: 'DIG_EMPLOYEE',
           canApplyUse: true,
+          resourceStatus: '2',
+          hasUsePermission: false,
+          canSetDefault: true,
           canEdit: true,
           canManageAuth: true,
         }}
@@ -224,12 +265,56 @@ describe('ResourceCard', () => {
       />
     );
 
-    expect(screen.getByText('resource.applyUse')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'plus' }).closest('button')).toBeTruthy();
+    expect(screen.queryByText('resource.applyUse')).toBeNull();
     expect(screen.getByText('common.editInfo')).toBeTruthy();
     expect(screen.getByText('common.manageAuthorization')).toBeTruthy();
     expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
   });
 
+  // 申请中、不可申请及权限缺失时，也不能仅凭 canSetDefault 展示默认入口。
+  it.each([
+    { hasUsePermission: false, canApplyUse: true, useApplyPending: true },
+    { hasUsePermission: false, canApplyUse: false },
+    { hasUsePermission: undefined, canApplyUse: false },
+  ])('hides set default without use permission: %j', (permissions) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{
+          resourceId: 'employee-unavailable',
+          resourceName: 'Unavailable Employee Group',
+          resourceStatus: '2',
+          canSetDefault: true,
+          ...permissions,
+        }}
+      />
+    );
+
+    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+    expect(screen.queryByText('resource.applyUse')).toBeNull();
+  });
+
+  // 共用卡片组件的其他资源仍通过菜单申请使用权限。
+  it('keeps the apply use menu for non-employee resources', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="TOOL"
+        resource={{
+          resourceId: 'tool-apply',
+          resourceName: 'Tool',
+          canApplyUse: true,
+          hasUsePermission: false,
+        }}
+        actionConfig={{ onApplyUse: jest.fn() }}
+      />
+    );
+
+    expect(screen.getByText('resource.applyUse')).toBeTruthy();
+  });
+
+  // 有使用权限且后端允许设为默认时，继续显示默认入口。
   it('shows set default for a usable non-default digital employee', () => {
     renderWithQueryClient(
       <ResourceCard
@@ -237,6 +322,7 @@ describe('ResourceCard', () => {
           resourceId: 'employee-default',
           resourceName: 'Usable Employee',
           resourceBizType: 'DIG_EMPLOYEE',
+          hasUsePermission: true,
           canSetDefault: true,
           isDefault: false,
         }}

@@ -288,6 +288,8 @@ export interface ResourceUseApplyAuditItem {
   userName: string; // 用户名称
   applyTime: string; // 申请时间
   auditTime?: string; // 审核通过或驳回的处理时间
+  auditUserId?: string; // 审核人ID
+  auditUserName?: string; // 审核人名称
   applyStatus: string; // 申请状态（如：pending/approved/rejected）
 }
 
@@ -603,7 +605,6 @@ export interface ResourceOperationPermissions {
   canUseAuth: boolean; // 是否可设置使用授权
   canDelete: boolean; // 是否有删除权限
   canApplyUse: boolean; // 是否可以申请使用
-  canAuditUse: boolean; // 是否有审核权限
   canSetDefault: boolean; // 是否有设为默认权限
   canRestore: boolean; // 是否有恢复权限
   canOnShelf?: boolean; // 是否可上架

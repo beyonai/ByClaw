@@ -4,9 +4,44 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
+import org.apache.ibatis.scripting.xmltags.XMLLanguageDriver;
+import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
 class SsResExtDigEmployeeMapperSqlTest {
+
+    /** 真实展开个人列表 SQL，确保历史授权、默认绑定和角色分支不能绕过创建者限定。 */
+    @Test
+    void personalOwnerQuery_alwaysRestrictsCreatorRegardlessOfRoleAndDefaultBinding() throws IOException {
+        String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
+        try (var input = getClass().getResourceAsStream(resourcePath)) {
+            assertThat(input).isNotNull();
+            String xml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            String query = selectBody(xml, "selectPersonalDigitalEmployeeByQo");
+            String script = "<script>" + query.substring(query.indexOf('>') + 1) + "</script>";
+            var source = new XMLLanguageDriver().createSqlSource(new Configuration(), script, DigitalEmployeeQo.class);
+            DigitalEmployeeQo qo = new DigitalEmployeeQo();
+            qo.setUserId(2L);
+            qo.setType("owner");
+            qo.setIncludeAllResourceStatus(true);
+            qo.setDefaultDigEmployeeId(100L);
+            qo.setDefaultSuperAssistantResourceCode("someone_main");
+            qo.setManagerOrgPathCodes(List.of("-1.100"));
+            for (boolean platformManager : List.of(false, true)) {
+                qo.setPlatformManager(platformManager);
+                String sql = source.getBoundSql(qo).getSql().replaceAll("\\s+", " ");
+                assertThat(sql).contains("and a.create_by = ?")
+                    .contains("a.resource_status != -1")
+                    .doesNotContain("or 1 = 1")
+                    .doesNotContain("org.path_code");
+            }
+            // 只收窄 owner 查询，其他调用方的 manageable 语义保持不变。
+            qo.setType("manageable");
+            assertThat(source.getBoundSql(qo).getSql()).contains("or 1 = 1");
+        }
+    }
 
     @Test
     void memberCandidateQuery_avoidsEmptyStringComparisonInOpenGauss() throws IOException {

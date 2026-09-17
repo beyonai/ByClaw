@@ -37,7 +37,6 @@ interface IResourceItem {
   canUseAuth?: boolean;
   canDelete?: boolean;
   canApplyUse?: boolean;
-  canAuditUse?: boolean;
   skillType?: string;
   sourceType?: string;
   version?: string;

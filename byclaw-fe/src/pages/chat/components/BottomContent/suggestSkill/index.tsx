@@ -80,7 +80,6 @@ interface ISkillItem {
   canUseAuth: boolean | null;
   canDelete: boolean | null;
   canApplyUse: boolean | null;
-  canAuditUse: boolean | null;
 }
 
 type ISkill = {

@@ -167,8 +167,9 @@ const MyEmployeesPage: React.FC = () => {
     }
     try {
       const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
+      // 个人页签只查本人创建的员工，历史管理授权不再作为列表入口。
       const type =
-        activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'manageable';
+        activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'owner';
       const res = await request({
         pageNum: requestedPage,
         pageSize: PAGE_SIZE,
@@ -366,26 +367,52 @@ const MyEmployeesPage: React.FC = () => {
     {
       title: intl.formatMessage({ id: 'myEmployees.employeeName' }),
       dataIndex: 'resourceName',
+      // 名称列承接其余列之外的可用宽度，长名称保持单行并可悬停查看全文。
       render: (value, row) => (
         <div className={styles.auditEmployeeName}>
           <div className={styles.auditEmployeeAvatar}>{getAgentChatAvatar(row.chatAvatar || row.avatar)}</div>
-          <span>{value}</span>
+          <span className={styles.auditEmployeeNameText} title={value}>
+            {value}
+          </span>
         </div>
       ),
     },
-    { title: intl.formatMessage({ id: 'myEmployees.type' }), dataIndex: 'employeeType' },
-    { title: intl.formatMessage({ id: 'myEmployees.applicant' }), dataIndex: 'userName' },
+    // 辅助信息使用紧凑列宽，把更多空间留给数字员工名称。
+    { title: intl.formatMessage({ id: 'myEmployees.type' }), dataIndex: 'employeeType', width: 110 },
+    { title: intl.formatMessage({ id: 'myEmployees.applicant' }), dataIndex: 'userName', width: 120, ellipsis: true },
     {
       title: intl.formatMessage({ id: 'myEmployees.applicationTime' }),
       dataIndex: 'applyTime',
+      width: 170,
       render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
     },
   ];
 
   if (auditFilter === 'history') {
+    // 历史记录按审核结果、审核人、处理时间排列，便于先看结论再追溯处理信息。
+    auditColumns.push({
+      title: intl.formatMessage({ id: 'myEmployees.auditResult' }),
+      dataIndex: 'applyStatus',
+      width: 120,
+      render: (value) => {
+        const status = `${value || ''}`;
+        const result = status === '审核通过' ? '通过' : status === '已驳回' ? '驳回' : status;
+        const color = result === '通过' ? 'success' : result === '驳回' ? 'error' : 'default';
+        return <Tag color={color}>{result || '-'}</Tag>;
+      },
+    });
+    // 审核人只对历史记录展示，待审核记录尚未产生处理人。
+    auditColumns.push({
+      title: intl.formatMessage({ id: 'myEmployees.auditor' }),
+      dataIndex: 'auditUserName',
+      width: 120,
+      ellipsis: true,
+      render: (value) => value || '-',
+    });
     auditColumns.push({
       title: intl.formatMessage({ id: 'myEmployees.processedTime' }),
       dataIndex: 'auditTime',
+      width: 170,
       render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
     });
   }
@@ -394,12 +421,14 @@ const MyEmployeesPage: React.FC = () => {
     auditColumns.push({
       title: intl.formatMessage({ id: 'myEmployees.status' }),
       dataIndex: 'applyStatus',
+      width: 100,
       render: (value) => (
         <Tag color={value === '已驳回' ? 'error' : value === '审核通过' ? 'success' : 'processing'}>{value}</Tag>
       ),
     });
     auditColumns.push({
       title: intl.formatMessage({ id: 'myEmployees.actions' }),
+      width: 150,
       render: (_: unknown, row: AuditRow) => (
         <Space>
           <Popconfirm
@@ -543,11 +572,15 @@ const MyEmployeesPage: React.FC = () => {
                         onEdit: () => handleEdit(employee),
                         onAuth: (type) => handleAuth(employee, type),
                         onDelete: () => handleDelete(employee),
+                        // 删除数据使用独立回调，复用删除接口及成功后的列表移除逻辑。
+                        onDeleteData: () => handleDelete(employee),
                         onShelf: () => handleShelfStatusChange(employee, 'shelf'),
                         onUnShelf: () => handleShelfStatusChange(employee, 'unShelf'),
                         // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
                         showDigitalEmployeeTypeTag: false,
                         enableDigitalEmployeeLifecycle: true,
+                        // 个人、企业页签统一按后端 canDelete 展示删除数据入口。
+                        enableDigitalEmployeeDelete: true,
                       }}
                     />
                   ))}
@@ -574,11 +607,14 @@ const MyEmployeesPage: React.FC = () => {
           </div>
           <Spin spinning={auditLoading} wrapperClassName={styles.auditTableSpin}>
             <div className={styles.auditTableWrap}>
+              {/* 固定辅助列宽，窄屏横向滚动，避免名称列被挤压换行。 */}
               <Table<AuditRow>
                 rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
                 dataSource={auditRows}
                 pagination={false}
                 sticky
+                tableLayout="fixed"
+                scroll={{ x: 1120 }}
                 columns={auditColumns}
                 locale={{
                   emptyText: (

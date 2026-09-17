@@ -304,11 +304,6 @@ public class ResourceAuthVo extends AuthVo {
      */
     private Boolean canApplyUse;
 
-    /**
-     * 是否可审核使用申请
-     */
-    private Boolean canAuditUse;
-
     private Boolean operationPermissionsLoaded;
 
     private Boolean hasManagePermission;
