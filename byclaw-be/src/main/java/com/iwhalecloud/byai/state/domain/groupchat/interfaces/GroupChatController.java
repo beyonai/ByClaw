@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatInvitati
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenResponse;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -52,15 +53,15 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatSettings
 @RestController
 @RequestMapping("/group-chats")
 public class GroupChatController {
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     private GroupChatSettingsService settingsService;
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     private GroupChatInvitationService invitationService;
     private final GroupChatApplicationService applicationService;
     private final GroupChatContextService contextService;
     private final GroupChatTaskService taskService;
     private final GroupChatReadService readService;
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     private GroupChatMessageSearchService messageSearchService;
 
     public GroupChatController(GroupChatApplicationService applicationService, GroupChatContextService contextService,
@@ -96,7 +97,7 @@ public class GroupChatController {
     public ResponseUtil<GroupChatContextResponse> context(@PathVariable Long sessionId,
         @RequestBody GroupChatContextRequest request) {
         request.setConversationKey(String.valueOf(sessionId));
-        return ResponseUtil.successResponse(contextService.load(request));
+        return ResponseUtil.successResponse(contextService.loadTimeline(request));
     }
 
     @PostMapping("/{sessionId}/messages/search")

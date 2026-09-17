@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -17,19 +17,9 @@ import java.util.Arrays;
 import java.util.List;
 import javax.sql.DataSource;
 
-import jakarta.validation.Validation;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.aop.framework.ProxyFactory;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
-import org.springframework.transaction.interceptor.TransactionInterceptor;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
-
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
@@ -37,16 +27,37 @@ import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
+import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatInvitationService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatSettingsService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatDetailResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
+import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import jakarta.validation.Validation;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class GroupChatCreationAndInvitationTest {
     private final ProjectApplicationService projects = mock(ProjectApplicationService.class);
@@ -55,10 +66,12 @@ class GroupChatCreationAndInvitationTest {
     private final SessionMemberService members = mock(SessionMemberService.class);
     private final GroupChatAuthorizationService authorization = mock(GroupChatAuthorizationService.class);
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
+    private final GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
     private GroupChatApplicationService service;
 
     @BeforeEach
     void setUp() {
+        TransactionSynchronizationManager.initSynchronization();
         LoginInfo login = new LoginInfo();
         login.setUserId(10L);
         CurrentUserHolder.setLoginInfo(login);
@@ -66,7 +79,7 @@ class GroupChatCreationAndInvitationTest {
         when(sequence.nextVal()).thenReturn(200L, 201L, 202L, 203L, 204L);
         service = new GroupChatApplicationService(sessions, sequence, authorization, members,
             projects, projectMembers, messages, mock(GroupChatExecutionCoordinator.class),
-            mock(GroupChatEventPublisher.class), mock(SessionExtService.class));
+            events, mock(SessionExtService.class));
         when(projects.createProject(any())).thenAnswer(invocation -> {
             ProjectDTO request = invocation.getArgument(0);
             Project project = new Project();
@@ -82,6 +95,9 @@ class GroupChatCreationAndInvitationTest {
 
     @AfterEach
     void tearDown() {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
         CurrentUserHolder.clearLoginInfo();
     }
 
@@ -108,51 +124,55 @@ class GroupChatCreationAndInvitationTest {
         ArgumentCaptor<ProjectDTO> projectRequest = ArgumentCaptor.forClass(ProjectDTO.class);
         verify(projects).createProject(projectRequest.capture());
         assertThat(projectRequest.getValue().getProjectName()).isEqualTo(request.getName());
+        // 初始成员属于建群状态，不进入成员变更时间线。
+        verify(messages, never()).insert(any(ByaiMessage.class));
+        TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
+        verifyNoInteractions(events);
     }
 
     @Test
     void directInvitationRouteDelegatesToApplicationService() throws Exception {
         var application = mock(GroupChatApplicationService.class);
-        var controller = new com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController(
-            application, mock(com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService.class),
-            mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService.class),
-            mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService.class));
-        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/group-chats/200/members")
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        var controller = new GroupChatController(
+            application, mock(GroupChatContextService.class),
+            mock(GroupChatTaskService.class),
+            mock(GroupChatReadService.class));
+        var mvc = MockMvcBuilders.standaloneSetup(controller).build();
+        mvc.perform(MockMvcRequestBuilders.post("/group-chats/200/members")
+                .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"type\":\"USER\",\"id\":20}"))
-            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+            .andExpect(MockMvcResultMatchers.status().isOk());
         verify(application).invite(200L, "USER", 20L);
-        var invitations = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatInvitationService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(controller, "invitationService", invitations);
+        var invitations = mock(GroupChatInvitationService.class);
+        ReflectionTestUtils.setField(controller, "invitationService", invitations);
         when(invitations.resolveSessionId("Ab1234CD")).thenReturn(200L);
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/group-chats/invitations/join")
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        mvc.perform(MockMvcRequestBuilders.post("/group-chats/invitations/join")
+                .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"token\":\"Ab1234CD\"}"))
-            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+            .andExpect(MockMvcResultMatchers.status().isOk());
         verify(application).acceptInvitation(200L, "Ab1234CD");
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/group-chats/200/members")
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        mvc.perform(MockMvcRequestBuilders.post("/group-chats/200/members")
+                .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"token\":\"Ab1234CD\"}"))
-            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+            .andExpect(MockMvcResultMatchers.status().isBadRequest());
     }
 
     @Test
     void legacyInvitationRoutesAreNotRegistered() throws Exception {
-        var controller = new com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController(
-            service, mock(com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService.class),
-            mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService.class),
-            mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService.class));
-        org.springframework.test.util.ReflectionTestUtils.setField(controller, "settingsService",
-            mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatSettingsService.class));
-        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        var controller = new GroupChatController(
+            service, mock(GroupChatContextService.class),
+            mock(GroupChatTaskService.class),
+            mock(GroupChatReadService.class));
+        ReflectionTestUtils.setField(controller, "settingsService",
+            mock(GroupChatSettingsService.class));
+        var mvc = MockMvcBuilders.standaloneSetup(controller).build();
         for (String path : List.of("/200/invitation", "/200/join-requests/me", "/200/join-requests")) {
-            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/group-chats" + path))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
+            mvc.perform(MockMvcRequestBuilders.get("/group-chats" + path))
+                .andExpect(MockMvcResultMatchers.status().isNotFound());
         }
         for (String path : List.of("/200/join", "/join-by-number", "/200/join-requests/request/review")) {
-            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/group-chats" + path))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().is4xxClientError());
+            mvc.perform(MockMvcRequestBuilders.post("/group-chats" + path))
+                .andExpect(MockMvcResultMatchers.status().is4xxClientError());
         }
         verifyNoInteractions(members, projectMembers);
     }
@@ -288,6 +308,7 @@ class GroupChatCreationAndInvitationTest {
 
     /** 使用真实 Spring 事务拦截器和 JDBC 事务管理器验证外层事务边界，无需启动业务依赖。 */
     private Connection transactionalProxy() throws Exception {
+        TransactionSynchronizationManager.clearSynchronization();
         DataSource dataSource = mock(DataSource.class);
         Connection connection = mock(Connection.class);
         when(dataSource.getConnection()).thenReturn(connection);

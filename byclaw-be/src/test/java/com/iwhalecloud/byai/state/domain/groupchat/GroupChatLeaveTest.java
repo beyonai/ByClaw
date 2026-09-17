@@ -7,43 +7,52 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import java.util.List;
 import java.util.Date;
-import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
-import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
-import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatSettingsService;
-import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
-import org.springframework.test.util.ReflectionTestUtils;
+import java.util.List;
 
+import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
+import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatSettingsService;
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
+import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-
-import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
-import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
-import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
-import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
-import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
-import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
 class GroupChatLeaveTest {
     private final SessionService sessions = mock(SessionService.class);
     private final SessionMemberService members = mock(SessionMemberService.class);
     private final GroupChatAuthorizationService authorization = mock(GroupChatAuthorizationService.class);
     private final GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
+    private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final SessionExtService extensions = mock(SessionExtService.class);
     private final GroupChatSettingsService settings = mock(GroupChatSettingsService.class);
     private final GroupChatApplicationService service = new GroupChatApplicationService(
-        sessions, mock(SequenceService.class), authorization, members, null, null, null, null, events, extensions);
+        sessions, mock(SequenceService.class), authorization, members, null, null, messages, null, events, extensions);
 
     @BeforeEach
     void setUp() {
         TransactionSynchronizationManager.initSynchronization();
+        ByaiSession group = new ByaiSession();
+        group.setSessionId(100L);
+        when(authorization.requireGroup(100L)).thenReturn(group);
+        when(sessions.findById(100L)).thenReturn(group);
         ReflectionTestUtils.setField(service, "settingsService", settings);
     }
 
@@ -61,7 +70,7 @@ class GroupChatLeaveTest {
         verify(members, never()).updateById(any());
         verify(events, never()).publish(any(), any(), any());
         TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
-        verify(events).publish(eq(100L), any(), isNull());
+        verify(events, times(2)).publish(eq(100L), any(), isNull());
     }
 
     @Test
@@ -78,11 +87,11 @@ class GroupChatLeaveTest {
         verify(members).deleteMember(1L);
         verify(events, never()).publish(any(), any(), any());
         TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
-        ArgumentCaptor<com.alibaba.fastjson.JSONObject> notifications =
-            ArgumentCaptor.forClass(com.alibaba.fastjson.JSONObject.class);
-        verify(events, org.mockito.Mockito.times(2)).publish(eq(100L), notifications.capture(), isNull());
-        assertThat(notifications.getAllValues().get(1).getString("event")).isEqualTo("OWNERSHIP_TRANSFERRED");
-        assertThat(notifications.getAllValues().get(1).getString("recipientUserId")).isEqualTo("3");
+        ArgumentCaptor<JSONObject> notifications =
+            ArgumentCaptor.forClass(JSONObject.class);
+        verify(events, times(3)).publish(eq(100L), notifications.capture(), isNull());
+        assertThat(notifications.getAllValues()).filteredOn(event -> "OWNERSHIP_TRANSFERRED".equals(event.getString("event")))
+            .singleElement().satisfies(event -> assertThat(event.getString("recipientUserId")).isEqualTo("3"));
     }
 
     @Test
@@ -105,6 +114,7 @@ class GroupChatLeaveTest {
         when(members.findOrderedGroupMembers(100L)).thenReturn(List.of(owner, member(2L, "AGENT", "MEMBER")));
         service.leave(100L);
         verify(settings).dissolve(100L);
+        verifyNoInteractions(messages, events);
         verify(members, never()).deleteMember(any());
         verify(members, never()).updateById(any());
         assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();

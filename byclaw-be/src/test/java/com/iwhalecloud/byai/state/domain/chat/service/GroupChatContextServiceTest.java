@@ -329,6 +329,40 @@ class GroupChatContextServiceTest {
         return service.load(request).getMessages().get(0);
     }
 
+    @Test
+    void timelineIncludesSystemEventsWhileAgentWindowAndRepliesExcludeThem() {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage event = message(20L, 5, "张三 邀请 李四 加入工作组", 200L);
+        event.setMetadata("{\"systemEvent\":{\"eventType\":\"MEMBER_INVITED\","
+            + "\"operatorId\":\"9223372036854775806\",\"memberId\":\"101\",\"memberName\":\"李四\"}}");
+        ByaiMessage reply = message(25L, 1, "收到", 250L);
+        reply.setMessageRef(20L);
+        when(messageMapper.selectByMessageId(20L)).thenReturn(event);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 30L, 2)).thenReturn(List.of(reply, event));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 30L)).thenReturn(3L);
+        when(messageMapper.selectVisibleBeforeMessageId(3L, 30L, 2)).thenReturn(List.of(reply));
+        when(messageMapper.countVisibleBeforeMessageId(3L, 30L)).thenReturn(1L);
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3");
+        request.setBeforeMessageId("30");
+        request.setMaxMessages(2);
+
+        GroupChatContextResponse timeline = service.loadTimeline(request);
+        assertThat(timeline.getMessages()).extracting(GroupChatContextResponse.Message::getUsage).containsExactly(5, 1);
+        GroupChatContextResponse.Message projected = timeline.getMessages().get(0);
+        assertThat(projected.getRole()).isEqualTo("event");
+        assertThat(projected.getKind()).isEqualTo("SYSTEM_EVENT");
+        assertThat(projected.getSpeaker().getType()).isEqualTo("system");
+        assertThat(projected.getSpeaker().getAgentId()).isNull();
+        assertThat(projected.getSystemEvent().getOperatorId()).isEqualTo("9223372036854775806");
+        assertThat(timeline.getMessages().get(1).getReplyTo().getUsage()).isEqualTo(5);
+        assertThat(timeline.getTruncation().getOmittedMessageCount()).isEqualTo(1);
+        GroupChatContextResponse agent = service.load(request);
+        assertThat(agent.getMessages()).singleElement().satisfies(message -> assertThat(message.getReplyTo()).isNull());
+        assertThat(agent.getTruncation().getTruncated()).isFalse();
+        assertThat(agent.getSnapshot().getLastIncludedMessageId()).isEqualTo("25");
+    }
+
     private ByaiMessage message(Long messageId, int usage, String content, long createdAt) {
         ByaiMessage message = new ByaiMessage();
         message.setMessageId(messageId);

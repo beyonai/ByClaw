@@ -2,23 +2,44 @@ package com.iwhalecloud.byai.state.domain.groupchat;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
+
+import java.sql.Connection;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.List;
-import org.junit.jupiter.api.*;
-import com.iwhalecloud.byai.manager.entity.message.MessageShareLink;
-import com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper;
+import java.util.Map;
+import javax.sql.DataSource;
+
+import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
-import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;
+import com.iwhalecloud.byai.manager.entity.message.MessageShareLink;
 import com.iwhalecloud.byai.manager.entity.session.*;
+import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.enterprise.EnterpriseInfoMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
+import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
+import com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.application.*;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.session.service.*;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import org.junit.jupiter.api.*;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class GroupChatInvitationTokenTest {
     private final MessageShareLinkMapper links = mock(MessageShareLinkMapper.class);
@@ -27,22 +48,22 @@ class GroupChatInvitationTokenTest {
     private final SessionExtService extensions = mock(SessionExtService.class);
     private final SessionMemberService members = mock(SessionMemberService.class);
     private final UserService users = mock(UserService.class);
-    private final com.iwhalecloud.byai.state.domain.sys.service.SequenceService sequence = mock(com.iwhalecloud.byai.state.domain.sys.service.SequenceService.class);
-    private final com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService projectMembers = mock(com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService.class);
-    private final com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper messages = mock(com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper.class);
-    private final com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher events = mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher.class);
+    private final SequenceService sequence = mock(SequenceService.class);
+    private final ProjectMemberService projectMembers = mock(ProjectMemberService.class);
+    private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
+    private final GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
     private final EnterpriseInfoMapper enterprises = mock(EnterpriseInfoMapper.class);
     private final GroupChatAuthorizationService auth = new GroupChatAuthorizationService(sessions, members, extensions);
     private final GroupChatInvitationService service = new GroupChatInvitationService(
-        links, sessions, extensions, members, auth, users, enterprises, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
-    private final com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService application =
-        new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService(
+        links, sessions, extensions, members, auth, users, enterprises, mock(SsResourceService.class));
+    private final GroupChatApplicationService application =
+        new GroupChatApplicationService(
             sessions, sequence, auth, members, null, projectMembers, messages, null, events, extensions);
     private ByaiSession group;
     private ByaiSessionMember owner;
 
     @BeforeEach void setup() {
-        org.springframework.test.util.ReflectionTestUtils.setField(application, "invitationService", service);
+        ReflectionTestUtils.setField(application, "invitationService", service);
         LoginInfo login = new LoginInfo();
         login.setUserId(10L);
         login.setEnterpriseId(3L);
@@ -112,8 +133,8 @@ class GroupChatInvitationTokenTest {
 
     @Test void settingsPersistEachPermissionWithoutChangingOtherSettings() {
         var settings = new GroupChatSettingsService(sessions, extensions, members, auth, sequence,
-            mock(com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper.class),
-            mock(com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper.class), events);
+            mock(ByaiGroupChatTaskMapper.class),
+            mock(ByaiGroupChatExecutionMapper.class), events);
         Map<String, ByaiSessionExt> stored = new HashMap<>();
         when(extensions.findOneByExtParamCode(eq(20L), anyString()))
             .thenAnswer(call -> stored.get(call.getArgument(1)));
@@ -124,14 +145,14 @@ class GroupChatInvitationTokenTest {
         }).when(extensions).save(any());
         assertThat(settings.settings(20L).isAllowMemberAddAgent()).isFalse();
         assertThat(settings.settings(20L).isAllowMemberInviteUser()).isFalse();
-        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.initSynchronization();
         try {
-            var request = new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest();
+            var request = new GroupChatSettingsRequest();
             request.setAllowMemberAddAgent(true);
             settings.updateSettings(20L, request);
             assertThat(settings.settings(20L).isAllowMemberAddAgent()).isTrue();
             assertThat(settings.settings(20L).isAllowMemberInviteUser()).isFalse();
-            request = new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest();
+            request = new GroupChatSettingsRequest();
             request.setAllowMemberInviteUser(true);
             settings.updateSettings(20L, request);
             assertThat(settings.settings(20L).isAllowMemberAddAgent()).isTrue();
@@ -144,7 +165,7 @@ class GroupChatInvitationTokenTest {
             var memberRequest = request;
             assertThatThrownBy(() -> settings.updateSettings(20L, memberRequest)).isInstanceOf(IllegalArgumentException.class);
         } finally {
-            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.clearSynchronization();
         }
     }
 
@@ -164,6 +185,31 @@ class GroupChatInvitationTokenTest {
         assertThat(repeated.getToken()).isEqualTo(result.getToken());
         assertThat(repeated.getExpiresAt()).isGreaterThanOrEqualTo(result.getExpiresAt());
     }
+    @Test void reusedLinkRetainsOriginalInviterWhenAnotherAdministratorRenewsIt() {
+        String token = service.create(20L).getToken();
+        ByaiSessionMember administrator = new ByaiSessionMember();
+        administrator.setMemObjId(11L);
+        administrator.setMemObjType("USER");
+        administrator.setUserRole("ADMIN");
+        when(members.findSessionMember(20L, "USER", 11L)).thenReturn(administrator);
+        Users administratorUser = new Users();
+        administratorUser.setState("A");
+        when(users.findById(11L)).thenReturn(administratorUser);
+        CurrentUserHolder.getLoginInfo().setUserId(11L);
+        assertThat(service.create(20L).getToken()).isEqualTo(token);
+        // 链接续期不会把后来的管理员写成最初的邀请人。
+        assertThat(service.validatedInviterId(20L, token)).isEqualTo(10L);
+        assertThat(records.get(20L).getCreatorId()).isEqualTo(10L);
+    }
+
+    @Test void inviterLookupRejectsForeignGroupMalformedAndExpiredTokens() {
+        String token = service.create(20L).getToken();
+        assertThatThrownBy(() -> service.validatedInviterId(21L, token)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.validatedInviterId(20L, "invalid!")).isInstanceOf(IllegalArgumentException.class);
+        records.get(20L).setExpireTime(LocalDateTime.now().minusSeconds(1));
+        assertThatThrownBy(() -> service.validatedInviterId(20L, token)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test void renewsTheSameSessionTokenFromTheCurrentTime() {
         var first = service.create(20L);
         records.get(20L).setExpireTime(LocalDateTime.now().plusMinutes(1));
@@ -201,7 +247,7 @@ class GroupChatInvitationTokenTest {
     @Test void aNewServiceInstanceReusesPersistedInvitation() {
         var first = service.create(20L);
         var restarted = new GroupChatInvitationService(links, sessions, extensions, members, auth, users,
-            enterprises, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
+            enterprises, mock(SsResourceService.class));
         assertThat(restarted.create(20L).getToken()).isEqualTo(first.getToken());
         assertThat(restarted.preview(first.getToken()).getGroupName()).isEqualTo("协作组");
         verify(links, times(1)).insert(any(MessageShareLink.class));
@@ -276,7 +322,7 @@ class GroupChatInvitationTokenTest {
         group.setProjectId(30L);
         when(sequence.nextVal()).thenReturn(99L);
         when(messages.selectLatestMessageId(20L)).thenReturn(50L);
-        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.initSynchronization();
         try {
             var joined = application.acceptInvitation(20L, token);
             assertThat(joined.getSessionId()).isEqualTo(20L);
@@ -285,16 +331,16 @@ class GroupChatInvitationTokenTest {
             assertThat(joined.getLastReadMessageId()).isEqualTo(50L);
             verify(projectMembers).addMember(30L, 11L, "member");
             verifyNoInteractions(events);
-            var callbacks = org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations();
-            assertThat(callbacks).hasSize(1);
+            var callbacks = TransactionSynchronizationManager.getSynchronizations();
+            assertThat(callbacks).hasSize(2);
             callbacks.forEach(callback -> callback.afterCommit());
-            verify(events).publish(eq(20L), any(), isNull());
+            verify(events, times(2)).publish(eq(20L), any(), isNull());
             when(members.findSessionMember(20L, "USER", 11L)).thenReturn(joined);
             assertThat(application.acceptInvitation(20L, token)).isSameAs(joined);
             verify(members, times(1)).save(any());
             verify(projectMembers, times(1)).addMember(any(), any(), any());
         } finally {
-            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.clearSynchronization();
         }
     }
 
@@ -303,18 +349,18 @@ class GroupChatInvitationTokenTest {
         CurrentUserHolder.getLoginInfo().setUserId(11L);
         when(users.findById(11L)).thenReturn(new Users());
         group.setProjectId(30L);
-        var dataSource = mock(javax.sql.DataSource.class);
-        var connection = mock(java.sql.Connection.class);
+        var dataSource = mock(DataSource.class);
+        var connection = mock(Connection.class);
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.getAutoCommit()).thenReturn(true);
-        var interceptor = new org.springframework.transaction.interceptor.TransactionInterceptor();
-        interceptor.setTransactionManager(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
-        interceptor.setTransactionAttributeSource(new org.springframework.transaction.annotation.AnnotationTransactionAttributeSource());
-        var factory = new org.springframework.aop.framework.ProxyFactory(application);
+        var interceptor = new TransactionInterceptor();
+        interceptor.setTransactionManager(new DataSourceTransactionManager(dataSource));
+        interceptor.setTransactionAttributeSource(new AnnotationTransactionAttributeSource());
+        var factory = new ProxyFactory(application);
         factory.setProxyTargetClass(true);
         factory.addAdvice(interceptor);
         when(members.save(any())).thenThrow(new IllegalStateException("group insert failed"));
-        var transactionalService = (com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService) factory.getProxy();
+        var transactionalService = (GroupChatApplicationService) factory.getProxy();
         assertThatThrownBy(() -> transactionalService.acceptInvitation(20L, token)).hasMessage("group insert failed");
         verify(connection).rollback();
         verify(connection, never()).commit();
@@ -331,12 +377,12 @@ class GroupChatInvitationTokenTest {
         owner.setMemObjType("USER");
         owner.setMemObjId(10L);
         when(members.findOrderedGroupMembers(20L)).thenReturn(List.of(owner, owner, owner, owner, owner));
-        var enterprise = new com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo();
+        var enterprise = new EnterpriseInfo();
         enterprise.setComAcctName("示例企业");
         when(enterprises.selectById(3L)).thenReturn(enterprise);
         var token = service.create(20L).getToken();
         CurrentUserHolder.clearLoginInfo();
-        var preview = com.alibaba.fastjson.JSON.parseObject(com.alibaba.fastjson.JSON.toJSONString(service.preview(token)));
+        var preview = JSON.parseObject(JSON.toJSONString(service.preview(token)));
         assertThat(preview.getString("enterpriseName")).isEqualTo("示例企业");
         var displayMembers = preview.getJSONArray("memberPreviews");
         assertThat(displayMembers).isNotNull().hasSize(4);

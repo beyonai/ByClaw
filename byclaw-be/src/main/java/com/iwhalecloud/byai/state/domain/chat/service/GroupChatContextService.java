@@ -86,7 +86,17 @@ public class GroupChatContextService {
         this(messageMapper, sessionService, resourceService, null, null);
     }
 
+    /** Agent 上下文始终只选择对话消息，事件不会挤占快照窗口。 */
     public GroupChatContextResponse load(GroupChatContextRequest request) {
+        return load(request, false);
+    }
+
+    /** 用户会话历史包含已持久化的系统事件。 */
+    public GroupChatContextResponse loadTimeline(GroupChatContextRequest request) {
+        return load(request, true);
+    }
+
+    private GroupChatContextResponse load(GroupChatContextRequest request, boolean timeline) {
         Long sessionId = parseRequiredLong(request == null ? null : request.getConversationKey(), "conversationKey");
         Long beforeMessageId = parseOptionalLong(request == null ? null : request.getBeforeMessageId());
         if (beforeMessageId == null) {
@@ -97,9 +107,11 @@ public class GroupChatContextService {
         int maxMessages = bounded(request.getMaxMessages(), DEFAULT_MAX_MESSAGES, MAX_MESSAGES);
         int maxCharacters = bounded(request.getMaxCharacters(), DEFAULT_MAX_CHARACTERS, MAX_CHARACTERS);
         long totalCount = Objects.requireNonNullElse(
-            messageMapper.countVisibleBeforeMessageId(sessionId, beforeMessageId), 0L);
-        List<ByaiMessage> newestFirst = messageMapper.selectVisibleBeforeMessageId(sessionId, beforeMessageId,
-            maxMessages);
+            timeline ? messageMapper.countTimelineBeforeMessageId(sessionId, beforeMessageId)
+                : messageMapper.countVisibleBeforeMessageId(sessionId, beforeMessageId), 0L);
+        List<ByaiMessage> newestFirst = timeline
+            ? messageMapper.selectTimelineBeforeMessageId(sessionId, beforeMessageId, maxMessages)
+            : messageMapper.selectVisibleBeforeMessageId(sessionId, beforeMessageId, maxMessages);
         if (newestFirst == null) {
             newestFirst = Collections.emptyList();
         }
@@ -108,6 +120,14 @@ public class GroupChatContextService {
 
         boolean characterTruncated = trimToCharacterLimit(ordered, maxCharacters);
         List<GroupChatContextResponse.Message> messages = toMessages(ordered);
+        if (!timeline) {
+            // 引用独立查询，不能绕过 Agent 主查询的系统事件排除规则。
+            messages.forEach(message -> {
+                if (message.getReplyTo() != null && Integer.valueOf(5).equals(message.getReplyTo().getUsage())) {
+                    message.setReplyTo(null);
+                }
+            });
+        }
 
         GroupChatContextResponse response = new GroupChatContextResponse();
         response.setConversationKey(String.valueOf(sessionId));
@@ -207,7 +227,12 @@ public class GroupChatContextService {
             message.setResourceList(toMemberResources(source.getMetadata()));
             message.setClientRequestId(toClientRequestId(source.getMetadata()));
             message.setTaskId(toMetadataString(source.getMetadata(), "taskId"));
-            message.setKind(toMetadataString(source.getMetadata(), "kind"));
+            message.setUsage(source.getUsage());
+            message.setKind(Integer.valueOf(5).equals(source.getUsage()) ? "SYSTEM_EVENT"
+                : toMetadataString(source.getMetadata(), "kind"));
+            if (Integer.valueOf(5).equals(source.getUsage())) {
+                message.setSystemEvent(toSystemEvent(source.getMetadata()));
+            }
             ByaiGroupChatTask task = tasks.get(messageTaskId(source));
             // 归属以任务记录为准，不使用发言 Agent、发布人或客户端 metadata 中的用户 ID。
             if (task != null && Objects.equals(task.getGroupSessionId(), source.getSessionId())
@@ -215,7 +240,7 @@ public class GroupChatContextService {
                 message.setInitiatorUserId(String.valueOf(task.getInitiatorUserId()));
             }
             message.setTarget(toTarget(source));
-            message.setRole(Integer.valueOf(1).equals(source.getUsage()) ? "user" : "assistant");
+            message.setRole(toRole(source.getUsage()));
             message.setSpeaker(toSpeaker(source, resources));
             message.setAttachments(toAttachments(source, cloudResources));
             if (source.getMessageRef() != null) {
@@ -225,7 +250,8 @@ public class GroupChatContextService {
                     reply.setMessageId(String.valueOf(referenced.getMessageId()));
                     reply.setContent(StringUtils.defaultString(referenced.getMessageContent()));
                     reply.setResourceList(toMemberResources(referenced.getMetadata()));
-                    reply.setRole(Integer.valueOf(1).equals(referenced.getUsage()) ? "user" : "assistant");
+                    reply.setUsage(referenced.getUsage());
+                    reply.setRole(toRole(referenced.getUsage()));
                     reply.setSpeaker(toSpeaker(referenced, resources));
                     message.setReplyTo(reply);
                 }
@@ -259,6 +285,21 @@ public class GroupChatContextService {
         }
         catch (NumberFormatException ignored) {
             // 旧消息的无效任务引用不应阻断整页历史，也不能据此猜测任务归属。
+            return null;
+        }
+    }
+
+    private String toRole(Integer usage) {
+        return Integer.valueOf(5).equals(usage) ? "event" : Integer.valueOf(1).equals(usage) ? "user" : "assistant";
+    }
+
+    private GroupChatContextResponse.SystemEvent toSystemEvent(String metadata) {
+        try {
+            JSONObject object = JSON.parseObject(metadata);
+            return object == null ? null : object.getObject("systemEvent", GroupChatContextResponse.SystemEvent.class);
+        }
+        catch (RuntimeException ignored) {
+            // 元数据缺失或损坏时仍保留事件正文，不能伪装成 Agent 回复。
             return null;
         }
     }
@@ -316,6 +357,11 @@ public class GroupChatContextService {
 
     private GroupChatContextResponse.Speaker toSpeaker(ByaiMessage message, Map<Long, SsResource> resources) {
         GroupChatContextResponse.Speaker speaker = new GroupChatContextResponse.Speaker();
+        if (Integer.valueOf(5).equals(message.getUsage())) {
+            speaker.setType("system");
+            speaker.setDisplayName("系统");
+            return speaker;
+        }
         if (Integer.valueOf(1).equals(message.getUsage())) {
             speaker.setType("user");
             speaker.setUserCode(resolveUserCode(message));

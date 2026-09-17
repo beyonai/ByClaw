@@ -45,6 +45,15 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - 项目成员、群成员和员工授权共用数据库事务，任一写入失败整体回滚。权限集合与用户权限缓存在事务提交后同步，回滚不发布权限缓存。
 - 本次不处理退出或移除成员后的撤权，也不补建群初始授权、后续邀请数字员工时向已有真人授权或存量群数据。
 
+## 群聊成员系统消息
+
+- 已有工作组的直接邀请（真人或数字员工）、链接入群、主动退出和管理员移除，各保存一条 `byai_message.usage=5` 消息。建群时的初始成员不生成消息；最后一位真人群主退出仍走解散，不生成退群消息。角色变更和解散提示不在此类持久化范围内。
+- 正文分别为 `邀请者 邀请 成员 加入工作组`、`成员 离开了工作组`、`操作者 将 成员 移出工作组`。名称保存操作时的快照，优先群昵称，再取用户或数字员工名称，缺失时显示 ID。链接入群使用链接记录中的邀请者，不使用加入者或转发者作为邀请者。
+- 消息与成员变更同事务保存。提交后保留 `MEMBER_ADDED` / `MEMBER_REMOVED` 成员通知，并发送 `GROUP_CHAT_EVENT / MESSAGE_CREATED` 消息；失败回滚、重复入群不产生新消息。WebSocket 仍为尽力投递，掉线后通过历史接口恢复。
+- `POST /group-chats/{sessionId}/context` 返回包含 `usage=5` 的会话时间线。历史与实时消息均提供 `messageId`、`usage=5`、`kind=SYSTEM_EVENT`、`role=event`、`speaker.type=system`、`content`、`createdAt` 和 `systemEvent`。`systemEvent` 含 `eventType`（`MEMBER_INVITED` / `MEMBER_LEFT` / `MEMBER_REMOVED`）、`operatorId`、`operatorName`、`memberId`、`memberType`、`memberName`；ID 使用字符串。前端按 `messageId` 合并实时与历史消息，后续需适配系统消息展示。
+- Agent 使用的 `GroupChatContextService.load` 仍只读取 `usage=1/2`，筛选发生在分页与截断之前。`GroupChatSessionContextFileService` 写入 `group-history.json` 和 `task-history.jsonl` 时排除系统事件，也不通过回复引用带入系统事件正文。这些事件不会作为模型指令或助手回答进入上下文。
+- 本次不改前端、不回填旧事件、不扩展消息搜索范围，也不修改数据库结构或初始化 SQL。
+
 ## 群聊引用续聊与自动协作
 
 - 用户非引用 `@` 创建新的协作链；引用群消息或 Agent 之间 `@` 时，在该链中复用目标助理的子会话。每个助理保留自己的 session，首次参与时创建；重复消息只登记一次 turn。

@@ -7,6 +7,10 @@ import java.time.ZoneId;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.message.MessageShareLink;
 import com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -32,15 +36,15 @@ public class GroupChatInvitationService {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String TOKEN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     private final MessageShareLinkMapper links;
-    private final com.iwhalecloud.byai.state.domain.session.service.SessionService sessions;
+    private final SessionService sessions;
     private final SessionExtService extensions;
     private final SessionMemberService members;
     private final GroupChatAuthorizationService authorization;
     private final UserService users;
     private final EnterpriseInfoMapper enterprises;
-    private final com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService resources;
+    private final SsResourceService resources;
 
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional
     public GroupChatInvitationTokenResponse create(Long sessionId) {
         Long userId = requireUser();
         sessions.lockById(sessionId);
@@ -123,6 +127,14 @@ public class GroupChatInvitationService {
         requireEnterprise(group);
         if (users.findById(requireUser()) == null) throw invalid();
         return group;
+    }
+
+    /** 群锁内读取服务端保存的邀请者，不能把链接使用者当作邀请者。 */
+    public Long validatedInviterId(Long sessionId, String token) {
+        InvitationRecord record = read(token);
+        if (!Objects.equals(sessionId, record.getSessionId())) throw invalid();
+        validate(record);
+        return record.getInviterId();
     }
 
     private GroupChatInvitationResponse.MemberPreview memberPreview(ByaiSessionMember member) {

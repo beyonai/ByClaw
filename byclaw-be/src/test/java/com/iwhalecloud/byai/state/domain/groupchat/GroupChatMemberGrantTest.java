@@ -3,10 +3,10 @@ package com.iwhalecloud.byai.state.domain.groupchat;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -49,9 +49,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.SetOperations;
 import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.data.redis.core.SetOperations;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
@@ -91,6 +91,7 @@ class GroupChatMemberGrantTest {
         group.setProjectId(100L);
         when(authorization.requireGroup(200L)).thenReturn(group);
         when(invitations.validateForMemberInvitation(200L, "Ab1234CD")).thenReturn(group);
+        when(invitations.validatedInviterId(200L, "Ab1234CD")).thenReturn(20L);
         when(members.findSessionMembers(200L, "AGENT", null)).thenReturn(List.of(agent(30L), agent(40L), agent(30L)));
         when(grantMapper.selectList(any())).thenReturn(List.of());
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "member-grant-test"),
@@ -147,7 +148,7 @@ class GroupChatMemberGrantTest {
         assertGrantTargets(10L, 30L, 40L);
         verify(projectMembers).addMember(100L, 10L, "member");
         verify(connection).commit();
-        verify(events).publish(any(), any(), any());
+        verify(events, times(2)).publish(any(), any(), any());
     }
 
     @Test
