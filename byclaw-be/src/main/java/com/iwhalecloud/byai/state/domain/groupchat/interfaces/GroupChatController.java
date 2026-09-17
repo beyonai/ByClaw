@@ -31,12 +31,16 @@ import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageSearchService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMessageSearchRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMessageSearchResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.DirectSessionCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatDetailResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTransferOwnershipRequest;
 
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationResponse;
@@ -56,6 +60,8 @@ public class GroupChatController {
     private final GroupChatContextService contextService;
     private final GroupChatTaskService taskService;
     private final GroupChatReadService readService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private GroupChatMessageSearchService messageSearchService;
 
     public GroupChatController(GroupChatApplicationService applicationService, GroupChatContextService contextService,
         GroupChatTaskService taskService, GroupChatReadService readService) {
@@ -91,6 +97,18 @@ public class GroupChatController {
         @RequestBody GroupChatContextRequest request) {
         request.setConversationKey(String.valueOf(sessionId));
         return ResponseUtil.successResponse(contextService.load(request));
+    }
+
+    @PostMapping("/{sessionId}/messages/search")
+    public ResponseUtil<GroupChatMessageSearchResponse> searchMessages(@PathVariable Long sessionId,
+        @RequestBody(required = false) GroupChatMessageSearchRequest request) {
+        return ResponseUtil.successResponse(messageSearchService.search(sessionId, request));
+    }
+
+    @GetMapping("/{sessionId}/messages/{messageId}/context")
+    public ResponseUtil<GroupChatContextResponse> messageContext(@PathVariable Long sessionId,
+        @PathVariable Long messageId) {
+        return ResponseUtil.successResponse(messageSearchService.around(sessionId, messageId));
     }
 
     @GetMapping("/{sessionId}")
@@ -148,6 +166,17 @@ public class GroupChatController {
         return ResponseUtil.successResponse(settingsService.updateNickname(sessionId, request.getNickname()));
     }
 
+    @GetMapping("/{sessionId}/lifecycle")
+    public ResponseUtil<Map<String, Boolean>> lifecycle(@PathVariable Long sessionId) {
+        return ResponseUtil.successResponse(Map.of("dissolved", settingsService.isDissolved(sessionId)));
+    }
+
+    @PostMapping("/{sessionId}/dissolution-acknowledgment")
+    public ResponseUtil<Void> acknowledgeDissolution(@PathVariable Long sessionId) {
+        settingsService.acknowledgeDissolution(sessionId);
+        return ResponseUtil.successResponse(null);
+    }
+
     @DeleteMapping("/{sessionId}")
     public ResponseUtil<Void> dissolve(@PathVariable Long sessionId) {
         settingsService.dissolve(sessionId);
@@ -168,8 +197,9 @@ public class GroupChatController {
     }
 
     @PostMapping("/{sessionId}/transfer-ownership")
-    public ResponseUtil<Void> transferOwnership(@PathVariable Long sessionId, @RequestBody Map<String, Long> body) {
-        applicationService.transferOwnership(sessionId, body == null ? null : body.get("userId"));
+    public ResponseUtil<Void> transferOwnership(@PathVariable Long sessionId,
+        @Valid @RequestBody GroupChatTransferOwnershipRequest request) {
+        applicationService.transferOwnership(sessionId, request.getUserId());
         return ResponseUtil.successResponse(null);
     }
 

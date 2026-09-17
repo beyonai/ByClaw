@@ -40,6 +40,9 @@ public class GroupChatEventPublisher {
         int sent = 0;
         List<ByaiSessionMember> members = memberService.findSessionMembers(sessionId, MemObjType.USER.name(), null);
         for (ByaiSessionMember member : members) {
+            // 群主交接提示只推送给新群主的在线设备。
+            if ("OWNERSHIP_TRANSFERRED".equals(event.getString("event"))
+                && !String.valueOf(member.getMemObjId()).equals(event.getString("recipientUserId"))) continue;
             for (Channel channel : channelManager.getChannels(member.getMemObjId())) {
                 if (channel.equals(excludedChannel) || !channel.isActive()) {
                     continue;

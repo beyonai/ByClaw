@@ -234,6 +234,57 @@
         LIMIT #{limit}
     </select>
 
+    <select id="selectVisibleGroupMessage" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id = #{messageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2)
+          AND message_content IS NOT NULL
+        LIMIT 1
+    </select>
+
+    <select id="selectVisibleAfterMessageId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &gt; #{messageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2)
+          AND message_content IS NOT NULL
+        ORDER BY create_time ASC, message_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="searchVisibleGroupMessages" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message message
+        WHERE message.session_id = #{sessionId}
+          AND message.archived_at IS NULL
+          AND message."usage" IN (1, 2)
+          AND message.message_content IS NOT NULL
+          <if test="keyword != null">
+              AND LOWER(message.message_content) LIKE CONCAT('%', LOWER(#{keyword}), '%') ESCAPE '\'
+          </if>
+          <if test="scope == 'MINE'">AND message.creator_id = #{userId}</if>
+          <if test="scope == 'MENTIONED_ME'">
+              AND EXISTS (
+                  SELECT 1 FROM byai_group_chat_mention mention
+                  WHERE mention.group_session_id = message.session_id
+                    AND mention.message_id = message.message_id
+                    AND mention.mentioned_user_id = #{userId}
+              )
+          </if>
+          <if test="senderType == 'USER'">AND message."usage" = 1</if>
+          <if test="senderType == 'AGENT'">AND message."usage" = 2</if>
+          <if test="startTime != null">AND message.create_time &gt;= #{startTime}</if>
+          <if test="endTime != null">AND message.create_time &lt;= #{endTime}</if>
+          <if test="beforeMessageId != null">AND message.message_id &lt; #{beforeMessageId}</if>
+        ORDER BY message.message_id DESC
+        LIMIT #{limit}
+    </select>
+
     <select id="selectPreviousTaskAnswers" resultMap="BaseResultMap" useCache="false">
         SELECT message_id, metadata, message_content
         FROM byai_message

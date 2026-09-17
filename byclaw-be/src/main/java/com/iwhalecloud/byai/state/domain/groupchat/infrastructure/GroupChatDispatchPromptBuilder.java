@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 import java.util.List;
 
 import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatTaskDeliverySignal;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.ContextFile;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.TaskHandoffHistory;
 
@@ -33,10 +34,18 @@ public class GroupChatDispatchPromptBuilder {
     }
 
     /** 初次任务和任务内修改共用交付提醒，是否已交付由 Agent 根据本轮实际结果判断。 */
-    public String appendTaskDeliveryReminder(String content) {
+    public String appendTaskDeliveryReminder(String content, Long taskSessionId) {
+        String signalPath = "/by" + GroupChatTaskDeliverySignal.storagePath(taskSessionId);
         return content + "\n\n[任务交付提醒]\n"
             + "仅当当前会话已判定为 TASK，且本轮已经向用户展示可检查的新产物、更新后的产物、"
-            + "有效文件链接或完整交付内容时，在答复末尾自然地提醒一次："
+            + "有效文件链接或完整交付内容时，必须在本轮结束前静默写入交付信号文件：" + signalPath + "。\n"
+            + "文件内容必须为：{\"schemaVersion\":\"" + GroupChatTaskDeliverySignal.SCHEMA_VERSION
+            + "\",\"taskSessionId\":\"" + taskSessionId + "\",\"delivered\":true}。\n"
+            + "必须实际写入文件，不能用口头声明或展示 JSON 代替。已有有效信号则保留，不重复写入；"
+            + "后续普通追问、修改请求、执行失败或切换 Agent 均不得删除、重置或改为 false。"
+            + "尚未交付或判定为 CHAT 时不创建信号。信号仅表示曾有交付，不表示用户已授权发布。"
+            + "不要向用户展示信号文件、路径或内部协议，也不要把信号文件当成交付物。\n"
+            + "本轮满足上述交付条件时，在答复末尾自然地提醒一次："
             + "“你可以先检查一下，有需要调整的地方随时告诉我；确认没问题后，可以让我帮你发布到群里。”\n"
             + "尚未完成交付、执行失败、等待用户补充信息或本轮只是普通问答时不要提醒；"
             + "CHAT 回复不提醒，不要在过程说明中反复提醒，不要将提醒写入 taskName 或 ackText。"

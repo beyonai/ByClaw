@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -441,6 +442,9 @@ public class GroupChatApplicationService {
         if (target == null || UserRole.OWNER.name().equals(target.getUserRole())) {
             throw new IllegalArgumentException("Member cannot be assigned this role");
         }
+        if (UserRole.ADMIN.name().equals(role) && !role.equals(target.getUserRole())) {
+            recordAdminAppointment(sessionId, target);
+        }
         target.setUserRole(role);
         memberService.updateById(target);
     }
@@ -451,31 +455,89 @@ public class GroupChatApplicationService {
         authorizationService.requireOwner(sessionId);
         ByaiSessionMember current = authorizationService.requireCurrentUserMember(sessionId);
         ByaiSessionMember target = memberService.findSessionMember(sessionId, MemObjType.USER.name(), newOwnerUserId);
-        if (target == null) {
-            throw new IllegalArgumentException("New owner must be a group member");
+        if (target == null || Objects.equals(current.getMemObjId(), newOwnerUserId)) {
+            throw new IllegalArgumentException("New owner must be another group member");
         }
+        recordAdminAppointment(sessionId, current);
         current.setUserRole(UserRole.ADMIN.name());
         target.setUserRole(UserRole.OWNER.name());
         memberService.updateById(current);
         memberService.updateById(target);
     }
 
+    private String adminAppointmentKey(ByaiSessionMember member) {
+        // 使用成员记录 ID，退群再加入不会继承上次任命的顺位。
+        return "group_admin_since_" + member.getByaiSessionMemberId();
+    }
+
+    private void recordAdminAppointment(Long sessionId, ByaiSessionMember member) {
+        String code = adminAppointmentKey(member);
+        ByaiSessionExt ext = sessionExtService.findOneByExtParamCode(sessionId, code);
+        boolean create = ext == null;
+        if (create) {
+            ext = new ByaiSessionExt();
+            ext.setExtId(sequenceService.nextVal());
+            ext.setSessionId(sessionId);
+            ext.setExtParamCode(code);
+            ext.setExtParamName(code);
+        }
+        ext.setExtParamValue(String.valueOf(System.currentTimeMillis()));
+        if (create) sessionExtService.save(ext);
+        else sessionExtService.update(ext);
+    }
+
+    private long joinedAt(ByaiSessionMember member) {
+        return member.getCreateTime() == null ? Long.MAX_VALUE : member.getCreateTime().getTime();
+    }
+
+    private long adminAppointmentTime(Long sessionId, ByaiSessionMember member) {
+        ByaiSessionExt ext = sessionExtService.findOneByExtParamCode(sessionId, adminAppointmentKey(member));
+        if (ext != null) {
+            try {
+                return Long.parseLong(ext.getExtParamValue());
+            } catch (NumberFormatException ignored) {
+                // 存量数据没有可用任命时间时，按入群顺序兜底。
+            }
+        }
+        return joinedAt(member);
+    }
+
     @Transactional
     public void leave(Long sessionId) {
         sessionService.lockById(sessionId);
         ByaiSessionMember current = authorizationService.requireCurrentUserMember(sessionId);
+        JSONObject ownershipEvent = new JSONObject();
         if (UserRole.OWNER.name().equals(current.getUserRole())) {
             // 在同一群锁和事务内交接后退出，避免并发退群留下无群主的工作组。
-            // 复用成员展示顺序：管理员优先，同角色按成员记录 ID 排序。
+            // 管理员按任命时间，普通成员按入群时间；时间相同再按成员记录 ID 排序。
+            Map<Long, Long> appointmentTimes = new HashMap<>();
             ByaiSessionMember successor = memberService.findOrderedGroupMembers(sessionId).stream()
                 .filter(member -> MemObjType.USER.name().equals(member.getMemObjType()))
                 .filter(member -> !Objects.equals(current.getMemObjId(), member.getMemObjId()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("没有其他真人成员，请使用“解散工作组”"));
+                .min(Comparator
+                    .comparingInt((ByaiSessionMember member) -> UserRole.ADMIN.name().equals(member.getUserRole()) ? 0 : 1)
+                    .thenComparingLong(member -> UserRole.ADMIN.name().equals(member.getUserRole())
+                        ? appointmentTimes.computeIfAbsent(member.getByaiSessionMemberId(),
+                            id -> adminAppointmentTime(sessionId, member))
+                        : joinedAt(member))
+                    .thenComparing(ByaiSessionMember::getByaiSessionMemberId))
+                .orElse(null);
+            if (successor == null) {
+                // 保留群主审计记录，复用解散用例停止任务并通知在线设备。
+                settingsService.dissolve(sessionId);
+                return;
+            }
             ByaiSessionMember update = new ByaiSessionMember();
             update.setByaiSessionMemberId(successor.getByaiSessionMemberId());
             update.setUserRole(UserRole.OWNER.name());
             memberService.updateById(update);
+            ByaiSession group = sessionService.findById(sessionId);
+            ownershipEvent.put("type", "GROUP_CHAT_EVENT");
+            ownershipEvent.put("event", "OWNERSHIP_TRANSFERRED");
+            ownershipEvent.put("eventId", String.valueOf(sequenceService.nextVal()));
+            ownershipEvent.put("sessionId", String.valueOf(sessionId));
+            ownershipEvent.put("recipientUserId", String.valueOf(successor.getMemObjId()));
+            ownershipEvent.put("groupName", group == null ? "工作组" : group.getSessionName());
         }
         memberService.deleteMember(current.getByaiSessionMemberId());
         JSONObject event = new JSONObject();
@@ -486,6 +548,7 @@ public class GroupChatApplicationService {
             @Override
             public void afterCommit() {
                 eventPublisher.publish(sessionId, event, null);
+                if (!ownershipEvent.isEmpty()) eventPublisher.publish(sessionId, ownershipEvent, null);
             }
         });
     }

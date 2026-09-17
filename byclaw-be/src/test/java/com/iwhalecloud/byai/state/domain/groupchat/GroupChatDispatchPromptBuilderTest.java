@@ -12,7 +12,10 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispa
 class GroupChatDispatchPromptBuilderTest {
     @Test
     void deliveryReminderRequiresActualTaskDeliveryAndPreservesPublicationConfirmation() {
-        String content = new GroupChatDispatchPromptBuilder().appendTaskDeliveryReminder("完成报告");
+        String content = new GroupChatDispatchPromptBuilder().appendTaskDeliveryReminder("完成报告", 31L);
+        assertTrue(content.contains("/by/.sessions/31/.byclaw/task-delivery.json"));
+        assertTrue(content.contains("\"taskSessionId\":\"31\",\"delivered\":true"));
+        assertTrue(content.contains("不得删除、重置或改为 false"));
         assertTrue(content.startsWith("完成报告\n\n"));
         assertTrue(content.contains("当前会话已判定为 TASK"));
         assertTrue(content.contains("更新后的产物"));

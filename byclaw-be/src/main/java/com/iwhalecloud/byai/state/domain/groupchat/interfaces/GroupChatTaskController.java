@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskDeliveryService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskDeliveryResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatPendingPublicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatPendingPublicationRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatPendingPublicationResponse;
@@ -26,9 +28,19 @@ public class GroupChatTaskController {
 
     private final GroupChatPendingPublicationService pendingService;
 
-    public GroupChatTaskController(GroupChatTaskService taskService, GroupChatPendingPublicationService pendingService) {
+    private final GroupChatTaskDeliveryService deliveryService;
+
+    public GroupChatTaskController(GroupChatTaskService taskService, GroupChatPendingPublicationService pendingService,
+        GroupChatTaskDeliveryService deliveryService) {
         this.taskService = taskService;
         this.pendingService = pendingService;
+        this.deliveryService = deliveryService;
+    }
+
+    /** 交付标记与发布权限分开，查询不会创建待发布内容或修改任务。 */
+    @GetMapping("/{taskId}/delivery-status")
+    public ResponseUtil<GroupChatTaskDeliveryResponse> deliveryStatus(@PathVariable Long taskId) {
+        return ResponseUtil.successResponse(deliveryService.current(taskId));
     }
 
     /** prepare_group_task_publication 使用登录用户身份调用，不能指定发布人或目标云盘。 */

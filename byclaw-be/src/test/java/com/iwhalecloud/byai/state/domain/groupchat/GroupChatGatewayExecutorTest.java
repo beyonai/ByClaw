@@ -143,7 +143,7 @@ class GroupChatGatewayExecutorTest {
         Map<String, Object> params = new HashMap<>();
         params.put("groupChat", Map.of("conversationKey", "60"));
         String decorated = (String) executor.decorate(context, child.getMessageContent(), params);
-        assertThat(decorated).contains("group-chat-disposition.json", "HUMAN_30", "用户三十", "[任务交付提醒]");
+        assertThat(decorated).contains("group-chat-disposition.json", "HUMAN_30", "用户三十", "[任务交付提醒]", "/by/.sessions/60/.byclaw/task-delivery.json");
         assertThat(child.getMessageContent()).doesNotContain("group-chat-disposition.json");
         Map<?, ?> groupChat = (Map<?, ?>) params.get("groupChat");
         assertThat(groupChat.get("contextToken")).isEqualTo("signed-context-token");
@@ -186,7 +186,7 @@ class GroupChatGatewayExecutorTest {
         context.assistantChatDto.setChatContent("修改报告");
         context.traceId = ScriptService.getTraceId(81L, 82L);
         String content = (String) executor.decorate(context, "修改报告", new HashMap<>());
-        assertThat(content).startsWith("修改报告").contains("[任务交付提醒]")
+        assertThat(content).startsWith("修改报告").contains("[任务交付提醒]", "/by/.sessions/60/.byclaw/task-delivery.json")
             .doesNotContain("群聊判定协议", "group-chat-disposition.json");
         assertThat(context.assistantChatDto.getChatContent()).isEqualTo("修改报告");
         for (String status : List.of("PUBLISHED", "CANCELLED")) {
@@ -219,7 +219,7 @@ class GroupChatGatewayExecutorTest {
             context.assistantChatDto.setAgentId(agentId);
             Map<String, Object> params = new HashMap<>();
             String result = (String) executor.decorate(context, "继续", params);
-            assertThat(result).contains("task-history.jsonl", "group-history.json", "[任务交付提醒]").doesNotContain("群聊判定协议");
+            assertThat(result).contains("task-history.jsonl", "group-history.json", "[任务交付提醒]", "/by/.sessions/60/.byclaw/task-delivery.json").doesNotContain("群聊判定协议");
             assertThat(((Map<?, ?>) params.get("groupChat")).get("targetAgentId")).isEqualTo(40L);
             verify(taskAuthorization).requireActiveAgent(60L, agentId);
         }
@@ -232,7 +232,7 @@ class GroupChatGatewayExecutorTest {
         ChatProcessContext context = taskContext(41L);
         when(messages.selectPreviousTaskAnswers(60L, 81L, 50)).thenReturn(List.of(answer(80L, 41L)));
         String content = (String) executor.decorate(context, "继续", new HashMap<>());
-        assertThat(content).contains("[任务交付提醒]").doesNotContain("任务接手上下文", "群聊历史", ".byclaw/context");
+        assertThat(content).contains("[任务交付提醒]", "/by/.sessions/60/.byclaw/task-delivery.json").doesNotContain("任务接手上下文", "群聊历史", ".byclaw/context");
         verifyNoInteractions(historyFiles);
     }
 
