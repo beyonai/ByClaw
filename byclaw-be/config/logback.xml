@@ -111,6 +111,7 @@
     <logger name="org.springframework.web.servlet.DispatcherServlet" level="WARN"/>
     <logger name="org.springframework.kafka.listener.KafkaMessageListenerContainer" level="WARN"/>
     <logger name="ch.qos.logback.core.rolling.helper" level="WARN"/>
+    <logger name="com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager" level="ERROR"/>
 
     <!-- 特定包日志级别配置 -->
     <logger name="interceptor.com.iwhalecloud.byai.manager.datasource.DataSourceMethodInterceptor" level="WARN"/>
