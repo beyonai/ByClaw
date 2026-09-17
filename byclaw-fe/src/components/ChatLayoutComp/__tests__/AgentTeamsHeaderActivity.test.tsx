@@ -15,11 +15,20 @@ const mockMessageHandlers = new Map<string, (message: any) => void>();
 const messages: Record<string, string> = {
   'agentTeamsActivity.openPanel': '打开专家团活动面板',
   'agentTeamsActivity.panelTitle': '专家团活动面板',
+  'ui.team.running': '执行中',
+  'ui.team.stopped': '已停止',
+  'ui.team.completed': '已完成',
+  'ui.team.idle': '待命',
+  'ui.team.openChild': '打开{name}子会话',
 };
+const formatMessage = ({ id }: { id: string }, values?: Record<string, unknown>) =>
+  (messages[id] || id).replace(/\{(\w+)\}/g, (_, key) => `${values?.[key] ?? ''}`);
+const mockIntl = { formatMessage };
 
 jest.mock('@umijs/max', () => ({
   useDispatch: () => mockDispatch,
-  useIntl: () => ({ formatMessage: ({ id }: { id: string }) => messages[id] || id }),
+  useIntl: () => mockIntl,
+  getIntl: () => mockIntl,
 }));
 jest.mock('@/hooks/useGlobal', () => () => ({ setSessionId: mockSetSessionId }));
 jest.mock('@/utils/websocket', () => ({
@@ -116,7 +125,7 @@ describe('AgentTeamsHeaderActivity', () => {
     const panel = screen.getByRole('dialog', { name: '专家团活动面板' });
     expect(within(panel).queryByText(/DSH|TEAM RUNTIME/i)).not.toBeInTheDocument();
     expect(within(panel).getByText('待命')).toBeInTheDocument();
-    expect(within(panel).getByText('进行中')).toBeInTheDocument();
+    expect(within(panel).getByText('执行中')).toBeInTheDocument();
     expect(within(panel).getByText('任务 1')).toBeInTheDocument();
     expect(within(panel).queryByText('任务 6')).not.toBeInTheDocument();
     fireEvent.click(within(panel).getByRole('button', { name: '下一页' }));

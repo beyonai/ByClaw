@@ -14,9 +14,19 @@ import { getConnectorAuthorization, queryAllConnectors, startConnectorAuthorizat
 
 jest.setTimeout(90000);
 
-jest.mock('@umijs/max', () => ({
-  useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
-}));
+jest.mock('@umijs/max', () => {
+  const messages = jest.requireActual('@/locales/zh-CN').default as Record<string, string>;
+  const formatMessage = ({ id }: { id: string }, values?: Record<string, unknown>) =>
+    (messages[id] || id).replace(/\{(\w+)\}/g, (_, key) => `${values?.[key] ?? ''}`);
+  const intl = { formatMessage };
+  const componentFormatMessage = ({ id }: { id: string }, values?: Record<string, unknown>) =>
+    id.startsWith('ui.email.') ? formatMessage({ id }, values) : id;
+
+  return {
+    useIntl: () => ({ formatMessage: componentFormatMessage }),
+    getIntl: () => intl,
+  };
+});
 
 jest.mock('@/service/personalEmail', () => ({
   queryPersonalEmailAccounts: jest.fn(),

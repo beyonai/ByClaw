@@ -16,8 +16,18 @@ let newMessageHandler: ((message: any) => void | Promise<void>) | undefined;
 let scopedStatusHandler: ((message: any) => void | Promise<void>) | undefined;
 let reconnectHandler: (() => void) | undefined;
 
+const messages: Record<string, string> = {
+  'ui.team.openChildren': '打开子会话列表',
+  'ui.team.childCount': '{count} 个子代理',
+  'ui.team.running': '执行中',
+  'ui.team.completed': '已完成',
+};
+const formatMessage = ({ id }: { id: string }, values?: Record<string, unknown>) =>
+  (messages[id] || id).replace(/\{(\w+)\}/g, (_, key) => `${values?.[key] ?? ''}`);
+
 jest.mock('@umijs/max', () => ({
   useDispatch: () => mockDispatch,
+  useIntl: () => ({ formatMessage }),
 }));
 
 jest.mock('@/hooks/useGlobal', () => () => ({

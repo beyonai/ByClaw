@@ -56,8 +56,7 @@ describe('chat resource file picker', () => {
     await screen.findByText(nestedFolder.name);
     expand(nestedFolder.name);
     await screen.findByText(file.name);
-    const fileRow = screen.getByText(file.name).closest('.ant-tree-treenode') as HTMLElement;
-    fireEvent.doubleClick(fileRow);
+    fireEvent.doubleClick(screen.getByText(file.name));
     expect(listFiles).toHaveBeenCalledWith({ resourceId: 'employee-resource', path: nestedFolder.path });
     expect(onSelect).toHaveBeenLastCalledWith(
       expect.objectContaining({
