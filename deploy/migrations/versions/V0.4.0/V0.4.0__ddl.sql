@@ -864,18 +864,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_task_plan_run
 ALTER TABLE byai.byai_super_delegations
   ADD COLUMN last_activity_at timestamptz NULL;
 
-UPDATE byai.byai_super_delegations
-   SET last_activity_at = updated_at
- WHERE started_at IS NOT NULL;
-
-INSERT INTO byai.byai_super_schema_migrations(version, name)
-SELECT 10, 'delegation_last_activity'
-WHERE NOT EXISTS (
-  SELECT 1
-    FROM byai.byai_super_schema_migrations
-   WHERE version = 10
-);
-
 -- v11: delegation_callback_deadline
 ALTER TABLE byai.byai_super_delegations
   ADD COLUMN callback_deadline_at timestamptz NULL;
@@ -912,3 +900,6 @@ ALTER TABLE byai.byai_super_delegations
 
 ALTER TABLE byai_project ADD COLUMN project_code VARCHAR(64);
 COMMENT ON COLUMN byai_project.project_code IS '项目编码，企业唯一业务编码';
+
+COMMENT ON COLUMN byai.byai_connector_info.connector_type IS
+    '连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器，ACCOUNT_TEMPLATE=运营账号初始化模板';
