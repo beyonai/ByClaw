@@ -4,21 +4,8 @@ import useEmployeeRowRefresh, {
   updateEmployeeRow,
 } from '@/hooks/useEmployeeRowRefresh';
 import { LeftOutlined } from '@ant-design/icons';
-import { useLocation, useNavigate, useIntl } from '@umijs/max';
-import {
-  Badge,
-  Button,
-  Empty,
-  Input,
-  Popconfirm,
-  Segmented,
-  Space,
-  Spin,
-  Table,
-  Tabs,
-  Tag,
-  message,
-} from 'antd';
+import { getIntl, useLocation, useNavigate, useIntl } from '@umijs/max';
+import { Badge, Button, Empty, Input, Popconfirm, Segmented, Space, Spin, Table, Tabs, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
@@ -133,9 +120,14 @@ const MyEmployeesPage: React.FC = () => {
     },
     [statusFilter]
   );
-  const refreshEmployee = useEmployeeRowRefresh(list, setList, () => {
-    setTotal((current) => Math.max(0, current - 1));
-  }, shouldKeepEmployee);
+  const refreshEmployee = useEmployeeRowRefresh(
+    list,
+    setList,
+    () => {
+      setTotal((current) => Math.max(0, current - 1));
+    },
+    shouldKeepEmployee
+  );
   const [pendingAuditRows, setPendingAuditRows] = useState<AuditRow[]>(() => {
     // 待审核数据由数字员工首页通过路由状态传入，避免进入“我的员工”后再次请求。
     const routeState = location.state as { pendingAuditRows?: ResourceUseApplyAuditItem[] } | null;
@@ -155,46 +147,49 @@ const MyEmployeesPage: React.FC = () => {
 
   const agentType = resourceFilter === 'group' ? '017' : undefined;
 
-  const loadEmployees = useCallback(async (requestedPage = 1) => {
-    if (activeTab === 'audit' || (requestedPage > 1 && employeeLoadingRef.current)) return;
-    const requestId = ++employeeRequestRef.current;
-    employeeLoadingRef.current = true;
-    setLoading(true);
-    if (requestedPage === 1) {
-      setList([]);
-      setTotal(0);
-      setPageNum(1);
-    }
-    try {
-      const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
-      // 个人页签只查本人创建的员工，历史管理授权不再作为列表入口。
-      const type =
-        activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'owner';
-      const res = await request({
-        pageNum: requestedPage,
-        pageSize: PAGE_SIZE,
-        type,
-        agentType,
-        includeEmployeeGroup: resourceFilter === 'all',
-        keyword: debouncedKeyword.trim() || undefined,
-        ...(statusFilter === 'all' ? { includeAllResourceStatus: true } : { resourceStatus: Number(statusFilter) }),
-      });
-      if (requestId !== employeeRequestRef.current) return;
-      const nextList = normalizeList(res);
-      setList((current) => (requestedPage === 1 ? nextList : [...current, ...nextList]));
-      setPageNum(requestedPage);
-      setTotal(Number(res?.total ?? res?.data?.total ?? 0));
-    } catch (error: any) {
-      if (requestId === employeeRequestRef.current) {
-        message.error(error?.message || intl.formatMessage({ id: 'common.operateFailed' }));
+  const loadEmployees = useCallback(
+    async (requestedPage = 1) => {
+      if (activeTab === 'audit' || (requestedPage > 1 && employeeLoadingRef.current)) return;
+      const requestId = ++employeeRequestRef.current;
+      employeeLoadingRef.current = true;
+      setLoading(true);
+      if (requestedPage === 1) {
+        setList([]);
+        setTotal(0);
+        setPageNum(1);
       }
-    } finally {
-      if (requestId === employeeRequestRef.current) {
-        employeeLoadingRef.current = false;
-        setLoading(false);
+      try {
+        const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
+        // 个人页签只查本人创建的员工，历史管理授权不再作为列表入口。
+        const type =
+          activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'owner';
+        const res = await request({
+          pageNum: requestedPage,
+          pageSize: PAGE_SIZE,
+          type,
+          agentType,
+          includeEmployeeGroup: resourceFilter === 'all',
+          keyword: debouncedKeyword.trim() || undefined,
+          ...(statusFilter === 'all' ? { includeAllResourceStatus: true } : { resourceStatus: Number(statusFilter) }),
+        });
+        if (requestId !== employeeRequestRef.current) return;
+        const nextList = normalizeList(res);
+        setList((current) => (requestedPage === 1 ? nextList : [...current, ...nextList]));
+        setPageNum(requestedPage);
+        setTotal(Number(res?.total ?? res?.data?.total ?? 0));
+      } catch (error: any) {
+        if (requestId === employeeRequestRef.current) {
+          message.error(error?.message || intl.formatMessage({ id: 'common.operateFailed' }));
+        }
+      } finally {
+        if (requestId === employeeRequestRef.current) {
+          employeeLoadingRef.current = false;
+          setLoading(false);
+        }
       }
-    }
-  }, [activeTab, agentType, debouncedKeyword, enterpriseScope, intl, resourceFilter, statusFilter]);
+    },
+    [activeTab, agentType, debouncedKeyword, enterpriseScope, intl, resourceFilter, statusFilter]
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -323,20 +318,17 @@ const MyEmployeesPage: React.FC = () => {
     setAuthDrawerOpen(true);
   }, []);
 
-  const handleDelete = useCallback(
-    async (employee: IAgentCache) => {
-      const resourceId = employee.resourceId ?? employee.id;
-      if (!resourceId) return;
-      try {
-        await deleteDigitalEmployee({ resourceId: String(resourceId) });
-        message.success('删除成功');
-        removeEmployeeRow(employeeRowId(employee));
-      } catch (error: any) {
-        message.error(error?.message || '删除失败');
-      }
-    },
-    []
-  );
+  const handleDelete = useCallback(async (employee: IAgentCache) => {
+    const resourceId = employee.resourceId ?? employee.id;
+    if (!resourceId) return;
+    try {
+      await deleteDigitalEmployee({ resourceId: String(resourceId) });
+      message.success(getIntl().formatMessage({ id: 'ui.employee.deleteSuccess' }));
+      removeEmployeeRow(employeeRowId(employee));
+    } catch (error: any) {
+      message.error(error?.message || getIntl().formatMessage({ id: 'ui.employee.deleteFailed' }));
+    }
+  }, []);
 
   const handleShelfStatusChange = useCallback(
     async (employee: IAgentCache, action: 'shelf' | 'unShelf') => {
@@ -346,9 +338,26 @@ const MyEmployeesPage: React.FC = () => {
         const request = action === 'shelf' ? shelfDigitalEmployee : unShelfDigitalEmployee;
         const response: any = await request({ resourceId: String(resourceId) });
         if (response?.success === false || (response?.code !== undefined && response.code !== 0)) {
-          throw new Error(response?.msg || `${action === 'shelf' ? '上架' : '下架'}失败`);
+          throw new Error(
+            response?.msg ||
+              getIntl().formatMessage(
+                { id: 'ui.employee.actionFailed' },
+                {
+                  v0: getIntl().formatMessage({
+                    id: action === 'shelf' ? 'ui.employee.publish' : 'ui.employee.unpublish',
+                  }),
+                }
+              )
+          );
         }
-        message.success(`${action === 'shelf' ? '上架' : '下架'}成功`);
+        message.success(
+          getIntl().formatMessage(
+            { id: 'ui.employee.actionSuccess' },
+            {
+              v0: getIntl().formatMessage({ id: action === 'shelf' ? 'ui.employee.publish' : 'ui.employee.unpublish' }),
+            }
+          )
+        );
         // 仅更新操作员工的状态与权限，保留分页和滚动位置。
         const refreshPromise = refreshEmployee(employee);
         updateEmployeeRow({
@@ -357,7 +366,17 @@ const MyEmployeesPage: React.FC = () => {
         });
         await refreshPromise;
       } catch (error: any) {
-        message.error(error?.message || `${action === 'shelf' ? '上架' : '下架'}失败`);
+        message.error(
+          error?.message ||
+            getIntl().formatMessage(
+              { id: 'ui.employee.actionFailed' },
+              {
+                v0: getIntl().formatMessage({
+                  id: action === 'shelf' ? 'ui.employee.publish' : 'ui.employee.unpublish',
+                }),
+              }
+            )
+        );
       }
     },
     [refreshEmployee]
@@ -378,7 +397,14 @@ const MyEmployeesPage: React.FC = () => {
       ),
     },
     // 辅助信息使用紧凑列宽，把更多空间留给数字员工名称。
-    { title: intl.formatMessage({ id: 'myEmployees.type' }), dataIndex: 'employeeType', width: 110 },
+    {
+      title: intl.formatMessage({ id: 'myEmployees.type' }),
+      dataIndex: 'employeeType',
+      width: 110,
+      // 保留数据中的员工类型，渲染时再翻译以支持切换语言。
+      render: (value) =>
+        intl.formatMessage({ id: value === '数字员工组' ? 'common.digitalEmployeeGroup' : 'common.digitalEmployee' }),
+    },
     { title: intl.formatMessage({ id: 'myEmployees.applicant' }), dataIndex: 'userName', width: 120, ellipsis: true },
     {
       title: intl.formatMessage({ id: 'myEmployees.applicationTime' }),
@@ -398,7 +424,14 @@ const MyEmployeesPage: React.FC = () => {
         const status = `${value || ''}`;
         const result = status === '审核通过' ? '通过' : status === '已驳回' ? '驳回' : status;
         const color = result === '通过' ? 'success' : result === '驳回' ? 'error' : 'default';
-        return <Tag color={color}>{result || '-'}</Tag>;
+        // 状态比较沿用接口原值，仅翻译展示标签。
+        const label =
+          result === '通过'
+            ? intl.formatMessage({ id: 'ui.employee.approved' })
+            : result === '驳回'
+            ? intl.formatMessage({ id: 'ui.employee.rejected' })
+            : result;
+        return <Tag color={color}>{label || '-'}</Tag>;
       },
     });
     // 审核人只对历史记录展示，待审核记录尚未产生处理人。
@@ -473,7 +506,10 @@ const MyEmployeesPage: React.FC = () => {
   );
 
   return (
-    <div id="myEmployeesScroller" className={`${styles.container} ${activeTab === 'audit' ? styles.auditContainer : ''}`}>
+    <div
+      id="myEmployeesScroller"
+      className={`${styles.container} ${activeTab === 'audit' ? styles.auditContainer : ''}`}
+    >
       <div className={styles.back} onClick={() => navigate('/digitalEmployees')}>
         <LeftOutlined /> {intl.formatMessage({ id: 'myEmployees.backToAll' })}
       </div>

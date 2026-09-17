@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AppstoreOutlined, CloudOutlined, LaptopOutlined, UserOutlined } from '@ant-design/icons';
 import { Select, Spin, Tabs, Tag, Empty } from 'antd';
@@ -28,6 +29,8 @@ const rowsOf = (response: any) => {
 /** Desktop-only session model picker. Web chat never mounts this component. */
 type Model = { id: string; label: string; provider?: string; source: 'local' | 'mine' | 'public' };
 const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
+  // 界面文案随当前语言更新，业务名称与接口数据保持原值。
+  const intl = useIntl();
   const [activeTab, setActiveTab] = useState<'local' | 'mine' | 'public'>('local');
   const [groups, setGroups] = useState<Record<'local' | 'mine' | 'public', Model[]>>({
     local: [],
@@ -56,11 +59,11 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
           const id = item?.id ?? item?.modelId ?? item?.modelCode ?? item?.code;
           return id
             ? {
-              id: `${id}`,
-              label: item.displayName || item.modelName || item.modelCode || `${id}`,
-              provider: item.providerName || item.provider,
-              source,
-            }
+                id: `${id}`,
+                label: item.displayName || item.modelName || item.modelCode || `${id}`,
+                provider: item.providerName || item.provider,
+                source,
+              }
             : null;
         };
         const dedupe = (items: Model[]) =>
@@ -147,7 +150,7 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
           current
         )
       }
-      placeholder="选择模型"
+      placeholder={intl.formatMessage({ id: 'ui.model.select' })}
       loading={loading}
       suffixIcon={loading ? <Spin size="small" /> : <AppstoreOutlined />}
       options={options}
@@ -163,7 +166,7 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
                 key: 'local',
                 label: (
                   <>
-                    <LaptopOutlined /> 本地
+                    <LaptopOutlined /> {intl.formatMessage({ id: 'ui.model.local' })}{' '}
                   </>
                 ),
               },
@@ -171,7 +174,7 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
                 key: 'mine',
                 label: (
                   <>
-                    <UserOutlined /> 我的
+                    <UserOutlined /> {intl.formatMessage({ id: 'ui.model.mine' })}{' '}
                   </>
                 ),
               },
@@ -179,7 +182,7 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
                 key: 'public',
                 label: (
                   <>
-                    <CloudOutlined /> 公共
+                    <CloudOutlined /> {intl.formatMessage({ id: 'ui.model.public' })}{' '}
                   </>
                 ),
               },
@@ -198,12 +201,19 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
                 </div>
               ))
             ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loading ? '加载中…' : '暂无模型'} />
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  loading
+                    ? intl.formatMessage({ id: 'ui.model.loading' })
+                    : intl.formatMessage({ id: 'ui.model.empty' })
+                }
+              />
             )}
           </div>
         </div>
       )}
-      aria-label="当前会话模型"
+      aria-label={intl.formatMessage({ id: 'ui.model.current' })}
     />
   );
 };

@@ -1,3 +1,5 @@
+// 用户可见提示在使用时读取当前语言，接口值与用户内容保持原样。
+import { useIntl, getIntl } from '@umijs/max';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import {
   Button,
@@ -157,8 +159,8 @@ const parseTemplateConfig = (template: OperationTaskTemplate): TaskTemplateFormV
       typeof template.config === 'string'
         ? JSON.parse(template.config)
         : template.config && typeof template.config === 'object'
-          ? template.config
-          : {};
+        ? template.config
+        : {};
     const config = { ...rawConfig };
     ['ontology', 'sourceOntology', 'knowledgeOrganization', 'organizeTemplateId', 'organize'].forEach((key) => {
       delete config[key];
@@ -194,13 +196,16 @@ const buildTemplatePrompt = (
       values.sourceMode === 'connector'
         ? values.connector
         : values.sourceMode === 'internet'
-          ? values.internetScope
-          : values.sourceKnowledge;
+        ? values.internetScope
+        : values.sourceKnowledge;
     const sourceLabel =
       values.sourceMode === 'knowledge'
         ? findOptionLabel(options.knowledgeBases, source as string | number | undefined)
         : source || '-';
-    const target = `知识库：${findOptionLabel(options.knowledgeBases, values.targetKnowledge)}`;
+    const target = getIntl().formatMessage(
+      { id: 'ui.task.knowledgeTarget' },
+      { v0: findOptionLabel(options.knowledgeBases, values.targetKnowledge) }
+    );
     detailLines.push(`采集方式：${sourceModeLabel}`, `采集来源：${sourceLabel}`, `入库位置：${target}`);
   } else if (template.templateType === 'content') {
     detailLines.push(`内容类型：${values.contentType || '-'}`, `目标受众：${values.audience || '-'}`);
@@ -229,15 +234,15 @@ const buildTemplatePrompt = (
   const runMode =
     values.runMode === 'periodic'
       ? `按周期执行：${periodTypeLabel} ${
-        values.periodType === 'yearly'
-          ? formatValue(values.periodYearDateTime, 'MM-DD HH:mm')
-          : formatValue(values.periodTime, 'HH:mm')
-      }${weekdays ? `（${weekdays}）` : ''}`
+          values.periodType === 'yearly'
+            ? formatValue(values.periodYearDateTime, 'MM-DD HH:mm')
+            : formatValue(values.periodTime, 'HH:mm')
+        }${weekdays ? `（${weekdays}）` : ''}`
       : values.runMode === 'interval'
-        ? `按间隔执行：每 ${values.intervalHours || 1} 小时${weekdays ? `（${weekdays}）` : ''}`
-        : values.runMode === 'once'
-          ? `单次执行：${formatValue(values.onceTime)}`
-          : '单次执行';
+      ? `按间隔执行：每 ${values.intervalHours || 1} 小时${weekdays ? `（${weekdays}）` : ''}`
+      : values.runMode === 'once'
+      ? `单次执行：${formatValue(values.onceTime)}`
+      : '单次执行';
   return [
     '请执行以下运营任务：',
     '',
@@ -269,6 +274,8 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   knowledgeOptionsOnly = false,
   accountOptions = [],
 }) => {
+  // 界面文案随当前语言更新，业务名称与接口数据保持原值。
+  const intl = useIntl();
   const [form] = Form.useForm<TaskTemplateFormValues>();
   const [templates, setTemplates] = useState<OperationTaskTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<OperationTaskTemplate>();
@@ -332,7 +339,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     try {
       const detail = await getOperationTaskTemplate(template.templateId);
       if (!detail || ['knowledge', 'object_discovery'].includes(detail.templateType)) {
-        message.warning('该任务模板已下线，请重新选择');
+        message.warning(intl.formatMessage({ id: 'ui.task.retired' }));
         return;
       }
       const resolvedTemplate = detail;
@@ -345,10 +352,10 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       const resolvedKnowledgeOptions = knowledgeOptionsOnly
         ? knowledgeOptions
         : knowledgeOptions.length
-          ? knowledgeOptions
-          : fetchedKnowledgeOptions.length
-            ? fetchedKnowledgeOptions
-            : DEFAULT_KNOWLEDGE_OPTIONS;
+        ? knowledgeOptions
+        : fetchedKnowledgeOptions.length
+        ? fetchedKnowledgeOptions
+        : DEFAULT_KNOWLEDGE_OPTIONS;
       const resolvedAccountOptions = accountOptions.length ? accountOptions : DEFAULT_ACCOUNT_OPTIONS;
       setSelectedTemplate(resolvedTemplate);
       form.setFieldsValue({
@@ -356,9 +363,9 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         // 采集类模板每次打开均默认选择界面中的第一个采集方式和入库方式。
         ...(resolvedTemplate.templateType === 'collect'
           ? {
-            sourceMode: 'connector' as const,
-            storageMode: 'knowledge' as const,
-          }
+              sourceMode: 'connector' as const,
+              storageMode: 'knowledge' as const,
+            }
           : {}),
         ...(initialTitle ? { title: initialTitle } : {}),
         ...(initialDescription ? { description: initialDescription } : {}),
@@ -382,16 +389,16 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   const title = selectedTemplate
     ? selectedTemplate.templateName
     : categoryLabel
-      ? `${categoryLabel} · 选择任务模板`
-      : '选择任务模板';
+    ? `${categoryLabel} · 选择任务模板`
+    : '选择任务模板';
   const subtitle = selectedTemplate ? '完善结构化任务信息和执行配置' : '用结构化信息精准描述任务，数字员工会据此执行';
   const fallbackAgentOptions = useMemo(
     () =>
       agentOptionsOnly
         ? agentOptions
         : agentOptions.length
-          ? agentOptions
-          : [{ label: '当前数字员工', value: '当前数字员工' }],
+        ? agentOptions
+        : [{ label: '当前数字员工', value: '当前数字员工' }],
     [agentOptions, agentOptionsOnly]
   );
   const availableGroupOptions = useMemo(
@@ -403,10 +410,10 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       knowledgeOptionsOnly
         ? knowledgeOptions
         : knowledgeOptions.length
-          ? knowledgeOptions
-          : fetchedKnowledgeOptions.length
-            ? fetchedKnowledgeOptions
-            : DEFAULT_KNOWLEDGE_OPTIONS,
+        ? knowledgeOptions
+        : fetchedKnowledgeOptions.length
+        ? fetchedKnowledgeOptions
+        : DEFAULT_KNOWLEDGE_OPTIONS,
     [fetchedKnowledgeOptions, knowledgeOptions, knowledgeOptionsOnly]
   );
   const availableAccountOptions = useMemo(
@@ -491,9 +498,9 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
             </div>
             <Form.Item
               className={styles.methodConfigField}
-              label="目标知识库"
+              label={intl.formatMessage({ id: 'ui.task.targetKnowledge' })}
               name="targetKnowledge"
-              rules={[{ required: true, message: '请选择目标知识库' }]}
+              rules={[{ required: true, message: intl.formatMessage({ id: 'ui.task.selectKnowledge' }) }]}
             >
               <Select options={availableKnowledgeOptions} showSearch optionFilterProp="label" />
             </Form.Item>
@@ -565,18 +572,18 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       footer={
         selectedTemplate
           ? [
-            <Button key="back" disabled={applying || applyingTemplate} onClick={() => setSelectedTemplate(undefined)}>
-              返回模板
-            </Button>,
-            <Button
-              key="apply"
-              type="primary"
-              loading={applying || applyingTemplate}
-              onClick={() => void applyTemplate()}
-            >
-              {applyText}
-            </Button>,
-          ]
+              <Button key="back" disabled={applying || applyingTemplate} onClick={() => setSelectedTemplate(undefined)}>
+                返回模板
+              </Button>,
+              <Button
+                key="apply"
+                type="primary"
+                loading={applying || applyingTemplate}
+                onClick={() => void applyTemplate()}
+              >
+                {applyText}
+              </Button>,
+            ]
           : null
       }
       closable={!applying && !applyingTemplate}
