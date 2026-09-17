@@ -39,7 +39,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
             List<GroupChatListItemResponse> groups = session.getMapper(ByaiGroupChatMentionMapper.class)
                 .selectMyGroups(30L);
 
-            // 分页总数应排除已解散群，同时兼容历史 state 为空的群。
+            // 分页总数应排除已确认解散的群，同时兼容历史 state 为空的群。
             assertThat(page.getTotal()).isEqualTo(2L);
             assertThat(groups).hasSize(1);
             assertThat(groups.get(0).getSessionId()).isEqualTo(10L);
@@ -51,6 +51,30 @@ class ByaiGroupChatMentionMapperPaginationTest {
         }
         finally {
             PageHelper.clearPage();
+        }
+    }
+
+    @Test
+    void dissolvedGroupRemainsForUnacknowledgedMembersOnly() throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-acknowledgment.sqlite").toAbsolutePath();
+        initializeSchema(jdbcUrl);
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+            Statement statement = connection.createStatement()) {
+            statement.execute("INSERT INTO byai_session_member VALUES (30, 'MEMBER', NULL, 'USER', 31)");
+            statement.execute("INSERT INTO byai_session_member VALUES (30, 'OWNER', NULL, 'USER', 32)");
+        }
+        try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
+            ByaiGroupChatMentionMapper mapper = session.getMapper(ByaiGroupChatMentionMapper.class);
+            assertThat(mapper.selectMyGroups(31L)).extracting(GroupChatListItemResponse::getSessionId).contains(30L);
+            assertThat(mapper.selectMyGroups(30L)).extracting(GroupChatListItemResponse::getSessionId).doesNotContain(30L);
+            assertThat(mapper.selectMyGroups(32L)).isEmpty();
+        }
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+            Statement statement = connection.createStatement()) {
+            statement.execute("INSERT INTO byai_session_ext VALUES (30, 'group_dissolution_ack_31', 'true')");
+        }
+        try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
+            assertThat(session.getMapper(ByaiGroupChatMentionMapper.class).selectMyGroups(31L)).isEmpty();
         }
     }
 
@@ -76,6 +100,16 @@ class ByaiGroupChatMentionMapperPaginationTest {
                     mem_obj_type TEXT,
                     mem_obj_id INTEGER
                 )
+                """);
+            statement.execute("""
+                CREATE TABLE byai_session_ext (
+                    session_id INTEGER,
+                    ext_param_code TEXT,
+                    ext_param_value TEXT
+                )
+                """);
+            statement.execute("""
+                INSERT INTO byai_session_ext VALUES (30, 'group_dissolution_ack_30', 'true')
                 """);
             statement.execute("""
                 CREATE TABLE byai_message (

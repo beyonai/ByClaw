@@ -106,6 +106,27 @@ public class GroupChatSettingsService {
         return member;
     }
 
+    /** 解散后仍允许原成员查询生命周期状态，不开放消息或其他群资源。 */
+    public boolean isDissolved(Long sessionId) {
+        Long userId = requireUser();
+        ByaiSession session = sessionService.findById(sessionId);
+        if (session == null || !SessionType.HS_AS.getCode().equals(session.getSessionType())
+            || memberService.findSessionMember(sessionId, MemObjType.USER.name(), userId) == null) {
+            throw new IllegalArgumentException("Group chat not found");
+        }
+        return GroupChatAuthorizationService.DISSOLVED_STATE.equals(session.getState());
+    }
+
+    /** 仅移除当前成员的列表入口，保留历史成员关系和审计数据。 */
+    @Transactional
+    public void acknowledgeDissolution(Long sessionId) {
+        sessionService.lockById(sessionId);
+        if (!isDissolved(sessionId)) {
+            throw new IllegalArgumentException("Group has not been dissolved");
+        }
+        putExt(sessionId, "group_dissolution_ack_" + requireUser(), "true");
+    }
+
     @Transactional
     public void dissolve(Long sessionId) {
         ByaiSession session = sessionService.lockById(sessionId);

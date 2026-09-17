@@ -40,6 +40,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatDetailResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTransferOwnershipRequest;
 
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationResponse;
@@ -165,6 +166,17 @@ public class GroupChatController {
         return ResponseUtil.successResponse(settingsService.updateNickname(sessionId, request.getNickname()));
     }
 
+    @GetMapping("/{sessionId}/lifecycle")
+    public ResponseUtil<Map<String, Boolean>> lifecycle(@PathVariable Long sessionId) {
+        return ResponseUtil.successResponse(Map.of("dissolved", settingsService.isDissolved(sessionId)));
+    }
+
+    @PostMapping("/{sessionId}/dissolution-acknowledgment")
+    public ResponseUtil<Void> acknowledgeDissolution(@PathVariable Long sessionId) {
+        settingsService.acknowledgeDissolution(sessionId);
+        return ResponseUtil.successResponse(null);
+    }
+
     @DeleteMapping("/{sessionId}")
     public ResponseUtil<Void> dissolve(@PathVariable Long sessionId) {
         settingsService.dissolve(sessionId);
@@ -185,8 +197,9 @@ public class GroupChatController {
     }
 
     @PostMapping("/{sessionId}/transfer-ownership")
-    public ResponseUtil<Void> transferOwnership(@PathVariable Long sessionId, @RequestBody Map<String, Long> body) {
-        applicationService.transferOwnership(sessionId, body == null ? null : body.get("userId"));
+    public ResponseUtil<Void> transferOwnership(@PathVariable Long sessionId,
+        @Valid @RequestBody GroupChatTransferOwnershipRequest request) {
+        applicationService.transferOwnership(sessionId, request.getUserId());
         return ResponseUtil.successResponse(null);
     }
 
