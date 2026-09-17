@@ -5,7 +5,7 @@ description = "Question answering application module for byclaw."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "by-qa[all]==0.4.4.dev0",
+    "by-qa[all]==0.4.4.dev1",
     "by-framework==v0.2.2.dev15",
     "by-framework-langgraph==v0.0.3.dev2",
     "by-framework-trace-langfuse==v0.0.3.dev4",
