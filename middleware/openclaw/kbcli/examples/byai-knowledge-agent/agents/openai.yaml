@@ -1,0 +1,4 @@
+interface:
+  display_name: "ByAI Knowledge Agent"
+  short_description: "Operate ByAI knowledge bases through kbcli"
+  default_prompt: "Use $byai-knowledge-agent to manage and search authorized ByAI knowledge bases for this session."
