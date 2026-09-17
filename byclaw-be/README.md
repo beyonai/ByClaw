@@ -26,6 +26,12 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - **多模型支持** - 支持多种大语言模型接入
 - **企业级安全** - 完整的认证、授权和审计机制
 
+## 聊天用户资料
+
+- 前端用户资料卡及助手设置统一使用已有的 `GET /system/user/getUserSuas?userId=42`，不新增 `/assiman/getUserSuas` 接口。
+- `userId` 是必填的用户主键（Long），不是工号或姓名；前端附带的 `language` 参数不参与用户查询。用户不存在时返回 `{code: -1, msg: '用户不存在'}`。
+- 成功返回 `{code: 0, data: {...}}`，资料卡读取 `userId`、`userName`、`userCode`（工号）、`phone`（沿用解密脱敏规则）、`pathName`（部门路径）、`positionName`（职位）。保留现有超级助手字段，助手或岗位记录缺失不会导致空指针异常。
+
 ## 群列表消息摘要
 
 - `GET /group-chats?pageNum=1&pageSize=20` 仅在返回时将 `latestMessageContent` 中的 `{{DIG_EMPLOYEE_资源ID}}`、`{{HUMAN_资源ID}}` 转成 `@名称`，名称取最新消息 metadata 中 `resourceList.resourceName` 的快照。
