@@ -20,6 +20,9 @@ describe('connector chat payload contract', () => {
       // 选择按 sessionId 记忆，避免把 A 会话的模型带到 B 会话。
       expect(source).toContain('selectedModelBySession');
       expect(source).toContain('onModelSelectChange');
+      // 新会话生成真实 sessionId 时输入框会被 key 重建，挂载阶段必须迁移临时选择。
+      expect(source).toContain("stored = this.readStoredModel('new')");
+      expect(source).toContain("this.clearStoredModel('new')");
       // 未选择时不发送 relModelId（服务端保留已有覆盖）；'-1' 仅在用户显式选「默认模型」时发送。
       expect(source).toContain('...(this.state.selectedModelId ? { relModelId: this.state.selectedModelId } : {})');
       expect(source).not.toContain('relModelId: this.state.selectedModelId || -1');

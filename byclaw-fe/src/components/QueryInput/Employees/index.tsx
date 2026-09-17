@@ -102,9 +102,19 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
   };
 
   restoreSelectedModel = () => {
-    const stored = this.readStoredModel(this.sessionKey());
+    const sessionKey = this.sessionKey();
+    let stored = this.readStoredModel(sessionKey);
+    // EasyConfirm 在新会话取得真实 sessionId 时会按 key 重建输入框，旧实例来不及走
+    // componentDidUpdate。新实例需主动接管 `new` 下的选择，避免侧栏/过程文件打开后回到默认模型。
+    if (!stored && sessionKey !== 'new') {
+      stored = this.readStoredModel('new');
+      if (stored) {
+        this.writeStoredModel(sessionKey, stored);
+        this.clearStoredModel('new');
+      }
+    }
     if (stored) {
-      this.setState({ selectedModelId: stored, selectedModelBySession: { [this.sessionKey()]: stored } });
+      this.setState({ selectedModelId: stored, selectedModelBySession: { [sessionKey]: stored } });
     }
   };
 
