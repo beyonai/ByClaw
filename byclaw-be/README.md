@@ -331,7 +331,7 @@ Endpoint 默认使用 `dysmsapi.aliyuncs.com`，登录和注册模板均须包�
 `GroupChatController` 提供以下接口（部署网关通常添加 `/byaiService` 前缀）：
 
 - `POST /group-chats/{sessionId}/invitations`：已登录群主/管理员获取会话邀请；有效 token 复用并从当前时间续期 7 天，缺失或过期则新建；返回 `token`、`expiresAt`（毫秒）。
-- `POST /group-chats/invitations/validate`：请求体 `{"token":"…"}`；允许匿名预览，返回工作组名称/号码、邀请人、企业、成员数量、最多四位 `memberPreviews`（`displayName`/`type`/`avatar`）、有效期、加入开关和当前成员状态。
+- `POST /group-chats/invitations/validate`：请求体 `{"token":"…"}`；允许匿名预览，返回工作组名称/号码、邀请人、企业、成员数量、最多四位 `memberPreviews`（`displayName`/`type`/`avatar`）、有效期、加入开关和当前成员状态。失败原因通过现有错误响应区分：`Invitation has expired`、`Invitation has been revoked`、`Group link joining is disabled`、`Group has been dissolved`；不包含原始 token。旧邀请码被替换后因不保留历史，只能报告无效。
 - `POST /group-chats/invitations/join`：登录后提交 `{token}`，由服务端解析绑定群 ID，复用 `GroupChatApplicationService.acceptInvitation(sessionId, token)`，锁群后重新校验有效期、群状态、开关、邀请人角色/账户状态及企业限制；返回成员信息，重复加入不重复写入。
 
 凭证使用 SecureRandom 从大小写字母和数字共 62 个字符中逐位均匀选取，固定 8 位，默认有效期 7 天。V0.4.1 起持久化到 `message_share_link`：`link_type=GROUP_INVITATION`、`link_id=session_id`、`link_token` 保存原始邀请码，`creator_id`/`com_acct_id`/`expire_time` 保存邀请人、企业和有效期；一群一行，过期重建更新原行，不保留历史，不写消息关联表。

@@ -149,9 +149,10 @@ public class GroupChatInvitationService {
 
     private InvitationRecord toRecord(MessageShareLink link) {
         if (link == null || !"GROUP_INVITATION".equals(link.getLinkType())
-            || !"ACTIVE".equals(link.getStatus()) || link.getLinkId() == null
+            || link.getLinkId() == null
             || link.getCreatorId() == null || link.getExpireTime() == null
             || link.getLinkToken() == null || !link.getLinkToken().matches("[A-Za-z0-9]{8}")) throw invalid();
+        if (!"ACTIVE".equals(link.getStatus())) throw new IllegalArgumentException("Invitation has been revoked");
         InvitationRecord record = new InvitationRecord();
         record.setSessionId(link.getLinkId());
         record.setInviterId(link.getCreatorId());
@@ -161,7 +162,11 @@ public class GroupChatInvitationService {
     }
 
     private ByaiSession validate(InvitationRecord record) {
-        if (record.getExpiresAt() <= System.currentTimeMillis()) throw invalid();
+        if (record.getExpiresAt() <= System.currentTimeMillis())
+            throw new IllegalArgumentException("Invitation has expired");
+        ByaiSession snapshot = sessions.findById(record.getSessionId());
+        if (snapshot != null && GroupChatAuthorizationService.DISSOLVED_STATE.equals(snapshot.getState()))
+            throw new IllegalArgumentException("Group has been dissolved");
         ByaiSession group = authorization.requireGroup(record.getSessionId());
         if (!Objects.equals(group.getEnterpriseId(), record.getEnterpriseId())) throw invalid();
         requireLinkEnabled(group.getSessionId());
@@ -182,7 +187,8 @@ public class GroupChatInvitationService {
 
     private void requireLinkEnabled(Long sessionId) {
         ByaiSessionExt ext = extensions.findOneByExtParamCode(sessionId, "group_join_link_enabled");
-        if (ext != null && !"true".equals(ext.getExtParamValue())) throw invalid();
+        if (ext != null && !"true".equals(ext.getExtParamValue()))
+            throw new IllegalArgumentException("Group link joining is disabled");
     }
 
     private void requireEnterprise(ByaiSession group) {

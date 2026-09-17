@@ -219,6 +219,23 @@ class GroupChatInvitationTokenTest {
         assertThatThrownBy(() -> service.preview(first.getToken())).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test void previewExplainsExpiredRevokedDisabledAndDissolvedInvitations() {
+        var token = service.create(20L).getToken();
+        records.get(20L).setExpireTime(LocalDateTime.now().minusDays(1));
+        assertThatThrownBy(() -> service.preview(token)).hasMessage("Invitation has expired");
+        records.get(20L).setExpireTime(LocalDateTime.now().plusDays(1));
+        records.get(20L).setStatus("REVOKED");
+        assertThatThrownBy(() -> service.preview(token)).hasMessage("Invitation has been revoked");
+        records.get(20L).setStatus("ACTIVE");
+        ByaiSessionExt ext = new ByaiSessionExt();
+        ext.setExtParamValue("false");
+        when(extensions.findOneByExtParamCode(20L, "group_join_link_enabled")).thenReturn(ext);
+        assertThatThrownBy(() -> service.preview(token)).hasMessage("Group link joining is disabled");
+        when(extensions.findOneByExtParamCode(20L, "group_join_link_enabled")).thenReturn(null);
+        group.setState("GROUP_DISSOLVED");
+        assertThatThrownBy(() -> service.preview(token)).hasMessage("Group has been dissolved");
+    }
+
     @Test void failedPersistenceDoesNotReturnAnInvitation() {
         when(links.insert(any(MessageShareLink.class))).thenReturn(0);
         assertThatThrownBy(() -> service.create(20L)).isInstanceOf(IllegalStateException.class);
