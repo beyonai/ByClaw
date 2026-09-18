@@ -28,6 +28,9 @@ export type IUsedModelInfo = {
   code?: string;
   name?: string;
   provider?: string;
+
+  /** 本轮实际使用的思考强度档位（后端 metadata.usedModel.thinkingLevel）。 */
+  thinkingLevel?: string;
 };
 
 /**
@@ -54,6 +57,7 @@ export function getUsedModelFromMetadata(metadata?: string): IUsedModelInfo | nu
       code: code || undefined,
       name: name || undefined,
       provider: `${usedModel.provider ?? ''}`.trim() || undefined,
+      thinkingLevel: `${usedModel.thinkingLevel ?? ''}`.trim() || undefined,
     };
   } catch (e) {
     return null;
