@@ -48,6 +48,8 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispo
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatExecutionEventHandler;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 
 class GroupChatTurnProjectionTest {
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
@@ -58,8 +60,9 @@ class GroupChatTurnProjectionTest {
     private final GroupChatDispositionReader reader = mock(GroupChatDispositionReader.class);
     private final UserService users = mock(UserService.class);
     private final SequenceService sequence = mock(SequenceService.class);
+    private final GroupChatExecutionCoordinator coordinator = mock(GroupChatExecutionCoordinator.class);
     private final GroupChatExecutionEventHandler handler = new GroupChatExecutionEventHandler(messages, publisher,
-        sequence, mock(ByaiGroupChatExecutionMapper.class), mock(GroupChatExecutionCoordinator.class),
+        sequence, mock(ByaiGroupChatExecutionMapper.class), coordinator,
         mock(SsResourceService.class), users, reader, tasks, mock(GroupChatCandidateSessionService.class), parser,
         mock(GroupChatMentionService.class), mock(ChatRuntimeStateService.class));
     private ByaiGroupChatTurn turn;
@@ -125,6 +128,45 @@ class GroupChatTurnProjectionTest {
         verify(messages).insert(any());
         verify(turns).markSucceeded(eq(10L), eq(90L), any());
         verifyNoInteractions(reader, tasks);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"NORMAL", "CHAT_CONTINUATION"})
+    void chatAndCompletedTaskContinuationDispatchPublicAnswerMentions(String phase) {
+        turn.setPhase(phase);
+        turn.setDisposition("CHAT");
+        ResourceVo agent = new ResourceVo();
+        agent.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
+        agent.setResourceId("40");
+        when(parser.parse(1L, 8L, "reply"))
+            .thenReturn(new GroupChatAgentMention("{{DIG_EMPLOYEE_40}}", List.of(agent)));
+        when(sequence.nextVal()).thenReturn(90L);
+
+        handler.afterPersisted(context);
+
+        verify(coordinator).enqueueChild(turn, 40L, 90L, 90L, "{{DIG_EMPLOYEE_40}}", List.of(agent));
+        verifyNoInteractions(tasks);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void taskProcessMentionsDoNotDispatchFromCallbackOrRecovery(boolean reconcile) {
+        turn.setDisposition("TASK");
+        turn.setTraceId(TraceIdCodec.encode(20L, 30L));
+        context.traceId = turn.getTraceId();
+        when(turns.selectByTrace(context.traceId)).thenReturn(turn);
+        ResourceVo agent = new ResourceVo();
+        agent.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
+        agent.setResourceId("40");
+        when(parser.parse(1L, 8L, "reply"))
+            .thenReturn(new GroupChatAgentMention("{{DIG_EMPLOYEE_40}}", List.of(agent)));
+
+        if (reconcile) { handler.reconcileTurn(10L); }
+        else { handler.afterPersisted(context); }
+
+        verifyNoInteractions(coordinator);
+        verify(messages).updateByMessageId(any());
+        verify(turns).markSucceeded(eq(10L), eq(30L), any());
     }
 
     @Test

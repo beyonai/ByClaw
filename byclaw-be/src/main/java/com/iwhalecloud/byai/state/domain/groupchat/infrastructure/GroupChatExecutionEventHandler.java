@@ -196,9 +196,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         if ("TASK".equals(disposition)) {
             // 保留普通链路保存的过程结构，仅补充合法成员引用的展示信息。
             normalizeTaskMentions(execution, answer, answerMetadata);
-            if (!failed) {
-                scheduleAgentMentions(execution, mentions, answerId, execution.getSourceMessageId());
-            }
+            // TASK 的 turn 结束不代表任务完成；过程中的 @ 只展示，发布成果时才允许委派。
             taskService.updateTurnStatus(execution.getCandidateSessionId(), failed ? "FAILED" : "WAITING_USER");
             if (failed) {
                 markFailed(execution, "TURN_FAILED", "Task turn failed");

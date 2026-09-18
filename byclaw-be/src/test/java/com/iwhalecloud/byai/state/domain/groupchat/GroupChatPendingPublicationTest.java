@@ -13,7 +13,22 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.inOrder;
 
+import java.sql.Connection;
+import javax.sql.DataSource;
 import java.util.List;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatAgentMention;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatAgentMentionParser;
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import java.util.Date;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +76,10 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 
 class GroupChatPendingPublicationTest {
+    private final GroupChatAgentMentionParser parser = mock(GroupChatAgentMentionParser.class);
+    private final GroupChatExecutionCoordinator coordinator = mock(GroupChatExecutionCoordinator.class);
+    private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
+    private final ByaiGroupChatExecutionMapper executions = mock(ByaiGroupChatExecutionMapper.class);
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
     private final ByaiGroupChatTaskPublicationMapper publications = mock(ByaiGroupChatTaskPublicationMapper.class);
     private final GroupChatTaskAuthorizationService authorization = mock(GroupChatTaskAuthorizationService.class);
@@ -102,10 +121,15 @@ class GroupChatPendingPublicationTest {
         ReflectionTestUtils.setField(datasets, "ssResourceService", resources);
         ReflectionTestUtils.setField(datasets, "feignPythonBuildService", cloud);
         pending = new GroupChatPendingPublicationService(authorization, tasks, store, sequence);
-        completion = new GroupChatTaskService(tasks, publications, null, messages, sequence, null, authorization,
+        completion = new GroupChatTaskService(tasks, publications, executions, messages, sequence, null, authorization,
             null, sessions, projects, resources,
             events, store, uploader, datasets);
         GroupChatTopicTestSupport.install(completion, messages, 1L, 2L);
+        ReflectionTestUtils.setField(completion, "mentionParser", parser);
+        ReflectionTestUtils.setField(completion, "executionCoordinator", coordinator);
+        ReflectionTestUtils.setField(completion, "turnMapper", turns);
+        when(parser.parse(eq(1L), eq(4L), any())).thenAnswer(call ->
+            new GroupChatAgentMention(call.getArgument(2), List.of()));
     }
 
     @AfterEach
@@ -389,7 +413,7 @@ class GroupChatPendingPublicationTest {
         assertThat(completion.complete(60L, confirm(100L)).getMessageId()).isEqualTo(999L);
         assertThatThrownBy(() -> completion.complete(60L, confirm(99L))).hasMessageContaining("outdated");
         verify(store, never()).find(any());
-        verifyNoInteractions(uploader, messages);
+        verifyNoInteractions(uploader, messages, coordinator, parser);
     }
 
     @Test
@@ -408,6 +432,100 @@ class GroupChatPendingPublicationTest {
         when(tasks.publish(eq(60L), any(), eq(10L), any())).thenReturn(0);
         assertThatThrownBy(() -> completion.complete(60L, confirm(100L))).hasMessageContaining("concurrently");
         verify(store, never()).clear(any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void resultMentionsUsePublishedMessageAndOriginalDelegationChain(boolean legacy) {
+        ResourceVo agent = resultMention();
+        ByaiGroupChatExecution parent = publicationParent(legacy);
+        when(store.find(60L)).thenReturn(record(100L));
+
+        GroupChatTaskPublicationResponse response = completion.complete(60L, confirm(100L));
+
+        verify(coordinator).enqueueChild(parent, 40L, response.getMessageId(), response.getMessageId(),
+            "{{DIG_EMPLOYEE_40}}", List.of(agent));
+        ArgumentCaptor<ByaiMessage> saved = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(messages).insert(saved.capture());
+        assertThat(saved.getValue().getMessageContent()).isEqualTo("{{DIG_EMPLOYEE_40}}");
+        assertThat(JSONObject.parseObject(saved.getValue().getMetadata()).getJSONArray("resourceList"))
+            .hasSize(1);
+        assertThat(response.getText()).isEqualTo(saved.getValue().getMessageContent());
+        assertThat(task.getStatus()).isEqualTo("PUBLISHED");
+        // 重试必须返回首次发布结果，不再次解析或创建委派。
+        ArgumentCaptor<ByaiGroupChatTaskPublication> publication =
+            ArgumentCaptor.forClass(ByaiGroupChatTaskPublication.class);
+        verify(publications).insert(publication.capture());
+        when(publications.selectById(60L)).thenReturn(publication.getValue());
+        completion.complete(60L, confirm(100L));
+        verify(coordinator, times(1)).enqueueChild(any(), any(), any(), any(), any(), any());
+        verify(parser, times(1)).parse(any(), any(), any());
+    }
+
+    @Test
+    void failedPublicationStateDoesNotScheduleMentions() {
+        resultMention();
+        when(store.find(60L)).thenReturn(record(100L));
+        when(tasks.publish(eq(60L), any(), eq(10L), any())).thenReturn(0);
+
+        assertThatThrownBy(() -> completion.complete(60L, confirm(100L))).hasMessageContaining("concurrently");
+
+        verifyNoInteractions(coordinator);
+    }
+
+    @Test
+    void delegationFailureRollsBackPublicationAndDoesNotBroadcast() throws Exception {
+        resultMention();
+        publicationParent(false);
+        when(store.find(60L)).thenReturn(record(100L));
+        when(coordinator.enqueueChild(any(), any(), any(), any(), any(), any()))
+            .thenThrow(new IllegalStateException("queue unavailable"));
+        Connection connection = mock(Connection.class);
+        DataSource source = mock(DataSource.class);
+        when(source.getConnection()).thenReturn(connection);
+        when(connection.getAutoCommit()).thenReturn(true);
+        ProxyFactory factory = new ProxyFactory(completion);
+        factory.setProxyTargetClass(true);
+        factory.addAdvice(new TransactionInterceptor(new DataSourceTransactionManager(source),
+            new AnnotationTransactionAttributeSource()));
+        GroupChatTaskService transactional = (GroupChatTaskService) factory.getProxy();
+
+        assertThatThrownBy(() -> transactional.complete(60L, confirm(100L)))
+            .hasMessageContaining("queue unavailable");
+
+        verify(connection).rollback();
+        verify(connection, never()).commit();
+        verifyNoInteractions(events);
+        verify(store, never()).clear(any(), any());
+    }
+
+    private ResourceVo resultMention() {
+        ResourceVo agent = new ResourceVo();
+        agent.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
+        agent.setResourceId("40");
+        when(parser.parse(1L, 4L, "server text"))
+            .thenReturn(new GroupChatAgentMention("{{DIG_EMPLOYEE_40}}", List.of(agent)));
+        return agent;
+    }
+
+    private ByaiGroupChatExecution publicationParent(boolean legacy) {
+        task.setDispatchId(8L);
+        ByaiGroupChatExecution parent;
+        if (legacy) {
+            parent = new ByaiGroupChatExecution();
+            when(executions.selectByCandidateSessionId(60L)).thenReturn(parent);
+        }
+        else {
+            ByaiGroupChatTurn turn = new ByaiGroupChatTurn();
+            turn.setHopCount(3);
+            when(turns.selectById(8L)).thenReturn(turn);
+            parent = turn;
+        }
+        parent.setExecutionId(8L);
+        parent.setCandidateSessionId(60L);
+        parent.setGroupSessionId(1L);
+        parent.setRootMessageId(2L);
+        return parent;
     }
 
     @Test

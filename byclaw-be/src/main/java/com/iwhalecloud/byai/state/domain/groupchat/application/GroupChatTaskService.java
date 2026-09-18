@@ -5,6 +5,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,10 @@ import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatAgentMention;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatAgentMentionParser;
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskCompleteRequest;
@@ -52,6 +57,10 @@ public class GroupChatTaskService {
     private GroupChatTopicService topicService;
     @Autowired
     private ByaiGroupChatTurnMapper turnMapper;
+    @Autowired
+    private GroupChatAgentMentionParser mentionParser;
+    @Autowired
+    private GroupChatExecutionCoordinator executionCoordinator;
     private final ByaiGroupChatTaskMapper taskMapper;
     private final ByaiGroupChatTaskPublicationMapper publicationMapper;
     private final ByaiGroupChatExecutionMapper executionMapper;
@@ -132,7 +141,7 @@ public class GroupChatTaskService {
         candidateSessionService.promote(task.getTaskSessionId(), taskName);
         publishTaskEvent(task, "TASK_CREATED", null);
         if (StringUtils.isNotBlank(ackText)) {
-            Long messageId = createGroupMessage(task, ackText, "TASK_ACK", null, null);
+            Long messageId = createGroupMessage(task, ackText, "TASK_ACK", null, null, null);
             if (execution instanceof ByaiGroupChatTurn) { turnMapper.setAckMessage(execution.getExecutionId(), messageId); }
             else { executionMapper.setAckMessage(execution.getExecutionId(), messageId); }
         }
@@ -188,6 +197,9 @@ public class GroupChatTaskService {
             throw new IllegalArgumentException("Published task result requires text or files");
         }
         validateCloudFiles(task, files);
+        // 只解析最终确认发布的正文，不能使用任务过程答复或未确认的交付内容触发委派。
+        GroupChatAgentMention mentions = mentionParser.parse(task.getGroupSessionId(), task.getTargetAgentId(), text);
+        text = mentions.normalizedContent();
         Long messageId = sequenceService.nextVal();
         ByaiGroupChatTaskPublication publication = new ByaiGroupChatTaskPublication();
         publication.setTaskSessionId(taskId);
@@ -199,16 +211,38 @@ public class GroupChatTaskService {
         publication.setFilesJson(JSON.toJSONString(files));
         publication.setCreateTime(new Date());
         publicationMapper.insert(publication);
-        createGroupMessage(task, text, "TASK_RESULT", files, messageId);
+        createGroupMessage(task, text, "TASK_RESULT", files, messageId, mentions);
         if (taskMapper.publish(taskId, messageId, publication.getPublisherUserId(), new Date()) != 1) {
             throw new IllegalStateException("Task publication state changed concurrently");
         }
         task.setStatus("PUBLISHED");
         task.setPublishMessageId(messageId);
         task.setPublishBy(publication.getPublisherUserId());
+        scheduleResultMentions(task, mentions, messageId);
         pendingStore.clear(task, messageId);
         publishTaskEvent(task, "TASK_PUBLISHED", messageId);
         return response(publication);
+    }
+
+    private void scheduleResultMentions(ByaiGroupChatTask task, GroupChatAgentMention mentions, Long messageId) {
+        List<ResourceVo> agents = mentions.resourceList().stream()
+            .filter(resource -> resource.getResourceType() == AgentMetaEnum.DIG_EMPLOYEE).toList();
+        if (agents.isEmpty()) {
+            return;
+        }
+        // 保留原始 turn 的委派链和 hop 预算；旧任务则沿用会话执行记录。
+        ByaiGroupChatExecution parent = turnMapper.selectById(task.getDispatchId());
+        if (parent == null || !Objects.equals(parent.getCandidateSessionId(), task.getTaskSessionId())) {
+            parent = executionMapper.selectByCandidateSessionId(task.getTaskSessionId());
+        }
+        if (parent == null) {
+            throw new IllegalStateException("Task publication cannot resolve its execution: " + task.getTaskSessionId());
+        }
+        // 与成果发布共用事务和公开消息边界；回滚不留委派，重复确认在入口直接返回已有成果。
+        for (ResourceVo agent : agents) {
+            executionCoordinator.enqueueChild(parent, Long.valueOf(agent.getResourceId()), messageId, messageId,
+                mentions.normalizedContent(), mentions.resourceList());
+        }
     }
 
     @Transactional
@@ -285,7 +319,7 @@ public class GroupChatTaskService {
     }
 
     private Long createGroupMessage(ByaiGroupChatTask task, String content, String kind,
-        List<GroupChatTaskFile> files, Long reservedMessageId) {
+        List<GroupChatTaskFile> files, Long reservedMessageId, GroupChatAgentMention mentions) {
         Long messageId = reservedMessageId == null ? sequenceService.nextVal() : reservedMessageId;
         Date now = new Date();
         ByaiMessage message = new ByaiMessage();
@@ -311,6 +345,9 @@ public class GroupChatTaskService {
         metadata.put("sourceMessageId", task.getSourceMessageId());
         metadata.put("publisherUserId", "TASK_RESULT".equals(kind) ? CurrentUserHolder.getCurrentUserId() : null);
         metadata.put("files", files);
+        if (mentions != null) {
+            metadata.put("resourceList", mentions.resourceList());
+        }
         message.setMetadata(JSON.toJSONString(metadata));
         message.setCreateTime(now);
         message.setUpdateTime(now);
@@ -331,6 +368,9 @@ public class GroupChatTaskService {
         event.put("initiatorUserId", task.getInitiatorUserId() == null ? null : String.valueOf(task.getInitiatorUserId()));
         event.put("kind", kind);
         event.put("content", content);
+        if (mentions != null) {
+            event.put("resourceList", mentions.resourceList());
+        }
         event.put("files", files);
         // 任务回执不携带文件，附件统一返回空数组；有附件时沿用历史查询结构以保留 ID 精度。
         event.put("attachments", files == null ? Collections.emptyList() : files.stream().map(file -> {

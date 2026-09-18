@@ -245,7 +245,7 @@ class GroupChatExecutionEventHandlerTest {
         handler.afterPersisted(context(60L, "new-trace", 32L));
 
         verify(tasks).updateTurnStatus(60L, "WAITING_USER");
-        verifyNoInteractions(messages, publisher);
+        verifyNoInteractions(messages, publisher, coordinator);
     }
 
     @Test
@@ -279,7 +279,7 @@ class GroupChatExecutionEventHandlerTest {
     }
 
     @Test
-    void taskMentionNormalizationPreservesProcessStructureAndDispatchesFinalMentions() {
+    void taskMentionNormalizationPreservesProcessStructureWithoutDispatching() {
         ResourceVo resource = new ResourceVo();
         resource.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
         resource.setResourceId("40");
@@ -300,8 +300,8 @@ class GroupChatExecutionEventHandlerTest {
         assertThat(JSON.parseArray(update.getValue().getMessageStruct()).getJSONObject(0).getLong("seq"))
             .isEqualTo(5L);
         assertThat(update.getValue().getMessageStruct()).contains("{{DIG_EMPLOYEE_40}}");
-        verify(coordinator).enqueueChild(execution, 40L, answer.getMessageId(),
-            execution.getSourceMessageId(), "{{DIG_EMPLOYEE_40}}", List.of(resource));
+        assertThat(update.getValue().getMessageContent()).isEqualTo("{{DIG_EMPLOYEE_40}}");
+        verifyNoInteractions(coordinator);
         verify(messages, never()).insert(any(ByaiMessage.class));
     }
 
