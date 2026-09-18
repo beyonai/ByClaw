@@ -10,8 +10,6 @@ export function setSessionModelPreparer(preparer: SessionModelPreparer | undefin
   if (preparer) state[SLOT] = preparer;
   else delete state[SLOT];
 }
-
 export async function prepareSessionModelForDispatch(sessionId: string): Promise<void> {
   await state[SLOT]?.(sessionId);
 }
-

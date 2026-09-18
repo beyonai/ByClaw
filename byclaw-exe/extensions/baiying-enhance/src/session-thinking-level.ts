@@ -34,7 +34,6 @@ export function normalizeRuntimeThinkingLevel(raw: unknown): RuntimeThinkingLeve
         ? (value as RuntimeThinkingLevel)
         : undefined;
 }
-
 /** 从 Redis 记录读取档位：对象取 thinkingLevel，同时容忍裸字符串旧格式。 */
 export function readThinkingLevelFromPayload(raw: unknown): RuntimeThinkingLevel | undefined {
     if (typeof raw === "string") {
@@ -74,4 +73,3 @@ export async function resolveSessionThinkingLevel(params: {
         return undefined;
     }
 }
-

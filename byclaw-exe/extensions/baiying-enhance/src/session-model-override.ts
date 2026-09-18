@@ -32,7 +32,6 @@ export type SessionModelOverrideRef = {
 export function sessionModelOverrideRedisKey(sessionId: string): string {
     return `${SESSION_MODEL_OVERRIDE_KEY_PREFIX}${sessionId.trim()}`;
 }
-
 function currentRuntimeConfig(api: OpenClawPluginApi): OpenClawConfig {
     return api.runtime.config.current?.() ?? api.runtime.config.loadConfig();
 }
@@ -140,4 +139,3 @@ export async function resolveSessionModelOverride(params: {
         model: bundle.provider.modelId,
     };
 }
-
