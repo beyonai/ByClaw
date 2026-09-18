@@ -11,6 +11,7 @@ import CarouselFile from '@/components/MessageList/components/CarouselFile';
 import QueryInputBase, { IProps as pIProps, IState as pIState } from '@/components/QueryInput/queryInputBase';
 import { chatModeMap } from '@/constants/query';
 import { ResourceTypeMap } from '@/constants/resource';
+import { THINKING_LEVEL_DEFAULT_SIGNAL } from '@/utils/thinkingLevel';
 
 import UploadFile from '../components/UploadFile';
 import ConnectorControl from '../components/ConnectorControl';
@@ -37,6 +38,9 @@ type IState = {
   selectedModelId?: string;
   // 按会话记住选择，避免切换会话后把 A 会话的模型带到 B 会话。
   selectedModelBySession: Record<string, string>;
+  // undefined=本会话未选择思考强度（不发送信号）；'-1'=跟随默认；其余为档位。
+  selectedThinkingLevel?: string;
+  selectedThinkingLevelBySession: Record<string, string>;
 } & pIState;
 
 type IProps = {
@@ -71,6 +75,8 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       selectedResourceAgentIds: '',
       selectedModelId: undefined,
       selectedModelBySession: {},
+      selectedThinkingLevel: undefined,
+      selectedThinkingLevelBySession: {},
     };
   }
 
@@ -79,6 +85,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     const prevSessionId = `${prevProps.sessionId || 'new'}`;
     const nextSessionId = this.sessionKey();
     const selectedModelBySession = { ...this.state.selectedModelBySession };
+    const selectedThinkingLevelBySession = { ...this.state.selectedThinkingLevelBySession };
     // 新建会话拿到真实 sessionId 后，把 'new' 下的选择迁移过去，避免首轮消息后丢失。
     if (prevSessionId === 'new' && nextSessionId !== 'new' && selectedModelBySession.new) {
       selectedModelBySession[nextSessionId] = selectedModelBySession.new;
@@ -86,15 +93,34 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       this.writeStoredModel(nextSessionId, selectedModelBySession[nextSessionId]);
       this.clearStoredModel('new');
     }
+    if (prevSessionId === 'new' && nextSessionId !== 'new' && selectedThinkingLevelBySession.new) {
+      selectedThinkingLevelBySession[nextSessionId] = selectedThinkingLevelBySession.new;
+      delete selectedThinkingLevelBySession.new;
+      this.writeStoredThinkingLevel(nextSessionId, selectedThinkingLevelBySession[nextSessionId]);
+      this.clearStoredThinkingLevel('new');
+    }
     const restored = selectedModelBySession[nextSessionId];
-    if (restored !== this.state.selectedModelId || selectedModelBySession !== this.state.selectedModelBySession) {
-      this.setState({ selectedModelId: restored, selectedModelBySession });
+    const restoredLevel = selectedThinkingLevelBySession[nextSessionId];
+    if (
+      restored !== this.state.selectedModelId ||
+      restoredLevel !== this.state.selectedThinkingLevel ||
+      selectedModelBySession !== this.state.selectedModelBySession ||
+      selectedThinkingLevelBySession !== this.state.selectedThinkingLevelBySession
+    ) {
+      this.setState({
+        selectedModelId: restored,
+        selectedModelBySession,
+        selectedThinkingLevel: restoredLevel,
+        selectedThinkingLevelBySession,
+      });
     }
   }
 
   sessionKey = () => `${this.props.sessionId || 'new'}`;
 
   modelStorageKey = (sessionId: string) => `byclaw.session.selected-model.${sessionId}`;
+
+  thinkingLevelStorageKey = (sessionId: string) => `byclaw.session.thinking-level.${sessionId}`;
 
   readStoredModel = (sessionId: string) =>
     typeof window === 'undefined'
@@ -109,6 +135,19 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     if (typeof window !== 'undefined') window.sessionStorage.removeItem(this.modelStorageKey(sessionId));
   };
 
+  readStoredThinkingLevel = (sessionId: string) =>
+    typeof window === 'undefined'
+      ? undefined
+      : window.sessionStorage.getItem(this.thinkingLevelStorageKey(sessionId)) || undefined;
+
+  writeStoredThinkingLevel = (sessionId: string, value: string) => {
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(this.thinkingLevelStorageKey(sessionId), value);
+  };
+
+  clearStoredThinkingLevel = (sessionId: string) => {
+    if (typeof window !== 'undefined') window.sessionStorage.removeItem(this.thinkingLevelStorageKey(sessionId));
+  };
+
   restoreSelectedModel = () => {
     const sessionKey = this.sessionKey();
     let stored = this.readStoredModel(sessionKey);
@@ -121,8 +160,25 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         this.clearStoredModel('new');
       }
     }
-    if (stored) {
-      this.setState({ selectedModelId: stored, selectedModelBySession: { [sessionKey]: stored } });
+    let storedLevel = this.readStoredThinkingLevel(sessionKey);
+    if (!storedLevel && sessionKey !== 'new') {
+      storedLevel = this.readStoredThinkingLevel('new');
+      if (storedLevel) {
+        this.writeStoredThinkingLevel(sessionKey, storedLevel);
+        this.clearStoredThinkingLevel('new');
+      }
+    }
+    if (stored || storedLevel) {
+      this.setState((prevState) => ({
+        selectedModelId: stored ?? prevState.selectedModelId,
+        selectedModelBySession: stored
+          ? { ...prevState.selectedModelBySession, [sessionKey]: stored }
+          : prevState.selectedModelBySession,
+        selectedThinkingLevel: storedLevel ?? prevState.selectedThinkingLevel,
+        selectedThinkingLevelBySession: storedLevel
+          ? { ...prevState.selectedThinkingLevelBySession, [sessionKey]: storedLevel }
+          : prevState.selectedThinkingLevelBySession,
+      }));
     }
   };
 
@@ -131,9 +187,29 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     const sessionKey = this.sessionKey();
     const stored = next || '-1';
     this.writeStoredModel(sessionKey, stored);
+    // 切换模型后旧档位对新模型可能不合法：只清掉本会话的档位选择，
+    // 不发送任何档位信号（未做显式选择时不改变服务端覆盖），由后端按新模型重新校验。
+    this.clearStoredThinkingLevel(sessionKey);
+    this.setState((prevState) => {
+      const nextLevels = { ...prevState.selectedThinkingLevelBySession };
+      delete nextLevels[sessionKey];
+      return {
+        selectedModelId: stored,
+        selectedModelBySession: { ...prevState.selectedModelBySession, [sessionKey]: stored },
+        selectedThinkingLevel: undefined,
+        selectedThinkingLevelBySession: nextLevels,
+      };
+    });
+  };
+
+  // '-1' = 「跟随默认 / 恢复默认」：服务端清除本会话档位覆盖；undefined = 本会话不发送信号。
+  onThinkingLevelChange = (next?: string) => {
+    const sessionKey = this.sessionKey();
+    const stored = next || THINKING_LEVEL_DEFAULT_SIGNAL;
+    this.writeStoredThinkingLevel(sessionKey, stored);
     this.setState((prevState) => ({
-      selectedModelId: stored,
-      selectedModelBySession: { ...prevState.selectedModelBySession, [sessionKey]: stored },
+      selectedThinkingLevel: stored,
+      selectedThinkingLevelBySession: { ...prevState.selectedThinkingLevelBySession, [sessionKey]: stored },
     }));
   };
 
@@ -208,6 +284,8 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         agentId,
         // 仅在用户为本会话显式选择时发送：'-1' = 默认模型（清除覆盖），正数 = 模型主键。
         ...(this.state.selectedModelId ? { relModelId: this.state.selectedModelId } : {}),
+        // 思考强度同理：'-1' = 跟随默认（清除档位覆盖），其余为档位值。
+        ...(this.state.selectedThinkingLevel ? { relThinkingLevel: this.state.selectedThinkingLevel } : {}),
         ...chatSettings,
       },
       msgOpt: {
@@ -506,6 +584,8 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             allowWeb={this.props.enableModelSelect}
             value={this.state.selectedModelId}
             onChange={this.onModelSelectChange}
+            level={this.state.selectedThinkingLevel}
+            onLevelChange={this.onThinkingLevelChange}
           />
           {this.STTRender()}
         </Space>
