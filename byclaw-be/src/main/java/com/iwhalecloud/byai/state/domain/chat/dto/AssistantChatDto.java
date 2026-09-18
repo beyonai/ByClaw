@@ -69,6 +69,13 @@ public class AssistantChatDto {
     private String relModelId;
 
     /**
+     * 会话级思考强度(用户选择)。取值见 THINKING_LEVELS；-1 表示「跟随默认」（清除会话档位覆盖）；
+     * 缺失表示本轮不改动已有覆盖。
+     */
+    @Schema(description = "思考强度(用户选择)；-1=跟随默认", example = "high")
+    private String relThinkingLevel;
+
+    /**
      * 本轮实际使用的模型（服务端解析结果，含回退），仅进程内传递，不参与序列化。
      */
     @JsonIgnore

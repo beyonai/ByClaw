@@ -11,6 +11,10 @@ import lombok.Setter;
  *
  * <p>该对象既用于写入 Redis 会话级覆盖键，也用于写入助手消息 metadata 的 {@code usedModel} 字段，
  * 因此字段名与前端角标读取的键保持一致。
+ *
+ * <p>作为 Redis 会话覆盖记录时是「双轴」结构：模型轴字段只在用户显式选择模型时存在，
+ * 档位轴字段（{@code thinkingLevel}/{@code thinkingSource}）每轮写入最终档位；
+ * 两轴可在同一键内独立清除，互不误删。
  */
 @Getter
 @Setter
@@ -28,6 +32,12 @@ public class SessionModelSelection {
     /** 服务商名称，可空。 */
     private String providerName;
 
+    /** 本轮实际使用的思考强度档位；词表见 SessionModelSelectionService.THINKING_LEVELS。 */
+    private String thinkingLevel;
+
+    /** 档位来源：session=用户显式选择（可作为下一轮覆盖候选），model_default=模型配置默认，off=关闭。 */
+    private String thinkingSource;
+
     public SessionModelSelection() {
     }
 
@@ -44,11 +54,12 @@ public class SessionModelSelection {
      * @return 可被 JSON 序列化的有序 Map
      */
     public Map<String, Object> toMetadata() {
-        Map<String, Object> metadata = new LinkedHashMap<>(4);
+        Map<String, Object> metadata = new LinkedHashMap<>(6);
         metadata.put("id", modelId);
         metadata.put("code", modelCode);
         metadata.put("name", modelName);
         metadata.put("provider", providerName);
+        metadata.put("thinkingLevel", thinkingLevel);
         return metadata;
     }
 }
