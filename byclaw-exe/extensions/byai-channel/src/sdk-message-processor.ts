@@ -492,6 +492,12 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
     rel_model_id?: unknown;
     rel_model_code?: unknown;
     rel_model_name?: unknown;
+    /**
+     * Java 网关透传的会话级思考档位（camelCase，词表与 byclaw-super THINKING_LEVELS 一致）。
+     * 运行时真正消费的是 Redis 会话记录的档位轴（baiying-enhance 写入 session store），
+     * 这里仅用于派发诊断日志，避免形成第二条事实来源。
+     */
+    thinkingLevel?: unknown;
   };
   laneMetadata?: ByaiLaneMetadata;
 };
@@ -569,6 +575,13 @@ async function deliverReplyToAgentViaSdkUnderGate(
     signal: deps.abortController?.signal,
     log,
   });
+
+  const sessionThinkingLevel = stringValue(extraPayload.thinkingLevel).trim();
+  if (sessionThinkingLevel) {
+    log?.info?.(
+      `[diagnose-sdk] session thinking level=${sessionThinkingLevel}, session=${sessionKey}, sessionId=${message.sessionId}, agent=${sessionAgentId}`,
+    );
+  }
 
   const { accountId } = account;
   const To = appendByaiLaneToTarget(`${sessionAgentId}:${message.sessionId}`, laneMetadata);
