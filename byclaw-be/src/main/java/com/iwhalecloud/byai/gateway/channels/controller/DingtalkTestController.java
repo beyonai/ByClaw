@@ -114,7 +114,7 @@ public class DingtalkTestController {
             AssistantChatDto assistantChatDto = new AssistantChatDto();
             assistantChatDto.setAccessTerminal(ChannelType.DINGTALK.getCode());
             assistantChatDto.setChatContent(text);
-            assistantChatDto.setRelModelId(-1L);
+            assistantChatDto.setRelModelId("-1");
             assistantChatDto.setAgentId(digitEmployVo.getId());
             assistantChatDto.setAgentType(digitEmployVo.getAgentType());
             assistantChatDto.setSessionId(dingtalkSessionService.resolveSessionId(

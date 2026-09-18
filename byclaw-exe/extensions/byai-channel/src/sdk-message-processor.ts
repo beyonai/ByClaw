@@ -4,6 +4,7 @@
  */
 
 import path from "node:path";
+import { prepareSessionModelForDispatch } from "../../shared/src/session-model-runtime.js";
 import {
   detectMime,
   fetchRemoteMedia,
@@ -163,17 +164,29 @@ function resolveManagedAgentPrimaryModel(
   return { ...parsed, primary };
 }
 
-async function alignManagedAgentSessionModel(params: {
+export async function alignManagedAgentSessionModel(params: {
   rt: ReturnType<typeof getByaiRuntime>;
   cfg: import("openclaw/plugin-sdk").OpenClawConfig;
   sessionAgentId: string;
   sessionKey: string;
   signal?: AbortSignal;
+  /**
+   * 网关透传的会话级模型选择信号（params.rel_model_id）。
+   * 正整数表示用户在对话框选定了模型：对齐工作交给 baiying-enhance（它负责按需注册 provider），
+   * 这里必须跳过，否则会把会话模型打回数字员工配置值。
+   */
+  relModelId?: string;
   log?: {
     info?: (msg: string) => void;
     warn?: (msg: string) => void;
   };
 }): Promise<void> {
+  if (params.relModelId && /^-?[1-9]\d*$/.test(params.relModelId.trim()) && params.relModelId.trim() !== "-1") {
+    params.log?.info?.(
+      `[diagnose-sdk] session model override present (relModelId=${params.relModelId.trim()}), skip config-primary alignment: agent=${params.sessionAgentId}, session=${params.sessionKey}`,
+    );
+    return;
+  }
   const target = resolveManagedAgentPrimaryModel(params.cfg, params.sessionAgentId);
   if (!target) {
     return;
@@ -413,6 +426,12 @@ export async function deliverReplyToAgentViaSdk(
   const sessionKey = baseSessionKey;
 
   const { result, meta, release } = await runSessionDispatchExclusiveLeased(sessionKey, async () => {
+    // Provider registration can replace the runtime config. Complete it before
+    // taking the snapshot that OpenClaw retains throughout this dispatch.
+    await awaitWithAbort(
+      prepareSessionModelForDispatch(message.sessionId),
+      deps.abortController?.signal,
+    );
     const dispatchCfg = await waitForBaiyingAgentConfig({
       runtime: rt,
       cfg,
@@ -469,6 +488,16 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
     agent_id?: unknown;
     agent_code?: unknown;
     agent_name?: unknown;
+    /** Java 网关透传的会话级模型选择（非零模型主键，-1 表示默认模型）。 */
+    rel_model_id?: unknown;
+    rel_model_code?: unknown;
+    rel_model_name?: unknown;
+    /**
+     * Java 网关透传的会话级思考档位（camelCase，词表与 byclaw-super THINKING_LEVELS 一致）。
+     * 运行时真正消费的是 Redis 会话记录的档位轴（baiying-enhance 写入 session store），
+     * 这里仅用于派发诊断日志，避免形成第二条事实来源。
+     */
+    thinkingLevel?: unknown;
   };
   laneMetadata?: ByaiLaneMetadata;
 };
@@ -540,9 +569,19 @@ async function deliverReplyToAgentViaSdkUnderGate(
     cfg,
     sessionAgentId,
     sessionKey,
+    ...(stringValue(extraPayload.rel_model_id).trim()
+      ? { relModelId: stringValue(extraPayload.rel_model_id).trim() }
+      : {}),
     signal: deps.abortController?.signal,
     log,
   });
+
+  const sessionThinkingLevel = stringValue(extraPayload.thinkingLevel).trim();
+  if (sessionThinkingLevel) {
+    log?.info?.(
+      `[diagnose-sdk] session thinking level=${sessionThinkingLevel}, session=${sessionKey}, sessionId=${message.sessionId}, agent=${sessionAgentId}`,
+    );
+  }
 
   const { accountId } = account;
   const To = appendByaiLaneToTarget(`${sessionAgentId}:${message.sessionId}`, laneMetadata);

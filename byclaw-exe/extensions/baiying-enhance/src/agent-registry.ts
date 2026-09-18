@@ -221,6 +221,34 @@ export function mergeDefaultAimodelIntoConfig(params: {
 }
 
 /**
+ * Merge one Redis-resolved model provider into a copy of the active OpenClaw config.
+ * Used by session-level model switching so a user-picked model becomes usable without
+ * a full watchdog flush; idempotent because the provider entry is fully replaced.
+ */
+export function mergeAimodelProviderIntoConfig(params: {
+  base: OpenClawConfig;
+  providerKey: string;
+  provider: ProviderBundle;
+  aimodelConfigRedisKey?: string;
+  aimodelTypeListRedisKey?: string;
+  aimodelSecretProviderName?: string;
+  aimodelSecretResolverCommand?: string;
+  aimodelSecretResolverArgs?: string[];
+}): OpenClawConfig {
+  const cfg = structuredClone(params.base);
+  ensureConfigModelContainers(cfg);
+  cfg.models!.providers![params.providerKey] = {
+    baseUrl: params.provider.baseUrl,
+    apiKey: params.provider.apiKey,
+    api: params.provider.api,
+    timeoutSeconds: params.provider.timeoutSeconds ?? DEFAULT_AIMODEL_TIMEOUT_SECONDS,
+    models: [defaultModelDefinition(params.provider)],
+  };
+  upsertAimodelSecretProvider(cfg, params);
+  return cfg;
+}
+
+/**
  * Merge managed Baiying agents into a copy of the active OpenClaw config.
  * Removes prior managed entries (same id prefix / provider prefix) before applying.
  */
