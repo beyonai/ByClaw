@@ -352,7 +352,7 @@ public class SsResourceService {
         }
 
         // 排除删除状态的
-        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.DELETE);
+        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.DELETE.getNum());
 
         return ssResourceMapper.selectCount(queryWrapper);
     }
