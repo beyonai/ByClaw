@@ -14,7 +14,9 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
+import com.iwhalecloud.byai.manager.entity.datasource.Datasource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.mapper.datasource.DataSourceMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectResourceMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareFileMapper;
@@ -55,6 +57,8 @@ class ProjectContextApplicationServiceTest {
     private ProjectShareFileMapper projectShareFileMapper;
     @Mock
     private SsResourceService ssResourceService;
+    @Mock
+    private DataSourceMapper dataSourceMapper;
 
     @BeforeEach
     void setCurrentUser() {
@@ -89,6 +93,15 @@ class ProjectContextApplicationServiceTest {
         knowledge.setResourceBizType("KG_DOC");
         when(ssResourceService.findByIdList(any())).thenReturn(List.of(knowledge));
 
+        Datasource datasource = new Datasource();
+        datasource.setDatasourceId(301L);
+        datasource.setDatasourceName("项目报表库");
+        datasource.setDescription("经营分析数据");
+        datasource.setDatasourceType("opengauss");
+        datasource.setConnectionConfig("{\"host\":\"secret.internal\"}");
+        datasource.setPasswordCipher("encrypted-secret");
+        when(dataSourceMapper.listByProject(7L)).thenReturn(List.of(datasource));
+
         ProjectMemberListDto member = new ProjectMemberListDto();
         member.setUserId(88L);
         member.setUserName("项目负责人");
@@ -119,6 +132,13 @@ class ProjectContextApplicationServiceTest {
             .isEqualTo("https://github.com/beyonai/byclaw-test.git");
         assertThat(result.getKnowledgeBases()).extracting(ProjectContextDto.ResourceSummary::getResourceName)
             .containsExactly("项目知识库", "已删除知识库");
+        assertThat(result.getDataSources()).singleElement().satisfies(item -> {
+            assertThat(item.getDatasourceId()).isEqualTo(301L);
+            assertThat(item.getDatasourceName()).isEqualTo("项目报表库");
+            assertThat(item.getDescription()).isEqualTo("经营分析数据");
+            assertThat(item.getDatasourceType()).isEqualTo("opengauss");
+        });
+        assertThat(result.getCounts()).containsEntry("dataSources", 1L);
         assertThat(result.getMembers()).singleElement().satisfies(item -> {
             assertThat(item.getUserName()).isEqualTo("项目负责人");
             assertThat(item.getUserNumber()).isEqualTo("0027000001");
@@ -143,6 +163,7 @@ class ProjectContextApplicationServiceTest {
         assertThat(result.getProject()).isNull();
         assertThat(result.getCounts()).containsEntry("repositories", 0L);
         verify(projectResourceMapper, never()).selectList(any());
+        verify(dataSourceMapper, never()).listByProject(any());
     }
 
     @Test
@@ -185,6 +206,7 @@ class ProjectContextApplicationServiceTest {
         ReflectionTestUtils.setField(service, "projectResourceMapper", projectResourceMapper);
         ReflectionTestUtils.setField(service, "projectShareFileMapper", projectShareFileMapper);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "dataSourceMapper", dataSourceMapper);
         return service;
     }
 }

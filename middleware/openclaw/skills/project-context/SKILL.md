@@ -39,11 +39,11 @@ node scripts/project-context.mjs files --project-id 20014944 --size 50
 - `current`：完整项目上下文。
 - `basic`：项目基本信息，位于返回 JSON 的 `project` 对象：`projectId`、`projectName`、`description`、`projectType`、`isShare`、`initStatus`、`buildIndex`、`indexSkills`、`cloudResourceId`（项目云盘知识库资源 ID）、`createBy`、`createTime`。
 - `repos`：代码仓库。
-- `resources`：知识库、数字员工。
+- `resources`：知识库、数字员工、项目关联数据源。
 - `members`：项目成员；不返回手机号。
 - `files`：项目共享文件；默认 50 条，最大 100 条，响应中的 `truncated.sharedFiles` 表示是否截断。
 
-输出为单行 JSON。直接依据返回数据回答用户；名称为空或 `available=false` 时，要说明绑定记录存在但资源当前不可用。
+输出为单行 JSON。直接依据返回数据回答用户；名称为空或 `available=false` 时，要说明绑定记录存在但资源当前不可用。数据源仅返回 ID、名称、描述和类型，不包含连接配置、密码或凭据。
 
 ## 安全约束
 

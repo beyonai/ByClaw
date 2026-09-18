@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.mapper.datasource.DataSourceMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectResourceMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareFileMapper;
@@ -45,7 +46,7 @@ public class ProjectContextApplicationService {
     private static final int DEFAULT_FILE_LIMIT = 50;
     private static final int MAX_FILE_LIMIT = 100;
     private static final Set<String> ALL_SECTIONS = Set.of(
-        "basic", "repositories", "knowledge", "members", "sharedfiles");
+        "basic", "repositories", "knowledge", "datasources", "members", "sharedfiles");
     private static final Set<String> KNOWLEDGE_TYPES = Set.of("KG_DOC", "KG_DB", "KG_QA", "KG_TERM");
 
     @Autowired
@@ -68,6 +69,9 @@ public class ProjectContextApplicationService {
 
     @Autowired
     private SsResourceService ssResourceService;
+
+    @Autowired
+    private DataSourceMapper dataSourceMapper;
 
     /**
      * 查询项目上下文。projectId 优先，sessionId 仅作为降级解析来源。
@@ -95,6 +99,9 @@ public class ProjectContextApplicationService {
         }
         if (sections.contains("knowledge")) {
             loadResources(project.getProjectId(), sections, result);
+        }
+        if (sections.contains("datasources")) {
+            loadDataSources(project.getProjectId(), result);
         }
         if (sections.contains("members")) {
             List<ProjectContextDto.MemberSummary> members = loadMembers(project.getProjectId());
@@ -228,6 +235,20 @@ public class ProjectContextApplicationService {
             result.getCounts().put("digitalEmployees", (long) result.getDigitalEmployees().size());
             result.getCounts().put("otherResources", (long) result.getOtherResources().size());
         }
+    }
+
+    private void loadDataSources(Long projectId, ProjectContextDto result) {
+        List<ProjectContextDto.DataSourceSummary> dataSources = dataSourceMapper.listByProject(projectId).stream()
+            .map(source -> {
+                ProjectContextDto.DataSourceSummary summary = new ProjectContextDto.DataSourceSummary();
+                summary.setDatasourceId(source.getDatasourceId());
+                summary.setDatasourceName(source.getDatasourceName());
+                summary.setDescription(source.getDescription());
+                summary.setDatasourceType(source.getDatasourceType());
+                return summary;
+            }).toList();
+        result.setDataSources(dataSources);
+        result.getCounts().put("dataSources", (long) dataSources.size());
     }
 
     private ProjectContextDto.ResourceSummary toResourceSummary(ProjectResource binding, SsResource resource) {

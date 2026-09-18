@@ -25,6 +25,7 @@ public class ProjectContextDto {
     private List<ResourceSummary> knowledgeBases = new ArrayList<>();
     private List<ResourceSummary> digitalEmployees = new ArrayList<>();
     private List<ResourceSummary> otherResources = new ArrayList<>();
+    private List<DataSourceSummary> dataSources = new ArrayList<>();
     private List<MemberSummary> members = new ArrayList<>();
     private List<SharedFileSummary> sharedFiles = new ArrayList<>();
     private Map<String, Long> counts = new LinkedHashMap<>();
@@ -74,6 +75,15 @@ public class ProjectContextDto {
         private String description;
         private Long parentResourceId;
         private boolean available;
+    }
+
+    @Getter
+    @Setter
+    public static class DataSourceSummary {
+        private Long datasourceId;
+        private String datasourceName;
+        private String description;
+        private String datasourceType;
     }
 
     @Getter
