@@ -330,6 +330,59 @@ function defaultSupportedEffortsForFormat(format?: string): string[] | undefined
     return undefined;
 }
 
+/** 运行时档位词表，与 byclaw-super THINKING_LEVELS / ByClaw BE 保持一致（off 单独处理）。 */
+const RUNTIME_THINKING_LEVELS: readonly AimodelThinkingLevel[] = [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "adaptive",
+    "max",
+];
+
+/** 关闭思考时写入上游的 effort 值；不属于可启用档位，因此不会被当成开启信号。 */
+const OFF_THINKING_EFFORT = "none";
+
+/**
+ * 构造完整的「档位 → provider effort」映射。
+ *
+ * <p>`off` 必须是「不被识别为有效 effort」的值：OpenClaw 的 `resolveAgentReasoningOption` 在档位为 off 时
+ * 会把 `thinkingLevelMap.off` 当成 effort 发出（只要它属于 minimal/low/medium/high/xhigh/max），
+ * 因此旧的 `{ off: defaultLevel }` 会让「关闭」仍然请求高档位推理；映射为 `none` 后
+ * OpenAI 兼容端点会收到显式关闭，deepseek/qwen 等格式则走各自的 disabled 分支。
+ *
+ * <p>其余档位按管理员 `effortMap` 翻译（此前只写入无人消费的 `compat.reasoningEffortMap`），
+ * 缺失映射时退化为档位本身。
+ */
+function buildThinkingLevelMap(params: {
+    effortMap?: Record<string, string>;
+    levels?: string[];
+    defaultLevel?: string;
+}): AimodelThinkingLevelMap {
+    const levels = new Set<string>(RUNTIME_THINKING_LEVELS);
+    for (const level of params.levels ?? []) {
+        if (level) {
+            levels.add(level);
+        }
+    }
+    if (params.defaultLevel) {
+        levels.add(params.defaultLevel);
+    }
+    const map: AimodelThinkingLevelMap = { off: OFF_THINKING_EFFORT };
+    for (const level of levels) {
+        if (level === "off" || !isAimodelThinkingLevel(level)) {
+            continue;
+        }
+        map[level] = params.effortMap?.[level] ?? level;
+    }
+    return map;
+}
+
+function isAimodelThinkingLevel(value: string): value is AimodelThinkingLevel {
+    return value === "adaptive" || (RUNTIME_THINKING_LEVELS as readonly string[]).includes(value);
+}
+
 function resolveReasoningModelOptions(params: {
     api: AimodelProviderApi;
     baseUrl: string;
@@ -337,9 +390,12 @@ function resolveReasoningModelOptions(params: {
     instanceParam: Record<string, unknown>;
 }): Pick<ProviderBundle, "reasoning" | "thinkingLevelMap" | "thinkingBudgets" | "compat"> {
     const config = parseReasoningConfig(params.instanceParam);
-    if (!config.enabled || config.defaultLevel === "off") {
+    if (!config.enabled) {
         return { reasoning: false };
     }
+    // 注意：defaultLevel === "off" 仍要下发完整档位映射（reasoning: true）——
+    // 「默认关闭」只决定会话默认档位（由 ByClaw BE 每轮解析下发），不代表模型不支持档位；
+    // 否则会话选了档位也会被运行时的 off-only profile 夹回 off，而 metadata/角标却记为已选档位。
     const format = inferThinkingFormat({
         api: params.api,
         baseUrl: params.baseUrl,
@@ -348,12 +404,14 @@ function resolveReasoningModelOptions(params: {
         modelProtocol: params.instanceParam.modelProtocol,
         configuredFormat: config.compatFormat,
     });
-    const thinkingLevelMap: AimodelThinkingLevelMap = {
-        off: config.defaultLevel,
-    };
     const effortMap = config.effortMap ?? defaultEffortMapForFormat(format);
     const supportedReasoningEfforts =
         config.supportedEfforts ?? defaultSupportedEffortsForFormat(format);
+    const thinkingLevelMap = buildThinkingLevelMap({
+        effortMap,
+        levels: supportedReasoningEfforts,
+        defaultLevel: config.defaultLevel,
+    });
     const compat: AimodelModelCompat = {};
     if (format && format !== "anthropic") {
         compat.thinkingFormat = format;
