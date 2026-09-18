@@ -221,7 +221,7 @@ public class FeishuBotEventHandler {
         assistantChatDto.setChatContent(message.getTextContent() == null || message.getTextContent().isBlank()
                 ? ""
                 : message.getTextContent());
-        assistantChatDto.setRelModelId(-1L);
+        assistantChatDto.setRelModelId("-1");
         assistantChatDto.setAgentId(digitEmployVo.getId());
         assistantChatDto.setAgentType(digitEmployVo.getAgentType());
         assistantChatDto.setSessionId(feishuSessionService.resolveSessionId(
