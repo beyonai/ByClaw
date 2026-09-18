@@ -117,6 +117,28 @@ public class ParamService {
     private SsResExtSkillMapper ssResExtSkillMapper;
 
     /**
+     * 写入会话级模型与思考强度参数。
+     *
+     * <p>键名是跨运行时契约：byclaw-super 直接读取 {@code extraPayload.thinkingLevel}（camelCase），
+     * 写成 thinking_level 会被静默忽略并回落 off。
+     *
+     * @param params 请求python的参数
+     * @param assistantChatDto 会话入参（含已解析的有效模型与档位）
+     */
+    void putSessionRuntimeParams(Map<String, Object> params, AssistantChatDto assistantChatDto) {
+        SessionModelSelection effectiveModel = assistantChatDto.getSessionModelSelection();
+        if (effectiveModel == null) {
+            return;
+        }
+        params.put("rel_model_id", effectiveModel.getModelId());
+        params.put("rel_model_code", effectiveModel.getModelCode());
+        params.put("rel_model_name", effectiveModel.getModelName());
+        if (StringUtils.isNotBlank(effectiveModel.getThinkingLevel())) {
+            params.put("thinkingLevel", effectiveModel.getThinkingLevel());
+        }
+    }
+
+    /**
      * 请求python的参数拼接
      *
      * @param ctx
@@ -139,12 +161,7 @@ public class ParamService {
         params.put("ext_params", assistantChatDto.getExtParams());
         params.put("worker_agent_type", resolveWorkerAgentType(assistantChatDto.getAgentId()));
         // 会话级模型选择：透传给 Agent 运行时（BY_SUPER 走 by-framework extraPayload）并便于日志排查。
-        SessionModelSelection effectiveModel = assistantChatDto.getSessionModelSelection();
-        if (effectiveModel != null) {
-            params.put("rel_model_id", effectiveModel.getModelId());
-            params.put("rel_model_code", effectiveModel.getModelCode());
-            params.put("rel_model_name", effectiveModel.getModelName());
-        }
+        putSessionRuntimeParams(params, assistantChatDto);
 
         if (assistantChatDto.getAgentId() != null
             && digitalEmployeeGroupApplicationService.isGroup(assistantChatDto.getAgentId())) {
