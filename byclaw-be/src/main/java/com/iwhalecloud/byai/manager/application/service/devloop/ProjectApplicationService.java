@@ -891,7 +891,9 @@ public class ProjectApplicationService {
         }
         ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
         // 新增仓库只负责保存配置并异步克隆，不触发项目初始化、.gitmodules 同步或架构会话流程。
-        projectInitService.cloneProjectRepositoryAsync(repo);
+        Long cloneUserId = CurrentUserHolder.getCurrentUserId();
+        String cloneUserCode = CurrentUserHolder.getCurrentUserCode();
+        projectInitService.cloneProjectRepositoryAsync(repo, cloneUserId, cloneUserCode);
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("repoFullName", repo.getRepoFullName());
@@ -940,7 +942,9 @@ public class ProjectApplicationService {
             projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
         }
         if (projectInitService != null && !"ready".equals(projectInitService.getCloneStatus(repo))) {
-            projectInitService.cloneProjectRepositoryAsync(repo);
+            Long cloneUserId = CurrentUserHolder.getCurrentUserId();
+            String cloneUserCode = CurrentUserHolder.getCurrentUserCode();
+            projectInitService.cloneProjectRepositoryAsync(repo, cloneUserId, cloneUserCode);
         }
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
