@@ -353,7 +353,8 @@ const OFF_THINKING_EFFORT = "none";
  * OpenAI 兼容端点会收到显式关闭，deepseek/qwen 等格式则走各自的 disabled 分支。
  *
  * <p>其余档位按管理员 `effortMap` 翻译（此前只写入无人消费的 `compat.reasoningEffortMap`），
- * 缺失映射时退化为档位本身。
+ * 缺失映射时退化为档位本身。`adaptive` 是会话运行时模式，但不是 OpenClaw 配置
+ * schema 允许的 `thinkingLevelMap` 键，因此必须保留在会话/compat 配置中而不写入该映射。
  */
 function buildThinkingLevelMap(params: {
     effortMap?: Record<string, string>;
@@ -371,7 +372,7 @@ function buildThinkingLevelMap(params: {
     }
     const map: AimodelThinkingLevelMap = { off: OFF_THINKING_EFFORT };
     for (const level of levels) {
-        if (level === "off" || !isAimodelThinkingLevel(level)) {
+        if (level === "off" || level === "adaptive" || !isAimodelThinkingLevel(level)) {
             continue;
         }
         map[level] = params.effortMap?.[level] ?? level;

@@ -54,7 +54,10 @@ export type AimodelThinkingLevel =
     | "xhigh"
     | "adaptive"
     | "max";
-export type AimodelThinkingLevelMap = Partial<Record<AimodelThinkingLevel, string | null>>;
+/** OpenClaw's config schema treats `adaptive` as a runtime mode, not a thinkingLevelMap key. */
+export type AimodelThinkingLevelMap = Partial<
+    Record<Exclude<AimodelThinkingLevel, "adaptive">, string | null>
+>;
 export type AimodelThinkingBudgets = Partial<
     Record<Exclude<AimodelThinkingLevel, "off" | "xhigh" | "adaptive">, number>
 >;
