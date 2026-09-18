@@ -58,6 +58,7 @@ export interface DefaultValueSchema {
 }
 export interface Props {
   inAgentRoute?: boolean;
+  inputDraft?: DefaultValueSchema;
   style?: React.CSSProperties;
   agentId?: string;
   agentType?: IAgentType;

@@ -3,6 +3,11 @@ import { act, render, waitFor } from '@testing-library/react';
 import { chatModeMap } from '@/constants/query';
 import RichInput, { RichInputRef } from '../index';
 import { ResourceType } from '../utils/constants';
+import getElementData from '../utils/getElementData';
+import type { MentionElementType } from '../elements/mention';
+import type { DefaultValueSchema } from '../types';
+
+let mockDefaultAgentElement: MentionElementType | undefined;
 
 const mockEventEmitter = {
   emit: jest.fn(),
@@ -20,12 +25,148 @@ jest.mock('@umijs/max', () => ({
 
 jest.mock('@/hooks/useGlobal', () => () => ({ EventEmitter: mockEventEmitter }));
 jest.mock('../mentionPopover', () => () => null);
-jest.mock('../useDefaultAgentElement', () => () => undefined);
+jest.mock('../useDefaultAgentElement', () => () => mockDefaultAgentElement);
 jest.mock('../useDefaultAgentPlaceholder', () => () => ({ agentPlaceholder: null, isComposing: { current: false } }));
 
 describe('RichInput', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockDefaultAgentElement = undefined;
+  });
+
+  const historyEmployee = (agentId = 'history-agent'): MentionElementType => ({
+    ...(getElementData(ResourceType.digitalEmployee, {
+      agentId,
+      agentType: '001',
+      name: 'History Employee',
+    }) as MentionElementType),
+    isDefaultAgent: true,
+    children: [{ text: '' }],
+  });
+
+  it.each<DefaultValueSchema>([
+    { text: 'Unsent text', resourceList: [] },
+    {
+      text: '{{draft-employee}} Unsent text {{draft-reference}}',
+      resourceList: [
+        {
+          id: 'draft-employee',
+          resourceType: ResourceType.digitalEmployee,
+          resourceId: 'draft-agent',
+          resourceName: 'Draft Employee',
+          agentType: '001',
+        },
+        {
+          id: 'draft-reference',
+          resourceType: ResourceType.dataSource,
+          resourceId: '17',
+          resourceName: 'Analytics',
+        },
+      ],
+    },
+  ])('restores only the draft without adding an existing or late history employee: %j', async (draft) => {
+    mockDefaultAgentElement = historyEmployee();
+    const inputRef = createRef<RichInputRef>();
+    const view = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote inputDraft={draft} />);
+    await act(async () => inputRef.current?.setText(draft));
+    const expectedIds = (draft.resourceList || []).map((resource) => resource.resourceId);
+    expect(inputRef.current?.getPayload().resourceList.map((resource) => resource.resourceId)).toEqual(expectedIds);
+    expect(view.container.textContent).not.toContain('History Employee');
+
+    // 会话详情和员工信息可能晚于草稿恢复，不能在异步更新后补入历史员工。
+    mockDefaultAgentElement = historyEmployee('late-history-agent');
+    view.rerender(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote inputDraft={draft} />);
+    expect(inputRef.current?.getPayload().resourceList.map((resource) => resource.resourceId)).toEqual(expectedIds);
+    expect(view.container.textContent).not.toContain('History Employee');
+
+    await act(async () => inputRef.current?.setText(''));
+    view.rerender(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote inputDraft={{ text: '' }} />);
+    expect(inputRef.current?.getPayload().resourceList).toEqual([]);
+  });
+
+  it.each([undefined, { text: '', resourceList: [] }])(
+    'automatically mentions the history employee when there is no draft: %j',
+    async (draft) => {
+      const inputRef = createRef<RichInputRef>();
+      const view = render(
+        <RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote inputDraft={draft} />
+      );
+      // 无草稿时仍等待并展示异步返回的历史会话员工。
+      mockDefaultAgentElement = historyEmployee();
+      view.rerender(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote inputDraft={draft} />);
+      await waitFor(() => {
+        expect(inputRef.current?.getPayload().resourceList.map((resource) => resource.resourceId)).toEqual([
+          'history-agent',
+        ]);
+        expect(view.container.textContent).toContain('History Employee');
+      });
+    }
+  );
+
+  it('does not carry an automatically restored employee into the next history session or a new session', async () => {
+    const onDraftChange = jest.fn();
+    const inputRef = createRef<RichInputRef>();
+    mockDefaultAgentElement = historyEmployee('history-a');
+    const view = render(
+      <RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote onDraftChange={onDraftChange} />
+    );
+    await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith({ text: '', resourceList: [] }));
+    expect(inputRef.current?.getPersistentMentionDraft(true)).toEqual({ text: '', resourceList: [] });
+    expect(inputRef.current?.getPersistentMentionDraft()).toEqual({ text: '', resourceList: [] });
+    view.unmount();
+
+    mockDefaultAgentElement = historyEmployee('history-b');
+    const next = render(
+      <RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote inputDraft={{ text: '', resourceList: [] }} />
+    );
+    await waitFor(() => {
+      expect(inputRef.current?.getPayload().resourceList.map((resource) => resource.resourceId)).toEqual(['history-b']);
+    });
+    next.unmount();
+    mockDefaultAgentElement = undefined;
+    render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
+    expect(inputRef.current?.getPayload().resourceList).toEqual([]);
+  });
+
+  it('saves a draft after typing and clears it when only the automatic employee remains', async () => {
+    mockDefaultAgentElement = historyEmployee();
+    const inputRef = createRef<RichInputRef>();
+    const onDraftChange = jest.fn();
+    render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote onDraftChange={onDraftChange} />);
+    await act(async () => inputRef.current?.appendText('My question'));
+    expect(onDraftChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('My question') })
+    );
+    expect(inputRef.current?.getPersistentMentionDraft(true).resourceList).toEqual([
+      expect.objectContaining({ resourceId: 'history-agent' }),
+    ]);
+    await act(async () => inputRef.current?.setText(''));
+    expect(onDraftChange).toHaveBeenLastCalledWith({ text: '', resourceList: [] });
+    expect(inputRef.current?.getPayload().resourceList).toEqual([
+      expect.objectContaining({ resourceId: 'history-agent' }),
+    ]);
+  });
+
+  it('treats a manually selected employee without question text as a draft', async () => {
+    mockDefaultAgentElement = historyEmployee();
+    const inputRef = createRef<RichInputRef>();
+    const onDraftChange = jest.fn();
+    render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote onDraftChange={onDraftChange} />);
+    await act(async () => {
+      inputRef.current?.insertItem(
+        { agentId: 'manual-agent', agentType: '001', name: 'Selected Employee' },
+        ResourceType.digitalEmployee
+      );
+    });
+    expect(onDraftChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        resourceList: expect.arrayContaining([expect.objectContaining({ resourceId: 'manual-agent' })]),
+      })
+    );
+    // 发送后保留手选员工，自动员工不成为跨会话草稿。
+    expect(inputRef.current?.getPersistentMentionDraft().resourceList.map((resource) => resource.resourceId)).toEqual([
+      'manual-agent',
+    ]);
   });
 
   it('serializes a data source reference into the actual send payload without connection fields', async () => {

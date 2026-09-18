@@ -161,7 +161,12 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   /**
    * 在专家模式下，通过@切换某个agent后，需要显示一个默认的agent在输入框的最左侧
    */
-  const defaultAgentElement = useDefaultAgentElement({ agentType, agentId });
+  const sessionDefaultAgentElement = useDefaultAgentElement({ agentType, agentId });
+
+  // 进入会话时有草稿就以草稿为准，禁止历史员工（包括异步返回的员工）混入正文或发送资源。
+  // 固定本次编辑器的恢复策略，避免清空草稿或父组件重渲染时又自动补上历史员工。
+  const hasInitialDraft = useRef(!!props.inputDraft?.text || !!props.inputDraft?.resourceList?.length);
+  const defaultAgentElement = hasInitialDraft.current && !inAgentRoute ? undefined : sessionDefaultAgentElement;
 
   const [value, setValue] = useState<Descendant[]>([
     {
@@ -300,7 +305,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   // 触发发送后只清空本轮问题和其它引用，保留输入框中已 @ 的数字员工，便于继续追问。
   const clearAfterSend = () => replaceText('', true);
 
-  // 草稿保存输入框中的全部数字员工 mention，避免回答过程切换当前 agent 后丢失其中一个。
+  // 完整草稿保留编辑中的员工；仅自动带入的默认员工不构成用户草稿。
   const getPersistentMentionDraft = (includeQuestion = false) => {
     const mentionedEmployeeIds = new Set<string>();
     const mentionNodes = Array.from(
@@ -311,12 +316,20 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       })
     )
       .map(([node]) => node)
+      // 发送后的草稿只保留用户选择的员工，自动带入的历史员工继续在当前输入框展示即可。
+      .filter((node: any) => includeQuestion || !node.isDefaultAgent)
       .filter((node: any) => {
         const identityKeys = getAgentIdentityKeys(node);
         if (identityKeys.some((item) => mentionedEmployeeIds.has(item))) return false;
         identityKeys.forEach((item) => mentionedEmployeeIds.add(item));
         return true;
       });
+    const questionText = getInputText(editor.children, true).text;
+    // 默认员工不参与 questionText；正文、手动 @ 和引用都为空时，不把历史员工保存成共享草稿。
+    // 用户输入后又删空，也应回到无草稿状态，让下次打开的会话使用自己的员工。
+    if (includeQuestion && !questionText.trim()) {
+      return { text: '', resourceList: [] };
+    }
     let persistentValue = editor.children;
     if (!includeQuestion) {
       persistentValue = [
@@ -335,7 +348,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
     return {
       // 普通草稿还要带上问题文本；发送后的草稿只保留数字员工 mention。
-      text: includeQuestion ? `${defaultMentionText}${getInputText(editor.children, true).text}` : mentionText,
+      text: includeQuestion ? `${defaultMentionText}${questionText}` : mentionText,
       resourceList,
     };
   };

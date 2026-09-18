@@ -730,6 +730,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           ref={this.richInputRef}
           defaultPlaceholder={placeholder}
           inAgentRoute={this.chechCannotAt()}
+          inputDraft={this.props.inputDraft}
           onPasteFiles={this.onPasteFiles}
           onDraftChange={this.props.onInputDraftChange}
           onChange={(inputSchema) => {
