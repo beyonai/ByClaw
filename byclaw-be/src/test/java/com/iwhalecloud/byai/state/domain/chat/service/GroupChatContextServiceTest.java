@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.ArgumentMatchers.anyCollection;
 
 import java.util.Arrays;
@@ -66,6 +67,22 @@ class GroupChatContextServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    @Test
+    void topicProjectionPreservesIdentityAndNeverLoadsHiddenReplyOutsideVisibleSnapshot() {
+        ByaiMessage reply = message(20L, 1, "visible reply", 100L);
+        reply.setTopicId(10L);
+        reply.setMessageRef(10L);
+        var projected = service.toMessages(List.of(reply), Map.of()).get(0);
+        assertThat(projected.getTopicId()).isEqualTo("10");
+        assertThat(projected.getContent()).isEqualTo("visible reply");
+        assertThat(projected.getReplyTo()).isNull();
+        verify(messageMapper, never()).selectByMessageId(10L);
+        ByaiMessage root = message(10L, 1, "visible root", 100L);
+        projected = service.toMessages(List.of(reply), Map.of(10L, root)).get(0);
+        assertThat(projected.getReplyTo().getMessageId()).isEqualTo("10");
+        assertThat(projected.getReplyTo().getContent()).isEqualTo("visible root");
     }
 
     @Test

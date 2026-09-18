@@ -54,6 +54,9 @@ public class GroupChatContextResponse {
 
         private String messageId;
 
+        /** 引用链归属，系统事件和未回填历史消息为空。 */
+        private String topicId;
+
         private Integer sequence;
 
         private Long createdAt;

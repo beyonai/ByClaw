@@ -44,10 +44,13 @@ import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatDisposition;
 import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTopicService;
 
 /** 只观察分类和已落库的子会话结果；流式聚合、快照及私有消息持久化由普通聊天链路负责。 */
 @Service
 public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserver {
+    @Autowired
+    private GroupChatTopicService topicService;
     @Autowired
     private ByaiGroupChatTurnMapper turnMapper;
     private final ByaiMessageMapper messageMapper;
@@ -99,7 +102,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
             }
             return;
         }
-        ByaiGroupChatExecution execution = executionMapper.selectForUpdateByCandidateSessionId(context.sessionId);
+        ByaiGroupChatExecution execution = lockLegacyExecution(context.sessionId);
         if (execution == null) {
             return;
         }
@@ -122,7 +125,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
     /** 定时观察分类并补偿进程重启、持久化后回调失败；不读取或 ACK Redis Stream。 */
     @Transactional
     public void reconcile(Long candidateSessionId) {
-        ByaiGroupChatExecution execution = executionMapper.selectForUpdateByCandidateSessionId(candidateSessionId);
+        ByaiGroupChatExecution execution = lockLegacyExecution(candidateSessionId);
         if (execution == null || !"RUNNING".equals(execution.getStatus())) {
             return;
         }
@@ -146,6 +149,13 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         if (TraceIdCodec.canDecode(turn.getTraceId())) {
             completeInitialTurn(turn, TraceIdCodec.decode(turn.getTraceId()).getModelAnswerMessageId(), false);
         }
+    }
+
+    private ByaiGroupChatExecution lockLegacyExecution(Long candidateSessionId) {
+        ByaiGroupChatExecution snapshot = executionMapper.selectByCandidateSessionId(candidateSessionId);
+        if (snapshot == null) return null;
+        topicService.lockGroup(snapshot.getGroupSessionId());
+        return executionMapper.selectForUpdateByCandidateSessionId(candidateSessionId);
     }
 
     private ByaiGroupChatTurn lockCurrentTurn(ByaiGroupChatTurn snapshot) {
@@ -351,7 +361,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         metadata.put("replyToMessageId", execution.getSourceMessageId());
         metadata.put("resourceList", mentions.resourceList());
         message.setMetadata(JSON.toJSONString(metadata));
-        messageMapper.insert(message);
+        topicService.persistMessage(message);
         mentionService.indexHumanMentions(execution.getGroupSessionId(), id, execution.getTargetAgentId(), null,
             mentions.resourceList());
         JSONObject payload = new JSONObject(metadata);
@@ -359,6 +369,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         payload.put("event", "MESSAGE_CREATED");
         payload.put("sessionId", String.valueOf(execution.getGroupSessionId()));
         payload.put("messageId", String.valueOf(id));
+        payload.put("topicId", String.valueOf(message.getTopicId()));
         payload.put("messageRef", execution.getSourceMessageId());
         payload.put("replyTo", buildReplySummary(execution));
         payload.put("creatorId", execution.getTargetAgentId());

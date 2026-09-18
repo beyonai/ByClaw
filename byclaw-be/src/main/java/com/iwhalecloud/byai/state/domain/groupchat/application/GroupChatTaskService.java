@@ -49,6 +49,8 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 @Service
 public class GroupChatTaskService {
     @Autowired
+    private GroupChatTopicService topicService;
+    @Autowired
     private ByaiGroupChatTurnMapper turnMapper;
     private final ByaiGroupChatTaskMapper taskMapper;
     private final ByaiGroupChatTaskPublicationMapper publicationMapper;
@@ -94,6 +96,7 @@ public class GroupChatTaskService {
 
     @Transactional
     public ByaiGroupChatTask promote(ByaiGroupChatExecution execution, String taskName, String ackText) {
+        sessionService.lockById(execution.getGroupSessionId());
         ByaiGroupChatTask existing = taskMapper.selectById(execution.getCandidateSessionId());
         if (existing != null) {
             return existing;
@@ -311,13 +314,14 @@ public class GroupChatTaskService {
         message.setMetadata(JSON.toJSONString(metadata));
         message.setCreateTime(now);
         message.setUpdateTime(now);
-        messageMapper.insert(message);
+        topicService.persistMessage(message);
 
         JSONObject event = new JSONObject();
         event.put("type", "GROUP_CHAT_EVENT");
         event.put("event", "MESSAGE_CREATED");
         event.put("sessionId", String.valueOf(task.getGroupSessionId()));
         event.put("messageId", String.valueOf(messageId));
+        event.put("topicId", String.valueOf(message.getTopicId()));
         event.put("messageRef", task.getSourceMessageId());
         event.put("replyToMessageId", task.getSourceMessageId());
         event.put("replyTo", buildReplySummary(task.getGroupSessionId(), task.getSourceMessageId()));

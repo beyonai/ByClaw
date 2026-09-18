@@ -57,6 +57,8 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 @Service
 public class GroupChatApplicationService {
     @Autowired
+    private GroupChatTopicService topicService;
+    @Autowired
     private UserService userService;
     @Autowired
     private AuthApplicationService authApplicationService;
@@ -207,7 +209,7 @@ public class GroupChatApplicationService {
         message.setCreateTime(new Date());
         message.setUpdateTime(new Date());
         message.setIsComplete(true);
-        messageMapper.insert(message);
+        topicService.persistMessage(message);
         if (mentionService != null) {
             mentionService.indexHumanMentions(session.getSessionId(), messageId,
                 CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserId(), command.getResourceList());
@@ -231,6 +233,7 @@ public class GroupChatApplicationService {
         speaker.put("displayName", senderName);
         event.put("speaker", speaker);
         event.put("replyToMessageId", command.getReplyToMessageId());
+        event.put("topicId", String.valueOf(message.getTopicId()));
         event.put("messageRef", command.getReplyToMessageId());
         event.put("replyTo", buildReplySummary(session.getSessionId(), command.getReplyToMessageId()));
         mentionedAgentIds.forEach(agentId -> executionCoordinator.enqueue(session.getSessionId(), messageId,

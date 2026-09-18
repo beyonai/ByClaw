@@ -58,6 +58,7 @@ class GroupChatTaskAcknowledgementTest {
     @Test
     void promotesTaskAndPersistsAttachmentFreeAcknowledgementBeforePublishingEvents() {
         ReflectionTestUtils.setField(service, "turnMapper", turns);
+        GroupChatTopicTestSupport.install(service, messages, 1L, 2L);
         ByaiGroupChatTurn turn = new ByaiGroupChatTurn();
         turn.setExecutionId(8L);
         turn.setAnchorExecutionId(7L);
@@ -95,6 +96,8 @@ class GroupChatTaskAcknowledgementTest {
             .containsExactly("TASK_CREATED", "MESSAGE_CREATED");
         JSONObject acknowledgement = published.getAllValues().get(1);
         assertThat(acknowledgement.getString("kind")).isEqualTo("TASK_ACK");
+        assertThat(acknowledgement.get("topicId")).isEqualTo("2");
+        assertThat(saved.getValue().getTopicId()).isEqualTo(2L);
         assertThat(acknowledgement.getString("taskId")).isEqualTo("60");
         assertThat(acknowledgement.get("initiatorUserId")).isEqualTo("10");
         assertThat(acknowledgement.getJSONArray("attachments")).isEmpty();

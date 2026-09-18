@@ -69,6 +69,7 @@ class GroupChatTurnProjectionTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(handler, "turnMapper", turns);
+        GroupChatTopicTestSupport.install(handler, messages, 1L, 2L);
         turn = new ByaiGroupChatTurn();
         turn.setExecutionId(10L); turn.setCandidateSessionId(60L); turn.setGatewaySessionId("60");
         turn.setGroupSessionId(1L); turn.setSourceMessageId(2L); turn.setRootMessageId(2L);

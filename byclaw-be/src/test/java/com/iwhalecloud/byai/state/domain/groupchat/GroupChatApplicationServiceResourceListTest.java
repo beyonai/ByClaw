@@ -82,6 +82,7 @@ class GroupChatApplicationServiceResourceListTest {
         service = new GroupChatApplicationService(mock(SessionService.class), sequenceService, authorizationService,
             memberService, mock(ProjectApplicationService.class), projectMemberService, messageMapper,
             executionCoordinator, eventPublisher, mock(SessionExtService.class), mentionService);
+        GroupChatTopicTestSupport.install(service, messageMapper, GROUP_ID, null);
     }
 
     @AfterEach
@@ -139,6 +140,8 @@ class GroupChatApplicationServiceResourceListTest {
         ArgumentCaptor<JSONObject> eventCaptor = ArgumentCaptor.forClass(JSONObject.class);
         verify(eventPublisher).publish(eq(GROUP_ID), eventCaptor.capture(), isNull());
         JSONObject event = eventCaptor.getValue();
+        assertThat(event.get("topicId")).isEqualTo(String.valueOf(MESSAGE_ID));
+        assertThat(messageCaptor.getValue().getTopicId()).isEqualTo(MESSAGE_ID);
         assertThat(event.getJSONArray("resourceList")).hasSize(3);
         assertThat(event.getString("clientRequestId")).isEqualTo("broadcast-before-ack");
         assertThat(event.getJSONArray("resourceList").getJSONObject(0).getString("resourceId")).isEqualTo("501");

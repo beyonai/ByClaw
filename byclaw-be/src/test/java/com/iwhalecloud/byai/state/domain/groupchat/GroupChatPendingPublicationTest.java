@@ -105,6 +105,7 @@ class GroupChatPendingPublicationTest {
         completion = new GroupChatTaskService(tasks, publications, null, messages, sequence, null, authorization,
             null, sessions, projects, resources,
             events, store, uploader, datasets);
+        GroupChatTopicTestSupport.install(completion, messages, 1L, 2L);
     }
 
     @AfterEach

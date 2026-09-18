@@ -20,6 +20,7 @@
         <result column="message_content" property="messageContent" />
         <result column="message_id" property="messageId" />
         <result column="message_ref" property="messageRef" />
+        <result column="topic_id" property="topicId" />
         <result column="message_struct" property="messageStruct" />
         <result column="metadata" property="metadata" />
         <result column="msg_status" property="msgStatus" />
@@ -67,10 +68,19 @@
         <result column="total_count" property="totalCount" />
     </resultMap>
 
+    <resultMap id="TopicParticipantMap"
+        type="com.iwhalecloud.byai.manager.entity.groupchat.GroupChatTopicParticipant">
+        <result column="topic_id" property="topicId" />
+        <result column="member_type" property="memberType" />
+        <result column="member_id" property="memberId" />
+        <result column="display_name" property="displayName" />
+        <result column="first_message_id" property="firstMessageId" />
+    </resultMap>
+
     <!-- 通用查询列 -->
     <sql id="Base_Column_List">
         id, access_terminal, append_index, archived_at, belong_date, call_logs, create_time, creator_id, creator_name, enterprise_id,
-        final_content, final_message_struct, infer_log, is_complete, message_content, message_id, message_ref, message_struct, metadata,
+        final_content, final_message_struct, infer_log, is_complete, message_content, message_id, message_ref, topic_id, message_struct, metadata,
         msg_status, project_id, rel_message_id, rel_objs, related_resources, res_com_id, res_com_ids, "role", session_id, task_id, update_time,
         "usage",
         doc_access_terminal, doc_belong_date, doc_create_time, doc_creator_id, doc_infer_log, doc_is_complete, doc_message_content, doc_message_id,
@@ -396,4 +406,34 @@
         ORDER BY create_time ASC, message_id ASC
     </select>
 
+    <!-- 同群校验由归属服务完成，群行锁串行化未回填链的补齐。 -->
+    <update id="assignGroupTopic">
+        UPDATE byai_message SET topic_id = #{topicId}
+        WHERE session_id = #{sessionId} AND message_id = #{messageId} AND topic_id IS NULL
+    </update>
+
+    <select id="selectVisibleGroupMessagesByIds" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" /> FROM byai_message
+        WHERE session_id = #{sessionId} AND archived_at IS NULL
+          AND "usage" IN (1, 2) AND message_content IS NOT NULL
+          AND message_id IN
+          <foreach collection="messageIds" item="messageId" open="(" separator="," close=")">#{messageId}</foreach>
+    </select>
+
+    <!-- creator_id 是群公开消息的真实发言者 ID；USER/AGENT 组合用于隔离同 ID 身份。 -->
+    <select id="selectGroupTopicParticipants" resultMap="TopicParticipantMap">
+        SELECT topic_id,
+               CASE WHEN "usage" = 1 THEN 'USER' ELSE 'AGENT' END AS member_type,
+               creator_id AS member_id,
+               MAX(creator_name) AS display_name,
+               MIN(message_id) AS first_message_id
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND topic_id IN
+          <foreach collection="topicIds" item="topicId" open="(" separator="," close=")">#{topicId}</foreach>
+          AND "usage" IN (1, 2)
+          AND creator_id IS NOT NULL
+        GROUP BY topic_id, "usage", creator_id
+        ORDER BY topic_id, first_message_id
+    </select>
 </mapper>
