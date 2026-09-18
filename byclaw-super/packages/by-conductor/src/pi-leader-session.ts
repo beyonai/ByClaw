@@ -753,7 +753,11 @@ export class PiLeaderSession implements LeaderSession {
         throw input.signal.reason ?? new Error("Run cancelled");
       }
       // 同一业务 Session 会复用 Pi Session；每个 Run 都必须显式覆盖上一轮的思考等级。
-      this.session.setThinkingLevel(input.thinkingLevel);
+      // 当前 Pi 依赖的声明滞后于它已支持的 aimodel `adaptive` 档位；
+      // 运行时方法只会保存并透传该字符串，因此仅在这个依赖边界收窄类型。
+      this.session.setThinkingLevel(
+        input.thinkingLevel as Parameters<typeof this.session.setThinkingLevel>[0],
+      );
       this.session.setActiveToolsByName(
         resolveActiveLeaderToolNames({
           authorizedAgents: input.agents,
