@@ -8,7 +8,9 @@ import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.Locale;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -141,6 +143,22 @@ class ProjectApplicationServiceCreateTest {
 
         assertThat(result).isEqualTo(workspace);
         verify(projectInitService).initProjectWorkspace(1001L);
+    }
+
+    @Test
+    void includesCloudResourceIdInProjectDetail() {
+        Project project = new Project();
+        project.setProjectId(20079441L);
+        project.setProjectName("百应创业团队");
+        project.setCloudResourceId(9001L);
+        when(projectService.findById(20079441L)).thenReturn(project);
+        when(projectRepoMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(projectResourceService.listByProjectId(20079441L)).thenReturn(Collections.emptyList());
+
+        Map<String, Object> detail = service().getProject(20079441L);
+
+        // 项目云盘入口必须使用项目详情中的知识库 ID，而不是把 projectId 当作 resourceId。
+        assertThat(detail).containsEntry("cloudResourceId", 9001L);
     }
 
     private void stubCreateCloudResource() {

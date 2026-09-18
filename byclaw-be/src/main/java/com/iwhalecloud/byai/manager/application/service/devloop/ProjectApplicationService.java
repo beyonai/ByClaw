@@ -683,6 +683,8 @@ public class ProjectApplicationService {
         map.put("projectName", project.getProjectName());
         map.put("description", project.getDescription());
         map.put("resourceId", project.getResourceId());
+        // 项目云盘页签依赖详情接口返回知识库资源 ID；缺失该字段会把已初始化项目误判为未初始化。
+        map.put("cloudResourceId", project.getCloudResourceId());
         map.put("isShare", project.getIsShare());
         // 研发项目初始化状态与配置:前端据此拦截建需求/启动任务并展示初始化中指示。
         map.put("initStatus", project.getInitStatus());
