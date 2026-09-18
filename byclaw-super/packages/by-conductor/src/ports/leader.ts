@@ -128,6 +128,11 @@ export interface LeaderModelSelection {
   modelId: string;
   /** 模型运行配置指纹；同一模型配置变更时也会触发 Session 热切换。 */
   fingerprint: string;
+  /**
+   * 模型 reasoningConfig.defaultLevel。调用方未下发 thinkingLevel 时作为兜底档位，
+   * 使管理员配置的思考强度在缺少会话选择时同样生效。
+   */
+  defaultThinkingLevel?: ThinkingLevel;
 }
 
 /** Leader 会话的创建和健康检查 Port。 */
