@@ -1,13 +1,32 @@
 import { useIntl } from '@umijs/max';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AppstoreOutlined, CloudOutlined, LaptopOutlined, UserOutlined } from '@ant-design/icons';
-import { Select, Spin, Tabs, Tag, Empty } from 'antd';
+import { Select, Slider, Spin, Tabs, Tag, Empty } from 'antd';
 import { getMyModels, getPublicModels } from '@/pages/models/service';
+import {
+  THINKING_LEVEL_DEFAULT_SIGNAL,
+  resolveThinkingPanelLevel,
+  thinkingCapabilityTag,
+  thinkingLevelsFor,
+  type ModelReasoningConfig,
+} from '@/utils/thinkingLevel';
 import styles from './index.less';
 
 type Props = {
   value?: string | number;
   onChange: (value?: string) => void;
+
+  /**
+   * 网页端是否渲染选择器：桌面端始终渲染（本地/我的/公共三 tab）；
+   * 网页端仅在个人数字员工会话传入 true，渲染我的/公共两 tab 并额外提供「默认模型」。
+   */
+  allowWeb?: boolean;
+
+  /** 本会话已显式选择的思考强度：undefined=未选择，'-1'=跟随默认，其余为档位。 */
+  level?: string;
+
+  /** 思考强度选择结果；'-1' 表示「跟随默认/恢复默认」（清除服务端覆盖）。 */
+  onLevelChange?: (level?: string) => void;
 };
 
 const rowsOf = (response: any) => {
@@ -26,12 +45,25 @@ const rowsOf = (response: any) => {
   });
 };
 
-/** Desktop-only session model picker. Web chat never mounts this component. */
-type Model = { id: string; label: string; provider?: string; source: 'local' | 'mine' | 'public' };
-const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
-  // 界面文案随当前语言更新，业务名称与接口数据保持原值。
+const reasoningOf = (item: any): ModelReasoningConfig | undefined => {
+  const config = item?.reasoningConfig;
+  return config && typeof config === 'object' ? (config as ModelReasoningConfig) : undefined;
+};
+
+/** Session model picker: desktop (local/mine/public) and web (mine/public) modes. */
+type Model = {
+  id: string;
+  label: string;
+  provider?: string;
+  source: 'local' | 'mine' | 'public';
+  reasoning?: ModelReasoningConfig;
+};
+const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level, onLevelChange }) => {
   const intl = useIntl();
-  const [activeTab, setActiveTab] = useState<'local' | 'mine' | 'public'>('local');
+  const desktop = typeof window !== 'undefined' && Boolean(window.byclawDesktop);
+  const enabled = desktop || allowWeb;
+  // 网页端没有「本地」tab，默认停在「我的」，避免首次展开显示空列表。
+  const [activeTab, setActiveTab] = useState<'local' | 'mine' | 'public'>(desktop ? 'local' : 'mine');
   const [groups, setGroups] = useState<Record<'local' | 'mine' | 'public', Model[]>>({
     local: [],
     mine: [],
@@ -39,14 +71,19 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
   });
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
-  const desktop = typeof window !== 'undefined' && Boolean(window.byclawDesktop);
+  const [previewModelId, setPreviewModelId] = useState<string | undefined>(undefined);
+  // 悬停面板中的调整先按模型暂存；点击对应模型行后，模型与档位才一起生效。
+  const [draftLevels, setDraftLevels] = useState<Record<string, string>>({});
   const storageKey = 'byclaw.desktop.selected-model';
+  const current = value === undefined || value === null || `${value}` === '' ? undefined : `${value}`;
+  // '-1' 是父组件显式选择「默认模型」的信号，区别于「本会话尚未选择」。
+  const explicitDefault = current === '-1';
 
   useEffect(() => {
-    if (!desktop) return undefined;
+    if (!enabled) return undefined;
     let cancelled = false;
     setLoading(true);
-    const localModels = window.byclawDesktop?.models?.local;
+    const localModels = desktop ? window.byclawDesktop?.models?.local : undefined;
     const localPromise = localModels ? localModels().catch(() => []) : Promise.resolve([]);
     Promise.all([
       localPromise,
@@ -57,14 +94,15 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
         if (cancelled) return;
         const normalize = (item: any, source: Model['source']): Model | null => {
           const id = item?.id ?? item?.modelId ?? item?.modelCode ?? item?.code;
-          return id
-            ? {
-                id: `${id}`,
-                label: item.displayName || item.modelName || item.modelCode || `${id}`,
-                provider: item.providerName || item.provider,
-                source,
-              }
-            : null;
+          if (!id) return null;
+          const reasoning = reasoningOf(item);
+          return {
+            id: `${id}`,
+            label: item.displayName || item.modelName || item.modelCode || `${id}`,
+            provider: item.providerName || item.provider,
+            source,
+            ...(reasoning ? { reasoning } : {}),
+          };
         };
         const dedupe = (items: Model[]) =>
           items.filter((item, index, list) => list.findIndex((candidate) => candidate.id === item.id) === index);
@@ -97,21 +135,35 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
     return () => {
       cancelled = true;
     };
-  }, [desktop]);
+  }, [desktop, enabled]);
 
   // Preserve the original picker behavior: a new desktop session always gets
   // a usable default model, while an explicitly selected model is untouched.
+  // 网页端不自动选中，空值即「默认模型」；显式选择「默认模型」时也不自动改回。
   useEffect(() => {
+    if (!desktop || explicitDefault) return;
     if (value !== undefined && value !== null && `${value}` !== '') return;
     const saved = window.localStorage.getItem(storageKey);
     const all = [...groups.local, ...groups.mine, ...groups.public];
     const first = all.find((item) => item.id === saved) || groups.local[0] || groups.mine[0] || groups.public[0];
     if (first) onChange(first.id);
-  }, [groups, value, onChange]);
+  }, [desktop, explicitDefault, groups, value, onChange]);
 
   const selectModel = (next?: string) => {
-    if (next) window.localStorage.setItem(storageKey, next);
+    if (desktop && next) window.localStorage.setItem(storageKey, next);
     onChange(next);
+    setOpen(false);
+  };
+
+  const updateDraftLevel = (model: Model, nextLevel: string) => {
+    setDraftLevels((previous) => ({ ...previous, [model.id]: nextLevel }));
+  };
+
+  const confirmModel = (modelId: string) => {
+    if (desktop) window.localStorage.setItem(storageKey, modelId);
+    onChange(modelId);
+    const draftLevel = draftLevels[modelId];
+    if (draftLevel) onLevelChange?.(draftLevel);
     setOpen(false);
   };
 
@@ -130,14 +182,73 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
     [activeTab, groups]
   );
 
-  if (!desktop) return null;
-  const current = value === undefined || value === null || `${value}` === '' ? undefined : `${value}`;
+  if (!enabled) return null;
+  const isDefaultChoice = current === undefined || explicitDefault;
   const selectedModel = allModels.find((item) => item.id === current);
+  // 右栏展示悬停中的模型，否则展示当前会话模型；两种状态都可直接调整。
+  const previewModel = previewModelId ? allModels.find((item) => item.id === previewModelId) : undefined;
+  const reasoningPanelModel = previewModel && previewModel.id !== current ? previewModel : selectedModel;
+  const reasoningPanelIsCurrent = Boolean(reasoningPanelModel && reasoningPanelModel.id === current);
+  const explicitLevel =
+    level === undefined || level === null || `${level}` === '' || `${level}` === THINKING_LEVEL_DEFAULT_SIGNAL
+      ? undefined
+      : `${level}`;
+  const draftLevel = reasoningPanelModel ? draftLevels[reasoningPanelModel.id] : undefined;
+  const reasoningLevels = thinkingLevelsFor(reasoningPanelModel?.reasoning);
+  const reasoningTag = thinkingCapabilityTag(reasoningPanelModel?.reasoning)
+    ? intl.formatMessage({ id: 'ui.model.reasoning.supported' })
+    : undefined;
+  const reasoningLevel = resolveThinkingPanelLevel({
+    reasoning: reasoningPanelModel?.reasoning,
+    explicitLevel: draftLevel || (reasoningPanelIsCurrent ? explicitLevel : undefined),
+  });
+  const reasoningMarks = reasoningLevels.reduce<Record<number, string>>((marks, item, index) => {
+    // 与后台模型编辑页的 supportedEfforts 回显一致，直接展示 low/high/xhigh 等原始档位名。
+    marks[index] = item;
+    return marks;
+  }, {});
+  const reasoningHint = draftLevel
+    ? intl.formatMessage({ id: 'ui.model.reasoning.pending' })
+    : reasoningPanelIsCurrent && explicitLevel
+      ? intl.formatMessage({ id: 'ui.model.reasoning.applied' })
+      : intl.formatMessage({ id: 'ui.model.reasoning.followingDefault' });
+  const tabs = [
+    {
+      key: 'mine',
+      label: (
+        <>
+          <UserOutlined /> {intl.formatMessage({ id: 'ui.model.mine' })}
+        </>
+      ),
+    },
+    {
+      key: 'public',
+      label: (
+        <>
+          <CloudOutlined /> {intl.formatMessage({ id: 'ui.model.public' })}
+        </>
+      ),
+    },
+  ];
+  if (desktop) {
+    tabs.unshift({
+      key: 'local',
+      label: (
+        <>
+          <LaptopOutlined /> {intl.formatMessage({ id: 'ui.model.local' })}
+        </>
+      ),
+    });
+  }
   return (
     <Select
       className={styles.select}
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // F10: 关闭下拉时复位悬停预览，避免重开显示上次悬停模型的只读卡片。
+        if (!next) setPreviewModelId(undefined);
+      }}
       size="middle"
       value={current}
       labelRender={() =>
@@ -147,68 +258,112 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
             {selectedModel.provider && <Tag bordered={false}>{selectedModel.provider}</Tag>}
           </span>
         ) : (
-          current
+          intl.formatMessage({ id: 'ui.model.default' })
         )
       }
-      placeholder={intl.formatMessage({ id: 'ui.model.select' })}
+      placeholder={intl.formatMessage({ id: 'ui.model.default' })}
       loading={loading}
       suffixIcon={loading ? <Spin size="small" /> : <AppstoreOutlined />}
       options={options}
       onChange={(next) => selectModel(next ? `${next}` : undefined)}
       popupMatchSelectWidth={360}
+      popupClassName={styles.popup}
       dropdownRender={() => (
         <div className={styles.panel}>
-          <Tabs
-            activeKey={activeTab}
-            onChange={(key) => setActiveTab(key as typeof activeTab)}
-            items={[
-              {
-                key: 'local',
-                label: (
-                  <>
-                    <LaptopOutlined /> {intl.formatMessage({ id: 'ui.model.local' })}{' '}
-                  </>
-                ),
-              },
-              {
-                key: 'mine',
-                label: (
-                  <>
-                    <UserOutlined /> {intl.formatMessage({ id: 'ui.model.mine' })}{' '}
-                  </>
-                ),
-              },
-              {
-                key: 'public',
-                label: (
-                  <>
-                    <CloudOutlined /> {intl.formatMessage({ id: 'ui.model.public' })}{' '}
-                  </>
-                ),
-              },
-            ]}
-          />
-          <div className={styles.list}>
-            {options.length ? (
-              options.map((option) => (
-                <div
-                  key={option.value}
-                  className={`${styles.item} ${option.value === current ? styles.selected : ''}`}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => selectModel(option.value)}
-                >
-                  {option.label}
+          <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key as typeof activeTab)} items={tabs} />
+          <div className={styles.body}>
+            <div className={styles.list}>
+              <div
+                key="__default__"
+                className={`${styles.item} ${isDefaultChoice ? styles.selected : ''}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectModel(undefined)}
+                onMouseEnter={() => setPreviewModelId(undefined)}
+              >
+                <span className={styles.option}>
+                  <span>{intl.formatMessage({ id: 'ui.model.default' })}</span>
+                </span>
+              </div>
+              {options.length ? (
+                options.map((option) => (
+                  <div
+                    key={option.value}
+                    data-testid={`model-row-${option.value}`}
+                    className={`${styles.item} ${option.value === current ? styles.selected : ''}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => confirmModel(option.value)}
+                    onMouseEnter={() => setPreviewModelId(option.value)}
+                  >
+                    {option.label}
+                  </div>
+                ))
+              ) : (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    loading
+                      ? intl.formatMessage({ id: 'ui.model.loading' })
+                      : intl.formatMessage({ id: 'ui.model.empty' })
+                  }
+                />
+              )}
+            </div>
+            {reasoningPanelModel && (
+              <div className={styles.reasoning} data-testid="model-reasoning-panel">
+                <div className={styles.reasoningHeader}>
+                  <span className={styles.reasoningTitle}>{reasoningPanelModel.label}</span>
+                  <span className={styles.reasoningTags}>
+                    {reasoningPanelModel.provider && <Tag bordered={false}>{reasoningPanelModel.provider}</Tag>}
+                    {reasoningTag && <Tag bordered={false}>{reasoningTag}</Tag>}
+                  </span>
                 </div>
-              ))
-            ) : (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={
-                  loading
-                    ? intl.formatMessage({ id: 'ui.model.loading' })
-                    : intl.formatMessage({ id: 'ui.model.empty' })
-                }
-              />
+                <div className={styles.reasoningDivider} />
+                {reasoningLevels.length > 0 ? (
+                  <>
+                    <div className={styles.reasoningRow}>
+                      <span>{intl.formatMessage({ id: 'ui.model.reasoning.title' })}</span>
+                      {draftLevel || (reasoningPanelIsCurrent && explicitLevel) ? (
+                        <a
+                          className={styles.reasoningReset}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => updateDraftLevel(reasoningPanelModel, THINKING_LEVEL_DEFAULT_SIGNAL)}
+                        >
+                          {intl.formatMessage({ id: 'ui.model.reasoning.reset' })}
+                        </a>
+                      ) : (
+                        <a
+                          className={styles.reasoningReset}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => updateDraftLevel(reasoningPanelModel, THINKING_LEVEL_DEFAULT_SIGNAL)}
+                        >
+                          {intl.formatMessage({ id: 'ui.model.reasoning.followDefault' })}
+                        </a>
+                      )}
+                    </div>
+                    <Slider
+                      className={styles.reasoningSlider}
+                      min={0}
+                      max={reasoningLevels.length - 1}
+                      step={1}
+                      value={Math.max(0, reasoningLevels.indexOf(reasoningLevel as never))}
+                      tooltip={{ open: false }}
+                      marks={reasoningMarks}
+                      onChange={(index) => {
+                        const next = reasoningLevels[index as number];
+                        if (next) updateDraftLevel(reasoningPanelModel, next);
+                      }}
+                      aria-label={intl.formatMessage({ id: 'ui.model.reasoning.title' })}
+                    />
+                    <div className={styles.reasoningHint} data-testid="model-reasoning-hint">
+                      {reasoningHint}
+                    </div>
+                  </>
+                ) : (
+                  <div className={styles.reasoningUnavailable} data-testid="model-reasoning-unavailable">
+                    {intl.formatMessage({ id: 'ui.model.reasoning.unavailable' })}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -218,4 +373,4 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
   );
 };
 
-export default DesktopModelSelect;
+export default ModelSelect;

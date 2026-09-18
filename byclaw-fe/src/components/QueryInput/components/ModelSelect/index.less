@@ -1,7 +1,11 @@
 .select {
   min-width: 180px;
 }
+.popup {
+  overflow: visible;
+}
 .panel {
+  position: relative;
   padding: 0 12px 10px;
 }
 .panel :global(.ant-tabs-nav) {
@@ -11,8 +15,108 @@
   padding: 10px 8px;
 }
 .list {
+  width: 100%;
   max-height: 280px;
   overflow: auto;
+}
+.body {
+  position: relative;
+}
+.reasoning {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 24px);
+  z-index: 1;
+  box-sizing: border-box;
+  width: 400px;
+  min-height: 252px;
+  padding: 22px 24px 20px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(31, 35, 48, 0.14);
+}
+.reasoning::before,
+.reasoning::after {
+  position: absolute;
+  top: 48px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  content: '';
+}
+.reasoning::before {
+  left: -11px;
+  border-width: 10px 11px 10px 0;
+  border-color: transparent #e5e7eb transparent transparent;
+}
+.reasoning::after {
+  left: -10px;
+  border-width: 10px 11px 10px 0;
+  border-color: transparent #fff transparent transparent;
+}
+.reasoningHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+.reasoningTitle {
+  overflow: hidden;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.reasoningTags :global(.ant-tag) {
+  margin-inline-end: 0;
+  color: #4b5563;
+  background: #f3f4f6;
+  border-radius: 12px;
+}
+.reasoningDivider {
+  height: 1px;
+  margin: 16px 0 20px;
+  background: #eceef2;
+}
+.reasoningRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 600;
+}
+.reasoningReset {
+  font-size: 14px;
+  font-weight: 500;
+}
+.reasoningFollow {
+  color: #1677ff;
+  font-size: 14px;
+  font-weight: 500;
+}
+.reasoningSlider {
+  margin: 8px 12px 34px;
+}
+.reasoningSlider :global(.ant-slider-mark-text) {
+  color: #374151;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.reasoningHint {
+  margin-top: 22px;
+  color: #9ca3af;
+  font-size: 14px;
+}
+.reasoningUnavailable {
+  padding: 28px 0 34px;
+  color: #9ca3af;
+  font-size: 14px;
+  text-align: center;
 }
 .item {
   padding: 10px 12px;
