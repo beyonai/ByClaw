@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem;
 import com.iwhalecloud.byai.common.message.qo.MessageHotDelQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotPageQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotQo;
+import com.iwhalecloud.byai.manager.entity.groupchat.GroupChatTopicParticipant;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -44,6 +45,16 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * @return 记录（可能为 null）
      */
     ByaiMessage selectByMessageId(@Param("messageId") Long messageId);
+
+    int assignGroupTopic(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
+        @Param("topicId") Long topicId);
+
+    List<ByaiMessage> selectVisibleGroupMessagesByIds(@Param("sessionId") Long sessionId,
+        @Param("messageIds") List<Long> messageIds);
+
+    /** 批量查询当前话题页的全部发言成员，避免按话题逐条查询。 */
+    List<GroupChatTopicParticipant> selectGroupTopicParticipants(@Param("sessionId") Long sessionId,
+        @Param("topicIds") List<Long> topicIds);
 
     /** 查询群聊入站消息的客户端幂等键。 */
     ByaiMessage selectGroupMessageByClientRequestId(@Param("sessionId") Long sessionId,

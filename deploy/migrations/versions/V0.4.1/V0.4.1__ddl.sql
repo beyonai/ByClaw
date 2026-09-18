@@ -139,6 +139,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_message_share_link_type_token
 COMMENT ON COLUMN byai.message_share_link.link_type IS
     'MESSAGE（NULL 兼容历史消息分享）/ GROUP_INVITATION（link_id 为群 session_id）';
 
+-- 群消息话题归属允许为空：私有消息、系统事件和待核查的历史异常不分配话题。
+SELECT byai._v041_add_column_if_missing(
+    'byai', 'byai_message', 'topic_id', 'BIGINT'
+);
+
 DROP FUNCTION IF EXISTS byai._v041_add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 CREATE TABLE IF NOT EXISTS byai.byai_group_chat_mention (
@@ -303,3 +308,27 @@ CREATE TABLE IF NOT EXISTS byai.byai_group_chat_pending_publication (
     CONSTRAINT fk_group_chat_pending_task FOREIGN KEY (task_session_id)
         REFERENCES byai.byai_group_chat_task (task_session_id)
 );
+
+
+-- 仅首条引用回复创建记录；独立根消息的 topic_id 不要求存在对应话题行。
+CREATE TABLE IF NOT EXISTS byai.byai_group_chat_topic (
+    topic_id BIGINT NOT NULL,
+    group_session_id BIGINT NOT NULL,
+    root_message_id BIGINT NOT NULL,
+    last_message_id BIGINT NOT NULL,
+    last_activity_at TIMESTAMP(3) NOT NULL,
+    create_time TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_group_chat_topic PRIMARY KEY (topic_id),
+    CONSTRAINT ck_group_chat_topic_root CHECK (topic_id = root_message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_chat_topic_group_activity
+    ON byai.byai_group_chat_topic
+        (group_session_id, last_activity_at DESC, last_message_id DESC, topic_id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_byai_message_session_topic_time
+    ON byai.byai_message (session_id, topic_id, create_time DESC, message_id DESC);
+
+COMMENT ON COLUMN byai.byai_message.topic_id IS '群公开消息引用链根 message_id；独立消息也有归属，系统事件及私有消息为空';
+COMMENT ON TABLE byai.byai_group_chat_topic IS '首次公开引用回复形成的话题，不维护消息计数';
+COMMENT ON COLUMN byai.byai_group_chat_topic.last_activity_at IS '最近发言时间，列表直接按本字段排序，不动态聚合消息';

@@ -98,6 +98,11 @@ public class ByaiMessage {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long messageRef;
 
+    /** 公开群消息的引用链根 ID；独立消息尚不对应话题表记录。 */
+    @TableField("topic_id")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long topicId;
+
     @TableField("message_struct")
     private String messageStruct;
 

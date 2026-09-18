@@ -213,6 +213,12 @@ public class GroupChatContextService {
 
     /** 将已鉴权的公开群消息转换为统一的前端消息协议。 */
     public List<GroupChatContextResponse.Message> toMessages(List<ByaiMessage> ordered) {
+        return toMessages(ordered, null);
+    }
+
+    /** 话题页传入已过滤的引用快照，避免逐条查询及隐藏父消息内容泄漏。 */
+    public List<GroupChatContextResponse.Message> toMessages(List<ByaiMessage> ordered,
+        Map<Long, ByaiMessage> visibleReferences) {
         List<GroupChatContextResponse.Message> result = new ArrayList<>(ordered.size());
         Map<Long, SsResource> resources = new HashMap<>();
         Map<Long, String> cloudResources = new HashMap<>();
@@ -221,6 +227,7 @@ public class GroupChatContextService {
             ByaiMessage source = ordered.get(index);
             GroupChatContextResponse.Message message = new GroupChatContextResponse.Message();
             message.setMessageId(String.valueOf(source.getMessageId()));
+            message.setTopicId(source.getTopicId() == null ? null : String.valueOf(source.getTopicId()));
             message.setSequence(index);
             message.setCreatedAt(source.getCreateTime() == null ? 0L : source.getCreateTime().getTime());
             message.setContent(StringUtils.defaultString(source.getMessageContent()));
@@ -244,7 +251,8 @@ public class GroupChatContextService {
             message.setSpeaker(toSpeaker(source, resources));
             message.setAttachments(toAttachments(source, cloudResources));
             if (source.getMessageRef() != null) {
-                ByaiMessage referenced = messageMapper.selectByMessageId(source.getMessageRef());
+                ByaiMessage referenced = visibleReferences == null ? messageMapper.selectByMessageId(source.getMessageRef())
+                    : visibleReferences.get(source.getMessageRef());
                 if (referenced != null && Objects.equals(source.getSessionId(), referenced.getSessionId())) {
                     GroupChatContextResponse.ReplyReference reply = new GroupChatContextResponse.ReplyReference();
                     reply.setMessageId(String.valueOf(referenced.getMessageId()));
