@@ -391,6 +391,14 @@ public class GroupChatApplicationService {
                 authApplicationService.grantDigitalEmployeesToUser(agentIds, memberId);
             }
         }
+        if (MemObjType.AGENT.name().equals(type)) {
+            // 新增数字员工后，群内所有真人成员都应立即获得其使用权限；复用授权服务的幂等补授权逻辑。
+            List<Long> userIds = memberService.findSessionMembers(session.getSessionId(), MemObjType.USER.name(), null)
+                .stream().map(ByaiSessionMember::getMemObjId).distinct().toList();
+            for (Long userId : userIds) {
+                authApplicationService.grantDigitalEmployeesToUser(List.of(memberId), userId);
+            }
+        }
         ByaiSessionMember member = new ByaiSessionMember();
         member.setByaiSessionMemberId(sequenceService.nextVal());
         member.setSessionId(session.getSessionId());

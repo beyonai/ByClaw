@@ -48,7 +48,8 @@ public class DigitEmployManControllerV2 {
     @PostMapping("/queryMyCreatedAndSubscribedAgents")
     public ResponseUtil queryMyAuthEmploy(@RequestBody MyAuthEmployQo myAuthEmployQo) {
         if (myAuthEmployQo.getExcludeGroupSessionId() != null) {
-            groupAuthorizationService.requireAdmin(myAuthEmployQo.getExcludeGroupSessionId());
+            // 群内候选列表应与实际添加数字员工共用成员权限，支持已开启开关的普通成员。
+            groupAuthorizationService.requireInvite(myAuthEmployQo.getExcludeGroupSessionId(), "AGENT");
         }
         PageInfo<AuthDigitEmployVo> pageInfo = digitEmployManServiceV2.queryMyAuthEmploy(myAuthEmployQo);
         return ResponseUtil.successResponse(pageInfo);

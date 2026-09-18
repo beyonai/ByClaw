@@ -177,11 +177,26 @@ class GroupChatMemberGrantTest {
     }
 
     @Test
-    void agentInvitationDoesNotGrantPrivileges() {
+    void agentInvitationGrantsNewEmployeeToEveryDistinctHumanMember() {
+        when(members.findSessionMembers(200L, "USER", null))
+            .thenReturn(List.of(user(10L), user(20L), user(10L)));
+
         service.invite(200L, "AGENT", 50L);
+
+        ArgumentCaptor<PrivilegeGrant> saved = ArgumentCaptor.forClass(PrivilegeGrant.class);
+        verify(grants, times(2)).save(saved.capture());
+        assertThat(saved.getAllValues()).extracting(PrivilegeGrant::getGrantObjId).containsOnly(50L);
+        assertThat(saved.getAllValues()).extracting(PrivilegeGrant::getGrantToObjId).containsExactly(10L, 20L);
+        assertThat(saved.getAllValues()).allSatisfy(grant -> {
+            assertThat(grant.getGrantObjType()).isEqualTo("DIG_EMPLOYEE");
+            assertThat(grant.getGrantToObjType()).isEqualTo("USER");
+            assertThat(grant.getGrantType()).isEqualTo("FORCE_USE");
+            assertThat(grant.getGrantToType()).isEqualTo("RED");
+            assertThat(grant.getOperType()).isEqualTo("READ");
+            assertThat(grant.getStatusCd()).isEqualTo("A");
+        });
         verify(members).save(any());
-        verifyNoInteractions(grants, grantMapper, projectMembers, cacheSync);
-        verifyNoInteractions(redis);
+        verify(projectMembers, never()).addMember(any(), any(), any());
     }
 
     @Test
@@ -276,6 +291,13 @@ class GroupChatMemberGrantTest {
         ByaiSessionMember member = new ByaiSessionMember();
         member.setMemObjType("AGENT");
         member.setMemObjId(resourceId);
+        return member;
+    }
+
+    private ByaiSessionMember user(Long userId) {
+        ByaiSessionMember member = new ByaiSessionMember();
+        member.setMemObjType("USER");
+        member.setMemObjId(userId);
         return member;
     }
 
