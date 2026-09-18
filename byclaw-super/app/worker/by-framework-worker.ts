@@ -332,7 +332,8 @@ class ByFrameworkAskCommandHandler {
     const sourceAgentId = commandSourceAgentId(command) || data.orchestrator?.id || "";
     const commonInput = {
       message: data.message,
-      thinkingLevel: data.thinkingLevel,
+      // 未下发档位时不传该字段，让 ingress 回落到模型 defaultLevel。
+      ...(data.thinkingLevel ? { thinkingLevel: data.thinkingLevel } : {}),
       ...(data.relModelId ? { relModelId: data.relModelId } : {}),
       ...(data.attachments.length > 0 ? { attachments: data.attachments } : {}),
       ...(sourceAgentId ? { sourceAgentId } : {}),

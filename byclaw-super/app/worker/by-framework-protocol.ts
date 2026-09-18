@@ -155,11 +155,16 @@ export function commandSessionContext(command: {
   };
 }
 
-/** 思考等级属于调用业务参数，只从 AskAgent extraPayload 读取。 */
-export function commandThinkingLevel(command: AskAgentCommand): ThinkingLevel {
+/**
+ * 思考等级属于调用业务参数，只从 AskAgent extraPayload 读取。
+ *
+ * <p>调用方未下发时返回 undefined（而不是 "off"），交由 ingress 回落到 Leader 模型的
+ * reasoningConfig.defaultLevel —— 否则管理员配置的默认档位永远不会生效。
+ */
+export function commandThinkingLevel(command: AskAgentCommand): ThinkingLevel | undefined {
   const value = command.extraPayload.thinkingLevel;
   if (value === undefined) {
-    return "off";
+    return undefined;
   }
   if (isThinkingLevel(value)) {
     return value;

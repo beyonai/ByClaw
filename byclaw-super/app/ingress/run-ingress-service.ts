@@ -164,7 +164,7 @@ export class RunIngressService {
       ...(input.context ? { context: input.context } : {}),
       message,
       attachments,
-      thinkingLevel: input.thinkingLevel ?? "off",
+      thinkingLevel: resolveRunThinkingLevel(input.thinkingLevel, orchestration.leaderModel),
       agentList,
       ...(ingressContext ? { ingressContext } : {}),
       // Token 同时写入专用执行凭证表，供其他实例在 lease 接管后恢复。
@@ -233,7 +233,7 @@ export class RunIngressService {
       sessionId: input.sessionId,
       message,
       attachments,
-      thinkingLevel: input.thinkingLevel ?? "off",
+      thinkingLevel: resolveRunThinkingLevel(input.thinkingLevel, orchestration.leaderModel),
       agentList,
       ...(ingressContext ? { ingressContext } : {}),
       // 追加 Run 同属 by-framework 入站时也需声明会话工作区。
@@ -631,4 +631,15 @@ export class RunIngressService {
 
 function claimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * 冻结一次 Run 的思考档位：显式下发（会话级选择）优先，
+ * 其次回落到 Leader 模型 reasoningConfig.defaultLevel，最后 off。
+ */
+function resolveRunThinkingLevel(
+  explicit: ThinkingLevel | undefined,
+  leaderModel: LeaderModelSelection | undefined,
+): ThinkingLevel {
+  return explicit ?? leaderModel?.defaultThinkingLevel ?? "off";
 }

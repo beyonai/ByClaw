@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { LeaderModelSelection, LlmProviderConfig } from "@byclaw/by-conductor";
+import { isThinkingLevel, type LeaderModelSelection, type LlmProviderConfig } from "@byclaw/by-conductor";
 import type { RedisFirstLlmProvider } from "../llm-provider/index.js";
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
 import { normalizeBaseUrl, postByClawBeJson, type FetchLike } from "./byclaw-be-http.js";
@@ -68,9 +68,13 @@ export async function resolveLeaderModelSelection(
 ): Promise<LeaderModelSelection> {
   const modelId = requiredScalar(rawModelId, "modelId");
   const config = await llmProvider.resolveByModelId(modelId);
+  // 模型配置的默认思考档位随选择一起冻结：调用方未下发 thinkingLevel 时作为兜底，
+  // 使管理员的 defaultLevel 在缺少会话选择时同样生效（词表外取值一律丢弃）。
+  const defaultThinkingLevel = config.reasoning?.defaultLevel;
   return {
     modelId,
     fingerprint: fingerprintModelConfig(config),
+    ...(isThinkingLevel(defaultThinkingLevel) ? { defaultThinkingLevel } : {}),
   };
 }
 
