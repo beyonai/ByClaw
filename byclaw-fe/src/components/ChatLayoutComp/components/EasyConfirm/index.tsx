@@ -29,14 +29,11 @@ import type { EasyConfirmDescriptor } from '@/components/MessagesComp/easyConfir
 import { notifyEasyConfirmInteraction } from '@/components/MessagesComp/withEasyConfirm';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
-const inputDraftMap = new Map<string, DefaultValueSchema>();
+// 普通聊天共用当前未发送草稿，跨会话及新建任务时继续编辑；不写入持久化存储。
+let sharedInputDraft: DefaultValueSchema | undefined;
 
-export const clearEasyConfirmInputDraft = (sessionId?: string | number) => {
-  if (sessionId === undefined || sessionId === null || `${sessionId}` === '') {
-    inputDraftMap.clear();
-    return;
-  }
-  inputDraftMap.delete(`${sessionId}`);
+export const clearEasyConfirmInputDraft = () => {
+  sharedInputDraft = undefined;
 };
 
 type IProps = {
@@ -89,7 +86,6 @@ const EasyConfirm = (props: IProps) => {
   const [eventList, setEventList] = useState<IEasyConfirmCompProps[]>([]);
 
   const currentMsgIdRef = useRef(lastMsg?.msgId || '');
-  const pendingNewSessionDraftRef = useRef(false);
 
   const getUUId = useCallback((easyConfirmItem: IEasyConfirmCompProps) => {
     const listItem = easyConfirmItem?.messageListItem || easyConfirmItem?.thinkListItem;
@@ -130,41 +126,24 @@ const EasyConfirm = (props: IProps) => {
   }, [compProps]);
 
   const inputDraftKey = sessionId || 'default';
-  if (!disableInputDraft && sessionId && pendingNewSessionDraftRef.current) {
-    // 新会话从 default 临时键切到真实 sessionId 时同步迁移草稿，避免输入框重挂载后只剩当前员工。
-    const pendingDraft = inputDraftMap.get('default');
-    if (pendingDraft && !inputDraftMap.has(inputDraftKey)) {
-      inputDraftMap.set(inputDraftKey, pendingDraft);
-    }
-    inputDraftMap.delete('default');
-    pendingNewSessionDraftRef.current = false;
-  }
-  // 固定聊天对象页面不读取共享草稿，避免把其他会话场景的文字、@ 员工或 # 引用带进来。
-  const inputDraft = disableInputDraft ? undefined : inputDraftMap.get(inputDraftKey);
+  // 固定聊天对象页面不读取或覆盖普通聊天草稿。
+  const inputDraft = disableInputDraft ? undefined : sharedInputDraft;
 
   const onInputDraftChange = useCallback(
     (draft: DefaultValueSchema) => {
-      if (disableInputDraft) {
-        return;
-      }
-      if (!draft.text && isEmpty(draft.resourceList)) {
-        inputDraftMap.delete(inputDraftKey);
-        return;
-      }
-
-      inputDraftMap.set(inputDraftKey, draft);
+      if (disableInputDraft) return;
+      sharedInputDraft = !draft.text && isEmpty(draft.resourceList) ? undefined : draft;
     },
-    [disableInputDraft, inputDraftKey]
+    [disableInputDraft]
   );
 
   const onSendWithDraftClean = useCallback(
     (param: ISendProps) => {
-      // 无 sessionId 时发送会创建新会话，标记后续需要把 default 草稿迁移到真实会话。
-      pendingNewSessionDraftRef.current = !disableInputDraft && inputDraftKey === 'default';
-      inputDraftMap.delete(inputDraftKey);
+      // 发送后不再带入本轮正文和引用；输入组件随后回写保留的 @ 员工。
+      if (!disableInputDraft) clearEasyConfirmInputDraft();
       onSend(param);
     },
-    [disableInputDraft, inputDraftKey, onSend]
+    [disableInputDraft, onSend]
   );
 
   useEffect(() => {
@@ -258,7 +237,7 @@ const EasyConfirm = (props: IProps) => {
       >
         <QueryInput
           // 每个会话使用独立的 Slate 编辑器实例，切换详情时避免沿用上一会话的默认 @ 员工节点。
-          // 会话草稿仍由 inputDraftMap 按 sessionId 恢复，不会丢失用户已输入内容。
+          // 重挂载时从共享草稿恢复未发送的文字、@ 员工和引用。
           key={preserveInputOnSessionChange ? 'new-session-input' : inputDraftKey}
           messageState={messageState}
           onCancel={onCancel}

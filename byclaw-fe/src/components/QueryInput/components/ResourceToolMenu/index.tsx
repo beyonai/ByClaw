@@ -80,7 +80,11 @@ const ResourceToolMenu: React.FC<Props> = ({
       icon: 'icon-a-Database-networkshujukuwangluo',
     },
     { key: 'knowledge', label: intl.formatMessage({ id: 'queryInput.tools.knowledge' }), icon: 'icon-zhishi' },
-    { key: 'file', label: intl.formatMessage({ id: 'common.file' }), icon: 'icon-a-Folder-openwenjianjia-kai' },
+    {
+      key: 'file',
+      label: intl.formatMessage({ id: 'chatResource.localSharedFile' }),
+      icon: 'icon-a-Folder-openwenjianjia-kai',
+    },
   ];
   // 新会话没有可查询的过程文件，隐藏该分类；历史会话沿用右侧资源面板的会话文件数据。
   const visibleTabs = sessionId ? tabs : tabs.filter((tab) => tab.key !== 'processFile');

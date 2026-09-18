@@ -52,6 +52,38 @@ describe('RichInput', () => {
     expect(JSON.stringify(inputRef.current?.getPayload())).not.toContain('must-not-leak');
   });
 
+  it('saves the latest unsent text and references and restores them into a new editor', async () => {
+    const inputRef = createRef<RichInputRef>();
+    const onDraftChange = jest.fn();
+    const view = render(
+      <RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote onDraftChange={onDraftChange} />
+    );
+    await act(async () => {
+      inputRef.current?.insertItem(
+        { agentId: 'agent-1', agentType: '001', name: 'Employee One' },
+        ResourceType.digitalEmployee
+      );
+      inputRef.current?.insertItem({ resourceId: '17', resourceName: 'Analytics' }, ResourceType.dataSource);
+      inputRef.current?.appendText('First line\nLast unsent input');
+      expect(inputRef.current?.getPersistentMentionDraft(true).text).toContain('Last unsent input');
+    });
+    const draft = onDraftChange.mock.calls[onDraftChange.mock.calls.length - 1][0];
+    expect(draft.text).toContain('Last unsent input');
+    expect(draft.resourceList.map((item: { resourceId: string }) => item.resourceId)).toEqual(['agent-1', '17']);
+    view.unmount();
+
+    const restoredRef = createRef<RichInputRef>();
+    render(<RichInput ref={restoredRef} chatMode={chatModeMap.expert} canQuote />);
+    await act(async () => restoredRef.current?.setText(draft));
+    expect(restoredRef.current?.getPayload().text).toBe(draft.text);
+    expect(restoredRef.current?.getPayload().resourceList).toEqual(draft.resourceList);
+
+    await act(async () => restoredRef.current?.clearAfterSend());
+    const retained = restoredRef.current?.getPersistentMentionDraft(true);
+    expect(retained?.text).not.toContain('Last unsent input');
+    expect(retained?.resourceList.map((item) => item.resourceId)).toEqual(['agent-1']);
+  });
+
   it('keeps the resource quote listener stable while the input rerenders', async () => {
     const inputRef = createRef<RichInputRef>();
     const view = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);

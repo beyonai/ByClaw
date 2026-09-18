@@ -1652,9 +1652,10 @@ public class DigitalEmployeeApplicationService {
         this.compareSsResourceRelDetail(ssResource, remainingRelIds, resourceRelDetails, null);
         this.deleteLegacyWorkspaceSkills(legacyWorkspaceSkills);
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
-        this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
-        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
+        robotChannelRegistryCoordinator.refreshForResource(digitalEmployeeId);
+        // 与编辑保存一致：关联删除提交后再重建 Redis 快照并发送 UPDATED，避免同步读到旧关联。
+        digitalEmployeeRuntimeRefreshService.scheduleDigitalEmployeeUpdateRefreshAfterCommit(digitalEmployeeId, null);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
@@ -1691,7 +1692,10 @@ public class DigitalEmployeeApplicationService {
         for (SsResourceRelDetail relation : this.safeRelations(skillRelations)) {
             Long skillId = relation.getRelResourceId();
             SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
-            if (source.isMalformed() || !source.isManual()) {
+            // 兼容来源字段为空的历史直接安装技能：旧版本没有写入来源元数据，应按手工来源卸载。
+            // 带有内容但无法解析的元数据仍保守保留，避免把未知的技能组来源误删。
+            if (!source.isManual()
+                || (source.isMalformed() && StringUtils.isNotBlank(relation.getRelResourceInfo()))) {
                 preservedSkillIds.add(skillId);
                 continue;
             }

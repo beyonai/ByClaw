@@ -63,6 +63,7 @@ export interface Props {
   agentType?: IAgentType;
   chatMode?: IChatModeType;
   onChange?: (payload: PayloadType) => void;
+  onDraftChange?: (draft: DefaultValueSchema) => void;
   onSend?: (payload: PayloadType) => void;
   isInputAtBottom?: boolean;
   defaultPlaceholder?: string;

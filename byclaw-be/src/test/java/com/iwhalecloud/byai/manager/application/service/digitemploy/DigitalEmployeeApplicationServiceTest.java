@@ -1463,6 +1463,23 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void ordinarySkillUninstallRemovesLegacyRelationWithoutSourceMetadata() {
+        DigitalEmployeeApplicationService uninstallService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skill = buildSkillResource(301L, 2L);
+        SsResourceRelDetail relation = directSkillRelation(901L, 301L, null);
+        prepareOrdinarySkillUninstall(employee, skill, relation);
+        when(ssResourceRelDetailService.removeById(901L)).thenReturn(true);
+        doReturn(new DigitalEmployeeDetailsDTO()).when(uninstallService).findDetailsById(any(EmployeeIdDTO.class));
+
+        uninstallService.uninstallDigitalEmployeeRelResources(uninstallDto(301L));
+
+        verify(ssResourceRelDetailService).removeById(901L);
+        verify(ssResourceRelDetailService, never()).updateById(relation);
+        verifySnapshotRefresh(uninstallService, employee, 1);
+    }
+
+    @Test
     void ordinarySkillUninstallLeavesMalformedRelationUntouchedAndStillRefreshes() {
         DigitalEmployeeApplicationService uninstallService = snapshotServiceSpy();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
@@ -1525,17 +1542,17 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
-    void ordinaryNonSkillUninstallKeepsLegacyFullDeleteFlowWithoutEmployeeRowLock() {
+    void knowledgeUninstallSchedulesPostCommitRefreshWithoutEmployeeRowLock() {
         DigitalEmployeeApplicationService uninstallService = snapshotServiceSpy();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
-        SsResource object = new SsResource();
-        object.setResourceId(401L);
-        object.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        SsResource knowledge = new SsResource();
+        knowledge.setResourceId(401L);
+        knowledge.setResourceBizType(ResourceBizTypeEnum.KG_DOC.name());
         SsResourceRelDetail relation = new SsResourceRelDetail();
         relation.setResourceRelDetailId(901L);
         relation.setResourceId(100L);
         relation.setRelResourceId(401L);
-        when(ssResourceService.findByIdList(List.of(401L))).thenReturn(List.of(object));
+        when(ssResourceService.findByIdList(List.of(401L))).thenReturn(List.of(knowledge));
         when(ssResourceService.findById(100L)).thenReturn(employee);
         when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(relation));
@@ -1548,11 +1565,11 @@ class DigitalEmployeeApplicationServiceTest {
         verify(skillGroupMapper, never()).selectDigitalEmployeeSkillRelations(any(), any());
         verify(ssResourceRelDetailService).removeById(901L);
         verify(uninstallService).rebuildAndSaveDigitalEmployeeRelSkills(100L);
-        verify(uninstallService).synOpenClawWorkSpace(100L);
+        verify(uninstallService, never()).synOpenClawWorkSpace(100L);
         verify(operationLogService).recordOperationLog(employee, OperationTypeEnum.UPDATE);
         verify(robotChannelRegistryCoordinator).refreshForResource(100L);
-        verify(digEmployeeChangeEventPublisher).publishAfterCommitOrNow(any(), eq(100L));
-        verifyNoInteractions(digitalEmployeeRuntimeRefreshService);
+        verifyNoInteractions(digEmployeeChangeEventPublisher);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, null);
     }
 
     @Test

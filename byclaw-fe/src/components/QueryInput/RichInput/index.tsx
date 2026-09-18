@@ -317,7 +317,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         identityKeys.forEach((item) => mentionedEmployeeIds.add(item));
         return true;
       });
-    let persistentValue = value;
+    let persistentValue = editor.children;
     if (!includeQuestion) {
       persistentValue = [
         {
@@ -335,7 +335,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
     return {
       // 普通草稿还要带上问题文本；发送后的草稿只保留数字员工 mention。
-      text: includeQuestion ? `${defaultMentionText}${getInputText(value, true).text}` : mentionText,
+      text: includeQuestion ? `${defaultMentionText}${getInputText(editor.children, true).text}` : mentionText,
       resourceList,
     };
   };
@@ -386,7 +386,11 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   // 这个onchange不仅仅包括输入，光标的变化也会触发
   const myOnChange = (value: Descendant[]) => {
     setValue(value);
-    // 组合输入阶段（中文输入法等），只同步 Slate 内部 value，不做额外副作用，
+    // 草稿直接读取 Slate 最新节点，避免异步 onChange 尚未执行就切换会话而丢失最后一次输入。
+    if (editor.operations.some((operation) => operation.type !== 'set_selection')) {
+      props.onDraftChange?.(getPersistentMentionDraft(true));
+    }
+    // 组合输入阶段（中文输入法等），只同步 Slate value 和草稿，不触发弹窗等副作用，
     // 避免在 IME 尚未结束时频繁依赖 selection / DOM 导致光标错乱和字符丢失。
     if (isComposing.current) {
       return;
