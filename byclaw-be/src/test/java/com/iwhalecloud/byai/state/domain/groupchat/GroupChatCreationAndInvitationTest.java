@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.sql.Connection;
@@ -142,7 +143,8 @@ class GroupChatCreationAndInvitationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"type\":\"USER\",\"id\":20}"))
             .andExpect(MockMvcResultMatchers.status().isOk());
-        verify(application).invite(200L, "USER", 20L);
+        // 兼容旧客户端的单个 ID，但控制器统一委托批量入口。
+        verify(application).inviteBatch(200L, "USER", List.of(20L));
         var invitations = mock(GroupChatInvitationService.class);
         ReflectionTestUtils.setField(controller, "invitationService", invitations);
         when(invitations.resolveSessionId("Ab1234CD")).thenReturn(200L);
@@ -155,6 +157,27 @@ class GroupChatCreationAndInvitationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"token\":\"Ab1234CD\"}"))
             .andExpect(MockMvcResultMatchers.status().isBadRequest());
+    }
+
+    @Test
+    void directInvitationRouteDelegatesArraysInOneBatchForUsersAndAgents() throws Exception {
+        var application = mock(GroupChatApplicationService.class);
+        var controller = new GroupChatController(
+            application, mock(GroupChatContextService.class),
+            mock(GroupChatTaskService.class),
+            mock(GroupChatReadService.class));
+        var mvc = MockMvcBuilders.standaloneSetup(controller).build();
+        // 与前端一致传字符串数组，两个成员类型都只调用一次批量服务。
+        for (String type : List.of("USER", "AGENT")) {
+            when(application.inviteBatch(200L, type, List.of(20L, 21L, 22L))).thenReturn(List.of());
+            mvc.perform(MockMvcRequestBuilders.post("/group-chats/200/members")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"type\":\"" + type + "\",\"id\":[\"20\",\"21\",\"22\"]}"))
+                .andExpect(MockMvcResultMatchers.status().isOk())
+                .andExpect(MockMvcResultMatchers.jsonPath("$.data").isArray());
+            verify(application).inviteBatch(200L, type, List.of(20L, 21L, 22L));
+        }
+        verifyNoMoreInteractions(application);
     }
 
     @Test
