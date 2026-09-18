@@ -39,7 +39,6 @@ export function normalizeThinkingLevel(value?: string | null): ThinkingLevel | u
   const normalized = `${value ?? ''}`.trim().toLowerCase();
   return (THINKING_LEVELS as readonly string[]).includes(normalized) ? (normalized as ThinkingLevel) : undefined;
 }
-
 export function thinkingLevelLabel(value?: string | null): string {
   const level = normalizeThinkingLevel(value);
   return level ? THINKING_LEVEL_LABELS[level] || level : '';
@@ -115,4 +114,3 @@ export function resolveThinkingPanelLevel(params: {
   if (explicit && levels.includes(explicit)) return explicit;
   return thinkingDefaultLevel(params.reasoning);
 }
-
