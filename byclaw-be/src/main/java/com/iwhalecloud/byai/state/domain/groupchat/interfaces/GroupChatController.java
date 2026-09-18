@@ -123,9 +123,9 @@ public class GroupChatController {
     }
 
     @PostMapping("/{sessionId}/members")
-    public ResponseUtil<ByaiSessionMember> invite(@PathVariable Long sessionId,
+    public ResponseUtil<List<ByaiSessionMember>> invite(@PathVariable Long sessionId,
         @Valid @RequestBody GroupChatMemberRequest request) {
-        return ResponseUtil.successResponse(applicationService.invite(sessionId, request.getType(), request.getId()));
+        return ResponseUtil.successResponse(applicationService.inviteBatch(sessionId, request.getType(), request.getId()));
     }
 
     @PostMapping("/{sessionId}/invitations")

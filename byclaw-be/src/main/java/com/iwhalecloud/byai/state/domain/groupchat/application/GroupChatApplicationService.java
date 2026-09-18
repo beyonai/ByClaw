@@ -380,6 +380,32 @@ public class GroupChatApplicationService {
         return member;
     }
 
+    /** 批量添加在一个事务内完成，任意成员或授权失败时整批回滚。 */
+    @Transactional(rollbackFor = Exception.class)
+    public List<ByaiSessionMember> inviteBatch(Long sessionId, String type, List<Long> memberIds) {
+        sessionService.lockById(sessionId);
+        authorizationService.requireInvite(sessionId, type);
+        ByaiSession session = authorizationService.requireGroup(sessionId);
+        if (!MemObjType.isValid(type) || memberIds == null || memberIds.isEmpty()
+            || memberIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new IllegalArgumentException("Invalid group member");
+        }
+        List<Long> distinctIds = memberIds.stream().distinct().toList();
+        // 全部检查通过后才开始写入，保持与原单成员接口相同的重复成员规则。
+        for (Long memberId : distinctIds) {
+            if (memberService.findSessionMember(sessionId, type, memberId) != null) {
+                throw new IllegalArgumentException("Member already exists");
+            }
+        }
+        List<ByaiSessionMember> result = new ArrayList<>();
+        for (Long memberId : distinctIds) {
+            ByaiSessionMember member = insertMember(session, type, memberId);
+            recordMemberEvent(session, member, CurrentUserHolder.getCurrentUserId(), "MEMBER_INVITED");
+            result.add(member);
+        }
+        return result;
+    }
+
     /** 两种入口在各自完成授权和重复成员检查后，共用事务内写入逻辑。 */
     private ByaiSessionMember insertMember(ByaiSession session, String type, Long memberId) {
         // 邀请真人时补齐项目成员关系；已有成员的角色不变，数字员工不加入项目成员表。

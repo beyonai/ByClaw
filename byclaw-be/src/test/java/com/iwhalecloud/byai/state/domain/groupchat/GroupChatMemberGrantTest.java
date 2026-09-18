@@ -272,6 +272,56 @@ class GroupChatMemberGrantTest {
         verifyNoInteractions(cacheSync);
     }
 
+    @Test
+    void batchAgentsAreDeduplicatedAndGrantedToAllUsersInOneTransaction() throws Exception {
+        when(members.findSessionMembers(200L, "USER", null)).thenReturn(List.of(user(10L), user(20L)));
+        assertThat(service.inviteBatch(200L, "AGENT", List.of(50L, 60L, 50L)))
+            .extracting(ByaiSessionMember::getMemObjId).containsExactly(50L, 60L);
+        verify(sessions).lockById(200L);
+        verify(authorization).requireInvite(200L, "AGENT");
+        verify(members, times(2)).save(any());
+        ArgumentCaptor<PrivilegeGrant> saved = ArgumentCaptor.forClass(PrivilegeGrant.class);
+        verify(grants, times(4)).save(saved.capture());
+        assertThat(saved.getAllValues()).extracting(PrivilegeGrant::getGrantObjId)
+            .containsExactly(50L, 50L, 60L, 60L);
+        assertThat(saved.getAllValues()).extracting(PrivilegeGrant::getGrantToObjId)
+            .containsExactly(10L, 20L, 10L, 20L);
+        verify(connection).commit();
+    }
+
+    @Test
+    void secondBatchMemberFailureRollsBackFirstMemberAndAllGrants() throws Exception {
+        when(members.findSessionMembers(200L, "USER", null)).thenReturn(List.of(user(10L)));
+        doAnswer(invocation -> {
+            ByaiSessionMember member = invocation.getArgument(0);
+            if (member.getMemObjId().equals(60L)) throw new IllegalStateException("second member failed");
+            return 1;
+        }).when(members).save(any());
+        assertThatThrownBy(() -> service.inviteBatch(200L, "AGENT", List.of(50L, 60L)))
+            .hasMessage("second member failed");
+        verify(members, times(2)).save(any());
+        assertRollbackWithoutCache();
+        verifyNoInteractions(events);
+    }
+
+    @Test
+    void batchUsersEachReceiveExistingEmployees() throws Exception {
+        service.inviteBatch(200L, "USER", List.of(20L, 21L));
+        verify(projectMembers).addMember(100L, 20L, "member");
+        verify(projectMembers).addMember(100L, 21L, "member");
+        verify(grants, times(4)).save(any());
+        verify(connection).commit();
+    }
+
+    @Test
+    void existingMemberRejectsBatchBeforeAnyWrites() {
+        when(members.findSessionMember(200L, "AGENT", 60L)).thenReturn(agent(60L));
+        assertThatThrownBy(() -> service.inviteBatch(200L, "AGENT", List.of(50L, 60L)))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(members, never()).save(any());
+        verifyNoInteractions(grants, events);
+    }
+
     private void assertGrantTargets(Long userId, Long... resourceIds) {
         ArgumentCaptor<PrivilegeGrant> saved = ArgumentCaptor.forClass(PrivilegeGrant.class);
         verify(grants, times(resourceIds.length)).save(saved.capture());

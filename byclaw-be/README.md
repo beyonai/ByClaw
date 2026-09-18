@@ -379,3 +379,11 @@ Endpoint 默认使用 `dysmsapi.aliyuncs.com`，登录和注册模板均须包�
 `GET /group-chat/tasks/{taskId}/delivery-status` 仅供仍在群内的任务发起人查询，返回字符串 taskId 和布尔 delivered。
 无文件/无效协议返回 false，存储故障返回可重试错误；不增加数据库状态、不直接授权或触发发布。
 前端进入、重连和每轮结束查询，按钮发送“确认完成并发布”，后续沿用现有发布卡片确认流程。
+
+### 群成员批量添加
+
+`POST /byaiService/group-chats/{sessionId}/members` 接受
+`{"type":"AGENT","id":["20010807","20037876"]}`，真人成员使用 `type: "USER"`。
+`id` 兼容旧客户端单值，响应 data 统一为成员数组。
+空数组、空 ID 和非正整数不可提交；重复 ID 去重，已在群中的成员沿用拒绝规则。
+整批成员、项目关系和使用授权在同一事务中完成，任一失败整批回滚，事件及缓存沿用提交后发布。
