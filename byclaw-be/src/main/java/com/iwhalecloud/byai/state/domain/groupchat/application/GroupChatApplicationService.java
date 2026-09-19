@@ -146,7 +146,8 @@ public class GroupChatApplicationService {
         Set<Long> agentIds = new LinkedHashSet<>();
         if (request.getAgentIds() != null) agentIds.addAll(request.getAgentIds());
         if (request.getTemplateId() != null) {
-            agentIds.addAll(workgroupTemplateService.resolveAgentIds(request.getTemplateId(), request.getExpectedTemplateVersion()));
+            agentIds.addAll(workgroupTemplateService.resolveResourceIds(request.getTemplateId(),
+                request.getExpectedTemplateVersion()));
         }
         if (!agentIds.isEmpty()) {
             agentIds.forEach(id -> addMember(members, session.getSessionId(), MemObjType.AGENT.name(), id,

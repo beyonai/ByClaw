@@ -136,12 +136,13 @@ class GroupChatCreationAndInvitationTest {
     }
 
     @Test
-    void resolvesTemplateAgentsAndMergesThemWithExplicitAgents() {
+    void keepsTemplateResourcesIntactAndMergesThemWithExplicitAgents() {
         GroupChatCreateRequest request = request();
         request.setTemplateId(50L);
         request.setExpectedTemplateVersion(3L);
         request.setAgentIds(List.of(30L, 31L));
-        when(templates.resolveAgentIds(50L, 3L)).thenReturn(List.of(31L, 32L));
+        // 31 可以是单个数字员工，32 可以是数字员工组；创建群时都以原始资源 ID 入群。
+        when(templates.resolveResourceIds(50L, 3L)).thenReturn(List.of(31L, 32L));
 
         GroupChatDetailResponse result = service.create(request);
 
@@ -149,7 +150,7 @@ class GroupChatCreationAndInvitationTest {
             .filteredOn(member -> "AGENT".equals(member.getMemObjType()))
             .extracting(ByaiSessionMember::getMemObjId)
             .containsExactly(30L, 31L, 32L);
-        verify(templates).resolveAgentIds(50L, 3L);
+        verify(templates).resolveResourceIds(50L, 3L);
     }
 
     @Test

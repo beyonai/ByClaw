@@ -175,9 +175,9 @@ public class WorkgroupTemplateService {
         mapper.updateById(value);
     }
 
-    public List<Long> resolveAgentIds(Long templateId, Long version) {
-        return requireEnabled(templateId, version).getEmployees().stream()
-            .map(agent -> Long.valueOf(agent.getId()))
+    public List<Long> resolveResourceIds(Long templateId, Long version) {
+        return requireEnabled(templateId, version).getResources().stream()
+            .map(resource -> Long.valueOf(resource.getResourceId()))
             .toList();
     }
 
