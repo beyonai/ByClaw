@@ -637,7 +637,8 @@ function AllDigitalEmployees(
       digitalEmployeeActionMode
       actionConfig={{
         scene: 'enterprise',
-        hiddenMenuItemKeys: source === 'available' ? ['authorize'] : [],
+        // “我可用的”统一隐藏授权入口，包括数字员工和员工组。
+        hiddenMenuItemKeys: source === 'available' ? ['authorize', 'use'] : [],
         onChat: () => chatEmployee(employee),
         onEdit: () => onEditEmployee(employee),
         onAuth: (type: any) => onAuthEmployee(employee, type),

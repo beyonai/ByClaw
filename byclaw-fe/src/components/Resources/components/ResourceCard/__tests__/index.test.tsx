@@ -70,6 +70,118 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
 };
 
 describe('ResourceCard', () => {
+  // 子类型沿用模块名称，确认后仍调用原删除回调。
+  it.each([
+    ['KG_DOC', 'KG_DOC', 'Knowledge'],
+    ['KG_DOC', 'KG_QA', 'Knowledge'],
+    ['KG_DOC', 'KG_TERM', 'Knowledge'],
+    ['SKILL', 'SKILL', 'Skill'],
+    ['TOOL', 'TOOLKIT', 'Tool'],
+    ['TOOL', 'MCP', 'Tool'],
+    ['TOOL', 'AGENT', 'Tool'],
+    ['TOOL', undefined, 'Tool'],
+  ])('uses module-specific delete wording for %s / %s', async (resourceType, resourceBizType, label) => {
+    const onDelete = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType={resourceType}
+        resource={{ resourceId: 'resource-delete', resourceBizType, canDelete: true }}
+        actionConfig={{ onDelete }}
+      />
+    );
+
+    expect(screen.queryByText('common.deleteResource')).toBeNull();
+    fireEvent.click(screen.getByText(`resource.delete${label}`));
+    expect(await screen.findByText(`resource.delete${label}Confirm`)).toBeTruthy();
+    expect(onDelete).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  // 个人页签关闭上下架操作后，编辑和注销员工仍独立遵循各自权限。
+  it.each(['2', '3'])(
+    'hides shelf actions for personal employees with status %s even when permitted',
+    (resourceStatus) => {
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType="DIG_EMPLOYEE"
+          digitalEmployeeActionMode
+          resource={{
+            resourceId: 'personal-lifecycle-employee',
+            ownerType: 'personal',
+            resourceStatus,
+            canOnShelf: true,
+            canOffShelf: true,
+            canEdit: true,
+            canDelete: true,
+          }}
+          actionConfig={{
+            scene: 'personal',
+            enableDigitalEmployeeLifecycle: false,
+            enableDigitalEmployeeDelete: true,
+          }}
+        />
+      );
+
+      expect(screen.queryByText('resource.shelfData')).toBeNull();
+      expect(screen.queryByText('resource.unShelfData')).toBeNull();
+      expect(screen.getByText('common.editInfo')).toBeTruthy();
+      expect(screen.getByText('resource.deleteData')).toBeTruthy();
+    }
+  );
+
+  it('hides personal employee use authorization while retaining other permitted actions', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{
+          resourceId: 'personal-employee',
+          ownerType: 'personal',
+          canUseAuth: true,
+          canManageAuth: true,
+          canEdit: true,
+        }}
+        actionConfig={{ scene: 'personal', hiddenMenuItemKeys: ['use'] }}
+      />
+    );
+
+    expect(screen.queryByText('common.useAuthorization')).toBeNull();
+    expect(screen.getByText('common.manageAuthorization')).toBeTruthy();
+    expect(screen.getByText('common.editInfo')).toBeTruthy();
+  });
+
+  // 即使后端返回授权权限，“我可用的”仍按页面配置屏蔽授权，保留编辑操作。
+  it.each(['DIG_EMPLOYEE', 'TOOLKIT', 'KG_DOC', 'SKILL'])(
+    'hides authorization actions for available %s resources and restores them outside the available tab',
+    (resourceType) => {
+      const resource = {
+        resourceId: 'available-resource',
+        resourceName: 'Available Resource',
+        resourceBizType: resourceType,
+        canUseAuth: true,
+        canManageAuth: true,
+        canEdit: true,
+      };
+      const queryClient = new QueryClient();
+      const renderCard = (hiddenMenuItemKeys: string[]) => (
+        <QueryClientProvider client={queryClient}>
+          <ResourceCard resource={resource} resourceType={resourceType} actionConfig={{ hiddenMenuItemKeys }} />
+        </QueryClientProvider>
+      );
+      const { rerender } = render(renderCard(['authorize', 'use']));
+
+      expect(screen.queryByText('common.useAuthorization')).toBeNull();
+      expect(screen.queryByText('common.manageAuthorization')).toBeNull();
+      expect(screen.getByText('common.editInfo')).toBeTruthy();
+
+      rerender(renderCard([]));
+
+      expect(screen.getByText('common.useAuthorization')).toBeTruthy();
+      expect(screen.getByText('common.manageAuthorization')).toBeTruthy();
+    }
+  );
+
   // 个人和企业删除入口均尊重后端权限，并在确认后调用专用删除回调。
   it.each(['personal', 'enterprise'])('confirms delete data for an allowed %s employee', async (ownerType) => {
     const onDeleteData = jest.fn();

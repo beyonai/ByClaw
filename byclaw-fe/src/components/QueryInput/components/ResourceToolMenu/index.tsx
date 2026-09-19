@@ -1,11 +1,15 @@
-import { LinkOutlined } from '@ant-design/icons';
+import { CodeOutlined, LinkOutlined } from '@ant-design/icons';
 import classNames from 'classnames';
 import { useIntl, useSelector } from '@umijs/max';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Empty } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
 import EmployeeList from '@/layout/sider/components/EmployeeList';
+import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
+import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import FileResourcePanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FileResourcePanel';
+import { getSessionResourceTabKeys } from '@/components/ChatLayoutComp/ChatResourceWorkspace/resourceTabUtils';
+import { useChatResourceProject } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useChatResourceProject';
 import ConnectorControl from '../ConnectorControl';
 import ResourceTabs from '../../RichInput/mentionPopover/resourceTabsCompact';
 import { chatModeMap } from '@/constants/query';
@@ -41,6 +45,16 @@ const ResourceToolMenu: React.FC<Props> = ({
   onSelect,
 }) => {
   const intl = useIntl();
+  const { project } = useChatResourceProject(projectId);
+  const activeEmployee = useActiveSiderAgent();
+  const projectSpaceResourceId =
+    activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
+  const resolvedProjectId = Number(project?.projectId ?? projectId);
+  const resolvedCloudResourceId = projectCloudResourceId ?? project?.cloudResourceId;
+  const visibleFileKeys = useMemo(() => {
+    const menuKeyMap = { file: 'processFile', sharedFile: 'file', projectFile: 'projectCloud', code: 'projectCode' };
+    return getSessionResourceTabKeys(resolvedProjectId, sessionId).map((key) => menuKeyMap[key]);
+  }, [resolvedProjectId, sessionId]);
   const currentUserInfo = useSelector((state: any) => state.user?.userInfo);
   const defaultDigEmployeeId = useSelector(
     (state: any) => state.employees?.defaultDigEmployeeId || state.user?.userInfo?.defaultDigEmployeeId
@@ -60,6 +74,12 @@ const ResourceToolMenu: React.FC<Props> = ({
     },
     { key: 'skill', label: intl.formatMessage({ id: 'queryInput.tools.skill' }), icon: 'icon-chajian' },
     {
+      key: 'tool',
+      label: intl.formatMessage({ id: 'queryInput.tools.tool' }),
+      icon: 'icon-a-Database-networkshujukuwangluo',
+    },
+    { key: 'knowledge', label: intl.formatMessage({ id: 'queryInput.tools.knowledge' }), icon: 'icon-zhishi' },
+    {
       key: 'connector',
       label: intl.formatMessage({ id: 'queryInput.tools.connector' }),
       icon: <LinkOutlined aria-hidden />,
@@ -70,29 +90,32 @@ const ResourceToolMenu: React.FC<Props> = ({
       icon: 'icon-a-Data-fileshujuwenjian',
     },
     {
+      key: 'file',
+      label: intl.formatMessage({ id: 'chatResource.localSharedFile' }),
+      icon: 'icon-a-Folder-openwenjianjia-kai',
+    },
+    {
       key: 'projectCloud',
       label: intl.formatMessage({ id: 'queryInput.tools.projectCloud' }),
       icon: 'icon-a-Folder-openwenjianjia-kai',
     },
     {
-      key: 'tool',
-      label: intl.formatMessage({ id: 'queryInput.tools.tool' }),
-      icon: 'icon-a-Database-networkshujukuwangluo',
-    },
-    { key: 'knowledge', label: intl.formatMessage({ id: 'queryInput.tools.knowledge' }), icon: 'icon-zhishi' },
-    {
-      key: 'file',
-      label: intl.formatMessage({ id: 'chatResource.localSharedFile' }),
-      icon: 'icon-a-Folder-openwenjianjia-kai',
+      key: 'projectCode',
+      label: intl.formatMessage({ id: 'chatResource.projectSpace' }),
+      icon: <CodeOutlined aria-hidden />,
     },
   ];
-  // 新会话没有可查询的过程文件，隐藏该分类；历史会话沿用右侧资源面板的会话文件数据。
-  const visibleTabs = sessionId ? tabs : tabs.filter((tab) => tab.key !== 'processFile');
+  const visibleTabs = tabs.filter(
+    (tab) =>
+      !['processFile', 'projectCloud', 'file', 'projectCode'].includes(tab.key) || visibleFileKeys.includes(tab.key)
+  );
   useEffect(() => {
-    if (sessionId || activeKey !== 'processFile') return;
-    setActiveKey('expert');
-    setVisitedKeys((current) => (current.includes('expert') ? current : [...current, 'expert']));
-  }, [activeKey, sessionId]);
+    // 已访问面板也必须随入口隐藏，不能继续展示或加载上一项目的数据。
+    const fileKeys = ['processFile', 'projectCloud', 'file', 'projectCode'];
+    if (fileKeys.includes(activeKey) && !visibleFileKeys.includes(activeKey)) setActiveKey('expert');
+    setVisitedKeys((current) => current.filter((key) => !fileKeys.includes(key) || visibleFileKeys.includes(key)));
+  }, [activeKey, visibleFileKeys]);
+  const visibleVisitedKeys = visitedKeys.filter((key) => visibleTabs.some((tab) => tab.key === key));
   const selectTab = (key: string) => {
     setActiveKey(key);
     setVisitedKeys((current) => (current.includes(key) ? current : [...current, key]));
@@ -111,6 +134,17 @@ const ResourceToolMenu: React.FC<Props> = ({
   const queryAgentIds = normalizedResourceAgentIds || (quoteAgentId ? `${quoteAgentId}` : undefined);
   const renderContent = (key: string) => {
     if (key === 'file') return <FilePicker onSelect={onSelect} />;
+    if (key === 'projectCode') {
+      // 与右侧边栏共用项目目录组件及资源作用域，普通文件和 Git 仓库均来自同一项目空间。
+      return (
+        <ProjectSpaceTab
+          projectId={resolvedProjectId}
+          sessionId={sessionId}
+          resourceId={projectSpaceResourceId}
+          projectCloudResourceId={resolvedCloudResourceId ? `${resolvedCloudResourceId}` : undefined}
+        />
+      );
+    }
     if (key === 'expert') {
       return (
         <EmployeeList
@@ -138,8 +172,8 @@ const ResourceToolMenu: React.FC<Props> = ({
         <FileResourcePanel
           scope="session"
           sessionId={sessionId}
-          projectId={projectId}
-          projectCloudResourceId={projectCloudResourceId}
+          projectId={resolvedProjectId}
+          projectCloudResourceId={resolvedCloudResourceId}
           resourceId={quoteAgentId}
           onOpenDetail={() => undefined}
         />
@@ -151,13 +185,13 @@ const ResourceToolMenu: React.FC<Props> = ({
       );
     }
     if (key === 'projectCloud') {
-      return projectCloudResourceId ? (
+      return resolvedCloudResourceId ? (
         <FileResourcePanel
           scope="project"
           sessionId={sessionId || ''}
-          projectId={projectId}
-          projectCloudResourceId={projectCloudResourceId}
-          resourceId={projectCloudResourceId}
+          projectId={resolvedProjectId}
+          projectCloudResourceId={resolvedCloudResourceId}
+          resourceId={resolvedCloudResourceId}
           onOpenDetail={() => undefined}
         />
       ) : (
@@ -203,7 +237,7 @@ const ResourceToolMenu: React.FC<Props> = ({
         ))}
       </div>
       <div className={styles.toolsMenuPanel}>
-        {visitedKeys.map((key) => (
+        {visibleVisitedKeys.map((key) => (
           <div
             key={key}
             className={classNames(

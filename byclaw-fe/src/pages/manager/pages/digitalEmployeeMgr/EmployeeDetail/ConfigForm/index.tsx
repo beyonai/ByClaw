@@ -604,6 +604,7 @@ const ConfigForm = (props) => {
   const isEmployeeGroup = `${agentType || ''}` === '017';
   const bundledSkillListRef = useRef<HTMLDivElement | null>(null);
   const bundledSkillLoadMoreLockRef = useRef(false);
+  const bundledSkillRequestIdRef = useRef(0);
   const hydratedBundledSkillKeysRef = useRef<Set<string>>(new Set());
   const [robotChannelOptions, setRobotChannelOptions] = useState([]);
   const [catalogList, setCatalogList] = useState([]);
@@ -631,6 +632,9 @@ const ConfigForm = (props) => {
   });
   const formOwnerType = Form.useWatch('ownerType', { form, preserve: true });
   const effectiveOwnerType = formOwnerType || ownerType;
+  const [bundledSkillTab, setBundledSkillTab] = useState('personal');
+  // 企业员工只能配置企业技能，表单归属变化时也不能保留个人查询范围。
+  const bundledSkillOwnerType = effectiveOwnerType === 'enterprise' ? 'enterprise' : bundledSkillTab;
   const selectedSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
   const selectedBundledSkillItems = useMemo(() => {
     const seenKeys = new Set();
@@ -730,67 +734,84 @@ const ConfigForm = (props) => {
     };
   }, []);
 
-  const fetchBundledSkills = useCallback(async (params: any = {}) => {
-    const pageNum = Number(params.pageNum || 1);
-    const pageSize = Number(params.pageSize || BUNDLED_SKILL_PAGE_SIZE);
-    const keyword = trim(params.keyword || '');
-    const append = !!params.append;
-    setBundledSkillLoading(true);
-    try {
-      const res = await listResourceUseAuth({
-        resourceBizTypeList: ['SKILL'],
-        pageNum,
-        pageSize,
-        // 配置技能搜索和配置工具/知识保持一致，交给后端按关键字查询。
-        keyword,
-      });
+  const fetchBundledSkills = useCallback(
+    async (params: any = {}) => {
+      const pageNum = Number(params.pageNum || 1);
+      const pageSize = Number(params.pageSize || BUNDLED_SKILL_PAGE_SIZE);
+      const keyword = trim(params.keyword || '');
+      const append = !!params.append;
+      const requestId = ++bundledSkillRequestIdRef.current;
+      setBundledSkillLoading(true);
+      try {
+        const res = await listResourceUseAuth({
+          resourceBizTypeList: ['SKILL'],
+          ownerType: bundledSkillOwnerType,
+          pageNum,
+          pageSize,
+          // 配置技能搜索和配置工具/知识保持一致，交给后端按关键字查询。
+          keyword,
+        });
 
-      const pageInfo = res?.data || res || {};
-      const list = pageInfo?.list || pageInfo?.rows || [];
-      const nextOptions = list.map(normalizeBundledSkillOption).filter((item) => item.value);
-      setBundledSkillOptions((prevOptions) => {
-        if (!append) return nextOptions;
-        const seenResourceIds = new Set();
-        // 滚动加载下一页时追加并按 resourceId 去重，避免触底重复请求造成重复卡片。
-        return [...prevOptions, ...nextOptions].filter((item) => {
-          const resourceId = normalizeBundledSkillIdentity(item.resourceId);
-          if (!resourceId || seenResourceIds.has(resourceId)) return false;
-          seenResourceIds.add(resourceId);
-          return true;
+        // 切换 tab 或搜索后忽略旧请求，防止慢响应覆盖当前范围的列表。
+        if (requestId !== bundledSkillRequestIdRef.current) return;
+        const pageInfo = res?.data || res || {};
+        const list = pageInfo?.list || pageInfo?.rows || [];
+        const nextOptions = list.map(normalizeBundledSkillOption).filter((item) => item.value);
+        setBundledSkillOptions((prevOptions) => {
+          if (!append) return nextOptions;
+          const seenResourceIds = new Set();
+          // 滚动加载下一页时追加并按 resourceId 去重，避免触底重复请求造成重复卡片。
+          return [...prevOptions, ...nextOptions].filter((item) => {
+            const resourceId = normalizeBundledSkillIdentity(item.resourceId);
+            if (!resourceId || seenResourceIds.has(resourceId)) return false;
+            seenResourceIds.add(resourceId);
+            return true;
+          });
         });
-      });
-      setBundledSkillPagination({
-        pageNum: Number(pageInfo.pageNum || pageInfo.pageIndex || pageNum),
-        pageSize: Number(pageInfo.pageSize || pageSize),
-        total: Number(pageInfo.total || 0),
-        current: Number(pageInfo.pageNum || pageInfo.pageIndex || pageNum),
-      });
-      if (!append) {
-        // 搜索或重新打开弹窗后回到顶部，避免停留在底部时立即触发下一页加载。
-        requestAnimationFrame(() => {
-          if (bundledSkillListRef.current) bundledSkillListRef.current.scrollTop = 0;
+        setBundledSkillPagination({
+          pageNum: Number(pageInfo.pageNum || pageInfo.pageIndex || pageNum),
+          pageSize: Number(pageInfo.pageSize || pageSize),
+          total: Number(pageInfo.total || 0),
+          current: Number(pageInfo.pageNum || pageInfo.pageIndex || pageNum),
         });
+        if (!append) {
+          // 搜索或重新打开弹窗后回到顶部，避免停留在底部时立即触发下一页加载。
+          requestAnimationFrame(() => {
+            if (bundledSkillListRef.current) bundledSkillListRef.current.scrollTop = 0;
+          });
+        }
+      } catch {
+        if (requestId !== bundledSkillRequestIdRef.current) return;
+        if (!append) {
+          setBundledSkillOptions([]);
+        }
+        setBundledSkillPagination((prev) => ({
+          ...prev,
+          pageNum,
+          current: pageNum,
+          pageSize,
+          total: 0,
+        }));
+      } finally {
+        if (requestId === bundledSkillRequestIdRef.current) {
+          bundledSkillLoadMoreLockRef.current = false;
+          setBundledSkillLoading(false);
+        }
       }
-    } catch {
-      if (!append) {
-        setBundledSkillOptions([]);
-      }
-      setBundledSkillPagination((prev) => ({
-        ...prev,
-        pageNum,
-        current: pageNum,
-        pageSize,
-        total: 0,
-      }));
-    } finally {
-      bundledSkillLoadMoreLockRef.current = false;
-      setBundledSkillLoading(false);
-    }
-  }, []);
+    },
+    [bundledSkillOwnerType]
+  );
 
   useEffect(() => {
     if (!canConfigureResources || !bundledSkillModalOpen) return;
+    setBundledSkillSearchName('');
+    setBundledSkillOptions([]);
+    setBundledSkillPagination({ pageNum: 1, pageSize: BUNDLED_SKILL_PAGE_SIZE, total: 0, current: 1 });
+    bundledSkillLoadMoreLockRef.current = false;
     fetchBundledSkills({ pageNum: 1, pageSize: BUNDLED_SKILL_PAGE_SIZE, keyword: '' });
+    return () => {
+      bundledSkillRequestIdRef.current += 1;
+    };
   }, [canConfigureResources, bundledSkillModalOpen, fetchBundledSkills]);
 
   useEffect(() => {
@@ -1482,10 +1503,8 @@ const ConfigForm = (props) => {
         return;
       }
 
+      // 已选技能补全只更新表单，避免其他归属的技能混入当前 tab 的分页列表。
       const nextOptions = mergeBundledSkillOptions([...bundledSkillOptions, ...fetchedOptions]);
-      if (fetchedOptions.length) {
-        setBundledSkillOptions(nextOptions);
-      }
 
       const latestSkills = form.getFieldValue('bundledSkills') || currentSkills;
       const normalizedSkills = normalizeBundledSkillItems(latestSkills, nextOptions);
@@ -2846,6 +2865,7 @@ const ConfigForm = (props) => {
                       size="small"
                       disabled={isReadOnly}
                       onClick={() => {
+                        setBundledSkillTab(effectiveOwnerType === 'enterprise' ? 'enterprise' : 'personal');
                         setBundledSkillSearchName('');
                         setBundledSkillPagination((prev) => ({ ...prev, pageNum: 1, current: 1 }));
                         setBundledSkillModalOpen(true);
@@ -3523,6 +3543,16 @@ const ConfigForm = (props) => {
               />
             </div>
           </div>
+          <Tabs
+            activeKey={bundledSkillOwnerType}
+            onChange={setBundledSkillTab}
+            items={[
+              ...(effectiveOwnerType === 'enterprise'
+                ? []
+                : [{ key: 'personal', label: intl.formatMessage({ id: 'employeeDetail.personalSkills' }) }]),
+              { key: 'enterprise', label: intl.formatMessage({ id: 'employeeDetail.enterpriseSkills' }) },
+            ]}
+          />
           <div className={styles.bundledSkillCardListWrap}>
             <Spin spinning={bundledSkillLoading}>
               {filteredBundledSkillOptions.length > 0 ? (

@@ -2160,6 +2160,15 @@ public class DigitalEmployeeApplicationService {
         this.validateDigitalEmployeeManagePermission(ssResource);
 
 
+        // 保留可辨认的删除记录并释放原名称;按状态判断,避免重复删除时叠加后缀.
+        if (!Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
+            String suffix = I18nUtil.get("digemployee.deleted.name.suffix");
+            String originalName = StringUtils.defaultString(ssResource.getResourceName());
+            // resource_name 最多 300 个字符,为删除标记预留空间且不截断 Unicode 字符.
+            int maxNameLength = 300 - suffix.codePointCount(0, suffix.length());
+            int nameLength = Math.min(originalName.codePointCount(0, originalName.length()), maxNameLength);
+            ssResource.setResourceName(originalName.substring(0, originalName.offsetByCodePoints(0, nameLength)) + suffix);
+        }
         // 让前端"已注销"筛选项可以查询到这些记录;运行期副作用(缓存/注册等)继续清理.
         ssResource.setResourceStatus(ResourceStatus.DELETE.getNum());
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Form } from 'antd';
+import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import ConfigForm from '..';
 import { isSuperAssistant } from '../../resourceConfiguration';
 
@@ -171,4 +172,121 @@ describe('employee editor resource configuration entries', () => {
       labels.forEach((label) => expect(screen.getByText(label)).not.toBeVisible());
     }
   );
+});
+
+describe('skill configuration ownership tabs', () => {
+  const listSkills = listResourceUseAuth as jest.Mock;
+  const personalTab = 'employeeDetail.personalSkills';
+  const enterpriseTab = 'employeeDetail.enterpriseSkills';
+  const openSkills = () => fireEvent.click(within(screen.getByText(labels[2]).parentElement!).getByRole('button'));
+
+  beforeEach(() => {
+    listSkills.mockReset().mockResolvedValue({ list: [], total: 0 });
+  });
+
+  it.each(['personal', 'enterprise'])('shows the allowed tabs and queries the initial %s scope', async (ownerType) => {
+    render(<Editor employee={{ ownerType, resourceCode: 'helper' }} />);
+    openSkills();
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByRole('tab', { name: enterpriseTab })).toBeVisible();
+    if (ownerType === 'personal') {
+      expect(dialog.getByRole('tab', { name: personalTab })).toHaveAttribute('aria-selected', 'true');
+    } else {
+      expect(dialog.queryByRole('tab', { name: personalTab })).not.toBeInTheDocument();
+      expect(dialog.getByRole('tab', { name: enterpriseTab })).toHaveAttribute('aria-selected', 'true');
+    }
+    await waitFor(() =>
+      expect(listSkills).toHaveBeenLastCalledWith({
+        resourceBizTypeList: ['SKILL'],
+        ownerType,
+        pageNum: 1,
+        pageSize: 30,
+        keyword: '',
+      })
+    );
+  });
+
+  it('resets search on tab switches and keeps selected skills across scopes', async () => {
+    render(<Editor employee={{ ownerType: 'personal', resourceCode: 'helper' }} />);
+    openSkills();
+    await waitFor(() => expect(listSkills).toHaveBeenCalled());
+    const dialog = within(screen.getByRole('dialog'));
+    const input = dialog.getByPlaceholderText('employeeDetail.bundledSkillsSearchPlaceholder');
+    fireEvent.change(input, { target: { value: 'search' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() =>
+      expect(listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          ownerType: 'personal',
+          keyword: 'search',
+          pageNum: 1,
+        })
+      )
+    );
+    act(() => editorForm.setFieldsValue({ bundledSkills: skills }));
+    fireEvent.click(dialog.getByRole('tab', { name: enterpriseTab }));
+    await waitFor(() =>
+      expect(listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          ownerType: 'enterprise',
+          keyword: '',
+          pageNum: 1,
+        })
+      )
+    );
+    expect(input).toHaveValue('');
+    expect(editorForm.getFieldValue('bundledSkills')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ resourceId: '103' })])
+    );
+    fireEvent.click(dialog.getByRole('tab', { name: personalTab }));
+    await waitFor(() =>
+      expect(listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          ownerType: 'personal',
+          keyword: '',
+          pageNum: 1,
+        })
+      )
+    );
+  });
+
+  it('ignores a personal response that arrives after switching to enterprise', async () => {
+    let resolvePersonal!: (value: any) => void;
+    listSkills.mockImplementation(({ ownerType }) =>
+      ownerType === 'personal'
+        ? new Promise((resolve) => {
+            resolvePersonal = resolve;
+          })
+        : Promise.resolve({
+            list: [{ resourceId: '202', resourceCode: 'enterprise', resourceName: 'Enterprise result' }],
+            total: 1,
+          })
+    );
+    render(<Editor employee={{ ownerType: 'personal', resourceCode: 'helper' }} />);
+    openSkills();
+    await waitFor(() => expect(resolvePersonal).toBeDefined());
+    const dialog = within(screen.getByRole('dialog'));
+    fireEvent.click(dialog.getByRole('tab', { name: enterpriseTab }));
+    await waitFor(() => expect(dialog.getByText('Enterprise result')).toBeVisible());
+    await act(async () =>
+      resolvePersonal({
+        list: [{ resourceId: '201', resourceCode: 'personal', resourceName: 'Stale personal result' }],
+        total: 1,
+      })
+    );
+    expect(dialog.queryByText('Stale personal result')).not.toBeInTheDocument();
+    expect(dialog.getByText('Enterprise result')).toBeVisible();
+  });
+
+  it('switches to enterprise scope when the form ownership changes', async () => {
+    render(<Editor employee={{ ownerType: 'personal', resourceCode: 'helper' }} />);
+    openSkills();
+    await waitFor(() => expect(listSkills).toHaveBeenCalled());
+    act(() => editorForm.setFieldsValue({ ownerType: 'enterprise' }));
+    const dialog = within(screen.getByRole('dialog'));
+    await waitFor(() => expect(dialog.queryByRole('tab', { name: personalTab })).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(listSkills).toHaveBeenLastCalledWith(expect.objectContaining({ ownerType: 'enterprise' }))
+    );
+  });
 });

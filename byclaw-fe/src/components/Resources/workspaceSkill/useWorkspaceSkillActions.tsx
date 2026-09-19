@@ -214,7 +214,7 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
         return;
       }
       Modal.confirm({
-        title: intl.formatMessage({ id: 'common.deleteResource' }),
+        title: intl.formatMessage({ id: 'resource.deleteSkill' }),
         content: intl.formatMessage({ id: 'resource.deleteWorkspaceSkillConfirm' }, { skillName: item.resourceName }),
         okText: intl.formatMessage({ id: 'common.confirm' }),
         cancelText: intl.formatMessage({ id: 'common.cancel' }),

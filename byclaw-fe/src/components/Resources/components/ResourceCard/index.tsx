@@ -273,6 +273,17 @@ const getInstallLabelId = (resource: IResourceCardItem, resourceType?: string) =
   return 'resource.installTool';
 };
 
+// 按资源所属模块展示删除文案，知识和工具的子类型使用相同的模块名称。
+const getDeleteLabelId = (resource: IResourceCardItem, resourceType?: string) => {
+  const bizType = resource?.resourceBizType || resourceType;
+  if (['KG_DOC', 'KG_QA', 'KG_TERM'].includes(bizType || '')) return 'resource.deleteKnowledge';
+  if (bizType === 'SKILL' || resourceType === 'SKILL') return 'resource.deleteSkill';
+  if (['TOOL', 'TOOLKIT', 'MCP', 'AGENT'].includes(bizType || '') || resourceType === 'TOOL') {
+    return 'resource.deleteTool';
+  }
+  return 'common.deleteResource';
+};
+
 const canInstallResource = (resource: IResourceCardItem, resourceType?: string) => {
   const bizType = resource?.resourceBizType || resourceType;
   if (bizType === 'SKILL' || resourceType === 'SKILL') {
@@ -752,6 +763,10 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
+    const deleteLabelId = getDeleteLabelId(resource, resourceType);
+    const deleteConfirmId =
+      deleteLabelId === 'common.deleteResource' ? 'common.deactivateConfirm' : `${deleteLabelId}Confirm`;
+
     // 数字员工下架使用“编辑信息”权限；我可用列表通过生命周期开关整体隐藏该操作。
     const canUnShelfDigitalEmployee =
       isDigitalEmployeeResource &&
@@ -762,7 +777,7 @@ const RenderContent = (props: ResourceCardProps) => {
         label: (
           <ConfirmMenuLabel
             title={intl.formatMessage({
-              id: isDigitalEmployeeResource ? 'resource.unShelfDataConfirm' : 'common.deactivateConfirm',
+              id: isDigitalEmployeeResource ? 'resource.unShelfDataConfirm' : deleteConfirmId,
             })}
             onConfirm={() => (isDigitalEmployeeResource ? onUnShelf() : onDelete())}
           >
@@ -771,7 +786,7 @@ const RenderContent = (props: ResourceCardProps) => {
               text={
                 isDigitalEmployeeResource
                   ? intl.formatMessage({ id: 'resource.unShelfData' })
-                  : intl.formatMessage({ id: 'common.deleteResource' })
+                  : intl.formatMessage({ id: deleteLabelId })
               }
             />
           </ConfirmMenuLabel>
@@ -779,7 +794,7 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 已下架数字员工始终提供“上架数据”，不再依赖恢复权限字段。
+    // 已下架数字员工始终提供“上架员工”，不再依赖恢复权限字段。
     if (
       enableDigitalEmployeeLifecycle &&
       isDigitalEmployeeResource &&
@@ -795,7 +810,7 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 我创建的已下架数字员工允许永久删除数据，操作与上下架生命周期菜单分开控制。
+    // 数字员工“注销员工”入口沿用删除权限和回调，与上下架生命周期菜单分开控制。
     if (isDigitalEmployeeResource && enableDigitalEmployeeDelete && canDelete === true) {
       items.push({
         key: 'deleteData',
@@ -921,7 +936,7 @@ const RenderContent = (props: ResourceCardProps) => {
       items.push({
         key: 'delete',
         label: (
-          <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
+          <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'resource.deleteSkill' })} />
         ),
         onClick: () => workspaceActions.removeSkill(resource as WorkspaceSkillItem),
       });

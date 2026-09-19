@@ -206,7 +206,18 @@
   padding: 4px;
   overflow: hidden;
 
+  // 分类及资源列表保留滚动能力，隐藏滚动条以免挤占弹窗空间。
+  &,
+  * {
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
   .toolsMenuNav {
+    flex-shrink: 0;
     width: 180px;
     padding: 4px 6px 4px 4px;
     border-right: 1px solid var(--beyond-color-border-secondary);

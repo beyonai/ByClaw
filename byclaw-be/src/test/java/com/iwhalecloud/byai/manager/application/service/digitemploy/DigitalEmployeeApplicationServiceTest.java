@@ -148,6 +148,8 @@ class DigitalEmployeeApplicationServiceTest {
         MessageSource mockMessageSource = mock(MessageSource.class);
         when(mockMessageSource.getMessage(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(java.util.Locale.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mockMessageSource.getMessage(eq("digemployee.deleted.name.suffix"), any(), any(Locale.class)))
+            .thenReturn("（已删除）");
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", mockMessageSource);
 
         service = new DigitalEmployeeApplicationService();
@@ -278,6 +280,39 @@ class DigitalEmployeeApplicationServiceTest {
         order.verify(ssResourceService).update(resource);
         order.verify(authApplicationService).invalidateResourceAuthorizationCachesAfterCommit(200L,
             ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {OwnerType.PERSONAL, OwnerType.ENTERPRISE})
+    void deleteDigitalEmployee_marksNameAndDoesNotAppendSuffixAgain(String ownerType) {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, ownerType, 1L);
+        resource.setResourceName("研发助手");
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        service.deleteDigitalEmployee(dto);
+        assertThat(resource.getResourceName()).isEqualTo("研发助手（已删除）");
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.DELETE.getNum());
+        service.deleteDigitalEmployee(dto);
+        assertThat(resource.getResourceName()).isEqualTo("研发助手（已删除）");
+        verify(ssResourceService, times(2)).update(resource);
+    }
+
+    @Test
+    void deleteDigitalEmployee_reservesSpaceForSuffixAtNameLengthLimit() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.PERSONAL, 1L);
+        resource.setResourceName("员".repeat(300));
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        service.deleteDigitalEmployee(dto);
+
+        assertThat(resource.getResourceName()).isEqualTo("员".repeat(295) + "（已删除）");
+        verify(ssResourceService).update(resource);
     }
 
     @Test

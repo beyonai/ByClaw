@@ -79,7 +79,8 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   const resolvedAgentId = currentAgent?.agentId || scopedAgentId || agentId;
   const isExpertResourceOverlayOpen = chatMode === chatModeMap.expert && !!currentAgent;
   const useInputWidth = isAtPopover && !isExpertResourceOverlayOpen && !!width;
-  const panelHeight = useInputWidth ? '40vh' : '65vh';
+  // 加号/@菜单容纳完整分类，同时在小屏幕上保留输入框的操作空间。
+  const panelHeight = useInputWidth ? 'min(480px, 60vh)' : '65vh';
   const panelWidth = useInputWidth && width ? width : 'min(calc(100vw - 24px), 485px)';
 
   useEffect(() => {
