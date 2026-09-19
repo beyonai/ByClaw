@@ -22,7 +22,6 @@ import SandboxStatusIndicator from './components/SandboxStatus';
 import useUserDropdown from '../header/useUserDropdown';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
-import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContentContext';
@@ -317,7 +316,6 @@ const Sidebar = () => {
             className={styles.sideIconWrap}
             onClick={() => {
               clearDetailPanel?.();
-              clearEasyConfirmInputDraft();
               // 项目会话组件持有当前下拉选中的项目，由它带 projectId 创建会话。
               EventEmitter.emit('projectSpace-create-session');
             }}

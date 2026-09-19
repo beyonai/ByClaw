@@ -8,6 +8,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import com.iwhalecloud.byai.common.util.concurrent.TtlTaskDecorator;
+
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -43,6 +45,8 @@ public class AsyncConfig {
 
         // 线程名称前缀
         executor.setThreadNamePrefix("project-init-");
+
+        configureContextPropagation(executor);
 
         // 拒绝策略：由调用线程执行（避免丢失任务）
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
@@ -85,6 +89,8 @@ public class AsyncConfig {
         // 线程名称前缀
         executor.setThreadNamePrefix("audit-log-");
 
+        configureContextPropagation(executor);
+
         // 拒绝策略：由调用线程执行（确保审计日志不丢失）
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
 
@@ -106,10 +112,7 @@ public class AsyncConfig {
      * 默认异步任务执行器
      *
      * 未指定线程池名的 @Async 注解会使用此执行器，避免退化到 SimpleAsyncTaskExecutor
-     * 当前发现三处裸 @Async：
-     * - DigEmployeeChangeAuthRefreshService.scheduleRefreshGranteesAsync
-     * - AuthApplicationService.syncUsersAuthToRedis
-     * - UserPrivateParamApplicationService.syncAllPrivateParamCache
+     * 裸 @Async 方法统一使用此执行器。
      */
     @Bean(name = {"taskExecutor", "defaultAsyncExecutor"})
     public Executor taskExecutor() {
@@ -130,6 +133,8 @@ public class AsyncConfig {
         // 线程名称前缀（用于定位问题）
         executor.setThreadNamePrefix("default-async-");
 
+        configureContextPropagation(executor);
+
         // 拒绝策略：由调用线程执行（避免丢失任务）
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
 
@@ -145,5 +150,13 @@ public class AsyncConfig {
             executor.getCorePoolSize(), executor.getMaxPoolSize(), executor.getQueueCapacity());
 
         return executor;
+    }
+
+    /**
+     * 按任务捕获并恢复所有 TransmittableThreadLocal，
+     * 避免线程池线程继承并长期保留首个请求的用户上下文。
+     */
+    private void configureContextPropagation(ThreadPoolTaskExecutor executor) {
+        executor.setTaskDecorator(TtlTaskDecorator.INSTANCE);
     }
 }

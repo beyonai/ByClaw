@@ -13,7 +13,6 @@ import classNames from 'classnames';
 import dayjs from 'dayjs';
 import { Tag } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
-import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { hydrateRunningSessions } from '@/hooks/useChat/chatRuntime';
 import useGlobal from '@/hooks/useGlobal';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
@@ -548,7 +547,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
   const handleNewSession = useCallback(() => {
     clearDetailPanel?.();
-    clearEasyConfirmInputDraft();
     setAgentId?.('');
     setSessionId?.('');
 
@@ -573,7 +571,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
       if (!session.sessionId) return;
 
       clearDetailPanel?.();
-      clearEasyConfirmInputDraft(session.sessionId);
       if (project) {
         selectProject(project, false);
       } else {
@@ -674,7 +671,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const handleNewProjectSession = useCallback(
     (project: ProjectSpace) => {
       clearDetailPanel?.();
-      clearEasyConfirmInputDraft();
       setAgentId?.('');
       setSessionId?.('');
       selectProject(project, false);

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { waitForWorkerLease } from "./worker-lifecycle.js";
 import {
   WorkerRunner,
   GatewayDataEmitter,
@@ -712,7 +713,8 @@ export class ByaiSdkApp {
     return this.log ?? {};
   }
 
-  async start(): Promise<void> {
+  async start(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     if (this.runner) {
       return;
     }
@@ -775,21 +777,42 @@ export class ByaiSdkApp {
     });
 
     // Runner 初始化统一负责 worker registry、消费组、控制流和 heartbeat。
-    await runner.initialize();
+    try {
+      await waitForWorkerLease(() => runner.initialize(), workerId, {
+        signal,
+        onWait: () => info?.(
+          `[${workerId}] waiting up to 65s for the previous worker lease to expire or be released`,
+        ),
+      });
+    } catch (err) {
+      // SDK 1.5.3 release() falls back to an unowned markWorkerInactive when no
+      // lock was acquired. Suppress that fallback: a failed contender must never
+      // delete the active owner's lease. Token-owned release still runs normally.
+      const markInactive = worker.registry.markWorkerInactive;
+      worker.registry.markWorkerInactive = async () => false;
+      try {
+        await runner.release();
+      } finally {
+        worker.registry.markWorkerInactive = markInactive;
+      }
+      throw err;
+    }
+    // Preserve the initialized runner even if later startup steps fail.
+    this.runner = runner;
     await setRunnerAgentTypeStreamsToLatest({
       redis,
       agentTypes,
       runnerGroupName,
       log: this.log,
     });
-    // 初始化完成后立即暴露 runner，确保冷启动等待期间收到 stop 也能释放 heartbeat 与 worker lock。
-    this.runner = runner;
 
     info?.(
       `[${this.account.accountId}] byai-channel worker registration: workerId=${workerId}, targetAgentTypes=${agentTypes}`,
     );
 
     registerSdkEmitter(this.account.accountId, emitter);
+
+    signal?.throwIfAborted();
 
     // OpenClaw starts channels before plugin services. Keep the consumer gate in
     // the background so baiying-enhance can start and publish its readiness.

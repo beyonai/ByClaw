@@ -176,7 +176,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   componentDidUpdate(prevProps: IProps) {
     if (`${prevProps.sessionId || ''}` !== `${this.props.sessionId || ''}`) {
-      // 新会话取得真实 sessionId 后重新读取已迁移的草稿，保证所有 @ 员工都恢复到输入框。
+      // 新会话取得真实 sessionId 后恢复共享草稿，保证未发送内容和所有 @ 员工仍在输入框。
       this.restoreInputDraft();
     }
   }
@@ -730,7 +730,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           ref={this.richInputRef}
           defaultPlaceholder={placeholder}
           inAgentRoute={this.chechCannotAt()}
+          inputDraft={this.props.inputDraft}
           onPasteFiles={this.onPasteFiles}
+          onDraftChange={this.props.onInputDraftChange}
           onChange={(inputSchema) => {
             const { text, agentId: currentAgentId, agentType, resourceList, displayText } = inputSchema;
             this.displayQuestion = displayText;
@@ -740,11 +742,6 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               inputValue: text,
               connectNet: resourceList.some((item) => `${item.resourceId}` === `${connectNetAgentId}`),
             }));
-            // 只要存在数字员工，就保存完整 mention 草稿，防止回答过程中默认 agent 变化后丢失其它员工。
-            const draft = resourceList.some((item) => `${item.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
-              ? this.getPersistentMentionDraft(true)
-              : { text, resourceList };
-            this.props.onInputDraftChange?.(draft);
             this.syncSiderAgent(resourceList);
             if (!cannotAt && `${agentId || ''}` !== `${currentAgentId || ''}`) {
               let nextAgentType = agentType;

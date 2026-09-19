@@ -23,14 +23,18 @@ export function resolveDigEmployeePubSub(pluginCfg: BaiyingEnhancePluginConfig):
 
 /** `plugins.entries.*` paths registered as in-process reload when this plugin syncs via `writeConfigFile`. */
 export function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): string[] {
-  const out = new Set<string>(["plugins.entries.baiying-enhance", "agents", "models"]);
+  const out = new Set<string>(["agents", "models"]);
   const extras = cfg.configSyncHotPluginEntriesPrefixes;
   if (Array.isArray(extras)) {
     for (const entry of extras) {
       if (typeof entry !== "string") continue;
       const t = entry.trim();
       if (!t) continue;
-      out.add(t.startsWith("plugins.entries.") ? t : `plugins.entries.${t}`);
+      const prefix = t.startsWith("plugins.entries.") ? t : `plugins.entries.${t}`;
+      // Preserve 7.1's built-in reload-plugins action for our generated membership.
+      const marker = "plugins.entries.baiying-enhance.config.thinkingProviderIds";
+      if (marker === prefix || marker.startsWith(prefix + ".")) continue;
+      out.add(prefix);
     }
   }
   return Array.from(out);

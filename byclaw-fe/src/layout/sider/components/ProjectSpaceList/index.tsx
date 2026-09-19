@@ -27,7 +27,6 @@ import {
   normalizeProjectDetail,
   normalizeProjectSession,
 } from '@/pages/projectSpace/utils';
-import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { saveProjectMembers, saveProjectResources, type DevloopProjectSessionSearchMode } from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
@@ -1188,8 +1187,6 @@ const ProjectSpaceList: React.FC = () => {
     }
 
     clearDetailPanel?.();
-    // 每次打开项目会话都以该会话详情返回的员工为准，清除目标会话上次遗留的多员工输入草稿。
-    clearEasyConfirmInputDraft(session.sessionId);
 
     if (Array.isArray(session.sessionExts) && session.sessionExts.length > 0) {
       dispatch({

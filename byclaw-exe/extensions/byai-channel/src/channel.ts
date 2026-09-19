@@ -11,7 +11,7 @@ import { ByaiChannelConfigSchema } from "./config-schema.js";
 import { listByaiAccountIds, resolveByaiAccount, resolveDefaultByaiAccountId } from "./config.js";
 import type { ResolvedByaiAccount, ByaiProbe } from "./types.js";
 import { sendReplyCallback } from "./webhook-handler.js";
-import type { ByaiSdkApp } from "./sdk-app.js";
+import { runSdkAccountLifetime } from "./worker-lifecycle.js";
 import {
   buildSdkStateEvent,
   emitSdkChunkTracked,
@@ -403,78 +403,15 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
     startAccount: async (ctx) => {
       const { account, cfg, log, abortSignal } = ctx;
 
-      // 启动任务列表
-      const startupTasks: Array<Promise<void>> = [];
-
-      // ============ SDK 模式（Gateway SDK TS，通过 SDK App 抽象） ============
-      let stopSdk: (() => Promise<void>) | null = null;
-      let sdkApp: ByaiSdkApp | null = null;
       log?.info?.(`[${account.accountId}] ${CHANNEL_ID} SDK mode enabled, starting...`);
-
-      try {
-        const { ByaiSdkApp: SdkApp } = await import("./sdk-app.js");
-        sdkApp = new SdkApp({
-          account,
-          cfg,
-          log,
-        });
-
-        const sdkStartPromise = sdkApp
-          .start()
-          .then(() => {
-            log?.info?.(
-              `[${account.accountId}] ${CHANNEL_ID} SDK app started successfully (gateway_sdk_ts)`,
-            );
-          })
-          .catch((err) => {
-            log?.error?.(
-              `[${account.accountId}] ${CHANNEL_ID} SDK app failed to start: ${String(err)}`,
-            );
-          });
-
-        startupTasks.push(sdkStartPromise);
-
-        stopSdk = async () => {
-          if (sdkApp) {
-            await sdkApp.stop();
-            sdkApp = null;
-          }
-        };
-      } catch (err) {
-        log?.error?.(
-          `[${account.accountId}] ${CHANNEL_ID} Failed to initialize SDK (gateway_sdk_ts): ${String(err)}`,
+      const { ByaiSdkApp } = await import("./sdk-app.js");
+      const app = new ByaiSdkApp({ account, cfg, log });
+      // Propagate startup failures to the host, and await cleanup before allowing restart.
+      await runSdkAccountLifetime(app, abortSignal, () => {
+        log?.info?.(
+          `[${account.accountId}] ${CHANNEL_ID} SDK app started successfully (gateway_sdk_ts)`,
         );
-      }
-
-      // 组合停止函数
-      const stop = () => {
-        // 停止 SDK
-        if (stopSdk) {
-          stopSdk();
-          stopSdk = null;
-        }
-      };
-
-      // 如果 abortSignal 被触发，自动停止
-      if (abortSignal) {
-        abortSignal.addEventListener("abort", stop, { once: true });
-      }
-
-      // 等待所有启动任务完成
-      if (startupTasks.length > 0) {
-        await Promise.all(startupTasks);
-      }
-
-      // 关键：返回一个永远不解析的 Promise，直到 abortSignal 被触发
-      if (abortSignal) {
-        await new Promise<void>((resolve) => {
-          abortSignal!.addEventListener("abort", () => resolve(), { once: true });
-        });
-      } else {
-        await new Promise(() => {});
-      }
-
-      return { stop };
+      });
     },
   },
 };

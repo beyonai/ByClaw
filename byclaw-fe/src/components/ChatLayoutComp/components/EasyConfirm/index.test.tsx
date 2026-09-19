@@ -3,10 +3,17 @@ import { IMessageState, SSEMessageType } from '@/constants/message';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 import type { IMessage } from '@/typescript/message';
 import { collectEasyConfirmItems } from '@/components/MessagesComp/easyConfirm';
-import EasyConfirm from './index';
+import EasyConfirm, { clearEasyConfirmInputDraft } from './index';
+import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 
 const mockEventListeners = new Map<string, (payload: unknown) => void>();
 const mockMessageInfo = jest.fn();
+let mockQueryInputProps: {
+  inputDraft?: DefaultValueSchema;
+  onInputDraftChange: (draft: DefaultValueSchema) => void;
+  onSend: (payload: any) => void;
+};
 
 jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
@@ -20,7 +27,10 @@ jest.mock('@/hooks/useGlobal', () => ({
 
 jest.mock('@/components/QueryInput', () => ({
   __esModule: true,
-  default: () => <div data-testid="query-input" />,
+  default: (props: typeof mockQueryInputProps) => {
+    mockQueryInputProps = props;
+    return <div data-testid="query-input" />;
+  },
 }));
 
 jest.mock('@/components/MessageList/lazyHandler', () => ({
@@ -81,6 +91,7 @@ const createPendingMessage = (): IMessage =>
 
 describe('EasyConfirm', () => {
   beforeEach(() => {
+    clearEasyConfirmInputDraft();
     mockEventListeners.clear();
     mockMessageInfo.mockClear();
   });
@@ -212,5 +223,88 @@ describe('EasyConfirm', () => {
 
     focusSpy.mockRestore();
     Object.defineProperty(window, 'Notification', { configurable: true, value: originalNotification });
+  });
+});
+
+describe('shared chat draft', () => {
+  const props = {
+    disabledInput: false,
+    isBottom: true,
+    cannotAt: false,
+    disableInputDraft: false,
+    queryInputProps: {},
+    sessionId: 'session-1',
+    onSend: jest.fn(),
+    onCancel: jest.fn(),
+    myAgentType: 1 as any,
+    setMyAgentType: jest.fn(),
+    updateMessage: (message: IMessage) => message,
+  };
+  const draft: DefaultValueSchema = {
+    text: '{{DIGITAL_EMPLOYEE_agent-1}} Compare {{DATA_SOURCE_17}} with this input',
+    resourceList: [
+      {
+        id: 'DIGITAL_EMPLOYEE_agent-1',
+        resourceType: ResourceType.digitalEmployee,
+        resourceId: 'agent-1',
+        resourceName: 'Employee One',
+      },
+      { id: 'DATA_SOURCE_17', resourceType: ResourceType.dataSource, resourceId: '17', resourceName: 'Analytics' },
+    ],
+  };
+
+  beforeEach(() => {
+    clearEasyConfirmInputDraft();
+    jest.clearAllMocks();
+  });
+
+  it('carries text, employees and references across existing and new sessions, including remounts', () => {
+    const view = render(<EasyConfirm {...props} />);
+    act(() => mockQueryInputProps.onInputDraftChange(draft));
+    view.rerender(<EasyConfirm {...props} sessionId="session-2" />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+    view.rerender(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+    view.unmount();
+    render(<EasyConfirm {...props} sessionId="session-3" />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+  });
+
+  it('does not resurrect an older draft after editing or clearing in another session', () => {
+    const view = render(<EasyConfirm {...props} />);
+    act(() => mockQueryInputProps.onInputDraftChange(draft));
+    view.rerender(<EasyConfirm {...props} sessionId="session-2" />);
+    act(() => mockQueryInputProps.onInputDraftChange({ text: 'Latest input', resourceList: [] }));
+    view.rerender(<EasyConfirm {...props} />);
+    expect(mockQueryInputProps.inputDraft?.text).toBe('Latest input');
+    act(() => mockQueryInputProps.onInputDraftChange({ text: '', resourceList: [] }));
+    view.rerender(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+  });
+
+  it('clears sent content and carries only retained employees into the next session', () => {
+    const view = render(<EasyConfirm {...props} sessionId="" />);
+    act(() => mockQueryInputProps.onInputDraftChange(draft));
+    act(() => mockQueryInputProps.onSend({ queryQuestion: 'sent' }));
+    view.rerender(<EasyConfirm {...props} />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    const retained = { text: '{{DIGITAL_EMPLOYEE_agent-1}}', resourceList: [draft.resourceList![0]] };
+    act(() => mockQueryInputProps.onInputDraftChange(retained));
+    view.rerender(<EasyConfirm {...props} sessionId="session-2" />);
+    expect(mockQueryInputProps.inputDraft).toEqual(retained);
+    expect(props.onSend).toHaveBeenCalledWith({ queryQuestion: 'sent' });
+  });
+
+  it('isolates fixed employee pages from the shared draft even when sending', () => {
+    const view = render(<EasyConfirm {...props} />);
+    act(() => mockQueryInputProps.onInputDraftChange(draft));
+    view.rerender(<EasyConfirm {...props} disableInputDraft sessionId="employee-session" />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    act(() => {
+      mockQueryInputProps.onInputDraftChange({ text: 'Private input' });
+      mockQueryInputProps.onSend({ queryQuestion: 'Private input' });
+    });
+    view.rerender(<EasyConfirm {...props} />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
   });
 });

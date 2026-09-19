@@ -58,11 +58,13 @@ export interface DefaultValueSchema {
 }
 export interface Props {
   inAgentRoute?: boolean;
+  inputDraft?: DefaultValueSchema;
   style?: React.CSSProperties;
   agentId?: string;
   agentType?: IAgentType;
   chatMode?: IChatModeType;
   onChange?: (payload: PayloadType) => void;
+  onDraftChange?: (draft: DefaultValueSchema) => void;
   onSend?: (payload: PayloadType) => void;
   isInputAtBottom?: boolean;
   defaultPlaceholder?: string;
