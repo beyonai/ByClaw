@@ -1,3 +1,4 @@
+import { withThinkingProviderReloadConfig } from "./configured-thinking.js";
 import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 
 type MutableConfigRuntime = OpenClawPluginApi["runtime"]["config"] & {
@@ -27,12 +28,12 @@ export async function mutateOpenClawConfigFile(
     await runtimeConfig.mutateConfigFile({
       afterWrite: { mode: "auto" },
       mutate: (base) => {
-        const next = mutator(base);
+        const next = withThinkingProviderReloadConfig(mutator(base));
         return replaceConfigContents(base, next);
       },
     });
     return;
   }
   const base = runtimeConfig.loadConfig();
-  await runtimeConfig.writeConfigFile(mutator(base));
+  await runtimeConfig.writeConfigFile(withThinkingProviderReloadConfig(mutator(base)));
 }

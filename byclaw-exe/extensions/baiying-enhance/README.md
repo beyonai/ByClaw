@@ -88,7 +88,7 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 ### 数字员工模型热切换
 
-数字员工同步会 `writeConfigFile`；本插件默认把 `plugins.entries.baiying-enhance`、`agents` 与 `models` 注册为热重载前缀，因此托管 Agent 条目、`models.providers.baiying-m-*`、`agents.list[].skills`、`main.subagents.allowAgents` 等变化会走**进程内热加载**（日志通常为 `config change detected` / `config hot reload applied`），**不会**整进程退出重启。若 diff 里出现其它插件的 `plugins.entries.*`，OpenClaw 仍可能判定需要**进程级重启**；这种情况下请在 **`plugins.entries.baiying-enhance.config`** 里增加 **`configSyncHotPluginEntriesPrefixes`**（仅当你需要时配置，可省略）：
+数字员工同步会 `writeConfigFile`；本插件把 `agents` 与 `models` 注册为热重载前缀；在已验证的 7.1 上，自身 `plugins.entries.baiying-enhance` 配置使用原生插件重载规则，因此托管 Agent 条目、`models.providers.baiying-m-*`、`agents.list[].skills`、`main.subagents.allowAgents` 等变化会走**进程内热加载**（日志通常为 `config change detected` / `config hot reload applied`），**不会**整进程退出重启。若 diff 里出现其它插件的 `plugins.entries.*`，OpenClaw 仍可能判定需要**进程级重启**；这种情况下请在 **`plugins.entries.baiying-enhance.config`** 里增加 **`configSyncHotPluginEntriesPrefixes`**（仅当你需要时配置，可省略）：
 
 完整链路如下：
 
@@ -216,6 +216,49 @@ MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调
 对百应详情 / 数字员工格式，插件会读取 JSON **根**上的 **`relTools`**（字符串数组）并写入托管 agent 的 **`agents.list[].tools.allow`**；元素会 `trim`，空串丢弃。配置 `["*"]` 表示允许全部 OpenClaw tools。
 
 该格式的托管 agent 仍会保留 **`baiying_call`**，用于调用百应关联资源桥接工具：当 `relTools` 非空时合并进 `tools.allow`，否则写为 `tools.alsoAllow`。数字员工 JSON 内容变化后，Redis Pub/Sub 或显式 flush 触发重新扫描时，`relTools` 变更会随配置同步写回；插件同时写入一个禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，让 OpenClaw 刷新 skills/tools 快照，无需重启网关。
+
+### 可视化 Thinking 配置与纯插件适配（已验证 OpenClaw 2026.7.1）
+
+适配由模型管理页配置驱动，**不按 `baiying-m-*` 前缀、模型名称或请求地址判断供应商能力**。ID 仅用于关联模型和凭据，URL 仅用于请求路由；代理地址和模型别名不会改变适配规则。
+
+| 配置项 | 运行时用途 |
+| --- | --- |
+| 模型协议 | 优先确定 OpenAI Chat Completions、Responses 或 Anthropic 请求通道；未指定时才用提供商作为兼容回退 |
+| 提供商 | 兼容格式为 `auto` 时参与默认格式选择，不覆盖显式协议或兼容格式 |
+| 启用 Thinking / Thinking 能力 | 决定是否允许思考，以及使用开关、effort、预算或自适应；关闭/unsupported 只允许 off |
+| 默认档位 | 由已有会话配置链路选择；用户当前会话选择优先，适配器不读取共享默认值覆盖单次请求 |
+| 兼容格式 | 决定参数结构；显式选择优先，auto 根据提供商和协议解析，不猜测 URL 或模型名称 |
+| Supported Efforts | 思考档位白名单；为空时保持前后端现有统一档位词表，off 始终可用 |
+| Effort Map / budgets | 按当前会话档位转换供应商 effort 或预算；百炼格式没有填写映射时原样使用档位，也不猜测预算；其它兼容格式保留已有默认规则 |
+
+同步链路为 `instanceParam.reasoningConfig → ProviderBundle.reasoningConfig → models.providers.*.models[].params.baiyingReasoningConfig`。完整保留能力和格式，OpenClaw 已有 `compat`、`thinkingLevelMap`、预算参数仍照常生成。
+
+`configured-thinking.ts` 使用正式的 `api.registerProvider`、`resolveThinkingProfile` 和 `wrapStreamFn`。按具有生成配置的实际 provider ID 注册，回调按模型配置选行为。新增独立的 `bailian`（百炼 OpenAI 兼容）格式，支持以下组合。原有 `qwen` / `qwen-chat-template` 及其他格式/协议交回原生 transport，不覆盖其包装器，也不改变现有 Qwen 请求规则：
+
+- `binary`：仅思考开关。
+- `effort`：思考开关 + 按 Effort Map 转换的 `reasoning_effort`。
+- `budget`：思考开关 + 管理员填写的 `thinking_budget`；缺失预算不编造。
+- `adaptive`：开启思考，不强制指定 effort 或预算。
+- off 或禁用：显式关闭，并清理冲突 effort / budget 字段。
+
+例如，百炼 Token Plan DeepSeek 可设置 **模型协议 OpenAI、Thinking 能力 effort、兼容格式 bailian（百炼）、Supported Efforts low/high/max**，得到 `enable_thinking` 与 `reasoning_effort`。不需要在代码中登记请求域名或模型名。使用其他部署/代理也由同一配置控制；请按实际供应商合同选择字段，配置不会自动纠正错误协议。
+
+后端模型新增/编辑接口的 `REASONING_COMPAT_FORMATS` 同样包含 `bailian`；新增兼容格式时必须同步保存校验，避免页面可选但提交返回 `aimodel.reasoning.invalid`。
+
+前端新增“百炼（OpenAI 兼容）”选项；调试请求和后台直接调用的 bailian 格式同步遵守 effort/budget 区分以及显式 Effort Map。已有 Qwen 配置不需修改，不批量修改旧模型记录；显式 Qwen 格式保留原语义。auto 现在只按提供商/协议解析，原来依赖地址或名称猜测的配置应显式选择兼容格式。其他原生格式保持各自通道语义；本次真实供应商验收范围为上述百炼组合，不代表所有供应商已逐一实测。
+
+配置写入时自动维护 `plugins.entries.baiying-enhance.config.thinkingProviderIds`（内部字段，无凭据、无需手填），与模型配置一起写入。新增/移除 provider 触发 7.1 正式插件热加载，重建缓存注册表；不采用轮询补注册。仅修改同一 provider 的配置不需要改变此列表。新增模型须等热加载完成后调用；完整插件环境已验证热新增和并发请求，页面首轮任务的业务时序仍需验收。
+
+自身插件配置使用 7.1 原生 `reload-plugins`，不再用普通 `hotPrefixes` 覆盖掉该动作。其它旧配置前缀仍按现有策略处理。适配器继承现有 Redis synthetic auth；配置中的 SecretRef 解析路径保持不变。
+
+安装只需构建并安装正常的 `baiying-enhance` 插件，然后重启或热加载插件。**不修改 OpenClaw 文件、不替换全局 fetch，也没有运行时补丁脚本。** 此方案已在原始 2026.7.1 验证；仓库镜像默认若仍为 2026.6.6，构建时须显式指定 `OPENCLAW_VERSION=2026.7.1`，不要把本次结果视为 6.6.6 兼容证明。此前实验打过桥接补丁的环境需先恢复原始运行时或使用干净镜像。
+
+```bash
+npm run build
+npm test -- src/configured-thinking.test.ts src/config-writer.test.ts src/plugin-reload.test.ts src/aimodel-config.test.ts src/aimodel-runtime-provider.test.ts
+```
+
+新增测试覆盖显式协议优先、auto 不猜 URL/名称、配置透传、开关/effort/预算及 Qwen 旧行为回归、原生格式不受影响、请求并发隔离、回调组合和原子热加载标记。低输出上限可能被 max 档推理耗尽，真实验证采用 maxTokens=4096；应由模型管理页合理配置输出上限。
 
 ### Zread 默认模型同步
 

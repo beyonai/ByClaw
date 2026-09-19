@@ -509,6 +509,7 @@ export default {
   'modelMgr.modal.reasoningCapability.adaptive': 'Adaptive thinking',
   'modelMgr.modal.reasoningDefaultLevel': 'Default thinking level',
   'modelMgr.modal.reasoningCompatFormat': 'Compatibility format',
+  'modelMgr.modal.reasoningCompatFormat.bailian': 'Bailian (OpenAI compatible)',
   'modelMgr.modal.reasoningSupportedEfforts': 'Supported efforts',
   'modelMgr.modal.reasoningEffortMap': 'Effort map JSON',
   'modelMgr.modal.debugPanelDesc':

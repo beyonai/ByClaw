@@ -87,7 +87,7 @@ public class ModelManagementApplicationService {
     private static final List<String> REASONING_CAPABILITIES = List.of("unsupported", "binary", "effort", "budget",
         "adaptive");
 
-    private static final List<String> REASONING_COMPAT_FORMATS = List.of("auto", "openai", "qwen", "qwen-chat-template",
+    private static final List<String> REASONING_COMPAT_FORMATS = List.of("auto", "openai", "bailian", "qwen", "qwen-chat-template",
         "deepseek", "openrouter", "together", "zai", "anthropic");
 
     private static final Logger logger = LoggerFactory.getLogger(ModelManagementApplicationService.class);

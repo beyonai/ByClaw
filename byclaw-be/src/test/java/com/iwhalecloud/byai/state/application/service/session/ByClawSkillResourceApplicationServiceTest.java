@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSource;
 import org.springframework.mock.web.MockMultipartFile;
@@ -48,6 +50,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -101,6 +104,39 @@ class ByClawSkillResourceApplicationServiceTest {
         loginInfo.setEnterpriseId(1L);
         loginInfo.setDefaultDigEmployeeId(9001L);
         CurrentUserHolder.setLoginInfo(loginInfo);
+    }
+
+    @Test
+    void unlinkWorkspaceSkillSchedulesRefreshAfterRemovingRelation() {
+        SsResource skill = new SsResource();
+        skill.setResourceId(7001L);
+        skill.setResourceBizType("SKILL");
+        skill.setOwnerType(OwnerType.PERSONAL);
+        skill.setCreateBy(10001L);
+        when(ssResourceService.getResourceListByCode(List.of("demo-skill"))).thenReturn(List.of(skill));
+
+        service.unlinkWorkspaceSkill("user001", 9001L,
+            "/.openclaw/workspace-baiying-agent-9001/skills/demo-skill", "demo-skill");
+
+        InOrder order = inOrder(ssResourceRelDetailService,
+            digitalEmployeeApplicationService, digitalEmployeeRuntimeRefreshService);
+        order.verify(ssResourceRelDetailService).remove(any(LambdaQueryWrapper.class));
+        order.verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        order.verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(9001L, null);
+        verify(digitalEmployeeApplicationService, never()).synOpenClawWorkSpace(any());
+    }
+
+    @Test
+    void unlinkWorkspaceSkillWithoutResourceStillSchedulesRefreshForDefaultEmployee() {
+        when(ssResourceService.getResourceListByCode(List.of("demo-skill"))).thenReturn(List.of());
+
+        service.unlinkWorkspaceSkill("user001", null,
+            "/.openclaw/workspace/skills/demo-skill", null);
+
+        verify(ssResourceRelDetailService, never()).remove(any(LambdaQueryWrapper.class));
+        verify(digitalEmployeeApplicationService, never()).rebuildAndSaveDigitalEmployeeRelSkills(any());
+        verify(digitalEmployeeApplicationService, never()).synOpenClawWorkSpace(any());
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(9001L, null);
     }
 
     @AfterEach

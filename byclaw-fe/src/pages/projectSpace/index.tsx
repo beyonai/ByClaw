@@ -16,7 +16,6 @@ import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
 import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 import { agentTypeMap } from '@/constants/agent';
-import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { getPublicPath } from '@/utils';
 import {
   activateDesktopProject,
@@ -214,8 +213,6 @@ const ProjectSpacePage: React.FC = () => {
   const handleOpenSession = useCallback(
     (session: ProjectSession) => {
       if (!session.sessionId) return;
-      // 项目详情切换会话时丢弃目标会话遗留的多员工草稿，只使用详情返回的默认员工。
-      clearEasyConfirmInputDraft(session.sessionId);
       // 研发任务会话绑的是项目维度执行员工，不在 redux employeesList/agentList 里,
       // useDefaultAgentElement 查不到就兜底成「AI 助手」。agentCache 在那个 hook 里优先于 redux 查表,
       // 所以带了名字就先把整份员工写进去。只在有 agentName 时写:会话列表那条路没有这个字段,

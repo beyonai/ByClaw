@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import com.iwhalecloud.byai.common.util.concurrent.TtlTaskDecorator;
+
 /**
  * 授权Redis同步异步线程池。
  */
@@ -22,6 +24,7 @@ public class AuthRedisSyncAsyncConfig {
         executor.setQueueCapacity(512);
         executor.setKeepAliveSeconds(60);
         executor.setThreadNamePrefix("auth-redis-sync-");
+        executor.setTaskDecorator(TtlTaskDecorator.INSTANCE);
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(10);
         executor.initialize();

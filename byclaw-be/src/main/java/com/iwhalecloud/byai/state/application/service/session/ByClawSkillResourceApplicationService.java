@@ -539,14 +539,15 @@ public class ByClawSkillResourceApplicationService {
         Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
         String resolvedSkillName = StringUtils.defaultIfBlank(skillName, lastPathSegment(skillPath));
         SsResource skillResource = findExistingSkill(resolvedSkillName, OwnerType.PERSONAL);
-        if (skillResource == null) {
-            return;
+        if (skillResource != null) {
+            ssResourceRelDetailService.remove(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SsResourceRelDetail>()
+                .eq(SsResourceRelDetail::getResourceId, resolvedDigitalEmployeeId)
+                .eq(SsResourceRelDetail::getRelResourceId, skillResource.getResourceId()));
+            digitalEmployeeApplicationService.rebuildAndSaveDigitalEmployeeRelSkills(resolvedDigitalEmployeeId);
         }
-        ssResourceRelDetailService.remove(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SsResourceRelDetail>()
-            .eq(SsResourceRelDetail::getResourceId, resolvedDigitalEmployeeId)
-            .eq(SsResourceRelDetail::getRelResourceId, skillResource.getResourceId()));
-        digitalEmployeeApplicationService.rebuildAndSaveDigitalEmployeeRelSkills(resolvedDigitalEmployeeId);
-        digitalEmployeeApplicationService.synOpenClawWorkSpace(resolvedDigitalEmployeeId);
+        // 目录已删除，即使历史技能没有资源记录也要通知运行态；提交后刷新，避免读到尚未解绑的关联。
+        digitalEmployeeRuntimeRefreshService.scheduleDigitalEmployeeUpdateRefreshAfterCommit(
+            resolvedDigitalEmployeeId, null);
     }
 
     private Long resolveDigitalEmployeeId(Long digitalEmployeeResourceId) {

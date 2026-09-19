@@ -13,9 +13,10 @@ jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
 }));
 
-const folder = { name: '资料', path: '/资料/', isDir: true };
-const nestedFolder = { name: '产品', path: '/资料/产品/', isDir: true };
-const file = { name: '需求.md', path: '/资料/产品/需求.md', isDir: false };
+const sharedRootPath = '/by/.shared/';
+const folder = { name: '资料', path: `${sharedRootPath}资料/`, isDir: true };
+const nestedFolder = { name: '产品', path: `${sharedRootPath}资料/产品/`, isDir: true };
+const file = { name: '需求.md', path: `${sharedRootPath}资料/产品/需求.md`, isDir: false };
 
 const expand = (name: string) => {
   const row = screen.getByText(name).closest('.ant-tree-treenode')!;
@@ -32,7 +33,9 @@ describe('chat resource file picker', () => {
     jest.clearAllMocks();
     mockResourceId = 'employee-resource';
     (listFiles as jest.Mock).mockImplementation(({ path }) =>
-      Promise.resolve({ data: path === '/' ? [folder] : path === folder.path ? [nestedFolder] : [file] })
+      Promise.resolve({
+        data: path === sharedRootPath ? [folder] : path === folder.path ? [nestedFolder] : [file],
+      })
     );
   });
 
@@ -40,7 +43,8 @@ describe('chat resource file picker', () => {
     const onSelect = jest.fn();
     render(<FilePicker onSelect={onSelect} />);
     await screen.findByText(folder.name);
-    expect(listFiles).toHaveBeenCalledWith({ resourceId: 'employee-resource', path: '/' });
+    expect(screen.getByText('chatResource.localSharedFile')).toBeInTheDocument();
+    expect(listFiles).toHaveBeenCalledWith({ resourceId: 'employee-resource', path: sharedRootPath });
     const folderRow = screen.getByText(folder.name).closest('.ant-tree-treenode') as HTMLElement;
     fireEvent.click(await openQuoteMenu(folderRow));
     expect(onSelect).toHaveBeenLastCalledWith(
