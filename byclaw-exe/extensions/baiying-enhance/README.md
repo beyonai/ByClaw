@@ -243,6 +243,8 @@ MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调
 
 例如，百炼 Token Plan DeepSeek 可设置 **模型协议 OpenAI、Thinking 能力 effort、兼容格式 bailian（百炼）、Supported Efforts low/high/max**，得到 `enable_thinking` 与 `reasoning_effort`。不需要在代码中登记请求域名或模型名。使用其他部署/代理也由同一配置控制；请按实际供应商合同选择字段，配置不会自动纠正错误协议。
 
+后端模型新增/编辑接口的 `REASONING_COMPAT_FORMATS` 同样包含 `bailian`；新增兼容格式时必须同步保存校验，避免页面可选但提交返回 `aimodel.reasoning.invalid`。
+
 前端新增“百炼（OpenAI 兼容）”选项；调试请求和后台直接调用的 bailian 格式同步遵守 effort/budget 区分以及显式 Effort Map。已有 Qwen 配置不需修改，不批量修改旧模型记录；显式 Qwen 格式保留原语义。auto 现在只按提供商/协议解析，原来依赖地址或名称猜测的配置应显式选择兼容格式。其他原生格式保持各自通道语义；本次真实供应商验收范围为上述百炼组合，不代表所有供应商已逐一实测。
 
 配置写入时自动维护 `plugins.entries.baiying-enhance.config.thinkingProviderIds`（内部字段，无凭据、无需手填），与模型配置一起写入。新增/移除 provider 触发 7.1 正式插件热加载，重建缓存注册表；不采用轮询补注册。仅修改同一 provider 的配置不需要改变此列表。新增模型须等热加载完成后调用；完整插件环境已验证热新增和并发请求，页面首轮任务的业务时序仍需验收。
