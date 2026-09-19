@@ -95,6 +95,8 @@ export type BaiyingEnhancePluginConfig = {
     zreadConfigTimeoutMs?: number;
     /** Redis Hash key for Baiying AI model config. Default `byai:aimodel:config`. */
     aimodelConfigRedisKey?: string;
+    /** Internal generated provider membership; drives native plugin reload on model sync. */
+    thinkingProviderIds?: string[];
     /** Redis Hash key for Baiying AI model type list. Default `byai:aimodel:typelist`; field `LLM` supplies the default model. */
     aimodelTypeListRedisKey?: string;
     /**
