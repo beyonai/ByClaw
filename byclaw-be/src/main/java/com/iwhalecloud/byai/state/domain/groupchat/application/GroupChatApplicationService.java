@@ -79,6 +79,8 @@ public class GroupChatApplicationService {
     private final GroupChatEventPublisher eventPublisher;
     private final SessionExtService sessionExtService;
     private final GroupChatMentionService mentionService;
+    @Autowired
+    private WorkgroupTemplateService workgroupTemplateService;
 
     @Autowired
     public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
@@ -117,6 +119,7 @@ public class GroupChatApplicationService {
         // 复用项目创建用例，云盘、工作目录和项目 owner 均使用现有初始化流程。
         ProjectDTO projectRequest = new ProjectDTO();
         projectRequest.setProjectName(request.getName());
+        projectRequest.setDescription(request.getGoal());
         Project project = projectApplicationService.createProject(projectRequest);
         Set<Long> userIds = new LinkedHashSet<>();
         if (request.getUserIds() != null) {
@@ -140,8 +143,13 @@ public class GroupChatApplicationService {
         addMember(members, session.getSessionId(), MemObjType.USER.name(), operatorId, UserRole.OWNER.name());
         userIds.forEach(id -> addMember(members, session.getSessionId(), MemObjType.USER.name(), id,
             UserRole.MEMBER.name()));
-        if (request.getAgentIds() != null) {
-            request.getAgentIds().forEach(id -> addMember(members, session.getSessionId(), MemObjType.AGENT.name(), id,
+        Set<Long> agentIds = new LinkedHashSet<>();
+        if (request.getAgentIds() != null) agentIds.addAll(request.getAgentIds());
+        if (request.getTemplateId() != null) {
+            agentIds.addAll(workgroupTemplateService.resolveAgentIds(request.getTemplateId(), request.getExpectedTemplateVersion()));
+        }
+        if (!agentIds.isEmpty()) {
+            agentIds.forEach(id -> addMember(members, session.getSessionId(), MemObjType.AGENT.name(), id,
                 UserRole.MEMBER.name()));
         }
         memberService.batchSave(members);

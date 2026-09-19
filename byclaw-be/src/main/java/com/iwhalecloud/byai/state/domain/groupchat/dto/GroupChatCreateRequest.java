@@ -18,4 +18,10 @@ public class GroupChatCreateRequest {
     private List<@NotNull @Positive Long> userIds;
     /** 数字员工仅加入群聊，不写入项目成员。 */
     private List<@NotNull @Positive Long> agentIds;
+    @Size(max = 500)
+    private String goal;
+    @Positive
+    private Long templateId;
+    @Positive
+    private Long expectedTemplateVersion;
 }

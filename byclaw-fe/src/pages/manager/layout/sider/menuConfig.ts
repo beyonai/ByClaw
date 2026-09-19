@@ -14,6 +14,13 @@ import {
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 
 const MANAGER_MENU_PARAM_CODE = 'SYSTEM_BACKEND_MENU_MANAGE';
+export const WORKGROUP_TEMPLATE_MENU = {
+  path: '/manager/workgroup-templates',
+  routePath: '/manager/workgroup-templates',
+  name: '工作组模板管理',
+  nameEn: 'Workgroup templates',
+  icon: TeamOutlined,
+};
 let managerMenuConfigPromise: Promise<any[]> | null = null;
 let managerMenuConfigCache: any[] | null = null;
 
@@ -221,4 +228,9 @@ export const filterMenusByMenuDisplay = (menus: any[], userInfo: any): any[] => 
 
     return item.menuDisplay.some((role: string) => userTypeList.includes(role));
   });
+};
+
+export const withWorkgroupTemplateMenu = (menus: any[], allowed: boolean) => {
+  const filtered = menus.filter((item) => item.path !== WORKGROUP_TEMPLATE_MENU.path);
+  return allowed ? [...filtered, WORKGROUP_TEMPLATE_MENU] : filtered;
 };

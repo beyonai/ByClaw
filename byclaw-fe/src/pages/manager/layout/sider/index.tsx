@@ -10,12 +10,14 @@ import AntdIcon from '@/pages/manager/components/AntdIcon';
 import UserDropdown from '@/pages/manager/layout/sider/components/userDropdown';
 
 import { isAdminVip } from '@/pages/manager/utils/auth';
+import { getWorkgroupTemplateCapability } from '@/pages/manager/service/WorkgroupTemplate';
 import {
   fallbackMenuConfig,
   filterMenusByAdminVip,
   filterMenusByMenuDisplay,
   getManagerMenuConfig,
   normalizeMenuUrl,
+  withWorkgroupTemplateMenu,
 } from './menuConfig';
 import { buildSiderMenuItems, flattenSiderMenuItems, getInitialOpenKeys } from './menuHelpers';
 
@@ -75,15 +77,20 @@ const Sider: React.FC = () => {
     let mounted = true;
     setMenuConfigReady(false);
 
-    getManagerMenuConfig({ refresh: true })
-      .then((menus) => {
+    const canManageTemplates = isAdminVip(userInfo)
+      ? getWorkgroupTemplateCapability().catch(() => false)
+      : Promise.resolve(false);
+
+    Promise.all([getManagerMenuConfig({ refresh: true }), canManageTemplates])
+      .then(([menus, templateAllowed]) => {
         if (!mounted) return;
-        if (menus.length > 0) setMenuConfig(menus.filter((item) => item.routePath));
+        const baseMenus = menus.length > 0 ? menus.filter((item) => item.routePath) : fallbackMenuConfig;
+        setMenuConfig(withWorkgroupTemplateMenu(baseMenus, templateAllowed));
         setMenuConfigReady(true);
       })
       .catch(() => {
         if (!mounted) return;
-        setMenuConfig(fallbackMenuConfig);
+        setMenuConfig(withWorkgroupTemplateMenu(fallbackMenuConfig, false));
         setMenuConfigReady(true);
       });
 

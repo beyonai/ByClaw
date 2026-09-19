@@ -332,3 +332,37 @@ CREATE INDEX IF NOT EXISTS idx_byai_message_session_topic_time
 COMMENT ON COLUMN byai.byai_message.topic_id IS '群公开消息引用链根 message_id；独立消息也有归属，系统事件及私有消息为空';
 COMMENT ON TABLE byai.byai_group_chat_topic IS '首次公开引用回复形成的话题，不维护消息计数';
 COMMENT ON COLUMN byai.byai_group_chat_topic.last_activity_at IS '最近发言时间，列表直接按本字段排序，不动态聚合消息';
+
+-- 工作组快速创建模板，绑定已有数字员工或数字员工组资源。
+CREATE TABLE IF NOT EXISTS byai.byai_workgroup_template (
+    template_id BIGINT PRIMARY KEY,
+    template_name VARCHAR(100) NOT NULL,
+    catalog_id BIGINT NOT NULL,
+    summary VARCHAR(500) NOT NULL,
+    default_group_name VARCHAR(100) NOT NULL,
+    default_goal VARCHAR(500) NOT NULL,
+    icon VARCHAR(64),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'ENABLED',
+    version BIGINT NOT NULL DEFAULT 1,
+    create_by BIGINT NOT NULL,
+    update_by BIGINT NOT NULL,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_workgroup_template_catalog
+    ON byai.byai_workgroup_template (status, catalog_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS byai.byai_workgroup_template_resource (
+    template_id BIGINT NOT NULL,
+    resource_id BIGINT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (template_id, resource_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workgroup_template_resource_resource
+    ON byai.byai_workgroup_template_resource (resource_id);
+
+COMMENT ON TABLE byai.byai_workgroup_template IS '工作组快速创建模板；catalog_id 引用资产目录';
+COMMENT ON TABLE byai.byai_workgroup_template_resource IS '模板包含的数字员工或数字员工组资源';

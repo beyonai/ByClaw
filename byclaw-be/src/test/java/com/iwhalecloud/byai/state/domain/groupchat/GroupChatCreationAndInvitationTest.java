@@ -35,6 +35,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatInvitati
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatSettingsService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.WorkgroupTemplateService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatDetailResponse;
@@ -68,6 +69,7 @@ class GroupChatCreationAndInvitationTest {
     private final GroupChatAuthorizationService authorization = mock(GroupChatAuthorizationService.class);
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
+    private final WorkgroupTemplateService templates = mock(WorkgroupTemplateService.class);
     private GroupChatApplicationService service;
 
     @BeforeEach
@@ -81,6 +83,7 @@ class GroupChatCreationAndInvitationTest {
         service = new GroupChatApplicationService(sessions, sequence, authorization, members,
             projects, projectMembers, messages, mock(GroupChatExecutionCoordinator.class),
             events, mock(SessionExtService.class));
+        ReflectionTestUtils.setField(service, "workgroupTemplateService", templates);
         when(projects.createProject(any())).thenAnswer(invocation -> {
             ProjectDTO request = invocation.getArgument(0);
             Project project = new Project();
@@ -125,10 +128,28 @@ class GroupChatCreationAndInvitationTest {
         ArgumentCaptor<ProjectDTO> projectRequest = ArgumentCaptor.forClass(ProjectDTO.class);
         verify(projects).createProject(projectRequest.capture());
         assertThat(projectRequest.getValue().getProjectName()).isEqualTo(request.getName());
+        assertThat(projectRequest.getValue().getDescription()).isEqualTo(request.getGoal());
         // 初始成员属于建群状态，不进入成员变更时间线。
         verify(messages, never()).insert(any(ByaiMessage.class));
         TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
         verifyNoInteractions(events);
+    }
+
+    @Test
+    void resolvesTemplateAgentsAndMergesThemWithExplicitAgents() {
+        GroupChatCreateRequest request = request();
+        request.setTemplateId(50L);
+        request.setExpectedTemplateVersion(3L);
+        request.setAgentIds(List.of(30L, 31L));
+        when(templates.resolveAgentIds(50L, 3L)).thenReturn(List.of(31L, 32L));
+
+        GroupChatDetailResponse result = service.create(request);
+
+        assertThat(result.getMembers())
+            .filteredOn(member -> "AGENT".equals(member.getMemObjType()))
+            .extracting(ByaiSessionMember::getMemObjId)
+            .containsExactly(30L, 31L, 32L);
+        verify(templates).resolveAgentIds(50L, 3L);
     }
 
     @Test
@@ -349,6 +370,7 @@ class GroupChatCreationAndInvitationTest {
     private GroupChatCreateRequest request() {
         GroupChatCreateRequest request = new GroupChatCreateRequest();
         request.setName(" 协作群 ");
+        request.setGoal("整理需求并形成执行计划");
         return request;
     }
 }
