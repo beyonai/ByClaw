@@ -69,6 +69,17 @@ export type AimodelModelCompat = {
     supportsUsageInStreaming?: boolean;
 };
 
+export type BaiyingReasoningConfig = {
+    enabled: boolean;
+    defaultLevel: AimodelThinkingLevel;
+    capability: "unsupported" | "binary" | "effort" | "budget" | "adaptive";
+    /** Resolved explicit format; auto is resolved from configured provider/protocol only. */
+    compatFormat: string;
+    supportedEfforts?: string[];
+    effortMap?: Record<string, string>;
+    budgets?: AimodelThinkingBudgets;
+};
+
 export type ProviderBundle = {
     baseUrl: string;
     apiKey: unknown;
@@ -81,6 +92,7 @@ export type ProviderBundle = {
     maxTokens?: number;
     input?: AimodelModelInput[];
     reasoning?: boolean;
+    reasoningConfig?: BaiyingReasoningConfig;
     thinkingLevelMap?: AimodelThinkingLevelMap;
     thinkingBudgets?: AimodelThinkingBudgets;
     compat?: AimodelModelCompat;

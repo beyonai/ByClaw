@@ -36,10 +36,11 @@ type DefaultAimodelBundle = {
 };
 
 function defaultModelDefinition(provider: ProviderBundle) {
-  const params =
-    provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
-      ? { baiyingThinkingBudgets: provider.thinkingBudgets }
-      : undefined;
+  const params = {
+    ...(provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
+      ? { baiyingThinkingBudgets: provider.thinkingBudgets } : {}),
+    ...(provider.reasoningConfig ? { baiyingReasoningConfig: provider.reasoningConfig } : {}),
+  };
   const compat = {
     ...(provider.compat ?? {}),
     ...MANAGED_MODEL_STREAMING_USAGE_COMPAT,
@@ -51,7 +52,7 @@ function defaultModelDefinition(provider: ProviderBundle) {
     reasoning: provider.reasoning ?? false,
     ...(provider.thinkingLevelMap ? { thinkingLevelMap: provider.thinkingLevelMap } : {}),
     compat,
-    ...(params ? { params } : {}),
+    ...(Object.keys(params).length ? { params } : {}),
     input: provider.input ?? (["text"] as Array<"text" | "image">),
     cost: {
       input: 0,

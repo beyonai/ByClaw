@@ -1,5 +1,6 @@
 import type {
     AimodelModelCompat,
+    BaiyingReasoningConfig,
     AimodelModelInput,
     AimodelProviderApi,
     AimodelThinkingBudgets,
@@ -27,6 +28,7 @@ const THINKING_FORMATS = new Set([
     "auto",
     "openai",
     "qwen",
+    "bailian",
     "qwen-chat-template",
     "deepseek",
     "openrouter",
@@ -56,16 +58,6 @@ type AiModelConfigRecord = {
     modelType?: unknown;
     status?: unknown;
     url?: unknown;
-};
-
-type BaiyingReasoningConfig = {
-    enabled: boolean;
-    defaultLevel: AimodelThinkingLevel;
-    capability: "unsupported" | "binary" | "effort" | "budget" | "adaptive";
-    compatFormat: string;
-    supportedEfforts?: string[];
-    effortMap?: Record<string, string>;
-    budgets?: AimodelThinkingBudgets;
 };
 
 export type ResolvedDefaultBaiyingAimodelProviderBundle = {
@@ -219,12 +211,12 @@ export function resolveAimodelProviderApiFromInstanceParam(
     instanceParam: Record<string, unknown>,
 ): AimodelProviderApi {
     const candidates = [
-        nonEmptyString(instanceParam.providerName),
         nonEmptyString(instanceParam.modelProtocol),
+        nonEmptyString(instanceParam.providerName),
     ];
     for (const candidate of candidates) {
         const normalized = candidate.toLowerCase();
-        if (normalized === "anthropic") {
+        if (normalized === "anthropic" || normalized === "anthropic-messages") {
             return "anthropic-messages";
         }
         if (
@@ -234,7 +226,7 @@ export function resolveAimodelProviderApiFromInstanceParam(
         ) {
             return "openai-responses";
         }
-        if (normalized === "openai") {
+        if (normalized === "openai" || normalized === "openai-completions") {
             return "openai-completions";
         }
     }
@@ -279,33 +271,15 @@ function inferThinkingFormat(params: {
     if (params.configuredFormat && params.configuredFormat !== "auto") {
         return params.configuredFormat;
     }
-    const haystack = [
-        params.baseUrl,
-        params.modelId,
-        nonEmptyString(params.providerName),
-        nonEmptyString(params.modelProtocol),
-    ]
-        .join(" ")
-        .toLowerCase();
-    if (params.api === "anthropic-messages" || haystack.includes("anthropic") || haystack.includes("claude")) {
-        return "anthropic";
-    }
-    if (haystack.includes("deepseek")) {
-        return "deepseek";
-    }
-    if (haystack.includes("qwen") || haystack.includes("dashscope")) {
-        return "qwen";
-    }
-    if (haystack.includes("openrouter")) {
-        return "openrouter";
-    }
-    if (haystack.includes("together")) {
-        return "together";
-    }
-    if (haystack.includes("zai") || haystack.includes("glm")) {
-        return "zai";
-    }
-    return params.api === "openai-completions" || params.api === "openai-responses" ? "openai" : undefined;
+    if (params.api === "anthropic-messages") return "anthropic";
+    const provider = nonEmptyString(params.providerName).toLowerCase();
+    const providerFormats: Record<string, string> = {
+        anthropic: "anthropic", deepseek: "deepseek", qwen: "qwen", dashscope: "qwen",
+        bailian: "bailian", aliyun: "bailian", "百炼": "bailian", "阿里云百炼": "bailian", "通义千问": "qwen",
+        openrouter: "openrouter", together: "together", zai: "zai", "z.ai": "zai",
+    };
+    return providerFormats[provider] ??
+        (params.api === "openai-completions" || params.api === "openai-responses" ? "openai" : undefined);
 }
 
 function defaultEffortMapForFormat(format?: string): Record<string, string> | undefined {
@@ -389,11 +363,9 @@ function resolveReasoningModelOptions(params: {
     baseUrl: string;
     modelId: string;
     instanceParam: Record<string, unknown>;
-}): Pick<ProviderBundle, "reasoning" | "thinkingLevelMap" | "thinkingBudgets" | "compat"> {
+}): Pick<ProviderBundle, "reasoning" | "reasoningConfig" | "thinkingLevelMap" | "thinkingBudgets" | "compat"> {
     const config = parseReasoningConfig(params.instanceParam);
-    if (!config.enabled) {
-        return { reasoning: false };
-    }
+
     // 注意：defaultLevel === "off" 仍要下发完整档位映射（reasoning: true）——
     // 「默认关闭」只决定会话默认档位（由 ByClaw BE 每轮解析下发），不代表模型不支持档位；
     // 否则会话选了档位也会被运行时的 off-only profile 夹回 off，而 metadata/角标却记为已选档位。
@@ -405,16 +377,18 @@ function resolveReasoningModelOptions(params: {
         modelProtocol: params.instanceParam.modelProtocol,
         configuredFormat: config.compatFormat,
     });
+    const reasoningConfig = params.instanceParam.reasoningConfig
+        ? { ...config, compatFormat: format ?? "auto" } : undefined;
+    if (!config.enabled) return { reasoning: false, ...(reasoningConfig ? { reasoningConfig } : {}) };
     const effortMap = config.effortMap ?? defaultEffortMapForFormat(format);
-    const supportedReasoningEfforts =
-        config.supportedEfforts ?? defaultSupportedEffortsForFormat(format);
+    const supportedReasoningEfforts = config.supportedEfforts ?? defaultSupportedEffortsForFormat(format);
     const thinkingLevelMap = buildThinkingLevelMap({
         effortMap,
         levels: supportedReasoningEfforts,
         defaultLevel: config.defaultLevel,
     });
     const compat: AimodelModelCompat = {};
-    if (format && format !== "anthropic") {
+    if (format && format !== "anthropic" && format !== "bailian") {
         compat.thinkingFormat = format;
     }
     if (supportedReasoningEfforts?.length) {
@@ -425,6 +399,7 @@ function resolveReasoningModelOptions(params: {
     }
     return {
         reasoning: true,
+        reasoningConfig,
         thinkingLevelMap,
         thinkingBudgets: config.budgets,
         compat: Object.keys(compat).length > 0 ? compat : undefined,
