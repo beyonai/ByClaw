@@ -478,6 +478,21 @@ public class AIService {
         boolean enabled = Boolean.TRUE.equals(reasoningConfig.get("enabled"));
         String capability = normalizeString(reasoningConfig.get("capability"), "unsupported");
         String defaultLevel = normalizeString(reasoningConfig.get("defaultLevel"), "off");
+        if ("bailian".equals(normalizeString(reasoningConfig.get("compatFormat"), "auto"))) {
+            boolean thinking = enabled && !"unsupported".equals(capability) && !"off".equals(defaultLevel);
+            requestBody.put("enable_thinking", thinking);
+            if (thinking && "effort".equals(capability)) {
+                Object rawMap = reasoningConfig.get("effortMap");
+                Map<?, ?> effortMap = rawMap instanceof Map<?, ?> map ? map : Map.of();
+                String effort = normalizeString(effortMap.get(defaultLevel), defaultLevel);
+                if (!"adaptive".equals(effort)) {
+                    requestBody.put("reasoning_effort", effort);
+                }
+            } else if (thinking && "budget".equals(capability)) {
+                putThinkingBudget(requestBody, reasoningConfig, defaultLevel);
+            }
+            return;
+        }
         if (!enabled || "unsupported".equals(capability) || "off".equals(defaultLevel)) {
             requestBody.put("enable_thinking", false);
             requestBody.put("chat_template_kwargs", Map.of("enable_thinking", false));
