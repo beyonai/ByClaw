@@ -501,6 +501,7 @@ export default {
   'modelMgr.modal.reasoningCapability.adaptive': '支持自适应 Thinking',
   'modelMgr.modal.reasoningDefaultLevel': '默认 Thinking 程度',
   'modelMgr.modal.reasoningCompatFormat': '兼容格式',
+  'modelMgr.modal.reasoningCompatFormat.bailian': '百炼（OpenAI 兼容）',
   'modelMgr.modal.reasoningSupportedEfforts': 'Supported Efforts',
   'modelMgr.modal.reasoningEffortMap': 'Effort 映射 JSON',
   'modelMgr.modal.debugPanelDesc': '保存配置后可直接在右侧发起调试，请求与输出保持同屏查看。',
