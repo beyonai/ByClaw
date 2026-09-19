@@ -34,6 +34,7 @@ export const THINKING_COMPAT_FORMAT_OPTIONS = [
   'auto',
   'openai',
   'qwen',
+  'bailian',
   'qwen-chat-template',
   'deepseek',
   'openrouter',
@@ -420,6 +421,19 @@ function applyReasoningDebugParams(req: Record<string, any>, formValues: any) {
   const capability = `${reasoningConfig?.capability ?? 'unsupported'}`.trim().toLowerCase();
   const defaultLevel = `${reasoningConfig?.defaultLevel ?? 'off'}`.trim().toLowerCase();
   const enabled = Boolean(reasoningConfig?.enabled) && capability !== 'unsupported' && defaultLevel !== 'off';
+  // Bailian is an explicit wire format; keep legacy Qwen behavior unchanged.
+  if (`${reasoningConfig?.compatFormat ?? ''}`.trim().toLowerCase() === 'bailian') {
+    req.enable_thinking = enabled;
+    if (enabled && capability === 'effort') {
+      const map = safeParseReasoningEffortMap(formValues?.reasoningEffortMapText) ?? reasoningConfig?.effortMap;
+      const effort = map?.[defaultLevel] ?? defaultLevel;
+      if (effort !== 'adaptive') req.reasoning_effort = effort;
+    } else if (enabled && capability === 'budget') {
+      const budget = getReasoningBudget(reasoningConfig, defaultLevel);
+      if (budget) req.thinking_budget = budget;
+    }
+    return;
+  }
   if (!enabled) {
     req.enable_thinking = false;
     req.chat_template_kwargs = { enable_thinking: false };
