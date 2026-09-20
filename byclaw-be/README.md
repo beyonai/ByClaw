@@ -417,3 +417,17 @@ keyset view, not a cross-request snapshot. No exact reply count is returned. The
 existing session/topic/time index supports the query; no schema migration is needed.
 Sending remains the existing group send protocol with `replyToMessageId` set to the
 root message ID. Deploy this endpoint before enabling the topic modal frontend.
+
+### 新建群自动添加群组工作助手
+
+关联 [byclaw-hacu#6](https://github.com/beyonai/byclaw-hacu/issues/6) 的建群初始化步骤。
+平台管理员统一创建并发布一份组织级数字员工及其技能，供多个企业共用。`POST /group-chats` 创建群时读取
+`byai_system_config` 的 `param_code=BYAI_GROUP_WORK_ASSISTANT_NAME`，以 `param_value`
+作为员工名称；配置缺失或为空时使用“群组工作助手”。可通过修改此配置适配不同语言的员工名称。
+
+后端按名称在平台范围内精确查询已上架的组织级数字员工，不按建群用户的企业 ID 过滤；排除数字员工组（017），
+找到唯一匹配时以 AGENT 成员加入新群，并与手选、模板中的资源 ID 去重。
+没有匹配或同名候选不唯一时正常建群，不自动添加助手。配置变更仅影响之后创建的群。
+创建响应的 `members` 包含自动加入的员工，前端直接使用该响应和群详情，无需额外入群请求。
+
+本步骤仅初始化群成员关系；默认任务执行员工、自动响应及群设置中的助手切换由后续步骤实现。

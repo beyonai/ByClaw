@@ -81,6 +81,8 @@ public class GroupChatApplicationService {
     private final GroupChatMentionService mentionService;
     @Autowired
     private WorkgroupTemplateService workgroupTemplateService;
+    @Autowired
+    private GroupWorkAssistantService groupWorkAssistantService;
 
     @Autowired
     public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
@@ -149,6 +151,8 @@ public class GroupChatApplicationService {
             agentIds.addAll(workgroupTemplateService.resolveResourceIds(request.getTemplateId(),
                 request.getExpectedTemplateVersion()));
         }
+        Long workAssistantId = groupWorkAssistantService.resolveResourceId();
+        if (workAssistantId != null) agentIds.add(workAssistantId);
         if (!agentIds.isEmpty()) {
             agentIds.forEach(id -> addMember(members, session.getSessionId(), MemObjType.AGENT.name(), id,
                 UserRole.MEMBER.name()));
