@@ -219,6 +219,7 @@
   .toolsMenuNav {
     flex-shrink: 0;
     width: 180px;
+    min-height: 0;
     padding: 4px 6px 4px 4px;
     border-right: 1px solid var(--beyond-color-border-secondary);
     overflow-y: auto;
@@ -261,9 +262,12 @@
   }
 
   .toolsMenuPanel {
+    // 明确补齐高度链，让资源列表在弹窗内部滚动，而不是把弹窗继续向下撑开。
+    display: flex;
+    flex-direction: column;
     flex: 1;
     min-width: 0;
-    height: auto;
+    height: 100%;
     min-height: 0;
     box-sizing: border-box;
     overflow: hidden;
@@ -299,11 +303,14 @@
 
   .toolsMenuPanelContentActive {
     display: flex;
+    flex: 1;
     flex-direction: column;
+    height: 100%;
     min-height: 0;
     overflow: hidden;
 
     > * {
+      flex: 1;
       min-height: 0;
     }
 

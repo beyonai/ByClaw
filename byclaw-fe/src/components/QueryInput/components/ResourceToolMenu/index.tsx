@@ -1,7 +1,7 @@
 import { CodeOutlined, LinkOutlined } from '@ant-design/icons';
 import classNames from 'classnames';
 import { useIntl, useSelector } from '@umijs/max';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Empty } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
 import EmployeeList from '@/layout/sider/components/EmployeeList';
@@ -29,6 +29,8 @@ interface Props {
 
   /** 打开资源面板时需要激活的分类。 */
   activeKey?: string;
+  /** 分类自然高度，用于限制外层弹窗高度。 */
+  onNavigationHeightChange?: (height: number) => void;
   onSelect: (item: any, type: any) => void;
 }
 
@@ -42,9 +44,21 @@ const ResourceToolMenu: React.FC<Props> = ({
   excludedAgentIds,
   userInfo,
   activeKey: activeKeyProp,
+  onNavigationHeightChange,
   onSelect,
 }) => {
   const intl = useIntl();
+  const navigationContentRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const content = navigationContentRef.current;
+    if (!content || !onNavigationHeightChange) return;
+    // 测量不受弹窗高度约束的内层，避免拿到被拉伸后的导航高度。
+    const measure = () => onNavigationHeightChange(content.offsetHeight + 16);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [onNavigationHeightChange]);
   const { project } = useChatResourceProject(projectId);
   const activeEmployee = useActiveSiderAgent();
   const projectSpaceResourceId =
@@ -221,20 +235,22 @@ const ResourceToolMenu: React.FC<Props> = ({
   return (
     <div className={styles.toolsMenu} data-resource-tool-menu="true">
       <div className={styles.toolsMenuNav}>
-        {visibleTabs.map((tab) => (
-          <button
-            type="button"
-            key={tab.key}
-            className={classNames(styles.toolsMenuNavItem, activeKey === tab.key && styles.toolsMenuNavItemActive)}
-            onMouseEnter={() => selectTab(tab.key)}
-            onFocus={() => selectTab(tab.key)}
-            onClick={() => selectTab(tab.key)}
-          >
-            {typeof tab.icon === 'string' ? <AntdIcon type={tab.icon} /> : tab.icon}
-            <span>{tab.label}</span>
-            <AntdIcon type="icon-a-Arrow-rightjiantouyou" />
-          </button>
-        ))}
+        <div ref={navigationContentRef}>
+          {visibleTabs.map((tab) => (
+            <button
+              type="button"
+              key={tab.key}
+              className={classNames(styles.toolsMenuNavItem, activeKey === tab.key && styles.toolsMenuNavItemActive)}
+              onMouseEnter={() => selectTab(tab.key)}
+              onFocus={() => selectTab(tab.key)}
+              onClick={() => selectTab(tab.key)}
+            >
+              {typeof tab.icon === 'string' ? <AntdIcon type={tab.icon} /> : tab.icon}
+              <span>{tab.label}</span>
+              <AntdIcon type="icon-a-Arrow-rightjiantouyou" />
+            </button>
+          ))}
+        </div>
       </div>
       <div className={styles.toolsMenuPanel}>
         {visibleVisitedKeys.map((key) => (

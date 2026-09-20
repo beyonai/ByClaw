@@ -33,7 +33,6 @@ const FilePicker: React.FC<Props> = ({ onSelect }) => {
   const [loadedKeys, setLoadedKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
   const generation = useRef(0);
 
   useEffect(() => {
@@ -59,7 +58,7 @@ const FilePicker: React.FC<Props> = ({ onSelect }) => {
     return () => {
       generation.current++;
     };
-  }, [resourceId, refreshKey]);
+  }, [resourceId]);
 
   const quoteFile = (item: FileBrowserItem) => {
     if (!resourceId) return;
@@ -72,6 +71,8 @@ const FilePicker: React.FC<Props> = ({ onSelect }) => {
   return (
     <FileSpaceBlock
       title={intl.formatMessage({ id: 'chatResource.localSharedFile' })}
+      // 左侧分类已标明本地共享，引用弹窗不再重复展示标题及刷新栏。
+      hideHeader
       fillContainer
       items={items}
       currentPath={LOCAL_SHARED_FILE_PATH}
@@ -81,7 +82,6 @@ const FilePicker: React.FC<Props> = ({ onSelect }) => {
       expandedKeys={expandedKeys}
       loadedKeys={loadedKeys}
       showActions
-      onRefresh={() => setRefreshKey((current) => current + 1)}
       onExpand={setExpandedKeys}
       onLoadData={async (node) => {
         if (!resourceId || !isDirectory(node)) return;

@@ -11,6 +11,19 @@ export interface ResourcePopoverAdapterOptions {
 export const getResourcePopoverPlacement = (isInputAtBottom?: boolean): PopoverProps['placement'] =>
   isInputAtBottom ? 'topLeft' : 'bottomLeft';
 
+/** 按展开方向使用实际可用空间，预留浮层间距及屏幕边缘，不设置会导致溢出的最小高度。 */
+export const getResourcePopoverPanelHeight = (
+  anchor: { top: number; bottom: number },
+  placement: PopoverProps['placement'],
+  viewportHeight: number,
+  viewportTop = 0
+): number => {
+  const available = `${placement || 'topLeft'}`.startsWith('bottom')
+    ? viewportTop + viewportHeight - anchor.bottom
+    : anchor.top - viewportTop;
+  return Math.max(0, Math.floor(available - 12 - 16));
+};
+
 /** 资源弹窗只依赖输入框宽度进行布局，不再使用光标坐标。 */
 export const getResourcePopoverPosition = (open: boolean, width?: number): CSSProperties | undefined =>
   open ? { width } : undefined;

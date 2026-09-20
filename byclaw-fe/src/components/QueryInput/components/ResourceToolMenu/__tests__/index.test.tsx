@@ -37,6 +37,32 @@ describe('resource menu local shared tab', () => {
 });
 
 describe('resource menu categories', () => {
+  it('reports the natural category height instead of the stretched panel height', () => {
+    const originalObserver = global.ResizeObserver;
+    global.ResizeObserver = jest.fn(() => ({ observe: jest.fn(), disconnect: jest.fn() })) as any;
+    const heightSpy = jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return Array.from(this.children).filter((child) => child.tagName === 'BUTTON').length * 42;
+    });
+    try {
+      const onNavigationHeightChange = jest.fn();
+      const { unmount } = render(
+        <ResourceToolMenu
+          projectId={42}
+          sessionId="session-1"
+          onSelect={jest.fn()}
+          onNavigationHeightChange={onNavigationHeightChange}
+        />
+      );
+      expect(onNavigationHeightChange).toHaveBeenCalledWith(9 * 42 + 16);
+      unmount();
+    } finally {
+      heightSpy.mockRestore();
+      global.ResizeObserver = originalObserver;
+    }
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     (useActiveSiderAgent as jest.Mock).mockReturnValue({ resourceId: 'sidebar-agent' });
