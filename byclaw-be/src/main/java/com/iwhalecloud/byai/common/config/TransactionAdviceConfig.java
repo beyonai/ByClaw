@@ -5,6 +5,13 @@ package com.iwhalecloud.byai.common.config;
  * @date 2025-04-24 16:16:15
  * @description TODO
  */
+
+import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.logging.Logger;
+
 import org.aspectj.lang.annotation.Aspect;
 import org.springframework.aop.framework.autoproxy.BeanNameAutoProxyCreator;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,11 +25,6 @@ import org.springframework.transaction.interceptor.RuleBasedTransactionAttribute
 import org.springframework.transaction.interceptor.TransactionAttribute;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.util.ClassUtils;
-import java.lang.reflect.Method;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.logging.Logger;
 
 /**
  * 全局事务配置，只代理*Service的类,代理方式cglib
@@ -54,7 +56,7 @@ public class TransactionAdviceConfig {
         // 如果当前方法已经在事务中，那么就以当前事务执行；如果当前方法不再事务中，那么就以非事务方式运行。如果运行在事务中，那么只要出现异常都会回滚
         RuleBasedTransactionAttribute readOnlyTx = new RuleBasedTransactionAttribute();
         readOnlyTx.setReadOnly(true);
-        readOnlyTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        readOnlyTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_SUPPORTS);
 
         // 如果当前方法已经在事务中，那么就以父事务执行，不需要新建事务；如果当前方法不在事务中，那么就为当前方法新建事务。回滚情况：父子方法中任何地方出现问题，都会全部回滚
         RuleBasedTransactionAttribute requiredTx = new RuleBasedTransactionAttribute();
