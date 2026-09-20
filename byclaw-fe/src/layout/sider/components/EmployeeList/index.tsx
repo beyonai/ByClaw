@@ -222,24 +222,35 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
       )}
       <div id="guideStep2-3" className="ub-f1 ub ub-ver">
         <EmployeeListContext.Provider value={{ chatMode }}>
-          <Tabs activeKey={selectedKeys} tabBarStyle={{ display: 'none' }} className={classNames('full-height')}>
-            {SelectItems.map((item) => {
-              const { value, Comp } = item;
-              return (
-                <Tabs.TabPane key={value} tabKey={value}>
-                  <Suspense fallback="loading...">
-                    <Comp
-                      {...props}
-                      searchName={searchName[value]}
-                      ref={(ref) => {
-                        CompRef.current[value] = ref;
-                      }}
-                    />
-                  </Suspense>
-                </Tabs.TabPane>
-              );
-            })}
-          </Tabs>
+          {hideCategoryTabs ? (
+            // 加号面板仅有全部员工，直接让列表参与剩余高度分配，避免隐藏 Tabs 的多层高度依赖。
+            <AllEmployees
+              {...props}
+              searchName={searchName.all}
+              ref={(ref) => {
+                CompRef.current.all = ref;
+              }}
+            />
+          ) : (
+            <Tabs activeKey={selectedKeys} tabBarStyle={{ display: 'none' }} className={classNames('full-height')}>
+              {SelectItems.map((item) => {
+                const { value, Comp } = item;
+                return (
+                  <Tabs.TabPane key={value} tabKey={value}>
+                    <Suspense fallback="loading...">
+                      <Comp
+                        {...props}
+                        searchName={searchName[value]}
+                        ref={(ref) => {
+                          CompRef.current[value] = ref;
+                        }}
+                      />
+                    </Suspense>
+                  </Tabs.TabPane>
+                );
+              })}
+            </Tabs>
+          )}
         </EmployeeListContext.Provider>
       </div>
     </div>

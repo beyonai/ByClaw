@@ -4,7 +4,7 @@ import { ConfigProvider, Popover } from 'antd';
 import type { PopoverProps } from 'antd';
 import type { TooltipRef } from 'antd/es/tooltip';
 import classNames from 'classnames';
-import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState } from 'react';
 import styles from './index.module.less';
 import ResourceTabs from './resourceTabsCompact';
 import ResourceToolMenu from '../../components/ResourceToolMenu';
@@ -18,6 +18,7 @@ import { useIntl, useSelector } from '@umijs/max';
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 import { getAgentChatAvatar } from '@/utils/agent';
 import { ResourceTypeMap } from '@/constants/resource';
+import { getResourcePopoverPanelHeight } from './resourcePopoverAdapter';
 
 interface MentionPopoverProps {
   type?: '@' | '#';
@@ -63,6 +64,9 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   const { trackerEmployeeClick } = useTracker();
   const intl = useIntl();
   const popoverRef = useRef<TooltipRef>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [availableHeight, setAvailableHeight] = useState(0);
+  const [navigationHeight, setNavigationHeight] = useState(0);
   // 下拉菜单、确认浮层通过 Portal 渲染到资源弹窗外部，操作期间禁止 Popover 自动关闭。
   const ignoreOutsideCloseRef = useRef<number>(0);
   const open = !!popoverPos;
@@ -79,9 +83,44 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   const resolvedAgentId = currentAgent?.agentId || scopedAgentId || agentId;
   const isExpertResourceOverlayOpen = chatMode === chatModeMap.expert && !!currentAgent;
   const useInputWidth = isAtPopover && !isExpertResourceOverlayOpen && !!width;
-  // 加号/@菜单容纳完整分类，同时在小屏幕上保留输入框的操作空间。
-  const panelHeight = useInputWidth ? 'min(480px, 60vh)' : '65vh';
+  const isResourcePicker = isAtPopover && activeTabKey !== undefined;
+  // 分类完整显示即可；只有屏幕空间不足时才压缩并允许导航滚动。
+  const panelHeight = isResourcePicker
+    ? Math.min(availableHeight, navigationHeight)
+    : 'min(65vh, calc(100vh - 32px))';
   const panelWidth = useInputWidth && width ? width : 'min(calc(100vw - 24px), 485px)';
+
+  useLayoutEffect(() => {
+    if (!open || !isResourcePicker || !anchorRef.current) return;
+    const anchor = anchorRef.current;
+    const viewport = window.visualViewport;
+    const measure = () => {
+      setAvailableHeight(
+        getResourcePopoverPanelHeight(
+          anchor.getBoundingClientRect(),
+          placement,
+          viewport?.height ?? window.innerHeight,
+          viewport?.offsetTop ?? 0
+        )
+      );
+    };
+    measure();
+    // 输入框增高、窗口缩放和页面滚动时同步剩余空间；关闭后解除监听。
+    const observer = new ResizeObserver(measure);
+    observer.observe(anchor);
+    if (anchor.parentElement) observer.observe(anchor.parentElement);
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    viewport?.addEventListener('resize', measure);
+    viewport?.addEventListener('scroll', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+      viewport?.removeEventListener('resize', measure);
+      viewport?.removeEventListener('scroll', measure);
+    };
+  }, [open, isResourcePicker, placement, width]);
 
   useEffect(() => {
     if (open && popoverRef.current) {
@@ -89,7 +128,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
         popoverRef.current?.forceAlign();
       });
     }
-  }, [open, currentAgent]);
+  }, [open, currentAgent, panelHeight]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -215,6 +254,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
     return (
       children || (
         <div
+          ref={anchorRef}
           style={{
             position: 'absolute',
             ...(isBottomPlacement ? { bottom: 0 } : { top: 0 }),
@@ -236,9 +276,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       // 连接器授权等子弹窗通过 Portal 打开时，资源面板仍需保持挂载，返回后继续保留当前分类和列表状态。
       destroyOnHidden={false}
       placement={placement || (isAtPopover ? 'topLeft' : undefined)}
-      // 位置由输入框所在区域统一决定：历史会话固定显示在输入框上方，新会话固定显示在下方。
-      // 禁止 antd 根据可视区域自动翻转，否则历史会话可能被错误翻到输入框下方并遮挡输入框。
-      // # 面板需要兼容窄屏，允许 antd 自动水平偏移；@ 面板仍保持输入框上下定位规则。
+      // 资源面板按指定方向计算可用高度，禁止翻转；# 面板沿用默认避让。
       autoAdjustOverflow={!isAtPopover}
       ref={popoverRef}
       arrow={false}
@@ -254,6 +292,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
         root: { width: panelWidth, minWidth: panelWidth, maxWidth: panelWidth },
         body: {
           height: panelHeight,
+          maxHeight: 'calc(100vh - 32px)',
           width: panelWidth,
           minWidth: panelWidth,
           padding: 0,
@@ -278,6 +317,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
             })}
             style={{
               height: panelHeight,
+              maxHeight: 'calc(100vh - 32px)',
               overflow: useInputWidth ? 'hidden' : undefined,
               width: panelWidth,
               maxWidth: panelWidth,
@@ -305,6 +345,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                 if (type === '@') {
                   return (
                     <ResourceToolMenu
+                      onNavigationHeightChange={setNavigationHeight}
                       keyword={inputText}
                       sessionId={sessionId}
                       projectId={projectId}
