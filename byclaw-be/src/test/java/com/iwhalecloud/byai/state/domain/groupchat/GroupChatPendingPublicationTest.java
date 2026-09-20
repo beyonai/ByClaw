@@ -20,6 +20,7 @@ import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.PlatformTransactionManager;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
@@ -530,6 +531,7 @@ class GroupChatPendingPublicationTest {
 
     @Test
     void cancellationClearsPendingCard() {
+        ReflectionTestUtils.setField(completion, "transactionManager", mock(PlatformTransactionManager.class));
         when(tasks.cancel(eq(60L), any())).thenReturn(1);
         completion.cancel(60L);
         verify(store).clear(task, null);

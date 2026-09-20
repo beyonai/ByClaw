@@ -9,6 +9,11 @@ import java.util.Objects;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -36,6 +41,13 @@ import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService;
+import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
+import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatAgentMention;
@@ -53,6 +65,16 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 /** 群聊任务提升、查询、取消以及一次性完成发布用例。 */
 @Service
 public class GroupChatTaskService {
+    // Chat preparation depends on the task guard; defer resolving the reverse stop dependency.
+    @Autowired
+    @Lazy
+    private AssistantChatApplicationService chatApplicationService;
+    @Autowired
+    private RunningOutputStreamRegistry runningRegistry;
+    @Autowired
+    private ChatRuntimeStateService chatRuntimeStateService;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
     @Autowired
     private GroupChatTopicService topicService;
     @Autowired
@@ -245,16 +267,79 @@ public class GroupChatTaskService {
         }
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void cancel(Long taskId) {
-        taskAuthorizationService.requireCanceller(taskId);
-        ByaiGroupChatTask task = taskMapper.selectForUpdate(taskId);
-        if (taskMapper.cancel(taskId, new Date()) != 1) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        ByaiGroupChatTask task = transaction.execute(status -> {
+            ByaiGroupChatTask current = requireActiveCancellation(taskId);
+            if (!"RUNNING".equals(current.getTurnStatus())) {
+                finishCancellation(current);
+                return null;
+            }
+            return current;
+        });
+        if (task == null) {
+            return;
+        }
+        // stopChat suspends transactions and can synchronously project persisted turns in REQUIRES_NEW.
+        // Release our validation lock first, otherwise that callback waits on the suspended task lock.
+        StopChatDto request = cancellationRequest(task);
+        chatApplicationService.stopChat(request);
+        transaction.executeWithoutResult(status -> {
+            // Stop is external and cannot roll back; recheck authorization/state after its callbacks finish.
+            ByaiGroupChatTask current = requireActiveCancellation(taskId);
+            if ("RUNNING".equals(current.getTurnStatus())) {
+                StopChatDto latest = cancellationRequest(current);
+                if ((latest.getMessageId() != null && !Objects.equals(latest.getMessageId(), request.getMessageId()))
+                    || (StringUtils.isNotBlank(latest.getTraceId())
+                        && !Objects.equals(latest.getTraceId(), request.getTraceId()))) {
+                    throw new IllegalArgumentException("Task started a new turn; retry cancellation");
+                }
+            }
+            finishCancellation(current);
+        });
+    }
+
+    private void finishCancellation(ByaiGroupChatTask task) {
+        if (taskMapper.cancel(task.getTaskSessionId(), new Date()) != 1) {
             throw new IllegalArgumentException("Task is no longer active");
         }
         task.setStatus("CANCELLED");
         pendingStore.clear(task, null);
         publishTaskEvent(task, "TASK_STATUS_CHANGED", null);
+    }
+
+    private ByaiGroupChatTask requireActiveCancellation(Long taskId) {
+        taskAuthorizationService.requireCanceller(taskId);
+        ByaiGroupChatTask task = taskMapper.selectForUpdate(taskId);
+        if (task == null || !"ACTIVE".equals(task.getStatus())) {
+            throw new IllegalArgumentException("Task is no longer active");
+        }
+        return task;
+    }
+
+    private StopChatDto cancellationRequest(ByaiGroupChatTask task) {
+        Long sessionId = task.getTaskSessionId();
+        RunningChatInfo running = runningRegistry.getRunning(sessionId);
+        ChatRuntimeState runtime = chatRuntimeStateService.get(sessionId);
+        // Durable runtime survives expiry of the short-lived registry, including Agent handoff identity.
+        AssistantChatDto assistant = runtime == null ? null : runtime.getAssistantChatDto();
+        StopChatDto request = new StopChatDto();
+        request.setSessionId(sessionId);
+        request.setAgentId(running != null && running.getAgentId() != null ? running.getAgentId()
+            : assistant != null && assistant.getAgentId() != null ? assistant.getAgentId() : task.getTargetAgentId());
+        request.setAgentCode(StringUtils.defaultIfBlank(running == null ? null : running.getAgentCode(),
+            assistant == null ? null : assistant.getAgentCode()));
+        request.setMessageId(running != null && running.getModelAnswerMessageId() != null
+            ? running.getModelAnswerMessageId() : runtime == null ? null : runtime.getModelAnswerMessageId());
+        request.setTraceId(StringUtils.defaultIfBlank(running == null ? null : running.getTraceId(),
+            runtime == null ? null : runtime.getTraceId()));
+        request.setLaneId(StringUtils.defaultIfBlank(running == null ? null : running.getLaneId(),
+            assistant == null ? null : assistant.getLaneId()));
+        request.setClientRequestId(StringUtils.defaultIfBlank(running == null ? null : running.getClientRequestId(),
+            runtime == null ? null : runtime.getClientRequestId()));
+        return request;
     }
 
     @Transactional
