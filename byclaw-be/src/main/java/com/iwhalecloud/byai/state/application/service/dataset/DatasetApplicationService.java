@@ -724,21 +724,6 @@ public class DatasetApplicationService {
         downloadResourceContent(ssResource, resourceId, directoryPath, response);
     }
 
-    /**
-     * 下载项目云盘文件。
-     *
-     * <p>项目云盘的访问权限由项目成员关系控制，不复用普通知识库的资源授权校验；调用方必须先在项目应用服务中
-     * 校验项目可见性，并且只能传入该项目绑定的 cloudResourceId。</p>
-     *
-     * @param resourceId    项目云盘对应的知识库资源标识
-     * @param directoryPath 文件路径，/联网搜索API.md
-     * @param response      响应流
-     */
-    public void downloadProjectCloudFile(Long resourceId, String directoryPath, HttpServletResponse response) {
-        SsResource ssResource = loadDatasetResource(resourceId);
-        downloadResourceContent(ssResource, resourceId, directoryPath, response);
-    }
-
     private void downloadResourceContent(SsResource ssResource, Long resourceId, String directoryPath,
                                          HttpServletResponse response) {
 
@@ -1088,18 +1073,24 @@ public class DatasetApplicationService {
      */
     public List<DirAndFileVo> queryDirAndFileByLevel(DirAndFileQo dirAndFileQo) {
 
+        Long resourceId = dirAndFileQo.getResourceId();
         String knCode = null;
         if (dirAndFileQo.getResourceId() != null) {
             SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
-            // validateDatasetReadablePermission(ssResource);
+            validateDatasetReadablePermission(ssResource);
             knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
         } else {
-            // openApi接口查询不做校验
+            // 保留普通 OpenAPI 编码查询兼容性；云盘即使只传编码，也必须校验项目读取权限。
             knCode = dirAndFileQo.getResourceCode();
+            List<SsResource> clouds = ssResourceService.findByCodeAndBizType(knCode, "KG_CLOUD");
+            for (SsResource cloud : clouds) {
+                validateDatasetReadablePermission(cloud);
+                resourceId = cloud.getResourceId();
+            }
         }
 
         String listDirectoryPath = normalizeKnowledgeDirectoryPath(dirAndFileQo.getDirectoryPath());
-        return listKnowledgeDir(dirAndFileQo.getResourceId(), knCode, listDirectoryPath);
+        return listKnowledgeDir(resourceId, knCode, listDirectoryPath);
     }
 
     /**
@@ -1123,6 +1114,10 @@ public class DatasetApplicationService {
     }
 
     private String resolveKnowledgeCode(DirAndFileQo dirAndFileQo, SsResource ssResource) {
+        // 云盘目录必须查询已鉴权资源绑定的库，不能用客户端的另一个编码替换目标。
+        if ("KG_CLOUD".equals(ssResource.getResourceBizType())) {
+            return ssResource.getResourceCode();
+        }
         if (StringUtil.isNotEmpty(dirAndFileQo.getResourceCode())) {
             return dirAndFileQo.getResourceCode();
         }

@@ -28,7 +28,6 @@ import useGlobal from '@/hooks/useGlobal';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import {
   deleteProjectSpaceFile,
-  downloadProjectCloudFile,
   listProjectRepos,
   type DevloopProjectRepo,
   renameProjectSpaceFile,
@@ -153,7 +152,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   // 项目详情异步加载期间也使用外部项目 ID，确保首次会话文件请求即可过滤仓库目录。
   const projectId = projectIdProp ?? Number(resolvedProject?.projectId);
   const projectCloudResourceId = projectCloudResourceIdProp || resolvedProject?.cloudResourceId;
-  const projectCloudProjectId = Number.isFinite(projectId) && projectId > 0 ? projectId : undefined;
   // 三类文件使用显式作用域，避免再根据项目 ID 推断本地共享文件和项目云盘的数据源。
   const usesFileBrowser = scope !== 'project';
   const rootPath =
@@ -330,7 +328,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
             path={filePath}
             fileUrl={undefined}
             sessionId={scope === 'session' ? sessionId : undefined}
-            projectId={scope === 'project' ? projectCloudProjectId : undefined}
             source={scope === 'project' ? 'dataset' : 'fileBrowser'}
             onOpenRelativeFile={(relativePath) => {
               const parentPath = getParentDirectoryPath(filePath);
@@ -346,7 +343,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       };
       openFileInTab(item.name, item.path);
     },
-    [intl, onOpenDetail, onPreviewFile, projectCloudProjectId, resourceId, scope, sessionId]
+    [intl, onOpenDetail, onPreviewFile, resourceId, scope, sessionId]
   );
 
   const downloadResource = useCallback(
@@ -364,10 +361,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       });
       try {
         if (scope === 'project') {
-          const response: any =
-            projectCloudProjectId !== undefined
-              ? await downloadProjectCloudFile({ projectId: projectCloudProjectId, directoryPath: item.path })
-              : await downloadResourceFile({ resourceId, directoryPath: item.path });
+          const response: any = await downloadResourceFile({ resourceId, directoryPath: item.path });
           const blob = response?.file instanceof Blob ? response.file : new Blob([response?.file || response]);
           downloadUrlFile({ file: blob, fileName: response?.fileName || item.name });
           message.destroy(messageKey);
@@ -387,7 +381,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.download.failed' }));
       }
     },
-    [intl, projectCloudProjectId, resourceId, scope]
+    [intl, resourceId, scope]
   );
 
   const deleteResource = useCallback(

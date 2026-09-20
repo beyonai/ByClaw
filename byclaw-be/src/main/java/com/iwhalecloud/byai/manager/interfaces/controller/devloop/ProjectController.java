@@ -7,15 +7,12 @@ import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
-
-import jakarta.servlet.http.HttpServletResponse;
 
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
@@ -101,18 +98,6 @@ public class ProjectController {
     public ResponseUtil<Map<String, Object>> getProject(@RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
         return ResponseUtil.successResponse(projectApplicationService.getProject(projectId));
-    }
-
-    /**
-     * 下载项目云盘文件或目录。
-     *
-     * <p>项目云盘的读取权限由项目成员关系校验，不能直接复用知识库下载接口的资源授权校验。</p>
-     */
-    @GetMapping("/cloud/download")
-    public void downloadProjectCloudFile(@RequestParam("projectId") Long projectId,
-                                         @RequestParam("directoryPath") String directoryPath,
-                                         HttpServletResponse response) {
-        projectApplicationService.downloadProjectCloudFile(projectId, directoryPath, response);
     }
 
     /**

@@ -5,6 +5,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Objects;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -141,6 +144,12 @@ public class AuthApplicationService {
 
     @Value("${dataset.system:}")
     private String datasetSystem;
+
+    @Autowired
+    private ProjectService projectService;
+
+    @Autowired
+    private ProjectMemberService projectMemberService;
 
     @Autowired
     private PrivilegeGrantMapper privilegeGrantMapper;
@@ -1255,7 +1264,26 @@ public class AuthApplicationService {
      * 判断当前登录用户是否可访问资源详情：管理权限或使用权限任一满足即可。
      */
     public boolean hasResourceAccessPermission(SsResource ssResource) {
+        // 云盘读取统一按绑定项目授权，目录、下载以及 QA 回调 FS 都经过此入口。
+        // 必须在普通资源管理员兜底之前分流，项目外用户不能通过资源授权绕过成员关系。
+        if (ssResource != null && ResourceBizTypeEnum.KG_CLOUD.name().equals(ssResource.getResourceBizType())) {
+            Long userId = CurrentUserHolder.getCurrentUserId();
+            if (CurrentUserHolder.getLoginInfo() == null || userId == null || ssResource.getResourceId() == null) {
+                return false;
+            }
+            return projectService.findByCloudResourceId(ssResource.getResourceId()).stream()
+                .filter(project -> !"1".equals(project.getDeleteFlag()))
+                .anyMatch(project -> isProjectCloudVisible(project, userId));
+        }
         return hasResourceManagePermission(ssResource) || hasResourceUsePermission(ssResource);
+    }
+
+    private boolean isProjectCloudVisible(Project project, Long userId) {
+        // 只有负 ID 的内置默认项目是公共入口，用户自己的默认项目仍需校验归属。
+        return ("default".equalsIgnoreCase(project.getProjectType()) && project.getProjectId() != null
+            && project.getProjectId() < 0)
+            || Objects.equals(project.getCreateBy(), userId)
+            || projectMemberService.isMember(project.getProjectId(), userId);
     }
 
     /**

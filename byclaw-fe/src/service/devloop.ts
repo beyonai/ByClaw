@@ -1,4 +1,4 @@
-import { GET, POST, type ConfigType } from '@/service/common/request';
+import { POST, type ConfigType } from '@/service/common/request';
 import type { IntegrationStage, TestAccount } from '@/layout/sider/components/ProjectSpaceList/Integration/types';
 
 // 默认项目只用于系统内置项目回显和编辑，接口层类型也需要覆盖，避免前端判断 default 时类型不一致。
@@ -223,15 +223,6 @@ export const listProjects = (data?: { keyword?: string; pageNum?: number; pageSi
   POST<any>('/byaiService/project/list', data || {}, config);
 
 export const getProject = (projectId: number) => POST<any>('/byaiService/project/get', { projectId });
-
-/** 项目云盘文件下载走项目维度权限校验，避免误用知识库资源授权。 */
-export const downloadProjectCloudFile = (data: {
-  projectId: string | number;
-  directoryPath: string;
-}) =>
-  GET<any>('/byaiService/project/cloud/download', data, {
-    responseType: 'blob',
-  });
 
 export const listProjectResources = (projectId: number) =>
   POST<any>('/byaiService/project/resource/list', { projectId });
