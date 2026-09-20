@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.groupchat.interfaces;
 
+import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageRecallService;
+
 import java.util.List;
 import java.util.Map;
 
@@ -63,6 +66,14 @@ public class GroupChatController {
     private final GroupChatReadService readService;
     @Autowired
     private GroupChatMessageSearchService messageSearchService;
+    @Autowired
+    private GroupChatMessageRecallService recallService;
+
+    /** 只改变原消息的展示状态，重复请求保持首次撤回事实。 */
+    @PostMapping("/{sessionId}/messages/{messageId}/recall")
+    public ResponseUtil<JSONObject> recall(@PathVariable Long sessionId, @PathVariable Long messageId) {
+        return ResponseUtil.successResponse(recallService.recall(sessionId, messageId));
+    }
 
     public GroupChatController(GroupChatApplicationService applicationService, GroupChatContextService contextService,
         GroupChatTaskService taskService, GroupChatReadService readService) {

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
+
 import java.util.Date;
 import java.util.List;
 
@@ -50,7 +52,13 @@ public class GroupChatReadService {
         int normalizedPageSize = pageSize == null || pageSize < 1 ? 20 : Math.min(pageSize, 100);
         Page<GroupChatListItemResponse> page = PageHelper.startPage(normalizedPageNum, normalizedPageSize);
         List<GroupChatListItemResponse> groups = mentionMapper.selectMyGroups(CurrentUserHolder.getCurrentUserId());
+        GroupChatRecallProjection projection = new GroupChatRecallProjection();
         for (GroupChatListItemResponse group : groups) {
+            if (group.isLatestMessageRecalled()) {
+                group.setLatestMessageContent(projection.content(group.getLatestMessageRecalledBy()));
+                group.setLatestMessageMetadata(null);
+                continue;
+            }
             group.setLatestMessageContent(GroupChatMessagePreview.fromMetadata(
                 group.getLatestMessageContent(), group.getLatestMessageMetadata()));
         }

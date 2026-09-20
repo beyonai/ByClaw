@@ -30,6 +30,18 @@ public class GroupChatListItemResponse {
 
     private String latestMessageContent;
 
+    @JsonIgnore
+    @JSONField(serialize = false)
+    private Date latestMessageRecalledAt;
+
+    @JsonIgnore
+    @JSONField(serialize = false)
+    private Long latestMessageRecalledBy;
+
+    public boolean isLatestMessageRecalled() {
+        return latestMessageRecalledAt != null;
+    }
+
     /** 仅供列表摘要投影使用，不向客户端暴露完整消息元数据。 */
     @JsonIgnore
     @JSONField(serialize = false)

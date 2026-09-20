@@ -39,6 +39,10 @@ public class GroupChatContextResponse {
         /** 关联发送队列，支持广播早于 ACK 或重连后的确认恢复。 */
         private String clientRequestId;
 
+        private boolean recalled;
+
+        private Recall recall;
+
         /** 任务卡片关联的任务会话 ID，与当前群会话 ID 不同。 */
         private String taskId;
 
@@ -79,6 +83,7 @@ public class GroupChatContextResponse {
 
     @Data
     public static class ReplyReference {
+        private boolean recalled;
         private Integer usage;
         private String messageId;
         private String content;
@@ -87,6 +92,14 @@ public class GroupChatContextResponse {
         private List<ResourceVo> resourceList = new ArrayList<>();
         private String role;
         private Speaker speaker;
+    }
+
+    /** 操作人名称来自读取时的 Redis 用户信息，不持久化名称副本。 */
+    @Data
+    public static class Recall {
+        private String operatorId;
+        private String operatorName;
+        private Long recalledAt;
     }
 
     /** 事件发生时的操作者和成员快照，ID 使用字符串避免精度丢失。 */

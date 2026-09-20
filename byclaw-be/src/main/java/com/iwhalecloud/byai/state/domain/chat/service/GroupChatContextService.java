@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -118,8 +120,11 @@ public class GroupChatContextService {
         List<ByaiMessage> ordered = new ArrayList<>(newestFirst);
         Collections.reverse(ordered);
 
+        GroupChatRecallProjection projection = new GroupChatRecallProjection();
+        // 字符预算只计算用户可见内容，隐藏原文不能挤占历史窗口。
+        ordered.replaceAll(projection::display);
         boolean characterTruncated = trimToCharacterLimit(ordered, maxCharacters);
-        List<GroupChatContextResponse.Message> messages = toMessages(ordered);
+        List<GroupChatContextResponse.Message> messages = toMessages(ordered, null, projection);
         if (!timeline) {
             // 引用独立查询，不能绕过 Agent 主查询的系统事件排除规则。
             messages.forEach(message -> {
@@ -219,14 +224,21 @@ public class GroupChatContextService {
     /** 话题页传入已过滤的引用快照，避免逐条查询及隐藏父消息内容泄漏。 */
     public List<GroupChatContextResponse.Message> toMessages(List<ByaiMessage> ordered,
         Map<Long, ByaiMessage> visibleReferences) {
+        return toMessages(ordered, visibleReferences, new GroupChatRecallProjection());
+    }
+
+    private List<GroupChatContextResponse.Message> toMessages(List<ByaiMessage> ordered,
+        Map<Long, ByaiMessage> visibleReferences, GroupChatRecallProjection projection) {
         List<GroupChatContextResponse.Message> result = new ArrayList<>(ordered.size());
         Map<Long, SsResource> resources = new HashMap<>();
         Map<Long, String> cloudResources = new HashMap<>();
         Map<Long, ByaiGroupChatTask> tasks = loadMessageTasks(ordered);
         for (int index = 0; index < ordered.size(); index++) {
-            ByaiMessage source = ordered.get(index);
+            ByaiMessage source = projection.display(ordered.get(index));
             GroupChatContextResponse.Message message = new GroupChatContextResponse.Message();
             message.setMessageId(String.valueOf(source.getMessageId()));
+            message.setRecalled(source.isRecalled());
+            message.setRecall(projection.recall(source.getRecalledAt(), source.getRecalledBy()));
             message.setTopicId(source.getTopicId() == null ? null : String.valueOf(source.getTopicId()));
             message.setSequence(index);
             message.setCreatedAt(source.getCreateTime() == null ? 0L : source.getCreateTime().getTime());
@@ -249,15 +261,18 @@ public class GroupChatContextService {
             message.setTarget(toTarget(source));
             message.setRole(toRole(source.getUsage()));
             message.setSpeaker(toSpeaker(source, resources));
-            message.setAttachments(toAttachments(source, cloudResources));
+            message.setAttachments(source.isRecalled() ? List.of() : toAttachments(source, cloudResources));
             if (source.getMessageRef() != null) {
                 ByaiMessage referenced = visibleReferences == null ? messageMapper.selectByMessageId(source.getMessageRef())
                     : visibleReferences.get(source.getMessageRef());
                 if (referenced != null && Objects.equals(source.getSessionId(), referenced.getSessionId())) {
                     GroupChatContextResponse.ReplyReference reply = new GroupChatContextResponse.ReplyReference();
                     reply.setMessageId(String.valueOf(referenced.getMessageId()));
-                    reply.setContent(StringUtils.defaultString(referenced.getMessageContent()));
-                    reply.setResourceList(toMemberResources(referenced.getMetadata()));
+                    boolean hidden = source.isRecalled() || referenced.isRecalled();
+                    reply.setRecalled(referenced.isRecalled());
+                    reply.setContent(hidden ? GroupChatRecallProjection.RECALLED_REFERENCE
+                        : StringUtils.defaultString(referenced.getMessageContent()));
+                    reply.setResourceList(hidden ? List.of() : toMemberResources(referenced.getMetadata()));
                     reply.setUsage(referenced.getUsage());
                     reply.setRole(toRole(referenced.getUsage()));
                     reply.setSpeaker(toSpeaker(referenced, resources));

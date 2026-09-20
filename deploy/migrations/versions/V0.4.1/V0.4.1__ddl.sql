@@ -144,6 +144,16 @@ SELECT byai._v041_add_column_if_missing(
     'byai', 'byai_message', 'topic_id', 'BIGINT'
 );
 
+-- 群消息撤回只记录状态与操作人，原文、引用和业务数据保持不变。
+SELECT byai._v041_add_column_if_missing(
+    'byai', 'byai_message', 'recalled_at', 'TIMESTAMP(3)'
+);
+SELECT byai._v041_add_column_if_missing(
+    'byai', 'byai_message', 'recalled_by', 'BIGINT'
+);
+COMMENT ON COLUMN byai.byai_message.recalled_at IS '撤回时间；空值表示未撤回';
+COMMENT ON COLUMN byai.byai_message.recalled_by IS '撤回操作人用户ID，用户名从Redis共享用户信息读取';
+
 DROP FUNCTION IF EXISTS byai._v041_add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 CREATE TABLE IF NOT EXISTS byai.byai_group_chat_mention (

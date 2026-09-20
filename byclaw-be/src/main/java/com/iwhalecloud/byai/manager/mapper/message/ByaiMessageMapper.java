@@ -28,6 +28,12 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      */
     List<ByaiMessage> selectBySessionId(@Param("sessionId") Long sessionId);
 
+    /** 群行锁后读取最新状态，避免事务内旧查询缓存覆盖撤回判断。 */
+    ByaiMessage selectForRecall(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId);
+
+    int recallGroupMessage(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
+        @Param("operatorId") Long operatorId, @Param("recalledAt") Date recalledAt);
+
     Long selectLatestMessageId(@Param("sessionId") Long sessionId);
 
     /**

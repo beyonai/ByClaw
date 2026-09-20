@@ -17,6 +17,14 @@ import java.util.Date;
 @Setter
 public class ByaiMessageHotDto {
 
+    /** 兼容通用详情与分享读取，撤回状态不进入普通消息内容写入 SQL。 */
+    private Date recalledAt;
+    private Long recalledBy;
+
+    public boolean isRecalled() {
+        return recalledAt != null;
+    }
+
     private String metadata;
 
     private String role;

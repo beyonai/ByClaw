@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
+
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -390,7 +392,8 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         }
         Map<String, Object> reply = new HashMap<>();
         reply.put("messageId", source.getMessageId());
-        reply.put("content", source.getMessageContent());
+        reply.put("content", GroupChatRecallProjection.referenceContent(source));
+        reply.put("recalled", source.isRecalled());
         reply.put("role", Integer.valueOf(1).equals(source.getUsage()) ? "USER" : "ASSISTANT");
         Map<String, Object> speaker = new HashMap<>();
         speaker.put("type", Integer.valueOf(1).equals(source.getUsage()) ? "USER" : "AGENT");

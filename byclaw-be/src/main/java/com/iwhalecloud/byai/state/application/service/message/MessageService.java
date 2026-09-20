@@ -324,7 +324,7 @@ public class MessageService {
 
         byaiMessageHotDtoDtos.forEach(message -> {
             List<String> collectIds = fileCodeMap.getOrDefault(message.getMessageId(), new ArrayList<>());
-            message.setCollectIds(collectIds);
+            message.setCollectIds(message.isRecalled() ? new ArrayList<>() : collectIds);
         });
 
         return byaiMessageHotDtoDtos;
@@ -334,7 +334,7 @@ public class MessageService {
         if (ListUtil.isEmpty(messages) || sessionId == null) {
             return;
         }
-        List<Long> messageIds = messages.stream().map(ByaiMessageHotDtoDto::getMessageId)
+        List<Long> messageIds = messages.stream().filter(message -> !message.isRecalled()).map(ByaiMessageHotDtoDto::getMessageId)
             .filter(Objects::nonNull).distinct().toList();
         Map<Long, TaskPlanSnapshot> taskPlans = taskPlanApplicationService.findLatestByMessageIds(sessionId,
             messageIds);

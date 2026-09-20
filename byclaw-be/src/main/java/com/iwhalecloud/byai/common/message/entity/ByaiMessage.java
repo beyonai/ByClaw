@@ -25,6 +25,18 @@ public class ByaiMessage {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
+    /** 撤回仅改变公开展示状态，原始内容与关系保持不变。 */
+    @TableField("recalled_at")
+    private Date recalledAt;
+
+    @TableField("recalled_by")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long recalledBy;
+
+    public boolean isRecalled() {
+        return recalledAt != null;
+    }
+
     private String metadata;
 
     /**

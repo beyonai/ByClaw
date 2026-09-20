@@ -22,6 +22,15 @@ public class ConversationOutlineItem {
 
     private String content;
 
+    private Date recalledAt;
+
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long recalledBy;
+
+    public boolean isRecalled() {
+        return recalledAt != null;
+    }
+
     private String displayContent;
 
     @JsonIgnore

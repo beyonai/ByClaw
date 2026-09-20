@@ -6,6 +6,8 @@
     <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.common.message.entity.ByaiMessage">
         <result column="access_terminal" property="accessTerminal" />
         <result column="append_index" property="appendIndex" />
+        <result column="recalled_at" property="recalledAt" />
+        <result column="recalled_by" property="recalledBy" />
         <result column="archived_at" property="archivedAt" />
         <result column="belong_date" property="belongDate" />
         <result column="call_logs" property="callLogs" />
@@ -66,6 +68,8 @@
         <result column="create_time" property="createTime" />
         <result column="position" property="position" />
         <result column="total_count" property="totalCount" />
+        <result column="recalled_at" property="recalledAt" />
+        <result column="recalled_by" property="recalledBy" />
     </resultMap>
 
     <resultMap id="TopicParticipantMap"
@@ -79,7 +83,7 @@
 
     <!-- 通用查询列 -->
     <sql id="Base_Column_List">
-        id, access_terminal, append_index, archived_at, belong_date, call_logs, create_time, creator_id, creator_name, enterprise_id,
+        id, access_terminal, append_index, recalled_at, recalled_by, archived_at, belong_date, call_logs, create_time, creator_id, creator_name, enterprise_id,
         final_content, final_message_struct, infer_log, is_complete, message_content, message_id, message_ref, topic_id, message_struct, metadata,
         msg_status, project_id, rel_message_id, rel_objs, related_resources, res_com_id, res_com_ids, "role", session_id, task_id, update_time,
         "usage",
@@ -223,6 +227,7 @@
                 AND creator_id = #{qo.creatorId}
             </if>
             <if test="qo.keyword != null and qo.keyword != ''">
+                AND recalled_at IS NULL
                 AND UPPER(message_content) LIKE CONCAT('%', UPPER(REPLACE(REPLACE(#{qo.keyword}, '*', '%'), '?', '_')), '%')
             </if>
         </where>
@@ -284,6 +289,7 @@
         FROM byai_message message
         WHERE message.session_id = #{sessionId}
           AND message.archived_at IS NULL
+          AND message.recalled_at IS NULL
           AND message."usage" IN (1, 2)
           AND message.message_content IS NOT NULL
           <if test="keyword != null">
@@ -382,6 +388,8 @@
                "usage",
                LEFT(COALESCE(NULLIF(final_content, ''), NULLIF(message_content, ''), ''), 800) AS content,
                related_resources,
+               recalled_at,
+               recalled_by,
                creator_name,
                create_time,
                position,
@@ -396,6 +404,8 @@
                    creator_name,
                    create_time,
                    archived_at,
+                   recalled_at,
+                   recalled_by,
                    ROW_NUMBER() OVER (ORDER BY create_time DESC, message_id DESC) AS position,
                    COUNT(1) OVER () AS total_count
             FROM byai_message
@@ -452,4 +462,16 @@
         GROUP BY topic_id, "usage", creator_id
         ORDER BY topic_id, first_message_id
     </select>
+    <select id="selectForRecall" resultMap="BaseResultMap" flushCache="true" useCache="false">
+        SELECT <include refid="Base_Column_List" /> FROM byai_message
+        WHERE session_id = #{sessionId} AND message_id = #{messageId}
+        FOR UPDATE
+    </select>
+
+    <update id="recallGroupMessage">
+        UPDATE byai_message
+        SET recalled_at = #{recalledAt}, recalled_by = #{operatorId}, update_time = #{recalledAt}
+        WHERE session_id = #{sessionId} AND message_id = #{messageId}
+          AND "usage" IN (1, 2) AND recalled_at IS NULL AND archived_at IS NULL
+    </update>
 </mapper>

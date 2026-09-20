@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
@@ -369,7 +371,8 @@ public class GroupChatApplicationService {
         }
         Map<String, Object> reply = new HashMap<>();
         reply.put("messageId", referenced.getMessageId());
-        reply.put("content", referenced.getMessageContent());
+        reply.put("content", GroupChatRecallProjection.referenceContent(referenced));
+        reply.put("recalled", referenced.isRecalled());
         boolean systemEvent = Integer.valueOf(5).equals(referenced.getUsage());
         reply.put("usage", referenced.getUsage());
         reply.put("role", systemEvent ? "event" : Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "ASSISTANT");

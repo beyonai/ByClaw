@@ -120,6 +120,8 @@ class ByaiGroupChatMentionMapperPaginationTest {
                     create_time TEXT,
                     creator_id INTEGER,
                     creator_name TEXT,
+                    recalled_at TIMESTAMP,
+                    recalled_by BIGINT,
                     archived_at TEXT
                 )
                 """);

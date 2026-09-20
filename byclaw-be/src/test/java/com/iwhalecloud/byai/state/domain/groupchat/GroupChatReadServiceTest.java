@@ -11,6 +11,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.Date;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -87,6 +89,35 @@ class GroupChatReadServiceTest {
             assertThat(item.getLatestMessageMetadata()).isEqualTo(storedMetadata);
             assertThat(new ObjectMapper().writeValueAsString(item)).doesNotContain("latestMessageMetadata", "resourceList");
             assertThat(JSONObject.toJSONString(item)).doesNotContain("latestMessageMetadata", "resourceList");
+            verifyNoInteractions(messageMapper, memberMapper, broadcastService);
+        }
+        finally {
+            PageHelper.clearPage();
+        }
+    }
+
+    @Test
+    void recalledLatestMessageKeepsListPositionWithoutLeakingContent() throws Exception {
+        GroupChatListItemResponse item = new GroupChatListItemResponse();
+        item.setSessionId(10L);
+        item.setLatestMessageId(20L);
+        item.setLatestMessageTime(new Date(100));
+        item.setLatestMessageContent("SECRET");
+        item.setLatestMessageMetadata("SECRET");
+        item.setLatestMessageRecalledAt(new Date(200));
+        item.setLatestMessageRecalledBy(30L);
+        when(mentionMapper.selectMyGroups(30L)).thenAnswer(invocation -> {
+            Page<GroupChatListItemResponse> page = PageHelper.getLocalPage();
+            page.add(item);
+            return page;
+        });
+        try {
+            var result = service.listMyGroups(1, 20).getList().get(0);
+            assertThat(result.isLatestMessageRecalled()).isTrue();
+            assertThat(result.getLatestMessageId()).isEqualTo(20L);
+            assertThat(result.getLatestMessageTime()).isEqualTo(new Date(100));
+            assertThat(result.getLatestMessageContent()).endsWith(" 撤回了一条消息");
+            assertThat(new ObjectMapper().writeValueAsString(result)).doesNotContain("SECRET");
             verifyNoInteractions(messageMapper, memberMapper, broadcastService);
         }
         finally {
