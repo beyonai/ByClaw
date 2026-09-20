@@ -8,6 +8,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -83,8 +84,6 @@ public class GroupChatApplicationService {
     private final GroupChatMentionService mentionService;
     @Autowired
     private WorkgroupTemplateService workgroupTemplateService;
-    @Autowired
-    private GroupWorkAssistantService groupWorkAssistantService;
 
     @Autowired
     public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
@@ -120,6 +119,22 @@ public class GroupChatApplicationService {
         if (operatorId == null || operatorId <= 0) {
             throw new IllegalArgumentException("Login required");
         }
+        Set<Long> agentIds = new LinkedHashSet<>();
+        if (request.getAgentIds() != null) agentIds.addAll(request.getAgentIds());
+        if (request.getTemplateId() != null) {
+            agentIds.addAll(workgroupTemplateService.resolveResourceIds(request.getTemplateId(),
+                request.getExpectedTemplateVersion()));
+        }
+        if (!agentIds.isEmpty()) {
+            if (agentIds.stream().anyMatch(id -> id == null || id <= 0)) {
+                throw new BaseException("error.resource.not.exist");
+            }
+            Set<Long> existingIds = new java.util.HashSet<>();
+            resourceService.findByIdList(agentIds).forEach(resource -> existingIds.add(resource.getResourceId()));
+            if (!existingIds.containsAll(agentIds)) {
+                throw new BaseException("error.resource.not.exist");
+            }
+        }
         // 复用项目创建用例，云盘、工作目录和项目 owner 均使用现有初始化流程。
         ProjectDTO projectRequest = new ProjectDTO();
         projectRequest.setProjectName(request.getName());
@@ -147,14 +162,6 @@ public class GroupChatApplicationService {
         addMember(members, session.getSessionId(), MemObjType.USER.name(), operatorId, UserRole.OWNER.name());
         userIds.forEach(id -> addMember(members, session.getSessionId(), MemObjType.USER.name(), id,
             UserRole.MEMBER.name()));
-        Set<Long> agentIds = new LinkedHashSet<>();
-        if (request.getAgentIds() != null) agentIds.addAll(request.getAgentIds());
-        if (request.getTemplateId() != null) {
-            agentIds.addAll(workgroupTemplateService.resolveResourceIds(request.getTemplateId(),
-                request.getExpectedTemplateVersion()));
-        }
-        Long workAssistantId = groupWorkAssistantService.resolveResourceId();
-        if (workAssistantId != null) agentIds.add(workAssistantId);
         if (!agentIds.isEmpty()) {
             agentIds.forEach(id -> addMember(members, session.getSessionId(), MemObjType.AGENT.name(), id,
                 UserRole.MEMBER.name()));

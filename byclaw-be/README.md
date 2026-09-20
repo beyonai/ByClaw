@@ -418,16 +418,20 @@ existing session/topic/time index supports the query; no schema migration is nee
 Sending remains the existing group send protocol with `replyToMessageId` set to the
 root message ID. Deploy this endpoint before enabling the topic modal frontend.
 
-### 新建群自动添加群组工作助手
+### 新建群的默认数字员工
 
-关联 [byclaw-hacu#6](https://github.com/beyonai/byclaw-hacu/issues/6) 的建群初始化步骤。
-平台管理员统一创建并发布一份组织级数字员工及其技能，供多个企业共用。`POST /group-chats` 创建群时读取
-`byai_system_config` 的 `param_code=BYAI_GROUP_WORK_ASSISTANT_NAME`，以 `param_value`
-作为员工名称；配置缺失或为空时使用“群组工作助手”。可通过修改此配置适配不同语言的员工名称。
+关联 [byclaw-hacu#6](https://github.com/beyonai/byclaw-hacu/issues/6)。
+`GET /group-chats/default-assistant` 返回默认员工数组，每项包含 `resourceId`（字符串）、
+`resourceName`、`resourceDesc`、`avatar`；无匹配时返回 `[]`。
 
-后端按名称在平台范围内精确查询已上架的组织级数字员工，不按建群用户的企业 ID 过滤；排除数字员工组（017），
-找到唯一匹配时以 AGENT 成员加入新群，并与手选、模板中的资源 ID 去重。
-没有匹配或同名候选不唯一时正常建群，不自动添加助手。配置变更仅影响之后创建的群。
-创建响应的 `members` 包含自动加入的员工，前端直接使用该响应和群详情，无需额外入群请求。
+`byai_system_config` 的 `param_code=BYAI_GROUP_WORK_ASSISTANT_NAME` 保持不变，`param_value`
+兼容原有单个名称，也支持 JSON 名称数组，例如 `["群组工作助手","知识助手"]`。
+配置缺失或空白时使用“群组工作助手”，`[]` 表示不配置默认员工。名称可按部署语言配置。
+按配置顺序在平台范围内精确匹配已上架的组织级数字员工，不按当前企业过滤，排除数字员工组（017）。
+每个名称返回全部匹配员工（按资源 ID 排序），最终按资源 ID 去重，不限制数量。
 
-本步骤仅初始化群成员关系；默认任务执行员工、自动响应及群设置中的助手切换由后续步骤实现。
+前端用查询结果回显各员工的名称、描述和头像；失败或结果为空时隐藏卡片，不影响创建。
+`POST /group-chats` 通过 `agentIds` 数组提交回显的员工以及用户已选员工。
+后端批量校验资源存在性，合并模板员工并去重后写入群成员，不再隐式追加默认助手。
+创建响应 `members` 返回实际加入的员工，后续群详情沿用已有成员信息回显。
+配置变更仅影响之后打开的创建页面。

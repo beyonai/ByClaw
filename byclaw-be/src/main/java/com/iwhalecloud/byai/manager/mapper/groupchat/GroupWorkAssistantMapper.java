@@ -18,7 +18,6 @@ public interface GroupWorkAssistantMapper {
           AND r.resource_name = #{name}
           AND e.agent_type <> '017'
         ORDER BY r.resource_id
-        LIMIT 2
         """)
     List<Long> findCandidates(@Param("name") String name);
 }

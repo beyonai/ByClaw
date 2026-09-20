@@ -5,6 +5,8 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageR
 
 import java.util.List;
 import java.util.Map;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupWorkAssistantService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupWorkAssistantResponse;
 
 import jakarta.validation.Valid;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
@@ -68,11 +70,18 @@ public class GroupChatController {
     private GroupChatMessageSearchService messageSearchService;
     @Autowired
     private GroupChatMessageRecallService recallService;
+    @Autowired
+    private GroupWorkAssistantService groupWorkAssistantService;
 
     /** 只改变原消息的展示状态，重复请求保持首次撤回事实。 */
     @PostMapping("/{sessionId}/messages/{messageId}/recall")
     public ResponseUtil<JSONObject> recall(@PathVariable Long sessionId, @PathVariable Long messageId) {
         return ResponseUtil.successResponse(recallService.recall(sessionId, messageId));
+    }
+
+    @GetMapping("/default-assistant")
+    public ResponseUtil<List<GroupWorkAssistantResponse>> defaultAssistant() {
+        return ResponseUtil.successResponse(groupWorkAssistantService.getDefaultAssistants());
     }
 
     public GroupChatController(GroupChatApplicationService applicationService, GroupChatContextService contextService,

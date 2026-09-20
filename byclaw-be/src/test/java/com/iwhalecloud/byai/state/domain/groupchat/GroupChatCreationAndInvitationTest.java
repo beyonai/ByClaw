@@ -47,7 +47,8 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
-import com.iwhalecloud.byai.state.domain.groupchat.application.GroupWorkAssistantService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import jakarta.validation.Validation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,7 +66,7 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class GroupChatCreationAndInvitationTest {
-    private final GroupWorkAssistantService workAssistant = mock(GroupWorkAssistantService.class);
+    private final SsResourceService resources = mock(SsResourceService.class);
     private final ProjectApplicationService projects = mock(ProjectApplicationService.class);
     private final ProjectMemberService projectMembers = mock(ProjectMemberService.class);
     private final SessionService sessions = mock(SessionService.class);
@@ -89,8 +90,15 @@ class GroupChatCreationAndInvitationTest {
             projects, projectMembers, messages, mock(GroupChatExecutionCoordinator.class),
             events, sessionExt);
         ReflectionTestUtils.setField(service, "workgroupTemplateService", templates);
-        ReflectionTestUtils.setField(service, "groupWorkAssistantService", workAssistant);
-        when(workAssistant.resolveResourceId()).thenReturn(null);
+        ReflectionTestUtils.setField(service, "resourceService", resources);
+        when(resources.findByIdList(any())).thenAnswer(invocation -> {
+            java.util.Collection<Long> ids = invocation.getArgument(0);
+            return ids.stream().map(id -> {
+                SsResource resource = new SsResource();
+                resource.setResourceId(id);
+                return resource;
+            }).toList();
+        });
         when(projects.createProject(any())).thenAnswer(invocation -> {
             ProjectDTO request = invocation.getArgument(0);
             Project project = new Project();
@@ -177,23 +185,25 @@ class GroupChatCreationAndInvitationTest {
     }
 
     @Test
-    void addsConfiguredWorkAssistantToNewGroup() {
-        when(workAssistant.resolveResourceId()).thenReturn(40L);
-        GroupChatDetailResponse result = service.create(request());
+    void addsAllSubmittedEmployeesToNewGroup() {
+        GroupChatCreateRequest request = request();
+        request.setAgentIds(List.of(40L, 41L, 40L));
+        GroupChatDetailResponse result = service.create(request);
         assertThat(result.getMembers()).filteredOn(member -> "AGENT".equals(member.getMemObjType()))
-            .extracting(ByaiSessionMember::getMemObjId).containsExactly(40L);
+            .extracting(ByaiSessionMember::getMemObjId).containsExactly(40L, 41L);
         verify(members).batchSave(result.getMembers());
     }
 
     @Test
     void groupsInDifferentEnterprisesIncludeSamePlatformAssistant() {
-        when(workAssistant.resolveResourceId()).thenReturn(40L);
         for (Long enterpriseId : List.of(20L, 21L)) {
             LoginInfo login = new LoginInfo();
             login.setUserId(10L);
             login.setEnterpriseId(enterpriseId);
             CurrentUserHolder.setLoginInfo(login);
-            GroupChatDetailResponse result = service.create(request());
+            GroupChatCreateRequest request = request();
+            request.setAgentIds(List.of(40L));
+            GroupChatDetailResponse result = service.create(request);
             assertThat(result.getSession().getEnterpriseId()).isEqualTo(enterpriseId);
             assertThat(result.getMembers()).filteredOn(member -> "AGENT".equals(member.getMemObjType()))
                 .extracting(ByaiSessionMember::getMemObjId).containsExactly(40L);
@@ -202,7 +212,6 @@ class GroupChatCreationAndInvitationTest {
 
     @Test
     void deduplicatesWorkAssistantAgainstSelectedAndTemplateAgents() {
-        when(workAssistant.resolveResourceId()).thenReturn(40L);
         GroupChatCreateRequest request = request();
         request.setAgentIds(List.of(40L));
         request.setTemplateId(50L);
@@ -214,10 +223,20 @@ class GroupChatCreationAndInvitationTest {
     }
 
     @Test
-    void createsGroupWithoutWorkAssistantWhenNotFound() {
-        when(workAssistant.resolveResourceId()).thenReturn(null);
+    void createsGroupWithoutEmployeesWhenNoneSubmitted() {
         assertThat(service.create(request()).getMembers())
             .extracting(ByaiSessionMember::getMemObjType).containsExactly("USER");
+    }
+
+    @Test
+    void rejectsMissingSubmittedEmployeeBeforeCreatingProject() {
+        when(resources.findByIdList(any())).thenReturn(List.of());
+        GroupChatCreateRequest request = request();
+        request.setAgentIds(List.of(40L, 41L));
+        assertThatThrownBy(() -> service.create(request))
+            .isInstanceOf(com.iwhalecloud.byai.common.exception.BaseException.class);
+        verify(projects, never()).createProject(any());
+        verify(members, never()).batchSave(any());
     }
 
     @Test
