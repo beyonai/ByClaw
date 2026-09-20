@@ -1069,7 +1069,6 @@ const ProjectResources: React.FC<Props> = ({
           <FilePreviewPanel
             fileName={previewFile.fileName}
             resourceId={project.cloudResourceId ? `${project.cloudResourceId}` : undefined}
-            projectId={project.projectId}
             path={previewFile.fileUrl || `/${previewFile.fileName}`}
             fileUrl={undefined}
             source="dataset"

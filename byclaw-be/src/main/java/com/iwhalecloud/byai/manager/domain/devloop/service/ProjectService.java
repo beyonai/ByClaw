@@ -55,6 +55,12 @@ public class ProjectService {
         return projectMapper.selectById(projectId);
     }
 
+    /** 按实际绑定的云盘资源反查项目，避免相信客户端传入的项目身份。 */
+    public List<Project> findByCloudResourceId(Long resourceId) {
+        return projectMapper.selectList(new LambdaQueryWrapper<Project>()
+            .eq(Project::getCloudResourceId, resourceId));
+    }
+
 
     /**
      * 按项目编码查询。

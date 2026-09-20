@@ -9,7 +9,6 @@ import {
   isTextPreviewFile,
 } from '@/layout/sider/components/FileSiderPanel/utils';
 import { downloadChatFileArtifact } from '@/service/chatFileArtifact';
-import { downloadProjectCloudFile } from '@/service/devloop';
 import { downloadResourceFile } from '@/service/file';
 import { downloadFile as downloadFileBrowserFile } from '@/service/fileBrowser';
 import { getFileUrl } from '@/utils/file';
@@ -23,7 +22,6 @@ const PreViewFile = React.lazy(() =>
 interface FilePreviewPanelProps {
   fileName: string;
   resourceId?: string;
-  projectId?: string | number;
   path?: string;
   fileUrl?: string;
   sessionId?: string;
@@ -151,7 +149,6 @@ const getFilePreviewUrl = (fileUrl: string, resourcePath: string, baseFilePath?:
 const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   fileName,
   resourceId,
-  projectId,
   path,
   fileUrl,
   sessionId,
@@ -210,11 +207,8 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   );
 
   const loadDatasetFile = useCallback(
-    (filePath: string) =>
-      source === 'dataset' && projectId !== undefined
-        ? downloadProjectCloudFile({ projectId, directoryPath: filePath })
-        : downloadResourceFile({ resourceId: resourceId!, directoryPath: filePath }),
-    [projectId, resourceId, source]
+    (filePath: string) => downloadResourceFile({ resourceId: resourceId!, directoryPath: filePath }),
+    [resourceId]
   );
 
   const resolveRelativeResource = useCallback<MarkdownImageResolver>(

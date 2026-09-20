@@ -1,6 +1,5 @@
 import {
   createManualRequirement,
-  downloadProjectCloudFile,
   getLocalRepoChanges,
   getLocalRepoFileDiff,
   getTaskChanges,
@@ -14,13 +13,11 @@ import {
 } from '../devloop';
 
 jest.mock('@/service/common/request', () => ({
-  GET: jest.fn(),
   POST: jest.fn(),
 }));
 
-import { GET, POST } from '@/service/common/request';
+import { POST } from '@/service/common/request';
 
-const mockGET = GET as jest.MockedFunction<typeof GET>;
 const mockPOST = POST as jest.MockedFunction<typeof POST>;
 
 describe('Devloop task service', () => {
@@ -63,16 +60,6 @@ describe('Devloop task service', () => {
     listProjectRepos(203);
 
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/project/repo/list', { projectId: 203 });
-  });
-
-  it('downloads project cloud files through the project-scoped endpoint', () => {
-    downloadProjectCloudFile({ projectId: 203, directoryPath: '/联网搜索API.md' });
-
-    expect(mockGET).toHaveBeenCalledWith(
-      '/byaiService/project/cloud/download',
-      { projectId: 203, directoryPath: '/联网搜索API.md' },
-      { responseType: 'blob' }
-    );
   });
 
   it('queries repositories that are both configured and present in the workspace', () => {
