@@ -367,6 +367,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
       onCardClick={() => onDetail(item)}
       actionConfig={{
         scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
+        // personal 对应“我可用的”，所有资源类型均隐藏授权入口。
         hiddenMenuItemKeys: activeTab === 'personal' ? ['authorize', 'use'] : [],
         installedResourceIds,
         canInstallToTarget: installTargetContext.mode !== 'fixed' || canManageInstallTarget,

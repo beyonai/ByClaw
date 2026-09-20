@@ -225,7 +225,7 @@
   overflow: hidden;
 
   :global(#guideStep2-3) {
-    flex: 0 1 auto;
+    flex: 1;
     height: auto;
     min-height: 0;
     overflow: hidden;
@@ -245,7 +245,7 @@
 
     .@{antPrefix}-tabs-content,
     .@{antPrefix}-tabs-tabpane {
-      height: auto;
+      height: 100%;
       min-height: 0;
     }
 
@@ -265,15 +265,14 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    flex: 1;
-    // 列表按内容收缩，超出弹窗可用空间时再由自身滚动，避免底部出现整块空白区域。
-    height: auto !important;
-    max-height: calc(40vh - 70px);
-    overflow-y: auto;
+    // 列表随弹窗撑满剩余高度，不再受旧版 40vh 弹窗高度限制。
+    height: 100%;
+    overflow-y: hidden;
     overflow-x: hidden;
 
     > div {
-      flex: 0 1 auto;
+      flex: 1;
+      height: 100%;
       min-height: 0;
     }
   }

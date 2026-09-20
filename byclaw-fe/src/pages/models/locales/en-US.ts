@@ -63,7 +63,7 @@ export default {
   'personalModel.add': 'Add Model',
   'personalModel.edit': 'Edit',
   'personalModel.debug': 'Debug',
-  'personalModel.delete': 'Delete',
+  'personalModel.delete': 'Delete model',
   'personalModel.delete.confirm': 'Are you sure to delete this model?',
   'personalModel.delete.success': 'Deleted successfully',
   'personalModel.delete.failed': 'Delete failed',

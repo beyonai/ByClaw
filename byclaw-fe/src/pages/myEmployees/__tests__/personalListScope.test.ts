@@ -5,6 +5,14 @@ import path from 'path';
 describe('my employees personal list scope', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../index.tsx'), 'utf8');
 
+  it('hides use authorization only in the personal tab', () => {
+    expect(source).toContain("hiddenMenuItemKeys: activeTab === 'personal' ? ['use'] : []");
+  });
+
+  it('enables shelf actions only in the enterprise tab', () => {
+    expect(source).toContain("enableDigitalEmployeeLifecycle: activeTab === 'enterprise'");
+  });
+
   // 两个页签复用同一卡片配置，开启入口的同时必须绑定实际删除回调。
   it('enables delete data and connects the employee deletion handler', () => {
     expect(source).toContain('enableDigitalEmployeeDelete: true');

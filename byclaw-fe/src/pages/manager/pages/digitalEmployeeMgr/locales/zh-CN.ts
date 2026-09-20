@@ -108,6 +108,8 @@ export default {
   'employeeDetail.catalogManagePlaceholder': '请选择所属领域',
   'employeeDetail.configureSkills': '配置工具',
   'employeeDetail.configureBundledSkills': '配置技能',
+  'employeeDetail.personalSkills': '个人技能',
+  'employeeDetail.enterpriseSkills': '企业技能',
   'employeeDetail.bundledSkillsPlaceholder': '请选择技能',
   'employeeDetail.bundledSkillsSearchPlaceholder': '搜索名称或描述',
   'employeeDetail.configureKnowledge': '配置知识',

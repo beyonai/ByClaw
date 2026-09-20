@@ -1,12 +1,16 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +31,9 @@ class SsResourceServiceTest {
 
     @BeforeEach
     void setUp() {
+        if (TableInfoHelper.getTableInfo(SsResource.class) == null) {
+            TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), SsResource.class);
+        }
         sequenceService = mock(SequenceService.class);
         ssResourceMapper = mock(SsResourceMapper.class);
 
@@ -83,5 +90,22 @@ class SsResourceServiceTest {
         assertThat(query.getSqlSegment()).contains("system_code", "resource_biz_type", "resource_code");
         assertThat(query.getParamNameValuePairs().values())
             .containsExactlyInAnyOrder("BYCLAW", "KG_DOC", "824794494620293");
+    }
+
+    @Test
+    void countResource_excludesDeletedRowsWithNumericStatusAndKeepsPersonalScope() {
+        when(ssResourceMapper.selectCount(any())).thenReturn(0L);
+
+        assertThat(service.countResource("研发助手", "DIG_EMPLOYEE", "personal", 100L)).isZero();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaQueryWrapper<SsResource>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(ssResourceMapper).selectCount(captor.capture());
+        LambdaQueryWrapper<SsResource> query = captor.getValue();
+        // 触发参数绑定,防止枚举 DELETE 被作为字符串传给数据库数值列.
+        assertThat(query.getSqlSegment()).contains("resource_status <>", "create_by =", "owner_type =",
+            "resource_name =", "resource_biz_type =", "resource_id NOT IN");
+        assertThat(query.getParamNameValuePairs().values())
+            .containsExactlyInAnyOrder(11L, "personal", "研发助手", "DIG_EMPLOYEE", 100L, -1);
     }
 }

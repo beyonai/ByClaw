@@ -13,7 +13,7 @@ import FileResourcePanel from './FileResourcePanel';
 import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
 import { querySessionDataSources } from '@/service/projectDataSources';
 import { useChatResourceProject } from './useChatResourceProject';
-import { getSessionFileTabKeys, type SessionFileTabKey } from './resourceTabUtils';
+import { getSessionResourceTabKeys, type SessionFileTabKey } from './resourceTabUtils';
 import styles from './index.module.less';
 
 type UpperScopeKey = 'session' | 'employee';
@@ -47,7 +47,14 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
   const resolvedProjectId = Number(project?.projectId ?? projectId);
-  const sessionFileTabKeys = useMemo(() => getSessionFileTabKeys(resolvedProjectId), [resolvedProjectId]);
+  const sessionResourceTabKeys = useMemo(
+    () => getSessionResourceTabKeys(resolvedProjectId, sessionId),
+    [resolvedProjectId, sessionId]
+  );
+  const sessionFileTabKeys = useMemo(
+    () => sessionResourceTabKeys.filter((key): key is SessionFileTabKey => key !== 'code'),
+    [sessionResourceTabKeys]
+  );
   const [dataSourceAvailability, setDataSourceAvailability] = useState<{
     sessionId: string;
     projectId: number;
@@ -66,7 +73,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const projectCloudResourceId = rawProjectCloudResourceId ? `${rawProjectCloudResourceId}` : undefined;
 
   // 项目空间展示项目目录本身，项目尚未配置仓库时也可以浏览普通文件。
-  const showCode = Boolean(sessionId && resolvedProjectId > 0);
+  const showCode = sessionResourceTabKeys.includes('code');
 
   // 按当前会话的实际可见数据决定入口；切换会话后不沿用上一个会话的结果。
   useEffect(() => {
