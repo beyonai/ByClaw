@@ -10,6 +10,11 @@
         <result column="create_time" property="createTime" />
     </resultMap>
 
+    <select id="selectTopic" resultMap="TopicMap">
+        SELECT topic_id, group_session_id, root_message_id, last_message_id, last_activity_at, create_time
+        FROM byai_group_chat_topic WHERE group_session_id = #{sessionId} AND topic_id = #{topicId}
+    </select>
+
     <!-- 所有公开写入先获取群行锁，避免并发 MERGE 的首次插入竞争。 -->
     <insert id="upsert">
         MERGE INTO byai_group_chat_topic target

@@ -11,6 +11,8 @@ import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTopic;
 /** 群行锁保护首次创建，活动游标不依赖消息聚合。 */
 @Mapper
 public interface ByaiGroupChatTopicMapper {
+    ByaiGroupChatTopic selectTopic(@Param("sessionId") Long sessionId, @Param("topicId") Long topicId);
+
     int upsert(ByaiGroupChatTopic topic);
 
     List<ByaiGroupChatTopic> selectPage(@Param("sessionId") Long sessionId,

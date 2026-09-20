@@ -46,6 +46,10 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      */
     ByaiMessage selectByMessageId(@Param("messageId") Long messageId);
 
+    /** 按话题索引正向读取，根消息由独立投影返回。 */
+    List<ByaiMessage> selectTopicMessages(@Param("sessionId") Long sessionId, @Param("topicId") Long topicId,
+        @Param("rootMessageId") Long rootMessageId, @Param("afterMessageId") Long afterMessageId, @Param("limit") int limit);
+
     int assignGroupTopic(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
         @Param("topicId") Long topicId);
 

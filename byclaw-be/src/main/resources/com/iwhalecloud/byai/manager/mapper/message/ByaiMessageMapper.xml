@@ -412,6 +412,22 @@
         WHERE session_id = #{sessionId} AND message_id = #{messageId} AND topic_id IS NULL
     </update>
 
+    <!-- 使用话题联合索引反向遍历，不扫描全群，也不按引用深度裁剪分支。 -->
+    <select id="selectTopicMessages" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" /> FROM byai_message
+        WHERE session_id = #{sessionId} AND topic_id = #{topicId}
+          AND message_id != #{rootMessageId} AND archived_at IS NULL
+          AND "usage" IN (1, 2) AND message_content IS NOT NULL
+        <if test="afterMessageId != null">
+          AND (create_time, message_id) &gt;
+              ((SELECT boundary.create_time FROM byai_message boundary
+                WHERE boundary.session_id = #{sessionId} AND boundary.message_id = #{afterMessageId}),
+               #{afterMessageId})
+        </if>
+        ORDER BY create_time ASC, message_id ASC
+        LIMIT #{limit}
+    </select>
+
     <select id="selectVisibleGroupMessagesByIds" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" /> FROM byai_message
         WHERE session_id = #{sessionId} AND archived_at IS NULL

@@ -397,3 +397,23 @@ TASK 进行中的所有 turn（包括等待用户继续输入时的最终答复�
 `TASK_RESULT` 使用确认发布的正文和群消息 ID 作为委派内容、触发 ID 与公开上下文边界，
 保留原始任务 turn 的委派链和层数限制。成果消息的正文、`metadata.resourceList` 与实时事件保持一致。
 发布与子委派登记共用事务；失败一起回滚，重复确认返回已有发布结果，不重复调度。
+
+
+### Group topic message pagination
+
+`GET /group-chats/{sessionId}/topics/{topicId}/messages?limit=20&cursor=...`
+returns the normal response wrapper with `topicId`, `rootMessageId`, nullable
+`rootMessage`, `messages`, `hasMore`, and nullable `nextCursor`. IDs are strings.
+The current caller must be a group member and the topic must belong to that group.
+The root is returned separately; replies include every branch with the same persisted
+topic identity, ordered by `(createTime, messageId)` ascending. `limit` defaults to
+20 and is clamped to 1–50. Message and reference projections reuse group history
+visibility and resource handling.
+
+Pass the opaque `nextCursor` unchanged to load subsequent replies. Cursors are scoped
+to the group and topic and validated against their original visible message boundary.
+If that boundary is no longer available, reload from the first page. This is a live
+keyset view, not a cross-request snapshot. No exact reply count is returned. The
+existing session/topic/time index supports the query; no schema migration is needed.
+Sending remains the existing group send protocol with `replyToMessageId` set to the
+root message ID. Deploy this endpoint before enabling the topic modal frontend.
