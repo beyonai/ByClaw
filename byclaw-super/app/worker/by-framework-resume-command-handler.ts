@@ -1,3 +1,4 @@
+import { currentDelivery } from "./by-framework-recovering-runner.js";
 import type { DelegationResumeResult } from "@byclaw/by-conductor";
 import {
   AgentState,
@@ -98,8 +99,8 @@ export interface FailureStreamInput {
 export interface ResumeCommandHandlerOptions {
   runService: WorkerRunService;
   runIngress: WorkerRunIngress;
-  resolveActiveRunId(sessionId: string, traceId: string): string | undefined;
-  releaseActiveRun(runId: string): void;
+  resolveActiveRunId(sessionId: string, traceId: string): Promise<string | undefined>;
+  releaseActiveRun(runId: string): Promise<void>;
   markOriginalExecutionFinished(runId: string, status: AgentState): Promise<void>;
   finishFailureStream(context: AgentContext, input: FailureStreamInput): Promise<void>;
   forwardRun(
@@ -157,7 +158,7 @@ export class ByFrameworkResumeCommandHandler {
   ): Promise<AgentTaskResult> {
     const runId =
       route.metadataRunId ||
-      this.#resolveActiveRunId(command.header.sessionId, command.header.traceId) ||
+      await this.#resolveActiveRunId(command.header.sessionId, command.header.traceId) ||
       "";
     const delegationId = recordString(command.header.metadata, "delegation_id");
     const routingIssues = resumeRoutingIssues(command, route.metadataRunId);
@@ -330,8 +331,15 @@ class DelegationCallbackResumeHandler {
     settlement: DelegationSettlement,
   ): Promise<AgentTaskResult> {
     switch (settlement.outcome) {
-      case "delegation_not_found":
       case "delegation_already_settled":
+        if (currentDelivery()?.recovered) {
+          const { authorized } = await authorizeResumeRun(this.#runIngress, command, settlement.runId, this.#runService);
+          return this.#forwardRun(authorized, context, settlement.afterEventId ?? 0);
+        }
+        // 已结算回调是正常重投，不产生答案或结束共享用户流。
+        context.setStreamFinished(true);
+        return completedResult();
+      case "delegation_not_found":
       case "callback_expired":
       case "run_not_resumable":
       case "run_not_found":
@@ -341,6 +349,7 @@ class DelegationCallbackResumeHandler {
           this.#runIngress,
           command,
           settlement.runId,
+          this.#runService,
         );
         return await this.#forwardRun(authorized, context, settlement.afterEventId ?? 0);
       }
@@ -454,7 +463,7 @@ class ResumeRunTerminator {
     let originalExecutionError = "";
     try {
       await this.#runService.cancelRun(runId, reason);
-      this.#releaseActiveRun(runId);
+      await this.#releaseActiveRun(runId);
     } catch (error) {
       cancellationError = toError(error).message;
     }
@@ -585,7 +594,17 @@ async function authorizeResumeRun(
   runIngress: WorkerRunIngress,
   command: ResumeCommand,
   runId: string,
+  recoveryService?: WorkerRunService,
 ): Promise<{ authorized: AuthorizedRunContext; beyondToken: string }> {
+  if (currentDelivery()?.recovered && recoveryService) {
+    const run = await recoveryService.getRun(runId);
+    const session = run ? await recoveryService.getSession(run.sessionId) : undefined;
+    if (run && session && run.ingressContext?.externalSessionId === command.header.sessionId &&
+        run.ingressContext?.traceId === command.header.traceId &&
+        (!command.header.userCode || session.owner.userCode === command.header.userCode)) {
+      return { authorized: { run, session }, beyondToken: "" };
+    }
+  }
   const beyondToken = requireBeyondToken(command);
   const systemCode = commandString(command, "System-Code");
   const authorized = await runIngress.authorizeRun(runId, {

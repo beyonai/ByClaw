@@ -72,8 +72,6 @@ export interface AppConfig {
   runLeaseMs: number;
   runQueuePollMs: number;
   piSessionCacheDirectory?: string;
-  piSessionCacheMaxEntries: number;
-  piSessionCacheIdleTtlMs: number;
   piProvider?: string;
   piModel?: string;
   arkBaseUrl?: string;
@@ -394,20 +392,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(env.PI_SESSION_CACHE_DIR
       ? { piSessionCacheDirectory: nonEmpty(env.PI_SESSION_CACHE_DIR, "PI_SESSION_CACHE_DIR") }
       : {}),
-    piSessionCacheMaxEntries: integer(
-      env.PI_SESSION_CACHE_MAX_ENTRIES ??
-        String(defaults.piSession.cacheMaxEntries),
-      "PI_SESSION_CACHE_MAX_ENTRIES",
-      1,
-      10_000,
-    ),
-    piSessionCacheIdleTtlMs: integer(
-      env.PI_SESSION_CACHE_IDLE_TTL_MS ??
-        String(defaults.piSession.cacheIdleTtlMs),
-      "PI_SESSION_CACHE_IDLE_TTL_MS",
-      1_000,
-      86_400_000,
-    ),
     piProvider: nonEmpty(
       env.PI_PROVIDER ?? defaults.pi.provider,
       "PI_PROVIDER",

@@ -106,7 +106,7 @@ export interface LeaderRunResult {
   text: string;
 }
 
-/** 每个业务 Session 独享并复用的 Pi Leader 会话协议。 */
+/** 单次执行独享的 Pi Leader；每次从数据库恢复业务 Session 的连续上下文。 */
 export interface LeaderSession {
   /** 当前实例加载的数据库 committed context revision。 */
   readonly contextRevision: number;
@@ -114,7 +114,7 @@ export interface LeaderSession {
   run(input: LeaderRunInput): Promise<LeaderRunResult>;
   /** Pi settled 后导出原生 header + append-only entries。 */
   checkpoint(): PiSessionCheckpoint | undefined;
-  /** checkpoint 原子提交成功后推进本地缓存版本。 */
+  /** checkpoint 原子提交成功后记录本次执行已提交的版本。 */
   markCommitted(revision: number): void;
   /** 中止当前模型生成和正在执行的工具。 */
   abort(): Promise<void>;
@@ -137,7 +137,7 @@ export interface LeaderModelSelection {
 
 /** Leader 会话的创建和健康检查 Port。 */
 export interface LeaderSessionFactory {
-  /** 为指定业务 Session 创建独立、可复用的 Pi 会话。 */
+  /** 为指定业务 Session 从权威存储创建独立的执行会话。 */
   create(
     sessionId: string,
     model?: LeaderModelSelection,

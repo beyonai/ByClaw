@@ -83,7 +83,7 @@ packages/by-conductor/            Orchestration core + Repository/Connector SPI 
   src/context/                    ContextCompiler + ordered processors (see "Context engineering")
   src/agent-capability.ts         capability-card compile domain
   src/attachments.ts, attachment-inspection.ts   controlled attachment reading tool
-  src/leader-session-cache.ts     single-flight + LRU + TTL cache of Pi LeaderSessions
+  src/application/run-service.ts restores each attempt from the authoritative database checkpoint
   src/pi-session-checkpoint.ts    Pi header + append-only entries checkpoint model
   src/execution-credentials.ts    short-lived Beyond-Token credential domain
   src/run-service.ts, delegation-service.ts, pi-leader.ts, leader.ts
@@ -132,7 +132,7 @@ INBOUND (two paths, same ingress chain)
   RunService claim loop (FOR UPDATE SKIP LOCKED)
     → claims earliest non-terminal Run per Session (per-Session FIFO, cross-Session parallel)
     → acquires Session lease + monotonic fencing token; bumps attemptNo; emits run.attempt
-    → lazily opens/reuses a Pi LeaderSession (LeaderSessionCache: single-flight + LRU + TTL)
+    → restores a fresh Pi LeaderSession from the committed PostgreSQL checkpoint for each attempt
   PiLeaderSession.run           ContextCompiler builds per-turn system context; tools resolved from snapshot
   delegateAgent execute         bridges into DelegationService (re-checks authorization vs snapshot)
         ↓ OUTBOUND
@@ -172,7 +172,7 @@ OUT (two paths, same RunEvent stream, both DB-backed)
 
 - **PostgreSQL is the only production store.** Production never assembles `InMemory*`. Anything touching Run status, lease, fencing, checkpoint, or transaction boundaries must ship with tests — do not change execution semantics under the guise of "reorganizing."
 - **Per-Session FIFO, cross-Session parallel.** The DB queue claims only the earliest non-terminal Run of each Session. There is no global lock.
-- **`sessionId` is the multi-turn handle; `runId` is one execution.** One Session owns one reused Pi LeaderSession. Missing and foreign Session/Run IDs both return 404. State is durable, but a Run's in-flight execution lives only on the instance currently holding its lease.
+- **`sessionId` is the multi-turn handle; `runId` is one execution.** Each attempt creates a fresh Pi LeaderSession from the Session checkpoint in PostgreSQL. Missing and foreign Session/Run IDs both return 404. State is durable, but a Run's in-flight execution lives only on the instance currently holding its lease.
 - **Session is the authorization root.** `Session.owner` is V1 = `userCode` only (`userName` is display-only; `tenantId`/`namespace`/`System-Code` are NOT used for V1 authorization — the DB reserves the columns for a future explicit owner-version migration). Run access resolves `Run.sessionId` and compares the full owner. A `runId` is a locator, never an authorization credential.
 - **Authorization is fetched at ingress and re-checked at execution.** `RunIngressService` pulls the agent snapshot (usesPermissions=true only) when the Run is created; `DelegationService.execute` re-validates `agentId` against that snapshot before touching the Connector. The Leader can never select an agent outside the snapshot.
 - **Leader sees no transport detail.** `AgentProfile.execution` (connectorId, targetId) is never injected into the Pi prompt — only `id/code/name/description` are. The agent allowlist is injected as a per-turn system context region, never written to the long-term Pi transcript.
@@ -190,7 +190,7 @@ Schema lives in `packages/storage-postgres/src/migrations.ts` (prefix `byai_supe
 
 - **Migrations do not auto-run in production.** Use `pnpm db:migrate` (recommended: a separate release job). `DB_MIGRATE_ON_START=true` is for controlled environments only.
 - **Run queue**: `FOR UPDATE SKIP LOCKED` claims the earliest non-terminal Run whose Session has no earlier non-terminal Run. Claim writes instance ID, lease expiry, attempt, and a monotonic fencing token.
-- **Pi context**: stored as native Pi header + append-only entries (not flattened messages). New entries are staged `PENDING` for the current Run/attempt and promoted to `COMMITTED` in the Run's success transaction; failed/canceled attempts discard `PENDING`. The local JSONL is a disposable instance-private cache — on cache miss, instance switch, or redeploy, it is rebuilt from PostgreSQL via `SessionManager.open()`.
+- **Pi context**: stored as native Pi header + append-only entries (not flattened messages). New entries are staged `PENDING` for the current Run/attempt and promoted to `COMMITTED` in the Run's success transaction; failed/canceled attempts discard `PENDING`. The local JSONL is an attempt-private SDK working file, rebuilt from PostgreSQL via `SessionManager.open()` on every attempt and removed on disposal. It is never used as a cross-run cache.
 - **Recovery by `executionStage`** (`QUEUED` / Leader running / Connector waiting / Leader synthesizing) re-derives work from committed Pi context + persisted Delegation `externalRef`/cursor. The code paths exist; production sign-off still requires actually killing an instance in each stage and proving takeover (see `.dev/progress/CURRENT.md`).
 - **Compatibility note**: SQL upserts use an advisory-lock + update/insert pattern that works on both standard PostgreSQL and the local openGauss test env (which lacks `LISTEN` — tests set `DB_EVENT_LISTEN_ENABLED=false` and poll). Standard PostgreSQL keeps `LISTEN/NOTIFY` on by default.
 
@@ -208,7 +208,7 @@ Adding a new context region = a new processor in this pipeline, not a prompt str
 
 ## Pi Leader configuration
 
-`packages/by-conductor/src/pi-leader.ts`. Extensions, skills, prompt templates, themes, and context files are disabled. Compaction is ON (`reserveTokens=16384`, `keepRecentTokens=20000`); retries (max 2) are on. `LeaderSessionCache`: single-flight open, LRU, default max 100 sessions, 30min idle TTL.
+`packages/by-conductor/src/pi-leader.ts`. Extensions, skills, prompt templates, themes, and context files are disabled. Compaction is ON (`reserveTokens=16384`, `keepRecentTokens=20000`); retries (max 2) are on. LeaderSessions and model bindings are not cached across Runs. Shared Worker delivery state and dispatch receipts live in Redis; PostgreSQL remains authoritative for business state and versions.
 
 **Tools** (`context/active-leader-tools.ts`):
 
@@ -244,7 +244,7 @@ Only one config file: `byclaw-super/.env` (copy from `.env.example`). The outer 
 Required / commonly overridden:
 
 - **Database** (required for a working service): `DB_USER`, `DB_PASS`; plus `DB_HOST`, `DB_PORT` (default 5432), `DB_DATABASE`, `DB_SCHEMA` (default `byai`), `DB_SSL`, `DB_POOL_MAX`, `DB_CONNECTION_TIMEOUT_MS`, `DB_IDLE_TIMEOUT_MS`, `DB_STATEMENT_TIMEOUT_MS`. `DB_TYPE` must be `postgresql`. `DB_MIGRATE_ON_START` (default false), `DB_EVENT_LISTEN_ENABLED` (default true; set false on DBs without `LISTEN`).
-- **Pi model**: the service reads the platform default LLM from Redis `byai:aimodel:typelist` field `LLM`; if Redis lookup or parsing fails it falls back to DeepSeek/Volcengine Ark using `PI_PROVIDER`, `PI_MODEL`, `ARK_BASE_URL`, and `ARK_API_KEY`. `PI_ENTRY_MAX_BYTES`, `PI_SESSION_MAX_BYTES`, `PI_SESSION_MAX_ENTRIES`, `PI_SESSION_CACHE_DIR` / `PI_SESSION_CACHE_MAX_ENTRIES` / `PI_SESSION_CACHE_IDLE_TTL_MS`.
+- **Pi model**: the service reads the platform default LLM from Redis `byai:aimodel:typelist` field `LLM`; if Redis lookup or parsing fails it falls back to DeepSeek/Volcengine Ark using `PI_PROVIDER`, `PI_MODEL`, `ARK_BASE_URL`, and `ARK_API_KEY`. `PI_ENTRY_MAX_BYTES`, `PI_SESSION_MAX_BYTES`, `PI_SESSION_MAX_ENTRIES`, `PI_SESSION_CACHE_DIR` (SDK working files only; cache size/TTL settings were removed).
 - **Redis** (must be the same Redis the OpenClaw `byai-channel` worker uses): `REDIS_HOST`, `REDIS_PORT`, `REDIS_DATABASE`/`REDIS_DB`, optional `REDIS_USERNAME`/`REDIS_PASSWORD`.
 - **Execution tuning**: `RUN_LEASE_MS`, `RUN_QUEUE_POLL_MS`, `DELEGATION_FIRST_ACTIVITY_TIMEOUT_MS`, `DELEGATION_IDLE_TIMEOUT_MS` (event-stream Connectors renew these boundaries with trusted activity), `DELEGATION_CALLBACK_TIMEOUT_MS` (absolute deadline after a callback Connector is accepted; `0` disables it, which is the current default), `BYCLAW_INSTANCE_ID` (defaults to `byclaw-super-{hostname}-{pid}`, or `BYCLAW_WORKER_ID` if set; must be unique per instance). Legacy `DELEGATION_TIMEOUT_MS` and `OPENCLAW_FIRST_EVENT_TIMEOUT_MS` remain fallback aliases for the idle and first-activity settings only.
 - **Worker**: `BYCLAW_WORKER_ENABLED` (default true) registers the process as a by-framework Worker under `BYCLAW_WORKER_AGENT_TYPE` (default `BY_SUPER`); `BYCLAW_WORKER_ID`, `BYCLAW_WORKER_MAX_CONCURRENCY`.

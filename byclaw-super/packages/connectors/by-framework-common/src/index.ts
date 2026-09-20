@@ -5,10 +5,8 @@ import {
   createRedis,
   type RedisConnectionConfig,
 } from "@byclaw/by-framework";
-import {
-  callAgent as frameworkCallAgent,
-  createRedisCallAgentDeps,
-} from "@byclaw/by-framework/dist/dispatch/dispatch_ask_agent.js";
+import { createIdempotentCallAgent, requestPendingDispatchCancellation } from "./idempotent-dispatch.js";
+import { RunCancellationRequestedError } from "@byclaw/by-conductor";
 import type {
   AgentConnector,
   ConnectorCapabilities,
@@ -39,6 +37,8 @@ export interface ByFrameworkCallAgentInput {
   parentMessageId?: string;
   routePolicy?: "FAIL_FAST" | "SEND_ANYWAY" | "WAKE_AND_WAIT" | "WAKE_AND_QUEUE" | "QUEUE_ONLY";
   availabilityTimeoutMs?: number;
+  /** Local execution ownership signal; never serialized into framework messages. */
+  signal?: AbortSignal;
 }
 
 export interface ByFrameworkCallAgentResult {
@@ -96,7 +96,7 @@ export class ByFrameworkConnector implements AgentConnector {
     this.#client = options.gatewayClient ?? new GatewayClient(registry, this.#redis);
     this.#callAgent =
       options.callAgent ??
-      ((input) => frameworkCallAgent(createRedisCallAgentDeps({ redis: this.#redis, registry }), input));
+      createIdempotentCallAgent(this.#redis, registry);
     this.#sourceAgentType = options.sourceAgentType ?? "BY_SUPER";
     this.#logger = options.logger;
   }
@@ -154,6 +154,7 @@ export class ByFrameworkConnector implements AgentConnector {
       response = await this.#callAgent({
         sessionId: childSessionId,
         traceId,
+        signal: context.signal,
         sourceAgentType: this.#sourceAgentType,
         defaultParentMessageId: request.delegationId,
         targetAgentType,
@@ -172,6 +173,20 @@ export class ByFrameworkConnector implements AgentConnector {
         availabilityTimeoutMs: 60000,
       });
     } catch (error) {
+      if (context.signal.reason instanceof RunCancellationRequestedError) {
+        // 即使发布确认丢失、start 尚未返回句柄，稳定 messageId 仍能定位 registry。
+        // registry 先于 XADD 初始化；取消 QUEUED 记录也会阻止稍后被 Worker 领取。
+        const cancellation = await this.#client.cancelTask({
+          messageId: childRequestMessageId,
+          sessionId: childSessionId,
+          reason: context.signal.reason.message,
+          requestedBy: "byclaw-super",
+          cancelMode: "force",
+        });
+        if (!["NOT_FOUND", "ALREADY_FINISHED", "CANCEL_REQUESTED"].includes(cancellation.status)) {
+          throw new Error(`by-framework pending dispatch cancellation failed: ${cancellation.status}`);
+        }
+      }
       this.#logger?.error(
         { ...dispatchFields, durationMs: Date.now() - dispatchStartedAt, error: errorMessage(error) },
         "调用 by-framework callAgent 异常",
@@ -195,7 +210,7 @@ export class ByFrameworkConnector implements AgentConnector {
       "by-framework callAgent 已受理子 Agent 调度",
     );
 
-    const cancel = this.#createCancel(response.messageId, childSessionId, targetAgentType);
+    const cancel = this.#createCancel(response.messageId, childSessionId, response.targetAgentType);
     const ref: ExternalExecutionRef = {
       connectorId: this.id,
       executionId: response.messageId,
@@ -203,7 +218,7 @@ export class ByFrameworkConnector implements AgentConnector {
         childSessionId,
         messageId: response.messageId,
         traceId,
-        targetAgentType,
+        targetAgentType: response.targetAgentType,
         userCode: request.userCode,
         sessionId: request.sessionId,
         delegationId: request.delegationId,
@@ -233,6 +248,20 @@ export class ByFrameworkConnector implements AgentConnector {
       completionMode: "callback",
       cancel: this.#createCancel(ref.executionId, childSessionId, targetAgentType),
     };
+  }
+
+  async cancelPending(delegationId: string, reason: string): Promise<void> {
+    const messageId = `${delegationId}:request`;
+    const route = await requestPendingDispatchCancellation(this.#redis, messageId);
+    if (!route) return;
+    const response = await this.#client.cancelTask({
+      messageId, sessionId: route.sessionId, targetAgentType: route.targetAgentType,
+      reason, requestedBy: "byclaw-super", cancelMode: "force",
+    });
+    // 路由可能已预留但尚未初始化 registry；持久化 tombstone 会阻止此后发布。
+    if (!["NOT_FOUND", "ALREADY_FINISHED", "CANCEL_REQUESTED"].includes(response.status)) {
+      throw new Error(`by-framework pending cancellation failed: ${response.status}`);
+    }
   }
 
   async health(): Promise<ConnectorHealth> {

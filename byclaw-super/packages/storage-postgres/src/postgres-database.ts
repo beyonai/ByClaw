@@ -1,5 +1,6 @@
 import {
   createPiSessionCheckpoint,
+  ExecutionOwnershipLostError,
   fingerprintGroupChatContext,
   isThinkingLevel,
   LEADER_CHECKPOINT_TOOL_NAMES,
@@ -370,6 +371,7 @@ export class PostgresRunRepository implements RunRepository {
 
   async save(run: Run): Promise<void> {
     await transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, run.id);
       await writeRun(client, this.schema, run);
     });
   }
@@ -380,6 +382,7 @@ export class PostgresRunRepository implements RunRepository {
     claim?: RunExecutionClaim,
   ): Promise<RunEvent> {
     return transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, run.id);
       if (claim) {
         await assertLease(client, this.schema, claim);
       }
@@ -407,6 +410,7 @@ export class PostgresRunRepository implements RunRepository {
     credential?: ExecutionCredential,
   ): Promise<RunEvent> {
     return transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, run.id);
       await writeRun(client, this.schema, run);
       if (credential) {
         await writeCredential(client, this.schema, credential);
@@ -424,6 +428,7 @@ export class PostgresRunRepository implements RunRepository {
     credential?: ExecutionCredential,
   ): Promise<RunEvent> {
     return transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, run.id);
       await client.query(
         `INSERT INTO ${table(this.schema, "sessions")}
            (id, owner_version, user_code, user_name, status, session_context,
@@ -447,6 +452,96 @@ export class PostgresRunRepository implements RunRepository {
       const stored = await appendRunEvent(client, this.schema, event);
       await notifyRunEvent(client, this.schema, event.runId);
       return stored;
+    });
+  }
+
+  /** Binding、首个 Session、Run 和消息幂等在同一事务中裁决，不使用进程缓存。 */
+  async createIngressRun(input: {
+    session: Session;
+    run: Run;
+    event: Omit<RunEvent, "eventId">;
+    credential?: ExecutionCredential;
+    binding: { source: string; userCode: string; externalSessionId: string };
+    externalMessageId: string;
+  }): Promise<{ session: Session; run: Run; created: boolean }> {
+    if (input.session.owner.userCode !== input.binding.userCode ||
+        input.event.runId !== input.run.id ||
+        (input.credential && input.credential.runId !== input.run.id)) {
+      throw new Error("Ingress persistence identity mismatch");
+    }
+    return transaction(this.pool, async (client) => {
+      const { binding } = input;
+      await advisoryLock(client, bindingLockKey(binding));
+      const existingBinding = await client.query<{ session_id: string }>(
+        `SELECT session_id FROM ${table(this.schema, "ingress_session_bindings")}
+          WHERE source = $1 AND owner_version = 1
+            AND user_code = $2 AND external_session_id = $3`,
+        [binding.source, binding.userCode, binding.externalSessionId],
+      );
+      const boundSessionId = existingBinding.rows[0]?.session_id;
+      let session = input.session;
+      if (boundSessionId) {
+        const existingSession = await client.query(
+          `SELECT * FROM ${table(this.schema, "sessions")}
+            WHERE id = $1 AND owner_version = 1 AND user_code = $2`,
+          [boundSessionId, binding.userCode],
+        );
+        if (!existingSession.rows[0]) {
+          throw new Error("Ingress binding Session is missing or belongs to another owner");
+        }
+        session = mapSession(existingSession.rows[0]);
+        const duplicate = await client.query(
+          `SELECT * FROM ${table(this.schema, "runs")}
+            WHERE session_id = $1
+              AND ingress_context->>'parentMessageId' = $2
+            ORDER BY created_at, id LIMIT 1`,
+          [session.id, input.externalMessageId],
+        );
+        if (duplicate.rows[0]) {
+          return { session, run: mapRun(duplicate.rows[0]), created: false };
+        }
+      }
+      const run: Run = {
+        ...input.run,
+        sessionId: session.id,
+        baseContextRevision: session.contextRevision,
+        ingressContext: {
+          ...input.run.ingressContext,
+          parentMessageId: input.externalMessageId,
+        },
+      };
+      await lockRunEventSequence(client, run.id);
+      if (!boundSessionId) {
+        await client.query(
+          `INSERT INTO ${table(this.schema, "sessions")}
+             (id, owner_version, user_code, user_name, status, session_context,
+              session_context_version, context_revision, created_at, updated_at)
+           VALUES ($1, 1, $2, $3, 'ACTIVE', $4, $5, $6, $7, $8)`,
+          [
+            session.id,
+            session.owner.userCode,
+            session.owner.userName ?? null,
+            JSON.stringify(session.sessionContext),
+            session.sessionContextVersion,
+            session.contextRevision,
+            date(session.createdAt),
+            date(session.updatedAt),
+          ],
+        );
+        await client.query(
+          `INSERT INTO ${table(this.schema, "ingress_session_bindings")}
+             (source, owner_version, user_code, external_session_id, session_id, created_at, updated_at)
+           VALUES ($1, 1, $2, $3, $4, $5, $5)`,
+          [binding.source, binding.userCode, binding.externalSessionId, session.id, date(run.createdAt)],
+        );
+      }
+      await writeRun(client, this.schema, run);
+      if (input.credential) {
+        await writeCredential(client, this.schema, input.credential);
+      }
+      await appendRunEvent(client, this.schema, input.event);
+      await notifyRunEvent(client, this.schema, run.id);
+      return { session, run, created: true };
     });
   }
 
@@ -510,6 +605,28 @@ export class PostgresRunRepository implements RunRepository {
     );
     return result.rows[0] ? mapRun(result.rows[0]) : undefined;
   }
+
+  /** 仅供可信入站控制面恢复丢失的路由；无 owner 时拒绝歧义匹配。 */
+  async findIngressRun(input: {
+    externalSessionId: string;
+    externalMessageId: string;
+    userCode?: string;
+  }): Promise<Run | undefined> {
+    const result = await this.pool.query(
+      `SELECT r.* FROM ${table(this.schema, "runs")} r
+         JOIN ${table(this.schema, "sessions")} s ON s.id = r.session_id
+        WHERE r.ingress_context->>'externalSessionId' = $1
+          AND r.ingress_context->>'parentMessageId' = $2
+          AND s.owner_version = 1
+          AND ($3::text IS NULL OR s.user_code = $3)
+        ORDER BY r.created_at, r.id LIMIT 2`,
+      [input.externalSessionId, input.externalMessageId, input.userCode ?? null],
+    );
+    if (result.rows.length > 1) {
+      throw new Error("Ambiguous ingress Run route");
+    }
+    return result.rows[0] ? mapRun(result.rows[0]) : undefined;
+  }
 }
 
 export class PostgresDelegationRepository implements DelegationRepository {
@@ -523,6 +640,7 @@ export class PostgresDelegationRepository implements DelegationRepository {
     claim?: RunExecutionClaim,
   ): Promise<void> {
     await transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, delegation.runId);
       if (claim) {
         await assertLease(client, this.schema, claim);
       }
@@ -536,6 +654,7 @@ export class PostgresDelegationRepository implements DelegationRepository {
     claim?: RunExecutionClaim,
   ): Promise<RunEvent> {
     return transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, delegation.runId);
       if (claim) {
         await assertLease(client, this.schema, claim);
       }
@@ -813,20 +932,27 @@ implements IngressSessionBindingRepository {
         input.sessionId,
         date(input.now),
       ];
-      await advisoryLock(
-        client,
-        `binding:${input.source}:${input.userCode}:${input.externalSessionId}`,
-      );
-      const updated = await client.query(
-        `UPDATE ${table(this.schema, "ingress_session_bindings")}
-            SET session_id = $4, updated_at = $5
+      await advisoryLock(client, bindingLockKey(input));
+      const existing = await client.query<{ session_id: string }>(
+        `SELECT session_id FROM ${table(this.schema, "ingress_session_bindings")}
           WHERE source = $1
             AND owner_version = 1
             AND user_code = $2
             AND external_session_id = $3`,
-        values,
+        values.slice(0, 3),
       );
-      if (updated.rowCount === 0) {
+      if (existing.rows[0] && existing.rows[0].session_id !== input.sessionId) {
+        throw new Error("Ingress Session binding already exists; rebinding is not allowed");
+      }
+      if (!existing.rows[0]) {
+        const ownedSession = await client.query(
+          `SELECT 1 FROM ${table(this.schema, "sessions")}
+            WHERE id = $1 AND owner_version = 1 AND user_code = $2`,
+          [input.sessionId, input.userCode],
+        );
+        if (ownedSession.rowCount !== 1) {
+          throw new Error("Ingress binding Session is missing or belongs to another owner");
+        }
         await client.query(
           `INSERT INTO ${table(this.schema, "ingress_session_bindings")} (
              source, owner_version, user_code, external_session_id, session_id,
@@ -883,83 +1009,115 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
                  AND active.lease_expires_at > clock_timestamp()
             )
           ORDER BY r.created_at, r.id
-          FOR UPDATE OF r SKIP LOCKED
-          LIMIT 1`,
+          LIMIT 64`,
         [CLAIMABLE_RUN_STATUSES, NON_TERMINAL_RUN_STATUSES],
       );
-      const row = candidate.rows[0];
-      if (!row) {
-        return undefined;
-      }
-      const attemptNo = Number(row.attempt_no) + 1;
-      await advisoryLock(client, `lease:${row.session_id}`);
-      let lease = await client.query<{
-        fencing_token: number | string;
-        lease_expires_at: Date | string;
-      }>(
-        `UPDATE ${table(this.schema, "session_execution_leases")}
-            SET owner_instance_id = $2,
-                fencing_token = fencing_token + 1,
-                lease_expires_at = clock_timestamp() + ($3 * interval '1 millisecond'),
-                heartbeat_at = clock_timestamp(),
-                run_id = $4,
-                attempt_no = $5
-          WHERE session_id = $1
-            AND lease_expires_at <= clock_timestamp()
-          RETURNING fencing_token, lease_expires_at`,
-        [row.session_id, instanceId, leaseMs, row.id, attemptNo],
-      );
-      if (lease.rowCount === 0) {
-        const existing = await client.query(
-          `SELECT 1 FROM ${table(this.schema, "session_execution_leases")}
-            WHERE session_id = $1`,
-          [row.session_id],
-        );
-        if (existing.rowCount) {
-          return undefined;
+      for (const proposed of candidate.rows) {
+        // All execution writes take the event lock, then the Session lease lock, before
+        // row locks. Recheck the optimistic candidate only after holding both locks.
+        if (!await tryAdvisoryLock(client, `byclaw-run-event:${proposed.id}`)) {
+          continue;
         }
-        lease = await client.query<{
+        if (!await tryAdvisoryLock(client, `byclaw-storage:lease:${proposed.session_id}`)) {
+          continue;
+        }
+        const selected = await client.query<{
+          id: string;
+          session_id: string;
+          attempt_no: number;
+        }>(
+          `SELECT r.id, r.session_id, r.attempt_no
+             FROM ${table(this.schema, "runs")} r
+            WHERE r.id = $1
+              AND r.status = ANY($2::text[])
+              AND NOT EXISTS (
+                SELECT 1 FROM ${table(this.schema, "runs")} earlier
+                 WHERE earlier.session_id = r.session_id
+                   AND earlier.status = ANY($3::text[])
+                   AND (earlier.created_at, earlier.id) < (r.created_at, r.id)
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM ${table(this.schema, "session_execution_leases")} active
+                 WHERE active.session_id = r.session_id
+                   AND active.lease_expires_at > clock_timestamp()
+              )
+            FOR UPDATE OF r SKIP LOCKED`,
+          [proposed.id, CLAIMABLE_RUN_STATUSES, NON_TERMINAL_RUN_STATUSES],
+        );
+        const row = selected.rows[0];
+        if (!row) {
+          continue;
+        }
+        const attemptNo = Number(row.attempt_no) + 1;
+        let lease = await client.query<{
           fencing_token: number | string;
           lease_expires_at: Date | string;
         }>(
-          `INSERT INTO ${table(this.schema, "session_execution_leases")} (
-             session_id, owner_instance_id, fencing_token, lease_expires_at,
-             heartbeat_at, run_id, attempt_no
-           ) VALUES (
-             $1, $2, 1, clock_timestamp() + ($3 * interval '1 millisecond'),
-             clock_timestamp(), $4, $5
-           )
-           RETURNING fencing_token, lease_expires_at`,
+          `UPDATE ${table(this.schema, "session_execution_leases")}
+              SET owner_instance_id = $2,
+                  fencing_token = fencing_token + 1,
+                  lease_expires_at = clock_timestamp() + ($3 * interval '1 millisecond'),
+                  heartbeat_at = clock_timestamp(),
+                  run_id = $4,
+                  attempt_no = $5
+            WHERE session_id = $1
+              AND lease_expires_at <= clock_timestamp()
+            RETURNING fencing_token, lease_expires_at`,
           [row.session_id, instanceId, leaseMs, row.id, attemptNo],
         );
+        if (lease.rowCount === 0) {
+          const existing = await client.query(
+            `SELECT 1 FROM ${table(this.schema, "session_execution_leases")}
+              WHERE session_id = $1`,
+            [row.session_id],
+          );
+          if (existing.rowCount) {
+            continue;
+          }
+          lease = await client.query<{
+            fencing_token: number | string;
+            lease_expires_at: Date | string;
+          }>(
+            `INSERT INTO ${table(this.schema, "session_execution_leases")} (
+               session_id, owner_instance_id, fencing_token, lease_expires_at,
+               heartbeat_at, run_id, attempt_no
+             ) VALUES (
+               $1, $2, 1, clock_timestamp() + ($3 * interval '1 millisecond'),
+               clock_timestamp(), $4, $5
+             )
+             RETURNING fencing_token, lease_expires_at`,
+            [row.session_id, instanceId, leaseMs, row.id, attemptNo],
+          );
+        }
+        const acquired = lease.rows[0];
+        if (!acquired) {
+          continue;
+        }
+        const fencingToken = integer(acquired.fencing_token);
+        await client.query(
+          `UPDATE ${table(this.schema, "runs")}
+              SET attempt_no = $2,
+                  lease_fencing_token = $3,
+                  base_context_revision = (
+                    SELECT context_revision
+                      FROM ${table(this.schema, "sessions")}
+                     WHERE id = $4
+                  ),
+                  version = version + 1,
+                  updated_at = clock_timestamp()
+            WHERE id = $1`,
+          [row.id, attemptNo, fencingToken, row.session_id],
+        );
+        return {
+          runId: row.id,
+          sessionId: row.session_id,
+          ownerInstanceId: instanceId,
+          attemptNo,
+          fencingToken,
+          leaseExpiresAt: milliseconds(acquired.lease_expires_at),
+        };
       }
-      const acquired = lease.rows[0];
-      if (!acquired) {
-        return undefined;
-      }
-      const fencingToken = integer(acquired.fencing_token);
-      await client.query(
-        `UPDATE ${table(this.schema, "runs")}
-            SET attempt_no = $2,
-                lease_fencing_token = $3,
-                base_context_revision = (
-                  SELECT context_revision
-                    FROM ${table(this.schema, "sessions")}
-                   WHERE id = $4
-                ),
-                version = version + 1,
-                updated_at = clock_timestamp()
-          WHERE id = $1`,
-        [row.id, attemptNo, fencingToken, row.session_id],
-      );
-      return {
-        runId: row.id,
-        sessionId: row.session_id,
-        ownerInstanceId: instanceId,
-        attemptNo,
-        fencingToken,
-        leaseExpiresAt: milliseconds(acquired.lease_expires_at),
-      };
+      return undefined;
     });
   }
 
@@ -971,6 +1129,8 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         WHERE session_id = $1
           AND owner_instance_id = $2
           AND fencing_token = $3
+          AND run_id = $5
+          AND attempt_no = $6
           AND lease_expires_at > clock_timestamp()
           AND EXISTS (
             SELECT 1 FROM ${table(this.schema, "runs")} r
@@ -982,6 +1142,8 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         claim.ownerInstanceId,
         claim.fencingToken,
         leaseMs,
+        claim.runId,
+        claim.attemptNo,
       ],
     );
     return result.rowCount === 1;
@@ -989,11 +1151,14 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
 
   async release(claim: RunExecutionClaim): Promise<void> {
     await this.pool.query(
-      `DELETE FROM ${table(this.schema, "session_execution_leases")}
+      `UPDATE ${table(this.schema, "session_execution_leases")}
+          SET lease_expires_at = '-infinity'::timestamptz
         WHERE session_id = $1
           AND owner_instance_id = $2
-          AND fencing_token = $3`,
-      [claim.sessionId, claim.ownerInstanceId, claim.fencingToken],
+          AND fencing_token = $3
+          AND run_id = $4
+          AND attempt_no = $5`,
+      [claim.sessionId, claim.ownerInstanceId, claim.fencingToken, claim.runId, claim.attemptNo],
     );
   }
 
@@ -1005,11 +1170,11 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
     claim?: RunExecutionClaim;
   }): Promise<{ runStatus: Run["status"]; suspended: boolean }> {
     return transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, input.runId);
       if (input.claim) {
         await assertLease(client, this.schema, input.claim);
       }
       // settleWaitingCallback 也采用 event lock -> Delegation/Run row locks，顺序必须一致。
-      await lockRunEventSequence(client, input.runId);
       const selected = await client.query<{
         delegation_status: string;
         run_status: Run["status"];
@@ -1093,7 +1258,12 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         [input.limit],
       );
       const expired: Array<{ runId: string; delegationId: string }> = [];
-      for (const candidateRef of candidateRefs.rows) {
+      // Different sweeps may see different deadline orderings. Lock shared Runs in
+      // one stable order so a batch cannot hold A while waiting on B and vice versa.
+      const orderedRefs = candidateRefs.rows.sort((left, right) =>
+        left.run_id < right.run_id ? -1 : left.run_id > right.run_id ? 1 : 0,
+      );
+      for (const candidateRef of orderedRefs) {
         // Resume/suspend/timeout 统一使用 event lock -> Delegation/Run row locks。
         // 先无锁找候选，再在锁内重查，避免旧实现 row lock -> event lock 的死锁窗口。
         await lockRunEventSequence(client, candidateRef.run_id);
@@ -1468,6 +1638,16 @@ implements ExecutionCredentialRepository {
 
   async save(credential: ExecutionCredential): Promise<void> {
     await transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, credential.runId);
+      const executable = await client.query(
+        `SELECT 1 FROM ${table(this.schema, "runs")}
+          WHERE id = $1
+            AND status NOT IN ('CANCELLING', 'COMPLETED', 'FAILED', 'CANCELLED')`,
+        [credential.runId],
+      );
+      if (executable.rowCount !== 1) {
+        throw new Error(`Run no longer accepts execution credentials: ${credential.runId}`);
+      }
       await writeCredential(client, this.schema, credential);
     });
   }
@@ -1478,18 +1658,24 @@ implements ExecutionCredentialRepository {
     fencingToken: number;
   }): Promise<ExecutionCredential | undefined> {
     const result = await this.pool.query(
-      `SELECT c.*
-         FROM ${table(this.schema, "run_execution_credentials")} c
-         JOIN ${table(this.schema, "runs")} r ON r.id = c.run_id
-         JOIN ${table(this.schema, "session_execution_leases")} l
+      `SELECT c.*,
+              COALESCE(l.owner_instance_id = $2
+                AND l.fencing_token = $3
+                AND l.fencing_token = r.lease_fencing_token
+                AND l.attempt_no = r.attempt_no
+                AND l.lease_expires_at > clock_timestamp(), false) AS lease_owned
+         FROM ${table(this.schema, "runs")} r
+         LEFT JOIN ${table(this.schema, "session_execution_leases")} l
            ON l.session_id = r.session_id AND l.run_id = r.id
-        WHERE c.run_id = $1
-          AND l.owner_instance_id = $2
-          AND l.fencing_token = $3
-          AND l.lease_expires_at > clock_timestamp()`,
+         LEFT JOIN ${table(this.schema, "run_execution_credentials")} c ON c.run_id = r.id
+        WHERE r.id = $1`,
       [input.runId, input.instanceId, input.fencingToken],
     );
-    return result.rows[0] ? mapCredential(result.rows[0]) : undefined;
+    const row = result.rows[0];
+    if (!row?.lease_owned) {
+      throw new ExecutionOwnershipLostError(input.runId);
+    }
+    return row.run_id ? mapCredential(row) : undefined;
   }
 
   async delete(runId: string): Promise<void> {
@@ -1635,6 +1821,7 @@ export class PostgresLeaderCheckpointStore implements LeaderCheckpointStore {
     validatePiSessionCheckpoint(input.checkpoint);
     validateCheckpointLimits(input.checkpoint, this.limits);
     await transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, input.runId);
       if (input.claim) {
         await assertExecutableLease(client, this.schema, input.claim);
       }
@@ -1713,6 +1900,7 @@ export class PostgresLeaderCheckpointStore implements LeaderCheckpointStore {
     validatePiSessionCheckpoint(input.checkpoint);
     validateCheckpointLimits(input.checkpoint, this.limits);
     return transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, input.runId);
       if (input.claim) {
         await assertLease(client, this.schema, input.claim);
       }
@@ -1858,6 +2046,7 @@ export class PostgresLeaderCheckpointStore implements LeaderCheckpointStore {
     claim?: RunExecutionClaim,
   ): Promise<void> {
     await transaction(this.pool, async (client) => {
+      await lockRunEventSequence(client, runId);
       if (claim) {
         await assertLease(client, this.schema, claim);
       }
@@ -2546,11 +2735,30 @@ async function advisoryLock(client: PoolClient, key: string): Promise<void> {
   );
 }
 
+/** Queue discovery must skip a busy Session rather than block unrelated Sessions. */
+async function tryAdvisoryLock(client: PoolClient, key: string): Promise<boolean> {
+  const result = await client.query<{ locked: boolean }>(
+    "SELECT pg_try_advisory_xact_lock(hashtext($1)::bigint) AS locked",
+    [key],
+  );
+  return result.rows[0]?.locked === true;
+}
+
+function bindingLockKey(input: {
+  source: string;
+  userCode: string;
+  externalSessionId: string;
+}): string {
+  return `binding:${input.source}:${input.userCode}:${input.externalSessionId}`;
+}
+
 async function assertLease(
   client: PoolClient,
   schema: string,
   claim: RunExecutionClaim,
 ): Promise<void> {
+  await lockRunEventSequence(client, claim.runId);
+  await advisoryLock(client, `lease:${claim.sessionId}`);
   const result = await client.query(
     `SELECT 1
        FROM ${table(schema, "session_execution_leases")} l
@@ -2558,16 +2766,19 @@ async function assertLease(
         AND l.run_id = $2
         AND l.owner_instance_id = $3
         AND l.fencing_token = $4
-        AND l.lease_expires_at > clock_timestamp()`,
+        AND l.attempt_no = $5
+        AND l.lease_expires_at > clock_timestamp()
+      FOR UPDATE OF l`,
     [
       claim.sessionId,
       claim.runId,
       claim.ownerInstanceId,
       claim.fencingToken,
+      claim.attemptNo,
     ],
   );
   if (result.rowCount !== 1) {
-    throw new Error(`Run lease fencing token lost: ${claim.runId}`);
+    throw new ExecutionOwnershipLostError(claim.runId);
   }
 }
 

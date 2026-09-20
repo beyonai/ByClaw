@@ -8,11 +8,11 @@
 - 多实例 Run claim、Session lease、heartbeat 与 fencing token；
 - 同 Session FIFO、不同 Session 并行及非终态 Run 接管；
 - `@earendil-works/pi-coding-agent@0.80.10` Leader；
-- Pi 原生 header + append-only entries 恢复、自动 compaction 和有界 Session cache；
+- 每次执行从 PostgreSQL 恢复 Pi 原生 header + append-only entries，支持自动 compaction；
 - 只包含 `delegateAgent`、`askUserQuestion`、`updateTaskPlan` 等平台白名单工具的安全工具集合；
 - 任务计划由 ByClaw BE 持久化并广播；计划仍为 `ACTIVE` 时 Leader 会自动续跑，不能把 Run 错误标记为完成；
 - `@byclaw/connector-by-framework-common` 公共传输层，以及 OpenClaw、Code 两个薄 Connector；
-- OpenClaw externalRef + Redis Stream cursor 恢复；
+- OpenClaw 稳定派发标识、Redis 原子派发去重和持久回调恢复；
 - 三方数字员工根据 `discoverMine` 返回信息自动选择 `INTERFACE`、`A2A`、`PAGE` 专用 Connector；
 - 专用数据库表短期保存执行凭证，Run 终态立即删除；
 - 默认注册为 by-framework `BY_SUPER` Worker，可通过 by-framework 发起入站任务；
@@ -431,7 +431,7 @@ curl -X POST http://127.0.0.1:3000/byclawSuper/v1/sessions/SESSION_ID/runs \
   }'
 ```
 
-同一 `sessionId` 的 Run 会复用同一个 Pi LeaderSession，并按 FIFO 执行；每轮都返回新的
+同一 `sessionId` 的 Run 按 FIFO 执行，每次从数据库已提交的 checkpoint 创建 Pi LeaderSession；每轮都返回新的
 `runId` 和 `eventsUrl`。同一用户可以创建多个互不共享普通上下文的 Session。
 
 读取 Session 历史消息：
@@ -629,13 +629,38 @@ BEYOND_TOKEN=token \
 pnpm smoke
 ```
 
+## 多实例部署与故障恢复
+
+Session、Run、Delegation、上下文版本、凭证和执行租约均以 PostgreSQL 为准。每次领取 Run
+后，从数据库恢复 Leader；结束后释放该 Leader，不复用进程内的历史上下文或模型绑定缓存。
+`PI_SESSION_CACHE_MAX_ENTRIES`、`PI_SESSION_CACHE_IDLE_TTL_MS` 已移除。
+`PI_SESSION_CACHE_DIR` 仅保留为 Pi SDK 当次执行的临时 JSONL 工作目录，不能作为恢复源。
+
+入站 binding、Session、Run、凭证和首个事件在同一事务创建；相同用户会话内重复的 Ask
+message ID 复用已有 Run。Session 租约释放后保留 fencing token，下一次领取继续递增；
+涉及 Run 的复合写入使用一致锁顺序，在事务内校验当前租约和 attempt，阻止旧实例写回。
+运行中失去租约或派发结果不确定时保留可恢复状态；服务正常停机也保留任务供其他实例接管。
+用户明确取消仍会传播到子任务。
+
+Redis 保存 by-framework 派发回执、Worker 投递租约、转发进度和取消路由。多个实例必须连接
+同一 PostgreSQL schema 和同一 Redis database，且每个进程的 `BYCLAW_WORKER_ID` 唯一。
+Worker pending 接管使用 `XPENDING IDLE` / `XCLAIM`，要求 Redis 6.2 或更高版本。
+Redis 属于投递恢复所需的共享状态，生产须配置持久化，不能作为可随意清空的缓存使用。
+数据库业务状态仍是权威来源；本次调整复用现有表，没有新增表或迁移。
+
+只有由 Worker pending 接管路径标记的历史消息才可复用数据库中已认证的 Run；新消息仍需
+完整验签和授权。模型资源每轮重新读取 BE/Redis，读取失败会明确失败，不回退到某个实例
+过去记住的配置。发布前应在真实 PostgreSQL、Redis 和下游 Worker 上验证滚动重启、进程
+强杀、网络中断及多轮回调，尤其是 Redis 持久化恢复和下游幂等行为。
+
 ## Current limitations
 
 - `Beyond-Token` 按已确认的部署安全边界明文短期保存在专用数据库表中；数据库访问控制、
   审计和备份保护由部署环境负责；
-- OpenClaw 使用稳定 `delegationId` 作为 message/trace ID 并支持 cursor resume，但
-  by-framework 是否对重复 `sendMessage` 做原子去重仍需在真实环境验证；进程恰好在外部接收任务、
-  数据库保存 externalRef 之前宕机，仍存在重复投递窗口；
+- OpenClaw/Code 的同一 Delegation 使用稳定 execution ID 和 Redis 原子派发回执；
+  回执与队列必须共同持久化，不能单独清理后重试旧任务。下游业务副作用仍需下游保证幂等；
+- Worker 输出采用至少一次投递：发送成功、转发进度尚未保存时宕机，接管可能重放最后一个片段；
+- 不支持恢复的三方 HTTP Connector 不会在失去租约后自动重复 POST；需由三方协议提供幂等/恢复能力；
 - QUEUED/RUNNING 的双实例竞争已有数据库集成覆盖；WAITING_AGENT/SYNTHESIZING 的真实
   kill/failover、LISTEN 重连和真实 Pi/OpenClaw 恢复仍需部署环境验收；
 - Artifact 内容持久化和本地 Spawn Connector 尚未实现；

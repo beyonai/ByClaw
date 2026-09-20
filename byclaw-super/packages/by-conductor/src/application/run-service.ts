@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { renderProjectContext } from "../context/processors/project-context.js";
 import {
   ATTACHMENT_INSPECTION_ERROR_CODES,
@@ -6,7 +7,7 @@ import {
 } from "../domain/attachment-inspection.js";
 import type { AttachmentResolver } from "../ports/attachment-resolver.js";
 import { DelegationService } from "./delegation-service.js";
-import { LeaderRunSuspendedError } from "./run-suspension.js";
+import { DelegationSuspendedError, LeaderRunSuspendedError } from "./run-suspension.js";
 import type { RunIngressContextV1 } from "../domain/run-ingress-context.js";
 import type {
   LeaderRunInput,
@@ -21,7 +22,11 @@ import type {
   TaskPlanCommand,
   TaskPlanSnapshot,
 } from "../domain/task-plan.js";
-import { LeaderSessionCache } from "./leader-session-cache.js";
+import {
+  ExecutionOwnershipLostError,
+  RunCancellationRequestedError,
+  isRecoverableExecutionError,
+} from "../domain/execution-ownership.js";
 import type {
   DelegationRepository,
   ExecutionCredentialRepository,
@@ -157,6 +162,11 @@ export interface CreateSessionRunInput extends CreateSessionInput {
   };
 }
 
+export interface CreateIngressRunInput extends CreateSessionRunInput {
+  binding: { source: string; externalSessionId: string };
+  externalMessageId: string;
+}
+
 type QueueEntry = { runId: string; metadata: Record<string, unknown> };
 
 const MAX_TASK_PLAN_CONTINUATIONS = 3;
@@ -164,7 +174,7 @@ const TASK_PLAN_CONTINUATION_MESSAGE = `The trusted runtime task plan is still a
 Continue the unfinished steps now. Do not repeat completed work. Call updateTaskPlan whenever progress changes.
 You may communicate progress and ask the user questions as needed. Report the actual outcome of this attempt.`;
 type SessionQueue = { running: boolean; entries: QueueEntry[] };
-type ActiveRun = { controller: AbortController; leader: LeaderSession };
+type ActiveRun = { controller: AbortController; leader?: LeaderSession };
 type PendingLeaderInteraction = {
   runId: string;
   resolve(response: UserInteractionResponse): void;
@@ -186,8 +196,6 @@ export interface RunServiceRuntimeOptions {
   leaseMs?: number;
   queuePollMs?: number;
   maxConcurrentRuns?: number;
-  leaderCacheMaxEntries?: number;
-  leaderCacheIdleTtlMs?: number;
   /** 是否扫描并执行子 Agent 终态回调截止时间；默认开启以兼容库调用。 */
   callbackTimeoutEnabled?: boolean;
   /**
@@ -201,16 +209,16 @@ export interface RunServiceRuntimeOptions {
 
 /**
  * 编排 Session 与 Run 的生命周期，并保证同一 Session 串行、不同 Session 并行。
- * 每个 Session 复用一个 Leader Session，以保留连续对话上下文。
+ * 每次执行从持久 checkpoint 创建独立 Leader，上下文版本以数据库为准。
  */
 export class RunService {
   readonly #queues = new Map<string, SessionQueue>();
-  readonly #leaderCache: LeaderSessionCache;
   readonly #active = new Map<string, ActiveRun>();
-  readonly #executionClaims = new Map<string, RunExecutionClaim>();
+  readonly #executionScope = new AsyncLocalStorage<RunExecutionClaim>();
   readonly #ephemeralMetadata = new Map<string, Record<string, unknown>>();
   readonly #pendingLeaderInteractions = new Map<string, PendingLeaderInteraction>();
   readonly #inFlightClaims = new Set<Promise<void>>();
+  readonly #executingRunIds = new Set<string>();
   readonly #persistentWaiting = new Set<string>();
   readonly #instanceId: string;
   readonly #leaseMs: number;
@@ -243,11 +251,6 @@ export class RunService {
     this.#maxConcurrentRuns = runtime.maxConcurrentRuns ?? 10;
     this.#attachmentResolver = runtime.attachmentResolver;
     this.#taskPlans = runtime.taskPlans;
-    this.#leaderCache = new LeaderSessionCache(leaders, {
-      maxEntries: runtime.leaderCacheMaxEntries ?? 100,
-      idleTtlMs: runtime.leaderCacheIdleTtlMs ?? 1_800_000,
-      now,
-    });
   }
 
   /** 启动持久队列轮询；纯内存测试路径无需显式启动。 */
@@ -378,6 +381,25 @@ export class RunService {
 
   /** 首个入口原子创建业务 Session、Run、run.created 和执行凭证。 */
   async createSessionRun(input: CreateSessionRunInput): Promise<Run> {
+    return this.#createSessionRun(input);
+  }
+
+  /** 同一外部会话并发入站及相同消息重投，均由数据库原子解析到唯一业务 Run。 */
+  async createIngressRun(input: CreateIngressRunInput): Promise<Run> {
+    if (!this.runs.createIngressRun) {
+      throw new Error("Atomic ingress Run persistence is not configured");
+    }
+    if (!input.binding.source.trim() || !input.binding.externalSessionId.trim() ||
+        !input.externalMessageId.trim()) {
+      throw new Error("Ingress source, Session and message ID are required");
+    }
+    return this.#createSessionRun(input, input);
+  }
+
+  async #createSessionRun(
+    input: CreateSessionRunInput,
+    ingress?: Pick<CreateIngressRunInput, "binding" | "externalMessageId">,
+  ): Promise<Run> {
     validateAgentList(input.agentList);
     const now = this.now();
     const session: Session = {
@@ -422,6 +444,22 @@ export class RunService {
         }
       : undefined;
     const credentialRepository = this.runtime.credentials;
+    if (ingress) {
+      const stored = await this.runs.createIngressRun!({
+        session,
+        run,
+        event,
+        ...(credential ? { credential } : {}),
+        binding: { ...ingress.binding, userCode: input.owner.userCode },
+        externalMessageId: ingress.externalMessageId,
+      });
+      if (stored.created) {
+        await this.#scheduleRun(stored.run, input.metadata);
+      } else {
+        void this.#kickPersistentQueue();
+      }
+      return stored.run;
+    }
     if (this.runs.createSessionWithRun) {
       await this.runs.createSessionWithRun(session, run, event, credential);
     } else {
@@ -508,6 +546,15 @@ export class RunService {
   /** 查询 Run 当前快照。 */
   async getRun(runId: string): Promise<Run | undefined> {
     return this.runs.get(runId);
+  }
+
+  /** 可信 Worker 控制面恢复消息到 Run 的路由；普通 HTTP 查询仍使用 getOwnedRun。 */
+  async findIngressRun(input: {
+    externalSessionId: string;
+    externalMessageId: string;
+    userCode?: string;
+  }): Promise<Run | undefined> {
+    return this.runs.findIngressRun?.(input);
   }
 
   async getOwnedRun(
@@ -653,7 +700,8 @@ export class RunService {
     // 回调可能早于旧执行提交 run.suspended。delegation.started 同样是可靠恢复边界，
     // 可避免 Resume 上下文从事件 0 重放 Super 的历史输出。
     return (
-      reversed.find((event) => event.type === "run.suspended") ??
+      reversed.find((event) =>
+        event.type === "run.suspended" && event.data.delegationId === delegationId) ??
       reversed.find(
         (event) =>
           event.type === "delegation.started" && event.data.delegationId === delegationId,
@@ -680,18 +728,16 @@ export class RunService {
     if (!run || TERMINAL_RUN_STATUSES.has(run.status)) {
       return run;
     }
-    if (run.status === "QUEUED" || run.status === "CREATED") {
-      return await this.#finishCancelled(run, reason);
-    }
-
+    // Even a queued snapshot can be claimed concurrently. Persist cancellation intent
+    // first, then cancel all known handles before publishing the terminal status.
     const cancelling = await this.#requestCancelling(run, reason);
     if (TERMINAL_RUN_STATUSES.has(cancelling.status)) {
       return cancelling;
     }
     const active = this.#active.get(runId);
-    active?.controller.abort(new Error(reason));
+    active?.controller.abort(new RunCancellationRequestedError(runId, reason));
     const [, delegationCancellation] = await Promise.allSettled([
-      active?.leader.abort() ?? Promise.resolve(),
+      active?.leader?.abort() ?? Promise.resolve(),
       this.delegationService.cancelRun(runId, reason),
     ]);
     if (delegationCancellation.status === "rejected") {
@@ -739,12 +785,14 @@ export class RunService {
       clearInterval(this.#pollTimer);
       this.#pollTimer = undefined;
     }
-    for (const active of this.#active.values()) {
-      active.controller.abort(new Error("service shutting down"));
-      await active.leader.abort().catch(() => undefined);
+    await this.#claimLoop;
+    for (const [runId, active] of this.#active) {
+      active.controller.abort(this.runtime.executionQueue
+        ? new ExecutionOwnershipLostError(runId, { cause: new Error("service shutting down") })
+        : new Error("service shutting down"));
+      await active.leader?.abort().catch(() => undefined);
     }
     await Promise.allSettled(this.#inFlightClaims);
-    await this.#leaderCache.dispose();
   }
 
   /** 持续 claim 可用 Run，单个执行不阻塞其他 Session。 */
@@ -769,20 +817,38 @@ export class RunService {
         if (!claim) {
           break;
         }
+        // 旧执行可能仍在等待模型/网络返回；它退出前不在同一进程叠加新的执行栈。
+        if (this.#executingRunIds.has(claim.runId)) {
+          await this.runtime.executionQueue!.release(claim).catch(() => undefined);
+          break;
+        }
+        this.#executingRunIds.add(claim.runId);
         this.#persistentActive += 1;
         let execution: Promise<void>;
-        execution = this.#executeClaim(claim)
+        execution = this.#executionScope.run(claim, () => this.#executeClaim(claim))
           // 数据库暂时不可用时保留非终态，lease 到期后允许其他实例重试。
-          .catch(() => undefined)
+          .catch((error: unknown) => {
+            this.runtime.logger?.warn({
+              runId: claim.runId,
+              attemptNo: claim.attemptNo,
+              error: error instanceof Error ? error.message : String(error),
+            }, "Run 执行中断，保留数据库状态等待重新领取");
+          })
           .finally(() => {
             this.#inFlightClaims.delete(execution);
+            this.#executingRunIds.delete(claim.runId);
             this.#persistentWaiting.delete(claim.runId);
             this.#persistentActive -= 1;
             void this.#kickPersistentQueue();
           });
         this.#inFlightClaims.add(execution);
       }
-    })().finally(() => {
+    })().catch((error: unknown) => {
+      this.runtime.logger?.error({
+        instanceId: this.#instanceId,
+        error: error instanceof Error ? error.message : String(error),
+      }, "领取 Run 失败，下次轮询重试");
+    }).finally(() => {
       this.#claimLoop = undefined;
     });
     return this.#claimLoop;
@@ -837,7 +903,7 @@ export class RunService {
     run: Run,
     metadata: Record<string, unknown> | undefined,
   ): Promise<void> {
-    if (metadata) {
+    if (metadata && !this.runtime.credentials) {
       this.#ephemeralMetadata.set(run.id, structuredClone(metadata));
     }
     if (this.runtime.executionQueue) {
@@ -866,21 +932,51 @@ export class RunService {
     if (!queue) {
       return;
     }
-    let retainEphemeralMetadata = false;
+    const controller = new AbortController();
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let heartbeatInFlight = false;
+    const renew = async () => {
+      if (heartbeatInFlight || controller.signal.aborted) {
+        return;
+      }
+      heartbeatInFlight = true;
+      try {
+        if (!(await queue.heartbeat(claim, this.#leaseMs))) {
+          // A lost lease only stops this attempt. A durable user cancellation applies
+          // to every attempt, including a remote start whose ref has not been saved yet.
+          const latest = await this.runs.get(claim.runId);
+          controller.abort(latest?.status === "CANCELLING" || latest?.status === "CANCELLED"
+            ? new RunCancellationRequestedError(claim.runId, latest.error)
+            : new ExecutionOwnershipLostError(claim.runId));
+        }
+      } catch (error) {
+        // 数据库不可用时无法确认执行权，安全停止本地；不把 Run 或远端任务判为取消。
+        controller.abort(new ExecutionOwnershipLostError(claim.runId, { cause: error }));
+        this.runtime.logger?.warn({ runId: claim.runId }, "Run 续租失败，停止本地执行等待接管");
+      } finally {
+        heartbeatInFlight = false;
+      }
+    };
     try {
       const run = await this.runs.get(claim.runId);
       if (!run || TERMINAL_RUN_STATUSES.has(run.status)) {
         return;
       }
-      this.#executionClaims.set(run.id, claim);
       if (run.status === "CANCELLING") {
+        await this.delegationService.cancelRun(run.id, "cancellation resumed after lease handoff");
         await this.#finishCancelled(
           run,
           "cancellation resumed after lease handoff",
         );
         return;
       }
-      let metadata = this.#ephemeralMetadata.get(run.id) ?? {};
+      this.#active.set(run.id, { controller });
+      await renew();
+      controller.signal.throwIfAborted();
+      // 包括凭证读取、模型工厂初始化和 checkpoint 恢复，全部处于续租保护内。
+      heartbeat = setInterval(() => { void renew(); }, Math.max(100, Math.floor(this.#leaseMs / 3)));
+      heartbeat.unref?.();
+      let metadata = this.runtime.credentials ? {} : this.#ephemeralMetadata.get(run.id) ?? {};
       if (this.runtime.credentials) {
         const credential = await this.runtime.credentials.loadForLease({
           runId: run.id,
@@ -912,18 +1008,17 @@ export class RunService {
           claim,
         );
       }
-      await this.#execute(run, metadata, claim);
-      const latest = await this.runs.get(claim.runId);
-      retainEphemeralMetadata = Boolean(
-        latest && !TERMINAL_RUN_STATUSES.has(latest.status),
-      );
+      controller.signal.throwIfAborted();
+      await this.#execute(run, metadata, claim, controller);
     } finally {
-      if (this.#executionClaims.get(claim.runId) === claim) {
-        this.#executionClaims.delete(claim.runId);
+      if (heartbeat) {
+        clearInterval(heartbeat);
       }
-      // callback/用户交互恢复会把同一个非终态 Run 再次入队，且不会重新携带入口
-      // metadata。单实例内需保留这份执行上下文，直到 Run 真正终结。
-      if (!retainEphemeralMetadata) {
+      if (this.#active.get(claim.runId)?.controller === controller) {
+        this.#active.delete(claim.runId);
+      }
+      if (this.runtime.credentials) {
+        // 活动调用栈退出即清理；下一 attempt 一律从数据库凭证恢复。
         this.#ephemeralMetadata.delete(claim.runId);
       }
       await queue.release(claim).catch(() => undefined);
@@ -962,6 +1057,7 @@ export class RunService {
     run: Run,
     metadata: Record<string, unknown>,
     claim?: RunExecutionClaim,
+    runController = new AbortController(),
   ): Promise<void> {
     // 持久队列会在接管时从凭证仓库重建 metadata。失败收口和 callback 恢复都只
     // 读取这个进程内副本；claim 释放时会立即删除，不进入 Run/Event/Pi 持久化。
@@ -975,22 +1071,16 @@ export class RunService {
       return;
     }
     let current = run;
-    let controller: AbortController | undefined;
-    let heartbeat: ReturnType<typeof setInterval> | undefined;
-    let leaderLease:
-      | Awaited<ReturnType<LeaderSessionCache["acquire"]>>
-      | undefined;
-    let dirtyLeader = false;
-    if (claim) {
-      this.#executionClaims.set(run.id, claim);
-    }
+    let leader: LeaderSession | undefined;
+    this.#active.set(run.id, { controller: runController });
 
     try {
-      leaderLease = await this.#leaderCache.acquire(
+      runController.signal.throwIfAborted();
+      leader = await this.leaders.create(
         session.id,
         latestLeaderModel(run),
       );
-      const leader = leaderLease.session;
+      runController.signal.throwIfAborted();
       const latest = await this.runs.get(run.id);
       if (!latest || TERMINAL_RUN_STATUSES.has(latest.status)) {
         return;
@@ -1001,22 +1091,7 @@ export class RunService {
           `Leader context revision ${leader.contextRevision} does not match Run base ${latest.baseContextRevision}`,
         );
       }
-      const runController = new AbortController();
-      controller = runController;
-      if (claim && this.runtime.executionQueue) {
-        heartbeat = setInterval(() => {
-          void this.runtime.executionQueue
-            ?.heartbeat(claim, this.#leaseMs)
-            .then((owned) => {
-              if (!owned && !runController.signal.aborted) {
-                runController.abort(new Error("Run lease fencing token lost"));
-              }
-            });
-        }, Math.max(1_000, Math.floor(this.#leaseMs / 3)));
-        heartbeat.unref?.();
-      }
       this.#active.set(run.id, { controller: runController, leader });
-      dirtyLeader = true;
       let leaderMessage = latest.input;
       if (recoveringStage === "USER_INTERACTION_WAITING") {
         const history = await this.events.list(latest.id);
@@ -1045,8 +1120,61 @@ Continue the original task using this response:
 ${JSON.stringify(response)}`;
         }
       }
+      current = await this.#setStatus(latest, "RUNNING");
       let recoveredDelegations: Delegation[] = [];
-      if (recoveringStage === "CONNECTOR_WAITING") {
+      if (latest.attemptNo > 1 || recoveringStage === "CONNECTOR_WAITING" || recoveringStage === "LEADER_SYNTHESIZING") {
+        // 接管必须先恢复已持久化的真实委派，不能依赖模型再次生成完全相同的工具参数。
+        const persistedDelegations = await this.delegations.listByRun(latest.id);
+        const history = await this.events.list(latest.id);
+        for (const delegation of persistedDelegations) {
+          if (TERMINAL_DELEGATION_STATUSES.has(delegation.status)) {
+            continue;
+          }
+          runController.signal.throwIfAborted();
+          const started = history.find((event) => event.type === "delegation.started" &&
+            event.data.delegationId === delegation.id);
+          const savedAttachments = started?.data.attachments;
+          if (!started && latest.attachments.length > 0 && !delegation.externalRef) {
+            throw new Error(`Cannot restore attachment selection for delegation: ${delegation.id}`);
+          }
+          const attachmentIds = Array.isArray(savedAttachments)
+            ? savedAttachments.map((attachment) => {
+                if (!attachment || typeof attachment !== "object" || Array.isArray(attachment) ||
+                    typeof attachment.id !== "string") {
+                  throw new Error(`Invalid persisted delegation attachment: ${delegation.id}`);
+                }
+                return attachment.id;
+              })
+            : [];
+          try {
+            await this.delegationService.execute({
+              session,
+              runId: latest.id,
+              traceId: latest.ingressContext?.traceId ?? latest.id,
+              agents: latest.agentList,
+              agentId: delegation.agentId,
+              recoverDelegationId: delegation.id,
+              task: delegation.task,
+              ...(delegation.expectedOutput ? { expectedOutput: delegation.expectedOutput } : {}),
+              attachments: resolveAttachmentSelection(latest.attachments, attachmentIds),
+              metadata: this.#delegationMetadata(latest, metadata),
+              signal: runController.signal,
+              ...(claim ? { leaseClaim: claim } : {}),
+              reuseCompleted: true,
+              onInputRequired: async (interactionId) => {
+                current = await this.#setStatus(current, "WAITING_USER", { interactionId, source: "by-framework" });
+              },
+              onInputResolved: async (interactionId) => {
+                current = await this.#setStatus(current, "WAITING_AGENT", { interactionId, resumed: true });
+              },
+            });
+          } catch (error) {
+            if (error instanceof DelegationSuspendedError) {
+              throw new LeaderRunSuspendedError(error.delegationId);
+            }
+            throw error;
+          }
+        }
         recoveredDelegations = (await this.delegations.listByRun(latest.id))
           .filter((delegation) => TERMINAL_DELEGATION_STATUSES.has(delegation.status));
         const completedDelegations = recoveredDelegations
@@ -1067,7 +1195,6 @@ the original task, dispatch only work that is still genuinely missing, and synth
 ${JSON.stringify(completedDelegations)}`;
         }
       }
-      current = await this.#setStatus(latest, "RUNNING");
       const taskPlanContext = this.#taskPlanContext(current, metadata);
       let taskPlanReady = false;
       let activeTaskPlan: TaskPlanSnapshot | undefined;
@@ -1199,21 +1326,10 @@ ${JSON.stringify(completedDelegations)}`;
             ...(delegationInput.expectedOutput
               ? { expectedOutput: delegationInput.expectedOutput }
               : {}),
-            metadata: {
-              ...metadata,
-              ...(current.ingressContext?.projectContext
-                ? { project_info: current.ingressContext.projectContext }
-                : {}),
-              ...(current.ingressContext?.externalSessionId
-                ? { externalSessionId: current.ingressContext.externalSessionId }
-                : {}),
-              ...(current.ingressContext?.parentMessageId
-                ? { parentMessageId: current.ingressContext.parentMessageId }
-                : {}),
-            },
+            metadata: this.#delegationMetadata(current, metadata),
             signal: delegationSignal,
             ...(claim ? { leaseClaim: claim } : {}),
-            ...(recoveringStage === "LEADER_SYNTHESIZING" || recoveringStage === "CONNECTOR_WAITING"
+            ...(recoveredDelegations.length > 0 || recoveringStage === "LEADER_SYNTHESIZING" || recoveringStage === "CONNECTOR_WAITING"
               ? { reuseCompleted: true }
               : {}),
             onInputRequired: async (interactionId) => {
@@ -1230,6 +1346,11 @@ ${JSON.stringify(completedDelegations)}`;
                 });
               }
             },
+          }).catch((error: unknown) => {
+            // Pi 把普通工具异常交给模型继续处理；接管/发布不确定错误必须停止整轮，
+            // 否则模型可能改写任务重新派发，或把尚未完成的委派误判为已完成。
+            if (isRecoverableExecutionError(error)) runController.abort(error);
+            throw error;
           });
           // 同步 Connector 返回了真实终态时，Leader 仍需继续使用工具结果。
           // 挂起会抛出 DelegationSuspendedError，因此不会执行到这里。
@@ -1261,7 +1382,9 @@ ${JSON.stringify(completedDelegations)}`;
             },
           });
           const response = await new Promise<UserInteractionResponse>((resolve, reject) => {
-            const interactionSignal = signal ?? runController.signal;
+            const interactionSignal = signal
+              ? AbortSignal.any([runController.signal, signal])
+              : runController.signal;
             const onAbort = () => {
               this.#pendingLeaderInteractions.delete(interactionId);
               reject(interactionSignal.reason ?? new Error("User interaction cancelled"));
@@ -1371,7 +1494,9 @@ ${JSON.stringify(completedDelegations)}`;
                   principal: session.owner,
                   credential,
                   mode: mode ?? "text",
-                  signal: signal ?? runController.signal,
+                  signal: signal
+                    ? AbortSignal.any([runController.signal, signal])
+                    : runController.signal,
                 });
               },
               ...(this.#attachmentResolver.materialize
@@ -1406,7 +1531,9 @@ ${JSON.stringify(completedDelegations)}`;
                         principal: session.owner,
                         credential,
                         destinationDirectory,
-                        signal: signal ?? runController.signal,
+                        signal: signal
+                          ? AbortSignal.any([runController.signal, signal])
+                          : runController.signal,
                       });
                     },
                   }
@@ -1453,8 +1580,8 @@ ${JSON.stringify(completedDelegations)}`;
       }
 
       if (runController.signal.aborted) {
-        await this.#finishLocallyCancelledRun(current, "run cancelled");
-        return;
+        // 某些模型在 abort 后仍正常 resolve；统一由 catch 区分用户取消和可接管中断。
+        runController.signal.throwIfAborted();
       }
       if (!result.text.trim()) {
         throw new Error("Leader returned an empty response");
@@ -1490,11 +1617,13 @@ ${JSON.stringify(completedDelegations)}`;
       } else {
         await this.#saveRunWithEvent(finished, completionEvent);
       }
-      dirtyLeader = false;
       this.#ephemeralMetadata.delete(finished.id);
       this.events.close(finished.id);
     } catch (error) {
-      if (error instanceof LeaderRunSuspendedError) {
+      if (isRecoverableExecutionError(error) || isRecoverableExecutionError(runController.signal.reason)) {
+        // 数据库及外部执行属于新 owner；旧栈不得写终态、失败计划或清除新 checkpoint。
+        return;
+      } else if (error instanceof LeaderRunSuspendedError) {
         await this.runtime.checkpoints
           ?.discardPending(current.id, current.attemptNo, claim)
           .catch(() => undefined);
@@ -1521,30 +1650,33 @@ ${JSON.stringify(completedDelegations)}`;
             },
           });
         }
-      } else if (controller?.signal.aborted) {
+      } else if (runController.signal.aborted) {
         await this.#finishLocallyCancelledRun(current, "run cancelled");
       } else {
         await this.#finishFailed(current, error instanceof Error ? error.message : String(error));
       }
     } finally {
-      if (heartbeat) {
-        clearInterval(heartbeat);
+      if (this.#active.get(run.id)?.controller === runController) {
+        this.#active.delete(run.id);
       }
-      this.#active.delete(run.id);
       for (const [interactionId, interaction] of this.#pendingLeaderInteractions) {
         if (interaction.runId === run.id) {
           this.#pendingLeaderInteractions.delete(interactionId);
         }
       }
-      leaderLease?.release();
-      if (dirtyLeader) {
-        await this.#leaderCache.evict(run.sessionId);
-      }
-      if (claim && this.#executionClaims.get(run.id) === claim) {
-        this.#executionClaims.delete(run.id);
-      }
+      await leader?.dispose();
       this.#persistentWaiting.delete(run.id);
     }
+  }
+
+  /** 只从可信 Run 快照和执行凭证构造计划归属，模型不能覆盖这些字段。 */
+  #delegationMetadata(run: Run, metadata: Record<string, unknown>): Record<string, unknown> {
+    return {
+      ...metadata,
+      ...(run.ingressContext?.projectContext ? { project_info: run.ingressContext.projectContext } : {}),
+      ...(run.ingressContext?.externalSessionId ? { externalSessionId: run.ingressContext.externalSessionId } : {}),
+      ...(run.ingressContext?.parentMessageId ? { parentMessageId: run.ingressContext.parentMessageId } : {}),
+    };
   }
 
   /** 只从可信 Run 快照和执行凭证构造计划归属，模型不能覆盖这些字段。 */
@@ -1683,7 +1815,7 @@ ${JSON.stringify(completedDelegations)}`;
       type: "run.status",
       data: { status, ...data },
     });
-    if (this.#executionClaims.has(updated.id)) {
+    if (this.#claimFor(updated.id)) {
       if (status === "WAITING_USER") {
         this.#persistentWaiting.add(updated.id);
         void this.#kickPersistentQueue();
@@ -1717,7 +1849,7 @@ ${JSON.stringify(completedDelegations)}`;
         ?.discardPending(
           finished.id,
           finished.attemptNo,
-          this.#executionClaims.get(finished.id),
+          this.#claimFor(finished.id),
         )
         .catch(() => undefined);
       try {
@@ -1744,23 +1876,16 @@ ${JSON.stringify(completedDelegations)}`;
   /** 幂等地将 Run 收敛到 FAILED，并关闭事件流。 */
   async #finishFailed(run: Run, error: string): Promise<Run> {
     const latest = await this.runs.get(run.id);
+    if (latest?.status === "CANCELLING") {
+      // A worker can observe the cancellation before its heartbeat aborts the model.
+      // Leave the durable intent intact for cancelRun or cancellation takeover.
+      return latest;
+    }
     if (latest && TERMINAL_RUN_STATUSES.has(latest.status)) {
       this.#ephemeralMetadata.delete(latest.id);
       return latest;
     }
     const runToFail = latest ?? run;
-    await this.#failActiveTaskPlan(runToFail).catch((taskPlanError) => {
-      this.runtime.logger?.warn(
-        {
-          runId: runToFail.id,
-          error:
-            taskPlanError instanceof Error
-              ? taskPlanError.message
-              : String(taskPlanError),
-        },
-        "Run 失败后的任务计划收口同步失败",
-      );
-    });
     const finished: Run = {
       ...runToFail,
       status: "FAILED",
@@ -1774,7 +1899,7 @@ ${JSON.stringify(completedDelegations)}`;
       ?.discardPending(
         finished.id,
         finished.attemptNo,
-        this.#executionClaims.get(finished.id),
+        this.#claimFor(finished.id),
       )
       .catch(() => undefined);
     try {
@@ -1798,10 +1923,28 @@ ${JSON.stringify(completedDelegations)}`;
       }
       throw saveError;
     }
+    // 先通过数据库所有权校验完成业务终态，再同步远端计划，旧实例不能抢先失败新任务。
+    await this.#failActiveTaskPlan(runToFail).catch((taskPlanError) => {
+      this.runtime.logger?.warn(
+        {
+          runId: runToFail.id,
+          error:
+            taskPlanError instanceof Error
+              ? taskPlanError.message
+              : String(taskPlanError),
+        },
+        "Run 失败后的任务计划收口同步失败",
+      );
+    });
     await this.runtime.credentials?.delete(finished.id).catch(() => undefined);
     this.#ephemeralMetadata.delete(finished.id);
     this.events.close(finished.id);
     return finished;
+  }
+
+  #claimFor(runId: string): RunExecutionClaim | undefined {
+    const claim = this.#executionScope.getStore();
+    return claim?.runId === runId ? claim : undefined;
   }
 
   /** PostgreSQL 走原子状态+事件事务，内存测试继续使用两个简单 Port。 */
@@ -1813,7 +1956,7 @@ ${JSON.stringify(completedDelegations)}`;
       return this.runs.saveWithEvent(
         run,
         event,
-        this.#executionClaims.get(run.id),
+        this.#claimFor(run.id),
       );
     }
     await this.runs.save(run);
@@ -1823,7 +1966,7 @@ ${JSON.stringify(completedDelegations)}`;
   async #appendRunEvent(
     event: Omit<RunEvent, "eventId">,
   ): Promise<RunEvent> {
-    const claim = this.#executionClaims.get(event.runId);
+    const claim = this.#claimFor(event.runId);
     if (claim && this.events.appendForClaim) {
       return this.events.appendForClaim(event, claim);
     }

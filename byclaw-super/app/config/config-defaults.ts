@@ -66,8 +66,6 @@ export const APP_CONFIG_DEFAULTS = {
     queuePollMs: 500,
   },
   piSession: {
-    cacheMaxEntries: 100,
-    cacheIdleTtlMs: 1_800_000,
     entryMaxBytes: 1_048_576,
     sessionMaxBytes: 16_777_216,
     sessionMaxEntries: 20_000,

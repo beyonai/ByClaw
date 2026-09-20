@@ -89,6 +89,11 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
   orchestrator?: OrchestratorRefV1;
 }
 
+export interface CreateIngressRunRequest extends CreateSessionRunRequest {
+  binding: { source: string; externalSessionId: string };
+  externalMessageId: string;
+}
+
 export interface AppendSessionRunRequest extends CreateSessionRunRequest {
   sessionId: string;
 }
@@ -113,8 +118,6 @@ interface RunOrchestrationSnapshot {
  * Session 是唯一授权根；Run 和 SSE 都通过 Run.sessionId 回溯 Session.owner。
  */
 export class RunIngressService {
-  readonly #lastKnownLeaderModels = new Map<string, LeaderModelSelection>();
-
   constructor(
     private readonly runService: RunService,
     private readonly verifyBeyondToken: BeyondTokenVerifier,
@@ -125,8 +128,13 @@ export class RunIngressService {
     private readonly orchestratorRuntimes?: OrchestratorRuntimeProvider,
   ) {}
 
-  /** 创建新 Session，并在其中创建首个 Run。 */
-  async createSessionRun(input: CreateSessionRunRequest): Promise<Run> {
+  /** 外部会话解析、首次 Session 创建和消息幂等由数据库同一事务完成。 */
+  async createIngressRun(input: CreateIngressRunRequest): Promise<Run> {
+    return this.createSessionRun(input);
+  }
+
+  /** 创建新 Session；Worker 的绑定与重复消息在持久仓库内原子处理。 */
+  async createSessionRun(input: CreateSessionRunRequest | CreateIngressRunRequest): Promise<Run> {
     const principal = await this.authenticate(input);
     const attachments = input.attachments ?? [];
     const message = resolveRunMessage(input.message, attachments);
@@ -159,7 +167,12 @@ export class RunIngressService {
         : {}),
       ...(input.traceId ? { traceId: input.traceId } : {}),
     });
-    const run = await this.runService.createSessionRun({
+    const create = "binding" in input
+      ? (prepared: Parameters<RunService["createSessionRun"]>[0]) => this.runService.createIngressRun({
+          ...prepared, binding: input.binding, externalMessageId: input.externalMessageId,
+        })
+      : (prepared: Parameters<RunService["createSessionRun"]>[0]) => this.runService.createSessionRun(prepared);
+    const run = await create({
       owner: principal,
       ...(input.context ? { context: input.context } : {}),
       message,
@@ -547,7 +560,7 @@ export class RunIngressService {
     };
   }
 
-  /** 每个新 Run 回源当前资源模型；失败时沿用该资源进程内最后一次有效选择。 */
+  /** 每轮回源模型配置；配置不可用时停止入口，避免不同实例静默选用不同模型。 */
   private async loadLeaderModel(
     input: CreateSessionRunRequest,
   ): Promise<LeaderModelSelection | undefined> {
@@ -559,7 +572,6 @@ export class RunIngressService {
     if (overrideModelId && this.resourceModels.resolveByModelId) {
       try {
         const override = await this.resourceModels.resolveByModelId(overrideModelId);
-        this.#lastKnownLeaderModels.set(resourceId, override);
         this.logger?.info(
           { resourceId, modelId: override.modelId },
           "会话级模型覆盖生效，本轮使用用户选择的模型",
@@ -578,28 +590,11 @@ export class RunIngressService {
         );
       }
     }
-    try {
-      const model = await this.resourceModels.resolve({
-        resourceId,
-        beyondToken: input.beyondToken,
-        ...(input.systemCode ? { systemCode: input.systemCode } : {}),
-      });
-      this.#lastKnownLeaderModels.set(resourceId, model);
-      return model;
-    } catch (error) {
-      const normalized = error instanceof Error ? error : new Error(String(error));
-      const fallback = this.#lastKnownLeaderModels.get(resourceId);
-      this.logger?.warn(
-        {
-          resourceId,
-          errorName: normalized.name,
-          errorMessage: normalized.message,
-          retainedLastKnownModel: Boolean(fallback),
-        },
-        "超级助手模型绑定不可用，本次沿用最后一次有效模型",
-      );
-      return fallback;
-    }
+    return this.resourceModels.resolve({
+      resourceId,
+      beyondToken: input.beyondToken,
+      ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+    });
   }
 
   /**

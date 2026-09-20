@@ -48,7 +48,7 @@ Resume 只完成子 Agent 回调，不会创建重复 Run。同一 owner scope �
 `POST /byclawSuper/v1/sessions` 接收必填 `message` 和可选的单次 Run 参数 `thinkingLevel`，返回
 `sessionId + runId`。`thinkingLevel` 支持 `off|minimal|low|medium|high|xhigh|max`，
 默认 `off`。后续向
-`POST /byclawSuper/v1/sessions/:sessionId/runs` 提交新消息，会复用同一个 Pi LeaderSession 并返回新的
+`POST /byclawSuper/v1/sessions/:sessionId/runs` 提交新消息，会从数据库 checkpoint 重建 Pi LeaderSession 并返回新的
 `runId`。`GET /byclawSuper/v1/sessions/:sessionId/messages` 从 Run 的 `input/finalAnswer`
 返回前端历史，
 支持 `limit` 和不透明 `before` 游标；不直接暴露 Pi 原生 entries。创建、追加、历史查询、
@@ -58,8 +58,8 @@ by-framework AskAgent 使用 `extraPayload.thinkingLevel` 传入同一参数，�
 当 AskAgent 带有 `extraPayload.agent_id` 时，每个新 Run 会通过 ByClaw BE
 `/open/api/v1/queryDigEmployeeDetail` 读取该超级助手 `prologue` 中的 `modelId`，再从 Redis
 `byai:aimodel:config` 解析模型运行配置。Run 只持久化模型 ID 和配置指纹，不保存模型密钥；
-同一 Session 的模型 ID 或配置指纹变化时，当前 Run 不受影响，下一 Run 会释放旧 Pi Session，
-并从已提交 checkpoint 恢复到新模型。BE/Redis 临时失败时优先沿用进程内最后一次有效绑定。
+同一 Session 的模型 ID 或配置指纹变化时，当前 Run 不受影响，下一 Run 会从已提交 checkpoint
+恢复到新模型。BE/Redis 读取模型资源失败时明确失败，不沿用进程内的旧绑定。
 服务会通过 Run 找到 Session，并在存储层按验签 JWT 中的 `userCode` 查询 owner；
 V1 不使用 tenantId、namespace 或 System-Code。不存在或越权统一返回 404。
 对外流式事件使用 ByClaw 的 `reasoningLog*`、`subAgent*`、`answer*` 和
@@ -83,6 +83,9 @@ V1 不使用 tenantId、namespace 或 System-Code。不存在或越权统一返�
 ## 状态
 
 当前已完成 HTTP/SSE 与 `BY_SUPER` Worker 双入口、PostgreSQL 真相源、Pi 原生 checkpoint、
-持久 Worker binding、多实例 Run lease/fencing、Run 执行凭证和 OpenClaw cursor resume。
+原子 Worker binding/Run 创建、多实例 Run lease/fencing、Run 执行凭证和 OpenClaw 持久回调恢复。
+Worker 投递租约、转发进度和取消路由保存在 Redis，pending 消息可由其他实例接管；
+正常停机只中止本实例执行，保留数据库 Run 和 pending 消息。重复 Ask 按原始 message ID 去重，
+重复 Resume 不结束正在使用的输出流。共享状态和部署要求见根目录 README 的多实例部署章节。
 上线前仍需完成真实 PostgreSQL + Pi + OpenClaw 的分阶段 kill/failover 验收。Artifact
 内容持久化属于后续里程碑。
