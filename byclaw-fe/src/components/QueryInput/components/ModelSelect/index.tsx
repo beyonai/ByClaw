@@ -1,7 +1,7 @@
-import { useIntl } from '@umijs/max';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useIntl, useSelector } from '@umijs/max';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AppstoreOutlined, CloudOutlined, LaptopOutlined, UserOutlined } from '@ant-design/icons';
-import { Select, Slider, Spin, Tabs, Tag, Empty } from 'antd';
+import { Select, Slider, Spin, Tabs, Tag, Empty, Tooltip } from 'antd';
 import { getMyModels, getPublicModels } from '@/pages/models/service';
 import {
   THINKING_LEVEL_DEFAULT_SIGNAL,
@@ -50,6 +50,29 @@ const reasoningOf = (item: any): ModelReasoningConfig | undefined => {
   return config && typeof config === 'object' ? (config as ModelReasoningConfig) : undefined;
 };
 
+const REASONING_LABEL_GAP = 12;
+
+/** Pick the smallest regular sampling stride whose visible labels no longer overlap. */
+export const reasoningLabelStrideFor = (trackWidth: number, labelWidths: number[], gap = REASONING_LABEL_GAP) => {
+  if (labelWidths.length < 2 || trackWidth <= 0) return 1;
+  const pointGap = trackWidth / (labelWidths.length - 1);
+  for (let stride = 1; stride < labelWidths.length; stride += 1) {
+    let previousRight = Number.NEGATIVE_INFINITY;
+    let overlaps = false;
+    for (let index = 0; index < labelWidths.length; index += stride) {
+      const center = pointGap * index;
+      const left = center - labelWidths[index] / 2;
+      if (left < previousRight + gap) {
+        overlaps = true;
+        break;
+      }
+      previousRight = center + labelWidths[index] / 2;
+    }
+    if (!overlaps) return stride;
+  }
+  return labelWidths.length;
+};
+
 /** Session model picker: desktop (local/mine/public) and web (mine/public) modes. */
 type Model = {
   id: string;
@@ -60,6 +83,10 @@ type Model = {
 };
 const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level, onLevelChange }) => {
   const intl = useIntl();
+  const authIdentity = useSelector(({ user }: any) => {
+    const userInfo = user?.userInfo;
+    return userInfo ? `${userInfo.sessionId || userInfo.userId || userInfo.id || 'authenticated'}` : '';
+  });
   const desktop = typeof window !== 'undefined' && Boolean(window.byclawDesktop);
   const enabled = desktop || allowWeb;
   // 网页端没有「本地」tab，默认停在「我的」，避免首次展开显示空列表。
@@ -72,6 +99,9 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [previewModelId, setPreviewModelId] = useState<string | undefined>(undefined);
+  const [reasoningLabelStride, setReasoningLabelStride] = useState(1);
+  const reasoningSliderFrameRef = useRef<HTMLDivElement>(null);
+  const reasoningLabelMeasureRef = useRef<HTMLDivElement>(null);
   // 悬停面板中的调整先按模型暂存；点击对应模型行后，模型与档位才一起生效。
   const [draftLevels, setDraftLevels] = useState<Record<string, string>>({});
   const storageKey = 'byclaw.desktop.selected-model';
@@ -81,15 +111,25 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
 
   useEffect(() => {
     if (!enabled) return undefined;
+    // `/chat` is rendered before login so the login modal can be displayed. Do not consume the
+    // one-shot web model load while requests still have no credentials; login updates Redux and
+    // changes authIdentity, which causes this effect to fetch the lists without a page refresh.
+    if (!desktop && !authIdentity) {
+      setGroups({ local: [], mine: [], public: [] });
+      setLoading(false);
+      return undefined;
+    }
     let cancelled = false;
     setLoading(true);
     const localModels = desktop ? window.byclawDesktop?.models?.local : undefined;
     const localPromise = localModels ? localModels().catch(() => []) : Promise.resolve([]);
-    Promise.all([
-      localPromise,
-      getMyModels({ pageNum: 1, pageSize: 100, modelType: 'LLM', status: 'ENABLED' }),
-      getPublicModels({ pageNum: 1, pageSize: 100, modelType: 'LLM' }),
-    ])
+    const myModelsPromise = authIdentity
+      ? getMyModels({ pageNum: 1, pageSize: 100, modelType: 'LLM', status: 'ENABLED' })
+      : Promise.resolve([]);
+    const publicModelsPromise = authIdentity
+      ? getPublicModels({ pageNum: 1, pageSize: 100, modelType: 'LLM' })
+      : Promise.resolve([]);
+    Promise.all([localPromise, myModelsPromise, publicModelsPromise])
       .then(([local, mine, shared]) => {
         if (cancelled) return;
         const normalize = (item: any, source: Model['source']): Model | null => {
@@ -135,7 +175,7 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
     return () => {
       cancelled = true;
     };
-  }, [desktop, enabled]);
+  }, [authIdentity, desktop, enabled]);
 
   // Preserve the original picker behavior: a new desktop session always gets
   // a usable default model, while an explicitly selected model is untouched.
@@ -182,7 +222,6 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
     [activeTab, groups]
   );
 
-  if (!enabled) return null;
   const isDefaultChoice = current === undefined || explicitDefault;
   const selectedModel = allModels.find((item) => item.id === current);
   // 右栏展示悬停中的模型，否则展示当前会话模型；两种状态都可直接调整。
@@ -202,16 +241,65 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
     reasoning: reasoningPanelModel?.reasoning,
     explicitLevel: draftLevel || (reasoningPanelIsCurrent ? explicitLevel : undefined),
   });
-  const reasoningMarks = reasoningLevels.reduce<Record<number, string>>((marks, item, index) => {
-    // 与后台模型编辑页的 supportedEfforts 回显一致，直接展示 low/high/xhigh 等原始档位名。
-    marks[index] = item;
+  const reasoningLevelIndex = Math.max(0, reasoningLevels.indexOf(reasoningLevel as never));
+  const reasoningMarks = reasoningLevels.reduce<Record<number, React.ReactNode>>((marks, item, index) => {
+    const hitArea = (
+      <span
+        className={styles.reasoningMarkHitArea}
+        role="button"
+        aria-label={item}
+        tabIndex={-1}
+        // Keep the Select option from treating a reasoning-node click as a model selection.
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (reasoningPanelModel) updateDraftLevel(reasoningPanelModel, item);
+        }}
+      />
+    );
+    marks[index] = (
+      <span className={styles.reasoningMark}>
+        <Tooltip title={item}>{hitArea}</Tooltip>
+        {index % reasoningLabelStride === 0 && <span className={styles.reasoningMarkLabel}>{item}</span>}
+      </span>
+    );
     return marks;
   }, {});
+  const reasoningLevelsKey = reasoningLevels.join('|');
+
+  useLayoutEffect(() => {
+    if (!open || reasoningLevels.length < 2) {
+      setReasoningLabelStride(1);
+      return undefined;
+    }
+    const frame = reasoningSliderFrameRef.current;
+    const measure = reasoningLabelMeasureRef.current;
+    // The application customizes Ant Design's prefixCls (for example `beyond-slider`),
+    // so locate the root through the accessible slider handle instead of a hard-coded class.
+    const slider = frame?.querySelector<HTMLElement>('[role="slider"]')?.parentElement;
+    if (!slider || !measure) return undefined;
+
+    const updateStride = () => {
+      const widths = Array.from(measure.children).map((node) => node.getBoundingClientRect().width);
+      const nextStride = reasoningLabelStrideFor(slider.getBoundingClientRect().width, widths);
+      setReasoningLabelStride((currentStride) => (currentStride === nextStride ? currentStride : nextStride));
+    };
+    updateStride();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(updateStride);
+    observer.observe(slider);
+    return () => observer.disconnect();
+  }, [open, reasoningLevelsKey, reasoningLevels.length]);
+
   const reasoningHint = draftLevel
     ? intl.formatMessage({ id: 'ui.model.reasoning.pending' })
     : reasoningPanelIsCurrent && explicitLevel
       ? intl.formatMessage({ id: 'ui.model.reasoning.applied' })
       : intl.formatMessage({ id: 'ui.model.reasoning.followingDefault' });
+  if (!enabled) return null;
   const tabs = [
     {
       key: 'mine',
@@ -309,7 +397,12 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
               )}
             </div>
             {reasoningPanelModel && (
-              <div className={styles.reasoning} data-testid="model-reasoning-panel">
+              <div
+                className={styles.reasoning}
+                data-testid="model-reasoning-panel"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={(event) => event.stopPropagation()}
+              >
                 <div className={styles.reasoningHeader}>
                   <span className={styles.reasoningTitle}>{reasoningPanelModel.label}</span>
                   <span className={styles.reasoningTags}>
@@ -340,20 +433,27 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
                         </a>
                       )}
                     </div>
-                    <Slider
-                      className={styles.reasoningSlider}
-                      min={0}
-                      max={reasoningLevels.length - 1}
-                      step={1}
-                      value={Math.max(0, reasoningLevels.indexOf(reasoningLevel as never))}
-                      tooltip={{ open: false }}
-                      marks={reasoningMarks}
-                      onChange={(index) => {
-                        const next = reasoningLevels[index as number];
-                        if (next) updateDraftLevel(reasoningPanelModel, next);
-                      }}
-                      aria-label={intl.formatMessage({ id: 'ui.model.reasoning.title' })}
-                    />
+                    <div className={styles.reasoningSliderFrame} ref={reasoningSliderFrameRef}>
+                      <Slider
+                        className={styles.reasoningSlider}
+                        min={0}
+                        max={reasoningLevels.length - 1}
+                        step={1}
+                        value={reasoningLevelIndex}
+                        tooltip={{ formatter: (index) => reasoningLevels[index ?? 0] }}
+                        marks={reasoningMarks}
+                        onChange={(index) => {
+                          const next = reasoningLevels[index as number];
+                          if (next) updateDraftLevel(reasoningPanelModel, next);
+                        }}
+                        aria-label={intl.formatMessage({ id: 'ui.model.reasoning.title' })}
+                      />
+                      <div className={styles.reasoningLabelMeasure} ref={reasoningLabelMeasureRef} aria-hidden="true">
+                        {reasoningLevels.map((item) => (
+                          <span key={item}>{item}</span>
+                        ))}
+                      </div>
+                    </div>
                     <div className={styles.reasoningHint} data-testid="model-reasoning-hint">
                       {reasoningHint}
                     </div>
