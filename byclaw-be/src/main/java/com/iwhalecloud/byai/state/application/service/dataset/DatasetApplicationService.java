@@ -721,6 +721,27 @@ public class DatasetApplicationService {
 
         validateDatasetReadablePermission(ssResource);
 
+        downloadResourceContent(ssResource, resourceId, directoryPath, response);
+    }
+
+    /**
+     * 下载项目云盘文件。
+     *
+     * <p>项目云盘的访问权限由项目成员关系控制，不复用普通知识库的资源授权校验；调用方必须先在项目应用服务中
+     * 校验项目可见性，并且只能传入该项目绑定的 cloudResourceId。</p>
+     *
+     * @param resourceId    项目云盘对应的知识库资源标识
+     * @param directoryPath 文件路径，/联网搜索API.md
+     * @param response      响应流
+     */
+    public void downloadProjectCloudFile(Long resourceId, String directoryPath, HttpServletResponse response) {
+        SsResource ssResource = loadDatasetResource(resourceId);
+        downloadResourceContent(ssResource, resourceId, directoryPath, response);
+    }
+
+    private void downloadResourceContent(SsResource ssResource, Long resourceId, String directoryPath,
+                                         HttpServletResponse response) {
+
         boolean directoryDownload = StringUtils.endsWith(StringUtils.trimToEmpty(directoryPath).replace('\\', '/'),
             "/");
         if (directoryDownload) {
