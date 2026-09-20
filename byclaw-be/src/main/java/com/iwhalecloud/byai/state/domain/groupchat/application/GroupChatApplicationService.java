@@ -154,11 +154,26 @@ public class GroupChatApplicationService {
                 UserRole.MEMBER.name()));
         }
         memberService.batchSave(members);
+        initializeMemberPermissions(session.getSessionId());
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
         response.setMembers(members);
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
+    }
+
+    /** 仅在建群事务中开启两项成员权限，存量群及后续手动关闭的设置保持不变。 */
+    private void initializeMemberPermissions(Long sessionId) {
+        for (String code : List.of(GroupChatAuthorizationService.MEMBER_INVITE_USER,
+            GroupChatAuthorizationService.MEMBER_ADD_AGENT)) {
+            ByaiSessionExt ext = new ByaiSessionExt();
+            ext.setExtId(sequenceService.nextVal());
+            ext.setSessionId(sessionId);
+            ext.setExtParamCode(code);
+            ext.setExtParamName(code);
+            ext.setExtParamValue(Boolean.TRUE.toString());
+            sessionExtService.save(ext);
+        }
     }
 
     private void addMember(ArrayList<ByaiSessionMember> members, Long sessionId, String type, Long id, String role) {

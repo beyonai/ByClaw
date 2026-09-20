@@ -8,6 +8,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -26,6 +27,7 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
@@ -70,6 +72,7 @@ class GroupChatCreationAndInvitationTest {
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
     private final WorkgroupTemplateService templates = mock(WorkgroupTemplateService.class);
+    private final SessionExtService sessionExt = mock(SessionExtService.class);
     private GroupChatApplicationService service;
 
     @BeforeEach
@@ -79,10 +82,10 @@ class GroupChatCreationAndInvitationTest {
         login.setUserId(10L);
         CurrentUserHolder.setLoginInfo(login);
         SequenceService sequence = mock(SequenceService.class);
-        when(sequence.nextVal()).thenReturn(200L, 201L, 202L, 203L, 204L);
+        when(sequence.nextVal()).thenReturn(200L, 201L, 202L, 203L, 204L, 205L, 206L);
         service = new GroupChatApplicationService(sessions, sequence, authorization, members,
             projects, projectMembers, messages, mock(GroupChatExecutionCoordinator.class),
-            events, mock(SessionExtService.class));
+            events, sessionExt);
         ReflectionTestUtils.setField(service, "workgroupTemplateService", templates);
         when(projects.createProject(any())).thenAnswer(invocation -> {
             ProjectDTO request = invocation.getArgument(0);
@@ -125,6 +128,7 @@ class GroupChatCreationAndInvitationTest {
         verify(projectMembers, never()).addMember(any(), any(), any());
         verify(sessions).save(result.getSession());
         verify(members).batchSave(result.getMembers());
+        assertDefaultMemberPermissions(result.getSession().getSessionId());
         ArgumentCaptor<ProjectDTO> projectRequest = ArgumentCaptor.forClass(ProjectDTO.class);
         verify(projects).createProject(projectRequest.capture());
         assertThat(projectRequest.getValue().getProjectName()).isEqualTo(request.getName());
@@ -151,6 +155,21 @@ class GroupChatCreationAndInvitationTest {
             .extracting(ByaiSessionMember::getMemObjId)
             .containsExactly(30L, 31L, 32L);
         verify(templates).resolveResourceIds(50L, 3L);
+        assertDefaultMemberPermissions(result.getSession().getSessionId());
+    }
+
+    private void assertDefaultMemberPermissions(Long sessionId) {
+        ArgumentCaptor<ByaiSessionExt> captured = ArgumentCaptor.forClass(ByaiSessionExt.class);
+        verify(sessionExt, times(2)).save(captured.capture());
+        assertThat(captured.getAllValues()).extracting(ByaiSessionExt::getExtParamCode)
+            .containsExactlyInAnyOrder(GroupChatAuthorizationService.MEMBER_INVITE_USER,
+                GroupChatAuthorizationService.MEMBER_ADD_AGENT);
+        assertThat(captured.getAllValues()).allSatisfy(ext -> {
+            assertThat(ext.getSessionId()).isEqualTo(sessionId);
+            assertThat(ext.getExtParamValue()).isEqualTo("true");
+            assertThat(ext.getExtParamName()).isEqualTo(ext.getExtParamCode());
+            assertThat(ext.getExtId()).isNotNull();
+        });
     }
 
     @Test
