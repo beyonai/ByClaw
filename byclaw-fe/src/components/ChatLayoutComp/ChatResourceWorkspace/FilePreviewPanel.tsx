@@ -9,6 +9,7 @@ import {
   isTextPreviewFile,
 } from '@/layout/sider/components/FileSiderPanel/utils';
 import { downloadChatFileArtifact } from '@/service/chatFileArtifact';
+import { downloadProjectCloudFile } from '@/service/devloop';
 import { downloadResourceFile } from '@/service/file';
 import { downloadFile as downloadFileBrowserFile } from '@/service/fileBrowser';
 import { getFileUrl } from '@/utils/file';
@@ -22,6 +23,7 @@ const PreViewFile = React.lazy(() =>
 interface FilePreviewPanelProps {
   fileName: string;
   resourceId?: string;
+  projectId?: string | number;
   path?: string;
   fileUrl?: string;
   sessionId?: string;
@@ -149,6 +151,7 @@ const getFilePreviewUrl = (fileUrl: string, resourcePath: string, baseFilePath?:
 const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   fileName,
   resourceId,
+  projectId,
   path,
   fileUrl,
   sessionId,
@@ -206,6 +209,14 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
     [resourceId, sessionId]
   );
 
+  const loadDatasetFile = useCallback(
+    (filePath: string) =>
+      source === 'dataset' && projectId !== undefined
+        ? downloadProjectCloudFile({ projectId, directoryPath: filePath })
+        : downloadResourceFile({ resourceId: resourceId!, directoryPath: filePath }),
+    [projectId, resourceId, source]
+  );
+
   const resolveRelativeResource = useCallback<MarkdownImageResolver>(
     async (imagePath) => {
       if (isExternalImagePath(imagePath)) {
@@ -233,10 +244,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       const loadFromSourcePath = () =>
         source === 'fileBrowser'
           ? loadFileBrowserFile(resolvedPath)
-          : downloadResourceFile({
-            resourceId: resourceId!,
-            directoryPath: resolvedPath,
-          });
+          : loadDatasetFile(resolvedPath);
       const request = (
         previewFileUrl
           ? loadFromFileUrl().catch(() =>
@@ -258,7 +266,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       markdownImageCacheRef.current.set(cacheKey, request);
       return request;
     },
-    [loadFileBrowserFile, previewFileUrl, resourceId, source, sourcePath]
+    [loadDatasetFile, loadFileBrowserFile, previewFileUrl, resourceId, source, sourcePath]
   );
 
   useEffect(() => {
@@ -280,16 +288,13 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return response.blob();
       }
       if (resourceId && sourcePath) {
-        // 会话、项目文件来自文件空间；知识库文件按知识库来源下载。
+        // 会话文件来自文件空间；项目云盘按项目维度下载；其它知识库文件按知识库来源下载。
         let response: any;
         try {
           response =
             source === 'fileBrowser'
               ? await loadFileBrowserFile(sourcePath)
-              : await downloadResourceFile({
-                resourceId,
-                directoryPath: sourcePath,
-              });
+              : await loadDatasetFile(sourcePath);
         } catch (error) {
           if (!previewFileUrl) throw error;
           const previewResponse = await fetch(previewFileUrl, { cache: 'no-store' });
@@ -332,6 +337,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
     content?.binary,
     fileName,
     fileUrl,
+    loadDatasetFile,
     loadFileBrowserFile,
     previewFileUrl,
     resourceId,

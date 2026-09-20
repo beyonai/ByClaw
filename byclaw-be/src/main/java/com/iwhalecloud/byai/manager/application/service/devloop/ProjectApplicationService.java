@@ -72,6 +72,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriComponentsBuilder;
+import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -313,6 +314,24 @@ public class ProjectApplicationService {
         Project project = projectService.findById(projectId);
         if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+        return project;
+    }
+
+    /**
+     * 项目云盘只允许项目可见用户读取：默认项目、项目创建者和项目成员均可访问。
+     */
+    private Project requireProjectCloudAccess(Long projectId) {
+        Project project = requireProject(projectId);
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        boolean visible = PROJECT_TYPE_DEFAULT.equalsIgnoreCase(project.getProjectType())
+            || Objects.equals(project.getCreateBy(), currentUserId)
+            || projectMemberService.isMember(projectId, currentUserId);
+        if (!visible) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.context.access.denied");
+        }
+        if (project.getCloudResourceId() == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "resource.notfound");
         }
         return project;
     }
@@ -694,6 +713,21 @@ public class ProjectApplicationService {
         map.put("repos", repos);
         map.put("resources", resources);
         return map;
+    }
+
+    /**
+     * 下载项目云盘中的文件或目录。
+     *
+     * <p>项目云盘底层复用知识库存储，但授权边界是项目可见性而不是知识库资源授权；先绑定项目再读取云盘资源，
+     * 避免把项目成员错误地当成知识库管理员或授权用户。</p>
+     *
+     * @param projectId     项目 ID
+     * @param directoryPath 云盘文件或目录路径
+     * @param response      响应流
+     */
+    public void downloadProjectCloudFile(Long projectId, String directoryPath, HttpServletResponse response) {
+        Project project = requireProjectCloudAccess(projectId);
+        datasetApplicationService.downloadProjectCloudFile(project.getCloudResourceId(), directoryPath, response);
     }
 
     /**
