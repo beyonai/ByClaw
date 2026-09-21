@@ -144,6 +144,7 @@ class GroupChatReadServiceTest {
         when(messageMapper.selectByMessageId(20L)).thenReturn(message);
         GroupChatListItemResponse state = new GroupChatListItemResponse();
         state.setLastReadMessageId(20L);
+        state.setUnreadCount(4);
         state.setUnreadMentionCount(2);
         state.setLatestMentionMessageId(25L);
         when(mentionMapper.selectMentionState(10L, 30L)).thenReturn(state);
@@ -153,6 +154,7 @@ class GroupChatReadServiceTest {
         verify(memberMapper).advanceReadCursor(eq(11L),
             eq(20L), any());
         assertThat(response.getLastReadMessageId()).isEqualTo(20L);
+        assertThat(response.getUnreadCount()).isEqualTo(4);
         assertThat(response.getUnreadMentionCount()).isEqualTo(2);
         assertThat(response.isHasUnreadMention()).isTrue();
         ArgumentCaptor<JSONObject> eventCaptor = ArgumentCaptor.forClass(JSONObject.class);
@@ -160,6 +162,7 @@ class GroupChatReadServiceTest {
             isNull());
         assertThat(eventCaptor.getValue().getString("sessionId")).isEqualTo("10");
         assertThat(eventCaptor.getValue().getString("lastReadMessageId")).isEqualTo("20");
+        assertThat(eventCaptor.getValue().getLongValue("unreadCount")).isEqualTo(4L);
         assertThat(eventCaptor.getValue().getLongValue("unreadMentionCount")).isEqualTo(2L);
     }
 

@@ -32,7 +32,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberSummary;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 
-/** 群列表未读 mention 查询与已读游标用例。 */
+/** 群列表未读消息、未读 mention 查询与已读游标用例。 */
 @Service
 public class GroupChatReadService {
     private static final int GROUP_AVATAR_MEMBER_LIMIT = 9;
@@ -92,6 +92,7 @@ public class GroupChatReadService {
         GroupChatReadStateResponse response = new GroupChatReadStateResponse();
         response.setSessionId(sessionId);
         response.setLastReadMessageId(state == null ? member.getLastReadMessageId() : state.getLastReadMessageId());
+        response.setUnreadCount(state == null ? 0 : state.getUnreadCount());
         response.setUnreadMentionCount(state == null ? 0 : state.getUnreadMentionCount());
         response.setLatestMentionMessageId(state == null ? null : state.getLatestMentionMessageId());
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -115,6 +116,7 @@ public class GroupChatReadService {
         event.put("sessionId", String.valueOf(response.getSessionId()));
         event.put("lastReadMessageId", response.getLastReadMessageId() == null
             ? null : String.valueOf(response.getLastReadMessageId()));
+        event.put("unreadCount", response.getUnreadCount());
         event.put("unreadMentionCount", response.getUnreadMentionCount());
         event.put("hasUnreadMention", response.isHasUnreadMention());
         event.put("latestMentionMessageId", response.getLatestMentionMessageId() == null

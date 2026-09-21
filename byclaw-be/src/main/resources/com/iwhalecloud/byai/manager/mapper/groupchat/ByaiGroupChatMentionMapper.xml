@@ -17,6 +17,7 @@
         <result column="latest_message_creator_id" property="latestMessageCreatorId" />
         <result column="latest_message_creator_name" property="latestMessageCreatorName" />
         <result column="last_read_message_id" property="lastReadMessageId" />
+        <result column="unread_count" property="unreadCount" />
         <result column="unread_message_count" property="unreadMessageCount" />
         <result column="unread_mention_count" property="unreadMentionCount" />
         <result column="latest_mention_message_id" property="latestMentionMessageId" />
@@ -44,6 +45,14 @@
     </insert>
 
     <sql id="MentionStateColumns">
+        COALESCE((
+            SELECT COUNT(1)
+            FROM byai_message unread_message
+            WHERE unread_message.session_id = session.session_id
+              AND unread_message.message_id &gt; COALESCE(member.last_read_message_id, 0)
+              AND unread_message.creator_id != #{userId}
+              AND unread_message.archived_at IS NULL
+        ), 0) AS unread_count,
         COALESCE((
             SELECT COUNT(1)
             FROM byai_group_chat_mention mention
@@ -87,6 +96,15 @@
                    FROM byai_message unread_message
                    WHERE unread_message.session_id = session.session_id
                      AND unread_message.message_id &gt; COALESCE(member.last_read_message_id, 0)
+                     AND unread_message.creator_id != #{userId}
+                     AND unread_message.archived_at IS NULL
+               ) AS unread_count,
+               (
+                   SELECT COUNT(1)
+                   FROM byai_message unread_message
+                   WHERE unread_message.session_id = session.session_id
+                     AND unread_message.message_id &gt; COALESCE(member.last_read_message_id, 0)
+                     AND unread_message.creator_id != #{userId}
                      AND unread_message.archived_at IS NULL
                ) AS unread_message_count,
                <include refid="MentionStateColumns" />

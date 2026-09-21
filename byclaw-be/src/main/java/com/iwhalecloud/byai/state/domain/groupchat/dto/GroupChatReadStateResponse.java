@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Getter;
 import lombok.Setter;
 
-/** 推进群聊已读游标后的权威 mention 状态。 */
+/** 推进群聊已读游标后的权威未读状态。 */
 @Getter
 @Setter
 public class GroupChatReadStateResponse {
@@ -15,6 +15,8 @@ public class GroupChatReadStateResponse {
 
     @JsonSerialize(using = ToStringSerializer.class)
     private Long lastReadMessageId;
+
+    private long unreadCount;
 
     private long unreadMentionCount;
 

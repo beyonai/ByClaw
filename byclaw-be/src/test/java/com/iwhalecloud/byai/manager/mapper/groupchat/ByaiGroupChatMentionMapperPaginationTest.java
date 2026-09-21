@@ -46,6 +46,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
             assertThat(groups.get(0).getLatestMessageId()).isEqualTo(99L);
             assertThat(groups.get(0).getLatestMessageContent()).isEqualTo("later timestamp but lower id");
             assertThat(groups.get(0).getLatestMessageMetadata()).isEqualTo("{\"resourceList\":[]}");
+            assertThat(groups.get(0).getUnreadCount()).isEqualTo(1L);
             assertThat(groups.get(0).getUnreadMentionCount()).isEqualTo(1L);
             assertThat(groups.get(0).getLatestMentionMessageId()).isEqualTo(100L);
         }
@@ -179,6 +180,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
                        (99, 10, 'later timestamp but lower id', '2026-09-11 13:00:00', 31, 'user 31', NULL),
                        (100, 10, 'highest active message id', '2026-09-11 12:00:00', 32, 'user 32', NULL),
                        (101, 10, 'archived highest id', '2026-09-11 14:00:00', 33, 'user 33', '2026-09-11'),
+                       (102, 10, 'own message', '2026-09-11 11:00:00', 30, 'user 30', NULL),
                        (200, 20, 'second group message', '2026-09-11 11:00:00', 31, 'user 31', NULL)
                 """);
             statement.execute("UPDATE byai_message SET metadata = '{\"resourceList\":[]}' WHERE message_id = 99");
