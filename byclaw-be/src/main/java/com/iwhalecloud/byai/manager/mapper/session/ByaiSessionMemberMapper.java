@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.mapper.session;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.qo.session.SessionByAgentQo;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberSummary;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -17,6 +18,10 @@ public interface ByaiSessionMemberMapper extends BaseMapper<ByaiSessionMember> {
 
     /** 按群主、管理员、普通成员、数字员工排序，同类使用主键稳定排序。 */
     List<ByaiSessionMember> findOrderedGroupMembers(@Param("sessionId") Long sessionId);
+
+    /** 一次查询多个群的头像成员，避免群列表逐项加载详情。 */
+    List<GroupChatMemberSummary> findGroupMemberSummaries(@Param("sessionIds") List<Long> sessionIds,
+        @Param("memberLimit") int memberLimit);
 
     /**
      * 查询会话成员

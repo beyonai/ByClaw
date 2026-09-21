@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Date;
+import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +35,7 @@ import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberSummary;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 
@@ -80,16 +82,24 @@ class GroupChatReadServiceTest {
             page.add(item);
             return page;
         });
+        GroupChatMemberSummary member = new GroupChatMemberSummary();
+        member.setSessionId(10L);
+        member.setMemObjType("AGENT");
+        member.setMemObjId(20010807L);
+        member.setMemName("官网助手");
+        member.setAvatar("avatar.png");
+        when(memberMapper.findGroupMemberSummaries(List.of(10L), 9)).thenReturn(List.of(member));
         try {
             PageInfo<GroupChatListItemResponse> result = service.listMyGroups(1, 20);
             assertThat(result.getPageNum()).isEqualTo(1);
             assertThat(result.getPageSize()).isEqualTo(20);
             assertThat(result.getTotal()).isEqualTo(21L);
             assertThat(result.getList().get(0).getLatestMessageContent()).isEqualTo("@官网助手 开发官网，@张三");
+            assertThat(result.getList().get(0).getMembers()).containsExactly(member);
             assertThat(item.getLatestMessageMetadata()).isEqualTo(storedMetadata);
             assertThat(new ObjectMapper().writeValueAsString(item)).doesNotContain("latestMessageMetadata", "resourceList");
             assertThat(JSONObject.toJSONString(item)).doesNotContain("latestMessageMetadata", "resourceList");
-            verifyNoInteractions(messageMapper, memberMapper, broadcastService);
+            verifyNoInteractions(messageMapper, broadcastService);
         }
         finally {
             PageHelper.clearPage();
@@ -111,6 +121,7 @@ class GroupChatReadServiceTest {
             page.add(item);
             return page;
         });
+        when(memberMapper.findGroupMemberSummaries(List.of(10L), 9)).thenReturn(List.of());
         try {
             var result = service.listMyGroups(1, 20).getList().get(0);
             assertThat(result.isLatestMessageRecalled()).isTrue();
@@ -118,7 +129,7 @@ class GroupChatReadServiceTest {
             assertThat(result.getLatestMessageTime()).isEqualTo(new Date(100));
             assertThat(result.getLatestMessageContent()).endsWith(" 撤回了一条消息");
             assertThat(new ObjectMapper().writeValueAsString(result)).doesNotContain("SECRET");
-            verifyNoInteractions(messageMapper, memberMapper, broadcastService);
+            verifyNoInteractions(messageMapper, broadcastService);
         }
         finally {
             PageHelper.clearPage();

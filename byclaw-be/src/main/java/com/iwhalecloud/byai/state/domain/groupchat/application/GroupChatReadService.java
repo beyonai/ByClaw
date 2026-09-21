@@ -3,7 +3,11 @@ package com.iwhalecloud.byai.state.domain.groupchat.application;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 
 import java.util.Date;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,12 +28,14 @@ import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessagePreview;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberSummary;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 
 /** 群列表未读 mention 查询与已读游标用例。 */
 @Service
 public class GroupChatReadService {
+    private static final int GROUP_AVATAR_MEMBER_LIMIT = 9;
     private final ByaiGroupChatMentionMapper mentionMapper;
     private final ByaiSessionMemberMapper memberMapper;
     private final ByaiMessageMapper messageMapper;
@@ -52,8 +58,15 @@ public class GroupChatReadService {
         int normalizedPageSize = pageSize == null || pageSize < 1 ? 20 : Math.min(pageSize, 100);
         Page<GroupChatListItemResponse> page = PageHelper.startPage(normalizedPageNum, normalizedPageSize);
         List<GroupChatListItemResponse> groups = mentionMapper.selectMyGroups(CurrentUserHolder.getCurrentUserId());
+        List<Long> sessionIds = groups.stream().map(GroupChatListItemResponse::getSessionId).toList();
+        Map<Long, List<GroupChatMemberSummary>> membersBySession = sessionIds.isEmpty()
+            ? Collections.emptyMap()
+            : Optional.ofNullable(memberMapper.findGroupMemberSummaries(sessionIds, GROUP_AVATAR_MEMBER_LIMIT))
+                .orElseGet(List::of).stream()
+                .collect(Collectors.groupingBy(GroupChatMemberSummary::getSessionId));
         GroupChatRecallProjection projection = new GroupChatRecallProjection();
         for (GroupChatListItemResponse group : groups) {
+            group.setMembers(membersBySession.getOrDefault(group.getSessionId(), List.of()));
             if (group.isLatestMessageRecalled()) {
                 group.setLatestMessageContent(projection.content(group.getLatestMessageRecalledBy()));
                 group.setLatestMessageMetadata(null);

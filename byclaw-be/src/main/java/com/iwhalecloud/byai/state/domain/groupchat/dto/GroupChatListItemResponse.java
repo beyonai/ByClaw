@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.dto;
 
 import java.util.Date;
+import java.util.List;
 
 import com.alibaba.fastjson.annotation.JSONField;
 import com.fasterxml.jackson.annotation.JsonFormat;
@@ -59,6 +60,9 @@ public class GroupChatListItemResponse {
     private Long lastReadMessageId;
 
     private long unreadMentionCount;
+
+    /** 侧栏组合头像使用，按角色稳定排序且最多返回九位。 */
+    private List<GroupChatMemberSummary> members = List.of();
 
     @JsonSerialize(using = ToStringSerializer.class)
     private Long latestMentionMessageId;

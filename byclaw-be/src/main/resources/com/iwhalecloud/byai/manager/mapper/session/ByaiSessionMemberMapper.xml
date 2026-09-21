@@ -18,6 +18,15 @@
         <result column="com_acct_id" property="comAcctId" />
     </resultMap>
 
+    <resultMap id="GroupMemberSummaryMap"
+        type="com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberSummary">
+        <result column="session_id" property="sessionId" />
+        <result column="mem_obj_type" property="memObjType" />
+        <result column="mem_obj_id" property="memObjId" />
+        <result column="mem_name" property="memName" />
+        <result column="avatar" property="avatar" />
+    </resultMap>
+
 
     <select id="findOrderedGroupMembers" resultMap="BaseResultMap">
         select *
@@ -29,6 +38,49 @@
             when user_role = 'ADMIN' then 1
             else 2
         end, byai_session_member_id asc
+    </select>
+
+    <select id="findGroupMemberSummaries" resultMap="GroupMemberSummaryMap">
+        SELECT ranked.session_id,
+               ranked.mem_obj_type,
+               ranked.mem_obj_id,
+               ranked.mem_name,
+               ranked.avatar
+        FROM (
+            SELECT member.session_id,
+                   member.mem_obj_type,
+                   member.mem_obj_id,
+                   COALESCE(
+                       NULLIF(TRIM(CASE
+                           WHEN member.mem_obj_type = 'AGENT' THEN resource.resource_name
+                           WHEN member.mem_obj_type = 'USER' THEN user_info.user_name
+                       END), ''),
+                       NULLIF(TRIM(member.mem_name), '')
+                   ) AS mem_name,
+                   resource.avatar,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY member.session_id
+                       ORDER BY CASE
+                           WHEN member.mem_obj_type = 'AGENT' THEN 3
+                           WHEN member.user_role = 'OWNER' THEN 0
+                           WHEN member.user_role = 'ADMIN' THEN 1
+                           ELSE 2
+                       END, member.byai_session_member_id ASC
+                   ) AS member_row_num
+            FROM byai_session_member member
+            LEFT JOIN ss_resource resource
+              ON member.mem_obj_type = 'AGENT'
+             AND resource.resource_id = member.mem_obj_id
+            LEFT JOIN po_users user_info
+              ON member.mem_obj_type = 'USER'
+             AND user_info.user_id = member.mem_obj_id
+            WHERE member.session_id IN
+            <foreach collection="sessionIds" item="sessionId" open="(" separator="," close=")">
+                #{sessionId}
+            </foreach>
+        ) ranked
+        WHERE ranked.member_row_num &lt;= #{memberLimit}
+        ORDER BY ranked.session_id, ranked.member_row_num
     </select>
 
     <!-- 查询会话成员 -->
