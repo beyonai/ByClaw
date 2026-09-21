@@ -4,6 +4,10 @@ import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
+import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileRenameRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
+import com.iwhalecloud.byai.manager.dto.resource.RemoveFileDto;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
@@ -59,6 +63,9 @@ import java.util.*;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -109,6 +116,10 @@ class DatasetApplicationServiceTest {
             "{0} failed: knowledge base service returned an empty response");
         messageSource.addMessage("user.permission.nopermission", Locale.getDefault(),
             "No permission to manage this resource");
+        for (String key : List.of("dataset.cloud.access.denied", "dataset.file.rename.name.invalid",
+            "dataset.file.rename.path.invalid", "dataset.cloud.item.manage.denied")) {
+            messageSource.addMessage(key, Locale.getDefault(), key);
+        }
         ApplicationContext applicationContext = org.mockito.Mockito.mock(ApplicationContext.class);
         org.mockito.Mockito.when(applicationContext.getBean(org.springframework.context.MessageSource.class))
             .thenReturn(messageSource);
@@ -147,9 +158,25 @@ class DatasetApplicationServiceTest {
     }
 
     @Test
+    void updateDatasetRejectsDeregisteredRecordsBeforeChangingContent() {
+        SsResource resource = new SsResource();
+        resource.setResourceId(100L);
+        resource.setResourceBizType("KG_DOC");
+        resource.setResourceStatus(-1);
+        when(ssResourceService.findByIdForUpdate(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        com.iwhalecloud.byai.manager.dto.resource.DatasetDto request =
+            new com.iwhalecloud.byai.manager.dto.resource.DatasetDto();
+        request.setResourceId(100L);
+        assertThatThrownBy(() -> service.updateDataset(request)).isInstanceOf(IllegalArgumentException.class);
+        verify(ssResourceService, never()).updateResourceEntity(any());
+        verifyNoInteractions(feignPythonBuildService);
+    }
+
+    @Test
     void deleteDataset_rejectsDefaultPersonalDataset() {
         SsResource resource = defaultPersonalDataset();
-        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(ssResourceService.findByIdForUpdate(100L)).thenReturn(resource);
 
         assertThatThrownBy(() -> service.deleteDataset(100L)).isInstanceOf(IllegalArgumentException.class)
             .hasMessage("dataset.default.personal.delete.not.allowed");
@@ -793,6 +820,224 @@ class DatasetApplicationServiceTest {
             assertThat(item.getDirectoryPath()).isEqualTo("/制度/人事/请假.pdf");
             assertThat(item.getSize()).isEqualTo(245760L);
         });
+    }
+
+    enum ContentOperation {
+        CREATE_FOLDER, RENAME_FOLDER, DELETE_FOLDER, UPLOAD_FILE, RENAME_FILE, DELETE_FILE, CHECK_UPLOAD
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ContentOperation.class, names = {"CREATE_FOLDER", "UPLOAD_FILE", "CHECK_UPLOAD"})
+    void cloudContentAllowsReadableMembersWithoutResourceManagement(ContentOperation operation) throws Exception {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+
+        invokeContentOperation(operation, true);
+
+        verify(authApplicationService).hasResourceAccessPermission(resource);
+        verify(authApplicationService, never()).hasResourceManagePermission(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(ContentOperation.class)
+    void cloudContentRejectsUsersOutsideProjectBeforeCallingKnowledgeService(ContentOperation operation) {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+
+        assertThatThrownBy(() -> invokeContentOperation(operation, false))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.cloud.access.denied");
+
+        // 不回退资源管理权限，项目外管理员也不能绕过项目读取规则。
+        verify(authApplicationService, never()).hasResourceManagePermission(any());
+        verifyNoInteractions(feignPythonBuildService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ContentOperation.class)
+    void ordinaryKnowledgeContentStillRequiresManagement(ContentOperation operation) {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_DOC");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+
+        assertThatThrownBy(() -> invokeContentOperation(operation, false)).isInstanceOf(IllegalArgumentException.class);
+
+        verify(authApplicationService).hasResourceManagePermission(resource);
+        verify(authApplicationService, never()).hasResourceAccessPermission(any());
+        verifyNoInteractions(feignPythonBuildService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ContentOperation.class)
+    void ordinaryKnowledgeManagersKeepContentOperations(ContentOperation operation) throws Exception {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_DOC");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        invokeContentOperation(operation, true);
+
+        verify(authApplicationService).hasResourceManagePermission(resource);
+        verify(authApplicationService, never()).hasResourceAccessPermission(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", ".", "..", "../outside.md", "sub/file.md", "sub\\file.md"})
+    void fileRenameRejectsNamesThatCouldMoveOutOfOriginalDirectory(String name) {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.canManageAllProjectCloudItems(resource)).thenReturn(true);
+        KnowledgeFileRenameRequest request = new KnowledgeFileRenameRequest();
+        request.setResourceId(100L);
+        request.setFilePath("/reports/old.md");
+        request.setFileName(name);
+
+        assertThatThrownBy(() -> service.renameKnowledgeFile(request, Collections.emptyMap()))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.file.rename.name.invalid");
+        verifyNoInteractions(feignPythonBuildService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ContentOperation.class, names = {"RENAME_FOLDER", "DELETE_FOLDER", "RENAME_FILE", "DELETE_FILE"})
+    void itemCreatorCanRenameAndDeleteOwnItems(ContentOperation operation) throws Exception {
+        prepareCloudItemOwner("member");
+        try (var current = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.class)) {
+            current.when(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder::getCurrentUserCode).thenReturn("member");
+            invokeContentOperation(operation, true);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ContentOperation.class, names = {"RENAME_FOLDER", "DELETE_FOLDER", "RENAME_FILE", "DELETE_FILE"})
+    void membersCannotRenameOrDeleteOtherUsersItems(ContentOperation operation) {
+        prepareCloudItemOwner("other-member");
+        try (var current = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.class)) {
+            current.when(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder::getCurrentUserCode).thenReturn("member");
+            assertThatThrownBy(() -> invokeContentOperation(operation, false))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.cloud.item.manage.denied");
+        }
+        verify(feignPythonBuildService, never()).updateDirectory(any(), any());
+        verify(feignPythonBuildService, never()).deleteDirectory(any(), any());
+        verify(feignPythonBuildService, never()).deleteKnowledgeItem(any(), any());
+        verify(feignPythonBuildService, never()).moveKnowledgeItems(any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ContentOperation.class, names = {"RENAME_FOLDER", "DELETE_FOLDER", "RENAME_FILE", "DELETE_FILE"})
+    void projectCreatorOrAdminVipCanManageAllItemsWithoutOwnerMetadata(ContentOperation operation) throws Exception {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.canManageAllProjectCloudItems(resource)).thenReturn(true);
+        invokeContentOperation(operation, true);
+        verify(feignPythonBuildService, never()).listDir(any(), any());
+    }
+
+    @Test
+    void missingCreatorDoesNotGrantOrdinaryMemberPermission() {
+        prepareCloudItemOwner("");
+        try (var current = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.class)) {
+            current.when(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder::getCurrentUserCode).thenReturn("member");
+            assertThatThrownBy(() -> invokeContentOperation(ContentOperation.DELETE_FILE, false))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.cloud.item.manage.denied");
+        }
+        verify(feignPythonBuildService, never()).deleteKnowledgeItem(any(), any());
+    }
+
+    private void prepareCloudItemOwner(String ownerCode) {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        Data data = new Data();
+        for (String path : List.of("/reports/", "/reports/old.md", "/reports/file.md")) {
+            DirOrFile item = new DirOrFile();
+            item.setName(path);
+            item.setMetadata(Map.of("userCode", Map.of("value", ownerCode)));
+            data.getData().add(item);
+        }
+        PythonBuildResponse<Data> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(data);
+        when(feignPythonBuildService.listDir(any(), eq(100L))).thenReturn(response);
+    }
+
+    private void invokeContentOperation(ContentOperation operation, boolean allowRemote) throws Exception {
+        Map<String, String> headers = Collections.emptyMap();
+        Folder folder = new Folder();
+        folder.setResourceId(100L);
+        folder.setDirectoryPath("/reports/");
+        folder.setDirectoryName("renamed");
+        switch (operation) {
+            case CREATE_FOLDER:
+                if (allowRemote) when(feignPythonBuildService.createDirectory(any(), any())).thenReturn(successResponse());
+                service.createFolder(folder, headers);
+                verify(feignPythonBuildService).createDirectory(any(), any());
+                break;
+            case RENAME_FOLDER:
+                if (allowRemote) when(feignPythonBuildService.updateDirectory(any(), any())).thenReturn(successResponse());
+                service.renameFolder(folder, headers);
+                verify(feignPythonBuildService).updateDirectory(any(), any());
+                break;
+            case DELETE_FOLDER:
+                if (allowRemote) when(feignPythonBuildService.deleteDirectory(any(), any())).thenReturn(successResponse());
+                FolderDelete delete = new FolderDelete();
+                delete.setResourceId(100L);
+                delete.setDirectoryPath("/reports/");
+                service.deleteFolder(delete, headers);
+                verify(feignPythonBuildService).deleteDirectory(any(), any());
+                break;
+            case DELETE_FILE:
+                if (allowRemote) when(feignPythonBuildService.deleteKnowledgeItem(any(), any())).thenReturn(successResponse());
+                RemoveFileDto remove = new RemoveFileDto();
+                remove.setResourceId(100L);
+                remove.setDirectoryPath("/reports/file.md");
+                service.removeFile(remove, headers);
+                verify(feignPythonBuildService).deleteKnowledgeItem(any(), any());
+                break;
+            case UPLOAD_FILE:
+                PythonBuildResponse<KbImportResult> uploaded = new PythonBuildResponse<>();
+                uploaded.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+                if (allowRemote) when(feignPythonBuildService.importKnowledgeItem(any(), any())).thenReturn(uploaded);
+                service.uploadFiles(new MockMultipartFile[]{
+                    new MockMultipartFile("files", "file.md", "text/markdown", "hello".getBytes())
+                }, 100L, "/reports/", "", null, false, false, headers);
+                verify(feignPythonBuildService).importKnowledgeItem(any(), any());
+                break;
+            case RENAME_FILE:
+                PythonBuildResponse<KnowledgeItemsMoveResult> moved = new PythonBuildResponse<>();
+                moved.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+                if (allowRemote) when(feignPythonBuildService.moveKnowledgeItems(any(), any())).thenReturn(moved);
+                KnowledgeFileRenameRequest rename = new KnowledgeFileRenameRequest();
+                rename.setResourceId(100L);
+                rename.setFilePath("/reports/old.md");
+                rename.setFileName("new.md");
+                service.renameKnowledgeFile(rename, headers);
+                ArgumentCaptor<KbKnowledgeItemsMove> captor = ArgumentCaptor.forClass(KbKnowledgeItemsMove.class);
+                verify(feignPythonBuildService).moveKnowledgeItems(captor.capture(),
+                    eq(Map.of(FeignPythonBuildService.RESOURCE_ID_HEADER, "100")));
+                assertThat(captor.getValue().getSourcePath()).containsExactly("/reports/old.md");
+                assertThat(captor.getValue().getTargetFilePath()).isEqualTo("/reports/new.md");
+                assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+                assertThat(captor.getValue().getOverwrite()).isFalse();
+                break;
+            case CHECK_UPLOAD:
+                PythonBuildResponse<Data> listed = new PythonBuildResponse<>();
+                listed.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+                if (allowRemote) when(feignPythonBuildService.listDir(any(), eq(100L))).thenReturn(listed);
+                KnowledgeUploadConflictCheckRequest conflict = new KnowledgeUploadConflictCheckRequest();
+                conflict.setResourceId(100L);
+                conflict.setDirectoryPath("/reports/");
+                conflict.setFileNames(List.of("file.md"));
+                service.checkUploadFileConflicts(conflict);
+                verify(feignPythonBuildService).listDir(any(), eq(100L));
+                break;
+            default:
+                throw new AssertionError(operation);
+        }
     }
 
     private SsResource defaultPersonalDataset() {

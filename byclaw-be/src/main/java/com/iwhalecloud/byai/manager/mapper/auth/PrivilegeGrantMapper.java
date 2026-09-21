@@ -137,6 +137,7 @@ public interface PrivilegeGrantMapper extends BaseMapper<PrivilegeGrant> {
 
     List<DigitalEmployeeAuthVo> listDigitalEmployeeAuthByUser(AuthQo authQo);
 
-    /** 批量查询数字员工审核中心的待审核或历史申请，避免按资源逐条查询。 */
-    List<DigitalEmployeeUseApplyAuditVo> queryDigitalEmployeeUseApplyAudit(@Param("history") boolean history);
+    /** 批量查询资源审核中心的待审核或历史申请，避免按资源逐条查询。 */
+    List<DigitalEmployeeUseApplyAuditVo> queryDigitalEmployeeUseApplyAudit(@Param("history") boolean history,
+        @Param("resourceBizTypeList") List<String> resourceBizTypeList);
 }

@@ -1148,14 +1148,16 @@ class SkillGroupApplicationServiceTest {
         assertThat(wrapperCaptor.getValue().getSqlSegment()).contains("resource_id", "rel_type_name");
         assertThat(wrapperCaptor.getValue().getParamNameValuePairs().values())
                 .contains(GROUP_ID, "SKILL_GROUP_MEMBER");
-        verify(resourceService).removeById(GROUP_ID);
+        verify(resourceService).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
+            group -> group.getResourceId().equals(GROUP_ID) && group.getResourceStatus() == -1));
+        verify(resourceService, never()).removeById(GROUP_ID);
         verify(resourceService, never()).removeById(501L);
         verify(relationService, never()).removeById(21L);
         InOrder order = inOrder(mapper, relationService, resourceService);
         order.verify(mapper).selectGroupForUpdate(GROUP_ID, TENANT_ID);
         order.verify(mapper).selectSkillRelationsWithSourceInfoByTenant(TENANT_ID);
         order.verify(relationService).remove(any());
-        order.verify(resourceService).removeById(GROUP_ID);
+        order.verify(resourceService).updateResourceEntity(any());
     }
 
     private void prepareManagedGroup() {
@@ -1175,9 +1177,22 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceManagePermission(employee)).thenReturn(true);
     }
 
+    @Test
+    void shelfChangesOnlyGroupStatusAndPreservesInstalledSnapshots() {
+        prepareLockedManagedGroup();
+        service.changeShelfStatus(GROUP_ID, true);
+        verify(resourceService).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
+            group -> group.getResourceStatus() == 2));
+        verifyNoInteractions(relationService);
+        service.changeShelfStatus(GROUP_ID, false);
+        verify(authService, org.mockito.Mockito.times(2)).invalidateResourceAuthorizationCachesAfterCommit(GROUP_ID, "SKILL_GROUP");
+    }
+
     private void prepareLockedManagedGroup() {
         setCurrentUser("adminvip", UserType.ORD_USER);
         SsResource group = group();
+        group.setOwnerType(OwnerType.ENTERPRISE);
+        group.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
     }

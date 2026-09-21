@@ -3,11 +3,15 @@ import {
   approveUseApply,
   listResourceUseAuth,
   queryUseApplyList,
+  queryResourceUseApplyAudit,
   queryDigEmployeeRelResourceAuth,
   queryFixedEntryOperationCapability,
   queryResourceDetail,
   queryResourceMembers,
   deleteResource,
+  shelfResource,
+  unShelfResource,
+  deregisterResource,
   deleteSkill,
   uploadSkillZip,
   pageSkillGroups,
@@ -90,6 +94,15 @@ const installSkillGroupResponseFixture: SkillGroupInstallResult = {
 };
 
 describe('manager resources service', () => {
+  it.each([
+    [shelfResource, 'shelfResource'],
+    [unShelfResource, 'unShelfResource'],
+    [deregisterResource, 'deregisterResource'],
+  ] as const)('uses the dedicated lifecycle endpoint %s', (operation, endpoint) => {
+    operation({ resourceId: '10' });
+    expect(mockPOST).toHaveBeenCalledWith(`/byaiService/tool/${endpoint}`, { resourceId: '10' });
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -168,6 +181,16 @@ describe('manager resources service', () => {
         customHandle: true,
       },
     });
+  });
+
+  it('should call the resource audit endpoint with resource business types', () => {
+    const payload = { history: false, resourceBizTypeList: ['SKILL', 'KG_DOC'] };
+    queryResourceUseApplyAudit(payload);
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit',
+      payload,
+      { responseCfg: { customHandle: true } }
+    );
   });
 
   it('should call approveUseApply with the approve endpoint', () => {

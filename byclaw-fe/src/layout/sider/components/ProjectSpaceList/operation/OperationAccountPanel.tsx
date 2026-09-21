@@ -34,6 +34,8 @@ export interface OperationAccountPanelProps {
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
   showPlatformFilter?: boolean;
   allowAccountEditing?: boolean;
+  /** 控制新增入口；商用版连接器仍可查看和编辑已有账号，但不允许新增账号。 */
+  allowAccountCreation?: boolean;
   fixedCreatePlatformId?: string;
   cardsOnly?: boolean;
   drawerCardLayout?: boolean;
@@ -65,6 +67,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   onRefreshToolbarChange,
   showPlatformFilter = true,
   allowAccountEditing = true,
+  allowAccountCreation = true,
   fixedCreatePlatformId,
   cardsOnly = false,
   drawerCardLayout = false,
@@ -120,11 +123,12 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   }, [filteredAccounts, loginTarget]);
   // 没有管理权限或没有保存回调时，隐藏新增和编辑入口，防止出现不可完成的操作。
   const canSaveAccount = canManage && !!onSaveAccount;
+  const canCreateAccount = canSaveAccount && allowAccountCreation;
   const openAddAccountModal = useCallback(() => {
-    if (!canSaveAccount) return;
+    if (!canCreateAccount) return;
     setEditingAccount(null);
     setAccountFormOpen(true);
-  }, [canSaveAccount]);
+  }, [canCreateAccount]);
 
   useEffect(() => {
     if (!onToolbarChange || toolbarPlacement !== 'external') return;
@@ -139,7 +143,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
             onChange={(value) => setActivePlatform(String(value))}
           />
         )}
-        {canSaveAccount && (
+        {canCreateAccount && (
           // 大详情页的新增账号按钮与需求 Tab 的新增需求按钮使用统一的次级按钮样式。
           <Button icon={<PlusOutlined />} onClick={openAddAccountModal}>
             {t('add')}
@@ -160,7 +164,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     };
   }, [
     activePlatform,
-    canSaveAccount,
+    canCreateAccount,
     filterOptions,
     intl,
     loading,
@@ -182,11 +186,11 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   }, [activePlatform, availablePlatformOptions]);
 
   useEffect(() => {
-    if (!openCreateModal || !canSaveAccount) return;
+    if (!openCreateModal || !canCreateAccount) return;
     openAddAccountModal();
     // 通知父容器消费本次请求，避免账号面板后续普通刷新时重复打开新增表单。
     onCreateModalOpened?.();
-  }, [canSaveAccount, onCreateModalOpened, openAddAccountModal, openCreateModal]);
+  }, [canCreateAccount, onCreateModalOpened, openAddAccountModal, openCreateModal]);
 
   const openEditAccountModal = useCallback(
     (account: OperationAccount) => {
@@ -295,7 +299,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                 {intl.formatMessage({ id: 'projectSpace.detail.common.refresh' })}
               </Button>
             )}
-            {canSaveAccount && (
+            {canCreateAccount && (
               <Button type="primary" icon={<PlusOutlined />} onClick={openAddAccountModal}>
                 {t('add')}
               </Button>

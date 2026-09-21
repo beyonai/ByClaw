@@ -1803,6 +1803,7 @@ class AuthApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(resourceId);
         resource.setResourceBizType(ResourceBizTypeEnum.AGENT.name());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setOwnerType(OwnerType.ENTERPRISE);
         resource.setCreateBy(createBy);
         resource.setPublishPortal(1);

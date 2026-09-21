@@ -19,3 +19,14 @@ describe('digital employee lifecycle messages', () => {
     expect(enUSManager[id as keyof typeof enUSManager]).toBe(english);
   });
 });
+
+// 创建菜单沿用员工称谓，与员工组入口保持一致。
+describe('digital employee creation messages', () => {
+  it.each([
+    ['digitalEmployees.createPersonal', '创建个人员工', 'Create personal employee'],
+    ['digitalEmployees.createEnterprise', '创建企业员工', 'Create enterprise employee'],
+  ])('uses concise employee wording for %s', (id, label, english) => {
+    expect(zhCN[id as keyof typeof zhCN]).toBe(label);
+    expect(enUS[id as keyof typeof enUS]).toBe(english);
+  });
+});

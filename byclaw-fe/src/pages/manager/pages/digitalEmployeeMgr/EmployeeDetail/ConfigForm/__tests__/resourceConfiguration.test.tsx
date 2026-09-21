@@ -25,7 +25,12 @@ jest.mock('@/pages/manager/utils/file', () => ({ compressImgFileAndUpload: jest.
 jest.mock('@/pages/manager/utils/agent', () => ({ getAvatarUrl: () => '' }));
 jest.mock('@/utils/file', () => ({ getFileUrl: () => '' }));
 jest.mock('@/pages/manager/components/Image', () => ({ Image: () => null }));
-jest.mock('@/pages/manager/components/AntdIcon', () => () => null);
+jest.mock(
+  '@/pages/manager/components/AntdIcon',
+  () =>
+    ({ type, onClick }: any) =>
+      onClick ? <button aria-label={type} onClick={onClick} /> : null
+);
 jest.mock('@/pages/manager/components/Ellipsis', () => ({ children }: any) => <span>{children}</span>);
 jest.mock('../../../components/ModelPopover', () => () => null);
 jest.mock('../ExampleModal', () => () => null);
@@ -42,6 +47,7 @@ const labels = [
   'employeeDetail.configureBundledSkills',
 ];
 const mockShowBaseList = jest.fn();
+const mockUpdateResource = jest.fn();
 const noop = () => {};
 const skills = [{ resourceId: '103', skillCode: 'search', label: 'Search skill', resourceDesc: 'Search' }];
 const tools = [{ resourceId: '102', resourceName: 'Existing tool', grantResourceType: 'MCP' }];
@@ -80,14 +86,17 @@ function Editor({ employee, canConfigureResources, agentType = '001' }: any) {
       setModelName={noop}
       setAvatar={noop}
       setRefineModalOpen={noop}
-      updateResource={noop}
+      updateResource={mockUpdateResource}
       showBaseList={mockShowBaseList}
     />
   );
 }
 
 describe('employee editor resource configuration entries', () => {
-  beforeEach(() => mockShowBaseList.mockClear());
+  beforeEach(() => {
+    mockShowBaseList.mockClear();
+    mockUpdateResource.mockReset();
+  });
 
   it.each(['personal', 'personal_default'])(
     'hides resource sections for a %s super assistant while keeping other settings',
@@ -120,6 +129,23 @@ describe('employee editor resource configuration entries', () => {
     expect(mockShowBaseList).toHaveBeenLastCalledWith('005');
     fireEvent.click(within(screen.getByText(labels[2]).parentElement!).getByRole('button'));
     await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+  });
+
+  it('removes the last configured skill from both form fields before saving', async () => {
+    render(<Editor employee={{ ownerType: 'personal', resourceCode: 'alice_helper' }} />);
+    await waitFor(() => expect(screen.getByText('employeeDetail.basicSettings')).toBeVisible());
+    act(() => editorForm.setFieldsValue({ bundledSkills: skills, role: JSON.stringify({ bundledSkills: skills }) }));
+    const card = screen.getByText('Search skill').closest('.ant-card')!;
+    mockUpdateResource.mockImplementation(() => {
+      expect(editorForm.getFieldValue('bundledSkills')).toEqual([]);
+      expect(JSON.parse(editorForm.getFieldValue('role')).bundledSkills).toEqual([]);
+    });
+
+    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'icon-a-Deleteshanchu' }));
+
+    await waitFor(() => expect(mockUpdateResource).toHaveBeenCalled());
+    expect(screen.queryByText('Search skill')).not.toBeInTheDocument();
+    mockUpdateResource.mockReset();
   });
 
   it('closes the resource dialog when switching from an ordinary employee to a super assistant', async () => {

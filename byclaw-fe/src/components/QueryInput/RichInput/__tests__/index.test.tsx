@@ -88,9 +88,7 @@ describe('RichInput', () => {
     'automatically mentions the history employee when there is no draft: %j',
     async (draft) => {
       const inputRef = createRef<RichInputRef>();
-      const view = render(
-        <RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote inputDraft={draft} />
-      );
+      const view = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote inputDraft={draft} />);
       // 无草稿时仍等待并展示异步返回的历史会话员工。
       mockDefaultAgentElement = historyEmployee();
       view.rerender(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote inputDraft={draft} />);
@@ -191,6 +189,23 @@ describe('RichInput', () => {
       ]);
     });
     expect(JSON.stringify(inputRef.current?.getPayload())).not.toContain('must-not-leak');
+  });
+
+  it.each([
+    [ResourceType.digitalEmployee, { agentId: 'agent-1', agentType: '001', name: 'Employee One' }],
+    [ResourceType.dataSource, { resourceId: '17', resourceName: 'Analytics' }],
+  ] as const)('appends text immediately after inserting a %s reference', async (resourceType, resource) => {
+    const inputRef = createRef<RichInputRef>();
+    render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
+
+    await act(async () => {
+      inputRef.current?.insertItem(resource, resourceType);
+      inputRef.current?.appendText('Immediate question');
+      // 必须在光标定时器执行前读取，验证连续调用不会静默丢字。
+      expect(inputRef.current?.getPersistentMentionDraft(true).text).toContain('Immediate question');
+    });
+    expect(inputRef.current?.getPayload().text).toContain('Immediate question');
+    expect(inputRef.current?.getPayload().resourceList).toHaveLength(1);
   });
 
   it('saves the latest unsent text and references and restores them into a new editor', async () => {

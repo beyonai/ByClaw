@@ -39,8 +39,7 @@ jest.mock('antd', () => {
   };
 });
 
-jest.mock('@/pages/manager/service/resources', () => ({
-}));
+jest.mock('@/pages/manager/service/resources', () => ({}));
 
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({
   installDigitalEmployeeRelResources: jest.fn(),
@@ -70,6 +69,166 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
 };
 
 describe('ResourceCard', () => {
+  it.each([
+    ['KG_DOC', 'KG_DOC', 'personal', 'personalKnowledge'],
+    ['KG_DOC', 'KG_QA', 'enterprise', 'enterpriseKnowledge'],
+    ['KG_DOC', 'KG_TERM', 'personal_default', 'personalKnowledge'],
+    ['SKILL', 'SKILL', 'personal', 'personalSkill'],
+    ['SKILL', 'SKILL', 'enterprise', 'enterpriseSkill'],
+    ['TOOL', 'MCP', 'personal', 'personalTool'],
+    ['TOOL', 'TOOLKIT', 'enterprise', 'enterpriseTool'],
+    ['TOOL', 'AGENT', 'enterprise', 'enterpriseTool'],
+  ])('switches %s / %s from ownership to status in my resources', (resourceType, resourceBizType, ownerType, tag) => {
+    const resource = {
+      resourceId: 'tag-test',
+      resourceName: 'Example',
+      resourceBizType,
+      ownerType,
+      resourceStatus: '2',
+    };
+    const view = renderWithQueryClient(
+      <ResourceCard
+        resource={resource}
+        resourceType={resourceType}
+        actionConfig={{ enableResourceLifecycle: true, showResourceTypeTag: true }}
+      />
+    );
+    expect(screen.getByText(`resource.tag.${tag}`).parentElement).toHaveClass(
+      ownerType.startsWith('personal') ? 'digitalEmployeePersonalTag' : 'digitalEmployeeEnterpriseTag'
+    );
+    expect(screen.queryByText('resourceStatus.published')).not.toBeInTheDocument();
+    view.unmount();
+    renderWithQueryClient(
+      <ResourceCard
+        resource={resource}
+        resourceType={resourceType}
+        actionConfig={{ enableResourceLifecycle: true, showResourceTypeTag: false }}
+      />
+    );
+    expect(screen.getByText('resourceStatus.published')).toBeInTheDocument();
+    expect(screen.queryByText(`resource.tag.${tag}`)).not.toBeInTheDocument();
+  });
+
+  it('shows ownership on official skill posters', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        variant="skillPoster"
+        resource={{ resourceId: 'poster', resourceBizType: 'SKILL', ownerType: 'enterprise', resourceStatus: '2' }}
+        actionConfig={{ enableResourceLifecycle: true, showResourceTypeTag: true }}
+      />
+    );
+    expect(screen.getByText('resource.tag.enterpriseSkill').parentElement).toHaveClass('digitalEmployeeEnterpriseTag');
+    expect(screen.queryByText('resourceStatus.published')).not.toBeInTheDocument();
+  });
+
+  // 状态、权限和回调一并验证，不能只替换菜单文字却继续调用删除接口。
+  it.each([
+    ['TOOL', 'TOOLKIT', '2', 'unShelfData', 'onUnShelf'],
+    ['TOOL', 'MCP', '3', 'shelfData', 'onShelf'],
+    ['KG_DOC', 'KG_DOC', '3', 'deleteData', 'onDeleteData'],
+    ['SKILL', 'SKILL', '0', 'shelfData', 'onShelf'],
+  ])(
+    'confirms lifecycle action for %s / %s in state %s',
+    async (resourceType, resourceBizType, status, action, callback) => {
+      const onAction = jest.fn();
+      const onDelete = jest.fn();
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType={resourceType}
+          resource={{
+            resourceId: 'lifecycle-resource',
+            resourceBizType,
+            ownerType: 'enterprise',
+            resourceStatus: status,
+            canOnShelf: true,
+            canOffShelf: true,
+            canDelete: true,
+          }}
+          actionConfig={{ enableResourceLifecycle: true, [callback]: onAction, onDelete }}
+        />
+      );
+      fireEvent.click(screen.getByText(`resource.lifecycle.${action}`));
+      expect(await screen.findByText(`resource.lifecycle.${action}Confirm`)).toBeTruthy();
+      expect(onAction).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+      expect(onAction).toHaveBeenCalledTimes(1);
+      expect(onDelete).not.toHaveBeenCalled();
+      expect(screen.queryByText('common.restoreResource')).toBeNull();
+    }
+  );
+
+  it.each(['TOOL', 'KG_DOC', 'SKILL'])(
+    'makes deregistered %s records read-only despite stale permissions',
+    (resourceType) => {
+      const onCardClick = jest.fn();
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType={resourceType}
+          resource={{
+            resourceId: 'deregistered',
+            resourceName: 'Deregistered record',
+            resourceStatus: '-1',
+            ownerType: 'enterprise',
+            canOnShelf: true,
+            canOffShelf: true,
+            canDelete: true,
+            canEdit: true,
+            canRestore: true,
+            hasUsePermission: true,
+          }}
+          onCardClick={onCardClick}
+          actionConfig={{ enableResourceLifecycle: true }}
+        />
+      );
+      expect(screen.getByText('resource.statusCancelled')).toBeTruthy();
+      expect(screen.queryByText('common.editInfo')).toBeNull();
+      expect(screen.queryByText('resource.lifecycle.shelfData')).toBeNull();
+      expect(screen.queryByText('resource.lifecycle.deleteData')).toBeNull();
+      expect(screen.queryByText('common.restoreResource')).toBeNull();
+      fireEvent.click(screen.getByText('Deregistered record'));
+      expect(onCardClick).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not expose lifecycle actions without backend permission', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="TOOL"
+        resource={{
+          resourceId: 'denied',
+          resourceStatus: '3',
+          ownerType: 'enterprise',
+          canOnShelf: false,
+          canDelete: false,
+        }}
+        actionConfig={{ enableResourceLifecycle: true }}
+      />
+    );
+    expect(screen.queryByText('resource.lifecycle.shelfData')).toBeNull();
+    expect(screen.queryByText('resource.lifecycle.deleteData')).toBeNull();
+  });
+
+  it('keeps personal data deletion separate from enterprise shelf actions', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        resource={{
+          resourceId: 'personal',
+          resourceStatus: '2',
+          ownerType: 'personal',
+          canOnShelf: true,
+          canOffShelf: true,
+          canDelete: true,
+        }}
+        actionConfig={{ enableResourceLifecycle: true }}
+      />
+    );
+    expect(screen.getByText('resource.lifecycle.deleteData')).toBeTruthy();
+    expect(screen.queryByText('resource.lifecycle.shelfData')).toBeNull();
+    expect(screen.queryByText('resource.lifecycle.unShelfData')).toBeNull();
+  });
+
   // 子类型沿用模块名称，确认后仍调用原删除回调。
   it.each([
     ['KG_DOC', 'KG_DOC', 'Knowledge'],
@@ -99,16 +258,22 @@ describe('ResourceCard', () => {
   });
 
   // 个人页签关闭上下架操作后，编辑和注销员工仍独立遵循各自权限。
-  it.each(['2', '3'])(
-    'hides shelf actions for personal employees with status %s even when permitted',
-    (resourceStatus) => {
+  it.each([
+    ['2', 'personal', '001'],
+    ['3', 'personal', '001'],
+    ['2', 'personal', '017'],
+    ['2', 'personal_default', '001'],
+  ])(
+    'hides shelf actions for personal status %s / %s / %s even when permitted',
+    (resourceStatus, ownerType, agentType) => {
       renderWithQueryClient(
         <ResourceCard
           resourceType="DIG_EMPLOYEE"
           digitalEmployeeActionMode
           resource={{
             resourceId: 'personal-lifecycle-employee',
-            ownerType: 'personal',
+            ownerType,
+            agentType,
             resourceStatus,
             canOnShelf: true,
             canOffShelf: true,
@@ -129,6 +294,49 @@ describe('ResourceCard', () => {
       expect(screen.getByText('resource.deleteData')).toBeTruthy();
     }
   );
+
+  // 可用的企业员工与员工组均保留下架入口，确认后调用专用下架回调。
+  it.each(['001', '017'])('allows taking an available enterprise %s off shelf', async (agentType) => {
+    const onUnShelf = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{
+          resourceId: 'available-enterprise',
+          ownerType: 'enterprise',
+          agentType,
+          resourceStatus: '2',
+          canOffShelf: true,
+        }}
+        actionConfig={{ enableDigitalEmployeeLifecycle: true, onUnShelf }}
+      />
+    );
+
+    fireEvent.click(screen.getByText('resource.unShelfData'));
+    expect(onUnShelf).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    expect(onUnShelf).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides off-shelf action for enterprise employees without operation permissions', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{
+          resourceId: 'available-enterprise-no-permission',
+          ownerType: 'enterprise',
+          resourceStatus: '2',
+          canOffShelf: false,
+          canEdit: false,
+        }}
+        actionConfig={{ enableDigitalEmployeeLifecycle: true }}
+      />
+    );
+
+    expect(screen.queryByText('resource.unShelfData')).toBeNull();
+  });
 
   it('hides personal employee use authorization while retaining other permitted actions', () => {
     renderWithQueryClient(
@@ -492,6 +700,39 @@ describe('ResourceCard', () => {
     expect(screen.getByText('digitalEmployees.tag.personalEmployee').parentElement).toHaveClass(
       'digitalEmployeePersonalTag'
     );
+  });
+
+  // 员工与员工组按个人/企业共享样式，仍显示各自的类型文案。
+  it.each([
+    ['personal', '001', 'personalEmployee', 'digitalEmployeePersonalTag'],
+    ['personal', '017', 'personalGroup', 'digitalEmployeePersonalTag'],
+    ['personal_default', '001', 'personalEmployee', 'digitalEmployeePersonalTag'],
+    ['enterprise', '001', 'enterpriseEmployee', 'digitalEmployeeEnterpriseTag'],
+    ['enterprise', '017', 'enterpriseGroup', 'digitalEmployeeEnterpriseTag'],
+  ])('shows the type tag for %s / %s', (ownerType, agentType, label, style) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        resource={{ resourceId: 'available-employee', ownerType, agentType, resourceStatus: '2' }}
+        actionConfig={{ showDigitalEmployeeTypeTag: true }}
+      />
+    );
+
+    expect(screen.getByText(`digitalEmployees.tag.${label}`).parentElement).toHaveClass(style);
+    expect(screen.queryByText('resourceStatus.published')).toBeNull();
+  });
+
+  it('retains status tags for official recommendations', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        resource={{ resourceId: 'official-employee', ownerType: 'enterprise', agentType: '017', resourceStatus: '2' }}
+        actionConfig={{ showDigitalEmployeeTypeTag: false }}
+      />
+    );
+
+    expect(screen.getByText('resourceStatus.published').parentElement).toHaveClass('digitalEmployeeStatusTag');
+    expect(screen.queryByText('digitalEmployees.tag.enterpriseGroup')).toBeNull();
   });
 
   it('keeps non digital employee tags on the base tag style', () => {

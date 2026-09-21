@@ -90,6 +90,22 @@ class ProjectCloudReadPermissionTest {
             .isInstanceOf(BaseException.class);
     }
 
+    @ParameterizedTest
+    @CsvSource({"88,0,true", "99,0,false", "88,1,false"})
+    void onlyProjectCreatorCanManageAllItems(long owner, String deleted, boolean allowed) {
+        bindProject(7L, "normal", owner, deleted, true);
+        assertThat(auth.canManageAllProjectCloudItems(cloud)).isEqualTo(allowed);
+    }
+
+    @Test
+    void adminVipCanManageAllCloudItems() {
+        LoginInfo login = new LoginInfo();
+        login.setUserId(88L);
+        login.setUserCode("adminvip");
+        CurrentUserHolder.setLoginInfo(login);
+        assertThat(auth.canManageAllProjectCloudItems(cloud)).isTrue();
+    }
+
     private void bindProject(long id, String type, long owner, String deleted, boolean member) {
         Project project = new Project();
         project.setProjectId(id);
