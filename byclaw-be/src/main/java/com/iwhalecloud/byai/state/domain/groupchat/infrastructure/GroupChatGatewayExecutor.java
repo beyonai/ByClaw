@@ -11,6 +11,7 @@ import java.util.function.UnaryOperator;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -23,36 +24,46 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
-import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
-import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
-import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
-import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
-import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
-import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
-import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
+import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
+import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
-import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatGatewayRequestDecorator;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
 import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
-import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMemberUidCodec;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispatchPromptBuilder.GroupMemberPrompt;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 /** Adapts group dispatch to the ordinary private session runtime and decorates its Gateway request. */
 @Service
 public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
+    @Autowired
+    private ApplicationEventPublisher schedulingEvents;
+
+    private void observeStarted(ByaiGroupChatExecution execution) {
+        if (schedulingEvents != null && "UNKNOWN".equals(execution.getDisposition())) {
+            schedulingEvents.publishEvent(new GroupChatExecutionStarted(execution.getExecutionId(),
+                execution instanceof ByaiGroupChatTurn, execution.getTraceId()));
+        }
+    }
+
     private static final int AGENT_HISTORY_PAGE_SIZE = 50;
     private final ScriptService scriptService;
     private final ByaiMessageMapper messageMapper;
@@ -146,6 +157,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             throw new IllegalStateException("Group execution is no longer running");
         }
         execution.setTraceId(traceId);
+        observeStarted(execution);
         userContextRunner.runAsUser(initiator.getUserCode(), () -> {
             try {
                 scriptService.startExistingMessageTurn(dto, existing);
@@ -163,6 +175,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             return;
         }
         turn.setTraceId(ScriptService.getTraceId(prepared.message().getMessageId(), prepared.request().getLlmMessageId()));
+        observeStarted(turn);
         userContextRunner.runAsUser(prepared.userCode(), () -> {
             try {
                 scriptService.startExistingMessageTurn(prepared.request(), prepared.message());

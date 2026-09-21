@@ -1,7 +1,5 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
-import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
-
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -9,12 +7,15 @@ import java.util.Map;
 import java.util.Objects;
 
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -25,10 +26,10 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
-import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
@@ -41,12 +42,14 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidat
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMentionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTopicService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatAgentMention;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatDisposition;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
-import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTopicService;
 
 /** 只观察分类和已落库的子会话结果；流式聚合、快照及私有消息持久化由普通聊天链路负责。 */
 @Service
@@ -55,6 +58,21 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
     private GroupChatTopicService topicService;
     @Autowired
     private ByaiGroupChatTurnMapper turnMapper;
+    @Autowired
+    private GroupChatTurnCoordinator turnCoordinator;
+    private TransactionTemplate projectionTransaction;
+
+    @Autowired
+    public void configureTransactions(PlatformTransactionManager manager) {
+        projectionTransaction = new TransactionTemplate(manager);
+        projectionTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
+    private void project(Runnable action) {
+        if (projectionTransaction == null) action.run();
+        else projectionTransaction.executeWithoutResult(status -> action.run());
+    }
+
     private final ByaiMessageMapper messageMapper;
     private final GroupChatEventPublisher eventPublisher;
     private final SequenceService sequenceService;
@@ -91,66 +109,85 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
     }
 
     @Override
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void afterPersisted(ChatProcessContext context) {
-        if (context == null || context.sessionId == null || StringUtils.isBlank(context.traceId)) {
-            return;
-        }
+        if (context == null || context.sessionId == null || StringUtils.isBlank(context.traceId)) return;
         ByaiGroupChatTurn turn = turnMapper == null ? null : turnMapper.selectByTrace(context.traceId);
-        if (turn != null) {
-            turn = lockCurrentTurn(turn);
-            if (turn != null && "RUNNING".equals(turn.getStatus()) && Objects.equals(turn.getTraceId(), context.traceId)) {
-                completeInitialTurn(turn, context.modelAnswerMessageId, context.gatewayError || context.getException() != null);
+        ByaiGroupChatExecution snapshot = turn != null ? turn : executionMapper.selectByCandidateSessionId(context.sessionId);
+        if (snapshot == null) return;
+        GroupChatDisposition observed = Objects.equals(snapshot.getTraceId(), context.traceId)
+            ? readDisposition(snapshot) : null;
+        project(() -> {
+            ByaiGroupChatExecution execution = snapshot instanceof ByaiGroupChatTurn
+                ? lockCurrentTurn((ByaiGroupChatTurn) snapshot) : lockLegacyExecution(context.sessionId);
+            if (execution == null) return;
+            if (Objects.equals(execution.getTraceId(), context.traceId)) {
+                if ("RUNNING".equals(execution.getStatus())) {
+                    completeInitialTurn(execution, context.modelAnswerMessageId,
+                        context.gatewayError || context.getException() != null, observed);
+                }
+                return;
             }
-            return;
-        }
-        ByaiGroupChatExecution execution = lockLegacyExecution(context.sessionId);
-        if (execution == null) {
-            return;
-        }
-        if (Objects.equals(execution.getTraceId(), context.traceId)) {
-            if ("RUNNING".equals(execution.getStatus())) {
-                completeInitialTurn(execution, context.modelAnswerMessageId, context.gatewayError
-                    || context.getException() != null);
+            if (execution instanceof ByaiGroupChatTurn) return;
+            ChatRuntimeState current = runtimeStateService.get(context.sessionId);
+            if ("TASK".equals(execution.getDisposition()) && current != null
+                && Objects.equals(current.getTraceId(), context.traceId)) {
+                taskService.updateTurnStatus(context.sessionId,
+                    context.gatewayError || context.getException() != null ? "FAILED" : "WAITING_USER");
             }
-            return;
-        }
-        // 首轮执行记录保留原 trace。后续普通 turn 的旧回调不能结束已经开始的新 turn。
-        ChatRuntimeState current = runtimeStateService.get(context.sessionId);
-        if ("TASK".equals(execution.getDisposition()) && current != null
-            && Objects.equals(current.getTraceId(), context.traceId)) {
-            taskService.updateTurnStatus(context.sessionId,
-                context.gatewayError || context.getException() != null ? "FAILED" : "WAITING_USER");
-        }
+        });
     }
 
-    /** 定时观察分类并补偿进程重启、持久化后回调失败；不读取或 ACK Redis Stream。 */
-    @Transactional
+    /** File reads happen before acquiring projection locks; the trace is fenced again inside the transaction. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void reconcile(Long candidateSessionId) {
-        ByaiGroupChatExecution execution = lockLegacyExecution(candidateSessionId);
-        if (execution == null || !"RUNNING".equals(execution.getStatus())) {
-            return;
-        }
-        resolveDisposition(execution, false);
-        if (!TraceIdCodec.canDecode(execution.getTraceId())) {
-            return;
-        }
-        Long answerId = TraceIdCodec.decode(execution.getTraceId()).getModelAnswerMessageId();
-        completeInitialTurn(execution, answerId, false);
+        reconcileSnapshot(executionMapper.selectByCandidateSessionId(candidateSessionId), null, true);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void reconcileTurn(Long turnId) {
-        ByaiGroupChatTurn turn = turnMapper.selectById(turnId);
-        if (turn == null) { return; }
-        turn = lockCurrentTurn(turn);
-        if (turn == null || !"RUNNING".equals(turn.getStatus())) { return; }
-        // 尚未绑定 trace 的 turn 由调度器负责恢复，观察器不能提前结束它。
-        if (turn.getTraceId() == null || retireLegacyAssessment(turn)) { return; }
-        resolveDisposition(turn, false);
-        if (TraceIdCodec.canDecode(turn.getTraceId())) {
-            completeInitialTurn(turn, TraceIdCodec.decode(turn.getTraceId()).getModelAnswerMessageId(), false);
-        }
+        reconcileSnapshot(turnMapper.selectById(turnId), null, true);
+    }
+
+    /** Returns whether this exact local observation still needs polling. No discovery query is performed. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public boolean observe(Long executionId, boolean turn, String traceId) {
+        ByaiGroupChatExecution snapshot = turn ? turnMapper.selectById(executionId) : executionMapper.selectById(executionId);
+        return reconcileSnapshot(snapshot, traceId, false);
+    }
+
+    private boolean reconcileSnapshot(ByaiGroupChatExecution snapshot, String expectedTrace, boolean completion) {
+        if (snapshot == null || !"RUNNING".equals(snapshot.getStatus()) || snapshot.getTraceId() == null
+            || (expectedTrace != null && !Objects.equals(expectedTrace, snapshot.getTraceId()))) return false;
+        boolean assessment = snapshot instanceof ByaiGroupChatTurn turn && "ASSESSMENT".equals(turn.getPhase());
+        if (!completion && !assessment && !"UNKNOWN".equals(snapshot.getDisposition())) return false;
+        GroupChatDisposition observed = readDisposition(snapshot);
+        // Missing files are the common case. A point read is sufficient until there is a decision to persist.
+        if (!completion && !assessment && observed == null) return true;
+        boolean[] pending = {false};
+        project(() -> {
+            ByaiGroupChatExecution current = snapshot instanceof ByaiGroupChatTurn
+                ? lockCurrentTurn((ByaiGroupChatTurn) snapshot) : lockLegacyExecution(snapshot.getCandidateSessionId());
+            if (current == null || !Objects.equals(current.getExecutionId(), snapshot.getExecutionId())
+                || !Objects.equals(current.getTraceId(), snapshot.getTraceId()) || !"RUNNING".equals(current.getStatus())) return;
+            if (retireLegacyAssessment(current)) return;
+            resolveDisposition(current, false, observed);
+            if (completion && TraceIdCodec.canDecode(current.getTraceId())) {
+                completeInitialTurn(current, TraceIdCodec.decode(current.getTraceId()).getModelAnswerMessageId(), false, observed);
+            }
+            pending[0] = "RUNNING".equals(current.getStatus()) && "UNKNOWN".equals(current.getDisposition());
+        });
+        return pending[0];
+    }
+
+    private GroupChatDisposition readDisposition(ByaiGroupChatExecution execution) {
+        if (!"RUNNING".equals(execution.getStatus()) || execution.getTraceId() == null
+            || (execution.getDisposition() != null && !"UNKNOWN".equals(execution.getDisposition()))
+            || (execution instanceof ByaiGroupChatTurn turn && "ASSESSMENT".equals(turn.getPhase()))) return null;
+        Users user = userService.findById(execution.getInitiatorUserId());
+        return user == null ? null : dispositionReader.read(user.getUserCode(),
+            execution instanceof ByaiGroupChatTurn ? Long.valueOf(execution.getGatewaySessionId())
+                : execution.getCandidateSessionId(), execution.getExecutionId());
     }
 
     private ByaiGroupChatExecution lockLegacyExecution(Long candidateSessionId) {
@@ -179,7 +216,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         return false;
     }
 
-    private void completeInitialTurn(ByaiGroupChatExecution execution, Long answerId, boolean failed) {
+    private void completeInitialTurn(ByaiGroupChatExecution execution, Long answerId, boolean failed, GroupChatDisposition observed) {
         if (retireLegacyAssessment(execution)) { return; }
         ByaiMessage answer = answerId == null ? null : messageMapper.selectByMessageId(answerId);
         if (answer == null || !Objects.equals(answer.getSessionId(), execution instanceof ByaiGroupChatTurn
@@ -191,7 +228,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         JSONObject answerMetadata = StringUtils.isBlank(answer.getMetadata())
             ? new JSONObject() : JSON.parseObject(answer.getMetadata());
         failed = failed || answerMetadata.getBooleanValue("turnFailed");
-        String disposition = resolveDisposition(execution, true);
+        String disposition = resolveDisposition(execution, true, observed);
         String finalText = finalAnswer(answer);
         GroupChatAgentMention mentions = mentionParser.parse(execution.getGroupSessionId(),
             execution.getTargetAgentId(), finalText);
@@ -225,14 +262,11 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         }
     }
 
-    private String resolveDisposition(ByaiGroupChatExecution execution, boolean terminal) {
+    private String resolveDisposition(ByaiGroupChatExecution execution, boolean terminal, GroupChatDisposition disposition) {
         String current = StringUtils.defaultIfBlank(execution.getDisposition(), "UNKNOWN");
         if (!"UNKNOWN".equals(current)) {
             return current;
         }
-        Users user = userService.findById(execution.getInitiatorUserId());
-        GroupChatDisposition disposition = user == null ? null : dispositionReader.read(user.getUserCode(),
-            execution instanceof ByaiGroupChatTurn ? Long.valueOf(execution.getGatewaySessionId()) : execution.getCandidateSessionId(), execution.getExecutionId());
         if (disposition == null && !terminal) {
             return current;
         }
@@ -411,11 +445,19 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         if (changed != 1) {
             throw new IllegalStateException("Group turn completion changed concurrently: " + execution.getExecutionId());
         }
+        execution.setStatus("SUCCEEDED");
+        wakeNext(execution);
     }
 
     private void markFailed(ByaiGroupChatExecution execution, String code, String message) {
         if (execution instanceof ByaiGroupChatTurn) { turnMapper.markFailed(execution.getExecutionId(), code, message, new Date()); }
         else { executionMapper.markFailed(execution.getExecutionId(), code, message, new Date()); }
+        execution.setStatus("FAILED");
+        wakeNext(execution);
+    }
+
+    private void wakeNext(ByaiGroupChatExecution execution) {
+        if (turnCoordinator != null) turnCoordinator.wakeAfterCommit(execution.getCandidateSessionId());
     }
 
     private void scheduleAgentMentions(ByaiGroupChatExecution execution, GroupChatAgentMention mentions,

@@ -28,7 +28,7 @@ class GroupChatExecutionLifecycleTest {
     void scheduledWorkDoesNotRedispatchLongRunningTasks() throws Exception {
         ByaiGroupChatExecutionMapper executions = mock(ByaiGroupChatExecutionMapper.class);
         GroupChatGatewayExecutor gateway = mock(GroupChatGatewayExecutor.class);
-        when(executions.selectQueuedExecutions()).thenReturn(List.of());
+        when(executions.selectQueuedPage(0L, 100)).thenReturn(List.of());
         GroupChatExecutionCoordinator coordinator = new GroupChatExecutionCoordinator(executions,
             mock(SequenceService.class), gateway, mock(GroupChatCandidateSessionService.class));
         // 运行全部定时入口，避免分类观察被误改成重新发送同一个 Agent turn。
@@ -50,7 +50,7 @@ class GroupChatExecutionLifecycleTest {
         first.setCandidateSessionId(60L);
         ByaiGroupChatExecution second = new ByaiGroupChatExecution();
         second.setCandidateSessionId(80L);
-        when(executions.selectRunningExecutions()).thenReturn(List.of(first, second));
+        when(executions.selectBoundPage(0L, 100)).thenReturn(List.of(first, second));
         doThrow(new IllegalStateException("temporary file read failure")).when(handler).reconcile(60L);
 
         new GroupChatStreamRouter(executions, handler).pollRunningExecutions();

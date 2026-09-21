@@ -1,8 +1,11 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -10,10 +13,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import java.util.List;
 import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
-
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -23,9 +28,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.beans.BeanUtils;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -35,6 +41,7 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
@@ -43,13 +50,15 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutio
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMentionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatAgentMention;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatDisposition;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatAgentMentionParser;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispositionReader;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatExecutionEventHandler;
-import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
-import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatExecutionStarted;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatStreamRouter;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 class GroupChatTurnProjectionTest {
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
@@ -251,10 +260,64 @@ class GroupChatTurnProjectionTest {
         verifyNoInteractions(publisher);
     }
 
+    @Test
+    void classificationFileIsReadBeforeProjectionTransactionAcquiresLocks() throws Exception {
+        when(reader.read(any(), any(), any())).thenAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return null;
+        });
+        when(turns.selectForUpdateById(10L)).thenAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            return turn;
+        });
+        when(parser.parse(1L, 8L, "reply")).thenReturn(new GroupChatAgentMention("reply", List.of()));
+        transactionalHandler(mock(Connection.class)).afterPersisted(context);
+        verify(reader).read("user-7", 60L, 10L);
+    }
+
+    @Test
+    void failedProjectionCommitKeepsLocalObservationUntilSuccessfulRetry() throws Exception {
+        Connection connection = mock(Connection.class);
+        doThrow(new SQLException("commit unavailable")).doNothing().when(connection).commit();
+        GroupChatStreamRouter router = new GroupChatStreamRouter(mock(ByaiGroupChatExecutionMapper.class),
+            transactionalHandler(connection));
+        ExecutorService observers = mock(ExecutorService.class);
+        doAnswer(call -> { call.getArgument(0, Runnable.class).run(); return null; })
+            .when(observers).execute(any(Runnable.class));
+        ReflectionTestUtils.setField(router, "observers", observers);
+        GroupChatDisposition classified = new GroupChatDisposition();
+        classified.setKind("CHAT");
+        when(reader.read(any(), any(), any())).thenReturn(classified);
+        when(turns.selectForUpdateById(10L)).thenAnswer(call -> {
+            ByaiGroupChatTurn locked = new ByaiGroupChatTurn();
+            BeanUtils.copyProperties(turn, locked);
+            return locked;
+        });
+        router.onExecutionStarted(new GroupChatExecutionStarted(10L, true, "current-trace"));
+        router.observeClassifications();
+        Map<?, ?> observations = (Map<?, ?>) ReflectionTestUtils.getField(router, "observations");
+        assertThat(observations).hasSize(1);
+        // Advance only this test observation's deadline; production retries use bounded backoff.
+        ReflectionTestUtils.setField(observations.values().iterator().next(), "nextAttempt", 0L);
+        router.observeClassifications();
+        assertThat(observations).isEmpty();
+        verify(connection, times(2)).commit();
+        verify(reader, times(2)).read("user-7", 60L, 10L);
+    }
+
+    @Test
+    void missingClassificationFileNeedsNoProjectionLocks() {
+        assertThat(handler.observe(10L, true, "current-trace")).isTrue();
+        verify(turns, never()).lockGroup(any());
+        verify(turns, never()).selectForUpdateById(any());
+        verifyNoInteractions(tasks, publisher);
+    }
+
     private GroupChatExecutionEventHandler transactionalHandler(Connection connection) throws Exception {
         DataSource dataSource = mock(DataSource.class);
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.getAutoCommit()).thenReturn(true);
+        handler.configureTransactions(new DataSourceTransactionManager(dataSource));
         ProxyFactory factory = new ProxyFactory(handler);
         factory.setProxyTargetClass(true);
         factory.addAdvice(new TransactionInterceptor(new DataSourceTransactionManager(dataSource),

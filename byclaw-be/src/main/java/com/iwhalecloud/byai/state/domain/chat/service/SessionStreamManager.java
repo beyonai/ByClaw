@@ -275,6 +275,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
                 outputStreamManager.removeContext(sessionId, completed);
                 chatRuntimeStateService.delete(completed);
                 applicationContext.getBean(RunningOutputStreamRegistry.class).releaseIfOwner(completed);
+                publishSessionReleased(completed.sessionId);
                 return false;
             }
             ChatProcessContext owner = outputStreamManager.getContext(sessionId);
@@ -295,6 +296,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
             stopSessionListener(sessionId);
             applicationContext.getBean(RunningOutputStreamRegistry.class).releaseIfOwner(completed);
+            publishSessionReleased(completed.sessionId);
             return true;
         }
     }
@@ -324,6 +326,20 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         RunningOutputStreamRegistry runningOutputStreamRegistry =
             applicationContext.getBean(RunningOutputStreamRegistry.class);
         runningOutputStreamRegistry.releaseIfOwner(ctx);
+        if (ctx != null) {
+            publishSessionReleased(ctx.sessionId);
+        }
+    }
+
+    private void publishSessionReleased(Long sessionId) {
+        try {
+            // 所有旧 listener、context 和 owner 清理完成后才唤醒，避免清理误伤下一轮。
+            applicationContext.publishEvent(new ChatSessionReleased(sessionId));
+        }
+        catch (RuntimeException error) {
+            // 通知只是低延迟提示；失败交给持久化队列补偿，不能反过来破坏完成清理。
+            log.warn("Unable to announce released chat session: sessionId={}", sessionId, error);
+        }
     }
 
     /**

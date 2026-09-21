@@ -152,4 +152,23 @@
         SELECT <include refid="BaseColumns" /> FROM byai_group_chat_execution
         WHERE answer_message_id = #{messageId} OR ack_message_id = #{messageId} LIMIT 1
     </select>
+
+    <!-- 补偿只发现执行标识；完整状态由处理事务锁定重读。 -->
+    <select id="selectQueuedPage" resultMap="BaseResultMap">
+        SELECT q.execution_id, q.candidate_session_id, q.trace_id
+        FROM byai_group_chat_execution q
+        WHERE q.status = 'QUEUED' AND q.execution_id &gt; #{afterId}
+        ORDER BY q.execution_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectBoundPage" resultMap="BaseResultMap">
+        SELECT q.execution_id, q.candidate_session_id, q.trace_id
+        FROM byai_group_chat_execution q
+        WHERE q.status = 'RUNNING' AND q.execution_id &gt; #{afterId}
+          AND q.trace_id IS NOT NULL
+        ORDER BY q.execution_id ASC
+        LIMIT #{limit}
+    </select>
+
 </mapper>

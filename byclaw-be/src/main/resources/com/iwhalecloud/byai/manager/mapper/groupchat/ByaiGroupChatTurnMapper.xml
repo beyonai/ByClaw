@@ -139,4 +139,37 @@
     <select id="selectForUpdateById" resultMap="BaseResultMap" flushCache="true" useCache="false">
         SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn WHERE execution_id = #{turnId} FOR UPDATE
     </select>
+
+    <!-- 补偿只发现执行标识；完整状态由处理事务锁定重读。 -->
+    <select id="selectQueuedPage" resultMap="BaseResultMap">
+        SELECT q.execution_id, q.candidate_session_id, q.trace_id
+        FROM byai_group_chat_turn q
+        WHERE q.status = 'QUEUED' AND q.execution_id &gt; #{afterId}
+          AND NOT EXISTS (
+              SELECT 1 FROM byai_group_chat_turn older
+              WHERE older.candidate_session_id = q.candidate_session_id
+                AND older.status = 'QUEUED' AND older.execution_id &lt; q.execution_id
+          )
+        ORDER BY q.execution_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectUnboundPage" resultMap="BaseResultMap">
+        SELECT q.execution_id, q.candidate_session_id, q.trace_id
+        FROM byai_group_chat_turn q
+        WHERE q.status = 'RUNNING' AND q.execution_id &gt; #{afterId}
+          AND q.trace_id IS NULL
+        ORDER BY q.execution_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectBoundPage" resultMap="BaseResultMap">
+        SELECT q.execution_id, q.candidate_session_id, q.trace_id
+        FROM byai_group_chat_turn q
+        WHERE q.status = 'RUNNING' AND q.execution_id &gt; #{afterId}
+          AND q.trace_id IS NOT NULL
+        ORDER BY q.execution_id ASC
+        LIMIT #{limit}
+    </select>
+
 </mapper>

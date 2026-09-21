@@ -1,25 +1,37 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
-import java.util.Date;
-
 import jakarta.annotation.PreDestroy;
-import java.util.Objects;
+import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
@@ -28,10 +40,9 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMappe
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatSessionReleased;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
@@ -55,7 +66,14 @@ public class GroupChatTurnCoordinator {
     private final ChatRuntimeStateService runtime;
     private final GroupChatGatewayExecutor gateway;
     private final TransactionTemplate transaction;
-    private final ExecutorService workers = Executors.newCachedThreadPool();
+    private final ExecutorService workers = new ThreadPoolExecutor(8, 8, 0L, TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(128));
+    private final Set<Long> submitted = ConcurrentHashMap.newKeySet();
+    private final TransactionTemplate dispatchTransaction;
+    @Value("${byclaw.group-chat.scan-batch-size:100}")
+    private int batchSize = 100;
+    private long queuedCursor;
+    private long unboundCursor;
 
     public GroupChatTurnCoordinator(ByaiGroupChatTurnMapper turns, ByaiGroupChatExecutionMapper anchors,
         ByaiGroupChatTaskMapper tasks, ByaiMessageMapper messages, GroupChatCandidateSessionService candidates,
@@ -75,6 +93,8 @@ public class GroupChatTurnCoordinator {
         this.runtime = runtime;
         this.gateway = gateway;
         this.transaction = new TransactionTemplate(transactionManager);
+        this.dispatchTransaction = new TransactionTemplate(transactionManager);
+        this.dispatchTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     public ByaiGroupChatTurn enqueueUser(Long group, Long source, Long reply, Long user, Long agent) {
@@ -221,6 +241,9 @@ public class GroupChatTurnCoordinator {
             }
         }
         turns.insert(turn);
+        if ("QUEUED".equals(turn.getStatus())) {
+            wakeAfterCommit(turn.getCandidateSessionId());
+        }
         return turn;
     }
 
@@ -243,56 +266,92 @@ public class GroupChatTurnCoordinator {
         return anchor;
     }
 
-    @Scheduled(fixedDelayString = "${byclaw.group-chat.execution-poll-ms:1000}")
+    /** Normal queue progression is event driven; these bounded pages only repair missed wakeups. */
+    @Scheduled(fixedDelayString = "${byclaw.group-chat.turn-recovery-ms:10000}")
     public void poll() {
-        for (ByaiGroupChatTurn queued : turns.selectQueuedExecutions()) {
-            ByaiGroupChatTurn claimed;
-            try {
-                claimed = transaction.execute(status -> claim(queued));
-            }
-            catch (RuntimeException error) {
-                log.warn("Unable to claim group turn: turnId={}", queued.getExecutionId(), error);
-                continue;
-            }
-            if (claimed != null) {
-                submit(claimed);
-            }
+        List<ByaiGroupChatTurn> queued = turns.selectQueuedPage(queuedCursor, batchSize);
+        queuedCursor = queued.size() < batchSize ? 0 : queued.get(queued.size() - 1).getExecutionId();
+        for (ByaiGroupChatTurn turn : queued) {
+            tryDispatchSession(turn.getCandidateSessionId());
         }
-        // A crash before trace binding cannot have sent a request. The locked bind fences competing workers.
-        for (ByaiGroupChatTurn running : turns.selectRunningExecutions()) {
-            if (running.getTraceId() != null) {
-                continue;
-            }
+        List<ByaiGroupChatTurn> unbound = turns.selectUnboundPage(unboundCursor, batchSize);
+        unboundCursor = unbound.size() < batchSize ? 0 : unbound.get(unbound.size() - 1).getExecutionId();
+        for (ByaiGroupChatTurn snapshot : unbound) {
             try {
-                ByaiGroupChatTurn resumable = transaction.execute(status -> resumeUnbound(running));
-                if (resumable != null) {
-                    submit(resumable);
-                }
+                ByaiGroupChatTurn resumed = dispatchTransaction.execute(status -> resumeUnbound(snapshot));
+                if (resumed != null) submit(resumed);
             }
             catch (RuntimeException error) {
-                log.warn("Unable to recover unbound group turn: turnId={}", running.getExecutionId(), error);
+                log.warn("Unable to recover unbound group turn: turnId={}", snapshot.getExecutionId(), error);
             }
         }
     }
 
-    private void submit(ByaiGroupChatTurn turn) {
-        workers.submit(() -> {
+    @EventListener
+    public void onSessionReleased(ChatSessionReleased event) {
+        wakeAfterCommit(event.sessionId());
+    }
+
+    /** Callbacks may still hold committed transaction resources, so dispatch always uses a fresh transaction. */
+    public void wakeAfterCommit(Long sessionId) {
+        Runnable wake = () -> {
             try {
-                gateway.executeTurn(turn);
+                workers.execute(() -> tryDispatchSession(sessionId));
             }
-            catch (RuntimeException error) {
-                log.warn("Unable to start group turn: turnId={}", turn.getExecutionId(), error);
-                transaction.execute(status -> {
-                    ByaiGroupChatTurn persisted = turns.selectForUpdateById(turn.getExecutionId());
-                    if (persisted != null && "RUNNING".equals(persisted.getStatus())
-                        && (persisted.getTraceId() == null || (isPreparationFailure(error)
-                            && Objects.equals(persisted.getTraceId(), turn.getTraceId())))) {
-                        turns.markFailed(turn.getExecutionId(), "START_FAILED", error.getMessage(), new Date());
-                    }
-                    return null;
-                });
+            catch (RejectedExecutionException error) {
+                log.debug("Group dispatch capacity exhausted; compensation will retry sessionId={}", sessionId);
             }
-        });
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { wake.run(); }
+            });
+        }
+        else wake.run();
+    }
+
+    public void tryDispatchSession(Long sessionId) {
+        try {
+            ByaiGroupChatTurn claimed = dispatchTransaction.execute(status -> {
+                anchors.selectForUpdateByCandidateSessionId(sessionId);
+                ByaiGroupChatTurn head = turns.selectFirstQueued(sessionId);
+                return head == null ? null : claim(head);
+            });
+            if (claimed != null) submit(claimed);
+        }
+        catch (RuntimeException error) {
+            log.warn("Unable to dispatch group session: sessionId={}", sessionId, error);
+        }
+    }
+
+    private void submit(ByaiGroupChatTurn turn) {
+        if (!submitted.add(turn.getExecutionId())) return;
+        try {
+            workers.execute(() -> {
+                try {
+                    gateway.executeTurn(turn);
+                }
+                catch (RuntimeException error) {
+                    log.warn("Unable to start group turn: turnId={}", turn.getExecutionId(), error);
+                    dispatchTransaction.execute(status -> {
+                        ByaiGroupChatTurn persisted = turns.selectForUpdateById(turn.getExecutionId());
+                        if (persisted != null && "RUNNING".equals(persisted.getStatus())
+                            && (persisted.getTraceId() == null || (isPreparationFailure(error)
+                                && Objects.equals(persisted.getTraceId(), turn.getTraceId())))) {
+                            turns.markFailed(turn.getExecutionId(), "START_FAILED", error.getMessage(), new Date());
+                            wakeAfterCommit(persisted.getCandidateSessionId());
+                        }
+                        return null;
+                    });
+                }
+                finally { submitted.remove(turn.getExecutionId()); }
+            });
+        }
+        catch (RejectedExecutionException error) {
+            // No worker bound a trace; the persisted RUNNING row remains recoverable.
+            submitted.remove(turn.getExecutionId());
+            log.debug("Group worker capacity exhausted: turnId={}", turn.getExecutionId());
+        }
     }
 
     private boolean isPreparationFailure(Throwable error) {
@@ -305,7 +364,6 @@ public class GroupChatTurnCoordinator {
     }
 
     private ByaiGroupChatTurn claim(ByaiGroupChatTurn queued) {
-        anchors.selectForUpdateByCandidateSessionId(queued.getCandidateSessionId());
         if (turns.selectRunningBySession(queued.getCandidateSessionId()) != null) {
             return null;
         }
@@ -385,6 +443,7 @@ public class GroupChatTurnCoordinator {
         turn.setErrorCode(reason);
         turn.setFinishTime(new Date());
         turns.updateById(turn);
+        wakeAfterCommit(turn.getCandidateSessionId());
     }
 
     private void requireMembers(Long group, Long user, Long agent) {

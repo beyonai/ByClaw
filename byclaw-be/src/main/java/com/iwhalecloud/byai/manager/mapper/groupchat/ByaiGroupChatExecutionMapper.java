@@ -47,6 +47,11 @@ public interface ByaiGroupChatExecutionMapper extends BaseMapper<ByaiGroupChatEx
 
     int requeueStaleRunning(@Param("before") Date before);
 
+    /** 补偿扫描仅取调度标识，按主键游标推进，避免重复搬运输入正文。 */
+    List<ByaiGroupChatExecution> selectQueuedPage(@Param("afterId") Long afterId, @Param("limit") int limit);
+
+    List<ByaiGroupChatExecution> selectBoundPage(@Param("afterId") Long afterId, @Param("limit") int limit);
+
     List<ByaiGroupChatExecution> selectRunningExecutions();
 
     List<ByaiGroupChatExecution> selectQueuedExecutions();

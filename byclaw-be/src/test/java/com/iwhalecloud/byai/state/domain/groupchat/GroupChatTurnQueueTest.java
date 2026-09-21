@@ -2,9 +2,11 @@ package com.iwhalecloud.byai.state.domain.groupchat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -15,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +26,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -36,6 +40,7 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatSessionReleased;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidateSessionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
@@ -74,15 +79,15 @@ class GroupChatTurnQueueTest {
             mock(UserService.class), mock(SsResourceService.class), runtime, gateway, transactions);
         // Inline executor makes scheduling deterministic; persisted row state still survives each poll.
         ExecutorService workers = mock(ExecutorService.class);
-        when(workers.submit(any(Runnable.class))).thenAnswer(call -> {
+        doAnswer(call -> {
             call.getArgument(0, Runnable.class).run();
             return null;
-        });
+        }).when(workers).execute(any(Runnable.class));
         ReflectionTestUtils.setField(coordinator, "workers", workers);
-        when(turns.selectQueuedExecutions()).thenAnswer(call -> rows.stream()
+        when(turns.selectQueuedPage(anyLong(), anyInt())).thenAnswer(call -> rows.stream()
             .filter(row -> "QUEUED".equals(row.getStatus())).toList());
-        when(turns.selectRunningExecutions()).thenAnswer(call -> rows.stream()
-            .filter(row -> "RUNNING".equals(row.getStatus())).toList());
+        when(turns.selectUnboundPage(anyLong(), anyInt())).thenAnswer(call -> rows.stream()
+            .filter(row -> "RUNNING".equals(row.getStatus()) && row.getTraceId() == null).toList());
         when(turns.selectRunningBySession(anyLong())).thenAnswer(call -> rows.stream()
             .filter(row -> row.getCandidateSessionId().equals(call.getArgument(0)) && "RUNNING".equals(row.getStatus()))
             .findFirst().orElse(null));
@@ -208,6 +213,61 @@ class GroupChatTurnQueueTest {
         assertThat(pending.getPhase()).isEqualTo("CHAT_CONTINUATION");
         assertThat(pending.getDisposition()).isEqualTo("CHAT");
         assertThat(pending.getGatewaySessionId()).isEqualTo("60");
+    }
+
+    @Test
+    void committedWakeStartsWithoutAnyPollAndWaitsForCommit() {
+        row(11L, 60L);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            coordinator.wakeAfterCommit(60L);
+            assertThat(sent).isEmpty();
+            TransactionSynchronizationManager.getSynchronizations().forEach(callback -> callback.afterCommit());
+            assertThat(sent).containsExactly(11L);
+        }
+        finally { TransactionSynchronizationManager.clearSynchronization(); }
+    }
+
+    @Test
+    void runtimeReleaseAndTerminalWakeAdvanceInEitherOrder() {
+        ByaiGroupChatTurn first = row(11L, 60L);
+        row(12L, 60L);
+        coordinator.tryDispatchSession(60L);
+        // A release arriving before persisted terminal status must not overlap the running turn.
+        coordinator.onSessionReleased(new ChatSessionReleased(60L));
+        assertThat(sent).containsExactly(11L);
+        first.setStatus("SUCCEEDED");
+        coordinator.wakeAfterCommit(60L);
+        assertThat(sent).containsExactly(11L, 12L);
+    }
+
+    @Test
+    void busyRuntimeWaitsUntilReleaseEvenAfterTerminalWake() {
+        row(11L, 60L);
+        ChatRuntimeState busy = new ChatRuntimeState();
+        busy.setStatus("RUNNING");
+        when(runtime.get(60L)).thenReturn(busy);
+        coordinator.wakeAfterCommit(60L);
+        assertThat(sent).isEmpty();
+        when(runtime.get(60L)).thenReturn(null);
+        coordinator.onSessionReleased(new ChatSessionReleased(60L));
+        assertThat(sent).containsExactly(11L);
+    }
+
+    @Test
+    void rejectedWorkerLeavesUnboundTurnRecoverable() {
+        ByaiGroupChatTurn pending = row(11L, 60L);
+        ExecutorService rejected = mock(ExecutorService.class);
+        doThrow(new RejectedExecutionException()).when(rejected).execute(any());
+        ExecutorService original = (ExecutorService) ReflectionTestUtils.getField(coordinator, "workers");
+        ReflectionTestUtils.setField(coordinator, "workers", rejected);
+        coordinator.tryDispatchSession(60L);
+        assertThat(pending.getStatus()).isEqualTo("RUNNING");
+        assertThat(pending.getTraceId()).isNull();
+        assertThat(sent).isEmpty();
+        ReflectionTestUtils.setField(coordinator, "workers", original);
+        coordinator.poll();
+        assertThat(sent).containsExactly(11L);
     }
 
     private ByaiGroupChatTurn row(long id, long session) {

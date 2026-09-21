@@ -4,18 +4,27 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import java.sql.Connection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
+import javax.sql.DataSource;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
@@ -26,8 +35,6 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMappe
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidateSessionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
@@ -78,6 +85,39 @@ class GroupChatTurnCoordinatorTest {
             mock(SessionService.class), users, resources, mock(ChatRuntimeStateService.class),
             mock(GroupChatGatewayExecutor.class), transactions);
     }
+
+    @Test
+    void enqueueSchedulesOnlyAfterSuccessfulDatabaseCommit() throws Exception {
+        Connection connection = mock(Connection.class);
+        DataSource dataSource = mock(DataSource.class);
+        when(connection.getAutoCommit()).thenReturn(true);
+        when(dataSource.getConnection()).thenReturn(connection);
+        ReflectionTestUtils.setField(coordinator, "transaction", new TransactionTemplate(new DataSourceTransactionManager(dataSource)));
+        ExecutorService workers = mock(ExecutorService.class);
+        ReflectionTestUtils.setField(coordinator, "workers", workers);
+        coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
+        var order = inOrder(connection, workers);
+        order.verify(connection).commit();
+        order.verify(workers).execute(any(Runnable.class));
+    }
+
+    @Test
+    void rolledBackEnqueueNeverSchedulesAgent() throws Exception {
+        Connection connection = mock(Connection.class);
+        DataSource dataSource = mock(DataSource.class);
+        when(connection.getAutoCommit()).thenReturn(true);
+        when(dataSource.getConnection()).thenReturn(connection);
+        ReflectionTestUtils.setField(coordinator, "transaction", new TransactionTemplate(new DataSourceTransactionManager(dataSource)));
+        ExecutorService workers = mock(ExecutorService.class);
+        ReflectionTestUtils.setField(coordinator, "workers", workers);
+        when(turns.insert(any(ByaiGroupChatTurn.class))).thenThrow(new IllegalStateException("database failure"));
+        assertThrows(IllegalStateException.class, () -> coordinator.enqueueUser(10L, 20L, null, 1L, 2L));
+        verify(connection).rollback();
+        verifyNoInteractions(workers);
+    }
+
+    @AfterEach
+    void cleanup() { coordinator.shutdown(); }
 
     @Test
     void agentReturnReusesItsOwnSessionAndCarriesImmediateSender() {

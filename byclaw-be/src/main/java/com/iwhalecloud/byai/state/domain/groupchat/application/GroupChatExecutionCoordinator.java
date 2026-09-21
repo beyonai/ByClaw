@@ -1,24 +1,29 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import jakarta.annotation.PreDestroy;
 import java.util.Date;
-import java.util.UUID;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
-import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-/** 群聊 Agent 执行记录入口；实际 Gateway 消费可由 Redis worker 异步接管。 */
+/** Legacy execution entry; new requests use persisted turns and immediate session dispatch. */
 @Service
 public class GroupChatExecutionCoordinator {
     @Autowired
@@ -28,7 +33,11 @@ public class GroupChatExecutionCoordinator {
     private final SequenceService sequenceService;
     private final GroupChatGatewayExecutor gatewayExecutor;
     private final GroupChatCandidateSessionService candidateSessionService;
-    private final ExecutorService workers = Executors.newCachedThreadPool();
+    private final ExecutorService workers = new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(128));
+    @Value("${byclaw.group-chat.scan-batch-size:100}")
+    private int batchSize = 100;
+    private long queuedCursor;
 
     public GroupChatExecutionCoordinator(ByaiGroupChatExecutionMapper executionMapper, SequenceService sequenceService,
         GroupChatGatewayExecutor gatewayExecutor, GroupChatCandidateSessionService candidateSessionService) {
@@ -89,13 +98,14 @@ public class GroupChatExecutionCoordinator {
     }
 
     /** 扫描持久化队列，进程重启后可重新接管尚未领取的执行。 */
-    @Scheduled(fixedDelayString = "${byclaw.group-chat.execution-poll-ms:1000}")
+    @Scheduled(fixedDelayString = "${byclaw.group-chat.legacy-queue-recovery-ms:60000}")
     public void pollQueuedExecutions() {
         if (gatewayExecutor == null) {
             return;
         }
-        List<ByaiGroupChatExecution> executions = executionMapper.selectQueuedExecutions();
+        List<ByaiGroupChatExecution> executions = executionMapper.selectQueuedPage(queuedCursor, batchSize);
         if (executions != null) {
+            queuedCursor = executions.size() < batchSize ? 0 : executions.get(executions.size() - 1).getExecutionId();
             executions.forEach(this::dispatch);
         }
     }
@@ -107,10 +117,18 @@ public class GroupChatExecutionCoordinator {
         if (execution == null || gatewayExecutor == null) {
             return;
         }
-        if (executionMapper.claim(execution.getExecutionId(), new Date()) <= 0) {
-            return;
+        try {
+            // Claim inside the accepted worker: a full pool must leave the legacy row QUEUED.
+            workers.execute(() -> {
+                if (executionMapper.claim(execution.getExecutionId(), new Date()) > 0) {
+                    ByaiGroupChatExecution current = executionMapper.selectById(execution.getExecutionId());
+                    if (current != null) execute(current);
+                }
+            });
         }
-        workers.submit(() -> execute(execution));
+        catch (RejectedExecutionException ignored) {
+            // The compatibility scan will retry the unclaimed row.
+        }
     }
 
     private void dispatchAfterCommit(ByaiGroupChatExecution execution) {
@@ -125,6 +143,9 @@ public class GroupChatExecutionCoordinator {
             }
         });
     }
+
+    @PreDestroy
+    public void shutdown() { workers.shutdown(); }
 
     private void execute(ByaiGroupChatExecution execution) {
         try {

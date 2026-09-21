@@ -32,6 +32,13 @@ public interface ByaiGroupChatTurnMapper extends BaseMapper<ByaiGroupChatTurn> {
     int markFailed(@Param("executionId") Long executionId, @Param("errorCode") String errorCode,
         @Param("errorMessage") String errorMessage, @Param("now") Date now);
 
+    /** 补偿扫描仅取调度标识，按主键游标推进，避免重复搬运输入正文。 */
+    List<ByaiGroupChatTurn> selectQueuedPage(@Param("afterId") Long afterId, @Param("limit") int limit);
+
+    List<ByaiGroupChatTurn> selectUnboundPage(@Param("afterId") Long afterId, @Param("limit") int limit);
+
+    List<ByaiGroupChatTurn> selectBoundPage(@Param("afterId") Long afterId, @Param("limit") int limit);
+
     List<ByaiGroupChatTurn> selectRunningExecutions();
 
     List<ByaiGroupChatTurn> selectQueuedExecutions();
