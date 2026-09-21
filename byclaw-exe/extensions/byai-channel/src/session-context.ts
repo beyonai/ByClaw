@@ -156,6 +156,7 @@ export type NativeChildRunTerminalSource =
   | "subagent_progress";
 
 export interface ActiveSdkRequest {
+  requestId?: string;
   accountId: string;
   sessionKey: string;
   to: string;
@@ -579,12 +580,14 @@ export function resetByclawChatContextForTest(): void {
 }
 
 export function buildSdkEmitMetadata(params: {
+    requestId?: string;
     laneMetadata?: ByaiLaneMetadata;
     traceId?: string;
     agentId?: string;
     agentName?: string;
 }): Record<string, any> {
     const metadata: Record<string, any> = {};
+    setMetadataField(metadata, "requestId", params.requestId || (params.traceId ? resolveActiveSdkRequestByTraceId(params.traceId)?.requestId : undefined));
     const lane = params.laneMetadata;
     setMetadataField(metadata, "laneId", lane?.laneId);
     setMetadataField(metadata, "turnId", lane?.turnId);
@@ -602,6 +605,7 @@ export function buildSdkEmitMetadata(params: {
 export function withSdkEmitMetadata(
     options: EmitOptions | undefined,
     params: {
+        requestId?: string;
         laneMetadata?: ByaiLaneMetadata;
         traceId?: string;
         agentId?: string;
@@ -635,6 +639,7 @@ export function withActiveSdkRequestEmitMetadata(
     options?: EmitOptions,
 ): EmitOptions {
     return withSdkEmitMetadata(options, {
+        requestId: request.requestId,
         laneMetadata: request.laneMetadata,
         traceId: request.traceId,
         parentMessageId: request.parentMessageId,
@@ -901,6 +906,7 @@ export function resolveChannelRequestContextBySessionKey(
 }
 
 export function registerActiveSdkRequest(params: {
+    requestId?: string;
     accountId: string;
     sessionKey: string;
     to: string;
@@ -940,6 +946,7 @@ export function registerActiveSdkRequest(params: {
         clearActiveSdkRequestRecord(existingRequestByTraceId);
     }
     const request: ActiveSdkRequest = {
+        requestId: params.requestId || params.traceId,
         accountId: normalizeAccountId(params.accountId),
         sessionKey: params.sessionKey,
         to: params.to,
@@ -995,6 +1002,7 @@ export function registerActiveSdkRequest(params: {
         accountId: request.accountId,
         createdAt: request.createdAt,
         fields: {
+            requestId: request.requestId,
             sessionId: request.sessionId,
             messageId: request.messageId,
             parentMessageId: request.parentMessageId,

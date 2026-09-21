@@ -1,3 +1,4 @@
+import { chatChainLog } from "./chat-chain-log.js";
 import {
   completeActiveSdkRequest,
   markActiveSdkDispatchSettled,
@@ -55,10 +56,12 @@ export async function waitForSdkSessionDispatchSettled(
     abortSignal?: AbortSignal;
     pollMs?: number;
     timeoutMs?: number;
+    log?: { info?: (text: string) => void; warn?: (text: string) => void };
   },
 ): Promise<SdkSessionDispatchSettleResult> {
   const normalized = sessionKey?.trim();
   const startedAt = Date.now();
+  let waitReported = false;
   const pollMs = options?.pollMs ?? DEFAULT_SETTLE_POLL_MS;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_SETTLE_TIMEOUT_MS;
 
@@ -100,6 +103,24 @@ export async function waitForSdkSessionDispatchSettled(
         rootLifecyclePhase: request?.rootLifecyclePhase,
         clearedRequest,
       };
+    }
+
+    if (!waitReported && Date.now() - startedAt >= 30_000 && request) {
+      waitReported = true;
+      chatChainLog(options?.log, "channel.final_wait", {
+        requestId: request.requestId || request.traceId,
+        sessionId: request.sessionId, traceId: request.traceId,
+        durationMs: Date.now() - startedAt, phase: request.rootLifecyclePhase,
+        pendingOutbound: request.pendingOutboundCount,
+        delegatedWork: request.delegatedWorkToolCallIds?.size ?? 0,
+        reason: [
+          request.awaitingFollowup && "awaiting_followup",
+          request.compactionRetryPending && "compaction_retry",
+          request.modelFallbackPending && "model_fallback",
+          request.overflowContinuePending && "overflow_continue",
+          request.activeRootRunId && "active_root_run",
+        ].filter(Boolean).join(",") || "completion_gate",
+      }, "waiting");
     }
 
     if (Date.now() - startedAt >= timeoutMs) {

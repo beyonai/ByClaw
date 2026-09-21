@@ -1,5 +1,14 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.log;
 
+import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
+import java.util.List;
+
 import com.iwhalecloud.byai.manager.application.service.log.TrackLogApplicationService;
 import com.iwhalecloud.byai.state.domain.log.dto.BatchTrackLogDto;
 import com.iwhalecloud.byai.manager.entity.log.TrackLog;
@@ -25,6 +34,26 @@ import org.springframework.web.bind.annotation.RestController;
 public class TrackLogController {
 
     private static final Logger logger = LoggerFactory.getLogger(TrackLogController.class);
+
+    public record DeliveryEvent(
+        @NotBlank @Size(max = 160) String eventId,
+        @Positive long time,
+        @NotNull @Pattern(regexp = "fe\\.(sent|final_received|final_applied|final_deferred|connection_closed|connection_opened)") String stage,
+        @NotBlank @Size(max = 160) String requestId,
+        @Size(max = 160) String sessionId,
+        @Size(max = 160) String streamId,
+        @NotNull @Pattern(regexp = "ok|failed|restoring|missing_context") String result) { }
+
+    public record DeliveryBatch(@NotNull @Size(min = 1, max = 20) List<@NotNull @Valid DeliveryEvent> events) { }
+
+    @PostMapping("/chatDelivery")
+    public ResponseUtil<String> chatDelivery(@Valid @RequestBody DeliveryBatch batch) {
+        for (DeliveryEvent event : batch.events()) {
+            ChatChainLog.record(event.stage(), event.requestId(), event.sessionId(), event.result(),
+                "clientTime", event.time(), "eventId", event.eventId(), "streamId", event.streamId(), "source", "browser_report");
+        }
+        return ResponseUtil.successResponse();
+    }
 
     @Autowired
     private TrackLogApplicationService trackLogApplicationService;

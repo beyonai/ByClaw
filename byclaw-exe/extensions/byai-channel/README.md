@@ -15,6 +15,12 @@ npm run build
 
 `openclaw` 扩展入口为 `./dist/index.js`。
 
+## 运行日志
+
+正常日志保留请求接收、OpenClaw运行、终态写入和异常等关键摘要，Gateway 链路按 `requestId` 检索，`sessionId` / `traceId` 辅助定位；Webhook使用已有 `requestId`。不逐条打印agent event，不打印问题/回答正文、注入的系统提示词、媒体文本或完整Redis配置；消息只记录长度，正常文本去重保持静默。
+
+root lifecycle terminal只表示该OpenClaw run结束，dispatch返回和SDK完成门通过也有各自含义，不能当作前端已收到终态。`channel.final_written` 记录实际 XADD 回复，前端收到及应用由 FE 独立上报，不能互相替代。需要检查完整模型输入时，使用下面默认关闭的Context Snapshot，不在常驻日志中dump正文。
+
 ## 配置说明
 
 ### 在 openclaw.json 中配置
@@ -632,3 +638,5 @@ export default ChatComponent;
 2. **流式输出**: 当 `streamEnabled: true` 时，AI 的回复会分多次推送，每次推送 `done: false`，最后一条 `done: true`
 3. **Session 管理**: 建议在服务端维护 session 映射关系
 4. **安全**: 生产环境请添加适当的认证和授权机制
+
+关键链路日志使用 `chat_chain` 标记和 metadata 中的 `requestId`：worker 接收、OpenClaw dispatch/lifecycle、终态 XADD 实际回复。终态写入日志观察 SDK 原有 pipeline，不改变命令、返回值或异常；pipeline 单命令错误会记录 failed，但保留 SDK 原有处理语义。完整排查说明见仓库 `docs/architecture/chat-request-logging-implementation.md`。

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.route;
 
+import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -212,9 +214,13 @@ public class RouteService {
             agentId, answerMessageId, traceId, userCode);
         registerMultiAgentContext(ctx, laneRoutes);
 
+        long dispatchStarted = System.nanoTime();
         boolean runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
         try {
             ensureWorkerReadyBeforeFirstSend(ctx, userCode, agentId, targetAgentType);
+            long readyMs = (System.nanoTime() - dispatchStarted) / 1_000_000;
+            ChatChainLog.record("be.worker_ready", ChatChainLog.requestId(ctx), sessionId, "ok",
+                "traceId", traceId, "targetAgentType", targetAgentType, "readyMs", readyMs);
             if (laneRoutes.isEmpty()) {
                 GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
                     userCode,
@@ -229,8 +235,9 @@ public class RouteService {
                     agentId,
                     ctx
                 );
-                log.info("Gateway SDK 消息发送成功, messageId: {}, targetWorker: {}, sessionId: {}, content: {}",
-                    response.getMessageId(), response.getTargetWorkerId(), sessionId, content);
+                ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "ok",
+                    "traceId", traceId, "workerId", response.getTargetWorkerId(), "readyMs", readyMs,
+                    "dispatchMs", (System.nanoTime() - dispatchStarted) / 1_000_000 - readyMs);
             } else {
                 Map<String, Object> multiAgentParams = buildMultiAgentGatewayParams(ctx.getParams(),
                     multiAgentMetadata, laneRoutes);
@@ -247,23 +254,26 @@ public class RouteService {
                     agentId,
                     ctx
                 );
-                log.info("Gateway SDK 多泳道批量消息发送成功, lanes: {}, messageId: {}, targetWorker: {}, sessionId: {}",
-                    laneRoutes.size(), response.getMessageId(), response.getTargetWorkerId(), sessionId);
+                ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "ok",
+                    "traceId", traceId, "workerId", response.getTargetWorkerId(), "readyMs", readyMs,
+                    "dispatchMs", (System.nanoTime() - dispatchStarted) / 1_000_000 - readyMs, "lanes", laneRoutes.size());
             }
         } catch (Exception e) {
+            ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "failed",
+                "durationMs", (System.nanoTime() - dispatchStarted) / 1_000_000, "errorType", e.getClass().getSimpleName());
             chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
             throw e;
         }
 
         if (ctx.sendByFrameworkMsgOnly) {
-            log.info("会话复用已有 Redis Stream 监听，本次仅发送 Gateway 消息完成, sessionId: {}, traceId: {}",
+            log.debug("会话复用已有 Redis Stream 监听，本次仅发送 Gateway 消息完成, sessionId: {}, traceId: {}",
                 sessionId, traceId);
             return;
         }
 
         if (ChatTransport.WEBSOCKET.equals(ctx.transport)) {
             ctx.asyncResponse = true;
-            log.info("WebSocket 会话已发送 Gateway，后续由 Redis Stream 路由异步推送, sessionId: {}, traceId: {}",
+            log.debug("WebSocket 会话已发送 Gateway，后续由 Redis Stream 路由异步推送, sessionId: {}, traceId: {}",
                 sessionId, traceId);
             return;
         }
@@ -670,6 +680,7 @@ public class RouteService {
             ResumeRoutingTraceLogger.logGatewayMetadataParseFailure(chatDto, sessionId, traceId, reqMetadata, error);
             throw error;
         }
+        metadata.put("requestId", ChatChainLog.requestId(ctx));
         metadata.put("language", ChatUtils.getLanguage());
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
         if (loginInfo != null) {
@@ -711,6 +722,7 @@ public class RouteService {
         String actionType = chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType();
         String parentMessageId = "-1";
         Map<String, Object> gatewayParams = params == null ? new HashMap<>() : new HashMap<>(params);
+        gatewayParams.put("requestId", ChatChainLog.requestId(ctx));
         gatewayParams.put("cwd", workspace);
         if (ActionType.ASK_AGENT.equals(actionType)
             && StringUtils.isNotBlank(sessionId)

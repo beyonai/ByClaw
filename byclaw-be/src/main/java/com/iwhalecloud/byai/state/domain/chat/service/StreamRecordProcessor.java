@@ -162,8 +162,8 @@ public class StreamRecordProcessor {
             dataJson = JSON.parseObject(String.valueOf(rawValue));
         }
         catch (Exception e) {
-            log.error("Redis Stream 消息 data 字段解析失败, stream: {}, messageId: {}, raw: {}",
-                record.getStream(), record.getId(), rawValue, e);
+            log.error("Redis Stream 消息 data 字段解析失败, stream: {}, messageId: {}, errorType: {}",
+                record.getStream(), record.getId(), e.getClass().getSimpleName());
             return StreamDispatchResult.INTENTIONALLY_IGNORED;
         }
 
@@ -173,10 +173,17 @@ public class StreamRecordProcessor {
         if (sessionId == null || sessionId.isBlank()) {
             return sessionStreamEventRouter.dispatch(dataJson);
         }
+        long processingStarted = System.nanoTime();
+        boolean terminal = ChatChainLog.terminal(dataJson);
+        String outcome = "failed";
+        String requestId = ChatChainLog.requestId(dataJson);
         SessionLock lock = acquireSessionLock(sessionId);
         lock.processing.lock();
+        long lockWaitMs = (System.nanoTime() - processingStarted) / 1_000_000;
         try {
             StreamDispatchResult result = sessionStreamEventRouter.dispatch(dataJson);
+            outcome = result.toString();
+            if (result.getContext() != null) requestId = ChatChainLog.requestId(result.getContext());
             if (!result.isTerminal() || result.getContext() == null) {
                 return result;
             }
@@ -188,18 +195,25 @@ public class StreamRecordProcessor {
             }
 
             if (!scriptService.persistAsyncGatewayContext(ctx)) {
+                outcome = "persist_failed";
                 log.warn("Redis Stream terminal 事件持久化失败，将保留 pending, stream: {}, messageId: {}",
                     record.getStream(), record.getId());
                 return StreamDispatchResult.ERROR;
             }
             // 标记必须在落库成功之后、ACK 之前写入：进程若在落库前崩溃，
             // 不能留下「已完成」的痕迹，否则重投会被误判并 ACK 掉。
+            outcome = "persist_marker_failed";
             terminalPersistMarkerService.markPersisted(ctx.sessionId, record.getId().getValue());
+            outcome = "ok";
             return result;
         }
         finally {
             lock.processing.unlock();
             releaseSessionLock(sessionId, lock);
+            if (terminal) ChatChainLog.record("be.final_processed", requestId, sessionId,
+                "ok".equals(outcome) || "TERMINAL_ALREADY_PERSISTED".equals(outcome) ? "ok" : outcome,
+                "streamId", record.getId().getValue(), "traceId", dataJson.get("trace_id"), "lockWaitMs", lockWaitMs,
+                "processingMs", (System.nanoTime() - processingStarted) / 1_000_000 - lockWaitMs);
         }
     }
 

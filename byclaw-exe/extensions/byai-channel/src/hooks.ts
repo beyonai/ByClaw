@@ -206,7 +206,7 @@ async function emitCompactionHookNotice(
         },
     });
     api.logger.info(
-        `[byai-channel] emitted compaction ${phase} notice from hook: sessionKey=${request.sessionKey}`,
+        `[byai-channel] emitted compaction ${phase} notice from hook: sessionId=${request.sessionId}, traceId=${request.traceId ?? ""}, sessionKey=${request.sessionKey}, runId=${ctx.runId ?? ""}`,
     );
 }
 
@@ -534,7 +534,7 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
                     await emitCompactionHookNotice(api, "start", event, ctx);
                 },
             ).catch((err) => {
-                api.logger.error(`[byai-channel] before_compaction enqueue failed: ${String(err)}`);
+                api.logger.error(`[byai-channel] before_compaction enqueue failed: sessionKey=${ctx.sessionKey ?? ""}, runId=${ctx.runId ?? ""}, error=${String(err)}`);
             });
         });
     });
@@ -546,7 +546,7 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         // Use the post-compaction token count from the event; the session store is
         // not yet updated at this point (see refreshCompactionSessionStatusRedis).
         void refreshCompactionSessionStatusRedis(ctx.sessionKey, event.tokenCount).catch((err) => {
-            api.logger.warn(`[byai-channel] after_compaction session status refresh failed: ${String(err)}`);
+            api.logger.warn(`[byai-channel] after_compaction session status refresh failed: sessionKey=${ctx.sessionKey ?? ""}, runId=${ctx.runId ?? ""}, error=${String(err)}`);
         });
         setImmediate(() => {
             void enqueueAfterAgentEvents(
@@ -555,7 +555,7 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
                     await emitCompactionHookNotice(api, "end", event, ctx);
                 },
             ).catch((err) => {
-                api.logger.error(`[byai-channel] after_compaction enqueue failed: ${String(err)}`);
+                api.logger.error(`[byai-channel] after_compaction enqueue failed: sessionKey=${ctx.sessionKey ?? ""}, runId=${ctx.runId ?? ""}, error=${String(err)}`);
             });
         });
     });
@@ -578,7 +578,7 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         // data. Done before the request/agent guards below so it is not skipped.
         void refreshRunStartSessionStatusRedis(sessionKey).catch((err) => {
             api.logger.warn(
-                `[byai-channel] before_dispatch session status refresh failed: ${String(err)}`,
+                `[byai-channel] before_dispatch session status refresh failed: sessionKey=${sessionKey}, error=${String(err)}`,
             );
         });
         const request = resolveActiveSdkRequestBySessionKey(sessionKey);
@@ -596,7 +596,7 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         try {
             await syncWorkspaceUserMd(api, workspaceDir, hintLanguage);
         } catch (err) {
-            api.logger.warn(`byai-channel sync USER.md failed: ${String(err)}`);
+            api.logger.warn(`[byai-channel] sync USER.md failed: sessionId=${request.sessionId}, traceId=${request.traceId ?? ""}, sessionKey=${sessionKey}, error=${String(err)}`);
         }
     });
 
@@ -616,9 +616,6 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     }): BeforePromptBuildResult => {
         const snapshot = takePromptInjectionSnapshot(ctx.sessionKey);
         if (snapshot?.appendSystemContext) {
-            api.logger.info(
-                `before_prompt_build hook emits (snapshot), sessionId=${ctx.sessionId}, appendSystemContext=${snapshot.appendSystemContext}`,
-            );
             return {
                 appendSystemContext: snapshot.appendSystemContext,
             };
@@ -656,9 +653,6 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
             }
         }
         const appendSystemContext = sections.join("\n\n");
-        api.logger.info(
-            `before_prompt_build hook emits, sessionId=${ctx.sessionId}, appendSystemContext=${appendSystemContext}`,
-        );
         return {
             appendSystemContext,
         };
@@ -685,7 +679,7 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
                     cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
                 },
             ).catch((err) => {
-                api.logger.error(`[byai-channel] message_sending enqueue failed: ${String(err)}`);
+                api.logger.error(`[byai-channel] message_sending enqueue failed: sessionId=${request.sessionId}, traceId=${request.traceId ?? ""}, sessionKey=${request.sessionKey}, error=${String(err)}`);
             });
         });
     });
@@ -716,21 +710,18 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
                     );
                 },
             ).catch((err) => {
-                api.logger.error(`[byai-channel] message_sent enqueue failed: ${String(err)}`);
+                api.logger.error(`[byai-channel] message_sent enqueue failed: sessionId=${request.sessionId}, traceId=${request.traceId ?? ""}, sessionKey=${request.sessionKey}, error=${String(err)}`);
             });
         });
     });
 
     api.on("llm_output", (event: LlmOutputHookEvent, ctx: LlmOutputHookContext) => {
         void refreshRealtimeSessionStatusRedis(event, ctx).catch((err) => {
-            api.logger.warn(`[byai-channel] llm_output session status refresh failed: ${String(err)}`);
+            api.logger.warn(`[byai-channel] llm_output session status refresh failed: sessionKey=${ctx.sessionKey ?? ""}, error=${String(err)}`);
         });
     });
 
     api.on("agent_end", (event: PluginHookAgentEndEvent, ctx: PluginHookAgentContext) => {
-        api.logger.info(
-            `agent_end hook emits, runId=${ctx.runId}, success=${event.success}, error=${event.error}`,
-        );
         const { runId } = ctx;
         if (!runId) {
             return;
@@ -771,6 +762,11 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
                     _error = "The request was interrupted (timed out or cancelled voluntarily) and the reply could not be completed. Please try again.";
                 }
             }
+        }
+        if (_success === false || _error) {
+            api.logger.warn(
+                `[byai-channel] agent_end failed: sessionId=${runBinding?.request?.sessionId ?? ""}, traceId=${runBinding?.request?.traceId ?? ""}, sessionKey=${ctx.sessionKey ?? ""}, runId=${runId}, error=${_error ?? ""}`,
+            );
         }
         if (resolve) {
             resolve({

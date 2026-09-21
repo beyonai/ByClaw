@@ -3,6 +3,7 @@
  * 类似于 message-processor.ts，但通过 Redis 输出
  */
 
+import { chatChainLog } from "./chat-chain-log.js";
 import path from "node:path";
 import { prepareSessionModelForDispatch } from "../../shared/src/session-model-runtime.js";
 import {
@@ -182,9 +183,6 @@ export async function alignManagedAgentSessionModel(params: {
   };
 }): Promise<void> {
   if (params.relModelId && /^-?[1-9]\d*$/.test(params.relModelId.trim()) && params.relModelId.trim() !== "-1") {
-    params.log?.info?.(
-      `[diagnose-sdk] session model override present (relModelId=${params.relModelId.trim()}), skip config-primary alignment: agent=${params.sessionAgentId}, session=${params.sessionKey}`,
-    );
     return;
   }
   const target = resolveManagedAgentPrimaryModel(params.cfg, params.sessionAgentId);
@@ -194,7 +192,7 @@ export async function alignManagedAgentSessionModel(params: {
   const sessionApi = params.rt.agent?.session;
   if (!sessionApi?.patchSessionEntry || !sessionApi.resolveStorePath) {
     params.log?.warn?.(
-      `[diagnose-sdk] managed agent session model alignment skipped: runtime session patch API unavailable, agent=${params.sessionAgentId}`,
+      `[diagnose-sdk] managed agent session model alignment skipped: runtime session patch API unavailable, agent=${params.sessionAgentId}, sessionKey=${params.sessionKey}`,
     );
     return;
   }
@@ -233,9 +231,6 @@ export async function alignManagedAgentSessionModel(params: {
       return Object.keys(patch).length > 0 ? patch : null;
     },
   }), params.signal);
-  params.log?.info?.(
-    `[diagnose-sdk] aligned managed agent session model before dispatch: agent=${params.sessionAgentId}, session=${params.sessionKey}, model=${target.primary}`,
-  );
 }
 
 /**
@@ -355,7 +350,7 @@ async function resolveSdkInboundMediaPayload(params: {
   }
 
   params.log?.info?.(
-    `[diagnose-sdk] attached inbound session files: sessionId=${params.sessionId}, count=${mediaPaths.length}, paths=${JSON.stringify(mediaPaths)}`,
+    `[diagnose-sdk] attached inbound session files: sessionId=${params.sessionId}, count=${mediaPaths.length}`,
   );
 
   return {
@@ -453,7 +448,7 @@ export async function deliverReplyToAgentViaSdk(
 
   if (meta.queued) {
     log?.info?.(
-      `[diagnose-sdk] session dispatch dequeued: sessionKey=${sessionKey}, queueDepthBefore=${meta.queueDepthBefore}, gateWaitMs=${meta.waitMs}`,
+      `[diagnose-sdk] session dispatch dequeued: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, queueDepthBefore=${meta.queueDepthBefore}, gateWaitMs=${meta.waitMs}`,
     );
   }
   let finalized = false;
@@ -555,11 +550,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     });
     if (reasoningSession.changed) {
       log?.info?.(
-        `[diagnose-sdk] forced session reasoningLevel=stream, session=${sessionKey}, sessionId=${reasoningSession.sessionId}, created=${String(reasoningSession.created)}, healed=${String(reasoningSession.healed)}, agent=${sessionAgentId}`,
-      );
-    } else {
-      log?.info?.(
-        `[diagnose-sdk] session reasoningLevel already stream, session=${sessionKey}, sessionId=${reasoningSession.sessionId}, agent=${sessionAgentId}`,
+        `[diagnose-sdk] forced session reasoningLevel=stream, sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, openclawSessionId=${reasoningSession.sessionId}, created=${String(reasoningSession.created)}, healed=${String(reasoningSession.healed)}, agent=${sessionAgentId}`,
       );
     }
   }
@@ -577,17 +568,13 @@ async function deliverReplyToAgentViaSdkUnderGate(
   });
 
   const sessionThinkingLevel = stringValue(extraPayload.thinkingLevel).trim();
-  if (sessionThinkingLevel) {
-    log?.info?.(
-      `[diagnose-sdk] session thinking level=${sessionThinkingLevel}, session=${sessionKey}, sessionId=${message.sessionId}, agent=${sessionAgentId}`,
-    );
-  }
 
   const { accountId } = account;
   const To = appendByaiLaneToTarget(`${sessionAgentId}:${message.sessionId}`, laneMetadata);
   const receivedAt = emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
 
   const activeRequest = registerActiveSdkRequest({
+    requestId: message.requestId,
     accountId,
     sessionKey,
     to: To,
@@ -720,7 +707,9 @@ async function deliverReplyToAgentViaSdkUnderGate(
       });
 
       const finalizedCtx = rt.channel.reply.finalizeInboundContext(ctxPayload);
-      log?.info?.(`[diagnose-sdk] finalized ctx, SessionKey: ${finalizedCtx.SessionKey}, To: ${To}`);
+      chatChainLog(log, "openclaw.started", {
+        requestId: message.requestId || message.traceId, sessionId: message.sessionId, traceId: message.traceId,
+      });
 
       dispatchStartedAt = emitByaiSdkDispatchStarted(diagnosticRef, diagnosticTrace);
       const turnResult = await runWithByaiSdkDiagnosticTrace(diagnosticTrace, () =>
@@ -752,7 +741,9 @@ async function deliverReplyToAgentViaSdkUnderGate(
                         onAgentRunStart: async (runId: string) => {
                           bindActiveSdkRequestRunId(sessionKey, runId);
                           registerAgentRunEndPromise(runId);
-                          log?.info?.(`[diagnose-sdk] onAgentRunStart called, runId: ${runId}`);
+                          log?.debug?.(
+                            `[diagnose-sdk] agent run started: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, runId=${runId}`,
+                          );
                           await onReply(
                           buildAgentReadyTitle(message.language, sessionAgentName),
                           withSdkEmitMetadata(
@@ -797,8 +788,8 @@ async function deliverReplyToAgentViaSdkUnderGate(
         startedAt: dispatchStartedAt,
         outcome: "completed",
       });
-      log?.info?.(
-        `[diagnose-sdk] dispatch finished, queuedFinal=${String(dispatchResult.queuedFinal)}, counts=${JSON.stringify(dispatchResult.counts)}`,
+      log?.debug?.(
+        `[diagnose-sdk] dispatch finished: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, messageId=${message.messageId}, sessionKey=${sessionKey}, durationMs=${Math.max(0, Date.now() - dispatchStartedAt)}, queuedFinal=${String(dispatchResult.queuedFinal)}, counts=${JSON.stringify(dispatchResult.counts)}`,
       );
       // The prepared dispatch promise is authoritative for the no-run
       // (precheck-blocked) path. Root runs with lifecycle events ignore this
@@ -836,25 +827,28 @@ async function deliverReplyToAgentViaSdkUnderGate(
     if (isOpenClawContextOverflowDispatchError(err)) {
       deferDispatchSettleToAgentEvents = true;
       log?.warn?.(
-        `[diagnose-sdk] Message dispatch reported context overflow; keeping SDK stream open for OpenClaw recovery: ${errorText}`,
+        `[diagnose-sdk] Message dispatch reported context overflow; keeping SDK stream open for OpenClaw recovery: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, error=${errorText}`,
       );
     } else {
-      log?.error?.(`[diagnose-sdk] Message dispatch failed: ${errorText}`);
+      log?.error?.(
+        `[diagnose-sdk] Message dispatch failed: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, error=${errorText}`,
+      );
       clearActiveSdkRequestByTarget(accountId, To);
       throw err;
     }
   } finally {
     if (deferDispatchSettleToAgentEvents) {
       log?.info?.(
-        `[diagnose-sdk] session dispatch settle deferred to OpenClaw recovery events: sessionKey=${sessionKey}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+        `[diagnose-sdk] session dispatch settle deferred to OpenClaw recovery events: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
       );
     } else {
       const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
+        log,
         abortSignal: deps.abortController?.signal,
       });
       settleTimedOut = settle.timedOut;
-      log?.info?.(
-        `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+      log?.debug?.(
+        `[diagnose-sdk] session dispatch settled: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
       );
     }
   }
@@ -879,7 +873,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
           const runIds = [...request.boundRunIds];
           const finalRunId = runIds[runIds.length - 1] ?? "";
           log?.info?.(
-            `context-overflow continuation trigger finished: sessionKey=${sessionKey}, ` +
+            `context-overflow continuation trigger finished: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, ` +
               `attempts=${request.overflowContinueCount}, finalRunId=${finalRunId}, ` +
               `compactionObserved=${String(request.overflowContinuationCompactionObserved)}`,
           );
@@ -914,7 +908,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
       request.overflowContinuationCompactionObserved = false;
       const overflowDiagnostic = request.lastRunOverflowDiagnostic;
       log?.info?.(
-        `context-overflow continuation trigger: sessionKey=${sessionKey}, ` +
+        `context-overflow continuation trigger: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, ` +
           `attempt=${request.overflowContinueCount}, ` +
           `trigger=length_context_pressure, ` +
           `stopReason=${overflowDiagnostic?.stopReason ?? "length"}, ` +

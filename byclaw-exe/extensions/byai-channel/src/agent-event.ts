@@ -1,3 +1,4 @@
+import { chatChainLog } from "./chat-chain-log.js";
 import { EmitOptions, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
   ActiveSdkRequest,
@@ -472,6 +473,11 @@ async function handleLifecycleEvent(
     );
     return;
   }
+  chatChainLog(api.logger, "openclaw.ended", {
+    requestId: activeRequest.requestId || activeRequest.traceId,
+    sessionId: activeRequest.sessionId, traceId: activeRequest.traceId,
+    runId: event.runId, phase,
+  }, phase === "error" ? "failed" : "ok");
   if (phase === "error") {
     const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
     await emitSdkChunk(request, errorText, {
@@ -586,9 +592,6 @@ async function emitReasoningText(
 }
 
 export default async function handleAgentEvent(api: OpenClawPluginApi, event: AgentEvent) {
-  api.logger.info(
-    `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
-  );
   const { seq, sessionKey, runId } = event;
   const runBinding = resolveActiveSdkRunBinding(runId);
   const resolvedSessionKey = sessionKey ?? runBinding?.sessionKey;

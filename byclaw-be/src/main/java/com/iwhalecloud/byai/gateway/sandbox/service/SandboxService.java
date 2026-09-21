@@ -431,7 +431,7 @@ public class SandboxService {
                 routing.getSandboxType(), routing.getEffectiveResourceId());
             if (existingRecord != null && STATUS_RUNNING.equals(existingRecord.getStatus())
                 && StringUtils.isNotBlank(existingRecord.getEndpoint())) {
-                LOGGER.info("复用已有沙箱：{}", sandboxRef(existingRecord));
+                LOGGER.debug("复用已有沙箱：{}", sandboxRef(existingRecord));
                 sandboxMetadataCache.put(toSandboxInfo(existingRecord));
                 return buildLaunchData(existingRecord);
             }
@@ -494,7 +494,7 @@ public class SandboxService {
         if (existingRecord != null && StringUtils.isNotBlank(existingRecord.getEndpoint())) {
             // 已有记录，直接拿到endpoint
             endpoint = normalizeRecordEndpoint(existingRecord);
-            LOGGER.info("等待模式-发现已有沙箱记录：{}", sandboxRef(existingRecord));
+            LOGGER.debug("等待模式-发现已有沙箱记录：{}", sandboxRef(existingRecord));
         }
         else {
             // 2. 没有记录，先调用launchSandbox启动
@@ -579,7 +579,7 @@ public class SandboxService {
             WorkerRegistry.OnlineAgentCheckResult result = Retry.decorateCheckedSupplier(retry,
                 () -> gatewayWorkerRegistry.hasOnlineAgentType(targetAgentType, true)).get();
             if (result != null && result.exists) {
-                LOGGER.info("Gateway worker 已就绪，targetAgentType：{}", targetAgentType);
+                LOGGER.debug("Gateway worker 已就绪，targetAgentType：{}", targetAgentType);
                 return true;
             }
         }
@@ -949,7 +949,7 @@ public class SandboxService {
     private boolean heartbeatRunningSandboxesByUser(String userCode, Long resourceId) {
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
         if (records == null || records.isEmpty()) {
-            LOGGER.warn("心跳失败：未找到运行中的沙箱记录，用户编码：{}，资源ID：{}", userCode, resourceId);
+            LOGGER.debug("心跳跳过：未找到运行中的沙箱记录，用户编码：{}，资源ID：{}", userCode, resourceId);
             return false;
         }
         Date now = new Date();
@@ -1242,7 +1242,7 @@ public class SandboxService {
                 // 已有运行中的沙箱，替换agentHomeUrl（访问时间由前端心跳接口更新）
                 String endpoint = normalizeRecordEndpoint(existingRecord);
                 param.put("agentHomeUrl", endpoint);
-                LOGGER.info("使用已有沙箱，用户编码：{}，资源ID：{}，endpoint：{}", userCode, resourceId, endpoint);
+                LOGGER.debug("使用已有沙箱，用户编码：{}，资源ID：{}，endpoint：{}", userCode, resourceId, endpoint);
             }
             else {
                 // 没有运行中的沙箱，启动新沙箱
@@ -1321,7 +1321,7 @@ public class SandboxService {
                     // 已有运行中的沙箱，替换agentHomeUrl（访问时间由前端心跳接口更新）
                     String endpoint = normalizeRecordEndpoint(existingRecord);
                     vo.setAgentHomeUrl(endpoint);
-                    LOGGER.info("AuthDigitEmployVo-使用已有沙箱，用户编码：{}，资源ID：{}，endpoint：{}", userCode, resourceId,
+                    LOGGER.debug("AuthDigitEmployVo-使用已有沙箱，用户编码：{}，资源ID：{}，endpoint：{}", userCode, resourceId,
                         endpoint);
                 }
                 else {
@@ -1355,7 +1355,7 @@ public class SandboxService {
         int scannedCount = 0;
         Date cursorTime = null;
         Long cursorId = null;
-        LOGGER.info("开始清理超时沙箱，候选数量：{}，idleTimeoutMinutes：{}", total, idleTimeoutMinutes);
+        LOGGER.debug("开始清理超时沙箱，候选数量：{}，idleTimeoutMinutes：{}", total, idleTimeoutMinutes);
         while (scannedCount < total) {
             List<SsSandboxRecord> records = sandboxRecordMapper.selectExpiredSandboxesPage(idleTimeoutMinutes,
                 cursorTime, cursorId, Math.min(LIFECYCLE_SCAN_PAGE_SIZE, total - scannedCount));
@@ -1367,7 +1367,7 @@ public class SandboxService {
             cursorId = last.getId();
             scannedCount += records.size();
             report.addScannedCount(records.size());
-            LOGGER.info("清理超时沙箱分页扫描，pageSize：{}，cursorTime：{}，cursorId：{}，记录：{}", records.size(), cursorTime, cursorId,
+            LOGGER.debug("清理超时沙箱分页扫描，pageSize：{}，cursorTime：{}，cursorId：{}，记录：{}", records.size(), cursorTime, cursorId,
                 records.stream().map(this::sandboxRef).collect(Collectors.toList()));
 
             for (SsSandboxRecord record : records) {
@@ -1385,7 +1385,7 @@ public class SandboxService {
             }
         }
 
-        LOGGER.info("清理超时沙箱完成，候选 {} 个，扫描 {} 个，清理 {} 个沙箱，释放记录：{}，失败记录：{}",
+        LOGGER.debug("清理超时沙箱完成，候选 {} 个，扫描 {} 个，清理 {} 个沙箱，释放记录：{}，失败记录：{}",
             total, scannedCount, cleanedCount, report.getAffectedSandboxes(), report.getFailedSandboxes());
         return report;
     }
@@ -1409,7 +1409,7 @@ public class SandboxService {
         Date cursorTime = null;
         Long cursorId = null;
         long idleTimeoutMillis = TimeUnit.MINUTES.toMillis(idleTimeoutMinutes);
-        LOGGER.info("开始执行沙箱续约，候选数量：{}，当前时间：{}，renewAheadSeconds：{}", total, now, renewAheadSeconds);
+        LOGGER.debug("开始执行沙箱续约，候选数量：{}，当前时间：{}，renewAheadSeconds：{}", total, now, renewAheadSeconds);
         while (scannedCount < total) {
             List<SsSandboxRecord> records = sandboxRecordMapper.selectDueRenewSandboxesPage(now,
                 cursorTime, cursorId, Math.min(LIFECYCLE_SCAN_PAGE_SIZE, total - scannedCount));
@@ -1421,7 +1421,7 @@ public class SandboxService {
             cursorId = last.getId();
             scannedCount += records.size();
             report.addScannedCount(records.size());
-            LOGGER.info("沙箱续约分页扫描，pageSize：{}，cursorTime：{}，cursorId：{}，记录：{}", records.size(), cursorTime, cursorId,
+            LOGGER.debug("沙箱续约分页扫描，pageSize：{}，cursorTime：{}，cursorId：{}，记录：{}", records.size(), cursorTime, cursorId,
                 records.stream().map(this::sandboxRef).collect(Collectors.toList()));
 
             for (SsSandboxRecord record : records) {
@@ -1429,12 +1429,12 @@ public class SandboxService {
                     && (record.getLastAccessTime() == null
                     || now.getTime() - record.getLastAccessTime().getTime() > idleTimeoutMillis)) {
                     report.addSkippedSandbox(sandboxRef(record));
-                    LOGGER.info("沙箱已空闲，跳过远端续约，等待释放策略处理：{}，lastAccessTime：{}",
+                    LOGGER.debug("沙箱已空闲，跳过远端续约，等待释放策略处理：{}，lastAccessTime：{}",
                         sandboxRef(record), record.getLastAccessTime());
                     continue;
                 }
                 try {
-                    LOGGER.info("开始远端续约：{}，当前remoteExpiresAt：{}，timeoutSeconds：{}，nextRenewAt：{}",
+                    LOGGER.debug("开始远端续约：{}，当前remoteExpiresAt：{}，timeoutSeconds：{}，nextRenewAt：{}",
                         sandboxRef(record), record.getRemoteExpiresAt(), record.getTimeoutSeconds(), record.getNextRenewAt());
                     Date remoteExpiresAt = new Date(now.getTime() + TimeUnit.SECONDS.toMillis(record.getTimeoutSeconds()));
                     SandboxInfo info = toSandboxInfo(record);
@@ -1464,7 +1464,7 @@ public class SandboxService {
                     sandboxMetadataCache.put(toSandboxInfo(record));
                     renewedCount++;
                     report.addAffectedSandbox(sandboxRef(record));
-                    LOGGER.info("沙箱远端续约成功：{}，新的remoteExpiresAt：{}，lastRenewAt：{}，nextRenewAt：{}",
+                    LOGGER.debug("沙箱远端续约成功：{}，新的remoteExpiresAt：{}，lastRenewAt：{}，nextRenewAt：{}",
                         sandboxRef(record), remoteExpiresAt, now, nextRenewAt);
                 }
                 catch (Exception e) {
@@ -1473,7 +1473,7 @@ public class SandboxService {
                 }
             }
         }
-        LOGGER.info("沙箱续约完成，候选 {} 个，扫描 {} 个，成功续约 {} 个，跳过 {} 个，失败 {} 个，成功记录：{}，跳过记录：{}，失败记录：{}",
+        LOGGER.debug("沙箱续约完成，候选 {} 个，扫描 {} 个，成功续约 {} 个，跳过 {} 个，失败 {} 个，成功记录：{}，跳过记录：{}，失败记录：{}",
             total, scannedCount, renewedCount, report.getSkippedCount(), report.getFailedCount(),
             report.getAffectedSandboxes(), report.getSkippedSandboxes(), report.getFailedSandboxes());
         return report;
@@ -1495,7 +1495,7 @@ public class SandboxService {
 
         long nowMillis = System.currentTimeMillis();
         long renewAheadMillis = TimeUnit.SECONDS.toMillis(Math.max(0L, renewAheadSeconds));
-        LOGGER.info("开始扫描定时任务沙箱预启动，候选数量：{}，当前时间：{}，renewAheadSeconds：{}",
+        LOGGER.debug("开始扫描定时任务沙箱预启动，候选数量：{}，当前时间：{}，renewAheadSeconds：{}",
             total, new Date(nowMillis), renewAheadSeconds);
 
         for (Map.Entry<String, String> entry : nextRunEntries.entrySet()) {
@@ -1565,7 +1565,7 @@ public class SandboxService {
             long lockTtlSeconds = Math.max(30L, TimeUnit.MILLISECONDS.toSeconds(reconcileMaxDurationMs) + 30L);
             locked = Boolean.TRUE.equals(RedisUtil.lock(SANDBOX_RECONCILE_JOB_LOCK_KEY, lockValue, lockTtlSeconds));
             if (!locked) {
-                LOGGER.info("沙箱一致性检测已有实例执行，本轮跳过，候选数量：{}", total);
+                LOGGER.debug("沙箱一致性检测已有实例执行，本轮跳过，候选数量：{}", total);
                 return report;
             }
         }
@@ -1581,7 +1581,7 @@ public class SandboxService {
                 return report;
             }
 
-            LOGGER.info("开始执行沙箱一致性检测，候选数量：{}，分组数量：{}，并发：{}，单轮记录上限：{}",
+            LOGGER.debug("开始执行沙箱一致性检测，候选数量：{}，分组数量：{}，并发：{}，单轮记录上限：{}",
                 total, groups.size(), concurrency, reconcileMaxRecordsPerRun);
 
             List<Callable<SandboxLifecycleJobReport>> tasks = new ArrayList<>();
@@ -1616,7 +1616,7 @@ public class SandboxService {
                 RedisUtil.releaseLock(SANDBOX_RECONCILE_JOB_LOCK_KEY, lockValue);
             }
         }
-        LOGGER.info("沙箱一致性检测完成，候选 {} 个，扫描 {} 个，重拉 {} 个，保持 {} 个，失败 {} 个，重拉记录：{}，保持记录：{}，失败记录：{}",
+        LOGGER.debug("沙箱一致性检测完成，候选 {} 个，扫描 {} 个，重拉 {} 个，保持 {} 个，失败 {} 个，重拉记录：{}，保持记录：{}，失败记录：{}",
             total, report.getScannedCount(), report.getAffectedCount(), report.getSkippedCount(), report.getFailedCount(),
             report.getAffectedSandboxes(), report.getSkippedSandboxes(), report.getFailedSandboxes());
         return report;
@@ -1652,7 +1652,7 @@ public class SandboxService {
             records.forEach(record -> groupReport.addFailedSandbox(sandboxRef(record)));
             return groupReport;
         }
-        LOGGER.info("沙箱一致性检测分组扫描，userCode：{}，sandboxType：{}，DB记录：{}，远端记录：{}",
+        LOGGER.debug("沙箱一致性检测分组扫描，userCode：{}，sandboxType：{}，DB记录：{}，远端记录：{}",
             group.getUserCode(), group.getSandboxType(), records.size(), remoteBySandboxId.size());
 
         for (SsSandboxRecord record : records) {
@@ -1728,7 +1728,7 @@ public class SandboxService {
             sandboxMetadataCache.put(toSandboxInfo(record));
             refreshRegisteredEndpointIfBindingChanged(record, originalEndpoint, originalGatewayToken);
             report.addSkippedSandbox(sandboxRef(record));
-            LOGGER.info("远端沙箱状态已同步：{}，remoteState={}，remoteExpiresAt={}，remoteCreatedAt={}",
+            LOGGER.debug("远端沙箱状态已同步：{}，remoteState={}，remoteExpiresAt={}，remoteCreatedAt={}",
                 sandboxRef(record), remoteInstance.getState(), remoteInstance.getExpiresAt(),
                 remoteInstance.getCreatedAt());
             return;
@@ -1768,7 +1768,7 @@ public class SandboxService {
             return;
         }
         if (group != null && group.getRecordCount() != null && group.getRecordCount() > records.size()) {
-            LOGGER.info("沙箱一致性检测跳过远端孤儿判断，分组 DB 记录未完整扫描，userCode：{}，sandboxType：{}，扫描：{}，总数：{}",
+            LOGGER.debug("沙箱一致性检测跳过远端孤儿判断，分组 DB 记录未完整扫描，userCode：{}，sandboxType：{}，扫描：{}，总数：{}",
                 group.getUserCode(), group.getSandboxType(), records.size(), group.getRecordCount());
             return;
         }
@@ -1820,7 +1820,7 @@ public class SandboxService {
                 if (isTerminalState || isPendingTimeout) {
                     String reason = buildCleanupReason("orphan", orphan);
                     if (!reconcileOrphanCleanupEnabled) {
-                        LOGGER.info("孤儿沙箱自动清理已关闭，跳过清理（保留用于排障），sandboxId：{}，状态：{}，reason：{}，创建时间：{}，已存在：{} 分钟",
+                        LOGGER.debug("孤儿沙箱自动清理已关闭，跳过清理（保留用于排障），sandboxId：{}，状态：{}，reason：{}，创建时间：{}，已存在：{} 分钟",
                             orphan.getSandboxId(), orphan.getState(), reason, orphan.getCreatedAt(), ageMinutes);
                         continue;
                     }
