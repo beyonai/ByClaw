@@ -737,6 +737,16 @@ function fromSearxng(doc, queryVerified) {
       url: r.url,
       title: typeof r.title === 'string' ? r.title : '',
       ...(typeof r.content === 'string' && r.content ? { searxngContent: r.content } : {}),
+      ...(typeof r.passage === 'string' && r.passage ? { passage: r.passage } : {}),
+      ...(typeof r.content === 'string' && r.content ? { content: r.content } : {}),
+      ...(typeof r.provider === 'string' && r.provider ? { provider: r.provider } : {}),
+      ...(typeof r.providerVersion === 'string' && r.providerVersion
+        ? { providerVersion: r.providerVersion } : {}),
+      ...(typeof r.requestId === 'string' && r.requestId ? { requestId: r.requestId } : {}),
+      ...(typeof r.publishedAt === 'string' && r.publishedAt ? { publishedAt: r.publishedAt } : {}),
+      ...(typeof r.site === 'string' && r.site ? { site: r.site } : {}),
+      ...(typeof r.evidenceLevel === 'string' && r.evidenceLevel
+        ? { evidenceLevel: r.evidenceLevel } : {}),
       discoveredBy,
       _verifiedDiscoveredBy: queryVerified ? discoveredBy : [],
       relevance: {
@@ -978,6 +988,12 @@ export function mergeDocuments({
     if (c.titleContext && !prev.titleContext) prev.titleContext = c.titleContext;
     if (c.searxngContent && !prev.searxngContent) prev.searxngContent = c.searxngContent;
     if (c.relevance && !prev.relevance) prev.relevance = c.relevance;
+    for (const field of [
+      'provider', 'providerVersion', 'requestId', 'publishedAt',
+      'passage', 'content', 'site', 'evidenceLevel',
+    ]) {
+      if (!prev[field] && c[field]) prev[field] = c[field];
+    }
   }
 
   const all = [...byKey.values()];

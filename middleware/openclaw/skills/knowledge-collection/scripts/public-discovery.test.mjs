@@ -99,8 +99,15 @@ test('uses the unified online-search runner and exposes compatible provider alia
           results: [{
             url: 'https://example.com/news/1234567',
             title: '人工智能深度报道',
+            passage: '人工智能产业发展深度报道摘要',
             content: '人工智能产业发展深度报道',
             engine: 'tencent-wsa',
+            provider: 'tencent-wsa',
+            providerVersion: 'flagship',
+            requestId: 'request-1',
+            publishedAt: '2026-09-20T08:00:00Z',
+            site: 'example.com',
+            evidenceLevel: 'search-summary',
           }],
         },
       };
@@ -125,6 +132,29 @@ test('uses the unified online-search runner and exposes compatible provider alia
   assert.equal(result.timing.searxngMs, result.timing.onlineSearchMs);
   assert.equal(result.snapshots.searxng, result.snapshots.onlineSearch);
   assert.equal(result.channels.hotDiscovery.status, 'skipped');
+  const persisted = JSON.parse(readFileSync(paths.session, 'utf8'));
+  assert.deepEqual(
+    persisted.task.discoveryGate.observations.map((observation) => ({
+      provider: observation.provider,
+      providerVersion: observation.providerVersion,
+      requestId: observation.requestId,
+      publishedAt: observation.publishedAt,
+      passage: observation.passage,
+      content: observation.content,
+      site: observation.site,
+      evidenceLevel: observation.evidenceLevel,
+    })),
+    [{
+      provider: 'tencent-wsa',
+      providerVersion: 'flagship',
+      requestId: 'request-1',
+      publishedAt: '2026-09-20T08:00:00Z',
+      passage: '人工智能产业发展深度报道摘要',
+      content: '人工智能产业发展深度报道',
+      site: 'example.com',
+      evidenceLevel: 'search-summary',
+    }],
+  );
 });
 
 test('keeps hot-discovery fallback when WSA returns a valid empty result', async () => {

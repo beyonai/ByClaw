@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { lstat, readFile } from 'node:fs/promises';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { createArtifactWriter } from '../shared/artifact-writer.mjs';
@@ -11,6 +12,22 @@ const MAX_MATERIALIZED_BYTES = 50 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = new Set(['md', 'markdown', 'txt', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']);
 const CONVERTIBLE_EXTENSIONS = new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']);
 const SHA256 = /^[a-f0-9]{64}$/;
+const PROJECT_CLOUD_SCRIPT = 'project-cloud-knowledge/scripts/project_cloud_knowledge.py';
+
+export function resolveCloudKnowledgeScript({
+  env = process.env,
+  fileExists = existsSync,
+  localScript = new URL(`../../../../${PROJECT_CLOUD_SCRIPT}`, import.meta.url).pathname,
+} = {}) {
+  const candidates = [
+    env.PROJECT_CLOUD_KNOWLEDGE_SCRIPT,
+    localScript,
+    `/app/skills/${PROJECT_CLOUD_SCRIPT}`,
+    `/opt/byclaw/dsh-managed/skills/${PROJECT_CLOUD_SCRIPT}`,
+  ].filter((candidate, index, values) => typeof candidate === 'string'
+    && candidate.trim() && values.indexOf(candidate) === index);
+  return candidates.find((candidate) => fileExists(candidate)) || candidates[0];
+}
 
 function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
@@ -85,6 +102,7 @@ function cloudCandidateFromRecord(record, scope) {
   const type = extensionFor(metadataValue(metadata, 'fileType'), filePath);
   const fileSize = asInteger(metadataValue(metadata, 'fileSize'));
   const fileSignature = asString(metadataValue(metadata, 'fileSignature')).toLowerCase();
+  const updatedAt = asString(metadataValue(metadata, 'updatedAt'));
   if (!type || fileSize === null || fileSize < 0 || (fileSignature && !SHA256.test(fileSignature))) {
     const error = new Error(`cloud candidate metadata is invalid: ${filePath}`);
     error.reasonCode = 'INVALID_RESPONSE';
@@ -100,6 +118,7 @@ function cloudCandidateFromRecord(record, scope) {
     fileType: type,
     fileSize,
     ...(fileSignature ? { fileSignature } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
     duplicateGroupKey: duplicateGroup(fileSignature, itemId),
     duplicateGroupProvisional: !fileSignature,
     title,
@@ -258,7 +277,7 @@ async function materializeOne(writer, candidate, dependencies, env) {
 export function createCloudKnowledgeAdapter(dependencies = {}) {
   const env = dependencies.env || process.env;
   const python = dependencies.python || 'python3';
-  const script = dependencies.script || new URL('../../../../project-cloud-knowledge/scripts/project_cloud_knowledge.py', import.meta.url).pathname;
+  const script = dependencies.script || resolveCloudKnowledgeScript({ env });
 
   async function search(request = {}) {
     const scope = await readCloudScope(request.outputDir);
