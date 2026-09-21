@@ -68,6 +68,8 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 
 ## 群聊上传附件
 
+- 群历史、Agent 群上下文、消息定位和话题根消息/回复/引用均保留正文为 `NULL` 但有 `related_resources` 的历史消息，分页计数采用同一条件。消息搜索排除 `NULL` 正文，关键词仅匹配正文，不搜索附件文件名；LIKE 使用 `ESCAPE CHR(92)`，兼容 Druid PostgreSQL 解析器并按字面匹配 `%`、`_` 和反斜杠。
+
 - `GROUP_CHAT_SEND` 的 `files` 与正文一同保存到消息的 `relatedResources.files`，并随 `MESSAGE_CREATED` 广播返回。仅附件消息和正文带附件消息均支持发送确认后的展示及历史加载。
 - `files` 非空时，`chatContent` 支持空字符串、纯空白、`null` 或省略；`null` 和省略正文按空字符串保存并广播，成功后返回 `GROUP_CHAT_ACCEPTED`。
 - 此修复无需数据库迁移。修复前未保存附件关联的旧消息不会自动恢复，需要重新发送附件。

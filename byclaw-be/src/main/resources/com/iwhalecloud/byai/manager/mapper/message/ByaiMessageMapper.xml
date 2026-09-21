@@ -237,6 +237,13 @@
         </if>
     </select>
 
+    <!-- 纯附件历史允许正文为 NULL；列表、定位、引用与计数必须采用同一可见载荷条件。
+         prefix 只由下方静态 include 指定，不能来自请求参数。 -->
+    <sql id="GroupMessagePayloadCondition">
+        (${prefix}message_content IS NOT NULL
+         OR NULLIF(TRIM(${prefix}related_resources), '') IS NOT NULL)
+    </sql>
+
     <select id="selectVisibleBeforeMessageId" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM byai_message
@@ -244,7 +251,7 @@
           AND message_id &lt; #{beforeMessageId}
           AND archived_at IS NULL
           AND "usage" IN (1, 2)
-          AND message_content IS NOT NULL
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
         ORDER BY create_time DESC, message_id DESC
         LIMIT #{limit}
     </select>
@@ -256,7 +263,7 @@
           AND message_id &lt; #{beforeMessageId}
           AND archived_at IS NULL
           AND "usage" IN (1, 2, 5)
-          AND message_content IS NOT NULL
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
         ORDER BY create_time DESC, message_id DESC
         LIMIT #{limit}
     </select>
@@ -268,7 +275,7 @@
           AND message_id = #{messageId}
           AND archived_at IS NULL
           AND "usage" IN (1, 2)
-          AND message_content IS NOT NULL
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
         LIMIT 1
     </select>
 
@@ -279,7 +286,7 @@
           AND message_id &gt; #{messageId}
           AND archived_at IS NULL
           AND "usage" IN (1, 2)
-          AND message_content IS NOT NULL
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
         ORDER BY create_time ASC, message_id ASC
         LIMIT #{limit}
     </select>
@@ -291,9 +298,10 @@
           AND message.archived_at IS NULL
           AND message.recalled_at IS NULL
           AND message."usage" IN (1, 2)
+          <!-- 正文搜索排除 NULL 正文；纯附件的历史展示使用独立查询。 -->
           AND message.message_content IS NOT NULL
           <if test="keyword != null">
-              AND LOWER(message.message_content) LIKE CONCAT('%', LOWER(#{keyword}), '%') ESCAPE '\'
+              AND LOWER(message.message_content) LIKE CONCAT('%', LOWER(#{keyword}), '%') ESCAPE CHR(92)
           </if>
           <if test="scope == 'MINE'">AND message.creator_id = #{userId}</if>
           <if test="scope == 'MENTIONED_ME'">
@@ -347,7 +355,7 @@
           AND message_id &lt; #{beforeMessageId}
           AND archived_at IS NULL
           AND "usage" IN (1, 2)
-          AND message_content IS NOT NULL
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
     </select>
 
     <select id="countTimelineBeforeMessageId" resultType="long">
@@ -357,7 +365,7 @@
           AND message_id &lt; #{beforeMessageId}
           AND archived_at IS NULL
           AND "usage" IN (1, 2, 5)
-          AND message_content IS NOT NULL
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
     </select>
 
 
@@ -427,7 +435,7 @@
         SELECT <include refid="Base_Column_List" /> FROM byai_message
         WHERE session_id = #{sessionId} AND topic_id = #{topicId}
           AND message_id != #{rootMessageId} AND archived_at IS NULL
-          AND "usage" IN (1, 2) AND message_content IS NOT NULL
+          AND "usage" IN (1, 2) AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
         <if test="afterMessageId != null">
           AND (create_time, message_id) &gt;
               ((SELECT boundary.create_time FROM byai_message boundary
@@ -441,7 +449,7 @@
     <select id="selectVisibleGroupMessagesByIds" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" /> FROM byai_message
         WHERE session_id = #{sessionId} AND archived_at IS NULL
-          AND "usage" IN (1, 2) AND message_content IS NOT NULL
+          AND "usage" IN (1, 2) AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
           AND message_id IN
           <foreach collection="messageIds" item="messageId" open="(" separator="," close=")">#{messageId}</foreach>
     </select>
