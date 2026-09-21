@@ -12,7 +12,7 @@ import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Getter;
 import lombok.Setter;
 
-/** 当前用户的群聊列表项及未读 mention 投影。 */
+/** 当前用户的群聊列表项及未读状态投影。 */
 @Getter
 @Setter
 public class GroupChatListItemResponse {
@@ -58,6 +58,8 @@ public class GroupChatListItemResponse {
 
     @JsonSerialize(using = ToStringSerializer.class)
     private Long lastReadMessageId;
+
+    private long unreadMessageCount;
 
     private long unreadMentionCount;
 

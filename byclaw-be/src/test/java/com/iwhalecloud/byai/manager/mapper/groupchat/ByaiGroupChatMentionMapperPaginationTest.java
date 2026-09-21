@@ -78,6 +78,31 @@ class ByaiGroupChatMentionMapperPaginationTest {
         }
     }
 
+    @Test
+    void selectMyGroupsCountsOnlyActiveMessagesAfterTheReadCursor() throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-unread-count.sqlite").toAbsolutePath();
+        initializeSchema(jdbcUrl);
+
+        try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
+            List<GroupChatListItemResponse> groups = session.getMapper(ByaiGroupChatMentionMapper.class)
+                .selectMyGroups(30L);
+
+            GroupChatListItemResponse groupWithReadCursor = groups.stream()
+                .filter(group -> group.getSessionId().equals(10L))
+                .findFirst()
+                .orElseThrow();
+            GroupChatListItemResponse groupWithoutReadCursor = groups.stream()
+                .filter(group -> group.getSessionId().equals(20L))
+                .findFirst()
+                .orElseThrow();
+
+            // 已撤回但未归档的消息 100 在游标之后；已归档的消息 101 不应计入未读数量。
+            assertThat(groupWithReadCursor.getUnreadMessageCount()).isEqualTo(1L);
+            // 空游标表示该群的全部未归档消息均未读。
+            assertThat(groupWithoutReadCursor.getUnreadMessageCount()).isEqualTo(1L);
+        }
+    }
+
     private void initializeSchema(String jdbcUrl) throws Exception {
         try (Connection connection = DriverManager.getConnection(jdbcUrl);
             Statement statement = connection.createStatement()) {
@@ -157,6 +182,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
                        (200, 20, 'second group message', '2026-09-11 11:00:00', 31, 'user 31', NULL)
                 """);
             statement.execute("UPDATE byai_message SET metadata = '{\"resourceList\":[]}' WHERE message_id = 99");
+            statement.execute("UPDATE byai_message SET recalled_at = '2026-09-11 14:00:00' WHERE message_id = 100");
             statement.execute("""
                 INSERT INTO byai_group_chat_mention(message_id, group_session_id, mentioned_user_id)
                 VALUES (99, 10, 30), (100, 10, 30), (101, 10, 30)
