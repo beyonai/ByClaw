@@ -69,6 +69,7 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 ## 群聊上传附件
 
 - `GROUP_CHAT_SEND` 的 `files` 与正文一同保存到消息的 `relatedResources.files`，并随 `MESSAGE_CREATED` 广播返回。仅附件消息和正文带附件消息均支持发送确认后的展示及历史加载。
+- `files` 非空时，`chatContent` 支持空字符串、纯空白、`null` 或省略；`null` 和省略正文按空字符串保存并广播，成功后返回 `GROUP_CHAT_ACCEPTED`。
 - 此修复无需数据库迁移。修复前未保存附件关联的旧消息不会自动恢复，需要重新发送附件。
 
 ## 群聊待发布成果编辑

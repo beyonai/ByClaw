@@ -17,8 +17,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -43,6 +45,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutio
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMentionService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
+import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatWebSocketService;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
@@ -50,6 +53,12 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.ws.model.ChatMessage;
+import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
+import com.iwhalecloud.byai.state.domain.ws.handler.WebSocketHandler;
+
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
 class GroupChatApplicationServiceResourceListTest {
     private static final Long GROUP_ID = 100L;
@@ -165,7 +174,8 @@ class GroupChatApplicationServiceResourceListTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = { "", "请查看附件" })
+    @NullSource
+    @ValueSource(strings = { "", " \t\n", "请查看附件" })
     void uploadedFilesSurvivePersistenceAndMessageBroadcast(String text) {
         ChatMessage command = command(List.of());
         command.setChatContent(text);
@@ -175,10 +185,26 @@ class GroupChatApplicationServiceResourceListTest {
         file.setFileType("file");
         command.setFiles(List.of(file));
 
-        service.acceptUserMessage(command);
+        command.setClientRequestId("file-only-request");
+        ChannelHandlerContext channel = mock(ChannelHandlerContext.class);
+        // 经实际 WebSocket 适配器验证反序列化、入库调用、广播和发送确认。
+        new GroupChatWebSocketService(service).send(channel,
+            JSON.parseObject(JSON.toJSONString(command), ChatMessage.class));
+        ArgumentCaptor<TextWebSocketFrame> response = ArgumentCaptor.forClass(TextWebSocketFrame.class);
+        verify(channel).writeAndFlush(response.capture());
+        try {
+            JSONObject ack = JSON.parseObject(response.getValue().text());
+            assertThat(ack.getString("type")).isEqualTo("GROUP_CHAT_ACCEPTED");
+            assertThat(ack.getLong("messageId")).isEqualTo(MESSAGE_ID);
+            assertThat(ack.getString("clientRequestId")).isEqualTo("file-only-request");
+        }
+        finally {
+            response.getValue().release();
+        }
 
         ArgumentCaptor<ByaiMessage> saved = ArgumentCaptor.forClass(ByaiMessage.class);
         verify(messageMapper).insert(saved.capture());
+        assertThat(saved.getValue().getMessageContent()).isEqualTo(text == null ? "" : text);
         MessageResourceDto resources = JSON.parseObject(saved.getValue().getRelatedResources(), MessageResourceDto.class);
         assertThat(resources).isNotNull();
         assertThat(resources.getFiles()).singleElement().satisfies(attachment -> {
@@ -209,6 +235,63 @@ class GroupChatApplicationServiceResourceListTest {
                 assertThat(attachment.getFileId()).isEqualTo("9007199254740993");
                 assertThat(attachment.getFileName()).isEqualTo("报告.pdf");
             }));
+    }
+
+    @Test
+    void fileOnlyJsonTraversesWebSocketHandlerAndPersists() {
+        // 保留客户端报文结构，只将会话 ID 替换为测试群，覆盖真实事件分发入口。
+        String payload = """
+            {"language":"zh-CN","type":"GROUP_CHAT_SEND","sessionId":"100",
+             "clientRequestId":"hacu-uyzFaQ9JLlYSJslAw9KHn","chatContent":"","resourceList":[],
+             "files":[{"fileId":"20089744","fileName":"rd-report.md",
+             "filePath":"/.sessions/20073015/rd-report.md",
+             "fileUrl":"/commonFile/preview?style=minio&bucketName=byclaw-0027011326&filePath=/.sessions/20073015/rd-report.md",
+             "fileSize":2726,"fileType":"file"}]}
+            """;
+        WebSocketHandler handler = new WebSocketHandler();
+        ReflectionTestUtils.setField(handler, "groupChatWebSocketService", new GroupChatWebSocketService(service));
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(Constant.ATT_USER_INFO).set(CurrentUserHolder.getLoginInfo());
+        try {
+            channel.writeInbound(new TextWebSocketFrame(payload));
+            TextWebSocketFrame response = channel.readOutbound();
+            assertThat(response).isNotNull();
+            try {
+                JSONObject ack = JSON.parseObject(response.text());
+                assertThat(ack.getString("type")).isEqualTo("GROUP_CHAT_ACCEPTED");
+                assertThat(ack.getLong("messageId")).isEqualTo(MESSAGE_ID);
+                assertThat(ack.getString("clientRequestId")).isEqualTo("hacu-uyzFaQ9JLlYSJslAw9KHn");
+            }
+            finally {
+                response.release();
+            }
+            ArgumentCaptor<ByaiMessage> saved = ArgumentCaptor.forClass(ByaiMessage.class);
+            verify(messageMapper).insert(saved.capture());
+            assertThat(saved.getValue().getMessageContent()).isEmpty();
+            JSONObject file = JSON.parseObject(saved.getValue().getRelatedResources()).getJSONArray("files")
+                .getJSONObject(0);
+            assertThat(file).containsAllEntriesOf(JSON.parseObject(payload).getJSONArray("files").getJSONObject(0));
+            verify(eventPublisher).publish(eq(GROUP_ID), any(JSONObject.class), isNull());
+        }
+        finally {
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void missingSessionOrNullContentWithoutFilesIsRejected() {
+        GroupChatWebSocketService socket = new GroupChatWebSocketService(service);
+        ChannelHandlerContext channel = mock(ChannelHandlerContext.class);
+        ChatMessage command = command(List.of());
+        command.setChatContent(null);
+        assertThatThrownBy(() -> socket.send(channel, command)).isInstanceOf(IllegalArgumentException.class);
+        command.setFiles(List.of());
+        assertThatThrownBy(() -> socket.send(channel, command)).isInstanceOf(IllegalArgumentException.class);
+        command.setFiles(List.of(new MessageFileDto()));
+        command.setSessionId(null);
+        assertThatThrownBy(() -> socket.send(channel, command)).isInstanceOf(IllegalArgumentException.class);
+        verify(messageMapper, never()).insert(any(ByaiMessage.class));
+        verify(channel, never()).writeAndFlush(any());
     }
 
     @Test

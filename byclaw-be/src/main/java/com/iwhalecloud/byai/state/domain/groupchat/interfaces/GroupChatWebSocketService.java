@@ -20,8 +20,13 @@ public class GroupChatWebSocketService {
     }
 
     public void send(ChannelHandlerContext context, ChatMessage message) {
-        if (message.getSessionId() == null || message.getChatContent() == null) {
+        if (message.getSessionId() == null || (message.getChatContent() == null
+            && (message.getFiles() == null || message.getFiles().isEmpty()))) {
             throw new IllegalArgumentException("Group chat session and content are required");
+        }
+        // 纯附件请求允许省略正文，统一为空字符串以保持持久化与广播的正文结构一致。
+        if (message.getChatContent() == null) {
+            message.setChatContent("");
         }
         JSONObject ack = new JSONObject();
         ack.put("type", "GROUP_CHAT_ACCEPTED");
