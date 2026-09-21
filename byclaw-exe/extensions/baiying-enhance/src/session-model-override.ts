@@ -1,7 +1,6 @@
 import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
-import { mergeAimodelProviderIntoConfig } from "./agent-registry.js";
+import { hasManagedProviderConfigDrift, mergeAimodelProviderIntoConfig } from "./agent-registry.js";
 import {
-    providerKeyForBaiyingModelId,
     resolveAimodelConfigRedisKey,
     resolveAimodelSecretProviderName,
     resolveBaiyingAimodelProviderBundle,
@@ -34,19 +33,6 @@ export function sessionModelOverrideRedisKey(sessionId: string): string {
 }
 function currentRuntimeConfig(api: OpenClawPluginApi): OpenClawConfig {
     return api.runtime.config.current?.() ?? api.runtime.config.loadConfig();
-}
-
-function providerHasModel(cfg: OpenClawConfig, providerKey: string, modelId: string): boolean {
-    const provider = cfg.models?.providers?.[providerKey];
-    const models = provider?.models;
-    if (!Array.isArray(models)) {
-        return false;
-    }
-    return models.some((entry) =>
-        typeof entry === "string"
-            ? entry === modelId
-            : Boolean(entry && typeof entry === "object" && (entry as { id?: string }).id === modelId),
-    );
 }
 
 function readString(raw: unknown, key: string): string {
@@ -95,12 +81,6 @@ export async function resolveSessionModelOverride(params: {
     if (!modelId) {
         return undefined;
     }
-    const providerKey = providerKeyForBaiyingModelId(modelId);
-    const modelCode = readString(payload?.raw, "modelCode");
-    const cfg = currentRuntimeConfig(params.api);
-    if (modelCode && providerHasModel(cfg, providerKey, modelCode)) {
-        return { providerKey, modelRef: `${providerKey}/${modelCode}`, model: modelCode };
-    }
 
     const redisJsonStore = getSharedRedisJsonStore({ logger: params.log });
     const bundle = await resolveBaiyingAimodelProviderBundle({
@@ -108,13 +88,18 @@ export async function resolveSessionModelOverride(params: {
         modelId,
         redisKey: resolveAimodelConfigRedisKey(params.pluginConfig.aimodelConfigRedisKey),
         secretProviderName: resolveAimodelSecretProviderName(params.pluginConfig.aimodelSecretProviderName),
-        log: params.log,
+        log: { warn: (message) => params.log.warn?.(message), info: (message) => params.log.info?.(message) },
     });
     if (!bundle) {
         params.log.warn?.(
             `baiying-enhance: session model override unavailable, sessionId=${sessionId}, modelId=${modelId}; falling back to agent model`,
         );
         return undefined;
+    }
+    const cfg = currentRuntimeConfig(params.api);
+    if (!hasManagedProviderConfigDrift(cfg, bundle.providerKey, bundle.provider) &&
+        cfg.agents?.defaults?.compaction?.timeoutSeconds !== undefined) {
+        return { providerKey: bundle.providerKey, modelRef: bundle.modelRef, model: bundle.provider.modelId };
     }
     await mutateOpenClawConfigFile(params.api, (base) =>
         mergeAimodelProviderIntoConfig({
@@ -130,6 +115,16 @@ export async function resolveSessionModelOverride(params: {
             ],
         }),
     );
+    // Same provider/model IDs can still carry stale window and reasoning values.
+    // Do not let a dispatch capture the previous runtime snapshot after writing.
+    const deadline = Date.now() + 3000;
+    for (;;) {
+        const current = currentRuntimeConfig(params.api);
+        if (!hasManagedProviderConfigDrift(current, bundle.providerKey, bundle.provider) &&
+            current.agents?.defaults?.compaction?.timeoutSeconds !== undefined) break;
+        if (Date.now() >= deadline) throw new Error("Session model configuration reload timed out");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     params.log.info?.(
         `baiying-enhance: registered session model override provider ${bundle.modelRef} for sessionId=${sessionId}`,
     );

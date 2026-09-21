@@ -10,6 +10,7 @@ import {
     resolveSdkEmitter,
     getAgentRunEndPromiseResolver,
     recordActiveSdkRootAgentEnd,
+    recordActiveSdkDispatchRunId,
 } from "./session-context.js";
 import {
     cancelActiveSdkCompletionCheck,
@@ -523,6 +524,13 @@ async function syncWorkspaceUserMd(
 }
 
 export function registerByaiHooks(api: OpenClawPluginApi): void {
+    api.on("llm_input", (event, ctx) => {
+        recordActiveSdkDispatchRunId(ctx.sessionKey, event.runId);
+    });
+    api.on("before_tool_call", (_event, ctx) => {
+        const request = ctx.sessionKey ? resolveActiveSdkRequestBySessionKey(ctx.sessionKey) : undefined;
+        if (request) request.contextOverflowRecovery.replaySafe = false;
+    });
     api.on("before_compaction", (event: CompactionHookEvent, ctx: PluginHookAgentContext) => {
         if (event?.messageCount !== -1) {
             return;
@@ -778,6 +786,8 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
             runId,
             success: _success,
             messages: event.messages,
+            error: _error,
+            sessionKey: ctx.sessionKey,
         });
         // agent_end 对 native child run 也会触发，且在 announce 投递之前，是与 child lifecycle
         // 互备的早期终态事实。台账按 runId 去重，root run 的 runId 不在台账里，登记会自然落空。

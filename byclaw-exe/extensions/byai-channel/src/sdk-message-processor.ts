@@ -25,6 +25,8 @@ import {
   registerAgentRunEndPromise,
   markActiveSdkCompactionRetryPending,
   markActiveSdkDispatchSettled,
+  markActiveSdkRootLifecycleFinished,
+  isActiveSdkRequestReadyForTaskPlanContinuation,
   markActiveSdkOverflowContinuePending,
   resolveActiveSdkRequestBySessionKey,
   withSdkEmitMetadata,
@@ -53,6 +55,7 @@ import { getAgentNameById } from "./utils.js";
 import {
   buildAgentReadyTitle,
   buildContextOverflowText,
+  buildContextRecoveryText,
 } from "./i18n.js";
 import {
   createByaiSdkDiagnosticTrace,
@@ -64,7 +67,10 @@ import {
 import {
   formatDispatchError,
   isOpenClawContextOverflowDispatchError,
+  isOpenClawContextOverflowPrecheckError,
 } from "./dispatch-error.js";
+import { enqueueAfterAgentEvents } from "./agent-event-serial.js";
+import { compactSessionForRecovery, dispatchWithContextOverflowRecovery } from "./context-overflow-recovery.js";
 import {
   BYAI_CHANNEL_ID,
   buildBroadcastSessionKey,
@@ -662,14 +668,24 @@ async function deliverReplyToAgentViaSdkUnderGate(
   // agent-events 自动重绑到同一 activeRequest。`bodyText` 为本次投给 core 的提示文本。
   async function runOneDispatch(
     bodyText: string,
-    options?: { includeMedia?: boolean },
+    options?: { includeMedia?: boolean; signal?: AbortSignal },
   ): Promise<void> {
+    const dispatchConfig = rt.config?.current?.() ?? cfg;
+    activeRequest.dispatchSettled = false;
+    activeRequest.contextOverflowRecovery.dispatchRunId = undefined;
+    setPromptInjectionSnapshot(sessionKey, buildPromptInjectionSnapshot({
+      request: activeRequest,
+      currentUserText: bodyText,
+      ...(groupChatContext ? { groupChatContext } : {}),
+      workspaceDir,
+      includeUserMdReloadHint,
+    }));
     const includeMedia = options?.includeMedia ?? true;
     const envelopeBody = rt.channel.reply.formatAgentEnvelope({
       channel: CHANNEL_ID,
       from: `${CHANNEL_ID}:${message.userId}`,
       timestamp: new Date(),
-      envelope: rt.channel.reply.resolveEnvelopeFormatOptions(cfg),
+      envelope: rt.channel.reply.resolveEnvelopeFormatOptions(dispatchConfig),
       body: bodyText,
     });
     const ctxPayload = {
@@ -717,7 +733,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
           channel: CHANNEL_ID,
           accountId,
           routeSessionKey: sessionKey,
-          storePath: rt.channel.session.resolveStorePath(cfg.session?.store, {
+          storePath: rt.channel.session.resolveStorePath(dispatchConfig.session?.store, {
             agentId: sessionAgentId,
           }),
           ctxPayload: finalizedCtx,
@@ -732,13 +748,14 @@ async function deliverReplyToAgentViaSdkUnderGate(
                   runWithByaiSdkDiagnosticTrace(diagnosticTrace, () =>
                     rt.channel.reply.dispatchReplyFromConfig({
                       ctx: finalizedCtx,
-                      cfg,
+                      cfg: dispatchConfig,
                       dispatcher,
                       replyOptions: {
                         ...replyOptions,
-                        abortSignal: deps.abortController?.signal,
+                        abortSignal: options?.signal ?? deps.abortController?.signal,
                         disableBlockStreaming: true,
                         onAgentRunStart: async (runId: string) => {
+                          activeRequest.contextOverflowRecovery.dispatchRunId = runId;
                           bindActiveSdkRequestRunId(sessionKey, runId);
                           registerAgentRunEndPromise(runId);
                           log?.debug?.(
@@ -796,6 +813,9 @@ async function deliverReplyToAgentViaSdkUnderGate(
       // flag and continue to use rootLifecyclePhase as their drain signal.
       markActiveSdkDispatchSettled(sessionKey);
     } catch (err) {
+      if (isOpenClawContextOverflowPrecheckError(err)) {
+        activeRequest.contextOverflowRecovery.precheckError = formatDispatchError(err);
+      }
       if (dispatchStartedAt > 0) {
         emitByaiSdkDispatchCompleted(diagnosticRef, diagnosticTrace, {
           startedAt: dispatchStartedAt,
@@ -804,13 +824,54 @@ async function deliverReplyToAgentViaSdkUnderGate(
         });
       }
       throw err;
+    } finally {
+      // Agent bus events are deferred with setImmediate. Drain them before
+      // deciding whether a failed precheck is safe to replay or starting RPC.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await enqueueAfterAgentEvents("context recovery dispatch drain", async () => {});
+      if (activeRequest.contextOverflowRecovery.precheckError) {
+        markActiveSdkDispatchSettled(sessionKey);
+        if (activeRequest.boundRunIds.size > 0 && !activeRequest.rootLifecyclePhase) {
+          markActiveSdkRootLifecycleFinished(sessionKey, "error", [...activeRequest.boundRunIds].at(-1));
+        }
+      }
     }
   }
 
   let deferDispatchSettleToAgentEvents = false;
   let settleTimedOut = false;
+  // Hold finalization from the first dispatch through recovery. Native lifecycle
+  // end/error must not close the user's stream between compression and replay.
+  activeRequest.contextOverflowRecovery.dispatchPending = true;
   try {
-    await runOneDispatch(message.text);
+    await dispatchWithContextOverflowRecovery({
+      state: activeRequest.contextOverflowRecovery,
+      signal: deps.abortController?.signal,
+      dispatch: (signal) => runOneDispatch(message.text, { signal }),
+      compact: (signal, remainingMs) => {
+        if (!isActiveSdkRequestReadyForTaskPlanContinuation(activeRequest)) {
+          throw new Error("Session still has active work; automatic compaction cancelled");
+        }
+        return compactSessionForRecovery({
+          runtime: rt,
+          sessionKey,
+          signal,
+          timeoutMs: Math.min(remainingMs, ((rt.config?.current?.() ?? cfg).agents?.defaults?.compaction?.timeoutSeconds ?? 180) * 1000 + 30_000),
+        });
+      },
+      notice: async (phase, attempt) => {
+        await onReply(buildContextRecoveryText(message.language, phase, attempt), {
+          parentMessageId: activeRequest.parentMessageId,
+          eventType: EventType.REASONING_LOG_DELTA,
+          contentType: SseReasonMessageType.think_status_title,
+          objectType: "compaction",
+          status: phase === "failed" ? "_ERROR_" : phase === "retry" ? "_DONE_" : "_START_",
+          metadata: { isCompactionNotice: true, recoveryAttempt: attempt, recoveryPhase: phase },
+        });
+      },
+      failureText: buildContextRecoveryText(message.language, "failed", 3),
+      logger: log,
+    });
     await maybeContinueAfterOverflow();
     await continueActiveTaskPlan({
       request: activeRequest,
@@ -837,6 +898,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
       throw err;
     }
   } finally {
+    activeRequest.contextOverflowRecovery.dispatchPending = false;
     if (deferDispatchSettleToAgentEvents) {
       log?.info?.(
         `[diagnose-sdk] session dispatch settle deferred to OpenClaw recovery events: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
