@@ -61,6 +61,7 @@ describe('chat resource file picker', () => {
     await screen.findByText(nestedFolder.name);
     expand(nestedFolder.name);
     await screen.findByText(file.name);
+    // rc-tree 将双击处理绑定在节点内容上，外层行不是事件触发入口。
     fireEvent.doubleClick(screen.getByText(file.name));
     expect(listFiles).toHaveBeenCalledWith({ resourceId: 'employee-resource', path: nestedFolder.path });
     expect(onSelect).toHaveBeenLastCalledWith(

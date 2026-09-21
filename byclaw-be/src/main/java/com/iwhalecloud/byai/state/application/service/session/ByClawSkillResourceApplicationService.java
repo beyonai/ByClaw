@@ -292,6 +292,10 @@ public class ByClawSkillResourceApplicationService {
         SsResource existing = ssResourceService.findByImportIdentity(SystemCode.WHAGE_AGENT.getCode(),
             ResourceBizTypeEnum.SKILL.name(), resourceCode);
         boolean updated = existing != null;
+        if (updated && Objects.equals(existing.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
+            // 注销终态不能通过第三方技能重复导入复活，保持资源中心的生命周期语义一致。
+            throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
         if (updated && !authApplicationService.hasResourceManagePermission(existing)) {
             throw new IllegalArgumentException(
                 I18nUtil.get("byclaw.skill.import.no.manage.permission", existing.getResourceName()));
@@ -529,7 +533,10 @@ public class ByClawSkillResourceApplicationService {
             extractString(extSkill.getTargetContent(), "skillPath"),
             extractString(extSkill.getTargetContent(), "skillDocObjectKey")));
         ssResExtSkillService.saveOrUpdate(extSkill);
-        syncSkillTargetContent(resolveResourceOwnerUserCode(skillResource), skillResource, extSkill, false);
+        // 下架期间允许维护信息，但不能因编辑而重新发布运行产物。
+        if (Objects.equals(skillResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum())) {
+            syncSkillTargetContent(resolveResourceOwnerUserCode(skillResource), skillResource, extSkill, false);
+        }
         return extSkill.getTargetContent();
     }
 
@@ -859,6 +866,9 @@ public class ByClawSkillResourceApplicationService {
     }
 
     private void assertSkillManagePermission(SsResource skillResource) {
+        if (skillResource != null && Objects.equals(skillResource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
         SsResExtSkill extSkill = skillResource == null || skillResource.getResourceId() == null ? null
             : ssResExtSkillService.findById(skillResource.getResourceId());
         if (isAdminVipInnerSkill(skillResource, extSkill)) {

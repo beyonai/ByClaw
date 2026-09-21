@@ -115,6 +115,29 @@
   }
 }
 
+.auditToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+
+  > :last-child {
+    margin-left: auto;
+  }
+}
+
+.employeeSearch,
+.auditSearch {
+  // 各页签统一使用“我可用”搜索框的尺寸，图标置于输入框内部右侧。
+  box-sizing: border-box;
+  width: 200px;
+  height: 32px;
+  max-width: 100%;
+}
+
 .auditTableWrap {
   min-height: 0;
   flex: 1;
@@ -128,7 +151,6 @@
 }
 
 .employeeSearch {
-  width: 240px;
   margin-right: 16px;
 }
 

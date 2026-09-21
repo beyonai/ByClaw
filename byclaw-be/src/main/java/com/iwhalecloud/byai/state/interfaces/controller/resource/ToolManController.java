@@ -52,6 +52,7 @@ import com.iwhalecloud.byai.state.application.service.session.ByClawSkillQueryAp
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillUploadApplicationService;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
 import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
 import com.iwhalecloud.byai.state.domain.resource.dto.CurlImportRequest;
@@ -530,7 +531,7 @@ public class ToolManController {
             return ResponseUtil.successResponse(I18nUtil.get("byclaw.third.party.skill.install.success"),
                 result);
         }
-        catch (IllegalArgumentException | BdpRuntimeException e) {
+        catch (IllegalArgumentException | BdpRuntimeException | BaseException e) {
             logger.warn(
                 "第三方技能安装接口调用失败，userCode={}, digId={}, requestBody={}, requestContext={}, "
                     + "downloadUrlHash={}, reason={}, durationMs={}",
@@ -646,7 +647,7 @@ public class ToolManController {
     }
 
     /**
-     * 删除资源（支持 tool、skill、kg_doc、object、view）
+     * 删除资源；资源中心支持的类型进入注销流程，历史资源类型继续兼容旧删除逻辑。
      */
     @PostMapping("/deleteResource")
     public ResponseUtil<Void> deleteResource(
@@ -669,7 +670,7 @@ public class ToolManController {
     }
 
     /**
-     * 按 resourceCode + ownerType 删除资源（支持 tool、skill、kg_doc、object、view）。 删除前同样会校验资源是否被引用；存在引用时不允许删除。
+     * 按 resourceCode + ownerType 删除资源；资源中心支持的类型进入注销流程，历史资源类型仍校验资源引用。
      */
     @PostMapping("/deleteResourceByCodeAndOwnerType")
     public ResponseUtil<Void> deleteResourceByCodeAndOwnerType(@RequestBody(required = false) DeleteResourceQo request,
@@ -704,8 +705,44 @@ public class ToolManController {
         }
     }
 
+    /** 资源中心生命周期入口，服务层统一校验状态与管理权限。 */
+    @PostMapping("/shelfResource")
+    public ResponseUtil<Void> shelfResource(@RequestBody ResourceIdDto request) {
+        return changeResourceLifecycle(request, "shelf");
+    }
+
+    @PostMapping("/unShelfResource")
+    public ResponseUtil<Void> unShelfResource(@RequestBody ResourceIdDto request) {
+        return changeResourceLifecycle(request, "unshelf");
+    }
+
+    @PostMapping("/deregisterResource")
+    public ResponseUtil<Void> deregisterResource(@RequestBody ResourceIdDto request) {
+        return changeResourceLifecycle(request, "deregister");
+    }
+
+    private ResponseUtil<Void> changeResourceLifecycle(ResourceIdDto request, String action) {
+        try {
+            Long resourceId = request == null ? null : request.getResourceId();
+            switch (action) {
+                case "shelf" -> toolManService.shelfResource(resourceId);
+                case "unshelf" -> toolManService.unShelfResource(resourceId);
+                case "deregister" -> toolManService.deregisterResource(resourceId);
+                default -> throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+            }
+            return ResponseUtil.success(I18nUtil.get("resource.lifecycle." + action + ".success"));
+        }
+        catch (IllegalArgumentException | BdpRuntimeException | BaseException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("Resource lifecycle operation failed: {}", action, e);
+            return ResponseUtil.fail(I18nUtil.get("resource.lifecycle.failed"));
+        }
+    }
+
     /**
-     * 删除资源。forceDelete=true 时跳过删除校验，直接删除主表、子表和资源关系。
+     * 删除资源；资源中心支持的类型转入统一注销流程，历史资源类型才继续使用 forceDelete 兼容参数。
      *
      * @author qin.guoquan
      * @date 2026-04-26 13:45:00
@@ -738,7 +775,7 @@ public class ToolManController {
     }
 
     /**
-     * 恢复资源。 将已注销（状态3）的资源恢复为已上架（状态2）。
+     * 兼容历史资源类型的恢复入口；资源中心支持的类型统一使用 shelfResource，注销终态不可恢复。
      *
      * @author qin.guoquan
      * @date 2026-05-14

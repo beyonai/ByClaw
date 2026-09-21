@@ -1,27 +1,21 @@
 // 状态相关常量
 export const STATUS_ALL_VALUE = ''; // 全部状态
-export const STATUS_IN_STOCK_VALUE = '2'; // 有效状态
-export const STATUS_CANCELLED_VALUE = '3'; // 已注销状态
+export const STATUS_IN_STOCK_VALUE = '2'; // 已上架状态
+export const STATUS_CANCELLED_VALUE = '-1'; // 已注销状态
 
 // 归属相关常量
 export const BELONG_ALL_VALUE = 'ALL'; // 全部归属
 export const BELONG_COMPANY_VALUE = 'COMPANY'; // 公司归属
 export const BELONG_DEPT_VALUE = 'DEPT'; // 部门归属
 
-// 状态筛选选项
+// 资源中心与数字员工共享状态值；注销与可重新上架的下架记录分开查询。
 export const statusOptions = [
-  {
-    label: 'common.all',
-    value: STATUS_ALL_VALUE,
-  },
-  {
-    label: 'resource.statusActive',
-    value: STATUS_IN_STOCK_VALUE,
-  },
-  {
-    label: 'resource.statusCancelled',
-    value: STATUS_CANCELLED_VALUE,
-  },
+  { label: 'common.all', value: STATUS_ALL_VALUE },
+  { label: 'resourceStatus.draft', value: '0' },
+  { label: 'resourceStatus.pendingShelf', value: '1' },
+  { label: 'resourceStatus.published', value: STATUS_IN_STOCK_VALUE },
+  { label: 'resourceStatus.unpublished', value: '3' },
+  { label: 'resource.statusCancelled', value: STATUS_CANCELLED_VALUE },
 ];
 
 // 数字员工专用状态筛选，值与 digitalEmployeeController 返回的 resourceStatus 一致。
@@ -120,6 +114,8 @@ export const knowledgeResourceBizTypeOptions = [
 // 权限相关常量
 export const PERMISSION_ALL_VALUE = ''; // 全部权限
 export const PERMISSION_CREATED_BY_ME_VALUE = 'CREATED_BY_ME'; // 我创建的
+export const PERMISSION_MANAGEABLE_BY_ME_VALUE = 'MANAGEABLE_BY_ME'; // 我可管理的（我创建的或我管理的）
+export const PERMISSION_MANAGED_BY_ME_VALUE = 'MANAGED_BY_ME'; // 我管理的（排除我创建的）
 export const PERMISSION_AUTHORIZED_TO_ME_VALUE = 'AUTHORIZED_TO_ME'; // 授权给我
 export const PERMISSION_PENDING_MY_APPROVAL_VALUE = 'PENDING_MY_APPROVAL'; // 待我审核
 export const PERMISSION_APPLIED_BY_ME_VALUE = 'APPLIED_BY_ME'; // 我申请的

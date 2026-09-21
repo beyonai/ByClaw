@@ -26,6 +26,7 @@ import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceLifecyclePolicy;
 import com.iwhalecloud.byai.manager.domain.resource.model.SkillRelationSource;
 import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupUninstallMode;
 import com.iwhalecloud.byai.manager.domain.resource.service.OperationLogService;
@@ -2013,6 +2014,9 @@ public class DigitalEmployeeApplicationService {
         if (CollectionUtils.isEmpty(resources) || resources.size() != distinctRelIds.size()) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
+        if (resources.stream().anyMatch(resource -> !ResourceLifecyclePolicy.isRuntimeAvailable(resource))) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
         return resources;
     }
 
@@ -2580,7 +2584,7 @@ public class DigitalEmployeeApplicationService {
                 return result;
             }
             for (SsResource rel : relResources) {
-                if (rel == null || rel.getResourceId() == null) {
+                if (!ResourceLifecyclePolicy.isRuntimeAvailable(rel) || rel.getResourceId() == null) {
                     continue;
                 }
                 String bizType = StringUtils.trimToEmpty(rel.getResourceBizType());
@@ -2789,7 +2793,7 @@ public class DigitalEmployeeApplicationService {
      * 同步单个关联资源配置到 Redis。
      */
     private void syncSingleRelatedResourceConfigJsonToRedis(Long digEmployeeResourceId, SsResource relResource) {
-        if (relResource == null || relResource.getResourceId() == null) {
+        if (!ResourceLifecyclePolicy.isRuntimeAvailable(relResource) || relResource.getResourceId() == null) {
             return;
         }
         String resourceBizType = StringUtils.trimToEmpty(relResource.getResourceBizType());
@@ -2815,7 +2819,7 @@ public class DigitalEmployeeApplicationService {
      * 关联资源标准 JSON 缺失时补齐。
      */
     private void syncSingleRelatedResourceJsonIfMissing(Long digEmployeeResourceId, SsResource relResource) {
-        if (relResource == null || relResource.getResourceId() == null) {
+        if (!ResourceLifecyclePolicy.isRuntimeAvailable(relResource) || relResource.getResourceId() == null) {
             return;
         }
         String resourceBizType = StringUtils.trimToEmpty(relResource.getResourceBizType());
@@ -3170,7 +3174,7 @@ public class DigitalEmployeeApplicationService {
             }
             // PR-3: 按 bizType 分桶后批量加载
             Map<String, List<Long>> bizTypeToIds = relResources.stream()
-                .filter(r -> r != null && r.getResourceId() != null)
+                .filter(r -> ResourceLifecyclePolicy.isRuntimeAvailable(r) && r.getResourceId() != null)
                 .collect(Collectors.groupingBy(
                     r -> StringUtils.trimToEmpty(r.getResourceBizType()),
                     Collectors.mapping(SsResource::getResourceId, Collectors.toList())));
@@ -3288,7 +3292,8 @@ public class DigitalEmployeeApplicationService {
 
         Map<Long, SsResource> skillResourceMap = relResources.stream()
             .filter(item -> item != null && item.getResourceId() != null
-                && ResourceBizTypeEnum.SKILL.name().equals(item.getResourceBizType()))
+                && ResourceBizTypeEnum.SKILL.name().equals(item.getResourceBizType())
+                && ResourceLifecyclePolicy.isRuntimeAvailable(item))
             .collect(Collectors.toMap(SsResource::getResourceId, item -> item, (left, right) -> left));
         if (MapUtils.isEmpty(skillResourceMap)) {
             return Collections.emptyList();
@@ -3503,9 +3508,8 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * Reconciles a full editor save while preserving snapshot sources on direct skill relations. Omitted skills lose
-     * only their manual source, included skills gain a manual source, and malformed omitted metadata is left
-     * untouched. Non-skill targets continue through the historical full replacement reconciler.
+     * 全量编辑以当前提交的技能列表为准：移除未选技能的整个员工关联，避免技能组来源使删除失效。
+     * 保留的技能继续维护来源信息；知识和工具沿用原有全量对账逻辑。
      */
     private void reconcileDigitalEmployeeUpdateRelations(SsResource digitalEmployee, List<Long> relIds,
                                                          List<SsResourceRelDetail> allRelations, List<RelResourceInfo> relResourceInfoList) {
@@ -3557,13 +3561,9 @@ public class DigitalEmployeeApplicationService {
                 this.updateCanonicalSkillRelation(digitalEmployee, relation, manualSource, currentUserId, now);
                 continue;
             }
-            if (source.isMalformed() || !source.isManual()) {
-                continue;
-            }
-            SkillRelationSource remainingSource = source.withoutManual();
-            if (remainingSource.hasAnySource()) {
-                this.updateCanonicalSkillRelation(digitalEmployee, relation, remainingSource, currentUserId, now);
-            } else if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
+            // 编辑页删除的是该员工的技能配置，必须同时移除手工和技能组来源（包括历史异常元数据）。
+            // 技能组的按来源卸载仍由独立接口处理，不改变技能资源本身或其他员工的关联。
+            if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
                 throw new BaseException("数字员工技能关系删除失败");
             }
         }
@@ -3882,7 +3882,8 @@ public class DigitalEmployeeApplicationService {
             List<SsResource> resources = ssResourceService.findByIdList(resourceIds);
             if (!CollectionUtils.isEmpty(resources)) {
                 resources.stream()
-                    .filter(item -> item != null && ResourceBizTypeEnum.SKILL.name().equals(item.getResourceBizType()))
+                    .filter(item -> item != null && ResourceBizTypeEnum.SKILL.name().equals(item.getResourceBizType())
+                        && ResourceLifecyclePolicy.isRuntimeAvailable(item))
                     .forEach(item -> resourceById.put(item.getResourceId(), item));
             }
         }
@@ -3892,7 +3893,8 @@ public class DigitalEmployeeApplicationService {
             List<SsResource> resources = ssResourceService.getResourceListByCode(new ArrayList<>(skillCodes));
             if (!CollectionUtils.isEmpty(resources)) {
                 resources.stream()
-                    .filter(item -> item != null && ResourceBizTypeEnum.SKILL.name().equals(item.getResourceBizType()))
+                    .filter(item -> item != null && ResourceBizTypeEnum.SKILL.name().equals(item.getResourceBizType())
+                        && ResourceLifecyclePolicy.isRuntimeAvailable(item))
                     .forEach(item -> resourceByCode.put(item.getResourceCode(), item));
             }
         }

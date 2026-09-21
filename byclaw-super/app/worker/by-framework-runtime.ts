@@ -49,7 +49,7 @@ export class ByFrameworkWorkerRuntime {
   readonly #logger: WorkerLogger | undefined;
   readonly #timeoutDeliveries: ByFrameworkWorkerRuntimeOptions["timeoutDeliveries"];
   readonly #protocolEmitter: GatewayDataEmitter;
-  readonly #maxConcurrency: number;
+  readonly #timeoutDeliveryBatchSize: number;
   #runPromise: Promise<void> | undefined;
   #timeoutDeliveryLoop: Promise<void> | undefined;
   #timeoutDeliveryTimer: ReturnType<typeof setInterval> | undefined;
@@ -81,7 +81,10 @@ export class ByFrameworkWorkerRuntime {
     this.#logger = options.logger;
     this.#timeoutDeliveries = options.timeoutDeliveries;
     this.#protocolEmitter = new GatewayDataEmitter(options.redis);
-    this.#maxConcurrency = options.maxConcurrency;
+    // Worker 不限并发时，Outbox 查询仍使用有限批次，避免向 SQL LIMIT 传入 Infinity。
+    this.#timeoutDeliveryBatchSize = Number.isFinite(options.maxConcurrency)
+      ? options.maxConcurrency
+      : 10;
   }
 
   /** 在后台启动消费循环，并等待注册中心确认 Worker 已在线。 */
@@ -132,10 +135,6 @@ export class ByFrameworkWorkerRuntime {
       await this.close();
       throw error;
     }
-  }
-
-  async poll() {
-
   }
 
   /** 查询当前 Worker 是否仍持有在线租约，供 /byclawSuper/ready 聚合。 */
@@ -213,7 +212,7 @@ export class ByFrameworkWorkerRuntime {
       .claimCallbackTimeoutDeliveries({
         instanceId: this.workerId,
         leaseMs: 30_000,
-        limit: this.#maxConcurrency,
+        limit: this.#timeoutDeliveryBatchSize,
       })
       .then(async (deliveries) => {
         await Promise.allSettled(deliveries.map((delivery) => this.#deliverTimeout(delivery)));
