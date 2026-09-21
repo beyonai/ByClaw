@@ -4,6 +4,7 @@ import type { IMessage, IMessageListItem } from '@/typescript/message';
 // import { message as antMessage } from 'antd';
 import React, { useCallback, useEffect } from 'react';
 import { isPendingEasyConfirmListItem } from './easyConfirm';
+import { hasNativeDesktopNotifications, showAppNotification } from '@/utils/notification';
 
 export type EasyConfirmNotificationContent = {
   title: string;
@@ -69,7 +70,12 @@ const requestNotificationPermission = () => {
 
 /** 为新出现的待处理快捷交互发送跨平台浏览器通知。 */
 export const notifyEasyConfirmInteraction = async (content: EasyConfirmNotificationContent) => {
-  if (typeof window === 'undefined' || typeof document === 'undefined' || !('Notification' in window)) return;
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  if (hasNativeDesktopNotifications()) {
+    await showAppNotification({ title: content.title, body: content.body, tag: content.tag });
+    return;
+  }
 
   let permission = Notification.permission;
   if (permission === 'default') {
