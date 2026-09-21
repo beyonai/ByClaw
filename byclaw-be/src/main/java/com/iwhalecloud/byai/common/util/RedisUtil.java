@@ -9,6 +9,11 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisCluster;
+import redis.clients.jedis.HostAndPort;
+import redis.clients.jedis.ConnectionPool;
+import redis.clients.jedis.params.ScanParams;
 import org.springframework.data.redis.connection.RedisClusterConnection;
 import org.springframework.data.redis.connection.RedisClusterNode;
 import org.springframework.data.redis.connection.RedisConnection;
@@ -425,7 +430,12 @@ public class RedisUtil {
             if (connection instanceof RedisClusterConnection cluster) {
                 for (RedisClusterNode node : cluster.clusterGetNodes()) {
                     if (node.isMaster()) {
-                        collectKeys(cluster.scan(node, options), keys);
+                        if (cluster.getNativeConnection() instanceof JedisCluster jedisCluster) {
+                            collectJedisClusterKeys(jedisCluster, node, prefix, keys);
+                        }
+                        else {
+                            collectKeys(cluster.scan(node, options), keys);
+                        }
                     }
                 }
             }
@@ -449,6 +459,26 @@ public class RedisUtil {
         // Keys can belong to different hash slots. Route each DEL independently.
         for (String key : keys) {
             instance.stringRedisTemplate.delete(key);
+        }
+    }
+
+    private static void collectJedisClusterKeys(JedisCluster cluster, RedisClusterNode node,
+            String prefix, Set<String> keys) {
+        String address = new HostAndPort(node.getHost(), node.getPort()).toString();
+        ConnectionPool pool = cluster.getClusterNodes().get(address);
+        if (pool == null) {
+            throw new IllegalStateException("Redis cluster primary connection pool not found: " + address);
+        }
+        // Keep the borrowed connection until every page is consumed. Spring's Jedis
+        // node SCAN cursor returns its connection before subsequent pages are read.
+        try (Jedis client = new Jedis(pool.getResource())) {
+            ScanParams params = new ScanParams().match(prefix + "*").count(100);
+            String cursor = ScanParams.SCAN_POINTER_START;
+            do {
+                var page = client.scan(cursor, params);
+                keys.addAll(page.getResult());
+                cursor = page.getCursor();
+            } while (!ScanParams.SCAN_POINTER_START.equals(cursor));
         }
     }
 
