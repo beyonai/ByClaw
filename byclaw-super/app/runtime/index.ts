@@ -108,8 +108,6 @@ function buildRunServiceOptions(config: AppConfig, database: PostgresDatabase) {
     leaseMs: config.runLeaseMs,
     queuePollMs: config.runQueuePollMs,
     maxConcurrentRuns: config.worker.maxConcurrency,
-    leaderCacheMaxEntries: config.piSessionCacheMaxEntries,
-    leaderCacheIdleTtlMs: config.piSessionCacheIdleTtlMs,
     callbackTimeoutEnabled: config.delegationTimeouts.callbackMs > 0,
   };
 }
@@ -198,7 +196,7 @@ function createOrchestration(input: {
   );
   const llmProvider = createLlmProviderSource(config, redis);
   const leaders = new LazyPiLeaderFactory(
-    buildPiRuntimeConfig(config, database, llmProvider.resolve(), undefined, logger),
+    () => buildPiRuntimeConfig(config, database, llmProvider.resolve(), undefined, logger),
     async (selection: LeaderModelSelection) => {
       const modelConfig = await llmProvider.resolveByModelId(selection.modelId);
       if (fingerprintModelConfig(modelConfig) !== selection.fingerprint) {

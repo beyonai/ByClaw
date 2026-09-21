@@ -1,6 +1,5 @@
 import {
   type CallerPrincipal,
-  type IngressSessionBindingRepository,
   type RunEvent,
 } from "@byclaw/by-conductor";
 import {
@@ -19,6 +18,9 @@ import {
   type AgentContext,
   type GatewayCommand,
 } from "@byclaw/by-framework";
+import { currentDelivery, DeliveryOwnershipLostError, WorkerDeliveryRetryError, retryWorkerDelivery } from "./by-framework-delivery-scope.js";
+import { ByFrameworkDeliveryRegistry, deliveryRedis } from "./by-framework-delivery-redis.js";
+import { ByFrameworkDeliveryState } from "./by-framework-delivery-state.js";
 import { BeyondTokenAuthError } from "../auth/beyond-token.js";
 import { truncateForLog } from "../log-format.js";
 import {
@@ -34,7 +36,6 @@ import {
   defaultWorkerId,
   delay,
   delegationFailureUserMessage,
-  externalSessionBindingKey,
   extractUserInput,
   orchestratorBindingSessionId,
   recordString,
@@ -78,13 +79,8 @@ interface AskCommandData {
   metadata: Record<string, unknown>;
 }
 
-interface AskSessionBinding {
-  externalSessionId: string;
-  key: string;
-  sessionId?: string;
-}
-
 interface ForwardedRun {
+  status?: string;
   id: string;
   sessionId: string;
   createdAt: number;
@@ -120,7 +116,7 @@ interface AskCommandHandlerOptions {
   registry: WorkerRegistry;
   runService: WorkerRunService;
   runIngress: WorkerRunIngress;
-  sessionBindings?: IngressSessionBindingRepository;
+  deliveryState: ByFrameworkDeliveryState;
   forwardRun(
     run: WorkerRun,
     principal: CallerPrincipal,
@@ -146,6 +142,36 @@ class AttributedDelegationFailure extends Error {
 // ─────────────────────────────────────────────────────────────────────────────
 // 框架适配插件
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** SDK 插件逐个 hook 会吞异常；所有权校验放在 Registry 外层，确保保留 pending。 */
+class DeliveryPluginRegistry extends PluginRegistry {
+  override async onTaskStart(context: AgentContext): Promise<void> {
+    const emitChunk = context.emitChunk?.bind(context);
+    if (emitChunk) context.emitChunk = async (...args) => {
+      await currentDelivery()?.assertOwned();
+      return emitChunk(...args);
+    };
+    await super.onTaskStart(context);
+  }
+
+  override async onTaskComplete(context: AgentContext, result: unknown): Promise<void> {
+    await currentDelivery()?.assertOwned();
+    return super.onTaskComplete(context, result);
+  }
+
+  override async onTaskError(context: AgentContext, error: Error): Promise<void> {
+    if (error instanceof WorkerDeliveryRetryError) throw error;
+    await currentDelivery()?.assertOwned();
+    return super.onTaskError(context, error);
+  }
+
+  override async onAgentReturnStart(...args: Parameters<PluginRegistry["onAgentReturnStart"]>): Promise<void> {
+    const failure = currentDelivery()?.failure;
+    if (failure) throw failure;
+    await currentDelivery()?.assertOwned();
+    return super.onAgentReturnStart(...args);
+  }
+}
 
 /**
  * GatewayWorker 会在 ResumeCommand 进入 processCommand 前自动发送一个面向框架内部的
@@ -195,18 +221,15 @@ class ByFrameworkAskCommandHandler {
   readonly #registry: WorkerRegistry;
   readonly #runService: WorkerRunService;
   readonly #runIngress: WorkerRunIngress;
-  readonly #sessionBindings: IngressSessionBindingRepository | undefined;
+  readonly #deliveryState: ByFrameworkDeliveryState;
   readonly #forwardRun: AskCommandHandlerOptions["forwardRun"];
   readonly #logger: WorkerLogger | undefined;
-  readonly #activeRuns = new Map<string, string>();
-  readonly #activeRunsByTrace = new Map<string, Set<string>>();
-  readonly #externalSessionBindings = new Map<string, string>();
 
   constructor(options: AskCommandHandlerOptions) {
     this.#registry = options.registry;
     this.#runService = options.runService;
     this.#runIngress = options.runIngress;
-    this.#sessionBindings = options.sessionBindings;
+    this.#deliveryState = options.deliveryState;
     this.#forwardRun = options.forwardRun;
     this.#logger = options.logger;
   }
@@ -217,19 +240,33 @@ class ByFrameworkAskCommandHandler {
     const data = this.#parseCommand(command);
     await context.checkCancelled();
     this.#logger?.info(commandLogFields(command), "开始处理 by-framework 入站任务");
-    const principal = await this.#runIngress.resolvePrincipal(data.auth);
+    const recoveredRun = currentDelivery()?.recovered
+      ? await this.#runService.findIngressRun({
+          externalSessionId: command.header.sessionId,
+          externalMessageId: command.header.messageId,
+          ...(command.header.userCode ? { userCode: command.header.userCode } : {}),
+        })
+      : undefined;
+    if (recoveredRun && data.orchestrator?.kind === "EXPERT_TEAM" &&
+        (recoveredRun.ingressContext?.orchestrator?.id !== data.orchestrator.id ||
+         recoveredRun.ingressContext?.orchestrator?.kind !== data.orchestrator.kind)) {
+      throw new Error("Recovered ingress Run does not match original orchestrator");
+    }
+    const recoveredSession = recoveredRun ? await this.#runService.getSession(recoveredRun.sessionId) : undefined;
+    // 传输接管复用曾经完成鉴权的持久 Run，不用旧 Token 重建授权快照或产生新任务。
+    const principal = recoveredSession?.owner ?? await this.#runIngress.resolvePrincipal(data.auth);
 
-    // Step 2：将外部会话定位到已有内部 Session；首次请求允许暂时没有绑定。
-    const binding = await this.#resolveSessionBinding(command, data, principal);
+    // Step 2：数据库原子解析外部会话、创建 Run，并复用重复 messageId 的既有 Run。
+    const run = recoveredRun ?? await this.#createRun(command, data);
 
-    // Step 3：在已有 Session 追加 Run，或者为首次请求原子创建 Session + Run。
-    const run = await this.#createRun(command, data, binding.sessionId);
-
-    // Step 4：持久化会话关联并建立取消路由，确保外部 execution 能找到内部 Run。
-    await this.#registerRun(command, context, principal, binding, run);
-
-    // Step 5：转发 Run 事件；只有 WAITING_AGENT 状态需要保留活动索引供后续取消。
-    return await this.#executeRun(command, context, principal, data, run);
+    // Step 3：持久化取消路由并转发事件；传输失败保留 pending 供任一实例接管。
+    try {
+      await this.#registerRun(command, context, run);
+      return await this.#executeRun(command, context, principal, data, run);
+    } catch (error) {
+      if (error instanceof AttributedDelegationFailure || error instanceof TaskCancelledError) throw error;
+      throw retryWorkerDelivery(error);
+    }
   }
 
   /** 将 by-framework 的取消控制命令映射到当前活动 Run。 */
@@ -238,8 +275,12 @@ class ByFrameworkAskCommandHandler {
       return;
     }
     const runId =
-      this.#activeRuns.get(command.targetMessageId) ||
-      this.#activeRuns.get(command.targetExecutionId);
+      await this.#deliveryState.resolveRun(command.header.sessionId, command.targetMessageId, command.targetExecutionId) ||
+      (await this.#runService.findIngressRun({
+        externalSessionId: command.header.sessionId,
+        externalMessageId: command.targetMessageId,
+        ...(command.header.userCode ? { userCode: command.header.userCode } : {}),
+      }))?.id;
     if (!runId) {
       this.#logger?.warn({ targetMessageId: command.targetMessageId }, "取消请求未找到活动 Run");
       return;
@@ -249,31 +290,16 @@ class ByFrameworkAskCommandHandler {
       "正在取消 by-framework 入站 Run",
     );
     await this.#runService.cancelRun(runId, command.reason || "by-framework task cancelled");
-    this.releaseRun(runId);
   }
 
-  /** 清理同一 Run 在 messageId、executionId 和 trace 下的全部活动索引。 */
-  releaseRun(runId: string): void {
-    for (const [key, mappedRunId] of this.#activeRuns) {
-      if (mappedRunId === runId) {
-        this.#activeRuns.delete(key);
-      }
-    }
-    for (const [key, runIds] of this.#activeRunsByTrace) {
-      runIds.delete(runId);
-      if (runIds.size === 0) {
-        this.#activeRunsByTrace.delete(key);
-      }
-    }
+  /** 清理共享活动路由，延迟取消仍由数据库中的 Run 状态判定。 */
+  async releaseRun(runId: string): Promise<void> {
+    await this.#deliveryState.release(runId);
   }
 
-  /** metadata 丢失时只在同一 session + trace 唯一命中一个活动 Run 的情况下兜底。 */
-  resolveActiveRunId(sessionId: string, traceId: string): string | undefined {
-    const runIds = this.#activeRunsByTrace.get(this.#traceKey(sessionId, traceId));
-    if (runIds?.size !== 1) {
-      return undefined;
-    }
-    return runIds.values().next().value;
+  /** metadata 丢失时，仅从 Redis 中解析同一 trace 的唯一活动 Run。 */
+  async resolveActiveRunId(sessionId: string, traceId: string): Promise<string | undefined> {
+    return this.#deliveryState.resolveTrace(sessionId, traceId);
   }
 
   #parseCommand(command: AskAgentCommand): AskCommandData {
@@ -300,34 +326,9 @@ class ByFrameworkAskCommandHandler {
     };
   }
 
-  async #resolveSessionBinding(
-    command: AskAgentCommand,
-    data: AskCommandData,
-    principal: CallerPrincipal,
-  ): Promise<AskSessionBinding> {
-    const externalSessionId = orchestratorBindingSessionId(
-      command.header.sessionId,
-      data.orchestrator,
-    );
-    const key = externalSessionBindingKey(principal, externalSessionId);
-    const sessionId = this.#sessionBindings
-      ? await this.#sessionBindings.get({
-          source: "by-framework",
-          userCode: principal.userCode,
-          externalSessionId,
-        })
-      : this.#externalSessionBindings.get(key);
-    return {
-      externalSessionId,
-      key,
-      ...(sessionId ? { sessionId } : {}),
-    };
-  }
-
   async #createRun(
     command: AskAgentCommand,
     data: AskCommandData,
-    sessionId?: string,
   ): Promise<WorkerRun> {
     const sourceAgentId = commandSourceAgentId(command) || data.orchestrator?.id || "";
     const commonInput = {
@@ -345,11 +346,13 @@ class ByFrameworkAskCommandHandler {
       ...(data.orchestrator ? { orchestrator: data.orchestrator } : {}),
       ...data.auth,
     };
-    if (sessionId) {
-      return await this.#runIngress.createRun({ sessionId, ...commonInput });
-    }
-    return await this.#runIngress.createSessionRun({
+    return this.#runIngress.createIngressRun({
       ...commonInput,
+      binding: {
+        source: "by-framework",
+        externalSessionId: orchestratorBindingSessionId(command.header.sessionId, data.orchestrator),
+      },
+      externalMessageId: command.header.messageId,
       ...(data.sessionContext ? { context: data.sessionContext } : {}),
     });
   }
@@ -357,37 +360,19 @@ class ByFrameworkAskCommandHandler {
   async #registerRun(
     command: AskAgentCommand,
     context: AgentContext,
-    principal: CallerPrincipal,
-    binding: AskSessionBinding,
     run: WorkerRun,
   ): Promise<void> {
-    if (this.#sessionBindings) {
-      await this.#sessionBindings.bind({
-        source: "by-framework",
-        userCode: principal.userCode,
-        externalSessionId: binding.externalSessionId,
-        sessionId: run.sessionId,
-        now: Date.now(),
-      });
-    } else {
-      this.#externalSessionBindings.set(binding.key, run.sessionId);
-    }
-    this.#activeRuns.set(command.header.messageId, run.id);
-    if (context.executionId) {
-      this.#activeRuns.set(context.executionId, run.id);
-    }
-    const traceKey = this.#traceKey(command.header.sessionId, command.header.traceId);
-    const traceRunIds = this.#activeRunsByTrace.get(traceKey) ?? new Set<string>();
-    traceRunIds.add(run.id);
-    this.#activeRunsByTrace.set(traceKey, traceRunIds);
+    await this.#deliveryState.register({
+      runId: run.id,
+      messageId: command.header.messageId,
+      executionId: context.executionId,
+      sessionId: command.header.sessionId,
+      traceId: command.header.traceId,
+    });
     this.#logger?.info(
       { ...commandLogFields(command), runId: run.id },
-      "by-framework 入站任务已创建 Run",
+      "by-framework 入站任务已定位 Run",
     );
-  }
-
-  #traceKey(sessionId: string, traceId: string): string {
-    return JSON.stringify([sessionId, traceId]);
   }
 
   async #executeRun(
@@ -398,7 +383,6 @@ class ByFrameworkAskCommandHandler {
     run: WorkerRun,
   ): Promise<AgentTaskResult> {
     const stopCancellationMonitor = this.#monitorPersistedCancellation(command, context, run.id);
-    let keepActiveRunMapping = false;
     try {
       if (context.isCancelRequested()) {
         await this.#runService.cancelRun(run.id, "by-framework task cancelled");
@@ -411,13 +395,9 @@ class ByFrameworkAskCommandHandler {
         data.agentName,
         data.sessionContext?.locale,
       );
-      keepActiveRunMapping = result.status === AgentState.WAITING_AGENT;
       return result;
     } finally {
       stopCancellationMonitor();
-      if (!keepActiveRunMapping) {
-        this.releaseRun(run.id);
-      }
     }
   }
 
@@ -579,20 +559,32 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
   readonly #runService: WorkerRunService;
   readonly #protocolEmitter: WorkerProtocolEmitter;
   readonly #presenter: ByFrameworkRunPresenter;
+  readonly #deliveryState: ByFrameworkDeliveryState;
   readonly #logger: WorkerLogger | undefined;
   readonly #askCommandHandler: ByFrameworkAskCommandHandler;
   readonly #resumeCommandHandler: ByFrameworkResumeCommandHandler;
 
   /** 注入共享 Redis、业务 Run 入口和日志实现。 */
   constructor(options: ByClawSuperWorkerOptions) {
-    const registry = options.registry ?? new WorkerRegistry(options.redis);
-    const pluginRegistry = new PluginRegistry();
+    const registry = options.registry ?? new ByFrameworkDeliveryRegistry(options.redis);
+    const pluginRegistry = new DeliveryPluginRegistry();
     pluginRegistry.registerBundle(new SuppressResumeStatePlugin());
-    super(options.workerId, registry, options.redis, pluginRegistry);
+    super(options.workerId, registry, deliveryRedis(options.redis), pluginRegistry);
     this.#agentType = options.agentType;
+    this.#deliveryState = new ByFrameworkDeliveryState(options.redis);
     this.#registry = registry;
     this.#runService = options.runService;
-    this.#protocolEmitter = options.protocolEmitter ?? new GatewayDataEmitter(options.redis);
+    const emitter = options.protocolEmitter ?? new GatewayDataEmitter(deliveryRedis(options.redis));
+    this.#protocolEmitter = {
+      emitChunk: async (...args) => {
+        await currentDelivery()?.assertOwned();
+        return emitter.emitChunk(...args);
+      },
+      emitEvent: async (...args) => {
+        await currentDelivery()?.assertOwned();
+        return emitter.emitEvent(...args);
+      },
+    };
     this.#presenter = new ByFrameworkRunPresenter(this.#agentType, this.#protocolEmitter);
     this.#logger = options.logger;
     this.#askCommandHandler = new ByFrameworkAskCommandHandler({
@@ -601,7 +593,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       runIngress: options.runIngress,
       forwardRun: (run, principal, context, agentName, locale) =>
         this.#forwardRunEvents(run, principal, context, agentName, locale),
-      ...(options.sessionBindings ? { sessionBindings: options.sessionBindings } : {}),
+      deliveryState: this.#deliveryState,
       ...(this.#logger ? { logger: this.#logger } : {}),
     });
     this.#resumeCommandHandler = new ByFrameworkResumeCommandHandler({
@@ -649,6 +641,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     error: unknown,
   ): Promise<AgentTaskResult> {
     const normalized = toError(error);
+    if (error instanceof WorkerDeliveryRetryError || currentDelivery()?.signal.aborted) {
+      throw retryWorkerDelivery(error);
+    }
 
     // Step 1：取消异常必须交回 GatewayWorker，保留框架原生的级联取消语义。
     if (error instanceof TaskCancelledError || normalized.name === "TaskCancelledError") {
@@ -699,6 +694,22 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
   /** 将 by-framework 的取消控制消息映射到正在执行的内部 Run。 */
   async onCancelTask(command: unknown): Promise<void> {
     await this.#askCommandHandler.handleCancel(command);
+  }
+
+  /** 原 Ask 已挂起/实例已退出时，任一实例仍会从 Redis 持久取消状态更新数据库 Run。 */
+  async pollPersistedCancellations(): Promise<void> {
+    for (const route of await this.#deliveryState.cancellationRoutes()) {
+      const execution = await this.#registry.getExecutionByMessageId(route.messageId, route.sessionId);
+      const status = String(execution?.status ?? "").toUpperCase();
+      const requested = String(execution?.cancel_requested ?? "").toLowerCase();
+      if (["true", "1"].includes(requested) || ["CANCELLED", "CANCELLING"].includes(status)) {
+        await this.#runService.cancelRun(route.runId, String(execution?.cancel_reason || "by-framework task cancelled"));
+      }
+      const run = await this.#runService.getRun(route.runId);
+      if (run && ["COMPLETED", "FAILED", "CANCELLED"].includes(run.status)) {
+        await this.#deliveryState.release(route.runId);
+      }
+    }
   }
 
   /** 由当前 BY_SUPER trace 负责的失败必须同时包含用户正文、最终快照和流终止帧。 */
@@ -770,8 +781,11 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       await this.#markOriginalExecutionFinished(authorized.run, result.status);
       return result;
     } catch (error) {
-      await this.#markOriginalExecutionFinished(authorized.run, AgentState.FAILED);
-      throw error;
+      if (error instanceof AttributedDelegationFailure || error instanceof TaskCancelledError) {
+        await this.#markOriginalExecutionFinished(authorized.run, AgentState.FAILED);
+        throw error;
+      }
+      throw retryWorkerDelivery(error);
     }
   }
 
@@ -823,8 +837,24 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     locale?: string,
     options: { afterEventId?: number; summaryMessageId?: string } = {},
   ): Promise<AgentTaskResult> {
-    const afterEventId = options.afterEventId ?? 0;
     const summaryMessageId = options.summaryMessageId;
+    const deliveryId = summaryMessageId ?? "ask";
+    const saved = await this.#deliveryState.load<{
+      afterEventId: number; state: RunForwardingState;
+      result?: ConstructorParameters<typeof AgentTaskResult>[0];
+    }>(run.id, deliveryId, context.sessionId);
+    const continuingResume = saved?.result?.status === AgentState.WAITING_AGENT && Boolean(summaryMessageId) && (
+      (options.afterEventId ?? 0) > saved.afterEventId ||
+      // 兼容旧持久事件缺少 callback 边界：只有实际 pending 恢复且数据库已离开挂起态才继续。
+      ((options.afterEventId ?? 0) === 0 && currentDelivery()?.recovered &&
+        Boolean(run.status) && run.status !== "WAITING_AGENT")
+    );
+    if (saved?.result && !continuingResume) {
+      await currentDelivery()?.assertOwned();
+      if (summaryMessageId) context.setStreamFinished(true);
+      return new AgentTaskResult(saved.result);
+    }
+    const afterEventId = Math.max(options.afterEventId ?? 0, saved?.afterEventId ?? 0);
     const scope: RunForwardingScope = {
       run,
       principal,
@@ -834,7 +864,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         : `${run.id}:reasoning`,
       ...(summaryMessageId ? { summaryMessageId } : {}),
     };
-    const state: RunForwardingState = {
+    const state: RunForwardingState = saved?.state ?? {
       reasoningStarted: false,
       reasoningEnded: false,
       answer: "",
@@ -850,19 +880,33 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       await this.#presenter.emitReadyTitle(run.id, context, agentName, locale);
     }
 
+    if (continuingResume) state.resumedAttemptStarted = false;
+    let awaitingResumeBoundary = Boolean(summaryMessageId && afterEventId === 0 && currentDelivery()?.recovered && !saved);
+
     // Step 2：逐个处理持久 Run 事件；每个事件的业务分支集中在 #forwardRunEvent。
-    for await (const event of this.#runService.streamEvents(run.id, afterEventId)) {
+    for await (const event of this.#runService.streamEvents(run.id, afterEventId, currentDelivery()?.signal)) {
+      await currentDelivery()?.assertOwned();
+      if (awaitingResumeBoundary) {
+        // 找到数据库的恢复边界后才转发，避免重复输出挂起前的正文。
+        if (!(event.type === "run.status" && event.data.resumed === true)) continue;
+        awaitingResumeBoundary = false;
+      }
       if (context.isCancelRequested()) {
         await this.#runService.cancelRun(run.id, "by-framework task cancelled");
         await context.checkCancelled();
       }
       this.#logRunStep(run, context, event);
       const result = await this.#forwardRunEvent(scope, state, event);
+      await currentDelivery()?.assertOwned();
+      await this.#deliveryState.save(run.id, deliveryId, {
+        afterEventId: event.eventId, state, ...(result ? { result } : {}),
+      }, Boolean(result && result.status !== AgentState.WAITING_AGENT), context.sessionId);
       if (result) {
         return result;
       }
     }
 
+    await currentDelivery()?.assertOwned();
     throw new Error(`Run event stream ended without a terminal event: ${run.id}`);
   }
 
@@ -1077,7 +1121,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     state.answer ||= finalAnswer;
     await this.#closeReasoning(scope, state);
     this.#logRunFinished(scope.principal, scope.run, "completed", scope.run.createdAt, finalAnswer);
-    this.#askCommandHandler.releaseRun(scope.run.id);
+    await this.#askCommandHandler.releaseRun(scope.run.id);
 
     const completedAnswer = state.answer || finalAnswer;
     if (completedAnswer && !state.answerEmitted) {
@@ -1102,7 +1146,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     await scope.context.checkCancelled();
     const reason = stringData(event.data.reason) || "run cancelled";
     this.#logRunFinished(scope.principal, scope.run, "cancelled", scope.run.createdAt, reason);
-    this.#askCommandHandler.releaseRun(scope.run.id);
+    await this.#askCommandHandler.releaseRun(scope.run.id);
     return new AgentTaskResult({
       status: AgentState.CANCELLED,
       content: "",
@@ -1118,7 +1162,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     await this.#closeReasoning(scope, state);
     const error = stringData(event.data.error) || "Run failed";
     this.#logRunFinished(scope.principal, scope.run, "failed", scope.run.createdAt, error);
-    this.#askCommandHandler.releaseRun(scope.run.id);
+    await this.#askCommandHandler.releaseRun(scope.run.id);
 
     const userMessage = stringData(event.data.userMessage);
     if (userMessage) {

@@ -4,6 +4,20 @@ import { describe, expect, it, vi } from "vitest";
 import { ThirdPartyA2aConnector } from "../src/index.js";
 
 describe("ThirdPartyA2aConnector", () => {
+  it("does not begin an external request when ownership is lost during descriptor loading", async () => {
+    const controller = new AbortController();
+    const descriptors = {
+      get: vi.fn(async () => {
+        controller.abort(new Error("execution ownership lost"));
+        return { resourceId: "1001", integrationType: "A2A", endpoint: "https://vendor.example.test", headers: {} };
+      }),
+    } as unknown as ExecutionDescriptorClient;
+    const fetchImpl = vi.fn();
+    const connector = new ThirdPartyA2aConnector({ descriptors, fetchImpl });
+    await expect(connector.start(request(), { signal: controller.signal })).rejects.toThrow("execution ownership lost");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("loads the Agent Card and maps A2A message/status events", async () => {
     const descriptors = new ExecutionDescriptorClient({
       baseUrl: "http://byclaw-be.test",

@@ -35,6 +35,10 @@ export async function startTestService(ready = true): Promise<TestService> {
   });
   const service = createRunService();
   const app = await buildHttpApp({
+    capabilityCards: { upsert: async () => undefined },
+    capabilityCompiler: {
+      compile: async () => { throw new Error("Capability compilation is outside this E2E fixture"); },
+    },
     runService: service,
     corsOrigin: true,
     runIngress: new RunIngressService(

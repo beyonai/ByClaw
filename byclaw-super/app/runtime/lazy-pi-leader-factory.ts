@@ -15,27 +15,13 @@ import {
  * 而不是在 Composition Root 创建阶段直接丢失诊断上下文。
  */
 export class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilityCompiler {
-  readonly #defaultFactory: Promise<
-    { factory: PiLeaderSessionFactory; error?: never } | { factory?: never; error: Error }
-  >;
-  readonly #modelFactories = new Map<string, Promise<PiLeaderSessionFactory>>();
-
-  /** 立即启动一次模型运行时初始化，并把成功或异常缓存为稳定结果。 */
+  /** 配置在使用时读取；不同实例均从 Redis 解析相同的当前模型数据。 */
   constructor(
-    config: PiRuntimeConfig | Promise<PiRuntimeConfig>,
+    private readonly config: PiRuntimeConfig | Promise<PiRuntimeConfig> | (() => Promise<PiRuntimeConfig>),
     private readonly modelConfig?: (
       selection: LeaderModelSelection,
     ) => Promise<PiRuntimeConfig>,
-  ) {
-    this.#defaultFactory = Promise.resolve(config)
-      .then(PiLeaderSessionFactory.create)
-      .then(
-        (factory) => ({ factory }),
-        (error: unknown) => ({
-          error: error instanceof Error ? error : new Error(String(error)),
-        }),
-      );
-  }
+  ) {}
 
   /** 使用已经初始化的 Pi 工厂创建业务 Session 对应的 Pi 会话。 */
   async create(
@@ -45,52 +31,44 @@ export class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilit
     if (model) {
       return (await this.#factoryForModel(model)).create(sessionId);
     }
-    const initialized = await this.#defaultFactory;
-    if (initialized.error) {
-      throw initialized.error;
-    }
-    return initialized.factory.create(sessionId);
+    return (await this.#createDefaultFactory()).create(sessionId);
   }
 
   /** 复用已初始化的 Pi 模型执行无状态能力卡编译。 */
   async compile(input: AgentCapabilityCompileInput): Promise<AgentCapabilityCompileResult> {
-    const initialized = await this.#defaultFactory;
-    if (initialized.error) {
+    let factory: PiLeaderSessionFactory;
+    try {
+      factory = await this.#createDefaultFactory();
+    } catch (error) {
       throw new AgentCapabilityCompileError("Capability model is unavailable", 503, {
-        cause: initialized.error,
+        cause: error,
       });
     }
-    return initialized.factory.compile(input);
+    return factory.compile(input);
   }
 
   /** 将 Pi 初始化异常转换为 readiness 可消费的健康状态。 */
   async health(): Promise<{ healthy: boolean; message?: string; model?: string }> {
-    const initialized = await this.#defaultFactory;
-    if (initialized.error) {
+    try {
+      return await (await this.#createDefaultFactory()).health();
+    } catch (error) {
       return {
         healthy: false,
-        message: initialized.error.message,
+        message: error instanceof Error ? error.message : String(error),
       };
     }
-    return initialized.factory.health();
+  }
+
+  async #createDefaultFactory(): Promise<PiLeaderSessionFactory> {
+    const config = typeof this.config === "function" ? this.config() : this.config;
+    return PiLeaderSessionFactory.create(await config);
   }
 
   #factoryForModel(selection: LeaderModelSelection): Promise<PiLeaderSessionFactory> {
     if (!this.modelConfig) {
       return Promise.reject(new Error("Leader model hot switching is not configured"));
     }
-    const key = `${selection.modelId}:${selection.fingerprint}`;
-    const existing = this.#modelFactories.get(key);
-    if (existing) {
-      return existing;
-    }
-    const created = this.modelConfig(selection).then(PiLeaderSessionFactory.create);
-    this.#modelFactories.set(key, created);
-    void created.catch(() => {
-      if (this.#modelFactories.get(key) === created) {
-        this.#modelFactories.delete(key);
-      }
-    });
-    return created;
+    // Redis 模型配置每次重新读取并校验冻结指纹，不能复用旧实例的模型配置缓存。
+    return this.modelConfig(selection).then(PiLeaderSessionFactory.create);
   }
 }

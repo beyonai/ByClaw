@@ -3,7 +3,7 @@ import {
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -36,7 +36,7 @@ export interface PiRuntimeConfig {
   checkpointStore?: LeaderCheckpointStore;
   /** 用于隔离同一主机上的多个实例，不会直接拼入文件路径。 */
   instanceId?: string;
-  /** 实例级缓存根目录；工厂会在下面再创建 instance hash 子目录。 */
+  /** Pi 临时运行目录；每次执行的 JSONL 均从数据库重建，结束后删除。 */
   sessionCacheDirectory?: string;
   compaction?: {
     enabled?: boolean;
@@ -52,7 +52,7 @@ export interface PiLeaderLogger {
   error(bindings: Record<string, unknown>, message: string): void;
 }
 
-/** 管理 Pi ModelRuntime 生命周期、Session 隔离缓存与 checkpoint 恢复。 */
+/** 管理 Pi ModelRuntime、独立执行目录与数据库 checkpoint 恢复。 */
 export class PiLeaderSessionFactory
   implements LeaderSessionFactory, AgentCapabilityCompiler
 {
@@ -81,7 +81,6 @@ export class PiLeaderSessionFactory
       cacheRoot,
       cacheScope(config.instanceId ?? `process-${process.pid}`),
     );
-    await rm(instanceCacheDirectory, { recursive: true, force: true });
     await mkdir(instanceCacheDirectory, { recursive: true, mode: 0o700 });
     const leaderRoot = config.cwd ?? join(instanceCacheDirectory, "root");
     if (!config.cwd) {
@@ -111,33 +110,37 @@ export class PiLeaderSessionFactory
 
   /** 从 committed checkpoint 恢复，或创建新的隔离 Pi Session。 */
   async create(sessionId: string): Promise<LeaderSession> {
-    const directory = join(this.sessionCacheDirectory, sessionId);
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    const stored = await this.checkpointStore?.load(sessionId);
-    const manager = stored
-      ? (
-          await materializePiSessionCheckpoint(stored.checkpoint, {
-            directory,
-            cwdOverride: this.cwd,
-          })
-        ).manager
-      : SessionManager.create(this.cwd, directory, { id: sessionId });
-    return PiLeaderSession.create(
-      this.runtime,
-      this.selectedModel,
-      // Leader 不直接操作业务文件；统一使用内部运行目录，避免把 Pi 状态目录
-      // 伪装成用户会话工作区。业务文件由子 Agent 在 /by/.sessions/{sessionId} 处理。
-      this.cwd,
-      this.systemPrompt,
-      this.contextCompiler,
-      manager,
-      stored?.revision ?? 0,
-      this.requestAdapter,
-      this.thinkingBudgets,
-      this.compaction,
-      sessionId,
-      this.logger,
-    );
+    // 每次 attempt 独立目录：过期执行的 finally 不能删除新执行的 Pi 文件。
+    const directory = await mkdtemp(join(this.sessionCacheDirectory, "attempt-"));
+    try {
+      const stored = await this.checkpointStore?.load(sessionId);
+      const manager = stored
+        ? (
+            await materializePiSessionCheckpoint(stored.checkpoint, {
+              directory,
+              cwdOverride: this.cwd,
+            })
+          ).manager
+        : SessionManager.create(this.cwd, directory, { id: sessionId });
+      return await PiLeaderSession.create(
+        this.runtime,
+        this.selectedModel,
+        // Leader 使用本次执行的临时运行目录；业务文件仍由子 Agent 操作。
+        this.cwd,
+        this.systemPrompt,
+        this.contextCompiler,
+        manager,
+        stored?.revision ?? 0,
+        this.requestAdapter,
+        this.thinkingBudgets,
+        this.compaction,
+        sessionId,
+        this.logger,
+      );
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   compile(

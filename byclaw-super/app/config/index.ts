@@ -72,8 +72,6 @@ export interface AppConfig {
   runLeaseMs: number;
   runQueuePollMs: number;
   piSessionCacheDirectory?: string;
-  piSessionCacheMaxEntries: number;
-  piSessionCacheIdleTtlMs: number;
   piProvider?: string;
   piModel?: string;
   arkBaseUrl?: string;
@@ -291,13 +289,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         "BYCLAW_WORKER_AGENT_TYPE",
       ),
       ...(workerId ? { workerId } : {}),
-      maxConcurrency: integer(
-        env.BYCLAW_WORKER_MAX_CONCURRENCY ??
-          String(defaults.worker.maxConcurrency),
-        "BYCLAW_WORKER_MAX_CONCURRENCY",
-        1,
-        1_000,
-      ),
+      maxConcurrency:
+        env.BYCLAW_WORKER_MAX_CONCURRENCY === undefined
+          ? defaults.worker.maxConcurrency
+          : integer(
+              env.BYCLAW_WORKER_MAX_CONCURRENCY,
+              "BYCLAW_WORKER_MAX_CONCURRENCY",
+              1,
+              1_000,
+            ),
     },
     database: {
       host: requiredEnv(env, "DB_HOST"),
@@ -394,20 +394,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(env.PI_SESSION_CACHE_DIR
       ? { piSessionCacheDirectory: nonEmpty(env.PI_SESSION_CACHE_DIR, "PI_SESSION_CACHE_DIR") }
       : {}),
-    piSessionCacheMaxEntries: integer(
-      env.PI_SESSION_CACHE_MAX_ENTRIES ??
-        String(defaults.piSession.cacheMaxEntries),
-      "PI_SESSION_CACHE_MAX_ENTRIES",
-      1,
-      10_000,
-    ),
-    piSessionCacheIdleTtlMs: integer(
-      env.PI_SESSION_CACHE_IDLE_TTL_MS ??
-        String(defaults.piSession.cacheIdleTtlMs),
-      "PI_SESSION_CACHE_IDLE_TTL_MS",
-      1_000,
-      86_400_000,
-    ),
     piProvider: nonEmpty(
       env.PI_PROVIDER ?? defaults.pi.provider,
       "PI_PROVIDER",

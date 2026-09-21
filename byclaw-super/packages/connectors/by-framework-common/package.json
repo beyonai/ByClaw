@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Shared Gateway, Redis stream and lifecycle transport for by-framework connectors",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -20,6 +22,6 @@
   },
   "dependencies": {
     "@byclaw/by-conductor": "workspace:*",
-    "@byclaw/by-framework": "1.5.1"
+    "@byclaw/by-framework": "1.6.0"
   }
 }

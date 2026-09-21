@@ -1,3 +1,4 @@
+import { ByFrameworkDeliveryRegistry } from "./by-framework-delivery-redis.js";
 import type {
   CallbackTimeoutDelivery,
   IngressSessionBindingRepository,
@@ -7,8 +8,7 @@ import {
   AgentState,
   EventType,
   GatewayDataEmitter,
-  WorkerRegistry,
-  WorkerRunner,
+  type WorkerRegistry,
 } from "@byclaw/by-framework";
 import {
   type RedisClient,
@@ -16,6 +16,7 @@ import {
   type WorkerRunIngress,
   type WorkerRunService,
 } from "./by-framework-worker-contracts.js";
+import { ByFrameworkRecoveringRunner } from "./by-framework-recovering-runner.js";
 import { ByClawSuperGatewayWorker } from "./by-framework-worker.js";
 import { defaultWorkerId, delay, toError } from "./by-framework-protocol.js";
 
@@ -40,12 +41,15 @@ export class ByFrameworkWorkerRuntime {
   readonly workerId: string;
   readonly agentType: string;
   readonly #registry: WorkerRegistry;
-  readonly #runner: WorkerRunner;
+  readonly #worker: ByClawSuperGatewayWorker;
+  #cancellationTimer: ReturnType<typeof setInterval> | undefined;
+  #cancellationPoll: Promise<void> | undefined;
+  readonly #runner: ByFrameworkRecoveringRunner;
   readonly #startupTimeoutMs: number;
   readonly #logger: WorkerLogger | undefined;
   readonly #timeoutDeliveries: ByFrameworkWorkerRuntimeOptions["timeoutDeliveries"];
   readonly #protocolEmitter: GatewayDataEmitter;
-  readonly #maxConcurrency: number;
+  readonly #timeoutDeliveryBatchSize: number;
   #runPromise: Promise<void> | undefined;
   #timeoutDeliveryLoop: Promise<void> | undefined;
   #timeoutDeliveryTimer: ReturnType<typeof setInterval> | undefined;
@@ -57,7 +61,7 @@ export class ByFrameworkWorkerRuntime {
   constructor(options: ByFrameworkWorkerRuntimeOptions) {
     this.workerId = options.workerId ?? defaultWorkerId();
     this.agentType = options.agentType;
-    this.#registry = new WorkerRegistry(options.redis);
+    this.#registry = new ByFrameworkDeliveryRegistry(options.redis);
     const worker = new ByClawSuperGatewayWorker({
       workerId: this.workerId,
       agentType: this.agentType,
@@ -68,7 +72,8 @@ export class ByFrameworkWorkerRuntime {
       ...(options.sessionBindings ? { sessionBindings: options.sessionBindings } : {}),
       ...(options.logger ? { logger: options.logger } : {}),
     });
-    this.#runner = new WorkerRunner(worker, {
+    this.#worker = worker;
+    this.#runner = new ByFrameworkRecoveringRunner(worker, {
       redisClient: options.redis,
       maxConcurrency: options.maxConcurrency,
     });
@@ -76,7 +81,10 @@ export class ByFrameworkWorkerRuntime {
     this.#logger = options.logger;
     this.#timeoutDeliveries = options.timeoutDeliveries;
     this.#protocolEmitter = new GatewayDataEmitter(options.redis);
-    this.#maxConcurrency = options.maxConcurrency;
+    // Worker 不限并发时，Outbox 查询仍使用有限批次，避免向 SQL LIMIT 传入 Infinity。
+    this.#timeoutDeliveryBatchSize = Number.isFinite(options.maxConcurrency)
+      ? options.maxConcurrency
+      : 10;
   }
 
   /** 在后台启动消费循环，并等待注册中心确认 Worker 已在线。 */
@@ -109,6 +117,13 @@ export class ByFrameworkWorkerRuntime {
         { workerId: this.workerId, agentType: this.agentType },
         "by-framework Worker 已注册并在线",
       );
+      this.#cancellationTimer = setInterval(() => {
+        if (this.#cancellationPoll || this.#closing) return;
+        this.#cancellationPoll = this.#worker.pollPersistedCancellations().catch((error) => {
+          this.#logger?.warn({ error: toError(error).message }, "同步共享 Worker 取消状态失败，稍后重试");
+        }).finally(() => { this.#cancellationPoll = undefined; });
+      }, 1_000);
+      this.#cancellationTimer.unref?.();
       if (this.#timeoutDeliveries?.claimCallbackTimeoutDeliveries) {
         this.#timeoutDeliveryTimer = setInterval(() => {
           void this.#drainTimeoutDeliveries();
@@ -120,10 +135,6 @@ export class ByFrameworkWorkerRuntime {
       await this.close();
       throw error;
     }
-  }
-
-  async poll() {
-
   }
 
   /** 查询当前 Worker 是否仍持有在线租约，供 /byclawSuper/ready 聚合。 */
@@ -151,6 +162,7 @@ export class ByFrameworkWorkerRuntime {
       return;
     }
     this.#closing = true;
+    if (this.#cancellationTimer) clearInterval(this.#cancellationTimer);
     if (this.#timeoutDeliveryTimer) {
       clearInterval(this.#timeoutDeliveryTimer);
       this.#timeoutDeliveryTimer = undefined;
@@ -158,6 +170,7 @@ export class ByFrameworkWorkerRuntime {
     this.#runner.stop();
     await this.#runPromise?.catch(() => undefined);
     await this.#timeoutDeliveryLoop?.catch(() => undefined);
+    await this.#cancellationPoll?.catch(() => undefined);
     this.#logger?.info(
       { workerId: this.workerId, agentType: this.agentType },
       "by-framework Worker 已停止",
@@ -199,7 +212,7 @@ export class ByFrameworkWorkerRuntime {
       .claimCallbackTimeoutDeliveries({
         instanceId: this.workerId,
         leaseMs: 30_000,
-        limit: this.#maxConcurrency,
+        limit: this.#timeoutDeliveryBatchSize,
       })
       .then(async (deliveries) => {
         await Promise.allSettled(deliveries.map((delivery) => this.#deliverTimeout(delivery)));

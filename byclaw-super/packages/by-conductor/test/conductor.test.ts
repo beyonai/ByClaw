@@ -1460,6 +1460,13 @@ describe("RunService", () => {
     });
     expect(enqueue).toHaveBeenCalledOnce();
 
+    // 下一轮委派已经挂起时，旧回调重投仍必须返回原委派的边界。
+    await events.append({
+      timestamp: 3,
+      runId: waitingRun.id,
+      type: "run.suspended",
+      data: { status: "WAITING_AGENT", delegationId: "later-delegation" },
+    });
     await expect(
       service.resumeDelegation({
         delegationId: "delegation-callback",
@@ -1470,6 +1477,7 @@ describe("RunService", () => {
       outcome: "delegation_already_settled",
       runId: waitingRun.id,
       delegationStatus: "COMPLETED",
+      afterEventId: 1,
     });
     expect(enqueue).toHaveBeenCalledOnce();
   });

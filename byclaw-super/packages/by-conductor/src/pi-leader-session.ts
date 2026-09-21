@@ -498,6 +498,29 @@ export class PiLeaderSession implements LeaderSession {
     let thinkingParser = new ThinkingStreamParser();
     let deltaWrites = Promise.resolve();
     let checkpointWrites = Promise.resolve();
+    let writeFailed = false;
+    let writeError: unknown;
+    const abortSession = () => {
+      void Promise.resolve()
+        .then(() => this.session.abort())
+        .catch(() => {
+          this.logger?.warn({ stage: "leader_abort_failed" }, "Leader 中止失败");
+        });
+    };
+    // 立即处理持久化拒绝；不能等模型返回后才监听，否则 lease/数据库异常会成为
+    // unhandledRejection。保留原错误，让编排层区分可接管故障和业务失败。
+    const enqueueWrite = (previous: Promise<void>, write: () => unknown) =>
+      previous.then(async () => {
+        if (writeFailed) return;
+        input.signal.throwIfAborted();
+        await write();
+      }).catch((error: unknown) => {
+        if (!writeFailed) {
+          writeFailed = true;
+          writeError = error;
+          abortSession();
+        }
+      });
     const runStartedAt = Date.now();
     let turnNumber = 0;
     let turnStartedAt: number | undefined;
@@ -513,9 +536,9 @@ export class PiLeaderSession implements LeaderSession {
       for (const segment of segments) {
         if (segment.kind === "answer") {
           currentAssistant += segment.text;
-          deltaWrites = deltaWrites.then(() => input.onDelta(segment.text));
+          deltaWrites = enqueueWrite(deltaWrites, () => input.onDelta(segment.text));
         } else if (input.onReasoningDelta) {
-          deltaWrites = deltaWrites.then(() => input.onReasoningDelta?.(segment.text));
+          deltaWrites = enqueueWrite(deltaWrites, () => input.onReasoningDelta?.(segment.text));
         }
       }
     };
@@ -603,7 +626,7 @@ export class PiLeaderSession implements LeaderSession {
           );
         }
         const delta = event.assistantMessageEvent.delta;
-        deltaWrites = deltaWrites.then(() => input.onReasoningDelta?.(delta));
+        deltaWrites = enqueueWrite(deltaWrites, () => input.onReasoningDelta?.(delta));
       } else if (event.type === "message_end" && event.message.role === "assistant") {
         const messageEndedAt = Date.now();
         const responseFields = {
@@ -739,20 +762,18 @@ export class PiLeaderSession implements LeaderSession {
         }
       } else if (event.type === "entry_appended" && input.onCheckpoint) {
         const checkpoint = exportPiSessionCheckpoint(this.session.sessionManager);
-        checkpointWrites = checkpointWrites.then(() => input.onCheckpoint?.(checkpoint));
+        checkpointWrites = enqueueWrite(checkpointWrites, () => input.onCheckpoint?.(checkpoint));
       }
     });
     // 把 Run 的 AbortSignal 转发给 Pi Session。
-    const onAbort = () => {
-      void this.session.abort();
-    };
+    const onAbort = abortSession;
     input.signal.addEventListener("abort", onAbort, { once: true });
 
     try {
       if (input.signal.aborted) {
         throw input.signal.reason ?? new Error("Run cancelled");
       }
-      // 同一业务 Session 会复用 Pi Session；每个 Run 都必须显式覆盖上一轮的思考等级。
+      // 每次从持久上下文恢复后都显式应用当前 Run 的思考等级。
       // 当前 Pi 依赖的声明滞后于它已支持的 aimodel `adaptive` 档位；
       // 运行时方法只会保存并透传该字符串，因此仅在这个依赖边界收窄类型。
       this.session.setThinkingLevel(
@@ -777,15 +798,23 @@ export class PiLeaderSession implements LeaderSession {
         input.attachments,
       );
       await this.compactBeforePromptIfNeeded(userMessage);
+      await Promise.all([deltaWrites, checkpointWrites]);
+      if (writeFailed) throw writeError;
+      input.signal.throwIfAborted();
       // Agent 授权快照通过 before_agent_start 临时注入 system prompt，不进入长期 transcript。
       try {
         await this.session.prompt(userMessage, { source: "rpc" });
       } catch (error) {
+        await Promise.all([deltaWrites, checkpointWrites]);
+        if (writeFailed) throw writeError;
+        input.signal.throwIfAborted();
         if (!this.suspendedDelegation) {
           throw error;
         }
       }
       await Promise.all([deltaWrites, checkpointWrites]);
+      if (writeFailed) throw writeError;
+      input.signal.throwIfAborted();
       const suspended = this.suspendedDelegation as DelegationSuspendedError | undefined;
       if (suspended) {
         throw new LeaderRunSuspendedError(suspended.delegationId);
@@ -811,6 +840,7 @@ export class PiLeaderSession implements LeaderSession {
       );
       input.signal.removeEventListener("abort", onAbort);
       unsubscribe();
+      await Promise.all([deltaWrites, checkpointWrites]);
       this.activeInput = undefined;
     }
   }

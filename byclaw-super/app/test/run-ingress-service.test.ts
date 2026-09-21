@@ -404,7 +404,7 @@ describe("RunIngressService group chat snapshot", () => {
     });
   });
 
-  it("retains the last known resource model when a later BE lookup fails", async () => {
+  it("rejects unavailable resource models instead of reusing instance-local configuration", async () => {
     const runService = fakeRunService();
     const resolve = vi
       .fn()
@@ -426,19 +426,8 @@ describe("RunIngressService group chat snapshot", () => {
     };
 
     await ingress.createSessionRun(input);
-    await ingress.createRun({ ...input, sessionId: "session-1" });
-
-    expect(runService.createRun.mock.calls[0][0].ingressContext.leaderModel).toEqual({
-      modelId: "100",
-      fingerprint: "b".repeat(64),
-    });
-    expect(warn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        resourceId: "10000249",
-        retainedLastKnownModel: true,
-      }),
-      "超级助手模型绑定不可用，本次沿用最后一次有效模型",
-    );
+    await expect(ingress.createRun({ ...input, sessionId: "session-1" })).rejects.toThrow("BE unavailable");
+    expect(runService.createRun).not.toHaveBeenCalled();
   });
 });
 

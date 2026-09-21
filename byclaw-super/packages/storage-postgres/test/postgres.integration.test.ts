@@ -13,7 +13,8 @@ import {
   type ThinkingLevel,
 } from "@byclaw/by-conductor";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PostgresDatabase } from "../src/postgres-database.js";
+import type { Pool } from "pg";
+import { PostgresDatabase, PostgresRunEventStore } from "../src/postgres-database.js";
 
 const integrationEnabled = process.env.POSTGRES_INTEGRATION === "true";
 const suite = integrationEnabled ? describe : describe.skip;
@@ -196,6 +197,112 @@ suite("PostgreSQL persistence integration", () => {
     ).resolves.toMatchObject({ runs: [], hasMore: false });
   });
 
+  it("atomically converges concurrent ingress messages on one Session and one Run per message", async () => {
+    const externalSessionId = randomUUID();
+    const userCode = `ingress-${randomUUID()}`;
+    const submit = async (messageId: string) => {
+      const candidateSession = session(userCode);
+      sessionsToDelete.push(candidateSession.id);
+      const run = queuedRun(candidateSession.id);
+      return database.runs.createIngressRun({
+        session: candidateSession,
+        run,
+        event: { runId: run.id, type: "run.created", timestamp: Date.now(), data: { status: "QUEUED" } },
+        credential: executionCredential(run.id),
+        binding: { source: "by-framework", userCode, externalSessionId },
+        externalMessageId: messageId,
+      });
+    };
+    const first = await Promise.all([submit("message-1"), submit("message-1")]);
+    expect(first.filter((result) => result.created)).toHaveLength(1);
+    expect(first[0]?.run.id).toBe(first[1]?.run.id);
+    const subsequent = await Promise.all([submit("message-2"), submit("message-3")]);
+    expect(new Set([...first, ...subsequent].map((result) => result.session.id)).size).toBe(1);
+    const sessionId = first[0]!.session.id;
+    const runs = await database.runs.listBySession(sessionId);
+    expect(runs).toHaveLength(3);
+    expect(new Set(runs.map((run) => run.ingressContext?.parentMessageId)).size).toBe(3);
+    for (const run of runs) {
+      expect(await database.events.list(run.id)).toHaveLength(1);
+      await database.runs.save({ ...run, status: "COMPLETED", executionStage: "SETTLED", version: run.version + 1 });
+    }
+  });
+
+  it("retains a monotonic fence across completed Runs and ignores an old finally release", async () => {
+    const owner = session("monotonic-fence-user");
+    sessionsToDelete.push(owner.id);
+    await database.sessions.save(owner);
+    const firstRun = queuedRun(owner.id);
+    await database.runs.save(firstRun);
+    const first = await database.queue.claimNext("same-instance", 30_000);
+    expect(first?.runId).toBe(firstRun.id);
+    const completed = (await database.runs.get(firstRun.id))!;
+    await database.runs.save({ ...completed, status: "COMPLETED", executionStage: "SETTLED", version: completed.version + 1 });
+    await database.queue.release(first!);
+    const nextRun = queuedRun(owner.id);
+    await database.runs.save(nextRun);
+    const next = await database.queue.claimNext("same-instance", 30_000);
+    expect(next?.runId).toBe(nextRun.id);
+    expect(next!.fencingToken).toBeGreaterThan(first!.fencingToken);
+    await database.queue.release(first!);
+    await expect(database.queue.heartbeat(next!, 30_000)).resolves.toBe(true);
+    const nextSnapshot = (await database.runs.get(nextRun.id))!;
+    await database.runs.save({ ...nextSnapshot, status: "COMPLETED", executionStage: "SETTLED", version: nextSnapshot.version + 1 });
+    await database.queue.release(next!);
+  });
+
+  it("prevents takeover between fencing validation and an event write", async () => {
+    const owner = session("transactional-fence-user");
+    sessionsToDelete.push(owner.id);
+    await database.sessions.save(owner);
+    const run = queuedRun(owner.id);
+    await database.runs.save(run);
+    const first = await database.queue.claimNext("paused-owner", 500);
+    expect(first?.runId).toBe(run.id);
+    let didValidate!: () => void;
+    let continueWrite!: () => void;
+    const validated = new Promise<void>((resolve) => { didValidate = resolve; });
+    const allowed = new Promise<void>((resolve) => { continueWrite = resolve; });
+    const pausingPool = {
+      connect: async () => {
+        const client = await database.pool.connect();
+        return {
+          query: async (sql: string, values?: unknown[]) => {
+            const result = await client.query(sql, values);
+            if (sql.includes('"byai_super_session_execution_leases" l')) {
+              didValidate();
+              await allowed;
+            }
+            return result;
+          },
+          release: () => client.release(),
+        };
+      },
+    } as unknown as Pool;
+    const pausedEvents = new PostgresRunEventStore(pausingPool, database.schema);
+    const writing = pausedEvents.appendForClaim({
+      runId: run.id, timestamp: Date.now(), type: "run.created", data: { status: "QUEUED" },
+    }, first!);
+    await validated;
+    await new Promise((resolve) => setTimeout(resolve, 510));
+    let prematureClaim;
+    try {
+      prematureClaim = await database.queue.claimNext("new-owner", 30_000);
+    } finally {
+      continueWrite();
+    }
+    await writing;
+    expect(prematureClaim).toBeUndefined();
+    const next = await database.queue.claimNext("new-owner", 30_000);
+    expect(next?.fencingToken).toBeGreaterThan(first!.fencingToken);
+    await expect(database.events.appendForClaim({
+      runId: run.id, timestamp: Date.now(), type: "run.status", data: { status: "RUNNING" },
+    }, first!)).rejects.toThrow("Run lease fencing token lost");
+    const snapshot = (await database.runs.get(run.id))!;
+    await database.runs.save({ ...snapshot, status: "COMPLETED", executionStage: "SETTLED", version: snapshot.version + 1 });
+    await database.queue.release(next!);
+  });
+
   it("hands an expired lease to another instance and fences the old owner", async () => {
     const owner = session("lease-user");
     sessionsToDelete.push(owner.id);
@@ -297,7 +404,7 @@ suite("PostgreSQL persistence integration", () => {
         instanceId: "instance-a",
         fencingToken: first?.fencingToken ?? 0,
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow("Run lease fencing token lost");
   });
 
   it("terminally settles one expired callback exactly once across concurrent sweepers", async () => {
