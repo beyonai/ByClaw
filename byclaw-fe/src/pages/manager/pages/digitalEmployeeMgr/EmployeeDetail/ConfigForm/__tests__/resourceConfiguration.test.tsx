@@ -1,8 +1,14 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { Form } from 'antd';
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider, Form } from 'antd';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import ConfigForm from '..';
 import { isSuperAssistant } from '../../resourceConfiguration';
+
+// 此处验证资源配置行为，禁用弹窗动画，避免在入场准备阶段判断可见性。
+const render = (ui: Parameters<typeof renderComponent>[0]) =>
+  renderComponent(ui, {
+    wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+  });
 
 jest.mock('@umijs/max', () => {
   const intl = { formatMessage: ({ id }: { id: string }) => id };

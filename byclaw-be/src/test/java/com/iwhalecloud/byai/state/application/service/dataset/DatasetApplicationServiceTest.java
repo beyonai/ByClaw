@@ -117,7 +117,8 @@ class DatasetApplicationServiceTest {
         messageSource.addMessage("user.permission.nopermission", Locale.getDefault(),
             "No permission to manage this resource");
         for (String key : List.of("dataset.cloud.access.denied", "dataset.file.rename.name.invalid",
-            "dataset.file.rename.path.invalid", "dataset.cloud.item.manage.denied")) {
+            "dataset.file.rename.path.invalid", "dataset.cloud.item.manage.denied",
+            "resource.lifecycle.status.invalid")) {
             messageSource.addMessage(key, Locale.getDefault(), key);
         }
         ApplicationContext applicationContext = org.mockito.Mockito.mock(ApplicationContext.class);

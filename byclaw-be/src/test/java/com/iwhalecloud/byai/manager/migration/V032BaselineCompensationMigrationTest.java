@@ -149,8 +149,8 @@ class V032BaselineCompensationMigrationTest {
             "create table if not exists byai_super_sessions",
             "create table if not exists byai_super_runs",
             "create table if not exists byai_super_agent_capability_cards",
-            "'access_expire_time', 'timestamp'",
-            "'credential_state', 'varchar(32) default ''unknown'' not null'"
+            "access_expire_time timestamp",
+            "credential_state varchar(32) default 'unknown' not null"
         );
         assertThat(dml).contains(
             "insert into byai.byai_super_schema_migrations",

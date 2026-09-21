@@ -253,6 +253,8 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
             <Space size="small">
               <Popconfirm
                 title={intl.formatMessage({ id: 'resourceCenter.confirmApprove' })}
+                okText={intl.formatMessage({ id: 'common.confirm' })}
+                cancelText={intl.formatMessage({ id: 'common.cancel' })}
                 onConfirm={() => void handleAudit(row, 'approve')}
               >
                 <Button type="link" size="small" loading={actionKey === `approve-${getAuditRowKey(row)}`}>
@@ -261,6 +263,8 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
               </Popconfirm>
               <Popconfirm
                 title={intl.formatMessage({ id: 'resourceCenter.confirmReject' })}
+                okText={intl.formatMessage({ id: 'common.confirm' })}
+                cancelText={intl.formatMessage({ id: 'common.cancel' })}
                 onConfirm={() => void handleAudit(row, 'reject')}
               >
                 <Button danger type="link" size="small" loading={actionKey === `reject-${getAuditRowKey(row)}`}>

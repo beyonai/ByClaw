@@ -72,7 +72,8 @@ describe('ResourceAuditCenter', () => {
     await waitFor(() => expect(screen.getByText('待审核技能')).toBeInTheDocument());
 
     fireEvent.click(screen.getByText('resourceCenter.approve'));
-    fireEvent.click(await screen.findByText('resourceCenter.confirmApprove'));
+    expect(await screen.findByText('resourceCenter.confirmApprove')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
     await waitFor(() =>
       expect(approveUseApply).toHaveBeenCalledWith({ resourceId: 'resource-2', applyUserId: 'user-2' })
     );

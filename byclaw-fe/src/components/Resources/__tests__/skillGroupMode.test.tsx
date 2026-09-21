@@ -197,8 +197,9 @@ jest.mock('@/components/Resources/components/SkillGroupList', () => ({
   __esModule: true,
   default: (props: any) => {
     mockSkillGroupProps(props);
-    const mountId = require('react').useRef(++mockSkillGroupMountCount);
-    return <div data-testid="skill-group-list">{mountId.current}</div>;
+    // Lazy initialization counts actual mounts; a useRef initializer would run on every render.
+    const mountId = require('react').useState(() => ++mockSkillGroupMountCount)[0];
+    return <div data-testid="skill-group-list">{mountId}</div>;
   },
 }));
 jest.mock('@/components/Resources/components/ResourceFilter', () => ({

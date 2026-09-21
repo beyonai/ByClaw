@@ -232,7 +232,11 @@ describe('RichInput', () => {
     render(<RichInput ref={restoredRef} chatMode={chatModeMap.expert} canQuote />);
     await act(async () => restoredRef.current?.setText(draft));
     expect(restoredRef.current?.getPayload().text).toBe(draft.text);
-    expect(restoredRef.current?.getPayload().resourceList).toEqual(draft.resourceList);
+    // 发送 payload 不携带仅用于草稿恢复的员工状态字段，但必须保留所有引用。
+    const restoredResources = restoredRef.current?.getPayload().resourceList || [];
+    expect(restoredResources).toEqual(
+      draft.resourceList.map(({ agentType, isInactiveAgentSelection, ...resource }) => resource)
+    );
 
     await act(async () => restoredRef.current?.clearAfterSend());
     const retained = restoredRef.current?.getPersistentMentionDraft(true);

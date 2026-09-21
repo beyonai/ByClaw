@@ -15,11 +15,35 @@ const mockMessageHandlers = new Map<string, (message: any) => void>();
 const messages: Record<string, string> = {
   'agentTeamsActivity.openPanel': '打开专家团活动面板',
   'agentTeamsActivity.panelTitle': '专家团活动面板',
+  'ui.team.idle': '待命',
+  'ui.team.running': '执行中',
+  'ui.team.inProgress': '进行中',
+  'ui.team.completed': '已完成',
+  'ui.team.failed': '失败',
+  'ui.team.cancelled': '已取消',
+  'ui.team.stopped': '已停止',
+  'ui.team.blocked': '已阻塞',
+  'ui.team.pending': '待处理',
+  'ui.team.member': '成员',
+  'ui.team.description': '专家团描述',
+  'ui.team.members': '成员',
+  'ui.team.tasks': '任务',
+  'ui.team.messages': '消息',
+  'ui.team.memberActivity': '成员活动',
+  'ui.team.taskList': '任务列表',
+  'ui.team.activity': '活动',
+  'ui.team.openChild': '打开子会话',
+  'ui.team.childNotReady': '子会话未就绪',
+  'ui.team.unassigned': '未分配',
 };
 
 jest.mock('@umijs/max', () => ({
   useDispatch: () => mockDispatch,
-  useIntl: () => ({ formatMessage: ({ id }: { id: string }) => messages[id] || id }),
+  useIntl: () => ({
+    formatMessage: ({ id }: { id: string }, values?: { name?: string }) =>
+      id === 'ui.team.openChild' && values?.name ? `打开${values.name}子会话` : messages[id] || id,
+  }),
+  getIntl: () => ({ formatMessage: ({ id }: { id: string }) => messages[id] || id }),
 }));
 jest.mock('@/hooks/useGlobal', () => () => ({ setSessionId: mockSetSessionId }));
 jest.mock('@/utils/websocket', () => ({

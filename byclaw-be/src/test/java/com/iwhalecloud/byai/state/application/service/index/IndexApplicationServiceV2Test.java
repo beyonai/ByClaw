@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.qo.index.DiscoverQo;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
@@ -43,6 +44,9 @@ class IndexApplicationServiceV2Test {
         SandboxService sandboxService = mock(SandboxService.class);
         SsResourceCatalogService ssResourceCatalogService = mock(SsResourceCatalogService.class);
         SuasSuperassistService suasSuperassistService = mock(SuasSuperassistService.class);
+        AuthApplicationService authApplicationService = mock(AuthApplicationService.class);
+        when(authApplicationService.queryResourceOperationPermissionsBatch(any()))
+            .thenReturn(Collections.emptyMap());
 
         MessageSource mockMessageSource = mock(MessageSource.class);
         when(mockMessageSource.getMessage(any(String.class), any(), any(java.util.Locale.class)))
@@ -58,6 +62,7 @@ class IndexApplicationServiceV2Test {
         ReflectionTestUtils.setField(service, "sandboxService", sandboxService);
         ReflectionTestUtils.setField(service, "ssResourceCatalogService", ssResourceCatalogService);
         ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
+        ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);

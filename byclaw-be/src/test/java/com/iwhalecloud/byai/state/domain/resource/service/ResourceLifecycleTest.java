@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.resource.service;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeRuntimeRefreshService;
 import com.iwhalecloud.byai.manager.domain.resource.service.*;
@@ -73,7 +74,7 @@ class ResourceLifecycleTest {
         permissions.setCanOffShelf(true);
         permissions.setCanDelete(true);
         when(auth.queryResourceOperationPermissions(10L)).thenReturn(permissions);
-        when(relations.list(any())).thenReturn(List.of());
+        when(relations.list(any(Wrapper.class))).thenReturn(List.of());
     }
 
     @AfterEach
@@ -162,7 +163,7 @@ class ResourceLifecycleTest {
         SsResourceRelDetail relation = new SsResourceRelDetail();
         relation.setResourceId(20L);
         relation.setRelResourceId(10L);
-        when(relations.list(any())).thenReturn(List.of(relation));
+        when(relations.list(any(Wrapper.class))).thenReturn(List.of(relation));
         SsResource employee = new SsResource();
         employee.setResourceId(20L);
         employee.setResourceBizType("DIG_EMPLOYEE");

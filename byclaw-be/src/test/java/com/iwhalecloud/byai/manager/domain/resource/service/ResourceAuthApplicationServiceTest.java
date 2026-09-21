@@ -97,20 +97,23 @@ class ResourceAuthApplicationServiceTest {
     }
 
     @Test
-    void listResourceAuth_doesNotFetchOperationPermissionsForSkillOptions() {
+    void listResourceAuth_loadsOperationPermissionsForResourceOptions() {
         ResourceUseAuthQo qo = new ResourceUseAuthQo();
         ResourceAuthVo resource = new ResourceAuthVo();
         resource.setResourceId(21L);
         PageInfo<ResourceAuthVo> page = new PageInfo<>();
         page.setList(List.of(resource));
         when(privilegeGrantService.listResourceAuth(qo)).thenReturn(page);
+        when(authApplicationService.queryResourceOperationPermissionsBatch(any()))
+            .thenReturn(Collections.emptyMap());
 
         ResourceAuthApplicationService service = service();
         service.listResourceAuth(qo);
 
-        verify(authApplicationService, never()).queryResourceOperationPermissionsBatch(any());
-        org.junit.jupiter.api.Assertions.assertTrue(Arrays.stream(ResourceAuthVo.class.getDeclaredFields())
-            .noneMatch(field -> "hasUsePermission".equals(field.getName())));
+        verify(authApplicationService).queryResourceOperationPermissionsBatch(List.of(21L));
+        assertThat(resource.getOperationPermissionsLoaded()).isFalse();
+        assertThat(Arrays.stream(ResourceAuthVo.class.getDeclaredFields())
+            .anyMatch(field -> "hasUsePermission".equals(field.getName()))).isTrue();
     }
 
     @Test
