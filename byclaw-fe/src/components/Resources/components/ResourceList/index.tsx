@@ -6,8 +6,9 @@ import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
 import {
   listResourceUseAuth,
-  deleteResource,
-  deleteKnowledge,
+  shelfResource,
+  unShelfResource,
+  deregisterResource,
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
 import { queryInstalledResourceIds } from '@/pages/manager/service/DigitalEmployeeMgr';
@@ -16,6 +17,11 @@ import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { KnowledgeCapability } from '@/service/knowledgeCenter';
 import { buildResourceListFilterParam, getBaseResourceBizTypeList } from '../../utils';
+import {
+  PERMISSION_CREATED_BY_ME_VALUE,
+  PERMISSION_MANAGEABLE_BY_ME_VALUE,
+  PERMISSION_MANAGED_BY_ME_VALUE,
+} from '../../constants';
 import { isWorkspaceSkill, mapWorkspaceSkillRows } from '../../workspaceSkill/utils';
 import { useDigitalEmployeeManagePermission } from '../../workspaceSkill/useDigitalEmployeeManagePermission';
 import styles from './index.module.less';
@@ -36,7 +42,16 @@ interface IResourceItem {
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canDelete?: boolean;
+  canOnShelf?: boolean;
+  canOffShelf?: boolean;
+  canRestore?: boolean;
   canApplyUse?: boolean;
+  hasUsePermission?: boolean;
+  approveStatus?: string;
+  useApplyPending?: boolean;
+  resourceStatus?: number | string;
+  metaStatus?: number | string;
+  canSetDefault?: boolean;
   skillType?: string;
   sourceType?: string;
   version?: string;
@@ -56,6 +71,8 @@ interface IResourceItem {
 interface ResourceListProps {
   resourceType: string;
   activeTab: string;
+  myResourcesOnly?: boolean;
+  myResourceScope?: 'all' | 'created' | 'managed';
   searchValue: string;
   catalogId: string;
   dropdownParam: any;
@@ -90,6 +107,8 @@ const collectInstalledResourceIds = (response: any) => {
 const ResourceList: React.FC<ResourceListProps> = ({
   resourceType,
   activeTab,
+  myResourcesOnly = false,
+  myResourceScope = 'all',
   searchValue,
   catalogId,
   dropdownParam,
@@ -153,19 +172,36 @@ const ResourceList: React.FC<ResourceListProps> = ({
       const filterParam = params?.dropdownParam ?? dropdownParam;
       setLoading(true);
       try {
-        // “我可用的”包含当前用户创建及被授权的全部资源，不限定 owner_type；
-        // “官方推荐”沿用企业资源口径。
-        const ownerTypes = activeTab === 'installed' ? ['personal', 'enterprise'] : [activeTab];
+        // 普通资源中心保留原有“我可用的/官方推荐”查询口径；“我的资源”改为后端权限筛选，
+        // 个人只查创建人资源，企业按“全部/我创建的/我管理的”映射到统一管理权限。
+        const ownerTypes = myResourcesOnly
+          ? [activeTab]
+          : activeTab === 'installed'
+          ? ['personal', 'enterprise']
+          : [activeTab];
         const responses = await Promise.all(
           ownerTypes.map(async (ownerType) => {
             const ownerFilterParam = buildResourceListFilterParam(ownerType, filterParam);
+            const myResourcePermission =
+              myResourcesOnly && ownerType === 'personal'
+                ? PERMISSION_CREATED_BY_ME_VALUE
+                : myResourcesOnly && myResourceScope === 'created'
+                ? PERMISSION_CREATED_BY_ME_VALUE
+                : myResourcesOnly && myResourceScope === 'managed'
+                ? PERMISSION_MANAGED_BY_ME_VALUE
+                : myResourcesOnly
+                ? PERMISSION_MANAGEABLE_BY_ME_VALUE
+                : undefined;
             const response = await listResourceUseAuth({
               keyword,
               pageNum,
               pageSize,
-              ...(activeTab === 'personal' ? {} : { ownerType }),
+              ...(activeTab === 'personal' && !myResourcesOnly ? {} : { ownerType }),
               catalogId: selectedCatalogId || undefined,
               ...ownerFilterParam,
+              // 我可用的和官方推荐只显示上架资源；管理列表保留状态筛选。
+              ...(!myResourcesOnly ? { resourceStatus: '2' } : {}),
+              ...(myResourcePermission ? { permission: myResourcePermission } : {}),
               resourceBizTypeList: ownerFilterParam.resourceBizTypeList?.length
                 ? ownerFilterParam.resourceBizTypeList
                 : baseResourceBizTypeList,
@@ -188,10 +224,15 @@ const ResourceList: React.FC<ResourceListProps> = ({
         let workspaceRows: IResourceItem[] = [];
         const shouldLoadWorkspaceSkills =
           resourceType === 'SKILL' &&
-          (activeTab === 'personal' || activeTab === 'installed') &&
+          activeTab === 'personal' &&
           !append &&
           pageNum === 1 &&
-          !selectedCatalogId;
+          !selectedCatalogId &&
+          (!myResourcesOnly ||
+            filterParam?.resourceStatus === null ||
+            filterParam?.resourceStatus === undefined ||
+            filterParam.resourceStatus === '' ||
+            `${filterParam.resourceStatus}` === '2');
         if (shouldLoadWorkspaceSkills && activeDigitalEmployeeIdRef.current) {
           try {
             const workspaceRes = await queryWorkspacePersonalSkillList({
@@ -224,25 +265,32 @@ const ResourceList: React.FC<ResourceListProps> = ({
         setLoading(false);
       }
     },
-    [activeTab, baseResourceBizTypeList, catalogId, dropdownParam, resourceType, searchValue]
+    [
+      activeTab,
+      baseResourceBizTypeList,
+      catalogId,
+      dropdownParam,
+      myResourceScope,
+      myResourcesOnly,
+      resourceType,
+      searchValue,
+    ]
   );
 
-  const { mutate: handleDel } = useRequest({
-    mutationFn: (params: any) => {
-      if (resourceType === 'KG_DOC') {
-        return deleteKnowledge({ resourceId: params.resourceId });
-      }
-      return deleteResource({ resourceId: params.resourceId });
+  const { mutate: handleLifecycle, isLoading: lifecycleLoading } = useRequest({
+    mutationFn: ({ resourceId, action }: { resourceId: string; action: 'shelf' | 'unShelf' | 'deregister' }) => {
+      const operations = { shelf: shelfResource, unShelf: unShelfResource, deregister: deregisterResource };
+      return operations[action]({ resourceId });
     },
     onSuccess: () => {
-      message.success(intl.formatMessage({ id: 'common.deactivateSuccess' }));
+      message.success(intl.formatMessage({ id: 'common.operationSuccess' }));
       onRefresh();
     },
   });
 
   useEffect(() => {
     getList({ pageIndex: 1 });
-  }, [baseResourceBizTypeList, activeTab, catalogId, dropdownParam, getList]);
+  }, [baseResourceBizTypeList, activeTab, catalogId, dropdownParam, getList, myResourceScope, myResourcesOnly]);
 
   const fixedInstallTargetId =
     installTargetContext.mode === 'fixed' ? installTargetContext.digitalEmployeeId : undefined;
@@ -377,7 +425,12 @@ const ResourceList: React.FC<ResourceListProps> = ({
         onAuth: (authType) => onAuth(item, authType),
         onApplyUse: () => onApplyUse(item),
         onAuditUse: () => onAuditUse(item),
-        onDelete: () => handleDel(item),
+        enableResourceLifecycle: true,
+        showResourceTypeTag: !myResourcesOnly,
+        lifecycleLoading,
+        onShelf: () => handleLifecycle({ resourceId: item.resourceId, action: 'shelf' }),
+        onUnShelf: () => handleLifecycle({ resourceId: item.resourceId, action: 'unShelf' }),
+        onDeleteData: () => handleLifecycle({ resourceId: item.resourceId, action: 'deregister' }),
       }}
     />
   );

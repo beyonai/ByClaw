@@ -10,6 +10,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -65,6 +66,7 @@ import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceLifecyclePolicy;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceTargetJsonBuilder;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
@@ -83,6 +85,7 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileRenameRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
@@ -338,6 +341,7 @@ public class DatasetApplicationService {
      *
      * @param datasetDto 需包含 resourceId，其余字段为待更新内容
      */
+    @Transactional(rollbackFor = Exception.class)
     public void updateDataset(DatasetDto datasetDto) {
 
         Long resourceId = datasetDto.getResourceId();
@@ -345,10 +349,13 @@ public class DatasetApplicationService {
         String resourceDesc = datasetDto.getResourceDesc();
 
         // 更新知识库
-        SsResource ssResource = ssResourceService.findById(resourceId);
+        SsResource ssResource = ssResourceService.findByIdForUpdate(resourceId);
         // 第三方知识库模式下，知识库由外部知识库体系发布，本系统不允许编辑。
         validateKnowledgeBaseWritable();
         validateDatasetManagePermission(ssResource);
+        if (Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
         ssResource = ssResourceService.updateResource(resourceId, resourceName, resourceDesc);
         if (datasetDto.getCatalogId() != null) {
             ssResource.setCatalogId(datasetDto.getCatalogId());
@@ -364,8 +371,11 @@ public class DatasetApplicationService {
             resourceName, resourceDesc);
         // 页面更新知识库后，也按知识库导入的同一套规则把最新 targetContent 同步到开放资源目录。
         // 同步失败仅记日志，不影响主流程成功返回。
-        syncDatasetTargetContentSafely(extDoc.getTargetContent(), ssResource.getResourceBizType(),
-            ssResource.getResourceId(), "updateDataset");
+        // 下架知识仍可维护元信息，标准 JSON 和缓存只在上架状态发布。
+        if (ResourceLifecyclePolicy.isRuntimeAvailable(ssResource)) {
+            syncDatasetTargetContentSafely(extDoc.getTargetContent(), ssResource.getResourceBizType(),
+                ssResource.getResourceId(), "updateDataset");
+        }
 
         // 同步python更新
         KbKnowledgeUpdate kbKnowledgeUpdate = new KbKnowledgeUpdate();
@@ -420,22 +430,30 @@ public class DatasetApplicationService {
      * @param resourceId 资源主键
      * @return 是否删除成功，未实现时返回 false
      */
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deleteDataset(Long resourceId) {
 
-        SsResource ssResource = ssResourceService.findById(resourceId);
+        SsResource ssResource = ssResourceService.findByIdForUpdate(resourceId);
         // 第三方知识库模式下，知识库由外部知识库体系发布，本系统不允许注销。
         validateKnowledgeBaseWritable();
         validateDefaultPersonalDatasetDeletable(ssResource);
         validateDatasetManagePermission(ssResource);
+        // 旧知识详情删除入口也使用同一注销权限，企业上架数据必须先下架。
+        if (!ResourceLifecyclePolicy.canDeregister(ssResource)) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
+        if (!authApplicationService.queryResourceOperationPermissions(resourceId).isCanDelete()) {
+            throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+        }
         SsResExtDoc extDoc = ssResExtDocService.findById(resourceId);
         String targetContent = extDoc == null ? null : extDoc.getTargetContent();
 
-        // 软删除：把 ss_resource.resource_status 置为 OFF_SHELF(3)，保留主表与扩展表数据，
-        // 让前端"已注销"筛选项可以查询到这些记录；运行期副作用（向量库/注册等）继续清理。
-        ssResource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        // 注销保留记录用于查询，状态 -1 不允许重新上架；下架不走此删除知识内容的流程。
+        ssResource.setResourceStatus(ResourceStatus.DELETE.getNum());
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
         ssResourceService.updateResourceEntity(ssResource);
+        authApplicationService.invalidateResourceAuthorizationCachesAfterCommit(resourceId, ssResource.getResourceBizType());
 
         KbKnowledgeDelete knowledgeDel = new KbKnowledgeDelete();
         knowledgeDel.setKnCode(ssResource.getResourceCode());
@@ -459,6 +477,57 @@ public class DatasetApplicationService {
             return;
         }
         throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+    }
+
+    /**
+     * 项目云盘内容维护与目录、预览使用同一项目访问权限；普通知识库仍要求资源管理权限。
+     * 不在通用资源管理入口放行，避免项目成员因此获得整库编辑、注销或授权能力。
+     */
+    private void validateDatasetContentPermission(SsResource ssResource) {
+        if (ssResource != null && ResourceBizTypeEnum.KG_CLOUD.name().equals(ssResource.getResourceBizType())) {
+            if (!authApplicationService.hasResourceAccessPermission(ssResource)) {
+                throw new IllegalArgumentException(I18nUtil.get("dataset.cloud.access.denied"));
+            }
+            return;
+        }
+        validateDatasetManagePermission(ssResource);
+    }
+
+    /** 改名、删除按服务端原始创建账号鉴权，不能信任前端姓名或 createBy 参数。 */
+    private void validateDatasetItemPermission(SsResource resource, String path) {
+        if (!ResourceBizTypeEnum.KG_CLOUD.name().equals(resource.getResourceBizType())) {
+            validateDatasetManagePermission(resource);
+            return;
+        }
+        if (authApplicationService.canManageAllProjectCloudItems(resource)) {
+            return;
+        }
+        validateDatasetContentPermission(resource);
+        String itemPath = normalizeKnowledgeFilePath(path).replaceAll("/+$", "");
+        String parentPath = itemPath.substring(0, Math.max(0, itemPath.lastIndexOf('/'))) + "/";
+        KbListDir query = new KbListDir();
+        query.setKnCode(resource.getResourceCode());
+        query.setDirectoryPath(parentPath);
+        PythonBuildResponse<Data> response = feignPythonBuildService.listDir(query, resource.getResourceId());
+        assertPythonBuildSuccess(response, "查询知识库目录");
+        Data data = response.getResultObject();
+        if (data != null && data.getData() != null && data.getData().stream().filter(Objects::nonNull)
+            .anyMatch(item -> StringUtils.isNotBlank(item.getName())
+                && itemPath.equals(normalizeKnowledgeFilePath(item.getName()).replaceAll("/+$", ""))
+                && isCurrentUserItemCreator(item))) {
+            return;
+        }
+        throw new IllegalArgumentException(I18nUtil.get("dataset.cloud.item.manage.denied"));
+    }
+
+    private boolean isCurrentUserItemCreator(DirOrFile item) {
+        Object owner = item.getMetadata() == null ? null : item.getMetadata().get("userCode");
+        if (!(owner instanceof Map)) {
+            return false;
+        }
+        Object userCode = ((Map<?, ?>) owner).get("value");
+        String currentCode = CurrentUserHolder.getCurrentUserCode();
+        return StringUtils.isNotBlank(currentCode) && userCode != null && currentCode.equals(userCode.toString());
     }
 
     private void validateDefaultPersonalDatasetDeletable(SsResource ssResource) {
@@ -554,7 +623,7 @@ public class DatasetApplicationService {
                                     boolean skipIfDuplicate, Map<String, String> headers) throws IOException {
 
         SsResource ssResource = loadDatasetResource(resourceId);
-        validateDatasetManagePermission(ssResource);
+        validateDatasetContentPermission(ssResource);
         Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
 
         UploadResult uploadResult = new UploadResult();
@@ -580,6 +649,7 @@ public class DatasetApplicationService {
                 : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
             if (!zipUpload && existingFilePaths.contains(filePath)) {
                 // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
+                validateDatasetItemPermission(ssResource, filePath);
                 deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件", forwardedHeaders);
             }
             kbFileImport.setFilePath(filePath);
@@ -610,7 +680,7 @@ public class DatasetApplicationService {
             throw new BaseException("知识库资源标识不能为空");
         }
         SsResource ssResource = loadDatasetResource(request.getResourceId());
-        validateDatasetManagePermission(ssResource);
+        validateDatasetContentPermission(ssResource);
 
         KnowledgeUploadConflictCheckResponse response = new KnowledgeUploadConflictCheckResponse();
         List<String> overwritePaths = findExistingKnowledgeFilePaths(ssResource, request.getDirectoryPath(),
@@ -818,7 +888,7 @@ public class DatasetApplicationService {
     public void removeFile(RemoveFileDto removeFileDto, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(removeFileDto.getResourceId());
-        validateDatasetManagePermission(ssResource);
+        validateDatasetItemPermission(ssResource, removeFileDto.getDirectoryPath());
         deleteKnowledgeFile(ssResource, removeFileDto.getDirectoryPath(), "删除知识库文件",
             forwardKnowledgeHeaders(headers, removeFileDto.getResourceId()));
 
@@ -887,7 +957,7 @@ public class DatasetApplicationService {
 
         // 查询知识库
         SsResource ssResource = loadDatasetResource(resourceId);
-        validateDatasetManagePermission(ssResource);
+        validateDatasetContentPermission(ssResource);
         Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
 
         KbDirectoryCreate kbDirectoryCreate = new KbDirectoryCreate();
@@ -912,7 +982,7 @@ public class DatasetApplicationService {
     public KbDirectoryUpdate renameFolder(Folder folder, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(folder.getResourceId());
-        validateDatasetManagePermission(ssResource);
+        validateDatasetItemPermission(ssResource, folder.getDirectoryPath());
         Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, folder.getResourceId());
 
         KbDirectoryUpdate kbDirectoryUpdate = new KbDirectoryUpdate();
@@ -935,7 +1005,7 @@ public class DatasetApplicationService {
     public void deleteFolder(FolderDelete folderDelete, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(folderDelete.getResourceId());
-        validateDatasetManagePermission(ssResource);
+        validateDatasetItemPermission(ssResource, folderDelete.getDirectoryPath());
         Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, folderDelete.getResourceId());
 
         KbDirectoryDelete kbDirectoryDelete = new KbDirectoryDelete();
@@ -954,6 +1024,33 @@ public class DatasetApplicationService {
     public KnowledgeItemsMoveResult moveKnowledgeItems(KnowledgeItemsMoveRequest request, Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
         validateDatasetManagePermission(ssResource);
+        return executeKnowledgeItemsMove(ssResource, request, headers);
+    }
+
+    /** 文件改名以路径定位，不依赖目录服务可能缺失的 fileId；只允许在原目录内改名。 */
+    public KnowledgeItemsMoveResult renameKnowledgeFile(KnowledgeFileRenameRequest request,
+                                                        Map<String, String> headers) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetItemPermission(ssResource, request.getFilePath());
+        String fileName = StringUtils.trimToEmpty(request.getFileName());
+        if (StringUtils.isBlank(fileName) || fileName.contains("/") || fileName.contains("\\")
+            || ".".equals(fileName) || "..".equals(fileName)) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.rename.name.invalid"));
+        }
+        String sourcePath = normalizeKnowledgeFilePath(request.getFilePath());
+        if (sourcePath.endsWith("/")) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.rename.path.invalid"));
+        }
+        KnowledgeItemsMoveRequest move = new KnowledgeItemsMoveRequest();
+        move.setResourceId(request.getResourceId());
+        move.setSourcePath(Collections.singletonList(sourcePath));
+        move.setTargetFilePath(sourcePath.substring(0, sourcePath.lastIndexOf('/') + 1) + fileName);
+        return executeKnowledgeItemsMove(ssResource, move, headers);
+    }
+
+    private KnowledgeItemsMoveResult executeKnowledgeItemsMove(SsResource ssResource,
+                                                                KnowledgeItemsMoveRequest request,
+                                                                Map<String, String> headers) {
         Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
 
         boolean hasTargetDirectory = StringUtils.isNotBlank(request.getTargetDirectoryPath());
@@ -1159,6 +1256,9 @@ public class DatasetApplicationService {
         if (resultObject == null || resultObject.getData() == null) {
             return resultList;
         }
+        SsResource resource = resourceId == null ? null : ssResourceService.findById(resourceId);
+        boolean cloud = resource != null && ResourceBizTypeEnum.KG_CLOUD.name().equals(resource.getResourceBizType());
+        boolean manageAll = cloud && authApplicationService.canManageAllProjectCloudItems(resource);
         for (DirOrFile dirOrFile : resultObject.getData()) {
             if (dirOrFile == null) {
                 continue;
@@ -1178,6 +1278,9 @@ public class DatasetApplicationService {
             dirAndFileVo.setUpdatedAt(dirOrFile.getUpdatedAt());
             dirAndFileVo.setBuildStatus(dirOrFile.getBuildStatus());
             dirAndFileVo.setBuildCurrentStep(dirOrFile.getBuildCurrentStep());
+            if (cloud) {
+                dirAndFileVo.setCanManageItem(manageAll || isCurrentUserItemCreator(dirOrFile));
+            }
 
             //获取创建用户信息
             this.buildCreateUserInfo(dirAndFileVo, dirOrFile);
@@ -1478,16 +1581,19 @@ public class DatasetApplicationService {
         ssResourceService.updateResourceEntity(existing);
 
         SsResExtDoc extDoc = saveOrUpdateExtDoc(dto, rawJson, resourceId);
-        resourceArtifactStorageService.syncResourceJsonByBizType(extDoc.getTargetContent(), dto.getResourceBizType(),
-            resourceId);
-        ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, dto.getResourceBizType(),
-            "dataset-import-update");
-        logImportedDatasetArtifactLocation(dto.getResourceBizType(), resourceId);
+        // 下架/待上架知识可以更新 source/target 内容，但只能在显式上架后重新发布运行产物。
+        if (ResourceLifecyclePolicy.isRuntimeAvailable(existing)) {
+            resourceArtifactStorageService.syncResourceJsonByBizType(extDoc.getTargetContent(),
+                dto.getResourceBizType(), resourceId);
+            ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, dto.getResourceBizType(),
+                "dataset-import-update");
+            logImportedDatasetArtifactLocation(dto.getResourceBizType(), resourceId);
 
-        logger.info("知识库JSON导入完成，准备重注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}",
-            dto.getResourceBizType(), resourceId, dto.getResourceCode());
-        resourceDiscoveryRegistrationService.reregisterAfterCommit(dto.getResourceBizType(), resourceId,
-            dto.getResourceCode(), oldTargetContent, extDoc.getTargetContent());
+            logger.info("知识库JSON导入完成，准备重注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}",
+                dto.getResourceBizType(), resourceId, dto.getResourceCode());
+            resourceDiscoveryRegistrationService.reregisterAfterCommit(dto.getResourceBizType(), resourceId,
+                dto.getResourceCode(), oldTargetContent, extDoc.getTargetContent());
+        }
 
         return resourceId;
     }

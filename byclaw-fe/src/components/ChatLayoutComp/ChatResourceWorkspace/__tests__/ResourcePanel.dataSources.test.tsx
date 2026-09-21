@@ -23,7 +23,11 @@ const panel = (sessionId = 'session-1') => (
   <ResourcePanel sessionId={sessionId} projectId={1} onOpenDetail={jest.fn()} />
 );
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  // 清除上一用例未消费的一次性响应，避免延迟请求污染后续会话测试。
+  query.mockReset();
+});
 
 it('hides the project data tab when the session has no data', async () => {
   query.mockResolvedValue(page(0));

@@ -251,9 +251,10 @@
                 <when test="type == 'owner'">
                     and a.create_by = #{userId}
                 </when>
-                <!-- authorize: 授权给我的 -->
+                <!-- 授权给我的与我创建的互斥，即使创建者同时命中个人或组织授权也应排除。 -->
                 <when test="type == 'authorize'">
                     and k.red_count &gt; 0
+                    and (a.create_by is null or a.create_by != #{userId})
                 </when>
                 <!-- 默认=all: 全部=红名单判断+我创建的 -->
                 <otherwise>

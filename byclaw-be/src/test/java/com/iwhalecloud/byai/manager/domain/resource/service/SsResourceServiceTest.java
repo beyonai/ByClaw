@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
@@ -16,6 +18,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -51,6 +55,29 @@ class SsResourceServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.setLoginInfo(null);
+    }
+
+    @Test
+    void lifecycleReadLocksTheRequestedResource() {
+        service.findByIdForUpdate(100L);
+        ArgumentCaptor<LambdaQueryWrapper<SsResource>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(ssResourceMapper).selectOne(captor.capture());
+        assertThat(captor.getValue().getSqlSegment()).contains("resource_id", "FOR UPDATE");
+        assertThat(captor.getValue().getParamNameValuePairs().values()).containsExactly(100L);
+    }
+
+    @Test
+    void activeDigitalEmployeeListExcludesUnpublishedAndDeregisteredRows() {
+        when(ssResourceMapper.selectList(any())).thenReturn(List.of());
+
+        service.listActiveDigitalEmployees();
+
+        ArgumentCaptor<LambdaQueryWrapper<SsResource>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(ssResourceMapper).selectList(captor.capture());
+        LambdaQueryWrapper<SsResource> query = captor.getValue();
+        assertThat(query.getSqlSegment()).contains("resource_biz_type", "resource_status NOT IN");
+        assertThat(query.getParamNameValuePairs().values()).containsExactlyInAnyOrder(
+            ResourceBizTypeEnum.DIG_EMPLOYEE.name(), ResourceStatus.OFF_SHELF.getNum(), ResourceStatus.DELETE.getNum());
     }
 
     @Test

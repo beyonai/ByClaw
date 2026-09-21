@@ -42,7 +42,7 @@ public class ResourceUseAuthQo extends AuthQo implements Serializable {
     private List<Long> catalogIds;
 
     /**
-     * 状态：0-草稿，2-已上架，3-已下架；null 时默认查询已上架，空字符串表示全部状态。
+     * 状态：-1-已注销，0-草稿，1-待上架，2-已上架，3-已下架；null 时默认查询已上架，空字符串表示全部状态。
      */
     @ApiModelProperty(value = "资源状态", required = false)
     private String resourceStatus;
@@ -54,7 +54,9 @@ public class ResourceUseAuthQo extends AuthQo implements Serializable {
     private String ownerType;
 
     /**
-     * 权限筛选：CREATED_BY_ME、AUTHORIZED_TO_ME、PENDING_MY_APPROVAL、APPLIED_BY_ME。
+     * 权限筛选：CREATED_BY_ME、AUTHORIZED_TO_ME、MANAGEABLE_BY_ME、MANAGED_BY_ME、PENDING_MY_APPROVAL、APPLIED_BY_ME。
+     * MANAGEABLE_BY_ME 表示本人创建或授权本人管理的资源；MANAGED_BY_ME 排除本人创建的资源。
+     * 两者均不因平台或组织管理员角色扩大范围，与数字员工“我的员工”的企业筛选保持一致。
      */
     @ApiModelProperty(value = "权限筛选", required = false)
     private String permission;

@@ -7,10 +7,18 @@
   padding: 16px 30px 30px;
 }
 
+.myResourcesContainer {
+  padding: 20px 24px;
+}
+
+.myResourcesBack {
+  margin-bottom: 12px;
+}
+
 .installedBackButton {
-  height: 35px;
-  padding: 0 8px 0 0;
-  color: #333;
+  height: auto;
+  padding: 0;
+  color: #666;
   font-size: 14px;
 
   &:hover,
@@ -20,12 +28,41 @@
   }
 }
 
+.myResourcesToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+
+  > :last-child {
+    margin-left: auto;
+  }
+}
+
 .installedTabs {
   :global {
     .@{antPrefix}-tabs-ink-bar {
       display: none;
     }
   }
+}
+
+.myResourcesTabs {
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin-bottom: 16px;
+    }
+
+    .@{antPrefix}-tabs-ink-bar {
+      display: block;
+    }
+  }
+}
+
+.auditTabLabel {
+  display: inline-block;
 }
 
 .secondaryTabs {
@@ -145,7 +182,10 @@
 }
 
 .searchInput {
+  // 与筛选入口、导入和我的资源按钮保持相同的外框高度。
+  box-sizing: border-box;
   width: 200px;
+  height: 32px;
 }
 
 .installedButton {

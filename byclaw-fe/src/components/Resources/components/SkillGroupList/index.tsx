@@ -3,7 +3,7 @@ import { Empty, Modal, Spin, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import useGlobal from '@/hooks/useGlobal';
-import { deleteSkillGroup, pageSkillGroups } from '@/pages/manager/service/resources';
+import { deregisterResource, shelfResource, unShelfResource, pageSkillGroups } from '@/pages/manager/service/resources';
 import type { SkillGroup } from '@/pages/manager/service/resources';
 import SkillGroupCard from '../SkillGroupCard';
 import styles from './index.module.less';
@@ -136,15 +136,15 @@ const SkillGroupList: React.FC<SkillGroupListProps> = ({
   const handleDelete = useCallback(
     (group: SkillGroup) => {
       Modal.confirm({
-        title: intl.formatMessage({ id: 'resource.skillGroup.deleteConfirmTitle' }),
-        content: intl.formatMessage({ id: 'resource.skillGroup.deleteConfirmContent' }, { name: group.resourceName }),
+        title: intl.formatMessage({ id: 'resource.lifecycle.deleteData' }),
+        content: intl.formatMessage({ id: 'resource.lifecycle.deleteDataConfirm' }, { name: group.resourceName }),
         okText: intl.formatMessage({ id: 'common.confirm' }),
         cancelText: intl.formatMessage({ id: 'common.cancel' }),
         okButtonProps: { danger: true },
         async onOk() {
           try {
-            await deleteSkillGroup({ groupId: `${group.resourceId}` });
-            message.success(intl.formatMessage({ id: 'resource.skillGroup.deleteSuccess' }));
+            await deregisterResource({ resourceId: `${group.resourceId}` });
+            message.success(intl.formatMessage({ id: 'common.deactivateSuccess' }));
             EventEmitter.emit('beyond-driver-close');
             reload();
           } catch (error: any) {
@@ -155,6 +155,27 @@ const SkillGroupList: React.FC<SkillGroupListProps> = ({
     },
     [EventEmitter, intl, reload]
   );
+
+  const handleShelf = (group: SkillGroup, shelf: boolean) => {
+    Modal.confirm({
+      title: intl.formatMessage({ id: shelf ? 'resource.lifecycle.shelfData' : 'resource.lifecycle.unShelfData' }),
+      content: intl.formatMessage({
+        id: shelf ? 'resource.lifecycle.shelfDataConfirm' : 'resource.lifecycle.unShelfDataConfirm',
+      }),
+      okText: intl.formatMessage({ id: 'common.confirm' }),
+      cancelText: intl.formatMessage({ id: 'common.cancel' }),
+      async onOk() {
+        try {
+          await (shelf ? shelfResource : unShelfResource)({ resourceId: `${group.resourceId}` });
+          message.success(intl.formatMessage({ id: 'common.operationSuccess' }));
+          EventEmitter.emit('beyond-driver-close');
+          reload();
+        } catch (error: any) {
+          message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+        }
+      },
+    });
+  };
 
   useEffect(
     () => () => {
@@ -250,6 +271,8 @@ const SkillGroupList: React.FC<SkillGroupListProps> = ({
                     onClick={handleOpen}
                     canDelete={canDeleteSkillGroup}
                     onDelete={handleDelete}
+                    onShelf={(group) => handleShelf(group, true)}
+                    onUnShelf={(group) => handleShelf(group, false)}
                     onEdit={onEditSkillGroup}
                   />
                 ))}

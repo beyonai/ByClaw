@@ -162,7 +162,8 @@ describe('ThinkingBlock', () => {
       },
       { timeout: 10000 }
     );
-  });
+    // 用例预算必须覆盖上面的动态加载等待，不能被 Jest 默认的 5 秒提前中断。
+  }, 15000);
 
   it('allows an ended block to collapse after the interaction is completed', () => {
     const item = createInteractiveItem(IFormStatus.FINISH);

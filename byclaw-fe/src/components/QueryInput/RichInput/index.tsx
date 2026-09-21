@@ -638,6 +638,14 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     getPersistentMentionDraft,
     insertItem,
     appendText: (text: string) => {
+      // 引用插入后的光标调整是异步的；连续追加文字时先移出不可编辑节点，避免 Slate 丢弃正文。
+      if (editor.selection && Range.isCollapsed(editor.selection)) {
+        const voidEntry = Editor.void(editor, { at: editor.selection.anchor });
+        if (voidEntry) {
+          const after = Editor.after(editor, voidEntry[1]);
+          Transforms.select(editor, after || Editor.end(editor, []));
+        }
+      }
       Transforms.insertText(editor, text);
     },
     getPayload,

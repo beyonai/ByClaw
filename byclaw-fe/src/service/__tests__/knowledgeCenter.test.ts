@@ -15,6 +15,7 @@ import {
   getDataList,
   queryDirAndFileByLevel,
   moveKnowledgeItems,
+  renameKnowledgeFile,
   queryKnowledgeItemReferences,
   globKnowledgeItems,
 } from '../knowledgeCenter';
@@ -310,5 +311,13 @@ describe('Knowledge Center Service', () => {
 
       expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/glob', data);
     });
+  });
+});
+
+it('renames knowledge files by resource and path without requiring a file ID', () => {
+  const request = { resourceId: 100, filePath: '/reports/old.md', fileName: 'new.md' };
+  renameKnowledgeFile(request);
+  expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/renameFile', request, {
+    responseCfg: { hideErrorTips: true },
   });
 });

@@ -78,6 +78,9 @@ export interface QueryDirAndFileByLevelParams {
 
 /** queryDirAndFileByLevel 单条记录 */
 export interface QueryDirAndFileByLevelItem {
+  /** 项目云盘条目的改名、删除权限。 */
+  canManageItem?: boolean;
+
   id: number;
   name: string;
   type: 'directory' | 'file';
@@ -159,6 +162,12 @@ export interface KnowledgeItemsMoveResult {
     failed: number;
   };
 }
+
+/** 按资源和文件路径改名，项目云盘由后端校验条目归属，不依赖 fileId。 */
+export const renameKnowledgeFile = (data: { resourceId: number; filePath: string; fileName: string }) =>
+  POST<KnowledgeItemsMoveResult>('/byaiService/datasetController/renameFile', data, {
+    responseCfg: { hideErrorTips: true },
+  });
 
 // 批量移动知识库文件或目录；targetDirectoryPath 与 targetFilePath 二选一
 export const moveKnowledgeItems = (data: KnowledgeItemsMovePayload) =>

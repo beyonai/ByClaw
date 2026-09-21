@@ -1,6 +1,7 @@
 import {
   buildSkillMarketplaceUrl,
   buildResourceListFilterParam,
+  filterResourceAuditRowsByType,
   getBaseResourceBizTypeList,
   isAllResourceBizTypeSelected,
   isSkillMarketplaceInstalledMessage,
@@ -60,6 +61,16 @@ describe('components/Resources utils', () => {
   it('sets full resourceBizTypeList for tool resources by default', () => {
     expect(getBaseResourceBizTypeList('TOOL')).toEqual(ALL_RESOURCE_BIZ_TYPE_VALUES);
     expect(getBaseResourceBizTypeList('KG_DOC')).toEqual(['KG_DOC', 'KG_QA', 'KG_TERM']);
+  });
+
+  it('keeps audit rows within the current resource module', () => {
+    const rows = [
+      { resourceId: 'employee-1', resourceBizType: 'DIG_EMPLOYEE' },
+      { resourceId: 'knowledge-1', resourceBizType: 'kg_doc' },
+    ];
+
+    expect(filterResourceAuditRowsByType(rows, ['KG_DOC', 'KG_QA', 'KG_TERM'])).toEqual([rows[1]]);
+    expect(filterResourceAuditRowsByType(rows, [])).toEqual([]);
   });
 
   it('removes enterprise scope filters in personal mode and keeps them in enterprise mode', () => {

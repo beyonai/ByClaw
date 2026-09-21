@@ -83,17 +83,17 @@ public class ResourceOperationPermissionsVo {
     private boolean canSetDefault;
 
     /**
-     * 是否可恢复资源（仅当资源状态为已注销时为 true）。
+     * 旧客户端上架兼容字段；已注销数据永远为 false。
      */
     private boolean canRestore;
 
     /**
-     * 是否可上架。仅数字员工且当前为已下架、具备管理权限时为 true。
+     * 是否可上架。企业数字员工或资源中心数据处于草稿/已下架且有权限时为 true。
      */
     private boolean canOnShelf;
 
     /**
-     * 是否可下架。仅数字员工且当前为已上架、具备管理权限时为 true。
+     * 是否可下架。企业数字员工或资源中心数据已上架且有权限时为 true。
      */
     private boolean canOffShelf;
 }
