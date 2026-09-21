@@ -26,6 +26,7 @@ import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceLifecyclePolicy;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtAgentService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtObjectService;
@@ -141,6 +142,12 @@ public class AuthApplicationService {
 
     private static final Set<String> MANAGE_USE_INHERIT_TARGET_TYPES = Set.of(GrantToObjType.USER, GrantToObjType.ORG,
         GrantToObjType.POST, GrantToObjType.STATION);
+
+    /**
+     * 审核中心允许按资源中心类型聚合查询的业务类型。空参数仍由下方方法兜底为数字员工，保持旧调用方兼容。
+     */
+    private static final Set<String> RESOURCE_AUDIT_BIZ_TYPES = Set.of(
+        "DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "MCP_TOOL", "TOOLKIT", "AGENT", "TOOL");
 
     @Value("${dataset.system:}")
     private String datasetSystem;
@@ -329,8 +336,9 @@ public class AuthApplicationService {
             com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.resource.SsResource> qw =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
             qw.eq(com.iwhalecloud.byai.manager.entity.resource.SsResource::getCreateBy, userId)
-                .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
-                    com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.OFF_SHELF.getNum());
+                .notIn(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
+                    com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.OFF_SHELF.getNum(),
+                    com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.DELETE.getNum());
             List<com.iwhalecloud.byai.manager.entity.resource.SsResource> createdResources =
                 ssResourceMapper.selectList(qw);
             if (!CollectionUtils.isEmpty(createdResources)) {
@@ -364,8 +372,9 @@ public class AuthApplicationService {
                     com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.resource.SsResource> rqw =
                         new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
                     rqw.in(com.iwhalecloud.byai.manager.entity.resource.SsResource::getManOrgId, managedOrgIds)
-                        .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
-                            com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.OFF_SHELF.getNum());
+                        .notIn(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
+                            com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.OFF_SHELF.getNum(),
+                            com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.DELETE.getNum());
                     List<com.iwhalecloud.byai.manager.entity.resource.SsResource> orgResources =
                         ssResourceMapper.selectList(rqw);
                     if (!CollectionUtils.isEmpty(orgResources)) {
@@ -401,7 +410,8 @@ public class AuthApplicationService {
         }
         Set<Long> effectiveResourceIds = resources.stream()
             .filter(Objects::nonNull)
-            .filter(resource -> !Objects.equals(resource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum()))
+            .filter(resource -> !Objects.equals(resource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
+                && !Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum()))
             .map(SsResource::getResourceId)
             .filter(Objects::nonNull)
             .collect(Collectors.toSet());
@@ -725,6 +735,9 @@ public class AuthApplicationService {
         }
         if (isPersonalResourceUseApplyUnsupported(ssResource)
             || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())
+            || (ResourceLifecyclePolicy.supports(ssResource)
+                && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum()))
             || !checkCanApplyUse(ssResource)) {
             return UseApplyOutcome.UNAVAILABLE;
         }
@@ -787,9 +800,22 @@ public class AuthApplicationService {
      * 避免前端先查资源再按资源逐个查询申请记录。
      */
     public List<DigitalEmployeeUseApplyAuditVo> queryDigitalEmployeeUseApplyAudit(Boolean history) {
+        return queryDigitalEmployeeUseApplyAudit(history, null);
+    }
+
+    /**
+     * 审核中心聚合查询。资源中心传入业务类型后，复用数字员工审核的权限校验链路，避免前端按资源逐条查询。
+     * 未传业务类型时仅查询数字员工，保证数字员工页面及旧调用方的返回范围不变。
+     */
+    public List<DigitalEmployeeUseApplyAuditVo> queryDigitalEmployeeUseApplyAudit(Boolean history,
+                                                                                    List<String> resourceBizTypeList) {
+        List<String> auditBizTypes = normalizeAuditBizTypes(resourceBizTypeList);
+        if (CollectionUtils.isNotEmpty(resourceBizTypeList) && CollectionUtils.isEmpty(auditBizTypes)) {
+            return Collections.emptyList();
+        }
         // 先一次联表查询真正存在申请的记录，避免遍历全部数字员工并逐个查询申请、用户和扩展信息。
         List<DigitalEmployeeUseApplyAuditVo> candidates = privilegeGrantMapper
-            .queryDigitalEmployeeUseApplyAudit(Boolean.TRUE.equals(history));
+            .queryDigitalEmployeeUseApplyAudit(Boolean.TRUE.equals(history), auditBizTypes);
         if (CollectionUtils.isEmpty(candidates)) {
             return Collections.emptyList();
         }
@@ -810,6 +836,18 @@ public class AuthApplicationService {
             }
         }
         return candidates.stream().filter(item -> auditableResourceIds.contains(item.getResourceId()))
+            .collect(Collectors.toList());
+    }
+
+    private List<String> normalizeAuditBizTypes(List<String> resourceBizTypeList) {
+        if (CollectionUtils.isEmpty(resourceBizTypeList)) {
+            return List.of("DIG_EMPLOYEE");
+        }
+        return resourceBizTypeList.stream()
+            .filter(StringUtils::isNotBlank)
+            .map(String::trim)
+            .filter(RESOURCE_AUDIT_BIZ_TYPES::contains)
+            .distinct()
             .collect(Collectors.toList());
     }
 
@@ -1225,7 +1263,10 @@ public class AuthApplicationService {
     public boolean hasResourceUsePermission(SsResource ssResource, Long userId) {
         if (ssResource == null || ssResource.getResourceId() == null
             || StringUtils.isBlank(ssResource.getResourceBizType())
-            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum()) || userId == null) {
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())
+            || (ResourceLifecyclePolicy.supports(ssResource)
+                && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum())) || userId == null) {
             return false;
         }
         if (userId.equals(ssResource.getCreateBy())
@@ -1276,6 +1317,20 @@ public class AuthApplicationService {
                 .anyMatch(project -> isProjectCloudVisible(project, userId));
         }
         return hasResourceManagePermission(ssResource) || hasResourceUsePermission(ssResource);
+    }
+
+    /** 项目创建人及 adminvip 可维护云盘所有文件，普通成员只维护本人创建的条目。 */
+    public boolean canManageAllProjectCloudItems(SsResource resource) {
+        if (resource == null || !ResourceBizTypeEnum.KG_CLOUD.name().equals(resource.getResourceBizType())) {
+            return false;
+        }
+        if (CurrentUserHolder.isAdminVip()) {
+            return true;
+        }
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        return userId != null && projectService.findByCloudResourceId(resource.getResourceId()).stream()
+            .filter(project -> !"1".equals(project.getDeleteFlag()))
+            .anyMatch(project -> Objects.equals(project.getCreateBy(), userId));
     }
 
     private boolean isProjectCloudVisible(Project project, Long userId) {
@@ -2216,6 +2271,11 @@ public class AuthApplicationService {
     }
 
     private void validateResourceUseApplyAuditAllowed(SsResource ssResource) {
+        if (ResourceLifecyclePolicy.supports(ssResource)
+            && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
         if (!isPersonalResourceUseApplyUnsupported(ssResource)) {
             return;
         }
@@ -3217,7 +3277,7 @@ public class AuthApplicationService {
             vo.setCanDelete(false);
             vo.setCanApplyUse(false);
             vo.setCanSetDefault(false);
-            vo.setCanRestore(canManage);
+            vo.setCanRestore(false);
             vo.setCanOnShelf(false);
             vo.setCanOffShelf(false);
             return vo;
@@ -3258,6 +3318,7 @@ public class AuthApplicationService {
             vo.setCanEdit(isOwner || canManage || isAdminVip);
             vo.setCanDelete(canDeleteStatus(resourceStatus, ownerType) && (isOwner || isAdminVip));
         }
+        applyResourceCenterLifecyclePermissions(ssResource, vo, currentUserId);
         return vo;
     }
 
@@ -3306,6 +3367,9 @@ public class AuthApplicationService {
         if (ssResource == null || ssResource.getResourceId() == null
             || StringUtils.isBlank(ssResource.getResourceBizType())
             || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())
+            || (ResourceLifecyclePolicy.supports(ssResource)
+                && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum()))
             || currentUserId == null) {
             return false;
         }
@@ -3364,7 +3428,9 @@ public class AuthApplicationService {
 
     private boolean checkCanApplyUse(SsResource ssResource, Long currentUserId, Set<Long> useBlacklistedIds,
                                      Set<Long> usePermittedIds, Set<Long> pendingUseApplyIds) {
-        if (ssResource == null || currentUserId == null) {
+        if (ssResource == null || currentUserId == null
+            || (ResourceLifecyclePolicy.supports(ssResource)
+                && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum()))) {
             return false;
         }
         if (ssResource.getPublishPortal() != null && ssResource.getPublishPortal() == 0) {
@@ -3419,7 +3485,7 @@ public class AuthApplicationService {
         vo.setUseApplyPending(useApplyPending);
         vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
 
-        // 如果资源已注销，只允许恢复操作，其他操作全部禁用
+        // 注销是终态，不能通过旧恢复入口重新启用。
         if (isResourceRemoved) {
             vo.setCanEdit(false);
             vo.setCanManageAuth(false);
@@ -3427,7 +3493,7 @@ public class AuthApplicationService {
             vo.setCanDelete(false);
             vo.setCanApplyUse(false);
             vo.setCanSetDefault(false);
-            vo.setCanRestore(canManage);
+            vo.setCanRestore(false);
             vo.setCanOnShelf(false);
             vo.setCanOffShelf(false);
             return vo;
@@ -3475,8 +3541,31 @@ public class AuthApplicationService {
             vo.setCanEdit(isOwner || canManage || isAdminVip);
             vo.setCanDelete(this.canDeleteStatus(resourceStatus, ownerType) && (isOwner || isAdminVip));
         }
+        applyResourceCenterLifecyclePermissions(ssResource, vo, CurrentUserHolder.getCurrentUserId());
 
         return vo;
+    }
+
+    /** 列表与详情共享生命周期权限，保留内置资源和外部托管资源的只读限制。 */
+    private void applyResourceCenterLifecyclePermissions(SsResource resource, ResourceOperationPermissionsVo vo,
+                                                         Long currentUserId) {
+        if (!ResourceLifecyclePolicy.supports(resource)) {
+            return;
+        }
+        boolean writable = vo.isCanDelete()
+            && !(StringUtils.startsWith(resource.getResourceBizType(), "KG_") && StringUtils.isNotBlank(datasetSystem));
+        boolean ownerOrAdmin = (currentUserId != null && currentUserId.equals(resource.getCreateBy()))
+            || CurrentUserHolder.isAdminVip();
+        vo.setCanOnShelf(writable && ResourceLifecyclePolicy.canShelf(resource));
+        vo.setCanOffShelf(writable && ResourceLifecyclePolicy.canUnShelf(resource));
+        vo.setCanDelete(writable && ownerOrAdmin && ResourceLifecyclePolicy.canDeregister(resource));
+        // canRestore 仅兼容旧客户端的上架入口，注销记录永远不会进入此分支。
+        vo.setCanRestore(vo.isCanOnShelf());
+        if (!Objects.equals(resource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum())) {
+            vo.setHasUsePermission(false);
+            vo.setCanApplyUse(false);
+            vo.setUseApplyPending(false);
+        }
     }
 
     /**
@@ -3643,7 +3732,8 @@ public class AuthApplicationService {
      * 计算 canApplyUse。复用已有 4 个判定：发布门户允许 + 非创建者 + 非黑名单 + 未授权使用 + 未在申请中。
      */
     private boolean checkCanApplyUse(SsResource ssResource) {
-        if (ssResource == null) {
+        if (ssResource == null || (ResourceLifecyclePolicy.supports(ssResource)
+            && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum()))) {
             return false;
         }
         if (ssResource.getPublishPortal() != null && ssResource.getPublishPortal() == 0) {

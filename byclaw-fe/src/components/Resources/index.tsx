@@ -1,17 +1,17 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
 import {
   CheckOutlined,
-  DownloadOutlined,
   DownOutlined,
   FullscreenOutlined,
   LeftOutlined,
   PlusOutlined,
   SearchOutlined,
+  UnorderedListOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
 import { useIntl, useLocation, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
-import { Button, Dropdown, Empty, Input, Space, Spin, Tooltip, message, Tabs } from 'antd';
+import { Badge, Button, Dropdown, Empty, Input, Segmented, Select, Space, Spin, Tooltip, message } from 'antd';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
@@ -22,6 +22,7 @@ import { queryCatalogTree, updateResource } from '@/service/digitalEmployees';
 import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/knowledgeCenter';
 import {
   applyResourceUse,
+  queryResourceUseApplyAudit,
   queryFixedEntryOperationCapability,
   type FixedEntryOperationCapability,
 } from '@/pages/manager/service/resources';
@@ -37,6 +38,7 @@ import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter from './components/ResourceFilter';
+import { statusOptions } from './constants';
 import { getDefaultParams } from './components/ResourceFilter';
 import ResourceList from './components/ResourceList';
 import SkillGroupList from './components/SkillGroupList';
@@ -47,7 +49,13 @@ import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { getToken, isAdminVip } from '@/utils/auth';
 import { get, trim, intersection, isEmpty } from 'lodash';
-import { buildSkillMarketplaceUrl, isSkillMarketplaceInstalledMessage } from './utils';
+import {
+  buildSkillMarketplaceUrl,
+  filterResourceAuditRowsByType,
+  getBaseResourceBizTypeList,
+  isSkillMarketplaceInstalledMessage,
+} from './utils';
+import ResourceAuditCenter from './components/ResourceAuditCenter';
 import styles from './index.module.less';
 
 interface IResourceItem {
@@ -85,8 +93,8 @@ interface IResourceItem {
 
 interface Props {
   resourceType: string; // 对应资源类型
-  installedOnly?: boolean;
-  onInstalledOnlyChange?: (installedOnly: boolean) => void;
+  myResourcesOnly?: boolean;
+  onMyResourcesOnlyChange?: (myResourcesOnly: boolean) => void;
 }
 
 const getBannerUrl = (bannerList: any[], labels: string | string[]) => {
@@ -112,7 +120,7 @@ const parseBannerList = (value: any) => {
   }
 };
 
-const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onInstalledOnlyChange }) => {
+const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onMyResourcesOnlyChange }) => {
   const intl = useIntl();
   const { EventEmitter, agentId, agentInfo } = useGlobal();
 
@@ -145,10 +153,11 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
     Array<{ catalogId: string | number; catalogName: string; pcatalogId?: string | number }>
   >([]);
 
-  type ResourceTab = 'personal' | 'enterprise' | 'marketplace' | 'installed';
+  type ResourceTab = 'personal' | 'enterprise' | 'marketplace' | 'audit';
+  type MyResourceScope = 'all' | 'created' | 'managed';
   const defaultTab = (): ResourceTab => {
-    if (installedOnly) {
-      return 'installed';
+    if (myResourcesOnly) {
+      return 'personal';
     }
     const tabFromUrl = searchParams.get('tab');
     if (
@@ -162,9 +171,10 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
   };
 
   const [activeTab, setActiveTab] = useState<ResourceTab>(defaultTab());
+  const [myResourceScope, setMyResourceScope] = useState<MyResourceScope>('all');
   const enterpriseSkillKind = searchParams.get('kind') === 'group' ? 'group' : 'skill';
   const isEnterpriseSkillGroupMode =
-    resourceType === 'SKILL' && activeTab === 'enterprise' && enterpriseSkillKind === 'group';
+    !myResourcesOnly && resourceType === 'SKILL' && activeTab === 'enterprise' && enterpriseSkillKind === 'group';
   const marketplaceRef = useRef<HTMLDivElement>(null);
   const marketplaceIframeRef = useRef<HTMLIFrameElement>(null);
   const [skillMarketplaceBaseUrl, setSkillMarketplaceBaseUrl] = useState('');
@@ -172,13 +182,13 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
-    if (installedOnly) {
-      if (activeTab !== 'installed') {
-        setActiveTab('installed');
+    const tabFromUrl = searchParams.get('tab');
+    if (myResourcesOnly) {
+      if (activeTab !== 'personal' && activeTab !== 'enterprise' && activeTab !== 'audit') {
+        setActiveTab('personal');
       }
       return;
     }
-    const tabFromUrl = searchParams.get('tab');
     if (
       (tabFromUrl === 'enterprise' ||
         tabFromUrl === 'personal' ||
@@ -187,20 +197,10 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
     ) {
       setActiveTab(tabFromUrl);
     }
-  }, [activeTab, installedOnly, resourceType, searchParams]);
-
-  useEffect(() => {
-    if (!installedOnly && activeTab === 'installed') {
-      const tabFromUrl = searchParams.get('tab');
-      setActiveTab(
-        tabFromUrl === 'enterprise' ||
-          tabFromUrl === 'personal' ||
-          (resourceType === 'SKILL' && tabFromUrl === 'marketplace')
-          ? tabFromUrl
-          : 'personal'
-      );
+    if (activeTab === 'audit') {
+      setActiveTab('personal');
     }
-  }, [activeTab, installedOnly, resourceType, searchParams]);
+  }, [activeTab, myResourcesOnly, resourceType, searchParams]);
 
   const { logoutModuleEvent } = useModuleEvent('KNOWLEDGE_CENTER');
 
@@ -235,11 +235,50 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
+  const [myResourceAuditPendingCount, setMyResourceAuditPendingCount] = useState(0);
+
+  useEffect(() => {
+    // 进入“我的资源”时从个人页签和“全部”范围开始，避免沿用普通资源中心的市场/企业筛选状态。
+    setActiveTab((currentTab) => (myResourcesOnly ? 'personal' : currentTab === 'audit' ? 'personal' : currentTab));
+    setMyResourceScope('all');
+    setCatalogId('');
+    setSearchValue('');
+    setDebouncedSearchValue('');
+    setDropdownParam(getDefaultParams());
+  }, [myResourcesOnly]);
 
   const topLevelCatalogList = React.useMemo(() => getTopLevelCatalogs(catalogList), [catalogList]);
   const refreshList = useCallback(() => {
     setRefreshKey((prevKey) => prevKey + 1);
   }, []);
+
+  const auditResourceBizTypeList = React.useMemo(() => getBaseResourceBizTypeList(resourceType), [resourceType]);
+
+  useEffect(() => {
+    // 外部入口和审核中心共用待审核数量，进入管理页前也需要查询。
+    let active = true;
+    setMyResourceAuditPendingCount(0);
+    queryResourceUseApplyAudit({ history: false, resourceBizTypeList: auditResourceBizTypeList })
+      .then((response: any) => {
+        if (!active) return;
+        const data = response?.data?.data ?? response?.data ?? response;
+        const rows = Array.isArray(data) ? data : data?.list || data?.rows || [];
+        // 与审核中心一致，忽略缺少资源标识的无效记录。
+        setMyResourceAuditPendingCount(
+          filterResourceAuditRowsByType(rows, auditResourceBizTypeList).filter(
+            (item: any) => item?.resourceId !== undefined && item?.resourceId !== null
+          ).length
+        );
+      })
+      .catch(() => {
+        if (active) {
+          setMyResourceAuditPendingCount(0);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [auditResourceBizTypeList, myResourcesOnly, refreshKey]);
 
   const notifySiderResourceListReload = useCallback(() => {
     EventEmitter.emit('beyond-resourceList-resourceType-reload', {
@@ -540,117 +579,167 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
     setDropdownParam(getDefaultParams());
     setSearchParams(nextSearchParams, { state: location.state });
   };
-  const tabBarExtraContent = (
-    <Space>
-      {!isEnterpriseSkillGroupMode && (
-        <ResourceFilter
-          resourceType={resourceType}
-          onOk={(param: any) => {
-            setDropdownParam(param);
-            // 刷新逻辑由ResourceList组件内部处理
-          }}
-          defaultParam={dropdownParam}
-          activeTab={activeTab}
-        />
-      )}
-      <Input
-        className={styles.searchInput}
-        placeholder={intl.formatMessage({ id: 'common.inputKeyword' })}
-        suffix={<SearchOutlined />}
-        value={searchValue}
-        onChange={(e) => {
-          const value = trim(e.target.value);
-          setSearchValue(value);
-          // 防抖处理，更新 debouncedSearchValue
-          if (debounceTimer.current) {
-            clearTimeout(debounceTimer.current);
-          }
-          debounceTimer.current = setTimeout(() => {
-            setDebouncedSearchValue(value);
-          }, 500);
-        }}
-        onPressEnter={() => {
-          // 立即更新 debouncedSearchValue，触发搜索
-          setDebouncedSearchValue(searchValue);
-        }}
-      />
-
-      {!installedOnly &&
-        brandVersion === 'openSource' &&
-        resourceType === 'KG_DOC' &&
-        (activeTab === 'personal' || isAdmin) && (
-        <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
-          <span>
-            <Button
-              icon={<PlusOutlined />}
-              type="primary"
-              disabled={!knowledgeCapability?.allowKnowledgeBaseCreate}
-              onClick={() => {
-                if (!knowledgeCapability?.allowKnowledgeBaseCreate) {
-                  return;
-                }
-                setCurrentItem(null);
-                setDetailPanelOpen(true);
-              }}
-            >
-              {intl.formatMessage({ id: 'common.create' })}
-            </Button>
-          </span>
-        </Tooltip>
-      )}
-
-      {!installedOnly && brandVersion === 'openSource' && (!isEnterpriseSkillGroupMode || isAdminVip(userInfo)) && (
-        <Tooltip
-          title={
-            !canImportCurrentEnterpriseResource
-              ? noPermissionDisabledTip
-              : intl.formatMessage({ id: 'resource.import.resourceCodeOverwrite' })
-          }
-        >
-          <span>
-            <Button
-              icon={<UploadOutlined />}
-              type="primary"
-              disabled={!canImportCurrentEnterpriseResource}
-              onClick={() => {
-                if (!canImportCurrentEnterpriseResource) {
-                  return;
-                }
-                if (isEnterpriseSkillGroupMode) {
-                  setSkillGroupEditing(null);
-                  setSkillGroupCreateModalOpen(true);
-                } else {
-                  setImportModalOpen(true);
-                }
-              }}
-            >
-              {intl.formatMessage({ id: 'common.import' })}
-            </Button>
-          </span>
-        </Tooltip>
-      )}
-      {!installedOnly && onInstalledOnlyChange && (
-        <Button
-          className={styles.installedButton}
-          icon={<DownloadOutlined />}
-          type={installedOnly ? 'primary' : 'default'}
-          onClick={() => onInstalledOnlyChange(!installedOnly)}
-        >
-          {intl.formatMessage({ id: 'resourceCenter.myInstalled' })}
-        </Button>
-      )}
-    </Space>
+  const resourceSearch = (
+    <Input
+      className={styles.searchInput}
+      placeholder={intl.formatMessage({ id: 'common.inputKeyword' })}
+      suffix={<SearchOutlined />}
+      value={searchValue}
+      onChange={(e) => {
+        const value = trim(e.target.value);
+        setSearchValue(value);
+        // 防抖处理，更新 debouncedSearchValue
+        if (debounceTimer.current) {
+          clearTimeout(debounceTimer.current);
+        }
+        debounceTimer.current = setTimeout(() => {
+          setDebouncedSearchValue(value);
+        }, 500);
+      }}
+      onPressEnter={() => {
+        // 立即更新 debouncedSearchValue，触发搜索
+        setDebouncedSearchValue(searchValue);
+      }}
+    />
   );
+  const tabBarExtraContent =
+    activeTab === 'audit' ? undefined : (
+      <Space>
+        {myResourcesOnly && activeTab === 'enterprise' && (
+          <Segmented
+            value={myResourceScope}
+            options={[
+              { value: 'all', label: intl.formatMessage({ id: 'resourceCenter.myResourcesAll' }) },
+              { value: 'created', label: intl.formatMessage({ id: 'resourceCenter.createdByMe' }) },
+              { value: 'managed', label: intl.formatMessage({ id: 'resourceCenter.managedByMe' }) },
+            ]}
+            onChange={(value) => setMyResourceScope(value as MyResourceScope)}
+          />
+        )}
+        {isEnterpriseSkillGroupMode && isAdminVip(userInfo) && (
+          <Select
+            aria-label={intl.formatMessage({ id: 'common.status' })}
+            value={dropdownParam.resourceStatus}
+            style={{ minWidth: 120 }}
+            options={statusOptions.map((item) => ({ ...item, label: intl.formatMessage({ id: item.label }) }))}
+            onChange={(resourceStatus) => setDropdownParam((previous) => ({ ...previous, resourceStatus }))}
+          />
+        )}
+        {!isEnterpriseSkillGroupMode && (
+          <ResourceFilter
+            key={`${resourceType}-${activeTab}-${myResourcesOnly}`}
+            resourceType={resourceType}
+            onOk={(param: any) => {
+              setDropdownParam(param);
+              setCatalogId(param.catalogId || '');
+              // 刷新逻辑由ResourceList组件内部处理
+            }}
+            defaultParam={{ ...dropdownParam, catalogId }}
+            catalogOptions={[
+              { value: '', label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }) },
+              ...topLevelCatalogList.map((item) => ({
+                value: `${item.catalogId}`,
+                label: getLocalizedCatalogName(item, intl.locale),
+              })),
+            ]}
+            activeTab={activeTab}
+            // 我可用的、官方推荐不提供状态筛选；我的资源保留原有筛选能力。
+            hideStatusFilter={!myResourcesOnly}
+            alwaysShowStatusFilter={myResourcesOnly}
+            hidePermissionFilter={myResourcesOnly}
+          />
+        )}
+        {!myResourcesOnly && resourceSearch}
+
+        {!myResourcesOnly &&
+          brandVersion === 'openSource' &&
+          resourceType === 'KG_DOC' &&
+          (activeTab === 'personal' || isAdmin) && (
+            <Tooltip
+              title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}
+            >
+              <span>
+                <Button
+                  icon={<PlusOutlined />}
+                  type="primary"
+                  disabled={!knowledgeCapability?.allowKnowledgeBaseCreate}
+                  onClick={() => {
+                    if (!knowledgeCapability?.allowKnowledgeBaseCreate) {
+                      return;
+                    }
+                    setCurrentItem(null);
+                    setDetailPanelOpen(true);
+                  }}
+                >
+                  {intl.formatMessage({ id: 'common.create' })}
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+
+        {!myResourcesOnly && brandVersion === 'openSource' && (!isEnterpriseSkillGroupMode || isAdminVip(userInfo)) && (
+          <Tooltip
+            title={
+              !canImportCurrentEnterpriseResource
+                ? noPermissionDisabledTip
+                : intl.formatMessage({ id: 'resource.import.resourceCodeOverwrite' })
+            }
+          >
+            <span>
+              <Button
+                icon={<UploadOutlined />}
+                type="primary"
+                disabled={!canImportCurrentEnterpriseResource}
+                onClick={() => {
+                  if (!canImportCurrentEnterpriseResource) {
+                    return;
+                  }
+                  if (isEnterpriseSkillGroupMode) {
+                    setSkillGroupEditing(null);
+                    setSkillGroupCreateModalOpen(true);
+                  } else {
+                    setImportModalOpen(true);
+                  }
+                }}
+              >
+                {intl.formatMessage({ id: 'common.import' })}
+              </Button>
+            </span>
+          </Tooltip>
+        )}
+        {!myResourcesOnly && onMyResourcesOnlyChange && (
+          <Badge count={myResourceAuditPendingCount} size="small" offset={[-2, 2]}>
+            <Button
+              className={styles.installedButton}
+              icon={<UnorderedListOutlined />}
+              type="default"
+              onClick={() => onMyResourcesOnlyChange(true)}
+            >
+              {intl.formatMessage({
+                id:
+                  resourceType === 'KG_DOC'
+                    ? 'resourceCenter.myKnowledge'
+                    : resourceType === 'SKILL'
+                    ? 'resourceCenter.mySkills'
+                    : resourceType === 'TOOL'
+                    ? 'resourceCenter.myTools'
+                    : 'resourceCenter.myResources',
+              })}
+            </Button>
+          </Badge>
+        )}
+      </Space>
+    );
 
   const items: TabsProps['items'] = [
     {
       key: 'personal',
-      label: `${intl.formatMessage({ id: 'resource.available' })}`,
+      label: intl.formatMessage({ id: myResourcesOnly ? 'resourceCenter.personal' : 'resource.available' }),
     },
     {
       key: 'enterprise',
       label:
-        resourceType === 'SKILL' ? (
+        resourceType === 'SKILL' && !myResourcesOnly ? (
           <Dropdown
             trigger={['hover']}
             open={enterpriseSkillDropdownOpen}
@@ -724,11 +813,20 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
             </span>
           </Dropdown>
         ) : (
-          `${intl.formatMessage({ id: 'resource.official' })}`
+          intl.formatMessage({ id: myResourcesOnly ? 'resourceCenter.enterprise' : 'resource.official' })
         ),
     },
   ];
-  if (resourceType === 'SKILL') {
+  if (myResourcesOnly) {
+    items.push({
+      key: 'audit',
+      label: (
+        <Badge count={myResourceAuditPendingCount} size="small" offset={[2, -2]}>
+          <span className={styles.auditTabLabel}>{intl.formatMessage({ id: 'resourceCenter.auditCenter' })}</span>
+        </Badge>
+      ),
+    });
+  } else if (resourceType === 'SKILL') {
     items.push({
       key: 'marketplace',
       label: (
@@ -783,30 +881,30 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
   }, []);
 
   return (
-    <div className={styles.fileManagerContainer}>
+    <div className={classnames(styles.fileManagerContainer, { [styles.myResourcesContainer]: myResourcesOnly })}>
+      {myResourcesOnly && (
+        <div className={styles.myResourcesBack}>
+          <Button
+            type="text"
+            className={styles.installedBackButton}
+            icon={<LeftOutlined />}
+            onClick={() => {
+              onMyResourcesOnlyChange?.(false);
+              const nextSearchParams = new URLSearchParams(searchParams);
+              nextSearchParams.delete('tab');
+              nextSearchParams.delete('kind');
+              setSearchParams(nextSearchParams, { state: location.state });
+            }}
+          >
+            {intl.formatMessage({ id: 'resourceCenter.backToAll' })}
+          </Button>
+        </div>
+      )}
       <CommonTabs
-        className={classnames(styles.secondaryTabs, { [styles.installedTabs]: installedOnly })}
+        className={classnames(styles.secondaryTabs, { [styles.myResourcesTabs]: myResourcesOnly })}
         activeKey={activeTab}
-        tabBarExtraContent={
-          activeTab === 'marketplace'
-            ? undefined
-            : installedOnly
-              ? {
-                left: (
-                  <Button
-                    type="text"
-                    className={styles.installedBackButton}
-                    icon={<LeftOutlined />}
-                    onClick={() => onInstalledOnlyChange?.(false)}
-                  >
-                    {intl.formatMessage({ id: 'resourceCenter.backToAll' })}
-                  </Button>
-                ),
-                right: tabBarExtraContent,
-              }
-              : tabBarExtraContent
-        }
-        items={installedOnly ? [] : items}
+        tabBarExtraContent={myResourcesOnly || activeTab === 'marketplace' ? undefined : tabBarExtraContent}
+        items={items}
         onChange={(key: string) => {
           const nextTab = key as ResourceTab;
           const nextSearchParams = new URLSearchParams(searchParams);
@@ -818,11 +916,21 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
           setSearchValue('');
           setDebouncedSearchValue('');
           setDropdownParam(getDefaultParams());
+          if (myResourcesOnly) {
+            setMyResourceScope('all');
+          }
           setActiveTab(nextTab);
           setSearchParams(nextSearchParams, { state: location.state });
         }}
       />
-      {resourceType === 'SKILL' && activeTab === 'marketplace' ? (
+      {/* 与我的数字员工一致：返回、页签、搜索筛选分别占一行。审核页使用自己的工具栏。 */}
+      {myResourcesOnly && activeTab !== 'audit' && (
+        <div className={styles.myResourcesToolbar}>
+          {resourceSearch}
+          {tabBarExtraContent}
+        </div>
+      )}
+      {!myResourcesOnly && resourceType === 'SKILL' && activeTab === 'marketplace' ? (
         <div ref={marketplaceRef} className={styles.marketplaceFrameContainer}>
           {!skillMarketplaceConfigLoaded ? (
             <div className={styles.marketplaceFramePlaceholder}>
@@ -843,31 +951,20 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
             </div>
           )}
         </div>
+      ) : myResourcesOnly && activeTab === 'audit' ? (
+        <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
+          <ResourceAuditCenter
+            key={resourceType}
+            resourceBizTypeList={auditResourceBizTypeList}
+            refreshKey={refreshKey}
+            onPendingCountChange={setMyResourceAuditPendingCount}
+          />
+        </div>
       ) : (
         <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
-          {!installedOnly && bannerLoaded && bannerUrl && (
+          {!myResourcesOnly && bannerLoaded && bannerUrl && (
             <div className="mb-16">
               <img className={styles.marketBg} src={bannerUrl} alt="poster" />
-            </div>
-          )}
-          {!isEnterpriseSkillGroupMode && (
-            <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
-              <Tabs
-                className={classnames('ub-f1', styles.tabs)}
-                activeKey={catalogId}
-                items={[
-                  { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
-                  ...topLevelCatalogList.map((item) => ({
-                    label: getLocalizedCatalogName(item, intl.locale),
-                    key: `${item?.catalogId}`,
-                  })),
-                ]}
-                onChange={(activeKey) => {
-                  setCatalogId(`${activeKey}`);
-                  setSearchValue('');
-                  setDebouncedSearchValue('');
-                }}
-              />
             </div>
           )}
           {isEnterpriseSkillGroupMode ? (
@@ -876,7 +973,13 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
               keyword={debouncedSearchValue}
               activeDigitalEmployeeId={`${activeDigitalEmployeeId || ''}`}
               ownerType="enterprise"
-              resourceStatus={2}
+              resourceStatus={
+                isAdminVip(userInfo)
+                  ? dropdownParam.resourceStatus === ''
+                    ? undefined
+                    : dropdownParam.resourceStatus
+                  : 2
+              }
               canDeleteSkillGroup={isAdminVip(userInfo)}
               onEditSkillGroup={(group) => {
                 setSkillGroupEditing(group);
@@ -888,6 +991,8 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
               key={refreshKey}
               resourceType={resourceType}
               activeTab={activeTab}
+              myResourcesOnly={myResourcesOnly}
+              myResourceScope={myResourceScope}
               searchValue={debouncedSearchValue}
               catalogId={catalogId}
               dropdownParam={dropdownParam}

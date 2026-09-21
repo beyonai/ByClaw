@@ -3,7 +3,7 @@ import useEmployeeRowRefresh, {
   removeEmployeeRow,
   updateEmployeeRow,
 } from '@/hooks/useEmployeeRowRefresh';
-import { LeftOutlined } from '@ant-design/icons';
+import { LeftOutlined, SearchOutlined } from '@ant-design/icons';
 import { getIntl, useLocation, useNavigate, useIntl } from '@umijs/max';
 import { Badge, Button, Empty, Input, Popconfirm, Segmented, Space, Spin, Table, Tabs, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -30,10 +30,11 @@ import {
 import styles from './index.module.less';
 import { EmployeePreviewModal } from '@/pages/digitalEmployees';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
+import useAuditSearch from './useAuditSearch';
 
 type OwnerTab = 'personal' | 'enterprise' | 'audit';
 type ResourceFilter = 'all' | 'employee' | 'group';
-type EnterpriseScope = 'created' | 'managed';
+type EnterpriseScope = 'all' | 'created' | 'managed';
 type EmployeeStatusFilter = 'all' | '0' | '1' | '2' | '3' | '-1';
 type AuditFilter = 'pending' | 'history';
 
@@ -106,7 +107,7 @@ const MyEmployeesPage: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<EmployeeStatusFilter>('all');
-  const [enterpriseScope, setEnterpriseScope] = useState<EnterpriseScope>('created');
+  const [enterpriseScope, setEnterpriseScope] = useState<EnterpriseScope>('all');
   const [loading, setLoading] = useState(false);
   const [historyAuditLoading, setHistoryAuditLoading] = useState(false);
   const [list, setList] = useState<IAgentCache[]>([]);
@@ -160,9 +161,15 @@ const MyEmployeesPage: React.FC = () => {
       }
       try {
         const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
-        // 个人页签只查本人创建的员工，历史管理授权不再作为列表入口。
+        // 企业“全部”仅合并本人创建和授权管理的数据，不因管理员角色扩大为全库列表。
         const type =
-          activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'owner';
+          activeTab !== 'enterprise'
+            ? 'owner'
+            : enterpriseScope === 'all'
+            ? 'ownerOrManager'
+            : enterpriseScope === 'created'
+            ? 'owner'
+            : 'managerExcludingOwner';
         const res = await request({
           pageNum: requestedPage,
           pageSize: PAGE_SIZE,
@@ -229,7 +236,11 @@ const MyEmployeesPage: React.FC = () => {
     }
   }, [auditFilter, historyAuditLoaded, loadHistoryAudit]);
 
-  const auditRows = auditFilter === 'pending' ? pendingAuditRows : historyAuditRows;
+  const {
+    auditKeyword,
+    setAuditKeyword,
+    filteredRows: auditRows,
+  } = useAuditSearch(auditFilter === 'pending' ? pendingAuditRows : historyAuditRows);
   const auditPendingCount = pendingAuditRows.length;
   const auditLoading = auditFilter === 'history' && historyAuditLoading;
 
@@ -522,21 +533,22 @@ const MyEmployeesPage: React.FC = () => {
           setResourceFilter('all');
           setKeyword('');
           setStatusFilter('all');
-          setEnterpriseScope('created');
+          setEnterpriseScope('all');
         }}
       />
       {activeTab !== 'audit' ? (
         <>
           <div className={styles.toolbar}>
-            <Input.Search
+            <Input
               className={styles.employeeSearch}
+              suffix={<SearchOutlined onClick={() => void loadEmployees()} />}
               allowClear
               placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
               value={keyword}
               onChange={(event) => {
                 setKeyword(event.target.value);
               }}
-              onSearch={() => void loadEmployees()}
+              onPressEnter={() => void loadEmployees()}
             />
             <div className={styles.rightFilters}>
               <Segmented
@@ -555,6 +567,7 @@ const MyEmployeesPage: React.FC = () => {
                   <Segmented
                     value={enterpriseScope}
                     options={[
+                      { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
                       { value: 'created', label: intl.formatMessage({ id: 'myEmployees.createdByMe' }) },
                       { value: 'managed', label: intl.formatMessage({ id: 'myEmployees.managedByMe' }) },
                     ]}
@@ -634,7 +647,16 @@ const MyEmployeesPage: React.FC = () => {
         </>
       ) : (
         <div className={styles.auditPanel}>
-          <div className={styles.auditFilter}>
+          <div className={styles.auditToolbar}>
+            <Input
+              className={styles.auditSearch}
+              suffix={<SearchOutlined />}
+              allowClear
+              aria-label={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+              placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+              value={auditKeyword}
+              onChange={(event) => setAuditKeyword(event.target.value)}
+            />
             <Segmented
               value={auditFilter}
               options={[

@@ -34,7 +34,7 @@ export const APP_CONFIG_DEFAULTS = {
   worker: {
     enabled: true,
     agentType: "BY_SUPER",
-    maxConcurrency: 10,
+    maxConcurrency: Number.POSITIVE_INFINITY,
   },
   byClawBe: {
     baseUrl: "http://127.0.0.1:8086",

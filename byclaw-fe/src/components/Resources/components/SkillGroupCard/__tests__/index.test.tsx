@@ -29,7 +29,7 @@ const group: SkillGroup = {
   avatar: '',
   catalogId: 'catalog-1',
   ownerType: 'enterprise',
-  resourceStatus: 2,
+  resourceStatus: 3,
   createBy: 'adminvip',
   createTime: '',
   updateTime: '',
@@ -45,10 +45,34 @@ describe('SkillGroupCard deletion action', () => {
     expect(screen.queryByRole('button', { name: 'resource.skillGroup.delete' })).not.toBeInTheDocument();
 
     rerender(<SkillGroupCard group={group} canDelete onDelete={onDelete} />);
-    const deleteButtons = screen.getAllByRole('button', { name: 'resource.skillGroup.delete' });
-    expect(deleteButtons[0]).toBeInTheDocument();
-
-    fireEvent.click(deleteButtons[1]);
+    const deleteButton = screen.getByRole('button', { name: 'resource.lifecycle.deleteData' });
+    fireEvent.click(deleteButton);
     expect(onDelete).toHaveBeenCalledWith(group);
   });
+});
+
+// 已上架只能下架，注销后不再开放详情和恢复入口。
+it('exposes unpublish before deregistration and locks terminal groups', () => {
+  const onUnShelf = jest.fn();
+  const onClick = jest.fn();
+  const { rerender } = render(
+    <SkillGroupCard group={{ ...group, resourceStatus: 2 }} canDelete onUnShelf={onUnShelf} onDelete={jest.fn()} />
+  );
+  expect(screen.queryByText('resource.lifecycle.deleteData')).toBeNull();
+  fireEvent.click(screen.getByText('resource.lifecycle.unShelfData'));
+  expect(onUnShelf).toHaveBeenCalledTimes(1);
+  rerender(
+    <SkillGroupCard
+      group={{ ...group, resourceStatus: -1 }}
+      canDelete
+      onClick={onClick}
+      onShelf={jest.fn()}
+      onEdit={jest.fn()}
+      onDelete={jest.fn()}
+    />
+  );
+  expect(screen.getByText('resource.statusCancelled')).toBeTruthy();
+  expect(screen.queryByText('resource.lifecycle.shelfData')).toBeNull();
+  fireEvent.click(screen.getByText(group.resourceName));
+  expect(onClick).not.toHaveBeenCalled();
 });

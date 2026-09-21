@@ -597,6 +597,10 @@ AskAgent 可以保留上下文；binding key 包含 `ownerVersion + userCode`，
 BYCLAW_WORKER_ENABLED=false
 ```
 
+`BYCLAW_WORKER_MAX_CONCURRENCY` 控制单个 Worker 同时处理的消息任务数。
+未设置时不限制并发；如需限制，可设置为 `1`～`1000` 的整数（例如 `10`）。
+不支持填写字符串 `Infinity` 或空值。超时回调 Outbox 在不限并发时仍每批最多领取 10 条。
+
 ## 日志
 
 应用使用 Fastify/Pino 输出 JSON 结构化日志，日志级别由根 `.env` 的 `LOG_LEVEL` 控制：

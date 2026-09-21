@@ -727,6 +727,30 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     @Test
+    void refreshUnpublishedSkillDoesNotPublishItsStandardJson() {
+        SsResource resource = new SsResource();
+        resource.setResourceId(7201L);
+        resource.setResourceBizType("SKILL");
+        resource.setResourceStatus(3);
+        SsResExtSkill ext = new SsResExtSkill();
+        ext.setResourceId(7201L);
+        ext.setVersion("v0.1");
+        when(ssResExtSkillService.findById(7201L)).thenReturn(ext);
+        service.refreshSkillBasicInfo(resource);
+        verify(ssResExtSkillService).saveOrUpdate(ext);
+        verify(resourceArtifactStorageService, never()).uploadToSubdirectory(any(byte[].class), any(), any(), any());
+    }
+
+    @Test
+    void deregisteredSkillCannotBeOverwrittenThroughImport() {
+        SsResource resource = new SsResource();
+        resource.setResourceId(7201L);
+        resource.setResourceStatus(-1);
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service, "assertSkillManagePermission", resource))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void refreshSkillBasicInfo_incrementsVersionAndRefreshesTargetContent() {
         SsResource resource = new SsResource();
         resource.setResourceId(7201L);
@@ -734,6 +758,7 @@ class ByClawSkillResourceApplicationServiceTest {
         resource.setResourceName("Demo Skill New");
         resource.setResourceDesc("new desc");
         resource.setResourceBizType("SKILL");
+        resource.setResourceStatus(2);
         resource.setResourceType("ATOM");
         resource.setOwnerType("personal");
         resource.setResourceVersionId("1.0");
@@ -894,6 +919,33 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceService).updateResourceEntity(existing);
         verify(ssResourceService, never()).saveResource(any(SsResource.class));
         verify(authApplicationService, never()).ensureCreatorDefaultPrivileges(existing);
+    }
+
+    @Test
+    void installThirdPartySkillCannotResurrectDeregisteredResource() {
+        String downloadUrl = "https://market.example/deregistered-skill.zip";
+        String resourceCode = DigestUtils.sha256Hex(downloadUrl);
+        ByClawSkillResourceApplicationService installService = spy(service);
+        doReturn(skillZipBytes("deregistered-skill")).when(installService)
+            .downloadThirdPartySkillPackage(downloadUrl);
+
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+
+        SsResource existing = new SsResource();
+        existing.setResourceId(7303L);
+        existing.setResourceStatus(-1);
+        existing.setResourceCode(resourceCode);
+        when(ssResourceService.findByImportIdentity("WHALE_AGENT", "SKILL", resourceCode)).thenReturn(existing);
+
+        assertThatThrownBy(() -> installService.installThirdPartySkill(9001L, downloadUrl))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("resource.lifecycle.status.invalid");
+        verify(ssResourceService, never()).updateResourceEntity(existing);
+        verify(ssResourceService, never()).saveResource(any(SsResource.class));
     }
 
     @Test

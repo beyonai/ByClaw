@@ -18,6 +18,26 @@ class ToolManControllerTest {
     }
 
     @Test
+    void lifecycleEndpointsDispatchToDistinctOperations() {
+        ToolManController controller = new ToolManController();
+        com.iwhalecloud.byai.state.domain.resource.service.ToolManService service =
+            org.mockito.Mockito.mock(com.iwhalecloud.byai.state.domain.resource.service.ToolManService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "toolManService", service);
+        com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto request =
+            new com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto();
+        request.setResourceId(10L);
+        try (org.mockito.MockedStatic<com.iwhalecloud.byai.common.i18n.I18nUtil> messages =
+                 org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.i18n.I18nUtil.class)) {
+            controller.shelfResource(request);
+            controller.unShelfResource(request);
+            controller.deregisterResource(request);
+        }
+        org.mockito.Mockito.verify(service).shelfResource(10L);
+        org.mockito.Mockito.verify(service).unShelfResource(10L);
+        org.mockito.Mockito.verify(service).deregisterResource(10L);
+    }
+
+    @Test
     void serializeThirdPartySkillInstallRequestKeepsCompleteParameters() {
         ThirdPartySkillInstallQo request = new ThirdPartySkillInstallQo();
         request.setDigId(10005856L);

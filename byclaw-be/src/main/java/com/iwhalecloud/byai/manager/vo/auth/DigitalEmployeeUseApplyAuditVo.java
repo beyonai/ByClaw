@@ -8,7 +8,7 @@ import lombok.Setter;
 
 import java.util.Date;
 
-/** 审核中心聚合返回的数字员工使用申请。 */
+/** 审核中心聚合返回的资源使用申请；保留原类名兼容数字员工审核调用方。 */
 @Getter
 @Setter
 public class DigitalEmployeeUseApplyAuditVo extends ResourceUseApplyItemVo {

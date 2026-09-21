@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createCloudKnowledgeAdapter } from './cloud-knowledge.mjs';
+import { createCloudKnowledgeAdapter, resolveCloudKnowledgeScript } from './cloud-knowledge.mjs';
 import { newSession, persistSession } from '../../session.mjs';
 
 async function fixture() {
@@ -17,6 +17,7 @@ if (args[0] === 'search-file') {
   process.stdout.write(JSON.stringify({ ok: true, data: [
     { resourceId: 1024, filePath: '/docs/a.md', score: 0.9, metadata: {
       fileType: { value: 'md' }, fileSize: { value: 12 }, fileSignature: { value: '${'a'.repeat(64)}' },
+      updatedAt: { value: '2026-09-20T08:00:00Z' },
     } },
     { resourceId: 1024, filePath: '/outside/escape.md', score: 1, metadata: {
       fileType: { value: 'md' }, fileSize: { value: 12 }, fileSignature: { value: '${'b'.repeat(64)}' },
@@ -28,6 +29,7 @@ if (args[0] === 'search-file') {
   fs.writeFileSync(output, '# downloaded\\n');
   process.stdout.write(JSON.stringify({ ok: true, output, bytes: 12 }));
 }
+
 `);
   await chmod(script, 0o700);
   const session = newSession({
@@ -43,6 +45,22 @@ if (args[0] === 'search-file') {
   return { root, script };
 }
 
+test('cloud knowledge script resolution falls back from the container skill root to the managed skill root', () => {
+  const existing = new Set([
+    '/opt/byclaw/dsh-managed/skills/project-cloud-knowledge/scripts/project_cloud_knowledge.py',
+  ]);
+  const resolved = resolveCloudKnowledgeScript({
+    env: {},
+    fileExists: (path) => existing.has(path),
+    localScript: '/workspace/skills/project-cloud-knowledge/scripts/project_cloud_knowledge.py',
+  });
+
+  assert.equal(
+    resolved,
+    '/opt/byclaw/dsh-managed/skills/project-cloud-knowledge/scripts/project_cloud_knowledge.py',
+  );
+});
+
 test('cloud knowledge adapter searches only authorized candidates and materializes selected Markdown safely', async () => {
   const { root, script } = await fixture();
   try {
@@ -57,6 +75,7 @@ test('cloud knowledge adapter searches only authorized candidates and materializ
     assert.equal(metadata.collection.items[0].fileSize, 12);
     assert.equal(metadata.collection.items[0].resourceId, 1024);
     assert.equal(metadata.collection.items[0].fileSignature, 'a'.repeat(64));
+    assert.equal(metadata.collection.items[0].updatedAt, '2026-09-20T08:00:00Z');
 
     const itemId = metadata.collection.items[0].itemId;
     const materialized = await adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [itemId] });

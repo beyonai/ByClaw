@@ -207,14 +207,14 @@ const COMMAND_SPECS = {
     group: 'collection',
     title: '并行搜索公共互联网与项目云盘，并按用户意图统一排序',
     args: {
-      '--session-dir': '必填。已由 init 创建的主会话目录',
+      '--session-dir': '必填。已由 init 以 selected + full-text 创建且授权 public-internet 的主会话目录；云盘分支需另授权 cloud-knowledge',
       '--query': '可选。默认使用 init 时的任务主题',
       '--cloud-resource-id': '可选。由 project-context basic 返回的 cloudResourceId；缺失时从环境读取',
       '--project-id': '可选。项目上下文中的 project_id；无 cloudResourceId 时由 project-context basic 解析项目云盘资源',
       '--category': '可选。公共互联网检索类别，默认 general',
       '--limit': '可选。统一候选上限，默认 50',
     },
-    example: 'knowledge-collection.mjs unified-search --session-dir /tmp/kc1 --cloud-resource-id 1024 --query "巡检流程"',
+    example: 'knowledge-collection.mjs unified-search --session-dir /tmp/kc1 --cloud-resource-id 1024 --query "巡检流程"（需先 init selected + full-text）',
   }),
   'unified-materialize': defineCommand({
     group: 'collection',

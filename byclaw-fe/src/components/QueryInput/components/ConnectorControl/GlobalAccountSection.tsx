@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { message } from 'antd';
 import { useIntl } from '@umijs/max';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import {
   buildGlobalOperationAccountPayload,
   normalizeOperationAccounts,
@@ -22,11 +23,31 @@ interface GlobalAccountSectionProps {
 
 const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) => {
   const intl = useIntl();
+  const [isCommercial, setIsCommercial] = useState<boolean | null>(null);
   const [accounts, setAccounts] = useState<OperationAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingAccountId, setDeletingAccountId] = useState<OperationAccount['id'] | null>(null);
   const loadGenerationRef = useRef(0);
+
+  useEffect(() => {
+    let disposed = false;
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((result) => {
+        if (disposed) return;
+        const brandVersion = result?.paramValue ?? result?.data?.paramValue;
+        setIsCommercial(brandVersion === 'commercial');
+      })
+      .catch(() => {
+        if (!disposed) {
+          // 配置读取失败时保留原有账号管理能力，避免配置服务短暂异常导致入口永久消失。
+          setIsCommercial(false);
+        }
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   const loadAccounts = useCallback(async () => {
     const requestGeneration = ++loadGenerationRef.current;
@@ -116,6 +137,8 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
       toolbarPlacement="external"
       showPlatformFilter={false}
       allowAccountEditing
+      // 初次读取品牌参数前先隐藏入口，避免商用版出现短暂的新增按钮闪烁。
+      allowAccountCreation={isCommercial === false}
       onToolbarChange={onToolbarChange}
       loading={loading}
       savingAccount={saving}

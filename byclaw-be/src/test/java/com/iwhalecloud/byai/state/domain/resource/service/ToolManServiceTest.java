@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceArtifact;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import org.junit.jupiter.api.AfterEach;
@@ -265,10 +266,16 @@ class ToolManServiceTest {
         enterpriseResource.setResourceCode("demo_tool");
         enterpriseResource.setOwnerType("enterprise");
         enterpriseResource.setResourceBizType(ResourceBizType.TOOLKIT.getCode());
+        enterpriseResource.setResourceStatus(3);
+        ResourceOperationPermissionsVo permissions = new ResourceOperationPermissionsVo();
+        permissions.setCanDelete(true);
+        when(authApplicationService.queryResourceOperationPermissions(502L)).thenReturn(permissions);
+        prepareRedisUtil();
 
         when(ssResourceService.getResourceListByCode(List.of("demo_tool"))).thenReturn(List.of(personalResource,
             enterpriseResource));
         when(ssResourceService.findById(502L)).thenReturn(enterpriseResource);
+        when(ssResourceService.findByIdForUpdate(502L)).thenReturn(enterpriseResource);
         when(authApplicationService.hasResourceManagePermission(enterpriseResource)).thenReturn(true);
         when(ssResourceRelDetailService.list(org.mockito.ArgumentMatchers.any(
             com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of());
@@ -277,8 +284,9 @@ class ToolManServiceTest {
         service.deleteManagedResource("demo_tool", "enterprise");
 
         verify(ssResourceService).findById(502L);
+        verify(ssResourceService).findByIdForUpdate(502L);
         verify(ssResourceService).updateResourceEntity(enterpriseResource);
-        assertThat(enterpriseResource.getResourceStatus()).isNotNull();
+        assertThat(enterpriseResource.getResourceStatus()).isEqualTo(-1);
     }
 
     @Test
@@ -302,6 +310,10 @@ class ToolManServiceTest {
         skillResource.setResourceCode("demo-skill");
         skillResource.setResourceBizType(ResourceBizType.SKILL.getCode());
         skillResource.setOwnerType("enterprise");
+        skillResource.setResourceStatus(3);
+        ResourceOperationPermissionsVo permissions = new ResourceOperationPermissionsVo();
+        permissions.setCanDelete(true);
+        when(authApplicationService.queryResourceOperationPermissions(801L)).thenReturn(permissions);
 
         SsResource digitalEmployee = new SsResource();
         digitalEmployee.setResourceId(901L);
@@ -314,6 +326,7 @@ class ToolManServiceTest {
         relation.setRelResourceId(801L);
 
         when(ssResourceService.findById(801L)).thenReturn(skillResource);
+        when(ssResourceService.findByIdForUpdate(801L)).thenReturn(skillResource);
         when(authApplicationService.hasResourceManagePermission(skillResource)).thenReturn(true);
         when(ssResExtSkillService.findById(801L)).thenReturn(null);
         when(ssResourceRelDetailService.list(org.mockito.ArgumentMatchers.any(
@@ -353,6 +366,7 @@ class ToolManServiceTest {
         extSkill.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
 
         when(ssResourceService.findById(802L)).thenReturn(skillResource);
+        when(ssResourceService.findByIdForUpdate(802L)).thenReturn(skillResource);
         when(authApplicationService.hasResourceManagePermission(skillResource)).thenReturn(true);
         when(ssResExtSkillService.findById(802L)).thenReturn(extSkill);
 

@@ -53,4 +53,7 @@ public class DirAndFileVo {
 
     private String createStaffName;
 
+    /** 项目云盘当前用户是否可改名、删除此条目；由服务端按创建账号及项目身份计算。 */
+    private Boolean canManageItem;
+
 }

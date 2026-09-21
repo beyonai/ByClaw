@@ -279,7 +279,7 @@ export interface ResourceUseApplyParams {
 }
 
 /**
- * 资源使用申请审核项
+ * 资源使用申请审核项；聚合审核中心同时返回资源基础信息。
  * 记录单个资源使用申请的详细信息
  */
 export interface ResourceUseApplyAuditItem {
@@ -287,6 +287,11 @@ export interface ResourceUseApplyAuditItem {
   userId: string; // 用户ID
   userName: string; // 用户名称
   applyTime: string; // 申请时间
+  resourceId?: string; // 资源ID，聚合审核中心返回
+  resourceName?: string; // 资源名称，聚合审核中心返回
+  resourceBizType?: string; // 资源业务类型，聚合审核中心返回
+  avatar?: string; // 资源头像，聚合审核中心返回
+  agentType?: string; // 数字员工/员工组类型，数字员工审核中心返回
   auditTime?: string; // 审核通过或驳回的处理时间
   auditUserId?: string; // 审核人ID
   auditUserName?: string; // 审核人名称
@@ -429,12 +434,26 @@ export function queryUseApplyList(params: ResourceUseApplyParams) {
 }
 
 /**
- * 聚合查询数字员工审核数据；false 或不传返回待审核，true 返回历史审核。
+ * 聚合查询资源审核数据；false 或不传返回待审核，true 返回历史审核。
  */
-export function queryDigitalEmployeeUseApplyAudit(params: { history?: boolean } = {}) {
-  return POST<any[]>('/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit', params, {
-    responseCfg: { customHandle: true },
-  });
+export interface ResourceUseApplyAuditQueryParams {
+  history?: boolean;
+  resourceBizTypeList?: string[];
+}
+
+export function queryResourceUseApplyAudit(params: ResourceUseApplyAuditQueryParams = {}) {
+  return POST<ResourceUseApplyAuditItem[]>(
+    '/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit',
+    params,
+    {
+      responseCfg: { customHandle: true },
+    }
+  );
+}
+
+/** 数字员工页面继续使用兼容命名，资源中心复用同一个聚合审核接口。 */
+export function queryDigitalEmployeeUseApplyAudit(params: ResourceUseApplyAuditQueryParams = {}) {
+  return queryResourceUseApplyAudit(params);
 }
 
 /**
@@ -542,6 +561,19 @@ export async function queryResourceMembers(params: any) {
  * @param params 删除参数（包含resourceId资源ID）
  * @returns Promise 删除结果
  */
+// 资源中心上下架与注销使用独立接口，避免将下架误调用为知识/技能删除。
+export function shelfResource(params: { resourceId: string | number }) {
+  return POST<any>('/byaiService/tool/shelfResource', params);
+}
+
+export function unShelfResource(params: { resourceId: string | number }) {
+  return POST<any>('/byaiService/tool/unShelfResource', params);
+}
+
+export function deregisterResource(params: { resourceId: string | number }) {
+  return POST<any>('/byaiService/tool/deregisterResource', params);
+}
+
 export function deleteResource(params: any) {
   return POST<any>('/byaiService/tool/deleteResourceById', params);
 }

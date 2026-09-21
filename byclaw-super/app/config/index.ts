@@ -289,13 +289,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         "BYCLAW_WORKER_AGENT_TYPE",
       ),
       ...(workerId ? { workerId } : {}),
-      maxConcurrency: integer(
-        env.BYCLAW_WORKER_MAX_CONCURRENCY ??
-          String(defaults.worker.maxConcurrency),
-        "BYCLAW_WORKER_MAX_CONCURRENCY",
-        1,
-        1_000,
-      ),
+      maxConcurrency:
+        env.BYCLAW_WORKER_MAX_CONCURRENCY === undefined
+          ? defaults.worker.maxConcurrency
+          : integer(
+              env.BYCLAW_WORKER_MAX_CONCURRENCY,
+              "BYCLAW_WORKER_MAX_CONCURRENCY",
+              1,
+              1_000,
+            ),
     },
     database: {
       host: requiredEnv(env, "DB_HOST"),

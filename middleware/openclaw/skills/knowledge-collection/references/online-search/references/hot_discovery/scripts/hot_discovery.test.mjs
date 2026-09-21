@@ -131,6 +131,60 @@ test('公开脱敏 URL 相同不得让不同内部身份共享 both 分组状态
   assert.notEqual(result.groups.bothChannels[0].url, result.groups.hotBySource.npm[0].url);
 });
 
+test('双通道 URL 去重保留 WSA 发布时间和来源证据', () => {
+  const url = 'https://example.com/news/ai-weekly';
+  const result = mergeDocuments({
+    hotDoc: { query: 'AI weekly', candidates: [{
+      url,
+      title: 'AI Weekly',
+      discoveredBy: ['bycli:example'],
+      popularity: {
+        source: 'example', metric: 'views', value: 100, allMetrics: { views: 100 },
+        rankInSource: 1, sortedLocally: true, searchWindowSize: 1,
+      },
+    }] },
+    sxDoc: { query: 'AI weekly', results: [{
+      url,
+      title: 'AI Weekly',
+      passage: 'AI weekly summary',
+      content: 'AI weekly summary content',
+      engine: 'tencent-wsa',
+      provider: 'tencent-wsa',
+      providerVersion: 'flagship',
+      requestId: 'request-1',
+      publishedAt: '2026-09-20T08:00:00Z',
+      site: 'example.com',
+      evidenceLevel: 'search-summary',
+    }] },
+    arDoc: null,
+    normalizer: n,
+    identityNormalizer: identityN,
+  });
+
+  assert.deepEqual(
+    {
+      provider: result.groups.bothChannels[0].provider,
+      providerVersion: result.groups.bothChannels[0].providerVersion,
+      requestId: result.groups.bothChannels[0].requestId,
+      publishedAt: result.groups.bothChannels[0].publishedAt,
+      passage: result.groups.bothChannels[0].passage,
+      content: result.groups.bothChannels[0].content,
+      site: result.groups.bothChannels[0].site,
+      evidenceLevel: result.groups.bothChannels[0].evidenceLevel,
+    },
+    {
+      provider: 'tencent-wsa',
+      providerVersion: 'flagship',
+      requestId: 'request-1',
+      publishedAt: '2026-09-20T08:00:00Z',
+      passage: 'AI weekly summary',
+      content: 'AI weekly summary content',
+      site: 'example.com',
+      evidenceLevel: 'search-summary',
+    },
+  );
+});
+
 test('同一对象的轮换签名 URL 应按资源身份合并且不公开签名', () => {
   const result = mergeDocuments({
     hotDoc: { query: 'q', candidates: [{

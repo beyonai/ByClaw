@@ -158,6 +158,12 @@ public class SsResourceService {
         ssResourceMapper.deleteById(resourceId);
     }
 
+    /** 生命周期事务先锁定资源，防止并发上架覆盖已经提交的注销状态。 */
+    public SsResource findByIdForUpdate(Long resourceId) {
+        return ssResourceMapper.selectOne(new LambdaQueryWrapper<SsResource>()
+            .eq(SsResource::getResourceId, resourceId).last("FOR UPDATE"));
+    }
+
     /**
      * 按主键查询资源
      *
@@ -712,7 +718,7 @@ public class SsResourceService {
     }
 
     /**
-     * 分页查询未注销的数字员工资源（用于启动时 Redis 全量同步等批处理场景）。
+     * 分页查询未下架且未注销的数字员工资源（用于启动时 Redis 全量同步等批处理场景）。
      *
      * @param pageNum  页码，从 1 开始
      * @param pageSize 每页条数
@@ -723,7 +729,8 @@ public class SsResourceService {
         int safePageSize = pageSize > 0 ? pageSize : 1000;
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum());
+        queryWrapper.notIn(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum(),
+            ResourceStatus.DELETE.getNum());
         queryWrapper.orderByAsc(SsResource::getResourceId);
         com.baomidou.mybatisplus.extension.plugins.pagination.Page<SsResource> page =
             new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(safePageNum, safePageSize, false);
@@ -731,12 +738,13 @@ public class SsResourceService {
     }
 
     /**
-     * 查询未注销的全部数字员工资源，用于按当前用户权限二次筛选的轻量列表场景。
+     * 查询未下架且未注销的全部数字员工资源，用于按当前用户权限二次筛选的轻量列表场景。
      */
     public List<SsResource> listActiveDigitalEmployees() {
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum());
+        queryWrapper.notIn(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum(),
+            ResourceStatus.DELETE.getNum());
         queryWrapper.orderByAsc(SsResource::getResourceName);
         queryWrapper.orderByAsc(SsResource::getResourceId);
         return ssResourceMapper.selectList(queryWrapper);

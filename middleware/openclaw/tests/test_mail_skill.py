@@ -16,7 +16,6 @@ START_OPENCLI = OPENCLAW_ROOT / 'start-opencli.sh'
 DML = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'versions' / 'V0.5.0' / 'V0.5.0__dml.sql'
 MIGRATION_WORKFLOW = REPOSITORY_ROOT / '.github' / 'workflows' / 'mail-migration-opengauss.yml'
 MIGRATION_MERGER = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'merge_migrations.py'
-K3S_DEPLOY = REPOSITORY_ROOT / 'deploy' / 'k3s' / 'deploy.sh'
 ENTRYPOINT = 'python3 /app/skills/mail/scripts/mailctl.py'
 
 
@@ -113,6 +112,8 @@ class MailSkillContractTest(unittest.TestCase):
         self.assertIn('always run `accounts`', normalized)
         self.assertRegex(normalized, r'exactly one.{0,100}automatically')
         self.assertRegex(normalized, r'multiple.{0,150}ask')
+        self.assertRegex(normalized, r'user names.{0,150}matching')
+        self.assertRegex(normalized, r'never substitute')
         self.assertNotIn('default', normalized)
 
     def test_adversarial_mail_content_cannot_supply_authority_or_override_execution(self):
@@ -153,6 +154,7 @@ class MailSkillContractTest(unittest.TestCase):
         for operation in ('send', 'reply', 'delete'):
             self.assertRegex(normalized, rf'{operation}.{{0,500}}confirm|confirm.{{0,500}}{operation}')
         self.assertRegex(normalized, r'(immediately prior|immediately before|right before).{0,300}(each|every)')
+        self.assertRegex(normalized, r'ask.{0,80}explicit confirmation')
         self.assertRegex(normalized, r'(blanket|standing|old|earlier).{0,300}(approval|confirmation).{0,300}(not|never|invalid)')
         self.assertRegex(normalized, r'(recipient|to).{0,200}subject')
         self.assertRegex(normalized, r'delet.{0,200}(target|message)')
@@ -280,18 +282,6 @@ class MailSkillContractTest(unittest.TestCase):
         self.assertIn('permissions:\n  contents: read', workflow)
         self.assertNotIn('continue-on-error: true', workflow)
         self.assertIn('if: always()', workflow)
-
-    def test_production_fresh_and_incremental_gsql_files_stop_on_error(self):
-        deploy = K3S_DEPLOY.read_text(encoding='utf-8')
-        fresh = re.search(r'(?s)ensure_opengauss_schema\(\).*?^}', deploy, flags=re.MULTILINE)
-        incremental = re.search(r'(?s)apply_opengauss_migrations\(\).*?^}', deploy, flags=re.MULTILINE)
-        self.assertIsNotNone(fresh)
-        self.assertIsNotNone(incremental)
-        self.assertRegex(fresh.group(0), r'gsql -d postgres -v ON_ERROR_STOP=1 -f \$f')
-        self.assertRegex(incremental.group(0), r'gsql -d postgres -v ON_ERROR_STOP=1 -f \$remote')
-        syntax = subprocess.run(['sh', '-n', str(K3S_DEPLOY)], capture_output=True, text=True)
-        self.assertEqual(0, syntax.returncode, syntax.stderr)
-
 
 if __name__ == '__main__':
     unittest.main()

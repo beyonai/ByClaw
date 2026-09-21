@@ -5,12 +5,9 @@ import { Badge, Button, Dropdown, Input, Menu, Modal, Popconfirm, Space, Spin, T
 import { trim, debounce } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import AllDigitalEmployees from './components/AllDigitalEmployees';
-import ResourceFilter, {
-  IOnOkParams,
-  getDefaultParams,
-  digitalEmployeeStatusOptions,
-} from '@/components/Resources/components/ResourceFilter';
-import { PERMISSION_AUTHORIZED_TO_ME_VALUE, PERMISSION_CREATED_BY_ME_VALUE } from '@/components/Resources/constants';
+import EmployeeTypeTag from './components/EmployeeTypeTag';
+import ResourceFilter, { IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
+import { buildDigitalEmployeeFilterParam } from './filterParams';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getAgentChatAvatar } from '@/utils/agent';
 import { navigateToEmployeeChat } from '@/utils/employeeChat';
@@ -43,45 +40,6 @@ const getListOperationPermissions = (employee: any) => {
     canRestore: employee.canRestore === true,
     canOnShelf: employee.canOnShelf === true,
     canOffShelf: employee.canOffShelf === true,
-  };
-};
-
-const buildDigitalEmployeeFilterParam = (
-  _activeTab: string,
-  filterParam?: IOnOkParams,
-  source: 'official' | 'available' = 'available'
-) => {
-  const permission = filterParam?.permission;
-  const employeeType = filterParam?.digitalEmployeeType;
-  let type: string | undefined;
-  if (source === 'available') {
-    if (permission === PERMISSION_CREATED_BY_ME_VALUE) {
-      type = 'owner';
-    } else if (permission === PERMISSION_AUTHORIZED_TO_ME_VALUE) {
-      type = 'authorize';
-    }
-  }
-
-  const employeeTypeParams =
-    source === 'available' && employeeType
-      ? {
-        ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
-        ...(employeeType.includes('GROUP') ? { agentType: '017' } : { excludeEmployeeGroup: true }),
-      }
-      : {};
-
-  return {
-    // “我可用的”接口固定只查已上架；官方推荐选择“全部”时仍需查询除已删除外的全部状态。
-    ...(source === 'official' && filterParam?.resourceStatus === '' ? { includeAllResourceStatus: true } : {}),
-    // 官方推荐的“全部”不展示已删除数据；具体状态筛选仍由 resourceStatus 控制。
-    ...(source === 'official' ? { excludeDeleted: true } : {}),
-    ...(filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
-      ? { resourceStatus: filterParam.resourceStatus }
-      : {}),
-    // 我可用接口使用 type=owner/authorize；官方推荐 discover 接口使用通用 permission 枚举。
-    ...(source === 'official' && permission ? { permission } : {}),
-    ...(type ? { type } : {}),
-    ...employeeTypeParams,
   };
 };
 
@@ -182,10 +140,10 @@ const DigitalEmployeesPage: React.FC = () => {
   }, []);
 
   const tabBarExtraContent = (
-    <Space>
+    <Space className={styles.toolbar}>
       <ResourceFilter
+        className={styles.toolbarFilter}
         resourceType="DIG_EMPLOYEE"
-        statusOptionsOverride={digitalEmployeeStatusOptions.filter((item) => !['-1', '1'].includes(item.value))}
         // 按一级 tab 重建筛选组件，加载该 tab 上次保存的筛选条件。
         key={activeTab}
         onOk={(param: any) => {
@@ -194,10 +152,9 @@ const DigitalEmployeesPage: React.FC = () => {
         }}
         defaultParam={dropdownParam}
         activeTab={activeTab}
-        // 我可用的仅按权限筛选，不展示状态筛选；官方推荐仍保留状态筛选。
-        hideStatusFilter={activeTab === 'available'}
-        // 类型筛选已移除，列表仍按员工组/数字员工分块展示。
-        digitalEmployeeTypeFilter={false}
+        // 两个页签都只展示已上架员工，不再提供状态筛选。
+        hideStatusFilter
+        digitalEmployeeTypeFilter
       />
       <Input
         suffix={
@@ -519,10 +476,6 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
   useEffect(() => {
     setResourceTab(detail?.agentType === '017' ? 'MEMBERS' : 'SKILL');
   }, [detail?.agentType, employee]);
-  let employeeTypeLabel = detail?.ownerType === 'personal' ? '个人数字员工' : '企业数字员工';
-  if (detail?.agentType === '017') {
-    employeeTypeLabel = detail?.ownerType === 'personal' ? '个人数字员工组' : '企业数字员工组';
-  }
   return (
     <Modal
       open={!!employee}
@@ -547,7 +500,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   <Typography.Title level={3} className={styles.employeePreviewTitle}>
                     {detail.name || detail.resourceName}
                   </Typography.Title>
-                  <span className={styles.employeePreviewTag}>{employeeTypeLabel}</span>
+                  <EmployeeTypeTag ownerType={detail.ownerType} agentType={detail.agentType} />
                 </div>
                 {isOffShelfEmployee ? null : hasUsePermission ? (
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateTask?.()}>

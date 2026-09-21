@@ -920,6 +920,7 @@ class AuthApplicationServiceTest {
         resource.setResourceId(300L);
         resource.setResourceBizType(ResourceBizTypeEnum.AGENT.name());
         resource.setCreateBy(1L);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceMapper.selectById(300L)).thenReturn(resource);
 
         PrivilegeGrant pendingApply = new PrivilegeGrant();
@@ -1803,6 +1804,7 @@ class AuthApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(resourceId);
         resource.setResourceBizType(ResourceBizTypeEnum.AGENT.name());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setOwnerType(OwnerType.ENTERPRISE);
         resource.setCreateBy(createBy);
         resource.setPublishPortal(1);

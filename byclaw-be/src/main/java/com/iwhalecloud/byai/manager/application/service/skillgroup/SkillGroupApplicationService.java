@@ -13,6 +13,8 @@ import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmplo
 import com.iwhalecloud.byai.manager.domain.auth.model.UseApplyOutcome;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceLifecyclePolicy;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.domain.resource.model.SkillRelationSource;
 import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
@@ -432,6 +434,9 @@ public class SkillGroupApplicationService {
     public void delete(Long groupId) {
         requireAdminVipCreatePermission();
         SsResource group = loadManagedGroupForUpdate(groupId);
+        if (!ResourceLifecyclePolicy.canDeregister(group)) {
+            throw new BaseException(I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
         List<SsResourceRelDetail> candidates =
                 skillGroupMapper.selectSkillRelationsWithSourceInfoByTenant(group.getComAcctId());
         boolean installed = candidates.stream()
@@ -444,7 +449,27 @@ public class SkillGroupApplicationService {
         relationService.remove(new LambdaQueryWrapper<SsResourceRelDetail>()
                 .eq(SsResourceRelDetail::getResourceId, groupId)
                 .eq(SsResourceRelDetail::getRelTypeName, MEMBER_REL_TYPE));
-        resourceService.removeById(groupId);
+        // 保留注销记录供管理列表查询，不删除组内技能本身。
+        group.setResourceStatus(ResourceStatus.DELETE.getNum());
+        group.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        group.setUpdateTime(new Date());
+        resourceService.updateResourceEntity(group);
+        authApplicationService.invalidateResourceAuthorizationCachesAfterCommit(groupId, SKILL_GROUP);
+    }
+
+    /** 技能组仅改变组的可安装状态，已安装快照与成员技能不随上下架改变。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void changeShelfStatus(Long groupId, boolean shelf) {
+        requireAdminVipCreatePermission();
+        SsResource group = loadManagedGroupForUpdate(groupId);
+        if (!(shelf ? ResourceLifecyclePolicy.canShelf(group) : ResourceLifecyclePolicy.canUnShelf(group))) {
+            throw new BaseException(I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
+        group.setResourceStatus(shelf ? ResourceStatus.ON_SHELF.getNum() : ResourceStatus.OFF_SHELF.getNum());
+        group.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        group.setUpdateTime(new Date());
+        resourceService.updateResourceEntity(group);
+        authApplicationService.invalidateResourceAuthorizationCachesAfterCommit(groupId, SKILL_GROUP);
     }
 
     private void validateInstallRequest(SkillGroupInstallQo qo) {
@@ -647,6 +672,9 @@ public class SkillGroupApplicationService {
     private void validateManagedGroup(SsResource group, Long tenantId) {
         if (group == null) {
             throw new BaseException("技能组不存在");
+        }
+        if (Objects.equals(ResourceStatus.DELETE.getNum(), group.getResourceStatus())) {
+            throw new BaseException(I18nUtil.get("resource.lifecycle.status.invalid"));
         }
         if (!SKILL_GROUP.equals(group.getResourceBizType())) {
             throw new BaseException("资源类型不是技能组");

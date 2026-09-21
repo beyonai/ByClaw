@@ -211,12 +211,13 @@ public class AuthController {
             authApplicationService.queryUseApplyList(qo));
     }
 
-    /** 审核中心聚合查询个人及企业数字员工使用申请。 */
+    /** 审核中心聚合查询数字员工或资源中心使用申请。 */
     @PostMapping("/queryDigitalEmployeeUseApplyAudit")
     public ResponseUtil<List<DigitalEmployeeUseApplyAuditVo>> queryDigitalEmployeeUseApplyAudit(
         @RequestBody ResourceUseApplyHistoryQo qo) {
         return ResponseUtil.successResponse(I18nUtil.get("auth.use.apply.list.query.success"),
-            authApplicationService.queryDigitalEmployeeUseApplyAudit(qo == null ? null : qo.getHistory()));
+            authApplicationService.queryDigitalEmployeeUseApplyAudit(qo == null ? null : qo.getHistory(),
+                qo == null ? null : qo.getResourceBizTypeList()));
     }
 
     /**

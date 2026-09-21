@@ -21,6 +21,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
+import com.iwhalecloud.byai.state.domain.resource.service.ToolManService;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
@@ -32,6 +33,7 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileRenameRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
@@ -97,6 +99,9 @@ public class DatasetController {
     private DatasetApplicationService datasetApplicationService;
 
     @Autowired
+    private ToolManService toolManService;
+
+    @Autowired
     private OpenClawKnowledgeDocumentService openClawKnowledgeDocumentService;
 
     /**
@@ -144,8 +149,9 @@ public class DatasetController {
      */
     @PostMapping("/deleteDataset")
     public ResponseUtil<Boolean> deleteDataset(@RequestBody DatasetIdDto datasetIdDto) {
-        return ResponseUtil.successResponse(I18nUtil.get("dataset.delete.success"),
-            datasetApplicationService.deleteDataset(datasetIdDto.getResourceId()));
+        // 旧知识入口也走统一注销流程，不能绕过状态、引用检查与运行产物清理。
+        toolManService.deregisterResource(datasetIdDto.getResourceId());
+        return ResponseUtil.successResponse(I18nUtil.get("resource.lifecycle.deregister.success"), Boolean.TRUE);
     }
 
     /**
@@ -212,6 +218,14 @@ public class DatasetController {
         Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
         datasetApplicationService.deleteFolder(folderDelete, headers);
         return ResponseUtil.success(I18nUtil.get("dataset.folder.delete.success"));
+    }
+
+    /** 按资源及文件路径改名，项目云盘按条目创建人及项目管理身份鉴权。 */
+    @PostMapping("/renameFile")
+    public ResponseUtil<KnowledgeItemsMoveResult> renameFile(HttpServletRequest httpServletRequest,
+                                                            @Valid @RequestBody KnowledgeFileRenameRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.rename.success"),
+            datasetApplicationService.renameKnowledgeFile(request, this.parseHeadersFromRequest(httpServletRequest)));
     }
 
     /**

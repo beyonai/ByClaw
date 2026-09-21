@@ -1,0 +1,42 @@
+@antPrefix: ant;
+
+.panel {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.filter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 16px;
+}
+
+.tableSpin {
+  min-height: 0;
+  flex: 1;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+}
+
+.tableWrap {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.resourceName {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

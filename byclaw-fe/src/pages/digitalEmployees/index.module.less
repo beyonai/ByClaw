@@ -20,6 +20,21 @@
   width: 200px;
 }
 
+.toolbar {
+  // 筛选、搜索和操作按钮使用同一高度，避免各自的内边距造成错位。
+  .searchInput,
+  .toolbarFilter,
+  :global(.@{antPrefix}-btn) {
+    box-sizing: border-box;
+    height: 32px;
+  }
+
+  .toolbarFilter {
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+}
+
 .sectionTitle {
   margin: 20px 6px 12px;
   color: var(--beyond-color-text-secondary, #666);
@@ -186,14 +201,6 @@
   margin: 0 !important;
   color: #15171a;
   font-size: 26px !important;
-}
-
-.employeePreviewTag {
-  padding: 4px 10px;
-  border: 1px solid #e5e5e5;
-  border-radius: 999px;
-  color: #777b82;
-  font-size: 12px;
 }
 
 .employeePreviewCreator {
