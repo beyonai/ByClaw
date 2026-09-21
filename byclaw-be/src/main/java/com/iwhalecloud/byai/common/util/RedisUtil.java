@@ -9,6 +9,11 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.connection.RedisClusterConnection;
+import org.springframework.data.redis.connection.RedisClusterNode;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.RedisConnectionUtils;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -412,19 +417,47 @@ public class RedisUtil {
         }
         Set<String> keys = new java.util.HashSet<>();
         ScanOptions options = ScanOptions.scanOptions().match(prefix + "*").count(100).build();
-        try (Cursor<byte[]> cursor = instance.stringRedisTemplate
-            .executeWithStickyConnection(connection -> connection.keyCommands().scan(options))) {
-            while (cursor != null && cursor.hasNext()) {
-                keys.add(new String(cursor.next()));
+        RedisConnectionFactory factory = instance.stringRedisTemplate.getRequiredConnectionFactory();
+        RedisConnection connection = RedisConnectionUtils.getConnection(factory);
+        boolean releaseConnection = true;
+        try {
+            // StringRedisTemplate wraps connections; use the factory connection to detect Cluster.
+            if (connection instanceof RedisClusterConnection cluster) {
+                for (RedisClusterNode node : cluster.clusterGetNodes()) {
+                    if (node.isMaster()) {
+                        collectKeys(cluster.scan(node, options), keys);
+                    }
+                }
+            }
+            else {
+                // A regular Jedis SCAN cursor owns its connection. Preserve sticky-connection
+                // ownership instead of releasing the same pooled connection twice.
+                releaseConnection = false;
+                RedisConnectionUtils.releaseConnection(connection, factory);
+                collectKeys(instance.stringRedisTemplate.executeWithStickyConnection(
+                    scanConnection -> scanConnection.keyCommands().scan(options)), keys);
             }
         }
         catch (Exception e) {
             throw new IllegalStateException("Scan redis keys by prefix failed, prefix=" + prefix, e);
         }
-        if (keys == null || keys.isEmpty()) {
-            return;
+        finally {
+            if (releaseConnection) {
+                RedisConnectionUtils.releaseConnection(connection, factory);
+            }
         }
-        instance.stringRedisTemplate.delete(keys);
+        // Keys can belong to different hash slots. Route each DEL independently.
+        for (String key : keys) {
+            instance.stringRedisTemplate.delete(key);
+        }
+    }
+
+    private static void collectKeys(Cursor<byte[]> cursor, Set<String> keys) {
+        try (cursor) {
+            while (cursor.hasNext()) {
+                keys.add(new String(cursor.next(), StandardCharsets.UTF_8));
+            }
+        }
     }
 
     /**
