@@ -13,6 +13,7 @@ import { useChatResourceProject } from '@/components/ChatLayoutComp/ChatResource
 import ConnectorControl from '../ConnectorControl';
 import ResourceTabs from '../../RichInput/mentionPopover/resourceTabsCompact';
 import { chatModeMap } from '@/constants/query';
+import { HIDDEN_RESOURCE_MENU_KEYS } from '@/constants/system';
 import { ResourceType } from '../../RichInput/utils/constants';
 import styles from '../../index.module.less';
 import FilePicker from './FilePicker';
@@ -29,6 +30,7 @@ interface Props {
 
   /** 打开资源面板时需要激活的分类。 */
   activeKey?: string;
+
   /** 分类自然高度，用于限制外层弹窗高度。 */
   onNavigationHeightChange?: (height: number) => void;
   onSelect: (item: any, type: any) => void;
@@ -76,7 +78,7 @@ const ResourceToolMenu: React.FC<Props> = ({
   const [activeKey, setActiveKey] = useState('expert');
   const [visitedKeys, setVisitedKeys] = useState<string[]>(['expert']);
   useEffect(() => {
-    if (!activeKeyProp || activeKeyProp === 'object' || activeKeyProp === 'ontology') return;
+    if (!activeKeyProp || HIDDEN_RESOURCE_MENU_KEYS.has(activeKeyProp)) return;
     setActiveKey(activeKeyProp);
     setVisitedKeys((current) => (current.includes(activeKeyProp) ? current : [...current, activeKeyProp]));
   }, [activeKeyProp]);

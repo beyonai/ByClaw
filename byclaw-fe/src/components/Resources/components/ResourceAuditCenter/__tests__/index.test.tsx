@@ -77,7 +77,8 @@ describe('ResourceAuditCenter', () => {
     await waitFor(() =>
       expect(approveUseApply).toHaveBeenCalledWith({ resourceId: 'resource-2', applyUserId: 'user-2' })
     );
-    expect(screen.queryByText('待审核技能')).not.toBeInTheDocument();
+    // 接口调用发生在 await 之前，需等待成功后的列表状态更新完成。
+    await waitFor(() => expect(screen.queryByText('待审核技能')).not.toBeInTheDocument());
   });
 
   it.each(['SKILL', 'KG_DOC', 'TOOL'])('isolates pending, history and counts for %s', async (resourceType) => {

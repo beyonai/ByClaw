@@ -75,6 +75,12 @@
 
       .@{antPrefix}-tabs-tab-btn {
         font-size: 16px;
+
+        // 审核入口的徽标容器继承 tab 字号，数字角标仍使用 Badge 自身的小号样式。
+        > .@{antPrefix}-badge {
+          font-size: inherit;
+          line-height: inherit;
+        }
       }
     }
   }

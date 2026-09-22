@@ -22,6 +22,9 @@ public class MetaPromptGenerateRequest {
     private String wordPreferences;
     private String sentenceAndTone;
     private String corePersonaDefinition;
+    // 与编辑页一致，数组以 JSON 字符串传递，重新生成时保留当前职责和标签上下文。
+    private String coreCompetencies;
+    private String agentTags;
 
     private List<String> relIds;
     private String OptimizeTypeEnum;

@@ -24,10 +24,11 @@ jest.mock('antd', () => ({
 }));
 jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
-  default: mockUseGlobal,
+  // 延迟读取 mock，避免 Jest 提升工厂后触发 const 暂时性死区。
+  default: (...args: unknown[]) => mockUseGlobal(...args),
 }));
 jest.mock('@/pages/manager/service/session', () => ({
-  getDcSystemConfig: mockGetDcSystemConfig,
+  getDcSystemConfig: (...args: unknown[]) => mockGetDcSystemConfig(...args),
 }));
 jest.mock('./recommendQuestion', () => () => null);
 jest.mock('./recommendTabs', () => () => null);

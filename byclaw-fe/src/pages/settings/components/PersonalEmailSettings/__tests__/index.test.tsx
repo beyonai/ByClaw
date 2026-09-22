@@ -17,10 +17,12 @@ jest.setTimeout(90000);
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({
-    formatMessage: ({ id }: { id: string }) => {
+    formatMessage: ({ id }: { id: string }, values?: Record<string, unknown>) => {
       if (!id.startsWith('ui.email.')) return id;
       const messages = require('@/locales/zh-CN').default as Record<string, string>;
-      return messages[id] || id;
+      // 与实际国际化行为一致，替换服务商名称、检查时间等动态参数。
+      const template = messages[id] || id;
+      return template.replace(/\{(v0|name|count)\}/g, (_, key: string) => `${values?.[key] ?? `{${key}}`}`);
     },
   }),
   getIntl: () => ({
