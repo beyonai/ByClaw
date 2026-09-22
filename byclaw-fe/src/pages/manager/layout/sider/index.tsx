@@ -11,8 +11,10 @@ import UserDropdown from '@/pages/manager/layout/sider/components/userDropdown';
 
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { getWorkgroupTemplateCapability } from '@/pages/manager/service/WorkgroupTemplate';
+import { getAppVersionCapability } from '@/pages/manager/service/AppVersion';
 import {
   fallbackMenuConfig,
+  filterAppVersionMenu,
   filterMenusByAdminVip,
   filterMenusByMenuDisplay,
   getManagerMenuConfig,
@@ -80,17 +82,21 @@ const Sider: React.FC = () => {
     const canManageTemplates = isAdminVip(userInfo)
       ? getWorkgroupTemplateCapability().catch(() => false)
       : Promise.resolve(false);
+    const canManageAppVersions = isAdminVip(userInfo)
+      ? getAppVersionCapability().catch(() => false)
+      : Promise.resolve(false);
 
-    Promise.all([getManagerMenuConfig({ refresh: true }), canManageTemplates])
-      .then(([menus, templateAllowed]) => {
+    Promise.all([getManagerMenuConfig({ refresh: true }), canManageTemplates, canManageAppVersions])
+      .then(([menus, templateAllowed, appVersionAllowed]) => {
         if (!mounted) return;
         const baseMenus = menus.length > 0 ? menus.filter((item) => item.routePath) : fallbackMenuConfig;
-        setMenuConfig(withWorkgroupTemplateMenu(baseMenus, templateAllowed));
+        // App 版本管理菜单项来自后台菜单配置，这里只按管理权限隐藏。
+        setMenuConfig(filterAppVersionMenu(withWorkgroupTemplateMenu(baseMenus, templateAllowed), appVersionAllowed));
         setMenuConfigReady(true);
       })
       .catch(() => {
         if (!mounted) return;
-        setMenuConfig(withWorkgroupTemplateMenu(fallbackMenuConfig, false));
+        setMenuConfig(filterAppVersionMenu(withWorkgroupTemplateMenu(fallbackMenuConfig, false), false));
         setMenuConfigReady(true);
       });
 

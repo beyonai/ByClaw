@@ -376,3 +376,32 @@ CREATE INDEX IF NOT EXISTS idx_workgroup_template_resource_resource
 
 COMMENT ON TABLE byai.byai_workgroup_template IS '工作组快速创建模板；catalog_id 引用资产目录';
 COMMENT ON TABLE byai.byai_workgroup_template_resource IS '模板包含的数字员工或数字员工组资源';
+
+-- 桌面端安装包版本管理：原有 sys_app_version 只按 device_type 存一条最新记录，
+-- 现在一条记录代表「平台 × 架构 × 渠道」的一个发布项，并补充安装包附件与发布状态。
+-- device_type 的语义不能动（桌面端固定发 electron），平台/架构放新列。
+ALTER TABLE byai.sys_app_version ALTER COLUMN app_version TYPE VARCHAR(32);
+ALTER TABLE byai.sys_app_version ALTER COLUMN url TYPE VARCHAR(1000);
+ALTER TABLE byai.sys_app_version ALTER COLUMN update_msg TYPE VARCHAR(2000);
+
+-- OpenGauss 不支持 ALTER TABLE ... ADD COLUMN IF NOT EXISTS，这里直接加列（本迁移只执行一次）。
+ALTER TABLE byai.sys_app_version ADD COLUMN platform VARCHAR(16);
+ALTER TABLE byai.sys_app_version ADD COLUMN arch VARCHAR(16);
+ALTER TABLE byai.sys_app_version ADD COLUMN channel VARCHAR(16) NOT NULL DEFAULT 'stable';
+ALTER TABLE byai.sys_app_version ADD COLUMN file_name VARCHAR(255);
+ALTER TABLE byai.sys_app_version ADD COLUMN file_size BIGINT;
+ALTER TABLE byai.sys_app_version ADD COLUMN sha256 VARCHAR(64);
+-- 历史数据视为已发布，避免新增过滤条件后已发布的桌面端收不到更新。
+ALTER TABLE byai.sys_app_version ADD COLUMN release_status VARCHAR(16) NOT NULL DEFAULT 'published';
+ALTER TABLE byai.sys_app_version ADD COLUMN create_by BIGINT;
+ALTER TABLE byai.sys_app_version ADD COLUMN update_by BIGINT;
+ALTER TABLE byai.sys_app_version ADD COLUMN create_time TIMESTAMP;
+ALTER TABLE byai.sys_app_version ADD COLUMN update_time TIMESTAMP;
+
+CREATE INDEX IF NOT EXISTS idx_sys_app_version_release
+    ON byai.sys_app_version (device_type, release_status, channel, platform, arch, publish_time DESC);
+
+COMMENT ON COLUMN byai.sys_app_version.platform IS 'windows/macos；本期只做桌面端，device_type 固定 electron';
+COMMENT ON COLUMN byai.sys_app_version.channel IS '发布渠道：stable/beta/dev';
+COMMENT ON COLUMN byai.sys_app_version.url IS '安装包存储地址；http 开头为外部地址，其余走 /api/v1/appVersion/package/{versionId} 免登录下载';
+COMMENT ON COLUMN byai.sys_app_version.release_status IS 'draft/published/offline；只有 published 会被 /latest 返回';

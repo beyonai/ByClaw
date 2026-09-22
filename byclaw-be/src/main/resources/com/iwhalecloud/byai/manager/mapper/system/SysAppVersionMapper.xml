@@ -10,19 +10,43 @@
         <result column="update_msg" property="updateMsg" jdbcType="VARCHAR"/>
         <result column="publish_time" property="publishTime" jdbcType="TIMESTAMP"/>
         <result column="update_status" property="updateStatus" jdbcType="VARCHAR"/>
+        <result column="platform" property="platform" jdbcType="VARCHAR"/>
+        <result column="arch" property="arch" jdbcType="VARCHAR"/>
+        <result column="channel" property="channel" jdbcType="VARCHAR"/>
+        <result column="file_name" property="fileName" jdbcType="VARCHAR"/>
+        <result column="file_size" property="fileSize" jdbcType="BIGINT"/>
+        <result column="sha256" property="sha256" jdbcType="VARCHAR"/>
+        <result column="release_status" property="releaseStatus" jdbcType="VARCHAR"/>
+        <result column="create_by" property="createBy" jdbcType="BIGINT"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
     </resultMap>
 
     <sql id="Base_Column_List">
-        version_id, device_type, app_version, url, update_type, update_msg, publish_time, update_status
+        version_id, device_type, app_version, url, update_type, update_msg, publish_time, update_status,
+        platform, arch, channel, file_name, file_size, sha256, release_status,
+        create_by, update_by, create_time, update_time
     </sql>
 
+    <!-- 只返回已发布的记录；platform/arch/channel 不传时保持只按 device_type 取最新的历史行为。 -->
     <select id="selectLatestVersionByDeviceType" resultMap="BaseResultMap">
         select
         <include refid="Base_Column_List"/>
         from sys_app_version
         where device_type = #{deviceType}
+        and release_status = 'published'
+        <if test="platform != null and platform != ''">
+            and platform = #{platform}
+        </if>
+        <if test="arch != null and arch != ''">
+            and arch = #{arch}
+        </if>
+        <if test="channel != null and channel != ''">
+            and channel = #{channel}
+        </if>
         order by publish_time desc
         limit 1
     </select>
 
-</mapper> 
+</mapper>

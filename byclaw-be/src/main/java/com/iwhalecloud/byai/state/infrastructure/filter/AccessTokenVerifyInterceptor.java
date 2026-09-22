@@ -109,6 +109,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             matcherList.add(Pattern.compile("/api-docs/")); // Swagger UI web jars
             matcherList.add(Pattern.compile("/api-docs")); // Swagger UI web jars
             matcherList.add(Pattern.compile("/api/v1/appVersion/latest")); // Swagger UI web jars
+            matcherList.add(Pattern.compile("/api/v1/appVersion/package")); // 安装包下载（桌面端更新无登录凭证）
             matcherList.add(Pattern.compile("/actuator/health"));
             matcherList.add(Pattern.compile("/actuator/info"));
             matcherList.add(Pattern.compile("/actuator/metrics"));

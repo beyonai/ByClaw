@@ -96,6 +96,11 @@ export default [
             name: 'managerWorkgroupTemplates',
             component: './manager/pages/WorkgroupTemplateMgr',
           },
+          {
+            path: '/manager/app-versions',
+            name: 'managerAppVersions',
+            component: './manager/pages/AppVersionMgr',
+          },
         ],
       },
       {
