@@ -37,16 +37,23 @@
                 source.last_message_id, source.last_activity_at, source.create_time)
     </insert>
 
-    <!-- 直接分页话题索引，既不统计消息数量，也不扫描有效回复或重算活动时间。 -->
+    <!-- 在游标分页前排除没有未撤回消息的话题，活动时间仍使用话题表的存储值。 -->
     <select id="selectPage" resultMap="TopicMap">
-        SELECT topic_id, group_session_id, root_message_id, last_message_id, last_activity_at, create_time
-        FROM byai_group_chat_topic
-        WHERE group_session_id = #{sessionId}
+        SELECT topic.topic_id, topic.group_session_id, topic.root_message_id,
+               topic.last_message_id, topic.last_activity_at, topic.create_time
+        FROM byai_group_chat_topic topic
+        WHERE topic.group_session_id = #{sessionId}
+          AND EXISTS (
+              SELECT 1 FROM byai_message message
+              WHERE message.session_id = topic.group_session_id
+                AND message.topic_id = topic.topic_id
+                AND message.recalled_at IS NULL
+          )
         <if test="beforeTime != null">
-            AND (last_activity_at, last_message_id, topic_id)
+            AND (topic.last_activity_at, topic.last_message_id, topic.topic_id)
                 &lt; (#{beforeTime}, #{beforeMessageId}, #{beforeTopicId})
         </if>
-        ORDER BY last_activity_at DESC, last_message_id DESC, topic_id DESC
+        ORDER BY topic.last_activity_at DESC, topic.last_message_id DESC, topic.topic_id DESC
         LIMIT #{limit}
     </select>
 </mapper>
