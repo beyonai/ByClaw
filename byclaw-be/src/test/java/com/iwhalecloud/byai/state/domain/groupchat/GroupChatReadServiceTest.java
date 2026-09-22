@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Date;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +41,19 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRespons
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 
 class GroupChatReadServiceTest {
+
+    @Test
+    void memberSummaryQueryReadsAvatarForBothMemberTypes() throws Exception {
+        try (var stream = getClass().getResourceAsStream(
+            "/com/iwhalecloud/byai/manager/mapper/session/ByaiSessionMemberMapper.xml")) {
+            assertThat(stream).isNotNull();
+            String mapper = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            assertThat(mapper).contains("WHEN member.mem_obj_type = 'AGENT' THEN resource.avatar")
+                .contains("WHEN member.mem_obj_type = 'USER' THEN user_info.thumbnail_uri")
+                .contains("END AS avatar");
+        }
+    }
+
     private final ByaiGroupChatMentionMapper mentionMapper = mock(ByaiGroupChatMentionMapper.class);
     private final ByaiSessionMemberMapper memberMapper = mock(ByaiSessionMemberMapper.class);
     private final ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);

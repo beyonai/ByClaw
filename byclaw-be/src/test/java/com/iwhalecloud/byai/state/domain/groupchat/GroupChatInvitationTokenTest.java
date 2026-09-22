@@ -298,6 +298,42 @@ class GroupChatInvitationTokenTest {
         assertThat(preview.isAlreadyMember()).isFalse();
         assertThatThrownBy(() -> application.acceptInvitation(20L, token)).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test void anonymousPreviewIncludesCurrentUserAvatar() {
+        Users user = new Users();
+        user.setUserName("邀请人");
+        user.setState("A");
+        user.setAvatar("/avatars/inviter.png");
+        when(users.findById(10L)).thenReturn(user);
+        var token = service.create(20L).getToken();
+        CurrentUserHolder.clearLoginInfo();
+
+        var preview = service.preview(token);
+
+        assertThat(preview.getMemberPreviews()).singleElement().satisfies(member -> {
+            assertThat(member.getType()).isEqualTo("USER");
+            assertThat(member.getAvatar()).isEqualTo("/avatars/inviter.png");
+        });
+    }
+
+    @Test void nicknameResponseIncludesCurrentUserAvatar() {
+        Users user = new Users();
+        user.setAvatar("/avatars/current.png");
+        when(users.findById(10L)).thenReturn(user);
+        var settings = new GroupChatSettingsService(sessions, extensions, members, auth, sequence,
+            mock(ByaiGroupChatTaskMapper.class), mock(ByaiGroupChatExecutionMapper.class), events);
+        ReflectionTestUtils.setField(settings, "userService", users);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            var updated = settings.updateNickname(20L, "群昵称");
+            assertThat(updated.getMemName()).isEqualTo("群昵称");
+            assertThat(updated.getAvatar()).isEqualTo("/avatars/current.png");
+        }
+        finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
     @Test void invalidExpiredAndRemovedTokensAreRejected() {
         assertThatThrownBy(() -> service.preview("20")).isInstanceOf(IllegalArgumentException.class);
         var token = service.create(20L).getToken();

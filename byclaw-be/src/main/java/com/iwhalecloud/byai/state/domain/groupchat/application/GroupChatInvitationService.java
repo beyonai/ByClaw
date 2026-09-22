@@ -148,9 +148,14 @@ public class GroupChatInvitationService {
                 preview.setDisplayName(agent.getResourceName());
                 preview.setAvatar(agent.getAvatar());
             }
-        } else if (preview.getDisplayName() == null || preview.getDisplayName().isBlank()) {
+        } else if ("USER".equals(member.getMemObjType())) {
             var user = users.findById(member.getMemObjId());
-            if (user != null) preview.setDisplayName(user.getUserName());
+            if (user != null) {
+                if (preview.getDisplayName() == null || preview.getDisplayName().isBlank()) {
+                    preview.setDisplayName(user.getUserName());
+                }
+                preview.setAvatar(user.getAvatar());
+            }
         }
         return preview;
     }

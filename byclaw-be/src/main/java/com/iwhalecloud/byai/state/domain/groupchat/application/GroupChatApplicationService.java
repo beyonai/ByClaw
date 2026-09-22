@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -129,7 +130,7 @@ public class GroupChatApplicationService {
             if (agentIds.stream().anyMatch(id -> id == null || id <= 0)) {
                 throw new BaseException("error.resource.not.exist");
             }
-            Set<Long> existingIds = new java.util.HashSet<>();
+            Set<Long> existingIds = new HashSet<>();
             resourceService.findByIdList(agentIds).forEach(resource -> existingIds.add(resource.getResourceId()));
             if (!existingIds.containsAll(agentIds)) {
                 throw new BaseException("error.resource.not.exist");
@@ -170,6 +171,7 @@ public class GroupChatApplicationService {
         initializeMemberPermissions(session.getSessionId());
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
+        members.forEach(this::fillMemberPresentation);
         response.setMembers(members);
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
@@ -297,22 +299,7 @@ public class GroupChatApplicationService {
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
         List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
-        for (ByaiSessionMember member : members) {
-            if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null
-                && (member.getMemName() == null || member.getMemName().isBlank())) {
-                Users user = userService.findById(member.getMemObjId());
-                if (user != null) {
-                    member.setMemName(user.getUserName());
-                }
-            }
-            else if (MemObjType.AGENT.name().equals(member.getMemObjType()) && resourceService != null) {
-                SsResource agent = resourceService.findById(member.getMemObjId());
-                if (agent != null) {
-                    member.setMemName(agent.getResourceName());
-                    member.setAvatar(agent.getAvatar());
-                }
-            }
-        }
+        members.forEach(this::fillMemberPresentation);
         response.setMembers(members);
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
@@ -396,7 +383,10 @@ public class GroupChatApplicationService {
         sessionService.lockById(sessionId);
         ByaiSession group = invitationService.validateForMemberInvitation(sessionId, token);
         ByaiSessionMember existing = memberService.findSessionMember(group.getSessionId(), "USER", CurrentUserHolder.getCurrentUserId());
-        if (existing != null) return existing;
+        if (existing != null) {
+            fillMemberPresentation(existing);
+            return existing;
+        }
         ByaiSessionMember member = insertMember(group, MemObjType.USER.name(), CurrentUserHolder.getCurrentUserId());
         recordMemberEvent(group, member, invitationService.validatedInviterId(sessionId, token), "MEMBER_INVITED");
         return member;
@@ -479,7 +469,28 @@ public class GroupChatApplicationService {
             member.setLastReadTime(new Date());
         }
         memberService.save(member);
+        fillMemberPresentation(member);
         return member;
+    }
+
+    /** 使用当前用户资料和数字员工资源补齐接口返回的成员展示信息。 */
+    private void fillMemberPresentation(ByaiSessionMember member) {
+        if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null) {
+            Users user = userService.findById(member.getMemObjId());
+            if (user != null) {
+                if (member.getMemName() == null || member.getMemName().isBlank()) {
+                    member.setMemName(user.getUserName());
+                }
+                member.setAvatar(user.getAvatar());
+            }
+        }
+        else if (MemObjType.AGENT.name().equals(member.getMemObjType()) && resourceService != null) {
+            SsResource agent = resourceService.findById(member.getMemObjId());
+            if (agent != null) {
+                member.setMemName(agent.getResourceName());
+                member.setAvatar(agent.getAvatar());
+            }
+        }
     }
 
     @Transactional

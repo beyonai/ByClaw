@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
@@ -30,11 +31,15 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** 群昵称、成员权限及链接加入开关与生命周期。所有写操作先锁群，再校验权限。 */
 @Service
 @RequiredArgsConstructor
 public class GroupChatSettingsService {
+    @Autowired
+    private UserService userService;
+
     private static final String LINK_ENABLED = "group_join_link_enabled";
     private final SessionService sessionService;
     private final SessionExtService extService;
@@ -102,6 +107,10 @@ public class GroupChatSettingsService {
         update.setMemName(validateName(nickname));
         memberService.updateById(update);
         member.setMemName(update.getMemName());
+        if (userService != null) {
+            var user = userService.findById(member.getMemObjId());
+            if (user != null) member.setAvatar(user.getAvatar());
+        }
         publishAfterCommit(sessionId, "MEMBER_UPDATED");
         return member;
     }

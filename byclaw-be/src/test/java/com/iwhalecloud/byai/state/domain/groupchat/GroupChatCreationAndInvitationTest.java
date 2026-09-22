@@ -25,11 +25,13 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
+import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
@@ -150,6 +152,44 @@ class GroupChatCreationAndInvitationTest {
         verify(messages, never()).insert(any(ByaiMessage.class));
         TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
         verifyNoInteractions(events);
+    }
+
+    @Test
+    void createReturnsCurrentUserAvatarForHumanMembers() {
+        UserService users = mock(UserService.class);
+        ReflectionTestUtils.setField(service, "userService", users);
+        Users owner = new Users();
+        owner.setUserName("群主");
+        owner.setAvatar("/avatars/owner.png");
+        when(users.findById(10L)).thenReturn(owner);
+
+        GroupChatDetailResponse result = service.create(request());
+
+        assertThat(result.getMembers()).singleElement().satisfies(member -> {
+            assertThat(member.getMemObjType()).isEqualTo("USER");
+            assertThat(member.getMemName()).isEqualTo("群主");
+            assertThat(member.getAvatar()).isEqualTo("/avatars/owner.png");
+        });
+    }
+
+    @Test
+    void detailRefreshesUserAvatarEvenWhenMemberHasNickname() {
+        UserService users = mock(UserService.class);
+        ReflectionTestUtils.setField(service, "userService", users);
+        ByaiSessionMember member = new ByaiSessionMember();
+        member.setMemObjId(10L);
+        member.setMemObjType("USER");
+        member.setMemName("群昵称");
+        when(members.findOrderedGroupMembers(200L)).thenReturn(List.of(member));
+        Users user = new Users();
+        user.setUserName("原名");
+        user.setAvatar("/avatars/current.png");
+        when(users.findById(10L)).thenReturn(user);
+
+        ByaiSessionMember result = service.detail(200L).getMembers().get(0);
+
+        assertThat(result.getMemName()).isEqualTo("群昵称");
+        assertThat(result.getAvatar()).isEqualTo("/avatars/current.png");
     }
 
     @Test

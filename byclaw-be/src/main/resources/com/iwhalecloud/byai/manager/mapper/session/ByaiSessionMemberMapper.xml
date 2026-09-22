@@ -57,7 +57,10 @@
                        END), ''),
                        NULLIF(TRIM(member.mem_name), '')
                    ) AS mem_name,
-                   resource.avatar,
+                   CASE
+                       WHEN member.mem_obj_type = 'AGENT' THEN resource.avatar
+                       WHEN member.mem_obj_type = 'USER' THEN user_info.thumbnail_uri
+                   END AS avatar,
                    ROW_NUMBER() OVER (
                        PARTITION BY member.session_id
                        ORDER BY CASE
