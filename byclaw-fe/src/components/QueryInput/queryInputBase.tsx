@@ -24,6 +24,7 @@ import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig'
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
 import { getLastMentionedDigitalEmployeeId } from './utils/mention';
+import { getInputResourceProject } from './utils/resourceProject';
 import MentionPopover from './RichInput/mentionPopover';
 import { getResourcePopoverAdapter } from './RichInput/mentionPopover/resourcePopoverAdapter';
 
@@ -764,8 +765,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           }}
           canQuote={this.checkCanQuote()}
           resourceAgentIds={this.getResourceAgentIds()}
-          projectId={this.props.projectId}
-          projectCloudResourceId={this.props.projectCloudResourceId}
+          {...getInputResourceProject(this.props)}
           mentionPopoverPlacement={this.props.mentionPopoverPlacement}
           onResourcePopoverChange={({ open, inputText, width }) => {
             if (!open) {
@@ -846,8 +846,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           type="@"
           chatMode={this.props.chatMode}
           sessionId={this.props.sessionId}
-          projectId={this.props.projectId}
-          projectCloudResourceId={this.props.projectCloudResourceId}
+          {...getInputResourceProject(this.props)}
           agentId={this.getQuoteAgentId()}
           resourceAgentIds={this.getResourceAgentIds()}
           excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
