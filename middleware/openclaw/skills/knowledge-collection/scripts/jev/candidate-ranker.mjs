@@ -1,9 +1,22 @@
 import { callTypeSafeJev } from './typesafe.mjs';
 
 const BATCH_SIZE = 40;
+const TOTAL_BUDGET_MS = 10_000;
+const MAX_REQUEST_CHARS = 2_000;
+const MAX_ID_CHARS = 500;
+const MAX_TITLE_CHARS = 1_000;
+const MAX_SUMMARY_CHARS = 4_000;
+const MAX_LABEL_CHARS = 100;
+const MAX_LABELS = 10;
 
-function text(value) {
-  return typeof value === 'string' ? value.trim() : '';
+function text(value, maximum) {
+  return typeof value === 'string' ? value.trim().slice(0, maximum) : '';
+}
+
+function labels(value) {
+  return Array.isArray(value)
+    ? value.slice(0, MAX_LABELS).map((entry) => text(entry, MAX_LABEL_CHARS)).filter(Boolean)
+    : [];
 }
 
 function eligible(candidate) {
@@ -34,9 +47,19 @@ export async function rankCandidates(request, candidates, options = {}) {
   const rows = source.filter(eligible);
   if (rows.length === 0) return { candidates: source, diagnostic: { status: 'skipped', code: 'NO_ELIGIBLE_CANDIDATES' } };
   const callJev = options.callJev || callTypeSafeJev;
+  const now = options.now || (() => performance.now());
+  const deadline = now() + TOTAL_BUDGET_MS;
+  const outerRemainingBudgetMs = options.remainingBudgetMs;
+  const remainingBudgetMs = () => {
+    const localRemaining = Math.max(0, deadline - now());
+    if (typeof outerRemainingBudgetMs !== 'function') return localRemaining;
+    const outerRemaining = Number(outerRemainingBudgetMs());
+    return Number.isFinite(outerRemaining) ? Math.max(0, Math.min(localRemaining, outerRemaining)) : localRemaining;
+  };
   const scores = new Map();
   let model = null;
   for (let offset = 0; offset < rows.length; offset += BATCH_SIZE) {
+    if (remainingBudgetMs() <= 0) return fallback(source, 'TYPESAFE_RANKING_BUDGET_EXHAUSTED');
     const batch = rows.slice(offset, offset + BATCH_SIZE);
     const questions = Object.fromEntries(batch.map((candidate, index) => [`r${index}`, {
       type: 'noul',
@@ -44,16 +67,16 @@ export async function rankCandidates(request, candidates, options = {}) {
       criteria: { true: 'directly relevant', false: 'not directly relevant' },
     }]));
     const state = {
-      request,
+      request: text(request, MAX_REQUEST_CHARS),
       candidates: Object.fromEntries(batch.map((candidate, index) => [`r${index}`, {
-        id: text(candidate.id) || `candidate-${offset + index}`,
-        title: text(candidate.title),
-        summary: text(candidate.content || candidate.passage || candidate.searxngContent),
-        providers: candidate.providers || [],
-        engines: candidate.engines || [],
+        id: text(candidate.id, MAX_ID_CHARS) || `candidate-${offset + index}`,
+        title: text(candidate.title, MAX_TITLE_CHARS),
+        summary: text(candidate.content || candidate.passage || candidate.searxngContent, MAX_SUMMARY_CHARS),
+        providers: labels(candidate.providers),
+        engines: labels(candidate.engines),
       }])),
     };
-    const response = await callJev({ state, questions }, options);
+    const response = await callJev({ state, questions }, { ...options, remainingBudgetMs });
     if (!response?.ok) return fallback(source, response?.diagnostic?.code || 'TYPESAFE_RANKING_FAILED');
     model = response.document?.model || model;
     for (let index = 0; index < batch.length; index += 1) {

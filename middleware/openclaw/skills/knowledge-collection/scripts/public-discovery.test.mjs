@@ -13,6 +13,51 @@ import * as publicDiscovery from './public-discovery.mjs';
 
 const { runPublicDiscover } = publicDiscovery;
 
+test('global Jev order reaches authorization across display groups with bounded inference budgets', async () => {
+  const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
+  const first = { url: 'https://example.com/news/deepseek-one', title: 'DeepSeek 深度报道', engine: 'google' };
+  const second = { url: 'https://example.com/news/deepseek-two', title: 'DeepSeek 最新报道', engine: 'bing' };
+  await runPublicDiscover(paths, { query: 'DeepSeek', category: 'general' }, {
+    environment: {}, remainingBudgetMs: () => 500, budgetNow: () => 0,
+    planDiscovery: async (input, options) => {
+      assert.deepEqual(input.categoryCandidates, ['general']);
+      assert.equal(options.remainingBudgetMs(), 50);
+      return { effective: { ...input, source: 'automatic' }, jev: { status: 'used' } };
+    },
+    rankCandidates: async (_request, candidates, options) => {
+      assert.equal(options.remainingBudgetMs(), 50);
+      return { candidates: [...candidates].reverse(), diagnostic: { status: 'used' } };
+    },
+    runOnlineSearch: async () => ({ ok: true, document: { results: [first, second] } }),
+    runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }), stderr: '' }),
+    merge: () => ({ groups: { bothChannels: [first], searxngTop: [second] } }),
+  });
+  const observations = loadSession(paths).session.task.discoveryGate.observations;
+  assert.equal(observations[0].url, second.url);
+  assert.equal(observations[0].rank, 1);
+});
+
+test('planned queries preserve the reservation identity and explicit time range', async () => {
+  const { paths } = makeInitializedSession(['public-internet'], '人工智能');
+  const result = await runPublicDiscover(paths, { query: '人工智能 报道', 'time-range': 'week' }, {
+    environment: {},
+    planDiscovery: async (input) => {
+      assert.deepEqual(input.timeRangeCandidates, ['week']);
+      return { effective: { ...input, query: '人工智能', category: 'it', source: 'automatic' }, jev: { status: 'used' } };
+    },
+    runOnlineSearch: async (args) => {
+      assert.equal(args.query, '人工智能');
+      return { ok: true, document: { results: [] } };
+    },
+    runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }), stderr: '' }),
+  });
+  assert.equal(result.ok, true);
+  const run = loadSession(paths).session.task.discoveryGate.runs.at(-1);
+  assert.equal(run.query, '人工智能 报道');
+  assert.equal(run.category, 'general');
+  assert.notEqual(run.status, 'running');
+});
+
 test('selects the bounded Chinese article profile from deterministic task state', () => {
   const session = newSession({
     query: '采集一篇关于米哈游的文章',

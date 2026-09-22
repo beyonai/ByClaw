@@ -35,6 +35,16 @@ function positiveInteger(value, fallback) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function safeHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export async function runSearch1Api(args, options = {}) {
   const environment = options.environment || process.env;
   if (disabled(environment.SEARCH1API_ENABLED)) {
@@ -44,7 +54,7 @@ export async function runSearch1Api(args, options = {}) {
   if (!apiKey) {
     return error('unavailable', 'SEARCH1API_KEY_MISSING', false, 'Search1API is not configured');
   }
-  const timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS);
+  const timeoutMs = Math.min(positiveInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS), DEFAULT_TIMEOUT_MS);
   const timeout = AbortSignal.timeout(timeoutMs);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   const requestedSource = text(args.source).toLowerCase();
@@ -84,9 +94,10 @@ export async function runSearch1Api(args, options = {}) {
     return error('invalid-response', 'SEARCH1API_INVALID_RESPONSE', false, 'Search1API returned an invalid response');
   }
   const results = payload.results.flatMap((row, index) => {
-    if (!row || typeof row !== 'object' || !text(row.link) || !text(row.title)) return [];
+    const url = safeHttpUrl(row?.link);
+    if (!row || typeof row !== 'object' || !url || !text(row.title)) return [];
     return [{
-      url: text(row.link),
+      url,
       title: text(row.title),
       content: text(row.snippet),
       ...(text(row.published_date) ? { publishedAt: text(row.published_date) } : {}),

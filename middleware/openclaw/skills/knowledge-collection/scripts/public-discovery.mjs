@@ -228,6 +228,20 @@ export async function runPublicDiscover(paths, args, options = {}) {
   }
   let query = requireText(args?.query, '--query');
   let category = typeof args?.category === 'string' && args.category.trim() ? args.category.trim() : 'general';
+  // Search planning must never change the parent workflow's reservation identity.
+  const reservationIdentity = { query, category };
+  const budgetNow = options.budgetNow || (() => performance.now());
+  const budgetStartedAt = budgetNow();
+  const discoveryBudgetMs = Math.max(1, Number(args?.timeout || DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS) * 1_000);
+  const remainingBudgetMs = () => Math.max(0, Math.min(
+    discoveryBudgetMs - (budgetNow() - budgetStartedAt),
+    options.remainingBudgetMs ? options.remainingBudgetMs() : Infinity,
+  ));
+  // Optional inference leaves most of the remaining budget for discovery and verification.
+  const enhancementBudget = () => {
+    const deadline = budgetNow() + Math.min(10_000, remainingBudgetMs() / 10);
+    return () => Math.max(0, Math.min(deadline - budgetNow(), remainingBudgetMs()));
+  };
   withSessionLock(paths, 'public-discover-reserve', () => {
     const current = loadSession(paths, { persistMigration: false }).session;
     if (!current.task.discoveryGate) {
@@ -275,10 +289,10 @@ export async function runPublicDiscover(paths, args, options = {}) {
     language,
     timeRange,
     queryCandidates: [...new Set([query, session.task?.query].filter((value) => typeof value === 'string' && value.trim()))],
-    categoryCandidates: [...new Set([category, 'general', 'news', 'it', 'science'])],
-    timeRangeCandidates: [null, 'day', 'week', 'month', 'year'],
+    categoryCandidates: args?.category?.trim() ? [category] : [...new Set([category, 'general', 'news', 'it', 'science'])],
+    timeRangeCandidates: timeRange ? [timeRange] : [null, 'day', 'week', 'month', 'year'],
     sourceCandidates: ['automatic', 'github', 'arxiv'],
-  }, { environment: options.environment || process.env, signal: options.signal });
+  }, { environment: options.environment || process.env, signal: options.signal, remainingBudgetMs: enhancementBudget() });
   query = planned.effective.query;
   category = planned.effective.category;
   timeRange = planned.effective.timeRange;
@@ -307,6 +321,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const runOnlineSearchChannel = async (_spec, { timeoutMs }) => {
     const result = await runOnlineSearch(onlineSearchArgs, {
       timeoutMs,
+      signal: options.signal,
       environment: options.environment || process.env,
       runProcess: options.runProcess || runPublicProcess,
       pythonExecutable: options.pythonExecutable,
@@ -349,7 +364,10 @@ export async function runPublicDiscover(paths, args, options = {}) {
     const startedAt = now();
     let outcome;
     try {
-      outcome = await runner(spec, { timeoutMs });
+      outcome = await runner(spec, {
+        timeoutMs: options.remainingBudgetMs ? Math.max(1, Math.floor(Math.min(timeoutMs, remainingBudgetMs()))) : timeoutMs,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
     } catch (error) {
       outcome = { code: 1, stdout: '', stderr: error.message };
     }
@@ -443,7 +461,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     if (options.orchestrationRunId === undefined) {
       withSessionLock(paths, 'public-discover-failed', () => {
         const current = loadSession(paths, { persistMigration: false }).session;
-        recordDiscoveryResult(current.task.discoveryGate, { query, category, candidates: [], error: failure });
+        recordDiscoveryResult(current.task.discoveryGate, { ...reservationIdentity, candidates: [], error: failure });
         persistSession(paths, current);
       });
     }
@@ -477,8 +495,10 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const ranked = await ranker(session.task?.query || query, mergedCandidates(annotatedMerged), {
     environment: options.environment || process.env,
     signal: options.signal,
+    remainingBudgetMs: enhancementBudget(),
   });
-  const rankedMerged = applyCandidateRanking(annotatedMerged, ranked.candidates);
+  const rankedMerged = ranked.diagnostic?.status === 'used'
+    ? applyCandidateRanking(annotatedMerged, ranked.candidates) : annotatedMerged;
   const candidateQuality = {
     searxng: classifyCandidates(Array.isArray(sxDoc?.results) ? sxDoc.results : [], topicContract),
     merged: summarizeMergedQuality(rankedMerged),
@@ -495,9 +515,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const authorization = withSessionLock(paths, 'public-discover-record', () => {
     const current = loadSession(paths, { persistMigration: false }).session;
     const result = recordDiscoveryResult(current.task.discoveryGate, {
-      query,
-      category,
-      candidates: mergedCandidates(rankedMerged),
+      ...reservationIdentity,
+      candidates: ranked.diagnostic?.status === 'used' ? ranked.candidates : mergedCandidates(annotatedMerged),
       keepOpen: options.orchestrationRunId !== undefined && options.channelMode === 'online',
     });
     persistSession(paths, current);
@@ -569,8 +588,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
       const running = current.task.discoveryGate?.runs?.at(-1)?.status === 'running';
       if (running && options.orchestrationRunId === undefined) {
         recordDiscoveryResult(current.task.discoveryGate, {
-          query,
-          category,
+          ...reservationIdentity,
           candidates: [],
           error: error instanceof Error ? error.message : String(error),
         });

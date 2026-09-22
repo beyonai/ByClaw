@@ -70,6 +70,62 @@ test('uses batches of no more than forty candidates', async () => {
   assert.equal(result.diagnostic.status, 'used');
 });
 
+test('bounds untrusted candidate fields before sending them to Jev', async () => {
+  let observed;
+  const candidates = [candidate('x'.repeat(600), {
+    title: 't'.repeat(1_100),
+    content: 's'.repeat(4_100),
+    providers: Array.from({ length: 12 }, () => 'p'.repeat(110)),
+    engines: Array.from({ length: 12 }, () => 'e'.repeat(110)),
+  })];
+  await rankCandidates('q'.repeat(2_100), candidates, {
+    callJev: async (payload) => {
+      observed = payload.state;
+      return { ok: true, document: { model: 'jev-1', answers: { r0: { type: 'noul', noul: 0.5 } } } };
+    },
+  });
+  assert.equal(observed.request.length, 2_000);
+  assert.equal(observed.candidates.r0.id.length, 500);
+  assert.equal(observed.candidates.r0.title.length, 1_000);
+  assert.equal(observed.candidates.r0.summary.length, 4_000);
+  assert.equal(observed.candidates.r0.providers.length, 10);
+  assert.equal(observed.candidates.r0.providers[0].length, 100);
+  assert.equal(observed.candidates.r0.engines.length, 10);
+});
+
+test('shares a ten-second budget across ranking batches', async () => {
+  const candidates = Array.from({ length: 41 }, (_, index) => candidate(`c${index}`));
+  let clock = 0;
+  let calls = 0;
+  const result = await rankCandidates('agents', candidates, {
+    now: () => clock,
+    callJev: async (payload, options) => {
+      calls += 1;
+      assert.equal(options.remainingBudgetMs(), 10_000);
+      clock = 10_000;
+      return { ok: true, document: { model: 'jev-1', answers:
+        Object.fromEntries(Object.keys(payload.questions).map((key) => [key, { type: 'noul', noul: 0.5 }])) } };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.diagnostic.code, 'TYPESAFE_RANKING_BUDGET_EXHAUSTED');
+  assert.deepEqual(result.candidates, candidates);
+});
+
+test('combines the ranking deadline with an outer remaining budget', async () => {
+  let observedRemaining;
+  await rankCandidates('agents', [candidate('a')], {
+    now: () => 100,
+    remainingBudgetMs: () => 250,
+    callJev: async (payload, options) => {
+      observedRemaining = options.remainingBudgetMs();
+      return { ok: true, document: { model: 'jev-1', answers:
+        Object.fromEntries(Object.keys(payload.questions).map((key) => [key, { type: 'noul', noul: 0.5 }])) } };
+    },
+  });
+  assert.equal(observedRemaining, 250);
+});
+
 for (const [name, callJev] of [
   ['provider failure', async () => ({ ok: false, diagnostic: { status: 'failed', code: 'TYPESAFE_HTTP_503' } })],
   ['missing score', async () => ({ ok: true, document: { model: 'jev-1', answers: {}, usage: {} } })],

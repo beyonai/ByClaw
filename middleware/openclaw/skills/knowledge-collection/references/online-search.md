@@ -10,8 +10,10 @@ WSA 从运行环境读取 `TENCENTCLOUD_SECRET_ID` 和 `TENCENTCLOUD_SECRET_KEY`
 
 Search1API 从运行环境读取 `SEARCH1API_API_KEY`，可用 `SEARCH1API_ENABLED=false` 显式关闭，
 `SEARCH1API_BASE_URL` 仅用于受控端点覆盖。TypeSafe Jev 从 `TYPESAFE_API_KEY` 读取凭据，并支持
-`TYPESAFE_MODEL` 可选，缺省使用 `jev-latest`；Jev 是否启用仅由 `TYPESAFE_API_KEY` 是否存在决定，调用超时固定为 10 秒。凭据缺失或调用失败时，规划和排序保持现有逻辑；
+`TYPESAFE_MODEL` 可选，缺省使用 `jev-latest`；Jev 是否启用仅由 `TYPESAFE_API_KEY` 是否存在决定，单次调用上限固定为 10 秒。规划与排序各自最多使用剩余发现预算的 10%（且不超过 10 秒），排序的全部批次共享该预算，并受 `public-collect` 总剩余预算约束。凭据缺失、预算耗尽或调用失败时，规划和排序保持现有逻辑；
 诊断只记录能力状态，不记录凭据。Jev 只提供规划与排序证据，不能授权 URL，也不能充当正文或 full-text evidence。
+
+显式指定的分类和时间范围不会被规划覆盖；改写后的检索词不改变原始发现预约标识，保证结果回写、重试和恢复使用同一工作流身份。排序输入会限制字段长度和来源数量。
 
 
 

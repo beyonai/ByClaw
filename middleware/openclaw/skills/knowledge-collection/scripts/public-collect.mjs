@@ -165,7 +165,7 @@ export async function runPublicCollect(paths, rawInput, options = {}) {
   const discover = options.discover || ((targetPaths, args, context) => runPublicDiscover(
     targetPaths,
     { ...args, timeout: String(Math.max(1, Math.ceil(context.remainingBudgetMs / 1_000))) },
-    { orchestrationRunId: context.runId, channelMode: context.channel },
+    { orchestrationRunId: context.runId, channelMode: context.channel, remainingBudgetMs },
   ));
   const managedDiscoveryGate = !options.discover;
   const verify = options.verify || ((targetPaths, attempt, context) => verifyCandidate(

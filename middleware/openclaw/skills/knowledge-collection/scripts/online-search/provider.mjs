@@ -2,6 +2,8 @@ import { runSearxng as defaultRunSearxng } from './searxng.mjs';
 import { runSearch1Api as defaultRunSearch1Api } from './search1api.mjs';
 import { runTencentWsa as defaultRunWsa } from './tencent-wsa.mjs';
 
+const MAX_COMMERCIAL_PROVIDER_TIMEOUT_MS = 15_000;
+
 function elapsed(start, end) {
   const value = Number(end) - Number(start);
   return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
@@ -43,6 +45,14 @@ function normalizedResult(row, provider, index) {
     providers: [provider], engines: [engine], providerAgreement: 1 };
 }
 
+function distinctValues(...values) {
+  return [...new Set(values.flat().filter((value) => typeof value === 'string' && value.trim()))];
+}
+
+function mergedText(left, right) {
+  return distinctValues(left, right).join('\n');
+}
+
 function mergeDocuments(successes, query) {
   const merged = new Map();
   for (const { provider, document } of successes) {
@@ -57,21 +67,31 @@ function mergeDocuments(successes, query) {
       }
       const providers = [...new Set([...found.providers, provider])];
       const engines = [...new Set([...found.engines, row.engine])];
+      const sourceUrls = distinctValues(found.sourceUrls || [], found.url, row.sourceUrls || [], row.url);
       merged.set(key, { ...found,
         title: String(row.title || '').length > String(found.title || '').length ? row.title : found.title,
-        content: String(row.content || '').length > String(found.content || '').length ? row.content : found.content,
+        content: mergedText(found.content, row.content),
+        passage: mergedText(found.passage, row.passage),
+        sourceUrls,
         originalRank: Math.min(found.originalRank, row.originalRank), providers, engines,
         providerAgreement: providers.length });
     }
   }
   const providers = successes.map(({ provider }) => provider);
-  return { query, provider: providers.length === 1 ? providers[0] : 'multi', providers,
+  const providerDocument = successes.length === 1 ? successes[0].document : {};
+  return { ...providerDocument, query, provider: providers.length === 1 ? providers[0] : 'multi', providers,
     fallbackUsed: false, results: [...merged.values()] };
 }
 
-async function timed(run, now) {
+async function timed(run, now, failureCode) {
   const startedAt = now();
-  const result = await run();
+  let result;
+  try {
+    result = await run();
+  } catch {
+    result = { ok: false, error: { category: 'provider', code: failureCode,
+      retryable: true, message: 'Online search provider failed unexpectedly' } };
+  }
   return { result, durationMs: elapsed(startedAt, now()) };
 }
 
@@ -79,12 +99,16 @@ export async function runOnlineSearch(args, options = {}) {
   const now = options.now || (() => performance.now());
   const startedAt = now();
   const timeoutMs = Number.isSafeInteger(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 60_000;
+  const commercialTimeoutMs = Math.max(1, Math.min(
+    MAX_COMMERCIAL_PROVIDER_TIMEOUT_MS,
+    Math.floor(timeoutMs / 2),
+  ));
   const environment = options.environment || process.env;
   const [wsa, search1api] = await Promise.all([
-    timed(() => (options.runWsa || defaultRunWsa)(args, { environment, timeoutMs,
-      client: options.wsaClient, capabilities: options.wsaCapabilities }), now),
-    timed(() => (options.runSearch1Api || defaultRunSearch1Api)(args, { environment, timeoutMs,
-      fetchImpl: options.search1ApiFetch }), now),
+    timed(() => (options.runWsa || defaultRunWsa)(args, { environment, timeoutMs: commercialTimeoutMs,
+      client: options.wsaClient, capabilities: options.wsaCapabilities }), now, 'WSA_UNEXPECTED_ERROR'),
+    timed(() => (options.runSearch1Api || defaultRunSearch1Api)(args, { environment, timeoutMs: commercialTimeoutMs,
+      fetchImpl: options.search1ApiFetch, signal: options.signal }), now, 'SEARCH1API_UNEXPECTED_ERROR'),
   ]);
   const providerDiagnostics = {
     tencentWsa: wsa.result?.ok ? successDiagnostic(wsa.result, wsa.durationMs) : failedDiagnostic(wsa.result, wsa.durationMs),
@@ -103,6 +127,10 @@ export async function runOnlineSearch(args, options = {}) {
   const remainingMs = timeoutMs - elapsed(startedAt, now());
   if (remainingMs <= 0) {
     providerDiagnostics.searxng = { status: 'skipped', durationMs: 0, skipReason: 'hard_budget_exhausted' };
+    if (successes.length > 0) {
+      const document = mergeDocuments(successes, args.query);
+      return { ok: true, durationMs: elapsed(startedAt, now()), document: { ...document, providerDiagnostics } };
+    }
     return { ok: false, provider: null, fallbackUsed: false,
       error: { category: 'timeout', code: 'ONLINE_SEARCH_FAILED', retryable: true,
         message: 'Online search hard budget exhausted' }, providerDiagnostics,
@@ -110,12 +138,16 @@ export async function runOnlineSearch(args, options = {}) {
   }
   const searxng = await timed(() => (options.runSearxng || defaultRunSearxng)(args, { environment,
     timeoutMs: remainingMs, runProcess: options.runProcess, pythonExecutable: options.pythonExecutable,
-    searxngScript: options.searxngScript }), now);
+    searxngScript: options.searxngScript }), now, 'SEARXNG_UNEXPECTED_ERROR');
   providerDiagnostics.searxng = searxng.result?.ok ? successDiagnostic(searxng.result, searxng.durationMs)
     : failedDiagnostic(searxng.result, searxng.durationMs);
   if (searxng.result?.ok && searxng.result.document) {
     const document = mergeDocuments([...successes, { provider: 'searxng', document: searxng.result.document }], args.query);
     document.fallbackUsed = successes.length === 0;
+    return { ok: true, durationMs: elapsed(startedAt, now()), document: { ...document, providerDiagnostics } };
+  }
+  if (successes.length > 0) {
+    const document = mergeDocuments(successes, args.query);
     return { ok: true, durationMs: elapsed(startedAt, now()), document: { ...document, providerDiagnostics } };
   }
   return { ok: false, provider: 'searxng', fallbackUsed: true,

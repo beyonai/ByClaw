@@ -22,6 +22,21 @@ test('returns WSA results without calling SearXNG', async () => {
   assert.equal(searxngCalls, 0);
 });
 
+test('preserves metadata from a single successful provider', async () => {
+  const result = await runOnlineSearch({ query: '人工智能' }, {
+    runWsa: async () => ({ ok: true, document: {
+      query: '人工智能', requestId: 'request-1', providerVersion: 'v1', warnings: ['partial'], message: 'ok',
+      results: [{ url: 'https://example.com/a', title: 'A' }],
+    } }),
+    runSearch1Api: async () => ({ ok: false, error: { category: 'unavailable', code: 'SEARCH1API_KEY_MISSING' } }),
+  });
+  assert.equal(result.document.requestId, 'request-1');
+  assert.equal(result.document.providerVersion, 'v1');
+  assert.deepEqual(result.document.warnings, ['partial']);
+  assert.equal(result.document.message, 'ok');
+  assert.equal(Object.hasOwn(result.document.results[0], 'sourceUrls'), false);
+});
+
 test('does not fall back when WSA returns fewer results than requested', async () => {
   let searxngCalls = 0;
   const result = await runOnlineSearch({ query: '人工智能', 'requested-count': '3' }, {
@@ -128,12 +143,15 @@ test('merges concurrent WSA and Search1API results with agreement evidence', asy
   const resultPromise = runOnlineSearch({ query: 'agent memory' }, {
     runWsa: async () => { await search1Ready; return {
       ok: true,
-      document: { query: 'agent memory', results: [{ url: 'https://example.com/a?utm_source=x', title: 'A', engine: 'wsa' }] },
+      document: { query: 'agent memory', results: [{
+        url: 'https://example.com/a?utm_source=x', title: 'A', content: 'short WSA evidence', engine: 'wsa',
+      }] },
     }; },
     runSearch1Api: async () => { releaseSearch1(); releaseWsa(); return {
       ok: true,
       document: { query: 'agent memory', results: [
-        { url: 'https://example.com/a', title: 'A richer title', engine: 'google', provider: 'search1api', originalRank: 2 },
+        { url: 'https://example.com/a', title: 'A richer title', content: 'different Search1 evidence',
+          engine: 'google', provider: 'search1api', originalRank: 2 },
         { url: 'https://example.com/b', title: 'B', engine: 'github', provider: 'search1api', originalRank: 1 },
       ] },
     }; },
@@ -147,6 +165,41 @@ test('merges concurrent WSA and Search1API results with agreement evidence', asy
   assert.deepEqual(result.document.results[0].providers, ['tencent-wsa', 'search1api']);
   assert.deepEqual(result.document.results[0].engines, ['wsa', 'google']);
   assert.equal(result.document.results[0].providerAgreement, 2);
+  assert.deepEqual(result.document.results[0].sourceUrls, [
+    'https://example.com/a?utm_source=x',
+    'https://example.com/a',
+  ]);
+  assert.equal(result.document.results[0].content, 'short WSA evidence\ndifferent Search1 evidence');
+});
+
+test('reserves fallback time by bounding concurrent commercial providers to half the total budget', async () => {
+  const observed = [];
+  await runOnlineSearch({ query: 'agent memory' }, {
+    timeoutMs: 10_000,
+    runWsa: async (_args, options) => {
+      observed.push(options.timeoutMs);
+      return { ok: true, document: { query: 'agent memory', results: [] } };
+    },
+    runSearch1Api: async (_args, options) => {
+      observed.push(options.timeoutMs);
+      return { ok: false, error: { category: 'unavailable', code: 'SEARCH1API_KEY_MISSING' } };
+    },
+  });
+  assert.deepEqual(observed, [5_000, 5_000]);
+
+  observed.length = 0;
+  await runOnlineSearch({ query: 'agent memory' }, {
+    timeoutMs: 60_000,
+    runWsa: async (_args, options) => {
+      observed.push(options.timeoutMs);
+      return { ok: true, document: { query: 'agent memory', results: [] } };
+    },
+    runSearch1Api: async (_args, options) => {
+      observed.push(options.timeoutMs);
+      return { ok: false, error: { category: 'unavailable', code: 'SEARCH1API_KEY_MISSING' } };
+    },
+  });
+  assert.deepEqual(observed, [15_000, 15_000]);
 });
 
 test('falls back to SearXNG when WSA and Search1API are both unavailable', async () => {
@@ -157,4 +210,45 @@ test('falls back to SearXNG when WSA and Search1API are both unavailable', async
   });
   assert.equal(result.document.provider, 'searxng');
   assert.equal(result.document.providerDiagnostics.search1api.code, 'SEARCH1API_KEY_MISSING');
+});
+
+test('isolates an unexpected provider exception and uses the other provider', async () => {
+  const result = await runOnlineSearch({ query: 'agent memory' }, {
+    runWsa: async () => { throw new Error('credential must not escape'); },
+    runSearch1Api: async () => ({ ok: true, document: { query: 'agent memory', results: [] } }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.document.provider, 'search1api');
+  assert.equal(result.document.providerDiagnostics.tencentWsa.code, 'WSA_UNEXPECTED_ERROR');
+  assert.equal(JSON.stringify(result).includes('credential must not escape'), false);
+});
+
+test('passes the cancellation signal to Search1API', async () => {
+  const controller = new AbortController();
+  let observedSignal;
+  await runOnlineSearch({ query: 'agent memory' }, {
+    signal: controller.signal,
+    runWsa: async () => ({ ok: false, error: { category: 'unavailable', code: 'WSA_DISABLED' } }),
+    runSearch1Api: async (_args, options) => {
+      observedSignal = options.signal;
+      return { ok: true, document: { query: 'agent memory', results: [] } };
+    },
+  });
+  assert.equal(observedSignal, controller.signal);
+});
+
+test('keeps successful commercial results when supplemental SearXNG fails', async () => {
+  const result = await runOnlineSearch({ query: 'agent memory' }, {
+    supplementWithSearxng: true,
+    runWsa: async () => ({ ok: true, document: { query: 'agent memory', results: [
+      { url: 'https://example.com/a', title: 'A' },
+    ] } }),
+    runSearch1Api: async () => ({ ok: false, error: { category: 'unavailable', code: 'SEARCH1API_KEY_MISSING' } }),
+    runSearxng: async () => ({ ok: false, error: { category: 'provider', code: 'SEARXNG_FAILED' } }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.document.provider, 'tencent-wsa');
+  assert.equal(result.document.fallbackUsed, false);
+  assert.equal(result.document.results.length, 1);
+  assert.equal(result.document.providerDiagnostics.searxng.code, 'SEARXNG_FAILED');
 });

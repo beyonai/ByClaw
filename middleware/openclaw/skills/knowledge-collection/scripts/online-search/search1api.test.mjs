@@ -88,3 +88,43 @@ test('rejects malformed Search1API success responses', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.error.category, 'invalid-response');
 });
+
+test('caps the Search1API timeout and combines it with a caller cancellation signal', async () => {
+  const controller = new AbortController();
+  const originalTimeout = AbortSignal.timeout;
+  let observedTimeout;
+  let observedSignal;
+  AbortSignal.timeout = (timeoutMs) => {
+    observedTimeout = timeoutMs;
+    return originalTimeout(timeoutMs);
+  };
+  try {
+    const result = await runSearch1Api({ query: 'agents' }, {
+      environment: { SEARCH1API_API_KEY: 'secret' },
+      timeoutMs: 60_000,
+      signal: controller.signal,
+      fetchImpl: async (_url, init) => {
+        observedSignal = init.signal;
+        controller.abort();
+        throw new DOMException('aborted', 'AbortError');
+      },
+    });
+    assert.equal(observedTimeout, 15_000);
+    assert.equal(observedSignal.aborted, true);
+    assert.equal(result.error.code, 'SEARCH1API_CANCELLED');
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
+});
+
+test('filters unsafe or credential-bearing result URLs', async () => {
+  const result = await runSearch1Api({ query: 'agents' }, {
+    environment: { SEARCH1API_API_KEY: 'secret' },
+    fetchImpl: async () => new Response(JSON.stringify({ results: [
+      { link: 'javascript:alert(1)', title: 'script' },
+      { link: 'https://user:pass@example.com/private', title: 'credentials' },
+      { link: 'https://example.com/safe', title: 'safe' },
+    ] }), { status: 200 }),
+  });
+  assert.deepEqual(result.document.results.map((row) => row.url), ['https://example.com/safe']);
+});

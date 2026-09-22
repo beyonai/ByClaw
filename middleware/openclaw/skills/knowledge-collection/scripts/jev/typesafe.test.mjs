@@ -73,6 +73,36 @@ test('returns unavailable without calling fetch when the token is missing', asyn
   assert.equal(result.diagnostic.code, 'TYPESAFE_API_KEY_MISSING');
 });
 
+test('does not call fetch when the shared request budget is exhausted', async () => {
+  let calls = 0;
+  const result = await callTypeSafeJev({ state: {}, questions: {} }, {
+    environment: { TYPESAFE_API_KEY: 'secret-value' },
+    remainingBudgetMs: () => 0,
+    fetchImpl: async () => { calls += 1; },
+  });
+  assert.equal(calls, 0);
+  assert.equal(result.ok, false);
+  assert.equal(result.diagnostic.code, 'TYPESAFE_BUDGET_EXHAUSTED');
+});
+
+test('caps each request timeout at the smaller shared budget', async () => {
+  let observedSignal;
+  const result = await callTypeSafeJev({ state: {}, questions: {} }, {
+    environment: { TYPESAFE_API_KEY: 'secret-value' },
+    remainingBudgetMs: () => 25,
+    fetchImpl: async (_url, init) => {
+      observedSignal = init.signal;
+      return new Promise((_resolve, reject) => {
+        const keepAlive = setTimeout(() => reject(new Error('timeout signal did not fire')), 100);
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+        init.signal.addEventListener('abort', () => clearTimeout(keepAlive), { once: true });
+      });
+    },
+  });
+  assert.equal(observedSignal.aborted, true);
+  assert.equal(result.diagnostic.code, 'TYPESAFE_TIMEOUT');
+});
+
 for (const [status, category, code] of [
   [401, 'authentication', 'TYPESAFE_HTTP_401'],
   [402, 'payment', 'TYPESAFE_HTTP_402'],

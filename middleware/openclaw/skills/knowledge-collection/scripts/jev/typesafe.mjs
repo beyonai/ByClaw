@@ -39,6 +39,13 @@ function normalizedUsage(value) {
   };
 }
 
+function requestBudget(options) {
+  if (typeof options.remainingBudgetMs !== 'function') return DEFAULT_TIMEOUT_MS;
+  const remaining = Number(options.remainingBudgetMs());
+  if (!Number.isFinite(remaining)) return DEFAULT_TIMEOUT_MS;
+  return Math.min(DEFAULT_TIMEOUT_MS, Math.floor(remaining));
+}
+
 export async function callTypeSafeJev(payload, options = {}) {
   const environment = options.environment || process.env;
   const capability = resolveTypeSafeCapability(environment);
@@ -47,8 +54,14 @@ export async function callTypeSafeJev(payload, options = {}) {
       'TypeSafe Jev is not configured');
   }
 
+  const timeoutMs = requestBudget(options);
+  if (timeoutMs <= 0) {
+    return failure('failed', 'timeout', 'TYPESAFE_BUDGET_EXHAUSTED', false,
+      'TypeSafe Jev request budget is exhausted');
+  }
+
   const fetchImpl = options.fetchImpl || fetch;
-  const timeout = AbortSignal.timeout(capability.timeoutMs);
+  const timeout = AbortSignal.timeout(timeoutMs);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   let response;
   try {
