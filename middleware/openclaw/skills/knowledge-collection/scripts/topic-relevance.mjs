@@ -171,7 +171,10 @@ function normalizeLexicalBoundaries(value) {
 }
 
 function anchorPattern(anchor) {
-  const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[\s\-_.+]+/gu, '[\\s\\-_.+]+');
+  // Split separators before escaping so literal dots/pluses cannot leave stray backslashes.
+  const escaped = anchor.split(/[\s\-_.+]+/u)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[\\s\\-_.+]+');
   return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
 }
 

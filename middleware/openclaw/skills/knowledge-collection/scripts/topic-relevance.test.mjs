@@ -92,6 +92,17 @@ test('Latin anchors use token boundaries instead of substring matching', () => {
   }).status, 'matched');
 });
 
+test('punctuated topic anchors compile and retain matching and token boundaries', () => {
+  for (const subject of ['Node.js', 'C++', 'GPT-4', 'foo_bar', 'Node.js + C++']) {
+    const contract = createTopicContract(`采集一篇关于 ${subject} 的文章`);
+    assert.equal(contract.required, true);
+    assert.doesNotThrow(() => assertDiscoveryQueryMatches(contract, `${subject} 技术资料`));
+    assert.equal(assessCandidateTopic(contract, { title: `${subject} 技术介绍` }).status, 'matched');
+    assert.equal(assessCandidateTopic(contract, { title: `prefix${subject}suffix` }).status, 'unmatched');
+    assert.equal(assessCandidateTopic(contract, { title: '无关主题介绍' }).status, 'unmatched');
+  }
+});
+
 test('matches Latin and numeric topic anchors across Chinese script boundaries', () => {
   const contract = createTopicContract('iPhone 18 文章');
   const titles = [

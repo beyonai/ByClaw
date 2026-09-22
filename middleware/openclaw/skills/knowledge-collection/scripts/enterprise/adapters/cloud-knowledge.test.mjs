@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createCloudKnowledgeAdapter, resolveCloudKnowledgeScript } from './cloud-knowledge.mjs';
 import { newSession, persistSession } from '../../session.mjs';
+import { dispatchEnterprise } from '../dispatcher.mjs';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'cloud-knowledge-'));
@@ -59,6 +60,32 @@ test('cloud knowledge script resolution falls back from the container skill root
     resolved,
     '/opt/byclaw/dsh-managed/skills/project-cloud-knowledge/scripts/project_cloud_knowledge.py',
   );
+});
+
+test('default enterprise dispatcher honors the adapter resolver and legacy script override', async () => {
+  for (const override of ['PROJECT_CLOUD_KNOWLEDGE_SCRIPT', 'CLOUD_KNOWLEDGE_CLI']) {
+    const { root, script } = await fixture();
+    const keys = ['PYTHON_BIN', 'PROJECT_CLOUD_KNOWLEDGE_SCRIPT', 'CLOUD_KNOWLEDGE_CLI'];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    try {
+      process.env.PYTHON_BIN = process.execPath;
+      delete process.env.CLOUD_KNOWLEDGE_CLI;
+      process.env.PROJECT_CLOUD_KNOWLEDGE_SCRIPT = '/missing/cloud-script.py';
+      process.env[override] = script;
+      const result = await dispatchEnterprise('search', {
+        source: 'cloud-knowledge', query: '巡检流程', 'output-dir': root,
+      });
+      assert.equal(result.status, 'complete', JSON.stringify(result));
+      const metadata = JSON.parse(await readFile(join(root, 'sanitized/metadata.json'), 'utf8'));
+      assert.equal(metadata.collection.items[0].filePath, '/docs/a.md');
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  }
 });
 
 test('cloud knowledge adapter searches only authorized candidates and materializes selected Markdown safely', async () => {
