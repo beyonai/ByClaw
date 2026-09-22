@@ -177,7 +177,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   componentDidUpdate(prevProps: IProps) {
     if (`${prevProps.sessionId || ''}` !== `${this.props.sessionId || ''}`) {
-      // 新会话取得真实 sessionId 后恢复共享草稿，保证未发送内容和所有 @ 员工仍在输入框。
+      // 新会话取得真实 sessionId 后恢复该会话草稿，保证未发送内容和所有 @ 员工仍在输入框。
       this.restoreInputDraft();
     }
   }
