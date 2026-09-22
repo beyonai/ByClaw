@@ -7,12 +7,16 @@ import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationServ
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
+import com.iwhalecloud.byai.common.constants.login.ShareSessionKey;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLoginAutoStartService;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.List;
 
@@ -60,6 +64,7 @@ class LoginApplicationServiceTest {
         users.setUserCode("zhangsan");
         users.setUserName("张三");
         users.setAssistantId(7L);
+        users.setAvatar("/commonFile/preview?filePath=avatar.png");
 
         SuasSuperassist superassist = new SuasSuperassist();
         superassist.setDefaultDigEmployeeId(200L);
@@ -76,6 +81,36 @@ class LoginApplicationServiceTest {
         assertThat(result.getDefaultDigEmployeeId()).isEqualTo(200L);
         assertThat(result.getEnterpriseId()).isEqualTo(99L);
         assertThat(result.getComAcctId()).isEqualTo(99L);
+        assertThat(result.getAvatar()).isEqualTo(users.getAvatar());
+        assertThat(service.buildShareCurrentUserObjectMap(result)).containsEntry("avatar", users.getAvatar());
+    }
+
+    @Test
+    void currentUserReturnsSavedAvatarInsteadOfOldSessionAvatar() {
+        LoginApplicationService service = new LoginApplicationService();
+        UserService userService = mock(UserService.class);
+        SuasSuperassistService superassistService = mock(SuasSuperassistService.class);
+        ReflectionTestUtils.setField(service, "userService", userService);
+        ReflectionTestUtils.setField(service, "userApplicationService", mock(UserApplicationService.class));
+        ReflectionTestUtils.setField(service, "suasSuperassistService", superassistService);
+        ReflectionTestUtils.setField(service, "sandboxLoginAutoStartService", mock(SandboxLoginAutoStartService.class));
+        ReflectionTestUtils.setField(service, "authRedisSyncService", mock(AuthRedisSyncService.class));
+        Users user = new Users();
+        user.setUserId(1L);
+        user.setAvatar("saved-avatar");
+        when(userService.findById(1L)).thenReturn(user);
+        SuasSuperassist superassist = new SuasSuperassist();
+        superassist.setSessionDatasetId(10L);
+        superassist.setDefaultDigEmployeeId(20L);
+        when(superassistService.findById(1L)).thenReturn(superassist);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession().setAttribute("userCode", "tester");
+        request.getSession().setAttribute(ShareSessionKey.SHARE_CURRENT_USER,
+            "{\"userId\":1,\"userCode\":\"tester\",\"avatar\":\"old-avatar\"}");
+
+        LoginInfo result = service.currentUser(request).getData();
+
+        assertThat(result.getAvatar()).isEqualTo("saved-avatar");
     }
 
     @Test

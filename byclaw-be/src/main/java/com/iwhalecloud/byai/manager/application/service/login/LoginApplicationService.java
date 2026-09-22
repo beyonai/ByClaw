@@ -145,6 +145,7 @@ public class LoginApplicationService {
         loginInfo.setUserName(users.getUserName());
         loginInfo.setAssistantId(users.getAssistantId());
         loginInfo.setPhone(users.getPhone());
+        loginInfo.setAvatar(users.getAvatar());
         loginInfo.setEmail(users.getEmail());
         loginInfo.setRegisterType(users.getRegisterType());
         loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId());
@@ -226,6 +227,7 @@ public class LoginApplicationService {
         shareCurrentUser.put("enterpriseId", loginInfo.getEnterpriseId());
         shareCurrentUser.put("comAcctId", loginInfo.getEnterpriseId());
         shareCurrentUser.put("phone", loginInfo.getPhone());
+        shareCurrentUser.put("avatar", loginInfo.getAvatar());
         return shareCurrentUser;
     }
 
@@ -259,6 +261,8 @@ public class LoginApplicationService {
 
             // 检查用户密码是否是默认密码
             Users users = userService.findById(loginInfo.getUserId());
+            // 头像可能在当前 session 建立后更新，使用数据库值覆盖会话快照。
+            loginInfo.setAvatar(users != null ? users.getAvatar() : null);
             loginInfo.setIsDefaultPwd(userApplicationService.checkDefaultPwd(users));
 
             // 用户关联组织

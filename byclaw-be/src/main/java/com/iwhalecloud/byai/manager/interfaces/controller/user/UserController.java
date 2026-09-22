@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.user;
 
 import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.UserAvatarApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserTokenQuotaApplicationService;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.UserTokenQuota;
@@ -20,13 +21,18 @@ import com.iwhalecloud.byai.common.annotation.Mod;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.Map;
 
 /**
@@ -39,10 +45,21 @@ public class UserController {
     private UserApplicationService userApplicationService;
 
     @Autowired
+    private UserAvatarApplicationService userAvatarApplicationService;
+
+    @Autowired
     protected SuasSuperassistService suasSuperassistService;
 
     @Autowired
     private UserTokenQuotaApplicationService userTokenQuotaApplicationService;
+
+    /**
+     * 上传图片并保存为当前登录用户的头像，返回已保存的头像地址。
+     */
+    @PostMapping(value = "/uploadAvatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseUtil<String> uploadAvatar(@RequestPart("file") MultipartFile file) throws IOException {
+        return ResponseUtil.successRes(userAvatarApplicationService.uploadAvatar(file));
+    }
 
     /**
      * 新增用户
