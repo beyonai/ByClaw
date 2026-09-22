@@ -521,95 +521,39 @@
     line-height: 18px;
   }
 
-  .abilityCollapse {
-    :global {
-      .@{antPrefix}-collapse-item {
-        border: 1px solid #e8e8e8;
-        border-radius: 6px;
-        margin-bottom: 8px;
-
-        &:last-child {
-          margin-bottom: 0;
-        }
-
-        .@{antPrefix}-collapse-header {
-          padding: 0px 12px;
-          align-items: center;
-        }
-
-        .@{antPrefix}-collapse-content-box {
-          padding: 0 !important;
-        }
-      }
-      .@{antPrefix}-input:not(.@{antPrefix}-input-textarea) {
-        border: none !important;
-        font-size: 14px;
-      }
-      .@{antPrefix}-input:not(.@{antPrefix}-input-textarea):focus {
-        outline: none !important;
-        border: none !important;
-        box-shadow: none !important;
-      }
-    }
-  }
-
-  .abilityPanelHeader {
+  .responsibilityList {
     display: flex;
-    align-items: center;
-    width: 100%;
-    padding-right: 8px;
+    flex-direction: column;
+    gap: 8px;
 
-    .abilityIcon {
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 16px;
-      height: 16px;
-      flex-shrink: 0;
-      transition: all 0.2s ease;
+    :global {
+      .@{antPrefix}-card:hover {
+        background-color: #f7fafc;
 
-      &:hover {
-        opacity: 0.8;
-      }
-    }
-
-    .abilityNameInput {
-      flex: 1;
-      font-size: 14px;
-      font-weight: 500;
-      color: #14161a;
-
-      :global {
         .@{antPrefix}-input {
-          padding: 0;
-          border: none;
-          background: transparent;
+          background-color: #f7fafc;
         }
       }
-    }
 
-    .abilityPanelActions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
+      .@{antPrefix}-card-body {
+        padding: 0 16px;
+      }
 
-      .actionIcon {
-        color: #999;
-        font-size: 16px;
+      .anticon {
         cursor: pointer;
-        transition: all 0.2s ease;
+      }
 
-        &:hover {
-          color: #165dff;
-        }
+      .@{antPrefix}-input {
+        padding: 0;
+        border: none;
       }
     }
   }
 
-  .abilityPanelContent {
-    padding-top: 8px;
+  .responsibilityRow {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
 }
 

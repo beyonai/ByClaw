@@ -589,7 +589,7 @@ const ConfigForm = (props) => {
     setRefineModalOpen,
     auditErrors = {},
     terminalTypeList = [],
-    initialCoreCompetencies = [],
+    initialCoreCompetencies,
     ownerType,
     agentType,
     employeeGroupMembers = [],
@@ -1009,7 +1009,7 @@ const ConfigForm = (props) => {
   );
 
   // 记录上一次的初始岗位职责，用于判断是否需要根据外部变更重新回显
-  const prevInitialCoreCompetenciesRef = useRef([]);
+  const prevInitialCoreCompetenciesRef = useRef(null);
 
   // 岗位职责列表状态
   const [coreAbilities, setCoreAbilities] = useState(() => {
@@ -1202,12 +1202,18 @@ const ConfigForm = (props) => {
   useEffect(() => {
     const coreCompetenciesFromForm = initialCoreCompetencies;
 
-    if (!Array.isArray(coreCompetenciesFromForm) || coreCompetenciesFromForm.length === 0) {
+    if (!Array.isArray(coreCompetenciesFromForm)) {
       return;
     }
 
-    const hasCoreCompetenciesChanged =
-      JSON.stringify(coreCompetenciesFromForm || []) !== JSON.stringify(prevInitialCoreCompetenciesRef.current || []);
+    // 首次无职责时保留默认输入行；之后弹窗传回空列表时需清空，包括删除本地新增的职责。
+    if (prevInitialCoreCompetenciesRef.current === null && coreCompetenciesFromForm.length === 0) {
+      prevInitialCoreCompetenciesRef.current = coreCompetenciesFromForm;
+      return;
+    }
+
+    // 每次外部应用的新列表都应回显，即使内容与上次相同，本地输入也可能已经修改。
+    const hasCoreCompetenciesChanged = coreCompetenciesFromForm !== prevInitialCoreCompetenciesRef.current;
 
     if (!hasCoreCompetenciesChanged) {
       return;

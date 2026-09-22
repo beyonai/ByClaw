@@ -803,12 +803,6 @@ export default {
   'headerSearch.currentTool': 'Current Tool',
   'headerSearch.personalTool': 'Personal Tool',
   'headerSearch.enterpriseTool': 'Enterprise Tool',
-  'headerSearch.currentView': 'Current View',
-  'headerSearch.personalView': 'Personal View',
-  'headerSearch.enterpriseView': 'Enterprise View',
-  'headerSearch.currentObject': 'Current Object',
-  'headerSearch.personalObject': 'Personal Object',
-  'headerSearch.enterpriseObject': 'Enterprise Object',
   'headerSearch.currentSkill': 'Current Skill',
   'headerSearch.personalSkill': 'Personal Skill',
   'headerSearch.enterpriseSkill': 'Enterprise Skill',
@@ -1503,8 +1497,7 @@ export default {
   'sider.space': 'Space',
   // 侧栏固定宽度较窄，使用简短文案避免英文被截断。
   'sider.knowledgeSource': 'Search',
-  'sider.employeeResourceGroup.tooltip':
-    'Knowledge, tools, views, objects, skills, and files follow the current digital employee.',
+  'sider.employeeResourceGroup.tooltip': 'Knowledge, tools, skills, and files follow the current digital employee.',
   'sider.employeeResourceGroup.label': 'Linked resources',
   'sider.currentDigitalEmployee': 'Current digital employee',
   'sider.files': 'Files',

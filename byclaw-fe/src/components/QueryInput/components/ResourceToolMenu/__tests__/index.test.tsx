@@ -40,11 +40,11 @@ describe('resource menu categories', () => {
   it('reports the natural category height instead of the stretched panel height', () => {
     const originalObserver = global.ResizeObserver;
     global.ResizeObserver = jest.fn(() => ({ observe: jest.fn(), disconnect: jest.fn() })) as any;
-    const heightSpy = jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return Array.from(this.children).filter((child) => child.tagName === 'BUTTON').length * 42;
-    });
+    const heightSpy = jest
+      .spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return Array.from(this.children).filter((child) => child.tagName === 'BUTTON').length * 42;
+      });
     try {
       const onNavigationHeightChange = jest.fn();
       const { unmount } = render(
@@ -89,6 +89,13 @@ describe('resource menu categories', () => {
     expect(screen.getByRole('button', { name: 'queryInput.tools.processFile' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'queryInput.tools.projectCloud' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'chatResource.projectSpace' })).toBeNull();
+  });
+
+  it.each(['view', 'object', 'ontology'])('ignores retired resource category %s from stale state', (activeKey) => {
+    render(<ResourceToolMenu projectId={42} activeKey={activeKey} onSelect={jest.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'common.digitalEmployee' }).className).toContain('Active');
+    expect(screen.queryByText(activeKey)).toBeNull();
   });
 
   it('loads the same project space component and resource scope as the sidebar', () => {
@@ -147,9 +154,7 @@ describe('resource menu categories', () => {
   });
 
   it('unmounts a visited category and returns to employees when it becomes hidden', () => {
-    const { rerender } = render(
-      <ResourceToolMenu projectId={42} sessionId="session-1" onSelect={jest.fn()} />
-    );
+    const { rerender } = render(<ResourceToolMenu projectId={42} sessionId="session-1" onSelect={jest.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'chatResource.projectSpace' }));
     jest.clearAllMocks();
     rerender(<ResourceToolMenu projectId={-1} sessionId="session-2" onSelect={jest.fn()} />);

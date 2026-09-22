@@ -51,16 +51,6 @@ const resourceGroupTitleIdByTabKey: Record<string, Record<EmployeeResourceGroup[
     personal: 'headerSearch.personalTool',
     enterprise: 'headerSearch.enterpriseTool',
   },
-  view: {
-    current: 'headerSearch.currentView',
-    personal: 'headerSearch.personalView',
-    enterprise: 'headerSearch.enterpriseView',
-  },
-  object: {
-    current: 'headerSearch.currentObject',
-    personal: 'headerSearch.personalObject',
-    enterprise: 'headerSearch.enterpriseObject',
-  },
   skill: {
     current: 'headerSearch.currentSkill',
     personal: 'headerSearch.personalSkill',

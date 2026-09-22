@@ -13,6 +13,7 @@ import SiderContent, { tabItems } from './components/SiderContent';
 import { getRuntimeActualUrl } from '@/utils';
 import { getSystemConfigByStorage } from '@/utils/system';
 import { agentMap, agentTypeMap } from '@/constants/agent';
+import { HIDDEN_RESOURCE_MENU_KEYS } from '@/constants/system';
 import useVisibleMenuKeys from './useVisibleMenuKeys';
 
 import styles from './index.module.less';
@@ -28,19 +29,9 @@ import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContent
 
 export const DEF_SIDER = 'sessions';
 
-const CENTER_TAB_KEYS = new Set([
-  'agent',
-  'knowledge',
-  'tool',
-  'view',
-  'object',
-  'ontology',
-  'skill',
-  'file',
-  'projectSpace',
-]);
+const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'skill', 'file', 'projectSpace']);
 // 资源菜单点击后直接进入全局中心页，不再打开当前数字员工关联的小列表。
-const RESOURCE_CENTER_TAB_KEYS = new Set(['knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file']);
+const RESOURCE_CENTER_TAB_KEYS = new Set(['knowledge', 'tool', 'skill', 'file']);
 // 独立工作区页面：无论当前在聊天页还是中心页，点击都要切换右侧大页面。
 const WORKSPACE_TAB_KEYS = new Set(['projectSpace', 'automation']);
 
@@ -210,6 +201,10 @@ const Sidebar = () => {
   // 新手指引时，需要点击左侧菜单
   React.useEffect(() => {
     const handleSetSiderActiveKey = (key: string) => {
+      if (HIDDEN_RESOURCE_MENU_KEYS.has(key)) {
+        return;
+      }
+
       const targetTab = tabItems.find((tab) => tab.key === key);
       setActiveKey(key);
       setManualSiderOpenKey(RESOURCE_CENTER_TAB_KEYS.has(key) || key === 'model' ? undefined : key);
