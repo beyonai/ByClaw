@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -230,7 +231,8 @@ class GroupChatCreationAndInvitationTest {
 
     @Test
     void rejectsMissingSubmittedEmployeeBeforeCreatingProject() {
-        when(resources.findByIdList(any())).thenReturn(List.of());
+        // 该 mock 已在 setUp 中配置 answer；使用 doReturn 避免重设桩时先执行旧 answer。
+        doReturn(List.of()).when(resources).findByIdList(any());
         GroupChatCreateRequest request = request();
         request.setAgentIds(List.of(40L, 41L));
         assertThatThrownBy(() -> service.create(request))

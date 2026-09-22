@@ -390,10 +390,10 @@ class GroupChatInvitationTokenTest {
         verify(members, never()).save(any());
     }
 
-    @Test void previewReturnsAtMostFourDisplayOnlyMembersAndEnterprise() {
+    @Test void previewReturnsAtMostNineDisplayOnlyMembersAndEnterprise() {
         owner.setMemObjType("USER");
         owner.setMemObjId(10L);
-        when(members.findOrderedGroupMembers(20L)).thenReturn(List.of(owner, owner, owner, owner, owner));
+        when(members.findOrderedGroupMembers(20L)).thenReturn(java.util.Collections.nCopies(10, owner));
         var enterprise = new EnterpriseInfo();
         enterprise.setComAcctName("示例企业");
         when(enterprises.selectById(3L)).thenReturn(enterprise);
@@ -402,7 +402,8 @@ class GroupChatInvitationTokenTest {
         var preview = JSON.parseObject(JSON.toJSONString(service.preview(token)));
         assertThat(preview.getString("enterpriseName")).isEqualTo("示例企业");
         var displayMembers = preview.getJSONArray("memberPreviews");
-        assertThat(displayMembers).isNotNull().hasSize(4);
+        assertThat(displayMembers).isNotNull().hasSize(9);
+        assertThat(preview.getInteger("memberCount")).isEqualTo(10);
         assertThat(displayMembers.getJSONObject(0).getString("displayName")).isEqualTo("邀请人");
         assertThat(displayMembers.getJSONObject(0).keySet()).doesNotContain("memObjId", "userId", "userRole");
     }

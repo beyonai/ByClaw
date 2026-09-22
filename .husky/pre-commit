@@ -104,7 +104,8 @@ fi
 if [ "$HAS_BE" = true ]; then
   echo "🔍 [pre-commit] Running backend checks..."
 
-  mvn -B -f "$REPO_ROOT/byclaw-be/pom.xml" test
+  # 清理旧的 test-classes，避免增量编译运行当前源码中已删除的测试类。
+  mvn -B -f "$REPO_ROOT/byclaw-be/pom.xml" clean test
   if [ $? -ne 0 ]; then
     echo "❌ [pre-commit] Backend tests failed"
     EXIT_CODE=1

@@ -104,7 +104,8 @@ public class GroupChatInvitationService {
         }
         var groupMembers = members.findOrderedGroupMembers(group.getSessionId());
         response.setMemberCount(groupMembers.size());
-        response.setMemberPreviews(groupMembers.stream().limit(4).map(this::memberPreview).toList());
+        // 群头像最多展示九位成员；预览仍只返回展示字段，不暴露成员身份信息。
+        response.setMemberPreviews(groupMembers.stream().limit(9).map(this::memberPreview).toList());
         response.setExpiresAt(record.getExpiresAt());
         response.setAllowJoinByLink(true);
         Long userId = CurrentUserHolder.getCurrentUserId();
