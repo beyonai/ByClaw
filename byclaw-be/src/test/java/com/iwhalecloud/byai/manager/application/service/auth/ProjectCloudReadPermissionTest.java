@@ -104,6 +104,7 @@ class ProjectCloudReadPermissionTest {
         login.setUserCode("adminvip");
         CurrentUserHolder.setLoginInfo(login);
         assertThat(auth.canManageAllProjectCloudItems(cloud)).isTrue();
+        assertThat(auth.hasResourceAccessPermission(cloud)).isTrue();
     }
 
     private void bindProject(long id, String type, long owner, String deleted, boolean member) {

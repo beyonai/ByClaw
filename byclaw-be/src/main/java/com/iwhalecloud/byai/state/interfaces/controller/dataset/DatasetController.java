@@ -283,12 +283,9 @@ public class DatasetController {
      */
     private Map<String, String> parseHeadersFromRequest(HttpServletRequest httpServletRequest) {
 
-        String userCode = httpServletRequest.getHeader("X-USER-CODE");
+        // 创建账号只取已认证登录态，禁止客户端通过同名请求头伪造归属。
+        String userCode = CurrentUserHolder.getCurrentUserCode();
         String sessionId = httpServletRequest.getHeader("X-CHAT-SESSION-ID");
-
-        if (StringUtil.isEmpty(userCode)) {
-            userCode = CurrentUserHolder.getCurrentUserCode();
-        }
 
         // 传递请求头信息
         Map<String, String> headers = new HashMap<String, String>();

@@ -85,11 +85,12 @@ class DatasetApplicationServiceProjectCloudDownloadTest {
         verify(authApplicationService).hasResourceAccessPermission(resource);
     }
 
-    @Test
-    void directoryUsesSharedPermissionAndBoundKnowledgeCode() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"KG_CLOUD", "KG_DOC"})
+    void directoryUsesSharedPermissionAndBoundKnowledgeCode(String resourceType) {
         SsResource resource = new SsResource();
         resource.setResourceId(9001L);
-        resource.setResourceBizType("KG_CLOUD");
+        resource.setResourceBizType(resourceType);
         resource.setResourceCode("project-cloud");
         when(ssResourceService.findById(9001L)).thenReturn(resource);
         when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
@@ -115,7 +116,7 @@ class DatasetApplicationServiceProjectCloudDownloadTest {
         SsResource resource = new SsResource();
         resource.setResourceId(9001L);
         resource.setResourceBizType("KG_CLOUD");
-        when(ssResourceService.findByCodeAndBizType("project-cloud", "KG_CLOUD"))
+        when(ssResourceService.findByCode("project-cloud"))
             .thenReturn(List.of(resource));
         when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(false);
         DirAndFileQo request = new DirAndFileQo();
