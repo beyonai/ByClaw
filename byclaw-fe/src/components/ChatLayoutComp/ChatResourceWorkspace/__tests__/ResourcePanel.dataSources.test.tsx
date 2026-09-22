@@ -74,3 +74,14 @@ it('hides the tab when the availability query fails', async () => {
   });
   expect(screen.queryByRole('tab', { name: 'dataSource.title' })).not.toBeInTheDocument();
 });
+
+it.each([
+  { sessionId: '', projectId: 42 },
+  { sessionId: 'session-1', projectId: -1 },
+])('does not query project data for unavailable scope %j', async ({ sessionId, projectId }) => {
+  await act(async () => {
+    render(<ResourcePanel sessionId={sessionId} projectId={projectId} onOpenDetail={jest.fn()} />);
+  });
+  expect(query).not.toHaveBeenCalled();
+  expect(screen.queryByRole('tab', { name: 'dataSource.title' })).not.toBeInTheDocument();
+});
