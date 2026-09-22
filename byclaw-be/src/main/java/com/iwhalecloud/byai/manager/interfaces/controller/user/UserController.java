@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.interfaces.controller.user;
 
 import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserAvatarApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.UserProfileApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserTokenQuotaApplicationService;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.UserTokenQuota;
@@ -11,6 +12,8 @@ import com.iwhalecloud.byai.manager.qo.users.SearchUserQo;
 import com.iwhalecloud.byai.manager.qo.users.UsersByOrgIdQo;
 import com.iwhalecloud.byai.manager.vo.users.UsersOrgVo;
 import com.iwhalecloud.byai.manager.dto.users.UsersDTO;
+import com.iwhalecloud.byai.manager.dto.users.UserProfileResponse;
+import com.iwhalecloud.byai.manager.dto.users.UserProfileUpdateRequest;
 import com.iwhalecloud.byai.manager.dto.users.BatchDelUserDTO;
 import com.iwhalecloud.byai.manager.dto.users.DelUserDTO;
 import com.iwhalecloud.byai.manager.dto.users.ResetPasswordDTO;
@@ -24,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
@@ -33,6 +37,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -48,6 +53,9 @@ public class UserController {
     private UserAvatarApplicationService userAvatarApplicationService;
 
     @Autowired
+    private UserProfileApplicationService userProfileApplicationService;
+
+    @Autowired
     protected SuasSuperassistService suasSuperassistService;
 
     @Autowired
@@ -59,6 +67,13 @@ public class UserController {
     @PostMapping(value = "/uploadAvatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<String> uploadAvatar(@RequestPart("file") MultipartFile file) throws IOException {
         return ResponseUtil.successRes(userAvatarApplicationService.uploadAvatar(file));
+    }
+
+    /** 修改当前登录用户的用户名和可选头像文件或地址。 */
+    @PostMapping(value = "/updateProfile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseUtil<UserProfileResponse> updateProfile(
+        @Validated @ModelAttribute UserProfileUpdateRequest request) throws IOException {
+        return ResponseUtil.successResponse(userProfileApplicationService.updateProfile(request));
     }
 
     /**
@@ -239,7 +254,7 @@ public class UserController {
     public ResponseUtil getTokenQuota(@RequestBody Map<String, Object> params) {
         Long userId = params.get("userId") != null ? Long.valueOf(params.get("userId").toString()) : null;
         UserTokenQuota quota = userTokenQuotaApplicationService.getUserQuota(userId);
-        Map<String, Object> result = new java.util.HashMap<>();
+        Map<String, Object> result = new HashMap<>();
         result.put("quota", quota);
         result.put("systemDefault", userTokenQuotaApplicationService.getSystemDefaultQuota());
         return ResponseUtil.success(result);

@@ -97,6 +97,7 @@ class LoginApplicationServiceTest {
         ReflectionTestUtils.setField(service, "authRedisSyncService", mock(AuthRedisSyncService.class));
         Users user = new Users();
         user.setUserId(1L);
+        user.setUserName("新名字");
         user.setAvatar("saved-avatar");
         when(userService.findById(1L)).thenReturn(user);
         SuasSuperassist superassist = new SuasSuperassist();
@@ -110,6 +111,7 @@ class LoginApplicationServiceTest {
 
         LoginInfo result = service.currentUser(request).getData();
 
+        assertThat(result.getUserName()).isEqualTo("新名字");
         assertThat(result.getAvatar()).isEqualTo("saved-avatar");
     }
 

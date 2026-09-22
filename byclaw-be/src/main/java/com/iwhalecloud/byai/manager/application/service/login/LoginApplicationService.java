@@ -261,6 +261,8 @@ public class LoginApplicationService {
 
             // 检查用户密码是否是默认密码
             Users users = userService.findById(loginInfo.getUserId());
+            // 个人资料可在登录后修改，使用数据库中的最新用户名。
+            loginInfo.setUserName(users != null ? users.getUserName() : null);
             // 头像可能在当前 session 建立后更新，使用数据库值覆盖会话快照。
             loginInfo.setAvatar(users != null ? users.getAvatar() : null);
             loginInfo.setIsDefaultPwd(userApplicationService.checkDefaultPwd(users));

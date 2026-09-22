@@ -44,11 +44,43 @@ public class UserAvatarApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public String uploadAvatar(MultipartFile file) throws IOException {
+        LoginInfo loginInfo = requireLogin();
+        validateFile(file);
+        Users user = usersMapper.selectById(loginInfo.getUserId());
+        if (user == null || !UserState.ACTIVE.equals(user.getState())) {
+            throw new BaseException("用户不存在或已禁用");
+        }
+
+        String url = storeValidatedAvatar(file);
+        // 精确更新头像，避免同时编辑用户资料时覆盖其他字段。
+        int updated = usersMapper.update(null, new LambdaUpdateWrapper<Users>()
+            .eq(Users::getUserId, loginInfo.getUserId())
+            .eq(Users::getState, UserState.ACTIVE)
+            .set(Users::getAvatar, url)
+            .set(Users::getUpdateDate, new Date()));
+        if (updated != 1) {
+            throw new BaseException("用户头像保存失败");
+        }
+        return url;
+    }
+
+    /** 供个人资料保存流程复用上传逻辑，用户资料由调用方统一写入。 */
+    public String storeAvatar(MultipartFile file) throws IOException {
+        requireLogin();
+        validateFile(file);
+        return storeValidatedAvatar(file);
+    }
+
+    private LoginInfo requireLogin() {
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
         if (loginInfo == null || loginInfo.getUserId() == null || loginInfo.getUserId() <= 0
             || StringUtils.isBlank(loginInfo.getUserCode())) {
             throw new BaseException("login.user.not.logged.in");
         }
+        return loginInfo;
+    }
+
+    private void validateFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BaseException("头像文件不能为空");
         }
@@ -60,27 +92,17 @@ public class UserAvatarApplicationService {
         if (extension == null) {
             throw new BaseException("仅支持 PNG、JPEG、GIF 或 WebP 图片");
         }
-        Users user = usersMapper.selectById(loginInfo.getUserId());
-        if (user == null || !UserState.ACTIVE.equals(user.getState())) {
-            throw new BaseException("用户不存在或已禁用");
-        }
+    }
 
+    private String storeValidatedAvatar(MultipartFile file) throws IOException {
+        String contentType = file.getContentType();
+        String extension = IMAGE_EXTENSIONS.get(contentType);
         // 独立对象名避免同秒上传覆盖，也允许客户端使用中文或带特殊字符的文件名。
         MultipartFile avatar = new MultipartFileUtil("file", UUID.randomUUID() + extension, contentType,
             file.getBytes());
         String url = filesApplicationService.uploadIcon(avatar).getFileUrl();
         if (StringUtils.isBlank(url) || url.length() > 400) {
             throw new BaseException("头像存储未返回有效地址");
-        }
-
-        // 精确更新头像，避免同时编辑用户资料时覆盖其他字段。
-        int updated = usersMapper.update(null, new LambdaUpdateWrapper<Users>()
-            .eq(Users::getUserId, loginInfo.getUserId())
-            .eq(Users::getState, UserState.ACTIVE)
-            .set(Users::getAvatar, url)
-            .set(Users::getUpdateDate, new Date()));
-        if (updated != 1) {
-            throw new BaseException("用户头像保存失败");
         }
         return url;
     }
