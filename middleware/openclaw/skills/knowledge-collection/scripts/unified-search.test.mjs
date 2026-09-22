@@ -5,7 +5,34 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { ensureSessionSkeleton, newSession, persistSession } from './session.mjs';
 import { mergeUnifiedCandidates } from './unified-candidates.mjs';
-import { runUnifiedMaterialize, runUnifiedSearch } from './unified-search.mjs';
+import { resolveProjectContextScript, runUnifiedMaterialize, runUnifiedSearch } from './unified-search.mjs';
+
+test('project context resolves beside deployed skills without an app mount', () => {
+  const localScript = '/opt/byclaw/dsh-managed/skills/project-context/scripts/project-context.mjs';
+  assert.equal(resolveProjectContextScript({
+    env: {}, localScript, fileExists: (candidate) => candidate === localScript,
+  }), localScript);
+});
+
+test('project context prefers an existing override and falls back from a missing override', () => {
+  const localScript = '/skills with spaces/project-context/scripts/project-context.mjs';
+  const env = { PROJECT_CONTEXT_SCRIPT: '/custom/project-context.mjs' };
+  assert.equal(resolveProjectContextScript({ env, localScript, fileExists: () => true }), env.PROJECT_CONTEXT_SCRIPT);
+  assert.equal(resolveProjectContextScript({
+    env, localScript, fileExists: (candidate) => candidate === localScript,
+  }), localScript);
+});
+
+test('project context supports container and managed fallback layouts', () => {
+  for (const expected of [
+    '/app/skills/project-context/scripts/project-context.mjs',
+    '/opt/byclaw/dsh-managed/skills/project-context/scripts/project-context.mjs',
+  ]) {
+    assert.equal(resolveProjectContextScript({
+      env: {}, localScript: '/missing/context.mjs', fileExists: (candidate) => candidate === expected,
+    }), expected);
+  }
+});
 
 function unifiedTask(query, extra = {}) {
   return {

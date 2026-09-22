@@ -1,6 +1,8 @@
 'use strict';
 
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { dirname, join } from 'node:path';
@@ -58,11 +60,25 @@ function filterCandidatesByTimeRange(candidates, timeRange, dateField, now = () 
   return { candidates: retained, excludedKnownOutOfRange, unknownPublicationDate };
 }
 
+export function resolveProjectContextScript({
+  env = process.env,
+  fileExists = existsSync,
+  localScript = fileURLToPath(new URL('../../project-context/scripts/project-context.mjs', import.meta.url)),
+} = {}) {
+  const candidates = [
+    env.PROJECT_CONTEXT_SCRIPT,
+    localScript,
+    '/app/skills/project-context/scripts/project-context.mjs',
+    '/opt/byclaw/dsh-managed/skills/project-context/scripts/project-context.mjs',
+  ].filter((candidate) => typeof candidate === 'string' && candidate.trim());
+  return candidates.find((candidate) => fileExists(candidate)) || candidates[0];
+}
+
 async function resolveCloudResourceIdFromProject(projectId, dependencies = {}) {
   if (dependencies.resolveCloudResourceId) {
     return dependencies.resolveCloudResourceId(projectId);
   }
-  const script = process.env.PROJECT_CONTEXT_SCRIPT || '/app/skills/project-context/scripts/project-context.mjs';
+  const script = resolveProjectContextScript();
   try {
     const { stdout } = await execFileAsync(process.execPath, [script, 'basic', '--project-id', String(projectId)], {
       timeout: 30_000,
