@@ -49,7 +49,7 @@ const COMMAND_SPECS = {
   }),
   'public-discover': defineCommand({
     group: 'discovery',
-    title: '运行 WSA 主用、SearXNG 故障降级的 online-search 与按需 hot-discovery，持久化并合并公共 URL 候选',
+    title: '使用可选 TypeSafe Jev 规划与重排，运行可选 WSA/Search1API、SearXNG 降级和按需 hot-discovery，持久化并合并公共 URL 候选',
     args: {
       '--session-dir': '必填。已由 init 创建的会话目录',
       '--query': '必填。公共互联网检索词',

@@ -77,14 +77,35 @@ test('supports an explicit SearXNG script path for local development', () => {
 test('uses the unified online-search runner and exposes compatible provider aliases', async () => {
   const { paths } = makeInitializedSession(['public-internet'], '人工智能');
   let onlineSearchCalls = 0;
+  let plannerCalls = 0;
+  let rankerCalls = 0;
   const result = await runPublicDiscover(paths, {
     query: '人工智能 报道',
     category: 'general',
     language: 'zh-CN',
     'requested-count': '1',
   }, {
+    planDiscovery: async (input) => {
+      plannerCalls += 1;
+      assert.deepEqual(input.queryCandidates, ['人工智能 报道', '人工智能']);
+      return {
+        effective: {
+          query: input.query,
+          category: input.category,
+          language: input.language,
+          timeRange: input.timeRange,
+          source: 'github',
+        },
+        jev: { status: 'used', model: 'jev-test' },
+      };
+    },
+    rankCandidates: async (_request, candidates) => {
+      rankerCalls += 1;
+      return { candidates, diagnostic: { status: 'used', model: 'jev-test', candidateCount: candidates.length } };
+    },
     runOnlineSearch: async (args) => {
       onlineSearchCalls += 1;
+      assert.equal(args.source, 'github');
       return {
         ok: true,
         durationMs: 12,
@@ -125,6 +146,10 @@ test('uses the unified online-search runner and exposes compatible provider alia
   });
 
   assert.equal(onlineSearchCalls, 1);
+  assert.equal(plannerCalls, 1);
+  assert.equal(rankerCalls, 1);
+  assert.deepEqual(result.queryPlanning, { status: 'used', model: 'jev-test' });
+  assert.equal(result.candidateRanking.status, 'used');
   assert.equal(result.channels.onlineSearch.provider, 'tencent-wsa');
   assert.equal(result.channels.onlineSearch.fallbackUsed, false);
   assert.deepEqual(result.channels.searxng, result.channels.onlineSearch);

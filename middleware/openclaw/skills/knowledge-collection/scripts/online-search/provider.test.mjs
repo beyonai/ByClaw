@@ -100,3 +100,61 @@ test('does not start SearXNG after the hard budget is exhausted', async () => {
   assert.equal(result.providerDiagnostics.searxng.skipReason, 'hard_budget_exhausted');
   assert.equal(searxngCalls, 0);
 });
+
+test('uses Search1API when WSA is unavailable without invoking SearXNG', async () => {
+  let searxngCalls = 0;
+  const result = await runOnlineSearch({ query: 'agent memory' }, {
+    runWsa: async () => ({ ok: false, error: { category: 'unavailable', code: 'WSA_CREDENTIALS_MISSING' } }),
+    runSearch1Api: async () => ({
+      ok: true,
+      document: { query: 'agent memory', provider: 'search1api', results: [{
+        url: 'https://example.com/a', title: 'A', engine: 'google', provider: 'search1api', originalRank: 1,
+      }] },
+    }),
+    runSearxng: async () => { searxngCalls += 1; },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.document.provider, 'search1api');
+  assert.deepEqual(result.document.providers, ['search1api']);
+  assert.equal(result.document.providerDiagnostics.search1api.status, 'success');
+  assert.equal(searxngCalls, 0);
+});
+
+test('merges concurrent WSA and Search1API results with agreement evidence', async () => {
+  let releaseWsa;
+  let releaseSearch1;
+  const wsaReady = new Promise((resolve) => { releaseWsa = resolve; });
+  const search1Ready = new Promise((resolve) => { releaseSearch1 = resolve; });
+  const resultPromise = runOnlineSearch({ query: 'agent memory' }, {
+    runWsa: async () => { await search1Ready; return {
+      ok: true,
+      document: { query: 'agent memory', results: [{ url: 'https://example.com/a?utm_source=x', title: 'A', engine: 'wsa' }] },
+    }; },
+    runSearch1Api: async () => { releaseSearch1(); releaseWsa(); return {
+      ok: true,
+      document: { query: 'agent memory', results: [
+        { url: 'https://example.com/a', title: 'A richer title', engine: 'google', provider: 'search1api', originalRank: 2 },
+        { url: 'https://example.com/b', title: 'B', engine: 'github', provider: 'search1api', originalRank: 1 },
+      ] },
+    }; },
+    runSearxng: async () => { throw new Error('must not run'); },
+  });
+  await wsaReady;
+  const result = await resultPromise;
+  assert.equal(result.document.provider, 'multi');
+  assert.deepEqual(result.document.providers, ['tencent-wsa', 'search1api']);
+  assert.equal(result.document.results.length, 2);
+  assert.deepEqual(result.document.results[0].providers, ['tencent-wsa', 'search1api']);
+  assert.deepEqual(result.document.results[0].engines, ['wsa', 'google']);
+  assert.equal(result.document.results[0].providerAgreement, 2);
+});
+
+test('falls back to SearXNG when WSA and Search1API are both unavailable', async () => {
+  const result = await runOnlineSearch({ query: 'agent memory' }, {
+    runWsa: async () => ({ ok: false, error: { category: 'unavailable', code: 'WSA_CREDENTIALS_MISSING' } }),
+    runSearch1Api: async () => ({ ok: false, error: { category: 'unavailable', code: 'SEARCH1API_KEY_MISSING' } }),
+    runSearxng: async () => ({ ok: true, document: { query: 'agent memory', results: [] } }),
+  });
+  assert.equal(result.document.provider, 'searxng');
+  assert.equal(result.document.providerDiagnostics.search1api.code, 'SEARCH1API_KEY_MISSING');
+});

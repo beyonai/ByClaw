@@ -25,6 +25,8 @@ import { loadSession, persistSession, withSessionLock } from './session.mjs';
 import { assertSessionWorkflowAllowsCommand } from './probe-state.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
 import { runOnlineSearch as defaultRunOnlineSearch } from './online-search/provider.mjs';
+import { planDiscovery as defaultPlanDiscovery } from './jev/query-planner.mjs';
+import { rankCandidates as defaultRankCandidates } from './jev/candidate-ranker.mjs';
 
 export { resolveSearxngRuntime } from './online-search/searxng.mjs';
 
@@ -186,6 +188,36 @@ function attemptedAdapterCount(hotDoc) {
     .filter((stats) => stats?.status && !skipped.has(stats.status)).length;
 }
 
+function applyCandidateRanking(document, rankedCandidates) {
+  const order = new Map();
+  const ranking = new Map();
+  rankedCandidates.forEach((candidate, index) => {
+    if (typeof candidate?.url !== 'string') return;
+    order.set(candidate.url, index);
+    if (candidate.ranking) ranking.set(candidate.url, candidate.ranking);
+  });
+  const decorate = (candidates) => (Array.isArray(candidates) ? candidates : [])
+    .map((candidate) => ranking.has(candidate?.url)
+      ? { ...candidate, ranking: ranking.get(candidate.url) }
+      : candidate)
+    .sort((a, b) => (order.get(a?.url) ?? Number.MAX_SAFE_INTEGER)
+      - (order.get(b?.url) ?? Number.MAX_SAFE_INTEGER));
+  const groups = document?.groups && typeof document.groups === 'object' ? document.groups : {};
+  return {
+    ...document,
+    groups: {
+      ...groups,
+      bothChannels: decorate(groups.bothChannels),
+      searxngTop: decorate(groups.searxngTop),
+      agentReachTop: decorate(groups.agentReachTop),
+      hotBySource: Object.fromEntries(Object.entries(groups.hotBySource || {})
+        .map(([source, candidates]) => [source, decorate(candidates)])),
+      hotWithoutPopularity: decorate(groups.hotWithoutPopularity),
+      unverified: decorate(groups.unverified),
+    },
+  };
+}
+
 export async function runPublicDiscover(paths, args, options = {}) {
   const now = options.now || (() => performance.now());
   const totalStartedAt = now();
@@ -194,8 +226,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
   if (!sourceScope.includes('public-internet')) {
     throw new Error('session task.sourceScope 必须包含 public-internet 才能执行公共发现');
   }
-  const query = requireText(args?.query, '--query');
-  const category = typeof args?.category === 'string' && args.category.trim() ? args.category.trim() : 'general';
+  let query = requireText(args?.query, '--query');
+  let category = typeof args?.category === 'string' && args.category.trim() ? args.category.trim() : 'general';
   withSessionLock(paths, 'public-discover-reserve', () => {
     const current = loadSession(paths, { persistMigration: false }).session;
     if (!current.task.discoveryGate) {
@@ -233,8 +265,23 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const effectiveMaxResults = profileEnabled ? String(profileStopAfter)
     : (options.orchestrationRunId !== undefined ? maxResults : (requestedCount || maxResults));
   const processTimeout = String(args?.timeout || DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS);
-  const timeRange = typeof args?.['time-range'] === 'string' && args['time-range'].trim()
+  let timeRange = typeof args?.['time-range'] === 'string' && args['time-range'].trim()
     ? args['time-range'].trim() : null;
+  const planner = options.planDiscovery || defaultPlanDiscovery;
+  const planned = await planner({
+    request: session.task?.query || query,
+    query,
+    category,
+    language,
+    timeRange,
+    queryCandidates: [...new Set([query, session.task?.query].filter((value) => typeof value === 'string' && value.trim()))],
+    categoryCandidates: [...new Set([category, 'general', 'news', 'it', 'science'])],
+    timeRangeCandidates: [null, 'day', 'week', 'month', 'year'],
+    sourceCandidates: ['automatic', 'github', 'arxiv'],
+  }, { environment: options.environment || process.env, signal: options.signal });
+  query = planned.effective.query;
+  category = planned.effective.category;
+  timeRange = planned.effective.timeRange;
   const tiers = typeof args?.tiers === 'string' && args.tiers.trim() ? args.tiers.trim() : '1,2,3';
   const limit = String(args?.limit || '20');
   const inputDir = requireText(paths?.inputDir, '会话 inputDir');
@@ -252,6 +299,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     language,
     pageno,
     'max-results': effectiveMaxResults,
+    ...(planned.effective.source !== 'automatic' ? { source: planned.effective.source } : {}),
     ...(requestedCount && options.orchestrationRunId === undefined
       ? { 'requested-count': requestedCount } : {}),
     ...(timeRange ? { 'time-range': timeRange } : {}),
@@ -425,9 +473,15 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const mergeStartedAt = now();
   const mergedDocument = await merge({ hotDoc, sxDoc, warnings });
   const annotatedMerged = annotateMergedCandidates(mergedDocument, topicContract);
+  const ranker = options.rankCandidates || defaultRankCandidates;
+  const ranked = await ranker(session.task?.query || query, mergedCandidates(annotatedMerged), {
+    environment: options.environment || process.env,
+    signal: options.signal,
+  });
+  const rankedMerged = applyCandidateRanking(annotatedMerged, ranked.candidates);
   const candidateQuality = {
     searxng: classifyCandidates(Array.isArray(sxDoc?.results) ? sxDoc.results : [], topicContract),
-    merged: summarizeMergedQuality(annotatedMerged),
+    merged: summarizeMergedQuality(rankedMerged),
   };
   candidateQuality.onlineSearch = candidateQuality.searxng;
   const mergeAndClassifyMs = elapsedMilliseconds(mergeStartedAt, now());
@@ -443,7 +497,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     const result = recordDiscoveryResult(current.task.discoveryGate, {
       query,
       category,
-      candidates: mergedCandidates(annotatedMerged),
+      candidates: mergedCandidates(rankedMerged),
       keepOpen: options.orchestrationRunId !== undefined && options.channelMode === 'online',
     });
     persistSession(paths, current);
@@ -458,9 +512,11 @@ export async function runPublicDiscover(paths, args, options = {}) {
   } : null;
   const selectedCandidate = authorization.result.articleCandidates[0] || null;
   const merged = {
-    ...annotatedMerged,
+    ...rankedMerged,
     channelDiagnostics,
     candidateQuality,
+    queryPlanning: planned.jev,
+    candidateRanking: ranked.diagnostic,
     timing,
     selectedCandidate,
     ...(discoveryProfile ? { discoveryProfile } : {}),
@@ -479,6 +535,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
     } : null,
     channels: channelDiagnostics,
     candidateQuality,
+    queryPlanning: planned.jev,
+    candidateRanking: ranked.diagnostic,
     discoveryAuthorization: {
       attemptCount: authorization.state.attemptCount,
       maxAttempts: authorization.state.maxAttempts,

@@ -37,7 +37,7 @@
     {
       "name": "online-search",
       "path": "online-search.md",
-      "description": "腾讯 WSA 主用、SearXNG 通道级故障降级的公共网页 URL 发现。"
+      "description": "可选 TypeSafe Jev 规划和重排、可选腾讯 WSA/Search1API、SearXNG 降级的公共网页 URL 发现。"
     }
   ]
 }

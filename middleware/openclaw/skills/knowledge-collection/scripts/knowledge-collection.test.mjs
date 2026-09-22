@@ -301,6 +301,10 @@ await (async () => {
   const publicDiscoverHelp = await runCli(['public-discover', '--help']);
   assert.equal(publicDiscoverHelp.json.ok, true);
   assert.equal(publicDiscoverHelp.json.command, 'public-discover');
+  assert.match(publicDiscoverHelp.json.title, /TypeSafe Jev/);
+  assert.match(publicDiscoverHelp.json.title, /Search1API/);
+  assert.match(publicDiscoverHelp.json.title, /SearXNG/);
+  assert.equal(JSON.stringify(publicDiscoverHelp.json).includes('API_KEY'), false);
   assert.match(publicDiscoverHelp.json.args['--category'], /general/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /明确指定/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /可用文章候选不足.*hot-discovery/);
