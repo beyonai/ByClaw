@@ -3,6 +3,7 @@ import {
   compactSessionForRecovery,
   didCompactContext,
   dispatchWithContextOverflowRecovery,
+  type CompactionResult,
   type ContextOverflowRecoveryState,
 } from "./context-overflow-recovery.js";
 
@@ -12,15 +13,54 @@ const { callGatewayFromCli } = vi.hoisted(() => ({ callGatewayFromCli: vi.fn() }
 vi.mock("openclaw/plugin-sdk/gateway-runtime", () => ({ callGatewayFromCli }));
 function setup() {
   const state: ContextOverflowRecoveryState = { dispatchPending: true, replaySafe: true, attempts: 0 };
-  const dispatch = vi.fn(async () => {}).mockRejectedValueOnce(new Error(precheck));
+  const dispatch = vi.fn(async (_signal?: AbortSignal) => {}).mockRejectedValueOnce(new Error(precheck));
   const compact = vi.fn(async () => success);
-  const notice = vi.fn(async () => {});
+  const notice = vi.fn(async (_phase: "start" | "retry" | "failed", _attempt: number, _failureKind?: string) => {});
   return { state, dispatch, compact, notice, failureText: "Recovery failed" };
 }
 
 afterEach(() => vi.useRealTimers());
 
 describe("precheck overflow recovery", () => {
+  it("recovers a required preflight summary timeout", async () => {
+    const p = setup();
+    p.dispatch.mockReset().mockRejectedValueOnce(new Error("Preflight compaction required but failed: Compaction timed out"));
+    await dispatchWithContextOverflowRecovery(p);
+    expect(p.compact).toHaveBeenCalledTimes(1);
+    expect(p.dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not abort a healthy replay when the recovery deadline passes", async () => {
+    vi.useFakeTimers();
+    const p = setup();
+    let replaySignal: AbortSignal | undefined;
+    p.dispatch.mockReset().mockRejectedValueOnce(new Error(precheck)).mockImplementationOnce(async (signal) => {
+      replaySignal = signal;
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+    });
+    const pending = dispatchWithContextOverflowRecovery({ ...p, timeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(2001);
+    await pending;
+    expect(replaySignal?.aborted).toBe(false);
+    expect(p.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves evidence of an oversized submission discovered on replay", async () => {
+    const p = setup();
+    p.dispatch.mockReset().mockRejectedValueOnce(new Error(precheck))
+      .mockRejectedValueOnce(Object.assign(new Error("too many bytes"), { code: "attachment_too_large" }));
+    await expect(dispatchWithContextOverflowRecovery(p)).rejects.toMatchObject({ kind: "input_too_large" });
+    expect(p.compact).toHaveBeenCalledTimes(1);
+    expect(p.notice).toHaveBeenLastCalledWith("failed", 1, "input_too_large");
+  });
+
+  it.each(["Unauthorized", "no messages", "nothing to compact"])("does not waste three attempts on definitive failure: %s", async (reason) => {
+    const p = setup();
+    p.compact.mockResolvedValue({ ok: false, compacted: false, reason } as never);
+    await expect(dispatchWithContextOverflowRecovery(p)).rejects.toThrow("Recovery failed");
+    expect(p.compact).toHaveBeenCalledTimes(1);
+    expect(p.dispatch).toHaveBeenCalledTimes(1);
+  });
   it("compacts before replay and stops on the first successful answer", async () => {
     const p = setup();
     await dispatchWithContextOverflowRecovery(p);
@@ -87,7 +127,7 @@ describe("precheck overflow recovery", () => {
     });
     await expect(dispatchWithContextOverflowRecovery({ ...p, signal: controller.signal })).rejects.toThrow("user cancelled");
     expect(p.dispatch).toHaveBeenCalledTimes(1);
-    expect(p.notice).not.toHaveBeenCalledWith("failed", expect.anything());
+    expect(p.notice.mock.calls.some(([phase]) => phase === "failed")).toBe(false);
   });
 
   it("does not start compaction after cancellation while displaying its notice", async () => {
@@ -165,10 +205,13 @@ describe("precheck overflow recovery", () => {
   it("rechecks cancellation after gateway availability resolves", async () => {
     const controller = new AbortController();
     const request = vi.fn();
+    const trackOperation = vi.fn((run: () => Promise<CompactionResult>) => run());
     await expect(compactSessionForRecovery({
       runtime: { gateway: { isAvailable: async () => { controller.abort(); return true; }, request } },
       sessionKey: "agent:test:direct:cancel", signal: controller.signal, timeoutMs: 330_000,
+      trackOperation,
     })).rejects.toThrow();
     expect(request).not.toHaveBeenCalled();
+    expect(trackOperation).not.toHaveBeenCalled();
   });
 });

@@ -1,12 +1,13 @@
 import path from "node:path";
 import type { ContextOverflowRecoveryState } from "./context-overflow-recovery.js";
-import { isOpenClawContextOverflowPrecheckError } from "./dispatch-error.js";
+import { isRecoverableContextPreflightError } from "./dispatch-error.js";
+import { classifyContextFailure, publicContextErrorText } from "./context-errors.js";
 import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-framework";
 import type { ByaiInboundMessage, ByaiLaneMetadata, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 import { clearDeliveredAnswerText } from "./answer-text-ledger.js";
 import { generateRandomId } from "./utils.js";
-import { buildContextOverflowText, resolveInboundLanguage } from "./i18n.js";
+import { resolveInboundLanguage } from "./i18n.js";
 import { emitByaiSdkFirstResponse } from "./diagnostics.js";
 import { SESSION_FILES_ROOT, getSessionPathBySessionId } from "./session-path.js";
 import {
@@ -1338,15 +1339,8 @@ export function markActiveSdkOverflowContinuePending(
     return request;
 }
 
-function isCoreContextOverflowPrecheckError(error: string): boolean {
-    return /Context overflow: prompt too large for the model \(precheck\)\.?/i.test(error);
-}
-
 function mapAgentEndErrorForSdk(request: ActiveSdkRequest, error: string): string {
-    if (isCoreContextOverflowPrecheckError(error)) {
-        return buildContextOverflowText(request.language);
-    }
-    return error;
+    return publicContextErrorText(error, request.language);
 }
 
 /**
@@ -1503,7 +1497,7 @@ export async function completeActiveSdkRequest(
             if (latest.abortController?.signal.aborted) {
                 return false;
             }
-            if (result?.error) {
+            if (result?.error && !(latest.deferFrameworkFinalization && classifyContextFailure(result.error))) {
                 const errorText = mapAgentEndErrorForSdk(latest, result.error);
                 const errorOptions = withActiveSdkRequestEmitMetadata(latest, {
                     eventType: EventType.ANSWER_DELTA,
@@ -1596,7 +1590,8 @@ export function recordActiveSdkRootStreamAnswer(params: {
 /** llm_input also runs before a blocked precheck, which has no lifecycle start. */
 export function recordActiveSdkDispatchRunId(sessionKey: string | undefined, runId: string | undefined): void {
     const request = sessionKey ? resolveActiveSdkRequestBySessionKey(sessionKey) : undefined;
-    if (request?.sessionKey === sessionKey && request?.contextOverflowRecovery.dispatchPending && runId) {
+    if (request?.sessionKey === sessionKey && request?.contextOverflowRecovery.dispatchPending && runId &&
+        !request.contextOverflowRecovery.retiredRunIds?.has(runId)) {
         request.contextOverflowRecovery.dispatchRunId = runId;
     }
 }
@@ -1617,8 +1612,19 @@ export function recordActiveSdkRootAgentEnd(params: {
         ? resolveActiveSdkRequestBySessionKey(params.sessionKey) : undefined);
     const isCurrentDispatch = request?.contextOverflowRecovery.dispatchRunId === normalizedRunId;
     if (request && isCurrentDispatch && (!binding || binding.sessionKey === request.sessionKey)) {
-        request.contextOverflowRecovery.precheckError = !params.success &&
-            isOpenClawContextOverflowPrecheckError(params.error) ? params.error : undefined;
+        if (params.success) {
+            request.contextOverflowRecovery.precheckError = undefined;
+            request.contextOverflowRecovery.contextFailure = undefined;
+            request.contextOverflowRecovery.onExecutionProgress?.();
+        }
+        if (!params.success && classifyContextFailure(params.error)) {
+            request.contextOverflowRecovery.contextFailure = params.error;
+            (request.contextOverflowRecovery.errors ??= new Set()).add(params.error!);
+        }
+        if (!params.success && isRecoverableContextPreflightError(params.error)) {
+            request.contextOverflowRecovery.precheckError = params.error;
+            request.contextOverflowRecovery.onContextFailure?.();
+        }
     }
     if (!binding || binding.sessionKey !== binding.request.sessionKey) {
         if (request && isCurrentDispatch && params.sessionKey === request.sessionKey) {

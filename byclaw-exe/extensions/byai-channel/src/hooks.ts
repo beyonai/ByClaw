@@ -529,9 +529,16 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     });
     api.on("before_tool_call", (_event, ctx) => {
         const request = ctx.sessionKey ? resolveActiveSdkRequestBySessionKey(ctx.sessionKey) : undefined;
-        if (request) request.contextOverflowRecovery.replaySafe = false;
+        if (request) {
+            request.contextOverflowRecovery.replaySafe = false;
+            request.contextOverflowRecovery.onExecutionProgress?.();
+        }
     });
     api.on("before_compaction", (event: CompactionHookEvent, ctx: PluginHookAgentContext) => {
+        const request = ctx.sessionKey ? resolveActiveSdkRequestBySessionKey(ctx.sessionKey) : undefined;
+        if (request && ctx.runId && ctx.runId === request.contextOverflowRecovery.dispatchRunId) {
+            request.contextOverflowRecovery.onNativeCompaction?.("start");
+        }
         if (event?.messageCount !== -1) {
             return;
         }
@@ -548,6 +555,10 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     });
 
     api.on("after_compaction", (event: CompactionHookEvent, ctx: PluginHookAgentContext) => {
+        const request = ctx.sessionKey ? resolveActiveSdkRequestBySessionKey(ctx.sessionKey) : undefined;
+        if (request && ctx.runId && ctx.runId === request.contextOverflowRecovery.dispatchRunId) {
+            request.contextOverflowRecovery.onNativeCompaction?.("end");
+        }
         if (event?.compactedCount !== -1) {
             return;
         }

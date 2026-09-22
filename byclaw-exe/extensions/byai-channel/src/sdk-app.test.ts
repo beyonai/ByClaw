@@ -134,6 +134,47 @@ describe("ByaiChannelGatewayWorker", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    { error: new Error("Context overflow: prompt too large for the model. Try /reset (or /new)."),
+      zh: "必要的背景和关键条件", en: "necessary background and key details" },
+    { error: Object.assign(new Error("oversized attachment"), { code: "attachment_too_large" }),
+      zh: "相关章节", en: "relevant sections" },
+    { error: { code: "BYAI_CONTEXT_FAILURE", kind: "operation_pending" },
+      zh: "联系管理员", en: "contact an administrator" },
+  ].flatMap((entry) => ["zh_CN", "en_US"].map((language) => ({ ...entry, language }))))(
+    "localizes context metadata and framework exceptions in $language: $en", async ({ error, zh, en, language }) => {
+      vi.stubEnv("LANG", "");
+      const { context, emitter, worker } = createWorker();
+      deliverReplyToAgentViaSdk.mockRejectedValueOnce(error);
+      const command = new AskAgentCommand(new MessageHeader("message-error", "session-error", "trace-error", {
+        targetAgentType: "BYCLAW_EXE_user-test", parentMessageId: "caller-message", metadata: { language },
+      }), "hello");
+      const advice = language === "en_US" ? en : zh;
+      let thrown: unknown;
+      try { await worker.processCommand(command, context as never); }
+      catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String(thrown)).toContain(advice);
+      const wire = JSON.stringify(vi.mocked(emitter.emitState).mock.calls);
+      expect(wire).toContain(advice);
+      expect(wire + String(thrown)).not.toMatch(/prompt too large|Try \/reset|oversized attachment|ByaiContextError:/);
+      if (language === "en_US") expect(wire + String(thrown)).not.toMatch(/\p{Script=Han}/u);
+      expect(emitter.emitState).toHaveBeenCalledTimes(1);
+      expect(finalizeSdkBusinessResult).not.toHaveBeenCalled();
+    },
+  );
+
+  it("honors the existing LANG override for context failures", async () => {
+    vi.stubEnv("LANG", "en_US.UTF-8");
+    const { context, emitter, worker } = createWorker();
+    deliverReplyToAgentViaSdk.mockRejectedValueOnce(new Error("Compaction timed out"));
+    const command = new AskAgentCommand(new MessageHeader("message-lang", "session-lang", "trace-lang", {
+      targetAgentType: "BYCLAW_EXE_user-test", metadata: { language: "zh_CN" },
+    }), "hello");
+    await expect(worker.processCommand(command, context as never)).rejects.toThrow("Start a new conversation");
+    expect(JSON.stringify(vi.mocked(emitter.emitState).mock.calls)).not.toMatch(/\p{Script=Han}/u);
+  });
+
   it("processes ASK_AGENT and leaves terminal stream ownership to the channel gate", async () => {
     const { context, worker } = createWorker();
     const command = new AskAgentCommand(
