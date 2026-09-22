@@ -148,6 +148,27 @@ test('calls an injected WSA client and returns a normalized document', async () 
   assert.deepEqual(calls, [{ Query: '人工智能', Mode: 0 }]);
 });
 
+test('treats a missing optional Tencent SDK as unavailable', async () => {
+  const result = await runTencentWsa({ query: '人工智能' }, {
+    environment: {
+      TENCENTCLOUD_SECRET_ID: 'id-value',
+      TENCENTCLOUD_SECRET_KEY: 'key-value',
+    },
+    importSdk: async () => {
+      throw Object.assign(new Error('Cannot find package'), { code: 'ERR_MODULE_NOT_FOUND' });
+    },
+  });
+  assert.deepEqual(result, {
+    ok: false,
+    error: {
+      category: 'unavailable',
+      code: 'WSA_SDK_UNAVAILABLE',
+      retryable: false,
+      message: 'Tencent WSA SDK is not installed',
+    },
+  });
+});
+
 test('truncates normalized WSA results to the requested local limit', async () => {
   const pages = [1, 2, 3].map((index) => JSON.stringify({
     title: `结果 ${index}`,

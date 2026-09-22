@@ -1,7 +1,27 @@
 import assert from 'node:assert/strict';
+import { cpSync, existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const policy = await import('./url-authorization.mjs').catch(() => ({}));
+
+test('loads URL authorization from the Skill without node_modules', () => {
+  const sourceRoot = dirname(fileURLToPath(import.meta.url));
+  const isolatedRoot = mkdtempSync(join(tmpdir(), 'knowledge-collection-runtime-'));
+  cpSync(join(sourceRoot, 'url-authorization.mjs'), join(isolatedRoot, 'url-authorization.mjs'));
+  if (existsSync(join(sourceRoot, 'vendor'))) {
+    cpSync(join(sourceRoot, 'vendor'), join(isolatedRoot, 'vendor'), { recursive: true });
+  }
+  const outcome = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    "import('./url-authorization.mjs').then((module) => { if (!module.authorizationAllowsHttpRedirect('https://a.example.co.uk/x', 'https://b.example.co.uk/y')) process.exit(2); })",
+  ], { cwd: isolatedRoot, encoding: 'utf8' });
+  assert.equal(outcome.status, 0, outcome.stderr);
+});
 
 test('normalizes equivalent URLs and allows safe same-site redirects', () => {
   assert.equal(typeof policy.authorizationAllowsHttpRedirect, 'function');

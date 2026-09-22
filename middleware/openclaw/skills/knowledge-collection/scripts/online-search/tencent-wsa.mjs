@@ -174,8 +174,16 @@ function configuredCapabilities(environment) {
   return { industry: values.has('industry'), count: values.has('count') };
 }
 
-async function createSdkClient(environment, timeoutMs) {
-  const imported = await import('tencentcloud-sdk-nodejs');
+async function createSdkClient(environment, timeoutMs, importSdk = () => import('tencentcloud-sdk-nodejs')) {
+  let imported;
+  try {
+    imported = await importSdk();
+  } catch (error) {
+    if (error?.code === 'ERR_MODULE_NOT_FOUND') {
+      throw Object.assign(new Error('Tencent WSA SDK is not installed'), { code: 'WSA_SDK_UNAVAILABLE' });
+    }
+    throw error;
+  }
   const sdk = imported.default || imported;
   const Client = sdk?.wsa?.v20250508?.Client;
   if (typeof Client !== 'function') throw Object.assign(new Error('Tencent WSA SDK client is unavailable'), {
@@ -227,7 +235,7 @@ export async function runTencentWsa(args, options = {}) {
   const timeoutMs = positiveInteger(options.timeoutMs)
     ? Math.min(options.timeoutMs, configuredTimeout) : configuredTimeout;
   try {
-    const client = options.client || await createSdkClient(environment, timeoutMs);
+    const client = options.client || await createSdkClient(environment, timeoutMs, options.importSdk);
     const params = buildSearchParams(args, options.capabilities || configuredCapabilities(environment));
     const response = await withTimeout(Promise.resolve(client.SearchPro(params)), timeoutMs);
     const document = normalizeSearchResponse(response, params.Query);
@@ -235,6 +243,9 @@ export async function runTencentWsa(args, options = {}) {
     if (limit) document.results = document.results.slice(0, limit);
     return { ok: true, document };
   } catch (error) {
+    if (error?.code === 'WSA_SDK_UNAVAILABLE') {
+      return unavailable('WSA_SDK_UNAVAILABLE', 'Tencent WSA SDK is not installed');
+    }
     return { ok: false, error: sanitizeProviderError(error) };
   }
 }
