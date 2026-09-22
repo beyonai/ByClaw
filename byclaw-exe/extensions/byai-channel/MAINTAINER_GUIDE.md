@@ -113,7 +113,7 @@ gate 内通过 `registerActiveSdkRequest` 建立 request，关键关联字段是
 - `nativeChildRuns`：native subagent 的权威台账，按 child runId 索引，`terminalAt === undefined` 即仍在跑。判定统一走 `hasPendingNativeChildRun`，不另存一份 child session 集合。
 - `rootRunsObservedWhileChildrenPending`：child 未闭合期间观测到的 root lifecycle start 次数，用于给早到的 announce 续跑抵账。
 - `delegatedWorkToolCallIds`：外部委派尚未回灌的 tool call 集合。
-- `contextOverflowRecovery`：本业务请求的预检查恢复状态。`sdk-message-processor.ts` 在首次 dispatch 前置 `dispatchPending=true`，在恢复、续跑编排完成或异常退出的 `finally` 中清除；`shouldCompleteActiveSdkRequest` 必须等待它释放。`dispatchRunId` 由同步的 `llm_input`/`onAgentRunStart` 记录，每次 dispatch 前清空，迟到的旧 `agent_end` 不得覆盖当前预检查结果。
+- `contextOverflowRecovery`：本业务请求的预检查恢复状态。`sdk-message-processor.ts` 在首次 dispatch 前置 `dispatchPending=true`，在恢复、续跑编排完成或异常退出的 `finally` 中清除；`shouldCompleteActiveSdkRequest` 必须等待它释放。`dispatchRunId` 由同步的 `llm_input`/`onAgentRunStart` 记录，每次 dispatch 前清空，迟到的旧 `agent_end` 不得覆盖当前预检查结果。`generation` 与 active request 身份保护异步回调；`retiredRunIds` 排除已退休 dispatch 的事件。
 
 ### 2. 预构建 prompt snapshot
 
@@ -123,17 +123,17 @@ dispatch 前会调用 `buildPromptInjectionSnapshot` 并通过 `setPromptInjecti
 
 ### 3. 创建并 dispatch
 
-`runOneDispatch` 每次都会新建 envelope、dispatcher 和 reply options，但复用同一 `sessionKey`、`To`、emitter 和 abort signal。这样 overflow continuation 或其他 follow-up 可以是新的 OpenClaw run，而不会把不同 dispatch 的 reply context 混在一起。
+`runOneDispatch` 每次都会新建 envelope、dispatcher 和 reply options，但复用同一 `sessionKey`、`To` 和 emitter。恢复编排中的每次 dispatch 使用独立 AbortController，并联动用户取消信号；压缩计时器不得取消成功重放后的正常回答。这样 overflow continuation 或其他 follow-up 可以是新的 OpenClaw run，而不会把不同 dispatch 的 reply context 混在一起。
 
 `onAgentRunStart` 调用 `bindActiveSdkRequestRunId` 把 SDK 自己启动的 root run 绑到 request，并注册 agent-end promise。native subagent 产生的 parent announce 续跑是 direct-path 启动的、不经过这个 callback，它只会以 root lifecycle start 的形式出现——见下面的 announce 抵账。
 
-预检查溢出可能只有 `llm_input` 和 `agent_end`，没有 `onAgentRunStart` 或 lifecycle；2026.7.1 还存在不触发这两个 hook、只经 `onAgentRunStart` 关联并返回规范化 lifecycle 溢出错误的提前返回路径。后一条路径也必须关联当前 dispatch，并确认 `replaySafe` 后才能进入恢复、抑制原始错误。`llm_input` 只记录当前 dispatch 的 runId，不把它当成已经启动业务 run，更不能据此认定模型已收到问题。dispatch 返回后先等待已排入的 agent event 队列，再按同一 runId 的错误事实决定恢复。
+预检查溢出可能只有 `llm_input` 和 `agent_end`，没有 `onAgentRunStart` 或 lifecycle；2026.7.1 还存在不触发这两个 hook、只经 `onAgentRunStart` 关联并返回规范化 lifecycle 溢出错误的提前返回路径。后一条路径也必须关联当前 dispatch，并确认 `replaySafe` 后才能进入恢复、抑制原始错误。`llm_input` 只记录当前 dispatch 的 runId，不把它当成已经启动业务 run，更不能据此认定模型已收到问题。错误也可能只由 `isError` ReplyPayload 返回，其 per-dispatch deliver 回调提供关联身份。dispatch 返回后先等待已排入的 agent event 队列，再按同一 runId / dispatch 的错误事实决定恢复；不得在串行 agent event 队列内等待压缩。
 
 ### 4. dispatch 返回后的 settle
 
 正常路径在 `finally` 调用 `waitForSdkSessionDispatchSettled`。它先标记 `dispatchSettled=true`，然后循环检查 `shouldCompleteActiveSdkRequest`；满足后调用 `completeActiveSdkRequest`，发出 `APP_STREAM_RESPONSE` 并清理 request。
 
-context-overflow recovery 期间会把 settle 延后给 OpenClaw recovery 事件；overflow continuation 在同一个 session gate 内运行，并用 `overflowContinuePending` 覆盖截断 run 到续跑 run 的整个窗口。
+context-overflow recovery 由 `dispatchPending` 挡住中间收尾。无在途业务的最终失败由 SDK worker 输出公开错误并结束，不再等待可能永不到来的原生恢复事件；已有子任务、委派和 outbound 工作则仍须排空原有完成门。overflow continuation 在同一个 session gate 内运行，并用 `overflowContinuePending` 覆盖截断 run 到续跑 run 的整个窗口。
 
 ## 流式事件和 hooks
 
@@ -218,10 +218,13 @@ SDK 直接由 `GatewayDataEmitter` 发 chunk/state。`agent-event.ts` 负责完�
 ### compaction、overflow、model fallback
 
 - **compaction**：`compactionRetryPending` 阻止过早收尾；展示 start/end notice。
-- **precheck recovery**：`context-overflow-recovery.ts` 接受明确的发送前 `(precheck)`，以及 `agent-event.ts` 确认属于当前 dispatch、仍可安全重放的根 lifecycle 溢出；不接受明确的 mid-turn precheck。`before_tool_call` 或实际答案输出将 `replaySafe` 永久置为 false；恢复前还须通过原有业务完成条件，确认没有 child、delegated 或 outbound 工作。流程持有原 session lease 和 `dispatchPending` 完成门，提示“正在自动压缩上下文”，调用公共 `sessions.compact`（不传 `maxLines`），压缩成功后重发原问题和附件并重新构建 prompt snapshot。最多额外 3 次恢复，整个恢复阶段最多 10 分钟；明确压缩失败计数但不重发，RPC 结果不确定或用户取消则停止。SDK 请求和业务 messageId 不变，运行时 MessageSid 每次唯一。最终完整输入预算仍由 OpenClaw 预检查确认。
+- **precheck recovery**：`context-overflow-recovery.ts` 接受明确发送前 `(precheck)`、必需的 preflight compaction 超时，以及关联当前 dispatch 的根 lifecycle / error ReplyPayload 溢出。不接受 mid-turn precheck，也不将 memory flush 失败作为压缩计数。`before_tool_call` 或实际答案输出将 `replaySafe` 永久置为 false；恢复前还须通过原有业务完成条件。持有原 session lease，提示第 N/3 次恢复，通过公共 `sessions.compact`（不传 `maxLines`）生成摘要；仅成功后重发原问题/附件并重建 snapshot。SDK 业务标识不变，运行时 MessageSid 每次唯一。最终完整输入预算仍由 OpenClaw 校验；没有改写历史文件或引入自定义摘要引擎。
+- **compaction watchdog**：`context-recovery-dispatch.ts` 只监督实际压缩/已知发送前失败。首次观测起计 10 分钟恢复预算；原生阶段按配置超时加 30 秒宽限，中止后最多再等 30 秒确认原 dispatch 退出。恢复成功后的正常回答没有这个计时器。原调用未退出时调用 `onUnsettledDispatch`，安装保护必须早于用户取消释放 FIFO lease。
+- **uncertain operations**：`context-recovery-operations.ts` 按 OpenClaw sessionKey 记录已发起操作；网关可用性检查/接口加载阶段不预占。原 promise 明确返回才释放；RPC 异常无法确认远端终态时保留保护，不以 TTL 假定远端停止。保护跨插件 bundle 热加载共享，但只限当前执行进程。管理员须确认服务端操作已结束再重启进程；更换同一 session 的百应对话不能规避保护。普通请求仅查 Map，新增压缩最多 256 条记录，已在运行的原生操作取消时仍保留。明确的派发前鉴权拒绝会释放保护，不继续重试。
+- **public errors**：`context-errors.ts` 只在可信错误边界分类，原错误不放在公开 cause 或 SDK metadata；普通答案引用错误文本不改写。上下文整理失败与确有证据的本次输入过大分别给出新建对话/补背景及拆问题/附件建议；后台状态不明提示等待或联系管理员。不要将所有 `context_length_exceeded` 都归因于用户本次附件。 所有展示文案从 `i18n.ts` 构建，沿用已有 `resolveInboundLanguage` 规则（LANG 优先于 metadata.language）。会话保护内部也传递 request language；公开异常的 `toString()` 只返回已本地化 message，name/code/kind 仍保留供内部分类。测试须同时覆盖中文、英文、序列化错误及 SDK 实际消息，不能只验证中文模板。
 - **overflow**：`agent_end` 识别 length/context pressure，`maybeContinueAfterOverflow` 在 session gate 内新建 dispatch；`overflowContinuePending` 必须覆盖整个续跑窗口。
 - **model fallback**：失败 candidate 的 lifecycle error 不能立即完成；`fallback_step=next_fallback` 会取消该次 completion check，只有 fallback 成功或 chain exhausted 才重新检查。
-- **dispatch error**：非 overflow 错误清掉 active request 并向 SDK 发 error state；overflow 错误交给 recovery 流程。
+- **dispatch error**：无在途业务的上下文失败以公开文案结束；需要排空业务的上下文失败保留完成门。其他错误沿用既有 SDK error 流程。清理 request 前检查对象身份，避免取消后的旧回调清掉下一请求。
 
 ## 其他子系统地图
 
@@ -273,7 +276,8 @@ npx vitest run \
 
 ```bash
 npx vitest run src/sdk-message-processor.test.ts src/sdk-app.test.ts \
-  src/context-overflow-recovery.test.ts src/i18n.compaction.test.ts
+  src/context-overflow-recovery.test.ts src/context-recovery-dispatch.test.ts \
+  src/context-recovery-operations.test.ts src/context-errors.test.ts src/i18n.compaction.test.ts
 ```
 
 如果改了取消链路，再加：

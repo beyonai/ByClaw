@@ -47,6 +47,7 @@ import {
   type RedisClient,
 } from "../../shared/src/redis-compat.js";
 import { releaseCancelledSessionDispatch } from "./session-dispatch-gate.js";
+import { classifyContextFailure, toPublicContextError } from "./context-errors.js";
 import { connectorAuthorizationFromMetadata } from "./connector-authorization.js";
 
 export interface ByaiSdkAppOptions {
@@ -549,10 +550,11 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
     let emittedLaneError = false;
     const emitSdkError = async (currentInbound: ByaiSdkInboundMessage, err: unknown) => {
       emittedLaneError = true;
+      const publicError = toPublicContextError(err, currentInbound.language);
       const errorOptions = withSdkEmitMetadata(
         {
           eventType: "error",
-          metadata: { error: String(err) },
+          metadata: { error: String(publicError) },
         },
         {
           requestId: currentInbound.requestId,
@@ -620,8 +622,12 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
           );
           throw new TaskCancelledError(String(abortController.signal.reason || "task cancelled"));
         }
-        await emitSdkError(currentInbound, err);
-        throw err;
+        if (classifyContextFailure(err)) {
+          this.log?.warn?.(`[context-overflow-recovery] failed: traceId=${currentInbound.traceId}, error=${String(err)}`);
+        }
+        const publicError = toPublicContextError(err, currentInbound.language);
+        await emitSdkError(currentInbound, publicError);
+        throw publicError;
       } finally {
         frameworkSignal?.removeEventListener("abort", abortFromFramework);
       }
@@ -693,7 +699,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
       if (!emittedLaneError) {
         await emitSdkError(inbound, err).catch(() => undefined);
       }
-      throw err;
+      throw toPublicContextError(err, inbound.language);
     }
   }
 }

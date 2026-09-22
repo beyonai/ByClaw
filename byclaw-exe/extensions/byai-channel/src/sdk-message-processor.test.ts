@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+afterEach(() => vi.useRealTimers());
 
 vi.mock("openclaw/plugin-sdk/media-runtime", () => ({
   detectMime: vi.fn(async () => "application/octet-stream"),
@@ -232,18 +234,23 @@ describe("SDK precheck recovery", () => {
           data: { phase: "error", error },
         });
         expect(request.contextOverflowRecovery.precheckError).toBeUndefined();
+        if (scenario === "stale-run") expect(request.contextOverflowRecovery.contextFailure).toBeUndefined();
       } finally {
         clearActiveSdkRequestByTarget(request.accountId, request.to);
       }
     },
   );
-  it.each([true, false, "lifecycle"])("holds finalization and replays original text/media (overflow path: %s)", async (runStarted) => {
+  it.each([true, false, "lifecycle", "required", "payload", "native-timeout"].flatMap((runStarted) =>
+    (["zh_CN", "en_US"] as const).map((language) => ({ runStarted, language })),
+  ))("holds finalization and replays original text/media ($runStarted, $language)", async ({ runStarted, language }) => {
+    if (runStarted === "native-timeout") vi.useFakeTimers();
+    let deliverPayload: (payload: { text: string; isError: boolean }) => Promise<void>;
     const sessionKey = "agent:test-agent:direct:acct-recovery:user-recovery";
     const contexts: Array<Record<string, unknown>> = [];
     const notices: string[] = [];
     const chunks: string[] = [];
     const states: unknown[] = [];
-    const cfg = { channels: {}, session: {}, agents: { defaults: { compaction: { timeoutSeconds: 300 } } } };
+    const cfg = { channels: {}, session: {}, agents: { defaults: { compaction: { timeoutSeconds: runStarted === "native-timeout" ? 1 : 300 } } } };
     const account = { accountId: "acct-recovery", enabled: true, configured: true,
       config: { sessionKeyPerSessionId: false, forceReasoningStream: false } } as ResolvedByaiAccount;
     const precheck = "Context overflow: prompt too large for the model (precheck).";
@@ -267,14 +274,26 @@ describe("SDK precheck recovery", () => {
         reply: {
           formatAgentEnvelope: ({ body }: any) => body,
           resolveEnvelopeFormatOptions: () => ({}),
-          createReplyDispatcherWithTyping: () => ({ dispatcher: {}, replyOptions: {} }),
+          createReplyDispatcherWithTyping: ({ deliver }: any) => {
+            deliverPayload = deliver;
+            return { dispatcher: {}, replyOptions: {} };
+          },
           finalizeInboundContext: (ctx: unknown) => ctx,
           withReplyDispatcher: async ({ run }: any) => run(),
           dispatchReplyFromConfig: async ({ ctx, replyOptions }: any) => {
             contexts.push(ctx);
             const runId = `run-precheck-${contexts.length}`;
             const success = contexts.length === 3;
-            if (runStarted || success) await replyOptions.onAgentRunStart(runId);
+            if (!success && runStarted === "required") throw new Error("Preflight compaction required but failed: Compaction timed out");
+            if (!success && runStarted === "payload") {
+              await deliverPayload({ text: "Context overflow: prompt too large for the model. Try /reset (or /new) to start a fresh session.", isError: true });
+              return { queuedFinal: false, counts: {} };
+            }
+            if (!success && runStarted === "native-timeout") {
+              await replyOptions.onCompactionStart();
+              await new Promise<void>((_resolve, reject) => replyOptions.abortSignal.addEventListener("abort", () => reject(replyOptions.abortSignal.reason)));
+            }
+            if (runStarted === true || runStarted === "lifecycle" || success) await replyOptions.onAgentRunStart(runId);
             const error = success ? undefined : precheck;
             if (runStarted === "lifecycle" && !success) {
               // Real 2026.7.1 early return: no llm_input or agent_end hook.
@@ -287,7 +306,7 @@ describe("SDK precheck recovery", () => {
               getAgentRunEndPromiseResolver(runId)?.({ success, error });
               recordActiveSdkRootAgentEnd({ runId, sessionKey, success, error,
                 messages: success ? [{ role: "assistant", content: "最终结果" }] : [] });
-              if (runStarted || success) markActiveSdkRootLifecycleFinished(sessionKey, success ? "end" : "error", runId);
+              if (runStarted === true || runStarted === "lifecycle" || success) markActiveSdkRootLifecycleFinished(sessionKey, success ? "end" : "error", runId);
             }
             return { queuedFinal: false, counts: {} };
           },
@@ -298,14 +317,16 @@ describe("SDK precheck recovery", () => {
       emitChunk: async (_s: unknown, _t: unknown, event: unknown) => { chunks.push(JSON.stringify(event)); },
       emitState: async (_s: unknown, _t: unknown, event: unknown) => { states.push(event); },
     } as unknown as GatewayDataEmitter);
-    const result = await deliverReplyToAgentViaSdk({
+    const pending = deliverReplyToAgentViaSdk({
       account, cfg: cfg as never,
       message: { messageId: "msg-recovery", sessionId: "user-recovery", userId: "user-recovery",
         text: "查一下名单", timestamp: Date.now(), traceId: "trace-recovery", accountId: account.accountId,
         files: [{ filePath: "report.png", contentType: "image/png" }], extraPayload: {},
-        language: "zh_CN", languageProvided: true },
+        language, languageProvided: true },
       onReply: async (text) => { notices.push(text); },
     });
+    if (runStarted === "native-timeout") await vi.advanceTimersByTimeAsync(65_000);
+    const result = await pending;
     expect(result.finalAnswer).toBe("最终结果");
     expect(compact).toHaveBeenCalledTimes(3);
     expect(contexts).toHaveLength(3);
@@ -315,7 +336,9 @@ describe("SDK precheck recovery", () => {
       expect(ctx.MediaPath).toBe("/by/report.png");
       expect(ctx.SessionKey).toBe(sessionKey);
     }
-    expect(notices.filter((text) => text.includes("正在自动压缩上下文"))).toHaveLength(3);
+    const recoveryTitle = language === "en_US" ? "Automatically compressing context" : "正在自动压缩上下文";
+    expect(notices.filter((text) => text.includes(recoveryTitle))).toHaveLength(3);
+    if (language === "en_US") expect(notices.join("\n")).not.toMatch(/\p{Script=Han}/u);
     expect(chunks.join("")).not.toContain(precheck);
     expect(chunks.join("")).not.toContain("Try /reset");
     expect(states).toHaveLength(0);

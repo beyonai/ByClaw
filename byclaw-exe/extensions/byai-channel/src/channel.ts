@@ -27,6 +27,7 @@ import {
 import { parseAgentIdFromTo, parseSessionIdFromTo } from "./outbound-dedup.js";
 import { EventType } from "@byclaw/by-framework";
 import { emitOutOfBandSdkEvent, generateRandomId } from "./utils.js";
+import { publicContextErrorText } from "./context-errors.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 
@@ -268,7 +269,7 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
 
     sendText: async (ctx: ChannelOutboundContext) => {
       const { to, accountId, replyToId } = ctx;
-      const text = ctx.text ?? "";
+      let text = ctx.text ?? "";
       const okResult = {
         channel: CHANNEL_ID,
         messageId: replyToId ?? `byai-${Date.now()}`,
@@ -289,6 +290,13 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
 
       const resolvedAccountId = accountId ?? "";
       const request = resolveActiveSdkRequestByTarget(resolvedAccountId, to);
+
+      // Only suppress a known error already correlated by lifecycle/agent_end.
+      // A normal answer discussing this error text must still be delivered.
+      if (request?.contextOverflowRecovery.errors?.has(text)) {
+        if (request.contextOverflowRecovery.dispatchPending) return suppressedResult;
+        text = publicContextErrorText(text, request.language);
+      }
 
       // out-of-band：无 active request（infra 注入等）。整段作为独立一条 emit。
       // cron/heartbeat 在源头不走 deliver，不会到达这里。

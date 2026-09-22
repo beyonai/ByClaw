@@ -1,4 +1,6 @@
-import { isOpenClawContextOverflowPrecheckError } from "./dispatch-error.js";
+import { formatDispatchError, isRecoverableContextPreflightError } from "./dispatch-error.js";
+import { ByaiContextError, classifyContextFailure, type ContextFailureKind } from "./context-errors.js";
+import { runObservedContextDispatch } from "./context-recovery-dispatch.js";
 
 export const MAX_CONTEXT_OVERFLOW_RECOVERIES = 3;
 export const CONTEXT_OVERFLOW_RECOVERY_TIMEOUT_MS = 10 * 60_000;
@@ -9,6 +11,15 @@ export type ContextOverflowRecoveryState = {
   dispatchRunId?: string;
   precheckError?: string;
   attempts: number;
+  generation?: number;
+  deadline?: number;
+  /** Error evidence only; never apply these matches to arbitrary assistant prose. */
+  errors?: Set<string>;
+  contextFailure?: unknown;
+  retiredRunIds?: Set<string>;
+  onNativeCompaction?: (phase: "start" | "end") => void;
+  onContextFailure?: () => void;
+  onExecutionProgress?: () => void;
 };
 
 export type CompactionResult = {
@@ -18,7 +29,9 @@ export type CompactionResult = {
   result?: { tokensBefore?: number; tokensAfter?: number };
 };
 
-export class ContextOverflowRecoveryError extends Error {}
+export class ContextOverflowRecoveryError extends ByaiContextError {
+  constructor(message: string) { super("recovery_failed", message); }
+}
 
 async function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
@@ -53,22 +66,29 @@ export async function dispatchWithContextOverflowRecovery(params: {
   signal?: AbortSignal;
   dispatch: (signal?: AbortSignal) => Promise<void>;
   compact: (signal: AbortSignal, remainingMs: number) => Promise<CompactionResult>;
-  notice: (phase: "start" | "retry" | "failed", attempt: number) => Promise<void>;
+  notice: (phase: "start" | "retry" | "failed", attempt: number, failureKind?: ContextFailureKind) => Promise<void>;
   failureText: string;
   logger?: { info?: (message: string) => void; warn?: (message: string) => void };
   timeoutMs?: number;
+  nativeCompactionTimeoutMs?: () => number;
+  drainTimeoutMs?: number;
+  onUnsettledDispatch?: (operation: Promise<void>) => void;
 }): Promise<void> {
   const { state } = params;
+  const timeoutMs = params.timeoutMs ?? CONTEXT_OVERFLOW_RECOVERY_TIMEOUT_MS;
   async function dispatch(signal?: AbortSignal) {
     signal?.throwIfAborted();
     state.precheckError = undefined;
+    state.contextFailure = undefined;
     try {
-      await abortable(params.dispatch(signal), signal);
+      await runObservedContextDispatch({ ...params, signal, recoveryTimeoutMs: timeoutMs });
     } catch (error) {
-      if (!isOpenClawContextOverflowPrecheckError(error) && !state.precheckError) throw error;
+      if (error instanceof ByaiContextError || classifyContextFailure(error) === "input_too_large") throw error;
+      if (!isRecoverableContextPreflightError(error) && !state.precheckError) throw error;
       state.precheckError ??= String(error);
     }
     signal?.throwIfAborted();
+    if (state.contextFailure && !state.precheckError) throw state.contextFailure;
     return Boolean(state.precheckError);
   }
 
@@ -79,13 +99,14 @@ export async function dispatchWithContextOverflowRecovery(params: {
   const abort = () => controller.abort(params.signal?.reason);
   params.signal?.addEventListener("abort", abort, { once: true });
   if (params.signal?.aborted) abort();
-  const timeoutMs = params.timeoutMs ?? CONTEXT_OVERFLOW_RECOVERY_TIMEOUT_MS;
-  const deadline = Date.now() + timeoutMs;
-  const timer = setTimeout(() => controller.abort(new ContextOverflowRecoveryError(params.failureText)), timeoutMs);
+  const deadline = state.deadline ??= Date.now() + timeoutMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     while (state.attempts < MAX_CONTEXT_OVERFLOW_RECOVERIES) {
       controller.signal.throwIfAborted();
+      if (!state.replaySafe || Date.now() >= deadline) throw new ContextOverflowRecoveryError(params.failureText);
       state.attempts += 1;
+      timer = setTimeout(() => controller.abort(new ContextOverflowRecoveryError(params.failureText)), Math.max(1, deadline - Date.now()));
       await abortable(params.notice("start", state.attempts), controller.signal);
       controller.signal.throwIfAborted();
       const startedAt = Date.now();
@@ -97,20 +118,30 @@ export async function dispatchWithContextOverflowRecovery(params: {
         `compacted=${compacted} durationMs=${Date.now() - startedAt} ` +
         `tokensBefore=${result?.result?.tokensBefore ?? "unknown"} tokensAfter=${result?.result?.tokensAfter ?? "unknown"}`,
       );
-      if (!compacted) continue;
+      clearTimeout(timer);
+      // Definitive configuration/authentication/non-compressible failures do not improve on retry.
+      if (!compacted) {
+        if (/unauthori[sz]ed|forbidden|(?:401|403)|invalid.*(?:key|credential)|no (?:messages|history)|nothing to compact|too few messages/i.test(result?.reason ?? "")) {
+          throw new ContextOverflowRecoveryError(params.failureText);
+        }
+        continue;
+      }
       await abortable(params.notice("retry", state.attempts), controller.signal);
       // Core validates the complete rebuilt input before submitting the question.
-      if (!await dispatch(controller.signal)) return;
+      // Recovery deadlines must not abort an otherwise healthy replay's tools/answer.
+      if (!await dispatch(params.signal)) return;
       if (!state.replaySafe) throw new ContextOverflowRecoveryError(params.failureText);
     }
     throw new ContextOverflowRecoveryError(params.failureText);
   } catch (error) {
     if (params.signal?.aborted) throw params.signal.reason ?? error;
     // A transport timeout/disconnect has unknown outcome: do not compact or replay again.
-    params.logger?.warn?.(`[context-overflow-recovery] stopped after ${state.attempts} attempt(s)`);
-    await params.notice("failed", state.attempts);
-    if (error instanceof ContextOverflowRecoveryError) throw error;
-    throw new ContextOverflowRecoveryError(params.failureText, { cause: error });
+    params.logger?.warn?.(`[context-overflow-recovery] stopped after ${state.attempts} attempt(s): ${formatDispatchError(error)}`);
+    const kind = classifyContextFailure(error) ?? "recovery_failed";
+    await params.notice("failed", state.attempts, kind);
+    if (error instanceof ByaiContextError) throw error;
+    if (kind !== "recovery_failed") throw new ByaiContextError(kind, params.failureText);
+    throw new ContextOverflowRecoveryError(params.failureText);
   } finally {
     clearTimeout(timer);
     params.signal?.removeEventListener("abort", abort);
@@ -128,16 +159,18 @@ export async function compactSessionForRecovery(params: {
   sessionKey: string;
   signal: AbortSignal;
   timeoutMs: number;
+  trackOperation?: (run: () => Promise<CompactionResult>) => Promise<CompactionResult>;
 }): Promise<CompactionResult> {
   params.signal.throwIfAborted();
   // Omit maxLines: setting it selects line trimming instead of LLM summarization.
   const input = { key: params.sessionKey };
+  const invoke = params.trackOperation ?? ((run: () => Promise<CompactionResult>) => run());
   if (await params.runtime.gateway?.isAvailable()) {
     params.signal.throwIfAborted();
     try {
-      return await params.runtime.gateway.request<CompactionResult>("sessions.compact", input, {
+      return await invoke(() => params.runtime.gateway!.request<CompactionResult>("sessions.compact", input, {
         timeoutMs: params.timeoutMs,
-      });
+      }));
     } catch (error) {
       // isAvailable checks host availability, not the official-plugin trust
       // gate. This exact rejection happens before dispatch. Use the public,
@@ -149,8 +182,8 @@ export async function compactSessionForRecovery(params: {
   }
   const { callGatewayFromCli } = await import("openclaw/plugin-sdk/gateway-runtime");
   params.signal.throwIfAborted();
-  return await callGatewayFromCli("sessions.compact", { timeout: String(params.timeoutMs) }, input, {
+  return await invoke(async () => await callGatewayFromCli("sessions.compact", { timeout: String(params.timeoutMs) }, input, {
     signal: params.signal,
     progress: false,
-  }) as CompactionResult;
+  }) as CompactionResult);
 }
