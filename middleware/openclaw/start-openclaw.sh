@@ -15,4 +15,8 @@ fi
 
 cd /app
 log "starting gateway on ${OPENCLAW_GATEWAY_BIND}:${OPENCLAW_GATEWAY_PORT}"
-exec node dist/index.js gateway --bind="${OPENCLAW_GATEWAY_BIND}" --port="${OPENCLAW_GATEWAY_PORT}" --allow-unconfigured --verbose
+set -- node dist/index.js gateway --bind="${OPENCLAW_GATEWAY_BIND}" --port="${OPENCLAW_GATEWAY_PORT}" --allow-unconfigured
+if [ "${OPENCLAW_VERBOSE:-false}" = "true" ]; then
+  set -- "$@" --verbose
+fi
+exec "$@"

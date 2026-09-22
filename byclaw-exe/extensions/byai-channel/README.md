@@ -15,6 +15,12 @@ npm run build
 
 `openclaw` 扩展入口为 `./dist/index.js`。
 
+## 运行日志
+
+正常日志保留请求接收、OpenClaw运行、终态写入和异常等关键摘要，Gateway 链路按 `requestId` 检索，`sessionId` / `traceId` 辅助定位；Webhook使用已有 `requestId`。不逐条打印agent event，不打印问题/回答正文、注入的系统提示词、媒体文本或完整Redis配置；消息只记录长度，正常文本去重保持静默。
+
+root lifecycle terminal只表示该OpenClaw run结束，dispatch返回和SDK完成门通过也有各自含义，不能当作前端已收到终态。`channel.final_written` 记录实际 XADD 回复，前端收到及应用由 FE 独立上报，不能互相替代。需要检查完整模型输入时，使用下面默认关闭的Context Snapshot，不在常驻日志中dump正文。
+
 ## 配置说明
 
 ### 在 openclaw.json 中配置
@@ -632,3 +638,23 @@ export default ChatComponent;
 2. **流式输出**: 当 `streamEnabled: true` 时，AI 的回复会分多次推送，每次推送 `done: false`，最后一条 `done: true`
 3. **Session 管理**: 建议在服务端维护 session 映射关系
 4. **安全**: 生产环境请添加适当的认证和授权机制
+
+关键链路日志使用 `chat_chain` 标记和 metadata 中的 `requestId`：worker 接收、OpenClaw dispatch/lifecycle、终态 XADD 实际回复。终态写入日志观察 SDK 原有 pipeline，不改变命令、返回值或异常；pipeline 单命令错误会记录 failed，但保留 SDK 原有处理语义。完整排查说明见仓库 `docs/architecture/chat-request-logging-implementation.md`。
+
+## 上下文溢出自动恢复
+
+SDK 会话在 OpenClaw 返回明确的 `Context overflow ... (precheck)`，或当前 dispatch 的根 lifecycle 返回上下文溢出错误后，可自动恢复最多 **3 次**，不包含原始请求或 OpenClaw 内部尝试。已执行工具或输出答案的请求不重放，避免重复业务操作；普通网络错误、鉴权错误、明确的 mid-turn precheck 及无法关联到当前 dispatch 的溢出不进入本流程。OpenClaw 2026.7.1 的部分发送前检查不触发 `llm_input`/`agent_end`，只输出去掉 `(precheck)` 的 lifecycle 错误，因此也须识别此终态路径。
+
+每次恢复先提示“正在自动压缩上下文（第 N/3 次恢复）”，在同一会话的 dispatch lease 内调用公开的 `sessions.compact` 语义摘要接口（不传 `maxLines`）。仅在 `ok=true && compacted=true`、且有效的 token 统计未显示压缩无效时，重发原问题和附件。`tokensBefore=0` 表示缺少压缩前用量样本，不据此认定压缩变大。最后由 OpenClaw 的发送前检查校验系统提示、工具定义、保留历史、新问题及输出预留是否满足对话模型窗口；若仍是预检查溢出，进入下一次恢复。
+
+压缩失败也消耗一次恢复额度，但不重发问题。压缩 RPC 超时或连接断开属于结果不确定，立即停止，不叠加新压缩。总恢复时间上限为 10 分钟，用户取消立即停止本地等待及后续重发；已经交给网关的压缩可能仍会由服务端完成或超时。恢复过程中保持 SDK 完成门关闭，只在最终答案或最终失败时结束请求。正常的输出截断续写仍沿用原来的独立流程。
+
+运行环境须提供 OpenClaw 2026.7.1 的公共 `sessions.compact` 接口。Redis worker 不处于网关请求上下文，或进程内官方插件信任门在派发前明确拒绝百应插件时，通过公开 `callGatewayFromCli` 使用宿主现有网关连接和鉴权配置。日志仅记录恢复次数、耗时和 token 统计，不记录问题、摘要或凭据。
+
+### 验证状态与验收范围（2026-09-21）
+
+当前状态为**分项验证通过，真实环境完整成功链路待验收**。OpenClaw 2026.7.1 与 `qwen3-max` 的隔离沙箱已验证：溢出后依次提示第 1/3、2/3、3/3 次恢复，明确压缩失败后只结束一次请求；另一个虚构历史会话通过真实 `sessions.compact` 生成摘要，压缩后的续问仍正确返回历史中的项目编号和负责人标识。测试仅使用虚构内容。
+
+三次恢复用例的本次问题本身超过窗口，且没有可压缩历史，因此验证的是失败分支，没有实际重发问题。独立的语义压缩和压缩后续问成功，也不能替代“历史过大 → 溢出 → 自动压缩成功 → 自动重发原问题 → 正常答案”的端到端证明。该完整成功分支及原问题、附件、业务标识的保留目前由集成测试覆盖；发布验收仍须使用与故障场景一致的模型、受控超长历史及普通短问题验证，并核对原压缩超时场景是否改善。
+
+定向测试覆盖恢复上限、取消、未知 RPC 结果不重入、有工具执行或正文输出时禁止重放、迟到旧 run 排除、公开网关传输兼容和缺失 token 样本。本轮未完成原线上同模型长会话的完整验收，也未发布新执行镜像。两个插件需一起构建发布；临时沙箱加载测试包不代表正式环境已更新。

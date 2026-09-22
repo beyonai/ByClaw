@@ -1,5 +1,7 @@
 import { setSessionModelPreparer } from "../../shared/src/session-model-runtime.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
+import { hasManagedProviderConfigDrift } from "./agent-registry.js";
+import type { ProviderBundle } from "./agent-adapter.js";
 import type { AimodelDefaultRunSyncDeps } from "./aimodel-default-run-sync.js";
 import {
     buildMainDefaultAimodelRuntimeSystemContext,
@@ -164,9 +166,10 @@ const UNRESOLVED_SECRETREF_MARKER = "secretref-managed";
 
 export function hasManagedModelConfigDrift(params: {
   cfg: {
-    agents?: { list?: Array<{ id?: string; model?: { primary?: string } }> };
+    agents?: { list?: Array<{ id?: string; model?: { primary?: string } }>; defaults?: { compaction?: { timeoutSeconds?: number } } };
+    models?: { providers?: Record<string, { models?: Array<{ id?: string }> }> };
   };
-  managed: Array<{ agentId: string; modelRef?: string }>;
+  managed: Array<{ agentId: string; modelRef?: string; providerKey?: string; provider?: ProviderBundle }>;
 }): boolean {
   for (const agent of params.managed) {
     const expected = agent.modelRef?.trim();
@@ -178,9 +181,14 @@ export function hasManagedModelConfigDrift(params: {
     if (primary !== expected) {
       return true;
     }
+    if (agent.provider && agent.providerKey) {
+      if (hasManagedProviderConfigDrift(params.cfg, agent.providerKey, agent.provider)) return true;
+      if (params.cfg.agents?.defaults?.compaction?.timeoutSeconds === undefined) return true;
+    }
   }
   return false;
 }
+
 
 function isUnresolvedProviderApiKey(apiKey: unknown): boolean {
   if (typeof apiKey === "string") {

@@ -6,6 +6,9 @@ export const LayoutMode = {
   preview: 'preview',
 } as const;
 
+// 已下线的资源模块不允许被默认配置或历史远端配置重新打开。
+export const HIDDEN_RESOURCE_MENU_KEYS = new Set(['ontology', 'view', 'object']);
+
 export const DEFAULT_MENU_CONFIG = [
   {
     paramId: 10001665,
@@ -51,24 +54,6 @@ export const DEFAULT_MENU_CONFIG = [
     paramValue: 'true',
     paramDesc: '工具',
     paramSeq: 5,
-  },
-  {
-    paramId: 10001669,
-    paramGroupCode: 'MENU_ICON_SHOW_TAB',
-    paramName: '视图',
-    paramEnName: 'View',
-    paramValue: 'false',
-    paramDesc: '视图',
-    paramSeq: 6,
-  },
-  {
-    paramId: 10001670,
-    paramGroupCode: 'MENU_ICON_SHOW_TAB',
-    paramName: '对象',
-    paramEnName: 'Object',
-    paramValue: 'false',
-    paramDesc: '对象',
-    paramSeq: 7,
   },
   {
     paramId: 10001671,
@@ -130,7 +115,7 @@ export const getVisibleMenuKeysFromConfig = (config: any[] = []) => {
     .reduce<string[]>((keys, item) => {
       const key = MENU_NAME_TO_KEY_MAP[item.paramName];
 
-      if (key && !visibleKeys.has(key)) {
+      if (key && !HIDDEN_RESOURCE_MENU_KEYS.has(key) && !visibleKeys.has(key)) {
         visibleKeys.add(key);
         keys.push(key);
       }

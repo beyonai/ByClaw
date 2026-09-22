@@ -29,10 +29,10 @@ public class SandboxCleanupJob {
         initialDelayString = "${sandbox.cleanup.initial-delay:35000}",
         scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
     public void cleanupExpiredSandboxes() {
-        LOGGER.info("开始执行沙箱清理任务");
+        LOGGER.debug("开始执行沙箱清理任务");
         try {
             SandboxLifecycleJobReport report = sandboxService.cleanupExpiredSandboxes();
-            LOGGER.info("沙箱清理任务执行完成，候选 {} 个，扫描 {} 个，清理 {} 个，失败 {} 个，释放记录：{}，失败记录：{}",
+            LOGGER.debug("沙箱清理任务执行完成，候选 {} 个，扫描 {} 个，清理 {} 个，失败 {} 个，释放记录：{}，失败记录：{}",
                 report.getTotalCandidates(), report.getScannedCount(), report.getAffectedCount(), report.getFailedCount(),
                 report.getAffectedSandboxes(), report.getFailedSandboxes());
         }

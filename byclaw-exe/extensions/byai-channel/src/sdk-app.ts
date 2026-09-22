@@ -1,3 +1,4 @@
+import { chatChainLog, observeEmitterRedis } from "./chat-chain-log.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -76,7 +77,7 @@ function buildLaneAssignmentLogItem(message: ByaiSdkInboundMessage, index: numbe
     agentName: lane?.agentName ?? "",
     traceId: message.traceId,
     messageId: message.messageId,
-    query: message.text,
+    textLength: message.text.length,
   };
 }
 
@@ -481,13 +482,15 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
       context.setStreamFinished(true);
       return AgentState.COMPLETED;
     }
-    this.log?.info?.(`处理问题: ${text}`);
+    const requestId = metadataString(metadata, "requestId") || traceId || messageId;
+    chatChainLog(this.log, "worker.received", { requestId, sessionId, traceId });
 
     const metadataLanguage = typeof metadata?.language === "string" ? metadata.language : undefined;
     const { language, languageProvided } = resolveInboundLanguage(metadataLanguage);
     const batchMetadata = parseByaiMultiAgentBatchMetadata(gatewayMsg.extraPayload);
     const laneMetadata = batchMetadata ? undefined : parseByaiLaneMetadata(gatewayMsg.extraPayload);
     const inbound: ByaiSdkInboundMessage = {
+      requestId,
       files,
       text,
       messageId,
@@ -552,6 +555,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
           metadata: { error: String(err) },
         },
         {
+          requestId: currentInbound.requestId,
           laneMetadata: currentInbound.laneMetadata,
           traceId: currentInbound.traceId,
           parentMessageId: currentInbound.parentMessageId,
@@ -591,7 +595,8 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
               return;
             }
             const emitOptions = withSdkEmitMetadata(options, {
-              laneMetadata: currentInbound.laneMetadata,
+              requestId: currentInbound.requestId,
+          laneMetadata: currentInbound.laneMetadata,
               traceId: currentInbound.traceId,
               parentMessageId: currentInbound.parentMessageId,
             });
@@ -683,7 +688,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
       this.log?.error?.(
         `[${
           this.account.accountId
-        }] byai-channel SDK handler failed for message ${messageId}: ${String(err)}`,
+        }] byai-channel SDK handler failed: sessionId=${sessionId}, traceId=${traceId || ""}, messageId=${messageId}, error=${String(err)}`,
       );
       if (!emittedLaneError) {
         await emitSdkError(inbound, err).catch(() => undefined);
@@ -724,7 +729,9 @@ export class ByaiSdkApp {
       throw new Error(`[${this.account.accountId}] byai-channel failed to get Redis information`);
     }
 
-    debug?.(`[${this.account.accountId}] byai-channel redisInfo: ${JSON.stringify(redisInfo)}`);
+    info?.(
+      `[${this.account.accountId}] chat_chain_config Redis config: mode=${redisInfo.mode}, keySchemaVersion=${redisInfo.keySchemaVersion}`,
+    );
     applyByFrameworkRedisKeyPatch({ QueueNames, RegistryKeys }, redisInfo);
 
     const redis = createRedisClient(redisInfo);
@@ -747,7 +754,7 @@ export class ByaiSdkApp {
     const runnerGroupName = consumerGroupSuffix
       ? `agent_engines:${agentTypes.join(",")}:${consumerGroupSuffix}`
       : undefined;
-    const emitter = new GatewayDataEmitter(redis, {
+    const emitter = new GatewayDataEmitter(observeEmitterRedis(redis, this.log), {
       sourceAgentType: agentTypes[0],
     });
     const worker = new ByaiChannelGatewayWorker({

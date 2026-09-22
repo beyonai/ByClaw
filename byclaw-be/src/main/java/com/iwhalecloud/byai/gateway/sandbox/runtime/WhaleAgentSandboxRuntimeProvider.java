@@ -46,7 +46,7 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
             return Optional.empty();
         }
         try {
-            log.info("WhaleAgent 查询可复用沙箱，userCode={}，sandboxType={}", userCode, sandboxType);
+            log.debug("WhaleAgent 查询可复用沙箱，userCode={}，sandboxType={}", userCode, sandboxType);
             var request = SandboxRuntimeRequestFactory.buildWhaleAgentListSandboxesRequest(userCode, sandboxType);
             KnowledgeResponse<WhaleAgentSandboxPageResult> response = withUserCode(userCode, () -> feignWhaleAgentService.listSandboxes(request));
             validateOperationResponse(response, "WhaleAgent sandbox list failed");
@@ -68,7 +68,7 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
                     .metadata(detail.getMetadata())
                     .build())
                 .findFirst();
-            log.info("WhaleAgent 可复用沙箱查询完成，userCode={}，sandboxType={}，selectedSandboxId={}",
+            log.debug("WhaleAgent 可复用沙箱查询完成，userCode={}，sandboxType={}，selectedSandboxId={}",
                 userCode, sandboxType, reusable.map(SandboxRuntimeInstance::getSandboxId).orElse(null));
             return reusable;
         }
@@ -204,7 +204,7 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
             return;
         }
         RenewSandboxTimeoutRequest request = SandboxRuntimeRequestFactory.buildWhaleAgentRenewRequest(sandboxInfo);
-        log.info("WhaleAgent 续约沙箱，userCode={}，sandboxType={}，sandboxId={}，duration={}",
+        log.debug("WhaleAgent 续约沙箱，userCode={}，sandboxType={}，sandboxId={}，duration={}",
             userCode, sandboxType, sandboxInfo.getSandboxId(), request.getDuration());
         KnowledgeResponse<SandboxRenewResult> response = withUserCode(userCode,
             () -> feignWhaleAgentService.renewSandboxTimeout(request));
@@ -214,7 +214,7 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
         if (renewedExpiresAt != null) {
             sandboxInfo.setRemoteExpiresAt(Date.from(renewedExpiresAt.toInstant()));
         }
-        log.info("WhaleAgent 续约沙箱成功，userCode={}，sandboxType={}，sandboxId={}",
+        log.debug("WhaleAgent 续约沙箱成功，userCode={}，sandboxType={}，sandboxId={}",
             userCode, sandboxType, sandboxInfo.getSandboxId());
     }
 
@@ -235,7 +235,7 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
         validateOperationResponse(response, "WhaleAgent sandbox query failed");
         SandboxDetail detail = response.getResultObject();
         boolean reusable = detail != null && SandboxRuntimeRequestFactory.isReusableSandboxState(detail.getStatus());
-        log.info("WhaleAgent 查询远端状态，userCode={}，sandboxType={}，sandboxId={}，exists={}，remoteState={}",
+        log.debug("WhaleAgent 查询远端状态，userCode={}，sandboxType={}，sandboxId={}，exists={}，remoteState={}",
             userCode, sandboxType, sandboxInfo.getSandboxId(), reusable,
             detail != null && detail.getStatus() != null ? detail.getStatus().getState() : null);
         if (detail == null) {

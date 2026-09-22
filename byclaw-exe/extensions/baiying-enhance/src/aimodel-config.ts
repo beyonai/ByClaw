@@ -272,6 +272,15 @@ function inferThinkingFormat(params: {
         return params.configuredFormat;
     }
     if (params.api === "anthropic-messages") return "anthropic";
+    // DashScope's hybrid Qwen models default to thinking. OpenAI-compatible
+    // transport alone does not describe the provider's enable_thinking switch.
+    if (params.api === "openai-completions" && /^qwen3\.[56]-(plus|flash)(?:-|$)/i.test(params.modelId)) {
+        try {
+            if (/(^|\.)dashscope(?:-intl|-us)?\.aliyuncs\.com$/i.test(new URL(params.baseUrl).hostname)) {
+                return "qwen";
+            }
+        } catch { /* Invalid URLs are rejected by the model configuration path. */ }
+    }
     const provider = nonEmptyString(params.providerName).toLowerCase();
     const providerFormats: Record<string, string> = {
         anthropic: "anthropic", deepseek: "deepseek", qwen: "qwen", dashscope: "qwen",
@@ -379,7 +388,23 @@ function resolveReasoningModelOptions(params: {
     });
     const reasoningConfig = params.instanceParam.reasoningConfig
         ? { ...config, compatFormat: format ?? "auto" } : undefined;
-    if (!config.enabled) return { reasoning: false, ...(reasoningConfig ? { reasoningConfig } : {}) };
+    if (!config.enabled) {
+        const hybridQwen = /^qwen3\.[56]-(plus|flash)(?:-|$)/i.test(params.modelId);
+        if (format === "qwen" && (hybridQwen || config.capability === "binary")) {
+            // SDK reasoning is a capability flag. Keep it enabled so the Qwen
+            // serializer sends enable_thinking:false, including summary calls.
+            // The platform switch stays off and every runtime level maps to off.
+            return {
+                reasoning: true,
+                reasoningConfig: { ...config, compatFormat: "qwen", defaultLevel: "off" },
+                thinkingLevelMap: buildThinkingLevelMap({
+                    effortMap: Object.fromEntries(RUNTIME_THINKING_LEVELS.map((level) => [level, OFF_THINKING_EFFORT])),
+                }),
+                compat: { thinkingFormat: "qwen" },
+            };
+        }
+        return { reasoning: false, ...(reasoningConfig ? { reasoningConfig } : {}) };
+    }
     const effortMap = config.effortMap ?? defaultEffortMapForFormat(format);
     const supportedReasoningEfforts = config.supportedEfforts ?? defaultSupportedEffortsForFormat(format);
     const thinkingLevelMap = buildThinkingLevelMap({

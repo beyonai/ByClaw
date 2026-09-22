@@ -1,13 +1,11 @@
 // @ts-nocheck
 import React, { useRef, useState } from 'react';
-import { Input, Form, Card, Select, Collapse, Button, Popover, Checkbox } from 'antd';
+import { Input, Form, Card, Select, Button, Checkbox } from 'antd';
 import classNames from 'classnames';
 import { customAlphabet } from 'nanoid';
 import { compact, last, set } from 'lodash';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
-import AbilityBoundaryModal from '../../../EmployeeDetail/ConfigForm/AbilityBoundaryModal';
-import AbilityExampleModal from '../../../EmployeeDetail/ConfigForm/AbilityExampleModal';
 
 import styles from './index.module.less';
 
@@ -38,6 +36,7 @@ const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6);
 const MyForm = (props) => {
   const {
     form,
+    promptConfigs = [],
     questionList,
     setQuestionList,
     tagsOptions,
@@ -65,17 +64,10 @@ const MyForm = (props) => {
   const compositionRef = useRef(false);
 
   const [inputTag, setInputTag] = useState('');
-  const [selectedTags, setSelectedTags] = useState([]);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [iconPopoverOpen, _setIconPopoverOpen] = useState({});
-  const [boundaryModalOpen, setBoundaryModalOpen] = useState(false);
-  const [editingBoundaryAbilityId, setEditingBoundaryAbilityId] = useState(null);
-  const [exampleModalOpen, setExampleModalOpen] = useState(false);
-  const [editingExampleAbilityId, setEditingExampleAbilityId] = useState(null);
-
   const handleTagSelect = (value) => {
+    const selectedTags = form.getFieldValue('tags') || [];
     if (value && !selectedTags.includes(value)) {
-      setSelectedTags([...selectedTags, value]);
+      form.setFieldsValue({ tags: [...selectedTags, value] });
     }
     setInputTag('');
   };
@@ -92,8 +84,9 @@ const MyForm = (props) => {
           value: inputTag.trim(),
           label: inputTag.trim(),
         };
-        // 这里可以更新tagOptions，但由于它是常量，我们直接添加到selectedTags
+        // 新增选项后立即写入表单，确保点击“使用”时标签不会丢失。
         setTagsOptions([...tagsOptions, newOption]);
+        handleTagSelect(newOption.value);
       } else {
         // 如果存在，直接选中
         handleTagSelect(existingOption.value);
@@ -101,78 +94,9 @@ const MyForm = (props) => {
     }
   };
 
-  const handleTagDeselect = (value) => {
-    setSelectedTags(
-      selectedTags.filter((tag) => {
-        return tag !== value;
-      })
-    );
-  };
   const handleCompositionEnd = () => {
     compositionRef.current = false;
   };
-
-  const abilityCollapseItems = coreAbilities.map((ability, index) => ({
-    key: ability.id,
-    label: (
-      <div className={styles.abilityPanelHeader}>
-        <Popover
-          trigger="click"
-          open={iconPopoverOpen[ability.id]}
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          onOpenChange={(_open) => {}}
-          placement="bottomLeft"
-        >
-          <div className={styles.abilityIcon} style={{ color: ability.color }}>
-            <AntdIcon type={ability.icon} style={{ fontSize: 16 }} />
-          </div>
-        </Popover>
-        <Form.Item style={{ marginBottom: 0, flex: 1 }}>
-          <Input
-            placeholder={intl.formatMessage({ id: 'refineModal.abilityNamePlaceholder' }, { index: index + 1 })}
-            value={ability.name}
-            onChange={(e) => {
-              setCoreAbilities(
-                coreAbilities.map((item) => (item.id === ability.id ? { ...item, name: e.target.value } : item))
-              );
-            }}
-            bordered={false}
-            className={styles.abilityNameInput}
-            onClick={(e) => e.stopPropagation()}
-          />
-        </Form.Item>
-        <div className={styles.abilityPanelActions}>
-          {coreAbilities.length > 1 && (
-            <AntdIcon
-              type="icon-a-Deleteshanchu"
-              className={styles.actionIcon}
-              onClick={(e) => {
-                e.stopPropagation();
-                setCoreAbilities(coreAbilities.filter((item) => item.id !== ability.id));
-              }}
-            />
-          )}
-        </div>
-      </div>
-    ),
-    children: (
-      <div className={styles.abilityPanelContent}>
-        <Form.Item label="" style={{ marginBottom: 0 }}>
-          <TextArea
-            placeholder={intl.formatMessage({ id: 'refineModal.abilityDescPlaceholder' })}
-            value={ability.description}
-            onChange={(e) => {
-              setCoreAbilities(
-                coreAbilities.map((item) => (item.id === ability.id ? { ...item, description: e.target.value } : item))
-              );
-            }}
-            rows={3}
-            autoSize={{ minRows: 3, maxRows: 6 }}
-          />
-        </Form.Item>
-      </div>
-    ),
-  }));
 
   return (
     <Form form={form} layout="vertical" className={styles.formSection}>
@@ -211,7 +135,7 @@ const MyForm = (props) => {
           name="resourceDesc"
           rules={[
             {
-              required: true,
+              required: selectedSections.has('desc'),
               message: intl.formatMessage({
                 id: 'employeeDetail.characterPlaceholder',
               }),
@@ -231,7 +155,7 @@ const MyForm = (props) => {
         </Form.Item>
       </div>
 
-      {/* 核心能力 */}
+      {/* 岗位职责：沿用 abilities 数据字段，与详情页职责列表保持一致。 */}
       <div
         className={classNames(styles.coreAbilitySection, {
           [styles.sectionUnselected]: !selectedSections.has('abilities'),
@@ -275,69 +199,48 @@ const MyForm = (props) => {
           </div>
         </div>
         <div className={styles.abilityHint}>{intl.formatMessage({ id: 'refineModal.coreAbilityHint' })}</div>
-        <Collapse
-          activeKey={coreAbilities.filter((item) => item.expanded).map((item) => item.id)}
-          onChange={(keys) => {
-            const activeKeys = Array.isArray(keys) ? keys : [keys];
-            setCoreAbilities(
-              coreAbilities.map((item) => ({
-                ...item,
-                expanded: activeKeys.includes(item.id),
-              }))
-            );
-          }}
-          className={styles.abilityCollapse}
-          ghost
-          items={abilityCollapseItems}
-        />
+        {/* 与外层一致，仅编辑职责名称；保留生成结果中的其他数据以便完整回填。 */}
+        <div className={styles.responsibilityList}>
+          {coreAbilities.map((ability) => (
+            <Card key={ability.id}>
+              <div className={styles.responsibilityRow}>
+                <Form.Item
+                  rules={[
+                    {
+                      required: true,
+                      message: intl.formatMessage({ id: 'employeeDetail.abilityNameRequired' }),
+                    },
+                  ]}
+                  style={{ marginBottom: 0, flex: 1 }}
+                >
+                  <Input
+                    placeholder={intl.formatMessage({ id: 'employeeDetail.abilityNamePlaceholder' })}
+                    value={ability.name}
+                    onChange={(e) => {
+                      setCoreAbilities(
+                        coreAbilities.map((item) => (item.id === ability.id ? { ...item, name: e.target.value } : item))
+                      );
+                    }}
+                    onCompositionStart={() => {
+                      compositionRef.current = true;
+                    }}
+                    onCompositionEnd={handleCompositionEnd}
+                    bordered={false}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </Form.Item>
+                <AntdIcon
+                  type="icon-a-Deleteshanchu"
+                  onClick={(e) => {
+                    e?.stopPropagation?.();
+                    setCoreAbilities(coreAbilities.filter((item) => item.id !== ability.id));
+                  }}
+                />
+              </div>
+            </Card>
+          ))}
+        </div>
       </div>
-      <AbilityBoundaryModal
-        open={boundaryModalOpen}
-        onCancel={() => {
-          setBoundaryModalOpen(false);
-          setEditingBoundaryAbilityId(null);
-        }}
-        ability={coreAbilities.find((item) => item.id === editingBoundaryAbilityId)}
-        isReadOnly={false}
-        onOk={(payload) => {
-          setCoreAbilities(
-            coreAbilities.map((item) =>
-              item.id === editingBoundaryAbilityId
-                ? {
-                  ...item,
-                  acceptBoundary: payload.acceptBoundary,
-                  rejectBoundary: payload.rejectBoundary,
-                }
-                : item
-            )
-          );
-          setBoundaryModalOpen(false);
-          setEditingBoundaryAbilityId(null);
-        }}
-      />
-      <AbilityExampleModal
-        open={exampleModalOpen}
-        onCancel={() => {
-          setExampleModalOpen(false);
-          setEditingExampleAbilityId(null);
-        }}
-        ability={coreAbilities.find((item) => item.id === editingExampleAbilityId)}
-        isReadOnly={false}
-        onOk={(list) => {
-          setCoreAbilities(
-            coreAbilities.map((item) =>
-              item.id === editingExampleAbilityId
-                ? {
-                  ...item,
-                  example: list,
-                }
-                : item
-            )
-          );
-          setExampleModalOpen(false);
-          setEditingExampleAbilityId(null);
-        }}
-      />
 
       {/* 标签管理 */}
       <div className={classNames({ [styles.sectionUnselected]: !selectedSections.has('tags') })}>
@@ -352,12 +255,9 @@ const MyForm = (props) => {
         >
           <Select
             mode="multiple"
-            value={selectedTags}
             onChange={(values) => {
-              setSelectedTags(values);
               form.setFieldsValue({ tags: values });
             }}
-            onDeselect={handleTagDeselect}
             placeholder={intl.formatMessage({ id: 'employeeDetail.tagSearchPlaceholder' })}
             options={tagsOptions}
             filterOption={(inputValue, option) => {
@@ -378,58 +278,32 @@ const MyForm = (props) => {
           />
         </Form.Item>
       </div>
-      <div className={classNames({ [styles.sectionUnselected]: !selectedSections.has('persona') })}>
-        <Form.Item
-          label={
-            <span className={styles.sectionCheckbox}>
-              <Checkbox checked={selectedSections.has('persona')} onChange={() => toggleSection('persona')} />
-              {intl.formatMessage({ id: 'employeeDetail.personalityDefinition' })}
-            </span>
-          }
-          name="corePersonaDefinition"
-        >
-          <TextArea
-            rows={4}
-            placeholder={intl.formatMessage({
-              id: 'employeeDetail.personalityDefinitionRequired',
-            })}
-            onCompositionStart={() => {
-              compositionRef.current = true;
-            }}
-            onCompositionEnd={handleCompositionEnd}
-          />
-        </Form.Item>
-        <Form.Item label={intl.formatMessage({ id: 'refineModal.workStandard' })} name="workStandard">
-          <TextArea
-            rows={4}
-            placeholder={intl.formatMessage({ id: 'refineModal.workStandardPlaceholder' })}
-            onCompositionStart={() => {
-              compositionRef.current = true;
-            }}
-            onCompositionEnd={handleCompositionEnd}
-          />
-        </Form.Item>
-        <Form.Item label={intl.formatMessage({ id: 'refineModal.toolStandard' })} name="toolStandard">
-          <TextArea
-            rows={4}
-            placeholder={intl.formatMessage({ id: 'refineModal.toolStandardPlaceholder' })}
-            onCompositionStart={() => {
-              compositionRef.current = true;
-            }}
-            onCompositionEnd={handleCompositionEnd}
-          />
-        </Form.Item>
-        <Form.Item label={intl.formatMessage({ id: 'refineModal.memoryStandard' })} name="memoryStandard">
-          <TextArea
-            rows={4}
-            placeholder={intl.formatMessage({ id: 'refineModal.memoryStandardPlaceholder' })}
-            onCompositionStart={() => {
-              compositionRef.current = true;
-            }}
-            onCompositionEnd={handleCompositionEnd}
-          />
-        </Form.Item>
-      </div>
+      {/* 动态配置与页面的标签页共用 key、名称和顺序，包含记忆规范和自定义项。 */}
+      {promptConfigs.map((item) => {
+        const sectionKey = `prompt:${item.key}`;
+        const label = intl.locale?.startsWith('en') ? item.nameEn || item.name : item.name || item.nameEn;
+        return (
+          <div key={item.key} className={classNames({ [styles.sectionUnselected]: !selectedSections.has(sectionKey) })}>
+            <Form.Item
+              name={['promptValues', item.key]}
+              label={
+                <span className={styles.sectionCheckbox}>
+                  <Checkbox checked={selectedSections.has(sectionKey)} onChange={() => toggleSection(sectionKey)} />
+                  {label || item.key}
+                </span>
+              }
+            >
+              <TextArea
+                autoSize={{ minRows: 5, maxRows: 10 }}
+                placeholder={intl.formatMessage(
+                  { id: 'employeeDetail.promptField.customPlaceholder' },
+                  { name: label }
+                )}
+              />
+            </Form.Item>
+          </div>
+        );
+      })}
       <div className={classNames({ [styles.sectionUnselected]: !selectedSections.has('greeting') })}>
         <Form.Item
           label={

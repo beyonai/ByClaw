@@ -70,6 +70,31 @@ function createAimodelTypeListPayload() {
 }
 
 describe("Baiying AI model config", () => {
+  it.each([undefined, { enabled: false, capability: "binary", compatFormat: "qwen" }])(
+    "keeps Qwen thinking transport available to explicitly turn it off: %j", (reasoningConfig) => {
+      const payload = createAimodelPayload();
+      Object.assign(payload.raw, {
+        modelCode: "qwen3.6-plus", maxContentToken: "1000000",
+        url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        instanceParam: { providerName: "OpenAI", maxTokens: 65536, reasoningConfig },
+      });
+      const provider = parseBaiyingAimodelProviderBundle({ payload, modelId: "test", secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME });
+      expect(provider).toMatchObject({
+        reasoning: true, contextWindow: 1_000_000, maxTokens: 65536,
+        compat: { thinkingFormat: "qwen" }, reasoningConfig: { enabled: false, defaultLevel: "off" },
+      });
+      expect(new Set(Object.values(provider!.thinkingLevelMap!))).toEqual(new Set(["none"]));
+    },
+  );
+
+  it("preserves explicit compaction limits while defaulting new managed setups to 300 seconds", () => {
+    const merge = (base: any) => mergeManagedAgentsIntoConfig({
+      base, managed: [], mainParentAgentId: "main", mergeAllowSpawnForMain: false,
+    });
+    expect(merge({}).agents?.defaults?.compaction?.timeoutSeconds).toBe(300);
+    expect(merge({ agents: { defaults: { compaction: { timeoutSeconds: 420, mode: "safeguard" } } } })
+      .agents?.defaults?.compaction).toEqual({ timeoutSeconds: 420, mode: "safeguard" });
+  });
   it("maps Redis model config into a provider without plaintext authToken", () => {
     const provider = parseBaiyingAimodelProviderBundle({
       payload: createAimodelPayload(),
@@ -177,7 +202,7 @@ describe("Baiying AI model config", () => {
     expect(provider).toEqual(
       expect.objectContaining({
         reasoning: true,
-        thinkingLevelMap: { off: "max" },
+        thinkingLevelMap: expect.objectContaining({ off: "none" }),
         compat: {
           thinkingFormat: "deepseek",
           supportedReasoningEfforts: ["high", "max"],
@@ -232,7 +257,7 @@ describe("Baiying AI model config", () => {
     expect(provider).toEqual(
       expect.objectContaining({
         reasoning: true,
-        thinkingLevelMap: { off: "high" },
+        thinkingLevelMap: expect.objectContaining({ off: "none" }),
         thinkingBudgets: { low: 2048, medium: 8192, high: 12000 },
         compat: { thinkingFormat: "qwen" },
       }),
@@ -275,7 +300,7 @@ describe("Baiying AI model config", () => {
       expect.objectContaining({
         api: "anthropic-messages",
         reasoning: true,
-        thinkingLevelMap: { off: "medium" },
+        thinkingLevelMap: expect.objectContaining({ off: "none" }),
         thinkingBudgets: { medium: 8192 },
         compat: undefined,
       }),
@@ -315,7 +340,7 @@ describe("Baiying AI model config", () => {
       expect.objectContaining({
         api: "anthropic-messages",
         reasoning: true,
-        thinkingLevelMap: { off: "adaptive" },
+        thinkingLevelMap: expect.objectContaining({ off: "none" }),
         compat: undefined,
       }),
     );

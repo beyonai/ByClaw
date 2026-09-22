@@ -407,14 +407,30 @@ export function buildCompactionNoticeText(language: string | undefined, params: 
 }): string {
     if (isEnglishLanguage(language)) {
         if (params.phase === "start") {
-            return "Automatic context compression started.";
+            return "Automatically compressing context.";
         }
-        return "Automatic context compression completed.";
+        return params.completed ? "Automatic context compression completed."
+            : params.willRetry ? "Context compression did not finish; retrying."
+            : "Automatic context compression failed.";
     }
     if (params.phase === "start") {
-        return "上下文自动压缩开始";
+        return "正在自动压缩上下文";
     }
-    return "上下文自动压缩完成";
+    return params.completed ? "上下文自动压缩完成"
+        : params.willRetry ? "上下文压缩未完成，正在重试" : "上下文自动压缩失败";
+}
+
+export function buildContextRecoveryText(language: string | undefined, phase: "start" | "retry" | "failed", attempt: number): string {
+    const english = isEnglishLanguage(language);
+    if (phase === "start") return english
+        ? `Automatically compressing context (recovery ${attempt}/3).`
+        : `正在自动压缩上下文（第 ${attempt}/3 次恢复）`;
+    if (phase === "retry") return english
+        ? "Context compressed. Automatically resending your question."
+        : "上下文已压缩，正在自动重新发送您的问题";
+    return english
+        ? "Automatic context recovery could not complete. Your history is preserved. Please start a new conversation and try again."
+        : "上下文自动恢复未能完成，历史记录已保留。请新建对话后重试。";
 }
 
 export function buildMaxTokenErrorText(language: string | undefined) {

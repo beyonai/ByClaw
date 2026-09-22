@@ -49,7 +49,7 @@ public class SandboxCronPrewarmJob {
                 return;
             }
             SandboxCronPrewarmReport report = cronPrewarmService.prewarmDueCronSandboxes();
-            LOGGER.info("OpenClaw cron 预热扫描完成，扫描用户 {} 个，缺失 DB {} 个，缺失表 {} 个，缺失列 {} 个，待执行任务 {} 个，候选容器 {} 个，已存在活跃记录跳过 {} 个，拉起 {} 个，失败 {} 个，拉起记录：{}，跳过记录：{}，失败记录：{}",
+            LOGGER.debug("OpenClaw cron 预热扫描完成，扫描用户 {} 个，缺失 DB {} 个，缺失表 {} 个，缺失列 {} 个，待执行任务 {} 个，候选容器 {} 个，已存在活跃记录跳过 {} 个，拉起 {} 个，失败 {} 个，拉起记录：{}，跳过记录：{}，失败记录：{}",
                 report.getScannedUsers(), report.getMissingDbUsers(), report.getMissingTableUsers(),
                 report.getMissingColumnUsers(), report.getDueJobs(), report.getCandidateTargets(),
                 report.getActiveSkipped(), report.getLaunched(), report.getFailed(), report.getLaunchedTargets(),

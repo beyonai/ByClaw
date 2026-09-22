@@ -152,12 +152,13 @@ RUN set -eux; \
       '' \
       'mkdir -p "${OPENCLAW_STATE_DIR}" "${DWS_CONFIG_DIR}"' \
       'if command -v git >/dev/null 2>&1 && [ -x /usr/local/lib/byclaw/runtime-tools/git-credential.mjs ]; then git config --global credential.https://github.com.helper /usr/local/lib/byclaw/runtime-tools/git-credential.mjs; fi' \
-      'exec node dist/index.js gateway \' \
+      'set -- node dist/index.js gateway \' \
       '  --bind=lan \' \
       '  --port="${OPENCLAW_GATEWAY_PORT}" \' \
       '  --allow-unconfigured \' \
-      '  --verbose \' \
       '  --token="${OPENCLAW_GATEWAY_TOKEN}"' \
+      'if [ "${OPENCLAW_VERBOSE:-false}" = "true" ]; then set -- "$@" --verbose; fi' \
+      'exec "$@"' \
       >/usr/local/bin/startOpenclaw.sh; \
     printf '%s\n' \
       '#!/bin/sh' \

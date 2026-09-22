@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.ws.service;
 
+import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -77,6 +79,8 @@ public class ChatService {
      * @see AssistantChatService#chat(ChatMessage, NettyArrayOutputStream)
      */
     public void llmChat(ChannelHandlerContext ctx, ChatMessage message) {
+        ChatChainLog.record("be.received", ChatChainLog.requestId(message), message.getSessionId(), "ok",
+            "channelId", ctx.channel().id().asShortText());
         LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
 
         // Token 月度限额检查（仅对公共模型和 TokenSaver 模型生效）
@@ -108,7 +112,7 @@ public class ChatService {
         // 设置发送端 Channel，用于多端广播时排除发送端避免重复推送
         message.setSenderChannel(ctx.channel());
         try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx, message.getClientRequestId(),
-            "CHAT_STREAM")) {
+            "CHAT_STREAM", ChatChainLog.requestId(message))) {
             assistantChatService.chat(message, outputStream, currentUser);
         }
         catch (IOException e) {

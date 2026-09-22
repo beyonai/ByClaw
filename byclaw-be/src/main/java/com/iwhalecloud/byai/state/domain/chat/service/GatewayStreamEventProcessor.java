@@ -180,6 +180,7 @@ public class GatewayStreamEventProcessor {
         if (payload == null) {
             return;
         }
+        payload.put("requestId", ChatChainLog.requestId(ctx));
         JSONObject laneMetadata = resolveLaneMetadata(ctx, dataJson, metadata, payload);
         if (laneMetadata == null || laneMetadata.isEmpty()) {
             return;

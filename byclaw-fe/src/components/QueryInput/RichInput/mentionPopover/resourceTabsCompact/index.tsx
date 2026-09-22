@@ -588,9 +588,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
         ),
       });
     }
-    const tabOrder = isOpenSource
-      ? ['skill', 'knowledge', 'tool', 'view', 'object', 'space', 'file']
-      : ['knowledge', 'tool', 'view', 'object', 'space'];
+    const tabOrder = isOpenSource ? ['skill', 'knowledge', 'tool', 'space', 'file'] : ['knowledge', 'tool', 'space'];
     const ordered = tabOrder.map((key) => items.find((item) => item.key === key)).filter(Boolean) as typeof items;
     return onlyTab ? ordered.filter((item) => item.key === onlyTab) : ordered;
   }, [

@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { ContextOverflowRecoveryState } from "./context-overflow-recovery.js";
+import { isOpenClawContextOverflowPrecheckError } from "./dispatch-error.js";
 import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-framework";
 import type { ByaiInboundMessage, ByaiLaneMetadata, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
@@ -156,6 +158,7 @@ export type NativeChildRunTerminalSource =
   | "subagent_progress";
 
 export interface ActiveSdkRequest {
+  requestId?: string;
   accountId: string;
   sessionKey: string;
   to: string;
@@ -209,6 +212,7 @@ export interface ActiveSdkRequest {
    * 进入完成判定前置位此标记，避免完成门被伪信号永久挡住。
    */
   dispatchSettled: boolean;
+  contextOverflowRecovery: ContextOverflowRecoveryState;
   /**
    * 最近一次 model 调用的有效上下文窗口 / token 预算快照，由 model_call_started hook 捕获。
    * core 不把 contextTokenBudget 透传进 agent_end 的 ctx，故在此按 sessionKey 暂存，供 agent_end
@@ -579,12 +583,14 @@ export function resetByclawChatContextForTest(): void {
 }
 
 export function buildSdkEmitMetadata(params: {
+    requestId?: string;
     laneMetadata?: ByaiLaneMetadata;
     traceId?: string;
     agentId?: string;
     agentName?: string;
 }): Record<string, any> {
     const metadata: Record<string, any> = {};
+    setMetadataField(metadata, "requestId", params.requestId || (params.traceId ? resolveActiveSdkRequestByTraceId(params.traceId)?.requestId : undefined));
     const lane = params.laneMetadata;
     setMetadataField(metadata, "laneId", lane?.laneId);
     setMetadataField(metadata, "turnId", lane?.turnId);
@@ -602,6 +608,7 @@ export function buildSdkEmitMetadata(params: {
 export function withSdkEmitMetadata(
     options: EmitOptions | undefined,
     params: {
+        requestId?: string;
         laneMetadata?: ByaiLaneMetadata;
         traceId?: string;
         agentId?: string;
@@ -635,6 +642,7 @@ export function withActiveSdkRequestEmitMetadata(
     options?: EmitOptions,
 ): EmitOptions {
     return withSdkEmitMetadata(options, {
+        requestId: request.requestId,
         laneMetadata: request.laneMetadata,
         traceId: request.traceId,
         parentMessageId: request.parentMessageId,
@@ -901,6 +909,7 @@ export function resolveChannelRequestContextBySessionKey(
 }
 
 export function registerActiveSdkRequest(params: {
+    requestId?: string;
     accountId: string;
     sessionKey: string;
     to: string;
@@ -940,6 +949,7 @@ export function registerActiveSdkRequest(params: {
         clearActiveSdkRequestRecord(existingRequestByTraceId);
     }
     const request: ActiveSdkRequest = {
+        requestId: params.requestId || params.traceId,
         accountId: normalizeAccountId(params.accountId),
         sessionKey: params.sessionKey,
         to: params.to,
@@ -962,6 +972,7 @@ export function registerActiveSdkRequest(params: {
         modelFallbackPending: false,
         rootLifecyclePhase: undefined,
         dispatchSettled: false,
+        contextOverflowRecovery: { dispatchPending: false, replaySafe: true, attempts: 0 },
         lastRunOverflowLength: false,
         overflowContinuePending: false,
         overflowContinuationCompactionObserved: false,
@@ -995,6 +1006,7 @@ export function registerActiveSdkRequest(params: {
         accountId: request.accountId,
         createdAt: request.createdAt,
         fields: {
+            requestId: request.requestId,
             sessionId: request.sessionId,
             messageId: request.messageId,
             parentMessageId: request.parentMessageId,
@@ -1451,6 +1463,7 @@ export function isActiveSdkRequestReadyForTaskPlanContinuation(
 
 export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
   return Boolean(
+    !request.contextOverflowRecovery.dispatchPending &&
     isActiveSdkRequestReadyForTaskPlanContinuation(request) &&
       !isTaskPlanContinuationPending(request.sessionKey),
   );
@@ -1580,17 +1593,37 @@ export function recordActiveSdkRootStreamAnswer(params: {
     );
 }
 
+/** llm_input also runs before a blocked precheck, which has no lifecycle start. */
+export function recordActiveSdkDispatchRunId(sessionKey: string | undefined, runId: string | undefined): void {
+    const request = sessionKey ? resolveActiveSdkRequestBySessionKey(sessionKey) : undefined;
+    if (request?.sessionKey === sessionKey && request?.contextOverflowRecovery.dispatchPending && runId) {
+        request.contextOverflowRecovery.dispatchRunId = runId;
+    }
+}
+
 export function recordActiveSdkRootAgentEnd(params: {
     runId: string | undefined;
     success: boolean;
     messages: unknown[];
+    error?: string;
+    sessionKey?: string;
 }): void {
     const normalizedRunId = normalizeAlias(params.runId);
     if (!normalizedRunId) {
         return;
     }
     const binding = activeSdkRequestsByRun.get(normalizedRunId);
+    const request = binding?.request ?? (params.sessionKey
+        ? resolveActiveSdkRequestBySessionKey(params.sessionKey) : undefined);
+    const isCurrentDispatch = request?.contextOverflowRecovery.dispatchRunId === normalizedRunId;
+    if (request && isCurrentDispatch && (!binding || binding.sessionKey === request.sessionKey)) {
+        request.contextOverflowRecovery.precheckError = !params.success &&
+            isOpenClawContextOverflowPrecheckError(params.error) ? params.error : undefined;
+    }
     if (!binding || binding.sessionKey !== binding.request.sessionKey) {
+        if (request && isCurrentDispatch && params.sessionKey === request.sessionKey) {
+            recordRootRunAgentEnd(request.frameworkFinalAnswerLedger, params);
+        }
         return;
     }
     recordRootRunAgentEnd(binding.request.frameworkFinalAnswerLedger, params);

@@ -113,6 +113,7 @@ gate 内通过 `registerActiveSdkRequest` 建立 request，关键关联字段是
 - `nativeChildRuns`：native subagent 的权威台账，按 child runId 索引，`terminalAt === undefined` 即仍在跑。判定统一走 `hasPendingNativeChildRun`，不另存一份 child session 集合。
 - `rootRunsObservedWhileChildrenPending`：child 未闭合期间观测到的 root lifecycle start 次数，用于给早到的 announce 续跑抵账。
 - `delegatedWorkToolCallIds`：外部委派尚未回灌的 tool call 集合。
+- `contextOverflowRecovery`：本业务请求的预检查恢复状态。`sdk-message-processor.ts` 在首次 dispatch 前置 `dispatchPending=true`，在恢复、续跑编排完成或异常退出的 `finally` 中清除；`shouldCompleteActiveSdkRequest` 必须等待它释放。`dispatchRunId` 由同步的 `llm_input`/`onAgentRunStart` 记录，每次 dispatch 前清空，迟到的旧 `agent_end` 不得覆盖当前预检查结果。
 
 ### 2. 预构建 prompt snapshot
 
@@ -125,6 +126,8 @@ dispatch 前会调用 `buildPromptInjectionSnapshot` 并通过 `setPromptInjecti
 `runOneDispatch` 每次都会新建 envelope、dispatcher 和 reply options，但复用同一 `sessionKey`、`To`、emitter 和 abort signal。这样 overflow continuation 或其他 follow-up 可以是新的 OpenClaw run，而不会把不同 dispatch 的 reply context 混在一起。
 
 `onAgentRunStart` 调用 `bindActiveSdkRequestRunId` 把 SDK 自己启动的 root run 绑到 request，并注册 agent-end promise。native subagent 产生的 parent announce 续跑是 direct-path 启动的、不经过这个 callback，它只会以 root lifecycle start 的形式出现——见下面的 announce 抵账。
+
+预检查溢出可能只有 `llm_input` 和 `agent_end`，没有 `onAgentRunStart` 或 lifecycle；2026.7.1 还存在不触发这两个 hook、只经 `onAgentRunStart` 关联并返回规范化 lifecycle 溢出错误的提前返回路径。后一条路径也必须关联当前 dispatch，并确认 `replaySafe` 后才能进入恢复、抑制原始错误。`llm_input` 只记录当前 dispatch 的 runId，不把它当成已经启动业务 run，更不能据此认定模型已收到问题。dispatch 返回后先等待已排入的 agent event 队列，再按同一 runId 的错误事实决定恢复。
 
 ### 4. dispatch 返回后的 settle
 
@@ -215,6 +218,7 @@ SDK 直接由 `GatewayDataEmitter` 发 chunk/state。`agent-event.ts` 负责完�
 ### compaction、overflow、model fallback
 
 - **compaction**：`compactionRetryPending` 阻止过早收尾；展示 start/end notice。
+- **precheck recovery**：`context-overflow-recovery.ts` 接受明确的发送前 `(precheck)`，以及 `agent-event.ts` 确认属于当前 dispatch、仍可安全重放的根 lifecycle 溢出；不接受明确的 mid-turn precheck。`before_tool_call` 或实际答案输出将 `replaySafe` 永久置为 false；恢复前还须通过原有业务完成条件，确认没有 child、delegated 或 outbound 工作。流程持有原 session lease 和 `dispatchPending` 完成门，提示“正在自动压缩上下文”，调用公共 `sessions.compact`（不传 `maxLines`），压缩成功后重发原问题和附件并重新构建 prompt snapshot。最多额外 3 次恢复，整个恢复阶段最多 10 分钟；明确压缩失败计数但不重发，RPC 结果不确定或用户取消则停止。SDK 请求和业务 messageId 不变，运行时 MessageSid 每次唯一。最终完整输入预算仍由 OpenClaw 预检查确认。
 - **overflow**：`agent_end` 识别 length/context pressure，`maybeContinueAfterOverflow` 在 session gate 内新建 dispatch；`overflowContinuePending` 必须覆盖整个续跑窗口。
 - **model fallback**：失败 candidate 的 lifecycle error 不能立即完成；`fallback_step=next_fallback` 会取消该次 completion check，只有 fallback 成功或 chain exhausted 才重新检查。
 - **dispatch error**：非 overflow 错误清掉 active request 并向 SDK 发 error state；overflow 错误交给 recovery 流程。
@@ -268,7 +272,8 @@ npx vitest run \
 如果改了入站 dispatch，再加：
 
 ```bash
-npx vitest run src/sdk-message-processor.test.ts src/sdk-app.test.ts
+npx vitest run src/sdk-message-processor.test.ts src/sdk-app.test.ts \
+  src/context-overflow-recovery.test.ts src/i18n.compaction.test.ts
 ```
 
 如果改了取消链路，再加：

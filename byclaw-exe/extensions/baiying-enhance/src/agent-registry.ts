@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 import type { AdaptedManagedAgent, ProviderBundle } from "./agent-adapter.js";
 import {
@@ -35,7 +36,7 @@ type DefaultAimodelBundle = {
   provider: ProviderBundle;
 };
 
-function defaultModelDefinition(provider: ProviderBundle) {
+export function defaultModelDefinition(provider: ProviderBundle) {
   const params = {
     ...(provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
       ? { baiyingThinkingBudgets: provider.thinkingBudgets } : {}),
@@ -63,6 +64,20 @@ function defaultModelDefinition(provider: ProviderBundle) {
     contextWindow: provider.contextWindow ?? 128000,
     maxTokens: provider.maxTokens ?? 8192,
   };
+}
+
+export function hasManagedProviderConfigDrift(
+  cfg: { models?: { providers?: Record<string, { models?: Array<{ id?: string }> }> } },
+  providerKey: string,
+  provider: ProviderBundle,
+): boolean {
+  const actual = cfg.models?.providers?.[providerKey]?.models?.find((model) => model.id === provider.modelId);
+  const expected = defaultModelDefinition(provider);
+  // Compare owned fields, never resolved credentials or unrelated overrides.
+  const keys = new Set([...Object.keys(expected), "thinkingLevelMap", "params"]);
+  return !actual || [...keys].some((key) => !isDeepStrictEqual(
+    (actual as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key],
+  ));
 }
 
 function buildAimodelSecretProviderConfig(params: {
@@ -120,6 +135,11 @@ function ensureConfigModelContainers(cfg: OpenClawConfig): void {
   if (!cfg.models.providers) {
     cfg.models.providers = {};
   }
+  cfg.agents.defaults ??= {};
+  cfg.agents.defaults.compaction ??= {};
+  // This bounds the entire summary pipeline, independently of provider timeout.
+  // Preserve an operator's explicit limit; new managed configs get five minutes.
+  cfg.agents.defaults.compaction.timeoutSeconds ??= 300;
 }
 
 function upsertDefaultAimodelProvider(

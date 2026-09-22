@@ -16,8 +16,9 @@ jest.setTimeout(90000);
 
 jest.mock('@umijs/max', () => {
   const messages = jest.requireActual('@/locales/zh-CN').default as Record<string, string>;
+  // 统一替换服务商名称、检查时间等动态参数；未提供的参数保留占位符。
   const formatMessage = ({ id }: { id: string }, values?: Record<string, unknown>) =>
-    (messages[id] || id).replace(/\{(\w+)\}/g, (_, key) => `${values?.[key] ?? ''}`);
+    (messages[id] || id).replace(/\{(\w+)\}/g, (_, key: string) => `${values?.[key] ?? `{${key}}`}`);
   const intl = { formatMessage };
   const componentFormatMessage = ({ id }: { id: string }, values?: Record<string, unknown>) =>
     id.startsWith('ui.email.') ? formatMessage({ id }, values) : id;

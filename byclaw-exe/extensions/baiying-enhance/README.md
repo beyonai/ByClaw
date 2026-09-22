@@ -274,3 +274,13 @@ npm test -- src/configured-thinking.test.ts src/config-writer.test.ts src/plugin
 - `GET /plugins/baiying-enhance/agents`（需网关认证）
 - `GET /plugins/baiying-enhance/doc-async/tasks`（需网关认证）
 - `POST /plugins/baiying-enhance/doc-async/complete`（需网关认证）
+
+## 上下文窗口与压缩配置同步
+
+托管模型使用平台 `maxContentToken` 作为 `contextWindow`。数字员工同步会比较同一模型 ID 下的窗口、输出上限和思考参数；会话选定模型也重新读取模型配置，仅在发生变化时写入，并等待运行时载入新模型参数。会话入站对齐会清除旧的 `contextTokens` 缓存，因此调整窗口无需更换模型 ID 或新建会话。
+
+对于已识别的 DashScope Qwen 3.5/3.6 Plus、Flash 混合思考模型，未配置或关闭思考时仍生成 SDK 所需的 `reasoning=true` 能力描述及 `compat.thinkingFormat=qwen`，将运行时档位映射为关闭。平台的思考开关仍保持关闭；此能力描述用于让 SDK 在摘要请求中真正发出 `enable_thinking:false`，不能将它理解为启用思考。管理员显式指定的协议格式优先，不自动为其他端点或仅支持思考的模型推断关闭能力。
+
+模型同步为未配置的 `agents.defaults.compaction.timeoutSeconds` 写入 **300 秒**默认值，保留管理员已有的显式配置。它控制整轮摘要流程，与 Provider 的请求超时独立。压缩默认沿用会话模型；本次不自动更换专用压缩模型，也不修改 OpenClaw 核心代码。
+
+发布时需同时更新 `baiying-enhance` 和 `byai-channel` 插件，完成模型同步和配置热加载。验收应检查运行时窗口与平台配置一致、摘要请求实际携带关闭思考参数，并使用受控长会话验证恢复；仅通过单元测试或构建不能证明原线上长会话已经恢复。百应侧最多 3 次恢复及 10 分钟总上限详见 `../byai-channel/README.md`。

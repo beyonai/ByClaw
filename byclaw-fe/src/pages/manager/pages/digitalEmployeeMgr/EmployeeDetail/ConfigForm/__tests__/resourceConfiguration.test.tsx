@@ -10,6 +10,18 @@ const render = (ui: Parameters<typeof renderComponent>[0]) =>
     wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
   });
 
+jest.mock('antd', () => {
+  const actual = jest.requireActual('antd');
+  return {
+    ...actual,
+    // motion token 不会移除 rc-dialog 的动画准备阶段；保留真实弹窗，只关闭过渡。
+    Modal: Object.assign(
+      (props: import('antd').ModalProps) => <actual.Modal {...props} transitionName="" maskTransitionName="" />,
+      actual.Modal
+    ),
+  };
+});
+
 jest.mock('@umijs/max', () => {
   const intl = { formatMessage: ({ id }: { id: string }) => id };
   return { useIntl: () => intl, getIntl: () => intl, getLocale: () => 'en-US' };

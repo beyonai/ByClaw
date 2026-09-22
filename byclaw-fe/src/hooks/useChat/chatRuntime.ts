@@ -1,3 +1,4 @@
+import { isChatTerminal, recordChatChain } from '@/utils/chatChainLog';
 import { applyAgentTeamsStreamSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import { get, isNil, set, unset } from 'lodash';
 
@@ -483,6 +484,8 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
     scheduleAnswerFlush(context);
   }
   markParsedStreamApplied(context, parsed);
+  if (isChatTerminal(rawMessage))
+    recordChatChain('fe.final_applied', { ...rawMessage, appliedClientRequestId: context.clientRequestId });
 };
 
 export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
@@ -491,12 +494,14 @@ export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
 
   const restoredKey = getRestoredKeyByParsed(parsed);
   if (restoringStreamKeys.has(restoredKey)) {
+    if (isChatTerminal(parsed.rawMessage)) recordChatChain('fe.final_deferred', parsed.rawMessage, 'restoring');
     bufferParsedStream(parsed);
     return;
   }
 
   const context = findChatStreamContext(parsed.rawMessage, parsed.res, parsed.eventName);
   if (!context) {
+    if (isChatTerminal(parsed.rawMessage)) recordChatChain('fe.final_deferred', parsed.rawMessage, 'missing_context');
     const messageSessionId = getChatStreamSessionId(parsed.rawMessage, parsed.res);
     const runtimeInfo = chatSessionRuntimeManager.getBySession(messageSessionId);
     if (runtimeInfo?.restored) {

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.ws.service;
 
+import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.nio.charset.StandardCharsets;
@@ -459,6 +461,7 @@ public class MultiDeviceBroadcastService implements MessageListener {
         message.put("sessionId", String.valueOf(sessionId));
         message.put("event", eventType);
         message.put("data", eventData);
+        message.put("requestId", ChatChainLog.requestId(dataJson));
         message.put("traceId", dataJson.getString("trace_id"));
         message.put("streamId", dataJson.getString("stream_id"));
 
@@ -527,6 +530,7 @@ public class MultiDeviceBroadcastService implements MessageListener {
 
     private int broadcastLocally(Long userId, String frameText, Channel senderChannel, String messageType) {
         Set<Channel> channels = channelManager.getChannels(userId);
+        JSONObject terminal = ChatChainLog.terminalFrame(frameText);
         int sentCount = 0;
         for (Channel channel : channels) {
             if (channel.equals(senderChannel)) {
@@ -536,7 +540,8 @@ public class MultiDeviceBroadcastService implements MessageListener {
                 continue;
             }
             try {
-                channel.writeAndFlush(new TextWebSocketFrame(frameText));
+                long started = System.nanoTime();
+                ChatChainLog.wsWritten(channel.writeAndFlush(new TextWebSocketFrame(frameText)), terminal, started);
                 sentCount++;
             }
             catch (Exception e) {

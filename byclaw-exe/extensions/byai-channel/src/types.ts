@@ -49,6 +49,7 @@ export interface ByaiLaneMetadata {
 
 /** SDK 模式入站消息（来自 Redis） */
 export interface ByaiSdkInboundMessage {
+  requestId?: string;
   messageId: string;
   /** Parent command message id used to preserve cross-worker callAgent nesting. */
   parentMessageId?: string;
@@ -89,6 +90,7 @@ export interface SdkProcessorDeps {
   cfg: import("openclaw/plugin-sdk").OpenClawConfig;
   abortController?: AbortController;
   log?: {
+    debug?: (msg: string) => void;
     info?: (msg: string) => void;
     warn?: (msg: string) => void;
     error?: (msg: string) => void;
