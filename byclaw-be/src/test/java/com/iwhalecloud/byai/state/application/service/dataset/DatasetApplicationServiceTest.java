@@ -8,6 +8,8 @@ import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileRenameRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.RemoveFileDto;
+import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
@@ -303,9 +305,12 @@ class DatasetApplicationServiceTest {
     }
 
     @Test
-    void searchKnowledgeMetadataByKnCode_passesQaProtocolThroughWithoutResourceLookup() {
+    void searchKnowledgeMetadataByKnCode_preservesProtocolAfterCheckingResourceAccess() {
         KbKnowledgeMetadataSearch request = new KbKnowledgeMetadataSearch();
         request.setKnCodeList(List.of("2"));
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findByCode("2")).thenReturn(List.of(resource));
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
         request.setWhere(Map.of("contains", Map.of("fieldName", "tags", "value", "contract")));
         request.setMetadataFieldList(List.of("status", "tags"));
         request.setPageNum(1);
@@ -324,7 +329,7 @@ class DatasetApplicationServiceTest {
         assertThat(result).isSameAs(response);
         assertThat(result.getResultObject()).isEqualTo(qaError);
         verify(feignPythonBuildService).searchKnowledgeMetadataRaw(request);
-        verifyNoInteractions(ssResourceService, authApplicationService);
+        verify(authApplicationService).hasResourceAccessPermission(resource);
     }
 
     @Test
@@ -824,11 +829,11 @@ class DatasetApplicationServiceTest {
     }
 
     enum ContentOperation {
-        CREATE_FOLDER, RENAME_FOLDER, DELETE_FOLDER, UPLOAD_FILE, RENAME_FILE, DELETE_FILE, CHECK_UPLOAD
+        CREATE_FOLDER, RENAME_FOLDER, DELETE_FOLDER, UPLOAD_FILE, RENAME_FILE, DELETE_FILE, CHECK_UPLOAD, BUILD_FILE, MOVE_ITEM, UPDATE_FILE, UPDATE_METADATA
     }
 
     @ParameterizedTest
-    @EnumSource(value = ContentOperation.class, names = {"CREATE_FOLDER", "UPLOAD_FILE", "CHECK_UPLOAD"})
+    @EnumSource(value = ContentOperation.class, names = {"CREATE_FOLDER", "UPLOAD_FILE", "CHECK_UPLOAD", "BUILD_FILE"})
     void cloudContentAllowsReadableMembersWithoutResourceManagement(ContentOperation operation) throws Exception {
         SsResource resource = defaultPersonalDataset();
         resource.setResourceBizType("KG_CLOUD");
@@ -902,7 +907,7 @@ class DatasetApplicationServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = ContentOperation.class, names = {"RENAME_FOLDER", "DELETE_FOLDER", "RENAME_FILE", "DELETE_FILE"})
+    @EnumSource(value = ContentOperation.class, names = {"RENAME_FOLDER", "DELETE_FOLDER", "RENAME_FILE", "DELETE_FILE", "MOVE_ITEM", "UPDATE_FILE", "UPDATE_METADATA"})
     void itemCreatorCanRenameAndDeleteOwnItems(ContentOperation operation) throws Exception {
         prepareCloudItemOwner("member");
         try (var current = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.class)) {
@@ -912,7 +917,7 @@ class DatasetApplicationServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = ContentOperation.class, names = {"RENAME_FOLDER", "DELETE_FOLDER", "RENAME_FILE", "DELETE_FILE"})
+    @EnumSource(value = ContentOperation.class, names = {"RENAME_FOLDER", "DELETE_FOLDER", "RENAME_FILE", "DELETE_FILE", "MOVE_ITEM", "UPDATE_FILE", "UPDATE_METADATA"})
     void membersCannotRenameOrDeleteOtherUsersItems(ContentOperation operation) {
         prepareCloudItemOwner("other-member");
         try (var current = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.class)) {
@@ -927,7 +932,7 @@ class DatasetApplicationServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = ContentOperation.class, names = {"RENAME_FOLDER", "DELETE_FOLDER", "RENAME_FILE", "DELETE_FILE"})
+    @EnumSource(value = ContentOperation.class, names = {"RENAME_FOLDER", "DELETE_FOLDER", "RENAME_FILE", "DELETE_FILE", "MOVE_ITEM", "UPDATE_FILE", "UPDATE_METADATA"})
     void projectCreatorOrAdminVipCanManageAllItemsWithoutOwnerMetadata(ContentOperation operation) throws Exception {
         SsResource resource = defaultPersonalDataset();
         resource.setResourceBizType("KG_CLOUD");
@@ -973,6 +978,52 @@ class DatasetApplicationServiceTest {
         folder.setDirectoryPath("/reports/");
         folder.setDirectoryName("renamed");
         switch (operation) {
+            case MOVE_ITEM:
+                KnowledgeItemsMoveRequest moveRequest = new KnowledgeItemsMoveRequest();
+                moveRequest.setResourceId(100L);
+                moveRequest.setSourcePath(List.of("/reports/old.md"));
+                moveRequest.setTargetDirectoryPath("/other/");
+                PythonBuildResponse<KnowledgeItemsMoveResult> moveResponse = new PythonBuildResponse<>();
+                moveResponse.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+                if (allowRemote) when(feignPythonBuildService.moveKnowledgeItems(any(), any())).thenReturn(moveResponse);
+                service.moveKnowledgeItems(moveRequest, headers);
+                verify(feignPythonBuildService).moveKnowledgeItems(any(), any());
+                break;
+            case UPDATE_FILE:
+                PythonBuildResponse<KbFileUpdateResult> updateResponse = new PythonBuildResponse<>();
+                updateResponse.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+                if (allowRemote) when(feignPythonBuildService.updateKnowledgeItem(any(), any())).thenReturn(updateResponse);
+                service.updateKnowledgeFile(100L, "/reports/old.md", "", false,
+                    new MockMultipartFile("fileContent", "old.md", "text/markdown", new byte[]{1}), headers);
+                verify(feignPythonBuildService).updateKnowledgeItem(any(), any());
+                break;
+            case UPDATE_METADATA:
+                KnowledgeFileMetadataUpdateRequest metadataRequest = new KnowledgeFileMetadataUpdateRequest();
+                metadataRequest.setResourceId(100L);
+                metadataRequest.setFilePath("/reports/old.md");
+                PythonBuildResponse<Map<String, Object>> metadataResponse = new PythonBuildResponse<>();
+                metadataResponse.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+                if (allowRemote) when(feignPythonBuildService.updateKnowledgeFileMetadata(any(), any())).thenReturn(metadataResponse);
+                service.updateKnowledgeFileMetadata(metadataRequest, headers);
+                verify(feignPythonBuildService).updateKnowledgeFileMetadata(any(), any());
+                break;
+            case BUILD_FILE:
+                if (allowRemote) {
+                    when(feignPythonBuildService.fileToMarkdownIndex(any(), any())).thenReturn(successResponse());
+                }
+                DatasetBuild build = new DatasetBuild();
+                build.setResourceId(100L);
+                build.setDirectoryPath("/reports/other-member.md");
+                service.build(build, headers);
+                ArgumentCaptor<KbFileToMarkdownIndex> buildCaptor = ArgumentCaptor.forClass(KbFileToMarkdownIndex.class);
+                verify(feignPythonBuildService).fileToMarkdownIndex(buildCaptor.capture(),
+                    org.mockito.ArgumentMatchers.argThat(value -> "100".equals(value.get(FeignPythonBuildService.RESOURCE_ID_HEADER))));
+                assertThat(buildCaptor.getValue().getFilePath()).isEqualTo("/reports/other-member.md");
+                assertThat(buildCaptor.getValue().getKnCode()).isEqualTo("personal-kb");
+                // 构建不查询条目创建人，也不要求项目创建人或 adminvip 身份。
+                verify(feignPythonBuildService, never()).listDir(any(), any());
+                verify(authApplicationService, never()).canManageAllProjectCloudItems(any());
+                break;
             case CREATE_FOLDER:
                 if (allowRemote) when(feignPythonBuildService.createDirectory(any(), any())).thenReturn(successResponse());
                 service.createFolder(folder, headers);
@@ -1002,7 +1053,14 @@ class DatasetApplicationServiceTest {
             case UPLOAD_FILE:
                 PythonBuildResponse<KbImportResult> uploaded = new PythonBuildResponse<>();
                 uploaded.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
-                if (allowRemote) when(feignPythonBuildService.importKnowledgeItem(any(), any())).thenReturn(uploaded);
+                if (allowRemote) {
+                    when(feignPythonBuildService.importKnowledgeItem(any(), any())).thenReturn(uploaded);
+                    if ("KG_CLOUD".equals(ssResourceService.findById(100L).getResourceBizType())) {
+                        PythonBuildResponse<Data> empty = new PythonBuildResponse<>();
+                        empty.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+                        when(feignPythonBuildService.listDir(any(), eq(100L))).thenReturn(empty);
+                    }
+                }
                 service.uploadFiles(new MockMultipartFile[]{
                     new MockMultipartFile("files", "file.md", "text/markdown", "hello".getBytes())
                 }, 100L, "/reports/", "", null, false, false, headers);
@@ -1019,7 +1077,7 @@ class DatasetApplicationServiceTest {
                 service.renameKnowledgeFile(rename, headers);
                 ArgumentCaptor<KbKnowledgeItemsMove> captor = ArgumentCaptor.forClass(KbKnowledgeItemsMove.class);
                 verify(feignPythonBuildService).moveKnowledgeItems(captor.capture(),
-                    eq(Map.of(FeignPythonBuildService.RESOURCE_ID_HEADER, "100")));
+                    org.mockito.ArgumentMatchers.argThat(value -> "100".equals(value.get(FeignPythonBuildService.RESOURCE_ID_HEADER))));
                 assertThat(captor.getValue().getSourcePath()).containsExactly("/reports/old.md");
                 assertThat(captor.getValue().getTargetFilePath()).isEqualTo("/reports/new.md");
                 assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
@@ -1039,6 +1097,103 @@ class DatasetApplicationServiceTest {
             default:
                 throw new AssertionError(operation);
         }
+    }
+
+    @Test
+    void metadataCannotChangeCreatorEvenForManagers() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        KnowledgeFileMetadataUpdateRequest request = new KnowledgeFileMetadataUpdateRequest();
+        request.setResourceId(100L);
+        request.setFilePath("/a.md");
+        KnowledgeFileMetadataUpdateRequest.MetadataOperation operation = new KnowledgeFileMetadataUpdateRequest.MetadataOperation();
+        operation.setPropertyName("userCode");
+        request.setOperationList(List.of(operation));
+        assertThatThrownBy(() -> service.updateKnowledgeFileMetadata(request, Map.of()))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.creator.immutable");
+        verifyNoInteractions(feignPythonBuildService);
+    }
+
+    @Test
+    void rawCodeSearchChecksEveryResourceBeforeForwarding() {
+        SsResource visible = defaultPersonalDataset();
+        SsResource hidden = new SsResource();
+        hidden.setResourceId(200L);
+        hidden.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findByCode("visible")).thenReturn(List.of(visible));
+        when(ssResourceService.findByCode("hidden")).thenReturn(List.of(hidden));
+        when(authApplicationService.hasResourceAccessPermission(visible)).thenReturn(true);
+        com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch request =
+            new com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch();
+        request.setKnCodeList(List.of("visible", "hidden"));
+        assertThatThrownBy(() -> service.searchKnowledgeMetadataByKnCode(request)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(feignPythonBuildService);
+    }
+
+    @Test
+    void forwardedCreatorComesFromServerNotCallerHeaders() {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        when(feignPythonBuildService.createDirectory(any(), any())).thenReturn(successResponse());
+        try (var user = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.class)) {
+            user.when(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder::getCurrentUserCode).thenReturn("real-user");
+            Folder folder = new Folder();
+            folder.setResourceId(100L);
+            folder.setDirectoryPath("/");
+            folder.setDirectoryName("new");
+            service.createFolder(folder, Map.of("x-user-code", "spoofed"));
+            verify(feignPythonBuildService).createDirectory(any(), org.mockito.ArgumentMatchers.argThat(headers ->
+                "real-user".equals(headers.get("X-USER-CODE")) && !headers.containsKey("x-user-code")));
+        }
+    }
+
+    @Test
+    void cloudOverwriteUpdatesExistingFileWithoutDeletingItsCreatorRecord() throws Exception {
+        SsResource resource = prepareCloudConflict();
+        when(authApplicationService.canManageAllProjectCloudItems(resource)).thenReturn(true);
+        PythonBuildResponse<KbFileUpdateResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        when(feignPythonBuildService.updateKnowledgeItem(any(), any())).thenReturn(response);
+        service.uploadFiles(new MockMultipartFile[]{new MockMultipartFile("files", "old.md", "text/markdown", new byte[]{1})},
+            100L, "/reports/", "", false, true, false, Map.of());
+        verify(feignPythonBuildService).updateKnowledgeItem(any(), any());
+        verify(feignPythonBuildService, never()).deleteKnowledgeItem(any(), any());
+        verify(feignPythonBuildService, never()).importKnowledgeItem(any(), any());
+    }
+
+    @Test
+    void cloudArchiveCannotOverwriteAnExistingFile() throws Exception {
+        prepareCloudConflict();
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(bytes)) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("old.md"));
+            zip.write(new byte[]{1});
+            zip.closeEntry();
+        }
+        MockMultipartFile archive = new MockMultipartFile("files", "files.zip", "application/zip", bytes.toByteArray());
+        assertThatThrownBy(() -> service.uploadFiles(new MockMultipartFile[]{archive}, 100L, "/reports/", "", false,
+            true, false, Map.of())).isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.file.exists");
+        verify(feignPythonBuildService, never()).importKnowledgeItem(any(), any());
+    }
+
+    private SsResource prepareCloudConflict() {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        DirOrFile item = new DirOrFile();
+        item.setName("/reports/old.md");
+        item.setType("file");
+        Data data = new Data();
+        data.setData(List.of(item));
+        PythonBuildResponse<Data> listing = new PythonBuildResponse<>();
+        listing.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        listing.setResultObject(data);
+        when(feignPythonBuildService.listDir(any(), eq(100L))).thenReturn(listing);
+        return resource;
     }
 
     private SsResource defaultPersonalDataset() {

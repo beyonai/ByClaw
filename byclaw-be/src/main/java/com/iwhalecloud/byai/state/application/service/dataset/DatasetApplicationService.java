@@ -145,6 +145,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 @Service
 public class DatasetApplicationService {
 
+
     public static final Logger logger = LoggerFactory.getLogger(DatasetApplicationService.class);
 
     /**
@@ -512,6 +513,33 @@ public class DatasetApplicationService {
         throw new IllegalArgumentException(I18nUtil.get("dataset.cloud.item.manage.denied"));
     }
 
+    /** 批量改写必须在发任务前检查全部文件，不能借目录级请求绕过文件归属。 */
+    private void validateDatasetScopePermission(SsResource resource, String filePath, String directoryPath, int depth) {
+        if (!"KG_CLOUD".equals(resource.getResourceBizType())) {
+            validateDatasetManagePermission(resource);
+            return;
+        }
+        if (authApplicationService.canManageAllProjectCloudItems(resource)) {
+            return;
+        }
+        validateDatasetContentPermission(resource);
+        if (StringUtils.isNotBlank(filePath)) {
+            validateDatasetItemPermission(resource, filePath);
+            return;
+        }
+        if (depth > 20) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.cloud.item.manage.denied"));
+        }
+        for (DirAndFileVo item : listKnowledgeDir(resource.getResourceId(), resource.getResourceCode(),
+            normalizeKnowledgeDirectoryPath(directoryPath))) {
+            if ("directory".equalsIgnoreCase(item.getType())) {
+                validateDatasetScopePermission(resource, null, item.getDirectoryPath(), depth + 1);
+            } else {
+                validateDatasetItemPermission(resource, item.getDirectoryPath());
+            }
+        }
+    }
+
     private boolean isCurrentUserItemCreator(DirOrFile item) {
         Object owner = item.getMetadata() == null ? null : item.getMetadata().get("userCode");
         if (!(owner instanceof Map)) {
@@ -625,7 +653,8 @@ public class DatasetApplicationService {
 
         List<String> uploadFileNames = Arrays.stream(files).filter(file -> !isZipUpload(file))
             .map(MultipartFile::getOriginalFilename).toList();
-        Set<String> existingFilePaths = Boolean.TRUE.equals(overwrite)
+        boolean projectCloud = "KG_CLOUD".equals(ssResource.getResourceBizType());
+        Set<String> existingFilePaths = (projectCloud || Boolean.TRUE.equals(overwrite))
             ? new HashSet<>(findExistingKnowledgeFilePaths(ssResource, directoryPath, uploadFileNames))
             : new HashSet<>();
 
@@ -634,11 +663,34 @@ public class DatasetApplicationService {
             // 上传文件到知识库
             KbFileImport kbFileImport = new KbFileImport();
             kbFileImport.setKnCode(ssResource.getResourceCode());
-            kbFileImport.setSkipIfDuplicate(skipIfDuplicate);
+            // 云盘新上传只创建不存在的条目，并发重名时也不得隐式覆盖。
+            kbFileImport.setSkipIfDuplicate(projectCloud || skipIfDuplicate);
 
             boolean zipUpload = isZipUpload(multipartFile);
+            if (projectCloud && zipUpload) {
+                validateCloudArchive(ssResource, directoryPath, multipartFile);
+            }
             String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
                 : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
+            if (projectCloud && !zipUpload && existingFilePaths.contains(filePath)) {
+                if (!Boolean.TRUE.equals(overwrite)) {
+                    if (skipIfDuplicate) {
+                        continue;
+                    }
+                    throw new IllegalArgumentException(I18nUtil.get("dataset.file.exists"));
+                }
+                // 覆盖更新保留创建人，不再先删后建导致管理员覆盖时归属被更换。
+                KbFileUpdateResult updated = updateKnowledgeFile(resourceId, filePath, fileDescription,
+                    processFrontMatter, multipartFile, headers);
+                boolean failed = updated.getData() != null && updated.getData().stream()
+                    .anyMatch(item -> item != null && Boolean.FALSE.equals(item.getSuccess()));
+                if (failed) {
+                    throw new IllegalArgumentException(I18nUtil.get("dataset.file.update.failed"));
+                }
+                uploadResult.getUploadItems().add(createUploadItem(filePath, multipartFile.getOriginalFilename(), true, null));
+                incrementUploadSummary(uploadResult, true);
+                continue;
+            }
             if (!zipUpload && existingFilePaths.contains(filePath)) {
                 // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
                 validateDatasetItemPermission(ssResource, filePath);
@@ -680,6 +732,39 @@ public class DatasetApplicationService {
         response.setOverwritePaths(overwritePaths);
         response.setConflict(!overwritePaths.isEmpty());
         return response;
+    }
+
+    /** ZIP 不允许隐式覆盖既有条目，避免解压绕过归属检查；需覆盖时使用显式单文件更新。 */
+    private void validateCloudArchive(SsResource resource, String directoryPath, MultipartFile file) throws IOException {
+        try (java.util.zip.ZipInputStream zip = new java.util.zip.ZipInputStream(file.getInputStream())) {
+            java.util.zip.ZipEntry entry;
+            int count = 0;
+            long bytes = 0;
+            byte[] buffer = new byte[8192];
+            while ((entry = zip.getNextEntry()) != null) {
+                if (++count > 1000 || entry.getName().startsWith("/") || entry.getName().contains("\\")) {
+                    throw new IllegalArgumentException(I18nUtil.get("dataset.archive.invalid"));
+                }
+                String path = normalizeKnowledgeFilePath(normalizeKnowledgeDirectoryPath(directoryPath) + "/" + entry.getName());
+                if (!entry.isDirectory()) {
+                    int offset = path.lastIndexOf('/');
+                    if (!findExistingKnowledgeFilePaths(resource, path.substring(0, offset + 1),
+                        Collections.singletonList(path.substring(offset + 1))).isEmpty()) {
+                        throw new IllegalArgumentException(I18nUtil.get("dataset.file.exists"));
+                    }
+                }
+                int read;
+                while ((read = zip.read(buffer)) != -1) {
+                    bytes += read;
+                    if (bytes > 100L * 1024 * 1024) {
+                        throw new IllegalArgumentException(I18nUtil.get("dataset.archive.invalid"));
+                    }
+                }
+            }
+            if (count == 0) {
+                throw new IllegalArgumentException(I18nUtil.get("dataset.archive.invalid"));
+            }
+        }
     }
 
     private boolean isZipUpload(MultipartFile multipartFile) {
@@ -743,7 +828,8 @@ public class DatasetApplicationService {
     public void build(DatasetBuild datasetBuild, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(datasetBuild.getResourceId());
-        validateDatasetManagePermission(ssResource);
+        // 项目云盘可见的文件均允许构建，不要求文件归属；普通知识库仍校验资源管理权限。
+        validateDatasetContentPermission(ssResource);
         Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, datasetBuild.getResourceId());
 
         // 构建知识文件
@@ -893,7 +979,7 @@ public class DatasetApplicationService {
                                                   Boolean processFrontMatter, MultipartFile fileContent,
                                                   Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(resourceId);
-        validateDatasetManagePermission(ssResource);
+        validateDatasetItemPermission(ssResource, filePath);
         Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
 
         KbFileUpdate kbFileUpdate = new KbFileUpdate();
@@ -1015,7 +1101,10 @@ public class DatasetApplicationService {
      */
     public KnowledgeItemsMoveResult moveKnowledgeItems(KnowledgeItemsMoveRequest request, Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
-        validateDatasetManagePermission(ssResource);
+        // 在发出任何移动前校验全部源条目，避免批量请求部分越权。
+        for (String sourcePath : request.getSourcePath()) {
+            validateDatasetItemPermission(ssResource, sourcePath);
+        }
         return executeKnowledgeItemsMove(ssResource, request, headers);
     }
 
@@ -1091,7 +1180,7 @@ public class DatasetApplicationService {
      */
     public KnowledgeEntityBatchResult entityDiscovery(KnowledgeEntityDiscoveryRequest request, Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
-        validateDatasetManagePermission(ssResource);
+        validateDatasetContentPermission(ssResource);
 
         KbEntityDiscovery qaRequest = new KbEntityDiscovery();
         qaRequest.setKnCode(ssResource.getResourceCode());
@@ -1118,7 +1207,7 @@ public class DatasetApplicationService {
      */
     public KnowledgeEntityBatchResult entityEnrich(KnowledgeEntityEnrichRequest request, Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
-        validateDatasetManagePermission(ssResource);
+        validateDatasetScopePermission(ssResource, request.getFilePath(), request.getDirectoryPath(), 0);
 
         KbEntityEnrich qaRequest = new KbEntityEnrich();
         qaRequest.setKnCode(ssResource.getResourceCode());
@@ -1171,11 +1260,8 @@ public class DatasetApplicationService {
         } else {
             // 保留普通 OpenAPI 编码查询兼容性；云盘即使只传编码，也必须校验项目读取权限。
             knCode = dirAndFileQo.getResourceCode();
-            List<SsResource> clouds = ssResourceService.findByCodeAndBizType(knCode, "KG_CLOUD");
-            for (SsResource cloud : clouds) {
-                validateDatasetReadablePermission(cloud);
-                resourceId = cloud.getResourceId();
-            }
+            SsResource resource = resolveReadableKnowledgeCode(knCode);
+            resourceId = resource.getResourceId();
         }
 
         String listDirectoryPath = normalizeKnowledgeDirectoryPath(dirAndFileQo.getDirectoryPath());
@@ -1203,13 +1289,7 @@ public class DatasetApplicationService {
     }
 
     private String resolveKnowledgeCode(DirAndFileQo dirAndFileQo, SsResource ssResource) {
-        // 云盘目录必须查询已鉴权资源绑定的库，不能用客户端的另一个编码替换目标。
-        if ("KG_CLOUD".equals(ssResource.getResourceBizType())) {
-            return ssResource.getResourceCode();
-        }
-        if (StringUtil.isNotEmpty(dirAndFileQo.getResourceCode())) {
-            return dirAndFileQo.getResourceCode();
-        }
+        // 所有资源都绑定已鉴权对象，不能用普通资源 ID 搭配另一云盘编码绕过权限。
         return ssResource.getResourceCode();
     }
 
@@ -1753,7 +1833,7 @@ public class DatasetApplicationService {
     public Map<String, Object> updateKnowledgeFileMetadata(KnowledgeFileMetadataUpdateRequest request,
                                                            Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
-        validateDatasetManagePermission(ssResource);
+        validateDatasetItemPermission(ssResource, request.getFilePath());
 
         KbFileMetadataUpdate qaRequest = new KbFileMetadataUpdate();
         qaRequest.setKnCode(ssResource.getResourceCode());
@@ -1763,6 +1843,9 @@ public class DatasetApplicationService {
             for (KnowledgeFileMetadataUpdateRequest.MetadataOperation item : request.getOperationList()) {
                 if (item == null) {
                     continue;
+                }
+                if (StringUtils.equalsAnyIgnoreCase(StringUtils.trimToEmpty(item.getPropertyName()), "userCode", "createBy", "createStaffName")) {
+                    throw new IllegalArgumentException(I18nUtil.get("dataset.creator.immutable"));
                 }
                 KbFileMetadataUpdate.MetadataOperation operation = new KbFileMetadataUpdate.MetadataOperation();
                 operation.setPropertyName(item.getPropertyName());
@@ -1936,7 +2019,20 @@ public class DatasetApplicationService {
      * 面向 ByClaw-datacloud 的 QA 原始协议透传入口，不转换 knCode，也不改写 QA 响应信封。
      */
     public PythonBuildResponse<Object> searchKnowledgeMetadataByKnCode(KbKnowledgeMetadataSearch request) {
+        if (request == null || request.getKnCodeList() == null || request.getKnCodeList().isEmpty()) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.metadata.search.resource.id.list.notempty"));
+        }
+        request.getKnCodeList().forEach(this::resolveReadableKnowledgeCode);
         return feignPythonBuildService.searchKnowledgeMetadataRaw(request);
+    }
+
+    private SsResource resolveReadableKnowledgeCode(String code) {
+        List<SsResource> resources = StringUtils.isBlank(code) ? Collections.emptyList() : ssResourceService.findByCode(code);
+        if (resources == null || resources.isEmpty()) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        resources.forEach(this::validateDatasetReadablePermission);
+        return resources.get(0);
     }
 
     /**
@@ -2022,6 +2118,12 @@ public class DatasetApplicationService {
      */
     private Map<String, String> forwardKnowledgeHeaders(Map<String, String> headers, Long resourceId) {
         Map<String, String> forwardedHeaders = headers == null ? new HashMap<>() : new HashMap<>(headers);
+        // 创建账号只使用当前登录态；内部生成文档也走同一入口补齐身份。
+        forwardedHeaders.keySet().removeIf(key -> "X-USER-CODE".equalsIgnoreCase(key));
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isNotBlank(userCode)) {
+            forwardedHeaders.put("X-USER-CODE", userCode);
+        }
         if (resourceId != null) {
             forwardedHeaders.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
         }

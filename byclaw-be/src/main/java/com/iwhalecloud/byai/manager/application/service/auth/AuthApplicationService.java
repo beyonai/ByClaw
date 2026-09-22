@@ -1312,6 +1312,9 @@ public class AuthApplicationService {
             if (CurrentUserHolder.getLoginInfo() == null || userId == null || ssResource.getResourceId() == null) {
                 return false;
             }
+            if (CurrentUserHolder.isAdminVip()) {
+                return true;
+            }
             return projectService.findByCloudResourceId(ssResource.getResourceId()).stream()
                 .filter(project -> !"1".equals(project.getDeleteFlag()))
                 .anyMatch(project -> isProjectCloudVisible(project, userId));

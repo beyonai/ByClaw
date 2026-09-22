@@ -246,6 +246,14 @@ class FsOperationApplicationServiceTest {
         verify(resourceFS, never()).delete("/resource/doc/KG_DOC_10001/old/b.txt");
     }
 
+    @Test
+    void nestedAuthorizedIdCannotDisguiseAnotherResourceRoot() {
+        assertThatThrownBy(() -> service().downloadFile("RESOURCE", 10001L,
+            "/resource/kg_doc/KG_DOC_20002/sub/10001/private.md"))
+            .isInstanceOf(BaseException.class);
+        org.mockito.Mockito.verifyNoInteractions(resourceFS, knowledgeResourceFS, ssResourceService);
+    }
+
     private FsOperationApplicationService service() {
         FsOperationApplicationService service = new FsOperationApplicationService();
         ReflectionTestUtils.setField(service, "userFS", userFS);

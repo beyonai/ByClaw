@@ -210,7 +210,7 @@ public class FsOperationApplicationService {
         String newPath = normalizeFilePath(spaceType, request.getNewPath());
         checkWritePermission(spaceType, request.getResourceId(), oldPath);
         if (spaceType == FsSpaceType.RESOURCE) {
-            validateResourcePath(request.getResourceId(), newPath);
+            checkWritePermission(spaceType, request.getResourceId(), newPath);
         }
         ensureTargetWritable(spaceType, newPath, Boolean.TRUE.equals(request.getOverwrite()));
         copyFile(spaceType, oldPath, newPath);
@@ -231,7 +231,7 @@ public class FsOperationApplicationService {
         String newPath = normalizeDirectoryPath(spaceType, request.getNewPath());
         checkWritePermission(spaceType, request.getResourceId(), oldPath);
         if (spaceType == FsSpaceType.RESOURCE) {
-            validateResourcePath(request.getResourceId(), newPath);
+            checkWritePermission(spaceType, request.getResourceId(), newPath);
         }
 
         List<String> sourcePaths = list(spaceType, oldPath);
@@ -325,12 +325,12 @@ public class FsOperationApplicationService {
         if (resourceId == null) {
             return;
         }
+        // 资源 ID 必须位于固定的第三段根节点，不能匹配任意子目录或文件名里的 ID。
+        String[] segments = path.split("/", 5);
+        String root = segments.length >= 4 ? segments[3] : "";
         String resourceIdText = String.valueOf(resourceId);
-        boolean belongsToResource = StringUtils.contains(path, "_" + resourceIdText + "/")
-            || StringUtils.endsWith(path, "_" + resourceIdText)
-            || StringUtils.endsWith(path, "_" + resourceIdText + ".json")
-            || StringUtils.contains(path, "/" + resourceIdText + "/")
-            || StringUtils.endsWith(path, "/" + resourceIdText);
+        boolean belongsToResource = root.equals(resourceIdText)
+            || root.matches("[A-Za-z][A-Za-z0-9_]*_" + resourceIdText + "(?:\\.json)?");
         if (!belongsToResource) {
             // resourceId 决定权限，path 决定实际对象；两者必须一致，避免用 A 资源权限操作 B 资源文件。
             throw new BaseException("byclaw.fs.resource.path.not.belong.resource");

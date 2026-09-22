@@ -623,7 +623,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         danger: key === 'delete',
         disabled:
           scope === 'project' &&
-          (key === 'rename' || key === 'delete') &&
+          (key === 'rename' || key === 'delete' || key === 'move') &&
           (item as ProjectFileItem).canManageItem !== true,
         label: <div className={employeeStyles.dropdownMenuItem}>{labels[key]}</div>,
       }));
@@ -697,7 +697,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (key === 'quote') quoteFile(item);
       if (
         scope === 'project' &&
-        (key === 'rename' || key === 'delete') &&
+        (key === 'rename' || key === 'delete' || key === 'move') &&
         (item as ProjectFileItem).canManageItem !== true
       ) {
         return;

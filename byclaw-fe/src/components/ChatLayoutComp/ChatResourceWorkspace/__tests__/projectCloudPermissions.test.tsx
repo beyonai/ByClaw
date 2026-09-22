@@ -184,7 +184,7 @@ it('disables rename and delete for another member while keeping upload and folde
     .mockResolvedValue(items.map((item) => ({ ...item, canManageItem: false })) as any);
   await openPanel();
   for (const name of ['old.md', 'reports']) {
-    for (const action of ['rename', 'delete']) {
+    for (const action of ['rename', 'delete', 'move']) {
       const button = screen.getByRole('button', { name: `${name}:${action}` });
       expect(button).toBeDisabled();
       fireEvent.click(button);
