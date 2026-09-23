@@ -125,7 +125,7 @@ public class GroupChatInvitationService {
         InvitationRecord record = read(token);
         if (!Objects.equals(sessionId, record.getSessionId())) throw invalid();
         ByaiSession group = validate(record);
-        requireEnterprise(group);
+        // 有效链接允许跨企业用户入群，仍须确认当前登录用户存在。
         if (users.findById(requireUser()) == null) throw invalid();
         return group;
     }

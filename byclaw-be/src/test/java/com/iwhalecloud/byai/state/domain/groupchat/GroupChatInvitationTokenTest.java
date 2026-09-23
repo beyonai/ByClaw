@@ -362,11 +362,17 @@ class GroupChatInvitationTokenTest {
         assertThatThrownBy(() -> service.preview(token)).isInstanceOf(IllegalArgumentException.class);
         verify(members, never()).save(any());
     }
-    @Test void crossEnterpriseCannotJoin() {
+    @Test void crossEnterpriseUserCanJoinByLink() {
         var token = service.create(20L).getToken();
+        CurrentUserHolder.getLoginInfo().setUserId(11L);
         CurrentUserHolder.getLoginInfo().setEnterpriseId(4L);
-        assertThatThrownBy(() -> application.acceptInvitation(20L, token)).isInstanceOf(IllegalArgumentException.class);
-        verify(members, never()).save(any());
+        when(users.findById(11L)).thenReturn(new Users());
+
+        ByaiSessionMember joined = application.acceptInvitation(20L, token);
+
+        assertThat(joined.getSessionId()).isEqualTo(20L);
+        assertThat(joined.getMemObjId()).isEqualTo(11L);
+        verify(members).save(joined);
     }
     @Test void successfulJoinUsesServerBoundGroupAndIsIdempotent() {
         var token = service.create(20L).getToken();
