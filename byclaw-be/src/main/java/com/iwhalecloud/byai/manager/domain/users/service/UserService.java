@@ -114,6 +114,12 @@ public class UserService {
         return usersMapper.selectById(userId);
     }
 
+    /** 与 findById 保持相同状态语义，供历史成员展示批量读取。 */
+    public List<Users> findByIds(Collection<Long> userIds) {
+        if (CollectionUtils.isEmpty(userIds)) return List.of();
+        return usersMapper.selectBatchIds(userIds);
+    }
+
     /**
      * 根据用户编码查找用户信息
      *

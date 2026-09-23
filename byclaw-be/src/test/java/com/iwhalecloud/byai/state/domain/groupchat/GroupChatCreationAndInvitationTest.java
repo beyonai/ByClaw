@@ -184,12 +184,66 @@ class GroupChatCreationAndInvitationTest {
         Users user = new Users();
         user.setUserName("原名");
         user.setAvatar("/avatars/current.png");
-        when(users.findById(10L)).thenReturn(user);
+        user.setUserId(10L);
+        when(users.findByIds(any())).thenReturn(List.of(user));
 
         ByaiSessionMember result = service.detail(200L).getMembers().get(0);
 
         assertThat(result.getMemName()).isEqualTo("群昵称");
         assertThat(result.getAvatar()).isEqualTo("/avatars/current.png");
+        verify(users).findByIds(java.util.Set.of(10L));
+        verify(users, never()).findById(any());
+    }
+
+    @Test
+    void detailBatchesMixedMembersAndPreservesOrderAndMissingSnapshots() {
+        UserService users = mock(UserService.class);
+        ReflectionTestUtils.setField(service, "userService", users);
+        ByaiSessionMember human = new ByaiSessionMember();
+        human.setMemObjType("USER");
+        human.setMemObjId(10L);
+        human.setMemName(" ");
+        ByaiSessionMember agent = new ByaiSessionMember();
+        agent.setMemObjType("AGENT");
+        agent.setMemObjId(30L);
+        agent.setMemName("旧员工名");
+        ByaiSessionMember missing = new ByaiSessionMember();
+        missing.setMemObjType("USER");
+        missing.setMemObjId(11L);
+        missing.setMemName("已删除成员快照");
+        when(members.findOrderedGroupMembers(200L)).thenReturn(List.of(human, agent, missing));
+        Users user = new Users();
+        user.setUserId(10L);
+        user.setUserName("用户名称");
+        user.setState("I");
+        user.setAvatar("user.png");
+        when(users.findByIds(any())).thenReturn(List.of(user));
+        SsResource resource = new SsResource();
+        resource.setResourceId(30L);
+        resource.setResourceName("新员工名");
+        resource.setAvatar("agent.png");
+        doReturn(List.of(resource)).when(resources).findByIdList(any());
+
+        var result = service.detail(200L).getMembers();
+
+        assertThat(result).extracting(ByaiSessionMember::getMemName)
+            .containsExactly("用户名称", "新员工名", "已删除成员快照");
+        assertThat(result).extracting(ByaiSessionMember::getAvatar).containsExactly("user.png", "agent.png", null);
+        verify(users).findByIds(java.util.Set.of(10L, 11L));
+        verify(resources).findByIdList(java.util.Set.of(30L));
+        verify(users, never()).findById(any());
+        verify(resources, never()).findById(any());
+        verify(authorization).requireCurrentUserMember(200L);
+    }
+
+    @Test
+    void detailDoesNotQueryPresentationForEmptyMembership() {
+        UserService users = mock(UserService.class);
+        ReflectionTestUtils.setField(service, "userService", users);
+        when(members.findOrderedGroupMembers(200L)).thenReturn(List.of());
+        assertThat(service.detail(200L).getMembers()).isEmpty();
+        verify(users, never()).findByIds(any());
+        verify(resources, never()).findByIdList(any());
     }
 
     @Test

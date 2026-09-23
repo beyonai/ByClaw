@@ -299,7 +299,7 @@ public class GroupChatApplicationService {
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
         List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
-        members.forEach(this::fillMemberPresentation);
+        fillMemberPresentations(members);
         response.setMembers(members);
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
@@ -474,6 +474,40 @@ public class GroupChatApplicationService {
     }
 
     /** 使用当前用户资料和数字员工资源补齐接口返回的成员展示信息。 */
+    /** 详情一次批量读取每种成员，保留列表顺序、群昵称及已删除成员的快照。 */
+    private void fillMemberPresentations(List<ByaiSessionMember> members) {
+        Set<Long> userIds = new LinkedHashSet<>();
+        Set<Long> agentIds = new LinkedHashSet<>();
+        for (ByaiSessionMember member : members) {
+            if (member.getMemObjId() == null) continue;
+            if (MemObjType.USER.name().equals(member.getMemObjType())) userIds.add(member.getMemObjId());
+            else if (MemObjType.AGENT.name().equals(member.getMemObjType())) agentIds.add(member.getMemObjId());
+        }
+        Map<Long, Users> users = new HashMap<>();
+        Map<Long, SsResource> agents = new HashMap<>();
+        if (userService != null && !userIds.isEmpty()) {
+            userService.findByIds(userIds).forEach(user -> users.put(user.getUserId(), user));
+        }
+        if (resourceService != null && !agentIds.isEmpty()) {
+            resourceService.findByIdList(agentIds).forEach(agent -> agents.put(agent.getResourceId(), agent));
+        }
+        for (ByaiSessionMember member : members) {
+            if (MemObjType.USER.name().equals(member.getMemObjType())) {
+                Users user = users.get(member.getMemObjId());
+                if (user != null) {
+                    if (member.getMemName() == null || member.getMemName().isBlank()) member.setMemName(user.getUserName());
+                    member.setAvatar(user.getAvatar());
+                }
+            } else if (MemObjType.AGENT.name().equals(member.getMemObjType())) {
+                SsResource agent = agents.get(member.getMemObjId());
+                if (agent != null) {
+                    member.setMemName(agent.getResourceName());
+                    member.setAvatar(agent.getAvatar());
+                }
+            }
+        }
+    }
+
     private void fillMemberPresentation(ByaiSessionMember member) {
         if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null) {
             Users user = userService.findById(member.getMemObjId());
