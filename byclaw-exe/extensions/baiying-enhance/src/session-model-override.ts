@@ -97,8 +97,7 @@ export async function resolveSessionModelOverride(params: {
         return undefined;
     }
     const cfg = currentRuntimeConfig(params.api);
-    if (!hasManagedProviderConfigDrift(cfg, bundle.providerKey, bundle.provider) &&
-        cfg.agents?.defaults?.compaction?.timeoutSeconds !== undefined) {
+    if (!hasManagedProviderConfigDrift(cfg, bundle.providerKey, bundle.provider)) {
         return { providerKey: bundle.providerKey, modelRef: bundle.modelRef, model: bundle.provider.modelId };
     }
     await mutateOpenClawConfigFile(params.api, (base) =>
@@ -120,8 +119,7 @@ export async function resolveSessionModelOverride(params: {
     const deadline = Date.now() + 3000;
     for (;;) {
         const current = currentRuntimeConfig(params.api);
-        if (!hasManagedProviderConfigDrift(current, bundle.providerKey, bundle.provider) &&
-            current.agents?.defaults?.compaction?.timeoutSeconds !== undefined) break;
+        if (!hasManagedProviderConfigDrift(current, bundle.providerKey, bundle.provider)) break;
         if (Date.now() >= deadline) throw new Error("Session model configuration reload timed out");
         await new Promise((resolve) => setTimeout(resolve, 100));
     }

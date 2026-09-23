@@ -37,9 +37,14 @@ describe("session model configuration refresh", () => {
     await resolveSessionModelOverride(params);
     expect(mutateConfigFile).toHaveBeenCalledTimes(1);
 
-    // A timeout-only config change must also wait for the runtime reload.
-    vi.useFakeTimers();
+    // Compaction defaults are unrelated to whether a selected model is ready.
     delete cfg.agents!.defaults!.compaction!.timeoutSeconds;
+    await resolveSessionModelOverride(params);
+    expect(mutateConfigFile).toHaveBeenCalledTimes(1);
+
+    // A stale model definition must still wait for the runtime reload.
+    vi.useFakeTimers();
+    cfg.models!.providers!["baiying-m-42"]!.models[0]!.contextWindow = 202752;
     mutateConfigFile.mockImplementation(async () => {});
     const pending = expect(resolveSessionModelOverride(params)).rejects.toThrow("configuration reload timed out");
     await vi.advanceTimersByTimeAsync(3100);
