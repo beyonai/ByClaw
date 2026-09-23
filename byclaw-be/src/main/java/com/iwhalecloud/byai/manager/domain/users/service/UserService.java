@@ -232,6 +232,13 @@ public class UserService {
         return users.get(0);
     }
 
+    /** 查询手机号关联的全部账号，保留明文旧数据与停用账号供自动登录判定。 */
+    public List<Users> findAllByUserPhone(String phone) {
+        LambdaQueryWrapper<Users> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.in(Users::getPhone, phone, Sm4Util.encrypt(phone));
+        return usersMapper.selectList(queryWrapper);
+    }
+
     /**
      * 根据邮箱查找用户信息，多个匹配时返回 null 避免自动绑定到错误用户。
      *

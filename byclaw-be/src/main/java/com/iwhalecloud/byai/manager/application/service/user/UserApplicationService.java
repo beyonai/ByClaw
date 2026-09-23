@@ -915,9 +915,12 @@ public class UserApplicationService extends BaseUserApplicationService {
 
         users.setPwd(MD5Utils.encrypt(this.getDefaultPwd(), users.getUserCode()));
 
-        users.setPhone(phone);
+        // 手机号查询使用确定性 SM4 密文，新注册账号需写入相同格式。
+        users.setPhone(Sm4Util.encrypt(phone));
 
         users.setIsLocked(IsLocked.NO);
+
+        users.setState(UserState.ACTIVE);
 
         users.setAssistantId(users.getUserId());
 

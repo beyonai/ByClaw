@@ -1,6 +1,5 @@
 package com.iwhalecloud.byai.manager.security.handle;
 
-import com.alibaba.fastjson.JSON;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.login.LoginAuthKey;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -24,6 +23,7 @@ import com.iwhalecloud.byai.manager.security.login.dingtalk.DingtalkAuthenticati
 import com.iwhalecloud.byai.manager.security.login.feilian.FeiLianAuthentication;
 import com.iwhalecloud.byai.manager.security.login.iwhale.IwhaleAuthentication;
 import com.iwhalecloud.byai.manager.security.login.username.UsernameAuthentication;
+import com.iwhalecloud.byai.manager.security.login.wechatphone.WechatPhoneAuthentication;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.constants.login.LoginType;
@@ -188,7 +188,8 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
         loginResponse.setRefreshToken(jwtService.generateRefreshJwt(loginInfo));
         loginResponse.setSsoToken(ssoTokenService.createSsoToken());
 
-        logger.info("当前用户登陆信息是:{}", JSON.toJSONString(loginResponse));
+        // 登录响应包含 JWT、刷新令牌和 SSO 令牌，日志只保留排障所需的非凭证字段。
+        logger.info("用户登录成功，userId={}, loginType={}", loginInfo.getUserId(), loginInfo.getLoginType());
 
         // 更新最后登陆的时间
         users.setLastLoginDate(new Date());
@@ -206,7 +207,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
             sandboxLoginAutoStartService.trigger(sandboxUserCode);
         }
         catch (Exception e) {
-            logger.error("提交登录沙箱自启动任务失败，用户编码：{}", sandboxUserCode, e);
+            logger.error("提交登录沙箱自启动任务失败，userId={}", loginInfo.getUserId(), e);
         }
         try {
             authRedisSyncService.asyncSyncUserAuthToRedis(loginInfo.getUserId());
@@ -226,12 +227,12 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
                     tokenSaverProvisionService.provisionIfNeeded(loginInfo.getUserId(), sandboxUserCode);
                 }
                 catch (Exception e) {
-                    logger.error("登录后初始化 Token Saver 失败，用户编码：{}", sandboxUserCode, e);
+                    logger.error("登录后初始化 Token Saver 失败，userId={}", loginInfo.getUserId(), e);
                 }
             });
         }
         catch (Exception e) {
-            logger.error("提交 Token Saver 初始化任务失败，用户编码：{}", sandboxUserCode, e);
+            logger.error("提交 Token Saver 初始化任务失败，userId={}", loginInfo.getUserId(), e);
         }
 
         // 放置用户授权信息
@@ -272,7 +273,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
         try {
             userFS.mount();
         } catch (Exception e) {
-            logger.error("登录后挂载用户bucket失败，系统继续登录流程, userCode={}", userCode, e);
+            logger.error("登录后挂载用户bucket失败，系统继续登录流程", e);
         }
     }
 
@@ -289,7 +290,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
             objectMapper.writeValue(outputStream, loginResponse);
             outputStream.flush();
         } catch (Exception e) {
-            logger.error(e.getMessage(), e);
+            logger.error("登录响应写入失败", e);
         }
     }
 
@@ -312,6 +313,8 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
             return LoginType.FEI_lIAN;
         } else if (authentication instanceof AppleAuthentication) {
             return LoginType.APPLE;
+        } else if (authentication instanceof WechatPhoneAuthentication) {
+            return LoginType.WECHAT_PHONE;
         }
         return null;
     }

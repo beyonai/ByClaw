@@ -23,6 +23,9 @@ import com.iwhalecloud.byai.manager.security.login.sso.SSOAuthenticationFilter;
 import com.iwhalecloud.byai.manager.security.login.sso.SSOAuthenticationProvider;
 import com.iwhalecloud.byai.manager.security.login.username.UsernameAuthenticationFilter;
 import com.iwhalecloud.byai.manager.security.login.username.UsernameAuthenticationProvider;
+import com.iwhalecloud.byai.manager.security.login.wechatphone.WechatPhoneAuthenticationFilter;
+import com.iwhalecloud.byai.manager.security.login.wechatphone.WechatPhoneAuthenticationProvider;
+import com.iwhalecloud.byai.manager.security.login.wechatphone.WechatPhoneLoginRateLimiter;
 import com.iwhalecloud.byai.state.common.filter.GlobalI18nFilter;
 import com.iwhalecloud.byai.state.common.filter.SignAntiReplayFilter;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -84,6 +87,12 @@ public class WebSecurityConfig {
     private PhoneRegisterAuthenticationProvider phoneRegisterAuthenticationProvider;
 
     @Autowired
+    private WechatPhoneAuthenticationProvider wechatPhoneAuthenticationProvider;
+
+    @Autowired
+    private WechatPhoneLoginRateLimiter wechatPhoneLoginRateLimiter;
+
+    @Autowired
     private IwhaleAuthenticationProvider iwhaleAuthenticationProvider;
 
     @Autowired
@@ -123,7 +132,8 @@ public class WebSecurityConfig {
 
             // 使用securityMatcher限定当前配置作用的路径,其他所有请求拦截
             http.securityMatcher("/system/session/loginByUsername", "/system/session/loginByPhone",
-                "/system/session/registerByPhone", "/system/social/iwhaleCallback", "/system/social/dingtalkCallback",
+                "/system/session/registerByPhone", "/system/session/loginByWechatPhone",
+                "/system/social/iwhaleCallback", "/system/social/dingtalkCallback",
                 "/system/session/loginBySso", "/system/social/feiLianCallback", "/system/social/casCallback",
                 "/system/social/appleLogin", "/commonFile/view", "/feishu/bot/events")
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll());
@@ -146,6 +156,11 @@ public class WebSecurityConfig {
                 pathPattern.matcher(HttpMethod.POST, "/system/session/registerByPhone"),
                 new ProviderManager(List.of(phoneRegisterAuthenticationProvider)), multAuthenticationSuccessHandler,
                 multAuthenticationFailureHandler);
+
+            WechatPhoneAuthenticationFilter wechatPhoneAuthenticationFilter = new WechatPhoneAuthenticationFilter(
+                pathPattern.matcher(HttpMethod.POST, "/system/session/loginByWechatPhone"),
+                new ProviderManager(List.of(wechatPhoneAuthenticationProvider)), multAuthenticationSuccessHandler,
+                multAuthenticationFailureHandler, wechatPhoneLoginRateLimiter);
 
             // 鲸加登陆
             IwhaleAuthenticationFilter iwhaleAuthenticationFilter = new IwhaleAuthenticationFilter(
@@ -194,6 +209,8 @@ public class WebSecurityConfig {
 
             // 手机验证码
             http.addFilterBefore(phoneAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+
+            http.addFilterBefore(wechatPhoneAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
             // 鲸加登陆
             http.addFilterBefore(iwhaleAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

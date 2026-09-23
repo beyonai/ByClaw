@@ -422,6 +422,12 @@ Endpoint 默认使用 `dysmsapi.aliyuncs.com`，登录和注册模板均须包�
 发送接口要求有效的图形验证码及同一 Session，并依赖数据库与 Redis。
 `GET /system/session/captcha` 与 `POST /system/session/sms/send` 允许匿名访问，部署时加上配置的 context-path（例如 `/byaiService`）。放行按 HTTP 方法和完整路径匹配；图形验证码仍为两分钟有效且只能使用一次，手机号重复发送间隔和按 IP、业务类型计数的限流仍然生效。
 
+### 微信小程序手机号登录配置
+
+BE 的 `config/application.properties`（部署时为 `deploy/config/application.properties`）从服务端环境变量读取 `WECHAT_MINIAPP_APP_ID` 和 `WECHAT_MINIAPP_APP_SECRET`，绑定为 `wechat.miniapp.app-id`、`wechat.miniapp.app-secret`。二者必须属于发起手机号授权的同一个微信小程序，不能放进小程序包。可选的 `WECHAT_MINIAPP_LOGIN_RATE_LIMIT_PER_MINUTE` 默认为 300。
+
+本地运行时将变量放在项目根目录 `.env`；Standalone Docker Compose 通过 `env_file` 读取该文件。K3s 部署需从 Secret 等服务端密钥来源注入这两个环境变量。未配置时 BE 可以启动，但 `POST /system/session/loginByWechatPhone` 会返回受控登录失败，不会尝试兑换手机号。
+
 ## 技术栈
 
 - **框架**: Spring Boot 3.x, Spring Cloud, MyBatis-Plus

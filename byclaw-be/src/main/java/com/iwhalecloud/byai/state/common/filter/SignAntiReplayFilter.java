@@ -61,6 +61,8 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         Pattern.compile("^/api/v1/appVersion/package/\\d+$")
     );
 
+    private static final String WECHAT_PHONE_LOGIN_PATH = "/system/session/loginByWechatPhone";
+
     @org.springframework.beans.factory.annotation.Value("${artifact.preview.path-prefix:/artifact-preview}")
     private String artifactPreviewPathPrefix;
 
@@ -88,6 +90,12 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         // 未开启，直接放行
         if (!signProperties.getEnabled()) {
             log.debug("SignAntiReplayFilter disable");
+            filterChain.doFilter(request, response);
+            return;
+        }
+        // 匿名手机号授权尚无 USER_CODE，不能用依赖已登录会话的通用签名；
+        // 仅放行精确 POST 路径，后续由微信一次性 code 校验和共享限流负责入口保护。
+        if (this.isExactPostRequestPath(request, WECHAT_PHONE_LOGIN_PATH)) {
             filterChain.doFilter(request, response);
             return;
         }

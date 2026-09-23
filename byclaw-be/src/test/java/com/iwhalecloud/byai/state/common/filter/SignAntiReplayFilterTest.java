@@ -13,6 +13,33 @@ import org.springframework.test.util.ReflectionTestUtils;
 class SignAntiReplayFilterTest {
 
     @Test
+    void letsExactWechatPhoneLoginReachItsOneTimeCodeAuthenticatorWhenSigningIsEnabled() throws Exception {
+        SignAntiReplayFilter filter = enabledFilter();
+        MockHttpServletRequest request = request("POST",
+            "/byaiService/system/session/loginByWechatPhone", "/byaiService");
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+        assertThat(chain.getRequest()).isSameAs(request);
+    }
+
+    @Test
+    void keepsSignatureCheckForOtherWechatPhoneMethodsAndLookalikePaths() {
+        SignAntiReplayFilter filter = enabledFilter();
+        for (MockHttpServletRequest request : java.util.List.of(
+            request("GET", "/byaiService/system/session/loginByWechatPhone", "/byaiService"),
+            request("POST", "/byaiService/system/session/loginByWechatPhone/other", "/byaiService"),
+            request("POST", "/other/system/session/loginByWechatPhone", "/byaiService"))) {
+            MockFilterChain chain = new MockFilterChain();
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> filter.doFilter(request, new MockHttpServletResponse(), chain))
+                .isInstanceOf(RuntimeException.class);
+            assertThat(chain.getRequest()).isNull();
+        }
+    }
+
+    @Test
     void letsWeixinOpenPlatformEventsPassWithoutCommonRequestSignature() throws Exception {
         SignAntiReplayFilter filter = enabledFilter();
         for (String path : java.util.List.of(

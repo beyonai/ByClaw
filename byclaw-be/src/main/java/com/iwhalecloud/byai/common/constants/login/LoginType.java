@@ -30,6 +30,9 @@ public final class LoginType {
      */
     public static final String PHONE = "phone";
 
+    /** 微信小程序授权手机号登录。 */
+    public static final String WECHAT_PHONE = "wechatPhone";
+
     /**
      * 单点登陆
      */
