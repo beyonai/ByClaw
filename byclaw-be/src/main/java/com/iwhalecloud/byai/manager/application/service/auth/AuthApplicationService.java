@@ -2183,9 +2183,9 @@ public class AuthApplicationService {
     }
 
     /**
-     * 为指定用户追加一条资源授权，不覆盖该资源已有授权名单。
+     * 为用户追加多个数字员工的直接使用红名单。调用方须先完成业务准入校验。
+     * 仅查询并补齐同维度 FORCE_USE，不覆盖其他授权；数据库写入加入调用方事务。
      */
-    /** 为用户追加多个数字员工的直接使用红名单。 */
     @Transactional(rollbackFor = Exception.class)
     public void grantDigitalEmployeesToUser(Collection<Long> resourceIds, Long userId) {
         if (CollectionUtils.isEmpty(resourceIds)) return;
@@ -2204,6 +2204,7 @@ public class AuthApplicationService {
             .eq(PrivilegeGrant::getStatusCd, "A");
         Set<Long> grantedIds = privilegeGrantMapper.selectList(query).stream()
             .map(PrivilegeGrant::getGrantObjId).collect(Collectors.toSet());
+        List<PrivilegeGrant> addedGrants = new ArrayList<>();
         for (Long resourceId : distinctIds) {
             if (grantedIds.contains(resourceId)) continue;
             PrivilegeGrant grant = new PrivilegeGrant();
@@ -2217,7 +2218,25 @@ public class AuthApplicationService {
             grant.setAllowUnsubscribe(Constants.NOT_ALLOW_UNSUBSCRIBE);
             grant.setStatusCd("A");
             privilegeGrantService.save(grant);
+            addedGrants.add(grant);
         }
+        if (addedGrants.isEmpty()) {
+            return;
+        }
+        // 旧权限集合也必须等数据库提交，避免后续入群失败时 Redis 残留已回滚的授权。
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    for (PrivilegeGrant grant : addedGrants) {
+                        writeRedis(GrantType.FORCE_USE, buildPrivilegeGrantKey(grant), buildPrivilegeGrantValue(grant));
+                    }
+                } catch (Exception exception) {
+                    logger.error("入群授权已提交，同步用户 {} 的数字员工权限缓存失败", userId, exception);
+                }
+            }
+        });
+        syncAuthChangedUsersAfterCommit(Set.of(userId), GrantType.FORCE_USE);
     }
 
     public void ensureUserDirectPrivilege(SsResource ssResource, Long userId, String grantType) {
