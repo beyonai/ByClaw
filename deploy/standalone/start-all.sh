@@ -9,7 +9,14 @@ if [ "$STANDALONE_MODULES" = "NONE" ]; then
 elif [ -n "$STANDALONE_MODULES" ]; then
     SERVICES=$(echo "$STANDALONE_MODULES" | tr ',' ' ')
     echo "Starting standalone services: $SERVICES"
-    $COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate $SERVICES
+    # 保留 compose.yml 中的 depends_on，只有在选择性启动且未包含 BE 时
+    # 禁止 Compose 因 FE 的依赖关系自动拉起 BE。
+    NO_DEPS=""
+    case " $SERVICES " in
+        *" be "*) ;;
+        *) NO_DEPS="--no-deps" ;;
+    esac
+    $COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate $NO_DEPS $SERVICES
 else
     echo "Starting all services..."
     $COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate
