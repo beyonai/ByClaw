@@ -114,15 +114,11 @@ export async function resolveSessionModelOverride(params: {
             ],
         }),
     );
-    // Same provider/model IDs can still carry stale window and reasoning values.
-    // Do not let a dispatch capture the previous runtime snapshot after writing.
-    const deadline = Date.now() + 3000;
-    for (;;) {
-        const current = currentRuntimeConfig(params.api);
-        if (!hasManagedProviderConfigDrift(current, bundle.providerKey, bundle.provider)) break;
-        if (Date.now() >= deadline) throw new Error("Session model configuration reload timed out");
-        await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    // `mutateConfigFile` performs the native in-process reload. The config
+    // object captured by this plugin instance can remain stale while that
+    // reload replaces plugin instances, so polling `current()` here can turn
+    // a successful hot switch into a false timeout. Dispatch resolves the
+    // model from the refreshed runtime after this preparer completes.
     params.log.info?.(
         `baiying-enhance: registered session model override provider ${bundle.modelRef} for sessionId=${sessionId}`,
     );
