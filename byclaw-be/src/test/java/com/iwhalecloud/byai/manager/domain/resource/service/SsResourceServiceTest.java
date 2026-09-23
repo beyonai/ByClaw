@@ -58,6 +58,20 @@ class SsResourceServiceTest {
     }
 
     @Test
+    void enterpriseSkillNameLookupIncludesOffShelfButExcludesDeregisteredAndOtherResourceTypes() {
+        when(ssResourceMapper.selectCount(any())).thenReturn(1L, 0L);
+        assertThat(service.existsEnterpriseSkillByName("技能1")).isTrue();
+        ArgumentCaptor<QueryWrapper<SsResource>> queryCaptor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(ssResourceMapper).selectCount(queryCaptor.capture());
+        QueryWrapper<SsResource> query = queryCaptor.getValue();
+        assertThat(query.getSqlSegment()).contains("resource_biz_type =", "owner_type =", "resource_name =",
+            "resource_status IS NULL", "resource_status <>");
+        assertThat(query.getParamNameValuePairs().values()).containsExactlyInAnyOrder("SKILL", "enterprise", "技能1", -1);
+        assertThat(query.getSqlSegment()).doesNotContain("create_by", "resource_status IN");
+        assertThat(service.existsEnterpriseSkillByName("技能1")).isFalse();
+    }
+
+    @Test
     void lifecycleReadLocksTheRequestedResource() {
         service.findByIdForUpdate(100L);
         ArgumentCaptor<LambdaQueryWrapper<SsResource>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);

@@ -16,6 +16,34 @@ import org.junit.jupiter.api.Test;
 class PrivilegeGrantMapperSqlTest {
 
     @Test
+    void resourceListQuery_excludesDeregisteredRowsBeforePaginationForBothOwners() throws IOException {
+        try (var input = getClass().getResourceAsStream(
+            "/com/iwhalecloud/byai/manager/mapper/auth/PrivilegeGrantMapper.xml")) {
+            assertThat(input).isNotNull();
+            String xml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            int start = xml.indexOf("<select id=\"listResourceAuth\"");
+            String query = xml.substring(start, xml.indexOf("</select>", start));
+            var source = new XMLLanguageDriver().createSqlSource(new Configuration(),
+                "<script>" + query.substring(query.indexOf('>') + 1) + "</script>", Map.class);
+            Map<String, Object> params = new HashMap<>();
+            params.put("userId", 2L);
+            params.put("defaultPersonalResourceId", 10L);
+            for (String owner : List.of("personal", "enterprise")) {
+                params.put("ownerType", owner);
+                for (String status : List.of("", "0", "2", "3", "-1")) {
+                    params.put("resourceStatus", status);
+                    params.put("excludeDeleted", true);
+                    String sql = source.getBoundSql(params).getSql().replaceAll("\\s+", " ");
+                    // 条件在 OR 组外，包含默认个人资源和全部状态时也不能返回注销数据。
+                    assertThat(sql).contains("WHERE a.resource_status != -1 and (");
+                    params.put("excludeDeleted", false);
+                    assertThat(source.getBoundSql(params).getSql()).doesNotContain("a.resource_status != -1");
+                }
+            }
+        }
+    }
+
+    @Test
     void digitalEmployeeAuditQuery_exposesProcessedResultAndTimeForHistory() throws IOException {
         String resourcePath = "/com/iwhalecloud/byai/manager/mapper/auth/PrivilegeGrantMapper.xml";
         try (var input = getClass().getResourceAsStream(resourcePath)) {

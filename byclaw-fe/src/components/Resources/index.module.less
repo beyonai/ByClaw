@@ -1,13 +1,18 @@
 @antPrefix: ant;
 
 .fileManagerContainer {
+  --resource-list-right-gutter: 30px;
+
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 16px 30px 30px;
+  // 列表自身已有底部外边距，外层仅保留少量留白以扩大可视区域。
+  padding: 16px 30px 8px;
 }
 
 .myResourcesContainer {
+  --resource-list-right-gutter: 24px;
+
   padding: 20px 24px;
 }
 

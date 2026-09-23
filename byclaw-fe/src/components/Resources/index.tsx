@@ -38,7 +38,7 @@ import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter from './components/ResourceFilter';
-import { statusOptions } from './constants';
+import { statusOptions, myResourceStatusOptions } from './constants';
 import { getDefaultParams } from './components/ResourceFilter';
 import ResourceList from './components/ResourceList';
 import SkillGroupList from './components/SkillGroupList';
@@ -53,6 +53,7 @@ import {
   buildSkillMarketplaceUrl,
   filterResourceAuditRowsByType,
   getBaseResourceBizTypeList,
+  getResourceQueryStatus,
   isSkillMarketplaceInstalledMessage,
 } from './utils';
 import ResourceAuditCenter from './components/ResourceAuditCenter';
@@ -233,6 +234,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const [knowledgeCapability, setKnowledgeCapability] = useState<KnowledgeCapability | null>(null);
   const [fixedEntryCapability, setFixedEntryCapability] = useState<FixedEntryOperationCapability | null>(null);
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
+  const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
   const [myResourceAuditPendingCount, setMyResourceAuditPendingCount] = useState(0);
@@ -394,7 +396,8 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
       })
       .catch(() => {
         setBrandVersion('openSource');
-      });
+      })
+      .finally(() => setBrandVersionLoaded(true));
 
     return () => {
       logoutModuleEvent();
@@ -602,6 +605,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
       }}
     />
   );
+  const isMyEnterpriseResources = myResourcesOnly && activeTab === 'enterprise';
   const tabBarExtraContent =
     activeTab === 'audit' ? undefined : (
       <Space>
@@ -616,6 +620,16 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             onChange={(value) => setMyResourceScope(value as MyResourceScope)}
           />
         )}
+        {isMyEnterpriseResources && (
+          <Segmented
+            value={getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus)}
+            options={myResourceStatusOptions.map((item) => ({
+              ...item,
+              label: intl.formatMessage({ id: item.label }),
+            }))}
+            onChange={(resourceStatus) => setDropdownParam((previous) => ({ ...previous, resourceStatus }))}
+          />
+        )}
         {isEnterpriseSkillGroupMode && isAdminVip(userInfo) && (
           <Select
             aria-label={intl.formatMessage({ id: 'common.status' })}
@@ -625,27 +639,40 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             onChange={(resourceStatus) => setDropdownParam((previous) => ({ ...previous, resourceStatus }))}
           />
         )}
-        {!isEnterpriseSkillGroupMode && (
+        {!isEnterpriseSkillGroupMode && !(myResourcesOnly && resourceType === 'SKILL') && (
           <ResourceFilter
             key={`${resourceType}-${activeTab}-${myResourcesOnly}`}
             resourceType={resourceType}
             onOk={(param: any) => {
-              setDropdownParam(param);
+              setDropdownParam({
+                ...param,
+                resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, param.resourceStatus),
+              });
               setCatalogId(param.catalogId || '');
               // 刷新逻辑由ResourceList组件内部处理
             }}
-            defaultParam={{ ...dropdownParam, catalogId }}
-            catalogOptions={[
-              { value: '', label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }) },
-              ...topLevelCatalogList.map((item) => ({
-                value: `${item.catalogId}`,
-                label: getLocalizedCatalogName(item, intl.locale),
-              })),
-            ]}
+            defaultParam={{
+              ...dropdownParam,
+              catalogId,
+              resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus),
+            }}
+            catalogOptions={
+              myResourcesOnly
+                ? undefined
+                : [
+                    { value: '', label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }) },
+                    ...topLevelCatalogList.map((item) => ({
+                      value: `${item.catalogId}`,
+                      label: getLocalizedCatalogName(item, intl.locale),
+                    })),
+                  ]
+            }
             activeTab={activeTab}
-            // 我可用的、官方推荐不提供状态筛选；我的资源保留原有筛选能力。
-            hideStatusFilter={!myResourcesOnly}
-            alwaysShowStatusFilter={myResourcesOnly}
+            resourceOwnerFilter={!myResourcesOnly && activeTab === 'personal'}
+            // 企业状态已移到外层分段控件，个人页固定查询已上架。
+            hideStatusFilter
+            alwaysShowStatusFilter={false}
+            statusOptionsOverride={myResourcesOnly ? myResourceStatusOptions : undefined}
             hidePermissionFilter={myResourcesOnly}
           />
         )}
@@ -655,27 +682,27 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           brandVersion === 'openSource' &&
           resourceType === 'KG_DOC' &&
           (activeTab === 'personal' || isAdmin) && (
-            <Tooltip
-              title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}
-            >
-              <span>
-                <Button
-                  icon={<PlusOutlined />}
-                  type="primary"
-                  disabled={!knowledgeCapability?.allowKnowledgeBaseCreate}
-                  onClick={() => {
-                    if (!knowledgeCapability?.allowKnowledgeBaseCreate) {
-                      return;
-                    }
-                    setCurrentItem(null);
-                    setDetailPanelOpen(true);
-                  }}
-                >
-                  {intl.formatMessage({ id: 'common.create' })}
-                </Button>
-              </span>
-            </Tooltip>
-          )}
+          <Tooltip
+            title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}
+          >
+            <span>
+              <Button
+                icon={<PlusOutlined />}
+                type="primary"
+                disabled={!knowledgeCapability?.allowKnowledgeBaseCreate}
+                onClick={() => {
+                  if (!knowledgeCapability?.allowKnowledgeBaseCreate) {
+                    return;
+                  }
+                  setCurrentItem(null);
+                  setDetailPanelOpen(true);
+                }}
+              >
+                {intl.formatMessage({ id: 'common.create' })}
+              </Button>
+            </span>
+          </Tooltip>
+        )}
 
         {!myResourcesOnly && brandVersion === 'openSource' && (!isEnterpriseSkillGroupMode || isAdminVip(userInfo)) && (
           <Tooltip
@@ -720,10 +747,10 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
                   resourceType === 'KG_DOC'
                     ? 'resourceCenter.myKnowledge'
                     : resourceType === 'SKILL'
-                    ? 'resourceCenter.mySkills'
-                    : resourceType === 'TOOL'
-                    ? 'resourceCenter.myTools'
-                    : 'resourceCenter.myResources',
+                      ? 'resourceCenter.mySkills'
+                      : resourceType === 'TOOL'
+                        ? 'resourceCenter.myTools'
+                        : 'resourceCenter.myResources',
               })}
             </Button>
           </Badge>
@@ -1005,6 +1032,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
               onApplyUse={handleApplyUse}
               onAuditUse={handleAuditUse}
               onRefresh={refreshList}
+              enablePublishToEnterprise={brandVersionLoaded && brandVersion !== 'commercial'}
               skillCardViewMode="new"
             />
           )}

@@ -1,7 +1,8 @@
 import { Button, DatePicker, Form, Input, InputNumber, Radio, Select, Space, TimePicker, message } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import QueryInput from '@/components/QueryInput';
+import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
 import { createScanSource, updateScanSource } from '@/service/devloop';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
@@ -14,6 +15,7 @@ import {
   normalizeIntervalValue,
   parseAutomationConfig,
 } from '../schedule';
+import { clearAutomationCreationDraft, getAutomationCreationDraft, saveAutomationCreationDraft } from '../drafts';
 import type { AutomationFormValues, AutomationSource, AutomationTemplate } from '../types';
 import styles from '../index.module.less';
 
@@ -43,10 +45,30 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
   const intl = useIntl();
   const [form] = Form.useForm<AutomationFormValues>();
   const [saving, setSaving] = useState(false);
-  const [promptDraft, setPromptDraft] = useState<{ text: string; resourceList: any[] }>({
-    text: '',
-    resourceList: [],
-  });
+  const [promptDraft, setPromptDraft] = useState<DefaultValueSchema>(
+    () => (!source && getAutomationCreationDraft(template?.key)?.prompt) || { text: '', resourceList: [] }
+  );
+  const promptDraftRef = useRef(promptDraft);
+  const persistCreationDraft = useCallback(
+    (values: AutomationFormValues = form.getFieldsValue(true)) => {
+      if (source) return;
+      saveAutomationCreationDraft({ values, prompt: promptDraftRef.current }, template?.key);
+    },
+    [form, source, template?.key]
+  );
+  const updatePromptDraft = useCallback(
+    (draft: DefaultValueSchema) => {
+      // 同步记录最新内容，离开页面不依赖组件卸载或异步 state 更新。
+      promptDraftRef.current = draft;
+      setPromptDraft(draft);
+      persistCreationDraft();
+    },
+    [persistCreationDraft]
+  );
+  const setDraftFields = (values: Partial<AutomationFormValues>) => {
+    form.setFieldsValue(values);
+    persistCreationDraft();
+  };
   const [promptDraftVersion, setPromptDraftVersion] = useState(0);
   const { projects, loading: projectsLoading } = useProjectList();
   // 新建入口可能未通过路由传入项目 ID（例如从聊天框进入），此时复用聊天框项目选择器
@@ -60,14 +82,15 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
     onResourceReferenceChange?.((resource) => {
       const name = resource?.name || resource?.fileName || resource?.resourceName;
       if (!name) return;
-      setPromptDraft((current) => ({
+      const current = promptDraftRef.current;
+      updatePromptDraft({
         text: `${current.text || ''}${current.text ? ' ' : ''}#${name}`,
         resourceList: [...(current.resourceList || []), resource],
-      }));
+      });
       setPromptDraftVersion((version) => version + 1);
     });
     return () => onResourceReferenceChange?.(() => undefined);
-  }, [onResourceReferenceChange]);
+  }, [onResourceReferenceChange, updatePromptDraft]);
   const scheduleMode = Form.useWatch('scheduleMode', form);
   const intervalUnit = Form.useWatch('intervalUnit', form);
   const intervalValue = Form.useWatch('intervalValue', form);
@@ -96,6 +119,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
 
   useEffect(() => {
     const initialValues = getAutomationFormInitialValues(source);
+    let initialPrompt: DefaultValueSchema;
     if (template && !source) {
       initialValues.sourceName = template.name;
       initialValues.scheduleMode = template.schedule.mode;
@@ -117,22 +141,34 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
         .date(template.schedule.monthDay || 1);
       initialValues.periodMonthDays = template.schedule.monthDays || [template.schedule.monthDay || 1];
       initialValues.intervalWeekdays = template.schedule.intervalWeekdays || [...DEFAULT_WEEKDAYS];
-      setPromptDraft({ text: template.prompt, resourceList: [] });
+      initialPrompt = { text: template.prompt, resourceList: [] };
     } else {
       const config = parseAutomationConfig(source?.config);
-      setPromptDraft({ text: config.chatContent, resourceList: config.resourceList });
+      initialPrompt = { text: config.chatContent, resourceList: config.resourceList };
     }
     if (!source && resolvedProjectId !== undefined && resolvedProjectId !== null) {
       initialValues.projectId = String(resolvedProjectId);
     }
+    // 已编辑的草稿优先于模板和全局项目默认值，避免切换项目作用域覆盖用户输入。
+    const savedDraft = !source ? getAutomationCreationDraft(template?.key) : undefined;
+    const restoredPrompt = savedDraft?.prompt || initialPrompt;
+    promptDraftRef.current = restoredPrompt;
+    setPromptDraft(restoredPrompt);
     setPromptDraftVersion((version) => version + 1);
-    form.setFieldsValue(initialValues);
+    form.setFieldsValue(savedDraft?.values || initialValues);
   }, [form, resolvedProjectId, source, template]);
+
+  const handleCancel = () => {
+    // 显式取消放弃当前新建草稿；仅切换页面时保留。
+    if (!source) clearAutomationCreationDraft(template?.key);
+    onCancel();
+  };
 
   const handleSave = async () => {
     try {
       const values = await form.validateFields();
-      const promptText = promptDraft.text.trim();
+      const currentPrompt = promptDraftRef.current;
+      const promptText = (currentPrompt.text || '').trim();
       if (!promptText) {
         message.error(intl.formatMessage({ id: 'automation.promptRequired' }));
         return;
@@ -146,7 +182,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
       setSaving(true);
       const config = JSON.stringify({
         chatContent: promptText,
-        resourceList: promptDraft.resourceList || [],
+        resourceList: currentPrompt.resourceList || [],
         schedule,
       });
       if (source?.sourceId) {
@@ -165,6 +201,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
           config,
         });
       }
+      if (!source) clearAutomationCreationDraft(template?.key);
       message.success(intl.formatMessage({ id: 'automation.saveSuccess' }));
       await onSaved();
     } catch (error: any) {
@@ -196,7 +233,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
           </span>
         </div>
         <Space>
-          <Button onClick={onCancel}>{intl.formatMessage({ id: 'common.cancel' })}</Button>
+          <Button onClick={handleCancel}>{intl.formatMessage({ id: 'common.cancel' })}</Button>
           <Button type="primary" loading={saving} onClick={() => void handleSave()}>
             {intl.formatMessage({ id: 'common.save' })}
           </Button>
@@ -206,6 +243,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
         <Form
           form={form}
           layout="vertical"
+          onValuesChange={() => persistCreationDraft()}
           className={styles.editorForm}
           initialValues={
             resolvedProjectId !== undefined && resolvedProjectId !== null
@@ -274,10 +312,10 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
               cannotSend
               inputDraft={promptDraft}
               onInputDraftChange={(draft) =>
-                setPromptDraft({ text: draft?.text || '', resourceList: draft?.resourceList || [] })
+                updatePromptDraft({ text: draft?.text || '', resourceList: draft?.resourceList || [] })
               }
               onSend={({ queryQuestion, resourceList }) =>
-                setPromptDraft({ text: queryQuestion || '', resourceList: resourceList || [] })
+                updatePromptDraft({ text: queryQuestion || '', resourceList: resourceList || [] })
               }
             />
           </Form.Item>
@@ -308,7 +346,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
                     <Select
                       className={styles.scheduleCompactField}
                       onChange={(nextPeriodType) => {
-                        form.setFieldsValue({
+                        setDraftFields({
                           periodType: nextPeriodType,
                           ...(nextPeriodType === 'weekly' || nextPeriodType === 'biweekly'
                             ? { periodWeekdays: [...DEFAULT_WEEKDAYS] }
@@ -409,7 +447,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
                       <Select
                         className={styles.intervalUnitField}
                         onChange={(nextUnit) => {
-                          form.setFieldsValue({
+                          setDraftFields({
                             intervalUnit: nextUnit,
                             intervalValue: nextUnit === 'minute' ? 60 : 1,
                           });

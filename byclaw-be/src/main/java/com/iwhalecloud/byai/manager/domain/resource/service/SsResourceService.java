@@ -279,6 +279,17 @@ public class SsResourceService {
         return ssResourceMapper.selectList(queryWrapper);
     }
 
+    /** 企业技能重名判断不受当前用户可见范围限制，下架技能也计入，注销记录不占用名称。 */
+    public boolean existsEnterpriseSkillByName(String resourceName) {
+        QueryWrapper<SsResource> query = new QueryWrapper<>();
+        query.eq("resource_biz_type", ResourceBizTypeEnum.SKILL.name())
+            .eq("owner_type", OwnerType.ENTERPRISE)
+            .eq("resource_name", resourceName)
+            .and(status -> status.isNull("resource_status")
+                .or().ne("resource_status", ResourceStatus.DELETE.getNum()));
+        return ssResourceMapper.selectCount(query) > 0;
+    }
+
     /**
      * 按系统来源、资源类型和资源编码查询资源。
      *

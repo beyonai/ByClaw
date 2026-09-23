@@ -1,3 +1,4 @@
+import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 // tslint:disable:ordered-imports
 import React, { useEffect, useMemo, useReducer, useState } from 'react';
 // @ts-ignore
@@ -550,21 +551,21 @@ function AllDigitalEmployees(
   );
 
   const onDeleteEmployee = React.useCallback(
-    async (employee: IAgentCache) => {
+    async (employee: IAgentCache, feedback: ResourceActionFeedback = message) => {
       const resourceId = employeeRowId(employee);
       try {
         await deleteDigitalEmployee({ resourceId });
-        message.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
+        feedback.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
         removeEmployeeRow(resourceId);
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'common.deleteFailed' }));
+        feedback.error(error?.message || intl.formatMessage({ id: 'common.deleteFailed' }));
       }
     },
     [intl]
   );
 
   const onChangeShelfStatus = React.useCallback(
-    async (employee: IAgentCache, action: 'shelf' | 'unShelf') => {
+    async (employee: IAgentCache, action: 'shelf' | 'unShelf', feedback: ResourceActionFeedback = message) => {
       const resourceId = String(employee.resourceId ?? employee.id ?? employee.agentId ?? '');
       if (!resourceId) return;
       try {
@@ -573,7 +574,7 @@ function AllDigitalEmployees(
         if (response?.success === false || (response?.code !== undefined && response.code !== 0)) {
           throw new Error(response?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
         }
-        message.success(
+        feedback.success(
           intl.formatMessage({
             id: action === 'shelf' ? 'digitalEmployees.shelfSuccess' : 'digitalEmployees.unShelfSuccess',
           })
@@ -583,9 +584,11 @@ function AllDigitalEmployees(
           resourceId,
           resourceStatus: action === 'shelf' ? 2 : 3,
         });
-        await refreshPromise;
+        await refreshPromise.catch(() => {
+          feedback.warning(intl.formatMessage({ id: 'resource.rowRefreshFailed' }));
+        });
       } catch (error: any) {
-        message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
+        feedback.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
       }
     },
     [intl, refreshEmployee]
@@ -630,6 +633,7 @@ function AllDigitalEmployees(
       digitalEmployeeActionMode
       actionConfig={{
         scene: 'enterprise',
+        enableSetDefault: source === 'available',
         // “我可用的”统一隐藏授权入口，包括数字员工和员工组。
         hiddenMenuItemKeys: source === 'available' ? ['authorize', 'use'] : [],
         onChat: () => chatEmployee(employee),
@@ -637,15 +641,13 @@ function AllDigitalEmployees(
         onAuth: (type: any) => onAuthEmployee(employee, type),
         onApplyUse: () => onApplyEmployee(employee),
         onAuditUse: () => onAuditEmployee(employee),
-        onDelete: () => onDeleteEmployee(employee),
-        onDeleteData: () => onDeleteEmployee(employee),
-        onShelf: () => onChangeShelfStatus(employee, 'shelf'),
-        onUnShelf: () => onChangeShelfStatus(employee, 'unShelf'),
-        // 我可用的仅企业员工/员工组开放上下架入口，具体权限仍由卡片校验；个人类型隐藏。
-        enableDigitalEmployeeLifecycle:
-          source === 'official' || `${employee.ownerType || ''}`.toLowerCase() === 'enterprise',
-        // 已下架且当前用户具备删除权限时展示“删除数据”；权限由列表接口返回。
-        enableDigitalEmployeeDelete: true,
+        onDelete: (feedback) => onDeleteEmployee(employee, feedback),
+        onDeleteData: (feedback) => onDeleteEmployee(employee, feedback),
+        onShelf: (feedback) => onChangeShelfStatus(employee, 'shelf', feedback),
+        onUnShelf: (feedback) => onChangeShelfStatus(employee, 'unShelf', feedback),
+        // 我可用的和官方推荐只提供浏览操作，生命周期管理统一从我的员工进入。
+        enableDigitalEmployeeLifecycle: false,
+        enableDigitalEmployeeDelete: false,
         // 官方推荐与我可用的复用员工类型标签及其国际化文案。
         showDigitalEmployeeTypeTag: true,
       }}

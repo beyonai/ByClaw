@@ -325,7 +325,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         return true;
       });
     const questionText = getInputText(editor.children, true).text;
-    // 默认员工不参与 questionText；正文、手动 @ 和引用都为空时，不把历史员工保存成共享草稿。
+    // 默认员工不参与 questionText；正文、手动 @ 和引用都为空时，不把历史员工单独保存成会话草稿。
     // 用户输入后又删空，也应回到无草稿状态，让下次打开的会话使用自己的员工。
     if (includeQuestion && !questionText.trim()) {
       return { text: '', resourceList: [] };

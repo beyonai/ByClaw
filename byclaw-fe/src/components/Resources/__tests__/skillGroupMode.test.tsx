@@ -187,7 +187,14 @@ jest.mock('@/components/CommonTabs', () => ({
 jest.mock('@/components/AntdIcon', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/components/Resources/components/ResourceList', () => ({
   __esModule: true,
-  default: ({ catalogId }: any) => <div data-testid="resource-list" data-catalog-id={catalogId} />,
+  default: ({ catalogId, enablePublishToEnterprise, dropdownParam }: any) => (
+    <div
+      data-testid="resource-list"
+      data-catalog-id={catalogId}
+      data-status={dropdownParam?.resourceStatus}
+      data-enterprise-publication={String(enablePublishToEnterprise)}
+    />
+  ),
 }));
 jest.mock('@/components/Resources/components/ResourceAuditCenter', () => ({
   __esModule: true,
@@ -272,10 +279,14 @@ jest.mock('@/utils/auth', () => ({ getToken: () => '', isAdminVip: () => mockAdm
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Resources from '..';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { queryResourceUseApplyAudit } from '@/pages/manager/service/resources';
 
 describe('Resources enterprise skill mode', () => {
   beforeEach(() => {
+    (getDcSystemConfig as jest.Mock).mockImplementation(({ paramCode }) =>
+      Promise.resolve(paramCode === 'BYAI_BRAND_VERSION' ? { paramValue: 'openSource' } : {})
+    );
     mockResourceFilterProps.mockClear();
     mockAdminVip = true;
     mockSkillGroupMountCount = 0;
@@ -291,12 +302,37 @@ describe('Resources enterprise skill mode', () => {
     return render(<Resources resourceType="SKILL" />);
   };
 
+  it.each(['commercial', 'openSource', 'custom', '', undefined])(
+    'enables enterprise publication only after loading a noncommercial brand: %s',
+    async (version) => {
+      let resolveBrand!: (value: any) => void;
+      (getDcSystemConfig as jest.Mock).mockImplementation(({ paramCode }) =>
+        paramCode === 'BYAI_BRAND_VERSION'
+          ? new Promise((resolve) => {
+              resolveBrand = resolve;
+            })
+          : Promise.resolve({})
+      );
+      renderAt('?tab=personal');
+      expect(screen.getByTestId('resource-list')).toHaveAttribute('data-enterprise-publication', 'false');
+      await act(async () => {
+        resolveBrand({ paramValue: version });
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId('resource-list')).toHaveAttribute(
+          'data-enterprise-publication',
+          String(version !== 'commercial')
+        )
+      );
+    }
+  );
+
   it.each(['SKILL', 'KG_DOC', 'TOOL'])('hides status filters in available and official %s tabs', (resourceType) => {
     window.history.pushState({}, '', '/resourceCenter?tab=personal');
     render(<Resources resourceType={resourceType} />);
 
     expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ activeTab: 'personal', hideStatusFilter: true })
+      expect.objectContaining({ activeTab: 'personal', hideStatusFilter: true, resourceOwnerFilter: true })
     );
     fireEvent.click(
       resourceType === 'SKILL'
@@ -304,21 +340,40 @@ describe('Resources enterprise skill mode', () => {
         : screen.getByRole('button', { name: 'resource.official' })
     );
     expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ activeTab: 'enterprise', hideStatusFilter: true })
+      expect.objectContaining({ activeTab: 'enterprise', hideStatusFilter: true, resourceOwnerFilter: false })
     );
   });
 
-  it.each(['SKILL', 'KG_DOC', 'TOOL'])('preserves status filters in my %s resources', (resourceType) => {
+  it.each(['SKILL', 'KG_DOC', 'TOOL'])('only shows supported status filters in my enterprise %s resources', (resourceType) => {
     window.history.pushState({}, '', '/resourceCenter?tab=personal');
     render(<Resources resourceType={resourceType} myResourcesOnly />);
 
-    expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ activeTab: 'personal', hideStatusFilter: false })
-    );
+    if (resourceType === 'SKILL') {
+      expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
+    } else {
+      expect(mockResourceFilterProps).toHaveBeenLastCalledWith(expect.objectContaining({
+        activeTab: 'personal', hideStatusFilter: true, catalogOptions: undefined,
+      }));
+    }
     fireEvent.click(screen.getByRole('button', { name: 'resourceCenter.enterprise' }));
-    expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ activeTab: 'enterprise', hideStatusFilter: false })
-    );
+    if (resourceType === 'SKILL') {
+      expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
+    } else {
+      expect(mockResourceFilterProps).toHaveBeenLastCalledWith(expect.objectContaining({
+        activeTab: 'enterprise', hideStatusFilter: true, catalogOptions: undefined,
+      }));
+    }
+    expect(screen.queryByRole('button', { name: 'resourceStatus.pendingShelf' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.statusCancelled' })).toBeNull();
+    for (const [label, value] of [
+      ['common.all', ''], ['resourceStatus.draft', '0'],
+      ['resourceStatus.published', '2'], ['resourceStatus.unpublished', '3'],
+    ]) {
+      const button = screen.getByRole('button', { name: label });
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByTestId('resource-list')).toHaveAttribute('data-status', value);
+    }
   });
 
   it.each([

@@ -135,6 +135,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [moveTargetDirectory, setMoveTargetDirectory] = useState('/');
   const [moving, setMoving] = useState(false);
   const [moveTreeData, setMoveTreeData] = useState<any[]>([]);
+  // 根节点异步到达时仍保持展开；Tree 需关闭 defaultExpandParent，避免过滤尚未加载的根键。
+  // 每次打开移动弹窗重新初始化，后续由用户控制目录展开状态。
+  const [moveExpandedKeys, setMoveExpandedKeys] = useState<Key[]>(['/']);
   const [moveTreeLoading, setMoveTreeLoading] = useState(false);
   const [saveDestination, setSaveDestination] = useState<'project' | 'shared'>('project');
   const [saveTarget, setSaveTarget] = useState<FileBrowserItem | null>(null);
@@ -579,8 +582,26 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     [language, resourceId, scope, usesFileBrowser]
   );
 
+  const handleLoadMoveData = useCallback(
+    async (node: { key: Key; children?: unknown[] }) => {
+      if (node.children) return;
+      const children = await loadMoveDirectories(String(node.key));
+      // Tree 回调节点不是 state 中的原始节点，需递归更新目录树才能展示任意层级的子目录。
+      const updateChildren = (nodes: any[]): any[] =>
+        nodes.map((item) => {
+          if (item.key === node.key) {
+            return { ...item, children, isLeaf: children.length === 0 };
+          }
+          return item.children ? { ...item, children: updateChildren(item.children) } : item;
+        });
+      setMoveTreeData((current) => updateChildren(current));
+    },
+    [loadMoveDirectories]
+  );
+
   useEffect(() => {
     if (!moveTarget || !resourceId) return;
+    setMoveExpandedKeys(['/']);
     setMoveTreeLoading(true);
     loadMoveDirectories('/')
       .then((children) =>
@@ -934,17 +955,14 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           <Spin spinning={moveTreeLoading}>
             <Tree
               treeData={moveTreeData}
-              defaultExpandedKeys={['/']}
+              defaultExpandParent={false}
+              expandedKeys={moveExpandedKeys}
+              onExpand={setMoveExpandedKeys}
               selectedKeys={[moveTargetDirectory]}
               onSelect={(keys) => {
                 if (keys.length) setMoveTargetDirectory(String(keys[0]));
               }}
-              loadData={async (node: any) => {
-                if (node.children?.length) return;
-                const children = await loadMoveDirectories(String(node.key));
-                node.children = children;
-                setMoveTreeData((current) => [...current]);
-              }}
+              loadData={handleLoadMoveData}
               blockNode
               showIcon
             />
@@ -1093,17 +1111,14 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         <Spin spinning={moveTreeLoading}>
           <Tree
             treeData={moveTreeData}
-            defaultExpandedKeys={['/']}
+            defaultExpandParent={false}
+            expandedKeys={moveExpandedKeys}
+            onExpand={setMoveExpandedKeys}
             selectedKeys={[moveTargetDirectory]}
             onSelect={(keys) => {
               if (keys.length) setMoveTargetDirectory(String(keys[0]));
             }}
-            loadData={async (node: any) => {
-              if (node.children?.length) return;
-              const children = await loadMoveDirectories(String(node.key));
-              node.children = children;
-              setMoveTreeData((current) => [...current]);
-            }}
+            loadData={handleLoadMoveData}
             blockNode
             showIcon
           />
