@@ -49,14 +49,18 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  padding: 40px 24px 48px;
-  overflow-y: auto;
+  padding: 40px 24px 12px;
+  // 页面保持固定高度，仅下方项目列表消化剩余空间并滚动。
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-sizing: border-box;
   background: #fff;
 }
 
 .projectHero {
   min-height: 260px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -103,6 +107,7 @@
 }
 
 .projectListHeader {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -122,21 +127,39 @@
   width: 340px;
 }
 
+.projectCardGrid,
+.projectListFeedback,
+.projectListLoading {
+  // 滚动区域延伸至面板右边缘，卡片仍保留与搜索栏一致的右侧留白。
+  margin-right: -24px;
+  padding-right: 24px;
+}
+
 .projectListFeedback {
-  min-height: 320px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .projectCardGrid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   display: grid;
+  // 剩余空间较大时仍保持卡片原有高度，避免网格行被拉伸。
+  align-content: start;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
 
 .projectListLoading {
-  min-height: 320px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -274,7 +297,7 @@
 
 @media (max-width: 760px) {
   .projectListPage {
-    padding: 24px;
+    padding: 24px 24px 12px;
   }
 
   .projectHero {

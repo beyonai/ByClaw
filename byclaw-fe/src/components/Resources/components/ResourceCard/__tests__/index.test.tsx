@@ -26,12 +26,17 @@ jest.mock('antd', () => {
 
   return {
     ...actual,
+    // 保留真实确认交互，去掉弹层动画准备阶段，避免全量运行时等待过渡。
+    Popconfirm: (props: import('antd').PopconfirmProps) => <actual.Popconfirm {...props} transitionName="" />,
     Dropdown: ({ children, menu }: { children: React.ReactNode; menu?: { items?: Array<any> } }) => (
       <div>
         {children}
         <div>
           {menu?.items?.map((item) => (
-            <div key={item?.key}>{item?.label}</div>
+            // 模拟 Menu 的条目点击分发，禁用项不触发业务回调。
+            <div key={item?.key} onClick={item?.disabled ? undefined : item?.onClick}>
+              {item?.label}
+            </div>
           ))}
         </div>
       </div>
@@ -53,8 +58,8 @@ jest.mock('@/components/AntdIcon', () => ({
 }));
 
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { message } from 'antd';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider, message } from 'antd';
 import { publishSkillToEnterprise } from '@/pages/manager/service/resources';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceCard from '..';
@@ -68,13 +73,29 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
     },
   });
 
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+  return render(
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    </ConfigProvider>
+  );
 };
+
+// 卡片包含真实确认弹层与全局消息；只增加用例总预算，不延长查找/断言超时。
+const lifecycleTestTimeout = 15000;
+
+afterEach(async () => {
+  // 全局 message 不属于 render 容器，必须单独清理，避免提示和计时器跨用例残留。
+  await act(async () => {
+    message.destroy();
+  });
+});
 
 describe('ResourceCard', () => {
   it('replaces processing with success before the row refresh completes', async () => {
     let finishRefresh!: () => void;
-    const refresh = new Promise<void>((resolve) => { finishRefresh = resolve; });
+    const refresh = new Promise<void>((resolve) => {
+      finishRefresh = resolve;
+    });
     renderWithQueryClient(
       <ResourceCard
         resource={{ resourceId: 'slow-refresh', resourceBizType: 'SKILL', ownerType: 'personal', canDelete: true }}
@@ -90,10 +111,13 @@ describe('ResourceCard', () => {
     fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
     fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
     expect(await screen.findByText('Deregistered')).toBeInTheDocument();
-    expect(screen.queryByText('common.processing')).not.toBeInTheDocument();
-    finishRefresh();
-    await waitFor(() => expect(screen.getByText('Deregistered')).toBeInTheDocument());
-  });
+    expect(screen.queryAllByText('common.processing')).toHaveLength(0);
+    await act(async () => {
+      finishRefresh();
+      await refresh;
+    });
+    expect(screen.getByText('Deregistered')).toBeInTheDocument();
+  }, lifecycleTestTimeout);
 
   it.each(['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'MCP', 'TOOLKIT', 'AGENT'])(
     'hides authorization for off-shelf %s and restores permitted actions after publishing',
@@ -165,9 +189,10 @@ describe('ResourceCard', () => {
   ])('shows processing until %s / %s / %s finishes', async (resourceBizType, resourceStatus, label, callback) => {
     let finish!: () => void;
     const operation = jest.fn(
-      () => new Promise<void>((resolve) => {
-        finish = resolve;
-      })
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
     );
     renderWithQueryClient(
       <ResourceCard
@@ -192,9 +217,12 @@ describe('ResourceCard', () => {
     expect(operation).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('common.processing')).toBeInTheDocument();
     expect(screen.getByText('Unchanged card')).toBe(title);
-    finish();
-    await waitFor(() => expect(screen.queryByText('common.processing')).not.toBeInTheDocument());
-  });
+    await act(async () => {
+      finish();
+      await operation.mock.results[0].value;
+    });
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+  }, lifecycleTestTimeout);
 
   it('clears the processing toast and permits retry after a lifecycle failure', async () => {
     const operation = jest.fn().mockRejectedValueOnce(new Error('Operation failed')).mockResolvedValue(undefined);
@@ -207,11 +235,11 @@ describe('ResourceCard', () => {
     fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
     fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
     expect(await screen.findByText('Operation failed')).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText('common.processing')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
     fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
     fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
     await waitFor(() => expect(operation).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByText('common.processing')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
   });
 
   it.each([true, false])('respects hidden deletion for workspace skills: %s', (hidden) => {
@@ -998,7 +1026,6 @@ describe('personal skill enterprise publication', () => {
   });
 
   afterEach(() => {
-    message.destroy();
     jest.restoreAllMocks();
   });
 
@@ -1067,17 +1094,12 @@ describe('personal skill enterprise publication', () => {
   it('reports failures without showing a success message', async () => {
     const success = jest.spyOn(message, 'success');
     (publishSkillToEnterprise as jest.Mock).mockRejectedValue('Publication permission revoked');
-    renderWithQueryClient(
-      <ResourceCard
-        resource={personalSkill}
-        actionConfig={{ enablePublishToEnterprise: true }}
-      />
-    );
+    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
     fireEvent.click(screen.getByText('resource.publishToEnterprise'));
     fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
     expect(await screen.findByText('Publication permission revoked')).toBeInTheDocument();
     expect(success).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByText('common.processing')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
   });
 
   it('blocks repeated confirmation while publication is pending', async () => {
@@ -1088,19 +1110,16 @@ describe('personal skill enterprise publication', () => {
           finish = resolve;
         })
     );
-    renderWithQueryClient(
-      <ResourceCard
-        resource={personalSkill}
-        actionConfig={{ enablePublishToEnterprise: true }}
-      />
-    );
+    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
     fireEvent.click(screen.getByText('resource.publishToEnterprise'));
-    expect(screen.queryByText('common.processing')).not.toBeInTheDocument();
+    expect(screen.queryAllByText('common.processing')).toHaveLength(0);
     const confirm = await screen.findByRole('button', { name: 'common.confirm' });
     fireEvent.click(confirm);
     fireEvent.click(confirm);
     expect(publishSkillToEnterprise).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText('common.processing')).toBeInTheDocument();
+    // 发布中菜单和全局提示同时显示处理文案，限定到卡片内部验证。
+    const card = screen.getByText('Personal skill').closest('.resourceCard') as HTMLElement;
+    expect(await within(card).findByText('common.processing')).toBeInTheDocument();
     const skillTitle = screen.getByText('Personal skill');
     expect(skillTitle).toBeInTheDocument();
     finish({ resource: enterpriseSkill, alreadyExists: false });
@@ -1108,6 +1127,6 @@ describe('personal skill enterprise publication', () => {
     expect(screen.getByText('Personal skill')).toBe(skillTitle);
     expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
     expect(emit).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByText('common.processing')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
   });
 });

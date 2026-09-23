@@ -62,6 +62,8 @@ jest.mock('../../EmployeeGroupMembers', () => () => <div>Configure Group Members
 // 完整配置表单保留真实 antd 交互，全量并行运行时为渲染和多次切换预留时间。
 // waitFor 仍使用默认超时，接口或状态断言失败不会被延长掩盖。
 jest.setTimeout(15000);
+// 日志中全量运行已使这两个多步表单用例超过 15 秒；仅扩大总预算，waitFor 仍保持默认值。
+const multiStepFormTimeout = 30000;
 
 const labels = [
   'employeeDetail.configureKnowledge',
@@ -150,8 +152,8 @@ describe('employee editor resource configuration entries', () => {
     fireEvent.click(within(screen.getByText(labels[1]).parentElement!).getByRole('button'));
     expect(mockShowBaseList).toHaveBeenLastCalledWith('005');
     fireEvent.click(within(screen.getByText(labels[2]).parentElement!).getByRole('button'));
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
-  });
+    await waitFor(() => expect(screen.getByRole('dialog', { hidden: true })).toBeVisible());
+  }, multiStepFormTimeout);
 
   it('removes the last configured skill from both form fields before saving', async () => {
     render(<Editor employee={{ ownerType: 'personal', resourceCode: 'alice_helper' }} />);
@@ -324,7 +326,7 @@ describe('skill configuration ownership tabs', () => {
     );
     expect(dialog.queryByText('Stale personal result')).not.toBeInTheDocument();
     expect(dialog.getByText('Enterprise result')).toBeVisible();
-  });
+  }, multiStepFormTimeout);
 
   it('switches to enterprise scope when the form ownership changes', async () => {
     render(<Editor employee={{ ownerType: 'personal', resourceCode: 'helper' }} />);
