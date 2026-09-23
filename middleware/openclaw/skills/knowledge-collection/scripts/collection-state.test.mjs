@@ -15,10 +15,34 @@ import {
   recordPendingCollectionItem,
   registerArxivAcquisitionVariant,
   registerFullTextEvidenceReceipt,
+  buildDownstreamInput,
 } from './collection-state.mjs';
 import { sessionPaths } from './session.mjs';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
+
+test('explicit selected handoff contains only selected validated Markdown', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-selected-handoff-'));
+  try {
+    await mkdir(join(root, 'sanitized/items'), { recursive: true });
+    await writeFile(join(root, 'sanitized/items/chosen.md'), '# Chosen\n');
+    await writeFile(join(root, 'sanitized/items/other.md'), '# Other\n');
+    const paths = { root };
+    const items = [
+      { itemId: 'chosen', sourceSkill: 'project-cloud-knowledge', materialization: { status: 'materialized', sanitizedPath: 'sanitized/items/chosen.md' } },
+      { itemId: 'other', sourceSkill: 'project-cloud-knowledge', materialization: { status: 'materialized', sanitizedPath: 'sanitized/items/other.md' } },
+    ];
+    const session = { task: { materializationTarget: 'selected', sourceScope: ['cloud-knowledge'],
+      selectedDelivery: { schemaVersion: '1.0', itemIds: ['chosen'] } },
+      collection: { sourceMetadata: { source: 'cloud-knowledge', operation: 'materialize' },
+        collection: { status: 'complete', items } } };
+    const result = { items: [
+      { fileName: 'sanitized/items/chosen.md' }, { fileName: 'sanitized/items/other.md' },
+    ] };
+    assert.deepEqual(buildDownstreamInput(paths, result, session).files,
+      [join(await realpath(root), 'sanitized/items/chosen.md')]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test('failed acquisition state preserves evidence and reconciles collection status', async () => {
   const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-failed-item-'));

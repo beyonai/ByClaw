@@ -6,6 +6,7 @@ import { promoteProbeMaterialization, registerControlledAcquisitionEvidence } fr
 import { commitProbeAttempt, pauseProbeRun, readProbeRun } from './probe-state.mjs';
 import { loadSession } from './session.mjs';
 import { assessMaterializedTopic } from './topic-relevance.mjs';
+import { reviewAmbiguousContent } from './jev/content-reviewer.mjs';
 import { analyzeWebMarkdown } from './web-content-analysis.mjs';
 import {
   acquireArxivProbe,
@@ -263,6 +264,7 @@ function acquisitionCandidate(candidate) {
 }
 
 export async function verifyCandidate(paths, { runId, attemptId }, options = {}) {
+  const verificationStarted = performance.now();
   const { run, attempt, session, candidate, terminal: alreadyTerminal } = candidateAndAttempt(
     paths, runId, attemptId,
   );
@@ -330,7 +332,7 @@ export async function verifyCandidate(paths, { runId, attemptId }, options = {})
   }, { internal: true });
   const kind = sourceKind(candidate);
   const wechat = kind === 'wechat' ? sanitizeWechatMarkdown(acquired.markdown, acquired) : null;
-  const analysis = analyzeWebMarkdown(wechat?.markdown || acquired.markdown, acquired);
+  let analysis = analyzeWebMarkdown(wechat?.markdown || acquired.markdown, acquired);
   if (kind === 'arxiv') {
     const headings = [...analysis.markdown.matchAll(/^#{2,6}\s+(.+)$/gmu)].map((match) => match[1]);
     const completePaper = analysis.markdown.length >= 5_000 && headings.length >= 5
@@ -342,6 +344,18 @@ export async function verifyCandidate(paths, { runId, attemptId }, options = {})
       analysis.reasonCodes = [...new Set([...analysis.reasonCodes, 'incomplete-arxiv-structure'])];
     }
   }
+  let topic = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
+    title: analysis.title, markdown: analysis.markdown,
+  });
+  const reviewStarted = performance.now();
+  const reviewBudget = Math.min(1500, Math.max(0,
+    Number(options.remainingBudgetMs ?? 30000) - (reviewStarted - verificationStarted)) / 20);
+  const reviewed = await reviewAmbiguousContent({ request: session.task.query, markdown: analysis.markdown,
+    title: analysis.title, analysis, topic, contract: session.task.discoveryGate.topicContract }, {
+    ...options, remainingBudgetMs: () => Math.max(0, reviewBudget - (performance.now() - reviewStarted)),
+  });
+  analysis = reviewed.analysis;
+  topic = reviewed.topic;
   if (analysis.confidence !== 'high') {
     return terminal(paths, runId, attemptId, {
       acquisitionOutcome: 'saved',
@@ -349,10 +363,6 @@ export async function verifyCandidate(paths, { runId, attemptId }, options = {})
       reasonCode: analysis.reasonCodes[0] || 'NOT_ARTICLE',
     });
   }
-  const topic = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
-    title: analysis.title,
-    markdown: analysis.markdown,
-  });
   if (!['matched', 'not-required'].includes(topic.status)) {
     return terminal(paths, runId, attemptId, {
       acquisitionOutcome: 'saved',
@@ -412,6 +422,8 @@ export async function verifyCandidate(paths, { runId, attemptId }, options = {})
       sanitized: { path: sanitizedPath, sha256: `sha256:${sha256(analysis.markdown)}` },
     },
     topic,
+    semanticReview: reviewed.diagnostic,
+    ...(reviewed.topicEvidence ? { topicEvidence: reviewed.topicEvidence } : {}),
   };
   const promotionManifest = {
     schemaVersion: '1.0', phase: 'planned', promotionId, runId, attemptId,
@@ -443,6 +455,7 @@ export async function verifyCandidate(paths, { runId, attemptId }, options = {})
     verificationReceipt: verificationPath,
     item: {
       itemId,
+      ...(reviewed.topicEvidence ? { topicEvidence: reviewed.topicEvidence } : {}),
       source: 'public-internet',
       sourceSkill: executor,
       backend: 'web',

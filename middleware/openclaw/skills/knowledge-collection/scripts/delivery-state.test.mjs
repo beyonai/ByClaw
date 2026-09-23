@@ -93,3 +93,43 @@ test('failed, incomplete, and duplicate promotions do not satisfy requested coun
   assert.equal(summarizePromotedDelivery(value).deliverableArticleCount, 1);
   assert.equal(deliveryCompleteForSession(value), false);
 });
+
+test('explicit unified selection completes a strict subset while keeping pending inventory', () => {
+  const value = session({ requiredContentGranularity: 'full-text', items: [
+    { itemId: 'chosen', sourceSkill: 'project-cloud-knowledge', ...materialized('full-text') },
+    { itemId: 'other', sourceSkill: 'project-cloud-knowledge', materialization: { status: 'pending' } },
+  ], status: 'partial' });
+  value.task.sourceScope = ['cloud-knowledge'];
+  value.collection.sourceMetadata = { source: 'cloud-knowledge', operation: 'materialize' };
+  value.task.selectedDelivery = { schemaVersion: '1.0', itemIds: ['chosen'] };
+  assert.equal(deliveryCompleteForSession(value), true);
+  value.collection.collection.items[0].materialization.status = 'failed';
+  assert.equal(deliveryCompleteForSession(value), false);
+});
+
+test('all target and legacy selected sessions still require every inventory row', () => {
+  const items = [
+    { itemId: 'chosen', ...materialized('full-text') },
+    { itemId: 'other', materialization: { status: 'pending' } },
+  ];
+  const legacy = session({ items, status: 'partial' });
+  assert.equal(deliveryCompleteForSession(legacy), false);
+  const all = session({ target: 'all', items, status: 'partial' });
+  all.task.selectedDelivery = { schemaVersion: '1.0', itemIds: ['chosen'] };
+  assert.equal(deliveryCompleteForSession(all), false);
+});
+
+test('selected completion retains source failure and rejects malformed or empty selections', () => {
+  const value = session({ items: [{ itemId: 'chosen', source: 'public-internet', ...materialized('full-text') }] });
+  value.task.sourceScope = ['public-internet'];
+  value.collection.sourceMetadata = { operation: 'unified-search', sources: {
+    publicInternet: { status: 'failed' }, cloudKnowledge: { status: 'complete' },
+  } };
+  value.task.selectedDelivery = { schemaVersion: '1.0', itemIds: ['chosen'] };
+  assert.equal(deliveryCompleteForSession(value), false);
+  delete value.collection.sourceMetadata;
+  for (const itemIds of [[], ['unknown'], ['chosen', 'chosen']]) {
+    value.task.selectedDelivery = { schemaVersion: '1.0', itemIds };
+    assert.equal(deliveryCompleteForSession(value), false);
+  }
+});

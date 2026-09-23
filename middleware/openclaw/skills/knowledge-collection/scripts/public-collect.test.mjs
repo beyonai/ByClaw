@@ -92,6 +92,82 @@ const input = {
   manualPolicy: 'pause',
 };
 
+test('hot source waves verify current candidates before requesting the next wave', async () => {
+  const paths = setup();
+  const events = [];
+  let wave = 0;
+  const result = await runPublicCollect(paths, { ...input, requestedCount: 1 }, {
+    environment: {}, discover: async (_paths, _args, context) => {
+      events.push(context.channel);
+      if (context.channel !== 'hot') return {};
+      wave++;
+      addCandidates(paths, [candidate(`wave-${wave}`)]);
+      return { nextHotWave: wave === 1 };
+    },
+    verify: async (targetPaths, attempt, context) => {
+      events.push('verify');
+      return verifyCandidate(targetPaths, attempt, { remainingBudgetMs: context.remainingBudgetMs,
+        environment: {}, acquire: async () => wave === 1 ? { status: 'unavailable', reasonCode: 'HTTP_FAILED' }
+          : { status: 'saved', markdown: body('second-wave'), title: 'DeepSeek Harness', executor: 'fixture-web',
+            requestedUrl: 'https://example.com/article/wave-2', resolvedUrl: 'https://example.com/article/wave-2' },
+      });
+    },
+  });
+  assert.deepEqual(events.slice(0, 5), ['online', 'hot', 'verify', 'hot', 'verify']);
+  assert.equal(wave, 2);
+  assert.equal(result.status, 'complete');
+});
+
+test('second round uses a bounded feedback query and failure preserves exact fallback query', async () => {
+  for (const succeeds of [true, false]) {
+    const paths = setup();
+    const queries = [];
+    let choices = 0;
+    const result = await runPublicCollect(paths, { ...input, requestedCount: 1 }, {
+      environment: {}, callJev: async () => {
+        choices++;
+        return succeeds ? { ok: true, document: { answers: { query: { type: 'choice', choice: 'q1', confidence: 0.95 } } } }
+          : { ok: false, diagnostic: { code: 'TYPESAFE_HTTP_503' } };
+      },
+      discover: async (_paths, args, context) => {
+        queries.push(args.query);
+        if (context.round === 1 && context.channel === 'online') addCandidates(paths, [candidate('failed-topic')]);
+        return {};
+      },
+      verify: async (targetPaths, attempt) => verifyCandidate(targetPaths, attempt, { environment: {},
+        acquire: async () => ({ status: 'unavailable', reasonCode: 'ABSTRACT_ONLY' }) }),
+    });
+    assert.equal(choices, 1);
+    assert.deepEqual(queries, [input.query, input.query,
+      succeeds ? `${input.fallbackQuery} 全文` : input.fallbackQuery,
+      succeeds ? `${input.fallbackQuery} 全文` : input.fallbackQuery]);
+    assert.equal(result.status, 'failed');
+    assert.equal(loadSession(paths).session.task.publicCollectRun.discoveryRounds.length, 2);
+  }
+});
+
+test('a discovery user gate pauses before probing or dispatching a fallback query', async () => {
+  const paths = setup();
+  const calls = [];
+  const result = await runPublicCollect(paths, input, {
+    environment: {},
+    discover: async (_paths, _args, context) => {
+      calls.push(context.channel);
+      if (context.channel === 'hot') {
+        addCandidates(paths, [candidate('completed-source')]);
+        return { requiresUserAction: { kind: 'captcha', source: 'weixin' } };
+      }
+      return {};
+    },
+    verify: async () => { assert.fail('discovery gate must stop new probes'); },
+  });
+  assert.deepEqual(calls, ['online', 'hot']);
+  assert.equal(result.status, 'paused-user-action');
+  assert.equal(result.pause.reasonCode, 'DISCOVERY_REQUIRES_USER_ACTION');
+  assert.equal(loadSession(paths).session.task.discoveryGate.candidates.length, 1);
+  assert.equal(loadSession(paths).session.task.publicCollectRun.discoveryReservation.phase, 'reserved');
+});
+
 test('probes an authorized user URL before running public discovery', async () => {
   const { paths, directUrl } = setupDirect();
   let discoveryCalls = 0;
@@ -118,6 +194,46 @@ test('probes an authorized user URL before running public discovery', async () =
   assert.equal(discoveryCalls, 0);
   assert.equal(result.status, 'complete');
   assert.equal(result.deliverableArticleCount, 1);
+});
+
+test('two failed acquisitions trigger one bounded rerank and stop after successful delivery', async () => {
+  const paths = setup();
+  const researchSession = loadSession(paths).session;
+  researchSession.task.followups = ['evaluation'];
+  researchSession.research.branches = [{ status: 'done', query: 'architecture', researchGoal: 'architecture details',
+    followups: ['failure modes'] }];
+  persistSession(paths, researchSession);
+  const candidates = ['a-fail', 'b-fail', 'c-slow', 'd-success'].map((id) => candidate(id));
+  const order = [];
+  let reranks = 0;
+  const result = await runPublicCollect(paths, { ...input, requestedCount: 1 }, {
+    environment: {},
+    discover: async () => addCandidates(paths, candidates),
+    rankCandidates: async (_request, remaining, options) => {
+      reranks += 1;
+      assert.equal(options.optimizeDelivery, true);
+      assert.equal(options.feedback.length, 2);
+      assert.ok(options.feedback.every((entry) => !entry.delivered));
+      assert.ok(options.remainingBudgetMs() <= 2000);
+      assert.deepEqual(options.evidenceContext, {
+        coveredSubtopics: ['architecture details'], missingSubtopics: ['evaluation', 'failure modes'],
+      });
+      return { candidates: [...remaining].reverse(), diagnostic: { status: 'used' } };
+    },
+    verify: async (targetPaths, attempt) => {
+      const id = loadSession(paths).session.task.publicCollectRun.attempts.find((row) => row.attemptId === attempt.attemptId).candidateId;
+      order.push(id);
+      const selected = candidates.find((row) => row.candidateId === id);
+      return verifyCandidate(targetPaths, attempt, { environment: {}, acquire: async () => id.endsWith('success')
+        ? { status: 'saved', requestedUrl: selected.canonicalUrl, resolvedUrl: selected.canonicalUrl,
+          title: 'DeepSeek Harness', markdown: body(id), executor: 'fixture-web' }
+        : { status: 'unavailable', reasonCode: 'ABSTRACT_ONLY' } });
+    },
+  });
+  assert.equal(result.status, 'complete');
+  assert.deepEqual(order, ['a-fail', 'b-fail', 'd-success']);
+  assert.equal(reranks, 1);
+  assert.equal(loadSession(paths).session.task.publicCollectRun.scheduling.afterAttemptCount, 2);
 });
 
 test('probes high priority before normal and stops at requested unique count', async () => {

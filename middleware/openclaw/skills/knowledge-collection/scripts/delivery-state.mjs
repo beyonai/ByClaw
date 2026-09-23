@@ -1,3 +1,5 @@
+import { selectedInventoryItems, selectionAppliesToSession } from './selected-delivery.mjs';
+
 function inventoryItems(session) {
   return Array.isArray(session?.collection?.collection?.items)
     ? session.collection.collection.items : [];
@@ -70,11 +72,23 @@ export function summarizeCrawlDelivery(session) {
 
 export function deliveryCompleteForSession(session) {
   const collection = session?.collection?.collection;
-  if (!collection || collection.status === 'failed' || collection.status === 'partial') return false;
+  if (!collection) return false;
   const target = session?.task?.materializationTarget || 'selected';
   const requiredContentGranularity = session?.task?.requiredContentGranularity || 'any';
+  const metadata = session?.collection?.sourceMetadata;
+  const selection = session?.task?.selectedDelivery;
+  const selectedWorkflow = selectionAppliesToSession(session);
+  if (selection !== undefined && !selectedWorkflow) return false;
+  if (!selectedWorkflow && ['failed', 'partial'].includes(collection.status)) return false;
+  if (selectedWorkflow && Object.values(metadata?.sources || {}).some((source) => (
+    ['failed', 'auth_required'].includes(source?.status)
+  ))) return false;
+  if (selectedWorkflow && (metadata?.terminal || metadata?.discovery?.groupsFailed?.length)) return false;
   if (target === 'candidates') return requiredContentGranularity === 'any';
-  const items = inventoryItems(session);
+  const items = selectedWorkflow ? selectedInventoryItems(inventoryItems(session), selection,
+    session?.task?.sourceScope || [])
+    : inventoryItems(session);
+  if (!items) return false;
   if (items.length === 0) return false;
   if (items.some((item) => item?.materialization?.status !== 'materialized')) return false;
   if (requiredContentGranularity === 'full-text'

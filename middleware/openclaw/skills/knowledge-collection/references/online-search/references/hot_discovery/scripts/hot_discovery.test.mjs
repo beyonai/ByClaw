@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -19,12 +19,120 @@ import {
   readJsonIfGiven, selectAdaptersForDimensions, bridgeFailureStats, allSelectedAdaptersEmpty,
   searchHotDiscovery,
 } from './hot_discovery.mjs';
+import { createHotRuntimeState, hotRequestIdentity } from './hot_runtime_state.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const decl = parseDeclarations(await readFile(resolve(HERE, '..', 'adapters.md'), 'utf8'));
 const n = (u, options) => normalizeUrl(u, decl, options);
 const identityN = (u) => normalizeUrl(u, decl);
 const publicN = (u) => normalizeUrl(u, decl, { preserveHostname: true });
+
+test('source waves reuse runtime metadata and checkpoint completed candidates before the next source', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'hot-waves-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, '.collection-inputs');
+  await mkdir(directory);
+  const declarations = { adapters: ['a', 'b'].map((site) => ({ site, cmd: 'search', tier: 1,
+    dimensions: ['general'], urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+  })) };
+  let loads = 0;
+  const args = { query: 'q', dimensions: 'general', sources: 'a,b',
+    'state-dir': directory, 'run-id': 'r1', 'wave-id': 'w1' };
+  const observer = await createHotRuntimeState({ directory, runId: 'r1', waveId: 'w1',
+    requestIdentity: hotRequestIdentity(args) });
+  const bycli = {
+    loadRuntime: async () => {
+      loads++;
+      return { version: 'v1', catalog: new Map(['a', 'b'].map((site) => [`${site}/search`, {
+        browser: false, columns: ['url', 'title'], args: [{ name: 'limit' }],
+      }])) };
+    },
+    invoke: async (_bin, commandArgs) => {
+      if (commandArgs[0] === 'b') {
+        const checkpoint = await observer.loadCheckpoint();
+        assert.equal(checkpoint?.candidates[0]?.title, 'a');
+        assert.equal(checkpoint.status, 'partial');
+        throw new Error('simulated process interruption');
+      }
+      return { code: 0, stdout: '[{"url":"https://e.test/a","title":"a"}]' };
+    },
+  };
+  await assert.rejects(searchHotDiscovery(args, { declarations, bycli, executableIdentity: 'exe1' }),
+    /simulated process interruption/);
+  await searchHotDiscovery({ ...args, sources: 'a', 'wave-id': 'w2' }, {
+    declarations, bycli, executableIdentity: 'exe1',
+  });
+  assert.equal(loads, 1);
+  const checkpoint = await observer.loadCheckpoint();
+  assert.equal(checkpoint.candidates.length, 1);
+});
+
+for (const ordered of [true, false]) {
+  for (const stop of ['budget', 'candidates']) {
+    test(`${ordered ? 'ordered' : 'default'} scheduling checks ${stop} before bridge setup`, async () => {
+      let clock = 0;
+      let bridges = 0;
+      const declarations = { adapters: ['a', 'b'].map((site) => ({
+        site, tier: 1, cmd: 'search', dimensions: ['general'],
+        urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+      })) };
+      const result = await searchHotDiscovery({ query: 'q', dimensions: 'general',
+        ...(ordered ? { sources: 'a,b' } : {}),
+        ...(stop === 'budget' ? { 'total-budget-ms': '100' } : { 'stop-after': '1' }),
+      }, { now: () => clock, declarations, bycli: {
+        loadRuntime: async () => ({ version: 'test', catalog: new Map(['a', 'b'].map((site) => [
+          `${site}/search`, { browser: site === 'b', args: [{ name: 'limit' }], columns: ['url', 'title'] },
+        ])) }),
+        ensureBridge: async () => { bridges++; return { ok: true }; },
+        invoke: async () => {
+          clock = 101;
+          return { code: 0, stdout: '[{"url":"https://e.test/article/1","title":"q"}]' };
+        },
+      } });
+      assert.equal(bridges, 0);
+      assert.equal(result.candidates.length, 1);
+      assert.equal(result.adapterStats.b.status, stop === 'budget'
+        ? 'skipped_total_budget' : 'skipped_after_sufficient_candidates');
+      assert.equal(result.stopReason, stop === 'budget' ? 'budget_exhausted' : 'sufficient_candidates');
+    });
+  }
+}
+
+test('runtime budget expiry returns an honest empty partial result without a user gate', async () => {
+  const result = await searchHotDiscovery({ query: 'q', dimensions: 'general', 'total-budget-ms': '100' }, {
+    declarations: { adapters: [{ site: 'a', cmd: 'search', tier: 1, dimensions: ['general'] }] },
+    bycli: { loadRuntime: async () => { throw Object.assign(new Error('expired'), {
+      code: 'HOT_DISCOVERY_BUDGET_EXHAUSTED',
+    }); } },
+  });
+  assert.equal(result.stopReason, 'budget_exhausted');
+  assert.equal(result.status, 'partial');
+  assert.equal(result.adapterStats.a.status, 'skipped_total_budget');
+  assert.equal(result.requiresUserAction, undefined);
+});
+
+test('budget expiry at the dispatch boundary returns partial results instead of throwing', async () => {
+  const declarations = { adapters: ['a', 'b'].map((site) => ({ site, cmd: 'search', tier: 1,
+    dimensions: ['general'], urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+  })) };
+  let dispatches = 0;
+  const result = await searchHotDiscovery({ query: 'q', dimensions: 'general', 'total-budget-ms': '100' }, {
+    now: () => 0, declarations, bycli: {
+      loadRuntime: async () => ({ version: 'v1', catalog: new Map(['a', 'b'].map((site) => [
+        `${site}/search`, { browser: false, columns: ['url', 'title'], args: [{ name: 'limit' }] },
+      ])) }),
+      invoke: async () => {
+        dispatches++;
+        throw Object.assign(new Error('expired before dispatch'), { code: 'HOT_DISCOVERY_BUDGET_EXHAUSTED' });
+      },
+    },
+  });
+  assert.equal(dispatches, 1);
+  assert.equal(result.status, 'partial');
+  assert.equal(result.stopReason, 'budget_exhausted');
+  assert.equal(result.adapterStats.a.status, 'skipped_total_budget');
+  assert.equal(result.adapterStats.b.status, 'skipped_total_budget');
+});
 
 // ═══════════════ §6.3 那 6 种形态：基础四条规则实测只对齐 1 种 ═══════════════
 
@@ -1269,15 +1377,17 @@ test('total adapter budget stops new scheduling and records skipped diagnostics'
     bycli: {
       loadRuntime: async () => ({ catalog, version: 'test' }),
       ensureBridge: async () => assert.fail('bridge not expected'),
-      invoke: async (_bin, args) => {
+      invoke: async (_bin, args, timeoutMs) => {
         calls.push(args[0]);
+        assert.ok(timeoutMs <= 100, 'an adapter must not overrun the remaining total budget');
         clock = 101;
-        return { code: 0, stdout: '[]', stderr: '' };
+        return { code: 0, stdout: JSON.stringify([{ url: 'https://example.com/article/123', title: 'Budget evidence' }]), stderr: '' };
       },
     },
   });
   assert.deepEqual(calls, ['a']);
   assert.equal(result.adapterStats.b.status, 'skipped_total_budget');
+  assert.equal(result.candidates[0].url, 'https://example.com/article/123');
 });
 
 test('bounded source mode preserves allowlist order across browser and direct transports', async () => {

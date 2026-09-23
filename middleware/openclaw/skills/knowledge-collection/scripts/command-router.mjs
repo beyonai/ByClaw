@@ -1,14 +1,15 @@
 import { assertNoActiveRoute } from './routing/plan-store.mjs';
+import { withJevRun } from './jev/run-context.mjs';
 import { executeRouteCommand } from './routing/cli.mjs';
 import { legacyChannel, registeredChannel } from './routing/channels.mjs';
 import {
-  cmdInit, cmdPlan, cmdBranch, cmdAggregate, cmdReport, cmdResearchStatus,
+  cmdInit, cmdReport, cmdResearchStatus,
 } from './research-state.mjs';
 import {
   cmdCollect, cmdInspect, cmdUnlockStale, cmdExportViews, collectionStatus,
 } from './collection-state.mjs';
 import {
-  cmdCrawlSeed, cmdCrawlNext, cmdCrawlMark, cmdCrawlStatus,
+  cmdCrawlMark, cmdCrawlStatus,
 } from './crawl-state.mjs';
 import { runPublicDiscover } from './public-discovery.mjs';
 import { runPublicCollect } from './public-collect.mjs';
@@ -21,14 +22,15 @@ import { cmdRetighten } from './granularity-repair.mjs';
 import { runUnifiedMaterialize, runUnifiedSearch } from './unified-search.mjs';
 import { assertExternalSessionWriteAllowed } from './probe-state.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
+import { runResearchUpdate, runResearchAggregate, runCrawlNext, runCrawlSeed } from './jev/workflow-advisory.mjs';
 
 const READ_ONLY_SESSION_COMMANDS = new Set(['status', 'inspect', 'crawl-status']);
 
 const RESEARCH_HANDLERS = {
   init: (args) => cmdInit(args),
-  plan: (args) => cmdPlan(args),
-  branch: (args) => cmdBranch(args),
-  aggregate: (args) => cmdAggregate(args),
+  plan: (args) => runResearchUpdate('plan', args),
+  branch: (args) => runResearchUpdate('branch', args),
+  aggregate: (args) => runResearchAggregate(args),
   report: (args) => cmdReport(args),
 };
 
@@ -41,8 +43,8 @@ const SESSION_HANDLERS = {
   'materialize-arxiv': (paths, args) => runArxivMaterialize(paths, args),
   collect: (paths, args) => cmdCollect(paths, args),
   inspect: (paths, args) => cmdInspect(paths, args),
-  'crawl-seed': (paths, args) => cmdCrawlSeed(paths, args),
-  'crawl-next': (paths, args) => cmdCrawlNext(paths, args),
+  'crawl-seed': (paths, args) => runCrawlSeed(paths, args),
+  'crawl-next': (paths, args) => runCrawlNext(paths, args),
   'crawl-mark': (paths, args) => cmdCrawlMark(paths, args),
   'crawl-status': (paths) => cmdCrawlStatus(paths),
   'unlock-stale': (paths) => cmdUnlockStale(paths),
@@ -96,6 +98,10 @@ function status(paths, args) {
 }
 
 export function executeLocalCommand(command, args) {
+  return withJevRun(() => executeLocalCommandInContext(command, args));
+}
+
+function executeLocalCommandInContext(command, args) {
   if (command.startsWith('route-')) return executeRouteCommand(command, args);
   if (!['status', 'inspect', 'crawl-status', 'init'].includes(command)) {
     const root = resolveSandboxPath(args['session-dir'], '--session-dir', { currentSessionRoot: args['session-root'] });

@@ -1,6 +1,7 @@
 'use strict';
 
 import crypto from 'node:crypto';
+import { prioritizeItems } from './jev/selection.mjs';
 
 export const UNIFIED_CANDIDATE_SCHEMA_VERSION = '1.0';
 
@@ -53,8 +54,16 @@ export function normalizePublicCandidate(candidate, query) {
     contentGranularity: text(candidate?.contentGranularity) || 'unknown',
     materializable: candidate?.discoveryDisposition === 'probe' || candidate?.eligibleArticle === true,
     matchedTerms: matchedTerms(query, [title, candidate?.content, candidate?.passage]),
+    ...(candidate?.ranking ? { ranking: candidate.ranking } : {}),
   };
   return { ...normalized, relevanceScore: scoreUnifiedCandidate(normalized, query) };
+}
+
+export async function prioritizeUnifiedCandidates(query, candidates, options = {}) {
+  return prioritizeItems(query, candidates, { ...options,
+    privateData: candidates.some((candidate) => candidate.source !== 'public-internet'),
+    purpose: 'Recommend relevant complementary public and enterprise documents before download. Prefer obtainable full text and lower conversion cost; do not remove any item.',
+  });
 }
 
 export function normalizeCloudCandidate(candidate, query) {

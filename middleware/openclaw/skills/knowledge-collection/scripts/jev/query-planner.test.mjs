@@ -39,6 +39,32 @@ test('selects only bounded query planning choices returned by Jev', async () => 
   assert.equal(result.jev.model, 'jev-1');
   assert.deepEqual(result.jev.confidence, { query: 0.92, category: 0.88, timeRange: 0.95, source: 0.8 });
 });
+test('deferred hot-source planning omits the question until the legacy path needs it', async () => {
+  const profile = { ...input, hotSourceCandidates: ['weixin', 'bing'] };
+  const response = async (payload) => {
+    assert.equal('hotSource' in payload.questions, false);
+    return { ok: true, document: { answers: {
+      query: { type: 'choice', choice: 'q0', confidence: 0.95 },
+      category: { type: 'choice', choice: 'c0', confidence: 0.95 },
+      timeRange: { type: 'choice', choice: 't0', confidence: 0.95 },
+      source: { type: 'choice', choice: 's0', confidence: 0.95 },
+    } } };
+  };
+  const planned = await planDiscovery(profile, { environment: {}, deferHotSource: true, callJev: response });
+  assert.equal(planned.jev.status, 'used');
+  assert.equal(planned.effective.hotSource, undefined);
+});
+test('singleton planning context asks only the restored legacy hot-source question', async () => {
+  const result = await planDiscovery({ ...input, queryCandidates: [input.query],
+    categoryCandidates: ['it'], timeRangeCandidates: ['week'], sourceCandidates: ['automatic'],
+    hotSourceCandidates: ['weixin', 'bing'] }, { environment: {}, callJev: async (payload) => {
+      assert.deepEqual(Object.keys(payload.questions), ['hotSource']);
+      return { ok: true, document: { answers: {
+        hotSource: { type: 'choice', choice: 'h1', confidence: 0.95 },
+      } } };
+    } });
+  assert.equal(result.effective.hotSource, 'bing');
+});
 
 for (const [name, response] of [
   ['missing token', { ok: false, diagnostic: { status: 'unavailable', code: 'TYPESAFE_API_KEY_MISSING' } }],

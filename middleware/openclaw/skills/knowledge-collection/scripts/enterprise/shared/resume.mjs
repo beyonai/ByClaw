@@ -1,5 +1,6 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { selectedItemSource } from '../../selected-delivery.mjs';
 
 function artifactPath(root, artifact) {
   if (typeof artifact !== 'string' || !artifact || isAbsolute(artifact)) throw new Error('resume artifact path is unsafe');
@@ -90,6 +91,8 @@ function projectResumeCandidate(item, source, root, resumeIdentity) {
       candidate.coverUrls = Array.isArray(item.coverUrls) ? item.coverUrls : [];
     }
     if (source === 'cloud-knowledge') {
+      if (selectedItemSource(item) !== source) throw new Error('cloud resume candidate has inconsistent source identity');
+      candidate.source = source;
       candidate.resourceId = item.resourceId;
       candidate.filePath = item.filePath;
       candidate.originalFileName = item.originalFileName;

@@ -152,8 +152,15 @@ function positiveInt(value, label) {
   return parsed;
 }
 
+function sameUrlMultiset(left, right) {
+  if (!Array.isArray(right) || left.length !== right.length || right.some((url) => typeof url !== 'string')) return false;
+  const original = left.slice().sort();
+  const ordered = right.slice().sort();
+  return original.every((url, index) => url === ordered[index]);
+}
+
 /** crawl-seed: 用发现结果建立或扩充 frontier。已存在的 URL 保持原状态,不会被重置。 */
-export function cmdCrawlSeed(paths, args) {
+export function cmdCrawlSeed(paths, args, { orderedRawUrls } = {}) {
   const urlsFile = path.resolve(requireString(args['urls-file'], '--urls-file'));
   if (!isInside(paths.root, urlsFile) && !fs.existsSync(urlsFile)) {
     throw new Error(`--urls-file 不存在: ${urlsFile}`);
@@ -162,7 +169,8 @@ export function cmdCrawlSeed(paths, args) {
     throw new Error(`--urls-file 不存在: ${urlsFile}`);
   }
   const text = fs.readFileSync(urlsFile, 'utf8');
-  const rawUrls = extractUrls(text);
+  const originalRawUrls = extractUrls(text);
+  const rawUrls = sameUrlMultiset(originalRawUrls, orderedRawUrls) ? orderedRawUrls : originalRawUrls;
   if (!rawUrls.length) {
     throw new Error('--urls-file 中没有解析到任何 http/https URL');
   }

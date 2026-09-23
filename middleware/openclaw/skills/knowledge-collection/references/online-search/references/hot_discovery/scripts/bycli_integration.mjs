@@ -44,16 +44,34 @@ export function createBycliIntegration({
   fileExists = existsSync,
   containerBridgeScript = DEFAULT_BRIDGE_SCRIPT,
   localBridgeScript = LOCAL_BRIDGE_SCRIPT,
+  remainingBudgetMs = () => Infinity,
   bridgeScript = environment.BYCLI_BRIDGE_BOOTSTRAP_SCRIPT
     || (fileExists(containerBridgeScript) ? containerBridgeScript : localBridgeScript),
 } = {}) {
-  const invoke = (cmd, args, timeoutMs) => run(cmd, args, timeoutMs);
+  const invoke = async (cmd, args, timeoutMs = BYCLI_TIMEOUT_MS) => {
+    const remaining = Number(remainingBudgetMs());
+    const bounded = Math.floor(Math.min(timeoutMs, remaining));
+    if (!(bounded > 0)) throw Object.assign(new Error('hot-discovery budget exhausted'), {
+      code: 'HOT_DISCOVERY_BUDGET_EXHAUSTED',
+    });
+    const result = await run(cmd, args, bounded);
+    return result;
+  };
+  const assertPreparationBudget = (result) => {
+    if (result.timedOut && remainingBudgetMs() < 1) {
+      throw Object.assign(new Error('hot-discovery budget exhausted'), {
+        code: 'HOT_DISCOVERY_BUDGET_EXHAUSTED',
+      });
+    }
+  };
 
   return {
     async loadRuntime() {
       const versionResult = await invoke('bycli', ['--version'], BYCLI_TIMEOUT_MS);
+      assertPreparationBudget(versionResult);
       const currentVersion = versionResult.code === 0 ? versionResult.stdout.trim() || null : null;
       const list = await invoke('bycli', ['list', '-f', 'json'], LIST_TIMEOUT_MS);
+      assertPreparationBudget(list);
       if (list.code !== 0) {
         throw new Error(`bycli list 失败 (exit ${list.code}): ${list.stderr.slice(0, 300)}`);
       }
@@ -77,6 +95,7 @@ export function createBycliIntegration({
         [bridgeScript, '--format', 'json'],
         BRIDGE_TIMEOUT_MS,
       );
+      assertPreparationBudget(result);
       let bridge;
       try {
         bridge = JSON.parse(result.stdout || '');
