@@ -2,6 +2,8 @@ import React, { useCallback, useMemo } from 'react';
 import { useIntl } from '@umijs/max';
 import type { ModalStore } from '@/pages/manager/hooks/useShowModal';
 import SharedModelFormModal from '@/pages/manager/pages/ModelMgr/components/SharedModelFormModal';
+import type { ModelTagItem } from '@/pages/manager/pages/ModelMgr/components/modelFormUtils';
+import { getDcSystemConfigListByStandType } from '@/pages/manager/service/session';
 import { getMyModelDetail, upsertMyModel } from '../service';
 
 type Props = ModalStore<any> & {
@@ -21,6 +23,23 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, onSaved, ...props }) => {
   );
 
   const loadDetail = useCallback((id: string | number) => getMyModelDetail({ id }).then((res: any) => res?.data), []);
+
+  // 资源中心与模型管理使用同一能力字典，打开表单时加载后端选项。
+  const loadAbilityOptions = useCallback(
+    () =>
+      getDcSystemConfigListByStandType({ standType: 'MODEL_TAGS' }).then((res: any) => {
+        const list: ModelTagItem[] = Array.isArray(res?.data) ? res.data : [];
+        return list
+          .map((item) => {
+            const label = `${item?.paramName ?? item?.standDisplayValue ?? ''}`.trim();
+            const value = `${item?.paramValue ?? item?.standCode ?? ''}`.trim();
+            if (!value) return null;
+            return { label: label || value, value };
+          })
+          .filter(Boolean) as Array<{ label: string; value: string }>;
+      }),
+    []
+  );
 
   const saveModelRequest = useCallback(
     async (payload: any) => {
@@ -80,7 +99,8 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, onSaved, ...props }) => {
       saveModelRequest={saveModelRequest}
       runDebugRequest={runDebugRequest}
       statusOptions={statusOptions}
-      showTags={false}
+      showTags
+      loadAbilityOptions={loadAbilityOptions}
       allowRerankTable={false}
       formatDebugError={formatDebugError}
       extractModelIdFromSave={extractModelIdFromSave}

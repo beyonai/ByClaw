@@ -12,6 +12,28 @@ import org.springframework.mock.web.MockHttpSession;
 
 class ToolManControllerTest {
 
+    @Test
+    void enterprisePublicationReturnsCopyAndPropagatesPermissionDenial() {
+        ToolManController controller = new ToolManController();
+        var service = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillResourceApplicationService", service);
+        var request = new com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto();
+        request.setResourceId(10L);
+        var target = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        target.setResourceId(11L);
+        var result = new com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService
+            .EnterpriseSkillPublishResult(target, false);
+        org.mockito.Mockito.when(service.publishSkillToEnterprise(10L)).thenReturn(result);
+        var response = controller.publishSkillToEnterprise(request);
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData().resource().getResourceId()).isEqualTo(11L);
+        org.mockito.Mockito.when(service.publishSkillToEnterprise(10L))
+            .thenThrow(new IllegalArgumentException("Permission denied"));
+        assertThat(controller.publishSkillToEnterprise(request).getCode()).isEqualTo(-1);
+        assertThat(controller.publishSkillToEnterprise(request).getMsg()).isEqualTo("Permission denied");
+    }
+
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();

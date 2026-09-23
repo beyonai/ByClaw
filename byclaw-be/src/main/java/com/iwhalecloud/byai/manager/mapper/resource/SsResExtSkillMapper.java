@@ -18,6 +18,9 @@ import java.util.List;
 @Mapper
 public interface SsResExtSkillMapper extends BaseMapper<SsResExtSkill> {
 
+    /** 批量读取个人技能对应的未注销企业副本，包含下架副本及再次发布生成的编号。 */
+    List<SsResExtSkill> findExistingEnterpriseCopies(@Param("sourceIds") Collection<Long> sourceIds);
+
     /**
      * 根据编码查询技能信息
      *

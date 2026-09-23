@@ -6,6 +6,12 @@ import { collectEasyConfirmItems } from '@/components/MessagesComp/easyConfirm';
 import EasyConfirm, { clearEasyConfirmInputDraft } from './index';
 import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
+import {
+  clearAutomationCreationDraft,
+  getAutomationCreationDraft,
+  saveAutomationCreationDraft,
+} from '@/pages/automation/drafts';
+import { getAutomationFormInitialValues } from '@/pages/automation/schedule';
 
 const mockEventListeners = new Map<string, (payload: unknown) => void>();
 const mockMessageInfo = jest.fn();
@@ -352,6 +358,21 @@ describe('session chat drafts', () => {
     expect(screen.getByTestId('query-input')).not.toBe(originalInput);
     view.rerender(<EasyConfirm {...props} preserveInputOnSessionChange />);
     expect(mockQueryInputProps.inputDraft).toEqual(draft);
+  });
+
+  it('keeps a new scheduled task draft separate from a new ordinary task', () => {
+    const automationDraft = { prompt: draft, values: getAutomationFormInitialValues() };
+    saveAutomationCreationDraft(automationDraft);
+    const view = render(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    act(() => mockQueryInputProps.onInputDraftChange({ text: 'Ordinary task' }));
+    view.unmount();
+    render(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft?.text).toBe('Ordinary task');
+    expect(getAutomationCreationDraft()).toEqual(automationDraft);
+    act(() => mockQueryInputProps.onSend({ queryQuestion: 'Ordinary task' }));
+    expect(getAutomationCreationDraft()).toEqual(automationDraft);
+    clearAutomationCreationDraft();
   });
 
   it('isolates fixed employee pages from session drafts even when sending', () => {

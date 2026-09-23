@@ -579,6 +579,23 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     [language, resourceId, scope, usesFileBrowser]
   );
 
+  const handleLoadMoveData = useCallback(
+    async (node: { key: Key; children?: unknown[] }) => {
+      if (node.children) return;
+      const children = await loadMoveDirectories(String(node.key));
+      // Tree 回调节点不是 state 中的原始节点，需递归更新目录树才能展示任意层级的子目录。
+      const updateChildren = (nodes: any[]): any[] =>
+        nodes.map((item) => {
+          if (item.key === node.key) {
+            return { ...item, children, isLeaf: children.length === 0 };
+          }
+          return item.children ? { ...item, children: updateChildren(item.children) } : item;
+        });
+      setMoveTreeData((current) => updateChildren(current));
+    },
+    [loadMoveDirectories]
+  );
+
   useEffect(() => {
     if (!moveTarget || !resourceId) return;
     setMoveTreeLoading(true);
@@ -939,12 +956,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
               onSelect={(keys) => {
                 if (keys.length) setMoveTargetDirectory(String(keys[0]));
               }}
-              loadData={async (node: any) => {
-                if (node.children?.length) return;
-                const children = await loadMoveDirectories(String(node.key));
-                node.children = children;
-                setMoveTreeData((current) => [...current]);
-              }}
+              loadData={handleLoadMoveData}
               blockNode
               showIcon
             />
@@ -1098,12 +1110,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
             onSelect={(keys) => {
               if (keys.length) setMoveTargetDirectory(String(keys[0]));
             }}
-            loadData={async (node: any) => {
-              if (node.children?.length) return;
-              const children = await loadMoveDirectories(String(node.key));
-              node.children = children;
-              setMoveTreeData((current) => [...current]);
-            }}
+            loadData={handleLoadMoveData}
             blockNode
             showIcon
           />

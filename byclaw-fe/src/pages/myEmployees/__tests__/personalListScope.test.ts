@@ -16,7 +16,7 @@ describe('my employees personal list scope', () => {
   // 两个页签复用同一卡片配置，开启入口的同时必须绑定实际删除回调。
   it('enables delete data and connects the employee deletion handler', () => {
     expect(source).toContain('enableDigitalEmployeeDelete: true');
-    expect(source).toContain('onDeleteData: () => handleDelete(employee)');
+    expect(source).toContain('onDeleteData: (feedback) => handleDelete(employee, feedback)');
   });
 
   it('requests owner scope for personal while preserving enterprise scopes', () => {

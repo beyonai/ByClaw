@@ -1,3 +1,4 @@
+import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import useEmployeeRowRefresh, {
   employeeRowId,
   removeEmployeeRow,
@@ -329,20 +330,20 @@ const MyEmployeesPage: React.FC = () => {
     setAuthDrawerOpen(true);
   }, []);
 
-  const handleDelete = useCallback(async (employee: IAgentCache) => {
+  const handleDelete = useCallback(async (employee: IAgentCache, feedback: ResourceActionFeedback = message) => {
     const resourceId = employee.resourceId ?? employee.id;
     if (!resourceId) return;
     try {
       await deleteDigitalEmployee({ resourceId: String(resourceId) });
-      message.success(getIntl().formatMessage({ id: 'ui.employee.deleteSuccess' }));
+      feedback.success(getIntl().formatMessage({ id: 'ui.employee.deleteSuccess' }));
       removeEmployeeRow(employeeRowId(employee));
     } catch (error: any) {
-      message.error(error?.message || getIntl().formatMessage({ id: 'ui.employee.deleteFailed' }));
+      feedback.error(error?.message || getIntl().formatMessage({ id: 'ui.employee.deleteFailed' }));
     }
   }, []);
 
   const handleShelfStatusChange = useCallback(
-    async (employee: IAgentCache, action: 'shelf' | 'unShelf') => {
+    async (employee: IAgentCache, action: 'shelf' | 'unShelf', feedback: ResourceActionFeedback = message) => {
       const resourceId = employee.resourceId ?? employee.id ?? employee.agentId;
       if (!resourceId) return;
       try {
@@ -361,7 +362,7 @@ const MyEmployeesPage: React.FC = () => {
               )
           );
         }
-        message.success(
+        feedback.success(
           getIntl().formatMessage(
             { id: 'ui.employee.actionSuccess' },
             {
@@ -375,9 +376,11 @@ const MyEmployeesPage: React.FC = () => {
           resourceId: String(resourceId),
           resourceStatus: action === 'shelf' ? 2 : 3,
         });
-        await refreshPromise;
+        await refreshPromise.catch(() => {
+          feedback.warning(getIntl().formatMessage({ id: 'resource.rowRefreshFailed' }));
+        });
       } catch (error: any) {
-        message.error(
+        feedback.error(
           error?.message ||
             getIntl().formatMessage(
               { id: 'ui.employee.actionFailed' },
@@ -622,11 +625,11 @@ const MyEmployeesPage: React.FC = () => {
                         onApplyUse: () => handleApplyUse(employee),
                         onEdit: () => handleEdit(employee),
                         onAuth: (type) => handleAuth(employee, type),
-                        onDelete: () => handleDelete(employee),
+                        onDelete: (feedback) => handleDelete(employee, feedback),
                         // 删除数据使用独立回调，复用删除接口及成功后的列表移除逻辑。
-                        onDeleteData: () => handleDelete(employee),
-                        onShelf: () => handleShelfStatusChange(employee, 'shelf'),
-                        onUnShelf: () => handleShelfStatusChange(employee, 'unShelf'),
+                        onDeleteData: (feedback) => handleDelete(employee, feedback),
+                        onShelf: (feedback) => handleShelfStatusChange(employee, 'shelf', feedback),
+                        onUnShelf: (feedback) => handleShelfStatusChange(employee, 'unShelf', feedback),
                         // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
                         showDigitalEmployeeTypeTag: false,
                         // 个人页签不提供上下架操作，企业页签继续按权限展示。

@@ -15,6 +15,7 @@ import {
   filterMenusByAdminVip,
   filterMenusByMenuDisplay,
   getManagerMenuConfig,
+  getManagerMenuLabel,
   normalizeMenuUrl,
 } from './menuConfig';
 import { buildSiderMenuItems, flattenSiderMenuItems, getInitialOpenKeys } from './menuHelpers';
@@ -105,18 +106,7 @@ const Sider: React.FC = () => {
   const menuItems = useMemo(() => {
     return buildSiderMenuItems(
       filteredMenus,
-      (item) => {
-        const name = isEnglish ? item.nameEn || item.name : item.name;
-
-        if (item.localeId) {
-          return intl.formatMessage({
-            id: item.localeId,
-            defaultMessage: name,
-          });
-        }
-
-        return name;
-      },
+      (item) => getManagerMenuLabel(item, intl),
       (icon) => {
         const IconComponent = icon;
         return IconComponent ? <IconComponent style={{ fontSize: 16 }} /> : null;
