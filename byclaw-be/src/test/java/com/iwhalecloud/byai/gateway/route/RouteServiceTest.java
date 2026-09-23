@@ -23,6 +23,10 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatGatewayRequestDecorator;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
+import org.springframework.beans.factory.ObjectProvider;
+import java.util.stream.Stream;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
 import com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver;
@@ -52,9 +56,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -203,12 +207,12 @@ class RouteServiceTest {
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
-        ArgumentCaptor<java.util.Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(java.util.Map.class);
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
         verify(gatewayClient, atLeastOnce()).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
-        org.assertj.core.api.Assertions.assertThat(metadataCaptor.getValue())
+        assertThat(metadataCaptor.getValue())
                 .containsEntry("Beyond-Token", "test-beyond-token");
-        org.assertj.core.api.Assertions.assertThat(output(ctx))
+        assertThat(output(ctx))
                 .contains("reasoningLogStart")
                 .contains("reasoningLogEnd")
                 .contains("个人助理正在启动中，请等待")
@@ -253,7 +257,7 @@ class RouteServiceTest {
                 .isInstanceOf(BdpRuntimeException.class)
                 .hasMessage("沙箱启动失败，请联系管理员");
 
-        org.assertj.core.api.Assertions.assertThat(output(ctx))
+        assertThat(output(ctx))
                 .contains("reasoningLogStart")
                 .contains("reasoningLogDelta")
                 .contains("reasoningLogEnd")
@@ -278,7 +282,7 @@ class RouteServiceTest {
                 .isInstanceOf(BdpRuntimeException.class)
                 .hasMessage("沙箱启动失败，模型参数配置不完整，请联系管理员");
 
-        org.assertj.core.api.Assertions.assertThat(output(ctx))
+        assertThat(output(ctx))
                 .contains("reasoningLogStart")
                 .contains("reasoningLogEnd")
                 .contains("沙箱启动失败，模型参数配置不完整，请联系管理员")
@@ -309,7 +313,7 @@ class RouteServiceTest {
         verify(gatewayClient, times(2)).sendMessage(targetAgentTypeCaptor.capture(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
-        org.assertj.core.api.Assertions.assertThat(targetAgentTypeCaptor.getAllValues())
+        assertThat(targetAgentTypeCaptor.getAllValues())
                 .containsExactly("BYCLAW_CODE_u1", "BYCLAW_CODE_u1");
         verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
     }
@@ -330,9 +334,9 @@ class RouteServiceTest {
         verify(gatewayClient).sendMessage(eq(WorkerAgentType.BY_SUPER.getCode()), eq("3"), eq("hello"),
                 eq("u1"), eq("testUser"), anyString(), eq("-1"), eq("2"), eq(ctx.getTraceId()),
                 paramsCaptor.capture(), any());
-        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue())
+        assertThat(paramsCaptor.getValue())
                 .containsEntry("worker_agent_type", WorkerAgentType.BY_SUPER.getCode());
-        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue().get("groupChat"))
+        assertThat(paramsCaptor.getValue().get("groupChat"))
                 .isEqualTo(Map.of(
                         "schemaVersion", "byclaw.group-chat-ref/v1",
                         "conversationKey", "3",
@@ -357,12 +361,12 @@ class RouteServiceTest {
         verify(gatewayClient).sendMessage(eq("BYCLAW_CODE_u1"), eq("3"), eq("hello"),
                 eq("u1"), eq("testUser"), eq(ActionType.ASK_AGENT), eq("-1"), eq("2"),
                 eq(ctx.getTraceId()), paramsCaptor.capture(), metadataCaptor.capture());
-        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue().get("groupChat"))
+        assertThat(paramsCaptor.getValue().get("groupChat"))
                 .isEqualTo(Map.of(
                         "schemaVersion", "byclaw.group-chat-ref/v1",
                         "conversationKey", "3",
                         "beforeMessageId", "1"));
-        org.assertj.core.api.Assertions.assertThat(metadataCaptor.getValue())
+        assertThat(metadataCaptor.getValue())
                 .containsEntry("Beyond-Token", "test-beyond-token");
     }
 
@@ -389,10 +393,10 @@ class RouteServiceTest {
         ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
         verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
             anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
-        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue())
+        assertThat(paramsCaptor.getValue())
             .containsEntry("cwd", "/by/projects/123");
         JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
-        org.assertj.core.api.Assertions.assertThat(projectInfo)
+        assertThat(projectInfo)
             .containsEntry("project_id", 123L)
             .containsEntry("workspace", "/by/projects/123");
         verify(projectApplicationService).getProjectWorkspacePath(123L);
@@ -415,11 +419,11 @@ class RouteServiceTest {
         ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
         verify(gatewayClient).sendMessage(anyString(), eq("3"), any(), anyString(), any(),
             anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
-        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue())
+        assertThat(paramsCaptor.getValue())
             .containsEntry("cwd", "/by/.sessions/3");
-        org.assertj.core.api.Assertions.assertThat(metadataCaptor.getValue())
+        assertThat(metadataCaptor.getValue())
             .doesNotContainKey("project_info");
-        org.assertj.core.api.Assertions.assertThat(Files.isDirectory(
+        assertThat(Files.isDirectory(
             tempDir.resolve("byclaw-u1/by/.sessions/3")))
             .isTrue();
         verifyNoInteractions(projectApplicationService);
@@ -440,7 +444,7 @@ class RouteServiceTest {
 
         routeService.route(ctx);
 
-        org.assertj.core.api.Assertions.assertThat(Files.readString(existingFile))
+        assertThat(Files.readString(existingFile))
             .isEqualTo("keep");
         verify(gatewayClient).sendMessage(anyString(), eq("3"), any(), anyString(), any(),
             anyString(), anyString(), anyString(), anyString(),
@@ -502,7 +506,7 @@ class RouteServiceTest {
         verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
             anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
         JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
-        org.assertj.core.api.Assertions.assertThat(projectInfo)
+        assertThat(projectInfo)
             .containsEntry("workspace", "/external/projects/123");
     }
 
@@ -522,7 +526,7 @@ class RouteServiceTest {
         ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
         verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 eq("CONTROL_ACTION"), anyString(), anyString(), anyString(), paramsCaptor.capture(), any());
-        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue()).doesNotContainKey("groupChat");
+        assertThat(paramsCaptor.getValue()).doesNotContainKey("groupChat");
     }
 
     @Test
@@ -548,7 +552,7 @@ class RouteServiceTest {
         ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("帮我处理这个任务");
+        assertThat(contentCaptor.getValue()).isEqualTo("帮我处理这个任务");
     }
 
     @Test
@@ -580,7 +584,7 @@ class RouteServiceTest {
         ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("@liu0518#persona-cfo 22");
+        assertThat(contentCaptor.getValue()).isEqualTo("@liu0518#persona-cfo 22");
     }
 
     @Test
@@ -607,7 +611,7 @@ class RouteServiceTest {
         ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("#persona-cfo 22");
+        assertThat(contentCaptor.getValue()).isEqualTo("#persona-cfo 22");
     }
 
     @Test
@@ -633,7 +637,7 @@ class RouteServiceTest {
         ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue())
+        assertThat(contentCaptor.getValue())
                 .isEqualTo("[合同.pdf](file-001) 请读取");
     }
 
@@ -660,7 +664,7 @@ class RouteServiceTest {
         ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue())
+        assertThat(contentCaptor.getValue())
                 .isEqualTo("[项目资料](folder-001) 请列出文件");
     }
 
@@ -681,7 +685,7 @@ class RouteServiceTest {
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
-        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue().toString())
+        assertThat(contentCaptor.getValue().toString())
                 .isEqualTo("请承接上条 coder 交接单，并给出 reviewer 结论")
                 .doesNotContain("[ByClaw handoff context]");
     }
@@ -721,28 +725,28 @@ class RouteServiceTest {
 
         String laneATraceId = TraceIdCodec.encode(11L, 21L);
         String laneBTraceId = TraceIdCodec.encode(12L, 22L);
-        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("请承接任务并分别回答");
-        org.assertj.core.api.Assertions.assertThat(answerMessageIdCaptor.getValue()).isEqualTo("2");
-        org.assertj.core.api.Assertions.assertThat(traceIdCaptor.getValue())
+        assertThat(contentCaptor.getValue()).isEqualTo("请承接任务并分别回答");
+        assertThat(answerMessageIdCaptor.getValue()).isEqualTo("2");
+        assertThat(traceIdCaptor.getValue())
                 .isEqualTo(TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
         Map<String, Object> params = paramsCaptor.getValue();
-        org.assertj.core.api.Assertions.assertThat(params.get("groupChat"))
+        assertThat(params.get("groupChat"))
                 .isEqualTo(Map.of(
                         "schemaVersion", "byclaw.group-chat-ref/v1",
                         "conversationKey", "3",
                         "beforeMessageId", "1"));
         JSONObject batchPayload = (JSONObject) params.get("multi_agent");
-        org.assertj.core.api.Assertions.assertThat(batchPayload)
+        assertThat(batchPayload)
                 .containsEntry("turnId", "turn-1")
                 .containsEntry("mode", "parallel");
         JSONArray batchLanes = batchPayload.getJSONArray("lanes");
-        org.assertj.core.api.Assertions.assertThat(batchLanes).hasSize(2);
+        assertThat(batchLanes).hasSize(2);
         JSONObject laneAPayload = batchLanes.stream()
                 .map(JSONObject.class::cast)
                 .filter(payload -> "lane-a".equals(payload.getString("laneId")))
                 .findFirst()
                 .orElseThrow();
-        org.assertj.core.api.Assertions.assertThat(laneAPayload)
+        assertThat(laneAPayload)
                 .containsEntry("laneId", "lane-a")
                 .containsEntry("clientRequestId", "client-a")
                 .containsEntry("queryMessageId", "11")
@@ -753,17 +757,17 @@ class RouteServiceTest {
                 .filter(payload -> "lane-b".equals(payload.getString("laneId")))
                 .findFirst()
                 .orElseThrow();
-        org.assertj.core.api.Assertions.assertThat(laneBPayload)
+        assertThat(laneBPayload)
                 .containsEntry("laneId", "lane-b")
                 .containsEntry("clientRequestId", "client-b")
                 .containsEntry("queryMessageId", "12")
                 .containsEntry("answerMessageId", "22")
                 .containsEntry("traceId", laneBTraceId);
-        org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentMessageContextsByTraceId())
+        assertThat(ctx.getMultiAgentMessageContextsByTraceId())
                 .containsKeys(laneATraceId, laneBTraceId);
-        org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentMessageContextsByTraceId().get(laneATraceId)
+        assertThat(ctx.getMultiAgentMessageContextsByTraceId().get(laneATraceId)
                 .getMessageId()).isEqualTo(1001L);
-        org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentMessageContextsByTraceId().get(laneBTraceId)
+        assertThat(ctx.getMultiAgentMessageContextsByTraceId().get(laneBTraceId)
                 .getMessageId()).isEqualTo(1002L);
     }
 
@@ -809,10 +813,28 @@ class RouteServiceTest {
                 .findFirst()
                 .orElseThrow();
 
-        org.assertj.core.api.Assertions.assertThat(laneAPayload.getString("traceId")).isEqualTo(laneATraceId);
-        org.assertj.core.api.Assertions.assertThat(laneBPayload.getString("traceId")).isEqualTo(laneBTraceId);
-        org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentTraceIds())
+        assertThat(laneAPayload.getString("traceId")).isEqualTo(laneATraceId);
+        assertThat(laneBPayload.getString("traceId")).isEqualTo(laneBTraceId);
+        assertThat(ctx.getMultiAgentTraceIds())
                 .containsExactlyInAnyOrder(laneATraceId, laneBTraceId);
+    }
+
+    @Test
+    void historyPreparationFailureStopsRuntimeBeforeAnyGatewaySend() {
+        ChatProcessContext ctx = buildContext();
+        ChatGatewayRequestDecorator decorator = mock(ChatGatewayRequestDecorator.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<ChatGatewayRequestDecorator> decorators = mock(ObjectProvider.class);
+        when(decorators.orderedStream()).thenAnswer(call -> Stream.of(decorator));
+        ReflectionTestUtils.setField(routeService, "requestDecorators", decorators);
+        ChatTurnPreparationException failure = new ChatTurnPreparationException(
+            "历史上下文准备失败，请重试", new IllegalStateException("UserFS unavailable"));
+        when(decorator.decorate(eq(ctx), any(), any())).thenThrow(failure);
+
+        assertThatThrownBy(() -> routeService.route(ctx)).isSameAs(failure).hasMessageContaining("请重试");
+
+        verify(chatStreamRuntimeCoordinator).stopIfStarted(ctx, true);
+        verifyNoInteractions(gatewayClient);
     }
 
     private ChatProcessContext buildContext() {

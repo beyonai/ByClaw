@@ -5,7 +5,7 @@ import java.util.List;
 import org.apache.commons.lang3.StringUtils;
 
 /** Central path policy for private runtime credentials mounted below the user's file workspace. */
-final class FileBrowserPathPolicy {
+public final class FileBrowserPathPolicy {
 
     private static final List<String> PROTECTED_ROOTS = List.of(
         "/.connector-auth",
@@ -14,7 +14,7 @@ final class FileBrowserPathPolicy {
     private FileBrowserPathPolicy() {
     }
 
-    static void assertBrowsable(String path) {
+    public static void assertBrowsable(String path) {
         String normalized = normalize(path);
         if (isProtected(normalized)) {
             throw new IllegalArgumentException("该目录属于系统凭据目录，禁止访问");

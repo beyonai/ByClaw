@@ -9,6 +9,9 @@ import lombok.Setter;
 @Setter
 public class RunningChatSnapshotResponse extends ByaiMessageHotDtoDto {
 
+    /** Kept separately so recovery never appends deltas onto the explicit final body. */
+    private String accumulatedAnswerText;
+
     private Boolean running;
 
     private String traceId;

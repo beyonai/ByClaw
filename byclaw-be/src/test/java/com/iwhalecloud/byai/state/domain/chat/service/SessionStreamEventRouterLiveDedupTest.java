@@ -7,6 +7,11 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import java.util.Map;
+import org.springframework.data.redis.connection.stream.MapRecord;
+import org.springframework.data.redis.connection.stream.RecordId;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +19,7 @@ import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -42,7 +48,7 @@ class SessionStreamEventRouterLiveDedupTest {
         runningChatSnapshotWriteBehind = mockField("runningChatSnapshotWriteBehind",
             RunningChatSnapshotWriteBehind.class);
         mockField("multiDeviceBroadcastService",
-            com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
+            MultiDeviceBroadcastService.class);
         mockField("chatContextRecoveryService", ChatContextRecoveryService.class);
         mockField("cronService", CronService.class);
         terminalPersistMarkerService = mockField("terminalPersistMarkerService", TerminalPersistMarkerService.class);
@@ -120,6 +126,36 @@ class SessionStreamEventRouterLiveDedupTest {
 
         assertThat(replay.isTerminal()).as("同进程 terminal 重投应仍为 terminal").isTrue();
         assertThat(replay.getContext()).isNotNull();
+        assertThat(replay.isAlreadyPersisted()).as("Observed terminal must retry unfinished persistence callbacks").isFalse();
+
+        when(terminalPersistMarkerService.isPersisted(10L, "100-0")).thenReturn(true);
+        StreamDispatchResult committedReplay = router.dispatch(event("100-0", SseResponseEventEnum.appStreamResponse));
+        assertThat(committedReplay.isAlreadyPersisted()).isTrue();
+    }
+
+    @Test
+    void observerFailureRetriesPersistenceOnSameProcessTerminalRedeliveryBeforeAck() {
+        when(gatewayStreamEventProcessor.normalizeEventType(any(), any()))
+            .thenReturn(SseResponseEventEnum.appStreamResponse);
+        ChatProcessContext context = liveCtx(null);
+        StreamRecordProcessor processor = new StreamRecordProcessor();
+        ScriptService script = mock(ScriptService.class);
+        ReflectionTestUtils.setField(processor, "sessionStreamEventRouter", router);
+        ReflectionTestUtils.setField(processor, "scriptService", script);
+        ReflectionTestUtils.setField(processor, "terminalPersistMarkerService", terminalPersistMarkerService);
+        when(script.persistAsyncGatewayContext(context)).thenReturn(false, true);
+        MapRecord<String, String, String> record = MapRecord.create("session-stream",
+            Map.of("data", event("100-0", SseResponseEventEnum.appStreamResponse).toJSONString()))
+            .withId(RecordId.of("100-0"));
+        try {
+            assertThat(processor.process(record).shouldAcknowledge()).isFalse();
+            assertThat(processor.process(record).shouldAcknowledge()).isTrue();
+            verify(script, times(2)).persistAsyncGatewayContext(context);
+            verify(terminalPersistMarkerService).markPersisted(10L, "100-0");
+        }
+        finally {
+            processor.shutdown();
+        }
     }
 
     @Test

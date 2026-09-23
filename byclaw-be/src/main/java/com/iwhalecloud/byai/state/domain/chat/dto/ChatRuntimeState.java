@@ -35,6 +35,12 @@ public class ChatRuntimeState {
 
     private Long userId;
 
+    /** Preserve the server-owned membership boundary through runtime recovery. */
+    private Long sessionMemberAgentId;
+
+    /** Preserve internal-only transport behavior when a runtime is recovered on another node. */
+    private boolean suppressUserEvents;
+
     private AssistantChatDto assistantChatDto;
 
     private ByaiMessageHotDtoDto askMsg;

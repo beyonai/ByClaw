@@ -28,7 +28,7 @@ public class AliyunSmsService {
     @Autowired
     private AliyunSmsConfig smsConfig;
 
-    private Client createClient() throws Exception {
+    Client createClient() throws Exception {
         Config config = new Config().setAccessKeyId(smsConfig.getAccessKeyId())
             .setAccessKeySecret(smsConfig.getAccessKeySecret()).setEndpoint(smsConfig.getEndpoint());
         return new Client(config);
@@ -47,7 +47,7 @@ public class AliyunSmsService {
             Client client = createClient();
             // 确保手机号和验证码都是数字格式
             if (!phoneNumber.matches("\\d+") || !code.matches("\\d+")) {
-                logger.error("手机号或验证码格式错误: phone={}, code={}", phoneNumber, code);
+                logger.error("手机号或验证码格式错误");
                 return false;
             }
 
@@ -70,7 +70,6 @@ public class AliyunSmsService {
             SendSmsRequest request = new SendSmsRequest().setPhoneNumbers(phoneNumber)
                 .setSignName(getSignName(smsConfig.getSignName())).setTemplateCode(templateCode)
                 .setTemplateParam(JSON.toJSONString(templateParam));
-            logger.info("Sending SMS's param is : {}", JSON.toJSONString(request));
             SendSmsResponse response = client.sendSms(request);
             if (!"OK".equals(response.getBody().getCode())) {
                 throw new BaseException(I18nUtil.get("sms.send.failed", response.getBody().getMessage()));

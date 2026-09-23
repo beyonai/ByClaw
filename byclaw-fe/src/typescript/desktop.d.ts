@@ -26,7 +26,8 @@ type IDesktopCapability =
   | 'files.attachments'
   | 'projects.local-directories'
   | 'sessions.local'
-  | 'sessions.local-history';
+  | 'sessions.local-history'
+  | 'notifications.native';
 
 interface IDesktopDirectorySelection {
   canceled: boolean;
@@ -91,6 +92,11 @@ interface IDesktopBridge {
   bridgeVersion?: number;
   platform?: string;
   capabilities?: IDesktopCapability[];
+  notifications?: {
+    show?: (input: { title: string; body?: string; tag?: string; url?: string }) => Promise<void>;
+    close?: (tag: string) => Promise<void>;
+    setBadge?: (count: number) => Promise<void>;
+  };
   app?: {
     info?: () => Promise<IDesktopAppInfo>;
     checkUpdate?: () => Promise<{

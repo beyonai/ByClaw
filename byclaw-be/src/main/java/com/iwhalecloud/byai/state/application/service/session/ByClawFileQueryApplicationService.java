@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+
 import com.iwhalecloud.byai.common.storage.ObjectStorage;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
 import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
@@ -16,6 +19,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
@@ -44,6 +49,9 @@ public class ByClawFileQueryApplicationService {
     private Logger logger = LoggerFactory.getLogger(ByClawFileQueryApplicationService.class);
 
     @Autowired
+    private SessionService sessionService;
+
+    @Autowired
     private UserFS userFS;
 
     @Autowired
@@ -67,12 +75,32 @@ public class ByClawFileQueryApplicationService {
         List<String> objectKeys = safeObjectKeys(withUserContext(userCode, () -> userFS.list(listPrefix, null)));
         String normalizedKeyword = StringUtils.trimToEmpty(keyword).toLowerCase(Locale.ROOT);
 
+        Map<Long, Boolean> publicSessions = new HashMap<>();
         return objectKeys.stream().filter(StringUtils::isNotBlank)
             .map(ByClawFileQueryApplicationService::normalizeObjectKey)
+            .filter(objectKey -> isPublicSessionObject(objectKey, publicSessions))
             .filter(objectKey -> matchSessionScope(objectKey, normalizedSessionId))
             .filter(objectKey -> matchKeyword(objectKey, normalizedKeyword)).sorted(Comparator.naturalOrder())
             .map(objectKey -> new ByClawFileDto(objectKey, FilenameUtils.getName(objectKey), objectKey))
             .collect(Collectors.toList());
+    }
+
+    private boolean isPublicSessionObject(String objectKey, Map<Long, Boolean> publicSessions) {
+        if (!objectKey.startsWith(SESSION_ROOT_PREFIX)) {
+            return true;
+        }
+        String relative = objectKey.substring(SESSION_ROOT_PREFIX.length());
+        int slash = relative.indexOf('/');
+        String sessionId = slash < 0 ? relative : relative.substring(0, slash);
+        if (!sessionId.matches("[0-9]+")) {
+            return true;
+        }
+        try {
+            return publicSessions.computeIfAbsent(Long.valueOf(sessionId),
+                id -> !GroupChatInternalSessionAccess.isInternal(sessionService.findById(id)));
+        } catch (NumberFormatException error) {
+            return true;
+        }
     }
 
     private String buildListPrefix(String normalizedSessionId) {

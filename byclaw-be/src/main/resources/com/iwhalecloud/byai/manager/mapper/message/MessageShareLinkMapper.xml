@@ -7,6 +7,7 @@
     <resultMap id="BaseResultMap"
         type="com.iwhalecloud.byai.manager.entity.message.MessageShareLink">
         <id column="link_id" jdbcType="BIGINT" property="linkId"/>
+        <result column="link_type" jdbcType="VARCHAR" property="linkType"/>
         <result column="link_token" jdbcType="VARCHAR" property="linkToken"/>
         <result column="title" jdbcType="VARCHAR" property="title"/>
         <result column="creator_id" jdbcType="BIGINT" property="creatorId"/>
@@ -23,6 +24,7 @@
 
     <!-- 列清单 -->
     <sql id="Base_Column_List">
+        link_type,
         link_id,
         link_token,
         title,
@@ -42,6 +44,7 @@
     <insert id="insert"
         parameterType="com.iwhalecloud.byai.manager.entity.message.MessageShareLink">
         INSERT INTO message_share_link (
+            link_type,
             link_id,
             link_token,
             creator_id,
@@ -56,6 +59,7 @@
             com_acct_id,
             title
         ) VALUES (
+            #{linkType,jdbcType=VARCHAR},
             #{linkId,jdbcType=BIGINT},
             #{linkToken,jdbcType=VARCHAR},
             #{creatorId,jdbcType=BIGINT},
@@ -77,6 +81,7 @@
         <include refid="Base_Column_List"/>
         FROM message_share_link
         WHERE link_token = #{linkToken,jdbcType=VARCHAR}
+          AND COALESCE(link_type, 'MESSAGE') = 'MESSAGE'
     </select>
 
     <update id="incrementAccessCountAndUpdateTime">
@@ -85,6 +90,29 @@
             last_access_time = #{lastAccessTime,jdbcType=TIMESTAMP},
             update_time = #{lastAccessTime,jdbcType=TIMESTAMP}
         WHERE link_id = #{linkId,jdbcType=BIGINT}
+          AND COALESCE(link_type, 'MESSAGE') = 'MESSAGE'
+    </update>
+
+    <select id="selectInvitationBySessionId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM message_share_link
+        WHERE link_type = 'GROUP_INVITATION' AND link_id = #{sessionId,jdbcType=BIGINT}
+    </select>
+
+    <select id="selectInvitationByToken" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM message_share_link
+        WHERE link_type = 'GROUP_INVITATION' AND link_token = #{linkToken,jdbcType=VARCHAR}
+    </select>
+
+    <update id="updateInvitation">
+        UPDATE message_share_link
+        SET link_token = #{linkToken,jdbcType=VARCHAR},
+            creator_id = #{creatorId,jdbcType=BIGINT},
+            com_acct_id = #{comAcctId,jdbcType=BIGINT},
+            status = #{status,jdbcType=VARCHAR},
+            expire_time = #{expireTime,jdbcType=TIMESTAMP},
+            update_time = #{updateTime,jdbcType=TIMESTAMP}
+        WHERE link_type = 'GROUP_INVITATION' AND link_id = #{linkId,jdbcType=BIGINT}
     </update>
 </mapper>
-

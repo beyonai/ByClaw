@@ -2185,6 +2185,41 @@ public class AuthApplicationService {
     /**
      * 为指定用户追加一条资源授权，不覆盖该资源已有授权名单。
      */
+    /** 为用户追加多个数字员工的直接使用红名单。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void grantDigitalEmployeesToUser(Collection<Long> resourceIds, Long userId) {
+        if (CollectionUtils.isEmpty(resourceIds)) return;
+        if (userId == null || userId <= 0 || resourceIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new IllegalArgumentException("Invalid digital employee grant target");
+        }
+        Set<Long> distinctIds = new LinkedHashSet<>(resourceIds);
+        LambdaQueryWrapper<PrivilegeGrant> query = new LambdaQueryWrapper<>();
+        query.eq(PrivilegeGrant::getGrantObjType, GrantObjType.DIG_EMPLOYEE)
+            .in(PrivilegeGrant::getGrantObjId, distinctIds)
+            .eq(PrivilegeGrant::getGrantToObjType, GrantToObjType.USER)
+            .eq(PrivilegeGrant::getGrantToObjId, userId)
+            .eq(PrivilegeGrant::getGrantType, GrantType.FORCE_USE)
+            .eq(PrivilegeGrant::getGrantToType, Color.RED)
+            .eq(PrivilegeGrant::getOperType, OperType.READ)
+            .eq(PrivilegeGrant::getStatusCd, "A");
+        Set<Long> grantedIds = privilegeGrantMapper.selectList(query).stream()
+            .map(PrivilegeGrant::getGrantObjId).collect(Collectors.toSet());
+        for (Long resourceId : distinctIds) {
+            if (grantedIds.contains(resourceId)) continue;
+            PrivilegeGrant grant = new PrivilegeGrant();
+            grant.setGrantObjType(GrantObjType.DIG_EMPLOYEE);
+            grant.setGrantObjId(resourceId);
+            grant.setGrantToObjType(GrantToObjType.USER);
+            grant.setGrantToObjId(userId);
+            grant.setGrantType(GrantType.FORCE_USE);
+            grant.setGrantToType(Color.RED);
+            grant.setOperType(OperType.READ);
+            grant.setAllowUnsubscribe(Constants.NOT_ALLOW_UNSUBSCRIBE);
+            grant.setStatusCd("A");
+            privilegeGrantService.save(grant);
+        }
+    }
+
     public void ensureUserDirectPrivilege(SsResource ssResource, Long userId, String grantType) {
         if (ssResource == null || ssResource.getResourceId() == null || userId == null
             || StringUtils.isBlank(grantType)) {

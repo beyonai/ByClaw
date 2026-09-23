@@ -93,6 +93,64 @@ describe("ByClaw BE group chat context", () => {
         "100",
       ),
     ).toThrow("must match the inbound sessionId");
+
+    expect(
+      parseOptionalGroupChatRef(
+        {
+          groupChat: {
+            schemaVersion: "byclaw.group-chat-ref/v1",
+            conversationKey: 100,
+            beforeMessageId: 20,
+            contextToken: "signed-context-token",
+            childSessionId: 500,
+            initiatorUserId: 300,
+            targetAgentId: 400,
+          },
+        },
+        "500",
+      ),
+    ).toEqual({
+      schemaVersion: "byclaw.group-chat-ref/v1",
+      conversationKey: "100",
+      beforeMessageId: "20",
+      contextToken: "signed-context-token",
+      childSessionId: "500",
+      initiatorUserId: "300",
+      targetAgentId: "400",
+    });
+  });
+
+  it("rejects incomplete or mismatched child-session authorization", () => {
+    expect(() =>
+      parseOptionalGroupChatRef(
+        {
+          groupChat: {
+            schemaVersion: "byclaw.group-chat-ref/v1",
+            conversationKey: "100",
+            beforeMessageId: "20",
+            childSessionId: "500",
+          },
+        },
+        "500",
+      ),
+    ).toThrow("authorization fields must be provided together");
+
+    expect(() =>
+      parseOptionalGroupChatRef(
+        {
+          groupChat: {
+            schemaVersion: "byclaw.group-chat-ref/v1",
+            conversationKey: "100",
+            beforeMessageId: "20",
+            contextToken: "signed-context-token",
+            childSessionId: "501",
+            initiatorUserId: "300",
+            targetAgentId: "400",
+          },
+        },
+        "500",
+      ),
+    ).toThrow("must match the inbound sessionId");
   });
 
   it("rejects unsafe numeric IDs before precision can be trusted", () => {
@@ -128,6 +186,10 @@ describe("ByClaw BE group chat context", () => {
       conversationKey: "100",
       beforeMessageId: "20",
       beyondToken: "secret-token",
+      contextToken: "signed-context-token",
+      childSessionId: "500",
+      initiatorUserId: "300",
+      targetAgentId: "400",
     });
 
     expect(loaded.messages).toHaveLength(3);
@@ -144,6 +206,10 @@ describe("ByClaw BE group chat context", () => {
       beforeMessageId: "20",
       maxMessages: 60,
       maxCharacters: 30_000,
+      contextToken: "signed-context-token",
+      childSessionId: "500",
+      initiatorUserId: "300",
+      targetAgentId: "400",
     });
   });
 
@@ -310,6 +376,41 @@ describe("ByClaw BE group chat context", () => {
     });
 
     expect(loaded?.messages.map((message) => message.messageId)).toEqual(["17", "19"]);
+  });
+
+  it("loads a parent group snapshot for an authorized child task session", async () => {
+    const provider: GroupChatContextProvider = {
+      load: vi.fn(async () => parseGroupChatContext(contextResponse())),
+    };
+
+    const loaded = await loadGroupChatContextForAgent({
+      extraPayload: {
+        groupChat: {
+          schemaVersion: "byclaw.group-chat-ref/v1",
+          conversationKey: "100",
+          beforeMessageId: "20",
+          contextToken: "signed-context-token",
+          childSessionId: "500",
+          initiatorUserId: "300",
+          targetAgentId: "400",
+        },
+      },
+      sessionId: "500",
+      beyondToken: "secret-token",
+      currentAgentIds: ["400"],
+      provider,
+    });
+
+    expect(loaded?.conversationKey).toBe("100");
+    expect(provider.load).toHaveBeenCalledWith({
+      conversationKey: "100",
+      beforeMessageId: "20",
+      beyondToken: "secret-token",
+      contextToken: "signed-context-token",
+      childSessionId: "500",
+      initiatorUserId: "300",
+      targetAgentId: "400",
+    });
   });
 
   it("supports worker disable and per-Agent rollout flags without calling BE", async () => {

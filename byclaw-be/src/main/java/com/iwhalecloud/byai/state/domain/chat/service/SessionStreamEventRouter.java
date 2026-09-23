@@ -186,6 +186,9 @@ public class SessionStreamEventRouter {
 
         String receivedTraceId = dataJson.getString("trace_id");
         MessageContext messageContext = ctx.resolveMessageContext(receivedTraceId);
+        if (messageContext != null) {
+            messageContext.setRecordedStreamEventData(null);
+        }
         if (ctx.recoveryOnly) {
             boolean alreadyHydrated = StreamIdUtil.isProcessedByWatermark(ctx.currentStreamId, ctx.hydratedStreamId);
             if (!alreadyHydrated) {
@@ -236,10 +239,9 @@ public class SessionStreamEventRouter {
     /**
      * 处理已被水位线覆盖的重投事件：内容不再推送，但仍要判断是否需要重新收尾。
      * <p>
-     * 水位线会随快照恢复，而 {@code terminalStreamId} 是内存字段，进程重启后为 null。
-     * 因此不能只依赖内存字段判断 terminal，否则重启后重投的终止事件会被当作普通重复事件
-     * ACK 掉，落库再也不会发生。这里按事件类型重新判定，并用持久标记区分
-     * 「已落库」与「落库尚未完成」两种情况。
+     * 水位线和 terminalStreamId 仅代表事件已被观察或聚合，不能证明消息和业务投影已提交。
+     * 无论同进程重投还是重启恢复，都按事件类型重新判定 terminal，并仅用持久标记区分
+     * 「消息及完成回调均已成功」与「仍需重试」两种情况。
      */
     private WebSocketRouteResult handleWatermarkedReplay(ChatProcessContext ctx, String eventType) {
         boolean terminalEventType = SseResponseEventEnum.appStreamResponse.equals(eventType)
@@ -250,9 +252,9 @@ public class SessionStreamEventRouter {
             return WebSocketRouteResult.ignored();
         }
 
-        boolean persistedInThisProcess = ctx.currentStreamId != null
-            && ctx.currentStreamId.equals(ctx.terminalStreamId);
-        if (persistedInThisProcess || terminalPersistMarkerService.isPersisted(ctx.sessionId, ctx.currentStreamId)) {
+        // Seeing a terminal event is not proof of persistence: business observers may still fail.
+        // Only the marker written after all persistence callbacks succeed permits ACK-only replay.
+        if (terminalPersistMarkerService.isPersisted(ctx.sessionId, ctx.currentStreamId)) {
             // 落库已完成，仅需重新走一次 ACK 与收尾；processor 会跳过重复落库。
             log.info("Stream 终止事件已落库，跳过重复落库并重新收尾, sessionId: {}, traceId: {}, streamId: {}",
                 ctx.sessionId, ctx.traceId, ctx.currentStreamId);
@@ -311,6 +313,9 @@ public class SessionStreamEventRouter {
     }
 
     private void broadcastToOtherDevices(ChatProcessContext ctx, JSONObject dataJson) {
+        if (ctx.suppressUserEvents) {
+            return;
+        }
         try {
             JSONObject broadcastEvent = buildBroadcastEvent(ctx, dataJson);
             multiDeviceBroadcastService.broadcastRawEvent(ctx.getUserId(), ctx.getSessionId(),
@@ -333,8 +338,19 @@ public class SessionStreamEventRouter {
         // 多端广播必须与当前 WebSocket 路由使用同一套事件类型归一化规则。
         // 否则非目标 agent 的 answerDelta 会在入库时按 reasoningLogDelta 处理，
         // 但其他设备仍收到原始 answerDelta，导致不同 WebSocket 客户端表现不一致。
-        broadcastJson.put("event_type", gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson));
-        broadcastJson.put("data", gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));
+        String eventType = gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson);
+        broadcastJson.put("event_type", eventType);
+        MessageContext messageContext = ctx.resolveMessageContext(dataJson.getString("trace_id"));
+        // WebSocket 增量已经完成聚合，广播直接复用与发起端相同的输出，不从原始事件重建而丢失 v2/seq。
+        if (ChatTransport.WEBSOCKET.equals(ctx.transport)
+            && (SseResponseEventEnum.answerDelta.equals(eventType)
+                || SseResponseEventEnum.reasoningLogDelta.equals(eventType))
+            && messageContext != null && messageContext.getRecordedStreamEventData() != null) {
+            broadcastJson.put("data", messageContext.getRecordedStreamEventData());
+        }
+        else {
+            broadcastJson.put("data", gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));
+        }
         return broadcastJson;
     }
 
@@ -515,6 +531,9 @@ public class SessionStreamEventRouter {
 
     private void broadcastBackgroundAnswerMessage(Long sessionId, ByaiMessageHotDtoDto message) {
         ByaiSession session = sessionService.findById(sessionId);
+        if (session != null && "GROUP_CHAT_ROUTING".equals(session.getState())) {
+            return;
+        }
         Long userId = session == null ? message.getCreatorId() : session.getCreatorId();
         if (userId == null) {
             return;
@@ -533,6 +552,9 @@ public class SessionStreamEventRouter {
             return;
         }
         ByaiSession session = sessionService.findById(sessionId);
+        if (session != null && "GROUP_CHAT_ROUTING".equals(session.getState())) {
+            return;
+        }
         Long userId = session == null ? null : session.getCreatorId();
         if (userId == null) {
             return;
@@ -550,6 +572,9 @@ public class SessionStreamEventRouter {
             return;
         }
         ByaiSession session = sessionService.findById(runtime.getSessionId());
+        if (session != null && "GROUP_CHAT_ROUTING".equals(session.getState())) {
+            return;
+        }
         Long userId = session == null ? null : session.getCreatorId();
         if (userId == null) {
             return;

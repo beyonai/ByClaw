@@ -21,6 +21,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.MultiAgentMetadata;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
+import com.iwhalecloud.byai.state.domain.chat.model.FinalAnswerContent;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
@@ -103,6 +104,12 @@ public class GatewayStreamEventProcessor {
     }
 
     public String buildEventData(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
+        // Normalize before stripping the Gateway envelope: final_content can live at its top level.
+        if (FinalAnswerContent.isFinalEvent(dataJson.getString("event_type"))) {
+            JSONObject finalPayload = new JSONObject();
+            finalPayload.put("final_content", FinalAnswerContent.extract(dataJson));
+            return finalPayload.toJSONString();
+        }
         String eventData = dataJson.getString("data");
         String sourceAgentType = dataJson.getString("source_agent_type");
         String traceId = dataJson.getString("trace_id");
@@ -173,7 +180,8 @@ public class GatewayStreamEventProcessor {
 
     public boolean shouldIgnoreEvent(ChatProcessContext ctx, String eventType, JSONObject dataJson) {
         String sourceAgentType = dataJson.getString("source_agent_type");
-        return !isTargetAgentType(ctx, sourceAgentType) && SseResponseEventEnum.appStreamResponse.equals(eventType);
+        return !isTargetAgentType(ctx, sourceAgentType)
+            && (SseResponseEventEnum.appStreamResponse.equals(eventType) || FinalAnswerContent.isFinalEvent(eventType));
     }
 
     public void enrichLaneMetadata(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata, JSONObject payload) {

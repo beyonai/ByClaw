@@ -5,6 +5,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -18,6 +19,8 @@ import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.constants.chat.ChatObjType;
+import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
@@ -112,6 +115,8 @@ public class ChatRuntimeStateService {
         state.setModelAnswerMessageId(ctx.modelAnswerMessageId);
         state.setTaskId(ctx.taskId);
         state.setUserId(ctx.userId);
+        state.setSessionMemberAgentId(ctx.sessionMemberAgentId);
+        state.setSuppressUserEvents(ctx.suppressUserEvents);
         state.setAssistantChatDto(ctx.assistantChatDto);
         state.setAskMsg(ctx.askMsg);
         state.setLoginInfo(ctx.loginInfo);
@@ -141,7 +146,7 @@ public class ChatRuntimeStateService {
 
     public ChatRuntimeState get(String sessionId, String traceId) {
         ChatRuntimeState primary = get(sessionId);
-        if (primary != null && java.util.Objects.equals(primary.getTraceId(), traceId)) return primary;
+        if (primary != null && Objects.equals(primary.getTraceId(), traceId)) return primary;
         return get(sessionId + ":turn:" + traceId);
     }
 
@@ -175,7 +180,7 @@ public class ChatRuntimeStateService {
         String value = (String) redisTemplate.opsForValue().get(RUNTIME_KEY_PREFIX + identifier(ctx));
         if (value == null) return false;
         ChatRuntimeState state = JSON.parseObject(value, ChatRuntimeState.class);
-        return java.util.Objects.equals(state.getToken(), ctx.runningOutputStreamToken);
+        return Objects.equals(state.getToken(), ctx.runningOutputStreamToken);
     }
 
     public void touch(ChatProcessContext ctx) {
@@ -377,6 +382,8 @@ public class ChatRuntimeStateService {
         ctx.modelAnswerMessageId = state.getModelAnswerMessageId();
         ctx.taskId = state.getTaskId();
         ctx.userId = state.getUserId();
+        ctx.sessionMemberAgentId = state.getSessionMemberAgentId();
+        ctx.suppressUserEvents = state.isSuppressUserEvents();
         ctx.askMsg = resolveAskMsg(state);
         ctx.loginInfo = state.getLoginInfo();
         ctx.targetAgentType = state.getTargetAgentType();
@@ -390,8 +397,8 @@ public class ChatRuntimeStateService {
         ctx.messageContext = snapshotService.hydrateMessageContext(state, watermarkHolder);
         ctx.hydratedStreamId = watermarkHolder[0];
         if (ctx.messageContext == null) {
-            ctx.messageContext = new com.iwhalecloud.byai.state.domain.chat.model.MessageContext(
-                com.iwhalecloud.byai.state.common.enums.AgentTypeEnum.getNameCode(
+            ctx.messageContext = new MessageContext(
+                AgentTypeEnum.getNameCode(
                     state.getAssistantChatDto().getAgentType()),
                 state.getModelAnswerMessageId(),
                 state.getTaskId());

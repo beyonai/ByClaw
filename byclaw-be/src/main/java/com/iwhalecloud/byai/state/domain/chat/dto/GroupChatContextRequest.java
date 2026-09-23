@@ -15,4 +15,13 @@ public class GroupChatContextRequest {
     private Integer maxMessages;
 
     private Integer maxCharacters;
+
+    /** 后端签发的群聊上下文凭证，供 Agent 回源读取历史。 */
+    private String contextToken;
+
+    private Long childSessionId;
+
+    private Long initiatorUserId;
+
+    private Long targetAgentId;
 }

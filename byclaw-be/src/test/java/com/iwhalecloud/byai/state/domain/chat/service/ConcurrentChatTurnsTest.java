@@ -1,11 +1,13 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,7 @@ class ConcurrentChatTurnsTest {
     private final OutputStreamManager outputs = new OutputStreamManager();
     private final ChatRuntimeStateService states = mock(ChatRuntimeStateService.class);
     private final RunningOutputStreamRegistry running = mock(RunningOutputStreamRegistry.class);
+    private ApplicationContext beans;
     private SessionStreamManager streams;
     private ChatProcessContext background;
     private ChatProcessContext followup;
@@ -27,7 +30,7 @@ class ConcurrentChatTurnsTest {
     @BeforeEach
     void setUp() {
         streams = spy(new SessionStreamManager());
-        ApplicationContext beans = mock(ApplicationContext.class);
+        beans = mock(ApplicationContext.class);
         when(beans.getBean(RunningOutputStreamRegistry.class)).thenReturn(running);
         ReflectionTestUtils.setField(streams, "applicationContext", beans);
         ReflectionTestUtils.setField(streams, "outputStreamManager", outputs);
@@ -62,6 +65,23 @@ class ConcurrentChatTurnsTest {
         assertThat(outputs.getContext("10", "followup")).isSameAs(followup);
         verify(streams, never()).stopSessionListener(anyString());
         assertThat(streams.completeSessionTurn(followup)).isTrue();
+    }
+
+    @Test
+    void releaseWakeupFollowsFinalListenerAndOwnerCleanup() {
+        assertThat(streams.completeSessionTurn(background)).isTrue();
+        var order = inOrder(states, streams, running, beans);
+        order.verify(states).delete(background);
+        order.verify(streams).stopSessionListener("10");
+        order.verify(running).releaseIfOwner(background);
+        order.verify(beans).publishEvent(new ChatSessionReleased(10L));
+    }
+
+    @Test
+    void completionDoesNotAnnounceFreeSlotWhileAnotherTurnRemains() {
+        outputs.putContext("10", followup);
+        streams.completeSessionTurn(background);
+        verify(beans, never()).publishEvent(any(ChatSessionReleased.class));
     }
 
     @Test
@@ -112,7 +132,7 @@ class ConcurrentChatTurnsTest {
         ChatStreamRuntimeCoordinator coordinator = coordinator(false);
         followup.transport = ChatTransport.HTTP_SSE;
         ReflectionTestUtils.setField(coordinator, "gatewayEventQueueCapacity", 4);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> coordinator.startIfNecessary(followup))
+        assertThatThrownBy(() -> coordinator.startIfNecessary(followup))
             .hasMessageContaining("请重新连接后再试");
         verify(states, never()).saveConcurrent(any());
     }
@@ -144,7 +164,7 @@ class ConcurrentChatTurnsTest {
             mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class));
         for (ChatProcessContext ctx : List.of(background, followup)) {
             ctx.transport = ChatTransport.HTTP_SSE;
-            ctx.gatewayEventQueue = new java.util.concurrent.ArrayBlockingQueue<>(4);
+            ctx.gatewayEventQueue = new ArrayBlockingQueue<>(4);
         }
         outputs.putContext("10", followup);
         JSONObject first = event("background", "answerDelta");

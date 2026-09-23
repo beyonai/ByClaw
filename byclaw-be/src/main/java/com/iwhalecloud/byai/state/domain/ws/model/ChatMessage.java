@@ -28,4 +28,7 @@ public class ChatMessage extends AssistantChatDto {
     /** Selected external child whose full projection this WebSocket wants to receive. */
     private String scopedSessionId;
 
+    /** 群聊引用消息 ID；普通聊天不使用。 */
+    private Long replyToMessageId;
+
 }

@@ -24,6 +24,48 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 class AccessTokenVerifyInterceptorTest {
 
+    @Test
+    void allowsOnlyAnonymousTokenPreviewAndClearsThreadIdentity() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        var login = new LoginInfo();
+        login.setUserId(99L);
+        CurrentUserHolder.setLoginInfo(login);
+        var request = new MockHttpServletRequest("POST", "/byaiService/group-chats/invitations/validate");
+        request.setContextPath("/byaiService");
+        request.setServletPath("/group-chats/invitations/validate");
+        var response = new MockHttpServletResponse();
+        assertTrue(interceptor.preHandle(request, response, new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserId()).isLessThanOrEqualTo(0L);
+        assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
+    }
+
+    @Test
+    void allowsOnlyExactAnonymousCaptchaAndSmsMethods() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+        for (String context : List.of("", "/byaiService")) {
+            assertTrue(interceptor.preHandle(request("GET", context + "/system/session/captcha", context),
+                new MockHttpServletResponse(), new Object()));
+            assertTrue(interceptor.preHandle(request("POST", context + "/system/session/sms/send", context),
+                new MockHttpServletResponse(), new Object()));
+            for (String[] route : List.of(
+                    new String[]{"POST", "/system/session/captcha"},
+                    new String[]{"GET", "/system/session/sms/send"},
+                    new String[]{"GET", "/system/session/captcha/"},
+                    new String[]{"GET", "/system/session/captcha/extra"},
+                    new String[]{"GET", "/other/system/session/captcha"},
+                    new String[]{"POST", "/system/session/sms/sendExtra"},
+                    new String[]{"POST", "/system/session/sms/send/"},
+                    new String[]{"POST", "/other/system/session/sms/send"},
+                    new String[]{"GET", "/system/session/currentUser"})) {
+                MockHttpServletResponse response = new MockHttpServletResponse();
+                assertFalse(interceptor.preHandle(request(route[0], context + route[1], context),
+                    response, new Object()), route[0] + " " + route[1]);
+                assertThat(response.getStatus()).isEqualTo(401);
+            }
+        }
+    }
+
     @AfterEach
     void clearCurrentUser() {
         CurrentUserHolder.clearLoginInfo();

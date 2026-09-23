@@ -50,6 +50,93 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - **多模型支持** - 支持多种大语言模型接入
 - **企业级安全** - 完整的认证、授权和审计机制
 
+## 聊天用户资料
+
+- 前端用户资料卡及助手设置统一使用已有的 `GET /system/user/getUserSuas?userId=42`，不新增 `/assiman/getUserSuas` 接口。
+- `userId` 是必填的用户主键（Long），不是工号或姓名；前端附带的 `language` 参数不参与用户查询。用户不存在时返回 `{code: -1, msg: '用户不存在'}`。
+- 成功返回 `{code: 0, data: {...}}`，资料卡读取 `userId`、`userName`、`userCode`（工号）、`phone`（沿用解密脱敏规则）、`pathName`（部门路径）、`positionName`（职位）。保留现有超级助手字段，助手或岗位记录缺失不会导致空指针异常。
+
+## 群列表消息摘要
+
+- `GET /group-chats?pageNum=1&pageSize=20` 仅在返回时将 `latestMessageContent` 中的 `{{DIG_EMPLOYEE_资源ID}}`、`{{HUMAN_资源ID}}` 转成 `@名称`，名称取最新消息 metadata 中 `resourceList.resourceName` 的快照。
+- Agent 的 `[@成员名称](uid=成员UID)` 同样转成 `@名称`；优先使用资源快照名称，没有快照时使用链接中的成员名称。无法找到名称的占位符和其他资源占位符保留原文。
+- 该转换适用于已有消息，不修改数据库正文、WebSocket 消息或 Agent 调度；查询所需的消息 metadata 不包含在接口响应中。
+
+## 群聊入群授权
+
+- 管理员邀请真人成员（`invite`）与用户接受链接邀请（`acceptInvitation`）统一经 `insertMember` 补齐项目成员和群内全部数字员工的使用授权；已是项目成员或群未关联项目时，也会补齐员工授权。
+- 员工授权只追加 `DIG_EMPLOYEE / USER / FORCE_USE` 红名单，已有有效同维度授权不重复插入，其他红名单和全部黑名单保持不变，黑名单仍按既有规则优先生效。
+- 项目成员、群成员和员工授权共用数据库事务，任一写入失败整体回滚。权限集合与用户权限缓存在事务提交后同步，回滚不发布权限缓存。
+- 本次不处理退出或移除成员后的撤权，也不补建群初始授权、后续邀请数字员工时向已有真人授权或存量群数据。
+
+## 群聊成员系统消息
+
+- 已有工作组的直接邀请（真人或数字员工）、链接入群、主动退出和管理员移除，各保存一条 `byai_message.usage=5` 消息。建群时的初始成员不生成消息；最后一位真人群主退出仍走解散，不生成退群消息。角色变更和解散提示不在此类持久化范围内。
+- 正文分别为 `邀请者 邀请 成员 加入工作组`、`成员 离开了工作组`、`操作者 将 成员 移出工作组`。名称保存操作时的快照，优先群昵称，再取用户或数字员工名称，缺失时显示 ID。链接入群使用链接记录中的邀请者，不使用加入者或转发者作为邀请者。
+- 消息与成员变更同事务保存。提交后保留 `MEMBER_ADDED` / `MEMBER_REMOVED` 成员通知，并发送 `GROUP_CHAT_EVENT / MESSAGE_CREATED` 消息；失败回滚、重复入群不产生新消息。WebSocket 仍为尽力投递，掉线后通过历史接口恢复。
+- `POST /group-chats/{sessionId}/context` 返回包含 `usage=5` 的会话时间线。历史与实时消息均提供 `messageId`、`usage=5`、`kind=SYSTEM_EVENT`、`role=event`、`speaker.type=system`、`content`、`createdAt` 和 `systemEvent`。`systemEvent` 含 `eventType`（`MEMBER_INVITED` / `MEMBER_LEFT` / `MEMBER_REMOVED`）、`operatorId`、`operatorName`、`memberId`、`memberType`、`memberName`；ID 使用字符串。前端按 `messageId` 合并实时与历史消息，后续需适配系统消息展示。
+- Agent 使用的 `GroupChatContextService.load` 仍只读取 `usage=1/2`，筛选发生在分页与截断之前。`GroupChatSessionContextFileService` 写入 `group-history.json` 和 `task-history.jsonl` 时排除系统事件，也不通过回复引用带入系统事件正文。这些事件不会作为模型指令或助手回答进入上下文。
+- 本次不改前端、不回填旧事件、不扩展消息搜索范围，也不修改数据库结构或初始化 SQL。
+
+## 群聊引用续聊与自动协作
+
+- 用户非引用 `@` 创建新的协作链；引用群消息或 Agent 之间 `@` 时，在该链中复用目标助理的子会话。每个助理保留自己的 session，首次参与时创建；重复消息只登记一次 turn。
+- 每轮输入保存原始用户需求、本次实际发送者类型/ID/名称、接收者以及本次完整正文；Agent 委派传入其最终回复，资源列表同时保留背景和当前正文中的成员引用。
+- 上述完整上下文只保存在 turn 调度快照中。子会话消息正文及普通聊天请求只保留“本次消息”的原文；首次执行和普通追问均在 Gateway 出站时追加上下文，Agent 仍可读取原始需求、参与者和已发布成果。此调整适用于新写入的消息，不自动改写历史消息。
+- `byai_group_chat_turn` 持久化逐轮身份、输入、分类、trace 和队列状态。同一 session 串行执行，不同 session 并行；自动 Agent 调用每条分支最多 6 跳，用户新消息重新开始自动计数，重试和等待不增加次数。
+- 未完成任务（`ACTIVE`，包括 `WAITING_USER`）不接受群引用或 Agent 自动续接，排队消息执行前也会重新检查。进入任务子会话仍可按原有流程处理任务。
+- 引用已结束任务时，直接以 `CHAT_CONTINUATION / CHAT` 在对应原子会话回答，保留原始需求和已发布成果上下文，不再创建内部评估会话或等待分类文件。提示词禁止修改、新增交付物或重新发布旧任务；遇到此类请求，提醒用户在群里直接 @助理发起新请求，不要使用引用回复。旧任务和发布记录保持不变。
+- 兼容旧版记录：尚未绑定 trace 的 `ASSESSMENT` 由调度器转为原会话追问；已绑定 trace 的旧评估结束为 `ASSESSMENT_RETIRED`，需要重新发送引用追问，不重发旧请求或投影内部答复。历史 `GROUP_CHAT_ROUTING` 会话继续禁止从普通入口访问。
+- 新表迁移位于 `deploy/migrations/versions/V0.4.1/V0.4.1__ddl.sql`，启动新版后端前须执行对应迁移。既有 execution 保留为会话入口和旧记录恢复依据，不重放已完成历史调用。
+- 后端重启可恢复领取后尚未绑定 trace 的 turn，事务锁和 trace 条件更新防止重复发送。确定发生在 Gateway 路由前的准备失败会结束该 turn；已绑定 trace 且送达情况未知的请求不盲目重发，因此异常远端调用可能继续占用队列，需沿原运行恢复流程处理。
+
+## 群聊上传附件
+
+- 群历史、Agent 群上下文、消息定位和话题根消息/回复/引用均保留正文为 `NULL` 但有 `related_resources` 的历史消息，分页计数采用同一条件。消息搜索排除 `NULL` 正文，关键词仅匹配正文，不搜索附件文件名；LIKE 使用 `ESCAPE CHR(92)`，兼容 Druid PostgreSQL 解析器并按字面匹配 `%`、`_` 和反斜杠。
+
+- `GROUP_CHAT_SEND` 的 `files` 与正文一同保存到消息的 `relatedResources.files`，并随 `MESSAGE_CREATED` 广播返回。仅附件消息和正文带附件消息均支持发送确认后的展示及历史加载。
+- `files` 非空时，`chatContent` 支持空字符串、纯空白、`null` 或省略；`null` 和省略正文按空字符串保存并广播，成功后返回 `GROUP_CHAT_ACCEPTED`。
+- 此修复无需数据库迁移。修复前未保存附件关联的旧消息不会自动恢复，需要重新发送附件。
+
+## 群聊待发布成果编辑
+
+- `POST /byaiService/group-chat/tasks/{taskId}/pending-publication` 接受 `text`、`sourcePaths` 和可选的 `expectedPendingPublicationId`。编辑客户端必须以十进制字符串传入当前正数 ID，例如 `{"expectedPendingPublicationId":"95001","text":"修改后的正文","sourcePaths":[]}`；不传该字段时保留原 Agent / 客户端整体替换行为。
+- 发起人仍在群内且任务为 `ACTIVE` 时才能准备内容。后端在任务行锁内比较当前卡片 ID；当前卡片缺失或 ID 不匹配时拒绝，不修改内容、不发送准备通知。成功整体替换并返回新 `pendingPublicationId`，清空旧上传进度，事务提交后发送私有 `TASK_PUBLICATION_PREPARED` 通知。
+- 正文最多 100000 字符、附件最多 100 项、路径最多 4096 字符；正文与附件不能同时为空。移除附件只改变发布列表，不删除源文件或云盘文件，保存时不上传文件。
+- 编辑客户端先保存，再用返回的新 ID 调用原 `POST /byaiService/group-chat/tasks/{taskId}/complete`，请求只传 `pendingPublicationId`，不能混传正文或附件。保存成功但确认失败时，未继续编辑的重试应复用该 ID 和上传记录；外部新版导致冲突时保留本地输入，由用户核对最新版。
+- 本次编辑能力无需数据库迁移，部署顺序为后端先、前端后；旧后端忽略新增字段，不能提供编辑版本保护。回退前端不影响旧准备和确认调用。
+
+## 群聊任务执行与恢复
+
+- 群聊分类和 disposition 文件写入要求 Agent 静默执行；过程正文、最终答复和 `taskName` / `ackText` 只包含用户业务内容，不汇报内部分类、控制文件或协议。此约束由请求提示词引导，不改变分类文件读取和任务提升流程。
+
+- Agent 成员引用仅接受 `[@成员名称](uid=目标成员uid)`；旧式 `uid?=`、普通 @ 文本和占位符不触发引用解析。合法引用保存到群历史前转换成 `{{目标成员uid}}` 并生成 `resourceList`，其中数字员工引用继续触发 child execution。
+
+- 子任务 WebSocket 广播复用普通聚合器处理后的增量，答案和思考事件携带 `messageRenderVersion="v2"` 及对应分段 `seq`。无发起端连接或 BE 恢复后也使用同一格式，广播不会再次聚合正文。
+
+- `TASK` 的 Agent 答案保存在独立任务会话；当前 turn 结束后进入 `WAITING_USER`，仍须发起人确认完成并发布到群里。
+- 初次群聊任务和 `ACTIVE` 任务子会话续聊通过 Gateway 追加统一交付提醒：Agent 在本轮交付可检查的新产物或修改版本后，温馨提醒用户检查，确认无误后可让 Agent 帮忙发布到群里。普通问答、未交付、失败、等待补充信息及已进入发布确认时不提醒；已结束任务的追问不追加此提示。提醒不授权自动发布，也不改变现有确认流程。
+- 群聊候选子会话从首个 turn 起复用 `ScriptService → RouteService → SessionStreamManager`，由普通聊天链路维护 Redis running/runtime、running snapshot、WebSocket 增量和完整消息落库。没有发起端 WebSocket 连接也能运行；用户在执行中进入或刷新任务会话时，普通聊天页加载快照后继续接收更新。
+- 一条群消息引用多个数字员工时，各员工使用独立的子会话、trace 和回答消息 ID。首条消息完整保留 `resourceList` 供展示，子会话成员统计只计入实际执行的目标员工，BE 重启恢复后仍保持这一约束。
+- 群聊观察器只负责读取 disposition 文件、提前提升 TASK、发送群内回执，以及从已落库的最终答案投影 CHAT 回复；不再独立消费或 ACK 子会话 Stream。初始投影失败可由持久化 execution 补偿，运行超过十分钟不会自动重新发送 Gateway 请求。
+- 当前没有可靠的远端执行租约，因此不对“运行中但长时间没有结果”的任务盲目重发。若投递结果不确定或远端失联，应先核实 Gateway/Agent 状态；用户可取消异常任务。此修复不会自动恢复此前已经误标为 `SUCCEEDED` 的记录。
+- Gateway 事件身份校验、流式聚合和恢复使用普通聊天链路。群聊完成投影按子会话和 trace 关联，并以已落库的回答为依据。结束事件已被看到不代表持久化及完成回调已成功；只有成功标记才允许重投时直接 ACK，避免失败回调被跳过。
+
+## 任务内切换 Agent 与历史文件
+
+- 未发布的群聊任务在当前 turn 结束后，发起人可以在同一子会话切换其他群内数字员工；目标员工必须存在并具有当前用户的资源授权。运行中的任务不能并行切换，已发布或已取消的任务不能从私有入口重新启动。
+- 切换只改变本轮执行者。任务的初始目标和最终群结果署名保持为最初被 @ 的 Agent，子会话历史通过消息 metadata 中实际的 `agentId` 区分不同员工的正文。
+- 群聊派发前，BE 在发起人的 UserFS 私有工作区生成 `/.sessions/{childSessionId}/.byclaw/context/{turnKey}/group-history.json`；任务子会话仅在本轮 Agent 与最近实际回答的 Agent 不同时生成群历史和 `task-history.jsonl`；同 Agent 续聊不生成这两份交接文件。Agent 的读取路径带 `/by` 前缀，由群聊历史和任务接手两个独立提示方法提供。提示只描述相关历史和文件路径，不暴露边界字段或讲解截断。执行端须具备该工作区的挂载及文件读取能力。
+- 群历史沿用原有快照边界和上限（60 条、30,000 正文字符），任务续聊不会隐式读入委派后新增群消息。任务文件按本轮输入之前的消息顺序分页导出全部已持久化的用户／Agent 正文，不附加 inferLog、工具日志或结构化消息 JSON，不生成摘要。
+- 每轮路径隔离；仅全部文件和完成标记写入成功后才发送 Gateway 请求。同轮重试验证并复用成功快照；查询、序列化、写入或完整性检查失败时提示“历史上下文准备失败，请重试”，本轮不发送。文件不写入公共群目录。
+- 原有 `groupChat` 参数、OpenClaw 历史加载及注入保留，与文件提示并存。普通非群聊会话不生成上述文件。
+
+## 最终正文持久化
+
+- 共用聊天链路收到有效 `finalAnswer` 或 `final_answer` 时，`messageContent` 优先保存该正文，已有 `final_content` 同步记录；缺失、空白或 `[DONE]` 则保持累计正文回退。最终正文事件本身不结束 turn。
+- `messageStruct` 仍保存完整结构化答案段供展示，`inferLog` 独立保存；运行快照分别保存累计正文和显式最终正文，恢复和重放不重复拼接。重新生成没有最终正文时，清除之前的 `final_content`。
+- 历史文件直接读取 `messageContent`。已有消息无需回填；公开群回复仍保留原有可见性规则，不将工具过程或未完成的中间正文发布到群。
+
 ## 系统架构
 
 ```
@@ -323,6 +410,17 @@ cp src/main/resources/application-dev.yml \
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
+### 短信验证码配置
+
+阿里云短信配置通过 `config/application.properties` 和部署配置
+`deploy/config/application.properties` 映射以下环境变量：
+`ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、
+`ALIYUN_SMS_ENDPOINT`、`ALIYUN_SMS_TEMPLATES_LOGIN`、`ALIYUN_SMS_TEMPLATES_REGISTER`。
+Endpoint 默认使用 `dysmsapi.aliyuncs.com`，登录和注册模板均须包含 `${code}` 参数。
+本地启动读取项目根目录 `.env`；Docker Compose 通过 `env_file` 注入变量，修改后需重建后端容器。
+发送接口要求有效的图形验证码及同一 Session，并依赖数据库与 Redis。
+`GET /system/session/captcha` 与 `POST /system/session/sms/send` 允许匿名访问，部署时加上配置的 context-path（例如 `/byaiService`）。放行按 HTTP 方法和完整路径匹配；图形验证码仍为两分钟有效且只能使用一次，手机号重复发送间隔和按 IP、业务类型计数的限流仍然生效。
+
 ## 技术栈
 
 - **框架**: Spring Boot 3.x, Spring Cloud, MyBatis-Plus
@@ -361,3 +459,106 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 ---
 
 <p align="center">Made with ❤️ by BeyondAI Team</p>
+
+群历史 `context.messages[].attachments` 会合并普通消息附件与 `TASK_RESULT` 的 `metadata.files`。云盘附件包含 `fileName`、`filePath`、`cloudResourceId`，允许 `fileId` 为空；新发布会保存服务端校验后的云盘 ID，旧消息缺少该字段时从所属群项目补齐。项目不存在时仍返回文件名和路径，云盘 ID 为空。实时 `MESSAGE_CREATED` 同时返回 `attachments` 与兼容字段 `files`。
+
+### 工作组邀请凭证接口
+
+`GroupChatController` 提供以下接口（部署网关通常添加 `/byaiService` 前缀）：
+
+- `POST /group-chats/{sessionId}/invitations`：已登录群主/管理员获取会话邀请；有效 token 复用并从当前时间续期 7 天，缺失或过期则新建；返回 `token`、`expiresAt`（毫秒）。
+- `POST /group-chats/invitations/validate`：请求体 `{"token":"…"}`；允许匿名预览，返回工作组名称/号码、邀请人、企业、成员数量、最多四位 `memberPreviews`（`displayName`/`type`/`avatar`）、有效期、加入开关和当前成员状态。失败原因通过现有错误响应区分：`Invitation has expired`、`Invitation has been revoked`、`Group link joining is disabled`、`Group has been dissolved`；不包含原始 token。旧邀请码被替换后因不保留历史，只能报告无效。
+- `POST /group-chats/invitations/join`：登录后提交 `{token}`，由服务端解析绑定群 ID，复用 `GroupChatApplicationService.acceptInvitation(sessionId, token)`，锁群后重新校验有效期、群状态、开关、邀请人角色/账户状态及企业限制；返回成员信息，重复加入不重复写入。
+
+凭证使用 SecureRandom 从大小写字母和数字共 62 个字符中逐位均匀选取，固定 8 位，默认有效期 7 天。V0.4.1 起持久化到 `message_share_link`：`link_type=GROUP_INVITATION`、`link_id=session_id`、`link_token` 保存原始邀请码，`creator_id`/`com_acct_id`/`expire_time` 保存邀请人、企业和有效期；一群一行，过期重建更新原行，不保留历史，不写消息关联表。
+前端链接只使用 `/hacu/invite#token=…`，不得拼接展示资料或群 ID。创建和预览响应禁止缓存。邀请码不再依赖 Redis 或 RSA 配置，原 Redis 邀请不会自动迁移，上线后需重新获取。数据库中的原始邀请码属于访问凭证，避免输出到日志。
+保留 `POST /group-chats/{sessionId}/members`，由 `GroupChatApplicationService.invite` 支持管理员直接添加真人或数字员工；请求体为 `{"type":"USER 或 AGENT","id":成员ID}`。
+旧的 `/{sessionId}/invitation`（GET）、`/{sessionId}/join`（POST）、
+`/join-by-number`（POST）、`/{sessionId}/join-requests`（GET）、`/{sessionId}/join-requests/me`（GET）
+及 `/{sessionId}/join-requests/{requestId}/review`（POST）已移除（均在 `/group-chats` 下）。
+群号申请/审批 service 方法及 DTO 同步删除。token 入群写操作由 `GroupChatApplicationService.acceptInvitation(sessionId, token)` 在凭证校验后执行，
+不再调用旧 service；`GroupChatSettingsService` 仅保留群设置、昵称和解散能力，设置 DTO 移除群号加入开关及审批标记。
+前端需同步更新并重新生成旧链接。历史申请数据不做清理或迁移，移除功能后不再读取。
+
+`GroupChatInvitationService` 负责生成、预览、解析绑定群及凭证校验；接受邀请通过 `acceptInvitation` 与管理员 `invite` 共用内部 `insertMember` 写入方法，不在邀请 service 中重复实现。
+邀请码在最后一次成功调用获取接口 7 天后逻辑过期（读取时检查 `expire_time`，不依赖自动清理）；预览、加入均不续期，成功加入不删除；关闭链接加入或邀请人权限失效时立即拒绝使用，但不主动删除记录。旧 43 位凭证不再接受，需重新生成。
+
+同一会话的获取在群行锁与数据库事务内串行，邀请人保留首次签发者，复用时仍检查其当前权限。分享主表新增可空的 `link_type`，默认 `MESSAGE`，历史 NULL 按 MESSAGE 查询；消息分享仍使用原来的独立 link_id。主表查询、更新按类型隔离，表达式唯一索引以 `COALESCE(link_type, 'MESSAGE')` 分别约束 ID 和 token。
+
+部署前先执行 `deploy/migrations/versions/V0.4.1/V0.4.1__ddl.sql`；若历史数据存在同类型重复 ID/token，唯一索引创建会失败，应先核查，迁移不自动删数据。此变更不修改 `deploy/middleware/initdb/`。避免新旧后端混跑：旧版本消息分享查询没有类型过滤，旧邀请服务仍读 Redis。
+
+### 群消息任务归属字段
+
+`POST /group-chats/{groupSessionId}/context` 的 `messages[]` 对 `TASK_RESULT` 和 `TASK_ACK` 消息返回
+`initiatorUserId`（字符串），表示任务发起者的用户 ID，与 `taskId` 一样保留完整整数精度。
+归属通过任务记录查询，并校验任务属于当前群；普通消息、任务不存在或引用无效时该字段为空，不从发言 Agent 或发布人推断。
+实时任务消息 `MESSAGE_CREATED` 使用同名字符串字段。
+
+前端处理 `kind="TASK_RESULT"` 时，只有 `initiatorUserId` 非空且等于当前登录用户 ID 的字符串形式才允许回复；
+字段缺失或为空时禁用回复。此字段用于 UI 展示判断，BE 仍独立执行任务发起者校验。
+
+历史文件导出会使用消息保存的成员名称快照，将 `{{DIG_EMPLOYEE_id}}` 和 `{{HUMAN_id}}` 转为 `@名称`（含群消息引用正文）。群消息读取 `metadata.resourceList`，任务用户消息优先读取 `related_resources.resourceList`，兼容 metadata 中的成员快照。无法还原名称的旧标记保留原文；数据库正文和原群历史接口保持不变。
+
+### 群任务交付信号
+
+任务交付提醒会要求 Agent 在 `/by/.sessions/{taskId}/.byclaw/task-delivery.json` 写入
+`{"schemaVersion":"1","taskSessionId":"任务ID","delivered":true}`。同一子会话的有效信号跨轮次和 Agent 保留。
+`GET /group-chat/tasks/{taskId}/delivery-status` 仅供仍在群内的任务发起人查询，返回字符串 taskId 和布尔 delivered。
+无文件/无效协议返回 false，存储故障返回可重试错误；不增加数据库状态、不直接授权或触发发布。
+前端进入、重连和每轮结束查询，按钮发送“确认完成并发布”，后续沿用现有发布卡片确认流程。
+
+### 群成员批量添加
+
+`POST /byaiService/group-chats/{sessionId}/members` 接受
+`{"type":"AGENT","id":["20010807","20037876"]}`，真人成员使用 `type: "USER"`。
+`id` 兼容旧客户端单值，响应 data 统一为成员数组。
+空数组、空 ID 和非正整数不可提交；重复 ID 去重，已在群中的成员沿用拒绝规则。
+整批成员、项目关系和使用授权在同一事务中完成，任一失败整批回滚，事件及缓存沿用提交后发布。
+
+### 群聊 Agent 间 @ 调度
+
+BE 仅在 CHAT 公开答复和任务最终发布的 `TASK_RESULT` 正文中解析 @ 并调度其他 Agent。
+TASK 进行中的所有 turn（包括等待用户继续输入时的最终答复）都不触发 Agent 委派；正文中的 @ 及成员展示信息仍保留。
+任务完成后的群内续聊沿用 `CHAT_CONTINUATION / CHAT`，允许继续 @ 调度，不重新打开原任务。
+
+`TASK_RESULT` 使用确认发布的正文和群消息 ID 作为委派内容、触发 ID 与公开上下文边界，
+保留原始任务 turn 的委派链和层数限制。成果消息的正文、`metadata.resourceList` 与实时事件保持一致。
+发布与子委派登记共用事务；失败一起回滚，重复确认返回已有发布结果，不重复调度。
+
+
+### Group topic message pagination
+
+`GET /group-chats/{sessionId}/topics/{topicId}/messages?limit=20&cursor=...`
+returns the normal response wrapper with `topicId`, `rootMessageId`, nullable
+`rootMessage`, `messages`, `hasMore`, and nullable `nextCursor`. IDs are strings.
+The current caller must be a group member and the topic must belong to that group.
+The root is returned separately; replies include every branch with the same persisted
+topic identity, ordered by `(createTime, messageId)` ascending. `limit` defaults to
+20 and is clamped to 1–50. Message and reference projections reuse group history
+visibility and resource handling.
+
+Pass the opaque `nextCursor` unchanged to load subsequent replies. Cursors are scoped
+to the group and topic and validated against their original visible message boundary.
+If that boundary is no longer available, reload from the first page. This is a live
+keyset view, not a cross-request snapshot. No exact reply count is returned. The
+existing session/topic/time index supports the query; no schema migration is needed.
+Sending remains the existing group send protocol with `replyToMessageId` set to the
+root message ID. Deploy this endpoint before enabling the topic modal frontend.
+
+### 新建群的默认数字员工
+
+关联 [byclaw-hacu#6](https://github.com/beyonai/byclaw-hacu/issues/6)。
+`GET /group-chats/default-assistant` 返回默认员工数组，每项包含 `resourceId`（字符串）、
+`resourceName`、`resourceDesc`、`avatar`；无匹配时返回 `[]`。
+
+`byai_system_config` 的 `param_code=BYAI_GROUP_WORK_ASSISTANT_NAME` 保持不变，`param_value`
+兼容原有单个名称，也支持 JSON 名称数组，例如 `["群组工作助手","知识助手"]`。
+配置缺失或空白时使用“群组工作助手”，`[]` 表示不配置默认员工。名称可按部署语言配置。
+按配置顺序在平台范围内精确匹配已上架的组织级数字员工，不按当前企业过滤，排除数字员工组（017）。
+每个名称返回全部匹配员工（按资源 ID 排序），最终按资源 ID 去重，不限制数量。
+
+前端用查询结果回显各员工的名称、描述和头像；失败或结果为空时隐藏卡片，不影响创建。
+`POST /group-chats` 通过 `agentIds` 数组提交回显的员工以及用户已选员工。
+后端批量校验资源存在性，合并模板员工并去重后写入群成员，不再隐式追加默认助手。
+创建响应 `members` 返回实际加入的员工，后续群详情沿用已有成员信息回显。
+配置变更仅影响之后打开的创建页面。

@@ -265,6 +265,14 @@
             <if test="agentType != null and agentType != ''">
                 and b.agent_type = #{agentType}
             </if>
+            <if test="excludeGroupSessionId != null">
+                and not exists (
+                    select 1 from byai_session_member gm
+                    where gm.session_id = #{excludeGroupSessionId}
+                      and gm.mem_obj_type = 'AGENT'
+                      and gm.mem_obj_id = a.resource_id
+                )
+            </if>
             <if test="excludeEmployeeGroup == true">
                 and (b.agent_type is null or b.agent_type != '017')
             </if>

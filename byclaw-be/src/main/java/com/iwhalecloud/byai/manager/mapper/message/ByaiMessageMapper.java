@@ -7,10 +7,12 @@ import com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem;
 import com.iwhalecloud.byai.common.message.qo.MessageHotDelQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotPageQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotQo;
+import com.iwhalecloud.byai.manager.entity.groupchat.GroupChatTopicParticipant;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
+import java.util.Date;
 
 /**
  * byai_message Mapper
@@ -25,6 +27,14 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * @return 消息列表
      */
     List<ByaiMessage> selectBySessionId(@Param("sessionId") Long sessionId);
+
+    /** 群行锁后读取最新状态，避免事务内旧查询缓存覆盖撤回判断。 */
+    ByaiMessage selectForRecall(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId);
+
+    int recallGroupMessage(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
+        @Param("operatorId") Long operatorId, @Param("recalledAt") Date recalledAt);
+
+    Long selectLatestMessageId(@Param("sessionId") Long sessionId);
 
     /**
      * 根据任务ID查询消息列表
@@ -41,6 +51,24 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * @return 记录（可能为 null）
      */
     ByaiMessage selectByMessageId(@Param("messageId") Long messageId);
+
+    /** 按话题索引正向读取，根消息由独立投影返回。 */
+    List<ByaiMessage> selectTopicMessages(@Param("sessionId") Long sessionId, @Param("topicId") Long topicId,
+        @Param("rootMessageId") Long rootMessageId, @Param("afterMessageId") Long afterMessageId, @Param("limit") int limit);
+
+    int assignGroupTopic(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
+        @Param("topicId") Long topicId);
+
+    List<ByaiMessage> selectVisibleGroupMessagesByIds(@Param("sessionId") Long sessionId,
+        @Param("messageIds") List<Long> messageIds);
+
+    /** 批量查询当前话题页的全部发言成员，避免按话题逐条查询。 */
+    List<GroupChatTopicParticipant> selectGroupTopicParticipants(@Param("sessionId") Long sessionId,
+        @Param("topicIds") List<Long> topicIds);
+
+    /** 查询群聊入站消息的客户端幂等键。 */
+    ByaiMessage selectGroupMessageByClientRequestId(@Param("sessionId") Long sessionId,
+        @Param("clientRequestId") String clientRequestId);
 
     /**
      * 根据会话ID删除记录
@@ -93,11 +121,37 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      */
     List<ByaiMessage> selectByQo(@Param("qo") MessageHotQo qo);
 
-    /**
-     * 查询严格早于当前用户消息的最近可见群聊消息，按时间倒序返回。
-     */
+    /** 用户会话时间线包括系统事件，Agent 查询仍使用独立的对话过滤。 */
+    List<ByaiMessage> selectTimelineBeforeMessageId(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
+
+    Long countTimelineBeforeMessageId(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId);
+
+    /** 查询严格早于当前输入的对话消息，按时间倒序返回，供 Agent 上下文使用。 */
     List<ByaiMessage> selectVisibleBeforeMessageId(@Param("sessionId") Long sessionId,
         @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
+
+    ByaiMessage selectVisibleGroupMessage(@Param("sessionId") Long sessionId,
+        @Param("messageId") Long messageId);
+
+    List<ByaiMessage> selectVisibleAfterMessageId(@Param("sessionId") Long sessionId,
+        @Param("messageId") Long messageId, @Param("limit") Integer limit);
+
+    List<ByaiMessage> searchVisibleGroupMessages(@Param("sessionId") Long sessionId,
+        @Param("keyword") String keyword, @Param("scope") String scope,
+        @Param("senderType") String senderType, @Param("userId") Long userId,
+        @Param("startTime") Date startTime, @Param("endTime") Date endTime,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
+
+    /** 倒序读取此前的回答身份，用于判断子会话实际执行 Agent 是否切换。 */
+    List<ByaiMessage> selectPreviousTaskAnswers(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
+
+    /** 按消息身份分页导出任务正文，不加载思考、结构段或工具记录。 */
+    List<ByaiMessage> selectTaskHistoryPage(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("afterMessageId") Long afterMessageId,
+        @Param("limit") Integer limit);
 
     /**
      * 统计严格早于当前用户消息的可见群聊消息，供截断信息使用。

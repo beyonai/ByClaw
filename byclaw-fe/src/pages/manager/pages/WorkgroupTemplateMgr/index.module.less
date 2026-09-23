@@ -1,0 +1,77 @@
+.page {
+  min-height: 100%;
+  padding: 24px;
+  background: #f5f7fa;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+
+  h1 {
+    margin: 0 0 6px;
+    color: #1d2129;
+    font-size: 24px;
+  }
+
+  p {
+    margin: 0;
+    color: #86909c;
+  }
+}
+
+.templateCell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+
+  span {
+    max-width: 420px;
+    overflow: hidden;
+    color: #86909c;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.unavailable {
+  color: #f53f3f;
+}
+
+.editorModal :global(.@{antPrefix}-modal-body) {
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+}
+
+.form {
+  padding-top: 8px;
+}
+
+.sectionTitle {
+  margin: 8px 0 16px;
+  padding-left: 10px;
+  color: #1d2129;
+  font-size: 15px;
+  font-weight: 600;
+  border-left: 3px solid #165dff;
+}
+
+.twoColumns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.sortField {
+  width: 140px;
+}
+
+@media (max-width: 900px) {
+  .twoColumns {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}

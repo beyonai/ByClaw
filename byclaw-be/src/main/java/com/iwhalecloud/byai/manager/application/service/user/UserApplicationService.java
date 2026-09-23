@@ -785,7 +785,7 @@ public class UserApplicationService extends BaseUserApplicationService {
 
             Station station = stationService.getById(user.getStationId());
 
-            result.put("stationName", station.getStationName());
+            result.put("stationName", station == null ? null : station.getStationName());
 
         }
 
@@ -805,15 +805,15 @@ public class UserApplicationService extends BaseUserApplicationService {
 
         result.put("pathName", pathName);
 
-        result.put("superassistId", superassist.getSuperassistId());
+        result.put("superassistId", superassist == null ? null : superassist.getSuperassistId());
 
-        result.put("avatar", superassist.getAvatar());
+        result.put("avatar", superassist == null ? null : superassist.getAvatar());
 
-        result.put("suasIntro", superassist.getIntro());
+        result.put("suasIntro", superassist == null ? null : superassist.getIntro());
 
-        result.put("suasName", superassist.getName());
+        result.put("suasName", superassist == null ? null : superassist.getName());
 
-        result.put("prologue", superassist.getPrologue());
+        result.put("prologue", superassist == null ? null : superassist.getPrologue());
 
         result.put("chattedTimes", getChattedNumber(user.getUserId()));
 

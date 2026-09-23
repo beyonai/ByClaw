@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper">
+    <select id="selectByGroup" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask">
+        SELECT * FROM byai_group_chat_task
+        WHERE group_session_id = #{groupSessionId}
+        ORDER BY create_time DESC, task_session_id DESC
+    </select>
+
+    <update id="updateTurnStatus">
+        UPDATE byai_group_chat_task SET turn_status = #{turnStatus}, update_time = #{now}
+        WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE'
+    </update>
+
+    <update id="claimTurn">
+        UPDATE byai_group_chat_task SET turn_status = 'RUNNING', update_time = #{now}
+        WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE'
+          AND turn_status IN ('WAITING_USER', 'FAILED')
+    </update>
+
+    <update id="publish">
+        UPDATE byai_group_chat_task
+        SET status = 'PUBLISHED', turn_status = 'WAITING_USER', publish_message_id = #{messageId},
+            publish_by = #{publisherUserId}, update_time = #{now}
+        WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE' AND turn_status != 'RUNNING'
+    </update>
+
+    <update id="cancel">
+        UPDATE byai_group_chat_task SET status = 'CANCELLED', update_time = #{now}
+        WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE'
+    </update>
+</mapper>

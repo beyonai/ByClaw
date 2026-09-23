@@ -6,6 +6,8 @@
     <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.common.message.entity.ByaiMessage">
         <result column="access_terminal" property="accessTerminal" />
         <result column="append_index" property="appendIndex" />
+        <result column="recalled_at" property="recalledAt" />
+        <result column="recalled_by" property="recalledBy" />
         <result column="archived_at" property="archivedAt" />
         <result column="belong_date" property="belongDate" />
         <result column="call_logs" property="callLogs" />
@@ -20,6 +22,7 @@
         <result column="message_content" property="messageContent" />
         <result column="message_id" property="messageId" />
         <result column="message_ref" property="messageRef" />
+        <result column="topic_id" property="topicId" />
         <result column="message_struct" property="messageStruct" />
         <result column="metadata" property="metadata" />
         <result column="msg_status" property="msgStatus" />
@@ -65,12 +68,23 @@
         <result column="create_time" property="createTime" />
         <result column="position" property="position" />
         <result column="total_count" property="totalCount" />
+        <result column="recalled_at" property="recalledAt" />
+        <result column="recalled_by" property="recalledBy" />
+    </resultMap>
+
+    <resultMap id="TopicParticipantMap"
+        type="com.iwhalecloud.byai.manager.entity.groupchat.GroupChatTopicParticipant">
+        <result column="topic_id" property="topicId" />
+        <result column="member_type" property="memberType" />
+        <result column="member_id" property="memberId" />
+        <result column="display_name" property="displayName" />
+        <result column="first_message_id" property="firstMessageId" />
     </resultMap>
 
     <!-- 通用查询列 -->
     <sql id="Base_Column_List">
-        id, access_terminal, append_index, archived_at, belong_date, call_logs, create_time, creator_id, creator_name, enterprise_id,
-        final_content, final_message_struct, infer_log, is_complete, message_content, message_id, message_ref, message_struct, metadata,
+        id, access_terminal, append_index, recalled_at, recalled_by, archived_at, belong_date, call_logs, create_time, creator_id, creator_name, enterprise_id,
+        final_content, final_message_struct, infer_log, is_complete, message_content, message_id, message_ref, topic_id, message_struct, metadata,
         msg_status, project_id, rel_message_id, rel_objs, related_resources, res_com_id, res_com_ids, "role", session_id, task_id, update_time,
         "usage",
         doc_access_terminal, doc_belong_date, doc_create_time, doc_creator_id, doc_infer_log, doc_is_complete, doc_message_content, doc_message_id,
@@ -83,6 +97,10 @@
         FROM byai_message
         WHERE session_id = #{sessionId}
         ORDER BY create_time DESC, message_id DESC
+    </select>
+
+    <select id="selectLatestMessageId" resultType="long">
+        SELECT MAX(message_id) FROM byai_message WHERE session_id = #{sessionId}
     </select>
 
     <select id="selectByTaskId" resultMap="BaseResultMap">
@@ -99,6 +117,15 @@
         LIMIT 1
     </select>
 
+    <select id="selectGroupMessageByClientRequestId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND metadata::jsonb ->> 'clientRequestId' = #{clientRequestId}
+        ORDER BY message_id DESC
+        LIMIT 1
+    </select>
+
     <delete id="deleteBySessionId">
         DELETE FROM byai_message
         WHERE session_id = #{sessionId}
@@ -107,7 +134,7 @@
     <insert id="insertBatch" parameterType="java.util.List">
         INSERT INTO byai_message (
         id, session_id, task_id, access_terminal, metadata, "role", "usage", creator_id,
-        message_id, message_struct, create_time, belong_date, message_content, related_resources,
+        message_id, message_struct, create_time, belong_date, message_content, final_content, related_resources,
         call_logs, infer_log, msg_status, project_id, res_com_ids, is_complete, archived_at, update_time
         )
         VALUES
@@ -126,6 +153,7 @@
             #{item.createTime,jdbcType=TIMESTAMP},
             #{item.belongDate,jdbcType=DATE},
             #{item.messageContent,jdbcType=VARCHAR},
+            #{item.finalContent,jdbcType=VARCHAR},
             #{item.relatedResources,jdbcType=VARCHAR},
             #{item.callLogs,jdbcType=VARCHAR},
             #{item.inferLog,jdbcType=VARCHAR},
@@ -158,6 +186,7 @@
             <if test="item.createTimeMillis != null and item.createTimeMillis != ''">create_time = to_timestamp(CAST(#{item.createTimeMillis} AS BIGINT) / 1000.0),</if>
             <if test="item.belongDateMillis != null and item.belongDateMillis != ''">belong_date = (to_timestamp(CAST(#{item.belongDateMillis} AS BIGINT) / 1000.0))::date,</if>
             <if test="item.messageContent != null">message_content = #{item.messageContent},</if>
+            <if test="item.replaceFinalContent or item.finalContent != null">final_content = #{item.finalContent,jdbcType=VARCHAR},</if>
             <if test="item.relatedResources != null">related_resources = #{item.relatedResources},</if>
             <if test="item.callLogs != null">call_logs = #{item.callLogs},</if>
             <if test="item.inferLog != null">infer_log = #{item.inferLog},</if>
@@ -198,6 +227,7 @@
                 AND creator_id = #{qo.creatorId}
             </if>
             <if test="qo.keyword != null and qo.keyword != ''">
+                AND recalled_at IS NULL
                 AND UPPER(message_content) LIKE CONCAT('%', UPPER(REPLACE(REPLACE(#{qo.keyword}, '*', '%'), '?', '_')), '%')
             </if>
         </where>
@@ -207,6 +237,13 @@
         </if>
     </select>
 
+    <!-- 纯附件历史允许正文为 NULL；列表、定位、引用与计数必须采用同一可见载荷条件。
+         prefix 只由下方静态 include 指定，不能来自请求参数。 -->
+    <sql id="GroupMessagePayloadCondition">
+        (${prefix}message_content IS NOT NULL
+         OR NULLIF(TRIM(${prefix}related_resources), '') IS NOT NULL)
+    </sql>
+
     <select id="selectVisibleBeforeMessageId" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM byai_message
@@ -214,8 +251,100 @@
           AND message_id &lt; #{beforeMessageId}
           AND archived_at IS NULL
           AND "usage" IN (1, 2)
-          AND message_content IS NOT NULL
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
         ORDER BY create_time DESC, message_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectTimelineBeforeMessageId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &lt; #{beforeMessageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2, 5)
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
+        ORDER BY create_time DESC, message_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectVisibleGroupMessage" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id = #{messageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2)
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
+        LIMIT 1
+    </select>
+
+    <select id="selectVisibleAfterMessageId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &gt; #{messageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2)
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
+        ORDER BY create_time ASC, message_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="searchVisibleGroupMessages" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message message
+        WHERE message.session_id = #{sessionId}
+          AND message.archived_at IS NULL
+          AND message.recalled_at IS NULL
+          AND message."usage" IN (1, 2)
+          <!-- 正文搜索排除 NULL 正文；纯附件的历史展示使用独立查询。 -->
+          AND message.message_content IS NOT NULL
+          <if test="keyword != null">
+              AND LOWER(message.message_content) LIKE CONCAT('%', LOWER(#{keyword}), '%') ESCAPE CHR(92)
+          </if>
+          <if test="scope == 'MINE'">AND message.creator_id = #{userId}</if>
+          <if test="scope == 'MENTIONED_ME'">
+              AND EXISTS (
+                  SELECT 1 FROM byai_group_chat_mention mention
+                  WHERE mention.group_session_id = message.session_id
+                    AND mention.message_id = message.message_id
+                    AND mention.mentioned_user_id = #{userId}
+              )
+          </if>
+          <if test="senderType == 'USER'">AND message."usage" = 1</if>
+          <if test="senderType == 'AGENT'">AND message."usage" = 2</if>
+          <if test="startTime != null">AND message.create_time &gt;= #{startTime}</if>
+          <if test="endTime != null">AND message.create_time &lt;= #{endTime}</if>
+          <if test="beforeMessageId != null">AND message.message_id &lt; #{beforeMessageId}</if>
+        ORDER BY message.message_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectPreviousTaskAnswers" resultMap="BaseResultMap" useCache="false">
+        SELECT message_id, metadata, message_content
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &lt; #{beforeMessageId}
+          AND archived_at IS NULL
+          AND "usage" = 2
+          AND (is_complete = TRUE OR is_complete IS NULL)
+        ORDER BY message_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 只选择公开正文列；游标和本轮边界确保完整导出不会混入当前或后续输入。 -->
+    <select id="selectTaskHistoryPage" resultMap="BaseResultMap" useCache="false">
+        SELECT message_id, session_id, "usage", creator_id, creator_name, metadata,
+               create_time, message_content, related_resources
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &lt; #{beforeMessageId}
+          AND message_id &gt; #{afterMessageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2)
+          AND message_content IS NOT NULL
+        ORDER BY message_id ASC
         LIMIT #{limit}
     </select>
 
@@ -226,7 +355,17 @@
           AND message_id &lt; #{beforeMessageId}
           AND archived_at IS NULL
           AND "usage" IN (1, 2)
-          AND message_content IS NOT NULL
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
+    </select>
+
+    <select id="countTimelineBeforeMessageId" resultType="long">
+        SELECT COUNT(1)
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &lt; #{beforeMessageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2, 5)
+          AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
     </select>
 
 
@@ -257,6 +396,8 @@
                "usage",
                LEFT(COALESCE(NULLIF(final_content, ''), NULLIF(message_content, ''), ''), 800) AS content,
                related_resources,
+               recalled_at,
+               recalled_by,
                creator_name,
                create_time,
                position,
@@ -271,6 +412,8 @@
                    creator_name,
                    create_time,
                    archived_at,
+                   recalled_at,
+                   recalled_by,
                    ROW_NUMBER() OVER (ORDER BY create_time DESC, message_id DESC) AS position,
                    COUNT(1) OVER () AS total_count
             FROM byai_message
@@ -281,4 +424,62 @@
         ORDER BY create_time ASC, message_id ASC
     </select>
 
+    <!-- 同群校验由归属服务完成，群行锁串行化未回填链的补齐。 -->
+    <update id="assignGroupTopic">
+        UPDATE byai_message SET topic_id = #{topicId}
+        WHERE session_id = #{sessionId} AND message_id = #{messageId} AND topic_id IS NULL
+    </update>
+
+    <!-- 使用话题联合索引反向遍历，不扫描全群，也不按引用深度裁剪分支。 -->
+    <select id="selectTopicMessages" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" /> FROM byai_message
+        WHERE session_id = #{sessionId} AND topic_id = #{topicId}
+          AND message_id != #{rootMessageId} AND archived_at IS NULL
+          AND "usage" IN (1, 2) AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
+        <if test="afterMessageId != null">
+          AND (create_time, message_id) &gt;
+              ((SELECT boundary.create_time FROM byai_message boundary
+                WHERE boundary.session_id = #{sessionId} AND boundary.message_id = #{afterMessageId}),
+               #{afterMessageId})
+        </if>
+        ORDER BY create_time ASC, message_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectVisibleGroupMessagesByIds" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" /> FROM byai_message
+        WHERE session_id = #{sessionId} AND archived_at IS NULL
+          AND "usage" IN (1, 2) AND <include refid="GroupMessagePayloadCondition"><property name="prefix" value="" /></include>
+          AND message_id IN
+          <foreach collection="messageIds" item="messageId" open="(" separator="," close=")">#{messageId}</foreach>
+    </select>
+
+    <!-- creator_id 是群公开消息的真实发言者 ID；USER/AGENT 组合用于隔离同 ID 身份。 -->
+    <select id="selectGroupTopicParticipants" resultMap="TopicParticipantMap">
+        SELECT topic_id,
+               CASE WHEN "usage" = 1 THEN 'USER' ELSE 'AGENT' END AS member_type,
+               creator_id AS member_id,
+               MAX(creator_name) AS display_name,
+               MIN(message_id) AS first_message_id
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND topic_id IN
+          <foreach collection="topicIds" item="topicId" open="(" separator="," close=")">#{topicId}</foreach>
+          AND "usage" IN (1, 2)
+          AND creator_id IS NOT NULL
+        GROUP BY topic_id, "usage", creator_id
+        ORDER BY topic_id, first_message_id
+    </select>
+    <select id="selectForRecall" resultMap="BaseResultMap" flushCache="true" useCache="false">
+        SELECT <include refid="Base_Column_List" /> FROM byai_message
+        WHERE session_id = #{sessionId} AND message_id = #{messageId}
+        FOR UPDATE
+    </select>
+
+    <update id="recallGroupMessage">
+        UPDATE byai_message
+        SET recalled_at = #{recalledAt}, recalled_by = #{operatorId}, update_time = #{recalledAt}
+        WHERE session_id = #{sessionId} AND message_id = #{messageId}
+          AND "usage" IN (1, 2) AND recalled_at IS NULL AND archived_at IS NULL
+    </update>
 </mapper>

@@ -102,7 +102,7 @@ export default {
   'sandboxMgr.profile.sortOrder': '排序',
   'sandboxMgr.profile.serviceTypePlaceholder': '请输入服务类型，如：openclaw',
   'sandboxMgr.profile.profileKeyPlaceholder': '请输入规格 Key，如：xs、s、m、l',
-  'sandboxMgr.profile.resourceRequestsPlaceholder': '请输入保障资源 JSON，如：{"cpu":"500m","memory":"1Gi"}',
+  'sandboxMgr.profile.resourceRequestsPlaceholder': '请输入保障资源 JSON，例如 CPU 500m、内存 1Gi',
   'sandboxMgr.profile.resourceLimitsPlaceholder': '请输入资源上限 JSON，如：{"cpu":"2","memory":"4Gi"}',
   'sandboxMgr.profile.templatePatchJsonPlaceholder': '请输入模板补丁 JSON（可选）',
   'sandboxMgr.profile.serviceTypeRequired': '请输入服务类型',

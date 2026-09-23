@@ -1,6 +1,7 @@
 import {
   ApartmentOutlined,
   AppstoreOutlined,
+  CloudDownloadOutlined,
   CodeSandboxOutlined,
   ControlOutlined,
   // DashboardOutlined,
@@ -14,6 +15,19 @@ import {
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 
 const MANAGER_MENU_PARAM_CODE = 'SYSTEM_BACKEND_MENU_MANAGE';
+export const WORKGROUP_TEMPLATE_MENU = {
+  path: '/manager/workgroup-templates',
+  routePath: '/manager/workgroup-templates',
+  name: '工作组模板管理',
+  nameEn: 'Workgroup templates',
+  icon: TeamOutlined,
+};
+
+/**
+ * App 版本管理的菜单项由后台菜单配置（SYSTEM_BACKEND_MENU_MANAGE）提供，前端不写死；
+ * 这里只保留 path 用于按 capability 决定是否隐藏，以及菜单图标映射。
+ */
+export const APP_VERSION_MENU_PATH = '/manager/app-versions';
 let managerMenuConfigPromise: Promise<any[]> | null = null;
 let managerMenuConfigCache: any[] | null = null;
 
@@ -27,6 +41,7 @@ const iconByMenuCode: Record<string, any> = {
   menu_sandbox_config: CodeSandboxOutlined,
   menu_ui_agent: RadarChartOutlined,
   menu_system_feedback: CommentOutlined,
+  menu_app_version: CloudDownloadOutlined,
 };
 
 const localeIdByPath: Record<string, string> = {
@@ -222,3 +237,14 @@ export const filterMenusByMenuDisplay = (menus: any[], userInfo: any): any[] => 
     return item.menuDisplay.some((role: string) => userTypeList.includes(role));
   });
 };
+
+export const withWorkgroupTemplateMenu = (menus: any[], allowed: boolean) => {
+  const filtered = menus.filter((item) => item.path !== WORKGROUP_TEMPLATE_MENU.path);
+  return allowed ? [...filtered, WORKGROUP_TEMPLATE_MENU] : filtered;
+};
+
+/**
+ * 菜单项本身来自后台菜单配置，前端只做「无管理权限时隐藏」的处理。
+ */
+export const filterAppVersionMenu = (menus: any[], allowed: boolean) =>
+  allowed ? menus : menus.filter((item) => item.path !== APP_VERSION_MENU_PATH);

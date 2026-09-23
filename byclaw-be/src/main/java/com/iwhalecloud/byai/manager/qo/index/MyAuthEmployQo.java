@@ -38,6 +38,9 @@ public class MyAuthEmployQo extends AuthQo {
      */
     private Boolean excludeEmployeeGroup;
 
+    /** 添加群成员时，在分页前排除该群已有的数字员工。 */
+    private Long excludeGroupSessionId;
+
     private String machineChannel;
 
     /**

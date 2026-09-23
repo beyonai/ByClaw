@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.state.common.dto.MessageQo;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.showcase.service.ShowcaseService;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 
@@ -42,6 +43,7 @@ class MessageServiceTest {
         taskPlanApplicationService = mock(TaskPlanApplicationService.class);
         conversationOutlineDisplayService = mock(ConversationOutlineDisplayService.class);
         service = new MessageService();
+        ReflectionTestUtils.setField(service, "sessionService", mock(SessionService.class));
         ReflectionTestUtils.setField(service, "byaiMessageHotService", byaiMessageHotService);
         ReflectionTestUtils.setField(service, "showcaseService", showcaseService);
         ReflectionTestUtils.setField(service, "taskPlanApplicationService", taskPlanApplicationService);
