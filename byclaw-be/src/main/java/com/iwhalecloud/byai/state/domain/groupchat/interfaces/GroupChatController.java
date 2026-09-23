@@ -36,6 +36,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageAckService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageSearchService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMessageSearchRequest;
@@ -66,6 +67,7 @@ public class GroupChatController {
     private final GroupChatContextService contextService;
     private final GroupChatTaskService taskService;
     private final GroupChatReadService readService;
+    private final GroupChatMessageAckService ackService;
     @Autowired
     private GroupChatMessageSearchService messageSearchService;
     @Autowired
@@ -84,12 +86,36 @@ public class GroupChatController {
         return ResponseUtil.successResponse(groupWorkAssistantService.getDefaultAssistants());
     }
 
+    @Autowired
     public GroupChatController(GroupChatApplicationService applicationService, GroupChatContextService contextService,
-        GroupChatTaskService taskService, GroupChatReadService readService) {
+        GroupChatTaskService taskService, GroupChatReadService readService, GroupChatMessageAckService ackService) {
         this.applicationService = applicationService;
         this.contextService = contextService;
         this.taskService = taskService;
         this.readService = readService;
+        this.ackService = ackService;
+    }
+
+    /** 保留旧测试和嵌入式调用方的构造签名。 */
+    public GroupChatController(GroupChatApplicationService applicationService, GroupChatContextService contextService,
+        GroupChatTaskService taskService, GroupChatReadService readService) {
+        this(applicationService, contextService, taskService, readService, null);
+    }
+
+    /** 更新原消息的“收到”状态，不发送新的群消息。 */
+    @PostMapping("/{sessionId}/messages/{messageId}/ack")
+    public ResponseUtil<com.alibaba.fastjson.JSONObject> acknowledge(
+        @PathVariable Long sessionId, @PathVariable Long messageId) {
+        if (ackService == null) throw new IllegalStateException("Group message acknowledgement is unavailable");
+        return ResponseUtil.successResponse(ackService.acknowledge(sessionId, messageId));
+    }
+
+    /** 撤销当前用户对原消息的“收到”状态。 */
+    @DeleteMapping("/{sessionId}/messages/{messageId}/ack")
+    public ResponseUtil<com.alibaba.fastjson.JSONObject> unacknowledge(
+        @PathVariable Long sessionId, @PathVariable Long messageId) {
+        if (ackService == null) throw new IllegalStateException("Group message acknowledgement is unavailable");
+        return ResponseUtil.successResponse(ackService.unacknowledge(sessionId, messageId));
     }
 
     /** 按当前 USER 成员关系返回群列表及未读 mention 状态。 */

@@ -76,9 +76,23 @@ public class GroupChatContextResponse {
         /** 与实时群消息一致的成员引用，用于还原正文中的占位符。 */
         private List<ResourceVo> resourceList = new ArrayList<>();
 
+        /** 被@真人用户的确认状态；确认不会创建新的消息。 */
+        private List<MessageAcknowledgement> acknowledgements = new ArrayList<>();
+
+        /** 仅当前登录用户使用：是否可以点击“收到”。 */
+        private boolean canAcknowledge;
+
         private ReplyReference replyTo;
 
         private List<Attachment> attachments;
+    }
+
+    @Data
+    public static class MessageAcknowledgement {
+        private String messageId;
+        private String userId;
+        private String userName;
+        private Long acknowledgedAt;
     }
 
     @Data

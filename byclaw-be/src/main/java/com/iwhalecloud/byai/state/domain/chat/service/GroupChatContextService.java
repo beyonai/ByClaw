@@ -19,9 +19,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
+import com.iwhalecloud.byai.common.cache.ShareBfmUser;
+import com.iwhalecloud.byai.state.common.share.helper.ShareCacheUtil;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatMessageAck;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMessageAckMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -64,6 +69,9 @@ public class GroupChatContextService {
     @Autowired
     private ByaiGroupChatTaskMapper taskMapper;
 
+    @Autowired
+    private UserService userService;
+
     private final ByaiMessageMapper messageMapper;
 
     private final SessionService sessionService;
@@ -71,15 +79,23 @@ public class GroupChatContextService {
     private final SsResourceService resourceService;
     private final SessionMemberService memberService;
     private final GroupChatContextTokenService tokenService;
+    private final ByaiGroupChatMessageAckMapper ackMapper;
+
+    public GroupChatContextService(ByaiMessageMapper messageMapper, SessionService sessionService,
+        SsResourceService resourceService, SessionMemberService memberService, GroupChatContextTokenService tokenService) {
+        this(messageMapper, sessionService, resourceService, memberService, tokenService, null);
+    }
 
     @Autowired
     public GroupChatContextService(ByaiMessageMapper messageMapper, SessionService sessionService,
-        SsResourceService resourceService, SessionMemberService memberService, GroupChatContextTokenService tokenService) {
+        SsResourceService resourceService, SessionMemberService memberService, GroupChatContextTokenService tokenService,
+        ByaiGroupChatMessageAckMapper ackMapper) {
         this.messageMapper = messageMapper;
         this.sessionService = sessionService;
         this.resourceService = resourceService;
         this.memberService = memberService;
         this.tokenService = tokenService;
+        this.ackMapper = ackMapper;
     }
 
     /** 兼容既有单元测试和历史构造方式。 */
@@ -233,6 +249,8 @@ public class GroupChatContextService {
         Map<Long, SsResource> resources = new HashMap<>();
         Map<Long, String> cloudResources = new HashMap<>();
         Map<Long, ByaiGroupChatTask> tasks = loadMessageTasks(ordered);
+        Map<Long, List<ByaiGroupChatMessageAck>> acknowledgements = loadAcknowledgements(ordered);
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
         for (int index = 0; index < ordered.size(); index++) {
             ByaiMessage source = projection.display(ordered.get(index));
             GroupChatContextResponse.Message message = new GroupChatContextResponse.Message();
@@ -244,6 +262,13 @@ public class GroupChatContextService {
             message.setCreatedAt(source.getCreateTime() == null ? 0L : source.getCreateTime().getTime());
             message.setContent(StringUtils.defaultString(source.getMessageContent()));
             message.setResourceList(toMemberResources(source.getMetadata()));
+            List<ByaiGroupChatMessageAck> messageAcks = acknowledgements.getOrDefault(source.getMessageId(), List.of());
+            message.setAcknowledgements(messageAcks.stream().map(this::toAcknowledgement).toList());
+            message.setCanAcknowledge(currentUserId != null
+                && !currentUserId.equals(source.getCreatorId())
+                && message.getResourceList().stream().anyMatch(resource -> "HUMAN".equals(resource.getResourceType())
+                    && String.valueOf(currentUserId).equals(String.valueOf(resource.getResourceId())))
+                && messageAcks.stream().noneMatch(ack -> currentUserId.equals(ack.getUserId())));
             message.setClientRequestId(toClientRequestId(source.getMetadata()));
             message.setTaskId(toMetadataString(source.getMetadata(), "taskId"));
             message.setUsage(source.getUsage());
@@ -281,6 +306,50 @@ public class GroupChatContextService {
             }
             result.add(message);
         }
+        return result;
+    }
+
+    private Map<Long, List<ByaiGroupChatMessageAck>> loadAcknowledgements(List<ByaiMessage> messages) {
+        if (ackMapper == null || messages.isEmpty()) return Map.of();
+        List<Long> ids = messages.stream().map(ByaiMessage::getMessageId).filter(Objects::nonNull).toList();
+        List<ByaiGroupChatMessageAck> acknowledgements = ackMapper.selectByMessageIds(messages.get(0).getSessionId(), ids);
+        Map<Long, String> userNames = new HashMap<>();
+        List<Long> missingUserIds = acknowledgements.stream().map(ByaiGroupChatMessageAck::getUserId)
+            .filter(Objects::nonNull).distinct().filter(userId -> {
+                try {
+                    ShareBfmUser cached = ShareCacheUtil.getShareBfmUser(userId);
+                    if (cached != null && cached.getUserName() != null && !cached.getUserName().isBlank()) {
+                        userNames.put(userId, cached.getUserName());
+                        return false;
+                    }
+                }
+                catch (RuntimeException ignored) {
+                    // Redis 不可用或缓存数据异常时统一批量回退数据库。
+                }
+                return true;
+            }).toList();
+        if (userService != null && !missingUserIds.isEmpty()) {
+            userService.findByIds(missingUserIds).stream()
+                .filter(user -> user.getUserId() != null && user.getUserName() != null && !user.getUserName().isBlank())
+                .forEach(user -> userNames.put(user.getUserId(), user.getUserName()));
+        }
+        Map<Long, List<ByaiGroupChatMessageAck>> result = new HashMap<>();
+        acknowledgements.forEach(ack -> {
+            String userName = userNames.get(ack.getUserId());
+            if (userName != null) ack.setUserName(userName);
+            result.computeIfAbsent(ack.getMessageId(), ignored -> new ArrayList<>()).add(ack);
+        });
+        return result;
+    }
+
+    private GroupChatContextResponse.MessageAcknowledgement toAcknowledgement(ByaiGroupChatMessageAck ack) {
+        GroupChatContextResponse.MessageAcknowledgement result = new GroupChatContextResponse.MessageAcknowledgement();
+        result.setMessageId(String.valueOf(ack.getMessageId()));
+        result.setUserId(String.valueOf(ack.getUserId()));
+        String userName = ack.getUserName();
+        result.setUserName(userName == null || userName.isBlank() || userName.equals(String.valueOf(ack.getUserId()))
+            ? "群成员" : userName);
+        result.setAcknowledgedAt(ack.getAcknowledgedAt() == null ? null : ack.getAcknowledgedAt().getTime());
         return result;
     }
 

@@ -155,4 +155,14 @@
           AND session.session_type = 'hs_as'
           AND (session.state IS NULL OR session.state != 'GROUP_DISSOLVED')
     </select>
+
+    <select id="existsUserMention" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM byai_group_chat_mention
+            WHERE group_session_id = #{sessionId}
+              AND message_id = #{messageId}
+              AND mentioned_user_id = #{userId}
+        )
+    </select>
 </mapper>
