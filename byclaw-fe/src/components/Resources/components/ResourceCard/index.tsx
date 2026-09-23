@@ -1,3 +1,5 @@
+import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
+import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
 import { EllipsisOutlined, MessageOutlined, PlusOutlined } from '@ant-design/icons';
 import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin } from 'antd';
@@ -6,7 +8,8 @@ import { getLocale, useDispatch, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
-import { restoreResource } from '@/pages/manager/service/resources';
+import { publishSkillToEnterprise, restoreResource } from '@/pages/manager/service/resources';
+import type { EnterpriseSkillPublishResult } from '@/pages/manager/service/resources';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
 import { useRequest } from '@/hooks/useRequest';
@@ -62,6 +65,7 @@ export interface IResourceCardItem {
   canDelete?: boolean;
   canOnShelf?: boolean;
   canOffShelf?: boolean;
+  canPublishToEnterprise?: boolean;
   canUnShelf?: boolean;
   canDeleteData?: boolean;
   canSetDefault?: boolean;
@@ -114,22 +118,30 @@ type ResourceCardActionConfig = {
   hiddenMenuItemKeys?: string[];
   onApplyUse?: () => void;
   onAuditUse?: () => void;
-  onDelete?: () => void;
-  onDeleteData?: () => void;
-  onShelf?: () => void;
-  onUnShelf?: () => void;
+  onDelete?: (feedback: ResourceActionFeedback) => void | Promise<void>;
+  onDeleteData?: (feedback: ResourceActionFeedback) => void | Promise<void>;
+  onShelf?: (feedback: ResourceActionFeedback) => void | Promise<void>;
+  onUnShelf?: (feedback: ResourceActionFeedback) => void | Promise<void>;
+
+  /** 品牌参数加载完成且非商业版时，由资源页开启此入口。 */
+  enablePublishToEnterprise?: boolean;
+  onEnterpriseSkillDetail?: (resource: EnterpriseSkillPublishResult['resource']) => void;
+
   /** 资源中心使用独立的上下架和注销流程，工作空间技能仍走原有文件操作。 */
   enableResourceLifecycle?: boolean;
   lifecycleLoading?: boolean;
   enableDigitalEmployeeLifecycle?: boolean;
   enableDigitalEmployeeDelete?: boolean;
   showDigitalEmployeeTypeTag?: boolean;
+
   /** 资源浏览页展示个人/企业归属，管理页保留生命周期状态。 */
   showResourceTypeTag?: boolean;
   onRestore?: () => void;
   onAuth?: (authType: 'useAuth' | 'mgrAuth') => void;
   onEdit?: () => void;
   onApply?: () => void;
+  /** 仅数字员工“我可用的”页签开启，其他使用卡片的场景默认隐藏。 */
+  enableSetDefault?: boolean;
   onSetDefault?: () => void;
   onChat?: () => void;
 };
@@ -359,25 +371,57 @@ const RenderContent = (props: ResourceCardProps) => {
     onAuth = noop,
     onApplyUse = noop,
     onRestore = noop,
-    onDelete = noop,
-    onDeleteData = noop,
-    onShelf = noop,
-    onUnShelf = noop,
+    onDelete: onDeleteAction = noop,
+    onDeleteData: onDeleteDataAction = noop,
+    onShelf: onShelfAction = noop,
+    onUnShelf: onUnShelfAction = noop,
+    onEnterpriseSkillDetail,
     onSetDefault = noop,
     onChat = noop,
   } = actionConfig || {};
+  const intl = useIntl();
+  const lifecycleLock = useRef(false);
+  const [processingLifecycle, setProcessingLifecycle] = useState(false);
+  // 提示只覆盖当前操作，异步期间锁定本卡片，其他卡片和列表仍可交互。
+  const runLifecycle = useCallback(
+    async (action: (feedback: ResourceActionFeedback) => void | Promise<void>) => {
+      if (lifecycleLock.current) return;
+      lifecycleLock.current = true;
+      setProcessingLifecycle(true);
+      try {
+        await runWithResourceFeedback(
+          action,
+          intl.formatMessage({ id: 'common.processing' }),
+          intl.formatMessage({ id: 'common.operationFailed' })
+        );
+      } finally {
+        lifecycleLock.current = false;
+        setProcessingLifecycle(false);
+      }
+    },
+    [intl]
+  );
+  const onShelf = useCallback(() => runLifecycle(onShelfAction), [runLifecycle, onShelfAction]);
+  const onUnShelf = useCallback(() => runLifecycle(onUnShelfAction), [runLifecycle, onUnShelfAction]);
+  const onDeleteData = useCallback(() => runLifecycle(onDeleteDataAction), [runLifecycle, onDeleteDataAction]);
+  const onDelete = useCallback(() => runLifecycle(onDeleteAction), [runLifecycle, onDeleteAction]);
   const enableDigitalEmployeeLifecycle = actionConfig?.enableDigitalEmployeeLifecycle !== false;
   const enableDigitalEmployeeDelete = actionConfig?.enableDigitalEmployeeDelete === true;
   // Standalone cards keep the descriptive employee-type tag by default; list
   // views can explicitly opt into lifecycle status tags when needed.
   const showDigitalEmployeeTypeTag = actionConfig?.showDigitalEmployeeTypeTag ?? true;
 
-  const intl = useIntl();
   const dispatch = useDispatch();
   const { agentId, agentInfo, EventEmitter } = useGlobal();
   const [digitalEmployeeMenuOpen, setDigitalEmployeeMenuOpen] = useState(false);
   const [installDialogOpen, setInstallDialogOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [publishingToEnterprise, setPublishingToEnterprise] = useState(false);
+  const [enterpriseCopyCreated, setEnterpriseCopyCreated] = useState(false);
+  const publishToEnterpriseLock = useRef(false);
+  useEffect(() => {
+    setEnterpriseCopyCreated(false);
+  }, [resource]);
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -593,8 +637,8 @@ const RenderContent = (props: ResourceCardProps) => {
       ? normalizedStatus === '-1'
         ? 'digitalEmployeeStatusDeleted'
         : normalizedStatus
-        ? `digitalEmployeeStatus${normalizedStatus}`
-        : ''
+          ? `digitalEmployeeStatus${normalizedStatus}`
+          : ''
       : '';
   const topRightTag = displayTopRightTag;
   const isInnerSkill = isInnerSkillResource(resource, resourceType);
@@ -666,6 +710,48 @@ const RenderContent = (props: ResourceCardProps) => {
 
   useEffect(() => () => handleSetDefaultDebounced.cancel(), [handleSetDefaultDebounced]);
 
+  const handlePublishToEnterprise = useCallback(async () => {
+    if (!resource.resourceId || publishToEnterpriseLock.current) return;
+    publishToEnterpriseLock.current = true;
+    setPublishingToEnterprise(true);
+    const messageKey = `publish-enterprise-${resource.resourceId}`;
+    message.loading({ key: messageKey, content: intl.formatMessage({ id: 'common.processing' }), duration: 0 });
+    try {
+      const result = await publishSkillToEnterprise(resource.resourceId);
+      // 仅更新当前卡片，不刷新或重新挂载列表，避免 loading 结束时列表短暂空白。
+      setEnterpriseCopyCreated(true);
+      message.success({
+        key: messageKey,
+        content: (
+          <span>
+            {intl.formatMessage({
+              id: result.alreadyExists ? 'resource.enterpriseSkillExists' : 'resource.publishToEnterpriseSuccess',
+            })}
+            {onEnterpriseSkillDetail && (
+              <Button type="link" onClick={() => onEnterpriseSkillDetail(result.resource)}>
+                {intl.formatMessage({ id: 'resource.viewEnterpriseSkill' })}
+              </Button>
+            )}
+          </span>
+        ),
+        duration: 6,
+      });
+    } catch (error) {
+      message.error({
+        key: messageKey,
+        content:
+          typeof error === 'string'
+            ? error
+            : error instanceof Error
+              ? error.message
+              : intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' }),
+      });
+    } finally {
+      publishToEnterpriseLock.current = false;
+      setPublishingToEnterprise(false);
+    }
+  }, [resource.resourceId, onEnterpriseSkillDetail, intl]);
+
   const menuItems = useMemo<MenuProps['items']>(() => {
     const {
       canEdit,
@@ -686,9 +772,10 @@ const RenderContent = (props: ResourceCardProps) => {
       isDigitalEmployeeResource && `${ownerType || ''}`.toLowerCase() === 'enterprise' && canEdit === true;
     const digitalEmployeeStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
 
-    // 设为默认必须同时具备使用权限，避免待申请员工因 canSetDefault 返回不一致而显示入口。
+    // 仅我可用的页签提供设为默认，同时保留使用权限和后端设置权限校验。
     if (
       isDigitalEmployeeResource &&
+      actionConfig?.enableSetDefault === true &&
       isTruthyFlag(resource.hasUsePermission) &&
       canSetDefault === true &&
       !isDefaultDigitalEmployee
@@ -722,8 +809,39 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
+    // 独立发布权限由后端返回；可编辑/可使用不代表允许复制到企业。
+    if (
+      isSkillResource(resource, resourceType) &&
+      isPersonalResource &&
+      !isWorkspaceSkillResource &&
+      currentResourceStatus !== '-1' &&
+      resource.resourceId &&
+      !enterpriseCopyCreated &&
+      actionConfig?.enablePublishToEnterprise === true &&
+      resource.canPublishToEnterprise === true
+    ) {
+      items.push({
+        key: 'publishToEnterprise',
+        label: (
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
+            loading={publishingToEnterprise}
+            onConfirm={handlePublishToEnterprise}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Uploadshangchuan"
+              text={intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+              loading={publishingToEnterprise}
+            />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
+
+    // 下架记录不提供授权入口，兼容旧接口的状态文本；上架后仍按原权限展示。
+    const isOffShelf = rawStatusKey === '3' || normalizedStatus === '3';
     // 管理授权
-    if (canManageAuth) {
+    if (canManageAuth && !isOffShelf) {
       items.push({
         key: 'authorize',
         label: (
@@ -739,7 +857,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 使用授权
-    if (canUseAuth) {
+    if (canUseAuth && !isOffShelf) {
       items.push({
         key: 'use',
         label: (
@@ -823,11 +941,11 @@ const RenderContent = (props: ResourceCardProps) => {
         .forEach((item) => {
           items.push({
             key: item.key,
-            disabled: actionConfig?.lifecycleLoading,
+            disabled: processingLifecycle || actionConfig?.lifecycleLoading,
             label: (
               <ConfirmMenuLabel
                 title={intl.formatMessage({ id: `${item.label}Confirm` })}
-                disabled={actionConfig?.lifecycleLoading}
+                disabled={processingLifecycle || actionConfig?.lifecycleLoading}
                 onConfirm={item.onConfirm}
               >
                 <BuildMenuLabel icon={item.icon} text={intl.formatMessage({ id: item.label })} />
@@ -948,6 +1066,13 @@ const RenderContent = (props: ResourceCardProps) => {
     dispatch,
     EventEmitter,
     handleSetDefaultDebounced,
+    handlePublishToEnterprise,
+    publishingToEnterprise,
+    processingLifecycle,
+    enterpriseCopyCreated,
+    isPersonalResource,
+    isWorkspaceSkillResource,
+    currentResourceStatus,
     intl,
     isDefaultDigitalEmployee,
     isDigitalEmployeeResource,
@@ -962,6 +1087,8 @@ const RenderContent = (props: ResourceCardProps) => {
     enableDigitalEmployeeLifecycle,
     enableResourceLifecycle,
     isCancelledResource,
+    rawStatusKey,
+    normalizedStatus,
     enableDigitalEmployeeDelete,
     showDigitalEmployeeTypeTag,
     onEdit,
@@ -978,6 +1105,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canDelete,
     resource?.canOnShelf,
     resource?.canOffShelf,
+    resource?.canPublishToEnterprise,
     resource?.canUnShelf,
     resource?.canDeleteData,
     resource?.canRestore,
@@ -1012,8 +1140,8 @@ const RenderContent = (props: ResourceCardProps) => {
         onClick: () => workspaceActions.shareSkill(resource as WorkspaceSkillItem),
       },
     ];
-    // 仅当对该数字员工有管理权限时，才允许删除工作空间技能（后端同样校验）。
-    if (actionConfig?.canManageWorkspaceSkill) {
+    // 工作空间技能同样遵循浏览页隐藏规则，管理入口仍需员工管理权限（后端同样校验）。
+    if (actionConfig?.canManageWorkspaceSkill && !actionConfig?.hiddenMenuItemKeys?.includes('delete')) {
       items.push({
         key: 'delete',
         label: <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'resource.deleteSkill' })} />,
@@ -1021,7 +1149,14 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
     return items;
-  }, [isWorkspaceSkillResource, intl, workspaceActions, resource, actionConfig?.canManageWorkspaceSkill]);
+  }, [
+    isWorkspaceSkillResource,
+    intl,
+    workspaceActions,
+    resource,
+    actionConfig?.canManageWorkspaceSkill,
+    actionConfig?.hiddenMenuItemKeys,
+  ]);
 
   const effectiveMenuItems = isWorkspaceSkillResource ? workspaceMenuItems : menuItems;
   const effectiveTopRightTag =

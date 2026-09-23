@@ -59,6 +59,10 @@ jest.mock('../ToolSelectorModal', () => () => null);
 jest.mock('../RobotModal', () => () => null);
 jest.mock('../../EmployeeGroupMembers', () => () => <div>Configure Group Members</div>);
 
+// 完整配置表单保留真实 antd 交互，全量并行运行时为渲染和多次切换预留时间。
+// waitFor 仍使用默认超时，接口或状态断言失败不会被延长掩盖。
+jest.setTimeout(15000);
+
 const labels = [
   'employeeDetail.configureKnowledge',
   'employeeDetail.configureSkills',

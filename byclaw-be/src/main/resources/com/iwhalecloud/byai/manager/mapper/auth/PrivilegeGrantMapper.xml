@@ -406,6 +406,10 @@
              ) p
                 on a.resource_id = p.grant_obj_id
         <where>
+            <!-- 在状态与默认个人资源的 OR 条件之外排除注销，避免全部状态或默认资源绕过。 -->
+            <if test="excludeDeleted == true">
+                and a.resource_status != -1
+            </if>
             <!-- 基础过滤条件 -->
             and (
                 <if test="defaultPersonalResourceId != null and (resourceStatus == null or resourceStatus == '' or resourceStatus == '2')">

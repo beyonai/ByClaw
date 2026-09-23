@@ -133,6 +133,21 @@ const parseConfigList = (value: any) => {
 
 const getMenuKey = (item: any) => item.path || item.menuUrl || item.menuCode;
 
+export const getManagerMenuLabel = (
+  item: { menuNameCn?: string; menuNameEn?: string; name?: string; nameEn?: string; localeId?: string },
+  intl: { locale: string; formatMessage: (descriptor: { id: string; defaultMessage?: string }) => string }
+) => {
+  const isEnglish = intl.locale.toLowerCase().startsWith('en');
+  // 参数中的名称由管理员维护，优先于内置语言包，避免已保存的名称被固定译文覆盖。
+  const configuredName = isEnglish ? item.menuNameEn || item.menuNameCn : item.menuNameCn || item.menuNameEn;
+  if (configuredName) {
+    return configuredName;
+  }
+
+  const name = (isEnglish ? item.nameEn || item.name : item.name) || '';
+  return item.localeId ? intl.formatMessage({ id: item.localeId, defaultMessage: name }) : name;
+};
+
 export const normalizeMenuUrl = (url?: string) => {
   if (!url) {
     return '';

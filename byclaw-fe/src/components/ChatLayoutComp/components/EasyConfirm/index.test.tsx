@@ -6,6 +6,12 @@ import { collectEasyConfirmItems } from '@/components/MessagesComp/easyConfirm';
 import EasyConfirm, { clearEasyConfirmInputDraft } from './index';
 import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
+import {
+  clearAutomationCreationDraft,
+  getAutomationCreationDraft,
+  saveAutomationCreationDraft,
+} from '@/pages/automation/drafts';
+import { getAutomationFormInitialValues } from '@/pages/automation/schedule';
 
 const mockEventListeners = new Map<string, (payload: unknown) => void>();
 const mockMessageInfo = jest.fn();
@@ -13,6 +19,7 @@ let mockQueryInputProps: {
   inputDraft?: DefaultValueSchema;
   onInputDraftChange: (draft: DefaultValueSchema) => void;
   onSend: (payload: any) => void;
+  onFileUploadSessionCreated: (sessionId: string) => void;
 };
 
 jest.mock('@/hooks/useGlobal', () => ({
@@ -226,7 +233,7 @@ describe('EasyConfirm', () => {
   });
 });
 
-describe('shared chat draft', () => {
+describe('session chat drafts', () => {
   const props = {
     disabledInput: false,
     isBottom: true,
@@ -258,32 +265,47 @@ describe('shared chat draft', () => {
     jest.clearAllMocks();
   });
 
-  it('carries text, employees and references across existing and new sessions, including remounts', () => {
+  it('restores text, employees and references only in their original session, including remounts', () => {
     const view = render(<EasyConfirm {...props} />);
     act(() => mockQueryInputProps.onInputDraftChange(draft));
     view.rerender(<EasyConfirm {...props} sessionId="session-2" />);
-    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    const secondDraft = { text: 'Second session input', resourceList: [] };
+    act(() => mockQueryInputProps.onInputDraftChange(secondDraft));
     view.rerender(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    act(() => mockQueryInputProps.onInputDraftChange({ text: 'New session input' }));
+    view.rerender(<EasyConfirm {...props} />);
     expect(mockQueryInputProps.inputDraft).toEqual(draft);
+    view.rerender(<EasyConfirm {...props} sessionId="session-2" />);
+    expect(mockQueryInputProps.inputDraft).toEqual(secondDraft);
     view.unmount();
-    render(<EasyConfirm {...props} sessionId="session-3" />);
+    const remounted = render(<EasyConfirm {...props} />);
     expect(mockQueryInputProps.inputDraft).toEqual(draft);
+    remounted.rerender(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft?.text).toBe('New session input');
   });
 
-  it('does not resurrect an older draft after editing or clearing in another session', () => {
+  it('clears only the active session draft and keeps late callbacks scoped to their source', () => {
     const view = render(<EasyConfirm {...props} />);
-    act(() => mockQueryInputProps.onInputDraftChange(draft));
+    const updateFirstDraft = mockQueryInputProps.onInputDraftChange;
+    act(() => updateFirstDraft(draft));
     view.rerender(<EasyConfirm {...props} sessionId="session-2" />);
-    act(() => mockQueryInputProps.onInputDraftChange({ text: 'Latest input', resourceList: [] }));
-    view.rerender(<EasyConfirm {...props} />);
-    expect(mockQueryInputProps.inputDraft?.text).toBe('Latest input');
+    act(() => {
+      mockQueryInputProps.onInputDraftChange({ text: 'Second session input' });
+      updateFirstDraft({ ...draft, text: `${draft.text} latest` });
+    });
     act(() => mockQueryInputProps.onInputDraftChange({ text: '', resourceList: [] }));
-    view.rerender(<EasyConfirm {...props} sessionId="" />);
+    view.rerender(<EasyConfirm {...props} />);
+    expect(mockQueryInputProps.inputDraft?.text).toBe(`${draft.text} latest`);
+    view.rerender(<EasyConfirm {...props} sessionId="session-2" />);
     expect(mockQueryInputProps.inputDraft).toBeUndefined();
   });
 
-  it('clears sent content and carries only retained employees into the next session', () => {
-    const view = render(<EasyConfirm {...props} sessionId="" />);
+  it('clears sent content only in the sending session and retains its employees there', () => {
+    const view = render(<EasyConfirm {...props} sessionId="session-2" />);
+    act(() => mockQueryInputProps.onInputDraftChange({ text: 'Other unsent input' }));
+    view.rerender(<EasyConfirm {...props} />);
     act(() => mockQueryInputProps.onInputDraftChange(draft));
     act(() => mockQueryInputProps.onSend({ queryQuestion: 'sent' }));
     view.rerender(<EasyConfirm {...props} />);
@@ -291,11 +313,69 @@ describe('shared chat draft', () => {
     const retained = { text: '{{DIGITAL_EMPLOYEE_agent-1}}', resourceList: [draft.resourceList![0]] };
     act(() => mockQueryInputProps.onInputDraftChange(retained));
     view.rerender(<EasyConfirm {...props} sessionId="session-2" />);
+    expect(mockQueryInputProps.inputDraft?.text).toBe('Other unsent input');
+    view.rerender(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    view.rerender(<EasyConfirm {...props} />);
     expect(mockQueryInputProps.inputDraft).toEqual(retained);
     expect(props.onSend).toHaveBeenCalledWith({ queryQuestion: 'sent' });
   });
 
-  it('isolates fixed employee pages from the shared draft even when sending', () => {
+  it('moves a new draft to its assigned session without remounting the uploading input', () => {
+    const view = render(<EasyConfirm {...props} sessionId="" preserveInputOnSessionChange />);
+    const originalInput = screen.getByTestId('query-input');
+    act(() => {
+      mockQueryInputProps.onInputDraftChange(draft);
+      mockQueryInputProps.onFileUploadSessionCreated(props.sessionId);
+    });
+    view.rerender(<EasyConfirm {...props} preserveInputOnSessionChange />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+    expect(screen.getByTestId('query-input')).toBe(originalInput);
+    view.rerender(<EasyConfirm {...props} sessionId="" preserveInputOnSessionChange />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    expect(screen.getByTestId('query-input')).not.toBe(originalInput);
+    view.rerender(<EasyConfirm {...props} />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+  });
+
+  it('does not transfer a new draft when navigating to an existing session', () => {
+    const view = render(<EasyConfirm {...props} sessionId="" preserveInputOnSessionChange />);
+    const originalInput = screen.getByTestId('query-input');
+    act(() => mockQueryInputProps.onInputDraftChange(draft));
+    view.rerender(<EasyConfirm {...props} preserveInputOnSessionChange />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    expect(screen.getByTestId('query-input')).not.toBe(originalInput);
+    view.rerender(<EasyConfirm {...props} sessionId="" preserveInputOnSessionChange />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+  });
+
+  it('remounts when switching existing sessions even if preservation is enabled', () => {
+    const view = render(<EasyConfirm {...props} preserveInputOnSessionChange />);
+    const originalInput = screen.getByTestId('query-input');
+    act(() => mockQueryInputProps.onInputDraftChange(draft));
+    view.rerender(<EasyConfirm {...props} sessionId="session-2" preserveInputOnSessionChange />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    expect(screen.getByTestId('query-input')).not.toBe(originalInput);
+    view.rerender(<EasyConfirm {...props} preserveInputOnSessionChange />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+  });
+
+  it('keeps a new scheduled task draft separate from a new ordinary task', () => {
+    const automationDraft = { prompt: draft, values: getAutomationFormInitialValues() };
+    saveAutomationCreationDraft(automationDraft);
+    const view = render(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    act(() => mockQueryInputProps.onInputDraftChange({ text: 'Ordinary task' }));
+    view.unmount();
+    render(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft?.text).toBe('Ordinary task');
+    expect(getAutomationCreationDraft()).toEqual(automationDraft);
+    act(() => mockQueryInputProps.onSend({ queryQuestion: 'Ordinary task' }));
+    expect(getAutomationCreationDraft()).toEqual(automationDraft);
+    clearAutomationCreationDraft();
+  });
+
+  it('isolates fixed employee pages from session drafts even when sending', () => {
     const view = render(<EasyConfirm {...props} />);
     act(() => mockQueryInputProps.onInputDraftChange(draft));
     view.rerender(<EasyConfirm {...props} disableInputDraft sessionId="employee-session" />);

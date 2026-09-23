@@ -210,6 +210,9 @@
 }
 
 .employeePreviewDescription {
+  // 与会话页一致保留描述中的换行和缩进，长文本仍在弹窗内自动折行。
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   max-height: 78px;
   margin: 28px 0 34px !important;

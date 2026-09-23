@@ -1,3 +1,4 @@
+import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 // tslint:disable:ordered-imports
 import React, { useEffect, useMemo, useReducer, useState } from 'react';
 // @ts-ignore
@@ -378,14 +379,14 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
   );
 
   const onDeleteEmployee = React.useCallback(
-    async (employee: IAgentCache) => {
+    async (employee: IAgentCache, feedback: ResourceActionFeedback = message) => {
       const resourceId = employeeRowId(employee);
       try {
         await deleteDigitalEmployee({ resourceId });
-        message.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
+        feedback.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
         removeEmployeeRow(resourceId);
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'common.deleteFailed' }));
+        feedback.error(error?.message || intl.formatMessage({ id: 'common.deleteFailed' }));
       }
     },
     [intl]
@@ -496,7 +497,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
                           onAuth: (type: any) => onAuthEmployee(employee, type),
                           onApplyUse: () => onApplyEmployee(employee),
                           onAuditUse: () => onAuditEmployee(employee),
-                          onDelete: () => onDeleteEmployee(employee),
+                          onDelete: (feedback) => onDeleteEmployee(employee, feedback),
                         }}
                       />
                     );

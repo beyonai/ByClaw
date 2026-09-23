@@ -126,6 +126,92 @@ class AuthApplicationServiceTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"creator", "manager", "AdMiNvIp", "useOnly", "blocked", "roleOnly"})
+    void enterpriseSkillPublishPermissionsAgreeForListDetailAndWrite(String identity) {
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        LoginInfo login = loginInfo(2L);
+        login.setUserCode(identity);
+        UsersOrganization role = new UsersOrganization();
+        role.setUserType(UserType.PLAT_MAN);
+        login.setUsersOrganizations(List.of(role));
+        CurrentUserHolder.setLoginInfo(login);
+        SsResource resource = enterpriseResource(601L, "creator".equals(identity) ? 2L : 1L);
+        resource.setResourceBizType("SKILL");
+        resource.setOwnerType("personal");
+        SsResourceMapper mapper = mock(SsResourceMapper.class);
+        SsResourceService resources = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "ssResourceService", resources);
+        ReflectionTestUtils.setField(service, "ssResExtSkillService",
+            mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService.class));
+        when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
+        when(resources.findById(601L)).thenReturn(resource);
+        List<PrivilegeGrant> assigned = new ArrayList<>();
+        if ("manager".equals(identity) || "blocked".equals(identity)) {
+            assigned.add(manageGrant(601L, 2L, GrantToObjType.USER, Color.RED, "A"));
+        }
+        if ("blocked".equals(identity)) {
+            assigned.add(manageGrant(601L, 2L, GrantToObjType.USER, Color.BLACK, "A"));
+        }
+        if ("useOnly".equals(identity)) {
+            assigned.add(useGrant(601L, 2L, GrantToObjType.USER, Color.RED, "A"));
+        }
+        PrivilegeGrantService grants =
+            (PrivilegeGrantService) ReflectionTestUtils.getField(service, "privilegeGrantService");
+        when(grants.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return assigned.stream().filter(g -> g.getGrantToObjType().equals(qo.getGrantToObjType()))
+                .filter(g -> qo.getGrantTypes() != null ? qo.getGrantTypes().contains(g.getGrantType())
+                    : g.getGrantType().equals(qo.getGrantType()))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        });
+        boolean allowed = List.of("creator", "manager", "AdMiNvIp").contains(identity);
+        assertThat(service.canPublishSkillToEnterprise(resource)).isEqualTo(allowed);
+        assertThat(service.queryResourceOperationPermissions(601L).isCanPublishToEnterprise()).isEqualTo(allowed);
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L)
+            .isCanPublishToEnterprise()).isEqualTo(allowed);
+        resource.setResourceStatus(-1);
+        assertThat(service.canPublishSkillToEnterprise(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L)
+            .isCanPublishToEnterprise()).isFalse();
+        resource.setResourceStatus(2);
+        resource.setOwnerType("enterprise");
+        assertThat(service.canPublishSkillToEnterprise(resource)).isFalse();
+        resource.setOwnerType("personal");
+        resource.setResourceBizType("TOOLKIT");
+        assertThat(service.canPublishSkillToEnterprise(resource)).isFalse();
+    }
+
+    @Test
+    void enterpriseCopyExistenceControlsListAndDetailWithoutChangingWritePermission() {
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource source = enterpriseResource(601L, 2L);
+        source.setResourceBizType("SKILL");
+        source.setOwnerType("personal");
+        SsResourceMapper mapper = mock(SsResourceMapper.class);
+        SsResourceService resources = mock(SsResourceService.class);
+        var skills = mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "ssResourceService", resources);
+        ReflectionTestUtils.setField(service, "ssResExtSkillService", skills);
+        when(mapper.selectBatchIds(any())).thenReturn(List.of(source));
+        when(resources.findById(601L)).thenReturn(source);
+        when(skills.findSourceIdsWithEnterpriseCopies(List.of(601L))).thenReturn(Set.of(601L));
+        assertThat(service.queryResourceOperationPermissions(601L).isCanPublishToEnterprise()).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L)
+            .isCanPublishToEnterprise()).isFalse();
+        // 并发请求仍可进入写接口，由已有事务逻辑返回同一副本。
+        assertThat(service.canPublishSkillToEnterprise(source)).isTrue();
+        when(skills.findSourceIdsWithEnterpriseCopies(List.of(601L))).thenReturn(Set.of());
+        assertThat(service.queryResourceOperationPermissions(601L).isCanPublishToEnterprise()).isTrue();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L)
+            .isCanPublishToEnterprise()).isTrue();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {
         UserType.PLAT_MAN,
         UserType.PLAT_DEVOPS,

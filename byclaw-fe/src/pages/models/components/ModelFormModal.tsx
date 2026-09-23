@@ -89,6 +89,7 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, onSaved, ...props }) => {
   }, []);
 
   const extractModelIdFromSave = useCallback((res: any) => res?.data?.id ?? res?.data, []);
+  // 资源中心与模型管理共用能力字典，并兼容不同版本的字典字段。
   const loadAbilityOptions = useCallback(
     () =>
       getDcSystemConfigListByStandType({ standType: 'MODEL_TAGS' }).then((res: any) =>

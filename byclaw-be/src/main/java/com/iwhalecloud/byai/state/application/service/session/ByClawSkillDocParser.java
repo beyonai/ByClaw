@@ -18,6 +18,24 @@ final class ByClawSkillDocParser {
     private ByClawSkillDocParser() {
     }
 
+    /**
+     * 企业快照使用独立运行时名称，避免数字员工按 skillCode 过滤时遗漏副本。
+     * 仅替换顶层 name（不修改 metadata.name 等嵌套字段），保留描述和 Markdown 正文。
+     */
+    static String withSkillName(String content, String skillName) {
+        String text = StringUtils.removeStart(StringUtils.defaultString(content), "\uFEFF");
+        java.util.regex.Matcher frontMatter = java.util.regex.Pattern.compile(
+            "\\A---[ \\t]*\\R([\\s\\S]*?)^(?:---|\\.\\.\\.)[ \\t]*(?:\\R|\\z)",
+            java.util.regex.Pattern.MULTILINE).matcher(text);
+        if (!frontMatter.find()) {
+            return "---\nname: " + skillName + "\n---\n" + text;
+        }
+        // name 可以是单行值或 YAML 块标量；替换时一并移除它的缩进续行。
+        String metadata = frontMatter.group(1).replaceAll(
+            "(?m)^(?:name|'name'|\"name\")[ \\t]*:[^\\r\\n]*(?:\\R[ \\t]+[^\\r\\n]*)*(?:\\R|\\z)", "");
+        return "---\nname: " + skillName + "\n" + metadata + "---\n" + text.substring(frontMatter.end());
+    }
+
     static String extractDescription(String content) {
         if (StringUtils.isBlank(content)) {
             return null;

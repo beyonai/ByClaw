@@ -106,3 +106,10 @@ export const buildResourceListFilterParam = (activeTab: string, filterParam?: Re
     return acc;
   }, {} as Record<string, any>);
 };
+
+/** 隐藏的筛选值不能继续参与查询，个人资源始终请求已上架数据。 */
+export const getResourceQueryStatus = (activeTab: string, myResourcesOnly: boolean, status?: unknown): string => {
+  if (!myResourcesOnly || activeTab === 'personal') return '2';
+  const value = `${status ?? '2'}`;
+  return ['', '0', '2', '3'].includes(value) ? value : '2';
+};

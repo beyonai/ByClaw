@@ -47,11 +47,19 @@ public class ResourceUseAuthQo extends AuthQo implements Serializable {
     @ApiModelProperty(value = "资源状态", required = false)
     private String resourceStatus;
 
+    /** 我的资源列表排除注销终态；在数据库分页前过滤，保持列表和总数一致。 */
+    @ApiModelProperty(value = "是否排除已注销资源", required = false)
+    private Boolean excludeDeleted;
+
     /**
      * 资源归属类型：enterprise-企业，personal-个人
      */
     @ApiModelProperty(value = "资源归属类型：enterprise-企业，personal-个人", required = false)
     private String ownerType;
+
+    /** 我可用的页面按归属筛选时仍限定使用权限，不能切换为官方企业资源全量口径。 */
+    @ApiModelProperty(value = "是否仅查询当前用户可用资源", required = false)
+    private Boolean availableOnly;
 
     /**
      * 权限筛选：CREATED_BY_ME、AUTHORIZED_TO_ME、MANAGEABLE_BY_ME、MANAGED_BY_ME、PENDING_MY_APPROVAL、APPLIED_BY_ME。
