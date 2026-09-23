@@ -16,6 +16,7 @@ import {
   filterMenusByAdminVip,
   filterMenusByMenuDisplay,
   getManagerMenuConfig,
+  getManagerMenuLabel,
   normalizeMenuUrl,
 } from '@/pages/manager/layout/sider/menuConfig';
 import { filterRoutesByBlockedPaths } from '@/pages/manager/utils/menu';
@@ -150,14 +151,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       blockedPaths || []
     ).map((item: any) => {
       const IconComponent = item.icon;
-      let label = item.name;
-
-      if (item.localeId) {
-        label = intl.formatMessage({
-          id: item.localeId,
-          defaultMessage: item.name,
-        });
-      }
+      const label = getManagerMenuLabel(item, intl);
 
       return {
         key: item.path,

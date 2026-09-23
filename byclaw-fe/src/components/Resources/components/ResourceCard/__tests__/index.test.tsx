@@ -26,12 +26,17 @@ jest.mock('antd', () => {
 
   return {
     ...actual,
+    // 保留真实确认交互，去掉弹层动画准备阶段，避免全量运行时等待过渡。
+    Popconfirm: (props: import('antd').PopconfirmProps) => <actual.Popconfirm {...props} transitionName="" />,
     Dropdown: ({ children, menu }: { children: React.ReactNode; menu?: { items?: Array<any> } }) => (
       <div>
         {children}
         <div>
           {menu?.items?.map((item) => (
-            <div key={item?.key}>{item?.label}</div>
+            // 模拟 Menu 的条目点击分发，禁用项不触发业务回调。
+            <div key={item?.key} onClick={item?.disabled ? undefined : item?.onClick}>
+              {item?.label}
+            </div>
           ))}
         </div>
       </div>
@@ -39,7 +44,7 @@ jest.mock('antd', () => {
   };
 });
 
-jest.mock('@/pages/manager/service/resources', () => ({}));
+jest.mock('@/pages/manager/service/resources', () => ({ publishSkillToEnterprise: jest.fn() }));
 
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({
   installDigitalEmployeeRelResources: jest.fn(),
@@ -53,9 +58,12 @@ jest.mock('@/components/AntdIcon', () => ({
 }));
 
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider, message } from 'antd';
+import { publishSkillToEnterprise } from '@/pages/manager/service/resources';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceCard from '..';
+import * as globalHook from '@/hooks/useGlobal';
 
 const renderWithQueryClient = (ui: React.ReactElement) => {
   const queryClient = new QueryClient({
@@ -65,10 +73,230 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
     },
   });
 
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+  return render(
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    </ConfigProvider>
+  );
 };
 
+// 卡片包含真实确认弹层与全局消息；只增加用例总预算，不延长查找/断言超时。
+const lifecycleTestTimeout = 15000;
+
+afterEach(async () => {
+  // 全局 message 不属于 render 容器，必须单独清理，避免提示和计时器跨用例残留。
+  await act(async () => {
+    message.destroy();
+  });
+});
+
 describe('ResourceCard', () => {
+  it('replaces processing with success before the row refresh completes', async () => {
+    let finishRefresh!: () => void;
+    const refresh = new Promise<void>((resolve) => {
+      finishRefresh = resolve;
+    });
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{ resourceId: 'slow-refresh', resourceBizType: 'SKILL', ownerType: 'personal', canDelete: true }}
+        actionConfig={{
+          enableResourceLifecycle: true,
+          onDeleteData: async (feedback) => {
+            feedback.success('Deregistered');
+            await refresh;
+          },
+        }}
+      />
+    );
+    fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    expect(await screen.findByText('Deregistered')).toBeInTheDocument();
+    expect(screen.queryAllByText('common.processing')).toHaveLength(0);
+    await act(async () => {
+      finishRefresh();
+      await refresh;
+    });
+    expect(screen.getByText('Deregistered')).toBeInTheDocument();
+  }, lifecycleTestTimeout);
+
+  it.each(['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'MCP', 'TOOLKIT', 'AGENT'])(
+    'hides authorization for off-shelf %s and restores permitted actions after publishing',
+    (resourceBizType) => {
+      const client = new QueryClient();
+      const onAuth = jest.fn();
+      const card = (resourceStatus: string) => (
+        <QueryClientProvider client={client}>
+          <ResourceCard
+            resource={{
+              resourceId: 'authorization-state',
+              resourceBizType,
+              resourceStatus,
+              ownerType: 'enterprise',
+              canManageAuth: true,
+              canUseAuth: true,
+              canEdit: true,
+            }}
+            actionConfig={{ enableResourceLifecycle: true, onAuth }}
+          />
+        </QueryClientProvider>
+      );
+      const { rerender } = render(card('3'));
+      expect(screen.queryByText('common.manageAuthorization')).toBeNull();
+      expect(screen.queryByText('common.useAuthorization')).toBeNull();
+      expect(screen.getByText('common.editInfo')).toBeInTheDocument();
+      rerender(card('2'));
+      fireEvent.click(screen.getByText('common.manageAuthorization'));
+      expect(onAuth).toHaveBeenCalledWith('mgrAuth');
+      fireEvent.click(screen.getByText('common.useAuthorization'));
+      expect(onAuth).toHaveBeenCalledWith('useAuth');
+      rerender(card('3'));
+      expect(screen.queryByText('common.manageAuthorization')).toBeNull();
+      expect(screen.queryByText('common.useAuthorization')).toBeNull();
+    }
+  );
+
+  it.each([
+    { resourceStatus: 3 },
+    { metaStatus: '3' },
+    { publishStatus: '3' },
+    { status: '3' },
+    { resourceStatus: 'OFF_SHELF' },
+    { resourceStatus: '已下架' },
+  ])('hides authorization for legacy off-shelf status: %j', (status) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'legacy-off-shelf',
+          resourceBizType: 'DIG_EMPLOYEE',
+          canManageAuth: true,
+          canUseAuth: true,
+          ...status,
+        }}
+      />
+    );
+    expect(screen.queryByText('common.manageAuthorization')).toBeNull();
+    expect(screen.queryByText('common.useAuthorization')).toBeNull();
+  });
+
+  // 员工和资源共用轻量提示；确认后不阻塞其他卡片，失败也须结束提示并允许重试。
+  it.each([
+    ['DIG_EMPLOYEE', '2', 'resource.unShelfData', 'onUnShelf'],
+    ['DIG_EMPLOYEE', '3', 'resource.shelfData', 'onShelf'],
+    ['DIG_EMPLOYEE', '3', 'resource.deleteData', 'onDeleteData'],
+    ['SKILL', '3', 'resource.lifecycle.shelfData', 'onShelf'],
+    ['KG_DOC', '2', 'resource.lifecycle.unShelfData', 'onUnShelf'],
+    ['TOOLKIT', '3', 'resource.lifecycle.deleteData', 'onDeleteData'],
+  ])('shows processing until %s / %s / %s finishes', async (resourceBizType, resourceStatus, label, callback) => {
+    let finish!: () => void;
+    const operation = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'processing-resource',
+          resourceName: 'Unchanged card',
+          resourceBizType,
+          resourceStatus,
+          ownerType: 'enterprise',
+          canOnShelf: true,
+          canOffShelf: true,
+          canDelete: true,
+        }}
+        actionConfig={{ enableResourceLifecycle: true, enableDigitalEmployeeDelete: true, [callback]: operation }}
+      />
+    );
+    const title = screen.getByText('Unchanged card');
+    fireEvent.click(screen.getByText(label));
+    const confirm = await screen.findByRole('button', { name: 'common.confirm' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(operation).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('common.processing')).toBeInTheDocument();
+    expect(screen.getByText('Unchanged card')).toBe(title);
+    await act(async () => {
+      finish();
+      await operation.mock.results[0].value;
+    });
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+  }, lifecycleTestTimeout);
+
+  it('clears the processing toast and permits retry after a lifecycle failure', async () => {
+    const operation = jest.fn().mockRejectedValueOnce(new Error('Operation failed')).mockResolvedValue(undefined);
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{ resourceId: 'retry', resourceBizType: 'SKILL', ownerType: 'personal', canDelete: true }}
+        actionConfig={{ enableResourceLifecycle: true, onDeleteData: operation }}
+      />
+    );
+    fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    expect(await screen.findByText('Operation failed')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+    fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    await waitFor(() => expect(operation).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+  });
+
+  it.each([true, false])('respects hidden deletion for workspace skills: %s', (hidden) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        resource={{ resourceId: 'WORKSPACE_SKILL:example', resourceBizType: 'SKILL' }}
+        actionConfig={{ canManageWorkspaceSkill: true, hiddenMenuItemKeys: hidden ? ['delete'] : [] }}
+      />
+    );
+    expect(screen.queryByText('resource.deleteSkill') !== null).toBe(!hidden);
+    expect(screen.getByText('common.detail')).toBeInTheDocument();
+    expect(screen.getByText('common.share')).toBeInTheDocument();
+  });
+
+  it.each(
+    ['DIG_EMPLOYEE', 'KG_DOC', 'SKILL', 'TOOLKIT'].flatMap((resourceBizType) =>
+      ['personal', 'enterprise'].flatMap((ownerType) =>
+        ['2', '3'].map((resourceStatus) => ({ resourceBizType, ownerType, resourceStatus }))
+      )
+    )
+  )('hides management actions in browsing cards: %j', (resource) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType={resource.resourceBizType}
+        resource={{
+          ...resource,
+          resourceId: 'browse-resource',
+          canOnShelf: true,
+          canOffShelf: true,
+          canDelete: true,
+          canPublishToEnterprise: true,
+          canEdit: true,
+        }}
+        actionConfig={{
+          enableResourceLifecycle: true,
+          enableDigitalEmployeeLifecycle: false,
+          enableDigitalEmployeeDelete: false,
+          enablePublishToEnterprise: true,
+          hiddenMenuItemKeys: ['shelfData', 'unShelfData', 'deleteData', 'delete', 'publishToEnterprise'],
+        }}
+      />
+    );
+    for (const id of [
+      'resource.lifecycle.shelfData',
+      'resource.lifecycle.unShelfData',
+      'resource.lifecycle.deleteData',
+      'resource.shelfData',
+      'resource.unShelfData',
+      'resource.deleteData',
+      'resource.publishToEnterprise',
+    ]) {
+      expect(screen.queryByText(id)).not.toBeInTheDocument();
+    }
+    expect(screen.getByText('common.editInfo')).toBeInTheDocument();
+  });
+
   it.each([
     ['KG_DOC', 'KG_DOC', 'personal', 'personalKnowledge'],
     ['KG_DOC', 'KG_QA', 'enterprise', 'enterpriseKnowledge'],
@@ -581,7 +809,7 @@ describe('ResourceCard', () => {
           canEdit: true,
           canManageAuth: true,
         }}
-        actionConfig={{ onApplyUse: jest.fn(), onEdit: jest.fn(), onAuth: jest.fn() }}
+        actionConfig={{ enableSetDefault: true, onApplyUse: jest.fn(), onEdit: jest.fn(), onAuth: jest.fn() }}
       />
     );
 
@@ -600,6 +828,7 @@ describe('ResourceCard', () => {
   ])('hides set default without use permission: %j', (permissions) => {
     renderWithQueryClient(
       <ResourceCard
+        actionConfig={{ enableSetDefault: true }}
         resourceType="DIG_EMPLOYEE"
         digitalEmployeeActionMode
         resource={{
@@ -627,17 +856,34 @@ describe('ResourceCard', () => {
           canApplyUse: true,
           hasUsePermission: false,
         }}
-        actionConfig={{ onApplyUse: jest.fn() }}
+        actionConfig={{ enableSetDefault: true, onApplyUse: jest.fn() }}
       />
     );
 
     expect(screen.getByText('resource.applyUse')).toBeTruthy();
   });
 
+  it.each([false, undefined])('hides set default outside the available tab: %s', (enableSetDefault) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'employee-other-page',
+          resourceBizType: 'DIG_EMPLOYEE',
+          hasUsePermission: true,
+          canSetDefault: true,
+          isDefault: false,
+        }}
+        actionConfig={{ enableSetDefault }}
+      />
+    );
+    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+  });
+
   // 有使用权限且后端允许设为默认时，继续显示默认入口。
   it('shows set default for a usable non-default digital employee', () => {
     renderWithQueryClient(
       <ResourceCard
+        actionConfig={{ enableSetDefault: true }}
         resource={{
           resourceId: 'employee-default',
           resourceName: 'Usable Employee',
@@ -655,6 +901,7 @@ describe('ResourceCard', () => {
   it('does not show set default for the current default digital employee', () => {
     renderWithQueryClient(
       <ResourceCard
+        actionConfig={{ enableSetDefault: true }}
         resource={{
           resourceId: 'default-agent-1',
           resourceName: 'Default Employee',
@@ -671,6 +918,7 @@ describe('ResourceCard', () => {
   it('does not infer set default from canApplyUse when canSetDefault is false', () => {
     renderWithQueryClient(
       <ResourceCard
+        actionConfig={{ enableSetDefault: true }}
         resource={{
           resourceId: 'employee-no-default-permission',
           resourceName: 'Unavailable Employee',
@@ -750,5 +998,135 @@ describe('ResourceCard', () => {
     expect(screen.getByText('Tool Tag').parentElement).not.toHaveClass('digitalEmployeeTag');
     expect(screen.getByText('Tool Tag').parentElement).not.toHaveClass('digitalEmployeePersonalTag');
     expect(screen.getByText('Tool Tag').parentElement).not.toHaveClass('digitalEmployeeDefaultTag');
+  });
+});
+
+describe('personal skill enterprise publication', () => {
+  const emit = jest.fn();
+  const personalSkill = {
+    resourceId: 'source-skill',
+    resourceName: 'Personal skill',
+    resourceBizType: 'SKILL',
+    ownerType: 'personal',
+    resourceStatus: '2',
+    canPublishToEnterprise: true,
+  };
+  const enterpriseSkill = {
+    resourceId: 'enterprise-copy',
+    resourceName: 'Enterprise skill',
+    resourceBizType: 'SKILL',
+    ownerType: 'enterprise',
+    resourceStatus: 2,
+  };
+
+  beforeEach(() => {
+    (publishSkillToEnterprise as jest.Mock).mockReset();
+    emit.mockReset();
+    jest.spyOn(globalHook, 'default').mockReturnValue({ EventEmitter: { emit } } as any);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it.each([false, undefined])('hides publication unless the brand explicitly enables it: %s', (enabled) => {
+    renderWithQueryClient(
+      <ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: enabled }} />
+    );
+    expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { canPublishToEnterprise: false, canEdit: true },
+    { canPublishToEnterprise: undefined, hasUsePermission: true },
+    { ownerType: 'enterprise' },
+    { resourceStatus: '-1' },
+    { resourceBizType: 'KG_DOC' },
+  ])('hides publication for ineligible skills: %j', (overrides) => {
+    renderWithQueryClient(
+      <ResourceCard resource={{ ...personalSkill, ...overrides }} actionConfig={{ enablePublishToEnterprise: true }} />
+    );
+    expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])('confirms publication and opens the returned copy (existing=%s)', async (alreadyExists) => {
+    const onEnterpriseSkillDetail = jest.fn();
+    (publishSkillToEnterprise as jest.Mock).mockResolvedValue({ resource: enterpriseSkill, alreadyExists });
+    renderWithQueryClient(
+      <ResourceCard
+        resource={personalSkill}
+        actionConfig={{ onEnterpriseSkillDetail, enablePublishToEnterprise: true }}
+      />
+    );
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    expect(await screen.findByText('resource.publishToEnterpriseConfirm')).toBeInTheDocument();
+    expect(publishSkillToEnterprise).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    await waitFor(() => expect(publishSkillToEnterprise).toHaveBeenCalledTimes(1));
+    expect(publishSkillToEnterprise).toHaveBeenCalledWith('source-skill');
+    expect(
+      await screen.findByText(alreadyExists ? 'resource.enterpriseSkillExists' : 'resource.publishToEnterpriseSuccess')
+    ).toBeInTheDocument();
+    expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
+    expect(screen.getByText('Personal skill')).toBeInTheDocument();
+    expect(emit).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByText('resource.viewEnterpriseSkill'));
+    expect(onEnterpriseSkillDetail).toHaveBeenCalledWith(enterpriseSkill);
+    expect(personalSkill.ownerType).toBe('personal');
+  });
+
+  it('restores the entry when refreshed permissions allow publication after copy removal', () => {
+    const client = new QueryClient();
+    const card = (allowed: boolean) => (
+      <QueryClientProvider client={client}>
+        <ResourceCard
+          resource={{ ...personalSkill, canPublishToEnterprise: allowed }}
+          actionConfig={{ enablePublishToEnterprise: true }}
+        />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(card(false));
+    expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
+    rerender(card(true));
+    expect(screen.getByText('resource.publishToEnterprise')).toBeInTheDocument();
+  });
+
+  it('reports failures without showing a success message', async () => {
+    const success = jest.spyOn(message, 'success');
+    (publishSkillToEnterprise as jest.Mock).mockRejectedValue('Publication permission revoked');
+    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    expect(await screen.findByText('Publication permission revoked')).toBeInTheDocument();
+    expect(success).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+  });
+
+  it('blocks repeated confirmation while publication is pending', async () => {
+    let finish!: (value: any) => void;
+    (publishSkillToEnterprise as jest.Mock).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    expect(screen.queryAllByText('common.processing')).toHaveLength(0);
+    const confirm = await screen.findByRole('button', { name: 'common.confirm' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(publishSkillToEnterprise).toHaveBeenCalledTimes(1);
+    // 发布中菜单和全局提示同时显示处理文案，限定到卡片内部验证。
+    const card = screen.getByText('Personal skill').closest('.resourceCard') as HTMLElement;
+    expect(await within(card).findByText('common.processing')).toBeInTheDocument();
+    const skillTitle = screen.getByText('Personal skill');
+    expect(skillTitle).toBeInTheDocument();
+    finish({ resource: enterpriseSkill, alreadyExists: false });
+    expect(await screen.findByText('resource.publishToEnterpriseSuccess')).toBeInTheDocument();
+    expect(screen.getByText('Personal skill')).toBe(skillTitle);
+    expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
+    expect(emit).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
   });
 });

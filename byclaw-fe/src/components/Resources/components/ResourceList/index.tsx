@@ -1,3 +1,4 @@
+import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { Spin, message } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
@@ -6,17 +7,17 @@ import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
 import {
   listResourceUseAuth,
+  queryResourceDetail,
   shelfResource,
   unShelfResource,
   deregisterResource,
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
 import { queryInstalledResourceIds } from '@/pages/manager/service/DigitalEmployeeMgr';
-import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { KnowledgeCapability } from '@/service/knowledgeCenter';
-import { buildResourceListFilterParam, getBaseResourceBizTypeList } from '../../utils';
+import { buildResourceListFilterParam, getBaseResourceBizTypeList, getResourceQueryStatus } from '../../utils';
 import {
   PERMISSION_CREATED_BY_ME_VALUE,
   PERMISSION_MANAGEABLE_BY_ME_VALUE,
@@ -44,6 +45,7 @@ interface IResourceItem {
   canDelete?: boolean;
   canOnShelf?: boolean;
   canOffShelf?: boolean;
+  canPublishToEnterprise?: boolean;
   canRestore?: boolean;
   canApplyUse?: boolean;
   hasUsePermission?: boolean;
@@ -86,6 +88,7 @@ interface ResourceListProps {
   onAuditUse: (item: IResourceItem) => void;
   onRefresh: () => void;
   skillCardViewMode?: 'current' | 'new';
+  enablePublishToEnterprise?: boolean;
 }
 
 const PAGE_SIZE_DEFAULT = 30;
@@ -108,6 +111,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
   resourceType,
   activeTab,
   myResourcesOnly = false,
+  enablePublishToEnterprise = false,
   myResourceScope = 'all',
   searchValue,
   catalogId,
@@ -145,7 +149,9 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const canManageActiveEmployee = useDigitalEmployeeManagePermission(
     resourceType === 'SKILL' ? activeDigitalEmployeeId : undefined
   );
-  const [loading, setLoading] = useState(false);
+  // 列表挂载后立即请求，首帧先展示加载态，避免请求开始前闪现空状态。
+  const [loading, setLoading] = useState(true);
+  const listGeneration = useRef(0);
   const [list, setList] = useState<IResourceItem[]>([]);
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
   const [canManageInstallTarget, setCanManageInstallTarget] = useState(false);
@@ -168,8 +174,19 @@ const ResourceList: React.FC<ResourceListProps> = ({
       const pageNum = params?.pageIndex ?? params?.pageNum ?? 1;
       const pageSize = params?.pageSize ?? 30; // 直接使用固定值，避免依赖pageInfo.pageSize
       const keyword = `${params?.searchValue ?? searchValue ?? ''}`.trim();
-      const selectedCatalogId = `${params?.catalogId ?? catalogId ?? ''}`;
-      const filterParam = params?.dropdownParam ?? dropdownParam;
+      // 我的个人和企业资源不按分类筛选，丢弃旧筛选及翻页参数中的分类值。
+      const selectedCatalogId = myResourcesOnly ? '' : `${params?.catalogId ?? catalogId ?? ''}`;
+      const rawFilterParam = params?.dropdownParam ?? dropdownParam;
+      const filterParam = {
+        ...rawFilterParam,
+        resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, rawFilterParam?.resourceStatus),
+      };
+      const availableOnly = !myResourcesOnly && activeTab === 'personal';
+      const selectedOwnerType =
+        availableOnly && ['personal', 'enterprise'].includes(rawFilterParam?.ownerType)
+          ? rawFilterParam.ownerType
+          : undefined;
+      if (!append) listGeneration.current += 1;
       setLoading(true);
       try {
         // 普通资源中心保留原有“我可用的/官方推荐”查询口径；“我的资源”改为后端权限筛选，
@@ -177,28 +194,32 @@ const ResourceList: React.FC<ResourceListProps> = ({
         const ownerTypes = myResourcesOnly
           ? [activeTab]
           : activeTab === 'installed'
-          ? ['personal', 'enterprise']
-          : [activeTab];
+            ? ['personal', 'enterprise']
+            : [activeTab];
         const responses = await Promise.all(
           ownerTypes.map(async (ownerType) => {
             const ownerFilterParam = buildResourceListFilterParam(ownerType, filterParam);
+            // 归属只在我可用的生效，管理页与官方页继续使用各自固定范围。
+            delete ownerFilterParam.ownerType;
+            if (myResourcesOnly) delete ownerFilterParam.catalogId;
             const myResourcePermission =
               myResourcesOnly && ownerType === 'personal'
                 ? PERMISSION_CREATED_BY_ME_VALUE
                 : myResourcesOnly && myResourceScope === 'created'
-                ? PERMISSION_CREATED_BY_ME_VALUE
-                : myResourcesOnly && myResourceScope === 'managed'
-                ? PERMISSION_MANAGED_BY_ME_VALUE
-                : myResourcesOnly
-                ? PERMISSION_MANAGEABLE_BY_ME_VALUE
-                : undefined;
+                  ? PERMISSION_CREATED_BY_ME_VALUE
+                  : myResourcesOnly && myResourceScope === 'managed'
+                    ? PERMISSION_MANAGED_BY_ME_VALUE
+                    : myResourcesOnly
+                      ? PERMISSION_MANAGEABLE_BY_ME_VALUE
+                      : undefined;
             const response = await listResourceUseAuth({
               keyword,
               pageNum,
               pageSize,
-              ...(activeTab === 'personal' && !myResourcesOnly ? {} : { ownerType }),
+              ...(availableOnly ? { ownerType: selectedOwnerType, availableOnly: true } : { ownerType }),
               catalogId: selectedCatalogId || undefined,
               ...ownerFilterParam,
+              ...(myResourcesOnly ? { excludeDeleted: true } : {}),
               // 我可用的和官方推荐只显示上架资源；管理列表保留状态筛选。
               ...(!myResourcesOnly ? { resourceStatus: '2' } : {}),
               ...(myResourcePermission ? { permission: myResourcePermission } : {}),
@@ -206,7 +227,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
                 ? ownerFilterParam.resourceBizTypeList
                 : baseResourceBizTypeList,
             });
-            return { ownerType, pageData: response?.data || response || {} };
+            return { ownerType: selectedOwnerType || ownerType, pageData: response?.data || response || {} };
           })
         );
 
@@ -225,6 +246,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
         const shouldLoadWorkspaceSkills =
           resourceType === 'SKILL' &&
           activeTab === 'personal' &&
+          selectedOwnerType !== 'enterprise' &&
           !append &&
           pageNum === 1 &&
           !selectedCatalogId &&
@@ -277,16 +299,62 @@ const ResourceList: React.FC<ResourceListProps> = ({
     ]
   );
 
-  const { mutate: handleLifecycle, isLoading: lifecycleLoading } = useRequest({
-    mutationFn: ({ resourceId, action }: { resourceId: string; action: 'shelf' | 'unShelf' | 'deregister' }) => {
-      const operations = { shelf: shelfResource, unShelf: unShelfResource, deregister: deregisterResource };
-      return operations[action]({ resourceId });
-    },
-    onSuccess: () => {
-      message.success(intl.formatMessage({ id: 'common.operationSuccess' }));
-      onRefresh();
-    },
-  });
+  const handleLifecycle = async ({
+    resourceId,
+    action,
+    feedback = message,
+  }: {
+    resourceId: string;
+    action: 'shelf' | 'unShelf' | 'deregister';
+    feedback?: ResourceActionFeedback;
+  }) => {
+    const generation = listGeneration.current;
+    const operations = { shelf: shelfResource, unShelf: unShelfResource, deregister: deregisterResource };
+    try {
+      const response = await operations[action]({ resourceId });
+      if (response?.success === false || (response?.code !== undefined && response.code !== 0)) {
+        throw new Error(response?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+      }
+    } catch (error: any) {
+      feedback.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
+      return;
+    }
+
+    feedback.success(intl.formatMessage({ id: 'common.operationSuccess' }));
+    const resourceStatus = action === 'shelf' ? '2' : action === 'unShelf' ? '3' : '-1';
+    let updatedRow: Record<string, any> = { resourceStatus };
+    // 注销是终态，无需再次查询已注销资源；上下架查询单条详情以取得最新权限。
+    if (action === 'deregister') {
+      updatedRow = {
+        ...updatedRow,
+        canOnShelf: false,
+        canOffShelf: false,
+        canDelete: false,
+        canPublishToEnterprise: false,
+      };
+    } else {
+      try {
+        const response = await queryResourceDetail({ resourceId });
+        const detail = response?.data || response;
+        if (`${detail?.resourceId}` !== `${resourceId}`) throw new Error('Missing resource detail');
+        updatedRow = { ...detail, ...detail.operationPermissions, resourceStatus };
+      } catch {
+        // 操作已经成功，详情失败不能回滚状态或触发整表刷新。
+        feedback.warning(intl.formatMessage({ id: 'resource.rowRefreshFailed' }));
+      }
+    }
+    // 等待期间如果用户切换筛选或分页，不把旧请求写回新列表。
+    if (generation !== listGeneration.current) return;
+    const statusFilter = getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam?.resourceStatus);
+    // 注销后立即移除当前行，与后端排除注销的分页查询口径一致。
+    const keepRow = resourceStatus !== '-1' && (!statusFilter || `${statusFilter}` === resourceStatus);
+    setList((current) =>
+      current.flatMap((row) =>
+        `${row.resourceId}` !== `${resourceId}` ? [row] : keepRow ? [{ ...row, ...updatedRow }] : []
+      )
+    );
+    if (!keepRow) setPageInfo((current) => ({ ...current, total: Math.max(0, current.total - 1) }));
+  };
 
   useEffect(() => {
     getList({ pageIndex: 1 });
@@ -415,22 +483,26 @@ const ResourceList: React.FC<ResourceListProps> = ({
       onCardClick={() => onDetail(item)}
       actionConfig={{
         scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
-        // personal 对应“我可用的”，所有资源类型均隐藏授权入口。
-        hiddenMenuItemKeys: activeTab === 'personal' ? ['authorize', 'use'] : [],
+        // 浏览页隐藏生命周期操作；我的资源仍沿用原有权限和状态判断。
+        hiddenMenuItemKeys: [
+          ...(activeTab === 'personal' ? ['authorize', 'use'] : []),
+          ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete', 'publishToEnterprise'] : []),
+        ],
         installedResourceIds,
         canInstallToTarget: installTargetContext.mode !== 'fixed' || canManageInstallTarget,
         installTargetContext,
         canManageWorkspaceSkill: canManageActiveEmployee,
         onEdit: () => onEdit(item),
+        enablePublishToEnterprise,
+        onEnterpriseSkillDetail: (enterpriseSkill) => onDetail(enterpriseSkill),
         onAuth: (authType) => onAuth(item, authType),
         onApplyUse: () => onApplyUse(item),
         onAuditUse: () => onAuditUse(item),
         enableResourceLifecycle: true,
         showResourceTypeTag: !myResourcesOnly,
-        lifecycleLoading,
-        onShelf: () => handleLifecycle({ resourceId: item.resourceId, action: 'shelf' }),
-        onUnShelf: () => handleLifecycle({ resourceId: item.resourceId, action: 'unShelf' }),
-        onDeleteData: () => handleLifecycle({ resourceId: item.resourceId, action: 'deregister' }),
+        onShelf: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'shelf', feedback }),
+        onUnShelf: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'unShelf', feedback }),
+        onDeleteData: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'deregister', feedback }),
       }}
     />
   );

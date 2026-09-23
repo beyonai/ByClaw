@@ -28,6 +28,7 @@ import {
 import { deleteFiles, downloadFile, downloadFolder, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
+import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import styles from './index.module.less';
 
 const toItems = (nodes: ProjectSpaceTreeNode[], rootPath = '/by/projects/') =>
@@ -286,8 +287,11 @@ const ProjectSpaceTab: React.FC<Props> = ({
     [intl, refreshSpace, resourceId]
   );
 
+  // 按实际提交的名称判断是否修改，按钮和回车提交共用同一条件。
+  const canRename = !!renameTarget && !!resourceId && !!renameName.trim() && renameName.trim() !== renameTarget.name;
+
   const rename = useCallback(async () => {
-    if (!renameTarget || !resourceId || !renameName.trim()) return;
+    if (!renameTarget || !resourceId || !canRename || renameLoading) return;
     setRenameLoading(true);
     try {
       await renameFile({ resourceId, sourcePath: renameTarget.path, newName: renameName.trim() });
@@ -299,7 +303,7 @@ const ProjectSpaceTab: React.FC<Props> = ({
     } finally {
       setRenameLoading(false);
     }
-  }, [intl, refreshSpace, renameName, renameTarget, resourceId]);
+  }, [canRename, intl, refreshSpace, renameLoading, renameName, renameTarget, resourceId]);
 
   const openSaveToProject = useCallback(
     async (item: SpaceItem) => {
@@ -372,18 +376,23 @@ const ProjectSpaceTab: React.FC<Props> = ({
   );
 
   const actions = useCallback(
-    (item: FileBrowserItem): MenuProps['items'] => [
-      ...(resourceId ? [{ key: 'quote', label: intl.formatMessage({ id: 'common.quote' }) }] : []),
-      ...(canPreviewFile(item)
-        ? [{ key: 'preview', label: intl.formatMessage({ id: 'fileBrowser.action.preview' }) }]
-        : []),
-      { key: 'download', label: intl.formatMessage({ id: 'fileBrowser.action.download' }) },
-      ...(projectCloudResourceId && !isDirectory(item)
-        ? [{ key: 'saveToProject', label: intl.formatMessage({ id: 'projectSpace.projectDrive.save' }) }]
-        : []),
-      { key: 'rename', label: intl.formatMessage({ id: 'fileBrowser.action.rename' }) },
-      { key: 'delete', label: intl.formatMessage({ id: 'fileBrowser.action.delete' }), danger: true },
-    ],
+    (item: FileBrowserItem): MenuProps['items'] =>
+      [
+        ...(resourceId ? [{ key: 'quote', label: intl.formatMessage({ id: 'common.quote' }) }] : []),
+        ...(canPreviewFile(item)
+          ? [{ key: 'preview', label: intl.formatMessage({ id: 'fileBrowser.action.preview' }) }]
+          : []),
+        { key: 'download', label: intl.formatMessage({ id: 'fileBrowser.action.download' }) },
+        ...(projectCloudResourceId && !isDirectory(item)
+          ? [{ key: 'saveToProject', label: intl.formatMessage({ id: 'projectSpace.projectDrive.save' }) }]
+          : []),
+        { key: 'rename', label: intl.formatMessage({ id: 'fileBrowser.action.rename' }) },
+        { key: 'delete', label: intl.formatMessage({ id: 'fileBrowser.action.delete' }), danger: true },
+      ].map((action) => ({
+        ...action,
+        // 文件树菜单清除了默认内边距，复用其他文件 Tab 的菜单项样式恢复统一间距。
+        label: <div className={employeeStyles.dropdownMenuItem}>{action.label}</div>,
+      })),
     [intl, projectCloudResourceId, resourceId]
   );
 
@@ -476,6 +485,7 @@ const ProjectSpaceTab: React.FC<Props> = ({
         okText={intl.formatMessage({ id: 'common.save' })}
         cancelText={intl.formatMessage({ id: 'common.cancel' })}
         confirmLoading={renameLoading}
+        okButtonProps={{ disabled: !canRename || renameLoading }}
         onCancel={() => !renameLoading && setRenameTarget(null)}
         onOk={() => void rename()}
         destroyOnClose

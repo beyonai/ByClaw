@@ -96,4 +96,7 @@ public class ResourceOperationPermissionsVo {
      * 是否可下架。企业数字员工或资源中心数据已上架且有权限时为 true。
      */
     private boolean canOffShelf;
+
+    /** 是否可将个人技能复制并上架为独立企业技能。 */
+    private boolean canPublishToEnterprise;
 }

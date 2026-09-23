@@ -505,6 +505,8 @@ public class AuthController {
         if (resourceUseAuthQo == null || CollectionUtils.isEmpty(resourceUseAuthQo.getResourceBizTypeList())) {
             return;
         }
+        // 可用列表即使筛选企业归属，也必须保留 mapper 中的创建人/使用授权约束。
+        resourceUseAuthQo.setIncludeAllEnterpriseOwnerType(false);
         boolean hasKnowledgeBizType = resourceUseAuthQo.getResourceBizTypeList().stream()
             .filter(StringUtils::isNotBlank).anyMatch(this::isKnowledgeBizType);
         boolean hasDigEmployeeBizType = resourceUseAuthQo.getResourceBizTypeList().stream()
@@ -526,7 +528,7 @@ public class AuthController {
         }
 
         if (StringUtils.equals(resourceUseAuthQo.getOwnerType(), OwnerType.ENTERPRISE)
-            && hasEnterpriseAllResourceBizType) {
+            && hasEnterpriseAllResourceBizType && !Boolean.TRUE.equals(resourceUseAuthQo.getAvailableOnly())) {
             resourceUseAuthQo.setIncludeAllEnterpriseOwnerType(true);
         }
     }

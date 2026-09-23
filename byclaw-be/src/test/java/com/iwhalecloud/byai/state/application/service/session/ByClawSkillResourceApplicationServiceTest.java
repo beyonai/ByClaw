@@ -107,6 +107,243 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     @Test
+    void publishEnterpriseCopiesRecordsAndFileReferencesWithoutAccessingStorage() throws Exception {
+        SsResource source = prepareEnterpriseCopy();
+        SsResExtSkill sourceExt = ssResExtSkillService.findById(7001L);
+        sourceExt.setSyncStatus("SUCCESS");
+        sourceExt.setSkillPackageSize(123L);
+        sourceExt.setSkillPackageHash("source-hash");
+        sourceExt.setSkillOriginalFilename("personal-skill.zip");
+        var result = service.publishSkillToEnterprise(7001L);
+
+        assertThat(result.alreadyExists()).isFalse();
+        SsResource target = result.resource();
+        assertThat(target.getResourceId()).isEqualTo(7101L);
+        assertThat(target.getResourceCode()).isEqualTo("enterprise-skill-7001");
+        assertThat(target.getOwnerType()).isEqualTo("enterprise");
+        assertThat(target.getResourceStatus()).isEqualTo(2);
+        assertThat(target.getResourceName()).isEqualTo(source.getResourceName());
+        verify(ssResourceService).existsEnterpriseSkillByName(source.getResourceName());
+        assertThat(target.getAvatar()).isEqualTo("skill-logo");
+        assertThat(target.getCatalogId()).isEqualTo(10L);
+        assertThat(source.getOwnerType()).isEqualTo("personal");
+        verify(ssResourceService, never()).updateResourceEntity(source);
+        verify(authApplicationService).ensureCreatorDefaultPrivileges(target);
+        ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
+        SsResExtSkill copy = extCaptor.getValue();
+        assertThat(copy).isNotSameAs(sourceExt);
+        assertThat(copy.getResourceId()).isEqualTo(7101L);
+        assertThat(sourceExt.getResourceId()).isEqualTo(7001L);
+        assertThat(copy.getSkillUrl()).isEqualTo(sourceExt.getSkillUrl());
+        assertThat(copy.getVersion()).isEqualTo("v0.3");
+        assertThat(copy.getSkillPackageSize()).isEqualTo(123L);
+        assertThat(copy.getSkillPackageHash()).isEqualTo("source-hash");
+        assertThat(copy.getSkillOriginalFilename()).isEqualTo("personal-skill.zip");
+        assertThat(copy.getSyncStatus()).isEqualTo("SUCCESS");
+        var json = com.alibaba.fastjson2.JSON.parseObject(copy.getTargetContent());
+        assertThat(json.getString("sourceResourceId")).isEqualTo("7001");
+        assertThat(json.getString("sourceCreatorId")).isEqualTo("10002");
+        assertThat(json.getString("ownerType")).isEqualTo("enterprise");
+        assertThat(json.getString("skillUrl")).endsWith("skillId=7101");
+        verify(ssResourceArtifactService).upsertArtifact(eq(7101L), eq("SKILL"),
+            eq(ResourceArtifactTypeEnum.IMPORT_ZIP.name()), eq("minio"),
+            eq("skill/user002-hub/personal-skill.zip"), any());
+        org.mockito.Mockito.verifyNoInteractions(resourceArtifactStorageService);
+    }
+
+    @Test
+    void publishEnterpriseAppendsPublisherNameWhenEnterpriseSkillNameExists() throws Exception {
+        SsResource source = prepareEnterpriseCopy();
+        source.setResourceName("技能1");
+        CurrentUserHolder.getLoginInfo().setUserName("张三");
+        when(ssResourceService.existsEnterpriseSkillByName("技能1")).thenReturn(true);
+        var result = service.publishSkillToEnterprise(7001L);
+        assertThat(result.resource().getResourceName()).isEqualTo("技能1（张三）");
+        assertThat(source.getResourceName()).isEqualTo("技能1");
+        verify(ssResourceService).existsEnterpriseSkillByName("技能1");
+        ArgumentCaptor<SsResExtSkill> extension = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService).saveOrUpdate(extension.capture());
+        assertThat(extension.getValue().getTargetContent()).contains("技能1（张三）");
+    }
+
+    @Test
+    void publishEnterpriseFallsBackToPublisherAccountWhenDisplayNameIsMissing() throws Exception {
+        SsResource source = prepareEnterpriseCopy();
+        when(ssResourceService.existsEnterpriseSkillByName(source.getResourceName())).thenReturn(true);
+        var result = service.publishSkillToEnterprise(7001L);
+        assertThat(result.resource().getResourceName()).isEqualTo(source.getResourceName() + "（user001）");
+    }
+
+    @Test
+    void publishEnterpriseReturnsExistingCopyWithoutUpdatingOrReadingSourcePackage() throws Exception {
+        prepareEnterpriseCopy();
+        SsResource existing = enterpriseCopy(7102L, 3);
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill-7001"))).thenReturn(List.of(existing));
+        var result = service.publishSkillToEnterprise(7001L);
+        assertThat(result.alreadyExists()).isTrue();
+        assertThat(result.resource()).isSameAs(existing);
+        assertThat(existing.getResourceStatus()).isEqualTo(3);
+        verify(ssResourceService, never()).saveResource(any());
+        verify(resourceArtifactStorageService, never()).readWithinResourceRoot(any());
+    }
+
+    @Test
+    void publishEnterpriseDoesNotReviveDeregisteredCopy() throws Exception {
+        prepareEnterpriseCopy();
+        SsResource deleted = enterpriseCopy(7102L, -1);
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill-7001"))).thenReturn(List.of(deleted));
+        var result = service.publishSkillToEnterprise(7001L);
+        assertThat(result.resource().getResourceCode()).isEqualTo("enterprise-skill-7001-2");
+        assertThat(deleted.getResourceStatus()).isEqualTo(-1);
+        verify(ssResourceService, never()).updateResourceEntity(deleted);
+    }
+
+    @Test
+    void publishEnterpriseRejectsUnauthorizedAndMissingResourceBeforeStorageAccess() {
+        assertThatThrownBy(() -> service.publishSkillToEnterprise(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
+            .hasMessage("byclaw.skill.enterprise.no.permission");
+        verify(ssResourceService, never()).saveResource(any());
+        verify(resourceArtifactStorageService, never()).readWithinResourceRoot(any());
+    }
+
+    @Test
+    void publishEnterpriseAllowsMissingPackageStream() throws Exception {
+        prepareEnterpriseCopy();
+        when(resourceArtifactStorageService.readWithinResourceRoot(any())).thenReturn(null);
+        assertPublishedWithoutPackage();
+    }
+
+    @Test
+    void publishEnterpriseAllowsStalePackagePathWithoutReadingOrWritingStorage() throws Exception {
+        prepareEnterpriseCopy();
+        when(resourceArtifactStorageService.existsWithinResourceRoot("skill/user002-hub/personal-skill.zip"))
+            .thenReturn(false);
+        assertPublishedWithoutPackage();
+        verify(resourceArtifactStorageService, never()).readWithinResourceRoot(any());
+    }
+
+    @Test
+    void publishEnterpriseAllowsMissingExtensionRecord() throws Exception {
+        prepareEnterpriseCopy();
+        when(ssResExtSkillService.findById(7001L)).thenReturn(null);
+        assertPublishedWithoutPackage();
+        verify(resourceArtifactStorageService, never()).existsWithinResourceRoot(any());
+    }
+
+    @Test
+    void publishEnterpriseAllowsBlankPackageUrl() throws Exception {
+        prepareEnterpriseCopy();
+        when(ssResExtSkillService.findById(7001L)).thenReturn(new SsResExtSkill());
+        assertPublishedWithoutPackage();
+        verify(resourceArtifactStorageService, never()).existsWithinResourceRoot(any());
+    }
+
+    private void assertPublishedWithoutPackage() {
+        var result = service.publishSkillToEnterprise(7001L);
+        assertThat(result.alreadyExists()).isFalse();
+        assertThat(result.resource().getResourceId()).isEqualTo(7101L);
+        assertThat(result.resource().getOwnerType()).isEqualTo("enterprise");
+        assertThat(result.resource().getResourceStatus()).isEqualTo(2);
+        verify(authApplicationService).ensureCreatorDefaultPrivileges(result.resource());
+        ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
+        SsResExtSkill ext = extCaptor.getValue();
+        assertThat(ext.getResourceId()).isEqualTo(7101L);
+        assertThat(ext.getSyncStatus()).isNull();
+        SsResExtSkill sourceExt = ssResExtSkillService.findById(7001L);
+        assertThat(ext.getSkillUrl()).isEqualTo(sourceExt == null ? null : sourceExt.getSkillUrl());
+        assertThat(com.alibaba.fastjson2.JSON.parseObject(ext.getTargetContent()).getString("sourceResourceId"))
+            .isEqualTo("7001");
+        verify(resourceArtifactStorageService, never()).uploadToSubdirectory(any(), any(), any(), any());
+        org.mockito.Mockito.verifyNoInteractions(resourceArtifactStorageService);
+        verify(ssResourceService, never()).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
+            resource -> resource != null && Long.valueOf(7001L).equals(resource.getResourceId())));
+    }
+
+    @Test
+    void publishEnterpriseRejectsUnrelatedCodeCollision() throws Exception {
+        prepareEnterpriseCopy();
+        SsResource collision = enterpriseCopy(7102L, 2);
+        SsResExtSkill unrelated = new SsResExtSkill();
+        unrelated.setTargetContent("{}");
+        when(ssResExtSkillService.findById(7102L)).thenReturn(unrelated);
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill-7001")))
+            .thenReturn(List.of(collision));
+        assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
+            .hasMessage("byclaw.skill.enterprise.code.conflict");
+        verify(ssResourceService, never()).saveResource(any());
+        verify(ssResourceService, never()).updateResourceEntity(any());
+    }
+
+    @Test
+    void enterpriseCopyUpdatesKeepIsolatedStorageAndSourceProvenance() throws Exception {
+        prepareEnterpriseCopy();
+        SsResource target = service.publishSkillToEnterprise(7001L).resource();
+        ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
+        SsResExtSkill ext = extCaptor.getValue();
+        when(ssResExtSkillService.findById(7101L)).thenReturn(ext);
+        when(ssResourceService.getResourceListByCode(List.of(target.getResourceCode()))).thenReturn(List.of(target));
+        when(authApplicationService.hasResourceManagePermission(target)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(target)).thenReturn(target);
+        MockMultipartFile update = new MockMultipartFile("file", "updated.zip", "application/zip",
+            skillZipBytes(target.getResourceCode()));
+
+        service.importSkillZip(update, 10L, "enterprise", "SKILL_MANAGE_IMPORT");
+
+        assertThat(ext.getSkillUrl()).isEqualTo("/byclaw/resource/skill/org-hub/7101/updated.zip");
+        assertThat(com.alibaba.fastjson2.JSON.parseObject(ext.getTargetContent()).getString("sourceResourceId"))
+            .isEqualTo("7001");
+        verify(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class),
+            eq("skill/org-hub/7101"), eq("updated.zip"), eq("application/zip"));
+        verify(ssResourceService, never()).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
+            resource -> resource != null && Long.valueOf(7001L).equals(resource.getResourceId())));
+    }
+
+    private SsResource enterpriseCopy(Long id, int status) {
+        SsResource existing = new SsResource();
+        existing.setResourceId(id);
+        existing.setSystemCode("BYAI");
+        existing.setResourceBizType("SKILL");
+        existing.setOwnerType("enterprise");
+        existing.setResourceStatus(status);
+        SsResExtSkill ext = new SsResExtSkill();
+        ext.setTargetContent("{\"sourceResourceId\":\"7001\"}");
+        when(ssResExtSkillService.findById(id)).thenReturn(ext);
+        return existing;
+    }
+
+    private SsResource prepareEnterpriseCopy() throws Exception {
+        SsResource source = new SsResource();
+        source.setResourceId(7001L);
+        source.setResourceBizType("SKILL");
+        source.setResourceCode("personal-skill");
+        source.setResourceName("Personal skill");
+        source.setResourceDesc("Current edited description");
+        source.setOwnerType("personal");
+        source.setResourceStatus(2);
+        source.setCatalogId(10L);
+        source.setAvatar("skill-logo");
+        source.setCreateBy(10002L);
+        when(ssResourceService.findByIdForUpdate(7001L)).thenReturn(source);
+        when(authApplicationService.canPublishSkillToEnterprise(source)).thenReturn(true);
+        when(ssResourceService.saveResource(any())).thenAnswer(invocation -> {
+            SsResource target = invocation.getArgument(0);
+            target.setResourceId(7101L);
+            return target;
+        });
+        SsResExtSkill ext = new SsResExtSkill();
+        ext.setResourceId(7001L);
+        ext.setSkillType("hub");
+        ext.setSkillUrl("/byclaw/resource/skill/user002-hub/personal-skill.zip");
+        ext.setVersion("v0.3");
+        when(ssResExtSkillService.findById(7001L)).thenReturn(ext);
+        return source;
+    }
+
+    @Test
     void unlinkWorkspaceSkillSchedulesRefreshAfterRemovingRelation() {
         SsResource skill = new SsResource();
         skill.setResourceId(7001L);
@@ -1008,6 +1245,26 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(metadata.skillDesc()).isEqualTo("AI 驱动的演示文稿生成技能");
     }
 
+    @Test
+    void inspectSkillPackage_acceptsGbkChineseEntryNamesWithoutLanguageEncodingFlag() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "ppt-master.zip", "application/zip",
+            unflaggedSkillZipBytes("GBK"));
+
+        assertThat(service.inspectSkillPackage(uploadFile).skillName()).isEqualTo("ppt-master");
+    }
+
+    @Test
+    void inspectSkillPackage_rejectsCorruptArchiveWithoutEncodingRetry() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "broken.zip", "application/zip",
+            new byte[] {1, 2, 3});
+
+        // 非编码错误保留原始异常，不能误走字符集回退并掩盖损坏原因。
+        assertThatThrownBy(() -> service.inspectSkillPackage(uploadFile))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("byclaw.skill.zip.read.failed")
+            .satisfies(error -> assertThat(error.getCause().getSuppressed()).isEmpty());
+    }
+
     private byte[] skillZipBytes(String skillName) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -1024,10 +1281,14 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     private byte[] utf8UnflaggedSkillZipBytes() {
+        return unflaggedSkillZipBytes(StandardCharsets.UTF_8.name());
+    }
+
+    private byte[] unflaggedSkillZipBytes(String encoding) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(out)) {
-                zip.setEncoding(StandardCharsets.UTF_8.name());
+                zip.setEncoding(encoding);
                 zip.setUseLanguageEncodingFlag(false);
                 zip.setCreateUnicodeExtraFields(ZipArchiveOutputStream.UnicodeExtraFieldPolicy.NEVER);
 

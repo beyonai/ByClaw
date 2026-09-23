@@ -492,6 +492,23 @@ public class ToolManController {
         }
     }
 
+    /** 将个人技能复制成独立企业资源，权限与事务统一由应用服务处理。 */
+    @PostMapping("/publishSkillToEnterprise")
+    public ResponseUtil<ByClawSkillResourceApplicationService.EnterpriseSkillPublishResult> publishSkillToEnterprise(
+        @RequestBody ResourceIdDto request) {
+        try {
+            return ResponseUtil.success(byClawSkillResourceApplicationService.publishSkillToEnterprise(
+                request == null ? null : request.getResourceId()));
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("publishSkillToEnterprise failed", e);
+            return ResponseUtil.fail(I18nUtil.get("byclaw.skill.enterprise.failed"));
+        }
+    }
+
     /** 第三方技能超市：按下载地址安装技能到指定数字员工。 */
     @PostMapping("/installThirdPartySkill")
     public ResponseUtil<ObjectZipImportResult> installThirdPartySkill(HttpServletRequest httpRequest,

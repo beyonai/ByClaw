@@ -83,4 +83,20 @@
         </foreach>
     </select>
 
+    <!-- 不按当前用户权限过滤副本；下架仍占用上架入口，只有注销或物理删除才释放。 -->
+    <select id="findExistingEnterpriseCopies" resultMap="BaseResultMap">
+        SELECT b.*
+        FROM ss_resource a
+        INNER JOIN ss_res_ext_skill b ON a.resource_id = b.resource_id
+        WHERE a.resource_biz_type = 'SKILL'
+          AND a.owner_type = 'enterprise'
+          AND (a.resource_status IS NULL OR a.resource_status != -1)
+          AND (
+          <foreach collection="sourceIds" item="sourceId" separator=" OR ">
+              a.resource_code = CONCAT('enterprise-skill-', CAST(#{sourceId} AS VARCHAR))
+              OR a.resource_code LIKE CONCAT('enterprise-skill-', CAST(#{sourceId} AS VARCHAR), '-%')
+          </foreach>
+          )
+    </select>
+
 </mapper>

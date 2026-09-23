@@ -29,12 +29,14 @@ import {
   permissionOptions,
   digitalEmployeeStatusOptions,
   digitalEmployeeTypeOptions,
+  getResourceOwnerOptions,
 } from '../../constants';
 import { isAllResourceBizTypeSelected, normalizeResourceBizTypeList } from '../../utils';
 import styles from './index.module.less';
 
 export type IOnOkParams = {
   resourceStatus: string;
+  ownerType?: string;
   catalogId?: string;
   belong?: string;
   deptBelong?: IOrgCache[];
@@ -76,6 +78,7 @@ export const getDefaultParams = (defaultParam: Partial<IOnOkParams> = {}) => {
     deptBelong: [],
     resourceBizTypeList: [],
     permission: '',
+    ownerType: '',
     ...defaultParam,
     // 数字员工类型默认选择“全部”，兼容调用方未传值或传入 undefined 的情况。
     digitalEmployeeType: defaultParam.digitalEmployeeType ?? '',
@@ -100,6 +103,7 @@ const ResourceFilterForm = ({
   hidePermissionFilter,
   statusOptionsOverride,
   digitalEmployeeTypeFilter = false,
+  resourceOwnerFilter = false,
   catalogOptions,
 }: {
   onOk: (param: IOnOkParams) => void;
@@ -110,6 +114,7 @@ const ResourceFilterForm = ({
   hidePermissionFilter?: boolean;
   statusOptionsOverride?: typeof statusOptions;
   digitalEmployeeTypeFilter?: boolean;
+  resourceOwnerFilter?: boolean;
   catalogOptions?: Array<{ value: string; label: string }>;
 }) => {
   const intl = useIntl();
@@ -169,6 +174,7 @@ const ResourceFilterForm = ({
       resourceStatus: filterStatus,
       ...(catalogOptions ? { catalogId: filterParam.catalogId || '' } : {}),
       permission: filterPermission,
+      ...(resourceOwnerFilter ? { ownerType: filterParam.ownerType || '' } : {}),
       ...(digitalEmployeeTypeFilter ? { digitalEmployeeType: filterDigitalEmployeeType } : {}),
     };
     const belongParams =
@@ -221,6 +227,26 @@ const ResourceFilterForm = ({
                   onClick={() => setFilterParam({ type: 'update', item: { catalogId: item.value } })}
                 >
                   {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {resourceOwnerFilter && (
+          <div className="ub ub-ver gap8">
+            <p className={styles.filterTitle}>{intl.formatMessage({ id: 'resource.ownership' })}</p>
+            <div className="ub gap8 ub-wrap">
+              {getResourceOwnerOptions(resourceType).map((item) => (
+                <button
+                  type="button"
+                  key={item.value}
+                  aria-pressed={(filterParam.ownerType || '') === item.value}
+                  className={classnames(styles.statusItem, 'ub ub-ac pointer', {
+                    [styles.active]: (filterParam.ownerType || '') === item.value,
+                  })}
+                  onClick={() => setFilterParam({ type: 'update', item: { ownerType: item.value } })}
+                >
+                  {intl.formatMessage({ id: item.label })}
                 </button>
               ))}
             </div>
@@ -407,6 +433,7 @@ const ResourceFilterForm = ({
                     resourceStatus: STATUS_IN_STOCK_VALUE,
                     digitalEmployeeType: '',
                     permission: '',
+                    ownerType: '',
                   },
                 });
               } else if (resourceType === 'TOOL') {
@@ -420,6 +447,7 @@ const ResourceFilterForm = ({
                     resourceBizTypeList: [],
                     digitalEmployeeType: '',
                     permission: '',
+                    ownerType: '',
                   },
                 });
               } else {
@@ -433,6 +461,7 @@ const ResourceFilterForm = ({
                     resourceBizTypeList: [],
                     digitalEmployeeType: '',
                     permission: '',
+                    ownerType: '',
                   },
                 });
               }
@@ -497,6 +526,7 @@ interface ResourceFilterWithDropdownProps {
   hidePermissionFilter?: boolean;
   statusOptionsOverride?: typeof statusOptions;
   digitalEmployeeTypeFilter?: boolean;
+  resourceOwnerFilter?: boolean;
   catalogOptions?: Array<{ value: string; label: string }>;
 }
 
@@ -511,6 +541,7 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
   hidePermissionFilter = false,
   statusOptionsOverride,
   digitalEmployeeTypeFilter = false,
+  resourceOwnerFilter = false,
   catalogOptions,
 }) => {
   const intl = useIntl();
@@ -550,6 +581,7 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
           hidePermissionFilter={hidePermissionFilter}
           statusOptionsOverride={statusOptionsOverride}
           digitalEmployeeTypeFilter={digitalEmployeeTypeFilter}
+          resourceOwnerFilter={resourceOwnerFilter}
           catalogOptions={catalogOptions}
         />
       )}
@@ -567,6 +599,16 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
               {intl.formatMessage({ id: 'resource.category' })}：
               {catalogOptions.find((item) => item.value === (defaultParam.catalogId || ''))?.label ||
                 intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' })}
+            </div>
+          )}
+          {resourceOwnerFilter && (
+            <div className={styles.selectedItem}>
+              {intl.formatMessage({ id: 'resource.ownership' })}：
+              {intl.formatMessage({
+                id:
+                  getResourceOwnerOptions(resourceType).find((item) => item.value === (defaultParam.ownerType || ''))
+                    ?.label || 'common.all',
+              })}
             </div>
           )}
           {/* 筛选-类型 */}

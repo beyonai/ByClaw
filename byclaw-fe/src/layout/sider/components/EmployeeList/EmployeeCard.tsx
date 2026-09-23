@@ -3,9 +3,8 @@ import { debounce, noop, isEmpty } from 'lodash';
 
 // @ts-ignore
 import { useNavigate, useIntl, useDispatch } from '@umijs/max';
-import { List, Skeleton, Typography, Dropdown, Popconfirm, message } from 'antd';
+import { List, Skeleton, Typography, Dropdown } from 'antd';
 import classNames from 'classnames';
-import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import AntdIcon from '@/components/AntdIcon';
 import useGlobal from '@/hooks/useGlobal';
 import { IAgentCache } from '@/typescript/agent';
@@ -39,13 +38,12 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   const dispatch = useDispatch();
 
   const { chatMode } = useContext(EmployeeListContext);
-  const { setAgentId, setSessionId, EventEmitter } = useGlobal();
+  const { setAgentId, setSessionId } = useGlobal();
 
   const listItemRef = useRef<HTMLDivElement>(null);
 
   const [canShow, setCanShow] = useState<boolean>(false);
   const [isUnApplyLoading, setIsUnApplyLoading] = useState<boolean>(false);
-  const [settingDefault, setSettingDefault] = useState<boolean>(false);
   const intl = useIntl();
 
   const isInput = isInputMode(chatMode);
@@ -57,66 +55,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   const menuItems = (item: IAgentCache) => {
     const items = [];
 
-    // 设为默认
-    if (item.canSetDefault && !disabledAction.includes('setDefault')) {
-      items.push({
-        key: 'setDefault',
-        label: (
-          <Popconfirm
-            title={intl.formatMessage({ id: 'resource.setDefaultAssistantConfirm' })}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
-            onConfirm={(e) => {
-              e?.stopPropagation();
-              const resourceId = item.resourceId ?? item.id ?? item.agentId;
-              if (!resourceId) return;
-
-              setSettingDefault(true);
-              setDefaultDigitalEmployee({ resourceId })
-                .then((data) => {
-                  message.success(intl.formatMessage({ id: 'resource.setDefaultAssistantSuccess' }));
-                  const newDefaultId = data?.newResourceId ?? resourceId;
-
-                  dispatch({
-                    type: 'employees/save',
-                    payload: { defaultDigEmployeeId: newDefaultId },
-                  });
-                  EventEmitter.emit('beyond-update-employee', {
-                    defaultResourceId: newDefaultId,
-                  });
-                  EventEmitter.emit('default-digital-employee-changed', {
-                    defaultResourceId: newDefaultId,
-                  });
-                })
-                .catch((error: any) => {
-                  message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
-                })
-                .finally(() => {
-                  setSettingDefault(false);
-                });
-            }}
-          >
-            <div
-              className={classNames(styles.dropdownMenuItem, { [styles.dropdownMenuItemDisabled]: settingDefault })}
-              onMouseDown={(event) => {
-                // 阻止外层加号资源弹窗监听到菜单按下事件，设置默认后保持弹窗打开。
-                event.stopPropagation();
-                document.body.dataset.resourceActionOverlay = 'true';
-              }}
-              onClick={(event) => {
-                event.stopPropagation();
-                window.setTimeout(() => {
-                  delete document.body.dataset.resourceActionOverlay;
-                }, 1000);
-              }}
-            >
-              <AntdIcon type="icon-a-Useryonghu" style={{ marginRight: '10px' }} />
-              {intl.formatMessage({ id: 'resource.setDefaultAssistant' })}
-            </div>
-          </Popconfirm>
-        ),
-      });
-    }
+    // 设为默认统一从数字员工“我可用的”页签进入，侧栏和输入框不提供入口。
 
     // 置顶/取消置顶入口暂时下线，保留原代码注释以便后续恢复。
     // if (`${item.isTop}` === '0' && !disabledAction.includes('pin')) {
@@ -275,7 +214,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
         pointer: true,
       })}
       onClick={(event) => {
-        // 更多操作及其确认浮层不属于员工选择操作，避免点击“设为默认”时触发外层资源弹窗关闭。
+        // 更多操作及其确认浮层不属于员工选择操作，避免操作菜单时触发外层资源弹窗关闭。
         const target = event.target as HTMLElement;
         if (target?.closest?.('.ant-dropdown, .ant-popover, .ant-modal, .ant-drawer')) {
           return;

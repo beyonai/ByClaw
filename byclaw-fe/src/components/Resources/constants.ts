@@ -18,6 +18,9 @@ export const statusOptions = [
   { label: 'resource.statusCancelled', value: STATUS_CANCELLED_VALUE },
 ];
 
+// 我的资源企业页只提供全部、草稿、已上架和已下架选项。
+export const myResourceStatusOptions = statusOptions.filter((item) => !['1', '-1'].includes(item.value));
+
 // 数字员工专用状态筛选，值与 digitalEmployeeController 返回的 resourceStatus 一致。
 export const digitalEmployeeStatusOptions = [
   { label: 'common.all', value: STATUS_ALL_VALUE },
@@ -139,3 +142,13 @@ export const permissionOptions = [
     value: PERMISSION_APPLIED_BY_ME_VALUE,
   },
 ];
+
+// 使用卡片相同的归属名称，避免技能、知识、工具筛选文案不一致。
+export const getResourceOwnerOptions = (resourceType?: string) => {
+  const suffix = resourceType === 'KG_DOC' ? 'Knowledge' : resourceType === 'TOOL' ? 'Tool' : 'Skill';
+  return [
+    { value: '', label: 'common.all' },
+    { value: 'personal', label: `resource.tag.personal${suffix}` },
+    { value: 'enterprise', label: `resource.tag.enterprise${suffix}` },
+  ];
+};

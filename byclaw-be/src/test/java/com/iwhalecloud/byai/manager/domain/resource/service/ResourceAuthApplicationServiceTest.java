@@ -140,6 +140,25 @@ class ResourceAuthApplicationServiceTest {
     }
 
     @Test
+    void listResourceAuthIncludesEnterprisePublicationPermission() {
+        ResourceUseAuthQo qo = new ResourceUseAuthQo();
+        ResourceAuthVo row = new ResourceAuthVo();
+        row.setResourceId(21L);
+        PageInfo<ResourceAuthVo> page = new PageInfo<>();
+        page.setList(List.of(row));
+        when(privilegeGrantService.listResourceAuth(qo)).thenReturn(page);
+        var permissions = new com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo();
+        permissions.setCanPublishToEnterprise(true);
+        when(authApplicationService.queryResourceOperationPermissionsBatch(List.of(21L)))
+            .thenReturn(java.util.Map.of(21L, permissions));
+
+        service().listResourceAuth(qo);
+
+        assertThat(row.getCanPublishToEnterprise()).isTrue();
+        assertThat(row.getOperationPermissionsLoaded()).isTrue();
+    }
+
+    @Test
     void listDigitalEmployeeAuthByUser_usesAncestorOrganizationsForPermissionCalculation() {
         Users user = new Users();
         user.setUserId(1001L);

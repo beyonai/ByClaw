@@ -4,8 +4,8 @@
   min-height: 0;
   box-sizing: border-box;
   overflow: hidden;
-  // padding: var(--beyond-header-height) 0 0;
-  padding: 30px;
+  // 右侧留白下放到工具栏和滚动内容内部，让滚动条贴边并缩小底部留白。
+  padding: 30px 0 16px 30px;
 }
 
 // .commonTabs {
@@ -46,6 +46,8 @@
 .tabContent {
   height: 100%;
   min-height: 0;
+  box-sizing: border-box;
+  padding-right: 30px;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -58,6 +60,7 @@
 
   :global {
     .@{antPrefix}-tabs-nav {
+      margin-right: 30px;
       font-weight: 400;
 
       .@{antPrefix}-tabs-tab {
@@ -210,6 +213,9 @@
 }
 
 .employeePreviewDescription {
+  // 与会话页一致保留描述中的换行和缩进，长文本仍在弹窗内自动折行。
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   max-height: 78px;
   margin: 28px 0 34px !important;
