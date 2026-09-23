@@ -89,6 +89,33 @@ class AccessTokenVerifyInterceptorTest {
     }
 
     @Test
+    void allowsAnonymousDesktopVersionDiscoveryAndPackageDownloadOnly() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+
+        assertTrue(interceptor.preHandle(request("GET",
+            "/byaiService/api/v1/appVersion/latest", "/byaiService"),
+            new MockHttpServletResponse(), new Object()));
+        assertTrue(interceptor.preHandle(request("GET",
+            "/byaiService/api/v1/appVersion/package/20096802", "/byaiService"),
+            new MockHttpServletResponse(), new Object()));
+
+        for (String path : List.of(
+                "/api/v1/appVersion/package/not-a-number",
+                "/api/v1/appVersion/package/20096802/extra",
+                "/api/v1/appVersion/admin/page")) {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            assertFalse(interceptor.preHandle(request("GET", "/byaiService" + path, "/byaiService"),
+                response, new Object()));
+            assertThat(response.getStatus()).isEqualTo(401);
+        }
+        MockHttpServletResponse postResponse = new MockHttpServletResponse();
+        assertFalse(interceptor.preHandle(request("POST",
+            "/byaiService/api/v1/appVersion/latest", "/byaiService"), postResponse, new Object()));
+        assertThat(postResponse.getStatus()).isEqualTo(401);
+    }
+
+    @Test
     void allowsAnonymousWeixinOpenPlatformEventsWithContextPathAndTrailingSlash() {
         AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
         for (String path : List.of(

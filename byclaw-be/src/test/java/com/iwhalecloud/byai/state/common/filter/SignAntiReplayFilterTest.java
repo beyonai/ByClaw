@@ -163,6 +163,36 @@ class SignAntiReplayFilterTest {
     }
 
     @Test
+    void letsDesktopVersionDiscoveryAndPackageDownloadPassWithoutRequestSignature() throws Exception {
+        SignAntiReplayFilter filter = enabledFilter();
+        for (String path : java.util.List.of(
+                "/byaiService/api/v1/appVersion/latest",
+                "/byaiService/api/v1/appVersion/package/20096802")) {
+            MockHttpServletRequest request = request("GET", path, "/byaiService");
+            MockFilterChain chain = new MockFilterChain();
+
+            filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+            assertThat(chain.getRequest()).isSameAs(request);
+        }
+    }
+
+    @Test
+    void keepsRequestSignatureForVersionManagementAndPackageLookalikes() {
+        SignAntiReplayFilter filter = enabledFilter();
+        for (MockHttpServletRequest request : java.util.List.of(
+                request("POST", "/byaiService/api/v1/appVersion/latest", "/byaiService"),
+                request("GET", "/byaiService/api/v1/appVersion/admin/page", "/byaiService"),
+                request("GET", "/byaiService/api/v1/appVersion/package/not-a-number", "/byaiService"),
+                request("GET", "/byaiService/api/v1/appVersion/package/20096802/extra", "/byaiService"))) {
+            MockFilterChain chain = new MockFilterChain();
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> filter.doFilter(request, new MockHttpServletResponse(), chain)).isInstanceOf(RuntimeException.class);
+            assertThat(chain.getRequest()).isNull();
+        }
+    }
+
+    @Test
     void keepsSignatureCheckForInternalAndLookalikeSessionResourcePaths() {
         SignAntiReplayFilter filter = enabledFilter();
         for (MockHttpServletRequest request : java.util.List.of(
