@@ -36,6 +36,7 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatActiveTaskException;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidateSessionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
@@ -84,9 +85,11 @@ class GroupChatTurnCoordinatorTest {
         when(resources.findById(anyLong())).thenAnswer(call -> { SsResource agent = new SsResource(); agent.setResourceName("Agent " + call.getArgument(0)); return agent; });
         PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        GroupChatContextService contextService = new GroupChatContextService(messages, mock(SessionService.class),
+            resources);
         coordinator = new GroupChatTurnCoordinator(turns, anchors, tasks, messages, candidates, sequence, members,
             mock(SessionService.class), users, resources, mock(ChatRuntimeStateService.class),
-            mock(GroupChatGatewayExecutor.class), transactions);
+            mock(GroupChatGatewayExecutor.class), contextService, transactions);
     }
 
     @Test
@@ -132,6 +135,7 @@ class GroupChatTurnCoordinatorTest {
         JSONObject input = JSON.parseObject(back.getInputContent());
         assertEquals("Here are the sources", input.getString("本次消息"));
         assertEquals(3L, input.getLong("本次发送者ID"));
+        assertFalse(input.containsKey("本次引用消息"));
         assertEquals("Analyze company news", input.getString("原始用户需求"));
         assertEquals(2, back.getHopCount());
         assertNotEquals(a.getCandidateSessionId(), coordinator.enqueueUser(10L, 30L, null, 1L, 2L).getCandidateSessionId());
@@ -260,6 +264,50 @@ class GroupChatTurnCoordinatorTest {
         assertEquals(2, JSON.parseObject(b.getInputMetadata()).getJSONArray("resourceList").size());
         assertEquals("3", JSON.parseObject(b.getInputMetadata()).getJSONArray("resourceList")
             .getJSONObject(1).getString("resourceId"));
+    }
+
+    @Test
+    void quotedMessageIncludesItsIdentityContentAndAttachmentsInTurnContext() {
+        ByaiMessage quoted = new ByaiMessage();
+        quoted.setMessageId(21L);
+        quoted.setSessionId(10L);
+        quoted.setUsage(1);
+        quoted.setCreatorName("Reporter");
+        quoted.setMessageContent("Please review the report");
+        quoted.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"report.pdf\",\"fileUrl\":\"/files/report.pdf\"}]}");
+        when(messages.selectByMessageId(21L)).thenReturn(quoted);
+        when(messages.selectVisibleGroupMessage(10L, 21L)).thenReturn(quoted);
+        ByaiGroupChatTurn original = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
+        when(turns.selectByPublicMessage(21L)).thenReturn(original);
+
+        ByaiGroupChatTurn reply = coordinator.enqueueUser(10L, 22L, 21L, 1L, 2L);
+        JSONObject reference = JSON.parseObject(reply.getInputContent()).getJSONObject("本次引用消息");
+        assertEquals("21", reference.getString("messageId"));
+        assertEquals("Please review the report", reference.getString("content"));
+        assertEquals("Reporter", reference.getJSONObject("speaker").getString("displayName"));
+        assertEquals("report.pdf", reference.getJSONArray("attachments").getJSONObject(0).getString("fileName"));
+        assertEquals("/files/report.pdf", reference.getJSONArray("attachments").getJSONObject(0).getString("fileUrl"));
+    }
+
+    @Test
+    void recalledQuotedMessageDoesNotExposeItsBodyOrFiles() {
+        ByaiMessage quoted = new ByaiMessage();
+        quoted.setMessageId(21L);
+        quoted.setSessionId(10L);
+        quoted.setUsage(1);
+        quoted.setMessageContent("private quoted text");
+        quoted.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"secret.pdf\"}]}");
+        quoted.setRecalledAt(new java.util.Date());
+        when(messages.selectByMessageId(21L)).thenReturn(quoted);
+        when(messages.selectVisibleGroupMessage(10L, 21L)).thenReturn(quoted);
+        ByaiGroupChatTurn original = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
+        when(turns.selectByPublicMessage(21L)).thenReturn(original);
+
+        ByaiGroupChatTurn reply = coordinator.enqueueUser(10L, 22L, 21L, 1L, 2L);
+        String context = reply.getInputContent();
+        assertTrue(JSON.parseObject(context).getJSONObject("本次引用消息").getBooleanValue("recalled"));
+        assertFalse(context.contains("private quoted text"));
+        assertFalse(context.contains("secret.pdf"));
     }
 
 }

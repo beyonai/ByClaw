@@ -42,6 +42,7 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatSessionReleased;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
@@ -64,6 +65,7 @@ public class GroupChatTurnCoordinator {
     private final UserService users;
     private final SsResourceService resources;
     private final ChatRuntimeStateService runtime;
+    private final GroupChatContextService contextService;
     private final GroupChatGatewayExecutor gateway;
     private final TransactionTemplate transaction;
     private final ExecutorService workers = new ThreadPoolExecutor(8, 8, 0L, TimeUnit.MILLISECONDS,
@@ -79,7 +81,7 @@ public class GroupChatTurnCoordinator {
         ByaiGroupChatTaskMapper tasks, ByaiMessageMapper messages, GroupChatCandidateSessionService candidates,
         SequenceService sequence, SessionMemberService members, SessionService sessions, UserService users,
         SsResourceService resources, ChatRuntimeStateService runtime, GroupChatGatewayExecutor gateway,
-        PlatformTransactionManager transactionManager) {
+        GroupChatContextService contextService, PlatformTransactionManager transactionManager) {
         this.turns = turns;
         this.anchors = anchors;
         this.tasks = tasks;
@@ -91,6 +93,7 @@ public class GroupChatTurnCoordinator {
         this.users = users;
         this.resources = resources;
         this.runtime = runtime;
+        this.contextService = contextService;
         this.gateway = gateway;
         this.transaction = new TransactionTemplate(transactionManager);
         this.dispatchTransaction = new TransactionTemplate(transactionManager);
@@ -139,8 +142,9 @@ public class GroupChatTurnCoordinator {
                 }
             }
             ByaiMessage message = messages.selectByMessageId(source);
+            JSONObject quoted = reply == null ? null : quotedMessage(group, reply);
             return enqueue(group, root, source, source, user, agent, "USER", user, message.getMessageContent(),
-                metadata(message), null, 0, preferred);
+                metadata(message), null, 0, preferred, quoted);
         });
     }
 
@@ -157,12 +161,32 @@ public class GroupChatTurnCoordinator {
             metadata.put("resourceList", resourceList);
             return enqueue(parent.getGroupSessionId(), parent.getRootMessageId(), trigger, publicBoundary,
                 parent.getInitiatorUserId(), agent, "AGENT", parent.getTargetAgentId(), content, metadata,
-                parent.getExecutionId(), hop, null);
+                parent.getExecutionId(), hop, null, null);
         });
     }
 
+    /** 将本轮明确引用的群消息冻结到调度快照，附件沿用群历史的安全投影。 */
+    private JSONObject quotedMessage(Long group, Long reply) {
+        ByaiMessage visible = messages.selectVisibleGroupMessage(group, reply);
+        JSONObject quoted = new JSONObject(true);
+        quoted.put("messageId", String.valueOf(reply));
+        if (visible == null || Integer.valueOf(5).equals(visible.getUsage())) {
+            quoted.put("unavailable", true);
+            return quoted;
+        }
+        var projected = contextService.toMessages(List.of(visible), Map.of()).get(0);
+        quoted.put("recalled", projected.isRecalled());
+        quoted.put("role", projected.getRole());
+        quoted.put("speaker", projected.getSpeaker());
+        quoted.put("content", projected.getContent());
+        quoted.put("resourceList", projected.getResourceList());
+        quoted.put("attachments", projected.getAttachments());
+        return quoted;
+    }
+
     private ByaiGroupChatTurn enqueue(Long group, Long root, Long trigger, Long boundary, Long user, Long agent,
-        String senderType, Long sender, String content, JSONObject metadata, Long parent, int hop, ByaiGroupChatExecution preferred) {
+        String senderType, Long sender, String content, JSONObject metadata, Long parent, int hop,
+        ByaiGroupChatExecution preferred, JSONObject quoted) {
         ByaiGroupChatTurn existing = turns.selectByTriggerAndAgent(trigger, agent);
         if (existing != null) {
             return existing;
@@ -212,6 +236,9 @@ public class GroupChatTurnCoordinator {
         envelope.put("本次接收者ID", agent);
         envelope.put("本次接收者名称", resources.findById(agent).getResourceName());
         envelope.put("本次消息", content);
+        if (quoted != null) {
+            envelope.put("本次引用消息", quoted);
+        }
         // 调度快照保留完整上下文；子会话正文只使用“本次消息”，其余信息在 Gateway 出站时追加。
         turn.setInputContent(envelope.toJSONString());
         mergeResources(metadata, metadata(messages.selectByMessageId(root)));

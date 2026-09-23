@@ -38,6 +38,7 @@ class GroupChatCandidateSessionServiceTest {
             ]}
             """;
         ByaiMessage source = source(metadata);
+        source.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"input.pdf\"}]}");
 
         ByaiMessage child = createChild(source);
 
@@ -47,6 +48,7 @@ class GroupChatCandidateSessionServiceTest {
             .isEqualTo(JSON.parseObject(metadata).getJSONArray("resourceList"));
         assertThat(childMetadata.containsKey("clientRequestId")).isFalse();
         assertThat(child.getMessageContent()).isEqualTo(source.getMessageContent());
+        assertThat(child.getRelatedResources()).isEqualTo(source.getRelatedResources());
         assertThat(child.getSessionId()).isEqualTo(900L);
         assertThat(source.getMetadata()).isEqualTo(metadata);
     }
