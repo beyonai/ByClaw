@@ -40,6 +40,7 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatActiveTaskException;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMentionService;
@@ -109,6 +110,35 @@ class GroupChatApplicationServiceResourceListTest {
             resource(AgentMetaEnum.DIG_EMPLOYEE, "501", "DIG_EMPLOYEE_501")))))
             .isInstanceOf(IllegalArgumentException.class);
         verify(eventPublisher, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void activeTaskRejectionReturnsCorrelatedWebSocketEventWithoutSuccessAck() {
+        GroupChatApplicationService rejectedService = mock(GroupChatApplicationService.class);
+        ChatMessage command = command(List.of(resource(AgentMetaEnum.DIG_EMPLOYEE, "501", "DIG_EMPLOYEE_501")));
+        command.setClientRequestId("request-active-task");
+        when(rejectedService.acceptUserMessage(command))
+            .thenThrow(new GroupChatActiveTaskException(700L, 501L));
+        ChannelHandlerContext channel = mock(ChannelHandlerContext.class);
+
+        new GroupChatWebSocketService(rejectedService).send(channel, command);
+
+        ArgumentCaptor<TextWebSocketFrame> response = ArgumentCaptor.forClass(TextWebSocketFrame.class);
+        verify(channel).writeAndFlush(response.capture());
+        try {
+            JSONObject rejected = JSON.parseObject(response.getValue().text());
+            assertThat(rejected.getString("type")).isEqualTo("GROUP_CHAT_REJECTED");
+            assertThat(rejected.getString("sessionId")).isEqualTo(String.valueOf(GROUP_ID));
+            assertThat(rejected.getString("clientRequestId")).isEqualTo("request-active-task");
+            assertThat(rejected.getString("code")).isEqualTo("ACTIVE_TASK_REQUIRES_TASK_ENTRY");
+            assertThat(rejected.getString("message")).isNotBlank();
+            assertThat(rejected.getString("taskId")).isEqualTo("700");
+            assertThat(rejected.getString("agentId")).isEqualTo("501");
+            assertThat(rejected.containsKey("messageId")).isFalse();
+        }
+        finally {
+            response.getValue().release();
+        }
     }
 
     @Test

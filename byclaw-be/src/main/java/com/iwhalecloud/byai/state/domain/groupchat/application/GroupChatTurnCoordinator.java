@@ -112,11 +112,9 @@ public class GroupChatTurnCoordinator {
                     origin = turns.selectByPublicMessage(reply);
                 }
                 if (origin != null) {
-                    if (!Objects.equals(user, origin.getInitiatorUserId())) {
-                        throw new IllegalArgumentException("Referenced conversation belongs to another user");
-                    }
                     root = origin.getRootMessageId();
-                    if (Objects.equals(agent, origin.getTargetAgentId())) {
+                    if (Objects.equals(user, origin.getInitiatorUserId())
+                        && Objects.equals(agent, origin.getTargetAgentId())) {
                         preferred = anchors.selectById(origin.getAnchorExecutionId());
                     }
                 }
@@ -130,11 +128,12 @@ public class GroupChatTurnCoordinator {
                     if (anchor == null) {
                         anchor = anchors.selectByPublicMessage(reply);
                     }
-                    if (anchor == null || !Objects.equals(anchor.getInitiatorUserId(), user)) {
+                    if (anchor == null) {
                         throw new IllegalArgumentException("Reply cannot resolve an authorized conversation");
                     }
                     root = anchor.getRootMessageId();
-                    if (Objects.equals(agent, anchor.getTargetAgentId())) {
+                    if (Objects.equals(user, anchor.getInitiatorUserId())
+                        && Objects.equals(agent, anchor.getTargetAgentId())) {
                         preferred = anchor;
                     }
                 }
@@ -176,7 +175,7 @@ public class GroupChatTurnCoordinator {
         ByaiGroupChatTask task = tasks.selectById(anchor.getCandidateSessionId());
         if (task != null && "ACTIVE".equals(task.getStatus())) {
             if ("USER".equals(senderType)) {
-                throw new IllegalArgumentException("Unfinished tasks require task entry");
+                throw new GroupChatActiveTaskException(anchor.getCandidateSessionId(), agent);
             }
         }
         ByaiGroupChatTurn turn = new ByaiGroupChatTurn();

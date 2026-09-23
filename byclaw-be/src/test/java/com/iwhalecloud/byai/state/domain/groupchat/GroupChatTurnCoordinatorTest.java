@@ -36,6 +36,7 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatActiveTaskException;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidateSessionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
@@ -61,9 +62,11 @@ class GroupChatTurnCoordinatorTest {
         when(candidates.createEmpty(anyLong(), anyLong(), anyLong(), anyLong())).thenAnswer(call -> ids.incrementAndGet());
         when(anchors.insert(any(ByaiGroupChatExecution.class))).thenAnswer(call -> {
             ByaiGroupChatExecution row = call.getArgument(0);
-            anchorRows.put(row.getRootMessageId() + ":" + row.getTargetAgentId(), row); return 1;
+            anchorRows.put(row.getRootMessageId() + ":" + row.getTargetAgentId() + ":" + row.getInitiatorUserId(), row);
+            return 1;
         });
-        when(turns.selectAnchor(anyLong(), anyLong(), anyLong())).thenAnswer(call -> anchorRows.get(call.getArgument(0) + ":" + call.getArgument(1)));
+        when(turns.selectAnchor(anyLong(), anyLong(), anyLong())).thenAnswer(call ->
+            anchorRows.get(call.getArgument(0) + ":" + call.getArgument(1) + ":" + call.getArgument(2)));
         when(turns.insert(any(ByaiGroupChatTurn.class))).thenAnswer(call -> {
             ByaiGroupChatTurn row = call.getArgument(0);
             turnRows.put(row.getTriggerMessageId() + ":" + row.getTargetAgentId(), row); return 1;
@@ -163,8 +166,66 @@ class GroupChatTurnCoordinatorTest {
         ByaiGroupChatTurn next = coordinator.enqueueUser(10L, 22L, 21L, 1L, 2L);
         assertEquals(0, next.getHopCount()); assertEquals(20L, next.getRootMessageId());
         assertEquals(a.getCandidateSessionId(), next.getCandidateSessionId());
-        assertThrows(IllegalArgumentException.class, () -> coordinator.enqueueUser(10L, 23L, 21L, 9L, 2L));
+        ByaiGroupChatTurn otherUser = coordinator.enqueueUser(10L, 23L, 21L, 9L, 2L);
+        assertEquals(20L, otherUser.getRootMessageId());
+        assertEquals(9L, otherUser.getInitiatorUserId());
+        assertNotEquals(a.getCandidateSessionId(), otherUser.getCandidateSessionId());
+        assertEquals(otherUser.getCandidateSessionId(), coordinator.enqueueUser(10L, 24L, 21L, 9L, 2L)
+            .getCandidateSessionId());
     }
+
+    @Test
+    void activeTaskRejectsOnlyItsOwnerEvenWhenAnotherUserQuotesTheSameReply() {
+        ByaiGroupChatTurn first = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
+        when(turns.selectByPublicMessage(21L)).thenReturn(first);
+        ByaiGroupChatTask firstTask = new ByaiGroupChatTask();
+        firstTask.setTaskSessionId(first.getCandidateSessionId());
+        firstTask.setStatus("ACTIVE");
+        when(tasks.selectById(first.getCandidateSessionId())).thenReturn(firstTask);
+
+        GroupChatActiveTaskException rejection = assertThrows(GroupChatActiveTaskException.class,
+            () -> coordinator.enqueueUser(10L, 22L, 21L, 1L, 2L));
+        assertEquals(first.getCandidateSessionId(), rejection.getTaskId());
+        assertEquals(2L, rejection.getAgentId());
+
+        ByaiGroupChatTurn second = coordinator.enqueueUser(10L, 23L, 21L, 9L, 2L);
+        assertEquals(first.getRootMessageId(), second.getRootMessageId());
+        assertEquals(9L, second.getInitiatorUserId());
+        assertNotEquals(first.getCandidateSessionId(), second.getCandidateSessionId());
+        verify(candidates).createEmpty(10L, 23L, 9L, 2L);
+        verify(tasks).selectById(second.getCandidateSessionId());
+
+        ByaiGroupChatTask secondTask = new ByaiGroupChatTask();
+        secondTask.setTaskSessionId(second.getCandidateSessionId());
+        secondTask.setStatus("ACTIVE");
+        when(tasks.selectById(second.getCandidateSessionId())).thenReturn(secondTask);
+        GroupChatActiveTaskException secondRejection = assertThrows(GroupChatActiveTaskException.class,
+            () -> coordinator.enqueueUser(10L, 24L, 21L, 9L, 2L));
+        assertEquals(second.getCandidateSessionId(), secondRejection.getTaskId());
+
+        when(turns.selectByPublicMessage(25L)).thenReturn(second);
+        assertThrows(GroupChatActiveTaskException.class,
+            () -> coordinator.enqueueUser(10L, 26L, 25L, 1L, 2L));
+        ByaiGroupChatTurn anotherAgent = coordinator.enqueueUser(10L, 27L, 25L, 1L, 3L);
+        assertEquals(first.getRootMessageId(), anotherAgent.getRootMessageId());
+        assertNotEquals(first.getCandidateSessionId(), anotherAgent.getCandidateSessionId());
+        assertEquals(1L, anotherAgent.getInitiatorUserId());
+    }
+
+    @Test
+    void legacyPublicAnchorProvidesRootWithoutTransferringItsOwner() {
+        ByaiGroupChatTurn first = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
+        ByaiGroupChatExecution legacyAnchor = anchorRows.get("20:2:1");
+        when(anchors.selectByPublicMessage(21L)).thenReturn(legacyAnchor);
+
+        ByaiGroupChatTurn quoted = coordinator.enqueueUser(10L, 22L, 21L, 9L, 2L);
+
+        assertEquals(20L, quoted.getRootMessageId());
+        assertEquals(9L, quoted.getInitiatorUserId());
+        assertNotEquals(first.getCandidateSessionId(), quoted.getCandidateSessionId());
+        verify(candidates).createEmpty(10L, 22L, 9L, 2L);
+    }
+
     @Test
     void publishedTaskReplyReusesReferencedSessionWithoutClassificationOrNewAnchor() {
         ByaiGroupChatTurn original = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
