@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatActiveTaskException;
 import com.iwhalecloud.byai.state.domain.ws.model.ChatMessage;
 
 import io.netty.channel.ChannelHandlerContext;
@@ -28,11 +29,26 @@ public class GroupChatWebSocketService {
         if (message.getChatContent() == null) {
             message.setChatContent("");
         }
-        JSONObject ack = new JSONObject();
-        ack.put("type", "GROUP_CHAT_ACCEPTED");
-        ack.put("sessionId", String.valueOf(message.getSessionId()));
-        ack.put("clientRequestId", message.getClientRequestId());
-        ack.put("messageId", applicationService.acceptUserMessage(message));
-        context.writeAndFlush(new TextWebSocketFrame(JSON.toJSONString(ack)));
+        try {
+            Long messageId = applicationService.acceptUserMessage(message);
+            JSONObject ack = new JSONObject();
+            ack.put("type", "GROUP_CHAT_ACCEPTED");
+            ack.put("sessionId", String.valueOf(message.getSessionId()));
+            ack.put("clientRequestId", message.getClientRequestId());
+            ack.put("messageId", messageId);
+            context.writeAndFlush(new TextWebSocketFrame(JSON.toJSONString(ack)));
+        }
+        catch (GroupChatActiveTaskException rejection) {
+            // The application transaction has rolled back before the rejected request is acknowledged.
+            JSONObject event = new JSONObject();
+            event.put("type", "GROUP_CHAT_REJECTED");
+            event.put("sessionId", String.valueOf(message.getSessionId()));
+            event.put("clientRequestId", message.getClientRequestId());
+            event.put("code", GroupChatActiveTaskException.CODE);
+            event.put("message", rejection.getMessage());
+            event.put("taskId", String.valueOf(rejection.getTaskId()));
+            event.put("agentId", String.valueOf(rejection.getAgentId()));
+            context.writeAndFlush(new TextWebSocketFrame(JSON.toJSONString(event)));
+        }
     }
 }
