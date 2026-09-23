@@ -77,6 +77,8 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private final List<Pattern> matcherList = new ArrayList<>(10);
 
+    private final List<Pattern> versionUrlList = new ArrayList<>(2);
+
     @Autowired
     private URLFilter urlFilter;
 
@@ -99,7 +101,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     public void init() {
         try {
 
-            matcherList.add(Pattern.compile("/api/v1/appVersion/latest"));
             matcherList.add(Pattern.compile("/actuator/health"));
             matcherList.add(Pattern.compile("/actuator/info"));
             matcherList.add(Pattern.compile("/actuator/metrics"));
@@ -113,6 +114,10 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             matcherList.add(Pattern.compile("/feishu/bot/events")); // 飞书事件回调：开放平台匿名推送，Controller 内部校验 token
             matcherList.add(Pattern.compile("/openclaw-ui")); // openclaw 控制台整页代理（用 openclaw 自带 token 鉴权，非系统登录态）
             matcherList.add(Pattern.compile("/group-chats/invitations/validate")); // 群邀请 token 匿名预览
+
+            // Desktop 在登录前检查版本、下载安装包；只开放这两个只读端点。
+            versionUrlList.add(Pattern.compile("^/api/v1/appVersion/latest$"));
+            versionUrlList.add(Pattern.compile("^/api/v1/appVersion/package/\\d+$"));
 
             String[] patternList = StringUtils.isNotEmpty(urlPattenrs) ? urlPattenrs.split(",") : new String[0];
             for (String regex : patternList) {
@@ -185,6 +190,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                     return true;
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request, "Artifact发布");
+            }
+            if (this.isPublicAppVersionRequest(request)) {
+                return true;
             }
             if (this.checkUrlByRegex(url)) {
                 return true;
@@ -421,6 +429,17 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         }
         String normalizedPath = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
         return normalizedPath.endsWith(FEISHU_BOT_EVENT_CALLBACK_PATH);
+    }
+
+    private boolean isPublicAppVersionRequest(HttpServletRequest request) {
+        if (request == null || !"GET".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        String requestUri = StringUtils.defaultString(request.getRequestURI());
+        String contextPath = StringUtils.defaultString(request.getContextPath());
+        String endpointPath = requestUri.startsWith(contextPath) ? requestUri.substring(contextPath.length()) : requestUri;
+        String normalizedPath = endpointPath.endsWith("/") ? endpointPath.substring(0, endpointPath.length() - 1) : endpointPath;
+        return versionUrlList.stream().anyMatch(pattern -> pattern.matcher(normalizedPath).matches());
     }
 
     /**

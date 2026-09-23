@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.common.filter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import com.iwhalecloud.byai.common.constants.staticdata.RedisConfig;
 import com.iwhalecloud.byai.common.ecrypt.MD5Util;
@@ -54,6 +55,11 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         "/internal/v1/orchestrators/resolve-runtime";
 
     private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
+
+    private static final List<Pattern> VERSION_URL_LIST = List.of(
+        Pattern.compile("^/api/v1/appVersion/latest$"),
+        Pattern.compile("^/api/v1/appVersion/package/\\d+$")
+    );
 
     @org.springframework.beans.factory.annotation.Value("${artifact.preview.path-prefix:/artifact-preview}")
     private String artifactPreviewPathPrefix;
@@ -111,6 +117,13 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         }
         // 沙箱上传使用 Beyond-Token；Artifact 公开内容与数据接口使用业务层访问约束，调用方均不持有门户签名盐。
         if (this.isArtifactUpload(request) || this.isArtifactCapabilityRequest(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        // Desktop version discovery and package download must work before a
+        // user logs in. Only these two read-only GET routes are public; version
+        // management endpoints remain protected by the normal filters.
+        if (this.isPublicAppVersionRequest(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -249,6 +262,17 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         return ("GET".equalsIgnoreCase(request.getMethod()) || "HEAD".equalsIgnoreCase(request.getMethod()))
             && (matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
                 || matchesConfiguredPrefix(request, artifactDownloadPathPrefix));
+    }
+
+    private boolean isPublicAppVersionRequest(HttpServletRequest request) {
+        if (request == null || !"GET".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        String requestUri = StringUtils.defaultString(request.getRequestURI());
+        String contextPath = StringUtils.defaultString(request.getContextPath());
+        String endpointPath = requestUri.startsWith(contextPath) ? requestUri.substring(contextPath.length()) : requestUri;
+        String normalizedPath = endpointPath.endsWith("/") ? endpointPath.substring(0, endpointPath.length() - 1) : endpointPath;
+        return VERSION_URL_LIST.stream().anyMatch(pattern -> pattern.matcher(normalizedPath).matches());
     }
 
     private boolean matchesConfiguredPrefix(HttpServletRequest request, String prefix) {
