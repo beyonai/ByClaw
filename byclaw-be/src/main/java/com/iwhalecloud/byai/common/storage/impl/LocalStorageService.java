@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.common.storage.impl;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.AbstractFileIngressStorageService;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
@@ -16,6 +17,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.Comparator;
@@ -226,8 +228,16 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
 
     @Override
     public void delete(StorageLocation location) {
+        Path path = resolve(location);
+        // 浏览器规范化后的目录路径不带末尾斜杠，必须按实际类型递归删除非空目录。
+        // 不跟随符号链接，避免把链接指向的其他目录内容一并删除。
+        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            deletePrefix(StoragePrefix.of(location.getNamespace(), location.getBucketOrRoot(), location.getPath(),
+                location.getShareType(), true));
+            return;
+        }
         try {
-            Files.deleteIfExists(resolve(location));
+            Files.deleteIfExists(path);
         }
         catch (IOException e) {
             throw new IllegalStateException("Local file delete failed: " + location.getPath(), e);
@@ -248,6 +258,22 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
         }
         catch (IOException e) {
             throw new IllegalStateException("Local file prefix delete failed: " + root, e);
+        }
+    }
+
+    @Override
+    public void move(StorageLocation source, StorageLocation target) {
+        try {
+            Path sourcePath = resolve(source);
+            Path targetPath = resolve(target);
+            // 本地文件系统直接移动整个目录，不依赖路径末尾的斜杠，也不创建目录副本。
+            // 不使用 REPLACE_EXISTING，避免重命名覆盖已有文件或之前失败留下的目录。
+            Files.createDirectories(targetPath.getParent());
+            Files.move(sourcePath, targetPath);
+        }
+        catch (IOException e) {
+            throw new IllegalStateException(I18nUtil.get("storage.local.move.failed", source.getPath(),
+                target.getPath()), e);
         }
     }
 
