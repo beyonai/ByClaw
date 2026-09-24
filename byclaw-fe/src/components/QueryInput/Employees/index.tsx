@@ -23,6 +23,7 @@ import { chatModeMap } from '@/constants/query';
 import { ResourceTypeMap } from '@/constants/resource';
 import { getDownloadOpenClawFileUrl, isOpenClawAgent, uploadFileToOpenClaw } from '@/utils/openClaw/utils';
 import { createPendingRemoteSession } from '@/utils/session';
+import { confirmExistingSessionModel } from '@/service/message';
 import queryStyles from '../index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
 import styles from './index.module.less';
@@ -204,6 +205,15 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
       selectedThinkingLevel: stored,
       selectedThinkingLevelBySession: { ...prevState.selectedThinkingLevelBySession, [sessionKey]: stored },
     }));
+  };
+
+  onModelConfirm = (selection: { modelId?: string; thinkingLevel?: string }) => {
+    this.onModelSelectChange(selection.modelId);
+    if (selection.thinkingLevel) this.onThinkingLevelChange(selection.thinkingLevel);
+    confirmExistingSessionModel(this.props.sessionId, {
+      modelId: selection.modelId || '-1',
+      ...(selection.thinkingLevel ? { thinkingLevel: selection.thinkingLevel } : {}),
+    });
   };
 
   componentDidMount(): void {
@@ -495,6 +505,7 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
             onLevelChange={this.onThinkingLevelChange}
             value={this.state.selectedModelId}
             onChange={this.onModelSelectChange}
+            onConfirm={this.onModelConfirm}
           />
           {this.STTRender()}
         </Space>

@@ -26,6 +26,7 @@ import MentionPopover from '../RichInput/mentionPopover';
 import { IChatSettingValue } from '@/typescript/cloud';
 import { agentTypeMap } from '@/constants/agent';
 import { createPendingRemoteSession } from '@/utils/session';
+import { confirmExistingSessionModel } from '@/service/message';
 
 type IState = {
   deepThink: boolean;
@@ -212,6 +213,15 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       selectedThinkingLevel: stored,
       selectedThinkingLevelBySession: { ...prevState.selectedThinkingLevelBySession, [sessionKey]: stored },
     }));
+  };
+
+  onModelConfirm = (selection: { modelId?: string; thinkingLevel?: string }) => {
+    this.onModelSelectChange(selection.modelId);
+    if (selection.thinkingLevel) this.onThinkingLevelChange(selection.thinkingLevel);
+    confirmExistingSessionModel(this.props.sessionId, {
+      modelId: selection.modelId || '-1',
+      ...(selection.thinkingLevel ? { thinkingLevel: selection.thinkingLevel } : {}),
+    });
   };
 
   componentDidMount(): void {
@@ -586,6 +596,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             onChange={this.onModelSelectChange}
             level={this.state.selectedThinkingLevel}
             onLevelChange={this.onThinkingLevelChange}
+            onConfirm={this.onModelConfirm}
           />
           {this.STTRender()}
         </Space>

@@ -27,6 +27,9 @@ type Props = {
 
   /** 思考强度选择结果；'-1' 表示「跟随默认/恢复默认」（清除服务端覆盖）。 */
   onLevelChange?: (level?: string) => void;
+
+  /** 点击模型行时原子提交模型与该模型下暂存的思考档位。 */
+  onConfirm?: (selection: { modelId?: string; thinkingLevel?: string }) => void;
 };
 
 const rowsOf = (response: any) => {
@@ -81,7 +84,7 @@ type Model = {
   source: 'local' | 'mine' | 'public';
   reasoning?: ModelReasoningConfig;
 };
-const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level, onLevelChange }) => {
+const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level, onLevelChange, onConfirm }) => {
   const intl = useIntl();
   const authIdentity = useSelector(({ user }: any) => {
     const userInfo = user?.userInfo;
@@ -191,7 +194,8 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
 
   const selectModel = (next?: string) => {
     if (desktop && next) window.localStorage.setItem(storageKey, next);
-    onChange(next);
+    if (onConfirm) onConfirm({ modelId: next });
+    else onChange(next);
     setOpen(false);
   };
 
@@ -201,9 +205,12 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
 
   const confirmModel = (modelId: string) => {
     if (desktop) window.localStorage.setItem(storageKey, modelId);
-    onChange(modelId);
     const draftLevel = draftLevels[modelId];
-    if (draftLevel) onLevelChange?.(draftLevel);
+    if (onConfirm) onConfirm({ modelId, ...(draftLevel ? { thinkingLevel: draftLevel } : {}) });
+    else {
+      onChange(modelId);
+      if (draftLevel) onLevelChange?.(draftLevel);
+    }
     setOpen(false);
   };
 
@@ -294,11 +301,11 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
     return () => observer.disconnect();
   }, [open, reasoningLevelsKey, reasoningLevels.length]);
 
-  const reasoningHint = draftLevel
-    ? intl.formatMessage({ id: 'ui.model.reasoning.pending' })
-    : reasoningPanelIsCurrent && explicitLevel
-      ? intl.formatMessage({ id: 'ui.model.reasoning.applied' })
-      : intl.formatMessage({ id: 'ui.model.reasoning.followingDefault' });
+  let reasoningHint = intl.formatMessage({ id: 'ui.model.reasoning.followingDefault' });
+  if (draftLevel) reasoningHint = intl.formatMessage({ id: 'ui.model.reasoning.pending' });
+  else if (reasoningPanelIsCurrent && explicitLevel) {
+    reasoningHint = intl.formatMessage({ id: 'ui.model.reasoning.applied' });
+  }
   if (!enabled) return null;
   const tabs = [
     {
