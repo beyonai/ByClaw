@@ -2626,12 +2626,11 @@ function readLeaderModelSelection(raw: unknown) {
   }
   const record = raw as Record<string, unknown>;
   const modelId = typeof record.modelId === "string" ? record.modelId.trim() : "";
-  const fingerprint =
-    typeof record.fingerprint === "string" ? record.fingerprint.trim() : "";
-  if (!modelId || !/^[a-f0-9]{64}$/.test(fingerprint)) {
+  if (!modelId) {
     throw new Error("Invalid persisted Run Leader model selection");
   }
-  return { modelId, fingerprint };
+  // 旧 Run 可能仍带有 fingerprint；恢复时忽略它，只读取模型资源 ID。
+  return { modelId };
 }
 
 function mapCredential(row: QueryResultRow): ExecutionCredential {

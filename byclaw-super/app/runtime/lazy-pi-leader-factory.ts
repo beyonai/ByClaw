@@ -68,7 +68,7 @@ export class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilit
     if (!this.modelConfig) {
       return Promise.reject(new Error("Leader model hot switching is not configured"));
     }
-    // Redis 模型配置每次重新读取并校验冻结指纹，不能复用旧实例的模型配置缓存。
+    // 每次恢复从 Redis 读取当前有效配置；模型密钥和参数更新不阻断已有 Run。
     return this.modelConfig(selection).then(PiLeaderSessionFactory.create);
   }
 }
