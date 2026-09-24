@@ -98,6 +98,20 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 4. **运行层**：`before_model_resolve` 在每轮 embedded run 再次强制 provider/model，避免内存 session 快照滞后；`before_prompt_build` 还会追加当前运行模型事实，减少模型自我介绍沿用旧上下文。上述 conversation hooks 从 `~/.openclaw/extensions/` 等非 bundled 路径加载时需 `plugins.entries.baiying-enhance.hooks.allowConversationAccess=true`，见下。
 5. **Channel 层**：`byai-channel` 的 SDK worker 在每次投递消息时读取 `getByaiRuntime().config.current()`，不再使用插件启动时捕获的旧配置，因此配置热重载后新的入站消息会走最新 agent/model 定义。
 
+会话模型选择复用同一套 Redis 权威数据与热加载机制。后端在用户确认选择后向
+`byai:pub:session_model_change` 发布 `SESSION_MODEL_CHANGED`，事件携带 `sessionId`、`userCode`、
+单调递增的 `revision` 和 `changeMask`。插件只消费与本沙箱 `USER_CODE` 相同的事件，短窗口内按
+session 保留最高 revision，并重新读取 Redis 的会话记录；事件只负责唤醒，不作为配置事实来源。
+
+- `changeMask=["thinking"]`：不读取模型配置、不写全局配置；下一次 `before_dispatch` 只更新 session 档位。
+- 切到已经注册的模型：只更新 session model override，不写 `openclaw.json`、不触发 reload。
+- 目标模型未注册：由唯一的 session-model preparer 注册；同一 `modelId:modelHash` 的并发请求共享一次写入。
+- 首条消息的 dispatch preparer 是事件丢失/用户立即发送的正确性兜底；后续 hooks 只读取会话记录并使用已准备的 provider，不再做 provider 深比较或轮询 reload。
+- 会话模型 preparer 不依赖数字员工授权列表先完成加载；网关冷启动时授权仍 pending，也会保留现有数字员工配置并单独完成目标 provider 与 allowlist 的 canonical 写入。
+- 新会话尚无真实 `sessionId` 时，前端只保存本地选择，不调用确认接口；首条消息携带该选择，后端在创建会话并获得真实 ID 后先写 Redis，再进入 dispatch preparer。
+
+前端的悬停预览和思考档位滑动属于草稿状态；点击模型行或“默认模型”才会原子确认模型与档位。完全相同的重复确认由前端去重，并由后端继续提供 no-op 兜底。
+
 从 `~/.openclaw/extensions/` 等非 bundled 路径加载时，OpenClaw 默认**屏蔽** `before_model_resolve` 等 conversation hooks，除非显式开启：
 
 ```json
