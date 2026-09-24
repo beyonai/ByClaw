@@ -10,7 +10,7 @@ import {
     warnUnregisteredManagedModelPrimaries,
 } from "./managed-agent-model-hook.js";
 import { adaptAgentJson, type AdaptedManagedAgent } from "./agent-adapter.js";
-import { hasManagedProviderConfigDrift, mergeDefaultAimodelIntoConfig, mergeManagedAgentsIntoConfig } from "./agent-registry.js";
+import { isManagedProviderBundleApplied, mergeDefaultAimodelIntoConfig, mergeManagedAgentsIntoConfig } from "./agent-registry.js";
 import { AgentRegistryState } from "./agent-state.js";
 import { mutateOpenClawConfigFile } from "./config-writer.js";
 import {
@@ -262,8 +262,7 @@ function hasDefaultModelConfigDrift(params: {
     if (!parsed) {
         return true;
     }
-    return hasManagedProviderConfigDrift(params.cfg, parsed.provider, params.defaultModel.provider) ||
-        params.cfg.agents?.defaults?.compaction?.timeoutSeconds === undefined;
+    return !params.cfg.models?.providers?.[parsed.provider]?.models?.some((model) => model.id === parsed.model);
 }
 
 export async function loadManagedAgentsFromRedis(params: {
@@ -418,6 +417,8 @@ export type AgentWatchdog = {
      * also force config write and workspace markdown re-seed for all currently visible agents.
      */
     __flushNow?: (opts?: AgentFlushNowOptions) => Promise<void>;
+    /** Register/refresh one session-selected model through the same canonical config merge as digital employees. */
+    ensureSessionModel?: (modelId: string, options?: { forceRefresh?: boolean; refreshDesired?: boolean }) => Promise<void>;
 };
 
 export function createAgentWatchdog(params: {
@@ -447,6 +448,15 @@ export function createAgentWatchdog(params: {
     const prevSkillSignatures = new Map<string, string>();
     /** Effective `agents.list[].tools` signatures from the last successful sync. */
     const prevToolSignatures = new Map<string, string>();
+    const sessionModelIds = new Set<string>();
+    const forcedSessionModelGeneration = new Map<string, number>();
+    const sessionModelRequestedGeneration = new Map<string, number>();
+    let sessionModelGeneration = 0;
+    const appliedSessionModelHashes = new Map<string, string>();
+    type SessionModelBundle = NonNullable<Awaited<ReturnType<typeof resolveBaiyingAimodelProviderBundle>>>;
+    const desiredSessionModelBundles = new Map<string, SessionModelBundle>();
+    const lastAppliedSessionModelBundles = new Map<string, SessionModelBundle>();
+    const sessionModelWaiters = new Map<string, Array<{ generation: number; resolve: () => void; reject: (error: Error) => void }>>();
     /** Last successful JSON/auth-filtered baseline, before workspace-uploaded skills are merged. */
     let lastBaseManaged: LoadedManagedAgent[] = [];
     let skillRefreshInFlight = false;
@@ -672,6 +682,7 @@ export function createAgentWatchdog(params: {
             return;
         }
         flushInFlight = true;
+        const capturedSessionModelGeneration = sessionModelGeneration;
         const forceAuthReseed = pendingFullWorkspaceReseed;
         pendingFullWorkspaceReseed = false;
         const deleteBatch = [...pendingDeletedSourceKeys];
@@ -714,6 +725,86 @@ export function createAgentWatchdog(params: {
                     params.api.logger.info(
                         "baiying-enhance: dig-employee auth set not available yet; managed agent sync deferred to avoid clearing registered agents",
                     );
+                }
+
+                // Session model readiness is independent from the digital-employee
+                // authorization snapshot. Keep the existing managed config intact,
+                // but still drain the captured session dependency through the same
+                // canonical merge/write path used by a normal watchdog flush.
+                const capturedSessionModelIds = [...sessionModelIds].filter((modelId) =>
+                    (sessionModelRequestedGeneration.get(modelId) ?? 0) <= capturedSessionModelGeneration);
+                const sessionModels = (await Promise.all(capturedSessionModelIds.map(async (modelId) => {
+                    const bundle = await resolveBaiyingAimodelProviderBundle({
+                        redisJsonStore: params.redisJsonStore,
+                        modelId,
+                        redisKey: resolveAimodelConfigRedisKey(params.pluginConfig.aimodelConfigRedisKey),
+                        secretProviderName: resolveAimodelSecretProviderName(params.pluginConfig.aimodelSecretProviderName),
+                        log: { warn: (message) => params.api.logger.warn(message), info: (message) => params.api.logger.info(message) },
+                    });
+                    if (bundle) {
+                        desiredSessionModelBundles.set(modelId, bundle);
+                        return { modelId, ...bundle, loadFailed: false };
+                    }
+                    const previous = lastAppliedSessionModelBundles.get(modelId);
+                    if (!previous) return null;
+                    params.api.logger.warn(`baiying-enhance: Redis AI model config unavailable for session modelId=${modelId}; keeping last synced provider ${previous.modelRef}`);
+                    return { modelId, ...previous, loadFailed: true };
+                }))).filter((entry) => entry !== null);
+
+                const resolvedIds = new Set(sessionModels.map((entry) => entry.modelId));
+                for (const modelId of capturedSessionModelIds) {
+                    if (resolvedIds.has(modelId)) continue;
+                    const failure = new Error(`Redis AI model config unavailable modelId=${modelId}`);
+                    const waiters = sessionModelWaiters.get(modelId) ?? [];
+                    for (const waiter of waiters.filter((item) => item.generation <= capturedSessionModelGeneration)) waiter.reject(failure);
+                    const remaining = waiters.filter((item) => item.generation > capturedSessionModelGeneration);
+                    if (remaining.length) sessionModelWaiters.set(modelId, remaining);
+                    else sessionModelWaiters.delete(modelId);
+                }
+
+                const runtimeCfg = params.api.runtime.config.loadConfig();
+                const hasSessionModelChanges = sessionModels.some((entry) => {
+                    const modelRef = `${entry.providerKey}/${entry.provider.modelId}`;
+                    const allowlisted = Boolean(runtimeCfg.agents?.defaults?.models?.[modelRef]);
+                    const previousHash = appliedSessionModelHashes.get(entry.modelId);
+                    return (!entry.loadFailed
+                        && (forcedSessionModelGeneration.get(entry.modelId) ?? Number.POSITIVE_INFINITY) <= capturedSessionModelGeneration)
+                        || (previousHash !== undefined && previousHash !== entry.hash)
+                        || !allowlisted
+                        || !isManagedProviderBundleApplied(runtimeCfg, entry.providerKey, entry.provider);
+                });
+                if (hasSessionModelChanges) {
+                    await mutateOpenClawConfigFile(params.api, (base) => mergeManagedAgentsIntoConfig({
+                        base,
+                        managed: [],
+                        defaultModel: null,
+                        sessionModels,
+                        preserveExistingManaged: true,
+                        mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+                        mergeAllowSpawnForMain: false,
+                        aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+                        aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
+                        aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
+                        aimodelSecretResolverCommand: process.execPath,
+                        aimodelSecretResolverArgs: [params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js"],
+                    }));
+                }
+                for (const model of sessionModels) {
+                    const waiters = sessionModelWaiters.get(model.modelId) ?? [];
+                    if (model.loadFailed) {
+                        const failure = new Error(`Redis AI model config unavailable modelId=${model.modelId}`);
+                        for (const waiter of waiters.filter((item) => item.generation <= capturedSessionModelGeneration)) waiter.reject(failure);
+                    } else {
+                        appliedSessionModelHashes.set(model.modelId, model.hash);
+                        lastAppliedSessionModelBundles.set(model.modelId, model);
+                        if ((forcedSessionModelGeneration.get(model.modelId) ?? Number.POSITIVE_INFINITY) <= capturedSessionModelGeneration) {
+                            forcedSessionModelGeneration.delete(model.modelId);
+                        }
+                        for (const waiter of waiters.filter((item) => item.generation <= capturedSessionModelGeneration)) waiter.resolve();
+                    }
+                    const remaining = waiters.filter((item) => item.generation > capturedSessionModelGeneration);
+                    if (remaining.length) sessionModelWaiters.set(model.modelId, remaining);
+                    else sessionModelWaiters.delete(model.modelId);
                 }
                 return;
             }
@@ -839,6 +930,72 @@ export function createAgentWatchdog(params: {
                       mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
                   })
                 : filteredManaged;
+
+            const capturedSessionModelIds = [...sessionModelIds].filter((modelId) =>
+                (sessionModelRequestedGeneration.get(modelId) ?? 0) <= capturedSessionModelGeneration);
+            const sessionModels = (await Promise.all(capturedSessionModelIds.map(async (modelId) => {
+                const bundle = await resolveBaiyingAimodelProviderBundle({
+                    redisJsonStore: params.redisJsonStore,
+                    modelId,
+                    redisKey: resolveAimodelConfigRedisKey(params.pluginConfig.aimodelConfigRedisKey),
+                    secretProviderName: resolveAimodelSecretProviderName(params.pluginConfig.aimodelSecretProviderName),
+                    log: { warn: (message) => params.api.logger.warn(message), info: (message) => params.api.logger.info(message) },
+                });
+                if (bundle) {
+                    desiredSessionModelBundles.set(modelId, bundle);
+                    return { modelId, ...bundle, loadFailed: false };
+                }
+                const previous = lastAppliedSessionModelBundles.get(modelId);
+                if (!previous) return null;
+                params.api.logger.warn(`baiying-enhance: Redis AI model config unavailable for session modelId=${modelId}; keeping last synced provider ${previous.modelRef}`);
+                return { modelId, ...previous, loadFailed: true };
+            }))).filter((entry) => entry !== null);
+            const resolvedSessionModelIds = new Set(sessionModels.map((entry) => entry.modelId));
+            for (const modelId of capturedSessionModelIds) {
+                if (resolvedSessionModelIds.has(modelId)) continue;
+                const waiters = sessionModelWaiters.get(modelId) ?? [];
+                const failure = new Error(`Redis AI model config unavailable modelId=${modelId}`);
+                for (const waiter of waiters.filter((item) => item.generation <= capturedSessionModelGeneration)) {
+                    waiter.reject(failure);
+                }
+                const remaining = waiters.filter((item) => item.generation > capturedSessionModelGeneration);
+                if (remaining.length) sessionModelWaiters.set(modelId, remaining);
+                else sessionModelWaiters.delete(modelId);
+            }
+            const cfgForSessionModels = params.api.runtime.config.loadConfig();
+            const hasSessionModelChanges = sessionModels.some((entry) => {
+                const modelRef = `${entry.providerKey}/${entry.provider.modelId}`;
+                const allowlisted = Boolean(cfgForSessionModels.agents?.defaults?.models?.[modelRef]);
+                const previousHash = appliedSessionModelHashes.get(entry.modelId);
+                return (!entry.loadFailed
+                    && (forcedSessionModelGeneration.get(entry.modelId) ?? Number.POSITIVE_INFINITY) <= capturedSessionModelGeneration)
+                    || (previousHash !== undefined && previousHash !== entry.hash)
+                    || !allowlisted
+                    || !isManagedProviderBundleApplied(cfgForSessionModels, entry.providerKey, entry.provider);
+            });
+            if (!hasSessionModelChanges) {
+                for (const model of sessionModels) {
+                    if (model.loadFailed) {
+                        const failure = new Error(`Redis AI model config unavailable modelId=${model.modelId}`);
+                        const waiters = sessionModelWaiters.get(model.modelId) ?? [];
+                        for (const waiter of waiters.filter((item) => item.generation <= capturedSessionModelGeneration)) waiter.reject(failure);
+                        const remaining = waiters.filter((item) => item.generation > capturedSessionModelGeneration);
+                        if (remaining.length) sessionModelWaiters.set(model.modelId, remaining);
+                        else sessionModelWaiters.delete(model.modelId);
+                        continue;
+                    }
+                    appliedSessionModelHashes.set(model.modelId, model.hash);
+                    lastAppliedSessionModelBundles.set(model.modelId, model);
+                    if ((forcedSessionModelGeneration.get(model.modelId) ?? Number.POSITIVE_INFINITY) <= capturedSessionModelGeneration) {
+                        forcedSessionModelGeneration.delete(model.modelId);
+                    }
+                    const waiters = sessionModelWaiters.get(model.modelId) ?? [];
+                    for (const waiter of waiters.filter((item) => item.generation <= capturedSessionModelGeneration)) waiter.resolve();
+                    const remaining = waiters.filter((item) => item.generation > capturedSessionModelGeneration);
+                    if (remaining.length) sessionModelWaiters.set(model.modelId, remaining);
+                    else sessionModelWaiters.delete(model.modelId);
+                }
+            }
 
             const currentIds = new Set(effectiveManaged.map((m) => m.agentId));
             const added: LoadedManagedAgent[] = [];
@@ -979,6 +1136,7 @@ export function createAgentWatchdog(params: {
                 hasSkillChanges ||
                 hasToolChanges ||
                 hasConfigModelDrift ||
+                hasSessionModelChanges ||
                 hasHubSkillChanges ||
                 deleteBatchSet.size > 0;
             const forceFullReseed = forceAuthReseed;
@@ -1106,6 +1264,7 @@ export function createAgentWatchdog(params: {
                     base,
                     managed: effectiveManaged,
                     defaultModel,
+                    sessionModels,
                     mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
                     mergeAllowSpawnForMain: params.pluginConfig.mergeAllowSpawnForMain !== false,
                     aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
@@ -1151,6 +1310,27 @@ export function createAgentWatchdog(params: {
                 managed: effectiveManaged,
                 log: { warn: (m) => params.api.logger.warn(m) },
             });
+            for (const model of sessionModels) {
+                if (model.loadFailed) {
+                    const failure = new Error(`Redis AI model config unavailable modelId=${model.modelId}`);
+                    const waiters = sessionModelWaiters.get(model.modelId) ?? [];
+                    for (const waiter of waiters.filter((item) => item.generation <= capturedSessionModelGeneration)) waiter.reject(failure);
+                    const remaining = waiters.filter((item) => item.generation > capturedSessionModelGeneration);
+                    if (remaining.length) sessionModelWaiters.set(model.modelId, remaining);
+                    else sessionModelWaiters.delete(model.modelId);
+                    continue;
+                }
+                appliedSessionModelHashes.set(model.modelId, model.hash);
+                lastAppliedSessionModelBundles.set(model.modelId, model);
+                if ((forcedSessionModelGeneration.get(model.modelId) ?? Number.POSITIVE_INFINITY) <= capturedSessionModelGeneration) {
+                    forcedSessionModelGeneration.delete(model.modelId);
+                }
+                const waiters = sessionModelWaiters.get(model.modelId) ?? [];
+                for (const waiter of waiters.filter((item) => item.generation <= capturedSessionModelGeneration)) waiter.resolve();
+                const remaining = waiters.filter((item) => item.generation > capturedSessionModelGeneration);
+                if (remaining.length) sessionModelWaiters.set(model.modelId, remaining);
+                else sessionModelWaiters.delete(model.modelId);
+            }
             // Keep model alignment prompt-local / dispatch-local. Background
             // managed-agent sync can run while an embedded model/tool loop has
             // released its session lock; rewriting the same session store here
@@ -1244,6 +1424,15 @@ export function createAgentWatchdog(params: {
             params.api.logger.error(
                 `baiying-enhance: sync failed: ${err instanceof Error ? err.message : String(err)}`,
             );
+            const failure = err instanceof Error ? err : new Error(String(err));
+            for (const [modelId, waiters] of sessionModelWaiters) {
+                for (const waiter of waiters.filter((item) => item.generation <= capturedSessionModelGeneration)) {
+                    waiter.reject(failure);
+                }
+                const remaining = waiters.filter((item) => item.generation > capturedSessionModelGeneration);
+                if (remaining.length) sessionModelWaiters.set(modelId, remaining);
+                else sessionModelWaiters.delete(modelId);
+            }
         } finally {
             flushInFlight = false;
             if (flushQueued) {
@@ -1302,6 +1491,32 @@ export function createAgentWatchdog(params: {
                 }
             }
             await flush();
+        },
+        ensureSessionModel: async (modelId: string, options?: { forceRefresh?: boolean; refreshDesired?: boolean }) => {
+            const id = modelId.trim();
+            if (!id) return;
+            const previousBundle = lastAppliedSessionModelBundles.get(id);
+            const desiredBundle = desiredSessionModelBundles.get(id);
+            const runtimeHasModel = previousBundle
+                ? isManagedProviderBundleApplied(params.api.runtime.config.loadConfig(), previousBundle.providerKey, previousBundle.provider)
+                : false;
+            if (!options?.forceRefresh && !options?.refreshDesired && sessionModelIds.has(id) && appliedSessionModelHashes.has(id)
+                && runtimeHasModel && desiredBundle?.hash === appliedSessionModelHashes.get(id)
+                && !forcedSessionModelGeneration.has(id)) return;
+            const generation = ++sessionModelGeneration;
+            sessionModelRequestedGeneration.set(id, generation);
+            if (options?.forceRefresh) forcedSessionModelGeneration.set(id, generation);
+            sessionModelIds.add(id);
+            const ready = new Promise<void>((resolve, reject) => {
+                const waiters = sessionModelWaiters.get(id) ?? [];
+                waiters.push({ generation, resolve, reject });
+                sessionModelWaiters.set(id, waiters);
+            });
+            // A flush can reject this waiter before `flush()` itself returns; attach immediately
+            // so Node does not report a transient unhandled rejection before the final await.
+            void ready.catch(() => undefined);
+            await flush();
+            await ready;
         },
     };
 }

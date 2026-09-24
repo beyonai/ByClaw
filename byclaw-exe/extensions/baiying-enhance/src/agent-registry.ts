@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 import type { AdaptedManagedAgent, ProviderBundle } from "./agent-adapter.js";
 import {
@@ -36,7 +35,7 @@ type DefaultAimodelBundle = {
   provider: ProviderBundle;
 };
 
-export function defaultModelDefinition(provider: ProviderBundle) {
+function defaultModelDefinition(provider: ProviderBundle) {
   const params = {
     ...(provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
       ? { baiyingThinkingBudgets: provider.thinkingBudgets } : {}),
@@ -66,18 +65,20 @@ export function defaultModelDefinition(provider: ProviderBundle) {
   };
 }
 
-export function hasManagedProviderConfigDrift(
-  cfg: { models?: { providers?: Record<string, { models?: Array<{ id?: string }> }> } },
+/** Compare runtime state with one already-applied canonical bundle, excluding resolved credentials. */
+export function isManagedProviderBundleApplied(
+  cfg: { models?: { providers?: Record<string, { baseUrl?: string; api?: unknown; timeoutSeconds?: number; models?: Array<Record<string, unknown>> }> } },
   providerKey: string,
   provider: ProviderBundle,
 ): boolean {
-  const actual = cfg.models?.providers?.[providerKey]?.models?.find((model) => model.id === provider.modelId);
-  const expected = defaultModelDefinition(provider);
-  // Compare owned fields, never resolved credentials or unrelated overrides.
-  const keys = new Set([...Object.keys(expected), "thinkingLevelMap", "params"]);
-  return !actual || [...keys].some((key) => !isDeepStrictEqual(
-    (actual as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key],
-  ));
+  const actualProvider = cfg.models?.providers?.[providerKey];
+  if (!actualProvider || actualProvider.baseUrl !== provider.baseUrl || actualProvider.api !== provider.api
+      || actualProvider.timeoutSeconds !== (provider.timeoutSeconds ?? DEFAULT_AIMODEL_TIMEOUT_SECONDS)) return false;
+  const actualModel = actualProvider.models?.find((model) => model.id === provider.modelId);
+  if (!actualModel) return false;
+  const expected = defaultModelDefinition(provider) as Record<string, unknown>;
+  const actualOwned = Object.fromEntries(Object.keys(expected).map((key) => [key, actualModel[key]]));
+  return JSON.stringify(actualOwned) === JSON.stringify(expected);
 }
 
 function buildAimodelSecretProviderConfig(params: {
@@ -242,34 +243,6 @@ export function mergeDefaultAimodelIntoConfig(params: {
 }
 
 /**
- * Merge one Redis-resolved model provider into a copy of the active OpenClaw config.
- * Used by session-level model switching so a user-picked model becomes usable without
- * a full watchdog flush; idempotent because the provider entry is fully replaced.
- */
-export function mergeAimodelProviderIntoConfig(params: {
-  base: OpenClawConfig;
-  providerKey: string;
-  provider: ProviderBundle;
-  aimodelConfigRedisKey?: string;
-  aimodelTypeListRedisKey?: string;
-  aimodelSecretProviderName?: string;
-  aimodelSecretResolverCommand?: string;
-  aimodelSecretResolverArgs?: string[];
-}): OpenClawConfig {
-  const cfg = structuredClone(params.base);
-  ensureConfigModelContainers(cfg);
-  cfg.models!.providers![params.providerKey] = {
-    baseUrl: params.provider.baseUrl,
-    apiKey: params.provider.apiKey,
-    api: params.provider.api,
-    timeoutSeconds: params.provider.timeoutSeconds ?? DEFAULT_AIMODEL_TIMEOUT_SECONDS,
-    models: [defaultModelDefinition(params.provider)],
-  };
-  upsertAimodelSecretProvider(cfg, params);
-  return cfg;
-}
-
-/**
  * Merge managed Baiying agents into a copy of the active OpenClaw config.
  * Removes prior managed entries (same id prefix / provider prefix) before applying.
  */
@@ -281,6 +254,10 @@ export function mergeManagedAgentsIntoConfig(params: {
     modelRef: string;
     provider: ProviderBundle;
   } | null;
+  /** Models selected by sessions but not necessarily referenced by a digital employee. */
+  sessionModels?: Array<{ providerKey: string; provider: ProviderBundle }>;
+  /** Auth is not ready: add session dependencies without pruning the existing managed snapshot. */
+  preserveExistingManaged?: boolean;
   mainParentAgentId: string;
   mergeAllowSpawnForMain: boolean;
   aimodelConfigRedisKey?: string;
@@ -300,11 +277,15 @@ export function mergeManagedAgentsIntoConfig(params: {
       .filter((entry) => entry.id && typeof entry.workspace === "string" && entry.workspace.trim())
       .map((entry) => [entry.id!, entry.workspace!.trim()]),
   );
-  const list = [...existingList].filter((entry) => !entry.id?.startsWith(MANAGED_AGENT_PREFIX));
+  const list = params.preserveExistingManaged
+    ? [...existingList]
+    : [...existingList].filter((entry) => !entry.id?.startsWith(MANAGED_AGENT_PREFIX));
 
-  for (const key of Object.keys(providers)) {
-    if (key.startsWith(MANAGED_PROVIDER_PREFIX)) {
-      delete providers[key];
+  if (!params.preserveExistingManaged) {
+    for (const key of Object.keys(providers)) {
+      if (key.startsWith(MANAGED_PROVIDER_PREFIX)) {
+        delete providers[key];
+      }
     }
   }
 
@@ -312,8 +293,8 @@ export function mergeManagedAgentsIntoConfig(params: {
     params.aimodelSecretProviderName ?? DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
   );
   const hasDefaultProvider = Boolean(params.defaultModel?.provider && params.defaultModel.providerKey);
-  const hasManagedProviders =
-    hasDefaultProvider || params.managed.some((m) => m.provider && m.providerKey);
+  const hasManagedProviders = hasDefaultProvider || params.managed.some((m) => m.provider && m.providerKey)
+    || Boolean(params.sessionModels?.length);
 
   if (params.defaultModel?.provider && params.defaultModel.providerKey) {
     upsertDefaultAimodelProvider(cfg, params.defaultModel);
@@ -337,6 +318,16 @@ export function mergeManagedAgentsIntoConfig(params: {
     }
   }
 
+  for (const model of params.sessionModels ?? []) {
+    providers[model.providerKey] = {
+      baseUrl: model.provider.baseUrl,
+      apiKey: model.provider.apiKey,
+      api: model.provider.api,
+      timeoutSeconds: model.provider.timeoutSeconds ?? DEFAULT_AIMODEL_TIMEOUT_SECONDS,
+      models: [defaultModelDefinition(model.provider)],
+    };
+  }
+
   const cfgWithSecrets = cfg as ConfigWithSecrets;
   if (hasManagedProviders) {
     upsertAimodelSecretProvider(cfg, params);
@@ -345,7 +336,7 @@ export function mergeManagedAgentsIntoConfig(params: {
   }
 
   cfg.agents.list = list;
-  syncManagedModelsToAgentsDefaults(cfg, params.managed, params.defaultModel ?? null);
+  syncManagedModelsToAgentsDefaults(cfg, params.managed, params.defaultModel ?? null, params.sessionModels);
 
   const managedIds = params.managed.map((m) => m.agentId);
   if (params.mergeAllowSpawnForMain || params.defaultModel?.modelRef) {
@@ -384,6 +375,7 @@ function syncManagedModelsToAgentsDefaults(
   cfg: OpenClawConfig,
   managed: AdaptedManagedAgent[],
   defaultModel?: { modelRef: string; provider: ProviderBundle } | null,
+  sessionModels?: Array<{ providerKey: string; provider: ProviderBundle }>,
 ): void {
   if (!cfg.agents) {
     cfg.agents = {};
@@ -414,6 +406,10 @@ function syncManagedModelsToAgentsDefaults(
         ? m.listEntry.identity.name.trim()
         : "");
     next[primary] = alias ? { alias } : {};
+  }
+  for (const model of sessionModels ?? []) {
+    const modelRef = `${model.providerKey}/${model.provider.modelId}`;
+    next[modelRef] = { alias: model.provider.modelName ?? model.provider.modelId };
   }
   cfg.agents.defaults.models = next;
 }
