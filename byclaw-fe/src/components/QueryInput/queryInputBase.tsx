@@ -55,6 +55,9 @@ export type IProps = {
   uploadFileConfig?: IAgentFileUploadConf;
   employeesList?: IAgentCache[];
   defaultDigEmployeeId?: string | number;
+
+  /** 业务表单的初始值，优先于草稿，空值也必须按原样回填。 */
+  initialInputValue?: DefaultValueSchema;
   inputDraft?: DefaultValueSchema;
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
   contextUsed?: ContextUsed;
@@ -198,8 +201,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   restoreInputDraft = () => {
-    const { inputDraft } = this.props;
-    if (!inputDraft || (!inputDraft.text && isEmpty(inputDraft.resourceList))) {
+    const { initialInputValue } = this.props;
+    const inputDraft = initialInputValue ?? this.props.inputDraft;
+    if (!inputDraft || (!initialInputValue && !inputDraft.text && isEmpty(inputDraft.resourceList))) {
       this.syncSiderAgent([]);
       return;
     }
@@ -731,6 +735,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           ref={this.richInputRef}
           defaultPlaceholder={placeholder}
           inAgentRoute={this.chechCannotAt()}
+          initialInputValue={this.props.initialInputValue}
           inputDraft={this.props.inputDraft}
           onPasteFiles={this.onPasteFiles}
           onDraftChange={this.props.onInputDraftChange}

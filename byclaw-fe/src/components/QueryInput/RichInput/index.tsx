@@ -166,7 +166,10 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   // 进入会话时有草稿就以草稿为准，禁止历史员工（包括异步返回的员工）混入正文或发送资源。
   // 固定本次编辑器的恢复策略，避免清空草稿或父组件重渲染时又自动补上历史员工。
   const hasInitialDraft = useRef(!!props.inputDraft?.text || !!props.inputDraft?.resourceList?.length);
-  const defaultAgentElement = hasInitialDraft.current && !inAgentRoute ? undefined : sessionDefaultAgentElement;
+  // 定时任务等业务表单以保存的正文和引用为准，即使正文为空也不能回退到历史员工。
+  const hasInitialInputValue = useRef(props.initialInputValue !== undefined);
+  const defaultAgentElement =
+    hasInitialInputValue.current || (hasInitialDraft.current && !inAgentRoute) ? undefined : sessionDefaultAgentElement;
 
   const [value, setValue] = useState<Descendant[]>([
     {

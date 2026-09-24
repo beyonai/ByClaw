@@ -2,21 +2,24 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { message } from 'antd';
 import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
-import { createScanSource } from '@/service/devloop';
+import { createScanSource, updateScanSource } from '@/service/devloop';
 import { clearAutomationCreationDraft, getAutomationCreationDraft } from '../drafts';
 import AutomationEditor from './AutomationEditor';
 
 let mockInputProps: {
-  inputDraft: DefaultValueSchema;
+  initialInputValue?: DefaultValueSchema;
+  inputDraft?: DefaultValueSchema;
   onInputDraftChange: (draft: DefaultValueSchema) => void;
 };
+const mockInputHistory: (typeof mockInputProps)[] = [];
 let mockScopedProjectId = '1';
 
 jest.mock('@/components/QueryInput', () => ({
   __esModule: true,
   default: (props: typeof mockInputProps) => {
     mockInputProps = props;
-    return <div data-testid="automation-prompt">{props.inputDraft.text}</div>;
+    mockInputHistory.push(props);
+    return <div data-testid="automation-prompt">{(props.initialInputValue ?? props.inputDraft)?.text}</div>;
   },
 }));
 jest.mock('@umijs/max', () => ({
@@ -58,6 +61,7 @@ const fillDraft = () => {
 describe('AutomationEditor creation draft', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockInputHistory.length = 0;
     clearAutomationCreationDraft();
     clearAutomationCreationDraft('template-one');
     mockScopedProjectId = '1';
@@ -100,7 +104,8 @@ describe('AutomationEditor creation draft', () => {
         source={{ sourceId: 5, sourceName: 'Existing', config: JSON.stringify({ chatContent: 'Saved prompt' }) }}
       />
     );
-    expect(mockInputProps.inputDraft.text).toBe('Saved prompt');
+    expect(mockInputProps.inputDraft).toBeUndefined();
+    expect(mockInputProps.initialInputValue?.text).toBe('Saved prompt');
     act(() => mockInputProps.onInputDraftChange({ text: 'Edited existing prompt', resourceList: [] }));
     view.rerender(
       <AutomationEditor
@@ -108,11 +113,71 @@ describe('AutomationEditor creation draft', () => {
         template={{ key: 'template-one', name: 'Template', prompt: 'Template prompt', schedule: { mode: 'periodic' } }}
       />
     );
-    expect(mockInputProps.inputDraft.text).toBe('Template prompt');
+    expect(mockInputProps.inputDraft?.text).toBe('Template prompt');
     act(() => mockInputProps.onInputDraftChange({ text: 'Edited template prompt', resourceList: [] }));
     view.rerender(<AutomationEditor {...props} />);
     expect(mockInputProps.inputDraft).toEqual(draft);
     expect(getAutomationCreationDraft('template-one')?.prompt.text).toBe('Edited template prompt');
+  });
+
+  it.each([draft, { text: '', resourceList: [] }])(
+    'always reopens an existing task from its saved prompt and resources: %j',
+    (savedPrompt) => {
+      const creation = render(<AutomationEditor {...props} />);
+      fillDraft();
+      creation.unmount();
+      const source = {
+        sourceId: 5,
+        sourceName: 'Existing',
+        projectId: 1,
+        config: JSON.stringify({ chatContent: savedPrompt.text, resourceList: savedPrompt.resourceList }),
+      };
+      mockInputHistory.length = 0;
+      const editing = render(<AutomationEditor {...props} source={source} />);
+      // 首次挂载就必须使用详情，不能先以空值或新建草稿初始化输入框。
+      expect(mockInputHistory[0].initialInputValue).toEqual(savedPrompt);
+      expect(mockInputHistory[0].inputDraft).toBeUndefined();
+      expect(mockInputProps.inputDraft).toBeUndefined();
+      expect(mockInputProps.initialInputValue).toEqual(savedPrompt);
+      act(() => mockInputProps.onInputDraftChange({ text: 'Unsaved edit', resourceList: [] }));
+      editing.unmount();
+
+      const reopened = render(<AutomationEditor {...props} source={source} />);
+      expect(mockInputProps.inputDraft).toBeUndefined();
+      expect(mockInputProps.initialInputValue).toEqual(savedPrompt);
+      expect(getAutomationCreationDraft()?.prompt).toEqual(draft);
+      reopened.unmount();
+      render(<AutomationEditor {...props} />);
+      expect(mockInputProps.initialInputValue).toBeUndefined();
+      expect(mockInputProps.inputDraft).toEqual(draft);
+    }
+  );
+
+  it('saves changes made to the task prompt without overwriting the creation draft', async () => {
+    (updateScanSource as jest.Mock).mockResolvedValue({});
+    const creation = render(<AutomationEditor {...props} />);
+    fillDraft();
+    creation.unmount();
+    render(
+      <AutomationEditor
+        {...props}
+        source={{
+          sourceId: 5,
+          sourceName: 'Existing',
+          projectId: 1,
+          config: JSON.stringify({ chatContent: 'Saved prompt' }),
+        }}
+      />
+    );
+    const editedPrompt = { ...draft, text: `${draft.text} Updated` };
+    act(() => mockInputProps.onInputDraftChange(editedPrompt));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(props.onSaved).toHaveBeenCalledTimes(1));
+    expect(JSON.parse((updateScanSource as jest.Mock).mock.calls[0][0].config)).toMatchObject({
+      chatContent: editedPrompt.text,
+      resourceList: editedPrompt.resourceList,
+    });
+    expect(getAutomationCreationDraft()?.prompt).toEqual(draft);
   });
 
   it('remembers clearing the prompt instead of resurrecting older content', () => {
@@ -132,7 +197,7 @@ describe('AutomationEditor creation draft', () => {
     expect(getAutomationCreationDraft()).toBeUndefined();
     view.unmount();
     render(<AutomationEditor {...props} />);
-    expect(mockInputProps.inputDraft.text).toBe('');
+    expect(mockInputProps.inputDraft?.text).toBe('');
   });
 
   it('clears the draft after successful creation and sends its referenced resources', async () => {

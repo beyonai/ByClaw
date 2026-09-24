@@ -84,6 +84,25 @@ describe('RichInput', () => {
     expect(inputRef.current?.getPayload().resourceList).toEqual([]);
   });
 
+  it.each<DefaultValueSchema>([
+    { text: 'Saved task prompt', resourceList: [] },
+    { text: '', resourceList: [] },
+  ])('keeps explicit task content free of existing and late history employees: %j', async (initialInputValue) => {
+    mockDefaultAgentElement = historyEmployee();
+    const inputRef = createRef<RichInputRef>();
+    const view = render(
+      <RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote initialInputValue={initialInputValue} />
+    );
+    await act(async () => inputRef.current?.setText(initialInputValue));
+    expect(inputRef.current?.getPayload()).toMatchObject(initialInputValue);
+    mockDefaultAgentElement = historyEmployee('late-history-agent');
+    view.rerender(
+      <RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote initialInputValue={initialInputValue} />
+    );
+    expect(inputRef.current?.getPayload()).toMatchObject(initialInputValue);
+    expect(view.container.textContent).not.toContain('History Employee');
+  });
+
   it.each([undefined, { text: '', resourceList: [] }])(
     'automatically mentions the history employee when there is no draft: %j',
     async (draft) => {
