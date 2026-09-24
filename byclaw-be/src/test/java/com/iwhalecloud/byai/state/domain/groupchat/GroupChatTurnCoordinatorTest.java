@@ -180,6 +180,46 @@ class GroupChatTurnCoordinatorTest {
     }
 
     @Test
+    void quotingHumanOnlyMessageStartsAndReusesAgentConversation() {
+        ByaiMessage reference = new ByaiMessage();
+        reference.setMessageId(20L);
+        reference.setSessionId(10L);
+        reference.setUsage(1);
+        reference.setCreatorName("Owner");
+        reference.setMessageContent("Hello B and C");
+        when(messages.selectByMessageId(20L)).thenReturn(reference);
+        when(messages.selectVisibleGroupMessage(10L, 20L)).thenReturn(reference);
+
+        ByaiGroupChatTurn first = coordinator.enqueueUser(10L, 21L, 20L, 1L, 2L);
+        ByaiGroupChatTurn second = coordinator.enqueueUser(10L, 22L, 20L, 1L, 2L);
+
+        assertEquals(20L, first.getRootMessageId());
+        assertEquals(first.getCandidateSessionId(), second.getCandidateSessionId());
+        JSONObject input = JSON.parseObject(first.getInputContent());
+        assertEquals("Hello B and C", input.getString("原始用户需求"));
+        assertEquals("Hello B and C", input.getJSONObject("本次引用消息").getString("content"));
+        assertEquals("Analyze company news", input.getString("本次消息"));
+    }
+
+    @Test
+    void quotingRecalledHumanMessageDoesNotRestoreItsOriginalContent() {
+        ByaiMessage reference = new ByaiMessage();
+        reference.setMessageId(20L);
+        reference.setSessionId(10L);
+        reference.setUsage(1);
+        reference.setMessageContent("private message");
+        reference.setRecalledAt(new java.util.Date());
+        when(messages.selectByMessageId(20L)).thenReturn(reference);
+        when(messages.selectVisibleGroupMessage(10L, 20L)).thenReturn(reference);
+
+        ByaiGroupChatTurn turn = coordinator.enqueueUser(10L, 21L, 20L, 1L, 2L);
+
+        assertEquals(21L, turn.getRootMessageId());
+        assertTrue(JSON.parseObject(turn.getInputContent()).getJSONObject("本次引用消息").getBooleanValue("recalled"));
+        assertFalse(turn.getInputContent().contains("private message"));
+    }
+
+    @Test
     void activeTaskRejectsOnlyItsOwnerEvenWhenAnotherUserQuotesTheSameReply() {
         ByaiGroupChatTurn first = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
         when(turns.selectByPublicMessage(21L)).thenReturn(first);

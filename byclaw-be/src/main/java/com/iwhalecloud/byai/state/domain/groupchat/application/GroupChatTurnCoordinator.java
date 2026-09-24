@@ -132,12 +132,19 @@ public class GroupChatTurnCoordinator {
                         anchor = anchors.selectByPublicMessage(reply);
                     }
                     if (anchor == null) {
-                        throw new IllegalArgumentException("Reply cannot resolve an authorized conversation");
+                        ByaiMessage visible = messages.selectVisibleGroupMessage(group, reply);
+                        if (visible == null || !Integer.valueOf(1).equals(visible.getUsage())) {
+                            throw new IllegalArgumentException("Reply cannot resolve an authorized conversation");
+                        }
+                        // 普通群消息尚无 Agent 会话；撤回后不能把旧正文作为新会话的原始需求。
+                        root = visible.isRecalled() ? source : reply;
                     }
-                    root = anchor.getRootMessageId();
-                    if (Objects.equals(user, anchor.getInitiatorUserId())
-                        && Objects.equals(agent, anchor.getTargetAgentId())) {
-                        preferred = anchor;
+                    else {
+                        root = anchor.getRootMessageId();
+                        if (Objects.equals(user, anchor.getInitiatorUserId())
+                            && Objects.equals(agent, anchor.getTargetAgentId())) {
+                            preferred = anchor;
+                        }
                     }
                 }
             }
