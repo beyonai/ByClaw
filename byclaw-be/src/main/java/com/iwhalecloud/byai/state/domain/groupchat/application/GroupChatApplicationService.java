@@ -168,6 +168,12 @@ public class GroupChatApplicationService {
                 UserRole.MEMBER.name()));
         }
         memberService.batchSave(members);
+        // 建群批量写入不会经过 insertMember；复用入群授权，补齐默认助手及所选员工的使用权限。
+        // 从最终成员列表取真人，包含创建人且避免重复授权；授权写入与建群共用当前事务。
+        if (!agentIds.isEmpty()) {
+            members.stream().filter(member -> MemObjType.USER.name().equals(member.getMemObjType()))
+                .forEach(member -> authApplicationService.grantDigitalEmployeesToUser(agentIds, member.getMemObjId()));
+        }
         initializeMemberPermissions(session.getSessionId());
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);

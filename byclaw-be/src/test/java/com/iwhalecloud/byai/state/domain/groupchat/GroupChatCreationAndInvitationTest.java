@@ -18,11 +18,13 @@ import static org.mockito.Mockito.when;
 import java.sql.Connection;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import javax.sql.DataSource;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -69,6 +71,7 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class GroupChatCreationAndInvitationTest {
+    private final AuthApplicationService authService = mock(AuthApplicationService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
     private final ProjectApplicationService projects = mock(ProjectApplicationService.class);
     private final ProjectMemberService projectMembers = mock(ProjectMemberService.class);
@@ -94,6 +97,7 @@ class GroupChatCreationAndInvitationTest {
             events, sessionExt);
         ReflectionTestUtils.setField(service, "workgroupTemplateService", templates);
         ReflectionTestUtils.setField(service, "resourceService", resources);
+        ReflectionTestUtils.setField(service, "authApplicationService", authService);
         when(resources.findByIdList(any())).thenAnswer(invocation -> {
             java.util.Collection<Long> ids = invocation.getArgument(0);
             return ids.stream().map(id -> {
@@ -139,6 +143,9 @@ class GroupChatCreationAndInvitationTest {
             .containsExactly("OWNER", "MEMBER", "MEMBER");
         assertThat(result.getMembers()).extracting(ByaiSessionMember::getMemObjType)
             .containsExactly("USER", "USER", "AGENT");
+        verify(authService).grantDigitalEmployeesToUser(Set.of(30L), 10L);
+        verify(authService).grantDigitalEmployeesToUser(Set.of(30L), 20L);
+        verifyNoMoreInteractions(authService);
         verify(projectMembers).addMembers(100L, List.of(20L), "member");
         verify(projectMembers, never()).addMember(any(), any(), any());
         verify(sessions).save(result.getSession());
@@ -287,6 +294,8 @@ class GroupChatCreationAndInvitationTest {
         assertThat(result.getMembers()).filteredOn(member -> "AGENT".equals(member.getMemObjType()))
             .extracting(ByaiSessionMember::getMemObjId).containsExactly(40L, 41L);
         verify(members).batchSave(result.getMembers());
+        verify(authService).grantDigitalEmployeesToUser(Set.of(40L, 41L), 10L);
+        verifyNoMoreInteractions(authService);
     }
 
     @Test
@@ -315,12 +324,15 @@ class GroupChatCreationAndInvitationTest {
         assertThat(service.create(request).getMembers())
             .filteredOn(member -> "AGENT".equals(member.getMemObjType()))
             .extracting(ByaiSessionMember::getMemObjId).containsExactly(40L, 41L);
+        verify(authService).grantDigitalEmployeesToUser(Set.of(40L, 41L), 10L);
+        verifyNoMoreInteractions(authService);
     }
 
     @Test
     void createsGroupWithoutEmployeesWhenNoneSubmitted() {
         assertThat(service.create(request()).getMembers())
             .extracting(ByaiSessionMember::getMemObjType).containsExactly("USER");
+        verifyNoInteractions(authService);
     }
 
     @Test
@@ -510,6 +522,24 @@ class GroupChatCreationAndInvitationTest {
         assertThatThrownBy(() -> service.create(request())).hasMessage("group members failed");
         verify(connection).rollback();
         verify(connection, never()).commit();
+    }
+
+    @Test
+    void creationGrantFailureRollsBackOuterJdbcTransaction() throws Exception {
+        Connection connection = transactionalProxy();
+        GroupChatCreateRequest request = request();
+        request.setAgentIds(List.of(40L));
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            throw new IllegalStateException("employee grant failed");
+        }).when(authService).grantDigitalEmployeesToUser(Set.of(40L), 10L);
+
+        assertThatThrownBy(() -> service.create(request)).hasMessage("employee grant failed");
+
+        verify(members).batchSave(anyList());
+        verify(connection).rollback();
+        verify(connection, never()).commit();
+        verifyNoInteractions(sessionExt);
     }
 
     @Test
