@@ -22,10 +22,7 @@ import { RedisByClawBeEndpointResolver } from "../business/endpoint-resolver.js"
 import { ByClawBeGroupChatContextProvider } from "../business/group-chat-context.js";
 import { ByClawBeTaskPlanGateway } from "../business/task-plan.js";
 import { ByClawBeOrchestratorRuntimeProvider } from "../business/orchestrator-runtime.js";
-import {
-  ByClawBeResourceModelResolver,
-  fingerprintModelConfig,
-} from "../business/resource-model-binding.js";
+import { ByClawBeResourceModelResolver } from "../business/resource-model-binding.js";
 import { RedisServiceRegistrar } from "../business/service-registrar.js";
 import { loadConfig, type AppConfig } from "../config/index.js";
 import { RunIngressService } from "../ingress/run-ingress-service.js";
@@ -199,16 +196,11 @@ function createOrchestration(input: {
     () => buildPiRuntimeConfig(config, database, llmProvider.resolve(), undefined, logger),
     async (selection: LeaderModelSelection) => {
       const modelConfig = await llmProvider.resolveByModelId(selection.modelId);
-      if (fingerprintModelConfig(modelConfig) !== selection.fingerprint) {
-        throw new Error(
-          `Leader model config changed before Run execution: ${selection.modelId}`,
-        );
-      }
       return buildPiRuntimeConfig(
         config,
         database,
         Promise.resolve({ source: "redis", config: modelConfig }),
-        `model:${selection.modelId}:${selection.fingerprint}`,
+        `model:${selection.modelId}`,
         logger,
       );
     },

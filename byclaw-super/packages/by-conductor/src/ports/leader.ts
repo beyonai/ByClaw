@@ -122,12 +122,10 @@ export interface LeaderSession {
   dispose(): Promise<void> | void;
 }
 
-/** Run 入站时冻结的 Leader 模型选择；不包含 URL、Token 等敏感配置。 */
+/** Run 入站时选定的 Leader 模型资源；恢复时读取该资源的当前有效配置。 */
 export interface LeaderModelSelection {
   /** ByAI 模型实例主键，对应 byai:aimodel:config 的 Hash field。 */
   modelId: string;
-  /** 模型运行配置指纹；同一模型配置变更时也会触发 Session 热切换。 */
-  fingerprint: string;
   /**
    * 模型 reasoningConfig.defaultLevel。调用方未下发 thinkingLevel 时作为兜底档位，
    * 使管理员配置的思考强度在缺少会话选择时同样生效。

@@ -45,6 +45,10 @@ by-framework。AskAgent 会进入与 HTTP 相同的 Token、Agent Catalog 和 Ru
 Resume 只完成子 Agent 回调，不会创建重复 Run。同一 owner scope 下的 by-framework
 `sessionId` 会复用内部 Session。设置 `BYCLAW_WORKER_ENABLED=false` 可关闭。
 
+同一 Run 顺序调度多个员工时，后一个回调从对应的 `run.suspended` 事件之后继续转发。
+该事件 ID 可以等于上次保存的转发游标；相等时仍须读取后续事件，不能直接复用旧的
+`WAITING_AGENT` 结果。成功和失败终态都结束用户流；普通重复回调不重复发送结束帧。
+
 `POST /byclawSuper/v1/sessions` 接收必填 `message` 和可选的单次 Run 参数 `thinkingLevel`，返回
 `sessionId + runId`。`thinkingLevel` 支持 `off|minimal|low|medium|high|xhigh|max`，
 默认 `off`。后续向
@@ -57,9 +61,10 @@ SSE 支持 `Last-Event-ID` 回放，连接断开不会取消任务。
 by-framework AskAgent 使用 `extraPayload.thinkingLevel` 传入同一参数，不从环境变量读取。
 当 AskAgent 带有 `extraPayload.agent_id` 时，每个新 Run 会通过 ByClaw BE
 `/open/api/v1/queryDigEmployeeDetail` 读取该超级助手 `prologue` 中的 `modelId`，再从 Redis
-`byai:aimodel:config` 解析模型运行配置。Run 只持久化模型 ID 和配置指纹，不保存模型密钥；
-同一 Session 的模型 ID 或配置指纹变化时，当前 Run 不受影响，下一 Run 会从已提交 checkpoint
-恢复到新模型。BE/Redis 读取模型资源失败时明确失败，不沿用进程内的旧绑定。
+`byai:aimodel:config` 解析模型运行配置。Run 只持久化已选模型实例 ID，不保存模型密钥；
+每次恢复按该 ID 读取当前有效配置，新 Run 则重新解析资源绑定。Pi 从已提交 checkpoint
+恢复历史并使用本次解析的模型。同一模型实例若被管理员改指向其他实际模型，后续执行也会
+采用新配置。BE/Redis 读取模型资源失败时明确失败，不沿用进程内的旧绑定。
 服务会通过 Run 找到 Session，并在存储层按验签 JWT 中的 `userCode` 查询 owner；
 V1 不使用 tenantId、namespace 或 System-Code。不存在或越权统一返回 404。
 对外流式事件使用 ByClaw 的 `reasoningLog*`、`subAgent*`、`answer*` 和
