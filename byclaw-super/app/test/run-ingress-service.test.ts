@@ -373,7 +373,6 @@ describe("RunIngressService group chat snapshot", () => {
     const runService = fakeRunService();
     const resolve = vi.fn(async () => ({
       modelId: "11000161",
-      fingerprint: "a".repeat(64),
     }));
     const ingress = new RunIngressService(
       runService.impl,
@@ -399,15 +398,14 @@ describe("RunIngressService group chat snapshot", () => {
     expect(runService.createSessionRun.mock.calls[0][0].ingressContext).toEqual({
       leaderModel: {
         modelId: "11000161",
-        fingerprint: "a".repeat(64),
       },
     });
   });
 
   it.each([undefined, "low"] as const)("refreshes selected models and fallback models with thinking override %s", async (thinkingLevel) => {
     const runService = fakeRunService();
-    const selected = { modelId: "selected", fingerprint: "a".repeat(64), defaultThinkingLevel: "adaptive" };
-    const current = { modelId: "current", fingerprint: "b".repeat(64), defaultThinkingLevel: "high" };
+    const selected = { modelId: "selected", defaultThinkingLevel: "adaptive" };
+    const current = { modelId: "current", defaultThinkingLevel: "high" };
     const resolveByModelId = vi.fn().mockResolvedValueOnce(selected).mockRejectedValue(new Error("selected unavailable"));
     const resolve = vi.fn().mockResolvedValueOnce(current).mockRejectedValue(new Error("BE unavailable"));
     const ingress = new RunIngressService(
@@ -446,7 +444,7 @@ describe("RunIngressService group chat snapshot", () => {
     const runService = fakeRunService();
     const resolve = vi
       .fn()
-      .mockResolvedValueOnce({ modelId: "100", fingerprint: "b".repeat(64) })
+      .mockResolvedValueOnce({ modelId: "100" })
       .mockRejectedValueOnce(new Error("BE unavailable"));
     const warn = vi.fn();
     const ingress = new RunIngressService(
@@ -484,7 +482,7 @@ describe("RunIngressService expert-team orchestration", () => {
         configVersion: "5",
       },
       agents: [agent("team-member")],
-      leaderModel: { modelId: "model-1", fingerprint: "c".repeat(64) },
+      leaderModel: { modelId: "model-1" },
     }));
     const ingress = new RunIngressService(
       runService.impl,
@@ -524,7 +522,7 @@ describe("RunIngressService expert-team orchestration", () => {
     ]);
     expect(created.ingressContext).toEqual({
       orchestrator: expect.objectContaining({ id: "team-1", configVersion: "5" }),
-      leaderModel: { modelId: "model-1", fingerprint: "c".repeat(64) },
+      leaderModel: { modelId: "model-1" },
     });
   });
 

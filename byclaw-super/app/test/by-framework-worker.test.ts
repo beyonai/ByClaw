@@ -1,7 +1,13 @@
 import { withDeliveryScope } from "../worker/by-framework-delivery-scope.js";
 import { DeliveryOwnershipLostError } from "../worker/by-framework-recovering-runner.js";
 import { workerRedisFake } from "./worker-redis-fake.js";
-import type { Run, RunEvent } from "@byclaw/by-conductor";
+import {
+  ConnectorRegistry, DelegationService, DelegationSuspendedError, LeaderRunSuspendedError,
+  InMemoryDelegationRepository, InMemoryExecutionCredentialRepository, InMemoryRunExecutionQueue,
+  InMemoryRunEventStore, InMemoryRunRepository, InMemorySessionRepository, RunService,
+  type AgentProfile, type LeaderSessionFactory, type Run, type RunEvent,
+} from "@byclaw/by-conductor";
+import { CodeByFrameworkConnector, type CodeByFrameworkConnectorOptions } from "@byclaw/connector-code-by-framework";
 import {
   AgentState,
   AskAgentCommand,
@@ -16,6 +22,131 @@ import { describe, expect, it, vi } from "vitest";
 import { ByClawSuperGatewayWorker } from "../worker/by-framework-worker.js";
 
 describe("ByClawSuperGatewayWorker", () => {
+  it.each([false, true])("finishes two sequential employee callbacks using real Run events (leader fails: %s)", async (leaderFails) => {
+    const redis = workerRedisFake();
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const connectors = new ConnectorRegistry();
+    // Only the external transport and model are substituted; event IDs and callback
+    // boundaries come from RunService, rather than independently authored fixtures.
+    const callAgent = vi.fn<NonNullable<CodeByFrameworkConnectorOptions["callAgent"]>>(async (input) => ({
+      status: AgentState.QUEUED,
+      messageId: input.messageId!,
+      targetAgentType: input.targetAgentType,
+    }));
+    connectors.register(new CodeByFrameworkConnector({ redis: redis as never, callAgent }));
+    const agents: AgentProfile[] = ["employee-1", "employee-2"].map((id) => ({
+      id, name: id, description: "test employee",
+      execution: { connectorId: "code-by-framework", targetId: id },
+    }));
+    let attempts = 0;
+    const leaders: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run(input) {
+            const attempt = attempts++;
+            if (attempt < 2) {
+              try {
+                await input.delegate({ agentId: agents[attempt]!.id, task: `task-${attempt + 1}` });
+              } catch (error) {
+                if (error instanceof DelegationSuspendedError) {
+                  throw new LeaderRunSuspendedError(error.delegationId);
+                }
+                throw error;
+              }
+              throw new Error("expected callback suspension");
+            }
+            expect(input.message).toContain("first employee done");
+            expect(input.message).toContain("second employee done");
+            if (leaderFails) throw new Error("Leader summary failed");
+            await input.onDelta("both employees finished");
+            return { text: "both employees finished" };
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      health: async () => ({ healthy: true }),
+    };
+    const service = new RunService(sessions, runs, delegations, events,
+      new DelegationService(connectors, delegations, events), leaders, Date.now, undefined, {
+        executionQueue: new InMemoryRunExecutionQueue(),
+        credentials: new InMemoryExecutionCredentialRepository(), queuePollMs: 5,
+        callbackTimeoutEnabled: false,
+      });
+    const createSessionRun = vi.fn(async (input) => service.createSessionRun({
+      owner: { userCode: "user-1" }, message: input.message, agentList: agents,
+      ingressContext: {
+        externalSessionId: input.externalSessionId, parentMessageId: input.parentMessageId,
+        traceId: input.traceId,
+      },
+      metadata: { ...input.metadata, externalSessionId: input.externalSessionId },
+      executionCredential: { secret: "secret-token" },
+    }));
+    const emitProtocolChunk = vi.fn();
+    const markExecutionFinished = vi.fn(async () => undefined);
+    const worker = createWorker({ redis, createSessionRun, emitProtocolChunk,
+      resumeDelegation: vi.fn((input) => service.resumeDelegation(input)),
+      cancelRun: vi.fn((id, reason) => service.cancelRun(id, reason)),
+      streamEvents: (id, after, signal) => service.streamEvents(id, after, signal),
+      authorizeRun: vi.fn(async (id) => {
+        const run = (await service.getRun(id))!;
+        return { run, session: (await service.getSession(run.sessionId))! };
+      }),
+      registry: {
+        getExecutionByMessageId: vi.fn(async () => ({ execution_id: "original-execution" })),
+        markExecutionFinished,
+      } as unknown as WorkerRegistry,
+    });
+    const callback = (index: number, answer: string) => {
+      const request = callAgent.mock.calls[index]![0];
+      return new ResumeCommand(new MessageHeader(request.parentMessageId!, request.sessionId, request.traceId, {
+        sourceAgentType: request.targetAgentType, targetAgentType: request.sourceAgentType,
+        parentMessageId: request.messageId!, metadata: { ...request.metadata },
+      }), "", AgentState.COMPLETED, answer);
+    };
+    service.start();
+    try {
+      expect((await worker.processCommand(askCommand(), contextMock())).status).toBe(AgentState.WAITING_AGENT);
+      expect(callAgent).toHaveBeenCalledTimes(1);
+      const firstCallback = callback(0, "first employee done");
+      expect((await worker.processCommand(firstCallback, contextMock())).status).toBe(AgentState.WAITING_AGENT);
+      expect(callAgent).toHaveBeenCalledTimes(2);
+
+      // A duplicate first reply must not close the stream while employee two is working.
+      await worker.processCommand(firstCallback, contextMock());
+      expect(emitProtocolChunk.mock.calls.filter((call) => call[3]?.eventType === EventType.APP_STREAM_RESPONSE)).toHaveLength(0);
+      expect(markExecutionFinished).not.toHaveBeenCalled();
+
+      const secondCallback = callback(1, "second employee done");
+      const setStreamFinished = vi.fn();
+      const result = await worker.processCommand(secondCallback, contextMock({ setStreamFinished }));
+      const expected = leaderFails ? AgentState.FAILED : AgentState.COMPLETED;
+      expect(result.status).toBe(expected);
+      const runId = String(secondCallback.header.metadata.parent_run_id);
+      expect((await service.getRun(runId))?.status).toBe(expected);
+      expect((await delegations.listByRun(runId)).map((entry) => entry.status)).toEqual(["COMPLETED", "COMPLETED"]);
+      expect(callAgent.mock.calls.map(([input]) => input.extraPayload?.agent_id)).toEqual(["employee-1", "employee-2"]);
+      expect(attempts).toBe(3);
+      expect(emitProtocolChunk.mock.calls.filter((call) => call[3]?.eventType === EventType.FINAL_ANSWER)).toHaveLength(1);
+      expect(emitProtocolChunk.mock.calls.filter((call) => call[3]?.eventType === EventType.APP_STREAM_RESPONSE)).toHaveLength(1);
+      expect(setStreamFinished).toHaveBeenCalledWith(true);
+      expect(markExecutionFinished).toHaveBeenCalledExactlyOnceWith("original-execution", "session-1", expected);
+
+      const outputCount = emitProtocolChunk.mock.calls.length;
+      await worker.processCommand(secondCallback, contextMock());
+      expect(emitProtocolChunk).toHaveBeenCalledTimes(outputCount);
+      expect(callAgent).toHaveBeenCalledTimes(2);
+    } finally {
+      await service.dispose();
+    }
+  });
+
   it("uses the atomic durable ingress API instead of a read/create/bind sequence", async () => {
     const createIngressRun = vi.fn(async () => run());
     const get = vi.fn();
@@ -110,7 +241,7 @@ describe("ByClawSuperGatewayWorker", () => {
   it("continues a later Resume after an earlier summary suspended for another delegation", async () => {
     const resumeDelegation = vi.fn()
       .mockResolvedValueOnce({ outcome: "run_resumed", runId: "run-1", afterEventId: 10 })
-      .mockResolvedValueOnce({ outcome: "run_resumed", runId: "run-1", afterEventId: 20 });
+      .mockResolvedValueOnce({ outcome: "run_resumed", runId: "run-1", afterEventId: 12 });
     const streamEvents = vi.fn(async function* (_id, after) {
       if (after === 10) {
         yield event(11, "run.attempt", { attemptNo: 2 });
@@ -128,11 +259,171 @@ describe("ByClawSuperGatewayWorker", () => {
     (callback.header.metadata as Record<string, unknown>)["Beyond-Token"] = "secret-token";
     const first = await worker.processCommand(callback, contextMock());
     expect(first.status).toBe(AgentState.WAITING_AGENT);
-    const second = await worker.processCommand(callback, contextMock());
+    const secondCallback = childResumeCommand("delegation-2");
+    (secondCallback.header.metadata as Record<string, unknown>)["Beyond-Token"] = "secret-token";
+    const second = await worker.processCommand(secondCallback, contextMock());
     expect(second.status).toBe(AgentState.COMPLETED);
-    expect(streamEvents).toHaveBeenLastCalledWith("run-1", 20, undefined);
+    expect(streamEvents).toHaveBeenLastCalledWith("run-1", 12, undefined);
     expect(emitProtocolChunk).toHaveBeenCalledWith("session-1", "trace-1", "second result",
       expect.objectContaining({ eventType: EventType.FINAL_ANSWER }));
+  });
+
+  it("finishes the original execution when a second callback resumes a failed Run", async () => {
+    const error = "Leader model config changed before Run execution: 10014488";
+    const resumeDelegation = vi.fn()
+      .mockResolvedValueOnce({ outcome: "run_resumed", runId: "run-1", afterEventId: 10 })
+      .mockResolvedValueOnce({ outcome: "run_resumed", runId: "run-1", afterEventId: 12 });
+    const streamEvents = vi.fn(async function* (_id, after) {
+      if (after === 10) {
+        yield event(11, "run.attempt", { attemptNo: 2 });
+        yield event(12, "run.suspended", { status: "WAITING_AGENT" });
+      } else {
+        yield event(21, "run.attempt", { attemptNo: 3 });
+        yield event(22, "run.failed", { status: "FAILED", error });
+      }
+    });
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const markExecutionFinished = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(),
+      resumeDelegation,
+      authorizeRun: vi.fn(async () => ({
+        run: { ...run("QUEUED"), ingressContext: {
+          externalSessionId: "session-1", parentMessageId: "original-message",
+        } },
+        session: session(),
+      })),
+      cancelRun: vi.fn(),
+      streamEvents,
+      emitProtocolChunk,
+      registry: {
+        getExecutionByMessageId: vi.fn(async () => ({ execution_id: "original-execution" })),
+        markExecutionFinished,
+      } as unknown as WorkerRegistry,
+    });
+    const callback = childResumeCommand();
+    (callback.header.metadata as Record<string, unknown>)["Beyond-Token"] = "secret-token";
+
+    const first = await worker.processCommand(callback, contextMock());
+    expect(first.status).toBe(AgentState.WAITING_AGENT);
+    expect(markExecutionFinished).not.toHaveBeenCalled();
+
+    const secondCallback = childResumeCommand("delegation-2");
+    (secondCallback.header.metadata as Record<string, unknown>)["Beyond-Token"] = "secret-token";
+    const setStreamFinished = vi.fn();
+    const second = await worker.processCommand(secondCallback, contextMock({ setStreamFinished }));
+
+    expect(second).toMatchObject({ status: AgentState.FAILED, metadata: { error_code: "RUN_FAILED" } });
+    expect(streamEvents).toHaveBeenLastCalledWith("run-1", 12, undefined);
+    expect(emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType)).toEqual([
+      EventType.ANSWER_DELTA,
+      EventType.FINAL_ANSWER,
+      EventType.APP_STREAM_RESPONSE,
+    ]);
+    expect(emitProtocolChunk.mock.calls[0]?.[2]).toMatchObject({
+      content: "超级助手模型配置在任务执行期间发生变化，请重新发起请求。",
+      metadata: expect.objectContaining({
+        error_code: "RUN_FAILED",
+        error_source: "超级助手",
+        error_detail: error,
+        parent_run_id: "run-1",
+      }),
+    });
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
+    expect(markExecutionFinished).toHaveBeenCalledExactlyOnceWith(
+      "original-execution", "session-1", AgentState.FAILED,
+    );
+    expect(resumeDelegation).toHaveBeenLastCalledWith(expect.objectContaining({ delegationId: "delegation-2" }));
+  });
+
+  it("recovers a settled second callback and closes a Run that already failed", async () => {
+    const redis = workerRedisFake();
+    await redis.set("lease", "owner");
+    const error = "Leader model config changed before Run execution: 10014488";
+    const resumeDelegation = vi.fn()
+      .mockResolvedValueOnce({ outcome: "run_resumed", runId: "run-1", afterEventId: 10 })
+      .mockResolvedValueOnce({ outcome: "delegation_already_settled", runId: "run-1",
+        delegationStatus: "COMPLETED", afterEventId: 12 });
+    const streamEvents = vi.fn(async function* (_id, after) {
+      if (after === 10) {
+        yield event(11, "run.attempt", { attemptNo: 2 });
+        yield event(12, "run.suspended", { status: "WAITING_AGENT" });
+      } else {
+        yield event(21, "run.attempt", { attemptNo: 3 });
+        yield event(22, "run.failed", { status: "FAILED", error });
+      }
+    });
+    const markExecutionFinished = vi.fn(async () => undefined);
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const worker = createWorker({
+      redis,
+      createSessionRun: vi.fn(),
+      resumeDelegation,
+      authorizeRun: vi.fn(async () => ({
+        run: { ...run("FAILED"), ingressContext: {
+          externalSessionId: "session-1", parentMessageId: "original-message",
+        } },
+        session: session(),
+      })),
+      cancelRun: vi.fn(),
+      streamEvents,
+      emitProtocolChunk,
+      registry: {
+        getExecutionByMessageId: vi.fn(async () => ({ execution_id: "original-execution" })),
+        markExecutionFinished,
+      } as unknown as WorkerRegistry,
+    });
+    const firstCallback = childResumeCommand();
+    (firstCallback.header.metadata as Record<string, unknown>)["Beyond-Token"] = "secret-token";
+    expect((await worker.processCommand(firstCallback, contextMock())).status).toBe(AgentState.WAITING_AGENT);
+
+    const secondCallback = childResumeCommand("delegation-2");
+    (secondCallback.header.metadata as Record<string, unknown>)["Beyond-Token"] = "secret-token";
+    const setStreamFinished = vi.fn();
+    const result = await withDeliveryScope({ sessionId: "session-1", leaseKey: "lease", token: "owner",
+      recovered: true, signal: new AbortController().signal,
+      assertOwned: vi.fn(async () => undefined) }, () =>
+      worker.processCommand(secondCallback, contextMock({ setStreamFinished })));
+
+    expect(result.status).toBe(AgentState.FAILED);
+    expect(streamEvents).toHaveBeenLastCalledWith("run-1", 12, expect.any(AbortSignal));
+    expect(emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType)).toEqual([
+      EventType.ANSWER_DELTA,
+      EventType.FINAL_ANSWER,
+      EventType.APP_STREAM_RESPONSE,
+    ]);
+    expect(emitProtocolChunk.mock.calls[0]?.[2]).toMatchObject({
+      content: "超级助手模型配置在任务执行期间发生变化，请重新发起请求。",
+      metadata: expect.objectContaining({ error_code: "RUN_FAILED", parent_run_id: "run-1" }),
+    });
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
+    expect(markExecutionFinished).toHaveBeenCalledExactlyOnceWith(
+      "original-execution", "session-1", AgentState.FAILED,
+    );
+  });
+
+  it("keeps a resumed Run retryable when reading its events fails", async () => {
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const markExecutionFinished = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(),
+      resumeDelegation: vi.fn(async () => ({ outcome: "run_resumed", runId: "run-1", afterEventId: 10 })),
+      cancelRun: vi.fn(),
+      streamEvents: async function* () {
+        yield event(11, "run.attempt", { attemptNo: 2 });
+        throw new Error("database unavailable");
+      },
+      emitProtocolChunk,
+      registry: { markExecutionFinished } as unknown as WorkerRegistry,
+    });
+
+    const callback = childResumeCommand();
+    (callback.header.metadata as Record<string, unknown>)["Beyond-Token"] = "secret-token";
+    await expect(worker.processCommand(callback, contextMock())).rejects.toThrow(
+      "pending message remains recoverable",
+    );
+    expect(emitProtocolChunk).not.toHaveBeenCalled();
+    expect(markExecutionFinished).not.toHaveBeenCalled();
   });
 
   it("recovers the second callback after settlement even if legacy events have no resume boundary", async () => {
@@ -1868,13 +2159,13 @@ function askCommand(
 }
 
 /** 构造通过子 Agent 终态协议校验的 ResumeCommand。 */
-function childResumeCommand(): ResumeCommand {
+function childResumeCommand(delegationId = "delegation-1"): ResumeCommand {
   return new ResumeCommand(
     new MessageHeader("callback-message", "session-1", "trace-1", {
       sourceAgentType: "BY_CHILD",
       targetAgentType: "BY_SUPER",
-      parentMessageId: "delegation-1:request",
-      metadata: { delegation_id: "delegation-1", parent_run_id: "run-1" },
+      parentMessageId: `${delegationId}:request`,
+      metadata: { delegation_id: delegationId, parent_run_id: "run-1" },
     }),
     "",
     AgentState.COMPLETED,

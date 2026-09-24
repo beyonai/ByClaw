@@ -1179,6 +1179,9 @@ describe("RunService", () => {
           contextRevision: 0,
           async run(input) {
             leaderRunCount += 1;
+            if (leaderRunCount === 3) {
+              return { text: "first done and second done" };
+            }
             try {
               await input.delegate({
                 agentId: agent.id,
@@ -1251,7 +1254,21 @@ describe("RunService", () => {
         channelExtension: { source: "byclaw-be" },
       },
     ]);
-    await service.cancelRun(run.id, "test complete");
+    const secondDelegation = (await delegations.listByRun(run.id)).find(
+      (delegation) => delegation.task === "second task",
+    );
+    expect(secondDelegation).toBeDefined();
+    await service.resumeDelegation({
+      delegationId: secondDelegation!.id,
+      status: "COMPLETED",
+      finalAnswer: "second done",
+    });
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+    expect((await events.list(run.id)).at(-1)).toMatchObject({
+      type: "run.completed",
+      data: { finalAnswer: "first done and second done" },
+    });
+    expect(leaderRunCount).toBe(3);
     await service.dispose();
   });
 

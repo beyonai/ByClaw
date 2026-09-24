@@ -58,6 +58,7 @@ import type {
 } from "./by-framework-worker-contracts.js";
 
 const COMMAND_PROCESSING_ERROR_CODE = "COMMAND_PROCESSING_FAILED";
+const RUN_FAILED_ERROR_CODE = "RUN_FAILED";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 文件内部模型：不参与对外 API
@@ -844,7 +845,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       result?: ConstructorParameters<typeof AgentTaskResult>[0];
     }>(run.id, deliveryId, context.sessionId);
     const continuingResume = saved?.result?.status === AgentState.WAITING_AGENT && Boolean(summaryMessageId) && (
-      (options.afterEventId ?? 0) > saved.afterEventId ||
+      // 新回调的起点正是上次已转发的 run.suspended；相等时应继续读其后的事件，
+      // 不能把上次等待结果当成本次结果。更早回调的恢复仍复用已保存进度。
+      (options.afterEventId ?? 0) >= saved.afterEventId ||
       // 兼容旧持久事件缺少 callback 边界：只有实际 pending 恢复且数据库已离开挂起态才继续。
       ((options.afterEventId ?? 0) === 0 && currentDelivery()?.recovered &&
         Boolean(run.status) && run.status !== "WAITING_AGENT")
@@ -1165,6 +1168,34 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     await this.#askCommandHandler.releaseRun(scope.run.id);
 
     const userMessage = stringData(event.data.userMessage);
+    if (scope.summaryMessageId) {
+      const failure = state.delegationFailure;
+      // 兼容升级前已落库的模型指纹失败，等待中的 Resume 重投仍需正常收口。
+      const fallbackMessage = error.startsWith("Leader model config changed before Run execution:")
+        ? "超级助手模型配置在任务执行期间发生变化，请重新发起请求。"
+        : "超级助手处理失败，本次任务已终止，请重试。";
+      const message = failure
+        ? delegationFailureUserMessage({
+            agentName: failure.agentName,
+            agentId: failure.agentId,
+            reason: userMessage || failure.reason || fallbackMessage,
+            stage: failure.stage,
+          })
+        : userMessage || fallbackMessage;
+      await this.#finishFailureStream(scope.context, {
+        errorCode: RUN_FAILED_ERROR_CODE,
+        userMessage: message,
+        errorSource: failure?.agentName || failure?.agentId || "超级助手",
+        errorDetail: error,
+        runId: scope.run.id,
+      });
+      return new AgentTaskResult({
+        status: AgentState.FAILED,
+        content: "",
+        replyData: null,
+        metadata: { error_code: RUN_FAILED_ERROR_CODE },
+      });
+    }
     if (userMessage) {
       const attributedMessage = state.delegationFailure
         ? delegationFailureUserMessage({

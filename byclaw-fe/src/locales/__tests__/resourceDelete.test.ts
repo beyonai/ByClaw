@@ -8,12 +8,12 @@ import zhCNModels from '../../pages/models/locales/zh-CN';
 describe('resource delete messages', () => {
   // 两份语言配置均需同步，菜单和确认提示使用对应模块名称。
   it.each([
-    ['resource.deleteKnowledge', '删除知识', 'Delete knowledge'],
-    ['resource.deleteKnowledgeConfirm', '确定删除该知识吗？', 'Are you sure you want to delete this knowledge?'],
-    ['resource.deleteSkill', '删除技能', 'Delete skill'],
-    ['resource.deleteSkillConfirm', '确定删除该技能吗？', 'Are you sure you want to delete this skill?'],
-    ['resource.deleteTool', '删除工具', 'Delete tool'],
-    ['resource.deleteToolConfirm', '确定删除该工具吗？', 'Are you sure you want to delete this tool?'],
+    ['resource.deleteKnowledge', '注销知识', 'Deregister knowledge'],
+    ['resource.deleteKnowledgeConfirm', '确定注销该知识吗？', 'Are you sure you want to deregister this knowledge?'],
+    ['resource.deleteSkill', '注销技能', 'Deregister skill'],
+    ['resource.deleteSkillConfirm', '确定注销该技能吗？', 'Are you sure you want to deregister this skill?'],
+    ['resource.deleteTool', '注销工具', 'Deregister tool'],
+    ['resource.deleteToolConfirm', '确定注销该工具吗？', 'Are you sure you want to deregister this tool?'],
   ])('defines module wording for %s', (id, chinese, english) => {
     expect(zhCN[id as keyof typeof zhCN]).toBe(chinese);
     expect(zhCNManager[id as keyof typeof zhCNManager]).toBe(chinese);

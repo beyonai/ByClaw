@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { message } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceList from '..';
@@ -37,7 +37,10 @@ jest.mock('@/pages/manager/service/resources', () => ({
 jest.mock('@/components/InfiniteScroll', () => ({
   __esModule: true,
   default: ({ children, next, hasMore }: any) => (
-    <div>{children}{hasMore && <button onClick={next}>load more</button>}</div>
+    <div>
+      {children}
+      {hasMore && <button onClick={next}>load more</button>}
+    </div>
   ),
 }));
 jest.mock('../../ResourceCard', () => ({
@@ -88,11 +91,55 @@ beforeEach(() => {
   (listResourceUseAuth as jest.Mock).mockResolvedValue({
     data: { list: [{ resourceId: '10', resourceBizType: 'TOOLKIT', ownerType: 'enterprise' }], total: 1 },
   });
-  (queryResourceDetail as jest.Mock).mockResolvedValue({ resourceId: '10', operationPermissions: { canOffShelf: true } });
+  (queryResourceDetail as jest.Mock).mockResolvedValue({
+    resourceId: '10',
+    operationPermissions: { canOffShelf: true },
+  });
   (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({ data: [] });
   [shelfResource, unShelfResource, deregisterResource].forEach((operation) =>
     (operation as jest.Mock).mockResolvedValue({ code: 0 })
   );
+});
+
+it.each(['SKILL', 'KG_DOC', 'TOOL'])('shows loading while the initial %s request is pending', async (resourceType) => {
+  let finish!: (value: any) => void;
+  (listResourceUseAuth as jest.Mock).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  renderList({ resourceType, activeTab: 'personal', myResourcesOnly: false });
+
+  expect(screen.getByText('common.loading')).toBeInTheDocument();
+  expect(screen.queryByText('common.noData')).toBeNull();
+  expect(screen.queryByTestId('resource-card')).toBeNull();
+
+  await act(async () => {
+    finish({ data: { list: [], total: 0 } });
+  });
+  expect(await screen.findByText('common.noData')).toBeInTheDocument();
+  expect(screen.queryByText('common.loading')).toBeNull();
+});
+
+it('keeps loading visible until workspace skills finish loading', async () => {
+  let finish!: (value: any) => void;
+  (queryWorkspacePersonalSkillList as jest.Mock).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false });
+  await waitFor(() => expect(queryWorkspacePersonalSkillList).toHaveBeenCalled());
+  expect(screen.getByText('common.loading')).toBeInTheDocument();
+  expect(screen.queryByTestId('resource-card')).toBeNull();
+
+  await act(async () => {
+    finish({ data: [] });
+  });
+  expect(await screen.findByTestId('resource-card')).toBeInTheDocument();
+  expect(screen.queryByText('common.loading')).toBeNull();
 });
 
 it.each([
@@ -159,10 +206,13 @@ it.each([true, false, undefined])('forwards enterprise publication brand control
 
 it('removes only the changed row when it no longer matches the status filter', async () => {
   (listResourceUseAuth as jest.Mock).mockResolvedValue({
-    data: { list: [
-      { resourceId: '10', resourceBizType: 'TOOLKIT', resourceStatus: '3' },
-      { resourceId: '11', resourceBizType: 'TOOLKIT', resourceStatus: '3' },
-    ], total: 2 },
+    data: {
+      list: [
+        { resourceId: '10', resourceBizType: 'TOOLKIT', resourceStatus: '3' },
+        { resourceId: '11', resourceBizType: 'TOOLKIT', resourceStatus: '3' },
+      ],
+      total: 2,
+    },
   });
   const refresh = renderList();
   const cards = await screen.findAllByTestId('resource-card');
@@ -175,7 +225,12 @@ it('removes only the changed row when it no longer matches the status filter', a
 
 it('keeps the list interactive while a lifecycle operation is pending', async () => {
   let finish!: (value: any) => void;
-  (shelfResource as jest.Mock).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  (shelfResource as jest.Mock).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
   renderList({ dropdownParam: { resourceStatus: '' } });
   const card = await screen.findByTestId('resource-card');
   fireEvent.click(screen.getByText('publish'));
@@ -248,61 +303,103 @@ it.each(['', '0', '2', '3'])('preserves supported enterprise status %s', async (
   expect(listResourceUseAuth).toHaveBeenCalledWith(expect.objectContaining({ resourceStatus }));
 });
 
-it.each(['SKILL', 'KG_DOC', 'TOOL'].flatMap((resourceType) =>
-  ['', 'personal', 'enterprise'].map((ownerType) => ({ resourceType, ownerType }))
-))('requests available $ownerType $resourceType resources on the server', async ({ resourceType, ownerType }) => {
+it.each(
+  ['SKILL', 'KG_DOC', 'TOOL'].flatMap((resourceType) =>
+    ['', 'personal', 'enterprise'].map((ownerType) => ({ resourceType, ownerType }))
+  )
+)('requests available $ownerType $resourceType resources on the server', async ({ resourceType, ownerType }) => {
   renderList({ resourceType, myResourcesOnly: false, activeTab: 'personal', dropdownParam: { ownerType } });
   await screen.findByTestId('resource-card');
-  expect(listResourceUseAuth).toHaveBeenCalledWith(expect.objectContaining({
-    ownerType: ownerType || undefined,
-    availableOnly: true,
-    resourceStatus: '2',
-  }));
+  expect(listResourceUseAuth).toHaveBeenCalledWith(
+    expect.objectContaining({
+      ownerType: ownerType || undefined,
+      availableOnly: true,
+      resourceStatus: '2',
+    })
+  );
   if (resourceType === 'SKILL') {
     if (ownerType === 'enterprise') expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
     else expect(queryWorkspacePersonalSkillList).toHaveBeenCalled();
   }
 });
 
-it.each([true, false])('ignores stale personal ownership on an enterprise tab, management=%s', async (myResourcesOnly) => {
-  renderList({ myResourcesOnly, activeTab: 'enterprise', dropdownParam: { ownerType: 'personal' } });
-  await screen.findByTestId('resource-card');
-  expect(listResourceUseAuth).toHaveBeenCalledWith(expect.objectContaining({ ownerType: 'enterprise' }));
-});
+it.each([true, false])(
+  'ignores stale personal ownership on an enterprise tab, management=%s',
+  async (myResourcesOnly) => {
+    renderList({ myResourcesOnly, activeTab: 'enterprise', dropdownParam: { ownerType: 'personal' } });
+    await screen.findByTestId('resource-card');
+    expect(listResourceUseAuth).toHaveBeenCalledWith(expect.objectContaining({ ownerType: 'enterprise' }));
+  }
+);
 
 it('preserves ownership and available scope when loading the next page', async () => {
-  (listResourceUseAuth as jest.Mock).mockResolvedValueOnce({
-    data: { list: [{ resourceId: '10', resourceBizType: 'SKILL', ownerType: 'enterprise' }], total: 2 },
-  }).mockResolvedValueOnce({
-    data: { list: [{ resourceId: '11', resourceBizType: 'SKILL', ownerType: 'enterprise' }], total: 2 },
+  (listResourceUseAuth as jest.Mock)
+    .mockResolvedValueOnce({
+      data: { list: [{ resourceId: '10', resourceBizType: 'SKILL', ownerType: 'enterprise' }], total: 2 },
+    })
+    .mockResolvedValueOnce({
+      data: { list: [{ resourceId: '11', resourceBizType: 'SKILL', ownerType: 'enterprise' }], total: 2 },
+    });
+  renderList({
+    resourceType: 'SKILL',
+    activeTab: 'personal',
+    myResourcesOnly: false,
+    dropdownParam: { ownerType: 'enterprise' },
   });
-  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false,
-    dropdownParam: { ownerType: 'enterprise' } });
   fireEvent.click(await screen.findByText('load more'));
   await waitFor(() => expect(listResourceUseAuth).toHaveBeenCalledTimes(2));
-  expect(listResourceUseAuth).toHaveBeenLastCalledWith(expect.objectContaining({
-    pageNum: 2, ownerType: 'enterprise', availableOnly: true, resourceStatus: '2',
-  }));
-  expect(await screen.findAllByTestId('resource-card')).toHaveLength(2);
+  expect(listResourceUseAuth).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      pageNum: 2,
+      ownerType: 'enterprise',
+      availableOnly: true,
+      resourceStatus: '2',
+    })
+  );
+  // 请求发出时旧卡片已存在，需等待分页结果合并后的数量。
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(2));
   expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
 });
 
-it.each(['SKILL', 'KG_DOC', 'TOOL'])('ignores stale category filters in my enterprise %s resources', async (resourceType) => {
-  renderList({ resourceType, catalogId: 'old-category', dropdownParam: { catalogId: 'old-filter', resourceStatus: '3' } });
-  await screen.findByTestId('resource-card');
-  expect(listResourceUseAuth).toHaveBeenCalledWith(expect.objectContaining({
-    catalogId: undefined, resourceStatus: '3', ownerType: 'enterprise',
-  }));
-});
+it.each(['SKILL', 'KG_DOC', 'TOOL'])(
+  'ignores stale category filters in my enterprise %s resources',
+  async (resourceType) => {
+    renderList({
+      resourceType,
+      catalogId: 'old-category',
+      dropdownParam: { catalogId: 'old-filter', resourceStatus: '3' },
+    });
+    await screen.findByTestId('resource-card');
+    expect(listResourceUseAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogId: undefined,
+        resourceStatus: '3',
+        ownerType: 'enterprise',
+      })
+    );
+  }
+);
 
-it.each(['SKILL', 'KG_DOC', 'TOOL'].flatMap((resourceType) =>
-  ['personal', 'enterprise'].map((activeTab) => ({ resourceType, activeTab }))
-))('excludes deregistered rows and stale categories for my $activeTab $resourceType', async ({ resourceType, activeTab }) => {
-  renderList({ resourceType, activeTab, catalogId: 'old-category',
-    dropdownParam: { catalogId: 'old-filter', resourceStatus: '' } });
-  await screen.findByTestId('resource-card');
-  expect(listResourceUseAuth).toHaveBeenCalledWith(expect.objectContaining({
-    excludeDeleted: true, catalogId: undefined,
-    resourceStatus: activeTab === 'personal' ? '2' : '',
-  }));
-});
+it.each(
+  ['SKILL', 'KG_DOC', 'TOOL'].flatMap((resourceType) =>
+    ['personal', 'enterprise'].map((activeTab) => ({ resourceType, activeTab }))
+  )
+)(
+  'excludes deregistered rows and stale categories for my $activeTab $resourceType',
+  async ({ resourceType, activeTab }) => {
+    renderList({
+      resourceType,
+      activeTab,
+      catalogId: 'old-category',
+      dropdownParam: { catalogId: 'old-filter', resourceStatus: '' },
+    });
+    await screen.findByTestId('resource-card');
+    expect(listResourceUseAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        excludeDeleted: true,
+        catalogId: undefined,
+        resourceStatus: activeTab === 'personal' ? '2' : '',
+      })
+    );
+  }
+);

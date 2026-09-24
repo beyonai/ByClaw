@@ -123,6 +123,7 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(target.getOwnerType()).isEqualTo("enterprise");
         assertThat(target.getResourceStatus()).isEqualTo(2);
         assertThat(target.getResourceName()).isEqualTo(source.getResourceName());
+        verify(ssResourceService).existsEnterpriseSkillByName(source.getResourceName());
         assertThat(target.getAvatar()).isEqualTo("skill-logo");
         assertThat(target.getCatalogId()).isEqualTo(10L);
         assertThat(source.getOwnerType()).isEqualTo("personal");
@@ -149,6 +150,29 @@ class ByClawSkillResourceApplicationServiceTest {
             eq(ResourceArtifactTypeEnum.IMPORT_ZIP.name()), eq("minio"),
             eq("skill/user002-hub/personal-skill.zip"), any());
         org.mockito.Mockito.verifyNoInteractions(resourceArtifactStorageService);
+    }
+
+    @Test
+    void publishEnterpriseAppendsPublisherNameWhenEnterpriseSkillNameExists() throws Exception {
+        SsResource source = prepareEnterpriseCopy();
+        source.setResourceName("技能1");
+        CurrentUserHolder.getLoginInfo().setUserName("张三");
+        when(ssResourceService.existsEnterpriseSkillByName("技能1")).thenReturn(true);
+        var result = service.publishSkillToEnterprise(7001L);
+        assertThat(result.resource().getResourceName()).isEqualTo("技能1（张三）");
+        assertThat(source.getResourceName()).isEqualTo("技能1");
+        verify(ssResourceService).existsEnterpriseSkillByName("技能1");
+        ArgumentCaptor<SsResExtSkill> extension = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService).saveOrUpdate(extension.capture());
+        assertThat(extension.getValue().getTargetContent()).contains("技能1（张三）");
+    }
+
+    @Test
+    void publishEnterpriseFallsBackToPublisherAccountWhenDisplayNameIsMissing() throws Exception {
+        SsResource source = prepareEnterpriseCopy();
+        when(ssResourceService.existsEnterpriseSkillByName(source.getResourceName())).thenReturn(true);
+        var result = service.publishSkillToEnterprise(7001L);
+        assertThat(result.resource().getResourceName()).isEqualTo(source.getResourceName() + "（user001）");
     }
 
     @Test
@@ -1221,6 +1245,26 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(metadata.skillDesc()).isEqualTo("AI 驱动的演示文稿生成技能");
     }
 
+    @Test
+    void inspectSkillPackage_acceptsGbkChineseEntryNamesWithoutLanguageEncodingFlag() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "ppt-master.zip", "application/zip",
+            unflaggedSkillZipBytes("GBK"));
+
+        assertThat(service.inspectSkillPackage(uploadFile).skillName()).isEqualTo("ppt-master");
+    }
+
+    @Test
+    void inspectSkillPackage_rejectsCorruptArchiveWithoutEncodingRetry() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "broken.zip", "application/zip",
+            new byte[] {1, 2, 3});
+
+        // 非编码错误保留原始异常，不能误走字符集回退并掩盖损坏原因。
+        assertThatThrownBy(() -> service.inspectSkillPackage(uploadFile))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("byclaw.skill.zip.read.failed")
+            .satisfies(error -> assertThat(error.getCause().getSuppressed()).isEmpty());
+    }
+
     private byte[] skillZipBytes(String skillName) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -1237,10 +1281,14 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     private byte[] utf8UnflaggedSkillZipBytes() {
+        return unflaggedSkillZipBytes(StandardCharsets.UTF_8.name());
+    }
+
+    private byte[] unflaggedSkillZipBytes(String encoding) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(out)) {
-                zip.setEncoding(StandardCharsets.UTF_8.name());
+                zip.setEncoding(encoding);
                 zip.setUseLanguageEncodingFlag(false);
                 zip.setCreateUnicodeExtraFields(ZipArchiveOutputStream.UnicodeExtraFieldPolicy.NEVER);
 

@@ -462,7 +462,14 @@ public class ByClawSkillResourceApplicationService {
 
         SsResExtSkill sourceExt = ssResExtSkillService.findById(sourceId);
         // 上架只复制数据库记录及文件引用，不探测、下载、重打包或上传源文件。
-        SkillPackageMetadata metadata = new SkillPackageMetadata(source.getResourceName(), targetCode,
+        String targetName = source.getResourceName();
+        if (ssResourceService.existsEnterpriseSkillByName(targetName)) {
+            // 重名时标明本次上架人；仅调整企业副本名称，不改变个人技能或已有副本。
+            String publisherName = StringUtils.defaultIfBlank(CurrentUserHolder.getCurrentUserName(),
+                CurrentUserHolder.getCurrentUserCode());
+            targetName += "（" + publisherName + "）";
+        }
+        SkillPackageMetadata metadata = new SkillPackageMetadata(targetName, targetCode,
             source.getResourceDesc(), sourceExt == null ? null : sourceExt.getSkillOriginalFilename(),
             sourceExt == null || sourceExt.getSkillPackageSize() == null ? 0 : sourceExt.getSkillPackageSize());
         SsResource target = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, source.getCatalogId(), null);
@@ -1378,7 +1385,15 @@ public class ByClawSkillResourceApplicationService {
         try {
             entries = readZipEntries(bytes, ZIP_ENTRY_NAME_PRIMARY_ENCODING);
         }
-        catch (CharacterCodingException primaryException) {
+        catch (IOException primaryException) {
+            // ZipFile 会包装中央目录的解码异常；只对编码问题回退，损坏的 ZIP 仍直接报错。
+            Throwable cause = primaryException;
+            while (cause != null && !(cause instanceof CharacterCodingException)) {
+                cause = cause.getCause();
+            }
+            if (cause == null) {
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), primaryException);
+            }
             logger.debug("Skill 资源包 entry 名无法按 {} 解码，使用 {} 重试",
                 ZIP_ENTRY_NAME_PRIMARY_ENCODING, ZIP_ENTRY_NAME_FALLBACK_ENCODING);
             try {
@@ -1388,9 +1403,6 @@ public class ByClawSkillResourceApplicationService {
                 fallbackException.addSuppressed(primaryException);
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), fallbackException);
             }
-        }
-        catch (IOException e) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
         }
         if (entries.isEmpty()) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));

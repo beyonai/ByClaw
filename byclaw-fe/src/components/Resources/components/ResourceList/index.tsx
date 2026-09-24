@@ -17,11 +17,7 @@ import { queryInstalledResourceIds } from '@/pages/manager/service/DigitalEmploy
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { KnowledgeCapability } from '@/service/knowledgeCenter';
-import {
-  buildResourceListFilterParam,
-  getBaseResourceBizTypeList,
-  getResourceQueryStatus,
-} from '../../utils';
+import { buildResourceListFilterParam, getBaseResourceBizTypeList, getResourceQueryStatus } from '../../utils';
 import {
   PERMISSION_CREATED_BY_ME_VALUE,
   PERMISSION_MANAGEABLE_BY_ME_VALUE,
@@ -153,7 +149,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const canManageActiveEmployee = useDigitalEmployeeManagePermission(
     resourceType === 'SKILL' ? activeDigitalEmployeeId : undefined
   );
-  const [loading, setLoading] = useState(false);
+  // 列表挂载后立即请求，首帧先展示加载态，避免请求开始前闪现空状态。
+  const [loading, setLoading] = useState(true);
   const listGeneration = useRef(0);
   const [list, setList] = useState<IResourceItem[]>([]);
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
@@ -178,9 +175,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
       const pageSize = params?.pageSize ?? 30; // 直接使用固定值，避免依赖pageInfo.pageSize
       const keyword = `${params?.searchValue ?? searchValue ?? ''}`.trim();
       // 我的个人和企业资源不按分类筛选，丢弃旧筛选及翻页参数中的分类值。
-      const selectedCatalogId = myResourcesOnly
-        ? ''
-        : `${params?.catalogId ?? catalogId ?? ''}`;
+      const selectedCatalogId = myResourcesOnly ? '' : `${params?.catalogId ?? catalogId ?? ''}`;
       const rawFilterParam = params?.dropdownParam ?? dropdownParam;
       const filterParam = {
         ...rawFilterParam,
@@ -211,7 +206,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
               myResourcesOnly && ownerType === 'personal'
                 ? PERMISSION_CREATED_BY_ME_VALUE
                 : myResourcesOnly && myResourceScope === 'created'
-                ? PERMISSION_CREATED_BY_ME_VALUE
+                  ? PERMISSION_CREATED_BY_ME_VALUE
                   : myResourcesOnly && myResourceScope === 'managed'
                     ? PERMISSION_MANAGED_BY_ME_VALUE
                     : myResourcesOnly
