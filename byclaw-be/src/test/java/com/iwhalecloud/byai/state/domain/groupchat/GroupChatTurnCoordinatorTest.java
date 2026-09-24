@@ -90,6 +90,7 @@ class GroupChatTurnCoordinatorTest {
         coordinator = new GroupChatTurnCoordinator(turns, anchors, tasks, messages, candidates, sequence, members,
             mock(SessionService.class), users, resources, mock(ChatRuntimeStateService.class),
             mock(GroupChatGatewayExecutor.class), contextService, transactions);
+        ReflectionTestUtils.setField(coordinator, "workers", mock(ExecutorService.class));
     }
 
     @Test
