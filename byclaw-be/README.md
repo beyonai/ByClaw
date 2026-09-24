@@ -61,6 +61,7 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - `GET /group-chats?pageNum=1&pageSize=20` 仅在返回时将 `latestMessageContent` 中的 `{{DIG_EMPLOYEE_资源ID}}`、`{{HUMAN_资源ID}}` 转成 `@名称`，名称取最新消息 metadata 中 `resourceList.resourceName` 的快照。
 - Agent 的 `[@成员名称](uid=成员UID)` 同样转成 `@名称`；优先使用资源快照名称，没有快照时使用链接中的成员名称。无法找到名称的占位符和其他资源占位符保留原文。
 - 该转换适用于已有消息，不修改数据库正文、WebSocket 消息或 Agent 调度；查询所需的消息 metadata 不包含在接口响应中。
+- 每个列表项的 `latestMessageAttachments` 返回最后一条消息的附件，字段结构与群消息时间线的 `attachments` 一致；无附件或最后一条消息已撤回时返回空数组。原始关联资源字段不包含在响应中。
 
 ## 群详情查询成本
 

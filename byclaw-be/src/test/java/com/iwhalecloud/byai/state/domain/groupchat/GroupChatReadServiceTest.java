@@ -38,6 +38,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthor
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberSummary;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
+import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 
 class GroupChatReadServiceTest {
@@ -59,8 +60,9 @@ class GroupChatReadServiceTest {
     private final ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);
     private final GroupChatAuthorizationService authorizationService = mock(GroupChatAuthorizationService.class);
     private final MultiDeviceBroadcastService broadcastService = mock(MultiDeviceBroadcastService.class);
+    private final GroupChatContextService contextService = new GroupChatContextService(messageMapper, null, null);
     private final GroupChatReadService service = new GroupChatReadService(mentionMapper, memberMapper, messageMapper,
-        authorizationService, broadcastService);
+        authorizationService, broadcastService, contextService);
 
     @BeforeEach
     void setUp() {
@@ -109,6 +111,7 @@ class GroupChatReadServiceTest {
             assertThat(result.getPageSize()).isEqualTo(20);
             assertThat(result.getTotal()).isEqualTo(21L);
             assertThat(result.getList().get(0).getLatestMessageContent()).isEqualTo("@官网助手 开发官网，@张三");
+            assertThat(result.getList().get(0).getLatestMessageAttachments()).isEmpty();
             assertThat(result.getList().get(0).getMembers()).containsExactly(member);
             assertThat(item.getLatestMessageMetadata()).isEqualTo(storedMetadata);
             assertThat(new ObjectMapper().writeValueAsString(item)).doesNotContain("latestMessageMetadata", "resourceList");
@@ -128,6 +131,7 @@ class GroupChatReadServiceTest {
         item.setLatestMessageTime(new Date(100));
         item.setLatestMessageContent("SECRET");
         item.setLatestMessageMetadata("SECRET");
+        item.setLatestMessageRelatedResources("{\"files\":[{\"fileId\":\"private\",\"fileName\":\"secret.txt\"}]}");
         item.setLatestMessageRecalledAt(new Date(200));
         item.setLatestMessageRecalledBy(30L);
         when(mentionMapper.selectMyGroups(30L)).thenAnswer(invocation -> {
@@ -142,8 +146,64 @@ class GroupChatReadServiceTest {
             assertThat(result.getLatestMessageId()).isEqualTo(20L);
             assertThat(result.getLatestMessageTime()).isEqualTo(new Date(100));
             assertThat(result.getLatestMessageContent()).endsWith(" 撤回了一条消息");
+            assertThat(result.getLatestMessageAttachments()).isEmpty();
             assertThat(new ObjectMapper().writeValueAsString(result)).doesNotContain("SECRET");
             verifyNoInteractions(messageMapper, broadcastService);
+        }
+        finally {
+            PageHelper.clearPage();
+        }
+    }
+
+    @Test
+    void listIncludesAttachmentsFromLatestMessageOnly() throws Exception {
+        GroupChatListItemResponse item = new GroupChatListItemResponse();
+        item.setSessionId(10L);
+        item.setLatestMessageId(20L);
+        item.setLatestMessageRelatedResources("""
+            {"files":[{"fileId":"123","fileName":"report.pdf","fileUrl":"/report.pdf","fileType":"application/pdf"}]}
+            """);
+        when(mentionMapper.selectMyGroups(30L)).thenAnswer(invocation -> {
+            Page<GroupChatListItemResponse> page = PageHelper.getLocalPage();
+            page.add(item);
+            return page;
+        });
+        try {
+            var result = service.listMyGroups(1, 20).getList().get(0);
+            assertThat(result.getLatestMessageAttachments()).hasSize(1);
+            assertThat(result.getLatestMessageAttachments().get(0).getFileId()).isEqualTo("123");
+            assertThat(result.getLatestMessageAttachments().get(0).getFileName()).isEqualTo("report.pdf");
+            assertThat(result.getLatestMessageAttachments().get(0).getMediaType()).isEqualTo("application/pdf");
+            assertThat(new ObjectMapper().writeValueAsString(result)).contains("latestMessageAttachments")
+                .doesNotContain("latestMessageRelatedResources");
+            verifyNoInteractions(messageMapper);
+        }
+        finally {
+            PageHelper.clearPage();
+        }
+    }
+
+    @Test
+    void listIncludesTaskResultFilesFromLatestMessageMetadata() {
+        GroupChatListItemResponse item = new GroupChatListItemResponse();
+        item.setSessionId(10L);
+        item.setLatestMessageId(21L);
+        item.setLatestMessageMetadata("""
+            {"scene":"GROUP_CHAT","kind":"TASK_RESULT","files":[
+              {"fileName":"result.txt","filePath":"/results/result.txt","cloudResourceId":"cloud-1"}
+            ]}
+            """);
+        when(mentionMapper.selectMyGroups(30L)).thenAnswer(invocation -> {
+            Page<GroupChatListItemResponse> page = PageHelper.getLocalPage();
+            page.add(item);
+            return page;
+        });
+        try {
+            var attachments = service.listMyGroups(1, 20).getList().get(0).getLatestMessageAttachments();
+            assertThat(attachments).hasSize(1);
+            assertThat(attachments.get(0).getFileName()).isEqualTo("result.txt");
+            assertThat(attachments.get(0).getFilePath()).isEqualTo("/results/result.txt");
+            assertThat(attachments.get(0).getCloudResourceId()).isEqualTo("cloud-1");
         }
         finally {
             PageHelper.clearPage();

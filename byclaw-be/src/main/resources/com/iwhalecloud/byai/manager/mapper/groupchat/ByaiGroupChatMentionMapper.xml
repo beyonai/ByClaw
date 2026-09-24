@@ -10,6 +10,7 @@
         <result column="user_role" property="role" />
         <result column="latest_message_id" property="latestMessageId" />
         <result column="latest_message_content" property="latestMessageContent" />
+        <result column="latest_message_related_resources" property="latestMessageRelatedResources" />
         <result column="latest_message_recalled_at" property="latestMessageRecalledAt" />
         <result column="latest_message_recalled_by" property="latestMessageRecalledBy" />
         <result column="latest_message_metadata" property="latestMessageMetadata" />
@@ -85,6 +86,7 @@
                member.last_read_message_id,
                latest.message_id AS latest_message_id,
                latest.message_content AS latest_message_content,
+               latest.related_resources AS latest_message_related_resources,
                latest.metadata AS latest_message_metadata,
                latest.recalled_at AS latest_message_recalled_at,
                latest.recalled_by AS latest_message_recalled_by,
@@ -114,6 +116,7 @@
             SELECT message.session_id,
                    message.message_id,
                    message.message_content,
+                   message.related_resources,
                    message.metadata,
                    message.recalled_at,
                    message.recalled_by,

@@ -520,6 +520,17 @@ public class GroupChatContextService {
         }
     }
 
+    /** 批量复用时间线附件投影，避免列表为每条消息重复查询历史云盘信息。 */
+    public Map<Long, List<GroupChatContextResponse.Attachment>> attachmentsForMessages(List<ByaiMessage> messages) {
+        Map<Long, List<GroupChatContextResponse.Attachment>> result = new HashMap<>();
+        Map<Long, String> cloudResources = new HashMap<>();
+        for (ByaiMessage message : messages) {
+            result.put(message.getMessageId(), message.isRecalled() ? List.of()
+                : Objects.requireNonNullElseGet(toAttachments(message, cloudResources), List::of));
+        }
+        return result;
+    }
+
     private List<GroupChatContextResponse.Attachment> toAttachments(ByaiMessage source,
         Map<Long, String> cloudResources) {
         List<GroupChatContextResponse.Attachment> legacy = toAttachments(source.getRelatedResources());

@@ -46,6 +46,8 @@ class ByaiGroupChatMentionMapperPaginationTest {
             assertThat(groups.get(0).getLatestMessageId()).isEqualTo(99L);
             assertThat(groups.get(0).getLatestMessageContent()).isEqualTo("later timestamp but lower id");
             assertThat(groups.get(0).getLatestMessageMetadata()).isEqualTo("{\"resourceList\":[]}");
+            assertThat(groups.get(0).getLatestMessageRelatedResources())
+                .isEqualTo("{\"files\":[{\"fileId\":\"123\",\"fileName\":\"report.pdf\"}]}");
             assertThat(groups.get(0).getUnreadCount()).isEqualTo(1L);
             assertThat(groups.get(0).getUnreadMentionCount()).isEqualTo(1L);
             assertThat(groups.get(0).getLatestMentionMessageId()).isEqualTo(100L);
@@ -142,6 +144,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
                     message_id INTEGER,
                     session_id INTEGER,
                     message_content TEXT,
+                    related_resources TEXT,
                     metadata TEXT,
                     create_time TEXT,
                     creator_id INTEGER,
@@ -184,6 +187,8 @@ class ByaiGroupChatMentionMapperPaginationTest {
                        (200, 20, 'second group message', '2026-09-11 11:00:00', 31, 'user 31', NULL)
                 """);
             statement.execute("UPDATE byai_message SET metadata = '{\"resourceList\":[]}' WHERE message_id = 99");
+            statement.execute("UPDATE byai_message SET related_resources = "
+                + "'{\"files\":[{\"fileId\":\"123\",\"fileName\":\"report.pdf\"}]}' WHERE message_id = 99");
             statement.execute("UPDATE byai_message SET recalled_at = '2026-09-11 14:00:00' WHERE message_id = 100");
             statement.execute("""
                 INSERT INTO byai_group_chat_mention(message_id, group_session_id, mentioned_user_id)

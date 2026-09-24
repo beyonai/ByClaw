@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -30,6 +31,14 @@ public class GroupChatListItemResponse {
     private Long latestMessageId;
 
     private String latestMessageContent;
+
+    /** 最新消息的附件，结构与群消息时间线一致。 */
+    private List<GroupChatContextResponse.Attachment> latestMessageAttachments = List.of();
+
+    /** 仅供列表附件投影使用，不向客户端暴露原始关联资源。 */
+    @JsonIgnore
+    @JSONField(serialize = false)
+    private String latestMessageRelatedResources;
 
     @JsonIgnore
     @JSONField(serialize = false)
