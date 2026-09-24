@@ -51,12 +51,17 @@ public class WechatPhoneAuthenticationFilter extends AbstractAuthenticationProce
                 throw new BadCredentialsException("微信手机号授权请求无效");
             }
             JsonNode root = mapper.readTree(body);
-            if (root == null || !root.isObject() || root.size() != 1) {
+            // 公共请求层会附带 language；除此之外不接受客户端自报的身份字段。
+            if (root == null || !root.isObject() || root.size() > 2
+                || (root.size() == 2 && !root.has("language"))) {
                 throw new BadCredentialsException("微信手机号授权请求无效");
             }
             JsonNode code = root.get("phoneCode");
+            JsonNode language = root.get("language");
             if (code == null || !code.isTextual() || code.textValue().isBlank()
-                || code.textValue().length() > 512) {
+                || code.textValue().length() > 512
+                || (language != null && (!language.isTextual() || language.textValue().isBlank()
+                    || language.textValue().length() > 32))) {
                 throw new BadCredentialsException("微信手机号授权请求无效");
             }
             // 只使用连接地址，避免未经网关净化的转发头绕过匿名入口限流。

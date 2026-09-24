@@ -434,6 +434,8 @@ BE 的 `config/application.properties`（部署时为 `deploy/config/application
 
 本地运行时将变量放在项目根目录 `.env`；Standalone Docker Compose 通过 `env_file` 读取该文件。K3s 部署需从 Secret 等服务端密钥来源注入这两个环境变量。未配置时 BE 可以启动，但 `POST /system/session/loginByWechatPhone` 会返回受控登录失败，不会尝试兑换手机号。
 
+该接口接受 JSON `{"phoneCode":"..."}`，兼容公共请求客户端附带的可选 `language` 字符串（例如 `zh-CN`）。手机号只能由服务端向微信兑换获得，请求体中的 `phone`、`verifyCode` 等其他身份字段仍会被拒绝。
+
 ## 技术栈
 
 - **框架**: Spring Boot 3.x, Spring Cloud, MyBatis-Plus

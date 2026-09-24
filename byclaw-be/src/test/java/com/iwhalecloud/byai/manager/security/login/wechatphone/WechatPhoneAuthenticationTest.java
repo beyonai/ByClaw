@@ -70,7 +70,31 @@ class WechatPhoneAuthenticationTest {
     }
 
     @Test
-    void filterAcceptsOnlyJsonCodeAndRejectsDuplicateOrOversizedFields() throws Exception {
+    void filterAcceptsSharedClientLanguageButRejectsOtherFields() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<Authentication> captured = new java.util.concurrent.atomic.AtomicReference<>();
+        WechatPhoneAuthenticationFilter filter = new WechatPhoneAuthenticationFilter(request -> true,
+            authentication -> {
+                captured.set(authentication);
+                return authentication;
+            }, (request, response, auth) -> { }, (request, response, error) -> { }, limiter);
+
+        MockHttpServletRequest valid = request("POST", "application/json",
+            "{\"phoneCode\":\"one-time-code\",\"language\":\"zh-CN\"}");
+        filter.attemptAuthentication(valid, new MockHttpServletResponse());
+        assertThat(captured.get().getCredentials()).isEqualTo("one-time-code");
+
+        for (MockHttpServletRequest invalid : java.util.List.of(
+            request("POST", "application/json",
+                "{\"phoneCode\":\"one-time-code\",\"language\":123}"),
+            request("POST", "application/json",
+                "{\"phoneCode\":\"one-time-code\",\"language\":\"zh-CN\",\"phone\":\"13800138000\"}"))) {
+            assertThatThrownBy(() -> filter.attemptAuthentication(invalid, new MockHttpServletResponse()))
+                .isInstanceOf(BadCredentialsException.class);
+        }
+    }
+
+    @Test
+    void filterAcceptsJsonCodeAndRejectsDuplicateOrOversizedFields() throws Exception {
         java.util.concurrent.atomic.AtomicReference<Authentication> captured = new java.util.concurrent.atomic.AtomicReference<>();
         WechatPhoneAuthenticationFilter filter = new WechatPhoneAuthenticationFilter(request -> true,
             authentication -> {
