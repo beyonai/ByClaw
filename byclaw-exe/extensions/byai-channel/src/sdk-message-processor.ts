@@ -430,7 +430,7 @@ export async function deliverReplyToAgentViaSdk(
 
   const { result, meta, release } = await runSessionDispatchExclusiveLeased(sessionKey, async () => {
     assertContextRecoveryIdle(sessionKey, message.language);
-    // Provider registration can replace the runtime config. Complete it before
+    // Session-model readiness may refresh the runtime config. Complete it before
     // taking the snapshot that OpenClaw retains throughout this dispatch.
     await awaitWithAbort(
       prepareSessionModelForDispatch(message.sessionId),
