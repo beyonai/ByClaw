@@ -27,12 +27,14 @@ import com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicat
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
 import com.iwhalecloud.byai.state.domain.callback.dto.CallbackRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
+import com.iwhalecloud.byai.state.domain.chat.dto.SessionModelConfirmDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatStatusRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionModelSelectionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.commons.lang3.StringUtils;
@@ -111,6 +113,23 @@ public class AssistantChatController {
 
     @Autowired
     private SessionService sessionService;
+
+    @Autowired
+    private SessionModelSelectionService sessionModelSelectionService;
+
+    /** 在用户确认选择时立即保存会话模型状态并通知对应运行时预热。 */
+    @PostMapping("/sessionModel")
+    public ResponseUtil confirmSessionModel(@RequestBody SessionModelConfirmDto request) {
+        if (request == null || request.getSessionId() == null) {
+            throw new BdpRuntimeException(I18nUtil.get("assistant.chat.session.id.not.empty"));
+        }
+        ByaiSession session = sessionService.findById(request.getSessionId());
+        if (session == null || !Objects.equals(session.getCreatorId(), CurrentUserHolder.getCurrentUserId())) {
+            throw new BdpRuntimeException("无权修改该会话的模型配置");
+        }
+        return ResponseUtil.successResponse(sessionModelSelectionService.confirmSessionOverride(
+            request.getSessionId(), session.getObjectId(), request.getModelId(), request.getThinkingLevel()));
+    }
 
     @Operation(summary = "获取消息详情(提供给问数，慧笔，鲸灵)", description = "根据消息ID获取消息详情，副驾调用主驾", responses = {
         @ApiResponse(responseCode = "0", description = "获取成功",
