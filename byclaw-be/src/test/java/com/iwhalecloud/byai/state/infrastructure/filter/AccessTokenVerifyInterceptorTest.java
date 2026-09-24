@@ -48,10 +48,11 @@ class AccessTokenVerifyInterceptorTest {
         for (String context : List.of("", "/byaiService")) {
             assertTrue(interceptor.preHandle(request("GET", context + "/system/session/captcha", context),
                 new MockHttpServletResponse(), new Object()));
+            assertTrue(interceptor.preHandle(request("POST", context + "/system/session/captcha", context),
+                new MockHttpServletResponse(), new Object()));
             assertTrue(interceptor.preHandle(request("POST", context + "/system/session/sms/send", context),
                 new MockHttpServletResponse(), new Object()));
             for (String[] route : List.of(
-                    new String[]{"POST", "/system/session/captcha"},
                     new String[]{"GET", "/system/session/sms/send"},
                     new String[]{"GET", "/system/session/captcha/"},
                     new String[]{"GET", "/system/session/captcha/extra"},
