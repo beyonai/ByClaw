@@ -1,4 +1,5 @@
-import { sessionKey, tokenKey } from '@/utils/auth';
+import { sessionKey, tokenKey, portalSessionKey } from '@/utils/auth';
+import cookie from '@/utils/cookie';
 import { useDispatch, useLocation, useSearchParams, useSelector, useNavigate } from '@umijs/max';
 import { useCallback, useEffect } from 'react';
 
@@ -71,7 +72,11 @@ const Auth = ({ children }: { children: JSX.Element }) => {
       return;
     }
 
-    const haslogin = window.localStorage.getItem(sessionKey) || window.localStorage.getItem(tokenKey);
+    const haslogin =
+      window.localStorage.getItem(sessionKey) ||
+      window.localStorage.getItem(tokenKey) ||
+      cookie.get(sessionKey) ||
+      cookie.get(portalSessionKey);
     if (haslogin) {
       initUserInfo();
       return;
