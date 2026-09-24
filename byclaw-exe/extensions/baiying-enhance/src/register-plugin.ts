@@ -312,6 +312,9 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
   let digEmployeeChangeSubscriber:
     | ReturnType<typeof import("./dig-employee-change-subscriber.js").createDigEmployeeChangeSubscriber>
     | undefined;
+  let sessionModelChangeSubscriber:
+    | ReturnType<typeof import("./session-model-change-subscriber.js").createSessionModelChangeSubscriber>
+    | undefined;
   let mainContextTemplateWatch:
     | ReturnType<typeof import("./main-context-template-watch.js").createMainContextTemplateWatch>
     | undefined;
@@ -328,12 +331,16 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         { createAgentWatchdog },
         { createDigEmployeeAuthWatch },
         { createDigEmployeeChangeSubscriber },
+        { createSessionModelChangeSubscriber },
+        { resolveSessionModelOverride, setSessionModelEnsurer },
         { createMainContextTemplateWatch },
         { resolveEffectiveMainAgentsMdMode, loadMainAgentsTemplate, seedMainAgentAgentsMd },
       ] = await Promise.all([
         import("./agent-watchdog.js"),
         import("./dig-employee-auth-watch.js"),
         import("./dig-employee-change-subscriber.js"),
+        import("./session-model-change-subscriber.js"),
+        import("./session-model-override.js"),
         import("./main-context-template-watch.js"),
         import("./main-workspace-seed.js"),
       ]);
@@ -371,6 +378,21 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
           `baiying-enhance: dig-employee Redis Pub/Sub enabled channel=${pub.channel}`,
         );
       }
+      sessionModelChangeSubscriber = createSessionModelChangeSubscriber({
+        logger: { info: (message) => api.logger.info(message), warn: (message) => api.logger.warn(message) },
+        debounceMs: Math.min(debounceMs, 100),
+        prepareSessionModel: async (sessionId) => {
+          if (serviceStopped) return;
+          await resolveSessionModelOverride({
+            api,
+            pluginConfig: pluginCfg,
+            sessionId,
+            refreshModelConfig: true,
+            aimodelSecretResolverScriptPath: path.join(pluginRuntimeDir, "aimodel-secret-resolver-cli.js"),
+            log: api.logger,
+          });
+        },
+      });
       const workspaceArchiveApi =
         pluginCfg.workspaceArchiveBackend === "local"
           ? undefined
@@ -450,6 +472,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
           getAuthorizedSourceKeys: () => digEmployeeAuthWatch?.getAuthorizedIds(),
         },
       });
+      setSessionModelEnsurer(agentWatch.ensureSessionModel);
       if (pub.subscribe) {
         digEmployeeChangeSubscriber = createDigEmployeeChangeSubscriber({
           logger: {
@@ -509,6 +532,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
           );
         }
         await digEmployeeChangeSubscriber?.start();
+        await sessionModelChangeSubscriber?.start();
       })().catch((err) => {
         markBaiyingEnhanceColdStartUnavailable("background_startup_sync_failed");
         api.logger.warn(
@@ -525,12 +549,16 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       serviceStopped = true;
       await digEmployeeChangeSubscriber?.stop();
       digEmployeeChangeSubscriber = undefined;
+      await sessionModelChangeSubscriber?.stop();
+      sessionModelChangeSubscriber = undefined;
       await mainContextTemplateWatch?.stop();
       mainContextTemplateWatch = undefined;
       await digEmployeeAuthWatch?.stop();
       digEmployeeAuthWatch = undefined;
       await agentWatch?.stop();
       agentWatch = undefined;
+      const { setSessionModelEnsurer } = await import("./session-model-override.js");
+      setSessionModelEnsurer(undefined);
       await redisJsonStore.close();
       setSharedRedisJsonStore(null);
       await managePermissionStore.close();

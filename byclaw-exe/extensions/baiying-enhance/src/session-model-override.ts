@@ -1,11 +1,9 @@
 import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
-import { hasManagedProviderConfigDrift, mergeAimodelProviderIntoConfig } from "./agent-registry.js";
 import {
     resolveAimodelConfigRedisKey,
     resolveAimodelSecretProviderName,
     resolveBaiyingAimodelProviderBundle,
 } from "./aimodel-config.js";
-import { mutateOpenClawConfigFile } from "./config-writer.js";
 import { getSharedRedisJsonStore, type RedisJsonPayload } from "./redis-json-store.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 
@@ -35,12 +33,44 @@ function currentRuntimeConfig(api: OpenClawPluginApi): OpenClawConfig {
     return api.runtime.config.current?.() ?? api.runtime.config.loadConfig();
 }
 
+type SessionModelEnsurer = (modelId: string, options?: { forceRefresh?: boolean; refreshDesired?: boolean }) => Promise<void>;
+let sessionModelEnsurer: SessionModelEnsurer | undefined;
+const preparedModelIds = new Set<string>();
+
+function providerHasModel(cfg: OpenClawConfig, providerKey: string, modelId: string): boolean {
+    return Boolean(cfg.models?.providers?.[providerKey]?.models?.some((model) => model.id === modelId));
+}
+
+export function resetSessionModelSyncStateForTests(): void {
+    sessionModelEnsurer = undefined;
+    preparedModelIds.clear();
+}
+
+export function setSessionModelEnsurer(ensurer: SessionModelEnsurer | undefined): void {
+    sessionModelEnsurer = ensurer;
+}
+
 function readString(raw: unknown, key: string): string {
     if (!raw || typeof raw !== "object") {
         return "";
     }
     const value = (raw as Record<string, unknown>)[key];
     return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+}
+
+function sessionSelectionChanged(before: RedisJsonPayload | null, after: RedisJsonPayload | null): boolean {
+    return readString(before?.raw, "revision") !== readString(after?.raw, "revision")
+        || readString(before?.raw, "modelId") !== readString(after?.raw, "modelId");
+}
+
+async function resolveLatestAfterEnsure(
+    params: Parameters<typeof resolveSessionModelOverride>[0],
+    before: RedisJsonPayload | null,
+    resolved: SessionModelOverrideRef,
+): Promise<SessionModelOverrideRef | undefined> {
+    const after = await readOverridePayload({ sessionId: params.sessionId!.trim(), log: params.log });
+    if (!sessionSelectionChanged(before, after)) return resolved;
+    return resolveSessionModelOverride(params);
 }
 
 async function readOverridePayload(params: {
@@ -71,6 +101,12 @@ export async function resolveSessionModelOverride(params: {
     sessionId?: string;
     aimodelSecretResolverScriptPath?: string;
     log: LoggerLike;
+    /** Pub/Sub model-change events set this so same-ID Redis parameter edits use the canonical reload path. */
+    forceModelSync?: boolean;
+    /** Re-read the authoritative Redis model bundle, but write only when hash/fingerprint changed. */
+    refreshModelConfig?: boolean;
+    /** Hook fast path: resolve an already prepared provider without reading the model-config hash. */
+    prepareModelConfig?: boolean;
 }): Promise<SessionModelOverrideRef | undefined> {
     const sessionId = params.sessionId?.trim();
     if (!sessionId) {
@@ -80,6 +116,22 @@ export async function resolveSessionModelOverride(params: {
     const modelId = readString(payload?.raw, "modelId");
     if (!modelId) {
         return undefined;
+    }
+
+    if (params.prepareModelConfig === false) {
+        const modelCode = readString(payload?.raw, "modelCode");
+        const providerKey = `baiying-m-${modelId}`;
+        if (!modelCode || !providerHasModel(currentRuntimeConfig(params.api), providerKey, modelCode)) {
+            return undefined;
+        }
+        return { providerKey, modelRef: `${providerKey}/${modelCode}`, model: modelCode };
+    }
+
+    const selectedModelCode = readString(payload?.raw, "modelCode");
+    const selectedProviderKey = `baiying-m-${modelId}`;
+    if (!params.forceModelSync && !params.refreshModelConfig && preparedModelIds.has(modelId) && selectedModelCode
+        && providerHasModel(currentRuntimeConfig(params.api), selectedProviderKey, selectedModelCode)) {
+        return { providerKey: selectedProviderKey, modelRef: `${selectedProviderKey}/${selectedModelCode}`, model: selectedModelCode };
     }
 
     const redisJsonStore = getSharedRedisJsonStore({ logger: params.log });
@@ -97,34 +149,34 @@ export async function resolveSessionModelOverride(params: {
         return undefined;
     }
     const cfg = currentRuntimeConfig(params.api);
-    if (!hasManagedProviderConfigDrift(cfg, bundle.providerKey, bundle.provider)) {
-        return { providerKey: bundle.providerKey, modelRef: bundle.modelRef, model: bundle.provider.modelId };
+    if (!params.forceModelSync && !params.refreshModelConfig
+        && providerHasModel(cfg, bundle.providerKey, bundle.provider.modelId)) {
+        // Register the dependency with the canonical watchdog even when no reload is needed;
+        // otherwise a later managed-agent merge could prune this session-only provider.
+        await sessionModelEnsurer?.(modelId);
+        preparedModelIds.add(modelId);
+        return resolveLatestAfterEnsure(params, payload, {
+            providerKey: bundle.providerKey, modelRef: bundle.modelRef, model: bundle.provider.modelId,
+        });
     }
-    await mutateOpenClawConfigFile(params.api, (base) =>
-        mergeAimodelProviderIntoConfig({
-            base,
-            providerKey: bundle.providerKey,
-            provider: bundle.provider,
-            aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
-            aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
-            aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
-            aimodelSecretResolverCommand: process.execPath,
-            aimodelSecretResolverArgs: [
-                params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
-            ],
-        }),
-    );
-    // `mutateConfigFile` performs the native in-process reload. The config
-    // object captured by this plugin instance can remain stale while that
-    // reload replaces plugin instances, so polling `current()` here can turn
-    // a successful hot switch into a false timeout. Dispatch resolves the
-    // model from the refreshed runtime after this preparer completes.
+    if (!sessionModelEnsurer) {
+        params.log.warn?.(`baiying-enhance: session model sync coordinator unavailable, modelId=${modelId}`);
+        return undefined;
+    }
+    await sessionModelEnsurer(modelId, {
+        forceRefresh: params.forceModelSync === true,
+        refreshDesired: params.refreshModelConfig === true,
+    });
+    preparedModelIds.add(modelId);
+    // The watchdog owns the native config mutation and its afterWrite reload policy.
+    // Its ensure promise drains the exact queued flush that covers this dependency;
+    // no hook polls a plugin instance that may be replaced by hot reload.
     params.log.info?.(
         `baiying-enhance: registered session model override provider ${bundle.modelRef} for sessionId=${sessionId}`,
     );
-    return {
+    return resolveLatestAfterEnsure(params, payload, {
         providerKey: bundle.providerKey,
         modelRef: bundle.modelRef,
         model: bundle.provider.modelId,
-    };
+    });
 }
