@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.time.Duration;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -11,6 +12,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
@@ -41,6 +43,8 @@ public class SessionModelSelectionService {
 
     /** 会话级模型覆盖键前缀，完整键为前缀 + sessionId。 */
     public static final String SESSION_MODEL_KEY_PREFIX = "byai:chat:session_model:";
+
+    static final String SESSION_MODEL_REVISION_KEY_PREFIX = "byai:chat:session_model_revision:";
 
     /** 覆盖键存活时间；会话长期不用后自动失效，避免 Redis 无限增长。 */
     static final Duration SESSION_MODEL_TTL = Duration.ofDays(7);
@@ -77,6 +81,45 @@ public class SessionModelSelectionService {
 
     private static final String CAPABILITY_ADAPTIVE = "adaptive";
 
+    private static final DefaultRedisScript<List> SAVE_OVERRIDE_SCRIPT = new DefaultRedisScript<>("""
+        local oldRaw = redis.call('GET', KEYS[1])
+        local old = {}
+        if oldRaw then old = cjson.decode(oldRaw) end
+        local next = cjson.decode(ARGV[1])
+        local function norm(value)
+          if value == nil or value == cjson.null then return '' end
+          return tostring(value)
+        end
+        local modelChanged = norm(old.modelId) ~= norm(next.modelId)
+          or norm(old.modelCode) ~= norm(next.modelCode)
+          or norm(old.modelName) ~= norm(next.modelName)
+          or norm(old.providerName) ~= norm(next.providerName)
+        -- 来源决定后续是否继承模型默认档位，即使当前档位相同也必须保存。
+        local thinkingChanged = norm(old.thinkingLevel) ~= norm(next.thinkingLevel)
+          or norm(old.thinkingSource) ~= norm(next.thinkingSource)
+        local currentRevision = tonumber(redis.call('GET', KEYS[2]) or old.revision or '0')
+        if not modelChanged and not thinkingChanged then
+          if oldRaw then redis.call('EXPIRE', KEYS[1], ARGV[2]) end
+          if currentRevision > 0 then redis.call('EXPIRE', KEYS[2], ARGV[2]) end
+          return {0, currentRevision, ''}
+        end
+        local revision = redis.call('INCR', KEYS[2])
+        redis.call('EXPIRE', KEYS[2], ARGV[2])
+        next.revision = revision
+        if norm(next.modelId) == '' and norm(next.thinkingLevel) == '' then
+          redis.call('DEL', KEYS[1])
+        else
+          redis.call('SET', KEYS[1], cjson.encode(next), 'EX', ARGV[2])
+        end
+        local mask = ''
+        if modelChanged then mask = 'model' end
+        if thinkingChanged then
+          if mask ~= '' then mask = mask .. ',' end
+          mask = mask .. 'thinking'
+        end
+        return {1, revision, mask}
+        """, List.class);
+
     private final ByaiAimodelMapper byaiAimodelMapper;
 
     private final AiModelService aiModelService;
@@ -85,12 +128,16 @@ public class SessionModelSelectionService {
 
     private final StringRedisTemplate stringRedisTemplate;
 
+    private final SessionModelChangePublisher sessionModelChangePublisher;
+
     public SessionModelSelectionService(ByaiAimodelMapper byaiAimodelMapper, AiModelService aiModelService,
-        SsResExtDigEmployeeService ssResExtDigEmployeeService, StringRedisTemplate stringRedisTemplate) {
+        SsResExtDigEmployeeService ssResExtDigEmployeeService, StringRedisTemplate stringRedisTemplate,
+        SessionModelChangePublisher sessionModelChangePublisher) {
         this.byaiAimodelMapper = byaiAimodelMapper;
         this.aiModelService = aiModelService;
         this.ssResExtDigEmployeeService = ssResExtDigEmployeeService;
         this.stringRedisTemplate = stringRedisTemplate;
+        this.sessionModelChangePublisher = sessionModelChangePublisher;
     }
 
     /**
@@ -320,9 +367,9 @@ public class SessionModelSelectionService {
      *
      * @param dto 会话入参（需已确定 sessionId，且已完成 resolveSelection）
      */
-    public void applySessionOverride(AssistantChatDto dto) {
+    public SessionModelSaveResult applySessionOverride(AssistantChatDto dto) {
         if (dto == null || dto.getSessionId() == null) {
-            return;
+            return SessionModelSaveResult.unchanged(0L);
         }
         SessionModelSelection record = readSessionOverrideRecord(dto.getSessionId()).orElse(null);
         SessionModelSelection modelAxis = resolveModelAxis(dto, record);
@@ -335,13 +382,24 @@ public class SessionModelSelectionService {
             source = record.getThinkingSource();
         }
         if (modelAxis == null && StringUtils.isBlank(level)) {
-            deleteSessionOverride(dto.getSessionId());
-            return;
+            return saveSessionOverride(dto.getSessionId(), new SessionModelSelection());
         }
         SessionModelSelection next = modelAxis != null ? modelAxis : new SessionModelSelection();
         next.setThinkingLevel(level);
         next.setThinkingSource(source);
-        saveSessionOverride(dto.getSessionId(), next);
+        return saveSessionOverride(dto.getSessionId(), next);
+    }
+
+    /** 保存用户在发送消息之前确认的会话运行状态。 */
+    public SessionModelSaveResult confirmSessionOverride(Long sessionId, Long agentId, String modelId,
+        String thinkingLevel) {
+        AssistantChatDto dto = new AssistantChatDto();
+        dto.setSessionId(sessionId);
+        dto.setAgentId(agentId);
+        dto.setRelModelId(modelId);
+        dto.setRelThinkingLevel(thinkingLevel);
+        resolveSelection(dto);
+        return applySessionOverride(dto);
     }
 
     /**
@@ -377,18 +435,30 @@ public class SessionModelSelectionService {
      * @param sessionId 会话标识
      * @param selection 已校验的模型轴或档位轴（至少一轴非空）
      */
-    public void saveSessionOverride(Long sessionId, SessionModelSelection selection) {
+    public SessionModelSaveResult saveSessionOverride(Long sessionId, SessionModelSelection selection) {
         if (sessionId == null || selection == null
             || (StringUtils.isBlank(selection.getModelId()) && StringUtils.isBlank(selection.getThinkingLevel()))) {
-            return;
+            if (sessionId == null || selection == null) {
+                return SessionModelSaveResult.unchanged(0L);
+            }
         }
         try {
-            stringRedisTemplate.opsForValue().set(sessionModelKey(sessionId), JSON.toJSONString(selection),
-                SESSION_MODEL_TTL);
+            List<?> result = stringRedisTemplate.execute(SAVE_OVERRIDE_SCRIPT,
+                List.of(sessionModelKey(sessionId), sessionModelRevisionKey(sessionId)),
+                JSON.toJSONString(selection), String.valueOf(SESSION_MODEL_TTL.toSeconds()));
+            boolean changed = result != null && !result.isEmpty() && numberValue(result.get(0)) == 1L;
+            long revision = result != null && result.size() > 1 ? numberValue(result.get(1)) : 0L;
+            List<String> changeMask = result != null && result.size() > 2
+                ? parseChangeMask(String.valueOf(result.get(2))) : List.of();
+            if (changed) {
+                sessionModelChangePublisher.publishQuietly(sessionId, revision, changeMask);
+            }
+            return new SessionModelSaveResult(changed, revision, changeMask);
         }
         catch (RuntimeException e) {
             LOGGER.warn("写入会话模型覆盖失败, sessionId={}, modelId={}: {}", sessionId, selection.getModelId(),
                 e.getMessage());
+            return SessionModelSaveResult.unchanged(0L);
         }
     }
 
@@ -401,12 +471,7 @@ public class SessionModelSelectionService {
         if (sessionId == null) {
             return;
         }
-        try {
-            stringRedisTemplate.delete(sessionModelKey(sessionId));
-        }
-        catch (RuntimeException e) {
-            LOGGER.warn("删除会话模型覆盖失败, sessionId={}: {}", sessionId, e.getMessage());
-        }
+        saveSessionOverride(sessionId, new SessionModelSelection());
     }
 
     /**
@@ -531,5 +596,26 @@ public class SessionModelSelectionService {
 
     private String sessionModelKey(Long sessionId) {
         return SESSION_MODEL_KEY_PREFIX + sessionId;
+    }
+
+    private String sessionModelRevisionKey(Long sessionId) {
+        return SESSION_MODEL_REVISION_KEY_PREFIX + sessionId;
+    }
+
+    private long numberValue(Object value) {
+        return value instanceof Number ? ((Number) value).longValue() : Long.parseLong(String.valueOf(value));
+    }
+
+    private List<String> parseChangeMask(String value) {
+        if (StringUtils.isBlank(value)) {
+            return List.of();
+        }
+        return List.of(value.split(","));
+    }
+
+    public record SessionModelSaveResult(boolean changed, long revision, List<String> changeMask) {
+        static SessionModelSaveResult unchanged(long revision) {
+            return new SessionModelSaveResult(false, revision, Collections.emptyList());
+        }
     }
 }

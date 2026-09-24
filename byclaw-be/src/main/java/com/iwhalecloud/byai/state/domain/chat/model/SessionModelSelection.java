@@ -38,6 +38,9 @@ public class SessionModelSelection {
     /** 档位来源：session=用户显式选择（可作为下一轮覆盖候选），model_default=模型配置默认，off=关闭。 */
     private String thinkingSource;
 
+    /** Redis 中会话运行状态的单调版本，仅在有效确认发生变化时递增。 */
+    private Long revision;
+
     public SessionModelSelection() {
     }
 
