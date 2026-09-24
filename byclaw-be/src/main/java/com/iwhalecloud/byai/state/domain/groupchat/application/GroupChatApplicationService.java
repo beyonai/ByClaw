@@ -140,7 +140,7 @@ public class GroupChatApplicationService {
         ProjectDTO projectRequest = new ProjectDTO();
         projectRequest.setProjectName(request.getName());
         projectRequest.setDescription(request.getGoal());
-        Project project = projectApplicationService.createProject(projectRequest);
+        Project project = projectApplicationService.createGroupChatProject(projectRequest);
         Set<Long> userIds = new LinkedHashSet<>();
         if (request.getUserIds() != null) {
             userIds.addAll(request.getUserIds());

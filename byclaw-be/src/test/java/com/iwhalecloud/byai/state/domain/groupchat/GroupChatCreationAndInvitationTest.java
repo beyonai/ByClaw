@@ -102,7 +102,7 @@ class GroupChatCreationAndInvitationTest {
                 return resource;
             }).toList();
         });
-        when(projects.createProject(any())).thenAnswer(invocation -> {
+        when(projects.createGroupChatProject(any())).thenAnswer(invocation -> {
             ProjectDTO request = invocation.getArgument(0);
             Project project = new Project();
             project.setProjectId(100L);
@@ -145,7 +145,7 @@ class GroupChatCreationAndInvitationTest {
         verify(members).batchSave(result.getMembers());
         assertDefaultMemberPermissions(result.getSession().getSessionId());
         ArgumentCaptor<ProjectDTO> projectRequest = ArgumentCaptor.forClass(ProjectDTO.class);
-        verify(projects).createProject(projectRequest.capture());
+        verify(projects).createGroupChatProject(projectRequest.capture());
         assertThat(projectRequest.getValue().getProjectName()).isEqualTo(request.getName());
         assertThat(projectRequest.getValue().getDescription()).isEqualTo(request.getGoal());
         // 初始成员属于建群状态，不进入成员变更时间线。
@@ -331,7 +331,7 @@ class GroupChatCreationAndInvitationTest {
         request.setAgentIds(List.of(40L, 41L));
         assertThatThrownBy(() -> service.create(request))
             .isInstanceOf(com.iwhalecloud.byai.common.exception.BaseException.class);
-        verify(projects, never()).createProject(any());
+        verify(projects, never()).createGroupChatProject(any());
         verify(members, never()).batchSave(any());
     }
 
@@ -423,7 +423,7 @@ class GroupChatCreationAndInvitationTest {
 
     @Test
     void projectFailureDoesNotWriteGroup() {
-        doThrow(new IllegalArgumentException("duplicate project name")).when(projects).createProject(any());
+        doThrow(new IllegalArgumentException("duplicate project name")).when(projects).createGroupChatProject(any());
         assertThatThrownBy(() -> service.create(request())).hasMessage("duplicate project name");
         verifyNoInteractions(projectMembers, sessions, members);
     }
@@ -505,7 +505,7 @@ class GroupChatCreationAndInvitationTest {
             project.setProjectId(100L);
             project.setProjectName("协作群");
             return project;
-        }).when(projects).createProject(any());
+        }).when(projects).createGroupChatProject(any());
         doThrow(new IllegalStateException("group members failed")).when(members).batchSave(anyList());
         assertThatThrownBy(() -> service.create(request())).hasMessage("group members failed");
         verify(connection).rollback();

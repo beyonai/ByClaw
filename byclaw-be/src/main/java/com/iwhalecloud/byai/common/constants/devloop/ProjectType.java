@@ -16,4 +16,7 @@ public final class ProjectType {
      */
     public static final String OPERATION = "operation";
 
+    /** 群聊自动创建的项目。 */
+    public static final String HACU = "hacu";
+
 }
