@@ -1,11 +1,16 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 
 import { Office } from './Office';
 
 const mockPreview = jest.fn();
 const mockDestroy = jest.fn();
-const mockInit = jest.fn(() => ({ preview: mockPreview, destroy: mockDestroy }));
+const mockInit = jest.fn();
+const mockPrepare = jest.fn();
+
+jest.mock('./preparePptxPreview', () => ({
+  preparePptxPreview: (source: ArrayBuffer) => mockPrepare(source),
+}));
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({
@@ -43,6 +48,8 @@ describe('Office PPTX preview', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockInit.mockReturnValue({ preview: mockPreview, destroy: mockDestroy, slideCount: 2 });
+    mockPrepare.mockImplementation(async (source: ArrayBuffer) => source);
     mockPreview.mockResolvedValue(undefined);
   });
 
@@ -58,5 +65,53 @@ describe('Office PPTX preview', () => {
       });
       expect(mockPreview).toHaveBeenCalledWith(source);
     });
+  });
+
+  it('renders the prepared PPTX copy without changing the source buffer', async () => {
+    const source = new ArrayBuffer(16);
+    const prepared = new ArrayBuffer(24);
+    mockPrepare.mockResolvedValue(prepared);
+
+    render(<Office data={source} type="pptx" />);
+
+    await waitFor(() => expect(mockPreview).toHaveBeenCalledWith(prepared));
+    expect(mockPrepare).toHaveBeenCalledWith(source);
+    expect(source.byteLength).toBe(16);
+  });
+
+  it('shows the translated error when the library silently returns zero slides', async () => {
+    const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockInit.mockReturnValue({ preview: mockPreview, destroy: mockDestroy, slideCount: 0 });
+    try {
+      render(<Office data={new ArrayBuffer(16)} type="pptx" />);
+      expect(await screen.findByText('fileBrowser.preview.failed')).toBeInTheDocument();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it('does not initialize a viewer when PPTX preparation fails', async () => {
+    const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockPrepare.mockRejectedValue(new Error('Missing referenced PPTX slide master'));
+    try {
+      render(<Office data={new ArrayBuffer(16)} type="pptx" />);
+      expect(await screen.findByText('fileBrowser.preview.failed')).toBeInTheDocument();
+      expect(mockInit).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it.each(['pdf', 'docx', 'xlsx'] as const)('keeps %s on its existing viewer without PPTX preparation', (type) => {
+    const component = { pdf: 'Pdf', docx: 'Docx', xlsx: 'Excel' }[type] as 'Pdf' | 'Docx' | 'Excel';
+    const viewer = jest.spyOn(Office, component).mockImplementation(() => <div>{type}</div>);
+    try {
+      render(<Office data={new ArrayBuffer(16)} type={type} />);
+      expect(screen.getByText(type)).toBeInTheDocument();
+      expect(mockPrepare).not.toHaveBeenCalled();
+      expect(mockInit).not.toHaveBeenCalled();
+    } finally {
+      viewer.mockRestore();
+    }
   });
 });

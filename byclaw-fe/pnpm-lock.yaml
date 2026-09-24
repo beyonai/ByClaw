@@ -115,6 +115,9 @@ importers:
       jsencrypt:
         specifier: 3.5.4
         version: 3.5.4
+      jszip:
+        specifier: 3.10.1
+        version: 3.10.1
       katex:
         specifier: 0.16.44
         version: 0.16.44

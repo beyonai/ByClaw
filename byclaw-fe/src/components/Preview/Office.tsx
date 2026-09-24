@@ -6,6 +6,7 @@ import type { JsPdfPreview } from '@js-preview/pdf';
 import type { JsDocxPreview } from '@js-preview/docx';
 import type { JsExcelPreview } from '@js-preview/excel';
 import ss from './Office.module.less';
+import { preparePptxPreview } from './preparePptxPreview';
 
 type PdfInit = (el: HTMLElement, opts?: any) => JsPdfPreview;
 type DocxInit = (el: HTMLElement, opts?: any) => JsDocxPreview;
@@ -13,6 +14,7 @@ type PptxInit = (el: HTMLElement, opts?: any) => any;
 type PptxPreviewer = {
   preview: (data: ArrayBuffer) => Promise<unknown>;
   destroy: () => void;
+  slideCount: number;
 };
 type ExcelPreviewer = JsExcelPreview & {
   renderExcel?: (data: ArrayBuffer) => Promise<any>;
@@ -427,14 +429,18 @@ function OfficePptx({ data, loading: spinning }: DocxProps) {
     setLoading(true);
     setPreviewFailed(false);
     root.replaceChildren();
-    loadLib
-      .then((pptxInit) => {
+    Promise.all([loadLib, preparePptxPreview(buffer)])
+      .then(async ([pptxInit, previewBuffer]) => {
         if (disposed) return undefined;
         previewer = pptxInit(root, {
           width: size[0],
           height: size[1],
         });
-        return previewer.preview(buffer);
+        await previewer.preview(previewBuffer);
+        // 渲染库会吞掉部分解析异常，零页结果需要明确报错，避免只留下黑色背景。
+        if (!disposed && previewer.slideCount === 0) {
+          throw new Error('PPTX preview contains no slides');
+        }
       })
       .catch((error) => {
         if (!disposed) {
