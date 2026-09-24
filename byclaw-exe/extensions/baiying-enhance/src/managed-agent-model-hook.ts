@@ -1,7 +1,5 @@
 import { setSessionModelPreparer } from "../../shared/src/session-model-runtime.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
-import { hasManagedProviderConfigDrift } from "./agent-registry.js";
-import type { ProviderBundle } from "./agent-adapter.js";
 import type { AimodelDefaultRunSyncDeps } from "./aimodel-default-run-sync.js";
 import {
     buildMainDefaultAimodelRuntimeSystemContext,
@@ -169,7 +167,7 @@ export function hasManagedModelConfigDrift(params: {
     agents?: { list?: Array<{ id?: string; model?: { primary?: string } }>; defaults?: { compaction?: { timeoutSeconds?: number } } };
     models?: { providers?: Record<string, { models?: Array<{ id?: string }> }> };
   };
-  managed: Array<{ agentId: string; modelRef?: string; providerKey?: string; provider?: ProviderBundle }>;
+  managed: Array<{ agentId: string; modelRef?: string }>;
 }): boolean {
   for (const agent of params.managed) {
     const expected = agent.modelRef?.trim();
@@ -181,10 +179,8 @@ export function hasManagedModelConfigDrift(params: {
     if (primary !== expected) {
       return true;
     }
-    if (agent.provider && agent.providerKey) {
-      if (hasManagedProviderConfigDrift(params.cfg, agent.providerKey, agent.provider)) return true;
-      if (params.cfg.agents?.defaults?.compaction?.timeoutSeconds === undefined) return true;
-    }
+    const parsed = parseModelPrimaryRef(expected);
+    if (!parsed || !isManagedModelRegisteredInConfig(params.cfg, parsed.provider, parsed.model)) return true;
   }
   return false;
 }
@@ -467,6 +463,10 @@ export function registerManagedAgentModelHooks(
         api,
         pluginConfig: aimodelRunSync.pluginConfig,
         sessionId,
+        // Pub/Sub is the low-latency trigger; this dispatch barrier is the
+        // event-loss fallback. Re-read Redis, but let the watchdog skip the
+        // config write when the applied hash/fingerprint is already current.
+        refreshModelConfig: true,
         aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
         log: api.logger,
       });
@@ -490,6 +490,7 @@ export function registerManagedAgentModelHooks(
           pluginConfig: aimodelRunSync.pluginConfig,
           sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
           aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
+          prepareModelConfig: false,
           log: api.logger,
         }).catch((error: unknown) => {
           api.logger.warn(
@@ -536,6 +537,7 @@ export function registerManagedAgentModelHooks(
         pluginConfig: aimodelRunSync.pluginConfig,
         sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
         aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
+        prepareModelConfig: false,
         log: api.logger,
       });
       if (sessionOverride) {
