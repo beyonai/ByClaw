@@ -362,7 +362,10 @@ describe('Resources enterprise skill mode', () => {
     (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: false });
     renderAt('?tab=personal');
 
-    expect(await screen.findByRole('button', { name: 'common.import' })).toBeEnabled();
+    const importButton = await screen.findByRole('button', { name: 'common.import' });
+    expect(importButton).toBeEnabled();
+    const exportToolbar = screen.getByTestId('skill-export-toolbar');
+    expect(importButton.compareDocumentPosition(exportToolbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it.each(['openSource', 'custom', '', undefined, null])(
@@ -377,6 +380,7 @@ describe('Resources enterprise skill mode', () => {
         await Promise.resolve();
       });
       expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
+      expect(screen.getByTestId('skill-export-toolbar')).toBeInTheDocument();
     }
   );
 

@@ -419,9 +419,20 @@ it('exports all filtered pages and workspace skills without changing the display
   (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
     data: [{ skillName: 'local', skillPath: '/workspace/skills/local' }],
   });
-  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false, searchValue: 'demo' });
+  const exportContainer = document.createElement('span');
+  document.body.appendChild(exportContainer);
+  renderList({
+    resourceType: 'SKILL',
+    activeTab: 'personal',
+    myResourcesOnly: false,
+    searchValue: 'demo',
+    exportContainer,
+  });
   await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(2));
-  fireEvent.click(screen.getByRole('button', { name: 'resource.skillExport.all' }));
+  const exportButton = screen.getByRole('button', { name: 'resource.skillExport.all' });
+  expect(exportContainer).toContainElement(exportButton);
+  expect(document.getElementById('SKILLListScroller')).not.toContainElement(exportButton);
+  fireEvent.click(exportButton);
   await waitFor(() => expect(saveSkillFile).toHaveBeenCalled());
   expect(listResourceUseAuth).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -440,4 +451,5 @@ it('exports all filtered pages and workspace skills without changing the display
     'employee-1'
   );
   expect(screen.getAllByTestId('resource-card')).toHaveLength(2);
+  exportContainer.remove();
 });

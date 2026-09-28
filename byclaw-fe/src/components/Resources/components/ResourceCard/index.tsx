@@ -13,7 +13,7 @@ import { publishSkillToEnterprise, restoreResource } from '@/pages/manager/servi
 import type { EnterpriseSkillPublishResult } from '@/pages/manager/service/resources';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
-import SkillExportButton from '../SkillExportButton';
+import { useSkillExport } from '../SkillExportButton';
 import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
@@ -1196,11 +1196,31 @@ const RenderContent = (props: ResourceCardProps) => {
     actionConfig?.hiddenMenuItemKeys,
   ]);
 
-  const effectiveMenuItems = isWorkspaceSkillResource ? workspaceMenuItems : menuItems;
-  const skillExportButton =
-    actionConfig?.enableSkillExport && (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL') ? (
-      <SkillExportButton item={resource} digitalEmployeeId={activeDigitalEmployeeId} />
-    ) : null;
+  const { loading: exportingSkill, exportSkills } = useSkillExport({
+    item: resource,
+    digitalEmployeeId: activeDigitalEmployeeId,
+  });
+  // 工作空间和资源化技能都在更多菜单中导出，不受管理权限限制。
+  const effectiveMenuItems: MenuProps['items'] = [
+    ...((isWorkspaceSkillResource ? workspaceMenuItems : menuItems) || []),
+    ...(actionConfig?.enableSkillExport && (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL')
+      ? [
+          {
+            key: 'exportSkill',
+            label: (
+              <BuildMenuLabel
+                icon="icon-a-Downloadxiazai"
+                text={intl.formatMessage({ id: 'resource.skillExport.single' })}
+              />
+            ),
+            disabled: exportingSkill,
+            onClick: () => {
+              void exportSkills();
+            },
+          },
+        ]
+      : []),
+  ];
   const effectiveTopRightTag =
     isWorkspaceSkillResource && !showResourceTypeTag
       ? intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })
@@ -1314,7 +1334,6 @@ const RenderContent = (props: ResourceCardProps) => {
               </span>
               <span className={styles.skillPosterCreatorName}>{skillSourceName}</span>
             </span>
-            {skillExportButton}
             <span className={styles.skillPosterDivider} />
             <span className={styles.skillPosterUseCount}>
               {intl.formatMessage(
@@ -1544,7 +1563,6 @@ const RenderContent = (props: ResourceCardProps) => {
             </Paragraph>
 
             <div className={classnames(styles.meta, 'ub ub-ac')}>
-              {skillExportButton}
               <div
                 className={classnames(styles.metaPrimary, 'ub ub-ac', {
                   [styles.metaPrimaryWithHover]: !!hoverExtra,

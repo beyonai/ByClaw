@@ -141,6 +141,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [skillExportContainer, setSkillExportContainer] = useState<HTMLSpanElement | null>(null);
   const [skillGroupCreateModalOpen, setSkillGroupCreateModalOpen] = useState(false);
   const [skillGroupEditing, setSkillGroupEditing] = useState<SkillGroup | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -744,6 +745,10 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             </span>
           </Tooltip>
         )}
+        {resourceType === 'SKILL' && !isEnterpriseSkillGroupMode && (
+          // 独立于导入权限，确保普通用户也可从工具栏导出。
+          <span ref={setSkillExportContainer} data-testid="skill-export-toolbar" />
+        )}
         {!myResourcesOnly && onMyResourcesOnlyChange && (
           <Badge count={myResourceAuditPendingCount} size="small" offset={[-2, 2]}>
             <Button
@@ -1026,6 +1031,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           ) : (
             <ResourceList
               key={refreshKey}
+              exportContainer={skillExportContainer}
               resourceType={resourceType}
               activeTab={activeTab}
               myResourcesOnly={myResourcesOnly}

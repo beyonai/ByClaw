@@ -39,7 +39,11 @@ jest.mock('antd', () => {
         <div>
           {menu?.items?.map((item) => (
             // 模拟 Menu 的条目点击分发，禁用项不触发业务回调。
-            <div key={item?.key} onClick={item?.disabled ? undefined : item?.onClick}>
+            <div
+              key={item?.key}
+              data-testid={`resource-menu-${item?.key}`}
+              onClick={item?.disabled ? undefined : item?.onClick}
+            >
               {item?.label}
             </div>
           ))}
@@ -1221,5 +1225,8 @@ it.each(['inner', 'custom'])('shows export for %s skills without management perm
       }}
     />
   );
-  expect(screen.getByRole('button', { name: /resource.skillExport.single/ })).toBeEnabled();
+  expect(
+    within(screen.getByTestId('resource-menu-exportSkill')).getByText('resource.skillExport.single')
+  ).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /resource.skillExport.single/ })).not.toBeInTheDocument();
 });

@@ -6,6 +6,7 @@ import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
 import SkillExportButton from '../SkillExportButton';
+import { createPortal } from 'react-dom';
 import {
   listResourceUseAuth,
   queryResourceDetail,
@@ -72,6 +73,7 @@ interface IResourceItem {
 }
 
 interface ResourceListProps {
+  exportContainer?: HTMLElement | null;
   resourceType: string;
   activeTab: string;
   myResourcesOnly?: boolean;
@@ -109,6 +111,7 @@ const collectInstalledResourceIds = (response: any) => {
 };
 
 const ResourceList: React.FC<ResourceListProps> = ({
+  exportContainer,
   resourceType,
   activeTab,
   myResourcesOnly = false,
@@ -525,18 +528,19 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   return (
     <div id={getScrollableTarget} className={styles.sectionsContainer}>
-      {resourceType === 'SKILL' && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 12 }}>
+      {resourceType === 'SKILL' &&
+        exportContainer &&
+        createPortal(
           <SkillExportButton
             digitalEmployeeId={activeDigitalEmployeeId}
             loadAll={async () => {
-              // 从第一页按当前筛选遍历，不能使用无限滚动已加载的局部 list。
+              // 导出入口在工具栏，分页查询仍复用列表的当前筛选。
               const rows = await getList({ pageNum: 1, pageSize: PAGE_SIZE_DEFAULT }, false, true);
               return Array.from(new Map(rows.map((row) => [String(row.resourceId), row])).values());
             }}
-          />
-        </div>
-      )}
+          />,
+          exportContainer
+        )}
       <Spin
         wrapperClassName={styles.spinningWrapper}
         tip={intl.formatMessage({ id: 'common.loading' })}

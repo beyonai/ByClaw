@@ -1,7 +1,6 @@
-import useEmployeePublicationCapabilities from '@/hooks/useEmployeePublicationCapabilities';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { PlusOutlined, SearchOutlined, UnorderedListOutlined } from '@ant-design/icons';
-import { useDispatch, useIntl, useNavigate, useSearchParams } from '@umijs/max';
+import { useDispatch, useIntl, useNavigate, useSearchParams, useSelector } from '@umijs/max';
 import { Badge, Button, Dropdown, Input, Menu, Modal, Popconfirm, Space, Spin, Tabs, Typography, message } from 'antd';
 import { trim, debounce } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
@@ -14,6 +13,8 @@ import { getAgentChatAvatar } from '@/utils/agent';
 import { navigateToEmployeeChat } from '@/utils/employeeChat';
 import AntdIcon from '@/components/AntdIcon';
 import { getFileUrl } from '@/utils/file';
+import { isAdminVip } from '@/utils/auth';
+import type { UserState } from '@/models/common/user';
 import useDigitalEmployeeAuditCount from '@/hooks/useDigitalEmployeeAuditCount';
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import EmployFormModal from '@/pages/manager/pages/digitalEmployeeMgr/components/EmployFormModal';
@@ -48,7 +49,11 @@ const getListOperationPermissions = (employee: any) => {
 };
 
 const DigitalEmployeesPage: React.FC = () => {
-  const publicationCapabilities = useEmployeePublicationCapabilities();
+  const userInfo = useSelector(({ user }: { user: UserState }) => user.userInfo);
+  // 创建入口按登录角色展示，避免发布能力接口失败或缓存未更新时误隐藏平台管理员入口。
+  const canCreateEnterprise =
+    (userInfo ? isAdminVip(userInfo) : false) ||
+    (userInfo?.usersOrganizations || []).some((organization) => organization.userType === 'PLAT_MAN');
   const intl = useIntl();
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -144,16 +149,19 @@ const DigitalEmployeesPage: React.FC = () => {
     });
   }, []);
 
-  const createMenuItems = [
-    { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
-    { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
-  ];
-  if (publicationCapabilities?.canCreateEnterprise) {
-    createMenuItems.push(
-      { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
-      { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) }
-    );
-  }
+  // 创建入口随页签区分归属；实际创建操作仍由后端校验权限。
+  const createMenuItems =
+    activeTab === 'available'
+      ? [
+          { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
+          { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
+        ]
+      : canCreateEnterprise
+      ? [
+          { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
+          { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) },
+        ]
+      : [];
 
   const tabBarExtraContent = (
     <Space className={styles.toolbar}>
@@ -191,32 +199,34 @@ const DigitalEmployeesPage: React.FC = () => {
           getSearch();
         }}
       />
-      <Dropdown
-        trigger={['click']}
-        overlay={
-          <Menu
-            items={createMenuItems}
-            onClick={({ key }) => {
-              if (key === 'enterprise') {
-                setEnterpriseCreateOpen(true);
-                return;
-              }
-              const [ownerType, group] = key.split('-');
-              const params = new URLSearchParams({ ownerType, digitalType: 'FROM_MANUALLY' });
-              if (group) params.set('agentType', '017');
-              sessionStorage.setItem(
-                'EmployeeDetail_prevRoute',
-                `${window.location.pathname}${window.location.search}`
-              );
-              navigate(`/digitalEmployeesCreate?${params.toString()}`);
-            }}
-          />
-        }
-      >
-        <Button type="primary" icon={<PlusOutlined />} id="guideStep2-6">
-          {intl.formatMessage({ id: 'digitalEmployees.create' })}
-        </Button>
-      </Dropdown>
+      {createMenuItems.length > 0 && (
+        <Dropdown
+          trigger={['click']}
+          overlay={
+            <Menu
+              items={createMenuItems}
+              onClick={({ key }) => {
+                if (key === 'enterprise') {
+                  setEnterpriseCreateOpen(true);
+                  return;
+                }
+                const [ownerType, group] = key.split('-');
+                const params = new URLSearchParams({ ownerType, digitalType: 'FROM_MANUALLY' });
+                if (group) params.set('agentType', '017');
+                sessionStorage.setItem(
+                  'EmployeeDetail_prevRoute',
+                  `${window.location.pathname}${window.location.search}`
+                );
+                navigate(`/digitalEmployeesCreate?${params.toString()}`);
+              }}
+            />
+          }
+        >
+          <Button type="primary" icon={<PlusOutlined />} id="guideStep2-6">
+            {intl.formatMessage({ id: 'digitalEmployees.create' })}
+          </Button>
+        </Dropdown>
+      )}
       <Badge count={auditCount} size="small" offset={[-2, 2]}>
         <Button
           icon={<UnorderedListOutlined />}
