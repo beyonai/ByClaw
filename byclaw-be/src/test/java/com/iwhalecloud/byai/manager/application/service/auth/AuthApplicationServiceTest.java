@@ -82,6 +82,60 @@ import org.mockito.InOrder;
 
 class AuthApplicationServiceTest {
 
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", UserType.PLAT_MAN, UserType.ORG_MAN, UserType.BUSINESS_MAN,
+        UserType.PLAT_DEVOPS, UserType.ORD_USER, "NO_ROLE"})
+    void officialSkillImportEntryOnlyAllowsAdminVipOrPlatformManager(String identity) {
+        LoginInfo login = new LoginInfo();
+        login.setUserCode("adminvip".equals(identity) ? "adminvip" : "test-user");
+        UsersOrganization role = new UsersOrganization();
+        role.setUserType(identity);
+        login.setUsersOrganizations("NO_ROLE".equals(identity) ? List.of() : List.of(role));
+        CurrentUserHolder.setLoginInfo(login);
+
+        var capability = new AuthApplicationService().queryFixedEntryOperationCapability();
+
+        assertThat(capability.getCanImportEnterpriseSkill())
+            .isEqualTo("adminvip".equals(identity) || UserType.PLAT_MAN.equals(identity));
+        // 收紧技能入口时，保留其他资源现有的管理员范围。
+        boolean existingImportPermission = List.of(UserType.PLAT_MAN, UserType.ORG_MAN, UserType.BUSINESS_MAN)
+            .contains(identity);
+        assertThat(capability.getCanImportEnterpriseKg()).isEqualTo(existingImportPermission);
+        assertThat(capability.getCanImportEnterpriseToolkit()).isEqualTo(existingImportPermission);
+    }
+
+    @Test
+    void officialSkillImportEntryIsHiddenWithoutLogin() {
+        CurrentUserHolder.clearLoginInfo();
+        assertThat(new AuthApplicationService().queryFixedEntryOperationCapability().getCanImportEnterpriseSkill())
+            .isFalse();
+    }
+
+    @Test
+    void employeePublicationStatusIsBatchedAndOnlyReturnedForAuthorizedSources() {
+        LoginInfo login = new LoginInfo(); login.setUserId(1L); login.setUserCode("author"); login.setEnterpriseId(1L);
+        CurrentUserHolder.setLoginInfo(login);
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        var resourceMapper = mock(SsResourceMapper.class);
+        var publicationMapper = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
+        var governance = mock(com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", resourceMapper);
+        ReflectionTestUtils.setField(service, "employeePublications", publicationMapper);
+        ReflectionTestUtils.setField(service, "employeeGovernance", governance);
+        SsResource own = enterpriseResource(601L, 1L); own.setResourceBizType("DIG_EMPLOYEE"); own.setOwnerType("personal");
+        SsResource other = enterpriseResource(602L, 2L); other.setResourceBizType("DIG_EMPLOYEE"); other.setOwnerType("personal");
+        when(resourceMapper.selectBatchIds(any())).thenReturn(List.of(own, other));
+        when(governance.canPublish(own)).thenReturn(true);
+        var rejected = new com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication();
+        rejected.setSourceId(601L); rejected.setStatus("REJECTED");
+        when(publicationMapper.currentStatuses(List.of(601L), 1L)).thenReturn(List.of(rejected));
+        var result = service.queryResourceOperationPermissionsBatch(List.of(601L, 602L));
+        assertThat(result.get(601L).getEmployeePublicationStatus()).isEqualTo("REJECTED");
+        assertThat(result.get(602L).getEmployeePublicationStatus()).isNull();
+        verify(publicationMapper).currentStatuses(List.of(601L), 1L);
+    }
+
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();

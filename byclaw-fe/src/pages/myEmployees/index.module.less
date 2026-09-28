@@ -102,6 +102,33 @@
   overflow: hidden;
 }
 
+.auditKinds {
+  flex-shrink: 0;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #ebeef2;
+}
+
+.auditHint {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+  color: var(--beyond-color-text-secondary, #666);
+  font-size: 13px;
+  line-height: 22px;
+}
+
+.auditCount {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: #e8edf5;
+  color: #596273;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+}
+
 .auditTableSpin {
   min-height: 0;
   flex: 1;
@@ -142,6 +169,20 @@
   min-height: 0;
   flex: 1;
   overflow: auto;
+  border: 1px solid #ebeef2;
+  border-radius: 10px;
+
+  :global {
+    .@{antPrefix}-table-thead > tr > th {
+      background: #f7f8fa;
+      color: #596273;
+      font-weight: 500;
+    }
+
+    .@{antPrefix}-table-tbody > tr > td {
+      padding: 18px 16px;
+    }
+  }
 }
 
 .back {

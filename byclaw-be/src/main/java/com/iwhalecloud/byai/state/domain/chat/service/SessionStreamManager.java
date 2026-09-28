@@ -278,6 +278,8 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
             stopSessionListener(sessionId);
             applicationContext.getBean(RunningOutputStreamRegistry.class).releaseIfOwner(completed);
+            // 清理最后一个运行轮次后唤醒群聊队列，撤回停止后的独立追问也从这里继续。
+            applicationContext.publishEvent(new ChatSessionReleased(completed.sessionId));
             return true;
         });
     }

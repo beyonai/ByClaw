@@ -38,7 +38,7 @@ describe('models/components/ModelFormModal', () => {
     mockSharedModelFormProps = undefined;
   });
 
-  it('loads ability and system tag options for the personal model form', async () => {
+  it.each(['add', 'edit'] as const)('loads ability and system tag options for the %s form', async (type) => {
     mockGetDcSystemConfigListByStandType.mockResolvedValue({
       data: [{ paramName: '对话模型', paramValue: '3' }],
     });
@@ -46,7 +46,7 @@ describe('models/components/ModelFormModal', () => {
       data: [{ systemName: 'ByClaw', systemCode: 'BY_CLAW' }],
     });
 
-    render(<ModelFormModal open type="add" onCancel={jest.fn()} onSaved={jest.fn()} />);
+    renderForm(type);
 
     expect(mockSharedModelFormProps.showTags).toBe(true);
 

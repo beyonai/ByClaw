@@ -13,6 +13,53 @@ import org.springframework.mock.web.MockHttpSession;
 class ToolManControllerTest {
 
     @Test
+    void personalDirectoryEndpointsIgnoreClientEmployeeAndUserIdentity() {
+        ToolManController controller = new ToolManController();
+        var query = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.state.application.service.session.ByClawSkillQueryApplicationService.class);
+        var resource = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class);
+        var deletion = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteApplicationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillQueryApplicationService", query);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillResourceApplicationService", resource);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillDeleteApplicationService", deletion);
+        LoginInfo login = new LoginInfo();
+        login.setUserId(11L);
+        login.setUserCode("me");
+        login.setDefaultDigEmployeeId(999L);
+        CurrentUserHolder.setLoginInfo(login);
+        String path = "/.openclaw/workspace/skills/mine";
+        var request = new com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillQo();
+        request.setPersonalWorkspace(true);
+        request.setSkillPath(path);
+        request.setResourceId(999L);
+        request.setUserCode("someone-else");
+        var list = new com.iwhalecloud.byai.state.domain.session.qo.QrySkillListByUserCodeQo();
+        list.setPersonalWorkspace(true);
+        list.setResourceId(999L);
+        list.setUserCode("someone-else");
+        list.setKeyword("mine");
+        var delete = new com.iwhalecloud.byai.state.domain.resource.qo.DeleteSkillQo();
+        delete.setPersonalWorkspace(true);
+        delete.setSkillPath(path);
+        delete.setUserCode("someone-else");
+        try (var messages = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.i18n.I18nUtil.class)) {
+            assertThat(controller.qryWorkspacePersonalSkillList(list).getCode()).isZero();
+            assertThat(controller.getWorkspaceSkillDetail(request).getCode()).isZero();
+            assertThat(controller.checkWorkspaceSkillShareConflicts(request).getCode()).isZero();
+            assertThat(controller.resourceizeWorkspaceSkill(request).getCode()).isZero();
+            assertThat(controller.deleteSkill(delete).getCode()).isZero();
+        }
+        org.mockito.Mockito.verify(query).qryMyDirectorySkills("mine");
+        org.mockito.Mockito.verify(query).getWorkspaceSkillDetail("me", null, path);
+        org.mockito.Mockito.verify(resource).previewMyDirectorySkillConflicts(path);
+        org.mockito.Mockito.verify(resource).resourceizeMyDirectorySkill(path, false);
+        org.mockito.Mockito.verify(deletion).deleteSkill("me", null, path);
+        org.mockito.Mockito.verify(resource, org.mockito.Mockito.never()).assertWorkspaceSkillManagePermission(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void enterprisePublicationReturnsCopyAndPropagatesPermissionDenial() {
         ToolManController controller = new ToolManController();
         var service = org.mockito.Mockito.mock(
@@ -32,6 +79,38 @@ class ToolManControllerTest {
             .thenThrow(new IllegalArgumentException("Permission denied"));
         assertThat(controller.publishSkillToEnterprise(request).getCode()).isEqualTo(-1);
         assertThat(controller.publishSkillToEnterprise(request).getMsg()).isEqualTo("Permission denied");
+    }
+
+    @Test
+    void builtinSkillDownloadReturnsCompletePackageForOrdinaryUser() throws Exception {
+        var controller = new ToolManController();
+        var resources = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class);
+        var skills = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService.class);
+        var exporter = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.state.application.service.session.ByClawBuiltinSkillExportService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "ssResourceService", resources);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "ssResExtSkillService", skills);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "builtinSkillExportService", exporter);
+        var login = new LoginInfo();
+        login.setUserCode("ordinary");
+        CurrentUserHolder.setLoginInfo(login);
+        var resource = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        resource.setResourceCode("demo");
+        var skill = new com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill();
+        skill.setSkillType("inner");
+        org.mockito.Mockito.when(resources.findById(1L)).thenReturn(resource);
+        org.mockito.Mockito.when(skills.findById(1L)).thenReturn(skill);
+        byte[] zip = new byte[] {80, 75, 3, 4};
+        org.mockito.Mockito.when(exporter.exportPackage("ordinary", "demo")).thenReturn(zip);
+        var response = controller.downloadSkillZip(null, 1L, null, null, null);
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getHeaders().getFirst("Content-Disposition")).contains("demo.zip");
+        var output = new java.io.ByteArrayOutputStream();
+        response.getBody().writeTo(output);
+        assertThat(output.toByteArray()).isEqualTo(zip);
+        org.mockito.Mockito.verify(exporter).exportPackage("ordinary", "demo");
     }
 
     @AfterEach

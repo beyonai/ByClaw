@@ -4,12 +4,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
+import java.security.SecureRandom;
 import java.util.concurrent.TimeUnit;
 import com.iwhalecloud.byai.manager.domain.login.model.ValidateCode;
 import com.iwhalecloud.byai.manager.domain.login.service.SafeAccountMsgService;
 import com.iwhalecloud.byai.common.util.DateUtils;
-import com.iwhalecloud.byai.common.util.IpUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +39,8 @@ public class CaptchaService {
 
     private static final int CAPTCHA_EXPIRE_MINUTES = 2;
 
-    private static final String SMS_IP_COUNT_KEY = "sms:ip:type:count:";
+    private static final String SMS_PHONE_COUNT_KEY = "sms:phone:count:";
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     @Autowired
     private AliyunSmsService smsService;
@@ -113,19 +113,28 @@ public class CaptchaService {
      */
     public boolean sendSmsCode(SmsCaptchaRequest param, HttpServletRequest request) {
 
+        if (param == null || !("1".equals(param.getBizType()) || "2".equals(param.getBizType()))) {
+            throw new BaseException("sms.type.unsupported");
+        }
+        String realPhone = this.decodePhone(param.getPhone());
+        if (realPhone == null || !realPhone.matches("1[3-9][0-9]{9}")) {
+            throw new BaseException("phone.format.invalid");
+        }
+
         // 校验图形验证码
         validateImageCaptcha(request.getSession(), param.getCaptcha());
 
-        String encryptedPhone = param.getPhone();
         String msgType = param.getBizType();
-        String realPhone = this.decodePhone(encryptedPhone);
 
         // 检查是否重复发送
         this.judgeRepeatedMsg(realPhone, msgType);
 
-        // 检查IP发送频率
-        String ip = IpUtil.getIpAddress(request);
-        checkSmsLimit(ip, msgType);
+        // 登录与注册共用手机号发送配额，不按 IP 限流。
+        checkSmsLimit(realPhone);
+        if (!Boolean.TRUE.equals(RedisUtil.setIfAbsent("sms:phone:cooldown:" + realPhone,
+                "1", TimeUnit.MINUTES.toSeconds(smsRateLimitConfig.getRepeatedInterval())))) {
+            throw new BaseException("captcha.sms.repeat.send");
+        }
 
         String smsCode = generateRandomCode();
         SafeAccountMsg newMsg = new SafeAccountMsg();
@@ -141,16 +150,14 @@ public class CaptchaService {
         newMsg.setExpireDate(DateUtils.addMinute(now, smsRateLimitConfig.getSmsExpireTime()));
         String templateType = "1".equals(msgType) ? "login" : "register";
 
-        boolean sendResult = smsService.sendSms(realPhone, smsCode, templateType);
-        newMsg.setState(sendResult ? SafeAccountMsg.STATE_SEND_SUCCESS : SafeAccountMsg.STATE_SEND_FAIL);
-
+        newMsg.setState(SafeAccountMsg.STATE_SEND_FAIL);
         safeAccountMsgService.save(newMsg);
-
-        if (sendResult) {
-            // 更新IP发送记录
-            updateSmsRecord(ip, msgType);
+        boolean sendResult = smsService.sendSms(realPhone, smsCode, templateType);
+        if (!sendResult) {
+            throw new BaseException("sms.send.failed");
         }
-
+        newMsg.setState(SafeAccountMsg.STATE_SEND_SUCCESS);
+        safeAccountMsgService.update(newMsg);
         return sendResult;
 
     }
@@ -169,7 +176,7 @@ public class CaptchaService {
      * 生成6位随机验证码
      */
     private String generateRandomCode() {
-        return String.format("%06d", ThreadLocalRandom.current().nextInt(1000000));
+        return String.format(java.util.Locale.ROOT, "%06d", RANDOM.nextInt(1000000));
     }
 
     /**
@@ -177,41 +184,27 @@ public class CaptchaService {
      */
     private String decodePhone(String accountCode) {
         try {
+            if (accountCode == null || accountCode.length() > 512) {
+                throw new IllegalArgumentException("Invalid encrypted phone");
+            }
             byte[] key = AesUtils.AES_KEY.getBytes(StandardCharsets.UTF_8);
             byte[] enbytes = Base64.getDecoder().decode(accountCode.getBytes(StandardCharsets.UTF_8));
             return new String(AesUtils.decrypt(new String(enbytes, StandardCharsets.UTF_8), key),
                 StandardCharsets.UTF_8);
         }
         catch (Exception e) {
-            LOGGER.error(e.getMessage(), e);
+            throw new BaseException("phone.format.invalid");
         }
-        return null;
     }
 
     /**
-     * 检查IP发送频率
+     * 检查手机号发送频率
      */
-    private void checkSmsLimit(String ip, String msgType) {
-        String countKey = SMS_IP_COUNT_KEY + ip + ":" + msgType;
-        String count = RedisUtil.getString(countKey);
-        if (count != null && Integer.parseInt(count) >= smsRateLimitConfig.getMaxCount()) {
+    private void checkSmsLimit(String phone) {
+        String countKey = SMS_PHONE_COUNT_KEY + phone;
+        if (!RedisUtil.reserveAttempt(countKey, smsRateLimitConfig.getMaxCount(),
+                TimeUnit.MINUTES.toSeconds(smsRateLimitConfig.getIntervalMinutes()))) {
             throw new BaseException(I18nUtil.get("sms.send.too.frequent"));
-        }
-    }
-
-    /**
-     * 更新IP发送记录
-     */
-    private void updateSmsRecord(String ip, String msgType) {
-        String countKey = SMS_IP_COUNT_KEY + ip + ":" + msgType;
-        String count = RedisUtil.getString(countKey);
-        if (count == null) {
-            // 设置初始次数为1，并设置时间窗口后过期
-            RedisUtil.setString(countKey, "1", smsRateLimitConfig.getIntervalMinutes(), TimeUnit.MINUTES);
-        }
-        else {
-            // 增加计数
-            RedisUtil.increment(countKey);
         }
     }
 

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatRecallMapper">
+    <!-- 群行锁与入队/发布共用，范围沿父轮次扩展，不使用可复用的 root_message_id。 -->
+    <select id="turns" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn" flushCache="true" useCache="false">
+        SELECT * FROM byai_group_chat_turn WHERE group_session_id = #{groupId} ORDER BY execution_id
+    </select>
+    <select id="executions" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution" flushCache="true" useCache="false">
+        SELECT * FROM byai_group_chat_execution WHERE group_session_id = #{groupId} AND status != 'CONVERSATION' ORDER BY execution_id
+    </select>
+    <insert id="insertStop">
+        INSERT INTO byai_group_chat_recall_stop (execution_id, session_id, initiator_user_id, trace_id, task_owned, status)
+        VALUES (#{executionId}, #{sessionId}, #{initiatorUserId}, #{traceId}, #{taskOwned}, #{status})
+    </insert>
+    <select id="isRecalled" resultType="boolean" flushCache="true" useCache="false">
+        SELECT COUNT(*) > 0 FROM byai_group_chat_recall_stop WHERE execution_id = #{executionId}
+    </select>
+    <select id="pending" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatRecallStop" flushCache="true" useCache="false">
+        SELECT * FROM byai_group_chat_recall_stop WHERE session_id = #{sessionId} AND status = 'PENDING' ORDER BY execution_id
+    </select>
+    <select id="pendingSessions" resultType="long" flushCache="true" useCache="false">
+        SELECT DISTINCT session_id FROM byai_group_chat_recall_stop WHERE status = 'PENDING' AND session_id > #{afterId}
+        ORDER BY session_id LIMIT #{limit}
+    </select>
+    <update id="finishStop">
+        UPDATE byai_group_chat_recall_stop SET status = 'DONE' WHERE execution_id = #{executionId}
+    </update>
+    <update id="cancelTurn">
+        UPDATE byai_group_chat_turn SET status = 'CANCELLED', error_code = 'MESSAGE_RECALLED', finish_time = CURRENT_TIMESTAMP
+        WHERE execution_id = #{executionId} AND status IN ('QUEUED', 'RUNNING')
+    </update>
+    <update id="cancelExecution">
+        UPDATE byai_group_chat_execution SET status = 'CANCELLED', error_code = 'MESSAGE_RECALLED', finish_time = CURRENT_TIMESTAMP
+        WHERE execution_id = #{executionId} AND status IN ('QUEUED', 'RUNNING')
+    </update>
+</mapper>

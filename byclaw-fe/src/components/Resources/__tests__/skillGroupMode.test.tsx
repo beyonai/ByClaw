@@ -221,7 +221,10 @@ jest.mock('@/components/Resources/components/ResourceFilter', () => ({
   },
   getDefaultParams: () => ({ resourceStatus: '2' }),
 }));
-jest.mock('@/components/Resources/components/ResourceImport', () => ({ __esModule: true, default: () => null }));
+jest.mock('@/components/Resources/components/ResourceImport', () => ({
+  __esModule: true,
+  default: ({ visible }: any) => (visible ? <div data-testid="resource-import-modal" /> : null),
+}));
 jest.mock('@/components/Resources/components/SkillGroupCreateModal', () => ({
   __esModule: true,
   default: ({ visible, onSuccess }: any) =>
@@ -280,7 +283,7 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Resources from '..';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
-import { queryResourceUseApplyAudit } from '@/pages/manager/service/resources';
+import { queryFixedEntryOperationCapability, queryResourceUseApplyAudit } from '@/pages/manager/service/resources';
 
 describe('Resources enterprise skill mode', () => {
   beforeEach(() => {
@@ -289,6 +292,8 @@ describe('Resources enterprise skill mode', () => {
     );
     mockResourceFilterProps.mockClear();
     mockAdminVip = true;
+    (queryFixedEntryOperationCapability as jest.Mock).mockReset();
+    (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: true });
     mockSkillGroupMountCount = 0;
     mockSkillGroupProps.mockReset();
     Object.keys(mockEventHandlers).forEach((event) => delete mockEventHandlers[event]);
@@ -301,6 +306,145 @@ describe('Resources enterprise skill mode', () => {
     window.history.pushState({}, '', `/skillCenter${search}`);
     return render(<Resources resourceType="SKILL" />);
   };
+
+  const setBrandVersion = (version: string | null | undefined) => {
+    (getDcSystemConfig as jest.Mock).mockImplementation(({ paramCode }) =>
+      Promise.resolve(paramCode === 'BYAI_BRAND_VERSION' ? { paramValue: version } : {})
+    );
+  };
+
+  it.each([true, false])('shows noncommercial skill import for authorized users (AdminVip: %s)', async (adminVip) => {
+    setBrandVersion('openSource');
+    mockAdminVip = adminVip;
+    renderAt('?tab=enterprise');
+
+    const importButton = await screen.findByRole('button', { name: 'common.import' });
+    expect(importButton).toBeEnabled();
+    fireEvent.click(importButton);
+    expect(screen.getByTestId('resource-import-modal')).toBeInTheDocument();
+  });
+
+  it.each([false, undefined])('hides official skill import without an explicit capability: %s', async (allowed) => {
+    setBrandVersion('openSource');
+    mockAdminVip = false;
+    (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: allowed });
+    renderAt('?tab=enterprise');
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
+  });
+
+  it('hides official skill import while permissions load and when the query fails', async () => {
+    setBrandVersion('openSource');
+    let rejectCapability!: (reason: Error) => void;
+    (queryFixedEntryOperationCapability as jest.Mock).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectCapability = reject;
+        })
+    );
+    renderAt('?tab=enterprise');
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
+    await act(async () => {
+      rejectCapability(new Error('unavailable'));
+    });
+    expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
+  });
+
+  it('keeps personal skill import available without official import permission', async () => {
+    mockAdminVip = false;
+    (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: false });
+    renderAt('?tab=personal');
+
+    const importButton = await screen.findByRole('button', { name: 'common.import' });
+    expect(importButton).toBeEnabled();
+    const exportToolbar = screen.getByTestId('skill-export-toolbar');
+    expect(importButton.compareDocumentPosition(exportToolbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it.each(['openSource', 'custom', '', undefined, null])(
+    'hides official skill import from ordinary users for noncommercial brand: %s',
+    async (version) => {
+      setBrandVersion(version);
+      mockAdminVip = false;
+      (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: false });
+      renderAt('?tab=enterprise');
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
+      expect(screen.getByTestId('skill-export-toolbar')).toBeInTheDocument();
+    }
+  );
+
+  it.each([true, false, undefined])(
+    'allows commercial skill import regardless of role capability: %s',
+    async (allowed) => {
+      setBrandVersion('commercial');
+      mockAdminVip = false;
+      (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: allowed });
+      renderAt('?tab=enterprise');
+
+      const importButton = await screen.findByRole('button', { name: 'common.import' });
+      expect(importButton).toBeEnabled();
+      fireEvent.click(importButton);
+      expect(screen.getByTestId('resource-import-modal')).toBeInTheDocument();
+    }
+  );
+
+  it('waits for the brand before exposing official skill import', async () => {
+    let resolveBrand!: (value: any) => void;
+    (getDcSystemConfig as jest.Mock).mockImplementation(({ paramCode }) =>
+      paramCode === 'BYAI_BRAND_VERSION'
+        ? new Promise((resolve) => {
+            resolveBrand = resolve;
+          })
+        : Promise.resolve({})
+    );
+    renderAt('?tab=enterprise');
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
+    await act(async () => {
+      resolveBrand({ paramValue: 'openSource' });
+    });
+    expect(screen.getByRole('button', { name: 'common.import' })).toBeEnabled();
+  });
+
+  it('allows commercial official skill import even when role capabilities fail to load', async () => {
+    setBrandVersion('commercial');
+    mockAdminVip = false;
+    (queryFixedEntryOperationCapability as jest.Mock).mockRejectedValue(new Error('unavailable'));
+    renderAt('?tab=enterprise');
+
+    expect(await screen.findByRole('button', { name: 'common.import' })).toBeEnabled();
+  });
+
+  it.each(['commercial', 'openSource'])(
+    'uses the same brand rule for official skill group import: %s',
+    async (version) => {
+      setBrandVersion(version);
+      mockAdminVip = false;
+      (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({
+        canImportEnterpriseSkill: version !== 'commercial',
+      });
+      renderAt('?tab=enterprise&kind=group');
+
+      const importButton = await screen.findByRole('button', { name: 'common.import' });
+      expect(importButton).toBeEnabled();
+      fireEvent.click(importButton);
+      expect(screen.getByTestId('skill-group-create-modal')).toBeInTheDocument();
+    }
+  );
 
   it.each(['commercial', 'openSource', 'custom', '', undefined])(
     'enables enterprise publication only after loading a noncommercial brand: %s',
@@ -550,7 +694,9 @@ describe('Resources enterprise skill mode', () => {
     );
   });
 
-  it('hides the skill group create entry from non AdminVip users', async () => {
+  it('hides the noncommercial skill group create entry from users without platform permission', async () => {
+    setBrandVersion('openSource');
+    (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: false });
     mockAdminVip = false;
     renderAt('?tab=enterprise&kind=group');
 

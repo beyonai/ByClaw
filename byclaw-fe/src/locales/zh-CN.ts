@@ -4,6 +4,9 @@ import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  'resource.skillExport.single': '导出技能',
+  'resource.skillExport.all': '导出',
+  'resource.skillExport.invalidBundle': '技能 ZIP 或批量导出包无效，请检查文件',
   'ui.resource.listSeparator': '、',
   'ui.employee.publish': '上架',
   'ui.employee.unpublish': '下架',

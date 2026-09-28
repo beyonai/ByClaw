@@ -11,6 +11,10 @@ import lombok.Data;
 @Data
 public class WorkspaceSkillQo {
 
+    /** 资源中心个人目录技能；身份只取当前登录用户，不回退默认数字员工。 */
+    private Boolean personalWorkspace;
+
+
     /**
      * skill 根目录路径。
      */

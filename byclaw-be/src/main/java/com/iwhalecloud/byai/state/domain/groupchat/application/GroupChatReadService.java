@@ -1,9 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
-import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
-
-import java.util.Date;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -25,8 +23,10 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper;
+import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessagePreview;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberSummary;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
@@ -41,15 +41,17 @@ public class GroupChatReadService {
     private final ByaiMessageMapper messageMapper;
     private final GroupChatAuthorizationService authorizationService;
     private final MultiDeviceBroadcastService broadcastService;
+    private final GroupChatContextService contextService;
 
     public GroupChatReadService(ByaiGroupChatMentionMapper mentionMapper, ByaiSessionMemberMapper memberMapper,
         ByaiMessageMapper messageMapper, GroupChatAuthorizationService authorizationService,
-        MultiDeviceBroadcastService broadcastService) {
+        MultiDeviceBroadcastService broadcastService, GroupChatContextService contextService) {
         this.mentionMapper = mentionMapper;
         this.memberMapper = memberMapper;
         this.messageMapper = messageMapper;
         this.authorizationService = authorizationService;
         this.broadcastService = broadcastService;
+        this.contextService = contextService;
     }
 
     @Transactional(readOnly = true)
@@ -64,9 +66,22 @@ public class GroupChatReadService {
             : Optional.ofNullable(memberMapper.findGroupMemberSummaries(sessionIds, GROUP_AVATAR_MEMBER_LIMIT))
                 .orElseGet(List::of).stream()
                 .collect(Collectors.groupingBy(GroupChatMemberSummary::getSessionId));
+        // 只投影本页每个群的最后一条未撤回消息，不触发逐条消息查询。
+        List<ByaiMessage> latestMessages = groups.stream()
+            .filter(group -> group.getLatestMessageId() != null && !group.isLatestMessageRecalled())
+            .map(group -> {
+                ByaiMessage message = new ByaiMessage();
+                message.setMessageId(group.getLatestMessageId());
+                message.setSessionId(group.getSessionId());
+                message.setMetadata(group.getLatestMessageMetadata());
+                message.setRelatedResources(group.getLatestMessageRelatedResources());
+                return message;
+            }).toList();
+        var attachmentsByMessage = contextService.attachmentsForMessages(latestMessages);
         GroupChatRecallProjection projection = new GroupChatRecallProjection();
         for (GroupChatListItemResponse group : groups) {
             group.setMembers(membersBySession.getOrDefault(group.getSessionId(), List.of()));
+            group.setLatestMessageAttachments(attachmentsByMessage.getOrDefault(group.getLatestMessageId(), List.of()));
             if (group.isLatestMessageRecalled()) {
                 group.setLatestMessageContent(projection.content(group.getLatestMessageRecalledBy()));
                 group.setLatestMessageMetadata(null);

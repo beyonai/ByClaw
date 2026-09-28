@@ -4,6 +4,9 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  'resource.skillExport.single': 'Export skill',
+  'resource.skillExport.all': 'Export',
+  'resource.skillExport.invalidBundle': 'Invalid skill ZIP or export bundle. Please check the file.',
   'ui.resource.listSeparator': ', ',
   'ui.employee.publish': 'publish',
   'ui.employee.unpublish': 'unpublish',

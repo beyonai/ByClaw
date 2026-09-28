@@ -723,9 +723,11 @@ export interface UploadSkillZipResponse {
   skillDesc?: string;
   displaySourceType?: string;
   resourceBacked?: boolean;
+  personalWorkspace?: boolean;
 }
 
 export interface QuerySkillListParams {
+  personalWorkspace?: boolean;
   userCode?: string;
   resourceId?: string | number;
   keyword?: string;
@@ -774,6 +776,7 @@ export const queryWorkspacePersonalSkillList = (params: QuerySkillListParams) =>
 };
 
 export interface WorkspaceSkillParams {
+  personalWorkspace?: boolean;
   skillPath: string;
   resourceId?: string | number;
   userCode?: string;
@@ -804,6 +807,7 @@ export const resourceizeWorkspaceSkill = (params: WorkspaceSkillParams) => {
 export const downloadSkillZip = (params: {
   skillPath?: string;
   skillId?: string | number;
+  personalWorkspace?: boolean;
   resourceId?: string | number;
   userCode?: string;
 }) => {
@@ -819,7 +823,7 @@ export const downloadSkillZip = (params: {
  * @param params 参数（包含skillPath技能路径、resourceId资源ID和可选的userCode用户编码）
  * @returns Promise 删除结果
  */
-export const deleteSkill = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
+export const deleteSkill = (params: WorkspaceSkillParams) => {
   return POST<any>('/byaiService/tool/deleteSkill', params, {
     responseCfg: {
       hideErrorTips: true,

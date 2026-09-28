@@ -197,6 +197,15 @@ public class SsResourceService {
         return ssResourceMapper.selectOne(queryWrapper, false);
     }
 
+    /** 个人目录技能只枚举本人创建的工作空间，不使用默认员工或授权给我的员工。 */
+    public List<SsResource> findCreatedDigitalEmployees(Long userId) {
+        if (userId == null) return Collections.emptyList();
+        return ssResourceMapper.selectList(new LambdaQueryWrapper<SsResource>()
+            .eq(SsResource::getCreateBy, userId)
+            .eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name())
+            .ne(SsResource::getResourceStatus, ResourceStatus.DELETE.getNum()));
+    }
+
     /**
      * 按资源编码查询资源。
      *

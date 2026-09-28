@@ -12,6 +12,11 @@ import {
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
 
+jest.mock('../../../skillExport', () => ({
+  buildSkillBundle: jest.fn().mockResolvedValue(new Blob(['zip'])),
+  saveSkillFile: jest.fn(),
+}));
+
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
   useSelector: (selector: any) =>
@@ -53,6 +58,7 @@ jest.mock('../../ResourceCard', () => ({
       data-hidden-menu-keys={JSON.stringify(actionConfig.hiddenMenuItemKeys)}
       data-type-tag={String(actionConfig.showResourceTypeTag)}
       data-enterprise-publication={String(actionConfig.enablePublishToEnterprise)}
+      data-manage-workspace={String(actionConfig.canManageWorkspaceSkill)}
     >
       <button onClick={() => actionConfig.onShelf()}>publish</button>
       <button onClick={() => actionConfig.onUnShelf()}>unpublish</button>
@@ -403,3 +409,73 @@ it.each(
     );
   }
 );
+
+it('exports all filtered pages and workspace skills without changing the displayed list', async () => {
+  const { buildSkillBundle, saveSkillFile } = jest.requireMock('../../../skillExport');
+  (listResourceUseAuth as jest.Mock).mockImplementation(({ pageNum }) =>
+    Promise.resolve({
+      data: { list: [{ resourceId: pageNum === 1 ? '1' : '2', resourceBizType: 'SKILL' }], total: 31 },
+    })
+  );
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'local', skillPath: '/workspace/skills/local' }],
+  });
+  const exportContainer = document.createElement('span');
+  document.body.appendChild(exportContainer);
+  renderList({
+    resourceType: 'SKILL',
+    activeTab: 'personal',
+    myResourcesOnly: false,
+    searchValue: 'demo',
+    exportContainer,
+  });
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(2));
+  const exportButton = screen.getByRole('button', { name: 'resource.skillExport.all' });
+  expect(exportContainer).toContainElement(exportButton);
+  expect(document.getElementById('SKILLListScroller')).not.toContainElement(exportButton);
+  fireEvent.click(exportButton);
+  await waitFor(() => expect(saveSkillFile).toHaveBeenCalled());
+  expect(listResourceUseAuth).toHaveBeenCalledWith(
+    expect.objectContaining({
+      pageNum: 2,
+      keyword: 'demo',
+      availableOnly: true,
+      resourceStatus: '2',
+    })
+  );
+  expect(buildSkillBundle).toHaveBeenCalledWith(
+    [
+      expect.objectContaining({ resourceBacked: false }),
+      expect.objectContaining({ resourceId: '1' }),
+      expect.objectContaining({ resourceId: '2' }),
+    ],
+    undefined
+  );
+  expect(screen.getAllByTestId('resource-card')).toHaveLength(2);
+  exportContainer.remove();
+});
+
+it.each([false, true])(
+  'hides skill sharing and allows publication only in my personal skills: %s',
+  async (myResourcesOnly) => {
+    renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly, enablePublishToEnterprise: true });
+    const card = await screen.findByTestId('resource-card');
+    const hiddenKeys = JSON.parse(card.getAttribute('data-hidden-menu-keys') || '[]');
+    expect(hiddenKeys).toContain('share');
+    expect(hiddenKeys.includes('publishToEnterprise')).toBe(!myResourcesOnly);
+    expect(card).toHaveAttribute('data-enterprise-publication', 'true');
+  }
+);
+
+
+it('loads personal directories without a default employee and trusts their personal scope for management', async () => {
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({ data: { list: [], total: 0 } });
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'mine', skillPath: '/.openclaw/workspace/skills/mine', personalWorkspace: true }],
+  });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: true });
+  expect(await screen.findByTestId('resource-card')).toHaveAttribute('data-manage-workspace', 'true');
+  expect(queryWorkspacePersonalSkillList).toHaveBeenCalledWith({ keyword: '', personalWorkspace: true });
+  const { queryInstalledResourceIds } = jest.requireMock('@/pages/manager/service/DigitalEmployeeMgr');
+  expect(queryInstalledResourceIds).not.toHaveBeenCalled();
+});

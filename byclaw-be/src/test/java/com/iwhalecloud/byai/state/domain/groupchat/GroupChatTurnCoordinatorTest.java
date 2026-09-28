@@ -6,6 +6,9 @@ import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.util.HashMap;
+import java.util.Date;
+import java.util.List;
+import static org.assertj.core.api.Assertions.assertThat;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
@@ -34,8 +37,10 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatRecallMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatActiveTaskException;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidateSessionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
@@ -84,9 +89,37 @@ class GroupChatTurnCoordinatorTest {
         when(resources.findById(anyLong())).thenAnswer(call -> { SsResource agent = new SsResource(); agent.setResourceName("Agent " + call.getArgument(0)); return agent; });
         PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        GroupChatContextService contextService = new GroupChatContextService(messages, mock(SessionService.class),
+            resources);
         coordinator = new GroupChatTurnCoordinator(turns, anchors, tasks, messages, candidates, sequence, members,
             mock(SessionService.class), users, resources, mock(ChatRuntimeStateService.class),
-            mock(GroupChatGatewayExecutor.class), transactions);
+            mock(GroupChatGatewayExecutor.class), contextService, transactions);
+        ReflectionTestUtils.setField(coordinator, "workers", mock(ExecutorService.class));
+    }
+
+    @Test
+    void recalledTriggerCannotBeEnqueuedAfterRecallTransactionCommitted() {
+        ByaiMessage recalled = new ByaiMessage();
+        recalled.setMessageId(20L);
+        recalled.setMessageContent("original");
+        recalled.setRecalledAt(new Date());
+        when(messages.selectByMessageId(20L)).thenReturn(recalled);
+        assertThat(coordinator.enqueueUser(10L, 20L, null, 1L, 2L)).isNull();
+        verify(turns, never()).insert(any(ByaiGroupChatTurn.class));
+    }
+
+    @Test
+    void completedButRecalledParentCannotAutomaticallyDelegateAgain() {
+        ByaiGroupChatRecallMapper recalls = mock(ByaiGroupChatRecallMapper.class);
+        ReflectionTestUtils.setField(coordinator, "recalls", recalls);
+        ByaiGroupChatTurn parent = new ByaiGroupChatTurn();
+        parent.setExecutionId(3L);
+        parent.setGroupSessionId(10L);
+        parent.setHopCount(0);
+        parent.setStatus("SUCCEEDED");
+        when(recalls.isRecalled(3L)).thenReturn(true);
+        assertThat(coordinator.enqueueAgent(parent, 2L, 21L, 21L, "delegate", List.of())).isNull();
+        verify(turns, never()).insert(any(ByaiGroupChatTurn.class));
     }
 
     @Test
@@ -132,6 +165,7 @@ class GroupChatTurnCoordinatorTest {
         JSONObject input = JSON.parseObject(back.getInputContent());
         assertEquals("Here are the sources", input.getString("本次消息"));
         assertEquals(3L, input.getLong("本次发送者ID"));
+        assertFalse(input.containsKey("本次引用消息"));
         assertEquals("Analyze company news", input.getString("原始用户需求"));
         assertEquals(2, back.getHopCount());
         assertNotEquals(a.getCandidateSessionId(), coordinator.enqueueUser(10L, 30L, null, 1L, 2L).getCandidateSessionId());
@@ -172,6 +206,46 @@ class GroupChatTurnCoordinatorTest {
         assertNotEquals(a.getCandidateSessionId(), otherUser.getCandidateSessionId());
         assertEquals(otherUser.getCandidateSessionId(), coordinator.enqueueUser(10L, 24L, 21L, 9L, 2L)
             .getCandidateSessionId());
+    }
+
+    @Test
+    void quotingHumanOnlyMessageStartsAndReusesAgentConversation() {
+        ByaiMessage reference = new ByaiMessage();
+        reference.setMessageId(20L);
+        reference.setSessionId(10L);
+        reference.setUsage(1);
+        reference.setCreatorName("Owner");
+        reference.setMessageContent("Hello B and C");
+        when(messages.selectByMessageId(20L)).thenReturn(reference);
+        when(messages.selectVisibleGroupMessage(10L, 20L)).thenReturn(reference);
+
+        ByaiGroupChatTurn first = coordinator.enqueueUser(10L, 21L, 20L, 1L, 2L);
+        ByaiGroupChatTurn second = coordinator.enqueueUser(10L, 22L, 20L, 1L, 2L);
+
+        assertEquals(20L, first.getRootMessageId());
+        assertEquals(first.getCandidateSessionId(), second.getCandidateSessionId());
+        JSONObject input = JSON.parseObject(first.getInputContent());
+        assertEquals("Hello B and C", input.getString("原始用户需求"));
+        assertEquals("Hello B and C", input.getJSONObject("本次引用消息").getString("content"));
+        assertEquals("Analyze company news", input.getString("本次消息"));
+    }
+
+    @Test
+    void quotingRecalledHumanMessageDoesNotRestoreItsOriginalContent() {
+        ByaiMessage reference = new ByaiMessage();
+        reference.setMessageId(20L);
+        reference.setSessionId(10L);
+        reference.setUsage(1);
+        reference.setMessageContent("private message");
+        reference.setRecalledAt(new Date());
+        when(messages.selectByMessageId(20L)).thenReturn(reference);
+        when(messages.selectVisibleGroupMessage(10L, 20L)).thenReturn(reference);
+
+        ByaiGroupChatTurn turn = coordinator.enqueueUser(10L, 21L, 20L, 1L, 2L);
+
+        assertEquals(21L, turn.getRootMessageId());
+        assertTrue(JSON.parseObject(turn.getInputContent()).getJSONObject("本次引用消息").getBooleanValue("recalled"));
+        assertFalse(turn.getInputContent().contains("private message"));
     }
 
     @Test
@@ -260,6 +334,50 @@ class GroupChatTurnCoordinatorTest {
         assertEquals(2, JSON.parseObject(b.getInputMetadata()).getJSONArray("resourceList").size());
         assertEquals("3", JSON.parseObject(b.getInputMetadata()).getJSONArray("resourceList")
             .getJSONObject(1).getString("resourceId"));
+    }
+
+    @Test
+    void quotedMessageIncludesItsIdentityContentAndAttachmentsInTurnContext() {
+        ByaiMessage quoted = new ByaiMessage();
+        quoted.setMessageId(21L);
+        quoted.setSessionId(10L);
+        quoted.setUsage(1);
+        quoted.setCreatorName("Reporter");
+        quoted.setMessageContent("Please review the report");
+        quoted.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"report.pdf\",\"fileUrl\":\"/files/report.pdf\"}]}");
+        when(messages.selectByMessageId(21L)).thenReturn(quoted);
+        when(messages.selectVisibleGroupMessage(10L, 21L)).thenReturn(quoted);
+        ByaiGroupChatTurn original = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
+        when(turns.selectByPublicMessage(21L)).thenReturn(original);
+
+        ByaiGroupChatTurn reply = coordinator.enqueueUser(10L, 22L, 21L, 1L, 2L);
+        JSONObject reference = JSON.parseObject(reply.getInputContent()).getJSONObject("本次引用消息");
+        assertEquals("21", reference.getString("messageId"));
+        assertEquals("Please review the report", reference.getString("content"));
+        assertEquals("Reporter", reference.getJSONObject("speaker").getString("displayName"));
+        assertEquals("report.pdf", reference.getJSONArray("attachments").getJSONObject(0).getString("fileName"));
+        assertEquals("/files/report.pdf", reference.getJSONArray("attachments").getJSONObject(0).getString("fileUrl"));
+    }
+
+    @Test
+    void recalledQuotedMessageDoesNotExposeItsBodyOrFiles() {
+        ByaiMessage quoted = new ByaiMessage();
+        quoted.setMessageId(21L);
+        quoted.setSessionId(10L);
+        quoted.setUsage(1);
+        quoted.setMessageContent("private quoted text");
+        quoted.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"secret.pdf\"}]}");
+        quoted.setRecalledAt(new Date());
+        when(messages.selectByMessageId(21L)).thenReturn(quoted);
+        when(messages.selectVisibleGroupMessage(10L, 21L)).thenReturn(quoted);
+        ByaiGroupChatTurn original = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
+        when(turns.selectByPublicMessage(21L)).thenReturn(original);
+
+        ByaiGroupChatTurn reply = coordinator.enqueueUser(10L, 22L, 21L, 1L, 2L);
+        String context = reply.getInputContent();
+        assertTrue(JSON.parseObject(context).getJSONObject("本次引用消息").getBooleanValue("recalled"));
+        assertFalse(context.contains("private quoted text"));
+        assertFalse(context.contains("secret.pdf"));
     }
 
 }

@@ -18,11 +18,13 @@ import static org.mockito.Mockito.when;
 import java.sql.Connection;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import javax.sql.DataSource;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -69,6 +71,7 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class GroupChatCreationAndInvitationTest {
+    private final AuthApplicationService authService = mock(AuthApplicationService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
     private final ProjectApplicationService projects = mock(ProjectApplicationService.class);
     private final ProjectMemberService projectMembers = mock(ProjectMemberService.class);
@@ -94,6 +97,7 @@ class GroupChatCreationAndInvitationTest {
             events, sessionExt);
         ReflectionTestUtils.setField(service, "workgroupTemplateService", templates);
         ReflectionTestUtils.setField(service, "resourceService", resources);
+        ReflectionTestUtils.setField(service, "authApplicationService", authService);
         when(resources.findByIdList(any())).thenAnswer(invocation -> {
             java.util.Collection<Long> ids = invocation.getArgument(0);
             return ids.stream().map(id -> {
@@ -102,7 +106,7 @@ class GroupChatCreationAndInvitationTest {
                 return resource;
             }).toList();
         });
-        when(projects.createProject(any())).thenAnswer(invocation -> {
+        when(projects.createGroupChatProject(any())).thenAnswer(invocation -> {
             ProjectDTO request = invocation.getArgument(0);
             Project project = new Project();
             project.setProjectId(100L);
@@ -139,13 +143,16 @@ class GroupChatCreationAndInvitationTest {
             .containsExactly("OWNER", "MEMBER", "MEMBER");
         assertThat(result.getMembers()).extracting(ByaiSessionMember::getMemObjType)
             .containsExactly("USER", "USER", "AGENT");
+        verify(authService).grantDigitalEmployeesToUser(Set.of(30L), 10L);
+        verify(authService).grantDigitalEmployeesToUser(Set.of(30L), 20L);
+        verifyNoMoreInteractions(authService);
         verify(projectMembers).addMembers(100L, List.of(20L), "member");
         verify(projectMembers, never()).addMember(any(), any(), any());
         verify(sessions).save(result.getSession());
         verify(members).batchSave(result.getMembers());
         assertDefaultMemberPermissions(result.getSession().getSessionId());
         ArgumentCaptor<ProjectDTO> projectRequest = ArgumentCaptor.forClass(ProjectDTO.class);
-        verify(projects).createProject(projectRequest.capture());
+        verify(projects).createGroupChatProject(projectRequest.capture());
         assertThat(projectRequest.getValue().getProjectName()).isEqualTo(request.getName());
         assertThat(projectRequest.getValue().getDescription()).isEqualTo(request.getGoal());
         // 初始成员属于建群状态，不进入成员变更时间线。
@@ -184,12 +191,66 @@ class GroupChatCreationAndInvitationTest {
         Users user = new Users();
         user.setUserName("原名");
         user.setAvatar("/avatars/current.png");
-        when(users.findById(10L)).thenReturn(user);
+        user.setUserId(10L);
+        when(users.findByIds(any())).thenReturn(List.of(user));
 
         ByaiSessionMember result = service.detail(200L).getMembers().get(0);
 
         assertThat(result.getMemName()).isEqualTo("群昵称");
         assertThat(result.getAvatar()).isEqualTo("/avatars/current.png");
+        verify(users).findByIds(java.util.Set.of(10L));
+        verify(users, never()).findById(any());
+    }
+
+    @Test
+    void detailBatchesMixedMembersAndPreservesOrderAndMissingSnapshots() {
+        UserService users = mock(UserService.class);
+        ReflectionTestUtils.setField(service, "userService", users);
+        ByaiSessionMember human = new ByaiSessionMember();
+        human.setMemObjType("USER");
+        human.setMemObjId(10L);
+        human.setMemName(" ");
+        ByaiSessionMember agent = new ByaiSessionMember();
+        agent.setMemObjType("AGENT");
+        agent.setMemObjId(30L);
+        agent.setMemName("旧员工名");
+        ByaiSessionMember missing = new ByaiSessionMember();
+        missing.setMemObjType("USER");
+        missing.setMemObjId(11L);
+        missing.setMemName("已删除成员快照");
+        when(members.findOrderedGroupMembers(200L)).thenReturn(List.of(human, agent, missing));
+        Users user = new Users();
+        user.setUserId(10L);
+        user.setUserName("用户名称");
+        user.setState("I");
+        user.setAvatar("user.png");
+        when(users.findByIds(any())).thenReturn(List.of(user));
+        SsResource resource = new SsResource();
+        resource.setResourceId(30L);
+        resource.setResourceName("新员工名");
+        resource.setAvatar("agent.png");
+        doReturn(List.of(resource)).when(resources).findByIdList(any());
+
+        var result = service.detail(200L).getMembers();
+
+        assertThat(result).extracting(ByaiSessionMember::getMemName)
+            .containsExactly("用户名称", "新员工名", "已删除成员快照");
+        assertThat(result).extracting(ByaiSessionMember::getAvatar).containsExactly("user.png", "agent.png", null);
+        verify(users).findByIds(java.util.Set.of(10L, 11L));
+        verify(resources).findByIdList(java.util.Set.of(30L));
+        verify(users, never()).findById(any());
+        verify(resources, never()).findById(any());
+        verify(authorization).requireCurrentUserMember(200L);
+    }
+
+    @Test
+    void detailDoesNotQueryPresentationForEmptyMembership() {
+        UserService users = mock(UserService.class);
+        ReflectionTestUtils.setField(service, "userService", users);
+        when(members.findOrderedGroupMembers(200L)).thenReturn(List.of());
+        assertThat(service.detail(200L).getMembers()).isEmpty();
+        verify(users, never()).findByIds(any());
+        verify(resources, never()).findByIdList(any());
     }
 
     @Test
@@ -233,6 +294,8 @@ class GroupChatCreationAndInvitationTest {
         assertThat(result.getMembers()).filteredOn(member -> "AGENT".equals(member.getMemObjType()))
             .extracting(ByaiSessionMember::getMemObjId).containsExactly(40L, 41L);
         verify(members).batchSave(result.getMembers());
+        verify(authService).grantDigitalEmployeesToUser(Set.of(40L, 41L), 10L);
+        verifyNoMoreInteractions(authService);
     }
 
     @Test
@@ -261,12 +324,15 @@ class GroupChatCreationAndInvitationTest {
         assertThat(service.create(request).getMembers())
             .filteredOn(member -> "AGENT".equals(member.getMemObjType()))
             .extracting(ByaiSessionMember::getMemObjId).containsExactly(40L, 41L);
+        verify(authService).grantDigitalEmployeesToUser(Set.of(40L, 41L), 10L);
+        verifyNoMoreInteractions(authService);
     }
 
     @Test
     void createsGroupWithoutEmployeesWhenNoneSubmitted() {
         assertThat(service.create(request()).getMembers())
             .extracting(ByaiSessionMember::getMemObjType).containsExactly("USER");
+        verifyNoInteractions(authService);
     }
 
     @Test
@@ -277,7 +343,7 @@ class GroupChatCreationAndInvitationTest {
         request.setAgentIds(List.of(40L, 41L));
         assertThatThrownBy(() -> service.create(request))
             .isInstanceOf(com.iwhalecloud.byai.common.exception.BaseException.class);
-        verify(projects, never()).createProject(any());
+        verify(projects, never()).createGroupChatProject(any());
         verify(members, never()).batchSave(any());
     }
 
@@ -369,7 +435,7 @@ class GroupChatCreationAndInvitationTest {
 
     @Test
     void projectFailureDoesNotWriteGroup() {
-        doThrow(new IllegalArgumentException("duplicate project name")).when(projects).createProject(any());
+        doThrow(new IllegalArgumentException("duplicate project name")).when(projects).createGroupChatProject(any());
         assertThatThrownBy(() -> service.create(request())).hasMessage("duplicate project name");
         verifyNoInteractions(projectMembers, sessions, members);
     }
@@ -451,11 +517,29 @@ class GroupChatCreationAndInvitationTest {
             project.setProjectId(100L);
             project.setProjectName("协作群");
             return project;
-        }).when(projects).createProject(any());
+        }).when(projects).createGroupChatProject(any());
         doThrow(new IllegalStateException("group members failed")).when(members).batchSave(anyList());
         assertThatThrownBy(() -> service.create(request())).hasMessage("group members failed");
         verify(connection).rollback();
         verify(connection, never()).commit();
+    }
+
+    @Test
+    void creationGrantFailureRollsBackOuterJdbcTransaction() throws Exception {
+        Connection connection = transactionalProxy();
+        GroupChatCreateRequest request = request();
+        request.setAgentIds(List.of(40L));
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            throw new IllegalStateException("employee grant failed");
+        }).when(authService).grantDigitalEmployeesToUser(Set.of(40L), 10L);
+
+        assertThatThrownBy(() -> service.create(request)).hasMessage("employee grant failed");
+
+        verify(members).batchSave(anyList());
+        verify(connection).rollback();
+        verify(connection, never()).commit();
+        verifyNoInteractions(sessionExt);
     }
 
     @Test

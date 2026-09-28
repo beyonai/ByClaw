@@ -104,6 +104,13 @@ public class SessionExtService {
         return ListUtil.isNotEmpty(byaiSessionExts) ? byaiSessionExts.getFirst() : null;
     }
 
+    public List<ByaiSessionExt> findByExtParamCodes(Long sessionId, List<String> codes) {
+        if (codes == null || codes.isEmpty()) return List.of();
+        return byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
+            .eq(ByaiSessionExt::getSessionId, sessionId)
+            .in(ByaiSessionExt::getExtParamCode, codes));
+    }
+
     /**
      * 删除会话的指定扩展参数。
      *

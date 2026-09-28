@@ -110,6 +110,7 @@ class GroupChatGatewayExecutorTest {
         child.setCreatorId(30L);
         child.setUsage(1);
         child.setMessageContent("{{DIG_EMPLOYEE_40}} 请生成报告");
+        child.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"input.pdf\"}]}");
         child.setMetadata("{\"scene\":\"GROUP_TASK\",\"resourceList\":[{\"resourceType\":\"DIG_EMPLOYEE\",\"resourceId\":\"40\",\"resourceName\":\"报告助理\"}]}");
         when(messages.selectBySessionId(60L)).thenReturn(List.of(child));
         when(executions.selectByCandidateSessionId(60L)).thenReturn(execution);
@@ -128,6 +129,8 @@ class GroupChatGatewayExecutorTest {
         assertThat(dto.getValue().getSessionId()).isEqualTo(60L);
         assertThat(dto.getValue().getChatContent()).isEqualTo(child.getMessageContent());
         assertThat(dto.getValue().getResourceList()).hasSize(1);
+        assertThat(dto.getValue().getFiles()).singleElement().satisfies(file ->
+            assertThat(file.getFileName()).isEqualTo("input.pdf"));
         assertThat(existing.getValue().getMessageId()).isEqualTo(61L);
         assertThat(existing.getValue().getMetadata()).isEqualTo(child.getMetadata());
     }

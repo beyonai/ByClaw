@@ -79,6 +79,7 @@ public class GroupChatCandidateSessionService {
         childMessage.setCreatorId(initiatorUserId);
         childMessage.setCreatorName(source.getCreatorName());
         childMessage.setMessageContent(source.getMessageContent());
+        childMessage.setRelatedResources(source.getRelatedResources());
         childMessage.setUsage(1);
         childMessage.setIsComplete(true);
         JSONObject metadata = new JSONObject();

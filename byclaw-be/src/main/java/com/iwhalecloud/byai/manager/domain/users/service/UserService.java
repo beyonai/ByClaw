@@ -114,6 +114,12 @@ public class UserService {
         return usersMapper.selectById(userId);
     }
 
+    /** 与 findById 保持相同状态语义，供历史成员展示批量读取。 */
+    public List<Users> findByIds(Collection<Long> userIds) {
+        if (CollectionUtils.isEmpty(userIds)) return List.of();
+        return usersMapper.selectBatchIds(userIds);
+    }
+
     /**
      * 根据用户编码查找用户信息
      *
@@ -230,6 +236,13 @@ public class UserService {
             return null;
         }
         return users.get(0);
+    }
+
+    /** 查询手机号关联的全部账号，保留明文旧数据与停用账号供自动登录判定。 */
+    public List<Users> findAllByUserPhone(String phone) {
+        LambdaQueryWrapper<Users> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.in(Users::getPhone, phone, Sm4Util.encrypt(phone));
+        return usersMapper.selectList(queryWrapper);
     }
 
     /**

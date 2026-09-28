@@ -140,7 +140,7 @@ public class GroupChatApplicationService {
         ProjectDTO projectRequest = new ProjectDTO();
         projectRequest.setProjectName(request.getName());
         projectRequest.setDescription(request.getGoal());
-        Project project = projectApplicationService.createProject(projectRequest);
+        Project project = projectApplicationService.createGroupChatProject(projectRequest);
         Set<Long> userIds = new LinkedHashSet<>();
         if (request.getUserIds() != null) {
             userIds.addAll(request.getUserIds());
@@ -168,6 +168,12 @@ public class GroupChatApplicationService {
                 UserRole.MEMBER.name()));
         }
         memberService.batchSave(members);
+        // 建群批量写入不会经过 insertMember；复用入群授权，补齐默认助手及所选员工的使用权限。
+        // 从最终成员列表取真人，包含创建人且避免重复授权；授权写入与建群共用当前事务。
+        if (!agentIds.isEmpty()) {
+            members.stream().filter(member -> MemObjType.USER.name().equals(member.getMemObjType()))
+                .forEach(member -> authApplicationService.grantDigitalEmployeesToUser(agentIds, member.getMemObjId()));
+        }
         initializeMemberPermissions(session.getSessionId());
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
@@ -299,7 +305,7 @@ public class GroupChatApplicationService {
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
         List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
-        members.forEach(this::fillMemberPresentation);
+        fillMemberPresentations(members);
         response.setMembers(members);
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
@@ -474,6 +480,40 @@ public class GroupChatApplicationService {
     }
 
     /** 使用当前用户资料和数字员工资源补齐接口返回的成员展示信息。 */
+    /** 详情一次批量读取每种成员，保留列表顺序、群昵称及已删除成员的快照。 */
+    private void fillMemberPresentations(List<ByaiSessionMember> members) {
+        Set<Long> userIds = new LinkedHashSet<>();
+        Set<Long> agentIds = new LinkedHashSet<>();
+        for (ByaiSessionMember member : members) {
+            if (member.getMemObjId() == null) continue;
+            if (MemObjType.USER.name().equals(member.getMemObjType())) userIds.add(member.getMemObjId());
+            else if (MemObjType.AGENT.name().equals(member.getMemObjType())) agentIds.add(member.getMemObjId());
+        }
+        Map<Long, Users> users = new HashMap<>();
+        Map<Long, SsResource> agents = new HashMap<>();
+        if (userService != null && !userIds.isEmpty()) {
+            userService.findByIds(userIds).forEach(user -> users.put(user.getUserId(), user));
+        }
+        if (resourceService != null && !agentIds.isEmpty()) {
+            resourceService.findByIdList(agentIds).forEach(agent -> agents.put(agent.getResourceId(), agent));
+        }
+        for (ByaiSessionMember member : members) {
+            if (MemObjType.USER.name().equals(member.getMemObjType())) {
+                Users user = users.get(member.getMemObjId());
+                if (user != null) {
+                    if (member.getMemName() == null || member.getMemName().isBlank()) member.setMemName(user.getUserName());
+                    member.setAvatar(user.getAvatar());
+                }
+            } else if (MemObjType.AGENT.name().equals(member.getMemObjType())) {
+                SsResource agent = agents.get(member.getMemObjId());
+                if (agent != null) {
+                    member.setMemName(agent.getResourceName());
+                    member.setAvatar(agent.getAvatar());
+                }
+            }
+        }
+    }
+
     private void fillMemberPresentation(ByaiSessionMember member) {
         if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null) {
             Users user = userService.findById(member.getMemObjId());

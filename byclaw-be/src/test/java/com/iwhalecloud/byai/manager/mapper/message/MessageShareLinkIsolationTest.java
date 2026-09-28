@@ -35,7 +35,7 @@ class MessageShareLinkIsolationTest {
                 )
                 """);
             // Execute the migration's actual expression indexes on a disposable local database.
-            String migration = Files.readString(Path.of("../deploy/migrations/versions/V0.4.1/V0.4.1__ddl.sql"));
+            String migration = Files.readString(Path.of("../deploy/migrations/versions/V0.5.0/V0.5.0__ddl.sql"));
             var indexes = Pattern.compile("CREATE UNIQUE INDEX IF NOT EXISTS uk_message_share_link_[\\s\\S]*?;")
                 .matcher(migration);
             int count = 0;

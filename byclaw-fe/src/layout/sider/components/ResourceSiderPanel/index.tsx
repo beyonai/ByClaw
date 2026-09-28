@@ -37,6 +37,7 @@ import ResourceSiderListItem, {
   type ResourceSiderType,
 } from './ResourceSiderListItem';
 import styles from './index.module.less';
+import { useEnterpriseSkillPublication } from './useEnterpriseSkillPublication';
 const PAGE_SIZE = 30;
 
 interface Props {
@@ -627,6 +628,17 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     );
   };
 
+  const { canPublish, publishingId, publish } = useEnterpriseSkillPublication({
+    enabled: resourceType === 'SKILL',
+    onDetail: handleDetail,
+    onPublished: (resourceId) => {
+      // 仅更新源技能的操作权限，保留当前分页和滚动位置。
+      setResourceList((rows) =>
+        rows.map((row) => (String(row.resourceId) === resourceId ? { ...row, canPublishToEnterprise: false } : row))
+      );
+    },
+  });
+
   const handleShare = async (item: ResourceItem) => {
     if (!isWorkspaceSkill(item)) {
       await openShareAuthModal(item);
@@ -756,7 +768,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   };
 
   const renderDetailDropdown = (item: ResourceItem) => {
-    const menuItems: { key: string; label: React.ReactNode }[] = [];
+    const menuItems: { key: string; label: React.ReactNode; disabled?: boolean }[] = [];
     if (!item.quoteDisabled) {
       menuItems.push({
         key: 'quote',
@@ -767,10 +779,21 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       key: 'detail',
       label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
     });
-    if (item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
+    if (resourceType !== 'SKILL' && item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
       menuItems.push({
         key: 'share',
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.share' })}</div>,
+      });
+    }
+    if (canPublish(item)) {
+      menuItems.push({
+        key: 'publishToEnterprise',
+        disabled: publishingId === String(item.resourceId),
+        label: (
+          <div className={employeeStyles.dropdownMenuItem}>
+            {intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+          </div>
+        ),
       });
     }
     if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL && canManageActiveAgent) {
@@ -794,6 +817,10 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
             domEvent.stopPropagation();
             if (key === 'quote') {
               handleQuoteResource(item);
+              return;
+            }
+            if (key === 'publishToEnterprise') {
+              publish(item);
               return;
             }
             if (key === 'share') {

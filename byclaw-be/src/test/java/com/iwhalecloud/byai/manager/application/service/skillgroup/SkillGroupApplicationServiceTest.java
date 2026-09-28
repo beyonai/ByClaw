@@ -314,7 +314,7 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceManagePermission(group)).thenReturn(false);
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         List<SkillGroupMemberVo> members = List.of(
                 statusMember(502L, SkillGroupMemberStatus.INSTALLABLE),
                 statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
@@ -368,7 +368,7 @@ class SkillGroupApplicationServiceTest {
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.install(installQo(401L, GROUP_ID)))
@@ -399,7 +399,7 @@ class SkillGroupApplicationServiceTest {
 
         SsResource employee = digitalEmployee(401L);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(false);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(false);
         assertThatThrownBy(() -> service.install(installQo(401L, GROUP_ID)))
                 .isInstanceOf(BaseException.class);
 
@@ -415,7 +415,7 @@ class SkillGroupApplicationServiceTest {
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         SkillGroupInstallResultVo delegated = new SkillGroupInstallResultVo();
         delegated.setTotalSkillIds(List.of(599L));
         delegated.setRemovedSkillIds(List.of(599L));
@@ -534,7 +534,7 @@ class SkillGroupApplicationServiceTest {
         when(mapper.selectDetail(GROUP_ID, TENANT_ID, USER_ID)).thenReturn(visible);
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(List.of(member));
         when(resourceService.findById(401L)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(memberStatusService.evaluate(any(), eq(401L))).thenReturn(List.of(member));
         SkillGroupIdQo qo = new SkillGroupIdQo();
         qo.setGroupId(GROUP_ID);
@@ -591,7 +591,7 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(inactiveEmployee);
-        when(authService.hasResourceManagePermission(inactiveEmployee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(inactiveEmployee)).thenReturn(true);
 
         assertThatThrownBy(() -> service.preflightInstall(installQo(401L, GROUP_ID)))
                 .isInstanceOf(BaseException.class);
@@ -612,7 +612,7 @@ class SkillGroupApplicationServiceTest {
         List<SkillGroupMemberVo> members = List.of(statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
         when(resourceService.findById(GROUP_ID)).thenReturn(group);
         when(resourceService.findById(401L)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(skill(501L)));
         when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
@@ -649,7 +649,7 @@ class SkillGroupApplicationServiceTest {
         when(resourceService.findById(GROUP_ID)).thenReturn(group);
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
         when(resourceService.findById(401L)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
         when(resourceService.findByIdList(List.of(501L, 502L))).thenReturn(List.of(skill(501L), skill(502L)));
         when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
@@ -1175,7 +1175,7 @@ class SkillGroupApplicationServiceTest {
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(employeeId, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
     }
 
     @Test

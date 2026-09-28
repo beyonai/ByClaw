@@ -14,6 +14,11 @@ import java.util.Date;
 @Getter
 @Setter
 public class DigitalEmployeePageVo {
+    private boolean officialPublication;
+    private boolean canPublishEmployee;
+    /** 当前活动申请或最近一次发布结果，用于列表入口展示。 */
+    private String employeePublicationStatus;
+
 
     /**
      * 资源ID

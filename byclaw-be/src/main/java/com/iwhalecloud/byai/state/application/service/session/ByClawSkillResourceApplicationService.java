@@ -143,6 +143,10 @@ public class ByClawSkillResourceApplicationService {
     @Autowired
     private ByClawSkillPathResolver skillPathResolver;
 
+    @org.springframework.context.annotation.Lazy
+    @Autowired
+    private ByClawSkillQueryApplicationService personalSkillQueryService;
+
     @Autowired
     private ByClawSkillUploadApplicationService byClawSkillUploadApplicationService;
 
@@ -352,13 +356,32 @@ public class ByClawSkillResourceApplicationService {
         return result;
     }
 
+    /** 个人目录资源化只创建本人技能，不安装、绑定或同步默认数字员工。 */
+    @Transactional(rollbackFor = Exception.class)
+    public SkillImportResult resourceizeMyDirectorySkill(String skillPath, boolean overwriteConfirmed) {
+        Long sourceId = personalSkillQueryService.resolveMySkillSource(skillPath);
+        return resourceizeWorkspaceSkill(CurrentUserHolder.getCurrentUserCode(), sourceId, skillPath,
+            overwriteConfirmed, false);
+    }
+
+    public ObjectZipImportResult previewMyDirectorySkillConflicts(String skillPath) {
+        Long sourceId = personalSkillQueryService.resolveMySkillSource(skillPath);
+        return previewSkillConflicts(
+            buildWorkspaceSkillPackage(CurrentUserHolder.getCurrentUserCode(), sourceId, skillPath), true);
+    }
+
     public ObjectZipImportResult previewWorkspaceSkillShareConflicts(String userCode, Long digitalEmployeeResourceId,
         String skillPath) {
         WorkspaceSkillPackage skillPackage = buildWorkspaceSkillPackage(userCode,
             resolveDigitalEmployeeId(digitalEmployeeResourceId), skillPath);
+        return previewSkillConflicts(skillPackage, false);
+    }
+
+    private ObjectZipImportResult previewSkillConflicts(WorkspaceSkillPackage skillPackage, boolean personalOnly) {
         ObjectZipImportResult result = new ObjectZipImportResult();
         result.setTotal(1);
         SsResource existing = findExistingSkillByNaturalKey(skillPackage.metadata().skillCode());
+        if (personalOnly) assertPersonalSkillOwner(existing);
         if (existing != null) {
             assertSkillManagePermission(existing);
             ObjectZipImportItem item = new ObjectZipImportItem();
@@ -382,10 +405,16 @@ public class ByClawSkillResourceApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public SkillImportResult resourceizeAndBindWorkspaceSkill(String userCode, Long digitalEmployeeResourceId,
         String skillPath, boolean overwriteConfirmed) {
-        Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
-        validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
+        return resourceizeWorkspaceSkill(userCode, resolveDigitalEmployeeId(digitalEmployeeResourceId), skillPath,
+            overwriteConfirmed, true);
+    }
+
+    private SkillImportResult resourceizeWorkspaceSkill(String userCode, Long resolvedDigitalEmployeeId,
+        String skillPath, boolean overwriteConfirmed, boolean bindEmployee) {
+        if (bindEmployee) validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
         WorkspaceSkillPackage skillPackage = buildWorkspaceSkillPackage(userCode, resolvedDigitalEmployeeId, skillPath);
         SsResource existing = findExistingSkillByNaturalKey(skillPackage.metadata().skillCode());
+        if (!bindEmployee) assertPersonalSkillOwner(existing);
         if (existing != null && !overwriteConfirmed) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.import.cover.confirm.item"));
         }
@@ -402,11 +431,24 @@ public class ByClawSkillResourceApplicationService {
         SsResExtSkill extSkill = saveOrUpdateSkillExt(userCode, skillResource, skillPackage.bytes(),
             skillPackage.metadata(), skillPackage.skillPath(), skillPackage.skillDocObjectKey(),
             SOURCE_TYPE_SKILL_MANAGE_IMPORT);
-        bindSkillToDigitalEmployee(resolvedDigitalEmployeeId, skillResource.getResourceId());
+        if (bindEmployee) bindSkillToDigitalEmployee(resolvedDigitalEmployeeId, skillResource.getResourceId());
         syncSkillTargetContent(userCode, skillResource, extSkill, true);
-        digitalEmployeeApplicationService.rebuildAndSaveDigitalEmployeeRelSkills(resolvedDigitalEmployeeId);
-        digitalEmployeeApplicationService.synOpenClawWorkSpace(resolvedDigitalEmployeeId);
+        if (bindEmployee) {
+            digitalEmployeeApplicationService.rebuildAndSaveDigitalEmployeeRelSkills(resolvedDigitalEmployeeId);
+            digitalEmployeeApplicationService.synOpenClawWorkSpace(resolvedDigitalEmployeeId);
+        }
         return new SkillImportResult(skillResource, extSkill, updated);
+    }
+
+    /** 个人目录只能覆盖本人个人技能，不能借目录资源化覆盖可管理的他人或企业资源。 */
+    private void assertPersonalSkillOwner(SsResource resource) {
+        if (resource == null) return;
+        boolean personalOwner = OwnerType.PERSONAL.equals(resource.getOwnerType())
+            || "personal_default".equals(resource.getOwnerType());
+        if (!personalOwner || !Objects.equals(resource.getCreateBy(), CurrentUserHolder.getCurrentUserId())) {
+            throw new IllegalArgumentException(
+                I18nUtil.get("byclaw.skill.import.no.manage.permission", resource.getResourceName()));
+        }
     }
 
     public ObjectZipImportResult buildSingleSkillImportResult(SkillImportResult itemResult) {
@@ -635,6 +677,7 @@ public class ByClawSkillResourceApplicationService {
     public void unlinkWorkspaceSkill(String userCode, Long digitalEmployeeResourceId, String skillPath,
         String skillName) {
         Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
+        validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
         String resolvedSkillName = StringUtils.defaultIfBlank(skillName, lastPathSegment(skillPath));
         SsResource skillResource = findExistingSkill(resolvedSkillName, OwnerType.PERSONAL);
         if (skillResource != null) {
@@ -684,7 +727,7 @@ public class ByClawSkillResourceApplicationService {
             }
             throw new IllegalArgumentException(I18nUtil.get("resource.not.found"));
         }
-        boolean baseManagePermission = authApplicationService.hasResourceManagePermission(digitalEmployee);
+        boolean baseManagePermission = authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee);
         boolean managePermission = baseManagePermission;
         if (detailedLog) {
             Long currentUserId = CurrentUserHolder.getCurrentUserId();

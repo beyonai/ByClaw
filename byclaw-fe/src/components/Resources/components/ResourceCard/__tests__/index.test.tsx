@@ -1,3 +1,8 @@
+jest.mock('@/service/employeePublication', () => ({
+  ...jest.requireActual('@/service/employeePublication'),
+  openEmployeePublication: jest.fn(),
+}));
+import { openEmployeePublication } from '@/service/employeePublication';
 jest.mock('@umijs/max', () => ({
   getIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
@@ -34,7 +39,11 @@ jest.mock('antd', () => {
         <div>
           {menu?.items?.map((item) => (
             // 模拟 Menu 的条目点击分发，禁用项不触发业务回调。
-            <div key={item?.key} onClick={item?.disabled ? undefined : item?.onClick}>
+            <div
+              key={item?.key}
+              data-testid={`resource-menu-${item?.key}`}
+              onClick={item?.disabled ? undefined : item?.onClick}
+            >
               {item?.label}
             </div>
           ))}
@@ -44,7 +53,11 @@ jest.mock('antd', () => {
   };
 });
 
-jest.mock('@/pages/manager/service/resources', () => ({ publishSkillToEnterprise: jest.fn() }));
+jest.mock('@/pages/manager/service/resources', () => ({
+  publishSkillToEnterprise: jest.fn(),
+  checkWorkspaceSkillShareConflicts: jest.fn(),
+  resourceizeWorkspaceSkill: jest.fn(),
+}));
 
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({
   installDigitalEmployeeRelResources: jest.fn(),
@@ -60,7 +73,11 @@ jest.mock('@/components/AntdIcon', () => ({
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider, message } from 'antd';
-import { publishSkillToEnterprise } from '@/pages/manager/service/resources';
+import {
+  publishSkillToEnterprise,
+  checkWorkspaceSkillShareConflicts,
+  resourceizeWorkspaceSkill,
+} from '@/pages/manager/service/resources';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceCard from '..';
 import * as globalHook from '@/hooks/useGlobal';
@@ -1136,5 +1153,196 @@ describe('personal skill enterprise publication', () => {
     expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
     expect(emit).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+  });
+});
+
+describe('digital employee publication entry', () => {
+  it.each([
+    [undefined, '发布到官方推荐'],
+    ['DRAFT', '继续发布'],
+    ['PENDING', '查看发布进度'],
+    ['APPLYING', '查看发布进度'],
+    ['REJECTED', '查看审核结果'],
+    ['WITHDRAWN', '查看发布申请'],
+    ['FAILED', '查看发布结果'],
+    ['PUBLISHED', '查看发布结果'],
+  ])('shows the entry for %s and opens the existing request', async (status, label) => {
+    (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: true,
+          employeePublicationStatus: status,
+        }}
+      />
+    );
+    fireEvent.click(screen.getByText(label!));
+    await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('10'));
+  });
+  it('only offers publication when the backend allows it', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: false,
+        }}
+      />
+    );
+    expect(screen.queryByText('发布到官方推荐')).not.toBeInTheDocument();
+  });
+  it('opens an official copy through its candidate workflow', async () => {
+    (openEmployeePublication as jest.Mock).mockResolvedValue(undefined);
+    const onEdit = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'enterprise',
+          canEdit: true,
+          officialPublication: true,
+        }}
+        actionConfig={{ onEdit }}
+      />
+    );
+    fireEvent.click(screen.getByText('common.editInfo'));
+    await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('10', 'editOfficial'));
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+});
+
+it.each(['inner', 'custom'])('shows export for %s skills without management permissions', async (skillType) => {
+  renderWithQueryClient(
+    <ResourceCard
+      resourceType="SKILL"
+      variant="skillPoster"
+      actionConfig={{ enableSkillExport: true }}
+      resource={{
+        resourceId: 'export-skill',
+        resourceName: 'Export skill',
+        resourceBizType: 'SKILL',
+        skillType,
+        canEdit: false,
+        canDelete: false,
+        canManageAuth: false,
+      }}
+    />
+  );
+  expect(
+    within(screen.getByTestId('resource-menu-exportSkill')).getByText('resource.skillExport.single')
+  ).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /resource.skillExport.single/ })).not.toBeInTheDocument();
+});
+
+describe('workspace skill enterprise publication', () => {
+  const workspaceSkill = {
+    resourceId: 'WORKSPACE_SKILL:/skills/example',
+    resourceName: 'Workspace skill',
+    resourceBizType: 'SKILL',
+    resourceBacked: false,
+    skillPath: '/skills/example',
+  };
+  const actionConfig = {
+    enablePublishToEnterprise: true,
+    canManageWorkspaceSkill: true,
+    hiddenMenuItemKeys: ['share'],
+  };
+  const emit = jest.fn();
+
+  beforeEach(() => {
+    emit.mockReset();
+    jest.spyOn(globalHook, 'default').mockReturnValue({ EventEmitter: { emit } } as any);
+    (checkWorkspaceSkillShareConflicts as jest.Mock).mockReset().mockResolvedValue({ updatedItems: [] });
+    (resourceizeWorkspaceSkill as jest.Mock).mockReset().mockResolvedValue({
+      items: [{ success: true, resourceId: 'personal-source' }],
+    });
+    (publishSkillToEnterprise as jest.Mock).mockReset().mockResolvedValue({
+      resource: { resourceId: 'enterprise-copy' },
+      alreadyExists: false,
+    });
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([
+    { hiddenMenuItemKeys: ['share', 'publishToEnterprise'] },
+    { canManageWorkspaceSkill: false },
+    { enablePublishToEnterprise: false },
+  ])('hides publication for browsing or insufficient capability: %j', (overrides) => {
+    renderWithQueryClient(
+      <ResourceCard resource={workspaceSkill} resourceType="SKILL" actionConfig={{ ...actionConfig, ...overrides }} />
+    );
+    expect(screen.queryByText('common.share')).not.toBeInTheDocument();
+    expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
+    expect(screen.getByText('common.detail')).toBeInTheDocument();
+  });
+
+  it('resourceizes after confirmation and publishes with the real ID without reloading', async () => {
+    renderWithQueryClient(<ResourceCard resource={workspaceSkill} resourceType="SKILL" actionConfig={actionConfig} />);
+    expect(screen.queryByText('common.share')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    expect(resourceizeWorkspaceSkill).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    await waitFor(() => expect(publishSkillToEnterprise).toHaveBeenCalledWith('personal-source'));
+    expect(resourceizeWorkspaceSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ skillPath: '/skills/example', overwriteConfirmed: false })
+    );
+    expect(await screen.findByText('resource.publishToEnterpriseSuccess')).toBeInTheDocument();
+    expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
+    expect(screen.getByText('Workspace skill')).toBeInTheDocument();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('publishes a personal directory without sending the default employee or user code', async () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{ ...workspaceSkill, personalWorkspace: true }}
+        resourceType="SKILL"
+        actionConfig={actionConfig}
+      />
+    );
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    await waitFor(() => expect(publishSkillToEnterprise).toHaveBeenCalledWith('personal-source'));
+    expect(checkWorkspaceSkillShareConflicts).toHaveBeenCalledWith({
+      skillPath: '/skills/example',
+      personalWorkspace: true,
+    });
+    expect(resourceizeWorkspaceSkill).toHaveBeenCalledWith({
+      skillPath: '/skills/example',
+      personalWorkspace: true,
+      overwriteConfirmed: false,
+    });
+  });
+
+  it('keeps the entry and does not publish when resourceization fails', async () => {
+    (resourceizeWorkspaceSkill as jest.Mock).mockResolvedValue({ items: [{ success: false }] });
+    renderWithQueryClient(<ResourceCard resource={workspaceSkill} resourceType="SKILL" actionConfig={actionConfig} />);
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    expect(await screen.findByText('common.operationFailed')).toBeInTheDocument();
+    expect(publishSkillToEnterprise).not.toHaveBeenCalled();
+    expect(screen.getByText('resource.publishToEnterprise')).toBeInTheDocument();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('does not resourceize or publish when the user cancels a name conflict', async () => {
+    (checkWorkspaceSkillShareConflicts as jest.Mock).mockResolvedValue({
+      updatedItems: [{ resourceCode: 'example', resourceName: 'Existing skill' }],
+    });
+    renderWithQueryClient(<ResourceCard resource={workspaceSkill} resourceType="SKILL" actionConfig={actionConfig} />);
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'common.cancel' }));
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+    expect(resourceizeWorkspaceSkill).not.toHaveBeenCalled();
+    expect(publishSkillToEnterprise).not.toHaveBeenCalled();
+    expect(screen.getByText('resource.publishToEnterprise')).toBeInTheDocument();
   });
 });

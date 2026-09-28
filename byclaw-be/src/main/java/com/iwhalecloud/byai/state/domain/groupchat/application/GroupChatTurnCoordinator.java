@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -39,9 +40,11 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatRecallMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatSessionReleased;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
@@ -53,6 +56,8 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 @Service
 public class GroupChatTurnCoordinator {
     private static final Logger log = LoggerFactory.getLogger(GroupChatTurnCoordinator.class);
+    @Autowired
+    private ByaiGroupChatRecallMapper recalls;
     private final ByaiGroupChatTurnMapper turns;
     private final ByaiGroupChatExecutionMapper anchors;
     private final ByaiGroupChatTaskMapper tasks;
@@ -64,6 +69,7 @@ public class GroupChatTurnCoordinator {
     private final UserService users;
     private final SsResourceService resources;
     private final ChatRuntimeStateService runtime;
+    private final GroupChatContextService contextService;
     private final GroupChatGatewayExecutor gateway;
     private final TransactionTemplate transaction;
     private final ExecutorService workers = new ThreadPoolExecutor(8, 8, 0L, TimeUnit.MILLISECONDS,
@@ -79,7 +85,7 @@ public class GroupChatTurnCoordinator {
         ByaiGroupChatTaskMapper tasks, ByaiMessageMapper messages, GroupChatCandidateSessionService candidates,
         SequenceService sequence, SessionMemberService members, SessionService sessions, UserService users,
         SsResourceService resources, ChatRuntimeStateService runtime, GroupChatGatewayExecutor gateway,
-        PlatformTransactionManager transactionManager) {
+        GroupChatContextService contextService, PlatformTransactionManager transactionManager) {
         this.turns = turns;
         this.anchors = anchors;
         this.tasks = tasks;
@@ -91,6 +97,7 @@ public class GroupChatTurnCoordinator {
         this.users = users;
         this.resources = resources;
         this.runtime = runtime;
+        this.contextService = contextService;
         this.gateway = gateway;
         this.transaction = new TransactionTemplate(transactionManager);
         this.dispatchTransaction = new TransactionTemplate(transactionManager);
@@ -129,18 +136,26 @@ public class GroupChatTurnCoordinator {
                         anchor = anchors.selectByPublicMessage(reply);
                     }
                     if (anchor == null) {
-                        throw new IllegalArgumentException("Reply cannot resolve an authorized conversation");
+                        ByaiMessage visible = messages.selectVisibleGroupMessage(group, reply);
+                        if (visible == null || !Integer.valueOf(1).equals(visible.getUsage())) {
+                            throw new IllegalArgumentException("Reply cannot resolve an authorized conversation");
+                        }
+                        // 普通群消息尚无 Agent 会话；撤回后不能把旧正文作为新会话的原始需求。
+                        root = visible.isRecalled() ? source : reply;
                     }
-                    root = anchor.getRootMessageId();
-                    if (Objects.equals(user, anchor.getInitiatorUserId())
-                        && Objects.equals(agent, anchor.getTargetAgentId())) {
-                        preferred = anchor;
+                    else {
+                        root = anchor.getRootMessageId();
+                        if (Objects.equals(user, anchor.getInitiatorUserId())
+                            && Objects.equals(agent, anchor.getTargetAgentId())) {
+                            preferred = anchor;
+                        }
                     }
                 }
             }
             ByaiMessage message = messages.selectByMessageId(source);
+            JSONObject quoted = reply == null ? null : quotedMessage(group, reply);
             return enqueue(group, root, source, source, user, agent, "USER", user, message.getMessageContent(),
-                metadata(message), null, 0, preferred);
+                metadata(message), null, 0, preferred, quoted);
         });
     }
 
@@ -153,16 +168,40 @@ public class GroupChatTurnCoordinator {
         }
         return transaction.execute(status -> {
             turns.lockGroup(parent.getGroupSessionId());
+            // 父轮次即使已完成，也可能已被撤回；禁止发布回调继续自动委派。
+            if (recalls != null && recalls.isRecalled(parent.getExecutionId())) return null;
             JSONObject metadata = new JSONObject();
             metadata.put("resourceList", resourceList);
             return enqueue(parent.getGroupSessionId(), parent.getRootMessageId(), trigger, publicBoundary,
                 parent.getInitiatorUserId(), agent, "AGENT", parent.getTargetAgentId(), content, metadata,
-                parent.getExecutionId(), hop, null);
+                parent.getExecutionId(), hop, null, null);
         });
     }
 
+    /** 将本轮明确引用的群消息冻结到调度快照，附件沿用群历史的安全投影。 */
+    private JSONObject quotedMessage(Long group, Long reply) {
+        ByaiMessage visible = messages.selectVisibleGroupMessage(group, reply);
+        JSONObject quoted = new JSONObject(true);
+        quoted.put("messageId", String.valueOf(reply));
+        if (visible == null || Integer.valueOf(5).equals(visible.getUsage())) {
+            quoted.put("unavailable", true);
+            return quoted;
+        }
+        var projected = contextService.toMessages(List.of(visible), Map.of()).get(0);
+        quoted.put("recalled", projected.isRecalled());
+        quoted.put("role", projected.getRole());
+        quoted.put("speaker", projected.getSpeaker());
+        quoted.put("content", projected.getContent());
+        quoted.put("resourceList", projected.getResourceList());
+        quoted.put("attachments", projected.getAttachments());
+        return quoted;
+    }
+
     private ByaiGroupChatTurn enqueue(Long group, Long root, Long trigger, Long boundary, Long user, Long agent,
-        String senderType, Long sender, String content, JSONObject metadata, Long parent, int hop, ByaiGroupChatExecution preferred) {
+        String senderType, Long sender, String content, JSONObject metadata, Long parent, int hop,
+        ByaiGroupChatExecution preferred, JSONObject quoted) {
+        ByaiMessage triggerMessage = messages.selectByMessageId(trigger);
+        if (triggerMessage != null && triggerMessage.isRecalled()) return null;
         ByaiGroupChatTurn existing = turns.selectByTriggerAndAgent(trigger, agent);
         if (existing != null) {
             return existing;
@@ -205,13 +244,16 @@ public class GroupChatTurnCoordinator {
         String name = "USER".equals(senderType) ? users.findById(sender).getUserName()
             : resources.findById(sender).getResourceName();
         JSONObject envelope = new JSONObject(true);
-        envelope.put("原始用户需求", messages.selectByMessageId(root).getMessageContent());
+        envelope.put("原始用户需求", visibleContent(messages.selectByMessageId(root)));
         envelope.put("本次发送者类型", senderType);
         envelope.put("本次发送者ID", sender);
         envelope.put("本次发送者名称", name);
         envelope.put("本次接收者ID", agent);
         envelope.put("本次接收者名称", resources.findById(agent).getResourceName());
         envelope.put("本次消息", content);
+        if (quoted != null) {
+            envelope.put("本次引用消息", quoted);
+        }
         // 调度快照保留完整上下文；子会话正文只使用“本次消息”，其余信息在 Gateway 出站时追加。
         turn.setInputContent(envelope.toJSONString());
         mergeResources(metadata, metadata(messages.selectByMessageId(root)));
@@ -232,7 +274,7 @@ public class GroupChatTurnCoordinator {
                 turn.setDisposition("CHAT");
                 ByaiMessage published = task.getPublishMessageId() == null ? null : messages.selectByMessageId(task.getPublishMessageId());
                 if (published != null) {
-                    envelope.put("已完成任务的公开成果", published.getMessageContent());
+                    envelope.put("已完成任务的公开成果", visibleContent(published));
                     mergeResources(metadata, metadata(published));
                     turn.setInputMetadata(metadata.toJSONString());
                     turn.setInputContent(envelope.toJSONString());
@@ -391,6 +433,8 @@ public class GroupChatTurnCoordinator {
     }
 
     private boolean validateBeforeStart(ByaiGroupChatTurn first) {
+        if (recalls != null && (recalls.isRecalled(first.getExecutionId())
+            || !recalls.pending(first.getCandidateSessionId()).isEmpty())) return false;
         try {
             requireMembers(first.getGroupSessionId(), first.getInitiatorUserId(), first.getTargetAgentId());
         }
@@ -417,7 +461,7 @@ public class GroupChatTurnCoordinator {
             ByaiMessage publication = task == null || task.getPublishMessageId() == null ? null : messages.selectByMessageId(task.getPublishMessageId());
             if (publication != null) {
                 JSONObject input = JSON.parseObject(first.getInputContent());
-                input.put("已完成任务的公开成果", publication.getMessageContent());
+                input.put("已完成任务的公开成果", visibleContent(publication));
                 first.setInputContent(input.toJSONString());
                 JSONObject displayMetadata = JSON.parseObject(first.getInputMetadata());
                 mergeResources(displayMetadata, metadata(publication));
@@ -474,7 +518,13 @@ public class GroupChatTurnCoordinator {
         workers.shutdown();
     }
 
+    private String visibleContent(ByaiMessage message) {
+        return message.isRecalled() ? "消息已撤回" : message.getMessageContent();
+    }
+
     private JSONObject metadata(ByaiMessage message) {
-        return message.getMetadata() == null ? new JSONObject() : JSON.parseObject(message.getMetadata());
+        JSONObject metadata = message.getMetadata() == null ? new JSONObject() : JSON.parseObject(message.getMetadata());
+        if (message.isRecalled()) metadata.remove("resourceList");
+        return metadata;
     }
 }

@@ -8,11 +8,13 @@ import org.junit.jupiter.api.Test;
 
 class MailStorageMigrationTest {
     @Test
-    void v050OnlyConfiguresConnectorsAndInitializesRowsBeforeUpdatingConfiguration() throws Exception {
+    void mailStorageUsesConnectorsAndInitializesRowsBeforeUpdatingConfiguration() throws Exception {
         Path root = Path.of("").toAbsolutePath();
         if (!Files.isDirectory(root.resolve("deploy"))) root = root.getParent();
         Path version = root.resolve("deploy/migrations/versions/V0.5.0");
-        assertThat(Files.exists(version.resolve("V0.5.0__ddl.sql"))).isFalse();
+        // Other features share this release; only the obsolete mail table is forbidden.
+        assertThat(Files.readString(version.resolve("V0.5.0__ddl.sql")))
+            .doesNotContain("po_user_mail_account");
         String sql = Files.readString(version.resolve("V0.5.0__dml.sql"));
         assertThat(sql).doesNotContain("po_user_mail_account", "ALTER TABLE", "DROP TABLE");
         assertThat(sql.indexOf("INSERT INTO byai.byai_connector_info"))

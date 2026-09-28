@@ -1,3 +1,4 @@
+import { getPublicationPendingCount } from '@/service/employeePublication';
 import { useCallback, useEffect, useState } from 'react';
 import { queryDigitalEmployeeUseApplyAudit, type ResourceUseApplyAuditItem } from '@/pages/manager/service/resources';
 
@@ -16,11 +17,17 @@ export const queryDigitalEmployeeAuditList = async (): Promise<DigitalEmployeeAu
 };
 
 export default function useDigitalEmployeeAuditCount() {
+  const [publicationCount, setPublicationCount] = useState(0);
   const [rows, setRows] = useState<DigitalEmployeeAuditItem[]>([]);
 
   const refresh = useCallback(async () => {
     try {
-      setRows(await queryDigitalEmployeeAuditList());
+      const [uses, publications] = await Promise.allSettled([
+        queryDigitalEmployeeAuditList(),
+        getPublicationPendingCount(),
+      ]);
+      setRows(uses.status === 'fulfilled' ? uses.value : []);
+      setPublicationCount(publications.status === 'fulfilled' ? Number(publications.value) || 0 : 0);
     } catch {
       setRows([]);
     }
@@ -30,5 +37,5 @@ export default function useDigitalEmployeeAuditCount() {
     refresh();
   }, [refresh]);
 
-  return { count: rows.length, rows, refresh };
+  return { count: rows.length + publicationCount, rows, refresh };
 }

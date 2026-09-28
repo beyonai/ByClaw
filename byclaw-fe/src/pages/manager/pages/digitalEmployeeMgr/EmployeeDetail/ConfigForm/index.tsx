@@ -574,6 +574,7 @@ const ConfigForm = (props) => {
     robotConfigs = [],
     setRobotConfigs,
     isReadOnly = false,
+    publicationMode = false,
     canConfigureResources = true,
     className,
     employeeType,
@@ -2928,7 +2929,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置机器人 */}
-              {robotChannelOptions.length > 0 && (
+              {!publicationMode && robotChannelOptions.length > 0 && (
                 <div className={styles.robotSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -3484,7 +3485,7 @@ const ConfigForm = (props) => {
         }}
       />
       <MemoryConfigModal
-        open={memoryModalOpen}
+        open={!publicationMode && memoryModalOpen}
         onClose={() => setMemoryModalOpen(false)}
         onAdd={(rule) => {
           // 检查是否已添加（同时比较 id 和 templateId，确保类型一致性）

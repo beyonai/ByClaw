@@ -37,6 +37,8 @@ import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatGatewayRequestDecorator;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
@@ -145,6 +147,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         dto.setAgentId(execution.getTargetAgentId());
         dto.setAgentType("001");
         dto.setChatContent(child.getMessageContent());
+        dto.setFiles(filesFromResources(child.getRelatedResources()));
         dto.setLlmMessageId(sequenceService.nextVal());
         dto.setClientRequestId(child.getMessageId() + "_" + dto.getLlmMessageId());
         JSONObject metadata = child.getMetadata() == null ? new JSONObject() : JSON.parseObject(child.getMetadata());
@@ -212,6 +215,11 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             throw new IllegalArgumentException("Queued group turn requires textual current message content");
         }
         ByaiMessage child = messageMapper.selectByMessageId(turn.getInputMessageId());
+        ByaiMessage source = "USER".equals(turn.getSenderType())
+            ? messageMapper.selectByMessageId(turn.getTriggerMessageId()) : null;
+        if (source != null && !Objects.equals(source.getSessionId(), turn.getGroupSessionId())) {
+            throw new IllegalArgumentException("Group turn source does not belong to its group");
+        }
         if (child == null) {
             child = new ByaiMessage();
             child.setId(turn.getInputMessageId());
@@ -223,6 +231,9 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             child.setCreatorName(initiator.getUserName());
             // 页面、历史记录及普通运行时均使用原始正文，内部调度上下文仅在出站装饰时追加。
             child.setMessageContent(messageContent);
+            if (source != null) {
+                child.setRelatedResources(source.getRelatedResources());
+            }
             child.setMetadata(turn.getInputMetadata());
             child.setUsage(1);
             child.setIsComplete(true);
@@ -244,6 +255,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         dto.setAgentId(turn.getTargetAgentId());
         dto.setAgentType("001");
         dto.setChatContent(child.getMessageContent());
+        dto.setFiles(filesFromResources(source == null ? child.getRelatedResources() : source.getRelatedResources()));
         dto.setLlmMessageId(sequenceService.nextVal());
         dto.setClientRequestId(child.getMessageId() + "_" + dto.getLlmMessageId());
         JSONObject metadata = child.getMetadata() == null ? new JSONObject() : JSON.parseObject(child.getMetadata());
@@ -258,6 +270,21 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
     }
 
     private record PreparedTurn(AssistantChatDto request, ByaiMessageHotDtoDto message, String userCode) {
+    }
+
+    /** 恢复当前群消息的原始文件载荷，供 RouteService 构造 Gateway 的 text/files 消息。 */
+    private List<MessageFileDto> filesFromResources(String json) {
+        if (StringUtils.isBlank(json)) {
+            return null;
+        }
+        try {
+            MessageResourceDto resources = JSON.parseObject(json, MessageResourceDto.class);
+            return resources == null ? null : resources.getFiles();
+        }
+        catch (RuntimeException ignored) {
+            // 历史附件关联损坏时仍允许派发正文，不能凭无法解析的元数据构造文件载荷。
+            return null;
+        }
     }
 
     @Override

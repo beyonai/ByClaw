@@ -9,7 +9,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -163,6 +162,13 @@ class SessionStreamManagerConcurrencyTest {
             .thenAnswer(call -> ((RedisStreamCommands.XClaimOptions) call.getArgument(3)).getIds().stream()
                 .map(id -> MapRecord.create("stream-10", Map.<Object, Object>of("data", "{}" )).withId(id)).toList());
         AtomicInteger checkpointed = new AtomicInteger();
+        AtomicInteger checkpointsAtResume = new AtomicInteger();
+        CountDownLatch resumed = new CountDownLatch(1);
+        doAnswer(call -> {
+            checkpointsAtResume.set(checkpointed.get());
+            resumed.countDown();
+            return true;
+        }).when(reactiveReceiver).resume("10");
         StreamRecordProcessor processor = mock(StreamRecordProcessor.class);
         when(processor.process(any())).thenAnswer(call -> {
             checkpointed.incrementAndGet();
@@ -181,7 +187,10 @@ class SessionStreamManagerConcurrencyTest {
             assertEquals(100, checkpointed.get(), "One pass must remain bounded to one PEL page");
             verify(reactiveReceiver, never()).resume("10");
 
-            verify(reactiveReceiver, timeout(3000)).resume("10");
+            // Timeout verification would hold resume's synchronized monitor and block the recovery worker.
+            assertTrue(resumed.await(3, TimeUnit.SECONDS), "Recovery must resume after the final PEL page");
+            verify(reactiveReceiver).resume("10");
+            assertEquals(101, checkpointsAtResume.get(), "Unread polling must follow all checkpoints");
             assertEquals(101, checkpointed.get());
         }
         finally {

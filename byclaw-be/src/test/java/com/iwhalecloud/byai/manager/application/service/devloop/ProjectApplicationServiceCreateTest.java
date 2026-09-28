@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.i18n.LocaleContextHolder;
@@ -97,11 +98,32 @@ class ProjectApplicationServiceCreateTest {
         ProjectDTO dto = new ProjectDTO();
         dto.setProjectName("workspace");
 
-        service.createProject(dto);
+        Project result = service.createProject(dto);
 
+        assertThat(result.getProjectType()).isEqualTo("normal");
         verify(projectInitService).initProjectWorkspace(1001L);
         verify(projectWorkspaceManifestService).syncProjectGitmodules(1001L);
         verify(datasetApplicationService).createDataset(any());
+    }
+
+    @Test
+    void createsGroupChatProjectWithHacuType() {
+        ProjectApplicationService service = service();
+        when(sequenceService.nextVal()).thenReturn(1001L);
+        Project persistedProject = new Project();
+        persistedProject.setProjectId(1001L);
+        when(projectService.findById(1001L)).thenReturn(persistedProject);
+        stubCreateCloudResource();
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectName("group workspace");
+
+        Project result = service.createGroupChatProject(dto);
+
+        ArgumentCaptor<Project> savedProject = ArgumentCaptor.forClass(Project.class);
+        verify(projectService).save(savedProject.capture());
+        assertThat(savedProject.getValue().getProjectType()).isEqualTo("hacu");
+        assertThat(result.getProjectType()).isEqualTo("hacu");
+        verify(projectInitService).initProjectWorkspace(1001L);
     }
 
     @Test

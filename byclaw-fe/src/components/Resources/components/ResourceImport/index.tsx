@@ -6,6 +6,7 @@ import AntdIcon from '@/components/AntdIcon';
 import { parseCurl } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getRuntimeActualUrl } from '@/utils';
 import styles from './index.module.less';
+import { expandSkillImportFiles } from '../../skillExport';
 
 import type {
   ResourceImportDiffItem,
@@ -45,6 +46,8 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const intl = useIntl();
   const [importLoading, setImportLoading] = useState(false);
   const [localFiles, setLocalFiles] = useState<File[]>([]);
+  const [parsingCount, setParsingCount] = useState(0);
+  const importGeneration = useRef(0);
   const [importTab, setImportTab] = useState('localFile');
   const [curlText, setCurlText] = useState('');
   const [curlPanelLoading, setCurlPanelLoading] = useState(false);
@@ -98,6 +101,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   // 当弹窗关闭时重置状态
   useEffect(() => {
     if (!visible) {
+      importGeneration.current += 1;
       setLocalFiles([]);
       setImportTab('localFile');
       setCurlText('');
@@ -150,8 +154,9 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
     return acceptedTypes.includes(fileExtension);
   };
 
-  const addLocalFiles = (fileList: File[]) => {
-    const acceptedFiles = fileList.filter(isAcceptedFile);
+  const addLocalFiles = async (fileList: File[]) => {
+    const generation = importGeneration.current;
+    let acceptedFiles = fileList.filter(isAcceptedFile);
 
     if (acceptedFiles.length !== fileList.length) {
       showUnsupportedFileTypeMessage();
@@ -161,6 +166,18 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
       return;
     }
 
+    if (resourceType === 'SKILL') {
+      setParsingCount((count) => count + 1);
+      try {
+        acceptedFiles = await expandSkillImportFiles(acceptedFiles);
+      } catch {
+        message.error(intl.formatMessage({ id: 'resource.skillExport.invalidBundle' }));
+        return;
+      } finally {
+        setParsingCount((count) => count - 1);
+      }
+    }
+    if (generation !== importGeneration.current) return;
     setLocalFiles((prevFiles) => {
       const mergedFiles = [...prevFiles];
       acceptedFiles.forEach((nextFile) => {
@@ -359,9 +376,10 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
           loading={currentStep === 'import' ? importLoading : curlPanelLoading}
           onClick={currentStep === 'import' ? handleImportSubmit : handleCurlSave}
           disabled={
-            !isImportSummaryMode &&
-            currentStep === 'import' &&
-            ((importTab === 'localFile' && !localFiles.length) || (importTab === 'curlImport' && !curlText.trim()))
+            parsingCount > 0 ||
+            (!isImportSummaryMode &&
+              currentStep === 'import' &&
+              ((importTab === 'localFile' && !localFiles.length) || (importTab === 'curlImport' && !curlText.trim())))
           }
         >
           {primaryButtonText}

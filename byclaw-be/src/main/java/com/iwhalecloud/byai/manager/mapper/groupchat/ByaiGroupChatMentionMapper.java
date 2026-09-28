@@ -17,4 +17,7 @@ public interface ByaiGroupChatMentionMapper {
 
     GroupChatListItemResponse selectMentionState(@Param("sessionId") Long sessionId,
         @Param("userId") Long userId);
+
+    boolean existsUserMention(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
+        @Param("userId") Long userId);
 }

@@ -58,6 +58,15 @@ class SsResourceServiceTest {
     }
 
     @Test
+    void directorySkillSourcesAreRestrictedToCreatorAndActiveEmployees() {
+        service.findCreatedDigitalEmployees(11L);
+        ArgumentCaptor<LambdaQueryWrapper<SsResource>> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(ssResourceMapper).selectList(query.capture());
+        assertThat(query.getValue().getSqlSegment()).contains("create_by =", "resource_biz_type =", "resource_status <>");
+        assertThat(query.getValue().getParamNameValuePairs().values()).containsExactlyInAnyOrder(11L, "DIG_EMPLOYEE", -1);
+    }
+
+    @Test
     void enterpriseSkillNameLookupIncludesOffShelfButExcludesDeregisteredAndOtherResourceTypes() {
         when(ssResourceMapper.selectCount(any())).thenReturn(1L, 0L);
         assertThat(service.existsEnterpriseSkillByName("技能1")).isTrue();
