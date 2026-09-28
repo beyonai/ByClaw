@@ -215,6 +215,7 @@ public class ProjectApplicationService {
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
         project.setDeleteFlag(DeleteFlag.NORMAL);
+        project.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         projectService.save(project);
 
         saveProjectRepos(project.getProjectId(), dto.getRepos());
@@ -342,7 +343,7 @@ public class ProjectApplicationService {
         //如果没有初始化云盘，创建云盘知识库
         Long cloudResourceId = project.getCloudResourceId();
         if (cloudResourceId == null) {
-             cloudResourceId = this.createCloudResource(project);
+            cloudResourceId = this.createCloudResource(project);
             project.setCloudResourceId(cloudResourceId);
         }
 
@@ -1001,7 +1002,9 @@ public class ProjectApplicationService {
         return null;
     }
 
-    /** 删除项目仓库；扫描源关联不再阻断删除。 */
+    /**
+     * 删除项目仓库；扫描源关联不再阻断删除。
+     */
     @Transactional
     public void deleteProjectRepo(Long repoId) {
         if (repoId == null) {
