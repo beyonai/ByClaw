@@ -16,10 +16,21 @@ export interface Publication {
   publishError?: string;
   canReview?: boolean;
 }
+export interface PublicationDependency {
+  resourceId: string;
+  name: string;
+  action: string;
+  error?: string;
+  warning?: string;
+  resourceType?: string;
+  availabilityScope?: string;
+  reason?: string;
+  impact?: string;
+}
 export interface PublicationDetail {
   publication: Publication;
   employee: any;
-  dependencies: { resourceId: string; name: string; action: string; error?: string }[];
+  dependencies: PublicationDependency[];
   canEdit: boolean;
   canSubmit: boolean;
   canReview: boolean;
@@ -53,6 +64,8 @@ export const getPublicationPendingCount = () => GET<number>(`${base}/pendingCoun
 export const getPublicationCapabilities = () =>
   GET<{ enabled: boolean; administrator: boolean; canCreateEnterprise: boolean }>(`${base}/capabilities`);
 export const getPublication = (requestId: string) => GET<PublicationDetail>(`${base}/detail`, { requestId });
+export const previewPublication = (publication: Pick<Publication, 'requestId' | 'revision'>) =>
+  POST<PublicationDetail>(`${base}/preview`, { requestId: publication.requestId, revision: publication.revision });
 export const getCurrentPublication = (resourceId: string) =>
   GET<PublicationDetail | null>(`${base}/current`, { resourceId });
 export const listPublications = (review: boolean, page = 1) =>

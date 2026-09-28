@@ -3,6 +3,7 @@ import {
   downloadPublicationSkill,
   publicationAction,
   getPublication,
+  previewPublication,
   publicationUrl,
   publicationStatus,
   openEmployeePublication,
@@ -12,8 +13,17 @@ import {
 import { Alert, Button, Input, Modal, Space, Tag, message } from 'antd';
 import { useRef, useState } from 'react';
 import dayjs from 'dayjs';
+import { publicationErrorMessage } from '@/utils/publicationError';
+import ResourceAvailabilityList from './ResourceAvailabilityList';
+import usePublicationConfirmation from './usePublicationConfirmation';
 
 type PublicationAction = 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'revise';
+const dependencyActionText: Record<string, string> = {
+  COPY_SKILL: '复制技能快照',
+  REFERENCE_TOOL: '保留工具关联，按现有权限和运行配置使用',
+  BUILTIN_TOOL: '平台内置工具，全员可使用',
+  REFERENCE_RESOURCE: '保留资源关联，按现有权限和运行配置使用',
+};
 
 export default function PublicationToolbar({
   detail,
@@ -33,6 +43,7 @@ export default function PublicationToolbar({
   const inFlight = useRef(false);
   const [rejecting, setRejecting] = useState(false);
   const [comment, setComment] = useState('');
+  const { confirmPublication, confirmationDialog } = usePublicationConfirmation();
   const run = async (action: PublicationAction) => {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -54,8 +65,13 @@ export default function PublicationToolbar({
         return;
       }
       if (publishing && current.dependencies.some((dependency) => dependency.error)) {
-        message.error('关联资源尚未满足发布条件，请处理页面提示后再提交');
+        message.error('待发布配置尚未满足发布条件，请处理页面提示后再提交');
         return;
+      }
+      if (publishing) {
+        current = await previewPublication(current.publication);
+        onChange(current);
+        if ((await confirmPublication(current)) !== 'publish') return;
       }
       const next = await publicationAction(action, current.publication, { comment });
       onChange(next);
@@ -64,7 +80,7 @@ export default function PublicationToolbar({
       if (next.publication.status === 'FAILED') message.error(next.publication.publishError || '发布失败');
       else message.success(publicationStatus[next.publication.status]);
     } catch (error: any) {
-      message.error(error?.message || '保存或操作失败，请刷新后重试');
+      message.error(publicationErrorMessage(error, '保存或操作失败，请刷新后重试'));
     } finally {
       inFlight.current = false;
       setBusyAction(undefined);
@@ -72,7 +88,8 @@ export default function PublicationToolbar({
     }
   };
   const blockers = detail.dependencies.filter((dependency) => dependency.error);
-  // 编辑后允许先保存并重新校验，避免已移除的私有资源仍被旧校验结果阻塞。
+  const warnings = detail.dependencies.filter((dependency) => dependency.warning);
+  // 编辑后允许先保存并重新校验，避免名称等旧校验结果阻塞提交。
   const publicationDisabled = busy || (dirty ? !detail.canEdit : blockers.length > 0);
   const reviewed = ['REJECTED', 'PUBLISHED'].includes(detail.publication.status);
   const reviewTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—');
@@ -93,7 +110,7 @@ export default function PublicationToolbar({
             onClick={() =>
               getPublication(detail.publication.requestId)
                 .then(onChange)
-                .catch(() => message.error('刷新失败'))
+                .catch((error) => message.error(publicationErrorMessage(error, '刷新失败')))
             }
           >
             刷新状态
@@ -133,7 +150,9 @@ export default function PublicationToolbar({
           <Button
             disabled={busy}
             onClick={() =>
-              openEmployeePublication(detail.publication.sourceId).catch(() => message.error('打开最新申请失败'))
+              openEmployeePublication(detail.publication.sourceId).catch((error) =>
+                message.error(publicationErrorMessage(error, '打开最新申请失败'))
+              )
             }
           >
             查看最新申请
@@ -187,11 +206,29 @@ export default function PublicationToolbar({
                 onClick={() =>
                   getPublication(detail.previousReview!.requestId)
                     .then((previous) => history.push(publicationUrl(previous)))
-                    .catch(() => message.error('打开上次审核记录失败'))
+                    .catch((error) => message.error(publicationErrorMessage(error, '打开上次审核记录失败')))
                 }
               >
                 查看上次审核记录
               </Button>
+            </>
+          }
+        />
+      )}
+      {warnings.length > 0 && (
+        <Alert
+          style={{ marginTop: 8 }}
+          showIcon
+          type="warning"
+          message="关联资源可用性提醒（不影响发布）"
+          description={
+            <>
+              <div style={{ marginBottom: 12 }}>
+                可以继续发布。以下资源可能影响其他成员使用员工的部分能力，你也可以先修改关联资源。
+              </div>
+              <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                <ResourceAvailabilityList dependencies={warnings} />
+              </div>
             </>
           }
         />
@@ -209,29 +246,31 @@ export default function PublicationToolbar({
         description={
           <>
             <div>
-              面向当前企业全员共享；个人技能复制为独立快照，已公开资源复用。个人记忆、聊天记录和机器人渠道不参与发布。
+              员工面向当前企业全员共享；工具、知识库和技能的使用限制不阻止发布。可复制的个人技能生成独立副本，其余资源保留原关联和权限。个人记忆、聊天记录和机器人渠道不参与发布。
             </div>
-            {detail.dependencies.map((dependency) => (
-              <div key={dependency.resourceId}>
-                {dependency.name}：
-                {dependency.error || (dependency.action === 'COPY_SKILL' ? '复制技能快照' : '复用企业公共资源')}
-                {dependency.action === 'COPY_SKILL' && (
-                  <Button
-                    type="link"
-                    onClick={() =>
-                      downloadPublicationSkill(detail.publication.requestId, dependency.resourceId).catch(() =>
-                        message.error('下载技能快照失败')
-                      )
-                    }
-                  >
-                    下载待审技能
-                  </Button>
-                )}
-              </div>
-            ))}
+            {detail.dependencies
+              .filter((dependency) => !dependency.warning)
+              .map((dependency, index) => (
+                <div key={`${dependency.resourceId}-${index}`}>
+                  {dependency.name}：{dependency.error || dependencyActionText[dependency.action] || '复用企业公共资源'}
+                  {dependency.action === 'COPY_SKILL' && (
+                    <Button
+                      type="link"
+                      onClick={() =>
+                        downloadPublicationSkill(detail.publication.requestId, dependency.resourceId).catch((error) =>
+                          message.error(publicationErrorMessage(error, '下载技能快照失败'))
+                        )
+                      }
+                    >
+                      下载待审技能
+                    </Button>
+                  )}
+                </div>
+              ))}
           </>
         }
       />
+      {confirmationDialog}
       <Modal
         title="驳回发布申请"
         open={rejecting}

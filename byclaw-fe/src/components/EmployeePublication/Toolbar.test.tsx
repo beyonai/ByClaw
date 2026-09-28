@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { message } from 'antd';
 import { history } from '@umijs/max';
 import PublicationToolbar from './Toolbar';
 import {
   publicationAction,
+  previewPublication,
   getPublication,
   openOfficialEmployee,
   type PublicationDetail,
@@ -13,6 +14,7 @@ jest.mock('@umijs/max', () => ({ history: { push: jest.fn(), replace: jest.fn() 
 
 jest.mock('@/service/employeePublication', () => ({
   publicationAction: jest.fn(),
+  previewPublication: jest.fn(),
   downloadPublicationSkill: jest.fn(),
   getPublication: jest.fn(),
   openOfficialEmployee: jest.fn(),
@@ -38,14 +40,111 @@ const candidate: PublicationDetail = {
   canWithdraw: true,
 };
 
+async function continuePublication() {
+  fireEvent.click(await screen.findByRole('button', { name: '继续发布' }));
+}
+
 describe('employee publication controls', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (publicationAction as jest.Mock).mockReset();
+    (previewPublication as jest.Mock)
+      .mockReset()
+      .mockImplementation(async (publication) => ({ ...candidate, publication }));
     jest.spyOn(message, 'success').mockImplementation(jest.fn());
     jest.spyOn(message, 'error').mockImplementation(jest.fn());
   });
   afterEach(() => jest.restoreAllMocks());
+
+  it('shows refreshed resource scope before publishing and returns to the saved configuration without submitting', async () => {
+    const saved = { ...candidate, publication: { ...candidate.publication, revision: 4 } };
+    const fresh = {
+      ...saved,
+      dependencies: [
+        {
+          resourceId: '21',
+          name: '项目知识库',
+          action: 'REFERENCE_RESOURCE',
+          resourceType: 'KG_DOC',
+          warning: '该资源为私有资源',
+          reason: '该资源为私有资源',
+          availabilityScope: '原有授权用户（私有资源）',
+          impact: '未获授权的使用者无法使用该知识库',
+        },
+      ],
+    };
+    const onSave = jest.fn().mockResolvedValue(saved);
+    const onChange = jest.fn();
+    (previewPublication as jest.Mock).mockResolvedValue(fresh);
+    render(<PublicationToolbar detail={candidate} dirty onChange={onChange} onSave={onSave} />);
+    fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(previewPublication).toHaveBeenCalledWith(saved.publication);
+    expect(dialog.getByText('知识')).toBeInTheDocument();
+    expect(dialog.getByText('项目知识库')).toBeInTheDocument();
+    expect(dialog.getByText('原有授权用户（私有资源）')).toBeInTheDocument();
+    expect(dialog.getByText('该资源为私有资源')).toBeInTheDocument();
+    expect(dialog.getByText('未获授权的使用者无法使用该知识库')).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: '继续发布' })).toBeEnabled();
+    expect(publicationAction).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '提交发布' })).toBeEnabled());
+    expect(publicationAction).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenLastCalledWith(fresh);
+  });
+
+  it('shows a preflight failure without submitting or opening confirmation', async () => {
+    (previewPublication as jest.Mock).mockRejectedValue('申请已被修改，请刷新后再操作');
+    render(<PublicationToolbar detail={candidate} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    await waitFor(() => expect(message.error).toHaveBeenCalledWith('申请已被修改，请刷新后再操作'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(publicationAction).not.toHaveBeenCalled();
+  });
+
+  it.each(['submit', 'approve'])('resource warnings remain visible and do not block %s', async (action) => {
+    const detail = {
+      ...candidate,
+      canSubmit: action === 'submit',
+      canReview: action === 'approve',
+      dependencies: [
+        { resourceId: '*', name: '全部工具', action: 'BUILTIN_TOOL' },
+        { resourceId: '20', name: '私有工具', action: 'REFERENCE_TOOL', warning: '部分使用者无权调用' },
+        { resourceId: '21', name: '私有知识库', action: 'REFERENCE_RESOURCE', warning: '部分使用者无权使用' },
+        { resourceId: '22', name: '失效技能', action: 'REFERENCE_RESOURCE', warning: '技能文件不存在' },
+      ],
+    };
+    (previewPublication as jest.Mock).mockResolvedValue(detail);
+    (publicationAction as jest.Mock).mockResolvedValue({
+      ...detail,
+      publication: { ...candidate.publication, status: 'PUBLISHED' },
+    });
+    render(<PublicationToolbar detail={detail} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
+    expect(screen.getByText('关联资源可用性提醒（不影响发布）')).toBeInTheDocument();
+    expect(screen.getByText('全部工具：平台内置工具，全员可使用')).toBeInTheDocument();
+    expect(screen.getByText('部分使用者无权使用')).toBeInTheDocument();
+    expect(screen.getByText('技能文件不存在')).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: action === 'submit' ? '提交发布' : '通过并发布' });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByText('可以继续发布，有 3 项资源需要留意')).toBeInTheDocument();
+    expect(dialog.getByText('私有知识库')).toBeInTheDocument();
+    expect(dialog.queryByText('全部工具')).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByText('查看其余资源（1 项，无使用限制提醒）'));
+    expect(await dialog.findByText('全部工具')).toBeInTheDocument();
+    await continuePublication();
+    await waitFor(() => expect(publicationAction).toHaveBeenCalledWith(action, detail.publication, { comment: '' }));
+  });
+
+  it('shows string errors returned by the request layer instead of the fallback', async () => {
+    (publicationAction as jest.Mock).mockRejectedValue('请先登录当前企业');
+    render(<PublicationToolbar detail={candidate} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    await continuePublication();
+    await waitFor(() => expect(message.error).toHaveBeenCalledWith('请先登录当前企业'));
+  });
 
   it('shows rejection details and only creates a draft after an explicit revision action', async () => {
     const rejected = {
@@ -159,12 +258,12 @@ describe('employee publication controls', () => {
     expect(screen.getByRole('button', { name: '提交发布' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: '通过并发布' })).not.toBeInTheDocument();
   });
-  it('blocks publication when dependencies are private', () => {
+  it('blocks submission for employee configuration errors', () => {
     render(
       <PublicationToolbar
         detail={{
           ...candidate,
-          dependencies: [{ resourceId: '1', name: '私有知识库', action: 'BLOCKED', error: '请先完成官方化' }],
+          dependencies: [{ resourceId: '', name: '员工名称', action: 'BLOCKED', error: '员工名称必填' }],
         }}
         dirty={false}
         onChange={jest.fn()}
@@ -172,7 +271,7 @@ describe('employee publication controls', () => {
       />
     );
     expect(screen.getByRole('button', { name: '提交发布' })).toBeDisabled();
-    expect(screen.getByText(/请先完成官方化/)).toBeInTheDocument();
+    expect(screen.getByText(/员工名称必填/)).toBeInTheDocument();
   });
   it('submits the reviewed revision and shows the returned state', async () => {
     const next = { ...candidate, publication: { ...candidate.publication, status: 'PENDING', revision: 4 } };
@@ -181,6 +280,7 @@ describe('employee publication controls', () => {
     const onSave = jest.fn();
     render(<PublicationToolbar detail={candidate} dirty={false} onChange={onChange} onSave={onSave} />);
     fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    await continuePublication();
     await waitFor(() =>
       expect(publicationAction).toHaveBeenCalledWith('submit', candidate.publication, { comment: '' })
     );
@@ -243,10 +343,11 @@ describe('employee publication controls', () => {
     expect(screen.getByRole('button', { name: '保存待发布配置' })).toBeDisabled();
     expect(onBusyChange).toHaveBeenCalledWith(true);
     await act(async () => finishSave(saved));
+    await continuePublication();
     await waitFor(() => expect(publicationAction).toHaveBeenCalledWith(action, saved.publication, { comment: '' }));
     expect(publicationAction).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenNthCalledWith(1, saved);
-    expect(onChange).toHaveBeenNthCalledWith(2, next);
+    expect(onChange).toHaveBeenLastCalledWith(next);
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
 
@@ -284,7 +385,7 @@ describe('employee publication controls', () => {
       <PublicationToolbar
         detail={{
           ...candidate,
-          dependencies: [{ resourceId: '1', name: '私有知识库', action: 'BLOCKED', error: '请先完成官方化' }],
+          dependencies: [{ resourceId: '', name: '员工名称', action: 'BLOCKED', error: '员工名称必填' }],
         }}
         dirty
         onSave={onSave}
@@ -292,6 +393,7 @@ describe('employee publication controls', () => {
       />
     );
     fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    await continuePublication();
     await waitFor(() => expect(publicationAction).toHaveBeenCalledWith('submit', saved.publication, { comment: '' }));
   });
 
@@ -299,7 +401,7 @@ describe('employee publication controls', () => {
     const saved = {
       ...candidate,
       publication: { ...candidate.publication, revision: 4 },
-      dependencies: [{ resourceId: '1', name: '私有知识库', action: 'BLOCKED', error: '请先完成官方化' }],
+      dependencies: [{ resourceId: '', name: '员工名称', action: 'BLOCKED', error: '员工名称必填' }],
     };
     const onChange = jest.fn();
     render(
@@ -308,7 +410,7 @@ describe('employee publication controls', () => {
     fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(saved));
     expect(publicationAction).not.toHaveBeenCalled();
-    expect(message.error).toHaveBeenCalledWith('关联资源尚未满足发布条件，请处理页面提示后再提交');
+    expect(message.error).toHaveBeenCalledWith('待发布配置尚未满足发布条件，请处理页面提示后再提交');
   });
 
   it('keeps the saved revision when submission subsequently fails', async () => {
@@ -319,8 +421,9 @@ describe('employee publication controls', () => {
       <PublicationToolbar detail={candidate} dirty onSave={jest.fn().mockResolvedValue(saved)} onChange={onChange} />
     );
     fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    await continuePublication();
     await waitFor(() => expect(message.error).toHaveBeenCalledWith('提交失败'));
-    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledTimes(2);
     expect(onChange).toHaveBeenCalledWith(saved);
   });
 
@@ -337,6 +440,7 @@ describe('employee publication controls', () => {
     render(<PublicationToolbar detail={failed} dirty={false} onSave={onSave} onChange={jest.fn()} />);
     expect(screen.queryByRole('button', { name: '保存待发布配置' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重试发布' }));
+    await continuePublication();
     await waitFor(() => expect(publicationAction).toHaveBeenCalledWith('approve', failed.publication, { comment: '' }));
     expect(onSave).not.toHaveBeenCalled();
   });

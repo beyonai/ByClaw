@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import DigitalEmployeesPage from '../index';
 
 let mockTab = 'available';
@@ -7,12 +7,23 @@ const mockNavigate = jest.fn();
 const mockDispatch = jest.fn();
 const mockSetSearchParams = jest.fn();
 const mockEventEmitter = { on: jest.fn(), off: jest.fn() };
+const mockUserListeners = new Set<() => void>();
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
   useNavigate: () => mockNavigate,
   useDispatch: () => mockDispatch,
-  useSelector: (selector: (state: any) => any) => selector({ user: { userInfo: mockUserInfo } }),
+  // 模拟 store 的订阅通知，使用户更新能穿过页面的 React.memo。
+  useSelector: (selector: (state: any) => any) => {
+    const userInfo = require('react').useSyncExternalStore(
+      (listener: () => void) => {
+        mockUserListeners.add(listener);
+        return () => mockUserListeners.delete(listener);
+      },
+      () => mockUserInfo
+    );
+    return selector({ user: { userInfo } });
+  },
   useSearchParams: () => [new URLSearchParams({ tab: mockTab }), mockSetSearchParams],
 }));
 jest.mock('@/utils/auth', () => ({
@@ -140,14 +151,18 @@ describe('digital employee creation by tab', () => {
 
   it('updates official creation when login roles load or change', () => {
     mockTab = 'official';
-    const { rerender } = render(<DigitalEmployeesPage />);
+    render(<DigitalEmployeesPage />);
     expect(screen.queryByText('digitalEmployees.create')).toBeNull();
-    mockUserInfo = { userCode: 'platform-manager', usersOrganizations: [{ userType: 'PLAT_MAN' }] };
-    rerender(<DigitalEmployeesPage />);
+    act(() => {
+      mockUserInfo = { userCode: 'platform-manager', usersOrganizations: [{ userType: 'PLAT_MAN' }] };
+      mockUserListeners.forEach((listener) => listener());
+    });
     expect(screen.getByText('digitalEmployees.create')).toBeTruthy();
     expect(screen.getAllByRole('menuitem')).toHaveLength(2);
-    mockUserInfo = { userCode: 'ordinary-user' };
-    rerender(<DigitalEmployeesPage />);
+    act(() => {
+      mockUserInfo = { userCode: 'ordinary-user' };
+      mockUserListeners.forEach((listener) => listener());
+    });
     expect(screen.queryByText('digitalEmployees.create')).toBeNull();
   });
 });

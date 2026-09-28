@@ -39,7 +39,7 @@ class GroupChatPublicationUploaderTest {
         ByaiGroupChatPendingPublication pending = pending();
         when(userFS.read(anyString())).thenAnswer(invocation -> new ByteArrayInputStream(new byte[] {1, 2}));
         AtomicReference<Boolean> failSecond = new AtomicReference<>(true);
-        when(datasets.uploadFiles(any(), eq(777L), anyString(), anyString(), eq(false), eq(false), eq(true), any()))
+        when(datasets.uploadFiles(any(), eq(777L), anyString(), anyString(), eq(false), eq(false), eq(false), any()))
             .thenAnswer(invocation -> {
                 String directory = invocation.getArgument(2);
                 MultipartFile file = ((MultipartFile[]) invocation.getArgument(0))[0];
@@ -89,7 +89,7 @@ class GroupChatPublicationUploaderTest {
         when(userFS.read(anyString())).thenReturn(new ByteArrayInputStream(new byte[] {1}));
         UploadResult result = uploaded("/group-task-results/60/100/0/a.md");
         result.getFailedItems().add(new UploadItem());
-        when(datasets.uploadFiles(any(), any(), any(), any(), any(), any(), eq(true), any())).thenReturn(result);
+        when(datasets.uploadFiles(any(), any(), any(), any(), any(), any(), eq(false), any())).thenReturn(result);
         assertThatThrownBy(() -> uploader.upload(pending, 777L)).hasMessageContaining("upload failed");
         verifyNoInteractions(store);
     }

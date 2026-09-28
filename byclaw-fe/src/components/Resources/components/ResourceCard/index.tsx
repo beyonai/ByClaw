@@ -1,4 +1,5 @@
 import { openEmployeePublication, publicationEntryLabel } from '@/service/employeePublication';
+import { publicationErrorMessage } from '@/utils/publicationError';
 import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
@@ -427,6 +428,9 @@ const RenderContent = (props: ResourceCardProps) => {
   const [installDialogOpen, setInstallDialogOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [publishingToEnterprise, setPublishingToEnterprise] = useState(false);
+  const [openingPublication, setOpeningPublication] = useState(false);
+  const publicationFeedbackCleanup = useRef<() => void>();
+  useEffect(() => () => publicationFeedbackCleanup.current?.(), []);
   const [enterpriseCopyCreated, setEnterpriseCopyCreated] = useState(false);
   const publishToEnterpriseLock = useRef(false);
   useEffect(() => {
@@ -788,14 +792,32 @@ const RenderContent = (props: ResourceCardProps) => {
     async (editOfficial = false) => {
       if (publishToEnterpriseLock.current) return;
       publishToEnterpriseLock.current = true;
+      setOpeningPublication(true);
+      const messageKey = `employee-publication-open-${resource.resourceId || resource.id || resource.agentId}`;
+      message.loading({ key: messageKey, content: '正在准备发布申请，请稍候…', duration: 0 });
+      const timer = setTimeout(() => {
+        message.loading({
+          key: messageKey,
+          content: '仍在准备发布配置，关联资源较多时可能需要更久，请勿重复点击。',
+          duration: 0,
+        });
+      }, 8000);
+      const clearFeedback = () => {
+        clearTimeout(timer);
+        message.destroy(messageKey);
+      };
+      publicationFeedbackCleanup.current = clearFeedback;
       try {
         const resourceId = String(resource.resourceId || resource.id || resource.agentId);
         if (editOfficial) await openEmployeePublication(resourceId, 'editOfficial');
         else await openEmployeePublication(resourceId);
       } catch (error: any) {
-        message.error(error?.message || '无法发起发布申请');
+        message.error(publicationErrorMessage(error, '无法发起发布申请'));
       } finally {
+        clearFeedback();
+        publicationFeedbackCleanup.current = undefined;
         publishToEnterpriseLock.current = false;
+        setOpeningPublication(false);
       }
     },
     [resource.resourceId, resource.id, resource.agentId]
@@ -850,10 +872,12 @@ const RenderContent = (props: ResourceCardProps) => {
     if (resource.canPublishEmployee && resource.agentType !== '017') {
       items.push({
         key: 'publishEmployee',
+        disabled: openingPublication,
         label: (
           <BuildMenuLabel
             icon="icon-a-Uploadshangchuan"
             text={publicationEntryLabel(resource.employeePublicationStatus)}
+            loading={openingPublication}
           />
         ),
         onClick: () => openPublication(),
@@ -864,7 +888,14 @@ const RenderContent = (props: ResourceCardProps) => {
     if (canEdit && !isInnerSkill) {
       items.push({
         key: 'edit',
-        label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'common.editInfo' })} />,
+        disabled: !!resource.officialPublication && openingPublication,
+        label: (
+          <BuildMenuLabel
+            icon="icon-a-Editorbianji"
+            text={intl.formatMessage({ id: 'common.editInfo' })}
+            loading={!!resource.officialPublication && openingPublication}
+          />
+        ),
         onClick: () => {
           if (resource.officialPublication) openPublication(true);
           else onEdit?.();
@@ -1133,6 +1164,7 @@ const RenderContent = (props: ResourceCardProps) => {
     handleSetDefaultDebounced,
     handlePublishToEnterprise,
     publishingToEnterprise,
+    openingPublication,
     processingLifecycle,
     enterpriseCopyCreated,
     isPersonalResource,
