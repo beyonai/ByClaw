@@ -441,6 +441,13 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     if (activeTab !== 'enterprise') {
       return true;
     }
+    // 商用版官方技能对所有用户开放；其他版本按角色控制，等待版本加载后再展示入口。
+    if (resourceType === 'SKILL') {
+      return (
+        brandVersionLoaded &&
+        (brandVersion === 'commercial' || fixedEntryCapability?.canImportEnterpriseSkill === true)
+      );
+    }
     if (!fixedEntryCapability) {
       return false;
     }
@@ -450,11 +457,14 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     if (resourceType === 'TOOL') {
       return fixedEntryCapability.canImportEnterpriseToolkit;
     }
-    if (resourceType === 'SKILL') {
-      return fixedEntryCapability.canImportEnterpriseSkill === true;
-    }
     return true;
-  }, [activeTab, fixedEntryCapability, resourceType]);
+  }, [activeTab, brandVersion, brandVersionLoaded, fixedEntryCapability, resourceType]);
+
+  // 官方推荐技能独立使用品牌和角色规则，其他资源保留原有的开源版入口限制。
+  const showImportEntry =
+    resourceType === 'SKILL' && activeTab === 'enterprise'
+      ? canImportCurrentEnterpriseResource
+      : brandVersion === 'openSource';
 
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
@@ -704,7 +714,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           </Tooltip>
         )}
 
-        {!myResourcesOnly && brandVersion === 'openSource' && (!isEnterpriseSkillGroupMode || isAdminVip(userInfo)) && (
+        {!myResourcesOnly && showImportEntry && (
           <Tooltip
             title={
               !canImportCurrentEnterpriseResource

@@ -34,6 +34,38 @@ class ToolManControllerTest {
         assertThat(controller.publishSkillToEnterprise(request).getMsg()).isEqualTo("Permission denied");
     }
 
+    @Test
+    void builtinSkillDownloadReturnsCompletePackageForOrdinaryUser() throws Exception {
+        var controller = new ToolManController();
+        var resources = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class);
+        var skills = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService.class);
+        var exporter = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.state.application.service.session.ByClawBuiltinSkillExportService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "ssResourceService", resources);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "ssResExtSkillService", skills);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "builtinSkillExportService", exporter);
+        var login = new LoginInfo();
+        login.setUserCode("ordinary");
+        CurrentUserHolder.setLoginInfo(login);
+        var resource = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        resource.setResourceCode("demo");
+        var skill = new com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill();
+        skill.setSkillType("inner");
+        org.mockito.Mockito.when(resources.findById(1L)).thenReturn(resource);
+        org.mockito.Mockito.when(skills.findById(1L)).thenReturn(skill);
+        byte[] zip = new byte[] {80, 75, 3, 4};
+        org.mockito.Mockito.when(exporter.exportPackage("ordinary", "demo")).thenReturn(zip);
+        var response = controller.downloadSkillZip(null, 1L, null, null, null);
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getHeaders().getFirst("Content-Disposition")).contains("demo.zip");
+        var output = new java.io.ByteArrayOutputStream();
+        response.getBody().writeTo(output);
+        assertThat(output.toByteArray()).isEqualTo(zip);
+        org.mockito.Mockito.verify(exporter).exportPackage("ordinary", "demo");
+    }
+
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();

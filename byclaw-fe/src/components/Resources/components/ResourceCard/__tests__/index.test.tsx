@@ -1203,3 +1203,23 @@ describe('digital employee publication entry', () => {
     expect(onEdit).not.toHaveBeenCalled();
   });
 });
+
+it.each(['inner', 'custom'])('shows export for %s skills without management permissions', async (skillType) => {
+  renderWithQueryClient(
+    <ResourceCard
+      resourceType="SKILL"
+      variant="skillPoster"
+      actionConfig={{ enableSkillExport: true }}
+      resource={{
+        resourceId: 'export-skill',
+        resourceName: 'Export skill',
+        resourceBizType: 'SKILL',
+        skillType,
+        canEdit: false,
+        canDelete: false,
+        canManageAuth: false,
+      }}
+    />
+  );
+  expect(screen.getByRole('button', { name: /resource.skillExport.single/ })).toBeEnabled();
+});

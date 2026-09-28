@@ -66,6 +66,7 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ToolSaveRequest;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteResourceQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
+import com.iwhalecloud.byai.state.application.service.session.ByClawBuiltinSkillExportService;
 import com.iwhalecloud.byai.state.domain.resource.qo.GenerateResourceImageQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.PersonalAgentArchiveQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
@@ -93,6 +94,9 @@ import jakarta.servlet.http.HttpSession;
 public class ToolManController {
 
     private static final Logger logger = LoggerFactory.getLogger(ToolManController.class);
+
+    @Autowired
+    private ByClawBuiltinSkillExportService builtinSkillExportService;
 
     @Autowired
     private ToolManService toolManService;
@@ -1508,7 +1512,18 @@ public class ToolManController {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.resource.notfound"));
         }
         if (StringUtils.equalsIgnoreCase(extSkill.getSkillType(), SsResExtSkillService.INNER_SKILL_TYPE)) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.inner.download.unneeded"));
+            SsResource resource = ssResourceService.findById(skillId);
+            if (resource == null) {
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.resource.notfound"));
+            }
+            // 导出无需管理权限；完整文件取自当前登录用户的运行镜像。
+            byte[] bytes = builtinSkillExportService.exportPackage(CurrentUserHolder.getCurrentUserCode(),
+                resource.getResourceCode());
+            String encoded = UriUtils.encode(resource.getResourceCode() + ".zip",
+                java.nio.charset.StandardCharsets.UTF_8);
+            return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip"))
+                .header("Content-Disposition", "attachment; filename*=UTF-8''" + encoded)
+                .body(out -> out.write(bytes));
         }
         String relativePath = stripResourcePrefix(extSkill.getSkillUrl());
         if (StringUtils.isBlank(relativePath)) {

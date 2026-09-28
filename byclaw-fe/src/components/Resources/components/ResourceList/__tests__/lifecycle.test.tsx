@@ -12,6 +12,11 @@ import {
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
 
+jest.mock('../../../skillExport', () => ({
+  buildSkillBundle: jest.fn().mockResolvedValue(new Blob(['zip'])),
+  saveSkillFile: jest.fn(),
+}));
+
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
   useSelector: (selector: any) =>
@@ -403,3 +408,36 @@ it.each(
     );
   }
 );
+
+it('exports all filtered pages and workspace skills without changing the displayed list', async () => {
+  const { buildSkillBundle, saveSkillFile } = jest.requireMock('../../../skillExport');
+  (listResourceUseAuth as jest.Mock).mockImplementation(({ pageNum }) =>
+    Promise.resolve({
+      data: { list: [{ resourceId: pageNum === 1 ? '1' : '2', resourceBizType: 'SKILL' }], total: 31 },
+    })
+  );
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'local', skillPath: '/workspace/skills/local' }],
+  });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false, searchValue: 'demo' });
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(2));
+  fireEvent.click(screen.getByRole('button', { name: 'resource.skillExport.all' }));
+  await waitFor(() => expect(saveSkillFile).toHaveBeenCalled());
+  expect(listResourceUseAuth).toHaveBeenCalledWith(
+    expect.objectContaining({
+      pageNum: 2,
+      keyword: 'demo',
+      availableOnly: true,
+      resourceStatus: '2',
+    })
+  );
+  expect(buildSkillBundle).toHaveBeenCalledWith(
+    [
+      expect.objectContaining({ resourceBacked: false }),
+      expect.objectContaining({ resourceId: '1' }),
+      expect.objectContaining({ resourceId: '2' }),
+    ],
+    'employee-1'
+  );
+  expect(screen.getAllByTestId('resource-card')).toHaveLength(2);
+});

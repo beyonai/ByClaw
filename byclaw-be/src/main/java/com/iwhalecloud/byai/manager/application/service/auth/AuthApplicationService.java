@@ -1524,6 +1524,7 @@ public class AuthApplicationService {
     /**
      * 查询资源中心固定入口按钮能力。
      * 企业知识/工具/视图/对象导入入口仅对平台管理员、组织管理员、业务管理员开放。
+     * 官方推荐技能导入入口仅对 adminvip 和具有平台管理角色的用户开放。
      *
      * @author qin.guoquan
      * @date 2026-04-24 19:08:00
@@ -1537,7 +1538,8 @@ public class AuthApplicationService {
         capabilityVo.setCanImportEnterpriseToolkit(hasEnterpriseImportPermission);
         capabilityVo.setCanImportEnterpriseView(hasEnterpriseImportPermission);
         capabilityVo.setCanImportEnterpriseObject(hasEnterpriseImportPermission);
-        capabilityVo.setCanImportEnterpriseSkill(hasEnterpriseImportPermission);
+        // 技能入口独立判断，避免组织管理、业务管理或平台运维角色获得官方技能导入入口。
+        capabilityVo.setCanImportEnterpriseSkill(CurrentUserHolder.isAdminVip() || CurrentUserHolder.isPlatformManager());
         return capabilityVo;
     }
 

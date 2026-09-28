@@ -13,6 +13,7 @@ import { publishSkillToEnterprise, restoreResource } from '@/pages/manager/servi
 import type { EnterpriseSkillPublishResult } from '@/pages/manager/service/resources';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
+import SkillExportButton from '../SkillExportButton';
 import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
@@ -137,6 +138,9 @@ type ResourceCardActionConfig = {
   enableDigitalEmployeeLifecycle?: boolean;
   enableDigitalEmployeeDelete?: boolean;
   showDigitalEmployeeTypeTag?: boolean;
+
+  /** 资源中心技能导出不依赖管理权限。 */
+  enableSkillExport?: boolean;
 
   /** 资源浏览页展示个人/企业归属，管理页保留生命周期状态。 */
   showResourceTypeTag?: boolean;
@@ -1193,6 +1197,10 @@ const RenderContent = (props: ResourceCardProps) => {
   ]);
 
   const effectiveMenuItems = isWorkspaceSkillResource ? workspaceMenuItems : menuItems;
+  const skillExportButton =
+    actionConfig?.enableSkillExport && (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL') ? (
+      <SkillExportButton item={resource} digitalEmployeeId={activeDigitalEmployeeId} />
+    ) : null;
   const effectiveTopRightTag =
     isWorkspaceSkillResource && !showResourceTypeTag
       ? intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })
@@ -1306,6 +1314,7 @@ const RenderContent = (props: ResourceCardProps) => {
               </span>
               <span className={styles.skillPosterCreatorName}>{skillSourceName}</span>
             </span>
+            {skillExportButton}
             <span className={styles.skillPosterDivider} />
             <span className={styles.skillPosterUseCount}>
               {intl.formatMessage(
@@ -1535,6 +1544,7 @@ const RenderContent = (props: ResourceCardProps) => {
             </Paragraph>
 
             <div className={classnames(styles.meta, 'ub ub-ac')}>
+              {skillExportButton}
               <div
                 className={classnames(styles.metaPrimary, 'ub ub-ac', {
                   [styles.metaPrimaryWithHover]: !!hoverExtra,

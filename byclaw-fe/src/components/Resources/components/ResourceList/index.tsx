@@ -5,6 +5,7 @@ import { useIntl, useSelector } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
+import SkillExportButton from '../SkillExportButton';
 import {
   listResourceUseAuth,
   queryResourceDetail,
@@ -170,7 +171,11 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const useWideCardLayout = WIDE_CARD_RESOURCE_TYPES.has(resourceType);
 
   const getList = useCallback(
-    async (params?: Record<string, any>, append = false) => {
+    async function fetchPage(
+      params?: Record<string, any>,
+      append = false,
+      exportOnly = false
+    ): Promise<IResourceItem[]> {
       const pageNum = params?.pageIndex ?? params?.pageNum ?? 1;
       const pageSize = params?.pageSize ?? 30; // 直接使用固定值，避免依赖pageInfo.pageSize
       const keyword = `${params?.searchValue ?? searchValue ?? ''}`.trim();
@@ -186,16 +191,18 @@ const ResourceList: React.FC<ResourceListProps> = ({
         availableOnly && ['personal', 'enterprise'].includes(rawFilterParam?.ownerType)
           ? rawFilterParam.ownerType
           : undefined;
-      if (!append) listGeneration.current += 1;
-      setLoading(true);
+      if (!exportOnly) {
+        if (!append) listGeneration.current += 1;
+        setLoading(true);
+      }
       try {
         // 普通资源中心保留原有“我可用的/官方推荐”查询口径；“我的资源”改为后端权限筛选，
         // 个人只查创建人资源，企业按“全部/我创建的/我管理的”映射到统一管理权限。
         const ownerTypes = myResourcesOnly
           ? [activeTab]
           : activeTab === 'installed'
-            ? ['personal', 'enterprise']
-            : [activeTab];
+          ? ['personal', 'enterprise']
+          : [activeTab];
         const responses = await Promise.all(
           ownerTypes.map(async (ownerType) => {
             const ownerFilterParam = buildResourceListFilterParam(ownerType, filterParam);
@@ -206,12 +213,12 @@ const ResourceList: React.FC<ResourceListProps> = ({
               myResourcesOnly && ownerType === 'personal'
                 ? PERMISSION_CREATED_BY_ME_VALUE
                 : myResourcesOnly && myResourceScope === 'created'
-                  ? PERMISSION_CREATED_BY_ME_VALUE
-                  : myResourcesOnly && myResourceScope === 'managed'
-                    ? PERMISSION_MANAGED_BY_ME_VALUE
-                    : myResourcesOnly
-                      ? PERMISSION_MANAGEABLE_BY_ME_VALUE
-                      : undefined;
+                ? PERMISSION_CREATED_BY_ME_VALUE
+                : myResourcesOnly && myResourceScope === 'managed'
+                ? PERMISSION_MANAGED_BY_ME_VALUE
+                : myResourcesOnly
+                ? PERMISSION_MANAGEABLE_BY_ME_VALUE
+                : undefined;
             const response = await listResourceUseAuth({
               keyword,
               pageNum,
@@ -267,11 +274,18 @@ const ResourceList: React.FC<ResourceListProps> = ({
               Array.isArray(workspaceData) ? workspaceData : workspaceData?.list || workspaceData?.rows || []
             ) as IResourceItem[];
           } catch (error) {
+            if (exportOnly) throw error;
             console.warn('query workspace personal skills failed', error);
           }
         }
 
         const nextRows = workspaceRows.length ? [...workspaceRows, ...rows] : rows;
+        if (exportOnly) {
+          if (pageNum * pageSize < total) {
+            return [...nextRows, ...(await fetchPage({ ...params, pageNum: pageNum + 1, pageSize }, true, true))];
+          }
+          return nextRows;
+        }
         setList((prev) => {
           const mergedRows = append ? [...prev, ...rows] : nextRows;
           return Array.from(
@@ -283,8 +297,9 @@ const ResourceList: React.FC<ResourceListProps> = ({
           pageSize,
           total,
         });
+        return nextRows;
       } finally {
-        setLoading(false);
+        if (!exportOnly) setLoading(false);
       }
     },
     [
@@ -499,6 +514,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
         onApplyUse: () => onApplyUse(item),
         onAuditUse: () => onAuditUse(item),
         enableResourceLifecycle: true,
+        enableSkillExport: resourceType === 'SKILL',
         showResourceTypeTag: !myResourcesOnly,
         onShelf: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'shelf', feedback }),
         onUnShelf: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'unShelf', feedback }),
@@ -509,6 +525,18 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   return (
     <div id={getScrollableTarget} className={styles.sectionsContainer}>
+      {resourceType === 'SKILL' && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 12 }}>
+          <SkillExportButton
+            digitalEmployeeId={activeDigitalEmployeeId}
+            loadAll={async () => {
+              // 从第一页按当前筛选遍历，不能使用无限滚动已加载的局部 list。
+              const rows = await getList({ pageNum: 1, pageSize: PAGE_SIZE_DEFAULT }, false, true);
+              return Array.from(new Map(rows.map((row) => [String(row.resourceId), row])).values());
+            }}
+          />
+        </div>
+      )}
       <Spin
         wrapperClassName={styles.spinningWrapper}
         tip={intl.formatMessage({ id: 'common.loading' })}

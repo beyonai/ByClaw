@@ -82,6 +82,35 @@ import org.mockito.InOrder;
 
 class AuthApplicationServiceTest {
 
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", UserType.PLAT_MAN, UserType.ORG_MAN, UserType.BUSINESS_MAN,
+        UserType.PLAT_DEVOPS, UserType.ORD_USER, "NO_ROLE"})
+    void officialSkillImportEntryOnlyAllowsAdminVipOrPlatformManager(String identity) {
+        LoginInfo login = new LoginInfo();
+        login.setUserCode("adminvip".equals(identity) ? "adminvip" : "test-user");
+        UsersOrganization role = new UsersOrganization();
+        role.setUserType(identity);
+        login.setUsersOrganizations("NO_ROLE".equals(identity) ? List.of() : List.of(role));
+        CurrentUserHolder.setLoginInfo(login);
+
+        var capability = new AuthApplicationService().queryFixedEntryOperationCapability();
+
+        assertThat(capability.getCanImportEnterpriseSkill())
+            .isEqualTo("adminvip".equals(identity) || UserType.PLAT_MAN.equals(identity));
+        // 收紧技能入口时，保留其他资源现有的管理员范围。
+        boolean existingImportPermission = List.of(UserType.PLAT_MAN, UserType.ORG_MAN, UserType.BUSINESS_MAN)
+            .contains(identity);
+        assertThat(capability.getCanImportEnterpriseKg()).isEqualTo(existingImportPermission);
+        assertThat(capability.getCanImportEnterpriseToolkit()).isEqualTo(existingImportPermission);
+    }
+
+    @Test
+    void officialSkillImportEntryIsHiddenWithoutLogin() {
+        CurrentUserHolder.clearLoginInfo();
+        assertThat(new AuthApplicationService().queryFixedEntryOperationCapability().getCanImportEnterpriseSkill())
+            .isFalse();
+    }
+
     @Test
     void employeePublicationStatusIsBatchedAndOnlyReturnedForAuthorizedSources() {
         LoginInfo login = new LoginInfo(); login.setUserId(1L); login.setUserCode("author"); login.setEnterpriseId(1L);
