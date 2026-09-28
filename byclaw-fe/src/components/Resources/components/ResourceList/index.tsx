@@ -1,7 +1,7 @@
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { Spin, message } from 'antd';
-import { useIntl, useSelector } from '@umijs/max';
+import { useIntl } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
@@ -16,8 +16,6 @@ import {
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
 import { queryInstalledResourceIds } from '@/pages/manager/service/DigitalEmployeeMgr';
-import useGlobal from '@/hooks/useGlobal';
-import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { KnowledgeCapability } from '@/service/knowledgeCenter';
 import { buildResourceListFilterParam, getBaseResourceBizTypeList, getResourceQueryStatus } from '../../utils';
 import {
@@ -26,7 +24,6 @@ import {
   PERMISSION_MANAGED_BY_ME_VALUE,
 } from '../../constants';
 import { isWorkspaceSkill, mapWorkspaceSkillRows } from '../../workspaceSkill/utils';
-import { useDigitalEmployeeManagePermission } from '../../workspaceSkill/useDigitalEmployeeManagePermission';
 import styles from './index.module.less';
 import useResourceInstallTargetContext from '../../useResourceInstallTargetContext';
 
@@ -70,6 +67,7 @@ interface IResourceItem {
   lastSyncTime?: string;
   useCount?: number | string;
   ownerType?: string;
+  personalWorkspace?: boolean;
 }
 
 interface ResourceListProps {
@@ -133,26 +131,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   const intl = useIntl();
   const installTargetContext = useResourceInstallTargetContext();
-  const { agentId, agentInfo } = useGlobal();
-  const { userInfo, defaultDigEmployeeId } = useSelector(
-    ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
-      userInfo: user.userInfo,
-      defaultDigEmployeeId: employees.defaultDigEmployeeId,
-    })
-  );
-  const activeDigitalEmployeeId =
-    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
-  const userCode = userInfo?.userCode;
-  // 通过 ref 读取，避免把 activeDigitalEmployeeId/userCode 放进 getList 依赖；
-  // 否则切换数字员工会让所有资源类型(含 KG_DOC/TOOL/...)的列表都触发一次冗余刷新。
-  const activeDigitalEmployeeIdRef = useRef(activeDigitalEmployeeId);
-  activeDigitalEmployeeIdRef.current = activeDigitalEmployeeId;
-  const userCodeRef = useRef(userCode);
-  userCodeRef.current = userCode;
-  // 工作空间技能删除入口需当前用户对该数字员工有管理权限，无权限时隐藏（后端同样会拦截）。
-  const canManageActiveEmployee = useDigitalEmployeeManagePermission(
-    resourceType === 'SKILL' ? activeDigitalEmployeeId : undefined
-  );
+  // 资源中心以当前用户为列表主体；安装目标只用于用户主动发起的安装操作。
   // 列表挂载后立即请求，首帧先展示加载态，避免请求开始前闪现空状态。
   const [loading, setLoading] = useState(true);
   const listGeneration = useRef(0);
@@ -265,12 +244,11 @@ const ResourceList: React.FC<ResourceListProps> = ({
             filterParam?.resourceStatus === undefined ||
             filterParam.resourceStatus === '' ||
             `${filterParam.resourceStatus}` === '2');
-        if (shouldLoadWorkspaceSkills && activeDigitalEmployeeIdRef.current) {
+        if (shouldLoadWorkspaceSkills) {
           try {
             const workspaceRes = await queryWorkspacePersonalSkillList({
               keyword,
-              resourceId: `${activeDigitalEmployeeIdRef.current}`,
-              userCode: userCodeRef.current,
+              personalWorkspace: true,
             });
             const workspaceData = (workspaceRes as any)?.data ?? workspaceRes;
             workspaceRows = mapWorkspaceSkillRows(
@@ -504,12 +482,13 @@ const ResourceList: React.FC<ResourceListProps> = ({
         // 浏览页隐藏生命周期操作；我的资源仍沿用原有权限和状态判断。
         hiddenMenuItemKeys: [
           ...(activeTab === 'personal' ? ['authorize', 'use'] : []),
+          ...(resourceType === 'SKILL' && activeTab === 'personal' ? ['share'] : []),
           ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete', 'publishToEnterprise'] : []),
         ],
         installedResourceIds,
         canInstallToTarget: installTargetContext.mode !== 'fixed' || canManageInstallTarget,
         installTargetContext,
-        canManageWorkspaceSkill: canManageActiveEmployee,
+        canManageWorkspaceSkill: item.personalWorkspace === true,
         onEdit: () => onEdit(item),
         enablePublishToEnterprise,
         onEnterpriseSkillDetail: (enterpriseSkill) => onDetail(enterpriseSkill),
@@ -532,7 +511,6 @@ const ResourceList: React.FC<ResourceListProps> = ({
         exportContainer &&
         createPortal(
           <SkillExportButton
-            digitalEmployeeId={activeDigitalEmployeeId}
             loadAll={async () => {
               // 导出入口在工具栏，分页查询仍复用列表的当前筛选。
               const rows = await getList({ pageNum: 1, pageSize: PAGE_SIZE_DEFAULT }, false, true);

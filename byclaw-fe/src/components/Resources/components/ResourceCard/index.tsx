@@ -85,6 +85,7 @@ export interface IResourceCardItem {
   openSuperHelper?: string;
   tagName?: string;
   displaySourceType?: string;
+  personalWorkspace?: boolean;
   skillType?: string;
   sourceType?: string;
   version?: string;
@@ -723,7 +724,15 @@ const RenderContent = (props: ResourceCardProps) => {
     const messageKey = `publish-enterprise-${resource.resourceId}`;
     message.loading({ key: messageKey, content: intl.formatMessage({ id: 'common.processing' }), duration: 0 });
     try {
-      const result = await publishSkillToEnterprise(resource.resourceId);
+      // 工作空间技能没有真实资源 ID，复用现有资源化及同名覆盖确认后再复制到企业。
+      const sourceSkill = isWorkspaceSkillResource
+        ? await workspaceActions.resourceizeSkill(resource as WorkspaceSkillItem)
+        : resource;
+      if (!sourceSkill?.resourceId) {
+        message.destroy(messageKey);
+        return;
+      }
+      const result = await publishSkillToEnterprise(String(sourceSkill.resourceId));
       // 仅更新当前卡片，不刷新或重新挂载列表，避免 loading 结束时列表短暂空白。
       setEnterpriseCopyCreated(true);
       message.success({
@@ -751,7 +760,7 @@ const RenderContent = (props: ResourceCardProps) => {
       publishToEnterpriseLock.current = false;
       setPublishingToEnterprise(false);
     }
-  }, [resource.resourceId, onEnterpriseSkillDetail, intl]);
+  }, [resource, isWorkspaceSkillResource, workspaceActions.resourceizeSkill, onEnterpriseSkillDetail, intl]);
 
   const openPublication = useCallback(
     async (editOfficial = false) => {
@@ -1161,7 +1170,7 @@ const RenderContent = (props: ResourceCardProps) => {
     settingDefault,
   ]);
 
-  // 工作空间技能用独立菜单(详情/分享/删除)，不走权限驱动的 menuItems。
+  // 工作空间技能用独立菜单；个人管理页支持资源化后上架，浏览页遵循隐藏规则。
   const workspaceMenuItems = useMemo<MenuProps['items']>(() => {
     if (!isWorkspaceSkillResource) {
       return [];
@@ -1178,6 +1187,24 @@ const RenderContent = (props: ResourceCardProps) => {
         onClick: () => workspaceActions.shareSkill(resource as WorkspaceSkillItem),
       },
     ];
+    if (actionConfig?.enablePublishToEnterprise && actionConfig?.canManageWorkspaceSkill && !enterpriseCopyCreated) {
+      items.push({
+        key: 'publishToEnterprise',
+        label: (
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
+            loading={publishingToEnterprise}
+            onConfirm={handlePublishToEnterprise}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Uploadshangchuan"
+              text={intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+              loading={publishingToEnterprise}
+            />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
     // 工作空间技能同样遵循浏览页隐藏规则，管理入口仍需员工管理权限（后端同样校验）。
     if (actionConfig?.canManageWorkspaceSkill && !actionConfig?.hiddenMenuItemKeys?.includes('delete')) {
       items.push({
@@ -1186,8 +1213,13 @@ const RenderContent = (props: ResourceCardProps) => {
         onClick: () => workspaceActions.removeSkill(resource as WorkspaceSkillItem),
       });
     }
-    return items;
+    const hiddenKeys = new Set(actionConfig?.hiddenMenuItemKeys || []);
+    return items.filter((item) => item && !hiddenKeys.has(String(item.key)));
   }, [
+    actionConfig?.enablePublishToEnterprise,
+    enterpriseCopyCreated,
+    publishingToEnterprise,
+    handlePublishToEnterprise,
     isWorkspaceSkillResource,
     intl,
     workspaceActions,

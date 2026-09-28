@@ -14,7 +14,6 @@ import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import { getCurrentUserDisplayName, type WorkspaceSkillItem } from './utils';
 
 interface UseWorkspaceSkillActionsParams {
-
   /** 当前数字员工 ID，用于定位工作空间路径。 */
   resourceId?: string | number;
 
@@ -76,7 +75,11 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
         return;
       }
       try {
-        const detail = await queryWorkspaceSkillDetail({ skillPath: item.skillPath, resourceId, userCode });
+        const detail = await queryWorkspaceSkillDetail(
+          item.personalWorkspace
+            ? { skillPath: item.skillPath, personalWorkspace: true }
+            : { skillPath: item.skillPath, resourceId, userCode }
+        );
         const detailData = (detail as any)?.data || detail;
 
         // 工作空间技能没有独立授权记录，管理人/使用人按所属数字员工口径展示：
@@ -84,7 +87,7 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
         // 同时从该接口拿数字员工名称（权威、无前端列表晚加载导致显示编码的时序问题）。
         let employeeManagerList: any[] = [];
         let employeeName = '';
-        if (resourceId) {
+        if (resourceId && !item.personalWorkspace) {
           try {
             const members = await queryResourceMembers({ resourceId });
             const membersData = (members as any)?.data ?? members;
@@ -105,7 +108,7 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
         const currentDigitalEmployeeName =
           employeeName || agentName || intl.formatMessage({ id: 'resource.currentDigitalEmployee' });
         const usedDigitalEmployees = [];
-        if (resourceId) {
+        if (resourceId && !item.personalWorkspace) {
           usedDigitalEmployees.push({
             resourceId,
             resourceName: currentDigitalEmployeeName,
@@ -164,14 +167,17 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
     [intl]
   );
 
-  const shareSkill = useCallback(
+  // 资源化供分享和上架共用；由调用方决定后续操作及是否刷新列表。
+  const resourceizeSkill = useCallback(
     async (item: WorkspaceSkillItem) => {
       if (!item.skillPath) {
         message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
         return;
       }
       try {
-        const baseParams = { skillPath: item.skillPath, resourceId, userCode };
+        const baseParams = item.personalWorkspace
+          ? { skillPath: item.skillPath, personalWorkspace: true }
+          : { skillPath: item.skillPath, resourceId, userCode };
         const conflictResult = await checkWorkspaceSkillShareConflicts(baseParams);
         const conflictData = (conflictResult as any)?.data || conflictResult;
         const updatedItems = conflictData?.updatedItems || [];
@@ -198,13 +204,22 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
           displaySourceType: undefined,
           resourceBacked: true,
         };
-        onChanged?.();
-        onShareAuth?.(resourceItem);
+        return resourceItem;
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
       }
     },
-    [confirmOverwrite, intl, onChanged, onShareAuth, resourceId, userCode]
+    [confirmOverwrite, intl, resourceId, userCode]
+  );
+
+  const shareSkill = useCallback(
+    async (item: WorkspaceSkillItem) => {
+      const resourceItem = await resourceizeSkill(item);
+      if (!resourceItem) return;
+      onChanged?.();
+      onShareAuth?.(resourceItem);
+    },
+    [onChanged, onShareAuth, resourceizeSkill]
   );
 
   const removeSkill = useCallback(
@@ -220,7 +235,11 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
         cancelText: intl.formatMessage({ id: 'common.cancel' }),
         async onOk() {
           try {
-            await deleteSkill({ skillPath: item.skillPath as string, resourceId, userCode });
+            await deleteSkill(
+              item.personalWorkspace
+                ? { skillPath: item.skillPath as string, personalWorkspace: true }
+                : { skillPath: item.skillPath as string, resourceId, userCode }
+            );
             message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
             onChanged?.();
           } catch (error: any) {
@@ -232,5 +251,5 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
     [intl, onChanged, resourceId, userCode]
   );
 
-  return { openDetail, shareSkill, removeSkill };
+  return { openDetail, shareSkill, resourceizeSkill, removeSkill };
 };

@@ -1173,6 +1173,10 @@ public class ToolManController {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
             }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.list.query.success"),
+                    byClawSkillQueryApplicationService.qryMyDirectorySkills(request.getKeyword()));
+            }
             String requestUserCode = request.getUserCode();
             String resolvedUserCode = StringUtils.isNotBlank(requestUserCode) ? requestUserCode
                 : CurrentUserHolder.getCurrentUserCode();
@@ -1207,6 +1211,12 @@ public class ToolManController {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
             }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                Long sourceId = byClawSkillQueryApplicationService.resolveMySkillSource(request.getSkillPath());
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.detail.query.success"),
+                    byClawSkillQueryApplicationService.getWorkspaceSkillDetail(CurrentUserHolder.getCurrentUserCode(),
+                        sourceId, request.getSkillPath()));
+            }
             String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
                 : CurrentUserHolder.getCurrentUserCode();
             Long resolvedResourceId = request.getResourceId() == null
@@ -1240,6 +1250,10 @@ public class ToolManController {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
             }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.import.conflict.query.success"),
+                    byClawSkillResourceApplicationService.previewMyDirectorySkillConflicts(request.getSkillPath()));
+            }
             String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
                 : CurrentUserHolder.getCurrentUserCode();
             Long resolvedResourceId = request.getResourceId() == null
@@ -1272,6 +1286,13 @@ public class ToolManController {
         try {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                ByClawSkillResourceApplicationService.SkillImportResult result =
+                    byClawSkillResourceApplicationService.resourceizeMyDirectorySkill(request.getSkillPath(),
+                        Boolean.TRUE.equals(request.getOverwriteConfirmed()));
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.resourceize.success"),
+                    byClawSkillResourceApplicationService.buildSingleSkillImportResult(result));
             }
             String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
                 : CurrentUserHolder.getCurrentUserCode();
@@ -1449,7 +1470,12 @@ public class ToolManController {
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
             : CurrentUserHolder.getCurrentUserCode();
         try {
-            logSkillDownloadRequest(resolvedUserCode, finalResourceId, finalSkillId, finalSkillPath);
+            if (request != null && Boolean.TRUE.equals(request.getPersonalWorkspace()) && finalSkillId == null) {
+                resolvedUserCode = CurrentUserHolder.getCurrentUserCode();
+                finalResourceId = byClawSkillQueryApplicationService.resolveMySkillSource(finalSkillPath);
+            } else {
+                logSkillDownloadRequest(resolvedUserCode, finalResourceId, finalSkillId, finalSkillPath);
+            }
             if (finalSkillId != null) {
                 return downloadManagedSkillZip(finalSkillId);
             }
@@ -1589,6 +1615,12 @@ public class ToolManController {
         try {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                Long sourceId = byClawSkillQueryApplicationService.resolveMySkillSource(request.getSkillPath());
+                ByClawSkillDto data = byClawSkillDeleteApplicationService.deleteSkill(
+                    CurrentUserHolder.getCurrentUserCode(), sourceId, request.getSkillPath());
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.delete.success"), data);
             }
             String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
                 : CurrentUserHolder.getCurrentUserCode();

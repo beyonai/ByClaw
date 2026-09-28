@@ -66,3 +66,20 @@ it('rejects a manifest referencing a missing package', async () => {
     expandSkillImportFiles([new File([await zip.generateAsync({ type: 'blob' })], 'skills.zip')])
   ).rejects.toThrow('resource.skillExport.invalidBundle');
 });
+
+it('exports personal directory skills independently of the selected employee', async () => {
+  (downloadSkillZip as jest.Mock).mockResolvedValue({ file: new Blob(['zip']), fileName: 'mine.zip' });
+  await fetchSkillPackage(
+    {
+      resourceBizType: 'SKILL',
+      resourceBacked: false,
+      personalWorkspace: true,
+      skillPath: '/.openclaw/workspace/skills/mine',
+    },
+    'unmanaged-default'
+  );
+  expect(downloadSkillZip).toHaveBeenCalledWith({
+    skillPath: '/.openclaw/workspace/skills/mine',
+    personalWorkspace: true,
+  });
+});

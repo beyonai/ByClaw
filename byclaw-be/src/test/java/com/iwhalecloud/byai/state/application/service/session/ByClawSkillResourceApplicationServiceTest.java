@@ -107,6 +107,52 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     @Test
+    void personalDirectoryResourceizationDoesNotBindOrValidateDefaultEmployee() throws Exception {
+        var query = mock(ByClawSkillQueryApplicationService.class);
+        var paths = mock(ByClawSkillPathResolver.class);
+        var files = mock(com.iwhalecloud.byai.common.storage.UserFS.class);
+        ReflectionTestUtils.setField(service, "personalSkillQueryService", query);
+        ReflectionTestUtils.setField(service, "skillPathResolver", paths);
+        ReflectionTestUtils.setField(service, "userFS", files);
+        String root = "/.openclaw/workspace/skills/";
+        String path = root + "demo-skill";
+        when(query.resolveMySkillSource(path)).thenReturn(null);
+        when(paths.resolveSkillRootPrefix("user001", null)).thenReturn(root);
+        when(files.list(path + "/", null)).thenReturn(List.of(path + "/SKILL.md"));
+        when(files.read(path + "/SKILL.md")).thenAnswer(invocation -> new java.io.ByteArrayInputStream(
+            "---\nname: demo-skill\ndescription: Demo\n---\nBody".getBytes(StandardCharsets.UTF_8)));
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> {
+            SsResource resource = invocation.getArgument(0);
+            resource.setResourceId(7101L);
+            resource.setCreateBy(10001L);
+            return resource;
+        });
+
+        var result = service.resourceizeMyDirectorySkill(path, false);
+        assertThat(result.resource().getOwnerType()).isEqualTo("personal");
+        assertThat(result.resource().getCreateBy()).isEqualTo(10001L);
+        verify(authApplicationService).ensureCreatorDefaultPrivileges(result.resource());
+        verify(authApplicationService, never()).hasResourceInstallTargetManagePermission(any());
+        org.mockito.Mockito.verifyNoInteractions(digitalEmployeeApplicationService, ssResourceRelDetailService);
+        verify(paths, never()).resolveSkillRootPrefix("user001", 9001L);
+
+        // 同码企业资源即使可管理，也不能被个人目录资源化覆盖。
+        SsResource enterprise = new SsResource();
+        enterprise.setResourceId(8001L);
+        enterprise.setResourceCode("demo-skill");
+        enterprise.setResourceBizType("SKILL");
+        enterprise.setSystemCode("BYAI");
+        enterprise.setOwnerType("enterprise");
+        enterprise.setCreateBy(10001L);
+        when(ssResourceService.getResourceListByCode(List.of("demo-skill"))).thenReturn(List.of(enterprise));
+        when(authApplicationService.hasResourceManagePermission(enterprise)).thenReturn(true);
+        assertThatThrownBy(() -> service.resourceizeMyDirectorySkill(path, true))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(ssResourceService, times(1)).saveResource(any(SsResource.class));
+        verify(ssResourceService, never()).updateResourceEntity(enterprise);
+    }
+
+    @Test
     void publishEnterpriseCopiesRecordsAndFileReferencesWithoutAccessingStorage() throws Exception {
         SsResource source = prepareEnterpriseCopy();
         SsResExtSkill sourceExt = ssResExtSkillService.findById(7001L);

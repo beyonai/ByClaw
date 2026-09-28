@@ -19,7 +19,11 @@ export const saveSkillFile = (file: Blob, fileName: string) => {
 
 export const fetchSkillPackage = async (item: WorkspaceSkillItem, digitalEmployeeId?: string | number) => {
   const result = await downloadSkillZip(
-    isWorkspaceSkill(item) ? { skillPath: item.skillPath, resourceId: digitalEmployeeId } : { skillId: item.resourceId }
+    isWorkspaceSkill(item)
+      ? item.personalWorkspace
+        ? { skillPath: item.skillPath, personalWorkspace: true }
+        : { skillPath: item.skillPath, resourceId: digitalEmployeeId }
+      : { skillId: item.resourceId }
   );
   if (!(result?.file instanceof Blob) || !result.file.size) throw new Error('common.downloadFailed');
   return { file: result.file as Blob, fileName: result.fileName || `${item.resourceCode || item.resourceName}.zip` };
