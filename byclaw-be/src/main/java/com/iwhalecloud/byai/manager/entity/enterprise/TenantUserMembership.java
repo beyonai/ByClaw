@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.manager.entity.users;
+package com.iwhalecloud.byai.manager.entity.enterprise;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;

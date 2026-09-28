@@ -1,109 +1,123 @@
 package com.iwhalecloud.byai.manager.domain.enterprise.service;
 
-
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;
+import com.iwhalecloud.byai.manager.mapper.enterprise.EnterpriseInfoMapper;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import jakarta.servlet.http.HttpServletResponse;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.io.OutputStream;
-import java.util.Map;
-
-import com.iwhalecloud.byai.manager.mapper.enterprise.EnterpriseInfoMapper;
-import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;
-import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
-import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
-import com.iwhalecloud.byai.common.exception.BaseException;
-import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import jakarta.servlet.http.HttpServletResponse;
-import org.apache.commons.collections.MapUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
-import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+
+import java.io.OutputStream;
 
 /**
- * 企业信息管理接口
+ * 企业信息领域服务，仅负责企业实体持久化。
  */
 @Service
 public class EnterpriseInfoService {
 
     private static final Logger logger = LoggerFactory.getLogger(EnterpriseInfoService.class);
 
-
     @Autowired
     private EnterpriseInfoMapper enterpriseInfoMapper;
 
+    @Autowired
+    private SequenceService sequenceService;
+
     /**
-     * 获取企业信息
+     * 按主键查询企业。
      *
-     * @param params 入参
-     * @return ResponseUtil
+     * @param enterpriseId 企业标识
+     * @return 企业信息，不存在则返回 null
      */
-    public ResponseUtil getEnterprise(Map<String, Object> params) {
-        Long enterpriseId = MapUtils.getLong(params, "enterpriseId", 1L);
-        EnterpriseInfo enterpriseInfo = enterpriseInfoMapper.selectById(enterpriseId);
-        return ResponseUtil.successResponse(enterpriseInfo);
+    public EnterpriseInfo findById(Long enterpriseId) {
+        if (enterpriseId == null) {
+            return null;
+        }
+        return enterpriseInfoMapper.selectById(enterpriseId);
     }
 
     /**
-     * 编辑企业信息
+     * 判断企业编码是否已被占用。
+     *
+     * @param comAcctCode 企业编码
+     * @param excludeEnterpriseId 排除的企业标识，可为 null
+     * @return true 表示已存在
+     */
+    public boolean existsByComAcctCode(String comAcctCode, Long excludeEnterpriseId) {
+        if (StringUtils.isBlank(comAcctCode)) {
+            return false;
+        }
+        LambdaQueryWrapper<EnterpriseInfo> wrapper = new LambdaQueryWrapper<EnterpriseInfo>()
+            .eq(EnterpriseInfo::getComAcctCode, StringUtils.trim(comAcctCode));
+        if (excludeEnterpriseId != null) {
+            wrapper.ne(EnterpriseInfo::getEnterpriseId, excludeEnterpriseId);
+        }
+        Long count = enterpriseInfoMapper.selectCount(wrapper);
+        return count != null && count > 0;
+    }
+
+    /**
+     * 新增企业并生成主键。
+     *
+     * @param enterpriseInfo 企业信息
+     * @return 已持久化的企业信息
+     */
+    public EnterpriseInfo create(EnterpriseInfo enterpriseInfo) {
+        enterpriseInfo.setEnterpriseId(sequenceService.nextVal());
+        enterpriseInfoMapper.insert(enterpriseInfo);
+        return enterpriseInfo;
+    }
+
+    /**
+     * 按主键更新企业信息。
+     *
+     * @param enterpriseInfo 企业信息
+     */
+    public void update(EnterpriseInfo enterpriseInfo) {
+        enterpriseInfoMapper.updateById(enterpriseInfo);
+    }
+
+    /**
+     * 按主键删除企业。
      *
      * @param enterpriseId 企业标识
-     * @param comAcctName 企业名称
-     * @param comAcctCode 企业编码
-     * @param comAcctAddress 企业地址
-     * @param systemName 系统名称
-     * @param logoDataFile 系统标识文件
-     * @return ResponseUtil
      */
-    public ResponseUtil editEnterprise(Long enterpriseId, String comAcctName, String comAcctCode, String comAcctAddress,
-        String systemName, MultipartFile logoDataFile) {
+    public void removeById(Long enterpriseId) {
+        enterpriseInfoMapper.deleteById(enterpriseId);
+    }
 
-        if (!CurrentUserHolder.isPlatformManager()) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("enterprise.edit.permission.deny"));
+    /**
+     * 写出企业 Logo 到响应流。
+     *
+     * @param enterpriseId 企业标识
+     * @param response HTTP 响应
+     */
+    public void writeLogoData(Long enterpriseId, HttpServletResponse response) {
+        EnterpriseInfo enterpriseInfo = findById(enterpriseId);
+        if (enterpriseInfo == null || enterpriseInfo.getLogoData() == null
+            || enterpriseInfo.getLogoData().length == 0) {
+            return;
         }
-
-        try {
-            EnterpriseInfo enterpriseInfo = new EnterpriseInfo();
-            enterpriseInfo.setEnterpriseId(enterpriseId);
-            enterpriseInfo.setComAcctName(comAcctName);
-            enterpriseInfo.setComAcctCode(comAcctCode);
-            enterpriseInfo.setComAcctAddress(comAcctAddress);
-            enterpriseInfo.setSystemName(systemName);
-            enterpriseInfo.setLogoData(logoDataFile != null ? logoDataFile.getBytes() : new byte[0]);
-            enterpriseInfoMapper.updateById(enterpriseInfo);
+        response.setContentType("image/png;charset=utf-8");
+        try (OutputStream outputStream = response.getOutputStream()) {
+            outputStream.write(enterpriseInfo.getLogoData());
+            outputStream.flush();
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
-            return ResponseUtil.fail(e.getMessage());
         }
-        return ResponseUtil.successResponse(I18nUtil.get("enterprise.update.success"));
     }
 
     /**
-     * 获取企业Logo信息
+     * 查询当前库中最大的企业标识。
      *
-     * @param enterpriseId 企业标识
-     * @param response 响应
-     */
-    public void getEnterpriseLogoData(Long enterpriseId, HttpServletResponse response) {
-        EnterpriseInfo enterpriseInfo = enterpriseInfoMapper.selectById(enterpriseId);
-        if (enterpriseInfo != null && enterpriseInfo.getLogoData() != null && enterpriseInfo.getLogoData().length > 0) {
-            response.setContentType("image/png;charset=utf-8");
-            // 自动关闭流
-            try (OutputStream outputStream = response.getOutputStream();) {
-                outputStream.write(enterpriseInfo.getLogoData());
-                outputStream.flush();
-            }
-            catch (Exception e) {
-                logger.error(e.getMessage(), e);
-            }
-        }
-    }
-
-    /**
-     * @return 获取企业标识
+     * @return 最大企业标识，表为空时可能为 null
      */
     public Long getEnterpriseId() {
         return enterpriseInfoMapper.getEnterpriseId();
     }
-
 }

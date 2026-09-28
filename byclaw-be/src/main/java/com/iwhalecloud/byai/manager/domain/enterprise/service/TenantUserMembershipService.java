@@ -1,10 +1,13 @@
-package com.iwhalecloud.byai.manager.domain.users.service;
+package com.iwhalecloud.byai.manager.domain.enterprise.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole;
+import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipStatus;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
-import com.iwhalecloud.byai.manager.entity.users.TenantUserMembership;
-import com.iwhalecloud.byai.manager.mapper.users.TenantUserMembershipMapper;
+import com.iwhalecloud.byai.manager.entity.enterprise.TenantUserMembership;
+import com.iwhalecloud.byai.manager.mapper.enterprise.TenantUserMembershipMapper;
+import com.iwhalecloud.byai.manager.vo.enterprise.UserEnterpriseVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,22 +17,12 @@ import org.springframework.util.CollectionUtils;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 用户与企业租户成员关系领域服务。
  */
 @Service
 public class TenantUserMembershipService {
-
-    public static final String ROLE_OWNER = "OWNER";
-    public static final String ROLE_ADMIN = "ADMIN";
-    public static final String ROLE_MEMBER = "MEMBER";
-
-    public static final String STATUS_ACTIVE = "ACTIVE";
-    public static final String STATUS_DISABLED = "DISABLED";
-
-    private static final Set<String> ALLOWED_ROLES = Set.of(ROLE_OWNER, ROLE_ADMIN, ROLE_MEMBER);
 
     @Autowired
     private TenantUserMembershipMapper tenantUserMembershipMapper;
@@ -52,7 +45,7 @@ public class TenantUserMembershipService {
                 "userId, enterpriseId and createdBy are required");
         }
         String normalizedRole = StringUtils.upperCase(StringUtils.trimToEmpty(role));
-        if (!ALLOWED_ROLES.contains(normalizedRole)) {
+        if (!TenantUserMembershipRole.ALL.contains(normalizedRole)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 "role must be OWNER, ADMIN or MEMBER");
         }
@@ -66,7 +59,7 @@ public class TenantUserMembershipService {
         membership.setUserId(userId);
         membership.setEnterpriseId(enterpriseId);
         membership.setRole(normalizedRole);
-        membership.setStatus(STATUS_ACTIVE);
+        membership.setStatus(TenantUserMembershipStatus.ACTIVE);
         membership.setCreatedBy(createdBy);
         membership.setJoinedAt(now);
         membership.setUpdatedAt(now);
@@ -103,6 +96,19 @@ public class TenantUserMembershipService {
     }
 
     /**
+     * 按用户标识联表查询关联企业简要信息。
+     *
+     * @param userId 用户标识
+     * @return 企业简要信息列表
+     */
+    public List<UserEnterpriseVo> listUserEnterprises(Long userId) {
+        if (userId == null) {
+            return Collections.emptyList();
+        }
+        return tenantUserMembershipMapper.listUserEnterprises(userId);
+    }
+
+    /**
      * 查询用户当前有效的租户成员关系。
      *
      * @param userId 用户标识
@@ -114,7 +120,7 @@ public class TenantUserMembershipService {
         }
         return tenantUserMembershipMapper.selectList(new LambdaQueryWrapper<TenantUserMembership>()
             .eq(TenantUserMembership::getUserId, userId)
-            .eq(TenantUserMembership::getStatus, STATUS_ACTIVE)
+            .eq(TenantUserMembership::getStatus, TenantUserMembershipStatus.ACTIVE)
             .orderByDesc(TenantUserMembership::getJoinedAt));
     }
 
@@ -130,7 +136,7 @@ public class TenantUserMembershipService {
         }
         return tenantUserMembershipMapper.selectList(new LambdaQueryWrapper<TenantUserMembership>()
             .eq(TenantUserMembership::getEnterpriseId, enterpriseId)
-            .eq(TenantUserMembership::getStatus, STATUS_ACTIVE)
+            .eq(TenantUserMembership::getStatus, TenantUserMembershipStatus.ACTIVE)
             .orderByDesc(TenantUserMembership::getJoinedAt));
     }
 
@@ -148,7 +154,7 @@ public class TenantUserMembershipService {
         return tenantUserMembershipMapper.selectOne(new LambdaQueryWrapper<TenantUserMembership>()
             .eq(TenantUserMembership::getUserId, userId)
             .eq(TenantUserMembership::getEnterpriseId, enterpriseId)
-            .eq(TenantUserMembership::getStatus, STATUS_ACTIVE)
+            .eq(TenantUserMembership::getStatus, TenantUserMembershipStatus.ACTIVE)
             .last("LIMIT 1"));
     }
 
@@ -164,7 +170,7 @@ public class TenantUserMembershipService {
         if (existing == null) {
             return false;
         }
-        existing.setStatus(STATUS_DISABLED);
+        existing.setStatus(TenantUserMembershipStatus.DISABLED);
         existing.setUpdatedAt(new Date());
         return tenantUserMembershipMapper.updateById(existing) > 0;
     }
@@ -191,5 +197,19 @@ public class TenantUserMembershipService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "membershipIds is required");
         }
         tenantUserMembershipMapper.deleteBatchIds(membershipIds);
+    }
+
+    /**
+     * 按企业租户物理删除全部成员关系。
+     *
+     * @param enterpriseId 企业租户标识
+     * @return 删除行数
+     */
+    public int removeByEnterpriseId(Long enterpriseId) {
+        if (enterpriseId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "enterpriseId is required");
+        }
+        return tenantUserMembershipMapper.delete(new LambdaQueryWrapper<TenantUserMembership>()
+            .eq(TenantUserMembership::getEnterpriseId, enterpriseId));
     }
 }

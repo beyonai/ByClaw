@@ -6,13 +6,13 @@ import {
   bathQryPropertyKey,
   clearCache,
   currentUser,
-  editEnterprise,
   getAllDistinctParams,
   getDcSystemConfig,
   getDcSystemConfigListByStandType,
   getDcSystemConfigValueByCodes,
   getEnterprise,
   qryPropertyKey,
+  updateEnterprise,
 } from '../session';
 import { POST } from '@/service/common/request';
 
@@ -62,10 +62,10 @@ describe('manager/service/session', () => {
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/system/enterprise/getEnterprise', payload);
   });
 
-  it('editEnterprise posts params directly', () => {
+  it('updateEnterprise posts params directly', () => {
     const payload = { enterpriseName: 'Beyond' };
-    editEnterprise(payload);
-    expect(mockPOST).toHaveBeenCalledWith('/byaiService/system/enterprise/editEnterprise', payload);
+    updateEnterprise(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/system/enterprise/update', payload);
   });
 
   it('qryPropertyKey posts params directly', () => {
