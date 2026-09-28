@@ -1157,6 +1157,57 @@ describe('personal skill enterprise publication', () => {
 });
 
 describe('digital employee publication entry', () => {
+  it('keeps preparation feedback visible and blocks duplicate clicks until navigation is ready', async () => {
+    let finish!: () => void;
+    (openEmployeePublication as jest.Mock).mockClear().mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      })
+    );
+    const loading = jest.spyOn(message, 'loading').mockImplementation(jest.fn());
+    const destroy = jest.spyOn(message, 'destroy').mockImplementation(jest.fn());
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: true,
+        }}
+      />
+    );
+    const entry = screen.getByText('发布到官方推荐');
+    fireEvent.click(entry);
+    fireEvent.click(entry);
+    expect(openEmployeePublication).toHaveBeenCalledTimes(1);
+    expect(loading).toHaveBeenCalledWith(
+      expect.objectContaining({ content: '正在准备发布申请，请稍候…', duration: 0 })
+    );
+    expect(destroy).not.toHaveBeenCalled();
+    await act(async () => {
+      finish();
+    });
+    expect(destroy).toHaveBeenCalledWith('employee-publication-open-10');
+    loading.mockRestore();
+    destroy.mockRestore();
+  });
+  it('displays the concrete server message when draft preparation rejects a string', async () => {
+    (openEmployeePublication as jest.Mock).mockRejectedValueOnce('仅在用数字员工支持发起发布或更新');
+    const error = jest.spyOn(message, 'error').mockImplementation(jest.fn());
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: true,
+        }}
+      />
+    );
+    fireEvent.click(screen.getByText('发布到官方推荐'));
+    await waitFor(() => expect(error).toHaveBeenCalledWith('仅在用数字员工支持发起发布或更新'));
+    error.mockRestore();
+  });
   it.each([
     [undefined, '发布到官方推荐'],
     ['DRAFT', '继续发布'],

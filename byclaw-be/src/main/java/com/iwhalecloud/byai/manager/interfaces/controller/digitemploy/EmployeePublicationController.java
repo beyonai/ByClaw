@@ -21,6 +21,13 @@ import org.springframework.web.bind.annotation.*;
 public class EmployeePublicationController {
     private final EmployeePublicationApplicationService publication;
 
+    /** 发布业务校验应展示具体原因，不能按服务器故障返回 500。 */
+    @ExceptionHandler(com.iwhalecloud.byai.common.exception.BaseException.class)
+    public org.springframework.http.ResponseEntity<ResponseUtil<Object>> validationFailure(
+        com.iwhalecloud.byai.common.exception.BaseException error) {
+        return org.springframework.http.ResponseEntity.badRequest().body(ResponseUtil.fail(error.getMessage()));
+    }
+
     @GetMapping("/capabilities")
     public ResponseUtil<Map<String, Boolean>> capabilities() { return ResponseUtil.successResponse(publication.capabilities()); }
 
@@ -52,6 +59,9 @@ public class EmployeePublicationController {
 
     @PostMapping("/prepare")
     public ResponseUtil<Detail> prepare(@RequestBody EmployeeIdDTO request) { return ResponseUtil.successResponse(publication.prepare(request.getResourceId())); }
+
+    @PostMapping("/preview")
+    public ResponseUtil<Detail> preview(@Valid @RequestBody EmployeePublicationRequest request) { return ResponseUtil.successResponse(publication.preview(request)); }
 
     @PostMapping("/revise")
     public ResponseUtil<Detail> revise(@Valid @RequestBody EmployeePublicationRequest request) { return ResponseUtil.successResponse(publication.revise(request)); }

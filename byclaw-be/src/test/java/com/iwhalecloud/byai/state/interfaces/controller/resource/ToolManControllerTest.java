@@ -30,6 +30,7 @@ class ToolManControllerTest {
         login.setDefaultDigEmployeeId(999L);
         CurrentUserHolder.setLoginInfo(login);
         String path = "/.openclaw/workspace/skills/mine";
+        org.mockito.Mockito.when(query.resolveMySkillSource(path)).thenReturn(null);
         var request = new com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillQo();
         request.setPersonalWorkspace(true);
         request.setSkillPath(path);
