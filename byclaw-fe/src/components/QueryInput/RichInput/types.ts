@@ -79,6 +79,7 @@ export interface Props {
   projectId?: number;
   mentionPopoverPlacement?: PopoverProps['placement'];
   onResourcePopoverChange?: (state: { open: boolean; inputText?: string; width?: number }) => void;
+  allowMultiAgentInExpertMode?: boolean;
 }
 
 export interface MentionTriggerInfo {

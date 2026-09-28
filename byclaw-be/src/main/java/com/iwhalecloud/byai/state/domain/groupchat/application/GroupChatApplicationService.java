@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -322,7 +323,7 @@ public class GroupChatApplicationService {
         }
         for (ResourceVo resource : resourceList) {
             if (resource == null || resource.getResourceType() == null) {
-                throw new IllegalArgumentException("Invalid group member resource");
+                throw new GroupChatMessageRejectedException("Invalid group member resource");
             }
             String memberType;
             if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
@@ -332,15 +333,15 @@ public class GroupChatApplicationService {
                 memberType = MemObjType.USER.name();
             }
             else {
-                throw new IllegalArgumentException("Unsupported group member resource type");
+                throw new GroupChatMessageRejectedException("Unsupported group member resource type");
             }
             Long memberId = parseResourceId(resource.getResourceId());
             String existingMemberType = referencedMemberTypes.putIfAbsent(memberId, memberType);
             if (existingMemberType != null && !existingMemberType.equals(memberType)) {
-                throw new IllegalArgumentException("Conflicting group member resource types");
+                throw new GroupChatMessageRejectedException("Conflicting group member resource types");
             }
             if (memberService.findSessionMember(sessionId, memberType, memberId) == null) {
-                throw new IllegalArgumentException("Referenced resource is not a group member");
+                throw new GroupChatMessageRejectedException("Referenced resource is not a group member");
             }
             if (MemObjType.AGENT.name().equals(memberType)) {
                 agentIds.add(memberId);
@@ -351,13 +352,13 @@ public class GroupChatApplicationService {
 
     private Long parseResourceId(String resourceId) {
         if (resourceId == null || resourceId.isBlank()) {
-            throw new IllegalArgumentException("Invalid group member resource ID");
+            throw new GroupChatMessageRejectedException("Invalid group member resource ID");
         }
         try {
             return Long.valueOf(resourceId);
         }
         catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("Invalid group member resource ID", exception);
+            throw new GroupChatMessageRejectedException("Invalid group member resource ID", exception);
         }
     }
 

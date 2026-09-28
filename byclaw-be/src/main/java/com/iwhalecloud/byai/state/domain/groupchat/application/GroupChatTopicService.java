@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -71,11 +73,11 @@ public class GroupChatTopicService {
         Long topicId;
         while (true) {
             if (visited.size() > MAX_LEGACY_CHAIN_LENGTH || !visited.add(currentId)) {
-                throw new IllegalArgumentException("Invalid or excessively deep group reply chain");
+                throw new GroupChatMessageRejectedException("Invalid or excessively deep group reply chain");
             }
             ByaiMessage current = messageMapper.selectByMessageId(currentId);
             if (current == null || !Objects.equals(sessionId, current.getSessionId()) || !isPublicMessage(current)) {
-                throw new IllegalArgumentException("Referenced group message not found");
+                throw new GroupChatMessageRejectedException("Referenced group message not found");
             }
             if (current.getTopicId() != null) {
                 topicId = current.getTopicId();
