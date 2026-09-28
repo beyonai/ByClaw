@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.interfaces.controller.enterprise;
 
 import com.iwhalecloud.byai.common.annotation.Add;
 import com.iwhalecloud.byai.common.annotation.Mod;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.application.service.enterprise.EnterpriseInfoApplicationService;
 import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseInfoDTO;
 import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseQueryDTO;
@@ -40,7 +41,7 @@ public class EnterpriseController {
      */
     @RequestMapping(value = "/getEnterprise", method = RequestMethod.POST)
     public ResponseUtil<EnterpriseInfo> getEnterprise(@RequestBody EnterpriseQueryDTO queryDTO) {
-        return enterpriseInfoApplicationService.getEnterprise(queryDTO);
+        return ResponseUtil.successResponse(enterpriseInfoApplicationService.getEnterprise(queryDTO));
     }
 
     /**
@@ -50,7 +51,7 @@ public class EnterpriseController {
      */
     @RequestMapping(value = "/listUserEnterprises", method = RequestMethod.POST)
     public ResponseUtil<List<UserEnterpriseVo>> listUserEnterprises() {
-        return enterpriseInfoApplicationService.listUserEnterprises();
+        return ResponseUtil.successResponse(enterpriseInfoApplicationService.listUserEnterprises());
     }
 
     /**
@@ -62,7 +63,8 @@ public class EnterpriseController {
     @RequestMapping(value = "/create", method = RequestMethod.POST)
     public ResponseUtil<Long> create(
         @Validated(Add.class) @RequestBody EnterpriseInfoDTO enterpriseInfoDTO) {
-        return enterpriseInfoApplicationService.create(enterpriseInfoDTO);
+        return ResponseUtil.successResponse(I18nUtil.get("enterprise.add.success"),
+            enterpriseInfoApplicationService.create(enterpriseInfoDTO));
     }
 
     /**
@@ -74,7 +76,8 @@ public class EnterpriseController {
     @RequestMapping(value = "/update", method = RequestMethod.POST)
     public ResponseUtil<Void> update(
         @Validated(Mod.class) @RequestBody EnterpriseInfoDTO enterpriseInfoDTO) {
-        return enterpriseInfoApplicationService.update(enterpriseInfoDTO);
+        enterpriseInfoApplicationService.update(enterpriseInfoDTO);
+        return ResponseUtil.success(I18nUtil.get("enterprise.update.success"));
     }
 
     /**
@@ -85,14 +88,15 @@ public class EnterpriseController {
      */
     @RequestMapping(value = "/remove", method = RequestMethod.POST)
     public ResponseUtil<Void> remove(@Validated @RequestBody EnterpriseRemoveDTO removeDTO) {
-        return enterpriseInfoApplicationService.remove(removeDTO);
+        enterpriseInfoApplicationService.remove(removeDTO);
+        return ResponseUtil.success(I18nUtil.get("enterprise.delete.success"));
     }
 
     /**
      * 获取企业 Logo 并写入响应流。
      *
      * @param enterpriseId 企业标识
-     * @param response     HTTP 响应
+     * @param response HTTP 响应
      */
     @RequestMapping(value = "/getEnterpriseLogoData", method = RequestMethod.GET)
     public void getEnterpriseLogoData(@RequestParam("enterpriseId") Long enterpriseId, HttpServletResponse response) {
@@ -103,12 +107,13 @@ public class EnterpriseController {
      * 切换当前登录用户的企业（租户）。
      *
      * @param switchDTO 切换入参
-     * @param session   HTTP 会话
+     * @param session HTTP 会话
      * @return 切换后的企业标识
      */
     @RequestMapping(value = "/switch", method = RequestMethod.POST)
     public ResponseUtil<Long> switchTo(@Validated @RequestBody EnterpriseSwitchDTO switchDTO,
                                        HttpSession session) {
-        return enterpriseInfoApplicationService.switchTo(switchDTO, session);
+        return ResponseUtil.successResponse(I18nUtil.get("enterprise.switch.success"),
+            enterpriseInfoApplicationService.switchTo(switchDTO, session));
     }
 }

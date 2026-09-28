@@ -17,7 +17,6 @@ import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseSwitchDTO;
 import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
-import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.vo.enterprise.UserEnterpriseVo;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
@@ -55,12 +54,12 @@ public class EnterpriseInfoApplicationService {
      * 获取企业信息；未传企业标识时默认查询系统预置企业。
      *
      * @param queryDTO 查询入参
-     * @return 企业信息响应
+     * @return 企业信息
      */
-    public ResponseUtil<EnterpriseInfo> getEnterprise(EnterpriseQueryDTO queryDTO) {
+    public EnterpriseInfo getEnterprise(EnterpriseQueryDTO queryDTO) {
         Long enterpriseId = queryDTO != null && queryDTO.getEnterpriseId() != null
             ? queryDTO.getEnterpriseId() : DEFAULT_ENTERPRISE_ID;
-        return ResponseUtil.successResponse(enterpriseInfoService.findById(enterpriseId));
+        return enterpriseInfoService.findById(enterpriseId);
     }
 
     /**
@@ -68,9 +67,9 @@ public class EnterpriseInfoApplicationService {
      *
      * @return 企业简要信息列表（企业标识、名称、编码、角色、成员状态）
      */
-    public ResponseUtil<List<UserEnterpriseVo>> listUserEnterprises() {
+    public List<UserEnterpriseVo> listUserEnterprises() {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        return ResponseUtil.successResponse(tenantUserMembershipService.listUserEnterprises(userId));
+        return tenantUserMembershipService.listUserEnterprises(userId);
     }
 
     /**
@@ -80,7 +79,7 @@ public class EnterpriseInfoApplicationService {
      * @return 新建企业标识
      */
     @Transactional(rollbackFor = Exception.class)
-    public ResponseUtil<Long> create(EnterpriseInfoDTO enterpriseInfoDTO) {
+    public Long create(EnterpriseInfoDTO enterpriseInfoDTO) {
         assertComAcctCodeUnique(enterpriseInfoDTO.getComAcctCode(), null);
 
         EnterpriseInfo enterpriseInfo = buildEnterpriseForCreate(enterpriseInfoDTO);
@@ -90,35 +89,31 @@ public class EnterpriseInfoApplicationService {
         tenantUserMembershipService.add(currentUserId, enterpriseInfo.getEnterpriseId(),
             TenantUserMembershipRole.OWNER, currentUserId);
 
-        return ResponseUtil.successResponse(I18nUtil.get("enterprise.add.success"),
-            enterpriseInfo.getEnterpriseId());
+        return enterpriseInfo.getEnterpriseId();
     }
 
     /**
      * 修改企业信息。
      *
      * @param enterpriseInfoDTO 修改入参
-     * @return 操作结果
      */
     @Transactional(rollbackFor = Exception.class)
-    public ResponseUtil<Void> update(EnterpriseInfoDTO enterpriseInfoDTO) {
+    public void update(EnterpriseInfoDTO enterpriseInfoDTO) {
         assertPlatformManager();
         Long enterpriseId = enterpriseInfoDTO.getEnterpriseId();
         requireEnterprise(enterpriseId);
         assertComAcctCodeUnique(enterpriseInfoDTO.getComAcctCode(), enterpriseId);
 
         enterpriseInfoService.update(buildEnterpriseForUpdate(enterpriseInfoDTO));
-        return ResponseUtil.success(I18nUtil.get("enterprise.update.success"));
     }
 
     /**
      * 删除企业信息，并清理该企业下的租户成员关系；系统预置默认企业不允许删除。
      *
      * @param removeDTO 删除入参
-     * @return 操作结果
      */
     @Transactional(rollbackFor = Exception.class)
-    public ResponseUtil<Void> remove(EnterpriseRemoveDTO removeDTO) {
+    public void remove(EnterpriseRemoveDTO removeDTO) {
         assertPlatformManager();
         Long enterpriseId = removeDTO.getEnterpriseId();
         if (DEFAULT_ENTERPRISE_ID.equals(enterpriseId)) {
@@ -129,7 +124,6 @@ public class EnterpriseInfoApplicationService {
 
         tenantUserMembershipService.removeByEnterpriseId(enterpriseId);
         enterpriseInfoService.removeById(enterpriseId);
-        return ResponseUtil.success(I18nUtil.get("enterprise.delete.success"));
     }
 
     /**
@@ -149,7 +143,7 @@ public class EnterpriseInfoApplicationService {
      * @param session HTTP 会话
      * @return 切换后的企业标识
      */
-    public ResponseUtil<Long> switchTo(EnterpriseSwitchDTO switchDTO, HttpSession session) {
+    public Long switchTo(EnterpriseSwitchDTO switchDTO, HttpSession session) {
         Long enterpriseId = switchDTO.getEnterpriseId();
         requireEnterprise(enterpriseId);
 
@@ -174,7 +168,7 @@ public class EnterpriseInfoApplicationService {
             ShareCacheUtil.setShareShareBfmUser(users, enterpriseId);
         }
 
-        return ResponseUtil.successResponse(I18nUtil.get("enterprise.switch.success"), enterpriseId);
+        return enterpriseId;
     }
 
     /**
