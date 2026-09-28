@@ -635,6 +635,7 @@ public class ByClawSkillResourceApplicationService {
     public void unlinkWorkspaceSkill(String userCode, Long digitalEmployeeResourceId, String skillPath,
         String skillName) {
         Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
+        validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
         String resolvedSkillName = StringUtils.defaultIfBlank(skillName, lastPathSegment(skillPath));
         SsResource skillResource = findExistingSkill(resolvedSkillName, OwnerType.PERSONAL);
         if (skillResource != null) {
@@ -684,7 +685,7 @@ public class ByClawSkillResourceApplicationService {
             }
             throw new IllegalArgumentException(I18nUtil.get("resource.not.found"));
         }
-        boolean baseManagePermission = authApplicationService.hasResourceManagePermission(digitalEmployee);
+        boolean baseManagePermission = authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee);
         boolean managePermission = baseManagePermission;
         if (detailedLog) {
             Long currentUserId = CurrentUserHolder.getCurrentUserId();

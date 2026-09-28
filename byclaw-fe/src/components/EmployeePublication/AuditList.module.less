@@ -1,0 +1,101 @@
+.container {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.description {
+  flex-shrink: 0;
+  margin: 12px 0 16px;
+  color: var(--beyond-color-text-secondary, #666);
+  font-size: 13px;
+  line-height: 22px;
+}
+
+.tableWrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #ebeef2;
+  border-radius: 10px;
+
+  :global {
+    .ant-table-thead > tr > th {
+      background: #f7f8fa;
+      color: #596273;
+      font-weight: 500;
+    }
+
+    .ant-table-tbody > tr > td {
+      padding: 18px 16px;
+      vertical-align: top;
+    }
+
+    .ant-table-pagination {
+      padding: 0 16px;
+    }
+  }
+}
+
+.employee,
+.reviewInfo,
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.employeeLink {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  text-align: left;
+  line-height: 22px;
+}
+
+.employeeName {
+  display: block;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.secondary,
+.errorLabel {
+  color: var(--beyond-color-text-secondary, #666);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.errorLabel {
+  color: #cf1322;
+}
+
+.noteBlock {
+  min-width: 0;
+}
+
+.note {
+  margin-bottom: 0 !important;
+  line-height: 22px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  margin: 64px 16px;
+}

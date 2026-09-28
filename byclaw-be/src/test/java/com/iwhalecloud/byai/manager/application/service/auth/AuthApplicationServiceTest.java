@@ -82,6 +82,31 @@ import org.mockito.InOrder;
 
 class AuthApplicationServiceTest {
 
+    @Test
+    void employeePublicationStatusIsBatchedAndOnlyReturnedForAuthorizedSources() {
+        LoginInfo login = new LoginInfo(); login.setUserId(1L); login.setUserCode("author"); login.setEnterpriseId(1L);
+        CurrentUserHolder.setLoginInfo(login);
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        var resourceMapper = mock(SsResourceMapper.class);
+        var publicationMapper = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
+        var governance = mock(com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", resourceMapper);
+        ReflectionTestUtils.setField(service, "employeePublications", publicationMapper);
+        ReflectionTestUtils.setField(service, "employeeGovernance", governance);
+        SsResource own = enterpriseResource(601L, 1L); own.setResourceBizType("DIG_EMPLOYEE"); own.setOwnerType("personal");
+        SsResource other = enterpriseResource(602L, 2L); other.setResourceBizType("DIG_EMPLOYEE"); other.setOwnerType("personal");
+        when(resourceMapper.selectBatchIds(any())).thenReturn(List.of(own, other));
+        when(governance.canPublish(own)).thenReturn(true);
+        var rejected = new com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication();
+        rejected.setSourceId(601L); rejected.setStatus("REJECTED");
+        when(publicationMapper.currentStatuses(List.of(601L), 1L)).thenReturn(List.of(rejected));
+        var result = service.queryResourceOperationPermissionsBatch(List.of(601L, 602L));
+        assertThat(result.get(601L).getEmployeePublicationStatus()).isEqualTo("REJECTED");
+        assertThat(result.get(602L).getEmployeePublicationStatus()).isNull();
+        verify(publicationMapper).currentStatuses(List.of(601L), 1L);
+    }
+
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();

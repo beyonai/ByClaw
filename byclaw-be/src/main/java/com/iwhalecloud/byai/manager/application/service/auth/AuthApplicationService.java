@@ -128,6 +128,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @Service
 public class AuthApplicationService {
 
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService employeeGovernance;
+
+    @Autowired
+    private com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper employeePublications;
+
     private static final Logger logger = LoggerFactory.getLogger(AuthApplicationService.class);
 
     private static final String USE_APPLY_PENDING_STATUS = "P";
@@ -619,6 +625,7 @@ public class AuthApplicationService {
         // 2. 统一校验当前用户是否具备维护该资源成员的权限。
         // 允许设置的人包括：adminvip 账号、资源创建人、显式授权的资源管理人。
         validateResourceMemberSettingPermission(ssResource);
+        validateEmployeeAuthorizationPermission(ssResource);
 
         // 3. 构造统一授权对象，并交给 handleAuth 做差异化更新。
         AuthRedBlackDTO authDto = buildResourceMemberAuthDto(ssResource, GrantType.ALLOW_MANAGE, qo);
@@ -1163,6 +1170,11 @@ public class AuthApplicationService {
      * 判断当前用户是否具备资源成员设置权限。
      */
     private boolean hasResourceMemberSettingPermission(SsResource ssResource) {
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(ssResource)) return false;
+        if (employeeGovernance != null && employeeGovernance.isProtected(ssResource)) return false;
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
+            return employeeGovernance.canMaintainOfficial(ssResource);
+        }
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
 
         // 单条资源管理权限仅保留 adminvip 账号特判，不按角色放行。
@@ -1236,6 +1248,9 @@ public class AuthApplicationService {
      * 安装场景不继承平台、业务或组织管理角色，只允许资源创建人、有效 ALLOW_MANAGE 授权用户和 adminvip。
      */
     public boolean hasResourceInstallTargetManagePermission(SsResource ssResource) {
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(ssResource)) return false;
+        if (employeeGovernance != null && employeeGovernance.isProtected(ssResource)) return false;
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) return false;
         if (ssResource == null) {
             return false;
         }
@@ -1372,6 +1387,11 @@ public class AuthApplicationService {
      * 判断当前登录用户是否具备资源使用授权维护权限。
      */
     public boolean hasResourceUseSettingPermission(SsResource ssResource) {
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(ssResource)) return false;
+        if (employeeGovernance != null && employeeGovernance.isProtected(ssResource)) return false;
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
+            return employeeGovernance.canAdministerOfficial(ssResource);
+        }
         if (ssResource == null) {
             return false;
         }
@@ -3319,6 +3339,7 @@ public class AuthApplicationService {
                 managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds,
                 defaultDigitalEmployeeId, innerSkillResourceIds, publishedSkillSourceIds));
         });
+        populateEmployeePublicationStatuses(result);
         return result;
     }
 
@@ -3399,6 +3420,7 @@ public class AuthApplicationService {
             vo.setCanEdit(isOwner || canManage || isAdminVip);
             vo.setCanDelete(canDeleteStatus(resourceStatus, ownerType) && (isOwner || isAdminVip));
         }
+        applyEmployeeGovernancePermissions(ssResource, vo);
         applyResourceCenterLifecyclePermissions(ssResource, vo, currentUserId);
         return vo;
     }
@@ -3430,6 +3452,11 @@ public class AuthApplicationService {
 
     private boolean hasResourceMemberSettingPermission(SsResource ssResource, Long currentUserId,
                                                        Set<Long> managePrivilegeIds) {
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(ssResource)) return false;
+        if (employeeGovernance != null && employeeGovernance.isProtected(ssResource)) return false;
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
+            return employeeGovernance.canMaintainOfficial(ssResource);
+        }
         if (ssResource == null) {
             return false;
         }
@@ -3625,9 +3652,57 @@ public class AuthApplicationService {
             vo.setCanEdit(isOwner || canManage || isAdminVip);
             vo.setCanDelete(this.canDeleteStatus(resourceStatus, ownerType) && (isOwner || isAdminVip));
         }
+        applyEmployeeGovernancePermissions(ssResource, vo);
         applyResourceCenterLifecyclePermissions(ssResource, vo, CurrentUserHolder.getCurrentUserId());
+        populateEmployeePublicationStatuses(Map.of(resourceId, vo));
 
         return vo;
+    }
+
+    private void populateEmployeePublicationStatuses(Map<Long, ResourceOperationPermissionsVo> permissions) {
+        List<Long> sourceIds = permissions.values().stream().filter(ResourceOperationPermissionsVo::isCanPublishEmployee)
+            .map(ResourceOperationPermissionsVo::getResourceId).toList();
+        if (sourceIds.isEmpty()) return;
+        // 列表只查询一次当前申请状态，不按卡片逐条读取审核记录，也不向无发布权限的人返回记录。
+        employeePublications.currentStatuses(sourceIds, CurrentUserHolder.getEnterpriseId()).forEach(publication -> {
+            ResourceOperationPermissionsVo permission = permissions.get(publication.getSourceId());
+            if (permission != null) permission.setEmployeePublicationStatus(publication.getStatus());
+        });
+    }
+
+    /** Authorization endpoints, including legacy bulk endpoints, share this guard. */
+    public void validateEmployeeAuthorizationPermission(SsResource resource) {
+        if (employeeGovernance == null) return;
+        employeeGovernance.requireNotProtected(resource);
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) throw new BaseException("发布技能为固定快照，请通过员工发布流程更新");
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(resource)
+            && !employeeGovernance.canAdministerOfficial(resource)) {
+            throw new BaseException("仅官方管理员可以调整官方副本授权");
+        }
+    }
+
+    private void applyEmployeeGovernancePermissions(SsResource resource, ResourceOperationPermissionsVo vo) {
+        if (employeeGovernance == null) return;
+        boolean official = com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(resource);
+        vo.setOfficialPublication(official);
+        vo.setCanPublishEmployee(employeeGovernance.canPublish(resource));
+        if (official) {
+            boolean admin = employeeGovernance.canAdministerOfficial(resource);
+            vo.setCanManageAuth(admin);
+            vo.setCanUseAuth(admin);
+            vo.setCanOffShelf(admin && Objects.equals(resource.getResourceStatus(), 2));
+            vo.setCanOnShelf(admin && Objects.equals(resource.getResourceStatus(), 3));
+            vo.setCanDelete(admin && Objects.equals(resource.getResourceStatus(), 3));
+        }
+        if (employeeGovernance.isProtected(resource) || com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) {
+            vo.setHasManagePermission(false);
+            vo.setCanEdit(false);
+            vo.setCanManageAuth(false);
+            vo.setCanUseAuth(false);
+            vo.setCanOnShelf(false);
+            vo.setCanOffShelf(false);
+            vo.setCanDelete(false);
+        }
     }
 
     /** 列表与详情共享生命周期权限，保留内置资源和外部托管资源的只读限制。 */

@@ -12,6 +12,11 @@ import lombok.Setter;
 @Getter
 @Setter
 public class DigitalEmployeeVo extends DigitalEmployeeDTO {
+    private boolean officialPublication;
+    private boolean canPublishEmployee;
+    /** 当前活动申请或最近一次发布结果，用于列表入口展示。 */
+    private String employeePublicationStatus;
+
 
     /**
      * 所在目录 ID。 列表查询场景直接回传给前端，方便页面展示数字员工所属目录，不影响保存/更新入参结构。

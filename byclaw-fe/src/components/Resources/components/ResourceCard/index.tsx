@@ -1,3 +1,4 @@
+import { openEmployeePublication, publicationEntryLabel } from '@/service/employeePublication';
 import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
@@ -59,6 +60,9 @@ export interface IResourceCardItem {
   hasUsePermission?: boolean;
   canViewDetail?: boolean;
   canEdit?: boolean;
+  officialPublication?: boolean;
+  canPublishEmployee?: boolean;
+  employeePublicationStatus?: string;
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canApplyUse?: boolean;
@@ -140,6 +144,7 @@ type ResourceCardActionConfig = {
   onAuth?: (authType: 'useAuth' | 'mgrAuth') => void;
   onEdit?: () => void;
   onApply?: () => void;
+
   /** 仅数字员工“我可用的”页签开启，其他使用卡片的场景默认隐藏。 */
   enableSetDefault?: boolean;
   onSetDefault?: () => void;
@@ -632,14 +637,11 @@ const RenderContent = (props: ResourceCardProps) => {
     statusTagTextMap[rawStatusKey.toUpperCase()] ||
     statusTagTextMap[`${displayTopRightTag || ''}`] ||
     '';
-  const statusTagClass =
-    (isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) || showResourceStatusTag
-      ? normalizedStatus === '-1'
-        ? 'digitalEmployeeStatusDeleted'
-        : normalizedStatus
-          ? `digitalEmployeeStatus${normalizedStatus}`
-          : ''
-      : '';
+  let statusTagClass = '';
+  if (((isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) || showResourceStatusTag) && normalizedStatus) {
+    statusTagClass =
+      normalizedStatus === '-1' ? 'digitalEmployeeStatusDeleted' : `digitalEmployeeStatus${normalizedStatus}`;
+  }
   const topRightTag = displayTopRightTag;
   const isInnerSkill = isInnerSkillResource(resource, resourceType);
   const isInstalledResource = Boolean(
@@ -737,20 +739,32 @@ const RenderContent = (props: ResourceCardProps) => {
         duration: 6,
       });
     } catch (error) {
-      message.error({
-        key: messageKey,
-        content:
-          typeof error === 'string'
-            ? error
-            : error instanceof Error
-              ? error.message
-              : intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' }),
-      });
+      let errorText = intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' });
+      if (typeof error === 'string') errorText = error;
+      else if (error instanceof Error) errorText = error.message;
+      message.error({ key: messageKey, content: errorText });
     } finally {
       publishToEnterpriseLock.current = false;
       setPublishingToEnterprise(false);
     }
   }, [resource.resourceId, onEnterpriseSkillDetail, intl]);
+
+  const openPublication = useCallback(
+    async (editOfficial = false) => {
+      if (publishToEnterpriseLock.current) return;
+      publishToEnterpriseLock.current = true;
+      try {
+        const resourceId = String(resource.resourceId || resource.id || resource.agentId);
+        if (editOfficial) await openEmployeePublication(resourceId, 'editOfficial');
+        else await openEmployeePublication(resourceId);
+      } catch (error: any) {
+        message.error(error?.message || '无法发起发布申请');
+      } finally {
+        publishToEnterpriseLock.current = false;
+      }
+    },
+    [resource.resourceId, resource.id, resource.agentId]
+  );
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const {
@@ -798,13 +812,27 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
+    if (resource.canPublishEmployee && resource.agentType !== '017') {
+      items.push({
+        key: 'publishEmployee',
+        label: (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={publicationEntryLabel(resource.employeePublicationStatus)}
+          />
+        ),
+        onClick: () => openPublication(),
+      });
+    }
+
     // 编辑信息
     if (canEdit && !isInnerSkill) {
       items.push({
         key: 'edit',
         label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'common.editInfo' })} />,
         onClick: () => {
-          onEdit?.();
+          if (resource.officialPublication) openPublication(true);
+          else onEdit?.();
         },
       });
     }
@@ -962,7 +990,8 @@ const RenderContent = (props: ResourceCardProps) => {
     // 数字员工下架沿用操作权限判断；页面通过生命周期开关隐藏个人员工的上下架入口。
     const canUnShelfDigitalEmployee =
       isDigitalEmployeeResource &&
-      (canOffShelf === true || (canManageEnterpriseDigitalEmployee && digitalEmployeeStatus === '2'));
+      (canOffShelf === true ||
+        (canOffShelf === undefined && canManageEnterpriseDigitalEmployee && digitalEmployeeStatus === '2'));
     if (
       enableDigitalEmployeeLifecycle &&
       ((!isDigitalEmployeeResource && !enableResourceLifecycle && canDelete) || canUnShelfDigitalEmployee)
@@ -993,7 +1022,8 @@ const RenderContent = (props: ResourceCardProps) => {
     if (
       enableDigitalEmployeeLifecycle &&
       isDigitalEmployeeResource &&
-      (canOnShelf === true || (canManageEnterpriseDigitalEmployee && ['0', '3'].includes(digitalEmployeeStatus)))
+      (canOnShelf === true ||
+        (canOnShelf === undefined && canManageEnterpriseDigitalEmployee && ['0', '3'].includes(digitalEmployeeStatus)))
     ) {
       items.push({
         key: 'shelfData',
@@ -1097,6 +1127,10 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.resourceStatus,
     resource?.metaStatus,
     resource?.canEdit,
+    resource?.officialPublication,
+    resource?.canPublishEmployee,
+    resource?.employeePublicationStatus,
+    openPublication,
     resource?.canManageAuth,
     resource?.canUseAuth,
     resource?.canApplyUse,

@@ -540,7 +540,7 @@ public class SkillGroupApplicationService {
                 || (group != null && !Objects.equals(group.getComAcctId(), digitalEmployee.getComAcctId()))) {
             throw new BaseException("数字员工与技能组不属于同一企业");
         }
-        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
+        if (!authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)) {
             throw new BaseException("当前用户没有数字员工管理权限");
         }
     }

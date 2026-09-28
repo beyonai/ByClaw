@@ -1,3 +1,8 @@
+jest.mock('@/service/employeePublication', () => ({
+  ...jest.requireActual('@/service/employeePublication'),
+  openEmployeePublication: jest.fn(),
+}));
+import { openEmployeePublication } from '@/service/employeePublication';
 jest.mock('@umijs/max', () => ({
   getIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
@@ -91,33 +96,37 @@ afterEach(async () => {
 });
 
 describe('ResourceCard', () => {
-  it('replaces processing with success before the row refresh completes', async () => {
-    let finishRefresh!: () => void;
-    const refresh = new Promise<void>((resolve) => {
-      finishRefresh = resolve;
-    });
-    renderWithQueryClient(
-      <ResourceCard
-        resource={{ resourceId: 'slow-refresh', resourceBizType: 'SKILL', ownerType: 'personal', canDelete: true }}
-        actionConfig={{
-          enableResourceLifecycle: true,
-          onDeleteData: async (feedback) => {
-            feedback.success('Deregistered');
-            await refresh;
-          },
-        }}
-      />
-    );
-    fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
-    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
-    expect(await screen.findByText('Deregistered')).toBeInTheDocument();
-    expect(screen.queryAllByText('common.processing')).toHaveLength(0);
-    await act(async () => {
-      finishRefresh();
-      await refresh;
-    });
-    expect(screen.getByText('Deregistered')).toBeInTheDocument();
-  }, lifecycleTestTimeout);
+  it(
+    'replaces processing with success before the row refresh completes',
+    async () => {
+      let finishRefresh!: () => void;
+      const refresh = new Promise<void>((resolve) => {
+        finishRefresh = resolve;
+      });
+      renderWithQueryClient(
+        <ResourceCard
+          resource={{ resourceId: 'slow-refresh', resourceBizType: 'SKILL', ownerType: 'personal', canDelete: true }}
+          actionConfig={{
+            enableResourceLifecycle: true,
+            onDeleteData: async (feedback) => {
+              feedback.success('Deregistered');
+              await refresh;
+            },
+          }}
+        />
+      );
+      fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
+      fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+      expect(await screen.findByText('Deregistered')).toBeInTheDocument();
+      expect(screen.queryAllByText('common.processing')).toHaveLength(0);
+      await act(async () => {
+        finishRefresh();
+        await refresh;
+      });
+      expect(screen.getByText('Deregistered')).toBeInTheDocument();
+    },
+    lifecycleTestTimeout
+  );
 
   it.each(['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'MCP', 'TOOLKIT', 'AGENT'])(
     'hides authorization for off-shelf %s and restores permitted actions after publishing',
@@ -186,43 +195,47 @@ describe('ResourceCard', () => {
     ['SKILL', '3', 'resource.lifecycle.shelfData', 'onShelf'],
     ['KG_DOC', '2', 'resource.lifecycle.unShelfData', 'onUnShelf'],
     ['TOOLKIT', '3', 'resource.lifecycle.deleteData', 'onDeleteData'],
-  ])('shows processing until %s / %s / %s finishes', async (resourceBizType, resourceStatus, label, callback) => {
-    let finish!: () => void;
-    const operation = jest.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        })
-    );
-    renderWithQueryClient(
-      <ResourceCard
-        resource={{
-          resourceId: 'processing-resource',
-          resourceName: 'Unchanged card',
-          resourceBizType,
-          resourceStatus,
-          ownerType: 'enterprise',
-          canOnShelf: true,
-          canOffShelf: true,
-          canDelete: true,
-        }}
-        actionConfig={{ enableResourceLifecycle: true, enableDigitalEmployeeDelete: true, [callback]: operation }}
-      />
-    );
-    const title = screen.getByText('Unchanged card');
-    fireEvent.click(screen.getByText(label));
-    const confirm = await screen.findByRole('button', { name: 'common.confirm' });
-    fireEvent.click(confirm);
-    fireEvent.click(confirm);
-    expect(operation).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText('common.processing')).toBeInTheDocument();
-    expect(screen.getByText('Unchanged card')).toBe(title);
-    await act(async () => {
-      finish();
-      await operation.mock.results[0].value;
-    });
-    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
-  }, lifecycleTestTimeout);
+  ])(
+    'shows processing until %s / %s / %s finishes',
+    async (resourceBizType, resourceStatus, label, callback) => {
+      let finish!: () => void;
+      const operation = jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          })
+      );
+      renderWithQueryClient(
+        <ResourceCard
+          resource={{
+            resourceId: 'processing-resource',
+            resourceName: 'Unchanged card',
+            resourceBizType,
+            resourceStatus,
+            ownerType: 'enterprise',
+            canOnShelf: true,
+            canOffShelf: true,
+            canDelete: true,
+          }}
+          actionConfig={{ enableResourceLifecycle: true, enableDigitalEmployeeDelete: true, [callback]: operation }}
+        />
+      );
+      const title = screen.getByText('Unchanged card');
+      fireEvent.click(screen.getByText(label));
+      const confirm = await screen.findByRole('button', { name: 'common.confirm' });
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+      expect(operation).toHaveBeenCalledTimes(1);
+      expect(await screen.findByText('common.processing')).toBeInTheDocument();
+      expect(screen.getByText('Unchanged card')).toBe(title);
+      await act(async () => {
+        finish();
+        await operation.mock.results[0].value;
+      });
+      await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+    },
+    lifecycleTestTimeout
+  );
 
   it('clears the processing toast and permits retry after a lifecycle failure', async () => {
     const operation = jest.fn().mockRejectedValueOnce(new Error('Operation failed')).mockResolvedValue(undefined);
@@ -1128,5 +1141,65 @@ describe('personal skill enterprise publication', () => {
     expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
     expect(emit).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+  });
+});
+
+describe('digital employee publication entry', () => {
+  it.each([
+    [undefined, '发布到官方推荐'],
+    ['DRAFT', '继续发布'],
+    ['PENDING', '查看发布进度'],
+    ['APPLYING', '查看发布进度'],
+    ['REJECTED', '查看审核结果'],
+    ['WITHDRAWN', '查看发布申请'],
+    ['FAILED', '查看发布结果'],
+    ['PUBLISHED', '查看发布结果'],
+  ])('shows the entry for %s and opens the existing request', async (status, label) => {
+    (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: true,
+          employeePublicationStatus: status,
+        }}
+      />
+    );
+    fireEvent.click(screen.getByText(label!));
+    await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('10'));
+  });
+  it('only offers publication when the backend allows it', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: false,
+        }}
+      />
+    );
+    expect(screen.queryByText('发布到官方推荐')).not.toBeInTheDocument();
+  });
+  it('opens an official copy through its candidate workflow', async () => {
+    (openEmployeePublication as jest.Mock).mockResolvedValue(undefined);
+    const onEdit = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'enterprise',
+          canEdit: true,
+          officialPublication: true,
+        }}
+        actionConfig={{ onEdit }}
+      />
+    );
+    fireEvent.click(screen.getByText('common.editInfo'));
+    await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('10', 'editOfficial'));
+    expect(onEdit).not.toHaveBeenCalled();
   });
 });

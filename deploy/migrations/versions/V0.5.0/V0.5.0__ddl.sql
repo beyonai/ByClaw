@@ -420,3 +420,60 @@ CREATE INDEX IF NOT EXISTS idx_group_chat_message_ack_message
     ON byai.byai_group_chat_message_ack (session_id, message_id, acknowledged_at);
 
 COMMENT ON TABLE byai.byai_group_chat_message_ack IS '群消息被@真人用户的收到确认，不产生新消息';
+
+-- 个人数字员工发布到官方推荐：源员工与官方副本独立维护，候选配置独立审核。
+ALTER TABLE byai.ss_resource ADD COLUMN publication_source_id BIGINT;
+ALTER TABLE byai.ss_resource ADD COLUMN publication_request_id BIGINT;
+CREATE UNIQUE INDEX uq_employee_official_source
+    ON byai.ss_resource (com_acct_id, publication_source_id);
+COMMENT ON COLUMN byai.ss_resource.publication_source_id IS '来源个人数字员工ID，关联ss_resource.resource_id；仅官方员工副本填写，普通资源为空';
+COMMENT ON COLUMN byai.ss_resource.publication_request_id IS '关联发布申请ID，关联digital_employee_publication.request_id；官方员工记录当前生效申请，技能副本记录创建该副本的申请';
+
+CREATE TABLE byai.digital_employee_publication (
+    request_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    source_id BIGINT NOT NULL,
+    author_id BIGINT NOT NULL,
+    author_name VARCHAR(255) NOT NULL,
+    employee_name VARCHAR(512) NOT NULL,
+    official_id BIGINT,
+    status VARCHAR(16) NOT NULL,
+    revision BIGINT NOT NULL DEFAULT 1,
+    snapshot_json TEXT NOT NULL,
+    dependencies_json TEXT NOT NULL,
+    comment VARCHAR(2000),
+    reviewer_id BIGINT,
+    reviewer_name VARCHAR(255),
+    reviewed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    publish_error VARCHAR(2000),
+    CONSTRAINT ck_employee_publication_status CHECK (status IN ('DRAFT','PENDING','APPLYING','PUBLISHED','REJECTED','WITHDRAWN','FAILED'))
+);
+CREATE INDEX idx_employee_publication_inbox
+    ON byai.digital_employee_publication (tenant_id, status, updated_at DESC);
+CREATE INDEX idx_employee_publication_source
+    ON byai.digital_employee_publication (tenant_id, source_id, created_at DESC);
+COMMENT ON TABLE byai.digital_employee_publication IS '数字员工发布申请、审核快照及发布结果；更新不修改在用版本';
+COMMENT ON COLUMN byai.digital_employee_publication.request_id IS '发布申请ID，主键';
+COMMENT ON COLUMN byai.digital_employee_publication.tenant_id IS '申请所属企业（租户）ID，用于发布数据隔离';
+COMMENT ON COLUMN byai.digital_employee_publication.source_id IS '来源个人数字员工ID，关联ss_resource.resource_id；官方副本的更新申请仍保留此来源ID';
+COMMENT ON COLUMN byai.digital_employee_publication.author_id IS '数字员工原创建者用户ID，用于作者署名及维护权限校验，不一定是本次申请的操作人';
+COMMENT ON COLUMN byai.digital_employee_publication.author_name IS '数字员工原创建者姓名快照，用于作者署名展示';
+COMMENT ON COLUMN byai.digital_employee_publication.employee_name IS '本次申请配置中的数字员工名称';
+COMMENT ON COLUMN byai.digital_employee_publication.official_id IS '官方数字员工副本ID，关联ss_resource.resource_id；首次发布成功前为空，更新申请沿用已有官方副本ID';
+COMMENT ON COLUMN byai.digital_employee_publication.status IS '申请状态：DRAFT草稿、PENDING待审核、APPLYING发布执行中、PUBLISHED已发布、REJECTED已驳回、WITHDRAWN已撤回、FAILED发布失败';
+COMMENT ON COLUMN byai.digital_employee_publication.revision IS '申请修订号，初始为1，随申请变更递增，用于并发操作及重复提交校验';
+COMMENT ON COLUMN byai.digital_employee_publication.snapshot_json IS '待发布数字员工配置快照，JSON格式；审核及发布以此快照为准';
+COMMENT ON COLUMN byai.digital_employee_publication.dependencies_json IS '关联资源快照清单，JSON格式，包含资源处理方式、校验结果及待复制技能的文件位置和摘要';
+COMMENT ON COLUMN byai.digital_employee_publication.comment IS '审核意见或处理说明，记录通过、驳回等操作的说明';
+COMMENT ON COLUMN byai.digital_employee_publication.reviewer_id IS '审核操作人用户ID；管理员免人工审核发布时记录该管理员';
+COMMENT ON COLUMN byai.digital_employee_publication.reviewer_name IS '审核操作人姓名快照；管理员免人工审核发布时记录该管理员';
+COMMENT ON COLUMN byai.digital_employee_publication.reviewed_at IS '审核操作时间；管理员免人工审核发布时记录自动通过时间';
+COMMENT ON COLUMN byai.digital_employee_publication.created_at IS '发布申请创建时间';
+COMMENT ON COLUMN byai.digital_employee_publication.updated_at IS '发布申请最近更新时间；用于列表排序及发布执行超时判定';
+COMMENT ON COLUMN byai.digital_employee_publication.publish_error IS '发布执行失败原因，供失败提示及管理员排查使用';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_publication_active
+    ON byai.digital_employee_publication (tenant_id, source_id)
+    WHERE status IN ('DRAFT', 'PENDING', 'APPLYING', 'FAILED');

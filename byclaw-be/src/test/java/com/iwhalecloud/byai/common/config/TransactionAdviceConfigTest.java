@@ -25,6 +25,28 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 class TransactionAdviceConfigTest {
 
     @Test
+    void publicationTransactionsDoNotChangeOrdinaryEmployeeSync() throws Exception {
+        TransactionAdviceConfig config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));
+        var source = config.getAdvisor().getTransactionAttributeSource();
+        var coordinator = com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationApplicationService.class;
+        for (Method method : coordinator.getDeclaredMethods()) {
+            if (java.lang.reflect.Modifier.isPublic(method.getModifiers())) {
+                assertThat(source.getTransactionAttribute(method, coordinator).getPropagationBehavior())
+                    .as(method.getName()).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+            }
+        }
+        var employee = com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService.class;
+        var dto = com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO.class;
+        assertThat(source.getTransactionAttribute(employee.getMethod("synOpenClawWorkSpace", Long.class, dto), employee).getPropagationBehavior())
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(source.getTransactionAttribute(employee.getMethod("syncPublicationOpenClawWorkSpace", Long.class, dto), employee).getPropagationBehavior())
+            .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+        assertThat(source.getTransactionAttribute(employee.getMethod("restorePublicationRuntimeAfterRollback", Long.class), employee).getPropagationBehavior())
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+    }
+
+    @Test
     void streamClassificationDoesNotBorrowADatabaseConnection() {
         DataSource dataSource = mock(DataSource.class);
         TransactionAdviceConfig config = new TransactionAdviceConfig();

@@ -30,6 +30,14 @@ public class SsResource implements Serializable {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long resourceId;
 
+    /** 个人发布到官方的来源员工；为空表示非发布副本。 */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long publicationSourceId;
+
+    /** 官方员工当前生效的发布申请。 */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long publicationRequestId;
+
     /**
      * 外系统编码，BYAI：百应，WHAGE_AGENT:老智能体，BOT：博特，DIFY：DIFY
      */

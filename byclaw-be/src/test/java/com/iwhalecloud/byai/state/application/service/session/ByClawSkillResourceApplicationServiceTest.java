@@ -345,6 +345,9 @@ class ByClawSkillResourceApplicationServiceTest {
 
     @Test
     void unlinkWorkspaceSkillSchedulesRefreshAfterRemovingRelation() {
+        SsResource employee = new SsResource(); employee.setResourceId(1001L); employee.setResourceBizType("DIG_EMPLOYEE");
+        when(ssResourceService.findById(anyLong())).thenReturn(employee);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         SsResource skill = new SsResource();
         skill.setResourceId(7001L);
         skill.setResourceBizType("SKILL");
@@ -365,6 +368,9 @@ class ByClawSkillResourceApplicationServiceTest {
 
     @Test
     void unlinkWorkspaceSkillWithoutResourceStillSchedulesRefreshForDefaultEmployee() {
+        SsResource employee = new SsResource(); employee.setResourceId(1001L); employee.setResourceBizType("DIG_EMPLOYEE");
+        when(ssResourceService.findById(anyLong())).thenReturn(employee);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(ssResourceService.getResourceListByCode(List.of("demo-skill"))).thenReturn(List.of());
 
         service.unlinkWorkspaceSkill("user001", null,
@@ -401,7 +407,7 @@ class ByClawSkillResourceApplicationServiceTest {
         SsResource digitalEmployee = new SsResource();
         digitalEmployee.setResourceId(9001L);
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(true);
 
         service.registerChatUploadedSkills("user001", 9001L, List.of(uploadFile), List.of(uploadedSkill));
 
@@ -473,7 +479,7 @@ class ByClawSkillResourceApplicationServiceTest {
         SsResource digitalEmployee = new SsResource();
         digitalEmployee.setResourceId(9001L);
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(false);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(false);
 
         assertThatThrownBy(() -> service.registerChatUploadedSkills("user001", 9001L, List.of(uploadFile),
             List.of(uploadedSkill))).isInstanceOf(IllegalArgumentException.class);
@@ -537,7 +543,7 @@ class ByClawSkillResourceApplicationServiceTest {
         historicalExtSkill.setVersion("v0.3");
 
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(true);
         when(ssResourceService.getResourceListByCode(List.of("demo-skill")))
             .thenReturn(List.of(existingEnterpriseSkill, historicalPersonalSkill));
         when(authApplicationService.hasResourceManagePermission(existingEnterpriseSkill)).thenReturn(true);
@@ -592,7 +598,7 @@ class ByClawSkillResourceApplicationServiceTest {
         digitalEmployee.setResourceId(9001L);
 
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(true);
         when(ssResourceService.getResourceListByCode(List.of("demo-skill")))
             .thenReturn(List.of(existingEnterpriseSkill));
         when(authApplicationService.hasResourceManagePermission(existingEnterpriseSkill)).thenReturn(false);
@@ -626,7 +632,7 @@ class ByClawSkillResourceApplicationServiceTest {
         innerExtSkill.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
 
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(true);
         when(ssResourceService.getResourceListByCode(List.of("demo-skill"))).thenReturn(List.of(innerSkill));
         when(authApplicationService.hasResourceManagePermission(innerSkill)).thenReturn(true);
         when(ssResExtSkillService.findById(7004L)).thenReturn(innerExtSkill);
@@ -1039,7 +1045,7 @@ class ByClawSkillResourceApplicationServiceTest {
         digitalEmployee.setManOrgId(30003L);
         digitalEmployee.setComAcctId(1L);
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(false);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(false);
 
         Logger serviceLogger = (Logger)LoggerFactory.getLogger(ByClawSkillResourceApplicationService.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -1092,7 +1098,7 @@ class ByClawSkillResourceApplicationServiceTest {
         digitalEmployee.setResourceId(9001L);
         digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(true);
         when(ssResourceService.findByImportIdentity("WHALE_AGENT", "SKILL", resourceCode)).thenReturn(null);
         when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> {
             SsResource resource = invocation.getArgument(0);
@@ -1134,7 +1140,7 @@ class ByClawSkillResourceApplicationServiceTest {
         digitalEmployee.setResourceId(9001L);
         digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(true);
 
         SsResource existing = new SsResource();
         existing.setResourceId(7302L);
@@ -1170,7 +1176,7 @@ class ByClawSkillResourceApplicationServiceTest {
         digitalEmployee.setResourceId(9001L);
         digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(true);
 
         SsResource existing = new SsResource();
         existing.setResourceId(7303L);

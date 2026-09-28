@@ -252,7 +252,9 @@ public class OpenApiApplicationService {
     }
 
     private void validateMountPermission(SsResource agentResource, SsResource relSsResource) {
-        if (!authApplicationService.hasResourceManagePermission(agentResource)) {
+        if (!("DIG_EMPLOYEE".equals(agentResource.getResourceBizType())
+            ? authApplicationService.hasResourceInstallTargetManagePermission(agentResource)
+            : authApplicationService.hasResourceManagePermission(agentResource))) {
             throw new BaseRuntimeException(I18nUtil.get("openapi.mount.agent.no.manage.permission",
                 agentResource.getResourceName()));
         }

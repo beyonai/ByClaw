@@ -1,3 +1,4 @@
+import useEmployeePublicationCapabilities from '@/hooks/useEmployeePublicationCapabilities';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { PlusOutlined, SearchOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { useDispatch, useIntl, useNavigate, useSearchParams } from '@umijs/max';
@@ -31,6 +32,9 @@ const getListOperationPermissions = (employee: any) => {
     hasUsePermission: employee.hasUsePermission === true,
     canViewDetail: employee.canViewDetail === true,
     canEdit: employee.canEdit === true,
+    officialPublication: employee.officialPublication === true,
+    canPublishEmployee: employee.canPublishEmployee === true,
+    employeePublicationStatus: employee.employeePublicationStatus,
     canManageAuth: employee.canManageAuth === true,
     canUseAuth: employee.canUseAuth === true,
     canDelete: employee.canDelete === true,
@@ -44,6 +48,7 @@ const getListOperationPermissions = (employee: any) => {
 };
 
 const DigitalEmployeesPage: React.FC = () => {
+  const publicationCapabilities = useEmployeePublicationCapabilities();
   const intl = useIntl();
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -139,6 +144,17 @@ const DigitalEmployeesPage: React.FC = () => {
     });
   }, []);
 
+  const createMenuItems = [
+    { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
+    { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
+  ];
+  if (publicationCapabilities?.canCreateEnterprise) {
+    createMenuItems.push(
+      { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
+      { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) }
+    );
+  }
+
   const tabBarExtraContent = (
     <Space className={styles.toolbar}>
       <ResourceFilter
@@ -179,12 +195,7 @@ const DigitalEmployeesPage: React.FC = () => {
         trigger={['click']}
         overlay={
           <Menu
-            items={[
-              { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
-              { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
-              { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
-              { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) },
-            ]}
+            items={createMenuItems}
             onClick={({ key }) => {
               if (key === 'enterprise') {
                 setEnterpriseCreateOpen(true);
