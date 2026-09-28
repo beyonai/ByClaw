@@ -91,8 +91,8 @@ export const useEnterpriseSkillPublication = ({
                     result.resource.resourceStatus === 4
                       ? 'resource.enterpriseSkillPending'
                       : result.alreadyExists
-                      ? 'resource.enterpriseSkillExists'
-                      : 'resource.publishToEnterpriseSuccess',
+                        ? 'resource.enterpriseSkillExists'
+                        : 'resource.publishToEnterpriseSuccess',
                 })}
                 {result.resource.resourceStatus !== 4 && (
                   <Button type="link" onClick={() => onDetail(result.resource)}>

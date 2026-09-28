@@ -23,11 +23,7 @@ import {
 } from '@/pages/projectSpace/service';
 import type { ProjectMember, ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getProjectMutationErrorMessage, hasDuplicateProjectName } from '@/pages/projectSpace/projectMutation';
-import {
-  getArrayData,
-  normalizeProjectDetail,
-  normalizeProjectSession,
-} from '@/pages/projectSpace/utils';
+import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { saveProjectMembers, saveProjectResources, type DevloopProjectSessionSearchMode } from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';

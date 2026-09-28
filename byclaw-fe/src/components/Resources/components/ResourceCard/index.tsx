@@ -761,8 +761,8 @@ const RenderContent = (props: ResourceCardProps) => {
                 result.resource.resourceStatus === 4
                   ? 'resource.enterpriseSkillPending'
                   : result.alreadyExists
-                  ? 'resource.enterpriseSkillExists'
-                  : 'resource.publishToEnterpriseSuccess',
+                    ? 'resource.enterpriseSkillExists'
+                    : 'resource.publishToEnterpriseSuccess',
             })}
             {onEnterpriseSkillDetail && result.resource.resourceStatus !== 4 && (
               <Button type="link" onClick={() => onEnterpriseSkillDetail(result.resource)}>
@@ -1259,20 +1259,20 @@ const RenderContent = (props: ResourceCardProps) => {
     ...((isWorkspaceSkillResource ? workspaceMenuItems : menuItems) || []),
     ...(actionConfig?.enableSkillExport && (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL')
       ? [
-          {
-            key: 'exportSkill',
-            label: (
-              <BuildMenuLabel
-                icon="icon-a-Downloadxiazai"
-                text={intl.formatMessage({ id: 'resource.skillExport.single' })}
-              />
-            ),
-            disabled: exportingSkill,
-            onClick: () => {
-              void exportSkills();
-            },
+        {
+          key: 'exportSkill',
+          label: (
+            <BuildMenuLabel
+              icon="icon-a-Downloadxiazai"
+              text={intl.formatMessage({ id: 'resource.skillExport.single' })}
+            />
+          ),
+          disabled: exportingSkill,
+          onClick: () => {
+            void exportSkills();
           },
-        ]
+        },
+      ]
       : []),
   ];
   const effectiveTopRightTag =

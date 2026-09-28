@@ -144,9 +144,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       !hasAnyUserRole(userTypeList, ['PLAT_MAN', 'ORG_MAN', 'BUSINESS_MAN', 'PLAT_DEVOPS']) ||
       ENV.includes('enterprise');
     const isDevelopHiden =
-      !devConfig?.devPortalUrl ||
-      !hasAnyUserRole(userTypeList, ['PLAT_MAN', 'DEV_USER']) ||
-      ENV.includes('develop');
+      !devConfig?.devPortalUrl || !hasAnyUserRole(userTypeList, ['PLAT_MAN', 'DEV_USER']) || ENV.includes('develop');
     const enterpriseMenuItems = filterRoutesByBlockedPaths(
       filterMenusByMenuDisplay(filterMenusByAdminVip(menuConfig, isAdminVip(userInfo as any)), userInfo),
       blockedPaths || []

@@ -119,21 +119,24 @@ describe('digital employee creation by tab', () => {
     expect(screen.getByText('digitalEmployees.myEmployees')).toBeTruthy();
   });
 
-  it.each(['PLAT_MAN', 'plat_man', 'Plat_Man', 'adminvip', 'AdminVip', 'ADMINVIP'])('only offers enterprise creation on official for %s', (role) => {
-    mockTab = 'official';
-    mockUserInfo = { userCode: role, usersOrganizations: [{ userType: 'USER' }, { userType: role }] };
-    render(<DigitalEmployeesPage />);
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'digitalEmployees.createEnterprise',
-      'digitalEmployees.createEnterpriseGroup',
-    ]);
-    fireEvent.click(screen.getByText('digitalEmployees.createEnterpriseGroup'));
-    expect(mockNavigate).toHaveBeenCalledWith(
-      '/digitalEmployeesCreate?ownerType=enterprise&digitalType=FROM_MANUALLY&agentType=017'
-    );
-    fireEvent.click(screen.getByText('digitalEmployees.createEnterprise'));
-    expect(screen.getByTestId('enterprise-form')).toBeTruthy();
-  });
+  it.each(['PLAT_MAN', 'plat_man', 'Plat_Man', 'adminvip', 'AdminVip', 'ADMINVIP'])(
+    'only offers enterprise creation on official for %s',
+    (role) => {
+      mockTab = 'official';
+      mockUserInfo = { userCode: role, usersOrganizations: [{ userType: 'USER' }, { userType: role }] };
+      render(<DigitalEmployeesPage />);
+      expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+        'digitalEmployees.createEnterprise',
+        'digitalEmployees.createEnterpriseGroup',
+      ]);
+      fireEvent.click(screen.getByText('digitalEmployees.createEnterpriseGroup'));
+      expect(mockNavigate).toHaveBeenCalledWith(
+        '/digitalEmployeesCreate?ownerType=enterprise&digitalType=FROM_MANUALLY&agentType=017'
+      );
+      fireEvent.click(screen.getByText('digitalEmployees.createEnterprise'));
+      expect(screen.getByTestId('enterprise-form')).toBeTruthy();
+    }
+  );
 
   it('updates official creation when login roles load or change', () => {
     mockTab = 'official';

@@ -446,8 +446,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     // 商用版官方技能对所有用户开放；其他版本按角色控制，等待版本加载后再展示入口。
     if (resourceType === 'SKILL') {
       return (
-        brandVersionLoaded &&
-        (brandVersion === 'commercial' || fixedEntryCapability?.canImportEnterpriseSkill === true)
+        brandVersionLoaded && (brandVersion === 'commercial' || fixedEntryCapability?.canImportEnterpriseSkill === true)
       );
     }
     if (!fixedEntryCapability) {
@@ -672,12 +671,12 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
               myResourcesOnly
                 ? undefined
                 : [
-                    { value: '', label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }) },
-                    ...topLevelCatalogList.map((item) => ({
-                      value: `${item.catalogId}`,
-                      label: getLocalizedCatalogName(item, intl.locale),
-                    })),
-                  ]
+                  { value: '', label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }) },
+                  ...topLevelCatalogList.map((item) => ({
+                    value: `${item.catalogId}`,
+                    label: getLocalizedCatalogName(item, intl.locale),
+                  })),
+                ]
             }
             activeTab={activeTab}
             resourceOwnerFilter={!myResourcesOnly && activeTab === 'personal'}
