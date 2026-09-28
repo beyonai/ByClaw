@@ -71,6 +71,7 @@ class ByClawSkillResourceApplicationServiceTest {
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
     private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
     private AuthApplicationService authApplicationService;
+    private com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService publications;
     private ByClawSkillResourceApplicationService service;
 
     @BeforeEach
@@ -86,6 +87,8 @@ class ByClawSkillResourceApplicationServiceTest {
         authApplicationService = mock(AuthApplicationService.class);
 
         service = new ByClawSkillResourceApplicationService();
+        publications = mock(com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService.class);
+        ReflectionTestUtils.setField(service, "skillPublicationService", publications);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "ssResExtSkillService", ssResExtSkillService);
         ReflectionTestUtils.setField(service, "ssResourceRelDetailService", ssResourceRelDetailService);
@@ -167,7 +170,8 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(target.getResourceId()).isEqualTo(7101L);
         assertThat(target.getResourceCode()).isEqualTo("enterprise-skill-7001");
         assertThat(target.getOwnerType()).isEqualTo("enterprise");
-        assertThat(target.getResourceStatus()).isEqualTo(2);
+        assertThat(target.getResourceStatus()).isEqualTo(4);
+        verify(publications).submit(source, target);
         assertThat(target.getResourceName()).isEqualTo(source.getResourceName());
         verify(ssResourceService).existsEnterpriseSkillByName(source.getResourceName());
         assertThat(target.getAvatar()).isEqualTo("skill-logo");
@@ -196,6 +200,60 @@ class ByClawSkillResourceApplicationServiceTest {
             eq(ResourceArtifactTypeEnum.IMPORT_ZIP.name()), eq("minio"),
             eq("skill/user002-hub/personal-skill.zip"), any());
         org.mockito.Mockito.verifyNoInteractions(resourceArtifactStorageService);
+    }
+
+    @Test
+    void publicationWarnsAboutPersonalDependenciesButCopiesOnlyEnterpriseDependencies() throws Exception {
+        prepareEnterpriseCopy();
+        SsResource personal = new SsResource();
+        personal.setResourceId(8001L);
+        personal.setResourceName("个人知识");
+        personal.setResourceBizType("KG_DOC");
+        personal.setOwnerType("personal");
+        SsResource enterprise = new SsResource();
+        enterprise.setResourceId(8002L);
+        enterprise.setResourceBizType("TOOLKIT");
+        enterprise.setOwnerType("enterprise");
+        SsResourceRelDetail personalRel = new SsResourceRelDetail();
+        personalRel.setResourceId(7001L);
+        personalRel.setRelResourceId(8001L);
+        SsResourceRelDetail enterpriseRel = new SsResourceRelDetail();
+        enterpriseRel.setResourceId(7001L);
+        enterpriseRel.setRelResourceId(8002L);
+        SsResource employee = new SsResource();
+        employee.setResourceId(8003L);
+        employee.setResourceName("个人数字员工");
+        employee.setResourceBizType("DIG_EMPLOYEE");
+        employee.setOwnerType("personal_default");
+        SsResource tool = new SsResource();
+        tool.setResourceId(8004L);
+        tool.setResourceName("个人工具");
+        tool.setResourceBizType("MCP");
+        tool.setOwnerType("personal");
+        // 数字员工安装技能是反向关联，也必须纳入提醒。
+        SsResourceRelDetail employeeRel = new SsResourceRelDetail();
+        employeeRel.setResourceId(8003L);
+        employeeRel.setRelResourceId(7001L);
+        SsResourceRelDetail toolRel = new SsResourceRelDetail();
+        toolRel.setResourceId(7001L);
+        toolRel.setRelResourceId(8004L);
+        when(ssResourceRelDetailService.list(any(LambdaQueryWrapper.class)))
+            .thenReturn(List.of(personalRel, enterpriseRel, employeeRel, toolRel));
+        when(ssResourceService.findByIdList(List.of(8001L, 8002L, 8004L)))
+            .thenReturn(List.of(personal, enterprise, tool));
+        when(ssResourceService.findByIdList(List.of(8001L, 8002L, 8003L, 8004L)))
+            .thenReturn(List.of(personal, enterprise, employee, tool));
+
+        var result = service.publishSkillToEnterprise(7001L);
+
+        assertThat(result.personalDependencies()).extracting(
+            ByClawSkillResourceApplicationService.PublicationDependency::resourceName)
+            .containsExactly("个人知识", "个人数字员工", "个人工具");
+        assertThat(result.resource().getResourceStatus()).isEqualTo(4);
+        ArgumentCaptor<SsResourceRelDetail> relation = ArgumentCaptor.forClass(SsResourceRelDetail.class);
+        verify(ssResourceRelDetailService).save(relation.capture());
+        assertThat(relation.getValue().getResourceId()).isEqualTo(7101L);
+        assertThat(relation.getValue().getRelResourceId()).isEqualTo(8002L);
     }
 
     @Test
@@ -232,6 +290,34 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(existing.getResourceStatus()).isEqualTo(3);
         verify(ssResourceService, never()).saveResource(any());
         verify(resourceArtifactStorageService, never()).readWithinResourceRoot(any());
+    }
+
+    @Test
+    void pendingPublicationReusesSnapshotWithoutAnotherRequest() throws Exception {
+        prepareEnterpriseCopy();
+        SsResource pending = enterpriseCopy(7102L, 4);
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill-7001"))).thenReturn(List.of(pending));
+        var result = service.publishSkillToEnterprise(7001L);
+        assertThat(result.alreadyExists()).isTrue();
+        assertThat(result.resource()).isSameAs(pending);
+        verifyNoPublicationCreated();
+    }
+
+    private void verifyNoPublicationCreated() {
+        verify(publications, never()).submit(any(), any());
+        verify(ssResourceService, never()).saveResource(any());
+    }
+
+    @Test
+    void rejectedPublicationResubmitsCurrentSourceAsNewSnapshot() throws Exception {
+        prepareEnterpriseCopy();
+        SsResource rejected = enterpriseCopy(7102L, 5);
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill-7001"))).thenReturn(List.of(rejected));
+        var result = service.publishSkillToEnterprise(7001L);
+        assertThat(result.resource().getResourceCode()).isEqualTo("enterprise-skill-7001-2");
+        assertThat(result.resource().getResourceStatus()).isEqualTo(4);
+        assertThat(rejected.getResourceStatus()).isEqualTo(5);
+        verify(publications).submit(any(), eq(result.resource()));
     }
 
     @Test
@@ -291,7 +377,7 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(result.alreadyExists()).isFalse();
         assertThat(result.resource().getResourceId()).isEqualTo(7101L);
         assertThat(result.resource().getOwnerType()).isEqualTo("enterprise");
-        assertThat(result.resource().getResourceStatus()).isEqualTo(2);
+        assertThat(result.resource().getResourceStatus()).isEqualTo(4);
         verify(authApplicationService).ensureCreatorDefaultPrivileges(result.resource());
         ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
         verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
@@ -327,6 +413,8 @@ class ByClawSkillResourceApplicationServiceTest {
     void enterpriseCopyUpdatesKeepIsolatedStorageAndSourceProvenance() throws Exception {
         prepareEnterpriseCopy();
         SsResource target = service.publishSkillToEnterprise(7001L).resource();
+        // 本用例覆盖审核通过后的企业副本更新，不允许审核中快照被导入覆盖。
+        target.setResourceStatus(2);
         ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
         verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
         SsResExtSkill ext = extCaptor.getValue();

@@ -145,6 +145,7 @@
     <select id="queryDigitalEmployeeUseApplyAudit"
             resultType="com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo">
         select pg.privilege_grant_id as privilegeGrantId,
+               case when pg.grant_type = 'SKILL_PUBLICATION' then 'SKILL_PUBLICATION' else 'USE' end as auditType,
                pg.grant_to_obj_id as userId,
                coalesce(u.user_name, cast(pg.grant_to_obj_id as varchar)) as userName,
                pg.create_date as applyTime,
@@ -180,7 +181,9 @@
                    r.resource_biz_type = 'DIG_EMPLOYEE'
                </otherwise>
            </choose>
-           and pg.grant_type = 'AVAILABLE_USE'
+           and (pg.grant_type = 'AVAILABLE_USE'
+                or (pg.grant_type = 'SKILL_PUBLICATION' and r.resource_biz_type = 'SKILL'
+                    and r.owner_type = 'enterprise'))
            and pg.grant_to_obj_type = 'USER'
            and pg.grant_to_type = 'RED'
            and pg.oper_type = 'READ'

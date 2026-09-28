@@ -206,7 +206,7 @@ public class ProjectApplicationService {
         if (projectName.isEmpty()) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.required");
         }
-        if (projectService.existsProjectName(projectName, null)) {
+        if (projectService.existsProjectName(projectName, CurrentUserHolder.getCurrentUserId(), null)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
         }
         this.validateProjectDescription(dto.getDescription());
@@ -360,7 +360,7 @@ public class ProjectApplicationService {
             if (projectName.isEmpty()) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.required");
             }
-            if (projectService.existsProjectName(projectName, dto.getProjectId())) {
+            if (projectService.existsProjectName(projectName, project.getCreateBy(), dto.getProjectId())) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
             }
             project.setProjectName(projectName);

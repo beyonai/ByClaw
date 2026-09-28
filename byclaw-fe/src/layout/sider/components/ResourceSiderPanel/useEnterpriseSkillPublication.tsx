@@ -66,16 +66,39 @@ export const useEnterpriseSkillPublication = ({
         try {
           const result = await publishSkillToEnterprise(resourceId);
           onPublished(resourceId);
+          if (result.personalDependencies?.length) {
+            Modal.warning({
+              title: intl.formatMessage({ id: 'resource.enterprisePersonalDependenciesTitle' }),
+              content: (
+                <div>
+                  <p>{intl.formatMessage({ id: 'resource.enterprisePersonalDependenciesWarning' })}</p>
+                  <ul>
+                    {result.personalDependencies.map((dependency) => (
+                      <li key={dependency.resourceId}>{dependency.resourceName}</li>
+                    ))}
+                  </ul>
+                </div>
+              ),
+              okText: intl.formatMessage({ id: 'common.confirm' }),
+            });
+          }
           message.success({
             key,
             content: (
               <span>
                 {intl.formatMessage({
-                  id: result.alreadyExists ? 'resource.enterpriseSkillExists' : 'resource.publishToEnterpriseSuccess',
+                  id:
+                    result.resource.resourceStatus === 4
+                      ? 'resource.enterpriseSkillPending'
+                      : result.alreadyExists
+                      ? 'resource.enterpriseSkillExists'
+                      : 'resource.publishToEnterpriseSuccess',
                 })}
-                <Button type="link" onClick={() => onDetail(result.resource)}>
-                  {intl.formatMessage({ id: 'resource.viewEnterpriseSkill' })}
-                </Button>
+                {result.resource.resourceStatus !== 4 && (
+                  <Button type="link" onClick={() => onDetail(result.resource)}>
+                    {intl.formatMessage({ id: 'resource.viewEnterpriseSkill' })}
+                  </Button>
+                )}
               </span>
             ),
             duration: 6,

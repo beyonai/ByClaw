@@ -283,6 +283,7 @@ export interface ResourceUseApplyParams {
  * 记录单个资源使用申请的详细信息
  */
 export interface ResourceUseApplyAuditItem {
+  auditType?: 'SKILL_PUBLICATION';
   privilegeGrantId: string; // 权限授权ID
   userId: string; // 用户ID
   userName: string; // 用户名称
@@ -302,6 +303,7 @@ export interface ResourceUseApplyAuditItem {
  * 审批资源使用申请参数
  */
 export interface ApproveResourceUseApplyParams {
+  auditType?: 'SKILL_PUBLICATION'; // 上架审核复用审核接口，保持与使用权限审核分流
   resourceId: string | number; // 资源ID
   applyUserId: string | number; // 申请用户ID
 }
@@ -646,6 +648,7 @@ export interface ResourceOperationPermissions {
 }
 
 export interface EnterpriseSkillPublishResult {
+  personalDependencies?: { resourceId: string; resourceName: string; resourceBizType: string }[];
   resource: {
     resourceId: string;
     resourceName: string;

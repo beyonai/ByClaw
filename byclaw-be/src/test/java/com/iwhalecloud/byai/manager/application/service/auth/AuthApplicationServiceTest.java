@@ -82,12 +82,71 @@ import org.mockito.InOrder;
 
 class AuthApplicationServiceTest {
 
+    @Test
+    void pendingEnterpriseSkillCannotBeManagedToBypassPublicationReview() {
+        var service = new AuthApplicationService();
+        SsResource skill = new SsResource();
+        skill.setResourceBizType("SKILL");
+        skill.setOwnerType("enterprise");
+        for (int status : List.of(4, 5)) {
+            skill.setResourceStatus(status);
+            assertThat(service.hasResourceManagePermission(skill)).isFalse();
+        }
+    }
+
+    @Test
+    void sharedAuditQueryFiltersPublicationByReviewerRoleAndTenant() {
+        var service = new AuthApplicationService();
+        var publications = mock(com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService.class);
+        var grants = mock(PrivilegeGrantMapper.class);
+        var resources = mock(com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper.class);
+        ReflectionTestUtils.setField(service, "skillPublicationService", publications);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        LoginInfo login = new LoginInfo();
+        login.setEnterpriseId(1L);
+        CurrentUserHolder.setLoginInfo(login);
+        var row = new com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo();
+        row.setAuditType("SKILL_PUBLICATION");
+        row.setResourceId(101L);
+        SsResource target = new SsResource();
+        target.setResourceId(101L);
+        target.setResourceBizType("SKILL");
+        target.setOwnerType("enterprise");
+        target.setResourceStatus(4);
+        target.setComAcctId(1L);
+        when(grants.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).thenReturn(List.of(row));
+        when(resources.selectBatchIds(any())).thenReturn(List.of(target));
+        when(publications.canReview()).thenReturn(true);
+        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).containsExactly(row);
+        when(publications.canReview()).thenReturn(false);
+        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
+        when(publications.canReview()).thenReturn(true);
+        target.setComAcctId(2L);
+        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
+    }
+
+    @Test
+    void sharedAuditActionsDispatchPublicationWithoutGrantingUsePermission() {
+        var service = new AuthApplicationService();
+        var publications = mock(com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService.class);
+        ReflectionTestUtils.setField(service, "skillPublicationService", publications);
+        var request = new com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyApproveQo();
+        request.setResourceId(101L);
+        request.setApplyUserId(10L);
+        request.setAuditType("SKILL_PUBLICATION");
+        service.approveUseApply(request);
+        service.rejectUseApply(request);
+        verify(publications).review(101L, 10L, true);
+        verify(publications).review(101L, 10L, false);
+    }
+
     @ParameterizedTest
-    @ValueSource(strings = {"adminvip", UserType.PLAT_MAN, UserType.ORG_MAN, UserType.BUSINESS_MAN,
+    @ValueSource(strings = {"adminvip", "AdminVip", "ADMINVIP", "plat_man", "Plat_Man", UserType.PLAT_MAN, UserType.ORG_MAN, UserType.BUSINESS_MAN,
         UserType.PLAT_DEVOPS, UserType.ORD_USER, "NO_ROLE"})
     void officialSkillImportEntryOnlyAllowsAdminVipOrPlatformManager(String identity) {
         LoginInfo login = new LoginInfo();
-        login.setUserCode("adminvip".equals(identity) ? "adminvip" : "test-user");
+        login.setUserCode("adminvip".equalsIgnoreCase(identity) ? identity : "test-user");
         UsersOrganization role = new UsersOrganization();
         role.setUserType(identity);
         login.setUsersOrganizations("NO_ROLE".equals(identity) ? List.of() : List.of(role));
@@ -96,10 +155,10 @@ class AuthApplicationServiceTest {
         var capability = new AuthApplicationService().queryFixedEntryOperationCapability();
 
         assertThat(capability.getCanImportEnterpriseSkill())
-            .isEqualTo("adminvip".equals(identity) || UserType.PLAT_MAN.equals(identity));
+            .isEqualTo("adminvip".equalsIgnoreCase(identity) || UserType.PLAT_MAN.equalsIgnoreCase(identity));
         // 收紧技能入口时，保留其他资源现有的管理员范围。
-        boolean existingImportPermission = List.of(UserType.PLAT_MAN, UserType.ORG_MAN, UserType.BUSINESS_MAN)
-            .contains(identity);
+        boolean existingImportPermission = UserType.matchesAny(identity, UserType.PLAT_MAN, UserType.ORG_MAN,
+            UserType.BUSINESS_MAN);
         assertThat(capability.getCanImportEnterpriseKg()).isEqualTo(existingImportPermission);
         assertThat(capability.getCanImportEnterpriseToolkit()).isEqualTo(existingImportPermission);
     }
@@ -593,6 +652,8 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         doNothing().when(service).handleAuth(any(AuthRedBlackDTO.class));
+        ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService",
+            mock(DigitalEmployeeGroupAuthorizationService.class));
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
@@ -618,6 +679,117 @@ class AuthApplicationServiceTest {
         service.setResourceUsers(qo);
 
         verify(privilegeGrantMapper).update(any(PrivilegeGrant.class), any(LambdaUpdateWrapper.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {GrantType.ALLOW_MANAGE, GrantType.FORCE_USE})
+    void resourceAuthorizationAppliesGroupAndMemberPlans(String grantType) {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        SsResourceMapper resources = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
+        DigitalEmployeeGroupAuthorizationService groups = mock(DigitalEmployeeGroupAuthorizationService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
+        ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", groups);
+        doNothing().when(service).handleAuth(any(AuthRedBlackDTO.class));
+        LoginInfo login = new LoginInfo();
+        login.setUserId(2L);
+        login.setUserCode("adminvip");
+        CurrentUserHolder.setLoginInfo(login);
+        for (Long id : List.of(300L, 301L)) {
+            SsResource resource = new SsResource();
+            resource.setResourceId(id);
+            resource.setResourceBizType("DIG_EMPLOYEE");
+            resource.setOwnerType(OwnerType.ENTERPRISE);
+            resource.setCreateBy(2L);
+            when(resources.selectById(id)).thenReturn(resource);
+        }
+        AuthDTO target = new AuthDTO();
+        target.setGrantToObjType(GrantToObjType.USER);
+        target.setGrantToObjId(1001L);
+        AuthRedBlackDTO memberAuth = new AuthRedBlackDTO();
+        memberAuth.setGrantObjId(301L);
+        memberAuth.setGrantObjType("DIG_EMPLOYEE");
+        memberAuth.setGrantType(grantType);
+        memberAuth.setRedList(List.of(target));
+        when(groups.buildMemberAuthorizations(any(), any())).thenReturn(List.of(memberAuth));
+        ResourceMemberSettingQo qo = new ResourceMemberSettingQo();
+        qo.setResourceId(300L);
+        qo.setRedList(List.of(target));
+
+        if (GrantType.ALLOW_MANAGE.equals(grantType)) {
+            service.setResourceManagers(qo);
+        } else {
+            service.setResourceUsers(qo);
+        }
+
+        InOrder order = inOrder(groups, service);
+        order.verify(groups).buildMemberAuthorizations(any(), any());
+        order.verify(service).handleAuth(argThat(dto -> Long.valueOf(300L).equals(dto.getGrantObjId())
+            && grantType.equals(dto.getGrantType())));
+        order.verify(service).handleAuth(memberAuth);
+        verify(grants, times(GrantType.FORCE_USE.equals(grantType) ? 2 : 0))
+            .update(any(PrivilegeGrant.class), any(LambdaUpdateWrapper.class));
+    }
+
+    @Test
+    void manageInheritancePreservesExistingUseRedAndBlackLists() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
+        PrivilegeGrantMapper mapper = mock(PrivilegeGrantMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", mapper);
+        doNothing().when(service).handleAuth(any(AuthRedBlackDTO.class));
+        when(mapper.selectCount(any())).thenReturn(0L);
+        PrivilegeGrant existing = new PrivilegeGrant();
+        existing.setGrantToObjType(GrantToObjType.USER);
+        existing.setGrantToObjId(200L);
+        existing.setGrantType(GrantType.FORCE_USE);
+        PrivilegeGrant blocked = new PrivilegeGrant();
+        blocked.setGrantToObjType(GrantToObjType.ORG);
+        blocked.setGrantToObjId(300L);
+        blocked.setGrantType(GrantType.FORCE_USE);
+        when(grants.findPrivilegeGrant(GrantType.FORCE_USE, "DIG_EMPLOYEE", 1L, Color.RED))
+            .thenReturn(List.of(existing));
+        when(grants.findPrivilegeGrant(GrantType.FORCE_USE, "DIG_EMPLOYEE", 1L, Color.BLACK))
+            .thenReturn(List.of(blocked));
+        AuthDTO target = new AuthDTO();
+        target.setGrantToObjType(GrantToObjType.USER);
+        target.setGrantToObjId(100L);
+        AuthRedBlackDTO dto = new AuthRedBlackDTO();
+        dto.setGrantObjId(1L);
+        dto.setGrantObjType("DIG_EMPLOYEE");
+        dto.setRedList(List.of(target));
+
+        ReflectionTestUtils.invokeMethod(service, "ensureUsePrivilegeForAllowManageTargets", dto);
+
+        ArgumentCaptor<AuthRedBlackDTO> captor = ArgumentCaptor.forClass(AuthRedBlackDTO.class);
+        verify(service).handleAuth(captor.capture());
+        assertThat(captor.getValue().getRedList()).extracting(AuthDTO::getGrantToObjId).containsExactly(200L, 100L);
+        assertThat(captor.getValue().getBlackList()).extracting(AuthDTO::getGrantToObjId).containsExactly(300L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void authorizationCacheChangesWaitForCommitAndAreDiscardedOnRollback(boolean commit) {
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            Runnable change = mock(Runnable.class);
+            ReflectionTestUtils.invokeMethod(new AuthApplicationService(), "afterAuthorizationCommit", change);
+            verify(change, never()).run();
+            for (var synchronization : org.springframework.transaction.support.TransactionSynchronizationManager
+                .getSynchronizations()) {
+                if (commit) {
+                    synchronization.afterCommit();
+                }
+                synchronization.afterCompletion(commit
+                    ? org.springframework.transaction.support.TransactionSynchronization.STATUS_COMMITTED
+                    : org.springframework.transaction.support.TransactionSynchronization.STATUS_ROLLED_BACK);
+            }
+            verify(change, times(commit ? 1 : 0)).run();
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     /**
@@ -1754,6 +1926,33 @@ class AuthApplicationServiceTest {
     void buildUserManageResources_returnsEmptyMapForNullUserId() {
         AuthApplicationService service = new AuthApplicationService();
         assertThat(service.buildUserManageResources(null)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PLAT_MAN", "plat_man", "Plat_Man", "plat_devops", "business_man", "org_man", "ORD_USER"})
+    void globalRoleChecksIgnoreCaseWithoutExpandingAllowedRoles(String roleCode) {
+        AuthApplicationService service = new AuthApplicationService();
+        UserService users = mock(UserService.class);
+        UsersOrganizationMapper mapper = mock(UsersOrganizationMapper.class);
+        ReflectionTestUtils.setField(service, "userService", users);
+        ReflectionTestUtils.setField(service, "usersOrganizationMapper", mapper);
+        Users user = new Users();
+        user.setUserCode("ordinary-account");
+        when(users.findById(1001L)).thenReturn(user);
+        com.iwhalecloud.byai.manager.entity.users.UsersOrganization storedRole =
+            new com.iwhalecloud.byai.manager.entity.users.UsersOrganization();
+        storedRole.setUserType(roleCode);
+        when(mapper.selectList(any())).thenReturn(List.of(storedRole));
+        LoginInfo login = new LoginInfo();
+        login.setUserCode("ordinary-account");
+        UsersOrganization role = new UsersOrganization();
+        role.setUserType(roleCode);
+        login.setUsersOrganizations(List.of(role));
+        CurrentUserHolder.setLoginInfo(login);
+
+        boolean allowed = !List.of("org_man", "ORD_USER").contains(roleCode);
+        assertThat(service.isCurrentUserGlobalResourceManager()).isEqualTo(allowed);
+        assertThat(service.isGlobalResourceManagerByUserId(1001L)).isEqualTo(allowed);
     }
 
     @Test

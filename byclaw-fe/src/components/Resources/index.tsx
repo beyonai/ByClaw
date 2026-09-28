@@ -1,3 +1,4 @@
+import { hasAnyUserRole } from '@/utils/userRole';
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
 import {
   CheckOutlined,
@@ -48,7 +49,7 @@ import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { getToken, isAdminVip } from '@/utils/auth';
-import { get, trim, intersection, isEmpty } from 'lodash';
+import { get, trim } from 'lodash';
 import {
   buildSkillMarketplaceUrl,
   filterResourceAuditRowsByType,
@@ -224,7 +225,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   );
   const usersOrganizations = get(userInfo, 'usersOrganizations') || [];
   const userTypeList = usersOrganizations.map((item: any) => item.userType);
-  const isAdmin = !isEmpty(intersection(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']));
+  const isAdmin = hasAnyUserRole(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']);
 
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
   const [selectRecord, setSelectRecord] = useState<any>(null);

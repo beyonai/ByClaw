@@ -1,3 +1,4 @@
+import { hasAnyUserRole } from '@/utils/userRole';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { PlusOutlined, SearchOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { useDispatch, useIntl, useNavigate, useSearchParams, useSelector } from '@umijs/max';
@@ -53,7 +54,7 @@ const DigitalEmployeesPage: React.FC = () => {
   // 创建入口按登录角色展示，避免发布能力接口失败或缓存未更新时误隐藏平台管理员入口。
   const canCreateEnterprise =
     (userInfo ? isAdminVip(userInfo) : false) ||
-    (userInfo?.usersOrganizations || []).some((organization) => organization.userType === 'PLAT_MAN');
+    hasAnyUserRole((userInfo?.usersOrganizations || []).map((organization) => organization.userType), ['PLAT_MAN']);
   const intl = useIntl();
   const navigate = useNavigate();
   const dispatch = useDispatch();

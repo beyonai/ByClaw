@@ -41,6 +41,7 @@ import { useProjectList } from './hooks/useProjectList';
 import { useProjectScopeId } from './hooks/useProjectScopeId';
 import { useProjectTypeConfig } from './hooks/useProjectTypeConfig';
 import type { ProjectSession, ProjectSpace } from './types';
+import { getProjectMutationErrorMessage, hasDuplicateProjectName } from './projectMutation';
 import styles from './index.module.less';
 
 const getProjectId = (value?: string | number) => `${value ?? ''}`.trim();
@@ -265,10 +266,11 @@ const ProjectSpacePage: React.FC = () => {
         message.warning(intl.formatMessage({ id: 'projectSpace.message.projectNameRequired' }));
         return '';
       }
-      const duplicateProject = projects.some(
-        (project) =>
-          getProjectId(project.projectId) !== getProjectId(editingProject?.projectId) &&
-          project.projectName.trim().toLocaleLowerCase() === projectName.toLocaleLowerCase()
+      const duplicateProject = hasDuplicateProjectName(
+        projects,
+        projectName,
+        editingProject ? editingProject.createBy : userInfo.userId ?? userInfo.id,
+        editingProject?.projectId
       );
       if (duplicateProject) {
         message.warning(intl.formatMessage({ id: 'projectSpace.message.projectNameDuplicate' }));
@@ -348,10 +350,12 @@ const ProjectSpacePage: React.FC = () => {
         return savedProjectId;
       } catch (error: any) {
         message.error(
-          error?.message ||
+          getProjectMutationErrorMessage(
+            error,
             intl.formatMessage({
               id: editingProject ? 'projectSpace.message.updateFailed' : 'projectSpace.message.createFailed',
             })
+          )
         );
         return '';
       } finally {
@@ -366,6 +370,8 @@ const ProjectSpacePage: React.FC = () => {
       intl,
       isDesktop,
       projects,
+      userInfo.userId,
+      userInfo.id,
       refreshProject,
       setSelectedProjectId,
     ]

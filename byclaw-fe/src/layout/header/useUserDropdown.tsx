@@ -1,4 +1,5 @@
-import { get, intersection, isEmpty } from 'lodash';
+import { hasAnyUserRole } from '@/utils/userRole';
+import { get } from 'lodash';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { App, Divider, DropdownProps, theme, Tooltip } from 'antd';
 import { useIntl, useNavigate, useSelector } from '@umijs/max';
@@ -140,11 +141,11 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
     const userTypeList = usersOrganizations.map((item: any) => item.userType);
 
     const isEnterpriseHiden =
-      isEmpty(intersection(userTypeList, ['PLAT_MAN', 'ORG_MAN', 'BUSINESS_MAN', 'PLAT_DEVOPS'])) ||
+      !hasAnyUserRole(userTypeList, ['PLAT_MAN', 'ORG_MAN', 'BUSINESS_MAN', 'PLAT_DEVOPS']) ||
       ENV.includes('enterprise');
     const isDevelopHiden =
       !devConfig?.devPortalUrl ||
-      isEmpty(intersection(userTypeList, ['PLAT_MAN', 'DEV_USER'])) ||
+      !hasAnyUserRole(userTypeList, ['PLAT_MAN', 'DEV_USER']) ||
       ENV.includes('develop');
     const enterpriseMenuItems = filterRoutesByBlockedPaths(
       filterMenusByMenuDisplay(filterMenusByAdminVip(menuConfig, isAdminVip(userInfo as any)), userInfo),

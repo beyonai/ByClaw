@@ -277,7 +277,14 @@ export default {
   'resource.rowRefreshFailed': 'Operation succeeded, but this resource could not be refreshed. Please try again later.',
   'resource.publishToEnterprise': 'Publish to enterprise',
   'resource.publishToEnterpriseConfirm':
-    'Create and publish an independent enterprise copy. The original personal skill will be retained; future changes will not be synchronized.',
+    'Submit an independent enterprise copy for review. It becomes available after approval; the original personal skill is retained.',
+  'resource.enterpriseSkillPending': 'Publication submitted for review',
+  'resource.enterprisePersonalDependenciesTitle': 'Personal resource dependencies',
+  'resource.enterprisePersonalDependenciesWarning':
+    'Publication submitted. The following linked personal employees, knowledge or tools are unavailable in the enterprise skill. Enterprise resources retain their existing access permissions. This notice does not block publication review.',
+  'resource.auditApplicationType': 'Application type',
+  'resource.skillPublicationAudit': 'Skill publication',
+  'resource.resourceUseAudit': 'Resource access',
   'resource.publishToEnterpriseSuccess': 'Published to enterprise',
   'resource.enterpriseSkillExists': 'An enterprise copy already exists. View or manage it in enterprise skills.',
   'resource.viewEnterpriseSkill': 'View enterprise skill',

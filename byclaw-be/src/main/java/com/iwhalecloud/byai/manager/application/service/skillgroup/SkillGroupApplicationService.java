@@ -613,7 +613,9 @@ public class SkillGroupApplicationService {
         catch (RuntimeException ignored) {
             // 配置不可用时与前端 isAdminVip 一致，保留默认 adminvip。
         }
-        if (!adminVipUserCodes.contains(CurrentUserHolder.getCurrentUserCode())) {
+        // 与前端名单匹配保持一致，默认账号和配置账号均忽略大小写。
+        String currentUserCode = CurrentUserHolder.getCurrentUserCode();
+        if (adminVipUserCodes.stream().noneMatch(code -> code.equalsIgnoreCase(currentUserCode))) {
             throw new BaseException("当前用户不是 AdminVip，没有企业技能组创建权限");
         }
     }

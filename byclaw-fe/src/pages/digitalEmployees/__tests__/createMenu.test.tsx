@@ -16,7 +16,7 @@ jest.mock('@umijs/max', () => ({
   useSearchParams: () => [new URLSearchParams({ tab: mockTab }), mockSetSearchParams],
 }));
 jest.mock('@/utils/auth', () => ({
-  isAdminVip: (userInfo: { userCode: string }) => userInfo.userCode === 'adminvip',
+  isAdminVip: (userInfo: { userCode: string }) => userInfo.userCode.toLowerCase() === 'adminvip',
 }));
 jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
@@ -119,7 +119,7 @@ describe('digital employee creation by tab', () => {
     expect(screen.getByText('digitalEmployees.myEmployees')).toBeTruthy();
   });
 
-  it.each(['PLAT_MAN', 'adminvip'])('only offers enterprise creation on official for %s', (role) => {
+  it.each(['PLAT_MAN', 'plat_man', 'Plat_Man', 'adminvip', 'AdminVip', 'ADMINVIP'])('only offers enterprise creation on official for %s', (role) => {
     mockTab = 'official';
     mockUserInfo = { userCode: role, usersOrganizations: [{ userType: 'USER' }, { userType: role }] };
     render(<DigitalEmployeesPage />);

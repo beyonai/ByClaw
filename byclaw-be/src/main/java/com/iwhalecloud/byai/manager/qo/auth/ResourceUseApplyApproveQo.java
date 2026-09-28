@@ -24,4 +24,7 @@ public class ResourceUseApplyApproveQo {
      */
     @NotNull(message = "applyUserId不能为空")
     private Long applyUserId;
+
+    /** 为空时兼容原使用权限审核；SKILL_PUBLICATION 表示技能上架审核。 */
+    private String auditType;
 }

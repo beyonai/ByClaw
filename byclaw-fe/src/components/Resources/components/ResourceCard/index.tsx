@@ -3,7 +3,7 @@ import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
 import { EllipsisOutlined, MessageOutlined, PlusOutlined } from '@ant-design/icons';
-import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin } from 'antd';
+import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin, Modal } from 'antd';
 import type { MenuProps } from 'antd';
 import { getLocale, useDispatch, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
@@ -733,6 +733,23 @@ const RenderContent = (props: ResourceCardProps) => {
         return;
       }
       const result = await publishSkillToEnterprise(String(sourceSkill.resourceId));
+      // 关联个人资源只做提醒，提交已经成功，不要求用户再次确认。
+      if (result.personalDependencies?.length) {
+        Modal.warning({
+          title: intl.formatMessage({ id: 'resource.enterprisePersonalDependenciesTitle' }),
+          content: (
+            <div>
+              <p>{intl.formatMessage({ id: 'resource.enterprisePersonalDependenciesWarning' })}</p>
+              <ul>
+                {result.personalDependencies.map((item) => (
+                  <li key={item.resourceId}>{item.resourceName}</li>
+                ))}
+              </ul>
+            </div>
+          ),
+          okText: intl.formatMessage({ id: 'common.confirm' }),
+        });
+      }
       // 仅更新当前卡片，不刷新或重新挂载列表，避免 loading 结束时列表短暂空白。
       setEnterpriseCopyCreated(true);
       message.success({
@@ -740,9 +757,14 @@ const RenderContent = (props: ResourceCardProps) => {
         content: (
           <span>
             {intl.formatMessage({
-              id: result.alreadyExists ? 'resource.enterpriseSkillExists' : 'resource.publishToEnterpriseSuccess',
+              id:
+                result.resource.resourceStatus === 4
+                  ? 'resource.enterpriseSkillPending'
+                  : result.alreadyExists
+                  ? 'resource.enterpriseSkillExists'
+                  : 'resource.publishToEnterpriseSuccess',
             })}
-            {onEnterpriseSkillDetail && (
+            {onEnterpriseSkillDetail && result.resource.resourceStatus !== 4 && (
               <Button type="link" onClick={() => onEnterpriseSkillDetail(result.resource)}>
                 {intl.formatMessage({ id: 'resource.viewEnterpriseSkill' })}
               </Button>

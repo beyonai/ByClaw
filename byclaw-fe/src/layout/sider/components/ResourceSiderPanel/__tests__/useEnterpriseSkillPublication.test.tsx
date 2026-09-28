@@ -7,7 +7,7 @@ import { useEnterpriseSkillPublication } from '../useEnterpriseSkillPublication'
 jest.mock('@umijs/max', () => ({ useIntl: () => ({ formatMessage: ({ id }: any) => id }) }));
 jest.mock('antd', () => ({
   Button: () => null,
-  Modal: { confirm: jest.fn() },
+  Modal: { confirm: jest.fn(), warning: jest.fn() },
   message: { loading: jest.fn(), success: jest.fn(), error: jest.fn() },
 }));
 jest.mock('@/pages/manager/service/resources', () => ({ publishSkillToEnterprise: jest.fn() }));
@@ -90,4 +90,18 @@ it('allows retry after cancellation or request failure without updating the item
   expect(message.error).toHaveBeenCalledWith(expect.objectContaining({ content: 'Denied' }));
   act(() => result.current.publish(skill));
   expect(Modal.confirm).toHaveBeenCalledTimes(3);
+});
+
+it('submits successfully before showing personal dependency warning', async () => {
+  const { result, onPublished } = setup();
+  await waitFor(() => expect(result.current.canPublish(skill)).toBe(true));
+  (publishSkillToEnterprise as jest.Mock).mockResolvedValue({
+    resource: { resourceId: 'copy', resourceStatus: 4 },
+    personalDependencies: [{ resourceId: 'personal-tool', resourceName: 'Personal tool', resourceBizType: 'MCP' }],
+  });
+  act(() => result.current.publish(skill));
+  await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
+  expect(onPublished).toHaveBeenCalledWith('personal-skill');
+  expect(Modal.warning).toHaveBeenCalledTimes(1);
+  expect(message.success).toHaveBeenCalled();
 });

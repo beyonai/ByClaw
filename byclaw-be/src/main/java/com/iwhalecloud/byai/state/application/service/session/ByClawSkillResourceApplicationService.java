@@ -129,6 +129,9 @@ public class ByClawSkillResourceApplicationService {
     private SequenceService sequenceService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService skillPublicationService;
+
+    @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
 
     @Autowired
@@ -468,7 +471,7 @@ public class ByClawSkillResourceApplicationService {
 
     /**
      * 一次性复制个人技能快照。锁定源资源直到事务结束，重复请求复用已有副本；
-     * 企业副本拥有独立资源 ID 和编码，文件沿用源引用，上架不以文件可用性为前置条件。
+     * 企业副本拥有独立资源 ID 和编码，文件沿用源引用；先进入审核中，通过后才上架。
      */
     @Transactional(rollbackFor = Exception.class)
     public EnterpriseSkillPublishResult publishSkillToEnterprise(Long sourceId) {
@@ -495,8 +498,10 @@ public class ByClawSkillResourceApplicationService {
                         "sourceResourceId"))) {
                     throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.enterprise.code.conflict"));
                 }
-                if (!Objects.equals(candidate.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
-                    return new EnterpriseSkillPublishResult(candidate, true);
+                // 驳回后重新提交当前个人技能的快照，保留旧审核历史及被驳回副本。
+                if (!Objects.equals(candidate.getResourceStatus(), ResourceStatus.DELETE.getNum())
+                    && !Objects.equals(candidate.getResourceStatus(), ResourceStatus.AUDIT_REJECT.getNum())) {
+                    return new EnterpriseSkillPublishResult(candidate, true, personalPublicationDependencies(sourceId));
                 }
             }
             targetCode = baseCode + "-" + (attempt + 1);
@@ -515,6 +520,7 @@ public class ByClawSkillResourceApplicationService {
             source.getResourceDesc(), sourceExt == null ? null : sourceExt.getSkillOriginalFilename(),
             sourceExt == null || sourceExt.getSkillPackageSize() == null ? 0 : sourceExt.getSkillPackageSize());
         SsResource target = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, source.getCatalogId(), null);
+        target.setResourceStatus(ResourceStatus.AUDIT.getNum());
         target.setAvatar(source.getAvatar());
         target.setTags(source.getTags());
         target.setSample(source.getSample());
@@ -549,9 +555,59 @@ public class ByClawSkillResourceApplicationService {
                 ResourceArtifactTypeEnum.IMPORT_ZIP.name(), "minio", stripResourcePrefix(targetExt.getSkillUrl()),
                 "enterprise-skill-file-reference");
         }
-        logger.info("Published enterprise skill resource copy: sourceId={}, targetId={}, operatorId={}",
+        copyEnterpriseSkillRelations(sourceId, target.getResourceId());
+        skillPublicationService.submit(source, target);
+        logger.info("Submitted enterprise skill resource copy: sourceId={}, targetId={}, operatorId={}",
             sourceId, target.getResourceId(), CurrentUserHolder.getCurrentUserId());
-        return new EnterpriseSkillPublishResult(target, false);
+        return new EnterpriseSkillPublishResult(target, false, personalPublicationDependencies(sourceId));
+    }
+
+    /** 只检查有效的显式关联；企业资源不会被计入个人依赖提醒。 */
+    private List<SsResourceRelDetail> publicationRelations(Long sourceId) {
+        return ssResourceRelDetailService.list(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SsResourceRelDetail>()
+                .eq(SsResourceRelDetail::getComAcctId, CurrentUserHolder.getEnterpriseId())
+                .eq(SsResourceRelDetail::getRelStatus, 1)
+                .and(q -> q.eq(SsResourceRelDetail::getResourceId, sourceId)
+                    .or().eq(SsResourceRelDetail::getRelResourceId, sourceId)));
+    }
+
+    private List<PublicationDependency> personalPublicationDependencies(Long sourceId) {
+        List<Long> ids = publicationRelations(sourceId).stream()
+            .map(rel -> Objects.equals(sourceId, rel.getResourceId()) ? rel.getRelResourceId() : rel.getResourceId())
+            .filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) return List.of();
+        return ssResourceService.findByIdList(ids).stream()
+            .filter(item -> OwnerType.PERSONAL.equals(item.getOwnerType()) || "personal_default".equals(item.getOwnerType()))
+            .filter(item -> !Objects.equals(item.getResourceStatus(), ResourceStatus.DELETE.getNum()))
+            .filter(item -> "DIG_EMPLOYEE".equals(item.getResourceBizType())
+                || StringUtils.startsWith(item.getResourceBizType(), "KG_")
+                || List.of("TOOL", "TOOLKIT", "MCP", "AGENT").contains(item.getResourceBizType()))
+            .map(item -> new PublicationDependency(String.valueOf(item.getResourceId()), item.getResourceName(),
+                item.getResourceBizType())).toList();
+    }
+
+    /** 企业副本保留出向企业依赖，不能把个人员工的安装关系迁移到企业副本。 */
+    private void copyEnterpriseSkillRelations(Long sourceId, Long targetId) {
+        List<SsResourceRelDetail> relations = publicationRelations(sourceId).stream()
+            .filter(rel -> Objects.equals(sourceId, rel.getResourceId())).toList();
+        List<Long> ids = relations.stream().map(SsResourceRelDetail::getRelResourceId)
+            .filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) return;
+        Set<Long> enterpriseIds = ssResourceService.findByIdList(ids).stream()
+            .filter(item -> OwnerType.ENTERPRISE.equals(item.getOwnerType()))
+            .filter(item -> !Objects.equals(item.getResourceStatus(), ResourceStatus.DELETE.getNum()))
+            .map(SsResource::getResourceId).collect(Collectors.toSet());
+        for (SsResourceRelDetail relation : relations) {
+            if (!enterpriseIds.contains(relation.getRelResourceId())) continue;
+            SsResourceRelDetail copy = new SsResourceRelDetail();
+            org.springframework.beans.BeanUtils.copyProperties(relation, copy);
+            copy.setResourceRelDetailId(sequenceService.nextVal());
+            copy.setResourceId(targetId);
+            copy.setCreateBy(CurrentUserHolder.getCurrentUserId());
+            copy.setCreateTime(new java.util.Date());
+            ssResourceRelDetailService.save(copy);
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -733,10 +789,10 @@ public class ByClawSkillResourceApplicationService {
             Long currentUserId = CurrentUserHolder.getCurrentUserId();
             String currentUserCode = CurrentUserHolder.getCurrentUserCode();
             List<String> currentUserTypes = CurrentUserHolder.getUserTypes();
-            boolean platformAdmin = currentUserTypes.contains(UserType.PLAT_MAN)
-                || currentUserTypes.contains(UserType.PLAT_DEVOPS);
-            boolean organizationAdminRole = currentUserTypes.contains(UserType.ORG_MAN);
-            boolean businessAdmin = currentUserTypes.contains(UserType.BUSINESS_MAN);
+            boolean platformAdmin = currentUserTypes.stream()
+                .anyMatch(type -> UserType.matchesAny(type, UserType.PLAT_MAN, UserType.PLAT_DEVOPS));
+            boolean organizationAdminRole = currentUserTypes.stream().anyMatch(type -> UserType.matchesAny(type, UserType.ORG_MAN));
+            boolean businessAdmin = currentUserTypes.stream().anyMatch(type -> UserType.matchesAny(type, UserType.BUSINESS_MAN));
             boolean superAdmin = ADMIN_VIP_USER_CODE.equalsIgnoreCase(currentUserCode);
             boolean creatorMatched = Objects.equals(currentUserId, digitalEmployee.getCreateBy());
             boolean defaultDigitalEmployeeMatched = Objects.equals(digitalEmployeeResourceId,
@@ -1620,7 +1676,14 @@ public class ByClawSkillResourceApplicationService {
         long size) {
     }
 
-    public record EnterpriseSkillPublishResult(SsResource resource, boolean alreadyExists) {
+    public record PublicationDependency(String resourceId, String resourceName, String resourceBizType) {
+    }
+
+    public record EnterpriseSkillPublishResult(SsResource resource, boolean alreadyExists,
+                                               List<PublicationDependency> personalDependencies) {
+        public EnterpriseSkillPublishResult(SsResource resource, boolean alreadyExists) {
+            this(resource, alreadyExists, List.of());
+        }
     }
 
     private record ZipEntryInfo(String name, byte[] content, int unixMode) {

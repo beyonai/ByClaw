@@ -1100,6 +1100,23 @@ describe('personal skill enterprise publication', () => {
     expect(personalSkill.ownerType).toBe('personal');
   });
 
+  it('shows pending review and a non-blocking personal dependency notice', async () => {
+    (publishSkillToEnterprise as jest.Mock).mockResolvedValue({
+      resource: { ...enterpriseSkill, resourceStatus: 4 },
+      alreadyExists: false,
+      personalDependencies: [{ resourceId: 'knowledge-1', resourceName: '个人知识库', resourceBizType: 'KG_DOC' }],
+    });
+    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    expect(await screen.findByText('resource.enterpriseSkillPending')).toBeInTheDocument();
+    expect(await screen.findByText('个人知识库')).toBeInTheDocument();
+    expect(screen.getByText('resource.enterprisePersonalDependenciesWarning')).toBeInTheDocument();
+    expect(publishSkillToEnterprise).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('resource.viewEnterpriseSkill')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+  });
+
   it('restores the entry when refreshed permissions allow publication after copy removal', () => {
     const client = new QueryClient();
     const card = (allowed: boolean) => (
