@@ -9,7 +9,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.bean.UsersOrganization;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
-import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
+import com.iwhalecloud.byai.common.constants.auth.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.model.UseApplyOutcome;
@@ -76,6 +76,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -107,7 +108,7 @@ class AuthApplicationServiceTest {
         login.setEnterpriseId(1L);
         CurrentUserHolder.setLoginInfo(login);
         var row = new com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo();
-        row.setAuditType("SKILL_PUBLICATION");
+        row.setAuditType(GrantType.SKILL_PUBLICATION);
         row.setResourceId(101L);
         SsResource target = new SsResource();
         target.setResourceId(101L);
@@ -130,15 +131,19 @@ class AuthApplicationServiceTest {
     void sharedAuditActionsDispatchPublicationWithoutGrantingUsePermission() {
         var service = new AuthApplicationService();
         var publications = mock(com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService.class);
+        var grants = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "skillPublicationService", publications);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
         var request = new com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyApproveQo();
         request.setResourceId(101L);
         request.setApplyUserId(10L);
-        request.setAuditType("SKILL_PUBLICATION");
+        request.setAuditType(GrantType.SKILL_PUBLICATION);
         service.approveUseApply(request);
         service.rejectUseApply(request);
         verify(publications).review(101L, 10L, true);
         verify(publications).review(101L, 10L, false);
+        // 上架审核只处理发布状态，不应写入普通使用授权。
+        verifyNoInteractions(grants);
     }
 
     @ParameterizedTest
