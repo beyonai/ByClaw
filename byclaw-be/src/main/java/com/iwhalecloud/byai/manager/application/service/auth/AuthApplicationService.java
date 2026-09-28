@@ -17,7 +17,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjTypeMapping;
-import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
+import com.iwhalecloud.byai.common.constants.auth.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantTypeRangeMapping;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.ResourceTypeValueMapping;
