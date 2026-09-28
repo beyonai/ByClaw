@@ -6,6 +6,9 @@ import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.util.HashMap;
+import java.util.Date;
+import java.util.List;
+import static org.assertj.core.api.Assertions.assertThat;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
@@ -34,6 +37,7 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatRecallMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
@@ -91,6 +95,31 @@ class GroupChatTurnCoordinatorTest {
             mock(SessionService.class), users, resources, mock(ChatRuntimeStateService.class),
             mock(GroupChatGatewayExecutor.class), contextService, transactions);
         ReflectionTestUtils.setField(coordinator, "workers", mock(ExecutorService.class));
+    }
+
+    @Test
+    void recalledTriggerCannotBeEnqueuedAfterRecallTransactionCommitted() {
+        ByaiMessage recalled = new ByaiMessage();
+        recalled.setMessageId(20L);
+        recalled.setMessageContent("original");
+        recalled.setRecalledAt(new Date());
+        when(messages.selectByMessageId(20L)).thenReturn(recalled);
+        assertThat(coordinator.enqueueUser(10L, 20L, null, 1L, 2L)).isNull();
+        verify(turns, never()).insert(any(ByaiGroupChatTurn.class));
+    }
+
+    @Test
+    void completedButRecalledParentCannotAutomaticallyDelegateAgain() {
+        ByaiGroupChatRecallMapper recalls = mock(ByaiGroupChatRecallMapper.class);
+        ReflectionTestUtils.setField(coordinator, "recalls", recalls);
+        ByaiGroupChatTurn parent = new ByaiGroupChatTurn();
+        parent.setExecutionId(3L);
+        parent.setGroupSessionId(10L);
+        parent.setHopCount(0);
+        parent.setStatus("SUCCEEDED");
+        when(recalls.isRecalled(3L)).thenReturn(true);
+        assertThat(coordinator.enqueueAgent(parent, 2L, 21L, 21L, "delegate", List.of())).isNull();
+        verify(turns, never()).insert(any(ByaiGroupChatTurn.class));
     }
 
     @Test
@@ -208,7 +237,7 @@ class GroupChatTurnCoordinatorTest {
         reference.setSessionId(10L);
         reference.setUsage(1);
         reference.setMessageContent("private message");
-        reference.setRecalledAt(new java.util.Date());
+        reference.setRecalledAt(new Date());
         when(messages.selectByMessageId(20L)).thenReturn(reference);
         when(messages.selectVisibleGroupMessage(10L, 20L)).thenReturn(reference);
 
@@ -338,7 +367,7 @@ class GroupChatTurnCoordinatorTest {
         quoted.setUsage(1);
         quoted.setMessageContent("private quoted text");
         quoted.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"secret.pdf\"}]}");
-        quoted.setRecalledAt(new java.util.Date());
+        quoted.setRecalledAt(new Date());
         when(messages.selectByMessageId(21L)).thenReturn(quoted);
         when(messages.selectVisibleGroupMessage(10L, 21L)).thenReturn(quoted);
         ByaiGroupChatTurn original = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);

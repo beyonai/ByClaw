@@ -6,6 +6,7 @@ import java.util.Date;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Options;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
@@ -13,6 +14,7 @@ import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 @Mapper
 public interface ByaiGroupChatTaskMapper extends BaseMapper<ByaiGroupChatTask> {
     /** 与继续对话、取消及待发布替换共用任务行锁，避免上传期间内容发生变化。 */
+    @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
     @Select("SELECT * FROM byai_group_chat_task WHERE task_session_id = #{taskId} FOR UPDATE")
     ByaiGroupChatTask selectForUpdate(@Param("taskId") Long taskId);
 

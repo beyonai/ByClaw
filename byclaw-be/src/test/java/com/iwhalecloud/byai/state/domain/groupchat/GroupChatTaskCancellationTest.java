@@ -227,4 +227,26 @@ class GroupChatTaskCancellationTest {
         assertThatThrownBy(() -> service.cancel(60L)).hasMessage("Task is no longer active");
         verifyNoInteractions(pending, events);
     }
+    @Test
+    void recallCancelsOnlyMatchingActiveTaskAndClearsPendingPublication() {
+        task.setDispatchId(7L);
+        assertThat(service.cancelForRecall(60L, 8L)).isNull();
+        verify(tasks, never()).cancel(any(), any());
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+            assertThat(service.cancelForRecall(60L, 7L)).isSameAs(task));
+        verify(tasks).cancel(eq(60L), any());
+        verify(pending).clear(task, null);
+        verifyNoInteractions(chat);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PUBLISHED", "CANCELLED"})
+    void recallPreservesTerminalTaskAndItsPublication(String status) {
+        task.setStatus(status);
+        task.setDispatchId(7L);
+        assertThat(service.cancelForRecall(60L, 7L)).isNull();
+        verify(tasks, never()).cancel(any(), any());
+        verifyNoInteractions(pending, events, chat);
+    }
+
 }

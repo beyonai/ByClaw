@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatRecallMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
@@ -54,6 +56,8 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 @Service
 public class GroupChatTurnCoordinator {
     private static final Logger log = LoggerFactory.getLogger(GroupChatTurnCoordinator.class);
+    @Autowired
+    private ByaiGroupChatRecallMapper recalls;
     private final ByaiGroupChatTurnMapper turns;
     private final ByaiGroupChatExecutionMapper anchors;
     private final ByaiGroupChatTaskMapper tasks;
@@ -164,6 +168,8 @@ public class GroupChatTurnCoordinator {
         }
         return transaction.execute(status -> {
             turns.lockGroup(parent.getGroupSessionId());
+            // 父轮次即使已完成，也可能已被撤回；禁止发布回调继续自动委派。
+            if (recalls != null && recalls.isRecalled(parent.getExecutionId())) return null;
             JSONObject metadata = new JSONObject();
             metadata.put("resourceList", resourceList);
             return enqueue(parent.getGroupSessionId(), parent.getRootMessageId(), trigger, publicBoundary,
@@ -194,6 +200,8 @@ public class GroupChatTurnCoordinator {
     private ByaiGroupChatTurn enqueue(Long group, Long root, Long trigger, Long boundary, Long user, Long agent,
         String senderType, Long sender, String content, JSONObject metadata, Long parent, int hop,
         ByaiGroupChatExecution preferred, JSONObject quoted) {
+        ByaiMessage triggerMessage = messages.selectByMessageId(trigger);
+        if (triggerMessage != null && triggerMessage.isRecalled()) return null;
         ByaiGroupChatTurn existing = turns.selectByTriggerAndAgent(trigger, agent);
         if (existing != null) {
             return existing;
@@ -236,7 +244,7 @@ public class GroupChatTurnCoordinator {
         String name = "USER".equals(senderType) ? users.findById(sender).getUserName()
             : resources.findById(sender).getResourceName();
         JSONObject envelope = new JSONObject(true);
-        envelope.put("原始用户需求", messages.selectByMessageId(root).getMessageContent());
+        envelope.put("原始用户需求", visibleContent(messages.selectByMessageId(root)));
         envelope.put("本次发送者类型", senderType);
         envelope.put("本次发送者ID", sender);
         envelope.put("本次发送者名称", name);
@@ -266,7 +274,7 @@ public class GroupChatTurnCoordinator {
                 turn.setDisposition("CHAT");
                 ByaiMessage published = task.getPublishMessageId() == null ? null : messages.selectByMessageId(task.getPublishMessageId());
                 if (published != null) {
-                    envelope.put("已完成任务的公开成果", published.getMessageContent());
+                    envelope.put("已完成任务的公开成果", visibleContent(published));
                     mergeResources(metadata, metadata(published));
                     turn.setInputMetadata(metadata.toJSONString());
                     turn.setInputContent(envelope.toJSONString());
@@ -425,6 +433,8 @@ public class GroupChatTurnCoordinator {
     }
 
     private boolean validateBeforeStart(ByaiGroupChatTurn first) {
+        if (recalls != null && (recalls.isRecalled(first.getExecutionId())
+            || !recalls.pending(first.getCandidateSessionId()).isEmpty())) return false;
         try {
             requireMembers(first.getGroupSessionId(), first.getInitiatorUserId(), first.getTargetAgentId());
         }
@@ -451,7 +461,7 @@ public class GroupChatTurnCoordinator {
             ByaiMessage publication = task == null || task.getPublishMessageId() == null ? null : messages.selectByMessageId(task.getPublishMessageId());
             if (publication != null) {
                 JSONObject input = JSON.parseObject(first.getInputContent());
-                input.put("已完成任务的公开成果", publication.getMessageContent());
+                input.put("已完成任务的公开成果", visibleContent(publication));
                 first.setInputContent(input.toJSONString());
                 JSONObject displayMetadata = JSON.parseObject(first.getInputMetadata());
                 mergeResources(displayMetadata, metadata(publication));
@@ -508,7 +518,13 @@ public class GroupChatTurnCoordinator {
         workers.shutdown();
     }
 
+    private String visibleContent(ByaiMessage message) {
+        return message.isRecalled() ? "消息已撤回" : message.getMessageContent();
+    }
+
     private JSONObject metadata(ByaiMessage message) {
-        return message.getMetadata() == null ? new JSONObject() : JSON.parseObject(message.getMetadata());
+        JSONObject metadata = message.getMetadata() == null ? new JSONObject() : JSON.parseObject(message.getMetadata());
+        if (message.isRecalled()) metadata.remove("resourceList");
+        return metadata;
     }
 }

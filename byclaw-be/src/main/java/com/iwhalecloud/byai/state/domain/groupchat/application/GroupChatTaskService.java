@@ -303,6 +303,16 @@ public class GroupChatTaskService {
         });
     }
 
+    /** 撤回事务已验证群权限；只取消由指定轮次创建的活动任务。 */
+    public ByaiGroupChatTask cancelForRecall(Long taskId, Long dispatchId) {
+        ByaiGroupChatTask task = taskMapper.selectForUpdate(taskId);
+        if (task == null || !Objects.equals(dispatchId, task.getDispatchId()) || !"ACTIVE".equals(task.getStatus())) {
+            return null;
+        }
+        finishCancellation(task);
+        return task;
+    }
+
     private void finishCancellation(ByaiGroupChatTask task) {
         if (taskMapper.cancel(task.getTaskSessionId(), new Date()) != 1) {
             throw new IllegalArgumentException("Task is no longer active");

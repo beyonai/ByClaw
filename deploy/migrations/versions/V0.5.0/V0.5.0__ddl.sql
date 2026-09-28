@@ -477,3 +477,19 @@ COMMENT ON COLUMN byai.digital_employee_publication.publish_error IS '发布执�
 CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_publication_active
     ON byai.digital_employee_publication (tenant_id, source_id)
     WHERE status IN ('DRAFT', 'PENDING', 'APPLYING', 'FAILED');
+
+-- 撤回的持久化屏障和停止补偿；执行 ID 来自统一序列，覆盖 turn 及历史 execution。
+CREATE TABLE IF NOT EXISTS byai.byai_group_chat_recall_stop (
+    execution_id BIGINT PRIMARY KEY,
+    session_id BIGINT NOT NULL,
+    initiator_user_id BIGINT NOT NULL,
+    trace_id VARCHAR(255),
+    task_owned BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(16) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_group_recall_stop_pending
+    ON byai.byai_group_chat_recall_stop(status, session_id);
+-- 独立于群/任务行锁，避免 STOP 的同步回调与发送串行化发生锁反转。
+CREATE TABLE IF NOT EXISTS byai.byai_group_chat_send_gate (
+    session_id BIGINT PRIMARY KEY
+);

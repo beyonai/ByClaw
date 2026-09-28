@@ -121,6 +121,21 @@ class GroupChatTurnProjectionTest {
         verifyNoInteractions(reader, parser, publisher, tasks);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void recallCommittedWhileReadingDispositionPreventsLatePromotionAndProjection(boolean reconcile) {
+        ByaiGroupChatTurn cancelled = new ByaiGroupChatTurn();
+        BeanUtils.copyProperties(turn, cancelled);
+        cancelled.setStatus("CANCELLED");
+        when(turns.selectForUpdateById(10L)).thenReturn(cancelled);
+        if (reconcile) handler.reconcileTurn(10L);
+        else handler.afterPersisted(context);
+        verifyNoInteractions(tasks, parser, publisher, coordinator);
+        verify(messages, never()).insert(any());
+        verify(turns, never()).markSucceeded(any(), any(), any());
+        verify(turns, never()).decideDisposition(any(), any(), any(), any(), any());
+    }
+
     @Test
     void staleCallbackCannotCompleteAnotherTurn() {
         turn.setPhase("CHAT_CONTINUATION"); turn.setTraceId("next-trace");
