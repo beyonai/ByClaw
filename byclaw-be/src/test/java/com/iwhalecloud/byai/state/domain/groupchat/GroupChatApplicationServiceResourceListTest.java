@@ -383,6 +383,36 @@ class GroupChatApplicationServiceResourceListTest {
     }
 
     @Test
+    void messageFileReferencesArePersistedWithoutMemberValidationOrAgentDispatch() {
+        ResourceVo uploadedFile = resource(AgentMetaEnum.COMMON_FILE, "file-701", "COMMON_FILE_file-701");
+        ResourceVo cloudFile = resource(AgentMetaEnum.KG_DOC_FILE, "/资料/报告.pdf", "KG_DOC_FILE_/资料/报告.pdf");
+        ResourceVo cloudFolder = resource(AgentMetaEnum.KG_DOC_FOLDER, "/资料/", "KG_DOC_FOLDER_/资料/");
+
+        service.acceptUserMessage(command(List.of(uploadedFile, cloudFile, cloudFolder)));
+
+        ArgumentCaptor<ByaiMessage> saved = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(messageMapper).insert(saved.capture());
+        JSONObject metadata = JSON.parseObject(saved.getValue().getMetadata());
+        assertThat(metadata.getJSONArray("resourceList")).hasSize(3);
+        verify(memberService, never()).findSessionMember(any(), any(), any());
+        verify(executionCoordinator, never()).enqueue(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void mixedMemberAndFileReferencesValidateOnlyMembersAndDispatchAgents() {
+        when(memberService.findSessionMember(GROUP_ID, MemObjType.AGENT.name(), 501L))
+            .thenReturn(new ByaiSessionMember());
+        ResourceVo agent = resource(AgentMetaEnum.DIG_EMPLOYEE, "501", "DIG_EMPLOYEE_501");
+        ResourceVo file = resource(AgentMetaEnum.COMMON_FILE, "not-a-number", "COMMON_FILE_not-a-number");
+
+        service.acceptUserMessage(command(List.of(agent, file)));
+
+        verify(memberService).findSessionMember(GROUP_ID, MemObjType.AGENT.name(), 501L);
+        verify(executionCoordinator).enqueue(GROUP_ID, MESSAGE_ID, null, USER_ID, 501L, null, MESSAGE_ID);
+        verify(messageMapper).insert(any(ByaiMessage.class));
+    }
+
+    @Test
     void rejectsMissingOrNonNumericResourceIdBeforePersisting() {
         assertThatThrownBy(() -> service.acceptUserMessage(
             command(List.of(resource(AgentMetaEnum.DIG_EMPLOYEE, "not-a-number", "DIG_EMPLOYEE_501")))))

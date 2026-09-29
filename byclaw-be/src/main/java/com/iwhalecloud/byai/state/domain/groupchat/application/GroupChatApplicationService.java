@@ -313,7 +313,11 @@ public class GroupChatApplicationService {
     }
 
     /**
-     * 群聊只接受成员类型资源。数字员工会触发委派，普通用户仅保留在消息资源信息中。
+     * 校验群成员引用并解析需要委派的数字员工。
+     *
+     * 文件引用也会随 resourceList 一起提交（例如工作组云盘的 KG_DOC_FILE/KG_DOC_FOLDER，
+     * 以及对话上传的 COMMON_FILE）。它们只是消息内容的一部分，不是群成员，不能参与成员
+     * 校验、ID 转换或 Agent 委派；原始 resourceList 会继续保存到消息元数据并广播给客户端。
      */
     private Set<Long> validateAndResolveMemberResources(Long sessionId, List<ResourceVo> resourceList) {
         Set<Long> agentIds = new LinkedHashSet<>();
@@ -332,6 +336,9 @@ public class GroupChatApplicationService {
             else if (AgentMetaEnum.HUMAN.equals(resource.getResourceType())) {
                 memberType = MemObjType.USER.name();
             }
+            else if (isMessageResourceType(resource.getResourceType())) {
+                continue;
+            }
             else {
                 throw new GroupChatMessageRejectedException("Unsupported group member resource type");
             }
@@ -348,6 +355,13 @@ public class GroupChatApplicationService {
             }
         }
         return agentIds;
+    }
+
+    private boolean isMessageResourceType(AgentMetaEnum resourceType) {
+        return AgentMetaEnum.COMMON_FILE.equals(resourceType)
+            || AgentMetaEnum.COMMON_FOLDER.equals(resourceType)
+            || AgentMetaEnum.KG_DOC_FILE.equals(resourceType)
+            || AgentMetaEnum.KG_DOC_FOLDER.equals(resourceType);
     }
 
     private Long parseResourceId(String resourceId) {
