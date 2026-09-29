@@ -2,9 +2,9 @@
 
 CREATE SCHEMA IF NOT EXISTS byai;
 
-SET search_path TO byai, public;
 
 CREATE SEQUENCE IF NOT EXISTS byai.byai_message_relobj_id_seq;
+CREATE SEQUENCE IF NOT EXISTS byai.seq_any_table;
 
 CREATE TABLE IF NOT EXISTS byai.byai_session (session_id bigint, parent_session_id bigint, session_name character varying(255), create_time timestamp without time zone, creator_id bigint, object_type character varying(255), object_id bigint, enterprise_id bigint, session_content text, is_debug integer, session_type character varying(10), update_by bigint, update_time timestamp without time zone, state text, project_id BIGINT NOT NULL DEFAULT -1, last_seq BIGINT NOT NULL DEFAULT 0);
 
@@ -162,7 +162,6 @@ CREATE TABLE IF NOT EXISTS byai.byai_group_chat_topic (
     CONSTRAINT ck_group_chat_topic_root CHECK (topic_id = root_message_id)
 );
 
-COMMENT ON SCHEMA byai IS 'ByClaw tenant schema V0.5.0';
 
 COMMENT ON COLUMN byai.byai_session.project_id IS '平台工作组ID；-1表示默认项目';
 

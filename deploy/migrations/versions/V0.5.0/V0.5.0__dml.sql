@@ -413,3 +413,12 @@ VALUES
   ('tenant-opengauss',
    '{"image":"${envVars.IMAGE_OPENGAUSS}","startup":{"entrypoint":["python3","/var/lib/opengauss/byclaw-tenant-entrypoint.py","gaussdb"]},"ports":[{"port":5432,"instance":"opengauss","protocol":"tcp"}],"servicePort":5432,"env":{"GS_USERNAME":"${envVars.DB_USER}","GS_PASSWORD":"${envVars.DB_PASSWORD}","GS_PORT":"5432","GS_DB":"${envVars.DB_NAME}"},"volumes":[{"key":"database","scope":"PRIVATE","subPath":"tenants/${envVars.TENANT_ID}/opengauss","hostPath":"${envVars.BYCLAW_SANDBOX_FILE_VOLUME_ROOT}","readOnly":false,"mountPath":"/var/lib/opengauss"}]}',
    'tenant-opengauss','租户 OpenGauss 数据库',1,'s',0,'TENANT');
+
+-- PLATFORM __dml.sql / 租户 Node 服务规格；连接信息及内部鉴权令牌由 BE 启动时注入。
+DELETE FROM byai.sandbox_service_spec WHERE service_key = 'tenant-data-node';
+INSERT INTO byai.sandbox_service_spec
+  (service_key,spec_json,service_type,display_name,enabled,default_profile_key,autoscale_enabled,owner_scope)
+VALUES
+  ('tenant-data-node',
+   '{"image":"${envVars.IMAGE_TENANT_NODE}","startup":{"entrypoint":["node","/app/dist/main.js"]},"ports":[{"port":3100,"instance":"tenant-node","protocol":"http"}],"servicePort":3100,"env":{"ENTERPRISE_ID":"${envVars.TENANT_ID}","TENANT_ID":"${envVars.TENANT_ID}","TENANT_GENERATION":"${envVars.TENANT_GENERATION}","DB_SANDBOX_RECORD_ID":"${envVars.DB_SANDBOX_RECORD_ID}","HOST":"0.0.0.0","PORT":"3100","ADVERTISE_HOST":"${envVars.NODE_ADVERTISE_HOST}","NODE_STATE_DIR":"/var/lib/byclaw-tenant","BE_INTERNAL_URL":"${envVars.BE_INTERNAL_URL}","KMS_DECRYPT_URL":"${envVars.KMS_DECRYPT_URL}","INTERNAL_TRANSPORT":"http","INTERNAL_API_TOKEN":"${envVars.INTERNAL_API_TOKEN}","REDIS_HOST":"${envVars.REDIS_HOST}","REDIS_PORT":"${envVars.REDIS_PORT}","REDIS_DATABASE":"${envVars.REDIS_DATABASE}","REDIS_USERNAME":"${envVars.REDIS_USERNAME}","REDIS_PASSWORD":"${envVars.REDIS_PASSWORD}","REDIS_TLS":"false"},"volumes":[{"key":"state","scope":"PRIVATE","subPath":"tenants/${envVars.TENANT_ID}/node","hostPath":"${envVars.BYCLAW_SANDBOX_FILE_VOLUME_ROOT}","readOnly":false,"mountPath":"/var/lib/byclaw-tenant"}]}',
+   'tenant-data-node','租户 Node 数据服务',1,'s',0,'TENANT');
