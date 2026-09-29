@@ -32,6 +32,11 @@ export default [
             component: './manager/pages/OrgMgr',
           },
           {
+            path: '/manager/tenants',
+            name: 'managerTenants',
+            component: './manager/pages/TenantMgr',
+          },
+          {
             path: '/manager/org/postManage',
             name: 'managerPostManage',
             component: './manager/pages/PostManage',
