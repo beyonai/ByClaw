@@ -726,9 +726,13 @@ public class SsResourceService {
         }
 
         // 四类已下线资源业务类型统一停用：无条件下发（未传类型时同样生效），规则见 DisabledResourceBizTypes。
-        // 保留 resource_biz_type 为 null 的历史行（与 SQL 入口的 `is null or ... not in` 语义一致）。
+        // 保留 resource_biz_type 为 null 的历史行，并对列值做 trim + 大写归一化，
+        // 与 5 处 XML 入口的 `(col is null or upper(trim(col)) not in (...))` 语义等价
+        // —— 裸 NOT IN 会放行小写/带空白的存量行（设计 A3 已否决该形态）。
+        // apply 的 {0}..{3} 占位符由 MyBatis-Plus 编译为 #{} 参数，不是字符串拼接。
         queryWrapper.and(wrapper -> wrapper.isNull("resource_biz_type")
-            .or().notIn("resource_biz_type", DisabledResourceBizTypes.codes()));
+            .or().apply("upper(trim(resource_biz_type)) not in ({0},{1},{2},{3})",
+                DisabledResourceBizTypes.codes().toArray()));
 
         if (StringUtil.isNotEmpty(resourceQo.getKeyword())) {
             queryWrapper.like("resource_name", resourceQo.getKeyword());

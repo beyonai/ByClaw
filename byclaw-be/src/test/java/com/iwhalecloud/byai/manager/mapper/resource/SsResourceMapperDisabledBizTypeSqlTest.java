@@ -43,7 +43,8 @@ class SsResourceMapperDisabledBizTypeSqlTest {
     void parentResourceIdExemptionIsRuleDerivedForAllRequestShapes() throws IOException {
         SqlSource source = sqlSource("getResourceListByPage");
 
-        // 与基线逐行一致：仅当请求显式要求停用类型（单个字段或列表）时不下发 parent_resource_id = -1。
+        // 6 组**规范大写**入参矩阵：豁免开关的触发条件与基线逐行一致。
+        // 非规范入参（小写/空白）的行为差异由 parentResourceIdExemptionIsCaseInsensitiveForNonCanonicalInputs 固化。
         int checkedShapes = 0;
         for (ResourceQueryRequest query : requestShapes()) {
             boolean expectsDisabledRequest = isDisabledRequest(query);
@@ -64,6 +65,41 @@ class SsResourceMapperDisabledBizTypeSqlTest {
         query.setResourceBizType(null);
         query.setResourceBizTypeList(null);
         assertThat(compact(pageSql(source, query))).contains("r.parent_resource_id = -1");
+    }
+
+    /**
+     * F-2：入口 4 的 {@code parent_resource_id} 豁免开关对**非规范入参**与基线存在**有意差异**（已登记）。
+     *
+     * <p>基线用精确匹配（{@code contains('OBJECT')}），新实现用统一规则的归一化判定
+     * （{@code containsAnyDisabled} ⇒ trim + 大写）。因此对 {@code ['KG_DOC','object']}：
+     * 基线**下发** {@code parent_resource_id = -1}（只返回顶层行），新实现**不下发**（返回顶层 + 子行）。
+     *
+     * <p>差异性质：仅影响「顶层行 vs 顶层+子行」的返回范围，**不泄露任何停用类型内容**（停用类型仍被
+     * 无条件排除条件过滤）；且与"停用四类资源"这一目标一致（请求里出现停用类型即视为"显式要求停用类型"）。
+     * 该差异已在 development-report 的「与设计的偏差」中登记为有意差异。
+     */
+    @Test
+    void parentResourceIdExemptionIsCaseInsensitiveForNonCanonicalInputs() throws IOException {
+        SqlSource source = sqlSource("getResourceListByPage");
+
+        // 非规范小写入参：新实现（归一化）触发豁免 —— 与基线的精确匹配行为不同，属有意差异。
+        ResourceQueryRequest lowerCase = request(null, new ArrayList<>(List.of("KG_DOC", "object")));
+        assertThat(compact(pageSql(source, lowerCase)))
+            .doesNotContain("r.parent_resource_id = -1");
+
+        // 规范大写入参：与基线一致（基线同样触发豁免）。
+        ResourceQueryRequest upperCase = request(null, new ArrayList<>(List.of("KG_DOC", "OBJECT")));
+        assertThat(compact(pageSql(source, upperCase)))
+            .doesNotContain("r.parent_resource_id = -1");
+
+        // 纯正常类型入参：两种形态都不触发豁免（差异不影响正常请求）。
+        ResourceQueryRequest normalOnly = request(null, new ArrayList<>(List.of("KG_DOC")));
+        assertThat(compact(pageSql(source, normalOnly))).contains("r.parent_resource_id = -1");
+
+        // 单个字段的非规范写法同理。
+        ResourceQueryRequest singleLowerCase = request("object", new ArrayList<>());
+        assertThat(compact(pageSql(source, singleLowerCase)))
+            .doesNotContain("r.parent_resource_id = -1");
     }
 
     @Test
@@ -114,6 +150,14 @@ class SsResourceMapperDisabledBizTypeSqlTest {
             .replaceAll("\\s*,\\s*", ",");
     }
 
+    /**
+     * 期望的豁免触发判定（**归一化语义**，即新实现与统一规则的口径）。
+     *
+     * <p>注意：本方法自身也做 {@code trim + toUpperCase}，因此它只对**规范大写**入参矩阵成立
+     * （{@link #requestShapes()} 的 6 组全为大写）。非规范入参（小写/空白）的期望值由
+     * {@link #parentResourceIdExemptionIsCaseInsensitiveForNonCanonicalInputs} 单独固化，
+     * 避免"用实现假设校验实现"。
+     */
     private static boolean isDisabledRequest(ResourceQueryRequest query) {
         String single = query.getResourceBizType();
         boolean singleDisabled = single != null && List.of("OBJECT", "VIEW", "ONTOLOGY_BASE", "SCENE")
