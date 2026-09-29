@@ -26,6 +26,8 @@ export class HistoryService {
   traditional = (...args: Parameters<TraditionalHistory["traditional"]>) =>
     this.basic.traditional(...args);
   byIds = (...args: Parameters<TraditionalHistory["byIds"]>) => this.basic.byIds(...args);
+  byCommand = (...args: Parameters<TraditionalHistory["byCommand"]>) =>
+    this.basic.byCommand(...args);
   forward = (...args: Parameters<TraditionalHistory["forward"]>) => this.basic.forward(...args);
   outline = (...args: Parameters<TraditionalHistory["outline"]>) => this.basic.outline(...args);
   groups = (...args: Parameters<GroupHistory["groups"]>) => this.group.groups(...args);

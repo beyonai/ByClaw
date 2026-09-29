@@ -11,6 +11,11 @@ export function requireId(value: unknown): string {
   if (!validId(value)) throw new DomainError("INVALID_ID");
   return value;
 }
+export function opaqueId(value: unknown, max = 64): string {
+  if (typeof value !== "string" || !new RegExp(`^[A-Za-z0-9:_-]{1,${max}}$`).test(value))
+    throw new DomainError("INVALID_REQUEST_ID");
+  return value;
+}
 export const text = (value: unknown, max: number, required = false): string => {
   if (value === undefined && !required) return "";
   if (typeof value !== "string" || Buffer.byteLength(value) > max)

@@ -57,6 +57,10 @@ export class SqlHistoryRepository implements HistoryRepository {
       conditions.push(expression.replace(/\?/g, `$${parameters.length}`));
     };
     if (filter.sessionId) add("m.session_id=?", filter.sessionId);
+    if (filter.commandId) {
+      conditions.push("m.enterprise_id=$1");
+      add("m.persist_command_id=?", filter.commandId);
+    }
     if (filter.ids) add("m.message_id=ANY(?::bigint[])", filter.ids);
     if (filter.before) add("m.message_id<?::bigint", filter.before);
     if (filter.after) {

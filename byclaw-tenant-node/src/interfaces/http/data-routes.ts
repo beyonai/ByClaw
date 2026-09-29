@@ -20,6 +20,10 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
   };
   const queryLimit = (req: any) =>
     bounded(req.query.limit === undefined ? undefined : Number(req.query.limit), 20, 50);
+  app.get<{ Params: { commandId: string } }>(
+    "/internal/v1/messages/by-command/:commandId",
+    async (req) => service.byCommand(actor(req), req.params.commandId),
+  );
   app.post("/internal/v1/assiman/getMessages", async (req) => {
     const b = body(req);
     return service.traditional(

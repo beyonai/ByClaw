@@ -1,11 +1,19 @@
 import { bounded } from "./paging.js";
 import { DomainError } from "../../domain/errors.js";
-import { requireId } from "../../domain/values.js";
+import { opaqueId, requireId } from "../../domain/values.js";
 import { HistoryAccess } from "./access.js";
 import { objectJson, recalled, safeMessage } from "./message-format.js";
 
 /** 保留传统 assiman 消息、关联与大纲查询的分页和位置语义。 */
 export class TraditionalHistory extends HistoryAccess {
+  async byCommand(actor: string, commandId: string) {
+    requireId(actor);
+    const [message] = await this.repository.messages({ commandId: opaqueId(commandId), limit: 1 });
+    if (!message || message.enterpriseId !== this.tenantId)
+      throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+    await this.access(actor, message.sessionId);
+    return safeMessage(message);
+  }
   async traditional(actor: string, sessionId: string, pageNum: number, pageSize: number) {
     pageNum = bounded(pageNum, 1, 100000);
     pageSize = bounded(pageSize, 20, 100);
