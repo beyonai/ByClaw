@@ -20,7 +20,7 @@
 ```bash
 export BE_DOMAINNAME=${BE_DOMAINNAME:-ByaiService}
 
-# 结构化对象/视图
+# 资源脚本
 /usr/local/bin/python3 scripts/resources/<script>.py '<JSON>'
 
 

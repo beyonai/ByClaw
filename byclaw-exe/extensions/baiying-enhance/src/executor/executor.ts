@@ -11,6 +11,11 @@ import { logChannelDebug, registerPrivateParamLogRedactions, type BaiyingEnhance
 import { resolveCapability } from "./capability-resolver.js";
 import { describeResource } from "./describe.js";
 import { normalizeResourceType } from "./resource-type.js";
+import {
+  DISABLED_RESOURCE_MESSAGE,
+  RESOURCE_TYPE_DISABLED,
+  isDisabledResourceBizType,
+} from "./disabled-resource-type.js";
 import { extractBackendParameters } from "./schema.js";
 import { executeAgent } from "./resource-types/agent.js";
 import { executeDoc } from "./resource-types/doc.js";
@@ -85,7 +90,7 @@ export class BaiyingExecutor {
     const resourceContext = getResourceContext(params.payload ?? {});
     logChannelDebug(`describe(${params.capabilityId})`, { resourceContext, logger: params.logger });
     const authContext = await this.getAuthContext();
-    const { capability, resolvedType } = await resolveCapability({
+    const { capability, resolvedType, disabled } = await resolveCapability({
       resourcesDir: this.resourcesDir,
       capabilityId: params.capabilityId,
       resourceType: params.resourceType,
@@ -94,6 +99,14 @@ export class BaiyingExecutor {
       session: this.session,
       logger: params.logger,
     });
+    if (disabled) {
+      return makeError(RESOURCE_TYPE_DISABLED, DISABLED_RESOURCE_MESSAGE, {
+        target: {
+          resource_id: params.capabilityId,
+          resource_type: resolvedType ?? params.resourceType,
+        },
+      });
+    }
     return describeResource({
       capability,
       resolvedType: resolvedType ?? capability?.resource_type ?? params.resourceType ?? null,
@@ -129,7 +142,7 @@ export class BaiyingExecutor {
     const mcpForwardHeaders = extractOpenclawMcpForwardHeaders(resourceContext);
 
     const authContext = await this.getAuthContext();
-    const { capability, resolvedType } = await resolveCapability({
+    const { capability, resolvedType, disabled } = await resolveCapability({
       resourcesDir: this.resourcesDir,
       capabilityId: params.capabilityId,
       resourceType: params.resourceType,
@@ -138,6 +151,14 @@ export class BaiyingExecutor {
       session: this.session,
       logger: params.logger,
     });
+    if (disabled) {
+      return makeError(RESOURCE_TYPE_DISABLED, DISABLED_RESOURCE_MESSAGE, {
+        target: {
+          resource_id: params.capabilityId,
+          resource_type: resolvedType ?? params.resourceType,
+        },
+      });
+    }
     if (!capability) {
       return makeError("CAPABILITY_NOT_FOUND", `Capability not found: ${params.capabilityId}`);
     }
@@ -155,6 +176,13 @@ export class BaiyingExecutor {
     }
 
     const resType = normalizeResourceType(resolvedType ?? capability.resource_type ?? "");
+    // Independent second gate: even if `resolveCapability` were bypassed or
+    // refactored, a retired type must never reach a dispatch branch.
+    if (isDisabledResourceBizType(resType)) {
+      return makeError(RESOURCE_TYPE_DISABLED, DISABLED_RESOURCE_MESSAGE, {
+        target: { resource_id: params.capabilityId, resource_type: resType },
+      });
+    }
     if (resType === "agent") {
       return await executeAgent({
         capability,

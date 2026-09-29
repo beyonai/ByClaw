@@ -245,4 +245,34 @@ class ToolManControllerTest {
             "\"currentUserId\":10001",
             "\"currentDefaultDigEmployeeId\":9001");
     }
+
+    @Test
+    void queryResourceDetailMapsDisabledTypeToResourceNotFound() {
+        ToolManController controller = new ToolManController();
+        var resourceApplicationService = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "resourceApplicationService",
+            resourceApplicationService);
+        org.mockito.Mockito.when(resourceApplicationService.queryResourceDetail(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(null);
+
+        var disabledTypeRequest = new com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo();
+        disabledTypeRequest.setResourceId(200L);
+        var missingResourceRequest = new com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo();
+        missingResourceRequest.setResourceId(999L);
+
+        try (var i18n = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.i18n.I18nUtil.class)) {
+            i18n.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get("resource.notfound"))
+                .thenReturn("资源不存在");
+            var disabledResponse = controller.queryResourceDetail(disabledTypeRequest, null);
+            var missingResponse = controller.queryResourceDetail(missingResourceRequest, null);
+
+            // Q-1 / Q-6：停用类型与「资源不存在」逐字同形，不引入可区分信息、不泄露资源存在性。
+            assertThat(disabledResponse.getCode()).isEqualTo(-1);
+            assertThat(disabledResponse.getMsg()).isEqualTo("资源不存在");
+            assertThat(disabledResponse.getData()).isNull();
+            assertThat(disabledResponse.getCode()).isEqualTo(missingResponse.getCode());
+            assertThat(disabledResponse.getMsg()).isEqualTo(missingResponse.getMsg());
+        }
+    }
 }

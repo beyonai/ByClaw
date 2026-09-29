@@ -1,5 +1,6 @@
 import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import type { BaiyingAssociatedResource } from "./types.js";
+import { isDisabledRelResource } from "./executor/disabled-resource-type.js";
 
 function nonEmpty(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -51,7 +52,10 @@ export function buildExecutorResourceContext(params: {
     rootAgent.agentHomeUrl = params.agent.agentHomeUrl;
   }
 
-  const resource = params.resource
+  // Defensive depth (Q-4): retired types never reach the executor context as
+  // `selected_resource`, even if a caller bypasses the adapter-level filter. The
+  // consumer side (`resolveCapability` gate 1) checks again.
+  const resource = params.resource && !isDisabledRelResource(params.resource)
     ? {
         resourceId: params.resource.resourceId,
         resourceName: params.resource.resourceName,

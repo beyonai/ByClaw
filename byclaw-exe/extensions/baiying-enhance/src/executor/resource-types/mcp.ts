@@ -13,6 +13,12 @@ import { extractJsonRpcPayload, postJson } from "../http.js";
 import { buildResourceMcpHeaders, debugMcpSessionHeaders } from "../resource-headers.js";
 import { resolveChildAction } from "../resolve-action.js";
 import { validateParameters } from "../schema.js";
+import { normalizeResourceType } from "../resource-type.js";
+import {
+  DISABLED_RESOURCE_MESSAGE,
+  RESOURCE_TYPE_DISABLED,
+  isDisabledResourceBizType,
+} from "../disabled-resource-type.js";
 import { logBaiyingRequest, type BaiyingEnhanceLogger } from "../debug-channel.js";
 import {
   docCallMode,
@@ -40,13 +46,16 @@ export async function executeMcp(params: {
   signal?: AbortSignal;
 }): Promise<ExecutorResponse> {
   const { capability } = params;
-  const resourceType = String(capability.resource_type ?? "").trim().toUpperCase();
-  if (resourceType === "OBJECT" || resourceType === "VIEW") {
-    return executeObjectViewViaCallAgent({
-      capability,
-      parameters: params.parameters,
-      logger: params.logger,
-      signal: params.signal,
+  // Retired types never reach the OBJECT/VIEW `callAgent` dispatch. Normalizing
+  // first also closes the previous gap where lowercase labels, `ONTOLOGY_BASE`
+  // and `SCENE` fell through into the generic MCP branch.
+  const resourceType = normalizeResourceType(capability.resource_type);
+  if (isDisabledResourceBizType(resourceType)) {
+    return makeError(RESOURCE_TYPE_DISABLED, DISABLED_RESOURCE_MESSAGE, {
+      target: {
+        resource_id: capability.metadata?.resource_id,
+        resource_type: resourceType,
+      },
     });
   }
 

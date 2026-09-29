@@ -94,15 +94,22 @@ describe("workspace-seed corePersonaDefinition", () => {
     expect(md).not.toContain("Associated resources");
   });
 
-  it("buildToolsMd renders relResourceList resources", () => {
+  it("buildToolsMd renders relResourceList resources and omits retired types", () => {
     const md = buildToolsMd({
       relResourceList: [
         {
           resourceId: "10000018",
           resourceName: "用户信息表",
-          resourceBizType: "OBJECT",
+          resourceBizType: "KG_DOC",
           resourceCode: "po_users",
           resourceDesc: "平台用户维度对象",
+        },
+        {
+          resourceId: "10000019",
+          resourceName: "销售管理视图",
+          resourceBizType: "VIEW",
+          resourceCode: "scene_sales_management",
+          resourceDesc: "销售漏斗视图",
         },
         {
           resourceId: "skill-001",
@@ -115,9 +122,14 @@ describe("workspace-seed corePersonaDefinition", () => {
     } as Parameters<typeof buildToolsMd>[0]);
     expect(md).toContain("用户信息表");
     expect(md).toContain("id: 10000018");
-    expect(md).toContain("type: OBJECT");
+    expect(md).toContain("type: KG_DOC");
+    expect(md).not.toContain("销售管理视图");
+    expect(md).not.toContain("type: VIEW");
     expect(md).not.toContain("DWS");
     expect(md).not.toContain("type: SKILL");
     expect(md).not.toContain("(none declared");
+    expect(md).toContain("已下线");
+    expect(md).not.toContain("file_url");
+    expect(md).not.toContain("call_object_ids");
   });
 });

@@ -16,6 +16,7 @@ import {
   normalizeResourceId,
   normalizeResourceType,
 } from "./resource-type.js";
+import { isDisabledRelResource, isDisabledResourceBizType } from "./disabled-resource-type.js";
 import type { BaiyingEnhanceLogger } from "./debug-channel.js";
 
 type FetchLike = typeof fetch;
@@ -83,10 +84,20 @@ export async function resolveCapability(params: {
   session?: string;
   fetchImpl?: FetchLike;
   logger?: BaiyingEnhanceLogger;
-}): Promise<{ capability: Capability | null; resolvedType: string | null }> {
+}): Promise<{ capability: Capability | null; resolvedType: string | null; disabled?: boolean }> {
   const { capabilityId } = params;
   let resourceType = params.resourceType ?? null;
   const hintedType = normalizeResourceType(resourceType);
+
+  // Gate 1 — entry, before any Redis read or network call: a retired type given
+  // explicitly, or carried by `resource_context.selected_resource`, short-circuits
+  // here so no snapshot lookup and no MCP tool discovery can happen.
+  const contextSelected = (params.resourceContext?.selected_resource ?? null) as
+    | { resourceBizType?: unknown; resourceType?: unknown }
+    | null;
+  if (isDisabledResourceBizType(params.resourceType) || isDisabledRelResource(contextSelected)) {
+    return { capability: null, resolvedType: resourceType, disabled: true };
+  }
 
   let capability: Capability | null = null;
   if (capabilityId) {
@@ -178,6 +189,15 @@ export async function resolveCapability(params: {
   }
 
   if (capability) {
+    // Gate 2 — after resolution, before header placeholders / datacloud URL
+    // lookup / MCP discovery: whatever the source (`local_snapshot`,
+    // `resource_context`, `direct_stub`), a retired `resource_type` is rejected
+    // and `_discovery_source` never exempts it.
+    const capTypeForGate = normalizeResourceType(capability.resource_type);
+    if (isDisabledResourceBizType(capTypeForGate)) {
+      return { capability: null, resolvedType: capTypeForGate, disabled: true };
+    }
+
     await resolveCapabilityHeaderPlaceholdersInPlace({
       capability,
       authContext: params.authContext,

@@ -26,6 +26,8 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeOutputSanitizer;
 import com.iwhalecloud.byai.common.feign.request.manager.ResourceOperQo;
 import com.iwhalecloud.byai.common.feign.response.KnowledgeResponse;
 import com.iwhalecloud.byai.common.log.exception.KnowledgeRuntimeExcepion;
@@ -165,6 +167,13 @@ public class ResourceApplicationService {
         SsResource ssResource = ssResourceService.findByIdOrCode(resourceId, resourceCode);
 
         if (ssResource == null) {
+            return null;
+        }
+
+        // 四类已下线资源业务类型统一停用：与「资源不存在」完全同形，原因只进服务端日志（不向无权调用方泄露存在性）。
+        if (DisabledResourceBizTypes.isDisabled(ssResource.getResourceBizType())) {
+            LOGGER.warn("资源详情读取被停用类型规则拒绝, reason={}, resourceId={}, resourceCode={}",
+                DisabledResourceBizTypes.REASON_CODE, resourceId, resourceCode);
             return null;
         }
 
@@ -685,7 +694,10 @@ public class ResourceApplicationService {
         if (resourceId == null) {
             return null;
         }
-        return ssResExtDigEmployeeService.findDetailsById(resourceId);
+        // 对外输出前净化：不输出未处理的内部 targetContent，并剔除停用类型关联资源。
+        DigitalEmployeeDetailsDTO details = ssResExtDigEmployeeService.findDetailsById(resourceId);
+        DigitalEmployeeOutputSanitizer.sanitizeForOutput(details);
+        return details;
     }
 
     /**
@@ -700,6 +712,11 @@ public class ResourceApplicationService {
             return new ArrayList<>();
         }
         List<SsResourceRelDetailDTO> allSkills = ssResourceRelDetailService.querySkillsForOpenApi(resourceId);
+
+        // 四类已下线资源业务类型统一停用：未传 resourceBizType 时同样剔除停用类型关联资源。
+        allSkills = allSkills.stream()
+            .filter(skill -> !DisabledResourceBizTypes.isDisabled(skill.getResourceBizType()))
+            .collect(Collectors.toList());
 
         if (StringUtils.isNotBlank(resourceBizType)) {
             String normalizedType = resourceBizType.trim();

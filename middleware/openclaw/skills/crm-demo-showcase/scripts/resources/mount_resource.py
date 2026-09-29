@@ -1,18 +1,23 @@
 #!/usr/local/bin/python3
-"""将对象/视图资源挂载到当前数字员工/个人助理。
+"""将资源挂载到当前数字员工/个人助理。
 
 I/O 协议：stdin JSON → stdout JSON
 
 入参（stdin JSON）:
     {
         "agent_id": 10004452,              # 必填，数字员工或个人助理的 ID
-        "resource_code": "by_my_device"   # 必填，资源编码
+        "resource_code": "by_my_device",   # 必填，资源编码
+        "resource_biz_type": "KG_DOC"      # 必填，资源业务类型（不再提供默认值）
     }
 
 出参（stdout JSON）:
     {
         "ok": true
     }
+
+注意：对象（OBJECT）、视图（VIEW）、本体库（ONTOLOGY_BASE）、场景（SCENE）四类资源的
+能力已下线，服务端不会为这四类建立关联。完整说明见
+`docs/disabled-resource-capabilities.md`。
 """
 
 from __future__ import annotations
@@ -50,7 +55,10 @@ def main() -> None:
         print(json.dumps({"ok": False, "error": "resource_code 不能为空"}), flush=True)
         sys.exit(1)
 
-    resource_biz_type: str = params.get("resource_biz_type", "OBJECT").upper().strip()
+    resource_biz_type: str = str(params.get("resource_biz_type") or "").strip().upper()
+    if not resource_biz_type:
+        print(json.dumps({"ok": False, "error": "resource_biz_type 不能为空"}), flush=True)
+        sys.exit(1)
 
     try:
         result = post_json(

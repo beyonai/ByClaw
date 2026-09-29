@@ -16,6 +16,12 @@ import type { Dict, ExecutorResponse } from "./types.js";
 import type { BaiyingExecutor } from "./executor.js";
 import type { DocDeltaCallback } from "./doc-shared.js";
 import type { BaiyingEnhanceLogger } from "./debug-channel.js";
+import { makeError } from "./errors.js";
+import {
+  DISABLED_RESOURCE_MESSAGE,
+  RESOURCE_TYPE_DISABLED,
+  isDisabledResourceBizType,
+} from "./disabled-resource-type.js";
 
 export type { BaiyingExecutor, BaiyingExecutorOptions } from "./executor.js";
 export type { ExecutorResponse } from "./types.js";
@@ -69,6 +75,13 @@ export async function runBaiyingExecutor(params: {
   /** Host logger; used for request logs emitted by resource executors. */
   logger?: BaiyingEnhanceLogger;
 }): Promise<ExecutorResponse> {
+  // Final entry gate: reject retired resource types before an executor (and
+  // therefore any Redis/MCP work) is even constructed.
+  if (isDisabledResourceBizType(params.resourceType)) {
+    return makeError(RESOURCE_TYPE_DISABLED, DISABLED_RESOURCE_MESSAGE, {
+      target: { resource_id: params.resourceId, resource_type: params.resourceType },
+    });
+  }
   const executor = await getExecutor(params.resourcesDir);
   if (params.metadataOnly) {
     return await executor.describe({

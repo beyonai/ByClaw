@@ -15,10 +15,10 @@ I/O 协议：stdin JSON → stdout JSON
         "data": [
             {
                 "resourceId": "10000044",
-                "resourceCode": "by_task",
-                "resourceName": "任务管理对象",
-                "resourceBizType": "OBJECT",
-                "resourceDesc": "任务管理对象描述"
+                "resourceCode": "by_kb",
+                "resourceName": "产品知识库",
+                "resourceBizType": "KG_DOC",
+                "resourceDesc": "产品文档知识库"
             }
         ]
     }
@@ -61,6 +61,7 @@ def main() -> None:
         },
     )
     items = (data or {}).get("list", [])
+    # 返回服务端已授权并已排除停用类型的全部关联资源。
     result = [
         {
             "resourceId": item.get("resourceId"),
@@ -70,7 +71,6 @@ def main() -> None:
             "resourceDesc": item.get("resourceDesc"),
         }
         for item in items
-        if item.get("resourceBizType") in {"OBJECT", "VIEW"}
     ]
     print(json.dumps({"ok": True, "data": result}, ensure_ascii=False), flush=True)
 

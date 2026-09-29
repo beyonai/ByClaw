@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.resource.service;
 
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes;
 import com.iwhalecloud.byai.common.constants.staticdata.RedisConfig;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -47,6 +48,10 @@ public class RedisResourceQueryService {
         List<Map<String, String>> resources = new ArrayList<>();
         entries.forEach((field, value) -> {
             String type = resourceType(value);
+            // 四类已下线资源业务类型统一停用：不返回停用类型条目（规则见 DisabledResourceBizTypes）。
+            if (DisabledResourceBizTypes.isDisabled(type)) {
+                return;
+            }
             if (RESOURCE_KEY_PREFIXES.containsKey(type)) {
                 resources.add(Map.of("resourceId", text(field), "resourceType", type));
             }
@@ -59,6 +64,11 @@ public class RedisResourceQueryService {
         String userId = resolveUserId();
         String resourceType = authorizedType(userId, resourceId);
         if (resourceType == null) return result("BY_RESOURCE_ID", Map.of("allowed", false, "resourceId", resourceId));
+        // 四类已下线资源业务类型统一停用：已授权的停用调用返回可识别原因（复用既有 reason 字段）。
+        if (DisabledResourceBizTypes.isDisabled(resourceType)) {
+            return result("BY_RESOURCE_ID", Map.of("allowed", false, "resourceId", resourceId,
+                "reason", DisabledResourceBizTypes.REASON_CODE));
+        }
         String prefix = RESOURCE_KEY_PREFIXES.get(resourceType);
         if (prefix == null) return result("BY_RESOURCE_ID", Map.of("allowed", false, "resourceId", resourceId, "reason", "UNSUPPORTED_RESOURCE_TYPE"));
         String raw = redis.opsForValue().get(prefix + resourceId);
@@ -76,7 +86,11 @@ public class RedisResourceQueryService {
         if (ids.size() > MAX_BATCH_SIZE) throw new IllegalArgumentException("resourceIds exceeds max batch size " + MAX_BATCH_SIZE);
         String userId = resolveUserId();
         Map<Object, Object> authorized = redis.opsForHash().entries(AUTH_KEY_PREFIX + userId);
-        List<String> authorizedIds = ids.stream().filter(id -> RESOURCE_KEY_PREFIXES.containsKey(resourceType(authorized.get(id)))).toList();
+        List<String> authorizedIds = ids.stream().filter(id -> {
+            String type = resourceType(authorized.get(id));
+            // 停用类型不参与取值：其结果由下方循环给出可识别原因。
+            return !DisabledResourceBizTypes.isDisabled(type) && RESOURCE_KEY_PREFIXES.containsKey(type);
+        }).toList();
         List<String> keys = authorizedIds.stream().map(id -> RESOURCE_KEY_PREFIXES.get(resourceType(authorized.get(id))) + id).toList();
         List<String> values = redis.opsForValue().multiGet(keys);
         Map<String, String> rawById = new LinkedHashMap<>();
@@ -88,6 +102,11 @@ public class RedisResourceQueryService {
         List<String> missing = new ArrayList<>();
         for (String id : ids) {
             String type = resourceType(authorized.get(id));
+            // 四类已下线资源业务类型统一停用：每条停用条目都带可识别原因。
+            if (DisabledResourceBizTypes.isDisabled(type)) {
+                items.add(Map.of("resourceId", id, "allowed", false, "reason", DisabledResourceBizTypes.REASON_CODE));
+                continue;
+            }
             if (!RESOURCE_KEY_PREFIXES.containsKey(type)) { items.add(Map.of("resourceId", id, "allowed", false)); continue; }
             String raw = rawById.get(id);
             if (raw == null || raw.isBlank()) { missing.add(id); continue; }
@@ -150,6 +169,8 @@ public class RedisResourceQueryService {
     private static String resourceType(Object value) {
         String raw = text(value); if (raw.isEmpty()) return "";
         String upper = raw.toUpperCase(); if (RESOURCE_KEY_PREFIXES.containsKey(upper)) return upper;
+        // 停用类型（含无 Redis 前缀项的 ONTOLOGY_BASE）也要解析出真实类型，使裸前缀与 JSON 两种存储形态得到同一原因码。
+        if (DisabledResourceBizTypes.isDisabled(upper)) return upper;
         try { Object parsed = JSON.parse(raw); if (parsed instanceof Map<?, ?> map) {
             Object type = map.get("resourceType"); if (type == null) type = map.get("resourceBizType"); return text(type).toUpperCase();
         }} catch (RuntimeException ignored) { }

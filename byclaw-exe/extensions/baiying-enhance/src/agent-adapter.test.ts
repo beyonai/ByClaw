@@ -198,7 +198,7 @@ describe("adaptAgentJson", () => {
         expect(res.baiyingModelId).toBeUndefined();
     });
 
-    it("uses relResourceList for associated resources", () => {
+    it("uses relResourceList for associated resources and drops retired types", () => {
         const raw = {
             resourceId: "10039008",
             resourceName: "Ontology helper",
@@ -210,6 +210,13 @@ describe("adaptAgentJson", () => {
                     resourceBizType: "VIEW",
                     resourceCode: "scene_sales_management",
                     resourceDesc: "销售漏斗视图",
+                },
+                {
+                    resourceId: "10000046",
+                    resourceName: "产品知识库",
+                    resourceBizType: "KG_DOC",
+                    resourceCode: "po_docs",
+                    resourceDesc: "产品文档",
                 },
                 {
                     resourceId: "skill-001",
@@ -231,12 +238,15 @@ describe("adaptAgentJson", () => {
         }
         expect(res.associatedResources).toHaveLength(1);
         expect(res.associatedResources![0]).toMatchObject({
-            resourceId: "10000045",
-            resourceName: "销售管理视图",
-            resourceBizType: "VIEW",
-            resourceCode: "scene_sales_management",
-            resourceDesc: "销售漏斗视图",
+            resourceId: "10000046",
+            resourceName: "产品知识库",
+            resourceBizType: "KG_DOC",
+            resourceCode: "po_docs",
+            resourceDesc: "产品文档",
         });
+        // Retired types (VIEW) are excluded from the injected context; a normal
+        // type whose agent name mentions ontology is not filtered by name.
+        expect(res.associatedResources!.some((r) => r.resourceBizType === "VIEW")).toBe(false);
         expect(res.associatedResources!.some((r) => r.resourceBizType === "SKILL")).toBe(false);
         expect(res.listEntry.skills).toEqual(["dws"]);
     });

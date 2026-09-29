@@ -182,6 +182,35 @@ class ResourceAuthApplicationServiceTest {
         assertThat(captor.getValue().getUserPositionIds()).containsExactly(30L);
     }
 
+    @Test
+    void listResourceAuthEstablishesAuthContextBeforeQuery() {
+        // AC-015：先建立用户权限上下文，再执行查询；停用类型排除写在同一条 SQL 的 WHERE 内，不产生新的前置提示。
+        ResourceUseAuthQo qo = new ResourceUseAuthQo();
+        PageInfo<ResourceAuthVo> page = new PageInfo<>();
+        page.setList(List.of());
+        when(privilegeGrantService.listResourceAuth(qo)).thenReturn(page);
+
+        service().listResourceAuth(qo);
+
+        org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(resourceAuthContextService, privilegeGrantService);
+        inOrder.verify(resourceAuthContextService).setCurrentUserAuthQo(qo);
+        inOrder.verify(privilegeGrantService).listResourceAuth(qo);
+    }
+
+    @Test
+    void listDigitalEmployeeRelResourceAuthKeepsSkillBranch() {
+        DigEmployeeRelResourceQo qo = new DigEmployeeRelResourceQo();
+        qo.setResourceId(10001L);
+        qo.setResourceBizTypeList(List.of("SKILL"));
+        when(ssResourceCatalogService.findSelfAndDescendantCatalogIds(null)).thenReturn(Collections.emptyList());
+        when(ssResourceMapper.queryDigEmployeeSkillResourceAuthList(qo)).thenReturn(Collections.emptyList());
+
+        service().listDigitalEmployeeRelResourceAuth(qo);
+
+        verify(ssResourceMapper).queryDigEmployeeSkillResourceAuthList(qo);
+        verify(ssResourceMapper, never()).queryDigEmployeeRelResourceAuthList(qo);
+    }
+
     private ResourceAuthApplicationService service() {
         ResourceAuthApplicationService service = new ResourceAuthApplicationService();
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);

@@ -22,6 +22,7 @@ ByClaw 是一个企业级 AI 智能助手平台，提供：
 | 5 | 👨‍💻 **想开发贡献** | [开发指南](./development/) |
 | 6 | 🔌 **想集成 API** | [API 文档](./api/) |
 | 7 | ❓ **遇到问题** | [常见问题](./getting-started/faq.md) |
+| 8 | ⚠️ **想确认哪些能力已下线** | [已下线资源能力说明](./disabled-resource-capabilities.md) |
 
 ## 目录结构
 
