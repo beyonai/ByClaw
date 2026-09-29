@@ -103,6 +103,17 @@ describe('employee publication controls', () => {
     expect(publicationAction).not.toHaveBeenCalled();
   });
 
+  it('groups the publication explanation with the actions and expands detailed rules on demand', async () => {
+    render(<PublicationToolbar detail={candidate} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
+    const overview = within(screen.getByRole('region', { name: '发布操作与说明' }));
+    expect(overview.getByRole('button', { name: '提交发布' })).toBeInTheDocument();
+    expect(
+      overview.getByText('本页编辑待发布版本。审核通过后创建或更新官方副本，原个人员工不变。')
+    ).toBeInTheDocument();
+    fireEvent.click(overview.getByRole('button', { name: '查看发布规则' }));
+    expect(await screen.findByText('发布范围与规则')).toBeInTheDocument();
+  });
+
   it.each(['submit', 'approve'])('resource warnings remain visible and do not block %s', async (action) => {
     const detail = {
       ...candidate,
@@ -110,9 +121,27 @@ describe('employee publication controls', () => {
       canReview: action === 'approve',
       dependencies: [
         { resourceId: '*', name: '全部工具', action: 'BUILTIN_TOOL' },
-        { resourceId: '20', name: '私有工具', action: 'REFERENCE_TOOL', warning: '部分使用者无权调用' },
-        { resourceId: '21', name: '私有知识库', action: 'REFERENCE_RESOURCE', warning: '部分使用者无权使用' },
-        { resourceId: '22', name: '失效技能', action: 'REFERENCE_RESOURCE', warning: '技能文件不存在' },
+        {
+          resourceId: '20',
+          name: '私有工具',
+          action: 'REFERENCE_TOOL',
+          resourceType: 'TOOL',
+          warning: '部分使用者无权调用',
+        },
+        {
+          resourceId: '21',
+          name: '私有知识库',
+          action: 'REFERENCE_RESOURCE',
+          resourceType: 'KG_DOC',
+          warning: '部分使用者无权使用',
+        },
+        {
+          resourceId: '22',
+          name: '失效技能',
+          action: 'REFERENCE_RESOURCE',
+          resourceType: 'SKILL',
+          warning: '技能文件不存在',
+        },
       ],
     };
     (previewPublication as jest.Mock).mockResolvedValue(detail);
@@ -121,8 +150,9 @@ describe('employee publication controls', () => {
       publication: { ...candidate.publication, status: 'PUBLISHED' },
     });
     render(<PublicationToolbar detail={detail} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
-    expect(screen.getByText('关联资源可用性提醒（不影响发布）')).toBeInTheDocument();
-    expect(screen.getByText('全部工具：平台内置工具，全员可使用')).toBeInTheDocument();
+    expect(screen.getByText('3 项使用范围受限')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '保留关联（4）' }));
+    expect(screen.getByText('全部工具')).toBeInTheDocument();
     expect(screen.getByText('部分使用者无权使用')).toBeInTheDocument();
     expect(screen.getByText('技能文件不存在')).toBeInTheDocument();
     const button = screen.getByRole('button', { name: action === 'submit' ? '提交发布' : '通过并发布' });
@@ -272,6 +302,26 @@ describe('employee publication controls', () => {
     );
     expect(screen.getByRole('button', { name: '提交发布' })).toBeDisabled();
     expect(screen.getByText(/员工名称必填/)).toBeInTheDocument();
+  });
+  it('explains adminvip-only review and gives platform submitters no approval or pending edit controls', () => {
+    render(
+      <PublicationToolbar
+        detail={{
+          ...candidate,
+          publication: { ...candidate.publication, status: 'PENDING', requiresAdminVipReview: true },
+          canEdit: false,
+          canSubmit: false,
+          canReview: false,
+        }}
+        dirty={false}
+        onChange={jest.fn()}
+        onSave={jest.fn()}
+      />
+    );
+    expect(screen.getByText('仅超管 adminvip 可审核')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '通过并发布' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '驳回' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '保存待发布配置' })).not.toBeInTheDocument();
   });
   it('submits the reviewed revision and shows the returned state', async () => {
     const next = { ...candidate, publication: { ...candidate.publication, status: 'PENDING', revision: 4 } };

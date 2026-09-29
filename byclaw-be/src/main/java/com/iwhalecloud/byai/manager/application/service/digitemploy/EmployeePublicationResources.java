@@ -87,6 +87,7 @@ public class EmployeePublicationResources {
         private String availabilityScope;
         private String impact;
         private Long requestId;
+        private String copyName;
         private List<String> toolCodes = new ArrayList<>();
     }
 
@@ -169,7 +170,7 @@ public class EmployeePublicationResources {
             dependency.setAction("REFERENCE_RESOURCE");
             if (resource == null || !"SKILL".equals(resource.getResourceBizType())
                 || !Objects.equals(tenantId, resource.getComAcctId())
-                || !isPersonal(resource) || !Objects.equals(authorId, resource.getCreateBy())) {
+                || !isPersonal(resource)) {
                 inspectReference(dependency, authorId, tenantId, roots);
                 result.add(dependency);
                 continue;
@@ -200,6 +201,7 @@ public class EmployeePublicationResources {
                 dependency.setSkill(snapshot);
                 dependency.setTargetId(id);
                 dependency.setAction("COPY_SKILL");
+                dependency.setCopyName(EmployeePublicationNames.enterpriseName(resource.getResourceName(), null));
                 checkSkill(dependency, bytes, authorId, tenantId);
             } catch (Exception error) {
                 omit(dependency, error instanceof BaseException ? error.getMessage() : "技能文件读取或校验失败");
@@ -222,7 +224,7 @@ public class EmployeePublicationResources {
                     SsResource current = resources.findById(dependency.getResource().getResourceId());
                     requireAvailable(current, tenantId);
                     if (!auth.hasResourceUsePermission(current, authorId)) throw new BaseException("创建者已无关联资源使用权限");
-                    if (!Objects.equals(current.getCreateBy(), authorId)) throw new BaseException("个人技能所有权已变更");
+                    if (!Objects.equals(current.getCreateBy(), dependency.getResource().getCreateBy())) throw new BaseException("个人技能所有权已变更");
                     byte[] bytes = snapshotBytes(dependency);
                     checkSkill(dependency, bytes, authorId, tenantId);
                 } catch (Exception error) {
@@ -276,7 +278,7 @@ public class EmployeePublicationResources {
             String[] parts = normalizePath(dependency.getSkill().getSkillUrl()).split("/");
             if (parts.length > 2 && "official-publications".equals(parts[1])) requestId = Long.valueOf(parts[2]);
         }
-        return new EmployeePublicationSkillBridge.Context(tenantId, authorId, requestId);
+        return new EmployeePublicationSkillBridge.Context(tenantId, authorId, requestId, dependency.getCopyName());
     }
 
     public InputStream openSnapshot(List<Dependency> dependencies, Long resourceId) {
@@ -458,7 +460,10 @@ public class EmployeePublicationResources {
                 "新企业员工中不会出现此资源，依赖它的能力不可用；原个人员工保持不变");
         }
         if ("COPY_SKILL".equals(dependency.getAction())) {
-            return new Availability("SKILL", "当前企业全员（发布成功后）", "个人技能将生成独立副本", "使用独立技能副本，不依赖原技能的私有权限");
+            String name = StringUtils.defaultIfBlank(dependency.getCopyName(),
+                EmployeePublicationNames.enterpriseName(dependency.getResource().getResourceName(), null));
+            return new Availability("SKILL", "当前企业全员（发布成功后）", "个人技能将生成独立副本",
+                "生成企业技能副本「" + name + "」，不依赖原技能的私有权限");
         }
         if ("BUILTIN_TOOL".equals(dependency.getAction())) {
             return new Availability("TOOL", "当前企业全员", "平台内置工具", "发布后全员可使用，仍需运行环境正常");

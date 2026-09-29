@@ -44,6 +44,9 @@ class EmployeePublicationApplicationServiceTest {
     DigitalEmployeePublication publication;
 
     @BeforeEach void setup() {
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+            new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(), "publication-test"),
+            DigitalEmployeePublication.class);
         login("user", 7L, List.of());
         when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn("openSource");
         when(transactions.getTransaction(any())).thenAnswer(invocation -> new SimpleTransactionStatus());
@@ -220,14 +223,78 @@ class EmployeePublicationApplicationServiceTest {
         publication.setTenantId(2L);
         assertThatThrownBy(() -> service.detail(100L)).hasMessageContaining("无权访问");
     }
-    @Test void nonCreatorCannotPublishEvenWithPlatformRole() {
+    @Test void platformCanPreparePublicationForAnotherCreatorWithoutChangingTheSource() {
         login("platform", 8L, List.of("PLAT_MAN"));
-        assertThatThrownBy(() -> service.prepare(10L)).hasMessageContaining("只能发布自己创建");
+        assertThat(service.prepare(10L).canSubmit()).isTrue();
+        verify(resources, never()).updateById(any(SsResource.class));
     }
     @Test void adminvipOwnershipOverridesPlatformRole() {
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
         login("platform", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
         assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("仅允许 adminvip");
+    }
+
+    @Test void platformSubmissionOfAdminvipEmployeeWaitsForAdminvipAndCannotBypassReview() {
+        Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
+        login("platform", 8L, List.of("PLAT_MAN"));
+        assertThat(service.prepare(10L).canSubmit()).isTrue();
+        var pending = service.submit(request());
+        assertThat(pending.publication().getStatus()).isEqualTo("PENDING");
+        assertThat(pending.publication().isRequiresAdminVipReview()).isTrue();
+        assertThat(pending.canReview()).isFalse();
+        assertThat(pending.canEdit()).isFalse();
+        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("仅允许 adminvip");
+        assertThatThrownBy(() -> service.reject(request())).hasMessageContaining("仅允许 adminvip");
+        assertThatThrownBy(() -> service.save(request())).hasMessageContaining("审核期间不可编辑");
+        verify(resources, never()).insert(any(SsResource.class));
+        assertThat(publication.getStatus()).isEqualTo("PENDING");
+        login("adminvip", 7L, List.of());
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(publication.getReviewerId()).isEqualTo(7L);
+        assertThat(publication.getReviewedAt()).isNotNull();
+    }
+
+    @Test void copiedAdminvipSkillRequiresAdminvipEvenWhenEmployeeBelongsToPlatformManager() {
+        Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(9L)).thenReturn(creator);
+        var skill = employee(20L, 9L); skill.setResourceBizType("SKILL");
+        var dependency = new EmployeePublicationResources.Dependency();
+        dependency.setResource(skill); dependency.setAction("COPY_SKILL"); dependency.setCopyName("技能(企业)");
+        publication.setDependenciesJson(JSON.toJSONString(List.of(dependency)));
+        login("platform", 7L, List.of("PLAT_MAN"));
+        assertThat(service.submit(request()).canReview()).isFalse();
+        assertThat(publication.getStatus()).isEqualTo("PENDING");
+        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("仅允许 adminvip");
+        when(publications.selectList(any())).thenReturn(List.of(publication));
+        assertThat(service.pendingCount()).isZero();
+        assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isFalse();
+        login("adminvip", 9L, List.of());
+        assertThat(service.detail(100L).canReview()).isTrue();
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"OMIT_RESOURCE", "REFERENCE_RESOURCE"})
+    void omittedOrExistingEnterpriseAdminvipSkillDoesNotRequireExtraReview(String action) {
+        Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(9L)).thenReturn(creator);
+        var skill = employee(20L, 9L); skill.setResourceBizType("SKILL");
+        if ("REFERENCE_RESOURCE".equals(action)) skill.setOwnerType("enterprise");
+        var dependency = new EmployeePublicationResources.Dependency();
+        dependency.setResource(skill); dependency.setAction(action);
+        publication.setDependenciesJson(JSON.toJSONString(List.of(dependency)));
+        login("platform", 7L, List.of("PLAT_MAN"));
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        assertThat(service.submit(request()).publication().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(publication.getReviewerId()).isEqualTo(7L);
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"platform", "adminvip"})
+    void administratorsPublishPlatformCreatedEmployeeImmediatelyWithReviewRecord(String operator) {
+        login(operator, 8L, List.of("PLAT_MAN"));
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        assertThat(service.submit(request()).publication().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(publication.getReviewerId()).isEqualTo(8L);
+        assertThat(publication.getReviewerName()).isEqualTo(operator);
+        assertThat(publication.getReviewedAt()).isNotNull();
+        assertThat(publication.getComment()).contains("免人工审核");
     }
     @Test void superAssistantAndGroupsAreRejected() {
         DigitalEmployeeDTO dto = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
@@ -362,7 +429,8 @@ class EmployeePublicationApplicationServiceTest {
         login("reviewer", 9L, List.of("PLAT_MAN"));
         assertThat(service.current(10L).publication()).isSameAs(publication);
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
-        assertThatThrownBy(() -> service.current(10L)).hasMessageContaining("仅允许 adminvip");
+        assertThat(service.current(10L).canSubmit()).isTrue();
+        assertThat(service.current(10L).publication().isRequiresAdminVipReview()).isTrue();
         login("adminvip", 7L, List.of()); source.setComAcctId(2L);
         assertThatThrownBy(() -> service.current(10L)).hasMessageContaining("不存在");
         source.setComAcctId(1L); when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn("commercial");

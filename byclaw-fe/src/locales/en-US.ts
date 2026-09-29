@@ -277,7 +277,7 @@ export default {
   'resource.rowRefreshFailed': 'Operation succeeded, but this resource could not be refreshed. Please try again later.',
   'resource.publishToEnterprise': 'Publish to official recommendations',
   'resource.publishToEnterpriseConfirm':
-    'Submit for publication to official recommendations? An independent enterprise copy becomes available after approval; the original personal skill is retained.',
+    'Publish an enterprise skill copy? Eligible administrators publish immediately with a review record. A platform administrator publishing a skill created by adminvip requires adminvip approval.',
   'resource.enterpriseSkillPending': 'Publication submitted for review',
   'resource.enterprisePersonalDependenciesTitle': 'Personal resource dependencies',
   'resource.enterprisePersonalDependenciesWarning':

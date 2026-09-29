@@ -80,7 +80,7 @@ const knowledge = [
 ];
 let editorForm: ReturnType<typeof Form.useForm>[0];
 
-function Editor({ employee, canConfigureResources, agentType = '001' }: any) {
+function Editor({ employee, canConfigureResources, agentType = '001', scrollWithPage = false }: any) {
   const [form] = Form.useForm();
   editorForm = form;
   return (
@@ -89,6 +89,7 @@ function Editor({ employee, canConfigureResources, agentType = '001' }: any) {
       agentType={agentType}
       employeeType={agentType}
       ownerType={employee.ownerType}
+      scrollWithPage={scrollWithPage}
       canConfigureResources={canConfigureResources ?? !isSuperAssistant(employee)}
       form={form}
       digitalType="FROM_MANUALLY"
@@ -122,6 +123,21 @@ describe('employee editor resource configuration entries', () => {
     mockUpdateResource.mockReset();
   });
 
+  it('allows page scrolling only when requested and retains the ordinary editor height constraints', async () => {
+    const employee = { ownerType: 'personal', resourceCode: 'alice_helper' };
+    const { container, rerender } = render(<Editor employee={employee} scrollWithPage />);
+    await screen.findByText('employeeDetail.basicSettings');
+    expect(container.querySelector('.pageScroll')).toBeInTheDocument();
+    expect(container.querySelector('form')).not.toHaveClass('full-height');
+    expect(container.querySelector('.basicSettings')).not.toHaveClass('full-height');
+    expect(container.querySelector('.configurationDetails')).not.toHaveClass('full-height');
+    rerender(<Editor employee={employee} />);
+    expect(container.querySelector('.pageScroll')).not.toBeInTheDocument();
+    expect(container.querySelector('form')).toHaveClass('full-height');
+    expect(container.querySelector('.basicSettings')).toHaveClass('full-height');
+    expect(container.querySelector('.configurationDetails')).toHaveClass('full-height');
+  });
+
   it.each(['personal', 'personal_default'])(
     'hides resource sections for a %s super assistant while keeping other settings',
     async (ownerType) => {
@@ -142,18 +158,22 @@ describe('employee editor resource configuration entries', () => {
   it.each([
     { ownerType: 'personal', resourceCode: 'alice_helper' },
     { ownerType: 'enterprise', resourceCode: 'enterprise_main' },
-  ])('keeps all resource entries usable for an ordinary assistant: %j', async (employee) => {
-    render(<Editor employee={employee} />);
-    await waitFor(() => expect(screen.getByText('employeeDetail.robotConfig.title')).toBeVisible());
-    labels.forEach((label) => expect(screen.getByText(label)).toBeVisible());
+  ])(
+    'keeps all resource entries usable for an ordinary assistant: %j',
+    async (employee) => {
+      render(<Editor employee={employee} />);
+      await waitFor(() => expect(screen.getByText('employeeDetail.robotConfig.title')).toBeVisible());
+      labels.forEach((label) => expect(screen.getByText(label)).toBeVisible());
 
-    fireEvent.click(within(screen.getByText(labels[0]).parentElement!).getByRole('button'));
-    expect(mockShowBaseList).toHaveBeenLastCalledWith('006');
-    fireEvent.click(within(screen.getByText(labels[1]).parentElement!).getByRole('button'));
-    expect(mockShowBaseList).toHaveBeenLastCalledWith('005');
-    fireEvent.click(within(screen.getByText(labels[2]).parentElement!).getByRole('button'));
-    await waitFor(() => expect(screen.getByRole('dialog', { hidden: true })).toBeVisible(), { timeout: 5000 });
-  }, multiStepFormTimeout);
+      fireEvent.click(within(screen.getByText(labels[0]).parentElement!).getByRole('button'));
+      expect(mockShowBaseList).toHaveBeenLastCalledWith('006');
+      fireEvent.click(within(screen.getByText(labels[1]).parentElement!).getByRole('button'));
+      expect(mockShowBaseList).toHaveBeenLastCalledWith('005');
+      fireEvent.click(within(screen.getByText(labels[2]).parentElement!).getByRole('button'));
+      await waitFor(() => expect(screen.getByRole('dialog', { hidden: true })).toBeVisible(), { timeout: 5000 });
+    },
+    multiStepFormTimeout
+  );
 
   it('removes the last configured skill from both form fields before saving', async () => {
     render(<Editor employee={{ ownerType: 'personal', resourceCode: 'alice_helper' }} />);
@@ -300,33 +320,37 @@ describe('skill configuration ownership tabs', () => {
     );
   });
 
-  it('ignores a personal response that arrives after switching to enterprise', async () => {
-    let resolvePersonal!: (value: any) => void;
-    listSkills.mockImplementation(({ ownerType }) =>
-      ownerType === 'personal'
-        ? new Promise((resolve) => {
-            resolvePersonal = resolve;
-          })
-        : Promise.resolve({
-            list: [{ resourceId: '202', resourceCode: 'enterprise', resourceName: 'Enterprise result' }],
-            total: 1,
-          })
-    );
-    render(<Editor employee={{ ownerType: 'personal', resourceCode: 'helper' }} />);
-    openSkills();
-    await waitFor(() => expect(resolvePersonal).toBeDefined());
-    const dialog = within(screen.getByRole('dialog'));
-    fireEvent.click(dialog.getByRole('tab', { name: enterpriseTab }));
-    await waitFor(() => expect(dialog.getByText('Enterprise result')).toBeVisible());
-    await act(async () =>
-      resolvePersonal({
-        list: [{ resourceId: '201', resourceCode: 'personal', resourceName: 'Stale personal result' }],
-        total: 1,
-      })
-    );
-    expect(dialog.queryByText('Stale personal result')).not.toBeInTheDocument();
-    expect(dialog.getByText('Enterprise result')).toBeVisible();
-  }, multiStepFormTimeout);
+  it(
+    'ignores a personal response that arrives after switching to enterprise',
+    async () => {
+      let resolvePersonal!: (value: any) => void;
+      listSkills.mockImplementation(({ ownerType }) =>
+        ownerType === 'personal'
+          ? new Promise((resolve) => {
+              resolvePersonal = resolve;
+            })
+          : Promise.resolve({
+              list: [{ resourceId: '202', resourceCode: 'enterprise', resourceName: 'Enterprise result' }],
+              total: 1,
+            })
+      );
+      render(<Editor employee={{ ownerType: 'personal', resourceCode: 'helper' }} />);
+      openSkills();
+      await waitFor(() => expect(resolvePersonal).toBeDefined());
+      const dialog = within(screen.getByRole('dialog'));
+      fireEvent.click(dialog.getByRole('tab', { name: enterpriseTab }));
+      await waitFor(() => expect(dialog.getByText('Enterprise result')).toBeVisible());
+      await act(async () =>
+        resolvePersonal({
+          list: [{ resourceId: '201', resourceCode: 'personal', resourceName: 'Stale personal result' }],
+          total: 1,
+        })
+      );
+      expect(dialog.queryByText('Stale personal result')).not.toBeInTheDocument();
+      expect(dialog.getByText('Enterprise result')).toBeVisible();
+    },
+    multiStepFormTimeout
+  );
 
   it('switches to enterprise scope when the form ownership changes', async () => {
     render(<Editor employee={{ ownerType: 'personal', resourceCode: 'helper' }} />);

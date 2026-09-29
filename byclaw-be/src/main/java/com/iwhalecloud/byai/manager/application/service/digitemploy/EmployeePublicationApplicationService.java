@@ -73,9 +73,15 @@ public class EmployeePublicationApplicationService {
     public long pendingCount() {
         if (!governance.publicationEnabled() || !DigitalEmployeeGovernanceService.isAdministrator()
             || CurrentUserHolder.getEnterpriseId() == null) return 0;
-        return publications.selectCount(new LambdaQueryWrapper<DigitalEmployeePublication>()
+        var query = new LambdaQueryWrapper<DigitalEmployeePublication>()
             .eq(DigitalEmployeePublication::getTenantId, CurrentUserHolder.getEnterpriseId())
-            .in(DigitalEmployeePublication::getStatus, "PENDING", "FAILED"));
+            .in(DigitalEmployeePublication::getStatus, "PENDING", "FAILED");
+        if (CurrentUserHolder.isAdminVip()) return publications.selectCount(query);
+        query.select(DigitalEmployeePublication::getTenantId, DigitalEmployeePublication::getSourceId,
+            DigitalEmployeePublication::getOfficialId, DigitalEmployeePublication::getAuthorId,
+            DigitalEmployeePublication::getStatus, DigitalEmployeePublication::getUpdatedAt,
+            DigitalEmployeePublication::getDependenciesJson);
+        return publications.selectList(query).stream().filter(this::canReview).count();
     }
 
     public Page list(boolean review, int page, int size) {
@@ -87,7 +93,10 @@ public class EmployeePublicationApplicationService {
         int limit = Math.max(1, Math.min(size, 100));
         query.orderByDesc(DigitalEmployeePublication::getUpdatedAt).last("limit " + limit + " offset " + (Math.max(0, page - 1) * (long) limit));
         List<DigitalEmployeePublication> rows = publications.selectList(query);
-        rows.forEach(publication -> publication.setCanReview(canReview(publication)));
+        rows.forEach(publication -> {
+            publication.setRequiresAdminVipReview(requiresAdminVipReview(publication));
+            publication.setCanReview(canReview(publication));
+        });
         return new Page(rows, total);
     }
 
@@ -119,7 +128,7 @@ public class EmployeePublicationApplicationService {
     /** 只读打开当前申请；查看审核结果不得隐式创建草稿。 */
     public Detail current(Long resourceId) {
         Long tenant = requireEnabled();
-        SsResource requested = requireEntryResource(resourceId, tenant, true);
+        SsResource requested = requireEntryResource(resourceId, tenant);
         Long sourceId = DigitalEmployeeGovernanceService.isOfficialCopy(requested) ? requested.getPublicationSourceId() : resourceId;
         DigitalEmployeePublication current = publications.current(sourceId, tenant);
         if (current == null) return null;
@@ -127,15 +136,14 @@ public class EmployeePublicationApplicationService {
         return view(current);
     }
 
-    private SsResource requireEntryResource(Long resourceId, Long tenant, boolean readOnly) {
+    private SsResource requireEntryResource(Long resourceId, Long tenant) {
         SsResource requested = resources.selectById(resourceId);
         if (requested == null || !Objects.equals(tenant, requested.getComAcctId())) throw new BaseException("数字员工不存在");
         requireEmployee(requested);
-        governance.requireNotProtected(requested);
         boolean official = DigitalEmployeeGovernanceService.isOfficialCopy(requested);
         if (official ? !governance.canMaintainOfficial(requested)
             : !Objects.equals(requested.getCreateBy(), CurrentUserHolder.getCurrentUserId())
-                && !(readOnly && DigitalEmployeeGovernanceService.isAdministrator())) {
+                && !DigitalEmployeeGovernanceService.isAdministrator()) {
             throw new BaseException("只能发布自己创建的个人数字员工，或维护有权限的官方副本");
         }
         if (!official && !"personal".equals(requested.getOwnerType())) throw new BaseException("仅个人数字员工支持发布");
@@ -152,7 +160,7 @@ public class EmployeePublicationApplicationService {
     public Detail prepare(Long resourceId) {
         Long tenant = requireEnabled();
         return transaction.execute(status -> {
-            SsResource requested = requireEntryResource(resourceId, tenant, false);
+            SsResource requested = requireEntryResource(resourceId, tenant);
             boolean official = DigitalEmployeeGovernanceService.isOfficialCopy(requested);
             Long sourceId = official ? requested.getPublicationSourceId() : resourceId;
             if (!Objects.equals(requested.getResourceStatus(), 2)) throw new BaseException("仅在用数字员工支持发起发布或更新");
@@ -247,7 +255,7 @@ public class EmployeePublicationApplicationService {
             advance(publication);
             return view(publication);
         });
-        if (DigitalEmployeeGovernanceService.isAdministrator()) {
+        if (canReview(result.publication())) {
             EmployeePublicationRequest auto = new EmployeePublicationRequest();
             auto.setRequestId(result.publication().getRequestId());
             auto.setRevision(result.publication().getRevision());
@@ -313,6 +321,7 @@ public class EmployeePublicationApplicationService {
                 requireState(publication, "APPLYING");
                 publications.lockResource(publication.getSourceId(), tenant);
                 validateCandidate(publication);
+                requireReviewer(publication);
                 SsResource official = publications.official(publication.getSourceId(), tenant);
                 boolean fresh = official == null;
                 if (!fresh) official = publications.lockResource(official.getResourceId(), tenant);
@@ -510,8 +519,8 @@ public class EmployeePublicationApplicationService {
             SsResourceDTO dto = new SsResourceDTO(); BeanUtils.copyProperties(resource, dto); return dto;
         }).toList());
         boolean active = List.of("DRAFT", "PENDING", "FAILED").contains(publication.getStatus());
-        boolean administrator = DigitalEmployeeGovernanceService.isAdministrator();
-        boolean editable = "DRAFT".equals(publication.getStatus()) || administrator && "PENDING".equals(publication.getStatus());
+        boolean editable = "DRAFT".equals(publication.getStatus()) || canReview(publication) && "PENDING".equals(publication.getStatus());
+        publication.setRequiresAdminVipReview(requiresAdminVipReview(publication));
         boolean canRevise = false;
         if (List.of("REJECTED", "WITHDRAWN").contains(publication.getStatus())) {
             DigitalEmployeePublication current = publications.current(publication.getSourceId(), publication.getTenantId());
@@ -543,7 +552,16 @@ public class EmployeePublicationApplicationService {
         SsResource resource = resources.selectById(publication.getOfficialId() == null ? publication.getSourceId() : publication.getOfficialId());
         return DigitalEmployeeGovernanceService.isEmployee(resource)
             && Objects.equals(resource.getComAcctId(), publication.getTenantId())
-            && Objects.equals(resource.getCreateBy(), publication.getAuthorId()) && !governance.isProtected(resource);
+            && Objects.equals(resource.getCreateBy(), publication.getAuthorId())
+            && (CurrentUserHolder.isAdminVip() || !requiresAdminVipReview(publication));
+    }
+
+    private boolean requiresAdminVipReview(DigitalEmployeePublication publication) {
+        if (governance.isAdminVipCreator(publication.getAuthorId())) return true;
+        return dependencyList(publication).stream().filter(d -> "COPY_SKILL".equals(d.getAction()))
+            .map(Dependency::getResource).filter(Objects::nonNull)
+            .map(SsResource::getCreateBy).filter(creatorId -> !Objects.equals(creatorId, publication.getAuthorId()))
+            .distinct().anyMatch(governance::isAdminVipCreator);
     }
 
     private List<Dependency> dependencyList(DigitalEmployeePublication publication) {
@@ -575,13 +593,12 @@ public class EmployeePublicationApplicationService {
         SsResource resource = resources.selectById(publication.getOfficialId() == null ? publication.getSourceId() : publication.getOfficialId());
         requireEmployee(resource);
         if (!Objects.equals(publication.getTenantId(), resource.getComAcctId()) || !Objects.equals(publication.getAuthorId(), resource.getCreateBy())) throw new BaseException("员工归属已变更");
-        governance.requireNotProtected(resource);
         return resource;
     }
     private void requireView(DigitalEmployeePublication publication) {
         if (publication == null || !Objects.equals(publication.getTenantId(), CurrentUserHolder.getEnterpriseId())
             || (!DigitalEmployeeGovernanceService.isAdministrator() && !Objects.equals(publication.getAuthorId(), CurrentUserHolder.getCurrentUserId()))) throw new BaseException("发布申请不存在或无权访问");
-        governance.requireNotProtected(basis(publication));
+        basis(publication);
     }
     private DigitalEmployeePublication locked(EmployeePublicationRequest request) {
         DigitalEmployeePublication publication = publications.lock(request.getRequestId(), CurrentUserHolder.getEnterpriseId());
@@ -591,11 +608,14 @@ public class EmployeePublicationApplicationService {
     }
     private void requireEditable(DigitalEmployeePublication publication) {
         requireState(publication, "DRAFT", "PENDING");
-        if ("PENDING".equals(publication.getStatus()) && !DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("审核期间不可编辑，请先撤回申请");
+        if ("PENDING".equals(publication.getStatus()) && !canReview(publication)) throw new BaseException("审核期间不可编辑，请先撤回申请");
     }
     private void requireReviewer(DigitalEmployeePublication publication) {
         if (!DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("仅 adminvip 和平台管理员可以审核");
-        governance.requireNotProtected(basis(publication));
+        basis(publication);
+        if (!CurrentUserHolder.isAdminVip() && requiresAdminVipReview(publication)) {
+            throw new BaseException("申请包含 adminvip 创建的员工或个人技能，仅允许 adminvip 审核");
+        }
     }
     private void requireState(DigitalEmployeePublication publication, String... states) {
         if (!List.of(states).contains(publication.getStatus())) throw new BaseException("当前申请状态不允许此操作");

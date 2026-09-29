@@ -4,6 +4,30 @@
   overflow: hidden;
 }
 
+// 发布页由外层统一滚动，资源说明展开后不再挤压下方配置表单。
+.publicationContainer {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 101;
+    background: #fff;
+  }
+
+  .content {
+    height: auto;
+    overflow: visible;
+
+    .contentLeft {
+      height: auto;
+      border-right: 0;
+    }
+  }
+}
+
 .header {
   position: relative;
   display: flex;

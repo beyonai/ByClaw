@@ -874,7 +874,7 @@ public class AuthApplicationService {
         return candidates.stream().filter(item -> {
             if (GrantType.SKILL_PUBLICATION.equals(item.getAuditType())) {
                 SsResource resource = resourceMap.get(item.getResourceId());
-                return skillPublicationService.canReview() && resource != null
+                return skillPublicationService.canReview(resource) && resource != null
                     && "SKILL".equals(resource.getResourceBizType())
                     && OwnerType.ENTERPRISE.equals(resource.getOwnerType())
                     && CurrentUserHolder.getEnterpriseId() != null
@@ -1312,9 +1312,12 @@ public class AuthApplicationService {
         return hasEffectiveAllowManagePrivilege(ssResource, currentUserId);
     }
 
-    /** 上架企业副本仅允许创建人、有效管理授权用户和 adminvip，不继承管理角色兜底权限。 */
+    /** 发布入口允许官方管理员代提交；审核范围由发布服务按来源创建人单独判断。 */
     public boolean canPublishSkillToEnterprise(SsResource resource) {
-        return isPersonalSkillPublishSource(resource) && hasResourceInstallTargetManagePermission(resource);
+        return isPersonalSkillPublishSource(resource)
+            && (hasResourceInstallTargetManagePermission(resource)
+                || CurrentUserHolder.isPlatformManager() && CurrentUserHolder.getEnterpriseId() != null
+                    && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId()));
     }
 
     private boolean isPersonalSkillPublishSource(SsResource resource) {

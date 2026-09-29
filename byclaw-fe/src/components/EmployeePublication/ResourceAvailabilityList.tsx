@@ -1,5 +1,6 @@
 import type { PublicationDependency } from '@/service/employeePublication';
 import { Space, Tag, Typography, theme } from 'antd';
+import type { ReactNode } from 'react';
 
 const resourceTypeLabels: Record<string, string> = {
   TOOL: '工具',
@@ -18,7 +19,13 @@ const resourceTypeLabels: Record<string, string> = {
 export const resourceIsOmitted = (row: PublicationDependency) =>
   ['OMIT_RESOURCE', 'UNAVAILABLE_RESOURCE'].includes(row.action);
 
-export default function ResourceAvailabilityList({ dependencies }: { dependencies: PublicationDependency[] }) {
+export default function ResourceAvailabilityList({
+  dependencies,
+  renderAction,
+}: {
+  dependencies: PublicationDependency[];
+  renderAction?: (row: PublicationDependency) => ReactNode;
+}) {
   const { token } = theme.useToken();
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 12 }}>
@@ -58,6 +65,7 @@ export default function ResourceAvailabilityList({ dependencies }: { dependencie
                 : row.impact || '按原有资源权限使用，实际可用性取决于资源状态。'}
             </span>
           </div>
+          {renderAction?.(row)}
         </li>
       ))}
     </ul>

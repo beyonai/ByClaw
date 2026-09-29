@@ -48,4 +48,6 @@ public class DigitalEmployeePublication {
     private String publishError;
     @TableField(exist = false)
     private boolean canReview;
+    @TableField(exist = false)
+    private boolean requiresAdminVipReview;
 }

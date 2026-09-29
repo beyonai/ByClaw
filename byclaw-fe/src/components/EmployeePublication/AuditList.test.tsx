@@ -54,6 +54,17 @@ describe('publication approval in the audit list', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
+  it('identifies adminvip-only applications without offering platform approval', async () => {
+    (listPublications as jest.Mock).mockResolvedValue({
+      list: [{ ...pending, requiresAdminVipReview: true, canReview: false }],
+      total: 1,
+    });
+    render(<PublicationAuditList />);
+    expect(await screen.findByText('等待超管 adminvip 审核')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '通过并发布' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看详情' })).toBeEnabled();
+  });
+
   it.each([undefined, { enabled: false, administrator: true }])(
     'does not load publication records when disabled or unconfirmed',
     (capabilities) => {

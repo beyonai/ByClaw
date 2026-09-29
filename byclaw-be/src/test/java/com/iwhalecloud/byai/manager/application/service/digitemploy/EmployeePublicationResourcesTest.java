@@ -54,7 +54,35 @@ class EmployeePublicationResourcesTest {
         when(resources.findById(20L)).thenReturn(resource);
         when(auth.hasResourceUsePermission(any(), eq(7L))).thenReturn(true);
     }
-    @AfterEach void cleanup() { CurrentUserHolder.clearLoginInfo(); }
+    @AfterEach void cleanup() {
+        CurrentUserHolder.clearLoginInfo();
+        org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
+    }
+    @Test void sharedPersonalSkillPreservesItsCreatorAndFreezesLocalizedCopyName() {
+        resource.setCreateBy(9L);
+        readableSkill();
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        assertThat(captured.getFirst().getAction()).isEqualTo("COPY_SKILL");
+        assertThat(captured.getFirst().getResource().getCreateBy()).isEqualTo(9L);
+        assertThat(captured.getFirst().getCopyName()).isEqualTo("技能(企业)");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        service.validate(captured, 7L, 1L);
+        assertThat(captured.getFirst().getAction()).isEqualTo("COPY_SKILL");
+        assertThat(EmployeePublicationResources.describe(captured.getFirst()).impact()).contains("技能(企业)");
+        when(auth.hasResourceUsePermission(resource, 7L)).thenReturn(false);
+        service.validate(captured, 7L, 1L);
+        assertThat(captured.getFirst().getAction()).isEqualTo("OMIT_RESOURCE");
+    }
+
+    @Test void existingEnterpriseSkillKeepsItsNameAndOnlyCreatesAnEmployeeAssociation() {
+        resource.setOwnerType("enterprise");
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        assertThat(captured.getFirst().getAction()).isEqualTo("REFERENCE_RESOURCE");
+        assertThat(service.materialize(captured, 1L, 90L)).containsEntry(20L, 20L);
+        assertThat(resource.getResourceName()).isEqualTo("技能");
+        verifyNoInteractions(bridge, storage);
+    }
     void readableSkill() {
         SsResExtSkill skill = new SsResExtSkill(); skill.setResourceId(20L); skill.setSkillType("hub"); skill.setSkillUrl("skill/original.zip");
         when(skills.findById(20L)).thenReturn(skill);
@@ -74,7 +102,7 @@ class EmployeePublicationResourcesTest {
         Map<Long,Long> mapping = service.materialize(captured, 1L, 90L);
         assertThat(mapping).containsEntry(20L, 99L);
         verify(bridge).publish(eq(resource), any(), eq(new byte[]{1,2,3}), eq(90L),
-            eq(new EmployeePublicationSkillBridge.Context(1L, 7L, 100L)));
+            eq(new EmployeePublicationSkillBridge.Context(1L, 7L, 100L, captured.getFirst().getCopyName())));
         service.applyPublishedResources(dto, captured, mapping);
         assertThat(dto.getRelIds()).containsExactly(99L);
         assertThat(resource.getOwnerType()).isEqualTo("personal");

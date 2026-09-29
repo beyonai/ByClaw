@@ -15,6 +15,7 @@ export interface Publication {
   comment?: string;
   publishError?: string;
   canReview?: boolean;
+  requiresAdminVipReview?: boolean;
 }
 export interface PublicationDependency {
   resourceId: string;

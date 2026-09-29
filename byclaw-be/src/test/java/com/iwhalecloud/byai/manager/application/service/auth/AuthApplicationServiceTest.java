@@ -118,11 +118,11 @@ class AuthApplicationServiceTest {
         target.setComAcctId(1L);
         when(grants.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).thenReturn(List.of(row));
         when(resources.selectBatchIds(any())).thenReturn(List.of(target));
-        when(publications.canReview()).thenReturn(true);
+        when(publications.canReview(target)).thenReturn(true);
         assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).containsExactly(row);
-        when(publications.canReview()).thenReturn(false);
+        when(publications.canReview(target)).thenReturn(false);
         assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
-        when(publications.canReview()).thenReturn(true);
+        when(publications.canReview(target)).thenReturn(true);
         target.setComAcctId(2L);
         assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
     }
@@ -327,6 +327,21 @@ class AuthApplicationServiceTest {
         assertThat(service.queryResourceOperationPermissions(601L).isCanPublishToEnterprise()).isTrue();
         assertThat(service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L)
             .isCanPublishToEnterprise()).isTrue();
+    }
+
+    @Test
+    void platformCanSubmitAnotherCreatorsPersonalSkillInSameTenantWithoutGettingManagePermission() {
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        LoginInfo login = loginInfo(2L); login.setEnterpriseId(1L); login.setUserCode("platform");
+        UsersOrganization role = new UsersOrganization(); role.setUserType(UserType.PLAT_MAN);
+        login.setUsersOrganizations(List.of(role)); CurrentUserHolder.setLoginInfo(login);
+        SsResource source = enterpriseResource(601L, 1L);
+        source.setComAcctId(1L); source.setResourceBizType("SKILL"); source.setOwnerType("personal");
+        assertThat(service.canPublishSkillToEnterprise(source)).isTrue();
+        assertThat(service.hasResourceInstallTargetManagePermission(source)).isFalse();
+        source.setComAcctId(2L);
+        assertThat(service.canPublishSkillToEnterprise(source)).isFalse();
     }
 
     @ParameterizedTest

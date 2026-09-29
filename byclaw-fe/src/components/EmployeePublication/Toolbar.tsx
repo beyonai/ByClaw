@@ -10,20 +10,16 @@ import {
   openOfficialEmployee,
   type PublicationDetail,
 } from '@/service/employeePublication';
-import { Alert, Button, Input, Modal, Space, Tag, message } from 'antd';
+import { InfoCircleOutlined } from '@ant-design/icons';
+import { Alert, Button, Input, Modal, Popover, Space, Tag, message } from 'antd';
 import { useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import { publicationErrorMessage } from '@/utils/publicationError';
-import ResourceAvailabilityList from './ResourceAvailabilityList';
+import PublicationResourceSummary from './ResourceSummary';
 import usePublicationConfirmation from './usePublicationConfirmation';
+import styles from './Toolbar.module.less';
 
 type PublicationAction = 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'revise';
-const dependencyActionText: Record<string, string> = {
-  COPY_SKILL: '复制技能快照',
-  REFERENCE_TOOL: '保留工具关联，按现有权限和运行配置使用',
-  BUILTIN_TOOL: '平台内置工具，全员可使用',
-  REFERENCE_RESOURCE: '保留资源关联，按现有权限和运行配置使用',
-};
 
 export default function PublicationToolbar({
   detail,
@@ -88,86 +84,112 @@ export default function PublicationToolbar({
     }
   };
   const blockers = detail.dependencies.filter((dependency) => dependency.error);
-  const warnings = detail.dependencies.filter((dependency) => dependency.warning);
   // 编辑后允许先保存并重新校验，避免名称等旧校验结果阻塞提交。
   const publicationDisabled = busy || (dirty ? !detail.canEdit : blockers.length > 0);
   const reviewed = ['REJECTED', 'PUBLISHED'].includes(detail.publication.status);
   const reviewTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—');
   return (
-    <div style={{ padding: '12px 24px' }}>
-      <Space wrap>
-        <strong>发布到官方推荐</strong>
-        <Tag>{publicationStatus[detail.publication.status]}</Tag>
-        <span>创建者：{detail.publication.authorName}</span>
-        {detail.canEdit && (
-          <Button loading={busyAction === 'save'} disabled={busy} onClick={() => run('save')}>
-            保存待发布配置
-          </Button>
-        )}
-        {detail.publication.status === 'APPLYING' && (
-          <Button
-            disabled={busy}
-            onClick={() =>
-              getPublication(detail.publication.requestId)
-                .then(onChange)
-                .catch((error) => message.error(publicationErrorMessage(error, '刷新失败')))
-            }
-          >
-            刷新状态
-          </Button>
-        )}
-        {detail.canSubmit && (
-          <Button
-            type="primary"
-            loading={busyAction === 'submit'}
-            disabled={publicationDisabled}
-            onClick={() => run('submit')}
-          >
-            提交发布
-          </Button>
-        )}
-        {detail.canReview && (
-          <>
+    <div className={styles.toolbar}>
+      <section className={styles.overview} aria-label="发布操作与说明">
+        <Space wrap>
+          <strong>发布到官方推荐</strong>
+          <Tag>{publicationStatus[detail.publication.status]}</Tag>
+          {detail.publication.requiresAdminVipReview && <Tag color="gold">仅超管 adminvip 可审核</Tag>}
+          <span>创建者：{detail.publication.authorName}</span>
+          {detail.canEdit && (
+            <Button loading={busyAction === 'save'} disabled={busy} onClick={() => run('save')}>
+              保存待发布配置
+            </Button>
+          )}
+          {detail.publication.status === 'APPLYING' && (
+            <Button
+              disabled={busy}
+              onClick={() =>
+                getPublication(detail.publication.requestId)
+                  .then(onChange)
+                  .catch((error) => message.error(publicationErrorMessage(error, '刷新失败')))
+              }
+            >
+              刷新状态
+            </Button>
+          )}
+          {detail.canSubmit && (
             <Button
               type="primary"
-              loading={busyAction === 'approve'}
+              loading={busyAction === 'submit'}
               disabled={publicationDisabled}
-              onClick={() => run('approve')}
+              onClick={() => run('submit')}
             >
-              {['FAILED', 'APPLYING'].includes(detail.publication.status) ? '重试发布' : '通过并发布'}
+              提交发布
             </Button>
-            <Button disabled={busy} onClick={() => setRejecting(true)}>
-              驳回
+          )}
+          {detail.canReview && (
+            <>
+              <Button
+                type="primary"
+                loading={busyAction === 'approve'}
+                disabled={publicationDisabled}
+                onClick={() => run('approve')}
+              >
+                {['FAILED', 'APPLYING'].includes(detail.publication.status) ? '重试发布' : '通过并发布'}
+              </Button>
+              <Button disabled={busy} onClick={() => setRejecting(true)}>
+                驳回
+              </Button>
+            </>
+          )}
+          {detail.canRevise && (
+            <Button loading={busyAction === 'revise'} disabled={busy} onClick={() => run('revise')}>
+              修改并重新申请
             </Button>
-          </>
-        )}
-        {detail.canRevise && (
-          <Button loading={busyAction === 'revise'} disabled={busy} onClick={() => run('revise')}>
-            修改并重新申请
-          </Button>
-        )}
-        {['REJECTED', 'WITHDRAWN'].includes(detail.publication.status) && !detail.canRevise && (
-          <Button
-            disabled={busy}
-            onClick={() =>
-              openEmployeePublication(detail.publication.sourceId).catch((error) =>
-                message.error(publicationErrorMessage(error, '打开最新申请失败'))
-              )
+          )}
+          {['REJECTED', 'WITHDRAWN'].includes(detail.publication.status) && !detail.canRevise && (
+            <Button
+              disabled={busy}
+              onClick={() =>
+                openEmployeePublication(detail.publication.sourceId).catch((error) =>
+                  message.error(publicationErrorMessage(error, '打开最新申请失败'))
+                )
+              }
+            >
+              查看最新申请
+            </Button>
+          )}
+          {detail.publication.status === 'PUBLISHED' && detail.publication.officialId && (
+            <Button onClick={() => openOfficialEmployee(detail.publication.officialId!)}>查看官方副本</Button>
+          )}
+          {detail.canWithdraw && (
+            <Button disabled={busy} onClick={() => run('withdraw')}>
+              撤回申请
+            </Button>
+          )}
+          {dirty && <span>有未保存的修改，提交发布或通过审核时将自动保存。</span>}
+        </Space>
+        <div className={styles.policy}>
+          <InfoCircleOutlined />
+          <span>
+            {detail.canEdit
+              ? '本页编辑待发布版本。审核通过后创建或更新官方副本，原个人员工不变。'
+              : '本页展示该次申请的配置，审核记录保留。'}
+          </span>
+          <Popover
+            trigger="click"
+            placement="bottomLeft"
+            title="发布范围与规则"
+            content={
+              <div className={styles.rules}>
+                员工面向当前企业全员共享。个人知识、个人工具、失效资源及无法复制的技能不会带入企业员工，不影响员工发布。
+                通过校验的个人技能随员工一起审核，通过后生成企业副本。保留的企业资源沿用原权限。
+                个人记忆、聊天记录和机器人渠道不参与发布。
+              </div>
             }
           >
-            查看最新申请
-          </Button>
-        )}
-        {detail.publication.status === 'PUBLISHED' && detail.publication.officialId && (
-          <Button onClick={() => openOfficialEmployee(detail.publication.officialId!)}>查看官方副本</Button>
-        )}
-        {detail.canWithdraw && (
-          <Button disabled={busy} onClick={() => run('withdraw')}>
-            撤回申请
-          </Button>
-        )}
-        {dirty && <span>有未保存的修改，提交发布或通过审核时将自动保存。</span>}
-      </Space>
+            <Button type="link" size="small">
+              查看发布规则
+            </Button>
+          </Popover>
+        </div>
+      </section>
       {reviewed && (
         <Alert
           style={{ marginTop: 8 }}
@@ -215,59 +237,26 @@ export default function PublicationToolbar({
           }
         />
       )}
-      {warnings.length > 0 && (
+      {(blockers.length > 0 || detail.publication.publishError) && (
         <Alert
           style={{ marginTop: 8 }}
           showIcon
           type="warning"
-          message="关联资源可用性提醒（不影响发布）"
-          description={
-            <>
-              <div style={{ marginBottom: 12 }}>
-                可以继续发布。标为“不会带入”的资源将在发布时自动排除，新企业员工无法使用这些资源及依赖它们的能力。你也可以返回修改配置。
-              </div>
-              <div style={{ maxHeight: 360, overflowY: 'auto' }}>
-                <ResourceAvailabilityList dependencies={warnings} />
-              </div>
-            </>
-          }
+          message={detail.publication.publishError || '待发布配置需要调整'}
+          description={blockers.map((dependency, index) => (
+            <div key={`${dependency.resourceId}-${index}`}>
+              {dependency.name}：{dependency.error}
+            </div>
+          ))}
         />
       )}
-      <Alert
-        style={{ marginTop: 8 }}
-        type={blockers.length || detail.publication.publishError ? 'warning' : 'info'}
-        showIcon
-        message={
-          detail.publication.publishError ||
-          (detail.canEdit
-            ? '本页编辑待发布版本。审核通过后创建或更新官方副本，原个人员工不变。'
-            : '本页展示该次申请的配置，审核记录保留。')
-        }
-        description={
-          <>
-            <div>
-              员工面向当前企业全员共享。个人知识、个人工具、失效资源及无法复制的技能不会带入企业员工，不影响员工发布。通过校验的个人技能随员工一起审核，通过后生成企业副本。保留的企业资源沿用原权限。个人记忆、聊天记录和机器人渠道不参与发布。
-            </div>
-            {detail.dependencies
-              .filter((dependency) => !dependency.warning)
-              .map((dependency, index) => (
-                <div key={`${dependency.resourceId}-${index}`}>
-                  {dependency.name}：{dependency.error || dependencyActionText[dependency.action] || '复用企业公共资源'}
-                  {dependency.action === 'COPY_SKILL' && (
-                    <Button
-                      type="link"
-                      onClick={() =>
-                        downloadPublicationSkill(detail.publication.requestId, dependency.resourceId).catch((error) =>
-                          message.error(publicationErrorMessage(error, '下载技能快照失败'))
-                        )
-                      }
-                    >
-                      下载待审技能
-                    </Button>
-                  )}
-                </div>
-              ))}
-          </>
+      <PublicationResourceSummary
+        key={detail.publication.requestId}
+        dependencies={detail.dependencies.filter((dependency) => !dependency.error)}
+        onDownloadSkill={(dependency) =>
+          downloadPublicationSkill(detail.publication.requestId, dependency.resourceId).catch((error) =>
+            message.error(publicationErrorMessage(error, '下载技能快照失败'))
+          )
         }
       />
       {confirmationDialog}

@@ -154,7 +154,9 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
         }
         target = new SsResource();
         target.setResourceId(sequence.nextVal()); target.setResourceCode(code);
-        target.setResourceName(source.getResourceName()); target.setResourceDesc(source.getResourceDesc());
+        target.setResourceName(StringUtils.defaultIfBlank(context.copyName(),
+            EmployeePublicationNames.enterpriseName(source.getResourceName(), null)));
+        target.setResourceDesc(source.getResourceDesc());
         target.setResourceBizType("SKILL"); target.setResourceType("ATOM"); target.setSystemCode("BYAI");
         target.setOwnerType("enterprise"); target.setComAcctId(context.tenantId());
         target.setResourceStatus(2); target.setCreateBy(context.authorId()); target.setUpdateBy(CurrentUserHolder.getCurrentUserId());

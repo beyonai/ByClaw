@@ -43,6 +43,15 @@ class DigitalEmployeeGovernanceServiceTest {
         assertThat(auth.hasResourceManagePermission(resource)).isTrue();
         assertThat(auth.hasResourceUseSettingPermission(resource)).isTrue();
     }
+    @Test void platformCanProposePublicationOfAdminvipEmployeeWithoutGettingMaintenancePermissions() {
+        EmployeePublicationApplicationServiceTest.login("platform", 2L, List.of("PLAT_MAN"));
+        SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
+        assertThat(governance.canPublish(resource)).isTrue();
+        assertThat(auth.hasResourceManagePermission(resource)).isFalse();
+        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("adminvip");
+        resource.setComAcctId(2L);
+        assertThat(governance.canPublish(resource)).isFalse();
+    }
     @Test void officialAuthorCanProposeChangesButCannotModifyGrantsOrInstallLiveSkills() {
         EmployeePublicationApplicationServiceTest.login("author", 7L, List.of());
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 7L);

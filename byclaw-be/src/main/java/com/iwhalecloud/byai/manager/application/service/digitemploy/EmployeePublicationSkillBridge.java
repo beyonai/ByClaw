@@ -9,7 +9,11 @@ import java.util.List;
  * 未提供实现时，个人技能在确认清单中标为不带入，员工本身仍可发布。
  */
 public interface EmployeePublicationSkillBridge {
-    record Context(Long tenantId, Long authorId, Long requestId) { }
+    record Context(Long tenantId, Long authorId, Long requestId, String copyName) {
+        public Context(Long tenantId, Long authorId, Long requestId) {
+            this(tenantId, authorId, requestId, null);
+        }
+    }
 
     /** 与用户约定的技能根目录/references/resourceMate.json 中的一项依赖。 */
     record Issue(String resourceId, String resourceType, String name, String reason) { }

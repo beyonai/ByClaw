@@ -2029,7 +2029,7 @@ const EmployeeDetail = ({ loading }) => {
   );
 
   return (
-    <div className={classnames(styles.container, 'ub ub-ver')}>
+    <div className={classnames(styles.container, publicationId ? styles.publicationContainer : 'ub ub-ver')}>
       <Modal
         open={!!publicationId && (publicationLoading || !!publicationLoadError)}
         footer={null}
@@ -2112,6 +2112,7 @@ const EmployeeDetail = ({ loading }) => {
                 setRobotConfigs={setRobotConfigs}
                 isReadOnly={readOnly}
                 publicationMode={!!publicationId || officialUpdateRequiresReview}
+                scrollWithPage={!!publicationId}
                 updateTime={updateTime}
                 modelName={modelName}
                 modelList={modelList}
