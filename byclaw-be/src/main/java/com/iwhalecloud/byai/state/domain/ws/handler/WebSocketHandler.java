@@ -5,16 +5,19 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Component;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantContextService;
 import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 import com.iwhalecloud.byai.state.domain.ws.model.ChatMessage;
 import com.iwhalecloud.byai.state.domain.ws.service.ChatService;
+import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 import com.iwhalecloud.byai.state.domain.ws.service.WebSocketI18nSupport;
 import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketService;
 import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatWebSocketService;
@@ -50,6 +53,12 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
 
     @Autowired
     private SandboxService sandboxService;
+
+    @Autowired
+    private TenantContextService tenantContextService;
+
+    @Autowired
+    private MultiDeviceBroadcastService multiDeviceBroadcastService;
 
     public WebSocketHandler() {
         super(true);
@@ -97,6 +106,13 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                 chatMessage.setSenderId(userInfo.getUserId());
                 chatMessage.setSenderName(userInfo.getUserName());
                 log.debug("websocket user message :{}", chatMessage);
+                if (chatMessage.getType() == MessageType.SWITCH_TENANT) {
+                    handleTenantSwitch(ctx, chatMessage);
+                    return;
+                }
+                if (!validateFrameTenant(ctx, chatMessage)) {
+                    return;
+                }
                 switch (chatMessage.getType()) {
                     case HEARTBEAT -> handleHeartbeat(ctx, chatMessage);
                     case LLM_MESSAGE -> chatService.llmChat(ctx, chatMessage);
@@ -130,13 +146,79 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         }
     }
 
+    private void handleTenantSwitch(ChannelHandlerContext ctx, ChatMessage chatMessage) {
+        String enterpriseId = chatMessage.getEnterpriseId();
+        if (enterpriseId != null && !enterpriseId.isBlank()) {
+            try {
+                tenantContextService.validate(enterpriseId);
+            }
+            catch (Exception e) {
+                sendTenantError(ctx, chatMessage, "tenant membership unavailable");
+                return;
+            }
+        }
+        else {
+            enterpriseId = null;
+        }
+
+        ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).set(enterpriseId);
+        ctx.channel().attr(Constant.ATT_SCOPED_SESSION_ID).set(null);
+        multiDeviceBroadcastService.clearChannelSubscription(ctx.channel());
+
+        ChatMessage response = new ChatMessage();
+        response.setType(MessageType.SWITCH_TENANT_ACK);
+        response.setClientRequestId(chatMessage.getClientRequestId());
+        response.setEnterpriseId(enterpriseId);
+        PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(JSON.toJSONString(response)));
+    }
+
+    private boolean validateFrameTenant(ChannelHandlerContext ctx, ChatMessage chatMessage) {
+        String selected = ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get();
+        if (selected == null) {
+            if (chatMessage.getEnterpriseId() != null && !chatMessage.getEnterpriseId().isBlank()) {
+                sendTenantError(ctx, chatMessage, "switch tenant before sending messages");
+                return false;
+            }
+            return true;
+        }
+        if (!selected.equals(chatMessage.getEnterpriseId())) {
+            sendTenantError(ctx, chatMessage, "enterprise ID does not match selected tenant");
+            return false;
+        }
+        try {
+            tenantContextService.validate(selected);
+        }
+        catch (Exception e) {
+            sendTenantError(ctx, chatMessage, "tenant membership unavailable");
+            return false;
+        }
+        if (chatMessage.getType() != MessageType.HEARTBEAT) {
+            sendTenantError(ctx, chatMessage, "tenant WebSocket operation is not ready");
+            return false;
+        }
+        if (chatMessage.getScopedSessionId() != null && !chatMessage.getScopedSessionId().isBlank()) {
+            sendTenantError(ctx, chatMessage, "personal session cannot be selected in a tenant");
+            return false;
+        }
+        return true;
+    }
+
+    private void sendTenantError(ChannelHandlerContext ctx, ChatMessage request, String detail) {
+        JSONObject response = new JSONObject();
+        response.put("type", MessageType.ERROR.name());
+        response.put("clientRequestId", request.getClientRequestId());
+        response.put("enterpriseId", request.getEnterpriseId());
+        response.put("chatContent", detail);
+        PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(response.toJSONString()));
+    }
+
     private void handleHeartbeat(ChannelHandlerContext ctx, ChatMessage chatMessage) {
         if (chatMessage.getScopedSessionId() != null) {
             String scopedSessionId = chatMessage.getScopedSessionId().trim();
             ctx.channel().attr(Constant.ATT_SCOPED_SESSION_ID).set(scopedSessionId.isEmpty() ? null : scopedSessionId);
         }
         LoginInfo userInfo = ctx.channel().attr(Constant.ATT_USER_INFO).get();
-        if (userInfo != null) {
+        if (userInfo != null && ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get() == null) {
             try {
                 sandboxService.heartbeat(userInfo.getUserCode(), -1L);
             }
@@ -146,6 +228,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         }
         ChatMessage heartbeatResponse = new ChatMessage();
         heartbeatResponse.setType(MessageType.HEARTBEAT);
+        heartbeatResponse.setEnterpriseId(ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get());
         PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(JSON.toJSONString(heartbeatResponse)));
         log.debug("Heartbeat response sent to: {}", ctx.channel().remoteAddress());
     }
