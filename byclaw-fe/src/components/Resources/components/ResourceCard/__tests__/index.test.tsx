@@ -1149,6 +1149,20 @@ describe('personal skill enterprise publication', () => {
     await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
   });
 
+  it('shows manifest dependency rejection and keeps publication available for retry', async () => {
+    const success = jest.spyOn(message, 'success');
+    const reason = '无法发布到官方推荐：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。';
+    (publishSkillToEnterprise as jest.Mock).mockRejectedValue(reason);
+    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    expect(success).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+    expect(screen.getByText('resource.publishToEnterprise')).toBeInTheDocument();
+  });
+
   it('blocks repeated confirmation while publication is pending', async () => {
     let finish!: (value: any) => void;
     (publishSkillToEnterprise as jest.Mock).mockImplementation(

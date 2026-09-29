@@ -38,6 +38,7 @@ import ResourceSiderListItem, {
 } from './ResourceSiderListItem';
 import styles from './index.module.less';
 import { useEnterpriseSkillPublication } from './useEnterpriseSkillPublication';
+import { useWorkspaceSkillCenterSync } from './useWorkspaceSkillCenterSync';
 const PAGE_SIZE = 30;
 
 interface Props {
@@ -530,6 +531,19 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     resourceType === 'SKILL' ? activeSiderAgent.resourceId : undefined
   );
 
+  const workspaceCenterSync = useWorkspaceSkillCenterSync({
+    employeeId: activeSiderAgent.resourceId,
+    enabled: resourceType === 'SKILL' && canManageActiveAgent,
+    rows: resourceList,
+    onChanged: (item, sourceDeleted) => {
+      if (sourceDeleted) {
+        resourceListRef.current = resourceListRef.current.filter((row) => row.skillPath !== item.skillPath);
+        setResourceList(resourceListRef.current);
+      }
+      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+    },
+  });
+
   // 工作空间(用户开发)技能的详情 / 分享(资源化) 复用公共 hook，保证与右侧个人技能 tab 行为一致。
   // 卸载仍走本地 handleUninstallSkill（左侧按数字员工维度，文案为“卸载”）。
   const workspaceActions = useWorkspaceSkillActions({
@@ -772,6 +786,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
 
   const renderDetailDropdown = (item: ResourceItem) => {
     const menuItems: { key: string; label: React.ReactNode; disabled?: boolean }[] = [];
+    const workspaceCenterItem = workspaceCenterSync.menuItem(item);
+    if (workspaceCenterItem) menuItems.push(workspaceCenterItem);
     if (!item.quoteDisabled) {
       menuItems.push({
         key: 'quote',
@@ -812,12 +828,19 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       <Dropdown
         key="detail"
         trigger={['hover']}
+        onOpenChange={(open) => {
+          if (open) workspaceCenterSync.onOpen(item);
+        }}
         overlayClassName={employeeStyles.mydropdown}
         menu={{
           items: menuItems,
           onClick: ({ key, domEvent }) => {
             domEvent.preventDefault();
             domEvent.stopPropagation();
+            if (key === 'workspaceCenter') {
+              workspaceCenterSync.onClick(item);
+              return;
+            }
             if (key === 'quote') {
               handleQuoteResource(item);
               return;

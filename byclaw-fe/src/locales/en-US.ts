@@ -275,9 +275,9 @@ export default {
   'resource.tool': 'Tool',
   'resource.installTool': 'Install Tool',
   'resource.rowRefreshFailed': 'Operation succeeded, but this resource could not be refreshed. Please try again later.',
-  'resource.publishToEnterprise': 'Publish to enterprise',
+  'resource.publishToEnterprise': 'Publish to official recommendations',
   'resource.publishToEnterpriseConfirm':
-    'Submit an independent enterprise copy for review. It becomes available after approval; the original personal skill is retained.',
+    'Submit for publication to official recommendations? An independent enterprise copy becomes available after approval; the original personal skill is retained.',
   'resource.enterpriseSkillPending': 'Publication submitted for review',
   'resource.enterprisePersonalDependenciesTitle': 'Personal resource dependencies',
   'resource.enterprisePersonalDependenciesWarning':
@@ -285,10 +285,10 @@ export default {
   'resource.auditApplicationType': 'Application type',
   'resource.skillPublicationAudit': 'Skill publication',
   'resource.resourceUseAudit': 'Resource access',
-  'resource.publishToEnterpriseSuccess': 'Published to enterprise',
+  'resource.publishToEnterpriseSuccess': 'Published to official recommendations',
   'resource.enterpriseSkillExists': 'An enterprise copy already exists. View or manage it in enterprise skills.',
   'resource.viewEnterpriseSkill': 'View enterprise skill',
-  'resource.publishToEnterpriseFailed': 'Failed to publish to enterprise. Please try again.',
+  'resource.publishToEnterpriseFailed': 'Failed to publish to official recommendations. Please try again.',
   'resource.installSkill': 'Install Skill',
   'resource.skillGroup.fallbackCover': 'Skill group member cover',
   'resource.skillGroup.memberCount': '{count} members',
@@ -3617,4 +3617,16 @@ export default {
   'editDiff.binary': 'Binary file changed',
 
   ...secondEdition,
+  'resource.workspaceCenter.install': 'Install',
+  'resource.workspaceCenter.update': 'Update',
+  'resource.workspaceCenter.personal': 'personal skills',
+  'resource.workspaceCenter.enterprise': 'enterprise skills',
+  'resource.workspaceCenter.checking': 'Checking Resource Center…',
+  'resource.workspaceCenter.retry': 'Check failed. Click to retry',
+  'resource.workspaceCenter.confirm':
+    '{action} “{name}” in Resource Center {scope}. After saving, its folder and all files in the current employee workspace will be deleted.',
+  'resource.workspaceCenter.success': 'Skill saved to Resource Center and source folder deleted',
+  'resource.workspaceCenter.cleanupFailed':
+    'Skill saved to Resource Center, but source cleanup failed or files changed. Review the folder before deleting it manually.',
+  'resource.workspaceCenter.failed': 'Skill sync failed. Refresh to check its current state.',
 };

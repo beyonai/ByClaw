@@ -92,6 +92,23 @@ it('allows retry after cancellation or request failure without updating the item
   expect(Modal.confirm).toHaveBeenCalledTimes(3);
 });
 
+it.each(['string', 'error'])('shows manifest rejection without marking the skill published (%s)', async (kind) => {
+  const reason = '无法发布到官方推荐：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。';
+  (publishSkillToEnterprise as jest.Mock).mockRejectedValue(kind === 'string' ? reason : new Error(reason));
+  const { result, onPublished } = setup();
+  await waitFor(() => expect(result.current.canPublish(skill)).toBe(true));
+  act(() => result.current.publish(skill));
+  await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
+
+  expect(message.error).toHaveBeenCalledWith(expect.objectContaining({ content: reason }));
+  expect(message.success).not.toHaveBeenCalled();
+  expect(Modal.warning).not.toHaveBeenCalled();
+  expect(onPublished).not.toHaveBeenCalled();
+  expect(result.current.publishingId).toBeNull();
+  act(() => result.current.publish(skill));
+  expect(Modal.confirm).toHaveBeenCalledTimes(2);
+});
+
 it('submits successfully before showing personal dependency warning', async () => {
   const { result, onPublished } = setup();
   await waitFor(() => expect(result.current.canPublish(skill)).toBe(true));

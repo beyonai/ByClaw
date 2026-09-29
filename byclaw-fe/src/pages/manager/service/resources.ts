@@ -767,6 +767,23 @@ export const queryWorkspaceSkillList = (params: QuerySkillListParams) => {
 
 export const queryLobsterInstalledSkillList = queryWorkspaceSkillList;
 
+export interface WorkspaceSkillCenterStatus {
+  action: 'INSTALL' | 'UPDATE' | 'NONE';
+  ownerType: 'personal' | 'enterprise';
+  targetResourceId?: string | number;
+  revision: string;
+}
+
+/** 员工目录同步使用当前登录身份；目标归属与匹配范围由后端解析。 */
+export const queryWorkspaceSkillCenterStatus = (params: { resourceId: string; skillPath: string }) =>
+  POST<WorkspaceSkillCenterStatus>('/byaiService/tool/queryWorkspaceSkillCenterStatus', params);
+
+export const syncWorkspaceSkillToCenter = (params: { resourceId: string; skillPath: string; revision: string }) =>
+  POST<{ resourceId: string | number; action: 'INSTALL' | 'UPDATE'; sourceDeleted: boolean }>(
+    '/byaiService/tool/syncWorkspaceSkillToCenter',
+    params
+  );
+
 /**
  * 查询当前数字员工 workspace 中、尚未进入个人技能资源列表的目录技能（用户开发）。
  * 与 queryWorkspaceSkillList 的区别：去重口径为“个人 tab 已资源化技能”，供首页右侧个人技能 tab 合并展示。

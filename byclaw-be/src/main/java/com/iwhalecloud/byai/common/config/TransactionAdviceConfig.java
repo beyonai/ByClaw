@@ -128,6 +128,11 @@ public class TransactionAdviceConfig {
         NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                // 目录技能同步自行提交保存事务，随后清理文件；清理失败不得被外层事务转为提交失败。
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService")) {
+                    return notSurpportedTx;
+                }
                 // 发布流程通过 TransactionTemplate 分别提交执行租约、官方副本和失败记录。
                 // 外层不得再包裹 REQUIRED 事务，否则这些阶段会合并，失败状态也会被回滚。
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
