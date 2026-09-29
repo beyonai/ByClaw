@@ -1,4 +1,31 @@
-import { getResourcePopoverPanelHeight } from './resourcePopoverAdapter';
+import { getResourcePopoverAdapter, getResourcePopoverPanelHeight } from './resourcePopoverAdapter';
+
+describe('resource popover placement', () => {
+  it.each([false, true])('opens above the employee detail input when isBottom is %s', (isInputAtBottom) => {
+    const adapter = getResourcePopoverAdapter({
+      open: true,
+      width: 800,
+      isInputAtBottom,
+      placement: 'topLeft',
+    });
+
+    expect(adapter).toEqual({ popoverPos: { width: 800 }, placement: 'topLeft' });
+    // 首次发送前也应使用输入框上方的空间，避免面板被压缩到页面底部。
+    expect(getResourcePopoverPanelHeight({ top: 680, bottom: 681 }, adapter.placement, 800)).toBe(652);
+  });
+
+  it.each([
+    [false, 'bottomLeft'],
+    [true, 'topLeft'],
+    [undefined, 'bottomLeft'],
+  ] as const)('preserves the default direction when isBottom is %s', (isInputAtBottom, placement) => {
+    expect(getResourcePopoverAdapter({ open: true, isInputAtBottom }).placement).toBe(placement);
+  });
+
+  it('keeps the panel closed when a page specifies its direction', () => {
+    expect(getResourcePopoverAdapter({ open: false, placement: 'topLeft' }).popoverPos).toBeUndefined();
+  });
+});
 
 describe('resource popover overflow strategy', () => {
   it('fills the space below a new conversation without crossing the viewport edge', () => {
