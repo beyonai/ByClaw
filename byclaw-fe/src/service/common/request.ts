@@ -21,6 +21,7 @@ import axios, { AxiosProgressEvent, AxiosResponse, InternalAxiosRequestConfig, M
 import { get, isPlainObject, throttle, isNil } from 'lodash';
 import { logout } from '../user';
 import { getDesktopLocalRequest } from './desktopLocal';
+import { getSelectedEnterpriseId, getTenantSwitchSeq } from '@/utils/tenantContext';
 
 declare module 'axios' {
   // 录制器需要在 409 时保留服务端原始响应，供调用方自行处理。
@@ -320,22 +321,39 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
     }
   }
   // 在创建 Axios 请求时固定凭证，响应晚到时仍可判断它属于哪个登录会话。
+  const tenantSwitchSeq = getTenantSwitchSeq();
+  const enterpriseId = getSelectedEnterpriseId();
   const headers: Record<string, string> = {
     ...(config.headers || {}),
     [tokenKey]: getToken(),
     [ssotokenKey]: getssoToken(),
     'x-session-id': getSessionKey(),
   };
+  if (
+    enterpriseId &&
+    url.startsWith('/byaiService/') &&
+    !url.startsWith('/byaiService/tenantContext/') &&
+    !url.startsWith('/byaiService/admin/') &&
+    !url.startsWith('/byaiService/system/session/')
+  ) {
+    headers['X-Enterprise-Id'] = enterpriseId;
+  }
   if (languageConf) {
     headers.language = getLocale();
   }
+
+  const desktopHeaders = (desktopToken: string) => ({
+    'content-type': config.headers?.['Content-Type'] || config.headers?.['content-type'] || 'application/json',
+    Authorization: `Bearer ${desktopToken}`,
+  });
 
   // 通过 Axios 标准 headers 传递认证信息，避免旧的自定义 myHeader 被单独覆盖或丢失。
   return getDesktopLocalRequest(url, method, myData).then((desktop) =>
     instance
       .request({
         ...config,
-        headers,
+        headers: desktop ? desktopHeaders(desktop.token) : headers,
+        desktopLocal: Boolean(desktop),
         baseURL: desktop?.baseURL || '/',
         url,
         method,
@@ -343,18 +361,11 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
         params: !['POST', 'PUT'].includes(method) ? myData : null,
         signal: cancelToken?.signal,
         preserveErrorResponse: responseCfg?.preserveErrorResponse,
-        ...(desktop
-          ? {
-            desktopLocal: true,
-            headers: {
-              'content-type':
-                  config.headers?.['Content-Type'] || config.headers?.['content-type'] || 'application/json',
-              Authorization: `Bearer ${desktop.token}`,
-            },
-          }
-          : {}),
       })
       .then((res) => {
+        if (tenantSwitchSeq !== getTenantSwitchSeq()) {
+          throw new Error('Tenant changed while request was pending');
+        }
         if (config && config.responseType === 'blob') {
           // @ts-ignore
           const disposition = res.headers.get('content-disposition') || '';
