@@ -298,9 +298,39 @@
           AND message.archived_at IS NULL
           AND message.recalled_at IS NULL
           AND message."usage" IN (1, 2)
-          <!-- 正文搜索排除 NULL 正文；纯附件的历史展示使用独立查询。 -->
-          AND message.message_content IS NOT NULL
+          <choose>
+              <when test="contentType == 'FILE' or contentType == 'IMAGE'">
+                  AND (
+                    <choose>
+                        <when test="contentType == 'IMAGE'">
+                            EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE((NULLIF(TRIM(message.related_resources), '')::jsonb -&gt; 'files'), '[]'::jsonb)) file
+                                WHERE LOWER(COALESCE(NULLIF(file-&gt;&gt;'fileType', ''), NULLIF(file-&gt;&gt;'mediaType', ''), '')) = 'image'
+                                   OR LOWER(COALESCE(NULLIF(file-&gt;&gt;'fileType', ''), NULLIF(file-&gt;&gt;'mediaType', ''), '')) LIKE 'image/%'
+                                   OR LOWER(COALESCE(file-&gt;&gt;'fileName', '')) LIKE ANY (ARRAY['%.apng', '%.avif', '%.bmp', '%.gif', '%.jpeg', '%.jpg', '%.png', '%.svg', '%.webp']))
+                            OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE((NULLIF(TRIM(message.metadata), '')::jsonb -&gt; 'files'), '[]'::jsonb)) file
+                                WHERE LOWER(COALESCE(NULLIF(file-&gt;&gt;'fileType', ''), NULLIF(file-&gt;&gt;'mediaType', ''), '')) = 'image'
+                                   OR LOWER(COALESCE(NULLIF(file-&gt;&gt;'fileType', ''), NULLIF(file-&gt;&gt;'mediaType', ''), '')) LIKE 'image/%'
+                                   OR LOWER(COALESCE(file-&gt;&gt;'fileName', '')) LIKE ANY (ARRAY['%.apng', '%.avif', '%.bmp', '%.gif', '%.jpeg', '%.jpg', '%.png', '%.svg', '%.webp']))
+                        </when>
+                        <otherwise>
+                            EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE((NULLIF(TRIM(message.related_resources), '')::jsonb -&gt; 'files'), '[]'::jsonb)) file
+                                WHERE NOT (LOWER(COALESCE(NULLIF(file-&gt;&gt;'fileType', ''), NULLIF(file-&gt;&gt;'mediaType', ''), '')) = 'image'
+                                       OR LOWER(COALESCE(NULLIF(file-&gt;&gt;'fileType', ''), NULLIF(file-&gt;&gt;'mediaType', ''), '')) LIKE 'image/%'
+                                       OR LOWER(COALESCE(file-&gt;&gt;'fileName', '')) LIKE ANY (ARRAY['%.apng', '%.avif', '%.bmp', '%.gif', '%.jpeg', '%.jpg', '%.png', '%.svg', '%.webp'])))
+                            OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE((NULLIF(TRIM(message.metadata), '')::jsonb -&gt; 'files'), '[]'::jsonb)) file
+                                WHERE NOT (LOWER(COALESCE(NULLIF(file-&gt;&gt;'fileType', ''), NULLIF(file-&gt;&gt;'mediaType', ''), '')) = 'image'
+                                       OR LOWER(COALESCE(NULLIF(file-&gt;&gt;'fileType', ''), NULLIF(file-&gt;&gt;'mediaType', ''), '')) LIKE 'image/%'
+                                       OR LOWER(COALESCE(file-&gt;&gt;'fileName', '')) LIKE ANY (ARRAY['%.apng', '%.avif', '%.bmp', '%.gif', '%.jpeg', '%.jpg', '%.png', '%.svg', '%.webp'])))
+                        </otherwise>
+                    </choose>
+                  )
+              </when>
+              <otherwise>
+                  AND message.message_content IS NOT NULL
+              </otherwise>
+          </choose>
           <if test="keyword != null">
+              AND message.message_content IS NOT NULL
               AND LOWER(message.message_content) LIKE CONCAT('%', LOWER(#{keyword}), '%') ESCAPE CHR(92)
           </if>
           <if test="scope == 'MINE'">AND message.creator_id = #{userId}</if>
@@ -314,6 +344,9 @@
           </if>
           <if test="senderType == 'USER'">AND message."usage" = 1</if>
           <if test="senderType == 'AGENT'">AND message."usage" = 2</if>
+          <if test="contentType == 'LINK'">
+              AND message.message_content ~* '(https?://|www\\.)'
+          </if>
           <if test="startTime != null">AND message.create_time &gt;= #{startTime}</if>
           <if test="endTime != null">AND message.create_time &lt;= #{endTime}</if>
           <if test="beforeMessageId != null">AND message.message_id &lt; #{beforeMessageId}</if>

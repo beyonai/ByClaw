@@ -52,12 +52,12 @@ class GroupChatMessageSearchServiceTest {
         request.setSenderType("AGENT");
         request.setLimit(20);
         when(mapper.searchVisibleGroupMessages(eq(10L), eq("50\\%\\_\\\\done"), eq("MENTIONED_ME"),
-            eq("AGENT"), eq(30L), isNull(), isNull(), isNull(), eq(21))).thenReturn(List.of());
+            eq("AGENT"), eq("ALL"), eq(30L), isNull(), isNull(), isNull(), eq(21))).thenReturn(List.of());
 
         assertThat(service.search(10L, request).isHasMore()).isFalse();
 
         verify(authorization).requireCurrentUserMember(10L);
-        verify(mapper).searchVisibleGroupMessages(10L, "50\\%\\_\\\\done", "MENTIONED_ME", "AGENT", 30L,
+        verify(mapper).searchVisibleGroupMessages(10L, "50\\%\\_\\\\done", "MENTIONED_ME", "AGENT", "ALL", 30L,
             null, null, null, 21);
     }
 
@@ -73,7 +73,7 @@ class GroupChatMessageSearchServiceTest {
                 message.setMessageId(id);
                 return message;
             }).toList();
-        when(mapper.searchVisibleGroupMessages(eq(10L), isNull(), eq("ALL"), eq("ALL"), eq(30L),
+        when(mapper.searchVisibleGroupMessages(eq(10L), isNull(), eq("ALL"), eq("ALL"), eq("ALL"), eq(30L),
             any(Date.class), any(Date.class), isNull(), eq(51))).thenReturn(rows);
         when(context.toMessages(any())).thenReturn(List.of());
 
@@ -81,6 +81,18 @@ class GroupChatMessageSearchServiceTest {
 
         assertThat(response.isHasMore()).isTrue();
         assertThat(response.getNextBeforeMessageId()).isEqualTo("99");
+    }
+
+    @Test
+    void forwardsContentTypeFilterToMapper() {
+        GroupChatMessageSearchRequest request = new GroupChatMessageSearchRequest();
+        request.setContentType("IMAGE");
+        when(mapper.searchVisibleGroupMessages(eq(10L), isNull(), eq("ALL"), eq("ALL"), eq("IMAGE"), eq(30L),
+            isNull(), isNull(), isNull(), eq(21))).thenReturn(List.of());
+
+        assertThat(service.search(10L, request).isHasMore()).isFalse();
+        verify(mapper).searchVisibleGroupMessages(10L, null, "ALL", "ALL", "IMAGE", 30L,
+            null, null, null, 21);
     }
 
     @Test

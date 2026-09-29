@@ -19,10 +19,21 @@ class GroupChatSearchSqlTest {
         var configuration = new MybatisConfiguration();
         configuration.addMapper(ByaiMessageMapper.class);
         String sql = configuration.getMappedStatement(ByaiMessageMapper.class.getName() + ".searchVisibleGroupMessages")
-            .getBoundSql(Map.of("sessionId", 10L, "keyword", keyword, "scope", "ALL", "senderType", "ALL",
+            .getBoundSql(Map.of("sessionId", 10L, "keyword", keyword, "scope", "ALL", "senderType", "ALL", "contentType", "ALL",
                 "userId", 7L, "limit", 20)).getSql();
         assertThat(new PGWallProvider(new WallConfig()).check(sql).getViolations()).isEmpty();
         assertThat(sql).contains("message.message_content IS NOT NULL");
         assertThat(sql).doesNotContain("TRIM(message.related_resources)");
+    }
+
+    @org.junit.jupiter.api.Test
+    void contentFiltersUseFilenameSuffixesWithoutRegexEscaping() {
+        var configuration = new MybatisConfiguration();
+        configuration.addMapper(ByaiMessageMapper.class);
+        String sql = configuration.getMappedStatement(ByaiMessageMapper.class.getName() + ".searchVisibleGroupMessages")
+            .getBoundSql(Map.of("sessionId", 10L, "scope", "ALL", "senderType", "ALL",
+                "contentType", "IMAGE", "userId", 7L, "limit", 20)).getSql();
+        assertThat(sql).contains("LIKE ANY").contains("%.png").contains("%.jpg");
+        assertThat(sql).doesNotContain("jsonb || jsonb");
     }
 }
