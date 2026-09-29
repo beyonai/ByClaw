@@ -4,6 +4,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.iwhalecloud.byai.gateway.route.RouteService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatInitializationDto;
 import com.iwhalecloud.byai.state.domain.session.dto.SessionMembersDto;
@@ -82,6 +83,9 @@ import lombok.extern.slf4j.Slf4j;
 public class ScriptService extends AbstractChatProcess {
 
     @Autowired
+    private TenantChatMirrorService tenantChatMirrorService;
+
+    @Autowired
     private ObjectProvider<ChatTurnPersistenceObserver> turnPersistenceObservers;
 
     private static final Logger logger = LoggerFactory.getLogger(ScriptService.class);
@@ -154,6 +158,7 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void prepareParams(ChatProcessContext ctx) {
+        ctx.tenantContext = TenantRequestContextHolder.get();
         // 前端有传就使用前端，没有则在马上生成一个session
         ctx.sessionId = ctx.assistantChatDto.getSessionId();
 
@@ -252,7 +257,7 @@ public class ScriptService extends AbstractChatProcess {
         }
 
         // 多端广播：将用户发送的消息推送到用户的其他设备
-        if (!ctx.continueRunningTrace) {
+        if (!ctx.continueRunningTrace && ctx.tenantContext == null) {
             broadcastUserMessage(ctx);
         }
 
@@ -262,7 +267,7 @@ public class ScriptService extends AbstractChatProcess {
         }
 
         // 多端广播：将 initialization 事件推送到用户的其他设备
-        if (!ctx.continueRunningTrace) {
+        if (!ctx.continueRunningTrace && ctx.tenantContext == null) {
             broadcastInitEvent(ctx);
         }
 
@@ -378,6 +383,10 @@ public class ScriptService extends AbstractChatProcess {
      * @param ctx
      */
     private void saveUserContent(ChatProcessContext ctx) {
+        if (ctx.tenantContext != null) {
+            tenantChatMirrorService.input(ctx);
+            return;
+        }
         if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType())) {
@@ -449,6 +458,26 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void storeMessage(ChatProcessContext ctx) {
+        if (ctx.tenantContext != null) {
+            if (!ctx.tryBeginPersist()) return;
+            try {
+                tenantChatMirrorService.terminal(ctx);
+            }
+            catch (RuntimeException error) {
+                ctx.messagePersisted.set(false);
+                throw error;
+            }
+            ChatResponse response = new ChatResponse();
+            response.setSessionId(ctx.sessionId);
+            response.setMessageId(ctx.modelAnswerMessageId);
+            response.setQueryMessageId(ctx.userMessageId);
+            ctx.chatResponse = response;
+            if (!ctx.gatewayError && !ctx.recoveryOnly && ctx.res != null) {
+                CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.appStreamResponse,
+                    JSON.toJSONString(response), ctx.sessionId);
+            }
+            return;
+        }
         if ((ctx.gatewayError || ctx.exception != null) && ctx.messageContext != null) {
             ctx.messageContext.setComplete(true);
         }
@@ -854,6 +883,13 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void handleException(ChatProcessContext ctx) {
+        if (ctx != null && ctx.tenantContext != null) {
+            if (ctx.messageContext != null && ctx.userMessageId != null && ctx.modelAnswerMessageId != null) {
+                ctx.gatewayError = true;
+                storeMessage(ctx);
+            }
+            throw new BdpRuntimeException(ctx.exception.getMessage(), ctx.exception);
+        }
         try {
             saveExceptionRequiresNew(ctx);
             notifyTurnPersisted(ctx);
@@ -1214,6 +1250,7 @@ public class ScriptService extends AbstractChatProcess {
 
     @Override
     public void afterProcess(ChatProcessContext ctx) {
+        if (ctx.tenantContext != null) return;
         if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType())) {

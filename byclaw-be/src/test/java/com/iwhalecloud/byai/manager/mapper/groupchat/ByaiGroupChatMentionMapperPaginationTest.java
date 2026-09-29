@@ -104,6 +104,22 @@ class ByaiGroupChatMentionMapperPaginationTest {
         }
     }
 
+    @Test
+    void legacyGroupsAreScopedToTheirOwningEnterprise() throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-tenant-scope.sqlite").toAbsolutePath();
+        initializeSchema(jdbcUrl);
+        try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
+            ByaiGroupChatMentionMapper mapper = session.getMapper(ByaiGroupChatMentionMapper.class);
+            assertThat(mapper.selectMyGroupsScoped(30L, 11221076L))
+                .extracting(GroupChatListItemResponse::getSessionId).containsExactly(10L);
+            assertThat(mapper.selectMyGroupsScoped(30L, 11221859L))
+                .extracting(GroupChatListItemResponse::getSessionId).containsExactly(20L);
+            assertThat(mapper.isLegacyGroupMember(10L, 30L, 11221076L)).isTrue();
+            assertThat(mapper.isLegacyGroupMember(10L, 30L, 11221859L)).isFalse();
+            assertThat(mapper.isLegacyGroupMember(10L, 31L, 11221076L)).isFalse();
+        }
+    }
+
     private void initializeSchema(String jdbcUrl) throws Exception {
         try (Connection connection = DriverManager.getConnection(jdbcUrl);
             Statement statement = connection.createStatement()) {
@@ -113,6 +129,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
                     session_name TEXT,
                     project_id INTEGER,
                     session_type TEXT,
+                    enterprise_id INTEGER,
                     state TEXT,
                     update_time TEXT,
                     create_time TEXT
@@ -159,10 +176,10 @@ class ByaiGroupChatMentionMapperPaginationTest {
                 )
                 """);
             statement.execute("""
-                INSERT INTO byai_session(session_id, session_name, project_id, session_type, state, update_time, create_time)
-                VALUES (10, 'group 10', 1, 'hs_as', NULL, '2026-09-11 12:00:00', '2026-09-11 10:00:00'),
-                       (20, 'group 20', 1, 'hs_as', 'GROUP_ACTIVE', '2026-09-11 11:00:00', '2026-09-11 09:00:00'),
-                       (30, 'dissolved group', 1, 'hs_as', 'GROUP_DISSOLVED', '2026-09-11 14:00:00', '2026-09-11 08:00:00')
+                INSERT INTO byai_session(session_id, session_name, project_id, session_type, enterprise_id, state, update_time, create_time)
+                VALUES (10, 'group 10', 1, 'hs_as', 11221076, NULL, '2026-09-11 12:00:00', '2026-09-11 10:00:00'),
+                       (20, 'group 20', 1, 'hs_as', 11221859, 'GROUP_ACTIVE', '2026-09-11 11:00:00', '2026-09-11 09:00:00'),
+                       (30, 'dissolved group', 1, 'hs_as', 11221076, 'GROUP_DISSOLVED', '2026-09-11 14:00:00', '2026-09-11 08:00:00')
                 """);
             statement.execute("""
                 INSERT INTO byai_session_member(

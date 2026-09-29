@@ -112,7 +112,7 @@ public class TenantAdminTenantService {
         insertConfig(enterpriseId, "PROVISION_STATE", state);
         tenantMapper.insertOwner(sequenceService.nextVal(), enterpriseId, userId);
         return new TenantView(Long.toString(enterpriseId), name, selectedPackage.getPackageName(), "RESERVED",
-            null, null, null);
+            "RESERVED", null, null, null);
     }
 
     private void insertConfig(long enterpriseId, String code, String value) {
@@ -132,7 +132,7 @@ public class TenantAdminTenantService {
 
     private String stateJson(String status) {
         try {
-            return objectMapper.writeValueAsString(Map.of("status", status, "generation", 1, "fencingToken", 1));
+            return objectMapper.writeValueAsString(Map.of("status", status, "generation", "1", "fencingToken", "1"));
         }
         catch (JsonProcessingException e) {
             throw new IllegalStateException("tenant provision state serialization failed", e);
@@ -141,14 +141,17 @@ public class TenantAdminTenantService {
 
     private TenantView toView(TenantAdminTenantRow row) {
         String status = "UNAVAILABLE";
+        String stage = "UNAVAILABLE";
         try {
-            status = objectMapper.readTree(row.getProvisionStateJson()).path("status").asText("UNAVAILABLE");
+            JsonNode state = objectMapper.readTree(row.getProvisionStateJson());
+            status = state.path("status").asText("UNAVAILABLE");
+            stage = "FAILED".equals(status) ? state.path("lastStage").asText("RESERVED") : status;
         }
         catch (Exception ignored) {
             // Invalid persisted state never grants tenant access.
         }
         return new TenantView(Long.toString(row.getEnterpriseId()), row.getEnterpriseName(),
-            row.getPackageName(), status, row.getCreatedAt(), row.getOpenedAt(), row.getFailureReason());
+            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), row.getFailureReason());
     }
 
     private void requirePlatformAdmin() {
@@ -162,7 +165,7 @@ public class TenantAdminTenantService {
     }
 
     public record TenantView(String enterpriseId, String enterpriseName, String packageName, String provisionState,
-                             String createdAt, String openedAt, String failureReason) {
+                             String provisionStage, String createdAt, String openedAt, String failureReason) {
     }
 
     public record PackageView(long id, String packageName, String packageContent) {

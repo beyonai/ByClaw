@@ -9,6 +9,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,7 +29,7 @@ class TenantContextServiceTest {
     @Test
     void available_preservesLargeEnterpriseIdsAndHidesInternalProvisionFields() {
         TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-        TenantContextService service = new TenantContextService(mapper, new ObjectMapper());
+        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis());
         LoginInfo login = new LoginInfo();
         login.setUserId(12L);
         CurrentUserHolder.setLoginInfo(login);
@@ -51,7 +53,7 @@ class TenantContextServiceTest {
     @Test
     void available_requiresAuthenticatedUser() {
         TenantContextService service = new TenantContextService(mock(TenantMembershipMapper.class),
-            new ObjectMapper());
+            new ObjectMapper(), redis());
 
         assertThatThrownBy(service::available).isInstanceOf(ResponseStatusException.class)
             .hasMessageContaining("401");
@@ -60,9 +62,10 @@ class TenantContextServiceTest {
     @Test
     void switchAndEachRequestRecheckCurrentUserMembership() {
         TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-        TenantContextService service = new TenantContextService(mapper, new ObjectMapper());
+        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis());
         LoginInfo login = new LoginInfo();
         login.setUserId(12L);
+        login.setSessionId("login-session-1");
         CurrentUserHolder.setLoginInfo(login);
         TenantMembershipRow membership = new TenantMembershipRow();
         membership.setEnterpriseId("123");
@@ -81,5 +84,34 @@ class TenantContextServiceTest {
         when(mapper.selectActiveMembership(12L, 123L)).thenReturn(null);
         assertThatThrownBy(() -> service.validate("123"))
             .isInstanceOf(ResponseStatusException.class).hasMessageContaining("403");
+    }
+
+    @Test
+    void switchIssuesTabContextTokenWithExpiry() {
+        TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
+        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis());
+        LoginInfo login = new LoginInfo();
+        login.setUserId(12L);
+        login.setSessionId("login-session-1");
+        CurrentUserHolder.setLoginInfo(login);
+        TenantMembershipRow membership = new TenantMembershipRow();
+        membership.setEnterpriseId("123");
+        membership.setRole("OWNER");
+        membership.setProvisionStateJson("{\"status\":\"READY\"}");
+        when(mapper.selectActiveMembership(12L, 123L)).thenReturn(membership);
+
+        var view = new ObjectMapper().valueToTree(service.switchTo("123"));
+
+        assertThat(view.path("tenantContextToken").asText()).isNotBlank();
+        assertThat(view.path("expiresAt").asText()).isNotBlank();
+        assertThat(view.path("contextVersion").asInt()).isPositive();
+    }
+
+    @SuppressWarnings("unchecked")
+    private StringRedisTemplate redis() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        return redis;
     }
 }

@@ -22,8 +22,9 @@ class TenantContextInterceptorTest {
     }
 
     @Test
-    void tenantHeaderCannotReachPersonalBusinessRoute() {
+    void tenantHeaderCannotReachUnmappedBusinessRoute() {
         MockHttpServletRequest request = request("/byaiService/chat/sessions", "123");
+        request.addHeader("X-Tenant-Context", "context-token");
         assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
             .isInstanceOf(ResponseStatusException.class)
             .hasMessageContaining("tenant route is not ready");
@@ -33,13 +34,37 @@ class TenantContextInterceptorTest {
     @Test
     void validatedTenantRouteSetsAndClearsContext() {
         TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
-        when(service.validate("123")).thenReturn(context);
-        MockHttpServletRequest request = request("/byaiService/tenantChat/sessions", "123");
+        when(service.validate("123", "context-token")).thenReturn(context);
+        MockHttpServletRequest request = request("/byaiService/assiman/getMessages", "123");
+        request.addHeader("X-Tenant-Context", "context-token");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         assertThat(interceptor.preHandle(request, response, new Object())).isTrue();
         assertThat(TenantRequestContextHolder.get()).isSameAs(context);
         interceptor.afterCompletion(request, response, new Object(), null);
+        assertThat(TenantRequestContextHolder.get()).isNull();
+    }
+
+    @Test
+    void projectSessionListAcceptsValidatedTenantContext() {
+        TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
+        when(service.validate("123", "context-token")).thenReturn(context);
+        MockHttpServletRequest request = request("/byaiService/project/session/listByQo", "123");
+        request.addHeader("X-Tenant-Context", "context-token");
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        assertThat(TenantRequestContextHolder.get()).isSameAs(context);
+    }
+
+    @Test
+    void existingChatRouteRequiresBothEnterpriseAndContextToken() {
+        MockHttpServletRequest missingToken = request("/byaiService/assiman/getMessages", "123");
+        assertThatThrownBy(() -> interceptor.preHandle(missingToken, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("401");
+
+        MockHttpServletRequest missingEnterprise = new MockHttpServletRequest("GET",
+            "/byaiService/assiman/getMessages");
+        missingEnterprise.setContextPath("/byaiService");
+        assertThat(interceptor.preHandle(missingEnterprise, new MockHttpServletResponse(), new Object())).isTrue();
         assertThat(TenantRequestContextHolder.get()).isNull();
     }
 

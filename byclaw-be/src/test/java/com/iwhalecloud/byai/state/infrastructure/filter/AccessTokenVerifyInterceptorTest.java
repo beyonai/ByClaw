@@ -138,6 +138,67 @@ class AccessTokenVerifyInterceptorTest {
         assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(7L);
     }
 
+    @Test
+    void explicitBeyondTokenWinsOverSharedBrowserSession() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        SessionFilter session = mock(SessionFilter.class);
+        LoginApplicationService login = mock(LoginApplicationService.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", session);
+        ReflectionTestUtils.setField(interceptor, "loginApplicationService", login);
+        interceptor.init();
+
+        MockHttpServletRequest request = request("POST", "/byaiService/sandbox/listRecords", "/byaiService");
+        request.addHeader("Beyond-Token", "platform-admin-token");
+        MockHttpSession cookieSession = new MockHttpSession();
+        cookieSession.setAttribute("USER_CODE", "another-account");
+        request.setSession(cookieSession);
+        when(jwt.doFilter(null, "platform-admin-token")).thenAnswer(invocation -> {
+            LoginInfo tokenUser = new LoginInfo();
+            tokenUser.setUserId(27L);
+            tokenUser.setUserCode("0027024710");
+            CurrentUserHolder.setLoginInfo(tokenUser);
+            return true;
+        });
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("0027024710");
+        verifyNoInteractions(session);
+        verify(login).shareSession(cookieSession, CurrentUserHolder.getLoginInfo());
+    }
+
+    @Test
+    void keepsSwitchedEnterpriseForTheSameTokenUser() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        LoginApplicationService login = mock(LoginApplicationService.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        ReflectionTestUtils.setField(interceptor, "loginApplicationService", login);
+        interceptor.init();
+
+        MockHttpServletRequest request = request("GET", "/byaiService/system/session/currentUser", "/byaiService");
+        request.addHeader("Beyond-Token", "same-user-token");
+        MockHttpSession session = new MockHttpSession();
+        // Redis-backed sessions may deserialize JSON numbers as Integer.
+        session.setAttribute("userId", 27);
+        session.setAttribute("enterpriseId", 11221859);
+        request.setSession(session);
+        when(jwt.doFilter(null, "same-user-token")).thenAnswer(invocation -> {
+            LoginInfo tokenUser = new LoginInfo();
+            tokenUser.setUserId(27L);
+            tokenUser.setEnterpriseId(11221076L);
+            tokenUser.setComAcctId(11221076L);
+            CurrentUserHolder.setLoginInfo(tokenUser);
+            return true;
+        });
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getLoginInfo().getEnterpriseId()).isEqualTo(11221859L);
+        assertThat(CurrentUserHolder.getLoginInfo().getComAcctId()).isEqualTo(11221859L);
+        verify(login).shareSession(session, CurrentUserHolder.getLoginInfo());
+    }
+
     private MockHttpServletRequest request(String method, String uri, String contextPath) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
         request.setContextPath(contextPath);

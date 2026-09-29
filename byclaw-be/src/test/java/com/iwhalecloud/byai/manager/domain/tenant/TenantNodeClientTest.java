@@ -1,0 +1,93 @@
+package com.iwhalecloud.byai.manager.domain.tenant;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandHashBody;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorEvent;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorInputPayload;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.SessionUpdate;
+import com.iwhaleai.byai.framework.core.discovery.ServiceInstance;
+import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
+
+class TenantNodeClientTest {
+
+    @Test
+    void mirrorEventKeepsExplicitNullStreamIdForNodeContract() throws Exception {
+        ObjectMapper mapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        MirrorEvent event = new MirrorEvent("10", "req-1", "run-1", "trace-1", "20", "21",
+            "input-20", null, 0, "0", "INPUT", new MirrorInputPayload("20", "30", null, "你好"));
+        assertThat(mapper.readTree(mapper.writeValueAsBytes(event)).has("sourceStreamId")).isTrue();
+        assertThat(mapper.readTree(mapper.writeValueAsBytes(event)).get("sourceStreamId").isNull()).isTrue();
+    }
+
+    @Test
+    void commandHashMatchesNodeCanonicalJsonContract() throws Exception {
+        CommandHashBody body = new CommandHashBody(1, "123", "8", "req-1", "456",
+            "UPDATE_SESSION", new SessionUpdate("renamed", null));
+        assertThat(TenantNodeClient.commandHash(new ObjectMapper(), body))
+            .isEqualTo("75ab7e02c951cdd400c61b241ca1744be140c9dd21490dd4c8c2fdbc809e69b1");
+    }
+
+    @Test
+    void resolvesRegisteredTenantNodeHttpEndpoint() {
+        ServiceInstance instance = instance("123", "1", "987", "READY");
+        assertThat(TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L, "987",
+            List.of(instance)).toString()).isEqualTo("http://tenant-node.example:3100");
+    }
+
+    @Test
+    void routesAnIdentityCheckedTenantNodeThroughItsSandboxProxy() {
+        URI registered = URI.create("http://host.containers.internal:3100");
+        assertThat(TenantNodeClient.proxyEndpoint(registered, "sandbox-123",
+            "/v1/sandboxes/sandbox-123/proxy/3100", "http://127.0.0.1:9005"))
+            .hasToString("http://127.0.0.1:9005/v1/sandboxes/sandbox-123/proxy/3100");
+    }
+
+    @Test
+    void rejectsProxyPathForAnotherSandbox() {
+        URI registered = URI.create("http://host.containers.internal:3100");
+        assertThatThrownBy(() -> TenantNodeClient.proxyEndpoint(registered, "sandbox-123",
+            "/v1/sandboxes/sandbox-456/proxy/3100", "http://127.0.0.1:9005"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("sandbox proxy mismatch");
+    }
+
+    @Test
+    void rejectsCrossTenantAndStaleRegistrations() {
+        assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
+            "987", List.of(instance("124", "1", "987", "READY"))))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("registration mismatch");
+        assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
+            "987", List.of(instance("123", "2", "987", "READY"))))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("registration mismatch");
+        assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
+            "987", List.of(instance("123", "1", "987", "ADMIN_ONLY"))))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("registration mismatch");
+    }
+
+    @Test
+    void rejectsMissingOrAmbiguousRegistrations() {
+        ServiceInstance instance = instance("123", "1", "987", "READY");
+        assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
+            "987", List.of())).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
+            "987", List.of(instance, instance))).isInstanceOf(ResponseStatusException.class);
+    }
+
+    private ServiceInstance instance(String enterpriseId, String generation, String dbRecordId, String mode) {
+        ServiceInstance instance = new ServiceInstance();
+        instance.setProtocol("http");
+        instance.setHost("tenant-node.example");
+        instance.setPort(3100);
+        instance.setMetadata(Map.of("enterpriseId", enterpriseId, "generation", generation,
+            "dbSandboxRecordId", dbRecordId, "mode", mode, "agentType", "TENANT_DATA_123"));
+        return instance;
+    }
+}

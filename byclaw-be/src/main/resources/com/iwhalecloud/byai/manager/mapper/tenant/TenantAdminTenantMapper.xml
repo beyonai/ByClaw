@@ -41,7 +41,7 @@
                m.user_id AS created_by
         FROM byai.tenant_config r
         JOIN byai.po_enterprise_info e ON e.enterprise_id = r.enterprise_id
-        JOIN byai.tenant_user_membership m ON m.enterprise_id = e.enterprise_id AND m.role = 'OWNER'
+        LEFT JOIN byai.tenant_user_membership m ON m.enterprise_id = e.enterprise_id AND m.role = 'OWNER'
         LEFT JOIN byai.tenant_config n ON n.enterprise_id = e.enterprise_id AND n.params_code = 'PACKAGE_NAME_SNAPSHOT'
         LEFT JOIN byai.tenant_config s ON s.enterprise_id = e.enterprise_id AND s.params_code = 'PROVISION_STATE'
         LEFT JOIN byai.tenant_config f ON f.enterprise_id = e.enterprise_id AND f.params_code = 'PROVISION_FAILURE_REASON'
@@ -63,6 +63,7 @@
         LEFT JOIN byai.tenant_config f ON f.enterprise_id = e.enterprise_id AND f.params_code = 'PROVISION_FAILURE_REASON'
         LEFT JOIN byai.tenant_user_membership m ON m.enterprise_id = e.enterprise_id AND m.role = 'OWNER'
         <where>
+            AND (s.params_value IS NULL OR s.params_value::jsonb -&gt;&gt; 'status' != 'DELETED')
             <if test="name != null and name != ''">
                 AND LOWER(e.com_acct_name) LIKE '%' || LOWER(#{name}) || '%'
             </if>
@@ -120,5 +121,33 @@
         SELECT params_code AS "paramsCode", params_value AS "paramsValue"
         FROM byai.tenant_config WHERE enterprise_id = #{enterpriseId}
     </select>
+
+    <select id="selectManagedEnterpriseName" resultType="string">
+        SELECT e.com_acct_name
+        FROM byai.po_enterprise_info e
+        JOIN byai.tenant_config r ON r.enterprise_id = e.enterprise_id
+          AND r.params_code = 'PROVISION_REQUEST_ID'
+        WHERE e.enterprise_id = #{enterpriseId}
+    </select>
+
+    <select id="selectPendingDeletions" resultType="long">
+        SELECT enterprise_id FROM byai.tenant_config
+        WHERE params_code = 'TENANT_DELETE_REQUESTED' AND params_value = 'true'
+        ORDER BY enterprise_id LIMIT 100
+    </select>
+
+    <delete id="deleteTenantMemberships">
+        DELETE FROM byai.tenant_user_membership WHERE enterprise_id = #{enterpriseId}
+    </delete>
+
+    <delete id="deleteTenantOrganizations">
+        DELETE FROM byai.tenant_organization WHERE enterprise_id = #{enterpriseId}
+    </delete>
+
+    <delete id="deleteTenantResourceConfigs">
+        DELETE FROM byai.tenant_config
+        WHERE enterprise_id = #{enterpriseId}
+          AND params_code NOT IN ('PROVISION_REQUEST_ID', 'PROVISION_STATE', 'TENANT_DELETE_REQUESTED')
+    </delete>
 
 </mapper>

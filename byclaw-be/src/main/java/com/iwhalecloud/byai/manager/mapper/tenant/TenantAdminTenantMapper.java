@@ -37,4 +37,14 @@ public interface TenantAdminTenantMapper {
     int deleteConfig(@Param("enterpriseId") long enterpriseId, @Param("code") String code);
 
     List<TenantConfigRow> selectConfigs(@Param("enterpriseId") long enterpriseId);
+
+    String selectManagedEnterpriseName(@Param("enterpriseId") long enterpriseId);
+
+    List<Long> selectPendingDeletions();
+
+    int deleteTenantMemberships(@Param("enterpriseId") long enterpriseId);
+
+    int deleteTenantOrganizations(@Param("enterpriseId") long enterpriseId);
+
+    int deleteTenantResourceConfigs(@Param("enterpriseId") long enterpriseId);
 }

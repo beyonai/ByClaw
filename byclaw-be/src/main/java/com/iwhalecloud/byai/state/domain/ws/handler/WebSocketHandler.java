@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.domain.ws.handler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -12,6 +13,8 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantContextService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
@@ -86,6 +89,8 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TextWebSocketFrame frame) {
         String message = frame.text();
+        ChatMessage chatMessage = null;
+        boolean tenantChatFrame = false;
 
         // 生成并设置 REQUEST_ID（WebSocket 消息入口）
         Long requestId = IdUtil.getSnowflakeNextId();
@@ -100,7 +105,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
             }
             try {
                 WebSocketI18nSupport.applyLocale(userInfo);
-                ChatMessage chatMessage = JSON.parseObject(message, ChatMessage.class);
+                chatMessage = JSON.parseObject(message, ChatMessage.class);
                 ResumeRoutingTraceLogger.logWebSocketIngress(chatMessage);
                 WebSocketI18nSupport.applyLocale(chatMessage.getLanguage(), userInfo);
                 chatMessage.setSenderId(userInfo.getUserId());
@@ -115,12 +120,24 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                 }
                 switch (chatMessage.getType()) {
                     case HEARTBEAT -> handleHeartbeat(ctx, chatMessage);
-                    case LLM_MESSAGE -> chatService.llmChat(ctx, chatMessage);
+                    case LLM_MESSAGE -> {
+                        tenantChatFrame = TenantRequestContextHolder.get() != null;
+                        chatService.llmChat(ctx, chatMessage);
+                    }
                     case SSE_STREAM -> chatService.sseStream(ctx, chatMessage);
                     case NOTIFICATION -> notificationService.getRealTimeNotification(ctx, message);
                     case STOP_CHAT -> chatService.stopChat(ctx, chatMessage);
-                    case TASK_PLAN_GET -> taskPlanWebSocketService.get(ctx, chatMessage);
-                    case GROUP_CHAT_SEND -> groupChatWebSocketService.send(ctx, chatMessage);
+                    case TASK_PLAN_GET -> {
+                        // The tenant Node does not persist task plans; keep this optional lookup
+                        // from failing the active chat with the same clientRequestId.
+                        if (TenantRequestContextHolder.get() == null) {
+                            taskPlanWebSocketService.get(ctx, chatMessage);
+                        }
+                    }
+                    case GROUP_CHAT_SEND -> {
+                        tenantChatFrame = TenantRequestContextHolder.get() != null;
+                        groupChatWebSocketService.send(ctx, chatMessage);
+                    }
                     default -> throw new RuntimeException(
                         I18nUtil.get("ws.handler.unsupported.message.type", chatMessage.getType()));
                 }
@@ -132,11 +149,24 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                 else {
                     CurrentUserHolder.setLoginInfo(previousLoginInfo);
                 }
+                TenantRequestContextHolder.clear();
             }
         }
         catch (Exception e) {
-            log.error("Error processing message: {}", message, e);
-            NettyResponse.sendErrorResponse(ctx, e.getMessage());
+            log.error("Error processing WebSocket message type={}, clientRequestId={}",
+                chatMessage == null ? null : chatMessage.getType(),
+                chatMessage == null ? null : chatMessage.getClientRequestId(), e);
+            if (tenantChatFrame) {
+                String detail = e instanceof ResponseStatusException status
+                    && status.getReason() != null
+                    && status.getReason().contains("TENANT_GROUP_AGENT_NOT_READY")
+                        ? "租户工作组暂不支持 @数字员工"
+                        : "租户聊天失败，请稍后重试";
+                sendTenantError(ctx, chatMessage, detail);
+            }
+            else {
+                NettyResponse.sendErrorResponse(ctx, e.getMessage());
+            }
         }
         finally {
             // 消息处理完成后清理上下文，防止线程池复用时数据污染
@@ -185,14 +215,18 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
             sendTenantError(ctx, chatMessage, "enterprise ID does not match selected tenant");
             return false;
         }
+        TenantRequestContext tenant;
         try {
-            tenantContextService.validate(selected);
+            tenant = tenantContextService.validate(selected);
         }
         catch (Exception e) {
             sendTenantError(ctx, chatMessage, "tenant membership unavailable");
             return false;
         }
-        if (chatMessage.getType() != MessageType.HEARTBEAT) {
+        if (chatMessage.getType() != MessageType.HEARTBEAT
+            && chatMessage.getType() != MessageType.LLM_MESSAGE
+            && chatMessage.getType() != MessageType.TASK_PLAN_GET
+            && chatMessage.getType() != MessageType.GROUP_CHAT_SEND) {
             sendTenantError(ctx, chatMessage, "tenant WebSocket operation is not ready");
             return false;
         }
@@ -200,6 +234,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
             sendTenantError(ctx, chatMessage, "personal session cannot be selected in a tenant");
             return false;
         }
+        TenantRequestContextHolder.set(tenant);
         return true;
     }
 
@@ -209,6 +244,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         response.put("clientRequestId", request.getClientRequestId());
         response.put("enterpriseId", request.getEnterpriseId());
         response.put("chatContent", detail);
+        response.put("message", detail);
         PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(response.toJSONString()));
     }
 

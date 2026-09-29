@@ -109,6 +109,11 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
+        // Tenant Node callbacks use the dedicated controller token instead of portal signatures.
+        if (this.isTenantNodeInternalRequest(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
         // 沙箱上传使用 Beyond-Token；Artifact 公开内容与数据接口使用业务层访问约束，调用方均不持有门户签名盐。
         if (this.isArtifactUpload(request) || this.isArtifactCapabilityRequest(request)) {
             filterChain.doFilter(request, response);
@@ -230,6 +235,14 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         return endsWithPath(request.getRequestURI(), ORCHESTRATOR_RUNTIME_PATH)
             || endsWithPath(request.getServletPath(), ORCHESTRATOR_RUNTIME_PATH)
             || endsWithPath(request.getPathInfo(), ORCHESTRATOR_RUNTIME_PATH);
+    }
+
+    private boolean isTenantNodeInternalRequest(HttpServletRequest request) {
+        String path = request == null ? null : request.getRequestURI();
+        if (path == null) return false;
+        return path.endsWith("/internal/v1/tenantKms/decrypt")
+            || path.endsWith("/internal/v1/tenantSchemaTaskReports")
+            || path.matches(".*/internal/v1/tenants/[1-9][0-9]*/schema/current");
     }
 
     private boolean isArtifactUpload(HttpServletRequest request) {

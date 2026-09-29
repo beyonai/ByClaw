@@ -174,6 +174,10 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request, "数字员工组运行时解析");
             }
+            // These three callbacks authenticate their own narrow tenant Node token in the controller.
+            if (this.isTenantNodeInternalRequest(request)) {
+                return true;
+            }
             // Artifact公开内容与数据接口不依赖登录态；有效期、记录级能力和管理密钥由业务服务校验。
             if (this.isArtifactCapabilityRequest(request)) {
                 return true;
@@ -193,24 +197,36 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 return urlFilter.doFilter(request);
             }
 
-            // 优先走session共享
             HttpSession httpSession = request.getSession(false);
-            String userCode = this.getSessionString(httpSession, "USER_CODE");
-            if (StringUtils.isNotEmpty(userCode)) {
-                return sessionFilter.doFilter(httpSession);
-            }
-
-            // token认证
+            // Explicit credentials identify this request. A browser may carry a shared
+            // session cookie from another tab/account, so it must not override the token.
             String systemCode = request.getHeader("system-code");
             String beyondToken = request.getHeader("beyond-token");
             if (StringUtils.isNotEmpty(beyondToken)) {
                 boolean res = jwtTokenFilter.doFilter(systemCode, beyondToken);
                 LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
                 if (res && httpSession != null && loginInfo != null) {
+                    // The token authenticates the user, while the browser session holds that
+                    // user's current enterprise. Do not reset a successful enterprise switch
+                    // to the enterprise embedded in an older token on the next request.
+                    Object sessionUserId = httpSession.getAttribute("userId");
+                    Object sessionEnterpriseId = httpSession.getAttribute("enterpriseId");
+                    if (loginInfo.getUserId() != null && sessionUserId instanceof Number sessionUser
+                        && loginInfo.getUserId().longValue() == sessionUser.longValue()
+                        && sessionEnterpriseId instanceof Number enterpriseId) {
+                        loginInfo.setEnterpriseId(enterpriseId.longValue());
+                        loginInfo.setComAcctId(enterpriseId.longValue());
+                        CurrentUserHolder.setLoginInfo(loginInfo);
+                    }
                     // 防御性措施，上面userCode为空则证明已经是session已经被清空，这里需要补全
                     loginApplicationService.shareSession(httpSession, loginInfo);
                 }
                 return res;
+            }
+
+            String userCode = this.getSessionString(httpSession, "USER_CODE");
+            if (StringUtils.isNotEmpty(userCode)) {
+                return sessionFilter.doFilter(httpSession);
             }
 
             // 单点登陆token
@@ -319,6 +335,14 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         String requestUri = request == null ? null : request.getRequestURI();
         return StringUtils.endsWith(requestUri, ORCHESTRATOR_RUNTIME_PATH)
             || StringUtils.endsWith(requestUri, ORCHESTRATOR_RUNTIME_PATH + "/");
+    }
+
+    private boolean isTenantNodeInternalRequest(HttpServletRequest request) {
+        String path = request == null ? null : request.getRequestURI();
+        if (path == null) return false;
+        return StringUtils.endsWith(path, "/internal/v1/tenantKms/decrypt")
+            || StringUtils.endsWith(path, "/internal/v1/tenantSchemaTaskReports")
+            || path.matches(".*/internal/v1/tenants/[1-9][0-9]*/schema/current");
     }
 
     private boolean isArtifactUploadRequest(HttpServletRequest request) {

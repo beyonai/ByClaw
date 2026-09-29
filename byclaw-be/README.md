@@ -50,6 +50,10 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - **多模型支持** - 支持多种大语言模型接入
 - **企业级安全** - 完整的认证、授权和审计机制
 
+## 租户数据源 SQL 接口
+
+`/admin/tenant-datasource/browse` 按 `page` 读取租户表数据；`/admin/tenant-datasource/execute` 接受单条 `sql`、`page` 和 `confirmed`。查询与浏览每页最多返回 500 行，`hasNextPage` 表示可继续翻页；无法分页的结果超过上限时返回 `truncated=true`。写入、删除及 DDL 等高危语句必须由客户端二次确认并传入 `confirmed=true`，服务端会拒绝未确认的请求。仅平台管理员可使用这些接口。
+
 ## 聊天用户资料
 
 - 前端用户资料卡及助手设置统一使用已有的 `GET /system/user/getUserSuas?userId=42`，不新增 `/assiman/getUserSuas` 接口。
@@ -562,3 +566,29 @@ root message ID. Deploy this endpoint before enabling the topic modal frontend.
 后端批量校验资源存在性，合并模板员工并去重后写入群成员，不再隐式追加默认助手。
 创建响应 `members` 返回实际加入的员工，后续群详情沿用已有成员信息回显。
 配置变更仅影响之后打开的创建页面。
+
+## 租户开通联调
+
+平台管理员选择套餐创建租户后，BE 异步创建独立 OpenGauss 沙箱、校验数据库身份、发布 Redis 配置、启动 `tenant-data-node`，并向 Node 的 `/internal/v1/schema-tasks` 上传 `BYCLAW_TENANT_BASELINE_BUNDLE`。Node 完成 `V0.5.0` baseline 后回报 `/internal/v1/tenantSchemaTaskReports`，BE 将 `tenant_schema_audit` 置为 `VERIFIED` 并发布 `READY`。失败可从租户管理的阶段进度弹窗重试；每次初始化尝试保留独立审计行。
+
+数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。
+
+本地 Podman 联调时，OpenSandbox 的 TCP endpoint 可能返回容器网段地址。`BYCLAW_TENANT_DB_PROBE_HOST=127.0.0.1` 只覆盖 BE 的宿主机连接探测地址；Node 仍使用同一 Podman 网络内的数据库容器名。Node 到 BE 的 `BYCLAW_TENANT_BE_INTERNAL_URL`、Redis 地址和 `BYCLAW_TENANT_INTERNAL_TOKEN` 由部署环境注入。HTTP 模式下 BE 经 OpenSandbox 代理访问 Node 时使用 `X-Byclaw-Internal-Token`；Node 直连 BE 的三个内部接口使用 Bearer 令牌。这些接口由控制器核验专用令牌。
+
+更新租户 Node 镜像后，平台管理员可调用 `POST /admin/tenants/recreate-node`（请求体 `{"enterpriseId":"…"}`）经 OpenSandbox 删除旧 Node 沙箱并从当前 `IMAGE_TENANT_NODE` 镜像重建，租户数据库沙箱和业务数据保留。接口更新 Node 沙箱记录及租户配置；替换失败时进入可重试的开通失败状态。仅重启已有容器不会应用新镜像。
+
+沙箱管理页的“指定租户启动沙箱”调用 `POST /admin/tenants/provision`，对未完成开通的租户继续开通，对已就绪租户检查数据库和数据节点是否仍在运行，并恢复缺失的沙箱。租户沙箱行的“重启”调用 `POST /admin/tenants/sandboxes/restart`（`enterpriseId`、`sandboxType`、`recordId`），只接受该租户该类型最新的运行中或失败记录；后台先释放旧沙箱，再使用当前镜像重新创建。重启 `tenant-opengauss` 会先释放依赖的数据节点，保留租户数据库卷，重建数据库后重新创建数据节点。重启 `tenant-data-node` 保留数据库沙箱。操作由平台管理员发起，开通锁阻止并发重建；状态和失败原因可在租户管理页查看。
+
+租户资源列表每次刷新会向 OpenSandbox 查询当前页运行中或失败记录的容器状态。表格的“记录运行中”筛选依照数据库生命周期状态；状态列则显示实时查询结果。查询得到沙箱不存在或已停止时显示“沙箱异常”，OpenSandbox 暂时不可达时显示“状态未核实”，不会把网络故障误判为沙箱停止。状态列表示容器运行情况；租户业务就绪状态仍以租户管理页的开通状态和数据节点就绪检查为准。
+
+本地 OpenSandbox v0.1.9 在删除已停止容器时会错误地再次 `kill` 并返回 500。`deploy/middleware/opensandbox-server.Dockerfile` 在镜像构建时应用 `patch-local-opensandbox-tcp.py`，只对实际运行中的容器执行 `kill`，然后释放容器。修改补丁后从 `deploy/middleware` 运行 `podman compose --env-file ../../.env -f docker-compose.yml up -d --no-deps --build opensandbox-server`（本机使用额外的 rootful override 时保留对应 `-f` 参数），让正在运行的服务使用新镜像；不要仅替换容器内脚本。
+
+HACU 切换企业时，登录 Token 负责认证用户，当前企业保存在该用户的 HTTP 会话中。后续带同一用户 Token 的请求会沿用会话里的企业 ID，避免旧 Token 把切换结果覆盖；浏览器 Cookie 属于其他用户时仍以 Token 身份为准。BE 访问租户 Node 时会校验服务注册记录与沙箱 ID，并使用配置的 OpenSandbox 基址和该沙箱的代理路径，避免依赖宿主机无法解析的容器域名。
+
+租户聊天继续使用现有 `/assiman/qryConversations` 和 `/assiman/getMessages` 协议。BE 根据租户上下文将会话精确查询、列表和历史消息转发到对应 Node；对尚无 `messageStruct` 的 worker 纯文本历史回答，在响应中投影为原有前端可渲染的回答片段，并将成对的 `<think>` 内容投影为思考片段。投影不改写租户数据库中的原始消息。个人空间沿用原处理链路。
+
+HACU 工作组列表合并租户 Node 中的新工作组与平台旧库中属于同一企业、且当前用户为成员的存量工作组；打开存量工作组时继续访问旧库，按企业和成员双重校验，防止跨租户读取。新建空成员工作组使用租户 Node，当前不支持在创建请求中附加其他成员、数字员工或模板。
+
+租户工作组的 `POST /group-chats/{sessionId}/members` 支持添加数字员工：BE 检查当前成员邀请权限、资源状态，并要求数字员工为已上架的企业资源或操作者有权访问的个人资源，再将 `ADD_MEMBERS` 命令写入租户 Node，并为现有真人成员补齐数字员工使用授权。`DELETE /group-chats/{sessionId}/members/{type}/{id}` 将成员移除命令交给租户 Node，由 Node 校验群主或管理员权限，拒绝移除群主。`POST /api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents` 在携带租户上下文且指定工作组时，使用租户 Node 校验添加权限；旧工作组继续使用原权限校验。HACU 在该候选查询中发送当前租户上下文。租户工作组邀请真人、角色变更和转让群主仍待后续实现。
+
+平台管理员可调用 `POST /admin/tenants/delete`，提交企业 ID 与完全一致的租户名称。删除请求先将状态设为 `DELETING` 并阻止新的开通和租户访问，再在同一开通锁下删除该租户历代 Node/数据库沙箱、`tenants/<企业ID>` 私有持久化目录、Redis 配置快照、租户成员及组织关联和连接配置。外部资源删除失败时保留删除标记并定时重试，状态显示 `DELETE_FAILED`；全部清理后标记 `DELETED` 并从租户列表隐藏。企业主记录、开通请求 ID、删除状态及沙箱/建表审计记录留作追踪，其他租户的目录与共享沙箱规格不会被清理。

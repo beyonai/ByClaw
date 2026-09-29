@@ -1,0 +1,100 @@
+package com.iwhalecloud.byai.manager.domain.tenant;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
+
+class TenantGroupMemberServiceTest {
+    private final TenantNodeClient node = mock(TenantNodeClient.class);
+    private final ByaiGroupChatMentionMapper legacyMembership = mock(ByaiGroupChatMentionMapper.class);
+    private final GroupChatAuthorizationService legacyAuthorization = mock(GroupChatAuthorizationService.class);
+    private final SsResourceService resources = mock(SsResourceService.class);
+    private final AuthApplicationService resourceAuthorization = mock(AuthApplicationService.class);
+    private final TenantGroupMemberService service = new TenantGroupMemberService(node, legacyMembership,
+        legacyAuthorization, resources, resourceAuthorization);
+    private final TenantRequestContext context = new TenantRequestContext(57L, 11221076L, "MEMBER");
+    private final Long groupId = 2104891116955410432L;
+
+    @AfterEach
+    void clear() {
+        TenantRequestContextHolder.clear();
+    }
+
+    @Test
+    void queryAuthorizesTenantGroupWithoutLookingInLegacyGroupDatabase() {
+        TenantRequestContextHolder.set(context);
+        when(node.request(eq(context), eq("GET"), eq(path()), eq(null), any())).thenReturn(detail());
+
+        service.requireInvite(groupId, "AGENT");
+
+        verify(legacyAuthorization, never()).requireInvite(groupId, "AGENT");
+    }
+
+    @Test
+    void inviteWritesAuthorizedAgentToTenantNodeAndGrantsGroupUsers() {
+        when(node.request(eq(context), eq("GET"), eq(path()), eq(null), any())).thenReturn(detail(),
+            Map.of("members", List.of(Map.of("memObjType", "AGENT", "memObjId", "10000713"))));
+        SsResource resource = new SsResource();
+        resource.setResourceId(10000713L);
+        resource.setResourceBizType("DIG_EMPLOYEE");
+        resource.setResourceStatus(2);
+        resource.setResourceName("文章创作助手");
+        resource.setComAcctId(11221076L);
+        resource.setOwnerType("enterprise");
+        when(resources.findById(10000713L)).thenReturn(resource);
+        when(resourceAuthorization.hasResourceAccessPermission(resource)).thenReturn(true);
+        GroupChatMemberRequest request = new GroupChatMemberRequest();
+        request.setType("AGENT");
+        request.setId(List.of(10000713L));
+
+        assertThat(service.invite(context, groupId, request)).hasSize(1);
+
+        verify(node).command(eq(context), eq("POST"), eq(path() + "/members"), eq(groupId.toString()),
+            eq("ADD_MEMBERS"), any(TenantNodeModels.AddMembers.class));
+        verify(resourceAuthorization).grantDigitalEmployeesToUser(List.of(10000713L), 57L);
+    }
+
+    @Test
+    void privateAgentWithoutAccessCannotBeAdded() {
+        when(node.request(eq(context), eq("GET"), eq(path()), eq(null), any())).thenReturn(detail());
+        SsResource resource = new SsResource();
+        resource.setResourceBizType("DIG_EMPLOYEE");
+        resource.setResourceStatus(2);
+        resource.setComAcctId(11221859L);
+        resource.setOwnerType("personal");
+        when(resources.findById(10000713L)).thenReturn(resource);
+        GroupChatMemberRequest request = new GroupChatMemberRequest();
+        request.setType("AGENT");
+        request.setId(List.of(10000713L));
+
+        assertThatThrownBy(() -> service.invite(context, groupId, request))
+            .isInstanceOf(ResponseStatusException.class);
+        verify(node, never()).command(eq(context), eq("POST"), any(), any(), any(), any());
+    }
+
+    private String path() {
+        return "/internal/v1/group-chats/" + groupId;
+    }
+
+    private Map<String, Object> detail() {
+        return Map.of("members", List.of(Map.of("memObjType", "USER", "memObjId", "57",
+            "userRole", "OWNER")), "settings", Map.of("allowMemberAddAgent", false));
+    }
+}

@@ -20,6 +20,8 @@ public interface TenantMembershipMapper {
                                  AND c.params_code = 'PROVISION_STATE'
         WHERE m.user_id = #{userId}
           AND m.status = 'ACTIVE'
+          AND (c.params_value IS NULL OR c.params_value::jsonb ->> 'status'
+               NOT IN ('DELETING', 'DELETE_FAILED', 'DELETED'))
         ORDER BY e.com_acct_name, m.enterprise_id
         """)
     List<TenantMembershipRow> selectAvailableForUser(@Param("userId") Long userId);
