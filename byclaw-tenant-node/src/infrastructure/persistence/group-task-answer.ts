@@ -48,7 +48,7 @@ export async function projectGroupTaskAnswer(
     );
     return;
   }
-  const messageId = await nextId(db);
+  const messageId = await nextId(db, enterpriseId);
   const content = answer.finalContent ?? answer.content;
   await insert(db, "byai_message", {
     id: messageId,

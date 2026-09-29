@@ -1,4 +1,5 @@
 import type { SqlRow, SqlSession } from "../../application/database-ports.js";
+import { DomainError } from "../../domain/errors.js";
 export const camel = (row: SqlRow): SqlRow =>
   Object.fromEntries(
     Object.entries(row).map(([key, value]) => [
@@ -25,7 +26,14 @@ export async function insert(
     entries.map(([, value]) => value),
   );
 }
-export async function nextId(db: SqlSession): Promise<string> {
+/** Reserve a disjoint signed-BIGINT range per tenant while retaining the local DB sequence counter. */
+export async function nextId(db: SqlSession, enterpriseId: string): Promise<string> {
+  if (!/^[1-9]\d*$/.test(enterpriseId)) throw new DomainError("INVALID_TENANT_ID");
+  const tenant = BigInt(enterpriseId);
+  if (tenant >= 1_000_000_000n) throw new DomainError("TENANT_ID_RANGE_EXHAUSTED");
   const [row] = await db.query("SELECT nextval('byai.seq_any_table')::text AS id");
-  return row!.id;
+  const sequence = BigInt(row!.id);
+  if (sequence < 1n || sequence >= 1_000_000_000n)
+    throw new DomainError("TENANT_SEQUENCE_EXHAUSTED");
+  return (8_000_000_000_000_000_000n + tenant * 1_000_000_000n + sequence).toString();
 }

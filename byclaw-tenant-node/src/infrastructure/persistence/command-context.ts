@@ -85,7 +85,7 @@ export class CommandContext {
       return;
     }
     await insert(this.db, "byai_session_ext", {
-      ext_id: await nextId(this.db),
+      ext_id: await nextId(this.db, this.command.enterpriseId),
       session_id: this.command.sessionId,
       ext_param_name: code,
       ext_param_code: code,

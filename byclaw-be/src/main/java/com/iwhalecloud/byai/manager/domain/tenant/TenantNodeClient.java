@@ -124,6 +124,13 @@ public class TenantNodeClient {
 
     public CommandResult command(TenantRequestContext context, String method, String path, String sessionId,
                                  String operation, CommandPayload payload, String requestId) {
+        return command(context, method, path, sessionId, operation, payload, requestId,
+            List.of(Long.toString(context.userId())));
+    }
+
+    public CommandResult command(TenantRequestContext context, String method, String path, String sessionId,
+                                 String operation, CommandPayload payload, String requestId,
+                                 List<String> tenantMemberUserIds) {
         try {
             if (requestId == null || !requestId.matches("[A-Za-z0-9:_-]{1,64}")) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant command request ID");
@@ -141,7 +148,7 @@ public class TenantNodeClient {
             String hash = commandHash(mapper, hashBody);
             CommandRequest body = new CommandRequest(1, Long.toString(enterpriseId),
                 Long.toString(state.generation()), dbRecordId, Long.toString(context.userId()), requestId,
-                sessionId, operation, List.of(Long.toString(context.userId())), hash, payload);
+                sessionId, operation, tenantMemberUserIds, hash, payload);
             return request(context, method, path, body, new TypeReference<CommandResult>() { });
         }
         catch (ResponseStatusException e) {

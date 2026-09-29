@@ -132,7 +132,7 @@ VERIFIED 立即删除 ZIP，只保留结果；报告失败仍持续重试。FAIL
 }
 ```
 
-数值型 ID 一律规范十进制字符串，正数、无前导零、不超过 signed bigint；不通过 JS Number 传递。requestId 最大 64 字符，允许 ASCII 字母/数字/冒号/下划线/连字符。
+数值型 ID 一律规范十进制字符串，正数、无前导零、不超过 signed bigint；不通过 JS Number 传递。Node 自行创建的消息、任务、成员等 ID 使用 `8_000_000_000_000_000_000 + enterpriseId × 1_000_000_000 + nextval(byai.seq_any_table)`，为每个租户保留独立的 BIGINT 区间；企业 ID 和本地序列值分别必须小于 10 亿，超出时拒绝写入。已有本地小 ID 保持原值，新写入使用新范围。requestId 最大 64 字符，允许 ASCII 字母/数字/冒号/下划线/连字符。
 
 BE 每次核验 ACTIVE 租户成员，并生成 tenantMemberUserIds；邀请/转让目标也必须在此列表。AGENT 和文件的 resourceAuthorized、链接的 joinLinkAuthorized 均由 BE 校验后生成，不能透传 FE 的布尔值。Node 再校验 session.enterprise_id、群成员、OWNER/ADMIN、任务发起人和私有任务的群归属。
 

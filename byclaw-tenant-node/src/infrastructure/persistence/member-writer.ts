@@ -32,7 +32,7 @@ export async function addMembers(context: CommandContext): Promise<void> {
     )
       continue;
     await insert(db, "byai_session_member", {
-      byai_session_member_id: await nextId(db),
+      byai_session_member_id: await nextId(db, command.enterpriseId),
       session_id: command.sessionId,
       mem_obj_type: member.memObjType,
       mem_obj_id: member.memObjId,

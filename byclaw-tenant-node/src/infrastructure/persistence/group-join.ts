@@ -14,7 +14,7 @@ export async function joinGroup(context: CommandContext): Promise<void> {
   if (setting?.extParamValue === "false") throw new DomainError("GROUP_JOIN_DISABLED");
   if (await context.member()) return;
   await insert(db, "byai_session_member", {
-    byai_session_member_id: await nextId(db),
+    byai_session_member_id: await nextId(db, command.enterpriseId),
     session_id: command.sessionId,
     mem_obj_type: "USER",
     mem_obj_id: command.userId,

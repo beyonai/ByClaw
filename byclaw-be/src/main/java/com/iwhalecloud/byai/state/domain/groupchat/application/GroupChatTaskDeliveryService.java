@@ -31,9 +31,14 @@ public class GroupChatTaskDeliveryService {
     }
 
     public GroupChatTaskDeliveryResponse current(Long taskId) {
-        String path = GroupChatTaskDeliverySignal.storagePath(taskId);
         // 先核验任务发起人和当前群成员资格，再使用登录上下文中的用户空间。
         authorization.requireInitiator(taskId);
+        return currentAuthorized(taskId);
+    }
+
+    /** 租户任务由 tenant Node 完成发起人与群成员校验后调用。 */
+    public GroupChatTaskDeliveryResponse currentAuthorized(Long taskId) {
+        String path = GroupChatTaskDeliverySignal.storagePath(taskId);
         byte[] bytes;
         try {
             String directory = path.substring(0, path.lastIndexOf('/'));

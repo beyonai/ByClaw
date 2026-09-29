@@ -68,7 +68,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       })),
     };
   }
-  const id = await nextId(db);
+  const id = await nextId(db, command.enterpriseId);
   const reference = payload.replyToMessageId == null ? null : requireId(payload.replyToMessageId);
   await insert(db, "byai_message", {
     id,
@@ -104,7 +104,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
   }
   const dispatches: GroupMessageResult["dispatches"] = [];
   for (const agentId of new Set(mentionedAgents)) {
-    const taskSessionId = await nextId(db);
+    const taskSessionId = await nextId(db, command.enterpriseId);
     await insert(db, "byai_session", {
       session_id: taskSessionId,
       parent_session_id: command.sessionId,
@@ -121,7 +121,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       task_session_id: taskSessionId,
       group_session_id: command.sessionId,
       source_message_id: id,
-      dispatch_id: await nextId(db),
+      dispatch_id: await nextId(db, command.enterpriseId),
       initiator_user_id: command.userId,
       target_agent_id: agentId,
       task_name: content.slice(0, 255) || "群聊任务",
@@ -131,7 +131,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       update_time: new Date(),
     });
     await insert(db, "byai_session_ext", {
-      ext_id: await nextId(db),
+      ext_id: await nextId(db, command.enterpriseId),
       session_id: taskSessionId,
       ext_param_name: "group_auto_dispatch",
       ext_param_code: "group_auto_dispatch",

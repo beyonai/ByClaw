@@ -4,8 +4,9 @@ import { sendGroupMessage } from "../src/infrastructure/persistence/group-messag
 import { command } from "./fixtures.js";
 
 function setup(payload: Record<string, any>) {
+  let sequence = 100;
   const query = vi.fn(async (sql: string) => {
-    if (sql.includes("nextval(")) return [{ id: "101" }];
+    if (sql.includes("nextval(")) return [{ id: String(++sequence) }];
     if (sql.includes("RETURNING last_seq")) return [{ last_seq: "1" }];
     if (sql.includes("mem_obj_type=$2")) return [{ exists: 1 }];
     if (sql.includes("SELECT m.*,s.session_type"))
@@ -31,7 +32,10 @@ describe("tenant group message", () => {
       resourceList: [],
       creatorName: "张三",
     });
-    expect(await sendGroupMessage(context)).toEqual({ messageId: "101", dispatches: [] });
+    expect(await sendGroupMessage(context)).toEqual({
+      messageId: "8000000010000000101",
+      dispatches: [],
+    });
     const insert = query.mock.calls.find(([sql]) =>
       sql.startsWith("INSERT INTO byai.byai_message"),
     );
@@ -46,8 +50,8 @@ describe("tenant group message", () => {
       resourceList: [{ resourceType: "DIG_EMPLOYEE", resourceId: "42" }],
     });
     expect(await sendGroupMessage(context)).toEqual({
-      messageId: "101",
-      dispatches: [{ taskSessionId: "101", targetAgentId: "42" }],
+      messageId: "8000000010000000101",
+      dispatches: [{ taskSessionId: "8000000010000000102", targetAgentId: "42" }],
     });
     expect(
       query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_session (")),
