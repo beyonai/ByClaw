@@ -30,6 +30,11 @@ public class ByaiGroupChatTask {
     private String taskName;
     private String status;
     private String turnStatus;
+    /** 本轮启动占位标识，防止启动失败的迟到回调释放后续轮次。 */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long currentTurnId;
+    /** 实际下发的本轮 trace；后台运行态的主 trace 不代表任务当前轮次。 */
+    private String currentTurnTraceId;
     @JsonSerialize(using = ToStringSerializer.class)
     private Long publishMessageId;
     @JsonSerialize(using = ToStringSerializer.class)

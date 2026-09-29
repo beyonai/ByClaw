@@ -63,6 +63,8 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskPublicationR
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
+import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 
 /** 群聊任务提升、查询、取消以及一次性完成发布用例。 */
 @Service
@@ -154,6 +156,8 @@ public class GroupChatTaskService {
         task.setTaskName(taskName);
         task.setStatus("ACTIVE");
         task.setTurnStatus("RUNNING");
+        task.setCurrentTurnId(execution.getExecutionId());
+        task.setCurrentTurnTraceId(execution.getTraceId());
         task.setCreateTime(now);
         task.setUpdateTime(now);
         taskMapper.insert(task);
@@ -355,23 +359,57 @@ public class GroupChatTaskService {
     }
 
     @Transactional
-    public void updateTurnStatus(Long taskId, String status) {
+    public void completeTurn(Long taskId, String traceId, boolean failed) {
+        if (StringUtils.isBlank(traceId)) return;
+        String status = failed ? "FAILED" : "WAITING_USER";
         ByaiGroupChatTask task = taskMapper.selectById(taskId);
-        if (task != null && taskMapper.updateTurnStatus(taskId, status, new Date()) == 1) {
+        // 数据库原子校验当前 trace，不能用仍属于后台 Agent 的主运行态判断轮次归属。
+        if (task != null && taskMapper.completeTurn(taskId, traceId, status, new Date()) == 1) {
             task.setTurnStatus(status);
             publishTaskEvent(task, "TASK_STATUS_CHANGED", null);
         }
     }
 
     @Transactional
-    public boolean startTurn(Long taskId) {
+    public Long startTurn(Long taskId) {
         ByaiGroupChatTask task = taskMapper.selectById(taskId);
-        if (task == null || taskMapper.claimTurn(taskId, new Date()) != 1) {
-            return false;
+        if (task == null) return null;
+        Long turnId = sequenceService.nextVal();
+        if (taskMapper.claimTurn(taskId, turnId, new Date()) != 1) {
+            return null;
         }
         task.setTurnStatus("RUNNING");
+        task.setCurrentTurnId(turnId);
+        task.setCurrentTurnTraceId(null);
         publishTaskEvent(task, "TASK_STATUS_CHANGED", null);
-        return true;
+        return turnId;
+    }
+
+    @Transactional
+    public void bindTurn(Long taskId, Long turnId, String traceId) {
+        // 新轮次不能复用已经完成的回答，否则补偿和迟到回调会把旧结果误当成本轮结果。
+        if (TraceIdCodec.canDecode(traceId)) {
+            ByaiMessage answer = messageMapper.selectByMessageId(TraceIdCodec.decode(traceId).getModelAnswerMessageId());
+            if (answer != null && (Boolean.TRUE.equals(answer.getIsComplete())
+                || MsgStatus.FINISH.getCode().equals(answer.getMsgStatus()))) {
+                throw new IllegalArgumentException("Group task new turn requires a new answer message ID");
+            }
+        }
+        if (turnId == null || StringUtils.isBlank(traceId)
+            || taskMapper.bindTurn(taskId, turnId, traceId, new Date()) != 1) {
+            throw new IllegalStateException("Group task turn is no longer current");
+        }
+    }
+
+    @Transactional
+    public void failTurnStart(Long taskId, Long turnId) {
+        if (turnId == null) return;
+        ByaiGroupChatTask task = taskMapper.selectById(taskId);
+        // 准备阶段可能尚未生成 trace，只能按本次请求取得的占位标识释放。
+        if (task != null && taskMapper.failTurnStart(taskId, turnId, new Date()) == 1) {
+            task.setTurnStatus("FAILED");
+            publishTaskEvent(task, "TASK_STATUS_CHANGED", null);
+        }
     }
 
     private Long projectCloudResourceId(ByaiGroupChatTask task) {

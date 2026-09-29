@@ -33,9 +33,7 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
-import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
-import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPersistenceObserver;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidateSessionService;
@@ -85,14 +83,13 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
     private final GroupChatCandidateSessionService candidateSessionService;
     private final GroupChatAgentMentionParser mentionParser;
     private final GroupChatMentionService mentionService;
-    private final ChatRuntimeStateService runtimeStateService;
 
     public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher,
         SequenceService sequenceService, ByaiGroupChatExecutionMapper executionMapper,
         GroupChatExecutionCoordinator executionCoordinator, SsResourceService resourceService,
         UserService userService, GroupChatDispositionReader dispositionReader, GroupChatTaskService taskService,
         GroupChatCandidateSessionService candidateSessionService, GroupChatAgentMentionParser mentionParser,
-        GroupChatMentionService mentionService, ChatRuntimeStateService runtimeStateService) {
+        GroupChatMentionService mentionService) {
         this.messageMapper = messageMapper;
         this.eventPublisher = eventPublisher;
         this.sequenceService = sequenceService;
@@ -105,7 +102,6 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         this.candidateSessionService = candidateSessionService;
         this.mentionParser = mentionParser;
         this.mentionService = mentionService;
-        this.runtimeStateService = runtimeStateService;
     }
 
     @Override
@@ -129,11 +125,9 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
                 return;
             }
             if (execution instanceof ByaiGroupChatTurn) return;
-            ChatRuntimeState current = runtimeStateService.get(context.sessionId);
-            if ("TASK".equals(execution.getDisposition()) && current != null
-                && Objects.equals(current.getTraceId(), context.traceId)) {
-                taskService.updateTurnStatus(context.sessionId,
-                    context.gatewayError || context.getException() != null ? "FAILED" : "WAITING_USER");
+            if ("TASK".equals(execution.getDisposition())) {
+                taskService.completeTurn(context.sessionId, context.traceId,
+                    context.gatewayError || context.getException() != null);
             }
         });
     }
@@ -236,7 +230,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
             // 保留普通链路保存的过程结构，仅补充合法成员引用的展示信息。
             normalizeTaskMentions(execution, answer, answerMetadata);
             // TASK 的 turn 结束不代表任务完成；过程中的 @ 只展示，发布成果时才允许委派。
-            taskService.updateTurnStatus(execution.getCandidateSessionId(), failed ? "FAILED" : "WAITING_USER");
+            taskService.completeTurn(execution.getCandidateSessionId(), execution.getTraceId(), failed);
             if (failed) {
                 markFailed(execution, "TURN_FAILED", "Task turn failed");
             }

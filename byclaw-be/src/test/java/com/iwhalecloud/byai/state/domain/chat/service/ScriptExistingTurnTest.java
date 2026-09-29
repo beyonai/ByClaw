@@ -50,6 +50,7 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskChatGuard;
 
 class ScriptExistingTurnTest {
     private ScriptService script;
@@ -123,6 +124,60 @@ class ScriptExistingTurnTest {
         verify(writeBehind, never()).enqueue(anyString(), anyLong(), any(), eq(true));
         verify(broadcast).broadcastToUserDevices(eq(30L), eq(60L), eq("initialization"), anyString(), isNull());
         assertThat(ctx.messagePersisted.get()).isFalse();
+    }
+
+    @Test
+    void concurrentTaskFollowupBindsItsOwnTraceBeforeDispatch() throws Exception {
+        RunningOutputStreamRegistry running = mock(RunningOutputStreamRegistry.class);
+        RunningChatInfo background = new RunningChatInfo();
+        background.setRunning(true);
+        background.setRootActive(false);
+        background.setAcceptingInput(true);
+        background.setTraceId(TraceIdCodec.encode(1L, 2L));
+        when(running.getRunning(60L)).thenReturn(background);
+        ReflectionTestUtils.setField(script, "runningOutputStreamRegistry", running);
+        GroupChatTaskChatGuard guard = mock(GroupChatTaskChatGuard.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<GroupChatTaskChatGuard> provider = mock(ObjectProvider.class);
+        when(provider.getObject()).thenReturn(guard);
+        ReflectionTestUtils.setField(script, "groupChatTaskGuardProvider", provider);
+        dto.setGroupTaskTurnId(101L);
+
+        ChatProcessContext context = script.startExistingMessageTurn(dto, existing);
+
+        assertThat(context.concurrentGatewayTurn).isTrue();
+        assertThat(context.traceId).isNotEqualTo(background.getTraceId());
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(guard, route);
+        order.verify(guard).bindTurn(60L, 101L, context.traceId);
+        order.verify(route).route(context);
+    }
+
+    @Test
+    void taskBindingFailurePreventsDispatch() {
+        GroupChatTaskChatGuard guard = mock(GroupChatTaskChatGuard.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<GroupChatTaskChatGuard> provider = mock(ObjectProvider.class);
+        when(provider.getObject()).thenReturn(guard);
+        ReflectionTestUtils.setField(script, "groupChatTaskGuardProvider", provider);
+        dto.setGroupTaskTurnId(101L);
+        doThrow(new IllegalStateException("stale task turn")).when(guard).bindTurn(eq(60L), eq(101L), anyString());
+        script = spy(script);
+        doNothing().when(script).handleException(any());
+
+        assertThatThrownBy(() -> script.startExistingMessageTurn(dto, existing))
+            .isInstanceOf(ChatTurnPreparationException.class);
+        verifyNoInteractions(route, broadcast);
+    }
+
+    @Test
+    void taskTurnReservationCannotBeSuppliedByClients() throws Exception {
+        String input = "{\"sessionId\":60,\"groupTaskTurnId\":999}";
+        assertThat(JSON.parseObject(input, AssistantChatDto.class).getGroupTaskTurnId()).isNull();
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        assertThat(mapper.readValue(input, AssistantChatDto.class).getGroupTaskTurnId()).isNull();
+        dto.setGroupTaskTurnId(101L);
+        assertThat(JSON.toJSONString(dto)).doesNotContain("groupTaskTurnId");
+        assertThat(mapper.writeValueAsString(dto)).doesNotContain("groupTaskTurnId");
     }
 
     @Test

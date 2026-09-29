@@ -20,10 +20,19 @@ public interface ByaiGroupChatTaskMapper extends BaseMapper<ByaiGroupChatTask> {
 
     List<ByaiGroupChatTask> selectByGroup(@Param("groupSessionId") Long groupSessionId);
 
-    int updateTurnStatus(@Param("taskSessionId") Long taskSessionId, @Param("turnStatus") String turnStatus,
+    int completeTurn(@Param("taskSessionId") Long taskSessionId, @Param("traceId") String traceId,
+        @Param("turnStatus") String turnStatus, @Param("now") Date now);
+
+    int claimTurn(@Param("taskSessionId") Long taskSessionId, @Param("turnId") Long turnId,
         @Param("now") Date now);
 
-    int claimTurn(@Param("taskSessionId") Long taskSessionId, @Param("now") Date now);
+    int bindTurn(@Param("taskSessionId") Long taskSessionId, @Param("turnId") Long turnId,
+        @Param("traceId") String traceId, @Param("now") Date now);
+
+    int failTurnStart(@Param("taskSessionId") Long taskSessionId, @Param("turnId") Long turnId,
+        @Param("now") Date now);
+
+    List<ByaiGroupChatTask> selectBoundRunningPage(@Param("afterId") Long afterId, @Param("limit") int limit);
 
     int publish(@Param("taskSessionId") Long taskSessionId, @Param("messageId") Long messageId,
         @Param("publisherUserId") Long publisherUserId, @Param("now") Date now);
