@@ -188,7 +188,7 @@ public class DingtalkTestController {
         loginInfo.setUserCode(user.getUserCode());
         loginInfo.setUserName(user.getUserName());
         loginInfo.setAssistantId(user.getAssistantId());
-        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId());
+        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId(user.getUserId()));
         SuasSuperassist suasSuperassist = suasSuperassistService.findByUserId(user.getUserId());
         if (suasSuperassist != null) {
             loginInfo.setSessionDatasetId(suasSuperassist.getSessionDatasetId());

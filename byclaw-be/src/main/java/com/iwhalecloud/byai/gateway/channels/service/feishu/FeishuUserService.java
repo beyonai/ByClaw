@@ -434,7 +434,7 @@ public class FeishuUserService {
         userInfo.setUserCode(matchedUser.getUserCode());
         userInfo.setUserName(matchedUser.getUserName());
         userInfo.setAssistantId(matchedUser.getAssistantId());
-        userInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId());
+        userInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId(matchedUser.getUserId()));
         SuasSuperassist suasSuperassist = suasSuperassistService.findByUserId(matchedUser.getUserId());
         if (suasSuperassist != null) {
             userInfo.setSessionDatasetId(suasSuperassist.getSessionDatasetId());

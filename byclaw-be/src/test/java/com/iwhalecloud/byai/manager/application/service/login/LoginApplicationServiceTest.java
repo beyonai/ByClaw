@@ -69,7 +69,7 @@ class LoginApplicationServiceTest {
         SuasSuperassist superassist = new SuasSuperassist();
         superassist.setDefaultDigEmployeeId(200L);
 
-        when(enterpriseInfoService.getEnterpriseId()).thenReturn(99L);
+        when(enterpriseInfoService.getEnterpriseId(1L)).thenReturn(99L);
         when(organizationService.findUsersOrganizationByUserId(1L)).thenReturn(List.of());
         when(privilegeGrantService.findUserManageOrg(1L)).thenReturn(List.of());
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);

@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.enterprise.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;
+import com.iwhalecloud.byai.manager.entity.enterprise.TenantUserMembership;
 import com.iwhalecloud.byai.manager.mapper.enterprise.EnterpriseInfoMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.OutputStream;
+import java.util.List;
 
 /**
  * 企业信息领域服务，仅负责企业实体持久化。
@@ -23,6 +25,9 @@ public class EnterpriseInfoService {
 
     @Autowired
     private EnterpriseInfoMapper enterpriseInfoMapper;
+
+    @Autowired
+    private TenantUserMembershipService tenantUserMembershipService;
 
     @Autowired
     private SequenceService sequenceService;
@@ -113,11 +118,30 @@ public class EnterpriseInfoService {
     }
 
     /**
-     * 查询当前库中最大的企业标识。
+     * 查询当前库中最小的企业标识。
      *
-     * @return 最大企业标识，表为空时可能为 null
+     * @return 最小企业标识，表为空时可能为 null
      */
     public Long getEnterpriseId() {
         return enterpriseInfoMapper.getEnterpriseId();
+    }
+
+    /**
+     * 解析指定用户的企业标识。用户已有有效租户关联时，取最早加入的一条；否则取当前库中最小企业标识。
+     *
+     * @param userId 用户标识，为空时直接取最小企业标识
+     * @return 企业标识，表为空时可能为 null
+     */
+    public Long getEnterpriseId(Long userId) {
+        if (userId != null) {
+            List<TenantUserMembership> memberships = tenantUserMembershipService.findActiveByUserId(userId);
+            for (int i = memberships.size() - 1; i >= 0; i--) {
+                TenantUserMembership membership = memberships.get(i);
+                if (membership != null && membership.getEnterpriseId() != null) {
+                    return membership.getEnterpriseId();
+                }
+            }
+        }
+        return getEnterpriseId();
     }
 }

@@ -69,7 +69,7 @@ class DingtalkUserServiceTest {
         when(tokenService.getAccessToken("sender-001", "robot-001")).thenReturn("token");
         doReturn(detail).when(service).getUserDetail("token", "sender-001");
         when(userService.findByUserName("张三")).thenReturn(List.of(selectedUser, otherUser));
-        when(enterpriseInfoService.getEnterpriseId()).thenReturn(88L);
+        when(enterpriseInfoService.getEnterpriseId(1001L)).thenReturn(88L);
         when(sequenceService.nextVal()).thenReturn(9001L);
 
         LoginInfo loginInfo = service.resolveLoginInfo(message);
@@ -111,7 +111,7 @@ class DingtalkUserServiceTest {
         when(externalSystemService.findBySourceAccount(SourceType.DING_TALK, "sender-001"))
                 .thenReturn(binding);
         when(userService.findById(1001L)).thenReturn(boundUser);
-        when(enterpriseInfoService.getEnterpriseId()).thenReturn(88L);
+        when(enterpriseInfoService.getEnterpriseId(1001L)).thenReturn(88L);
 
         LoginInfo loginInfo = service.resolveLoginInfo(message);
 
