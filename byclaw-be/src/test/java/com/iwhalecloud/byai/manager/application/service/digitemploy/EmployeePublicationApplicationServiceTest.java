@@ -510,4 +510,38 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(resources.selectById(published.getOfficialId()).getResourceName()).isEqualTo("员工");
         if (existing) assertThat(published.getOfficialId()).isEqualTo(90L);
     }
+
+    /** 卡片 0009 · 收口点 ④：发布快照的 relIds 保守剔除四类已下线资源（sanitize 白名单语义未变）。 */
+    @Test void publicationSnapshotExcludesDisabledRelIds() {
+        // 走到快照创建分支：无 active / 无 current / 无 official 副本。
+        when(publications.active(10L, 1L)).thenReturn(null);
+        when(publications.current(10L, 1L)).thenReturn(null);
+        when(publications.official(10L, 1L)).thenReturn(null);
+        DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
+        details.setAgentType("001"); details.setResourceName("\u5458\u5de5"); details.setOwnerType("personal");
+        details.setResourceId(10L);
+        details.setRelIds(new java.util.ArrayList<>(java.util.List.of(888L, 999L)));
+        java.util.List<SsResourceDTO> relResources = new java.util.ArrayList<>();
+        relResources.add(relResource(888L, "MCP"));
+        relResources.add(relResource(999L, "OBJECT"));
+        details.setRelResourceList(relResources);
+        when(employees.findDetailsById(any())).thenReturn(details);
+
+        service.prepare(10L);
+
+        org.mockito.ArgumentCaptor<DigitalEmployeePublication> captor =
+            org.mockito.ArgumentCaptor.forClass(DigitalEmployeePublication.class);
+        verify(publications).insert(captor.capture());
+        String snapshotJson = captor.getValue().getSnapshotJson();
+        DigitalEmployeeDTO snapshot = JSON.parseObject(snapshotJson, DigitalEmployeeDTO.class);
+        assertThat(snapshot.getRelIds()).containsExactly(888L);
+        // sanitize 的字段白名单语义未变：relIds 仍出现在快照 JSON 中（只是取值被过滤）。
+        assertThat(snapshotJson).contains("relIds");
+    }
+
+    static SsResourceDTO relResource(Long resourceId, String resourceBizType) {
+        SsResourceDTO dto = new SsResourceDTO();
+        dto.setResourceId(resourceId); dto.setResourceBizType(resourceBizType); dto.setResourceName("R-" + resourceId);
+        return dto;
+    }
 }

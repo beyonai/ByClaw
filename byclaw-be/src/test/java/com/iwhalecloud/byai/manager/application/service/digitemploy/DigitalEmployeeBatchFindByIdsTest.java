@@ -346,20 +346,22 @@ class DigitalEmployeeBatchFindByIdsTest {
     }
 
     @Test
-    @DisplayName("batchLoadTargetContent(VIEW, mapper 返回空) → 返回空 Map")
+    @DisplayName("batchLoadTargetContent(VIEW) → 停用类型早退，返回空 Map 且不触碰 Mapper")
     void batchLoadTargetContent_viewEmptyResult_returnsEmptyMap() {
         List<Long> ids = Arrays.asList(501L, 502L);
         doReturn(Collections.emptyList()).when(viewMapper).findByIds(ids);
 
         Map<Long, String> result = appService.batchLoadTargetContent("VIEW", ids);
 
+        // 卡片 0009（AC-010 / 收口点 ③）：VIEW 属四类已下线资源，不再参与运行配置同步 ⇒ 早退、不发查询。
+        // 这是本卡**有意**的行为变更（原断言为 times(1) 且依赖 mapper 调用）。
         assertThat(result).isEmpty();
-        verify(viewMapper, times(1)).findByIds(ids);
+        verify(viewMapper, never()).findByIds(ids);
         verify(viewMapper, never()).selectById(org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
-    @DisplayName("batchLoadTargetContent(OBJECT) → Mapper.findByIds 调用 1 次（替换原循环 findById）")
+    @DisplayName("batchLoadTargetContent(OBJECT) → 停用类型早退，返回空 Map 且不触碰 Mapper")
     void batchLoadTargetContent_object_callsFindByIdsOnceNotFindById() {
         List<Long> ids = Arrays.asList(601L, 602L);
         SsResExtObject o = new SsResExtObject();
@@ -369,8 +371,10 @@ class DigitalEmployeeBatchFindByIdsTest {
 
         Map<Long, String> result = appService.batchLoadTargetContent("OBJECT", ids);
 
-        assertThat(result).hasSize(1).containsEntry(601L, "{\"object\":1}");
-        verify(objectMapper, times(1)).findByIds(ids);
+        // 卡片 0009（AC-010 / 收口点 ③）：OBJECT 属四类已下线资源，不再参与运行配置同步 ⇒ 早退、不发查询。
+        // 这是本卡**有意**的行为变更（原断言为 hasSize(1) + times(1)）。
+        assertThat(result).isEmpty();
+        verify(objectMapper, never()).findByIds(ids);
         verify(objectMapper, never()).selectById(org.mockito.ArgumentMatchers.anyLong());
     }
 

@@ -1386,14 +1386,13 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(createdSkill[0].getRelTypeName()).isEqualTo("DIG_EMPLOYEE_SKILL");
         assertThat(createdSkill[0].getRelStatus()).isEqualTo(1);
         assertThat(SkillRelationSource.parse(createdSkill[0].getRelResourceInfo()).isManual()).isTrue();
-        assertThat(createdObject[0]).isNotNull();
-        assertThat(createdObject[0].getRelTypeName()).isNull();
-        assertThat(createdObject[0].getRelStatus()).isNull();
-        assertThat(createdObject[0].getRelResourceInfo()).isNull();
+        // 卡片 0009（AC-006 / 收口点 ① 的 S2）：OBJECT 属四类已下线资源，安装入口不得重新挂载它。
+        // 这是本卡**有意**的行为变更 —— 该断言原先为 isNotNull()，编码的是停用前的旧行为。
+        assertThat(createdObject[0]).isNull();
         InOrder order = inOrder(skillGroupMapper, ssResourceRelDetailService);
         order.verify(skillGroupMapper).selectDigitalEmployeeForUpdate(100L, 201L);
         order.verify(ssResourceRelDetailService).findByResourceId(100L);
-        order.verify(ssResourceRelDetailService, times(2)).save(any());
+        order.verify(ssResourceRelDetailService, times(1)).save(any());
         order.verify(skillGroupMapper).selectDigitalEmployeeSkillRelations(100L, List.of(301L));
         order.verify(ssResourceRelDetailService).updateById(createdSkill[0]);
     }

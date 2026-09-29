@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
+import com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
@@ -29,6 +30,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
@@ -171,12 +173,21 @@ public class EmployeePublicationApplicationService {
             EmployeeIdDTO employeeId = new EmployeeIdDTO();
             employeeId.setResourceId(resourceId);
             DigitalEmployeeDetailsDTO details = employees.findDetailsById(employeeId);
+            // 发布快照只保留可用类型：先从未过滤列表算出停用 id 集合（过滤会移除元素，必须先算）。
+            Set<Long> disabledRelIds = disabledRelResourceIds(details.getRelResourceList());
+            details.setRelResourceList(DigitalEmployeeOutputSanitizer.filterRelResources(details.getRelResourceList()));
             if (details.getRelResourceList() != null) {
                 details.setRelResourceInfoList(details.getRelResourceList().stream()
                     .filter(r -> StringUtils.isNotBlank(r.getRelResourceInfo()) && !"SKILL".equals(r.getResourceBizType()))
                     .map(r -> JSON.parseObject(r.getRelResourceInfo(), com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo.class)).toList());
             }
             DigitalEmployeeDTO snapshot = sanitize(details, requested);
+            // 结果上追加过滤：不改 sanitize 的字段白名单语义（被过滤列表移除的 id 不会进入 relResourceInfoList，
+            // 但 sanitize 会把请求侧 relIds 原样带进快照，故在此显式剔除）。
+            if (!disabledRelIds.isEmpty() && snapshot.getRelIds() != null) {
+                snapshot.setRelIds(snapshot.getRelIds().stream()
+                    .filter(id -> id == null || !disabledRelIds.contains(id)).toList());
+            }
             DigitalEmployeePublication publication = new DigitalEmployeePublication();
             publication.setRequestId(sequence.nextVal());
             publication.setTenantId(tenant);
@@ -441,6 +452,22 @@ public class EmployeePublicationApplicationService {
         publication.setSnapshotJson(JSON.toJSONString(snapshot));
         publication.setDependenciesJson(JSON.toJSONString(captured));
         publication.setUpdatedAt(new Date());
+    }
+
+    /**
+     * 取出关联资源列表中属四类已下线资源的 id（用于发布快照的保守过滤）。
+     *
+     * <p>必须在过滤列表**之前**调用：过滤会移除元素，之后就算不出这些 id。
+     */
+    private static Set<Long> disabledRelResourceIds(List<SsResourceDTO> relResourceList) {
+        if (relResourceList == null || relResourceList.isEmpty()) {
+            return Set.of();
+        }
+        return relResourceList.stream()
+            .filter(r -> r != null && DisabledResourceBizTypes.isDisabled(r.getResourceBizType()))
+            .map(SsResourceDTO::getResourceId)
+            .filter(Objects::nonNull)
+            .collect(java.util.stream.Collectors.toSet());
     }
 
     private void validateCandidate(DigitalEmployeePublication publication) {

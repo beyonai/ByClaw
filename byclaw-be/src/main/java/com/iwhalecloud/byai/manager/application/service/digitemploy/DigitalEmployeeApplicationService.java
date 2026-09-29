@@ -1216,6 +1216,8 @@ public class DigitalEmployeeApplicationService {
         // 关联资源对比
         if (!isEmployeeGroup) {
             List<Long> relIds = this.mergeRelSkillIds(digitalEmployeeDTO.getRelIds(), digitalEmployeeDTO.getRelSkills());
+            // 入口前置校验（防御性）：忽略请求中新增的停用类型关联；已在库内的历史停用关联不在此剔除。
+            relIds = this.excludeNewlyRequestedDisabledRelIds(relIds, resourceId);
             List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(resourceId);
             this.reconcileDigitalEmployeeUpdateRelations(ssResource, relIds, resourceRelDetails,
                 digitalEmployeeDTO.getRelResourceInfoList());
@@ -1341,6 +1343,7 @@ public class DigitalEmployeeApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "数字员工组不支持安装普通关联资源");
         }
 
+        // 入口前置校验（防御性）：忽略本次安装中新增的停用类型关联；已在库内的历史停用关联不在此剔除。
         List<SsResource> installRelResources = this.findInstallRelResources(installRelIds);
         SsResource ssResource;
         if (this.containsSkillResource(installRelResources)) {
@@ -1357,7 +1360,10 @@ public class DigitalEmployeeApplicationService {
             mergedRelIds.addAll(
                 resourceRelDetails.stream().map(SsResourceRelDetail::getRelResourceId).collect(Collectors.toList()));
         }
-        mergedRelIds.addAll(installRelIds);
+        // 入口前置校验（防御性，放在既有权限校验与关联读取之后 ⇒ 不新增任何查询、不改变校验顺序）：
+        // 忽略本次安装中新增的停用类型关联；类型直接取自已加载的 installRelResources。
+        mergedRelIds.addAll(this.excludeNewlyRequestedDisabledRelIds(installRelIds, resourceRelDetails,
+            this.bizTypesOf(installRelResources), digitalEmployeeId));
 
         this.compareSsResourceRelDetail(ssResource, new ArrayList<>(mergedRelIds), resourceRelDetails, null);
         this.canonicalizeManualSkillRelations(digitalEmployeeId, installRelResources);
@@ -2700,9 +2706,14 @@ public class DigitalEmployeeApplicationService {
         // - relPrompt 与 corePersonaDefinition 同源,入参更"新"则优先用入参,避免编辑场景被旧库值覆盖.
         this.applyInputRuntimeFields(details, inputDto);
         // target_content 只是镜像快照,不能参与本次 JSON 序列化,否则会出现 JSON 套 JSON 的递归膨胀.
-        details.setTargetContent(null);
+        // 运行配置只导出可用类型:在**副本**上做投影,不修改共用 findDetailsById 返回的实例
+        // （该实例仍被其它消费方使用，就地改字段会把导出投影泄漏成内部状态变更）。
+        DigitalEmployeeDetailsDTO exportDetails = new DigitalEmployeeDetailsDTO();
+        org.springframework.beans.BeanUtils.copyProperties(details, exportDetails);
+        exportDetails.setTargetContent(null);
+        exportDetails.setRelResourceList(DigitalEmployeeOutputSanitizer.filterRelResources(details.getRelResourceList()));
 
-        String jsonContent = com.alibaba.fastjson.JSON.toJSONString(details);
+        String jsonContent = com.alibaba.fastjson.JSON.toJSONString(exportDetails);
         String fileName = this.buildDigEmployeeJsonFileName(resourceId);
         String effectiveStorageType = StringUtils.defaultIfBlank(storageType, "minio");
         String resourceDir = ResourceBizTypeEnum.DIG_EMPLOYEE.name().toLowerCase();
@@ -2914,9 +2925,13 @@ public class DigitalEmployeeApplicationService {
      * 判断是否为支持补齐 JSON 的关联资源类型。
      */
     private boolean isSupportedRelatedResourceBizType(String resourceBizType) {
+        // 四类已下线资源不再参与运行配置同步（单一事实来源）。
+        if (DisabledResourceBizTypes.isDisabled(resourceBizType)) {
+            return false;
+        }
         return StringUtils.equalsAny(resourceBizType, ResourceBizTypeEnum.TOOLKIT.name(),
-            ResourceBizTypeEnum.MCP.name(), ResourceBizTypeEnum.AGENT.name(), ResourceBizTypeEnum.VIEW.name(),
-            ResourceBizTypeEnum.OBJECT.name(), ResourceBizTypeEnum.SKILL.name())
+            ResourceBizTypeEnum.MCP.name(), ResourceBizTypeEnum.AGENT.name(),
+            ResourceBizTypeEnum.SKILL.name())
             || StringUtils.startsWithIgnoreCase(resourceBizType, "KG_");
     }
 
@@ -3507,6 +3522,16 @@ public class DigitalEmployeeApplicationService {
             resourceRelDetailMap.put(ssResourceRelDetail.getRelResourceId(), ssResourceRelDetail);
         }
 
+        // 一次批量解析涉及资源的真实业务类型（请求 ∪ 现存），避免逐条查询（非 N+1）。
+        // 取不到类型（资源不存在）时 isDisabled(null) == false ⇒ 保持基线不误拦。
+        Set<Long> involvedRelIds = new HashSet<>(resourceRelDetailMap.keySet());
+        if (relIds != null) {
+            involvedRelIds.addAll(relIds);
+        }
+        Map<Long, String> bizTypeById = this.loadRelResourceBizTypes(involvedRelIds);
+        List<Long> ignoredNewDisabledIds = new ArrayList<>();
+        List<Long> preservedHistoryDisabledIds = new ArrayList<>();
+
         // 对比,存在的修改,不存在的新增
         for (int i = 0; relIds != null && i < relIds.size(); i++) {
             Long relResourceId = relIds.get(i);
@@ -3526,6 +3551,12 @@ public class DigitalEmployeeApplicationService {
                 }
                 ssResourceRelDetailService.updateById(ssResourceRelDetail);
             } else {
+                // 新增挂载：四类已下线资源不写库（单一事实来源 DisabledResourceBizTypes），
+                // 只记录服务端日志，不报错、不改变响应结构。
+                if (DisabledResourceBizTypes.isDisabled(bizTypeById.get(relResourceId))) {
+                    ignoredNewDisabledIds.add(relResourceId);
+                    continue;
+                }
                 ssResourceRelDetail = new SsResourceRelDetail();
                 // 关联子资源的信息(可用状态)
                 if (CollectionUtils.isNotEmpty(relActiveChildResourceIds)) {
@@ -3546,8 +3577,94 @@ public class DigitalEmployeeApplicationService {
 
         // 删除当前没有关联对象
         for (SsResourceRelDetail ssResourceRelDetail : resourceRelDetailMap.values()) {
+            // 服务端保留历史停用关联：对外详情已剔除四类 ⇒ 前端不可见 ⇒ 保存时不会回传，
+            // 若在此删除即为不可逆的数据丢失（本卡最高风险）。
+            if (DisabledResourceBizTypes.isDisabled(bizTypeById.get(ssResourceRelDetail.getRelResourceId()))) {
+                preservedHistoryDisabledIds.add(ssResourceRelDetail.getRelResourceId());
+                continue;
+            }
             ssResourceRelDetailService.removeById(ssResourceRelDetail.getResourceRelDetailId());
         }
+
+        if (!ignoredNewDisabledIds.isEmpty() || !preservedHistoryDisabledIds.isEmpty()) {
+            logger.warn("数字员工关联停用类型处理: employeeId={}, ignoredNew={}, preservedHistory={}, reason={}",
+                ssResource.getResourceId(), ignoredNewDisabledIds, preservedHistoryDisabledIds,
+                DisabledResourceBizTypes.REASON_CODE);
+        }
+    }
+
+    /**
+     * 批量解析关联资源的真实业务类型（一次 IN 查询；空入参不发查询）。
+     *
+     * @param relResourceIds 关联资源标识集合（请求 ∪ 现存）
+     * @return resourceId → resourceBizType（资源不存在时不出现该键）
+     */
+    private Map<Long, String> loadRelResourceBizTypes(Collection<Long> relResourceIds) {
+        if (CollectionUtils.isEmpty(relResourceIds)) {
+            return Collections.emptyMap();
+        }
+        return this.safeResources(ssResourceService.findByIdList(new ArrayList<>(relResourceIds))).stream()
+            .filter(resource -> resource != null && resource.getResourceId() != null)
+            .collect(Collectors.toMap(SsResource::getResourceId,
+                resource -> StringUtils.trimToEmpty(resource.getResourceBizType()), (left, right) -> left));
+    }
+
+    /**
+     * 入口前置校验（防御性，与对账层收口点同源）：剔除请求中**新增**的停用类型 id。
+     *
+     * <p>只剔「**不在库内**」的停用 id；**已在库内**的停用 id 若出现在请求里（例如旧客户端回传）保留，
+     * 由对账层的"保留历史停用关联"兜底 —— 否则会出现"入口剔了 ⇒ 对账层当成请求外 ⇒ 删除"的自相矛盾路径。
+     */
+    private List<Long> excludeNewlyRequestedDisabledRelIds(List<Long> relIds, Long digitalEmployeeId) {
+        if (CollectionUtils.isEmpty(relIds)) {
+            return relIds;
+        }
+        return this.excludeNewlyRequestedDisabledRelIds(relIds,
+            ssResourceRelDetailService.findByResourceId(digitalEmployeeId),
+            this.loadRelResourceBizTypes(relIds), digitalEmployeeId);
+    }
+
+    /**
+     * 入口前置校验的共用实现：已有"库内关联"与"资源类型"时不再发起任何查询（供 install 入口复用已加载数据）。
+     *
+     * @param relIds            请求中的关联 id
+     * @param existingRelations 库内现有关系（用于判断是否"新增"）
+     * @param bizTypeById       关联资源 id → 真实业务类型
+     * @param digitalEmployeeId 数字员工标识（仅用于日志）
+     * @return 剔除"新增的停用类型 id"后的请求列表
+     */
+    private List<Long> excludeNewlyRequestedDisabledRelIds(List<Long> relIds,
+                                                           List<SsResourceRelDetail> existingRelations,
+                                                           Map<Long, String> bizTypeById, Long digitalEmployeeId) {
+        if (CollectionUtils.isEmpty(relIds)) {
+            return relIds;
+        }
+        Set<Long> existingRelIds = this.safeRelations(existingRelations)
+            .stream().map(SsResourceRelDetail::getRelResourceId).filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        List<Long> kept = new ArrayList<>(relIds.size());
+        List<Long> dropped = new ArrayList<>();
+        for (Long relId : relIds) {
+            if (relId != null && !existingRelIds.contains(relId)
+                && DisabledResourceBizTypes.isDisabled(bizTypeById.get(relId))) {
+                dropped.add(relId);
+                continue;
+            }
+            kept.add(relId);
+        }
+        if (!dropped.isEmpty()) {
+            logger.warn("数字员工保存入口忽略新增停用类型关联: employeeId={}, ignoredNew={}, reason={}",
+                digitalEmployeeId, dropped, DisabledResourceBizTypes.REASON_CODE);
+        }
+        return kept;
+    }
+
+    /** 从已加载的资源列表构造 resourceId → 业务类型 映射。 */
+    private Map<Long, String> bizTypesOf(List<SsResource> resources) {
+        return this.safeResources(resources).stream()
+            .filter(resource -> resource != null && resource.getResourceId() != null)
+            .collect(Collectors.toMap(SsResource::getResourceId,
+                resource -> StringUtils.trimToEmpty(resource.getResourceBizType()), (left, right) -> left));
     }
 
     /**
