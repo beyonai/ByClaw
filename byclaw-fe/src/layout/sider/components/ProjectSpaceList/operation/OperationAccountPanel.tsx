@@ -34,6 +34,7 @@ export interface OperationAccountPanelProps {
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
   showPlatformFilter?: boolean;
   allowAccountEditing?: boolean;
+
   /** 控制新增入口；商用版连接器仍可查看和编辑已有账号，但不允许新增账号。 */
   allowAccountCreation?: boolean;
   fixedCreatePlatformId?: string;

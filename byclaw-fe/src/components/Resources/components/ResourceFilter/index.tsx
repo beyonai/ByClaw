@@ -181,10 +181,10 @@ const ResourceFilterForm = ({
       activeTab === 'personal'
         ? {}
         : {
-            belong: filterBelong,
-            deptBelong: deptSelectValue,
-            orgFilters: buildOrgFilters(),
-          };
+          belong: filterBelong,
+          deptBelong: deptSelectValue,
+          orgFilters: buildOrgFilters(),
+        };
 
     if (activeTab === 'personal') {
       return {
