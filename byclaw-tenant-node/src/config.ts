@@ -1,0 +1,74 @@
+import { hostname } from "node:os";
+import { requireId } from "./domain/values.js";
+import type { TenantIdentity } from "./domain/tenant.js";
+
+export interface Config extends TenantIdentity {
+  tenantId: string;
+  instanceId: string;
+  host: string;
+  port: number;
+  advertiseHost: string;
+  stateDir: string;
+  beUrl: string;
+  kmsUrl: string;
+  beClientIdentity: string;
+  tls: { certFile: string; keyFile: string; caFile: string };
+  redis: { host: string; port: number; db: number; username: string; password: string; tls?: {} };
+}
+export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const required = (key: string): string => {
+    const value = env[key];
+    if (!value) throw new Error(`Missing configuration: ${key}`);
+    return value;
+  };
+  const integer = (key: string, fallback: number, max = 65535): number => {
+    const value = Number(env[key] ?? fallback);
+    if (!Number.isSafeInteger(value) || value < 0 || value > max) throw new Error(`Invalid ${key}`);
+    return value;
+  };
+  const secureUrl = (key: string): string => {
+    const value = new URL(required(key));
+    if (
+      value.protocol !== "https:" ||
+      value.username ||
+      value.password ||
+      value.search ||
+      value.hash
+    )
+      throw new Error(`Invalid ${key}`);
+    return value.toString().replace(/\/$/, "");
+  };
+  const enterpriseId = requireId(required("ENTERPRISE_ID"));
+  if (requireId(required("TENANT_ID")) !== enterpriseId) throw new Error("Tenant IDs must match");
+  if (required("REDIS_TLS") !== "true") throw new Error("REDIS_TLS must be true");
+  const port = integer("PORT", 3100),
+    redisPort = integer("REDIS_PORT", 6379);
+  if (!port || !redisPort) throw new Error("Ports must be positive");
+  return {
+    enterpriseId,
+    tenantId: enterpriseId,
+    generation: requireId(required("TENANT_GENERATION")),
+    dbSandboxRecordId: requireId(required("DB_SANDBOX_RECORD_ID")),
+    instanceId: env.INSTANCE_ID ?? hostname(),
+    host: env.HOST ?? "0.0.0.0",
+    port,
+    advertiseHost: required("ADVERTISE_HOST"),
+    stateDir: required("NODE_STATE_DIR"),
+    beUrl: secureUrl("BE_INTERNAL_URL"),
+    kmsUrl: secureUrl("KMS_DECRYPT_URL"),
+    beClientIdentity: required("BE_CLIENT_IDENTITY"),
+    tls: {
+      certFile: required("TLS_CERT_FILE"),
+      keyFile: required("TLS_KEY_FILE"),
+      caFile: required("TLS_CA_FILE"),
+    },
+    redis: {
+      host: required("REDIS_HOST"),
+      port: redisPort,
+      db: integer("REDIS_DATABASE", 0),
+      username: required("REDIS_USERNAME"),
+      password: required("REDIS_PASSWORD"),
+      tls: {},
+    },
+  };
+}

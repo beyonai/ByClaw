@@ -1,0 +1,172 @@
+import { displayMessages } from "../src/application/history/timeline-format.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  HistoryService,
+  safeMessage,
+  type HistoryRepository,
+  type Row,
+} from "../src/application/history.js";
+
+function setup() {
+  const repo: HistoryRepository = {
+    session: vi.fn(async (id: string) => ({
+      sessionId: id,
+      enterpriseId: "10",
+      creatorId: "20",
+      sessionType: "hs_as",
+    })),
+    member: vi.fn(async () => ({ memObjId: "20", userRole: "MEMBER" })),
+    members: vi.fn(async () => []),
+    extensions: vi.fn(async () => []),
+    messages: vi.fn(async () => []),
+    countMessages: vi.fn(async () => 0),
+    groups: vi.fn(async () => ({ list: [], total: 0 })),
+    tasks: vi.fn(async () => []),
+    task: vi.fn(async () => null),
+    pending: vi.fn(async () => null),
+    topics: vi.fn(async () => []),
+    topic: vi.fn(async () => null),
+    participants: vi.fn(async () => []),
+  };
+  return { repo, service: new HistoryService("10", repo) };
+}
+const message = (overrides: Row = {}) => ({
+  messageId: "100",
+  sessionId: "30",
+  usage: 1,
+  messageContent: "hello",
+  createTime: new Date(1000),
+  metadata: '{"clientRequestId":"request"}',
+  ...overrides,
+});
+describe("tenant history use cases", () => {
+  it("allows a group member who did not create the group", async () => {
+    const { service, repo } = setup();
+    await service.detail("21", "30");
+    expect(repo.member).toHaveBeenCalledWith("30", "21");
+  });
+  it("denies nonmembers, foreign tenant rows, and internal routing sessions", async () => {
+    const { service, repo } = setup();
+    vi.mocked(repo.member).mockResolvedValue(null);
+    await expect(service.traditional("21", "30", 1, 10)).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
+    vi.mocked(repo.session).mockResolvedValue({ enterpriseId: "11" });
+    await expect(service.detail("20", "30")).rejects.toThrow();
+    vi.mocked(repo.session).mockResolvedValue({ enterpriseId: "10", state: "GROUP_CHAT_ROUTING" });
+    await expect(service.detail("20", "30")).rejects.toThrow();
+    expect(repo.messages).not.toHaveBeenCalled();
+  });
+  it("checks task initiator plus group membership for private sessions", async () => {
+    const { service, repo } = setup();
+    vi.mocked(repo.session).mockImplementation(async (id) => ({
+      sessionId: id,
+      enterpriseId: "10",
+      creatorId: "20",
+      sessionType: id === "30" ? "hs_as" : "h_as",
+    }));
+    vi.mocked(repo.task).mockImplementation(async (id) =>
+      id === "40"
+        ? { taskSessionId: "40", groupSessionId: "30", initiatorUserId: "20", status: "ACTIVE" }
+        : null,
+    );
+    await service.traditional("20", "40", 1, 10);
+    await expect(service.traditional("21", "40", 1, 10)).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
+  });
+  it("checks access for every session in an ID batch", async () => {
+    const { service, repo } = setup();
+    vi.mocked(repo.messages).mockResolvedValue([message({ sessionId: "99" })]);
+    vi.mocked(repo.member).mockResolvedValue(null);
+    await expect(service.byIds("20", ["100"])).rejects.toThrow();
+  });
+  it("preserves a terminal-safe timeline projection and clientRequestId", async () => {
+    const { service, repo } = setup();
+    vi.mocked(repo.messages).mockResolvedValue([
+      message(),
+      message({
+        messageId: "99",
+        usage: 5,
+        metadata: '{"kind":"SYSTEM_EVENT","systemEvent":{"eventType":"MEMBER_ADDED"}}',
+      }),
+    ]);
+    vi.mocked(repo.countMessages).mockResolvedValue(2);
+    const result = await service.context("20", "30", undefined, 50, 20000);
+    expect(result.messages.map((r) => r.messageId)).toEqual(["99", "100"]);
+    expect(result.messages[1]?.clientRequestId).toBe("request");
+    expect(result.messages[0]?.role).toBe("event");
+    expect(result.truncation.truncated).toBe(false);
+  });
+  it("redacts every content-bearing field of a recalled message", () => {
+    const result = safeMessage(
+      message({
+        recalledAt: new Date(1000),
+        messageStruct: "secret",
+        inferLog: "secret",
+        finalContent: "secret",
+        relatedResources: "secret",
+        metadata: '{"files":["secret"],"clientRequestId":"request"}',
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain("secret");
+    expect(result.messageContent).toBe("消息已撤回");
+  });
+  it("validates search filters and binds the trusted user for MINE", async () => {
+    const { service, repo } = setup();
+    await service.search("20", "30", { scope: "MINE", keyword: "hi", limit: 10 });
+    expect(repo.messages).toHaveBeenCalledWith(
+      expect.objectContaining({ actor: "20", scope: "MINE", limit: 11 }),
+    );
+    await expect(service.search("20", "30", { scope: "OTHER" })).rejects.toThrow(
+      "INVALID_SEARCH_FILTER",
+    );
+  });
+  it("rejects a topic cursor bound to a different group", async () => {
+    const { service, repo } = setup();
+    await expect(
+      service.topics("20", "30", 20, Buffer.from("1:31:1000:100:100").toString("base64url")),
+    ).rejects.toThrow("INVALID_CURSOR");
+    expect(repo.topics).not.toHaveBeenCalled();
+  });
+  it("preserves outline positions and final content while redacting recalls", async () => {
+    const { service, repo } = setup();
+    vi.mocked(repo.messages).mockResolvedValue([
+      message({ usage: 4, finalContent: "final", role: "tool", position: "8", totalCount: "10" }),
+      message({ recalledAt: new Date(), finalContent: "secret", position: "2", totalCount: "10" }),
+    ]);
+    const result = await service.outline("20", "30");
+    expect(result[0]).toMatchObject({
+      usage: 4,
+      role: "tool",
+      content: "final",
+      position: 8,
+      totalCount: 10,
+    });
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+  it("keeps both legacy and publication attachments in history", async () => {
+    const { repo } = setup();
+    const [row] = await displayMessages(repo, [
+      message({
+        usage: 2,
+        relatedResources: JSON.stringify({
+          files: [{ fileId: "1", fileName: "old", fileType: "text/plain" }],
+        }),
+        metadata: JSON.stringify({
+          scene: "GROUP_CHAT",
+          kind: "TASK_RESULT",
+          files: [{ fileName: "new", filePath: "/deliver/new", cloudResourceId: "88" }],
+        }),
+      }),
+    ]);
+    expect(row!.attachments.map((a: Row) => a.fileName)).toEqual(["old", "new"]);
+    expect(row!.speaker.type).toBe("agent");
+  });
+  it("detects cyclic parent session identities", async () => {
+    const { service, repo } = setup();
+    vi.mocked(repo.session).mockResolvedValue({
+      enterpriseId: "10",
+      sessionType: "h_as",
+      parentSessionId: "30",
+      creatorId: "20",
+    });
+    await expect(service.access("20", "30")).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
+  });
+});
