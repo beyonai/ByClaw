@@ -5,6 +5,8 @@
     <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord">
         <id column="id" jdbcType="BIGINT" property="id" />
         <result column="resource_id" jdbcType="BIGINT" property="resourceId" />
+        <result column="owner_scope" jdbcType="VARCHAR" property="ownerScope" />
+        <result column="enterprise_id" jdbcType="BIGINT" property="enterpriseId" />
         <result column="user_code" jdbcType="VARCHAR" property="userCode" />
         <result column="sandbox_type" jdbcType="VARCHAR" property="sandboxType" />
         <result column="service_type" jdbcType="VARCHAR" property="serviceType" />
@@ -40,7 +42,7 @@
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, resource_id, user_code, sandbox_type, service_type, profile_key, resource_requests, resource_limits,
+        id, resource_id, owner_scope, enterprise_id, user_code, sandbox_type, service_type, profile_key, resource_requests, resource_limits,
         endpoint, sandbox_id, gateway_token, chat_id,
         status, auto_release, lease_policy, timeout_seconds, remote_expires_at,
         last_renew_at, next_renew_at, last_access_time, release_time, release_reason,
@@ -53,7 +55,7 @@
     <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord"
             useGeneratedKeys="true" keyProperty="id" keyColumn="id">
         INSERT INTO ss_sandbox_record (
-            resource_id, user_code, sandbox_type, service_type, profile_key, resource_requests, resource_limits,
+            resource_id, owner_scope, enterprise_id, user_code, sandbox_type, service_type, profile_key, resource_requests, resource_limits,
             endpoint, sandbox_id, gateway_token, chat_id,
             status, auto_release, lease_policy, timeout_seconds, remote_expires_at,
             last_renew_at, next_renew_at, last_access_time, release_time, release_reason,
@@ -62,6 +64,8 @@
             version, lock_version, create_time, update_time
         ) VALUES (
             #{resourceId,jdbcType=BIGINT},
+            COALESCE(#{ownerScope,jdbcType=VARCHAR}, 'USER'),
+            #{enterpriseId,jdbcType=BIGINT},
             #{userCode,jdbcType=VARCHAR},
             #{sandboxType,jdbcType=VARCHAR},
             #{serviceType,jdbcType=VARCHAR},
@@ -101,7 +105,8 @@
     <select id="selectRunningByUserAndResource" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+        WHERE owner_scope = 'USER'
+          AND user_code = #{userCode,jdbcType=VARCHAR}
         <if test="sandboxType != null and sandboxType != ''">
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
         </if>
@@ -117,7 +122,8 @@
     <select id="selectActiveByUserAndResource" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+        WHERE owner_scope = 'USER'
+          AND user_code = #{userCode,jdbcType=VARCHAR}
         <if test="sandboxType != null and sandboxType != ''">
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
         </if>
@@ -129,11 +135,25 @@
         LIMIT 1
     </select>
 
+    <select id="selectActiveTenantByResourceAndType" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE owner_scope = 'TENANT'
+          AND enterprise_id = #{enterpriseId,jdbcType=BIGINT}
+          AND resource_id = #{enterpriseId,jdbcType=BIGINT}
+          AND user_code = CONCAT('tenant-', CAST(#{enterpriseId,jdbcType=BIGINT} AS VARCHAR))
+          AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+          AND status IN ('STARTING', 'RUNNING', 'RELEASING')
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
     <!-- 批量查询运行中的沙箱记录 -->
     <select id="selectRunningByUserAndResources" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+        WHERE owner_scope = 'USER'
+          AND user_code = #{userCode,jdbcType=VARCHAR}
           AND status = 'RUNNING'
         <if test="sandboxType != null and sandboxType != ''">
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
@@ -150,7 +170,8 @@
     <select id="selectRunningByUser" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+        WHERE owner_scope = 'USER'
+          AND user_code = #{userCode,jdbcType=VARCHAR}
           AND status = 'RUNNING'
         ORDER BY create_time DESC
     </select>
@@ -158,7 +179,8 @@
     <select id="selectRunningByUserAndSandboxType" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+        WHERE owner_scope = 'USER'
+          AND user_code = #{userCode,jdbcType=VARCHAR}
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
           AND status = 'RUNNING'
         ORDER BY create_time DESC
@@ -167,7 +189,8 @@
     <select id="selectRunningAutoscaleRecords" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE status IN ('STARTING', 'RUNNING')
+        WHERE owner_scope = 'USER'
+          AND status IN ('STARTING', 'RUNNING')
           AND sandbox_id IS NOT NULL
           AND length(sandbox_id) > 0
           AND profile_key IS NOT NULL
@@ -355,7 +378,8 @@
     <select id="countExpiredSandboxes" resultType="int">
         SELECT COUNT(*)
         FROM ss_sandbox_record
-        WHERE status = 'RUNNING'
+        WHERE owner_scope = 'USER'
+          AND status = 'RUNNING'
           AND auto_release = 1
           AND last_access_time IS NOT NULL
           <![CDATA[
@@ -367,7 +391,8 @@
     <select id="selectExpiredSandboxesPage" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE status = 'RUNNING'
+        WHERE owner_scope = 'USER'
+          AND status = 'RUNNING'
           AND auto_release = 1
           AND last_access_time IS NOT NULL
           <![CDATA[
@@ -386,7 +411,8 @@
     <select id="countDueRenewSandboxes" resultType="int">
         SELECT COUNT(*)
         FROM ss_sandbox_record
-        WHERE status = 'RUNNING'
+        WHERE owner_scope = 'USER'
+          AND status = 'RUNNING'
           AND (lease_policy IN ('REMOTE_AUTO_EXPIRE', 'MANUAL') OR auto_release = 0)
           AND sandbox_id IS NOT NULL
           AND timeout_seconds IS NOT NULL
@@ -398,7 +424,8 @@
     <select id="selectDueRenewSandboxesPage" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE status = 'RUNNING'
+        WHERE owner_scope = 'USER'
+          AND status = 'RUNNING'
           AND (lease_policy IN ('REMOTE_AUTO_EXPIRE', 'MANUAL') OR auto_release = 0)
           AND sandbox_id IS NOT NULL
           AND timeout_seconds IS NOT NULL
@@ -418,14 +445,16 @@
     <select id="countReconcileSandboxes" resultType="int">
         SELECT COUNT(*)
         FROM ss_sandbox_record
-        WHERE status IN ('STARTING', 'RUNNING', 'RELEASING')
+        WHERE owner_scope = 'USER'
+          AND status IN ('STARTING', 'RUNNING', 'RELEASING')
           AND sandbox_id IS NOT NULL
     </select>
 
     <select id="selectReconcileSandboxesPage" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE status != 'RELEASED'
+        WHERE owner_scope = 'USER'
+          AND status != 'RELEASED'
           AND sandbox_id IS NOT NULL
         <if test="cursorTime != null and cursorId != null">
           <![CDATA[
@@ -442,7 +471,8 @@
                sandbox_type AS "sandboxType",
                COUNT(*) AS "recordCount"
         FROM ss_sandbox_record
-        WHERE status IN ('STARTING', 'RUNNING', 'RELEASING')
+        WHERE owner_scope = 'USER'
+          AND status IN ('STARTING', 'RUNNING', 'RELEASING')
           AND sandbox_id IS NOT NULL
         GROUP BY user_code, sandbox_type
         ORDER BY MIN(update_time) ASC, user_code ASC, sandbox_type ASC
@@ -452,7 +482,8 @@
     <select id="selectReconcileSandboxesByGroup" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+        WHERE owner_scope = 'USER'
+          AND user_code = #{userCode,jdbcType=VARCHAR}
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
           AND status IN ('STARTING', 'RUNNING', 'RELEASING')
           AND sandbox_id IS NOT NULL
@@ -516,7 +547,8 @@
     <select id="countRunningSandboxes" resultType="int">
         SELECT COUNT(*)
         FROM ss_sandbox_record
-        WHERE status = 'RUNNING'
+        WHERE owner_scope = 'USER'
+          AND status = 'RUNNING'
     </select>
 
     <!-- 分页查询沙箱记录 -->
@@ -524,6 +556,12 @@
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
         <where>
+            <if test="ownerScope != 'ALL'">
+                AND owner_scope = #{ownerScope}
+            </if>
+            <if test="enterpriseId != null">
+                AND enterprise_id = #{enterpriseId}
+            </if>
             <if test="status != null and status != ''">
                 AND status = #{status,jdbcType=VARCHAR}
             </if>
@@ -533,6 +571,11 @@
                     OR endpoint LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
                     OR chat_id LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
                     OR CAST(resource_id AS VARCHAR) LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    <if test="ownerScope == 'TENANT'">
+                        OR EXISTS (SELECT 1 FROM byai.po_enterprise_info e
+                            WHERE e.enterprise_id = ss_sandbox_record.enterprise_id
+                              AND LOWER(e.com_acct_name) LIKE CONCAT('%', LOWER(#{keyword,jdbcType=VARCHAR}), '%'))
+                    </if>
                 )
             </if>
         </where>
@@ -545,6 +588,12 @@
         SELECT COUNT(*)
         FROM ss_sandbox_record
         <where>
+            <if test="ownerScope != 'ALL'">
+                AND owner_scope = #{ownerScope}
+            </if>
+            <if test="enterpriseId != null">
+                AND enterprise_id = #{enterpriseId}
+            </if>
             <if test="status != null and status != ''">
                 AND status = #{status,jdbcType=VARCHAR}
             </if>
@@ -554,6 +603,11 @@
                     OR endpoint LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
                     OR chat_id LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
                     OR CAST(resource_id AS VARCHAR) LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    <if test="ownerScope == 'TENANT'">
+                        OR EXISTS (SELECT 1 FROM byai.po_enterprise_info e
+                            WHERE e.enterprise_id = ss_sandbox_record.enterprise_id
+                              AND LOWER(e.com_acct_name) LIKE CONCAT('%', LOWER(#{keyword,jdbcType=VARCHAR}), '%'))
+                    </if>
                 )
             </if>
         </where>
@@ -569,7 +623,8 @@
     <select id="selectLatestBySandboxId" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+        WHERE owner_scope = 'USER'
+          AND user_code = #{userCode,jdbcType=VARCHAR}
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
           AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
         ORDER BY create_time DESC
@@ -579,7 +634,8 @@
     <select id="selectLatestBySandboxIdAnyUser" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE sandbox_id = #{sandboxId,jdbcType=VARCHAR}
+        WHERE owner_scope = 'USER'
+          AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
         ORDER BY create_time DESC
         LIMIT 1
     </select>
