@@ -5,6 +5,7 @@ import { DomainError } from "../../domain/errors.js";
 import { validateMirror } from "../contracts/mirror.js";
 import { outboundStream, sessionShard } from "./stream-keys.js";
 import type { StreamMetrics } from "./mirror-consumer.js";
+/** 单条投递适配：合法事件提交后 ACK；临时失败保留 pending，永久错误原子隔离引用并 ACK。 */
 export class MirrorDelivery {
   constructor(
     private readonly redis: Redis,
@@ -38,6 +39,7 @@ export class MirrorDelivery {
         throw new DomainError("MIRROR_STREAM_MISMATCH");
       validated = true;
       await this.service.apply(event, this.guard);
+      // apply 已等待数据库提交；ACK 失败时重投仍由既有行的幂等判断兜底。
       await this.redis.xack(this.stream, this.group, id);
       this.metrics.committed++;
       return true;
@@ -67,7 +69,7 @@ export class MirrorDelivery {
         this.metrics.retries++;
         return false;
       }
-      // Keep the source body in its stream; quarantine stores a reference, never message content.
+      // 隔离记录仅保存源流/ID/错误码；原正文保留在源流，ACK 不表示业务成功。
       await this.redis.eval(
         "redis.call('XADD',KEYS[2],'*','sourceStream',KEYS[1],'sourceId',ARGV[2],'code',ARGV[3]); return redis.call('XACK',KEYS[1],ARGV[1],ARGV[2])",
         2,

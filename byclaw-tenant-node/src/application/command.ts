@@ -22,6 +22,7 @@ export const operations = [
   "RECALL_MESSAGE",
 ] as const;
 export type Operation = (typeof operations)[number];
+/** BE 生成的内部写入命令；ACTIVE 成员断言与请求摘要由 BE 提供，Node 再核验资源权限。 */
 export interface TenantCommand extends TenantIdentity {
   protocolVersion: 1;
   userId: string;

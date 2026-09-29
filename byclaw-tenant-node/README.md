@@ -184,6 +184,18 @@ hash 的字节约定：递归按 JSON 对象键的 UTF-16 字典顺序排序，�
 
 ## 验证与联调边界
 
+启动入口自动读取模块根目录的 `.env`，不依赖调试器工作目录，已有环境变量优先。
+
+本地填写 `.env` 后运行 `pnpm dev`，或调试 `src/dev.ts`。开发入口默认监听 `127.0.0.1`，把示例状态目录改为模块内 `.tenant-state/`；TLS 路径未填写或仍为 `/run/secrets/` 时，用 OpenSSL 自动生成本地 CA、Node 证书和 BE 客户端证书，保存至 `.tenant-state/dev-tls/`，有效证书重复启动会复用。自定义证书路径保持不变。私钥仅当前用户可读，目录已被 gitignore 排除；不会安装系统信任证书。
+
+本地仍使用 HTTPS/mTLS，受保护接口须带开发 BE 客户端证书、租户与代际头。进程存活检查可使用：
+
+```bash
+curl --cacert .tenant-state/dev-tls/ca.crt https://localhost:3100/internal/v1/health/live
+```
+
+本地开发入口不会模拟 Redis、BE、KMS 或数据库；这些配置仍需填写，就绪取决于依赖和租户结构。`pnpm start` 使用正式入口，不生成开发证书或修改监听/状态目录，部署时由 BE 注入环境和真实证书。
+
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
@@ -191,7 +203,7 @@ pnpm test
 pnpm build
 pnpm format:check
 # 配置证书与真实环境后，由联调人员启动：
-node --env-file=.env dist/main.js
+pnpm start
 ```
 
 本次仅做离线类型、构建、格式和 mock 单元/HTTP/ZIP 测试，没有连接真实数据库、Redis 或 KMS，也没有执行任何迁移。

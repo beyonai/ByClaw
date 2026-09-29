@@ -3,6 +3,7 @@ import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
 import { first, insert } from "./sql-utils.js";
 
+/** 验证群内源消息与目标 AGENT，并在同一事务创建发起人私有会话和群任务。 */
 export async function createTask(context: CommandContext): Promise<void> {
   const { command, db } = context,
     p = command.payload,
@@ -50,6 +51,7 @@ export async function createTask(context: CommandContext): Promise<void> {
     update_time: new Date(),
   });
 }
+/** 仅发起人可修改任务或待发布卡片；已结束任务不复活，PUBLISHED 只能通过发布命令产生。 */
 export async function changeTask(context: CommandContext): Promise<void> {
   const { command, db } = context,
     p = command.payload,

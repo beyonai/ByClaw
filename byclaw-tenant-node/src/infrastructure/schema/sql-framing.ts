@@ -1,7 +1,6 @@
 import { DomainError } from "../../domain/errors.js";
 
-// Lexical framing preserves dollar bodies, escaped quotes and nested comments.
-// Each framed statement is then parsed as SQL, rather than validated by keyword matching.
+/** 按 SQL 词法状态分句，忽略字符串、美元引号与嵌套注释内的分号。 */
 export function frameSql(sql: string): string[] {
   const statements: string[] = [];
   let start = 0;

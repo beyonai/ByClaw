@@ -4,6 +4,7 @@ import { requireId } from "../../domain/values.js";
 import { HistoryAccess } from "./access.js";
 import { objectJson, recalled, safeMessage } from "./message-format.js";
 
+/** 保留传统 assiman 消息、关联与大纲查询的分页和位置语义。 */
 export class TraditionalHistory extends HistoryAccess {
   async traditional(actor: string, sessionId: string, pageNum: number, pageSize: number) {
     pageNum = bounded(pageNum, 1, 100000);

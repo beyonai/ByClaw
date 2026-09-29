@@ -3,6 +3,7 @@ import type { SchemaManifest, SchemaMarker } from "../../application/schema/type
 import { DomainError } from "../../domain/errors.js";
 import { canonical, sha256 } from "../../interfaces/contracts/validation.js";
 
+/** 读取 byai schema 注释中的版本标记，并校验标记属于当前租户。 */
 export async function readMarker(
   db: SqlSession,
   enterpriseId: string,
@@ -27,6 +28,7 @@ export async function readMarker(
     throw new DomainError("SCHEMA_MARKER_INVALID");
   return marker;
 }
+/** 指纹覆盖对象、列、约束、索引与序列；发布侧必须采用相同查询、排序和编码。 */
 export async function catalogDigest(db: SqlSession): Promise<string> {
   const objects =
     await db.query(`SELECT c.relname AS name, c.relkind AS kind, obj_description(c.oid,'pg_class') AS comment
@@ -49,12 +51,14 @@ export async function catalogDigest(db: SqlSession): Promise<string> {
     FROM information_schema.sequences WHERE sequence_schema='byai' ORDER BY sequence_name`);
   return sha256(canonical({ objects, columns, indexes, constraints, sequences }));
 }
+/** INIT 的空库检查包含 byai/public 及租户账号自有 schema，避免误把其他 schema 的数据忽略。 */
 export async function assertEmpty(db: SqlSession): Promise<boolean> {
   const [row] =
     await db.query(`SELECT (SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('byai','public') OR n.nspowner=(SELECT oid FROM pg_roles WHERE rolname=current_user))+
     (SELECT COUNT(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN('byai','public') OR n.nspowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)) AS count`);
   return Number(row?.count) === 0;
 }
+/** 先检查清单对象及类型存在，再比较整个 byai catalog 指纹。 */
 export async function verifyCatalog(db: SqlSession, manifest: SchemaManifest): Promise<void> {
   for (const object of manifest.objects) {
     const kinds =

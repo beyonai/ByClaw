@@ -2,6 +2,7 @@ import { mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
+/** 私有持久卷的文件存储；通过同步临时文件和原子替换防止任务记录被写成半份 JSON。 */
 export class JsonStore {
   constructor(readonly directory: string) {}
   path(name: string): string {
@@ -20,6 +21,7 @@ export class JsonStore {
   async write(name: string, value: unknown): Promise<void> {
     await this.bytes(name, Buffer.from(JSON.stringify(value)));
   }
+  /** 先同步文件内容，再重命名并同步目录；完成后上层才能确认任务已持久受理。 */
   async bytes(name: string, content: Buffer): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const target = this.path(name),

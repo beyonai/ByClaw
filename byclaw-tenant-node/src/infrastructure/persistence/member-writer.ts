@@ -3,6 +3,7 @@ import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
 import { first, insert, nextId } from "./sql-utils.js";
 
+/** 邀请用户须有 BE 的 ACTIVE 成员断言；邀请 AGENT 须有资源授权，普通成员还受群设置限制。 */
 export async function addMembers(context: CommandContext): Promise<void> {
   const { command, db } = context,
     members = command.payload.members;
@@ -43,6 +44,7 @@ export async function addMembers(context: CommandContext): Promise<void> {
     });
   }
 }
+/** 区分主动离群与管理移除；OWNER 先转让，ADMIN 不能移除另一个 ADMIN。 */
 export async function removeMember(context: CommandContext): Promise<void> {
   const { command, db } = context,
     self = command.operation === "LEAVE_GROUP";
@@ -64,6 +66,7 @@ export async function removeMember(context: CommandContext): Promise<void> {
     [target.byaiSessionMemberId, command.enterpriseId],
   );
 }
+/** 仅 OWNER 可调整角色或转让；降级原 OWNER 与升级新 OWNER 在同一命令事务完成。 */
 export async function changeRole(context: CommandContext): Promise<void> {
   const { command, db } = context,
     targetId = requireId(command.payload.userId);
@@ -91,6 +94,7 @@ export async function changeRole(context: CommandContext): Promise<void> {
     ],
   );
 }
+/** 统一处理群设置、解散及成员确认；不同操作各自核验角色和生命周期。 */
 export async function groupSettings(context: CommandContext): Promise<void> {
   const { command, db } = context;
   if (command.operation === "ACK_DISSOLUTION") {

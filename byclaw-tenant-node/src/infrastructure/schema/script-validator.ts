@@ -15,6 +15,7 @@ const allowed = new Set([
   "drop sequence",
   "comment",
 ]);
+/** 通过分句和 AST 限定 byai 清单对象的 DDL；禁止 DML、事务控制及 UPDATE 删除对象。 */
 export function validateScript(
   sql: string,
   objects: SchemaObject[],
@@ -72,6 +73,7 @@ function checkObject(object: { schema?: string; name: string }, names: Set<strin
   if ((object.schema && object.schema !== "byai") || !names.has(object.name))
     throw new DomainError("INVALID_SQL_OBJECT");
 }
+/** 递归核验嵌套 schema、外键和函数调用，防止仅检查语句顶层而漏掉跨 schema 操作。 */
 function visit(value: any, names: Set<string>): void {
   if (!value || typeof value !== "object") return;
   if (value.schema && value.schema !== "byai") throw new DomainError("INVALID_SQL_SCHEMA");

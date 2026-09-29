@@ -8,7 +8,7 @@ export type { HistoryRepository, MessageFilter, Row } from "./history/contracts.
 export { safeMessage, objectJson } from "./history/message-format.js";
 export { bounded } from "./history/paging.js";
 
-/** Small facade preserves the external query contract; each query family owns its logic. */
+/** 历史查询统一入口；权限与各类投影交由小型用例类处理，保持 HTTP 和 Worker 语义一致。 */
 export class HistoryService {
   private readonly permission: HistoryAccess;
   private readonly basic: TraditionalHistory;

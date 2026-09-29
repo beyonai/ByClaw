@@ -19,6 +19,7 @@ export const arrayJson = (value: unknown): any[] => {
 export const time = (value: unknown) =>
   value instanceof Date ? value.getTime() : new Date(value as string).getTime();
 export const recalled = (row: Row) => row.recalledAt != null;
+/** 撤回消息清除正文、附件及非展示元数据，仅保留撤回身份和安全展示字段。 */
 export function safeMessage(row: Row): Row {
   if (!recalled(row)) return { ...row, complete: row.isComplete };
   const meta = objectJson(row.metadata);

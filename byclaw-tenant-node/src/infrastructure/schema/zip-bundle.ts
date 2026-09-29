@@ -3,6 +3,7 @@ import { crc32 } from "node:zlib";
 import { DomainError } from "../../domain/errors.js";
 
 const maxBytes = 32 * 1024 * 1024;
+/** 在内存中读取 ZIP；限制条目和解压总量，拒绝越界路径、重复名、链接及 CRC 不符。 */
 export async function unzipBundle(bytes: Uint8Array): Promise<Map<string, Buffer>> {
   if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new DomainError("INVALID_BUNDLE_SIZE");
   return new Promise((resolve, reject) => {

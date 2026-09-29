@@ -8,7 +8,7 @@ import {
 } from "../domain/tenant.js";
 import type { ConnectionPorts, SqlSession, TenantDatabase } from "./database-ports.js";
 
-/** Owns the pool and write lease; callers never select a database. */
+/** 管理固定租户连接池和写入租约；调用方只能使用本实例的库。 */
 export class ConnectionManager {
   private pool?: TenantDatabase;
   private snapshot?: TenantSnapshot;
@@ -24,9 +24,11 @@ export class ConnectionManager {
   get connected() {
     return this.available && !!this.snapshot && Date.parse(this.snapshot.leaseUntil) > Date.now();
   }
+  /** Schema 已核验即可供 BE 验收，避免开通流程互相等待 READY。 */
   get provisioned() {
     return this.connected && this.schemaReady && !this.schemaBusy;
   }
+  /** 业务写入还必须取得 BE 发布的 READY 状态。 */
   get ready() {
     return (
       this.connected && this.schemaReady && !this.schemaBusy && this.snapshot?.status === "READY"
@@ -44,6 +46,7 @@ export class ConnectionManager {
   setSchemaBusy(value: boolean) {
     this.schemaBusy = value;
   }
+  /** 合并并发刷新，防止同时轮换连接池或覆盖权威版本下限。 */
   refresh(): Promise<void> {
     this.refreshing ??= this.reload().finally(() => {
       this.refreshing = undefined;
@@ -83,6 +86,7 @@ export class ConnectionManager {
       ].every((key) => old[key as keyof TenantSnapshot] === next[key as keyof TenantSnapshot])
     );
   }
+  /** 候选池先核验再替换；切池后重新核验 Schema，旧事务不得跨池提交。 */
   private async replacePool(snapshot: TenantSnapshot): Promise<void> {
     this.available = false;
     const candidate = await this.ports.open(snapshot, await this.ports.decrypt(snapshot));
@@ -101,6 +105,7 @@ export class ConnectionManager {
     if (!this.connected || !this.pool) throw new DomainError("NOT_READY");
     return this.pool;
   }
+  /** 重读 Redis 权威快照；租约、实例、代际或凭证变化时立即撤销写入资格。 */
   async assertWriteAuthority(business = false): Promise<void> {
     try {
       const actual = await this.ports.snapshot();
@@ -124,11 +129,13 @@ export class ConnectionManager {
     if (business && !this.ready)
       throw new DomainError(this.schemaBusy ? "TENANT_SCHEMA_UPGRADING" : "NOT_READY");
   }
+  /** 异步读取配置前后都检查捕获的连接池，防止读取期间发生轮换。 */
   async guard(pool: TenantDatabase, business = false): Promise<void> {
     this.assertPool(pool, business);
     await this.assertWriteAuthority(business);
     this.assertPool(pool, business);
   }
+  /** 业务事务在入场、取得 Schema 共享锁后和 COMMIT 前分别核验写入资格。 */
   async write<T>(work: (session: SqlSession) => Promise<T>): Promise<T> {
     const pool = this.database();
     await this.guard(pool, true);

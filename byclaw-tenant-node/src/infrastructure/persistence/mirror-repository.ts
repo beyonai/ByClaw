@@ -11,6 +11,7 @@ import { MirrorInputWriter } from "./mirror-input.js";
 import { MirrorAnswerWriter } from "./mirror-answer.js";
 import { first } from "./sql-utils.js";
 
+/** 将镜像业务端口接到租户事务，INPUT、回答与关系写入共用同一连接。 */
 export class SqlMirrorTransactions implements MirrorTransactions {
   constructor(private readonly connection: ConnectionManager) {}
   run<T>(work: (tx: MirrorTransaction) => Promise<T>): Promise<T> {

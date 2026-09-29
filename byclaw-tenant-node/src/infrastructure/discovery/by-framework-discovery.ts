@@ -2,6 +2,7 @@ import { ServiceRegistry } from "@byclaw/by-framework";
 import type { Redis } from "ioredis";
 import type { Config } from "../../config.js";
 
+/** 发布固定租户与代际的 HTTPS endpoint，模式改变时重新注册，失去连接权威时撤销。 */
 export class Discovery {
   private readonly registry: ServiceRegistry;
   private published?: string;

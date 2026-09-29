@@ -11,6 +11,7 @@ const camel = (row: Row): Row =>
   );
 const visible =
   "m.archived_at IS NULL AND m.usage IN (1,2) AND (m.message_content IS NOT NULL OR NULLIF(TRIM(m.related_resources),'') IS NOT NULL)";
+/** 既有历史 SQL 的租户适配器；应用层先鉴权，消息查询同时限定所属会话的企业。 */
 export class SqlHistoryRepository implements HistoryRepository {
   constructor(
     private readonly db: SqlSession,

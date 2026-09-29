@@ -8,6 +8,7 @@ export class ServiceError extends DomainError {
   }
 }
 
+/** 将脱敏业务错误码映射到 HTTP 状态，避免接口泄露底层数据库异常。 */
 export function errorStatus(error: DomainError): number {
   if (error instanceof ServiceError) return error.status;
   if (

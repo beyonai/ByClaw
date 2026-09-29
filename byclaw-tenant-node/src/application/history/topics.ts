@@ -6,6 +6,7 @@ import { time } from "./message-format.js";
 import { decodeCursor, encodeCursor } from "./paging.js";
 import { displayMessages } from "./timeline-format.js";
 
+/** 话题列表及话题消息查询；游标绑定会话和话题，防止跨上下文复用。 */
 export class TopicHistory extends HistoryAccess {
   private display(rows: Row[]) {
     return displayMessages(this.repository, rows);

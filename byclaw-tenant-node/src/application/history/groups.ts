@@ -4,6 +4,7 @@ import { requireId } from "../../domain/values.js";
 import { HistoryAccess } from "./access.js";
 import { arrayJson, objectJson } from "./message-format.js";
 
+/** 群列表、详情、设置及任务读取；私有任务和待发布卡片仅向发起人开放。 */
 export class GroupHistory extends HistoryAccess {
   async groups(actor: string, pageNum: number, pageSize: number) {
     requireId(actor);

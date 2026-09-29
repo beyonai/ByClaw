@@ -25,6 +25,7 @@ export interface HttpServices {
   schemaState(): SchemaState;
   health(): Record<string, unknown>;
 }
+/** 组装 HTTPS、鉴权和就绪门禁；健康及 Schema 管理路由按开通阶段单独放行。 */
 export function createApp(
   config: Config,
   services: HttpServices,

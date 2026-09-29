@@ -1,4 +1,5 @@
 import { DomainError } from "./errors.js";
+/** ID 保持规范十进制字符串并限制在 signed BIGINT 范围，避免 JS Number 精度丢失。 */
 export function validId(value: unknown): value is string {
   return (
     typeof value === "string" &&

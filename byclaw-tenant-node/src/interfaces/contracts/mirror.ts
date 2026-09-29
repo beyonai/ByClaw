@@ -4,6 +4,7 @@ import { assertTenant, type TenantIdentity } from "../../domain/tenant.js";
 import { requireId } from "../../domain/values.js";
 import { canonical, digest, opaqueId, record, sha256 } from "./validation.js";
 
+/** 摘要绑定事件业务内容，排除代际和实例，便于换代后按稳定业务标识重放。 */
 export function mirrorHash(envelope: Omit<MirrorEnvelope, "payloadHash"> | MirrorEnvelope): string {
   const {
     payloadHash: _,
@@ -13,6 +14,7 @@ export function mirrorHash(envelope: Omit<MirrorEnvelope, "payloadHash"> | Mirro
   } = envelope as MirrorEnvelope;
   return sha256(canonical(value));
 }
+/** 校验固定身份、稳定业务 ID、排序字段及事件 payload；字段合法后才能进入消费事务。 */
 export function validateMirror(input: unknown, identity: TenantIdentity): MirrorEnvelope {
   const event = record(input) as MirrorEnvelope;
   assertTenant(event, identity);

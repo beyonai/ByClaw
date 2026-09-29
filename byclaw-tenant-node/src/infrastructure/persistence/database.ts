@@ -4,6 +4,7 @@ import { DomainError } from "../../domain/errors.js";
 import type { TenantSnapshot } from "../../domain/tenant.js";
 import type { SqlSession, TenantDatabase } from "../../application/database-ports.js";
 
+/** 固定租户连接池的 SQL 适配器；关闭自动建表和迁移，仅执行上层授权的参数化语句。 */
 export class Database implements TenantDatabase {
   private constructor(
     private readonly source: DataSource,
@@ -43,6 +44,7 @@ export class Database implements TenantDatabase {
     )
       throw new DomainError("DATABASE_IDENTITY_MISMATCH");
   }
+  /** 普通写入取得 Schema 共享锁；提交阶段异常保留 COMMIT_UNCERTAIN，供幂等重投或版本对账。 */
   async transaction<T>(
     work: (session: SqlSession) => Promise<T>,
     beforeCommit?: () => Promise<void>,
@@ -69,7 +71,7 @@ export class Database implements TenantDatabase {
         try {
           await runner.rollbackTransaction();
         } catch {
-          /* Preserve the original failure or commit uncertainty. */
+          /* 回滚或清理失败不能覆盖原始错误，尤其不能丢失提交不确定状态。 */
         }
       }
       if (committing) throw new DomainError("COMMIT_UNCERTAIN");
@@ -84,6 +86,7 @@ export class Database implements TenantDatabase {
       }
     }
   }
+  /** 独占锁绑定专用连接并覆盖整条版本链；链内每版仍使用自己的事务。 */
   async exclusive<T>(work: (database: TenantDatabase) => Promise<T>): Promise<T> {
     const runner = this.source.createQueryRunner();
     let acquired = false,

@@ -7,6 +7,7 @@ import type { BeSchemaClient } from "./be-schema-client.js";
 import { validateBundle } from "./bundle-validator.js";
 import { SchemaExecutionAdapter } from "./schema-execution.js";
 
+/** 将任务端口接到本代际文件目录、连接池与 BE；所有 DDL 都受租约和 fencingToken 约束。 */
 export function schemaPorts(
   connection: ConnectionManager,
   files: SchemaTaskFiles,

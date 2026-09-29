@@ -6,6 +6,7 @@ import { validateTenantCommand } from "../contracts/command.js";
 import { requireId } from "../../domain/values.js";
 import { DomainError } from "../../domain/errors.js";
 
+/** 路由与命令操作、路径资源、真实 actor 必须一致，再调用统一命令事务入口。 */
 export function commandRoutes(
   app: FastifyInstance,
   identity: TenantIdentity,

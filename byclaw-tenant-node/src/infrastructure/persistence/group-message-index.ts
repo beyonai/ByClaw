@@ -3,7 +3,7 @@ import type { MirrorEnvelope } from "../../domain/mirror.js";
 import { DomainError } from "../../domain/errors.js";
 import { first } from "./sql-utils.js";
 
-/** Group lock is held by the enclosing message transaction. */
+/** 在外层会话锁与消息事务内维护回复链的话题归属和真人提及索引。 */
 export async function indexGroupMessage(
   db: SqlSession,
   enterpriseId: string,

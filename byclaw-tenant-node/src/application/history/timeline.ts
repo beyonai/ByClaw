@@ -6,6 +6,7 @@ import { safeMessage } from "./message-format.js";
 import { bounded } from "./paging.js";
 import { displayMessages } from "./timeline-format.js";
 
+/** 群时间线、搜索和上下文快照；在用例层限制数量与字符量，覆盖 HTTP 和 Worker 两种入口。 */
 export class TimelineHistory extends HistoryAccess {
   private display(rows: Row[]) {
     return displayMessages(this.repository, rows);

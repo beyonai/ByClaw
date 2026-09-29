@@ -1,7 +1,7 @@
 import type { Redis } from "ioredis";
 import { DomainError } from "../../domain/errors.js";
 
-/** One reader owns a shard; a commit must still hold this lease. */
+/** 每分片仅一个读者持租约；提交前仍须确认令牌属于当前消费者，释放时也按令牌校验。 */
 export class ConsumerLease {
   private owned = false;
   constructor(

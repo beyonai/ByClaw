@@ -24,6 +24,7 @@ export interface RuntimePorts {
   };
   warn(code: string): void;
 }
+/** 串行对账连接、Schema、任务与服务组件，并汇总开通验收和业务就绪状态。 */
 export class TenantRuntime {
   private tick?: Promise<void>;
   private timer?: ReturnType<typeof setInterval>;
@@ -69,6 +70,7 @@ export class TenantRuntime {
       void this.reconcile();
     }, 5000);
   }
+  /** 定时和手动触发共用一次在途对账，避免恢复任务被重复入队。 */
   reconcile(): Promise<void> {
     if (this.stopped) return Promise.resolve();
     this.tick ??= this.update().finally(() => {
@@ -110,6 +112,7 @@ export class TenantRuntime {
       }
     }
   }
+  /** 先关闭业务门禁，再停止消费者并等待 Schema 任务；保持连接直到任务收尾。 */
   async stop(): Promise<void> {
     this.stopped = true;
     clearInterval(this.timer);

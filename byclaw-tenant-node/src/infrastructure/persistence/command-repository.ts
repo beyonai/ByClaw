@@ -32,6 +32,7 @@ const handlers = {
   DELETE_PENDING_PUBLICATION: changeTask,
   RECALL_MESSAGE: recallMessage,
 };
+/** 把业务命令映射到租户事务，接入统一的写入资格检查。 */
 export class SqlCommandTransactions implements CommandTransactions {
   constructor(private readonly connection: ConnectionManager) {}
   run<T>(work: (tx: CommandTransaction) => Promise<T>): Promise<T> {
@@ -40,6 +41,7 @@ export class SqlCommandTransactions implements CommandTransactions {
 }
 class SqlCommandTransaction implements CommandTransaction {
   constructor(private readonly db: SqlSession) {}
+  /** 会话级事务锁与镜像写入共用同一锁键，避免成员、消息和幂等记录交错更新。 */
   async lock(sessionId: string): Promise<void> {
     await this.db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`session:${sessionId}`]);
   }
@@ -62,6 +64,7 @@ class SqlCommandTransaction implements CommandTransaction {
       operation: command.operation,
     };
   }
+  /** 复用 session_ext 存幂等结果，与业务变更同事务提交，不新增独立回执表。 */
   async record(command: TenantCommand, result: Record<string, any>): Promise<void> {
     await new CommandContext(this.db, command).setExtension(
       `node_command:${command.requestId}`,

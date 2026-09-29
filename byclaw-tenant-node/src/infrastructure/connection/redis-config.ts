@@ -13,6 +13,7 @@ export const connectionFields = [
   "DB_CREDENTIAL_VERSION",
   "PROVISION_STATE",
 ] as const;
+/** 单次 HMGET 获取八个连接字段，按固定企业校验库名、账号及 PROVISION_STATE。 */
 export async function readTenantSnapshot(
   redis: Pick<Redis, "hmget">,
   enterpriseId: string,

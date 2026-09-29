@@ -3,6 +3,7 @@ import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
 import { first, insert, nextId } from "./sql-utils.js";
 
+/** 创建个人或群会话；群成员与默认设置在外层命令事务内一并写入，项目编排由 BE 负责。 */
 export async function createSession(context: CommandContext): Promise<void> {
   const { command, db } = context,
     p = command.payload;
@@ -78,6 +79,7 @@ async function createMembers(context: CommandContext): Promise<void> {
     });
   }
 }
+/** 个人删除写 CLOSED；群使用独立解散命令，群名称/内容修改要求 OWNER 或 ADMIN。 */
 export async function changeSession(context: CommandContext): Promise<void> {
   const { command, db } = context,
     session = await context.session();
@@ -108,6 +110,7 @@ export async function changeSession(context: CommandContext): Promise<void> {
     ],
   );
 }
+/** 确认消息属于本群后单调推进已读游标，旧请求不会把游标回退。 */
 export async function readState(context: CommandContext): Promise<void> {
   const { command, db } = context,
     messageId = requireId(command.payload.messageId);
@@ -125,6 +128,7 @@ export async function readState(context: CommandContext): Promise<void> {
     [messageId, command.sessionId, command.userId, command.enterpriseId],
   );
 }
+/** 消息作者或群管理员可撤回；保留原行并记录撤回身份，读取侧负责内容脱敏。 */
 export async function recallMessage(context: CommandContext): Promise<void> {
   const { command, db } = context,
     messageId = requireId(command.payload.messageId);

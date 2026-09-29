@@ -5,6 +5,7 @@ import { indexGroupMessage } from "./group-message-index.js";
 import { DomainError } from "../../domain/errors.js";
 import { first, insert } from "./sql-utils.js";
 import { nextSequence, answerFields } from "./message-fields.js";
+/** 稳定回答行的读取与版本条件更新；回答终态和问答关系由外层事务一起提交。 */
 export class MirrorAnswerWriter {
   constructor(
     private readonly db: SqlSession,

@@ -4,6 +4,7 @@ import { assertTenant, type TenantIdentity } from "../../domain/tenant.js";
 import { requireId } from "../../domain/values.js";
 import { digest, opaqueId, record } from "./validation.js";
 
+/** 核验任务身份、INIT/UPDATE 版本链与精确脚本路径；期限在受理和执行阶段检查。 */
 export function validateSchemaTask(input: unknown, identity: TenantIdentity): SchemaTask {
   const task = record(input) as SchemaTask;
   assertTenant(task, identity);

@@ -1,6 +1,7 @@
 import type { HistoryRepository, Row } from "./contracts.js";
 import { safeMessage, objectJson, arrayJson, recalled, time } from "./message-format.js";
 
+/** 组合历史展示字段和引用摘要，所有被展示的消息都使用撤回安全投影。 */
 export async function displayMessages(repository: HistoryRepository, rows: Row[]): Promise<Row[]> {
   const references = [...new Set(rows.map((r) => r.messageRef).filter(Boolean))];
   const byId = new Map(

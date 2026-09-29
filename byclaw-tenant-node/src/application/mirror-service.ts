@@ -2,6 +2,7 @@ import { DomainError } from "../domain/errors.js";
 import { reduceAnswer, type AnswerState, type MirrorEnvelope } from "../domain/mirror.js";
 import type { MirrorTransaction, MirrorTransactions } from "./mirror-ports.js";
 
+/** 将镜像事件转为租户事务；只负责数据库结果，Stream 的 ACK 由消费适配器处理。 */
 export class MirrorService {
   constructor(private readonly transactions: MirrorTransactions) {}
   async apply(event: MirrorEnvelope, beforeCommit?: () => Promise<void>): Promise<void> {
@@ -28,6 +29,7 @@ export class MirrorService {
     await tx.assertInputAccess(event);
     await tx.insertInput(event);
   }
+  /** 回答必须关联已提交的 INPUT；一个 run 固定一条回答，终态和问答关系同时写入。 */
   private async answer(tx: MirrorTransaction, event: MirrorEnvelope): Promise<void> {
     const input = await tx.input(event);
     if (!input) throw new DomainError("INPUT_NOT_COMMITTED");
