@@ -1,17 +1,27 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.enterprise;
 
-import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
+import com.iwhalecloud.byai.common.annotation.Add;
+import com.iwhalecloud.byai.common.annotation.Mod;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.manager.application.service.enterprise.EnterpriseInfoApplicationService;
+import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseInfoDTO;
+import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseQueryDTO;
+import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseRemoveDTO;
+import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseSwitchDTO;
+import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.manager.vo.enterprise.UserEnterpriseVo;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.multipart.MultipartFile;
-import jakarta.validation.constraints.Size;
-import java.util.Map;
+
+import java.util.List;
 
 /**
  * 企业信息管理
@@ -21,50 +31,89 @@ import java.util.Map;
 public class EnterpriseController {
 
     @Autowired
-    private EnterpriseInfoService enterpriseInfoService;
+    private EnterpriseInfoApplicationService enterpriseInfoApplicationService;
 
     /**
-     * 获取企业信息
-     * 
-     * @param params 入参
-     * @return ResponseUtil
+     * 获取企业信息；未传企业标识时默认查询系统预置企业。
+     *
+     * @param queryDTO 查询入参
+     * @return 企业信息响应
      */
     @RequestMapping(value = "/getEnterprise", method = RequestMethod.POST)
-    public ResponseUtil getEnterprise(@RequestBody Map<String, Object> params) {
-        return enterpriseInfoService.getEnterprise(params);
+    public ResponseUtil<EnterpriseInfo> getEnterprise(@RequestBody EnterpriseQueryDTO queryDTO) {
+        return ResponseUtil.successResponse(enterpriseInfoApplicationService.getEnterprise(queryDTO));
     }
 
     /**
-     * 编辑企业信息
-     * 
-     * @param enterpriseId 企业标识
-     * @param comAcctName 企业名称
-     * @param comAcctCode 企业编码
-     * @param comAcctAddress 企业地址
-     * @param systemName 系统名称
-     * @param logoDataFile 系统标识文件
-     * @return ResponseUtil
+     * 查询当前登录用户关联的企业列表。
+     *
+     * @return 企业简要信息列表（企业标识、名称、编码、角色、成员状态）
      */
-    @RequestMapping(value = "/editEnterprise", method = RequestMethod.POST)
-    public ResponseUtil editEnterprise(@RequestParam("enterpriseId") Long enterpriseId,
-        @RequestParam("comAcctName") @Size(max = 200, message = "{enterprisecontroller.comacctname.size}") String comAcctName,
-        @RequestParam("comAcctCode") @Size(max = 100, message = "{enterprisecontroller.comacctcode.size}") String comAcctCode,
-        @RequestParam(value = "comAcctAddress", required = false) String comAcctAddress,
-        @RequestParam(value = "systemName", required = false) @Size(max = 255,
-            message = "{enterprisecontroller.systemname.size}") String systemName,
-        @RequestParam(value = "logoData", required = false) MultipartFile logoDataFile) {
-        return enterpriseInfoService.editEnterprise(enterpriseId, comAcctName, comAcctCode, comAcctAddress, systemName,
-            logoDataFile);
+    @RequestMapping(value = "/listUserEnterprises", method = RequestMethod.POST)
+    public ResponseUtil<List<UserEnterpriseVo>> listUserEnterprises() {
+        return ResponseUtil.successResponse(enterpriseInfoApplicationService.listUserEnterprises());
     }
 
     /**
-     * 获取企业Logo信息
-     * 
+     * 新增企业信息；任意登录用户可创建，创建成功后将当前用户设为该企业 OWNER。
+     *
+     * @param enterpriseInfoDTO 新增入参
+     * @return 新建企业标识
+     */
+    @RequestMapping(value = "/create", method = RequestMethod.POST)
+    public ResponseUtil<Long> create(
+        @Validated(Add.class) @RequestBody EnterpriseInfoDTO enterpriseInfoDTO) {
+        return ResponseUtil.successResponse(I18nUtil.get("enterprise.add.success"),
+            enterpriseInfoApplicationService.create(enterpriseInfoDTO));
+    }
+
+    /**
+     * 修改企业信息。
+     *
+     * @param enterpriseInfoDTO 修改入参
+     * @return 操作结果
+     */
+    @RequestMapping(value = "/update", method = RequestMethod.POST)
+    public ResponseUtil<Void> update(
+        @Validated(Mod.class) @RequestBody EnterpriseInfoDTO enterpriseInfoDTO) {
+        enterpriseInfoApplicationService.update(enterpriseInfoDTO);
+        return ResponseUtil.success(I18nUtil.get("enterprise.update.success"));
+    }
+
+    /**
+     * 删除企业信息，并清理该企业下的租户成员关系。
+     *
+     * @param removeDTO 删除入参
+     * @return 操作结果
+     */
+    @RequestMapping(value = "/remove", method = RequestMethod.POST)
+    public ResponseUtil<Void> remove(@Validated @RequestBody EnterpriseRemoveDTO removeDTO) {
+        enterpriseInfoApplicationService.remove(removeDTO);
+        return ResponseUtil.success(I18nUtil.get("enterprise.delete.success"));
+    }
+
+    /**
+     * 获取企业 Logo 并写入响应流。
+     *
      * @param enterpriseId 企业标识
-     * @param response 响应
+     * @param response HTTP 响应
      */
     @RequestMapping(value = "/getEnterpriseLogoData", method = RequestMethod.GET)
     public void getEnterpriseLogoData(@RequestParam("enterpriseId") Long enterpriseId, HttpServletResponse response) {
-        enterpriseInfoService.getEnterpriseLogoData(enterpriseId, response);
+        enterpriseInfoApplicationService.getEnterpriseLogoData(enterpriseId, response);
+    }
+
+    /**
+     * 切换当前登录用户的企业（租户）。
+     *
+     * @param switchDTO 切换入参
+     * @param session HTTP 会话
+     * @return 切换后的企业标识
+     */
+    @RequestMapping(value = "/switch", method = RequestMethod.POST)
+    public ResponseUtil<Long> switchTo(@Validated @RequestBody EnterpriseSwitchDTO switchDTO,
+                                       HttpSession session) {
+        return ResponseUtil.successResponse(I18nUtil.get("enterprise.switch.success"),
+            enterpriseInfoApplicationService.switchTo(switchDTO, session));
     }
 }
