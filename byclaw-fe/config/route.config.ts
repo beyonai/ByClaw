@@ -37,6 +37,11 @@ export default [
             component: './manager/pages/TenantMgr',
           },
           {
+            path: '/manager/tenant-datasource',
+            name: 'managerTenantDatasource',
+            component: './manager/pages/TenantDatasource',
+          },
+          {
             path: '/manager/org/postManage',
             name: 'managerPostManage',
             component: './manager/pages/PostManage',

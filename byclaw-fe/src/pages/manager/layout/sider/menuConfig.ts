@@ -4,6 +4,7 @@ import {
   CloudDownloadOutlined,
   CodeSandboxOutlined,
   ControlOutlined,
+  DatabaseOutlined,
   // DashboardOutlined,
   ExperimentOutlined,
   // RobotOutlined,
@@ -29,10 +30,19 @@ export const TENANT_ADMIN_MENU = {
   nameEn: 'Tenants',
   icon: ApartmentOutlined,
 };
+export const TENANT_DATASOURCE_MENU = {
+  path: '/manager/tenant-datasource',
+  routePath: '/manager/tenant-datasource',
+  name: '租户数据源',
+  nameEn: 'Tenant datasource',
+  icon: DatabaseOutlined,
+};
 
 export const withTenantAdminMenu = (menus: any[], allowed: boolean): any[] => {
-  const filtered = menus.filter((item) => item.path !== TENANT_ADMIN_MENU.path);
-  return allowed ? [...filtered, TENANT_ADMIN_MENU] : filtered;
+  const filtered = menus.filter(
+    (item) => item.path !== TENANT_ADMIN_MENU.path && item.path !== TENANT_DATASOURCE_MENU.path
+  );
+  return allowed ? [...filtered, TENANT_ADMIN_MENU, TENANT_DATASOURCE_MENU] : filtered;
 };
 
 /**
