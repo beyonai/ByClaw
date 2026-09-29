@@ -148,6 +148,8 @@ BE 每次核验 ACTIVE 租户成员，并生成 tenantMemberUserIds；邀请/转
 | UPDATE_SETTINGS                                       | allowJoinByLink、allowMemberAddAgent、allowMemberInviteUser 布尔字段                                                                                         |
 | READ_STATE / RECALL_MESSAGE                           | messageId；已读游标仅向前，撤回由作者或群管理员操作                                                                                                          |
 | CREATE_TASK                                           | taskSessionId、sourceMessageId、dispatchId、targetAgentId、taskName                                                                                          |
+| SEND_GROUP_MESSAGE                                    | chatContent、resourceList、files、replyToMessageId；消息与每个被提及数字员工的 QUEUED 私有任务在同一事务写入，返回 messageId 和 dispatches |
+| CLAIM_TASK                                            | taskSessionId；仅发起人可将 QUEUED 任务原子领取为 RUNNING，返回 claimed，重复领取不会启动第二次执行 |
 | UPDATE_TASK                                           | taskSessionId、status(ACTIVE/CANCELLED)、turnStatus(RUNNING/WAITING_USER/FAILED)                                                                             |
 | SAVE_PENDING_PUBLICATION / DELETE_PENDING_PUBLICATION | taskSessionId、pendingPublicationId、text、sourcePaths / taskSessionId                                                                                       |
 | PUBLISH_TASK                                          | taskSessionId、id、messageId、text、files[]、pendingPublicationId?、metadata?；仅发起人，非 RUNNING；发布消息、publication、PUBLISHED 状态与待发布清理同事务 |
@@ -158,7 +160,7 @@ API 路径对应 `command-routes.ts` 和 OpenAPI。HTTP 正常结果是**事务�
 
 输入消息保留 INPUT 的 commandId；回答行只保留最近一次已提交的出站 commandId，后续事件会覆盖旧 ID。该接口查询当前行，不保存逐事件审计历史，404 不能作为“事件从未落库”的证明。旧出站事件应结合稳定 answerMessageId、后续消息状态和源流记录对账。
 
-历史保留既有 assiman、群列表/详情/上下文/搜索、话题、任务与待发布查询，撤回内容做脱敏投影。任务状态沿用 ACTIVE/PUBLISHED/CANCELLED 与 RUNNING/WAITING_USER/FAILED。群消息沿引用链写 topic_id，首次公开回复形成话题；真人提及投影至既有 mention 表。
+历史保留既有 assiman、群列表/详情/上下文/搜索、话题、任务与待发布查询，撤回内容做脱敏投影。任务状态沿用 ACTIVE/PUBLISHED/CANCELLED 与 QUEUED/RUNNING/WAITING_USER/FAILED。群消息沿引用链写 topic_id，首次公开回复形成话题；真人提及投影至既有 mention 表。BE 领取私有任务并运行数字员工后，Node 在回答 TERMINAL 镜像事务内保存私有回答、问答关系和群公开回复，群回复 ID 记录在任务中；ERROR 则将任务标记 FAILED。BE 在 Node 提交成功后广播群事件。
 
 BE 仍负责平台项目 PENDING→READY 编排、过滤未 READY 项目、租户权限、资源/云文件授权、上传、AI 调度与实时广播。Node 的群创建结果提交后 BE 才能发布项目 READY；上传/文件元数据未租户化的入口不能靠本模块绕开。
 

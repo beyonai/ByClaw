@@ -8,7 +8,7 @@ import { joinGroup } from "./group-join.js";
 import { createSession, changeSession, readState, recallMessage } from "./session-writer.js";
 import { addMembers, removeMember, changeRole, groupSettings } from "./member-writer.js";
 import { publishTask } from "./task-publication.js";
-import { createTask, changeTask } from "./task-writer.js";
+import { createTask, changeTask, claimTask } from "./task-writer.js";
 import { sendGroupMessage } from "./group-message-writer.js";
 
 const handlers = {
@@ -27,6 +27,7 @@ const handlers = {
   ACK_DISSOLUTION: groupSettings,
   READ_STATE: readState,
   CREATE_TASK: createTask,
+  CLAIM_TASK: claimTask,
   UPDATE_TASK: changeTask,
   PUBLISH_TASK: publishTask,
   SAVE_PENDING_PUBLICATION: changeTask,
@@ -65,6 +66,7 @@ class SqlCommandTransaction implements CommandTransaction {
       requestId: command.requestId,
       operation: command.operation,
       ...(typeof messageId === "string" ? { messageId } : {}),
+      ...(messageId && typeof messageId === "object" ? messageId : {}),
     };
   }
   /** 复用 session_ext 存幂等结果，与业务变更同事务提交，不新增独立回执表。 */

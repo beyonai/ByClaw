@@ -10,6 +10,7 @@ import { DomainError } from "../../domain/errors.js";
 import { MirrorInputWriter } from "./mirror-input.js";
 import { MirrorAnswerWriter } from "./mirror-answer.js";
 import { first } from "./sql-utils.js";
+import { projectGroupTaskAnswer } from "./group-task-answer.js";
 
 /** 将镜像业务端口接到租户事务，INPUT、回答与关系写入共用同一连接。 */
 export class SqlMirrorTransactions implements MirrorTransactions {
@@ -53,10 +54,13 @@ class SqlMirrorTransaction implements MirrorTransaction {
   answer(event: MirrorEnvelope) {
     return this.answerWriter.answer(event);
   }
-  saveAnswer(event: MirrorEnvelope, state: AnswerState, previous: AnswerState | null) {
-    return this.answerWriter.saveAnswer(event, state, previous);
+  async saveAnswer(event: MirrorEnvelope, state: AnswerState, previous: AnswerState | null) {
+    await this.answerWriter.saveAnswer(event, state, previous);
+    if (event.eventType === "ERROR")
+      await projectGroupTaskAnswer(this.db, this.enterpriseId, event, state);
   }
-  saveRelation(event: MirrorEnvelope, input: InputState, answer: AnswerState) {
-    return this.answerWriter.saveRelation(event, input, answer);
+  async saveRelation(event: MirrorEnvelope, input: InputState, answer: AnswerState) {
+    await this.answerWriter.saveRelation(event, input, answer);
+    await projectGroupTaskAnswer(this.db, this.enterpriseId, event, answer);
   }
 }

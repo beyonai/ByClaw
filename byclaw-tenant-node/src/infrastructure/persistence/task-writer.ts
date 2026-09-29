@@ -51,6 +51,17 @@ export async function createTask(context: CommandContext): Promise<void> {
     update_time: new Date(),
   });
 }
+
+/** Only one worker may start a queued tenant group task, even across BE replicas. */
+export async function claimTask(context: CommandContext): Promise<{ claimed: boolean }> {
+  const { command, db } = context;
+  const taskId = requireId(command.payload.taskSessionId);
+  const rows = await db.query(
+    "UPDATE byai.byai_group_chat_task SET turn_status='RUNNING',update_time=CURRENT_TIMESTAMP WHERE task_session_id=$1 AND group_session_id=$2 AND initiator_user_id=$3 AND status='ACTIVE' AND turn_status='QUEUED' RETURNING task_session_id",
+    [taskId, command.sessionId, command.userId],
+  );
+  return { claimed: rows.length === 1 };
+}
 /** 仅发起人可修改任务或待发布卡片；已结束任务不复活，PUBLISHED 只能通过发布命令产生。 */
 export async function changeTask(context: CommandContext): Promise<void> {
   const { command, db } = context,

@@ -7,6 +7,7 @@ function setup(payload: Record<string, any>) {
   const query = vi.fn(async (sql: string) => {
     if (sql.includes("nextval(")) return [{ id: "101" }];
     if (sql.includes("RETURNING last_seq")) return [{ last_seq: "1" }];
+    if (sql.includes("mem_obj_type=$2")) return [{ exists: 1 }];
     if (sql.includes("SELECT m.*,s.session_type"))
       return [{ session_id: "30", session_type: "hs_as" }];
     return [];
@@ -30,7 +31,7 @@ describe("tenant group message", () => {
       resourceList: [],
       creatorName: "张三",
     });
-    expect(await sendGroupMessage(context)).toBe("101");
+    expect(await sendGroupMessage(context)).toEqual({ messageId: "101", dispatches: [] });
     const insert = query.mock.calls.find(([sql]) =>
       sql.startsWith("INSERT INTO byai.byai_message"),
     );
@@ -39,14 +40,23 @@ describe("tenant group message", () => {
     expect(insert![1]).toContain("hacu-request");
   });
 
-  it("rejects agent mentions until tenant execution has its own persistence path", async () => {
+  it("creates a tenant task and private session for an agent mention", async () => {
     const { context, query } = setup({
       chatContent: "@助手 你好",
       resourceList: [{ resourceType: "DIG_EMPLOYEE", resourceId: "42" }],
     });
-    await expect(sendGroupMessage(context)).rejects.toThrow("TENANT_GROUP_AGENT_NOT_READY");
-    expect(query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_message"))).toBe(
-      false,
-    );
+    expect(await sendGroupMessage(context)).toEqual({
+      messageId: "101",
+      dispatches: [{ taskSessionId: "101", targetAgentId: "42" }],
+    });
+    expect(
+      query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_session (")),
+    ).toBe(true);
+    expect(
+      query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_group_chat_task")),
+    ).toBe(true);
+    expect(
+      query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_session_ext")),
+    ).toBe(true);
   });
 });

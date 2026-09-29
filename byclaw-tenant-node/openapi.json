@@ -2004,6 +2004,58 @@
         }
       }
     },
+    "/internal/v1/group-chats/{id}/messages": {
+      "post": {
+        "summary": "SEND_GROUP_MESSAGE",
+        "parameters": [
+          { "$ref": "#/components/parameters/enterprise" },
+          { "$ref": "#/components/parameters/generation" },
+          { "$ref": "#/components/parameters/actor" },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/TenantCommand" } }
+          }
+        },
+        "responses": { "200": { "description": "Committed messageId and agent dispatches" } }
+      }
+    },
+    "/internal/v1/group-chats/{id}/tasks/{taskId}/claim": {
+      "post": {
+        "summary": "CLAIM_TASK",
+        "parameters": [
+          { "$ref": "#/components/parameters/enterprise" },
+          { "$ref": "#/components/parameters/generation" },
+          { "$ref": "#/components/parameters/actor" },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/TenantCommand" } }
+          }
+        },
+        "responses": { "200": { "description": "Committed claimed flag" } }
+      }
+    },
     "/internal/v1/group-chats/{id}/tasks": {
       "post": {
         "summary": "CREATE_TASK",
@@ -5109,11 +5161,13 @@
               "UPDATE_SETTINGS",
               "READ_STATE",
               "CREATE_TASK",
+              "CLAIM_TASK",
               "UPDATE_TASK",
               "PUBLISH_TASK",
               "SAVE_PENDING_PUBLICATION",
               "DELETE_PENDING_PUBLICATION",
-              "RECALL_MESSAGE"
+              "RECALL_MESSAGE",
+              "SEND_GROUP_MESSAGE"
             ]
           },
           "tenantMemberUserIds": {

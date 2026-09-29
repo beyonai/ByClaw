@@ -15,6 +15,7 @@ export const operations = [
   "UPDATE_SETTINGS",
   "READ_STATE",
   "CREATE_TASK",
+  "CLAIM_TASK",
   "UPDATE_TASK",
   "PUBLISH_TASK",
   "SAVE_PENDING_PUBLICATION",

@@ -98,7 +98,7 @@ public final class TenantNodeModels {
     }
 
     public sealed interface CommandPayload permits SessionCreate, GroupCreate, SessionUpdate, MessageId, EmptyPayload,
-        GroupMessagePayload, AddMembers, RemoveMember {
+        GroupMessagePayload, GroupTaskUpdate, GroupTaskClaim, AddMembers, RemoveMember {
     }
 
     public record SessionCreate(String sessionName, String sessionType) implements CommandPayload {
@@ -135,6 +135,13 @@ public final class TenantNodeModels {
     public record GroupMessagePayload(String chatContent, List<ResourceVo> resourceList,
                                       List<MessageFileDto> files, String replyToMessageId,
                                       String creatorName) implements CommandPayload {
+    }
+
+    public record GroupTaskUpdate(String taskSessionId, String status,
+                                  String turnStatus) implements CommandPayload {
+    }
+
+    public record GroupTaskClaim(String taskSessionId) implements CommandPayload {
     }
 
     public sealed interface MirrorPayload permits MirrorInputPayload, MirrorAnswerPayload {
@@ -195,6 +202,13 @@ public final class TenantNodeModels {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record CommandResult(String sessionId, String requestId, String operation, String messageId) {
+    public record GroupDispatch(String taskSessionId, String targetAgentId) {
+    }
+
+    public record CommandResult(String sessionId, String requestId, String operation, String messageId,
+                                List<GroupDispatch> dispatches, Boolean claimed) {
+        public CommandResult(String sessionId, String requestId, String operation, String messageId) {
+            this(sessionId, requestId, operation, messageId, null, null);
+        }
     }
 }

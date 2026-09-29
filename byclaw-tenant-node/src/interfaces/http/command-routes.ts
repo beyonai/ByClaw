@@ -29,6 +29,7 @@ export function commandRoutes(
     ["PATCH", "/group-chats/:id/settings", "UPDATE_SETTINGS"],
     ["PATCH", "/group-chats/:id/read-state", "READ_STATE"],
     ["POST", "/group-chats/:id/tasks", "CREATE_TASK"],
+    ["POST", "/group-chats/:id/tasks/:taskId/claim", "CLAIM_TASK"],
     ["PATCH", "/group-chats/:id/tasks/:taskId", "UPDATE_TASK"],
     ["POST", "/group-chats/:id/tasks/:taskId/publication", "PUBLISH_TASK"],
     ["POST", "/group-chats/:id/tasks/:taskId/pending-publication", "SAVE_PENDING_PUBLICATION"],
