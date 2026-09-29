@@ -16,6 +16,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 
 class TenantCredentialCryptoTest {
@@ -32,6 +33,12 @@ class TenantCredentialCryptoTest {
         assertThat(crypto.isOpenGaussCompatible(password)).isTrue();
         assertThat(crypto.isOpenGaussCompatible(password + "12345")).isFalse();
         assertThat(envelope).contains("SM4-GCM", "byclaw-sm4-v2").doesNotContain(password);
+        JsonNode fields = new ObjectMapper().readTree(envelope);
+        for (String field : new String[] {"nonce", "ciphertext", "tag"}) {
+            String encoded = fields.path(field).asText();
+            assertThat(Base64.getEncoder().encodeToString(Base64.getDecoder().decode(encoded)))
+                .isEqualTo(encoded);
+        }
         assertThat(crypto.decrypt(123L, "byclaw_t_123", envelope))
             .isEqualTo(password);
         assertThatThrownBy(() -> crypto.decrypt(124L, "byclaw_t_124", envelope))

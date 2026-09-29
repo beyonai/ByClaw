@@ -26,8 +26,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class TenantCredentialCrypto {
 
     private static final SecureRandom RANDOM = new SecureRandom();
-    private static final Base64.Encoder ENCODER = Base64.getUrlEncoder().withoutPadding();
-    private static final Base64.Decoder DECODER = Base64.getUrlDecoder();
+    private static final Base64.Encoder PASSWORD_ENCODER = Base64.getUrlEncoder().withoutPadding();
+    private static final Base64.Encoder ENVELOPE_ENCODER = Base64.getEncoder();
     private static final int NONCE_LENGTH = 12;
     private static final int TAG_LENGTH = 16;
     private static final String KEY_ID = "byclaw-sm4-v2";
@@ -64,7 +64,7 @@ public class TenantCredentialCrypto {
         do {
             RANDOM.nextBytes(random);
             // OpenGauss requires a punctuation character as well as mixed case and digits.
-            password = ENCODER.encodeToString(random) + "@";
+            password = PASSWORD_ENCODER.encodeToString(random) + "@";
         } while (!password.matches(".*[A-Z].*") || !password.matches(".*[a-z].*")
             || !password.matches(".*[0-9].*"));
         return password;
@@ -91,9 +91,9 @@ public class TenantCredentialCrypto {
             cipher.updateAAD(aad(enterpriseId, dbName));
             byte[] sealed = cipher.doFinal(password.getBytes(StandardCharsets.UTF_8));
             int ciphertextLength = sealed.length - TAG_LENGTH;
-            Envelope envelope = new Envelope("SM4-GCM", KEY_ID, ENCODER.encodeToString(nonce),
-                ENCODER.encodeToString(Arrays.copyOf(sealed, ciphertextLength)),
-                ENCODER.encodeToString(Arrays.copyOfRange(sealed, ciphertextLength, sealed.length)));
+            Envelope envelope = new Envelope("SM4-GCM", KEY_ID, ENVELOPE_ENCODER.encodeToString(nonce),
+                ENVELOPE_ENCODER.encodeToString(Arrays.copyOf(sealed, ciphertextLength)),
+                ENVELOPE_ENCODER.encodeToString(Arrays.copyOfRange(sealed, ciphertextLength, sealed.length)));
             return objectMapper.writeValueAsString(envelope);
         }
         catch (GeneralSecurityException | JsonProcessingException e) {
@@ -111,9 +111,11 @@ public class TenantCredentialCrypto {
             }
             byte[] tenantKey = LEGACY_KEY_ID.equals(envelope.keyId())
                 ? Sm4Util.deriveTenantCredentialKey(enterpriseId) : deriveTenantKey(enterpriseId);
-            byte[] nonce = DECODER.decode(envelope.nonce());
-            byte[] ciphertext = DECODER.decode(envelope.ciphertext());
-            byte[] tag = DECODER.decode(envelope.tag());
+            Base64.Decoder decoder = LEGACY_KEY_ID.equals(envelope.keyId())
+                ? Base64.getUrlDecoder() : Base64.getDecoder();
+            byte[] nonce = decoder.decode(envelope.nonce());
+            byte[] ciphertext = decoder.decode(envelope.ciphertext());
+            byte[] tag = decoder.decode(envelope.tag());
             if (nonce.length != NONCE_LENGTH || tag.length != TAG_LENGTH) {
                 throw new GeneralSecurityException("invalid tenant credential envelope");
             }
