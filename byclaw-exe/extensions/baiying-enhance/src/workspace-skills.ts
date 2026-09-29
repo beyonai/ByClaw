@@ -14,6 +14,7 @@ const CORE_BUNDLED_SKILLS = [
   "notice",
   "project-cloud-knowledge",
   "project-task-status-update",
+  "byclaw-cron-schedule"
 ];
 
 function normalizeSkillName(raw: unknown): string {
