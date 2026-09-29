@@ -3,6 +3,7 @@ import { IMessageState, SSEMessageType } from '@/constants/message';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 import type { IMessage } from '@/typescript/message';
 import { collectEasyConfirmItems } from '@/components/MessagesComp/easyConfirm';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import EasyConfirm, { clearEasyConfirmInputDraft } from './index';
 import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
@@ -126,6 +127,69 @@ describe('EasyConfirm', () => {
 
     expect(screen.getByTestId('easy-confirm-pending-1')).toHaveAttribute('data-presentation', 'dock');
     expect(screen.queryByTestId('query-input')).not.toBeInTheDocument();
+  });
+
+  it('marks the session user-confirmed only after the pending interaction is finished', () => {
+    // 服务端投影仍报「等待用户输入」：标识由来源 B 驱动。
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 'session-1',
+      traceId: 'trace-1',
+      source: 'test-engine',
+      status: 'waiting_user',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 1,
+      revision: 1,
+      changedAt: 1000,
+    });
+
+    const renderEasyConfirm = (lastMsg: IMessage) =>
+      render(
+        <EasyConfirm
+          disabledInput={false}
+          isBottom
+          cannotAt={false}
+          disableInputDraft
+          queryInputProps={{}}
+          lastMsg={lastMsg}
+          sessionId="session-1"
+          onSend={jest.fn()}
+          onCancel={jest.fn()}
+          myAgentType={1 as any}
+          setMyAgentType={jest.fn()}
+          messageState={IMessageState.Answer}
+          updateMessage={(message) => message}
+        />
+      );
+
+    // 提问卡片仍待处理（formStatus = INIT）→ 不得写入「已确认」覆盖位。
+    const { rerender } = renderEasyConfirm(createPendingMessage());
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('session-1')).toBe(true);
+
+    // formStatus 置为 FINISH → 待处理项归零 → 写入覆盖位，谓词立即为 false。
+    const finishedMessage = createPendingMessage();
+    (finishedMessage.thinkList![0].content as any).substance.formStatus = IFormStatus.FINISH;
+    rerender(
+      <EasyConfirm
+        disabledInput={false}
+        isBottom
+        cannotAt={false}
+        disableInputDraft
+        queryInputProps={{}}
+        lastMsg={finishedMessage}
+        sessionId="session-1"
+        onSend={jest.fn()}
+        onCancel={jest.fn()}
+        myAgentType={1 as any}
+        setMyAgentType={jest.fn()}
+        messageState={IMessageState.Answer}
+        updateMessage={(message) => message}
+      />
+    );
+
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('session-1')).toBe(false);
+    // 覆盖位不得伪造服务端投影：来源 B 原样保留。
+    expect(chatSessionRuntimeManager.getSessionRuntime('session-1')?.revision).toBe(1);
   });
 
   it('keeps the canonical v2 sequence after compatibility events arrive out of order', () => {
