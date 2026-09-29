@@ -573,7 +573,7 @@ root message ID. Deploy this endpoint before enabling the topic modal frontend.
 
 数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。
 
-本地 Podman 联调时，OpenSandbox 的 TCP endpoint 可能返回容器网段地址。`BYCLAW_TENANT_DB_PROBE_HOST=127.0.0.1` 只覆盖 BE 的宿主机连接探测地址；Node 仍使用同一 Podman 网络内的数据库容器名。Node 到 BE 的 `BYCLAW_TENANT_BE_INTERNAL_URL`、Redis 地址和 `BYCLAW_TENANT_INTERNAL_TOKEN` 由部署环境注入。HTTP 模式下 BE 经 OpenSandbox 代理访问 Node 时使用 `X-Byclaw-Internal-Token`；Node 直连 BE 的三个内部接口使用 Bearer 令牌。这些接口由控制器核验专用令牌。
+本地 Podman 联调时，OpenSandbox 的 TCP endpoint 可能返回容器网段地址。Docker 模式返回的 `/proxy/5432` 地址由 BE 的连接探测和租户数据源管理统一转换为数据库容器名与原生 5432 端口。`BYCLAW_TENANT_DB_PROBE_HOST=127.0.0.1` 可覆盖 BE 连接租户数据库时使用的主机；Node 仍使用同一 Podman 网络内的数据库容器名。Node 到 BE 的 `BYCLAW_TENANT_BE_INTERNAL_URL`、Redis 地址和 `BYCLAW_TENANT_INTERNAL_TOKEN` 由部署环境注入。HTTP 模式下 BE 经 OpenSandbox 代理访问 Node 时使用 `X-Byclaw-Internal-Token`；Node 直连 BE 的三个内部接口使用 Bearer 令牌。这些接口由控制器核验专用令牌。
 
 更新租户 Node 镜像后，平台管理员可调用 `POST /admin/tenants/recreate-node`（请求体 `{"enterpriseId":"…"}`）经 OpenSandbox 删除旧 Node 沙箱并从当前 `IMAGE_TENANT_NODE` 镜像重建，租户数据库沙箱和业务数据保留。接口更新 Node 沙箱记录及租户配置；替换失败时进入可重试的开通失败状态。仅重启已有容器不会应用新镜像。
 

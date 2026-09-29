@@ -9,10 +9,23 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
 class TenantDatasourceServiceTest {
+    @Test
+    void connectsToTenantDatabaseContainerBehindOpenSandboxProxy() {
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setSandboxId("c4858896-dcbb-47d3-a1ff-dd52bcf25f52");
+        record.setEndpoint("tcp://192.168.0.83:57571/proxy/5432");
+
+        TenantDbProvisioningService.HostPort endpoint = TenantDatasourceService.databaseEndpoint(record);
+
+        assertThat(endpoint.host()).isEqualTo("sandbox-c4858896-dcbb-47d3-a1ff-dd52bcf25f52");
+        assertThat(endpoint.port()).isEqualTo(5432);
+    }
+
     @Test
     void acceptsOneStatementWithQuotedSemicolon() {
         assertThat(TenantDatasourceService.singleStatement("SELECT ';' AS value;"))

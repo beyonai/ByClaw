@@ -1,6 +1,5 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
-import java.net.URI;
 import java.security.GeneralSecurityException;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -148,24 +147,23 @@ public class TenantDatasourceService {
             || record.getEndpoint() == null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database sandbox is not running");
         }
-        URI endpoint;
-        try {
-            endpoint = URI.create(record.getEndpoint());
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database endpoint is invalid");
-        }
-        if (!"tcp".equals(endpoint.getScheme()) || endpoint.getHost() == null
-            || endpoint.getPort() < 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database endpoint is invalid");
-        }
-        String host = dbProbeHost == null || dbProbeHost.isBlank() ? endpoint.getHost() : dbProbeHost;
-        String url = "jdbc:postgresql://" + host + ":" + endpoint.getPort() + "/" + dbName
+        TenantDbProvisioningService.HostPort endpoint = databaseEndpoint(record);
+        String host = dbProbeHost == null || dbProbeHost.isBlank() ? endpoint.host() : dbProbeHost;
+        String url = "jdbc:postgresql://" + host + ":" + endpoint.port() + "/" + dbName
             + "?connectTimeout=5&socketTimeout=20";
         try {
             return DriverManager.getConnection(url, dbUser,
                 credentialCrypto.decrypt(enterpriseId, dbName, envelope));
         } catch (GeneralSecurityException | SQLException e) {
             throw databaseUnavailable(e);
+        }
+    }
+
+    static TenantDbProvisioningService.HostPort databaseEndpoint(SsSandboxRecord record) {
+        try {
+            return TenantDbProvisioningService.parseEndpoint(record.getEndpoint(), record.getSandboxId());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database endpoint is invalid");
         }
     }
 
