@@ -28,7 +28,7 @@ public class DigitalEmployeeGovernanceService {
     }
 
     public boolean publicationEnabled() {
-        return "openSource".equalsIgnoreCase(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION"));
+        return true; // 开源与商业版本共用发布流程，角色、租户和资源权限仍分别校验。
     }
 
     public static boolean isAdministrator() {

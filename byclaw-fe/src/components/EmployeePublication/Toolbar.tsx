@@ -224,7 +224,7 @@ export default function PublicationToolbar({
           description={
             <>
               <div style={{ marginBottom: 12 }}>
-                可以继续发布。以下资源可能影响其他成员使用员工的部分能力，你也可以先修改关联资源。
+                可以继续发布。标为“不会带入”的资源将在发布时自动排除，新企业员工无法使用这些资源及依赖它们的能力。你也可以返回修改配置。
               </div>
               <div style={{ maxHeight: 360, overflowY: 'auto' }}>
                 <ResourceAvailabilityList dependencies={warnings} />
@@ -246,7 +246,7 @@ export default function PublicationToolbar({
         description={
           <>
             <div>
-              员工面向当前企业全员共享；工具、知识库和技能的使用限制不阻止发布。可复制的个人技能生成独立副本，其余资源保留原关联和权限。个人记忆、聊天记录和机器人渠道不参与发布。
+              员工面向当前企业全员共享。个人知识、个人工具、失效资源及无法复制的技能不会带入企业员工，不影响员工发布。通过校验的个人技能随员工一起审核，通过后生成企业副本。保留的企业资源沿用原权限。个人记忆、聊天记录和机器人渠道不参与发布。
             </div>
             {detail.dependencies
               .filter((dependency) => !dependency.warning)

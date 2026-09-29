@@ -5,7 +5,7 @@ import { Button, Result } from 'antd';
 import type { ReactNode } from 'react';
 import PublicationLoading from './Loading';
 
-/** 旧链接也必须先确认版本，避免商业版挂载发布编辑器和发起详情请求。 */
+/** 发布链接先确认功能可用性；开源和商业版本均支持，普通编辑不受此请求影响。 */
 export default function PublicationEditionGuard({ children }: { children: ReactNode }) {
   const { search } = useLocation();
   const navigate = useNavigate();
@@ -37,8 +37,8 @@ export default function PublicationEditionGuard({ children }: { children: ReactN
     return (
       <Result
         status="info"
-        title="当前版本不支持发布到官方推荐"
-        subTitle="数字员工发布功能仅在开源版本提供。你仍可以返回列表使用已有员工。"
+        title="当前暂不可使用发布功能"
+        subTitle="请确认当前登录状态，或返回列表使用已有员工。"
         extra={
           <Button type="primary" onClick={() => navigate('/myEmployees')}>
             返回员工列表

@@ -41,7 +41,7 @@ const candidate: PublicationDetail = {
 };
 
 async function continuePublication() {
-  fireEvent.click(await screen.findByRole('button', { name: '继续发布' }));
+  fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
 }
 
 describe('employee publication controls', () => {
@@ -86,7 +86,7 @@ describe('employee publication controls', () => {
     expect(dialog.getByText('原有授权用户（私有资源）')).toBeInTheDocument();
     expect(dialog.getByText('该资源为私有资源')).toBeInTheDocument();
     expect(dialog.getByText('未获授权的使用者无法使用该知识库')).toBeInTheDocument();
-    expect(dialog.getByRole('button', { name: '继续发布' })).toBeEnabled();
+    expect(dialog.getByRole('button', { name: '确认并继续发布' })).toBeEnabled();
     expect(publicationAction).not.toHaveBeenCalled();
     fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '提交发布' })).toBeEnabled());

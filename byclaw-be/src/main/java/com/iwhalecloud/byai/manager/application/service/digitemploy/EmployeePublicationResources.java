@@ -9,7 +9,6 @@ import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
 import com.iwhalecloud.byai.manager.dto.auth.AuthRedBlackDTO;
@@ -18,10 +17,7 @@ import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper;
-import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
-import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
-import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -36,6 +32,7 @@ import lombok.Getter;
 import lombok.Setter;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.ObjectProvider;
 
 /** Resolves the entire declared dependency list before a candidate can be submitted.
  * @author qin.guoquan
@@ -46,38 +43,32 @@ import org.springframework.stereotype.Service;
 public class EmployeePublicationResources {
     private static final int MAX_SKILL_BYTES = 100 * 1024 * 1024;
     private final SsResourceService resources;
-    private final SsResourceMapper resourceMapper;
     private final SsResExtSkillService skills;
     private final ResourceArtifactStorageService storage;
-    private final SsResourceArtifactService artifacts;
-    private final ByClawSkillResourceApplicationService skillRuntime;
     private final AuthApplicationService auth;
     private final PrivilegeGrantMapper grants;
     private final OrganizationService organizations;
     private final EnterpriseInfoService enterprise;
     private final DigitalEmployeePublicationMapper publications;
-    private final SequenceService sequence;
+    private final ObjectProvider<EmployeePublicationSkillBridge> skillBridge;
     private final com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService config;
 
-    public EmployeePublicationResources(SsResourceService resources, SsResourceMapper resourceMapper,
-        SsResExtSkillService skills, ResourceArtifactStorageService storage, SsResourceArtifactService artifacts,
-        ByClawSkillResourceApplicationService skillRuntime, AuthApplicationService auth,
+    public EmployeePublicationResources(SsResourceService resources,
+        SsResExtSkillService skills, ResourceArtifactStorageService storage, AuthApplicationService auth,
         PrivilegeGrantMapper grants, OrganizationService organizations, EnterpriseInfoService enterprise,
-        DigitalEmployeePublicationMapper publications, SequenceService sequence,
-        com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService config) {
+        DigitalEmployeePublicationMapper publications,
+        com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService config,
+        ObjectProvider<EmployeePublicationSkillBridge> skillBridge) {
         this.resources = resources;
-        this.resourceMapper = resourceMapper;
         this.skills = skills;
         this.storage = storage;
-        this.artifacts = artifacts;
-        this.skillRuntime = skillRuntime;
         this.auth = auth;
         this.grants = grants;
         this.organizations = organizations;
         this.enterprise = enterprise;
         this.publications = publications;
-        this.sequence = sequence;
         this.config = config;
+        this.skillBridge = skillBridge;
     }
 
     @Getter
@@ -95,10 +86,12 @@ public class EmployeePublicationResources {
         private String resourceType;
         private String availabilityScope;
         private String impact;
+        private Long requestId;
+        private List<String> toolCodes = new ArrayList<>();
     }
 
     public List<Long> audienceRoots(Long tenantId) {
-        // The current open-source identity system is deployment-scoped: login uses this enterprise ID.
+        // 版本开放不改变本部署的组织授权边界；不能将另一企业授权到当前部署的根组织。
         if (tenantId == null || !Objects.equals(tenantId, enterprise.getEnterpriseId())) {
             throw new BaseException("发布范围与当前部署企业不一致");
         }
@@ -128,7 +121,7 @@ public class EmployeePublicationResources {
                     Dependency unresolved = new Dependency();
                     unresolved.setLabel("技能配置");
                     unresolved.setResourceType("SKILL");
-                    unresolved.setAction("REFERENCE_RESOURCE");
+                    unresolved.setAction("OMIT_RESOURCE");
                     unresolved.setWarning(error instanceof BaseException ? error.getMessage() : "技能资源标识无效，此技能可能不可用");
                     result.add(unresolved);
                 }
@@ -137,9 +130,10 @@ public class EmployeePublicationResources {
         if (employee.getRelTools() != null) {
             for (String code : employee.getRelTools()) {
                 Dependency tool = new Dependency();
-                tool.setAction("REFERENCE_TOOL");
+                tool.setAction("OMIT_RESOURCE");
                 tool.setToolCode(code);
                 tool.setLabel("*".equals(code) ? "全部工具" : code);
+                tool.setResourceType("TOOL");
                 try {
                     if ("*".equals(code) || builtInTools().contains(code)) {
                         tool.setAction("BUILTIN_TOOL");
@@ -147,13 +141,18 @@ public class EmployeePublicationResources {
                         List<SsResource> matches = publications.resourcesByCode(code, tenantId);
                         if (matches.size() == 1 && isTool(matches.getFirst())) {
                             ids.add(matches.getFirst().getResourceId());
-                            continue;
+                            tool.setResource(matches.getFirst());
+                            tool.setTargetId(matches.getFirst().getResourceId());
+                            tool.setToolCodes(List.of(code));
+                            inspectReference(tool, authorId, tenantId, roots);
+                        } else {
+                            omit(tool, "当前无法唯一识别此工具或工具已下架");
                         }
-                        tool.setWarning("当前无法唯一识别此工具或工具已下架，发布后可能无法调用");
+
                     }
                 } catch (RuntimeException error) {
                     log.warn("检查发布工具失败，toolCode={}", code, error);
-                    tool.setWarning("暂时无法检查此工具的可用性，发布后可能无法调用");
+                    omit(tool, "暂时无法检查此工具的可用性");
                 }
                 result.add(tool);
             }
@@ -161,18 +160,22 @@ public class EmployeePublicationResources {
         ids.remove(null);
         if (ids.size() > 200) result.add(blocker("关联资源数量", "一次发布最多关联 200 个资源，请调整后提交"));
         for (Long id : ids) {
+            if (result.stream().anyMatch(d -> d.getResource() != null && Objects.equals(id, d.getResource().getResourceId()))) continue;
             SsResource resource = resources.findById(id);
             Dependency dependency = new Dependency();
+            dependency.setRequestId(requestId);
             dependency.setResource(resource);
             dependency.setTargetId(id);
             dependency.setAction("REFERENCE_RESOURCE");
             if (resource == null || !"SKILL".equals(resource.getResourceBizType())
-                || !"personal".equals(resource.getOwnerType()) || !Objects.equals(authorId, resource.getCreateBy())) {
+                || !Objects.equals(tenantId, resource.getComAcctId())
+                || !isPersonal(resource) || !Objects.equals(authorId, resource.getCreateBy())) {
                 inspectReference(dependency, authorId, tenantId, roots);
                 result.add(dependency);
                 continue;
             }
             try {
+                if (skillBridge.getIfAvailable() == null) throw new BaseException("技能校验和发布服务尚未接入，本次不复制此技能");
                 requireAvailable(resource, tenantId);
                 if (!auth.hasResourceUsePermission(resource, authorId)) throw new BaseException("创建者已无资源使用权限");
                 SsResExtSkill skill = skills.findById(id);
@@ -195,11 +198,11 @@ public class EmployeePublicationResources {
                 snapshot.setSkillPackageSize((long) bytes.length);
                 snapshot.setTargetContent(null);
                 dependency.setSkill(snapshot);
-                dependency.setTargetId(sequence.nextVal());
+                dependency.setTargetId(id);
                 dependency.setAction("COPY_SKILL");
+                checkSkill(dependency, bytes, authorId, tenantId);
             } catch (Exception error) {
-                referenceInsteadOfCopy(dependency, error);
-                inspectReference(dependency, authorId, tenantId, roots);
+                omit(dependency, error instanceof BaseException ? error.getMessage() : "技能文件读取或校验失败");
             }
             result.add(dependency);
         }
@@ -210,29 +213,70 @@ public class EmployeePublicationResources {
     public void validate(List<Dependency> dependencies, Long authorId, Long tenantId) {
         List<Long> roots = audienceRoots(tenantId);
         for (Dependency dependency : dependencies) {
-            if (dependency.getError() != null) throw new BaseException(dependency.getError());
+            if (dependency.getError() != null && dependency.getResource() == null && dependency.getTargetId() == null) {
+                throw new BaseException(dependency.getError());
+            }
+            dependency.setError(null); // 升级前的个人资源阻塞记录按当前规则转成排除提醒。
             if ("COPY_SKILL".equals(dependency.getAction())) {
                 try {
                     SsResource current = resources.findById(dependency.getResource().getResourceId());
                     requireAvailable(current, tenantId);
                     if (!auth.hasResourceUsePermission(current, authorId)) throw new BaseException("创建者已无关联资源使用权限");
                     if (!Objects.equals(current.getCreateBy(), authorId)) throw new BaseException("个人技能所有权已变更");
-                    try (InputStream snapshot = openSnapshot(List.of(dependency), current.getResourceId())) {
-                        if (snapshot == null) throw new BaseException("待发布技能快照文件不存在");
-                        byte[] bytes = snapshot.readNBytes(MAX_SKILL_BYTES + 1);
-                        String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-                        if (bytes.length == 0 || bytes.length > MAX_SKILL_BYTES || !hash.equals(dependency.getSkill().getSkillPackageHash())) throw new BaseException("技能快照已变更");
-                    }
+                    byte[] bytes = snapshotBytes(dependency);
+                    checkSkill(dependency, bytes, authorId, tenantId);
                 } catch (Exception error) {
-                    referenceInsteadOfCopy(dependency, error);
-                    inspectReference(dependency, authorId, tenantId, roots);
+                    omit(dependency, error instanceof BaseException ? error.getMessage() : "技能文件读取或校验失败");
                 }
-            } else if (dependency.getResource() != null || dependency.getTargetId() != null) {
-                inspectReference(dependency, authorId, tenantId, roots);
+            } else if ("OMIT_RESOURCE".equals(dependency.getAction()) && dependency.getSkill() != null) {
+                // 保留已审核版本的排除结果；重新保存草稿才能重新捕获个人技能。
+                omit(dependency, dependency.getWarning());
+            } else if (dependency.getToolCode() != null && dependency.getResource() == null) {
+                inspectToolCode(dependency, authorId, tenantId);
             } else {
-                inspectToolCode(dependency, tenantId);
+                inspectReference(dependency, authorId, tenantId, roots);
             }
         }
+    }
+
+    private byte[] snapshotBytes(Dependency dependency) throws Exception {
+        if (dependency.getSkill() == null || StringUtils.isBlank(dependency.getSkill().getSkillUrl())) {
+            throw new BaseException("待发布技能快照不存在");
+        }
+        try (InputStream input = storage.readWithinResourceRoot(normalizePath(dependency.getSkill().getSkillUrl()))) {
+            if (input == null) throw new BaseException("待发布技能快照文件不存在");
+            byte[] bytes = input.readNBytes(MAX_SKILL_BYTES + 1);
+            String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+            if (bytes.length == 0 || bytes.length > MAX_SKILL_BYTES || !hash.equals(dependency.getSkill().getSkillPackageHash())) {
+                throw new BaseException("技能快照已变更，请重新保存待发布配置");
+            }
+            return bytes;
+        }
+    }
+
+    private void checkSkill(Dependency dependency, byte[] bytes, Long authorId, Long tenantId) {
+        EmployeePublicationSkillBridge bridge = skillBridge.getIfAvailable();
+        if (bridge == null) {
+            omit(dependency, "技能校验和发布服务尚未接入，本次不复制此技能");
+            return;
+        }
+        var checked = bridge.check(dependency.getResource(), dependency.getSkill(), bytes,
+            context(dependency, tenantId, authorId));
+        if (checked == null || !checked.copyAllowed()) {
+            String reasons = checked == null || checked.issues() == null ? "技能依赖校验未通过"
+                : checked.issues().stream().map(issue -> StringUtils.defaultIfBlank(issue.name(), issue.resourceId())
+                    + "：" + issue.reason()).collect(java.util.stream.Collectors.joining("；"));
+            omit(dependency, StringUtils.defaultIfBlank(reasons, "技能依赖校验未通过"));
+        }
+    }
+
+    private EmployeePublicationSkillBridge.Context context(Dependency dependency, Long tenantId, Long authorId) {
+        Long requestId = dependency.getRequestId();
+        if (requestId == null && dependency.getSkill() != null) {
+            String[] parts = normalizePath(dependency.getSkill().getSkillUrl()).split("/");
+            if (parts.length > 2 && "official-publications".equals(parts[1])) requestId = Long.valueOf(parts[2]);
+        }
+        return new EmployeePublicationSkillBridge.Context(tenantId, authorId, requestId);
     }
 
     public InputStream openSnapshot(List<Dependency> dependencies, Long resourceId) {
@@ -242,57 +286,72 @@ public class EmployeePublicationResources {
         return storage.readWithinResourceRoot(normalizePath(dependency.getSkill().getSkillUrl()));
     }
 
-    public Map<Long, Long> materialize(List<Dependency> dependencies, Long tenantId) {
+    public Map<Long, Long> materialize(List<Dependency> dependencies, Long tenantId, Long officialEmployeeId) {
         Map<Long, Long> mapping = new LinkedHashMap<>();
         for (Dependency dependency : dependencies) {
             SsResource source = dependency.getResource();
-            if ("UNAVAILABLE_RESOURCE".equals(dependency.getAction())) {
-                mapping.put(dependency.getTargetId(), null);
-                continue; // 员工可以发布，但不得把跨企业资源绑定到官方运行配置。
-            }
-            if (source == null) {
-                // 已失效的资源保留原关联 ID；内置工具和配置提示没有资源 ID。
-                if (dependency.getTargetId() != null) mapping.put(dependency.getTargetId(), dependency.getTargetId());
+            Long sourceId = source == null ? dependency.getTargetId() : source.getResourceId();
+            if (isOmitted(dependency)) {
+                if (sourceId != null) mapping.put(sourceId, null);
                 continue;
             }
-            mapping.put(source.getResourceId(), dependency.getTargetId());
-            if (!"COPY_SKILL".equals(dependency.getAction())) continue;
-            SsResource target = new SsResource();
-            target.setResourceBizType("SKILL");
-            target.setResourceType("ATOM");
-            target.setSystemCode("BYAI");
-            target.setResourceName(source.getResourceName());
-            target.setResourceDesc(source.getResourceDesc());
-            target.setAvatar(source.getAvatar());
-            target.setTags(source.getTags());
-            target.setCreateBy(source.getCreateBy());
-            target.setComAcctId(tenantId);
-            target.setResourceStatus(2);
-            target.setResourceDVerid(1L);
-            target.setResourceRVerid(0L);
-            target.setResourceId(dependency.getTargetId());
-            target.setResourceCode("official-skill-" + target.getResourceId());
-            target.setOwnerType("enterprise");
-            target.setPublicationSourceId(null);
-            target.setPublicationRequestId(Long.valueOf(dependency.getSkill().getSkillUrl().split("/")[2]));
-            target.setCreateTime(new Date());
-            target.setUpdateTime(new Date());
-            target.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-            target.setManOrgId(audienceRoots(tenantId).getFirst());
-            target.setManUserId(String.valueOf(target.getCreateBy()));
-            resourceMapper.insert(target);
-            SsResExtSkill skill = dependency.getSkill();
-            skill.setResourceId(target.getResourceId());
-            skill.setSourceType("OFFICIAL_EMPLOYEE_PUBLICATION");
-            skill.setSyncStatus("SUCCESS");
-            skill.setSyncError(null);
-            skills.save(skill);
-            skillRuntime.refreshSkillBasicInfo(target);
-            artifacts.upsertArtifact(target.getResourceId(), "SKILL", "IMPORT_ZIP", "minio", skill.getSkillUrl(), "employee-publication");
-            auth.ensureCreatorDefaultPrivileges(target);
-            grantAudience(target, tenantId);
+            if (source == null) continue;
+            if (!"COPY_SKILL".equals(dependency.getAction())) {
+                mapping.put(sourceId, sourceId);
+                continue;
+            }
+            try {
+                EmployeePublicationSkillBridge bridge = skillBridge.getIfAvailable();
+                if (bridge == null) throw new BaseException("技能发布服务暂不可用，请稍后重试");
+                Long targetId = bridge.publish(source, dependency.getSkill(), snapshotBytes(dependency),
+                    officialEmployeeId, context(dependency, tenantId, source.getCreateBy()));
+                SsResource target = targetId == null ? null : resources.findById(targetId);
+                requireAvailable(target, tenantId);
+                if (Objects.equals(sourceId, targetId) || !"SKILL".equals(target.getResourceBizType())
+                    || !"enterprise".equals(target.getOwnerType())) throw new BaseException("技能发布未返回有效的企业副本");
+                dependency.setTargetId(targetId);
+                auth.ensureCreatorDefaultPrivileges(target);
+                grantAudience(target, tenantId);
+                mapping.put(sourceId, targetId);
+            } catch (Exception error) {
+                // B 已开始写入时必须回滚，不能留下未完成的企业资源并声称发布成功。
+                log.error("发布企业技能失败，officialEmployeeId={}, sourceSkillId={}", officialEmployeeId, sourceId, error);
+                throw new BaseException("企业技能生成失败，请重试发布：" + source.getResourceName());
+            }
         }
         return mapping;
+    }
+
+    /** 仅修改发布执行用 DTO；原员工和待发布草稿仍保留完整清单供用户对照。 */
+    public void applyPublishedResources(DigitalEmployeeDTO snapshot, List<Dependency> dependencies, Map<Long, Long> mapping) {
+        java.util.Set<Long> allowed = new LinkedHashSet<>();
+        for (Dependency dependency : dependencies) {
+            if (!isOmitted(dependency) && dependency.getResource() != null) allowed.add(dependency.getResource().getResourceId());
+        }
+        snapshot.setRelIds(allowed.stream()
+            .map(id -> mapping.getOrDefault(id, id)).filter(Objects::nonNull).distinct().toList());
+        java.util.Set<String> allowedCodes = new LinkedHashSet<>();
+        for (Dependency dependency : dependencies) {
+            if (isOmitted(dependency)) continue;
+            if ("BUILTIN_TOOL".equals(dependency.getAction())) allowedCodes.add(dependency.getToolCode());
+            if (dependency.getResource() != null && isTool(dependency.getResource())) {
+                allowedCodes.add(dependency.getResource().getResourceCode());
+                if (dependency.getToolCodes() != null) allowedCodes.addAll(dependency.getToolCodes());
+            }
+        }
+        snapshot.setRelTools(snapshot.getRelTools().stream().filter(allowedCodes::contains).distinct().toList());
+        snapshot.setRelResourceInfoList(snapshot.getRelResourceInfoList().stream()
+            .filter(info -> snapshot.getRelIds().stream().anyMatch(id -> String.valueOf(id).equals(info.getRelId()))).toList());
+        snapshot.setRelSkills(List.of());
+        snapshot.setSkills("[]"); // 后续同步只根据企业副本的最终关系重建运行配置。
+    }
+
+    static boolean isOmitted(Dependency dependency) {
+        return "OMIT_RESOURCE".equals(dependency.getAction()) || "UNAVAILABLE_RESOURCE".equals(dependency.getAction());
+    }
+
+    static boolean isPersonal(SsResource resource) {
+        return resource != null && List.of("personal", "personal_default").contains(StringUtils.defaultString(resource.getOwnerType()));
     }
 
     public void grantAudience(SsResource resource, Long tenantId) {
@@ -338,59 +397,53 @@ public class EmployeePublicationResources {
             && List.of("TOOLKIT", "TOOL", "MCP", "AGENT").contains(resource.getResourceBizType());
     }
 
-    /** 依赖可用性与员工发布资格分离；保留引用和原权限，只提醒使用限制。 */
+    /** 发布只排除不可携带的依赖，不改变原资源权限或阻止员工本身发布。 */
     private void inspectReference(Dependency dependency, Long authorId, Long tenantId, List<Long> roots) {
-        dependency.setAction(isTool(dependency.getResource()) ? "REFERENCE_TOOL" : "REFERENCE_RESOURCE");
+        String previousWarning = dependency.getWarning();
         dependency.setError(null);
         dependency.setWarning(null);
-        dependency.setAvailabilityScope("尚未确认");
-        dependency.setImpact("保留原关联，实际使用仍取决于资源授权、状态及运行环境");
-        if (dependency.getResource() != null) dependency.setResourceType(dependency.getResource().getResourceBizType());
         Long id = dependency.getResource() == null ? dependency.getTargetId() : dependency.getResource().getResourceId();
         try {
             SsResource current = resources.findById(id);
-            if (current != null && !Objects.equals(current.getComAcctId(), tenantId)) {
-                dependency.setAction("UNAVAILABLE_RESOURCE");
-                dependency.setResource(null);
-                dependency.setTargetId(id);
-                dependency.setWarning("资源不属于当前企业，官方副本不启用此关联；不影响员工发布");
-                dependency.setAvailabilityScope("当前企业不可用");
-                dependency.setImpact("官方副本不启用此关联，当前企业用户不能通过该副本使用它");
-            } else if (current == null) {
-                dependency.setWarning("资源不存在，发布后可能无法使用");
-                dependency.setAvailabilityScope("当前不可用");
-                dependency.setImpact("资源恢复前，用户无法使用此关联资源");
-            } else if (!Objects.equals(current.getResourceStatus(), 2)) {
-                dependency.setWarning("资源已下架或注销，当前不可用");
-                dependency.setAvailabilityScope("当前不可用");
-                dependency.setImpact("资源恢复前，用户无法使用此关联资源");
-            } else if (!auth.hasResourceUsePermission(current, authorId)) {
-                dependency.setWarning("创建者当前无此资源的使用权限；其他使用者能否使用取决于各自权限");
-                dependency.setAvailabilityScope("原有授权用户（创建者当前无权）");
-                dependency.setImpact("未获授权的用户无法使用此资源，发布员工不会新增授权");
-            } else if (!"enterprise".equals(current.getOwnerType())) {
-                dependency.setWarning("私有资源保留原有权限，未获授权的使用者无法使用");
-                dependency.setAvailabilityScope("原有授权用户（私有资源）");
-                dependency.setImpact("未获授权的其他用户无法使用此资源，原有授权继续生效");
-            } else if (roots.isEmpty()) {
-                dependency.setWarning("尚未确认企业全员的资源使用权限，部分使用者可能无法使用");
-            } else {
+            if (current == null) { omit(dependency, "资源不存在或已失效"); return; }
+            if (!Objects.equals(current.getComAcctId(), tenantId)) {
+                dependency.setResource(null); dependency.setTargetId(id);
+                dependency.setLabel("其他企业资源");
+                omit(dependency, "资源不属于当前企业"); return;
+            }
+            dependency.setResource(current);
+            dependency.setTargetId(id);
+            dependency.setResourceType(current.getResourceBizType());
+            if (!Objects.equals(current.getResourceStatus(), 2)) { omit(dependency, "资源已下架或注销"); return; }
+            if (isPersonal(current)) {
+                omit(dependency, "SKILL".equals(current.getResourceBizType()) ? StringUtils.defaultIfBlank(previousWarning, "个人技能未生成企业副本") : "个人资源不带入企业员工");
+                return;
+            }
+            if (!"enterprise".equals(current.getOwnerType())) { omit(dependency, "尚未确认资源的企业归属"); return; }
+            dependency.setAction(isTool(current) ? "REFERENCE_TOOL" : "REFERENCE_RESOURCE");
+            dependency.setAvailabilityScope("原有授权用户");
+            dependency.setImpact("保留原资源关联和权限，未获授权的用户无法使用此资源");
+            if (!auth.hasResourceUsePermission(current, authorId)) {
+                dependency.setWarning("创建者当前无此资源的使用权限；其他使用者仍按各自权限使用");
+                return;
+            }
+            try {
                 requirePublic(current, roots);
                 dependency.setAvailabilityScope("当前企业全员");
-                dependency.setImpact("企业用户可按现有授权使用，运行配置及服务状态仍需有效");
-            }
-        } catch (BaseException error) {
-            dependency.setWarning("资源未确认对全员可用：" + error.getMessage());
-            dependency.setAvailabilityScope("原有授权用户（未确认全员可用）");
-            dependency.setImpact("未获授权或命中使用黑名单的用户无法使用此资源");
+                dependency.setImpact("保留企业资源关联，运行配置及服务状态仍需有效");
+            } catch (BaseException warning) { dependency.setWarning(warning.getMessage()); }
         } catch (RuntimeException error) {
             log.warn("检查发布资源失败，resourceId={}", id, error);
-            dependency.setWarning("暂时无法检查此资源的可用性，发布后可能无法使用");
+            omit(dependency, "暂时无法确认此资源的归属或可用性");
         }
-        if (dependency.getSnapshotWarning() != null) {
-            dependency.setWarning(dependency.getSnapshotWarning() + StringUtils.defaultString(dependency.getWarning()));
-            dependency.setImpact("未生成独立技能副本，保留原技能关联。" + dependency.getImpact());
-        }
+    }
+
+    private void omit(Dependency dependency, String reason) {
+        dependency.setAction("OMIT_RESOURCE");
+        dependency.setError(null);
+        dependency.setWarning(StringUtils.defaultIfBlank(reason, "此资源无法随员工发布"));
+        dependency.setAvailabilityScope("不带入企业员工");
+        dependency.setImpact("新企业员工中不会出现此资源，依赖它的能力不可用；原个人员工保持不变");
     }
 
     public record Availability(String resourceType, String scope, String reason, String impact) { }
@@ -399,6 +452,11 @@ public class EmployeePublicationResources {
     static Availability describe(Dependency dependency) {
         String type = dependency.getResource() == null ? dependency.getResourceType() : dependency.getResource().getResourceBizType();
         if ("BUILTIN_TOOL".equals(dependency.getAction()) || "REFERENCE_TOOL".equals(dependency.getAction())) type = "TOOL";
+        if (isOmitted(dependency)) {
+            return new Availability(StringUtils.defaultIfBlank(type, "UNKNOWN"), "不带入企业员工",
+                StringUtils.defaultIfBlank(dependency.getWarning(), "此资源无法随员工发布"),
+                "新企业员工中不会出现此资源，依赖它的能力不可用；原个人员工保持不变");
+        }
         if ("COPY_SKILL".equals(dependency.getAction())) {
             return new Availability("SKILL", "当前企业全员（发布成功后）", "个人技能将生成独立副本", "使用独立技能副本，不依赖原技能的私有权限");
         }
@@ -411,37 +469,25 @@ public class EmployeePublicationResources {
         return new Availability(StringUtils.defaultIfBlank(type, "UNKNOWN"), scope, reason, impact);
     }
 
-    private void referenceInsteadOfCopy(Dependency dependency, Exception error) {
-        dependency.setAction("REFERENCE_RESOURCE");
-        dependency.setTargetId(dependency.getResource().getResourceId());
-        dependency.setSkill(null);
-        dependency.setError(null);
-        String reason = error instanceof BaseException ? error.getMessage() : "技能文件读取或快照保存失败";
-        dependency.setSnapshotWarning("未生成独立技能副本，改为保留原关联：" + reason + "。");
-        log.warn("发布技能改为保留原关联，resourceId={}", dependency.getTargetId(), error);
-    }
-
-    private void inspectToolCode(Dependency dependency, Long tenantId) {
-        if (!List.of("REFERENCE_TOOL", "BUILTIN_TOOL").contains(dependency.getAction())) return;
+    private void inspectToolCode(Dependency dependency, Long authorId, Long tenantId) {
         try {
             if ("*".equals(dependency.getToolCode()) || builtInTools().contains(dependency.getToolCode())) {
-                dependency.setAction("BUILTIN_TOOL");
-                dependency.setWarning(null); // 平台内置工具（包括全部工具）面向全员开放。
+                dependency.setAction("BUILTIN_TOOL"); dependency.setWarning(null); dependency.setError(null);
             } else {
-                dependency.setAction("REFERENCE_TOOL");
-                dependency.setWarning("自定义工具保留原配置，可用性取决于使用者权限及运行环境");
-                if (publications.resourcesByCode(dependency.getToolCode(), tenantId).isEmpty()) {
-                    dependency.setWarning("当前无法识别此工具或工具已下架，发布后可能无法调用");
-                }
+                // 旧申请只保存了工具编码时也按资源表复验，不能绕过个人资源过滤。
+                List<SsResource> matches = publications.resourcesByCode(dependency.getToolCode(), tenantId);
+                if (matches.size() == 1 && isTool(matches.getFirst())) {
+                    dependency.setResource(matches.getFirst());
+                    dependency.setTargetId(matches.getFirst().getResourceId());
+                    dependency.setToolCodes(List.of(dependency.getToolCode()));
+                    inspectReference(dependency, authorId, tenantId, audienceRoots(tenantId));
+                } else omit(dependency, "当前无法唯一识别此工具或工具已下架");
             }
-        } catch (RuntimeException error) {
-            log.warn("检查发布工具失败，toolCode={}", dependency.getToolCode(), error);
-            dependency.setWarning("暂时无法检查此工具的可用性，发布后可能无法调用");
-        }
+        } catch (RuntimeException error) { omit(dependency, "暂时无法检查此工具的可用性"); }
     }
 
     private void requirePublic(SsResource resource, List<Long> roots) {
-        if (!isTool(resource) && !List.of("SKILL", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM").contains(resource.getResourceBizType())) {
+        if (!isTool(resource) && !List.of("SKILL", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "KG_CLOUD").contains(resource.getResourceBizType())) {
             throw new BaseException("当前资源类型可能不受运行环境支持");
         }
         if (!"enterprise".equals(resource.getOwnerType())) throw new BaseException("私有资源未向全员开放");
