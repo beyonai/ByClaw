@@ -1,3 +1,4 @@
+import { hasAnyUserRole } from '@/utils/userRole';
 import React, { useState, useMemo, useEffect } from 'react';
 import { connect } from 'dva';
 import { Tree, Input, Tooltip, Modal, message, Dropdown, Popconfirm } from 'antd';
@@ -39,7 +40,7 @@ const BusinessFieldTree = ({
         const { data } = res;
         const { userType } = data || {};
         // 只有平台管理员才能操作
-        setIsPlatformAdmin(userType === 'PLAT_MAN');
+        setIsPlatformAdmin(hasAnyUserRole([userType], ['PLAT_MAN']));
       },
       fail: () => {
         setIsPlatformAdmin(false);

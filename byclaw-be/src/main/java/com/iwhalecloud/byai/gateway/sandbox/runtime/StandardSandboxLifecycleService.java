@@ -129,7 +129,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 ? Optional.empty()
                 : runtimeProvider.findReusable(userCode, sandboxType);
             if (reusable.isPresent()) {
-                log.info("生命周期服务命中可复用远端沙箱，provider={}，user={}，type={}，sandboxId={}",
+                log.debug("生命周期服务命中可复用远端沙箱，provider={}，user={}，type={}，sandboxId={}",
                     runtimeProvider.providerType(), userCode, sandboxType, reusable.get().getSandboxId());
             }
             else if (Boolean.TRUE.equals(launchRequest.getSkipReusableSandbox())) {
@@ -201,13 +201,13 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             if (sandboxInfo == null) {
                 return SandboxResponse.error("sandboxInfo is required");
             }
-            log.info("生命周期服务开始续约沙箱，provider={}，user={}，type={}，sandboxId={}，timeoutSeconds={}，remoteExpiresAt={}",
+            log.debug("生命周期服务开始续约沙箱，provider={}，user={}，type={}，sandboxId={}，timeoutSeconds={}，remoteExpiresAt={}",
                 runtimeProvider.providerType(), sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(),
                 sandboxInfo.getSandboxId(), sandboxInfo.getTimeoutSeconds(), sandboxInfo.getRemoteExpiresAt());
             runtimeProvider.heartbeat(sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(), sandboxInfo);
             sandboxInfo.setLastHeartbeatTime(LocalDateTime.now());
             persistSandbox(buildRedisKey(sandboxInfo.getUserCode(), sandboxInfo.getSandboxType()), sandboxInfo);
-            log.info("生命周期服务续约沙箱完成，provider={}，user={}，type={}，sandboxId={}",
+            log.debug("生命周期服务续约沙箱完成，provider={}，user={}，type={}，sandboxId={}",
                 runtimeProvider.providerType(), sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(),
                 sandboxInfo.getSandboxId());
             return SandboxResponse.success(null);
@@ -241,7 +241,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             var remote = runtimeProvider.getSandbox(
                 sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(), sandboxInfo);
             SandboxRuntimeInstance instance = remote.orElse(null);
-            log.info("生命周期服务查询远端沙箱详情，provider={}，user={}，type={}，sandboxId={}，exists={}，state={}，expiresAt={}，createdAt={}",
+            log.debug("生命周期服务查询远端沙箱详情，provider={}，user={}，type={}，sandboxId={}，exists={}，state={}，expiresAt={}，createdAt={}",
                 runtimeProvider.providerType(), sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(),
                 sandboxInfo.getSandboxId(), instance != null, instance != null ? instance.getState() : null,
                 instance != null ? instance.getExpiresAt() : null, instance != null ? instance.getCreatedAt() : null);

@@ -244,7 +244,8 @@ function defaultAdapters() {
     }),
     'cloud-knowledge': createCloudKnowledgeAdapter({
       python: process.env.PYTHON_BIN || 'python3',
-      script: process.env.CLOUD_KNOWLEDGE_CLI || new URL('../../../project-cloud-knowledge/scripts/project_cloud_knowledge.py', import.meta.url).pathname,
+      // Preserve the legacy override; otherwise let the adapter resolve its runtime layout.
+      script: process.env.CLOUD_KNOWLEDGE_CLI || undefined,
       env: process.env,
     }),
   };

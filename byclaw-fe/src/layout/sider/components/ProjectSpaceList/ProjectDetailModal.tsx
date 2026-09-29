@@ -140,7 +140,6 @@ import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
 import useAppStore from '@/models/common/useAppStore';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
-import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import useFilePreviewActions from '@/layout/sider/components/FileSiderPanel/hooks/useFilePreviewActions';
@@ -1303,9 +1302,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
           (candidateProjectId) =>
             Number.isFinite(candidateProjectId) && (candidateProjectId === -1 || candidateProjectId > 0)
         );
-
-      // 任务详情切换时只使用当前任务员工，清除该会话之前残留的多员工输入草稿。
-      clearEasyConfirmInputDraft(normalizedTaskSession.sessionId);
 
       if (targetProjectId !== undefined) {
         EventEmitter.emit('projectSpace-session-context', {
@@ -3665,7 +3661,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const openArchitectSession = (sessionId?: string, agentId?: string, agentName?: string) => {
     if (!sessionId || !projectId) return;
     const sessionIdText = String(sessionId);
-    clearEasyConfirmInputDraft(sessionIdText);
     if (agentId && agentName) {
       setAgentCache(
         getElementData(ResourceType.digitalEmployee, {
@@ -3870,8 +3865,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return;
     }
     const sessionIdText = String(requirement.sessionId);
-    // 进历史会话前清掉该会话遗留的多员工输入草稿,避免上一次退出时的半截输入又冒出来。
-    clearEasyConfirmInputDraft(sessionIdText);
     if (projectId) {
       EventEmitter.emit('projectSpace-session-context', {
         sessionId: sessionIdText,

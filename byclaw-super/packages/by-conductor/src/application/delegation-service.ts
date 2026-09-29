@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { isRecoverableExecutionError, RunCancellationRequestedError } from "../domain/execution-ownership.js";
 import type { ConnectorExecution, ConnectorRequest } from "../ports/connectors.js";
 import { ConnectorRegistry } from "../ports/connectors.js";
 import type {
@@ -62,6 +64,8 @@ export interface ExecuteDelegationInput {
   leaseClaim?: RunExecutionClaim;
   /** SYNTHESIZING 恢复时允许复用本 Run 已完成且参数相同的委派结果。 */
   reuseCompleted?: boolean;
+  /** 接管时精确恢复持久委派，禁止同参数的其他委派结果替代它。 */
+  recoverDelegationId?: string;
   onInputRequired?(interactionId: string, request: UserInteractionRequest): Promise<void> | void;
   onInputResolved?(interactionId: string): Promise<void> | void;
 }
@@ -73,6 +77,7 @@ type ActiveExecution = {
 
 type ActiveInteraction = {
   runId: string;
+  executionToken: symbol;
   respond(response: UserInteractionResponse): Promise<void>;
 };
 
@@ -99,7 +104,8 @@ type DelegationTimeoutKind = "first_activity" | "idle";
  */
 export class DelegationService {
   readonly #active = new Map<string, Map<string, ActiveExecution>>();
-  readonly #claims = new Map<string, RunExecutionClaim>();
+  // 仅保存当前异步调用栈的执行凭证，旧 attempt 不能借用同 Run 新 attempt 的 claim。
+  readonly #executionClaim = new AsyncLocalStorage<RunExecutionClaim | undefined>();
   readonly #interactions = new Map<string, ActiveInteraction>();
   readonly #timeouts: DelegationTimeoutOptions;
 
@@ -131,7 +137,11 @@ export class DelegationService {
    * 执行一次委派，聚合流式输出并处理成功、失败、超时和上游取消。
    * 工具真正执行前会再次从 Run 的 Agent 快照中校验授权，防止模型越权。
    */
-  async execute(input: ExecuteDelegationInput): Promise<AgentResult> {
+  execute(input: ExecuteDelegationInput): Promise<AgentResult> {
+    return this.#executionClaim.run(input.leaseClaim, () => this.#execute(input));
+  }
+
+  async #execute(input: ExecuteDelegationInput): Promise<AgentResult> {
     // AbortSignal 不会为“注册监听前已经发生”的取消补发事件。先在任何持久化或
     // Connector 投递之前拒绝，避免已停止的 Run 仍创建并启动新委派。
     input.signal.throwIfAborted();
@@ -179,6 +189,7 @@ export class DelegationService {
         .reverse()
         .find(
           (candidate) =>
+            (!input.recoverDelegationId || candidate.id === input.recoverDelegationId) &&
             TERMINAL_DELEGATION_STATUSES.has(candidate.status) &&
             candidate.result &&
             candidate.agentId === agent.id &&
@@ -200,18 +211,19 @@ export class DelegationService {
         return structuredClone(completed.result);
       }
     }
-    if (input.leaseClaim) {
-      this.#claims.set(input.runId, input.leaseClaim);
-    }
     const existing = historical
       .reverse()
       .find(
         (candidate) =>
+          (!input.recoverDelegationId || candidate.id === input.recoverDelegationId) &&
           !TERMINAL_DELEGATION_STATUSES.has(candidate.status) &&
           candidate.agentId === agent.id &&
           candidate.task === input.task &&
           candidate.expectedOutput === input.expectedOutput,
       );
+    if (input.recoverDelegationId && !existing) {
+      throw new Error(`Cannot recover persisted delegation: ${input.recoverDelegationId}`);
+    }
     const delegationId = existing?.id ?? this.createId();
     const resuming = Boolean(existing?.externalRef);
     let delegation: Delegation = existing ?? {
@@ -228,57 +240,44 @@ export class DelegationService {
       updatedAt: this.now(),
     };
     if (!existing) {
-      try {
-        await this.#saveDelegationWithEvent(delegation, {
-          timestamp: this.now(),
-          runId: input.runId,
-          type: "delegation.started",
-          data: {
-            delegationId,
-            agentId: agent.id,
-            agentName: agent.name,
-            connectorId: connector.id,
-            task: input.task,
-            ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
-            ...(input.attachments?.length
-              ? {
-                  attachments: input.attachments.map((attachment) => ({
-                    id: attachment.id,
-                    name: attachment.name,
-                    ...(attachment.mediaType ? { mediaType: attachment.mediaType } : {}),
-                  })),
-                }
-              : {}),
-          },
-        });
-        this.logger?.info(
-          {
-            ...lifecycleFields,
-            stage: "delegation_created",
-            delegationId,
-          },
-          "已创建子 Agent 委派",
-        );
-      } catch (error) {
-        if (this.#claims.get(input.runId) === input.leaseClaim) {
-          this.#claims.delete(input.runId);
-        }
-        throw error;
-      }
+      await this.#saveDelegationWithEvent(delegation, {
+        timestamp: this.now(),
+        runId: input.runId,
+        type: "delegation.started",
+        data: {
+          delegationId,
+          agentId: agent.id,
+          agentName: agent.name,
+          connectorId: connector.id,
+          task: input.task,
+          ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
+          attachments: (input.attachments ?? []).map((attachment) => ({
+            id: attachment.id,
+            name: attachment.name,
+            ...(attachment.mediaType ? { mediaType: attachment.mediaType } : {}),
+          })),
+        },
+      });
+      this.logger?.info(
+        {
+          ...lifecycleFields,
+          stage: "delegation_created",
+          delegationId,
+        },
+        "已创建子 Agent 委派",
+      );
     }
 
     // list/save 期间也可能发生取消。此时委派记录已经存在，但尚未向外部系统
     // 投递；直接收敛为 CANCELLED，不能继续调用 Connector。
     if (input.signal.aborted) {
-      try {
-        return await this.#finishAborted(delegation);
-      } finally {
-        if (this.#claims.get(input.runId) === input.leaseClaim) {
-          this.#claims.delete(input.runId);
-        }
+      if (isRecoverableExecutionError(input.signal.reason)) {
+        throw input.signal.reason;
       }
+      return this.#finishAborted(delegation);
     }
 
+    const executionToken = Symbol("delegation execution");
     const controller = new AbortController();
     let timeoutKind: DelegationTimeoutKind | undefined;
     let execution: ConnectorExecution | undefined;
@@ -322,14 +321,6 @@ export class DelegationService {
           : "等待子 Agent 事件超时",
       );
       controller.abort(new Error(timeoutReason(kind)));
-      if (execution) {
-        void this.#cancelExecution(
-          input.runId,
-          delegationId,
-          execution,
-          `delegation ${kind} timeout`,
-        ).catch(() => undefined);
-      }
     };
     const armActivityTimeout = () => {
       if (activityTimeout) {
@@ -365,6 +356,9 @@ export class DelegationService {
 
     try {
       if (controller.signal.aborted) {
+        if (isRecoverableExecutionError(controller.signal.reason)) {
+          throw controller.signal.reason;
+        }
         return await this.#finishAborted(delegation);
       }
       if (resuming) {
@@ -430,13 +424,7 @@ export class DelegationService {
         pauseActivityTimeout();
       }
       if (controller.signal.aborted) {
-        await this.#cancelExecution(
-          input.runId,
-          delegationId,
-          execution,
-          timeoutKind ? `delegation ${timeoutKind} timeout` : "run cancelled",
-        );
-        return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
+        throw controller.signal.reason ?? new Error("Run cancelled");
       }
 
       if (!resuming) {
@@ -492,7 +480,9 @@ export class DelegationService {
         await input.onInputRequired?.(interactionId, request);
         this.#interactions.set(interactionId, {
           runId: input.runId,
-          respond: async (response) => {
+          executionToken,
+          respond: (response) => this.#executionClaim.run(input.leaseClaim, async () => {
+            controller.signal.throwIfAborted();
             if (!execution?.respondToInput) {
               throw new Error(`Connector does not support user-input resume: ${connector.id}`);
             }
@@ -508,7 +498,7 @@ export class DelegationService {
             await this.#saveDelegation(delegation);
             armActivityTimeout();
             await input.onInputResolved?.(interactionId);
-          },
+          }),
         });
         void this.#waitForInteractionResponse(
           input.runId,
@@ -518,7 +508,7 @@ export class DelegationService {
         )
           .then(async (response) => {
             const active = this.#interactions.get(interactionId);
-            if (active?.runId !== input.runId) {
+            if (active?.executionToken !== executionToken) {
               return;
             }
             this.#interactions.delete(interactionId);
@@ -547,7 +537,7 @@ export class DelegationService {
 
       for await (const event of execution.events) {
         if (controller.signal.aborted) {
-          return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
+          throw controller.signal.reason ?? new Error("Run cancelled");
         }
         if (event.type !== "completed" && event.type !== "failed") {
           markActivity();
@@ -798,7 +788,38 @@ export class DelegationService {
       if (error instanceof DelegationSuspendedError) {
         throw error;
       }
+      // 只有数据库确认的全局用户取消可越过旧 lease：该意图针对整个 Run，
+      // 不是旧 owner 的失败处理。start 返回后仍必须取消已被接受的远端句柄。
+      const requestedCancellation = error instanceof RunCancellationRequestedError
+        ? error
+        : controller.signal.reason instanceof RunCancellationRequestedError ? controller.signal.reason : undefined;
+      if (requestedCancellation) {
+        if (execution) {
+          await this.#cancelExecution(input.runId, delegationId, execution, requestedCancellation.message);
+        }
+        delegation = (await this.delegations.get(delegationId)) ?? delegation;
+        if (TERMINAL_DELEGATION_STATUSES.has(delegation.status) && delegation.result) {
+          return structuredClone(delegation.result);
+        }
+        return this.#finishAborted(delegation);
+      }
+      // 租约丢失/心跳不确定只停止本地；外部任务可能已被其他实例接管。
+      if (isRecoverableExecutionError(error)) {
+        throw error;
+      }
+      if (isRecoverableExecutionError(controller.signal.reason)) {
+        throw controller.signal.reason;
+      }
       if (controller.signal.aborted) {
+        // 先通过受 fencing 保护的终态提交确认当前所有权，再触发远端副作用。
+        delegation = (await this.delegations.get(delegationId)) ?? delegation;
+        if (TERMINAL_DELEGATION_STATUSES.has(delegation.status) && delegation.result) {
+          if (connectorCompletionMode === "callback") {
+            throw new DelegationSuspendedError(input.runId, delegationId);
+          }
+          return structuredClone(delegation.result);
+        }
+        const result = await this.#finishAborted(delegation, timeoutKind, timeoutReason);
         if (execution) {
           await this.#cancelExecution(
             input.runId,
@@ -807,7 +828,7 @@ export class DelegationService {
             timeoutKind ? `delegation ${timeoutKind} timeout` : "run cancelled",
           );
         }
-        return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
+        return result;
       }
       const message = error instanceof Error ? error.message : String(error);
       this.logger?.error(
@@ -820,18 +841,14 @@ export class DelegationService {
         },
         execution ? "处理子 Agent 事件流失败" : "调度子 Agent 失败",
       );
-      if (execution) {
-        // externalRef/cursor 无法可靠持久化时停止外部任务，避免留下无人接管的执行。
-        await this.#cancelExecution(
-          input.runId,
-          delegationId,
-          execution,
-          "delegation persistence or stream failed",
-        ).catch(() => undefined);
-      }
       // 保存 externalRef 或 cursor 失败时，本地 version 可能领先数据库；以真相源版本收敛终态。
       delegation = (await this.delegations.get(delegationId)) ?? delegation;
       if (TERMINAL_DELEGATION_STATUSES.has(delegation.status) && delegation.result) {
+        // callback 可以在 start 返回前已提交并重新排队 Run；旧栈只能退出，
+        // 不能返回结果后再用旧 Run 版本推进 SYNTHESIZING 或覆盖回调恢复状态。
+        if (connectorCompletionMode === "callback") {
+          throw new DelegationSuspendedError(input.runId, delegationId);
+        }
         return structuredClone(delegation.result);
       }
       const result: AgentResult = {
@@ -846,20 +863,26 @@ export class DelegationService {
         result,
         execution ? "connector_stream" : "dispatch",
       );
+      if (execution) {
+        // 提交失败（包括无法确认租约）时保留远端任务，交由持有有效租约的实例恢复。
+        await this.#cancelExecution(
+          input.runId,
+          delegationId,
+          execution,
+          "delegation persistence or stream failed",
+        ).catch(() => undefined);
+      }
       return result;
     } finally {
       if (activityTimeout) {
         clearTimeout(activityTimeout);
       }
       input.signal.removeEventListener("abort", forwardAbort);
-      this.#untrack(input.runId, delegationId);
+      this.#untrack(input.runId, delegationId, execution);
       for (const [interactionId, interaction] of this.#interactions) {
-        if (interaction.runId === input.runId) {
+        if (interaction.executionToken === executionToken) {
           this.#interactions.delete(interactionId);
         }
-      }
-      if (this.#claims.get(input.runId) === input.leaseClaim) {
-        this.#claims.delete(input.runId);
       }
     }
   }
@@ -1041,16 +1064,25 @@ export class DelegationService {
         delegation.externalRef &&
         !activeById.has(delegation.id),
     );
+    const pending = persisted.filter((delegation) =>
+      !TERMINAL_DELEGATION_STATUSES.has(delegation.status) && !delegation.externalRef && !activeById.has(delegation.id));
     const results = await Promise.allSettled([
+      ...pending.map(async (delegation) => {
+        await this.connectors.require(delegation.connectorId).cancelPending?.(delegation.id, reason);
+      }),
       ...active.map(([delegationId, item]) =>
         this.#cancelExecution(runId, delegationId, item.execution, reason),
       ),
       ...recoverable.map(async (delegation) => {
         const connector = this.connectors.require(delegation.connectorId);
         if (!connector.resume || !delegation.externalRef) {
-          throw new Error(
-            `Connector cannot resume persisted cancellation: ${delegation.connectorId}`,
+          // 不可恢复的 HTTP Connector 只持有本地连接。旧实例已离线时无法取消远端，
+          // 但不能因此阻塞数据库中用户取消的收敛，也不能通过 start 重投任务。
+          this.logger?.warn(
+            { runId, delegationId: delegation.id, connectorId: connector.id },
+            "Connector 无法恢复远端取消；仅收敛持久化的 Run 取消状态",
           );
+          return;
         }
         const execution = await connector.resume(delegation.externalRef, {
           signal: new AbortController().signal,
@@ -1060,7 +1092,7 @@ export class DelegationService {
         try {
           await this.#cancelExecution(runId, delegation.id, execution, reason);
         } finally {
-          this.#untrack(runId, delegation.id);
+          this.#untrack(runId, delegation.id, execution);
         }
       }),
     ]);
@@ -1083,8 +1115,11 @@ export class DelegationService {
   }
 
   /** 从活动表中移除已经结束的委派，并清理空的 Run 分组。 */
-  #untrack(runId: string, delegationId: string): void {
+  #untrack(runId: string, delegationId: string, execution?: ConnectorExecution): void {
     const items = this.#active.get(runId);
+    if (items?.get(delegationId)?.execution !== execution) {
+      return;
+    }
     items?.delete(delegationId);
     if (items?.size === 0) {
       this.#active.delete(runId);
@@ -1100,7 +1135,8 @@ export class DelegationService {
     execution: ConnectorExecution,
     reason: string,
   ): Promise<void> {
-    const item = this.#active.get(runId)?.get(delegationId);
+    const tracked = this.#active.get(runId)?.get(delegationId);
+    const item = tracked?.execution === execution ? tracked : undefined;
     if (item?.cancelPromise) {
       return item.cancelPromise;
     }
@@ -1204,7 +1240,7 @@ export class DelegationService {
     delegation: Delegation,
     event: Parameters<RunEventStore["append"]>[0],
   ): Promise<import("../domain/types.js").RunEvent> {
-    const claim = this.#claims.get(delegation.runId);
+    const claim = this.#executionClaim.getStore();
     if (this.delegations.saveWithEvent) {
       return this.delegations.saveWithEvent(delegation, event, claim);
     }
@@ -1213,13 +1249,13 @@ export class DelegationService {
   }
 
   async #saveDelegation(delegation: Delegation): Promise<void> {
-    await this.delegations.save(delegation, this.#claims.get(delegation.runId));
+    await this.delegations.save(delegation, this.#executionClaim.getStore());
   }
 
   async #appendEvent(
     event: Parameters<RunEventStore["append"]>[0],
   ): Promise<import("../domain/types.js").RunEvent> {
-    const claim = this.#claims.get(event.runId);
+    const claim = this.#executionClaim.getStore();
     if (claim && this.events.appendForClaim) {
       return this.events.appendForClaim(event, claim);
     }

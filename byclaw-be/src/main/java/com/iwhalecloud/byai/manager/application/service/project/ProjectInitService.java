@@ -614,11 +614,15 @@ public class ProjectInitService {
      * @throws BaseException 如果 repoFullName 或 repoUrl 无效
      */
     private Path buildRepoPath(ProjectRepo repo) throws BaseException {
+        return buildRepoPath(repo, CurrentUserHolder.getCurrentUserCode());
+    }
+
+    private Path buildRepoPath(ProjectRepo repo, String userCode) throws BaseException {
         // 1. 提取仓库名称（repoFullName 的最后一部分）
         String repoName = extractRepoName(repo);
 
         // Git 根目录按项目隔离，避免不同项目的工作区仓库互相覆盖。
-        Path root = Paths.get(gitWorkspaceConfig.getRoot(repo.getProjectId(), resolveCurrentUserBucket()))
+        Path root = Paths.get(gitWorkspaceConfig.getRoot(repo.getProjectId(), resolveUserBucket(userCode)))
             .toAbsolutePath().normalize();
         Path repositoryPath = root.resolve(repoName).normalize();
         if (!root.equals(repositoryPath.getParent())) {
@@ -641,7 +645,12 @@ public class ProjectInitService {
 
     /** 克隆项目仓库到当前用户的项目工作目录；已存在有效仓库时复用。 */
     public Path cloneProjectRepository(ProjectRepo repo) throws BaseException {
-        Path repoPath = getProjectRepositoryPath(repo);
+        return cloneProjectRepository(repo, CurrentUserHolder.getCurrentUserId(),
+            CurrentUserHolder.getCurrentUserCode());
+    }
+
+    private Path cloneProjectRepository(ProjectRepo repo, Long userId, String userCode) throws BaseException {
+        Path repoPath = buildRepoPath(repo, userCode).toAbsolutePath().normalize();
         if (gitCommandExecutor.isGitRepository(repoPath)) {
             return repoPath;
         }
@@ -649,7 +658,7 @@ public class ProjectInitService {
         if (repoUrl.isEmpty()) {
             throw new BaseException(50500, "project.repo.url.required");
         }
-        String token = getUserGitHubToken();
+        String token = getUserGitHubToken(userId, userCode);
         if (token == null || token.isBlank()) {
             throw new BaseException(50403, "GitHub Token (GH_TOKEN) is required for Git operations.");
         }
@@ -666,10 +675,10 @@ public class ProjectInitService {
 
     /** 异步克隆项目代码仓库，避免新增仓库接口被远程网络耗时阻塞。 */
     @Async
-    public void cloneProjectRepositoryAsync(ProjectRepo repo) {
+    public void cloneProjectRepositoryAsync(ProjectRepo repo, Long userId, String userCode) {
         cloneStatuses.put(repo.getRepoId(), "cloning");
         try {
-            cloneProjectRepository(repo);
+            cloneProjectRepository(repo, userId, userCode);
             cloneStatuses.put(repo.getRepoId(), "ready");
             log.info("Project repository cloned asynchronously: repoId={}, projectId={}",
                 repo.getRepoId(), repo.getProjectId());
@@ -692,7 +701,11 @@ public class ProjectInitService {
      * @return 当前登录用户对应的规范化用户桶名称
      */
     private String resolveCurrentUserBucket() {
-        return userBucketNamingService.buildUserBucketName(CurrentUserHolder.getCurrentUserCode());
+        return resolveUserBucket(CurrentUserHolder.getCurrentUserCode());
+    }
+
+    private String resolveUserBucket(String userCode) {
+        return userBucketNamingService.buildUserBucketName(userCode);
     }
 
     private String userFsRootPathSegment() {
@@ -917,13 +930,16 @@ public class ProjectInitService {
      * @return GitHub Token，如果未配置则返回 null
      */
     private String getUserGitHubToken() {
+        return getUserGitHubToken(CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserCode());
+    }
+
+    private String getUserGitHubToken(Long userId, String userCode) {
         String connectorToken = githubCredentialResolver == null
-            ? null : githubCredentialResolver.resolve(CurrentUserHolder.getCurrentUserId());
+            ? null : githubCredentialResolver.resolve(userId);
         if (StringUtils.isNotBlank(connectorToken)) {
             return connectorToken;
         }
         try {
-            String userCode = CurrentUserHolder.getCurrentUserCode();
             if (StringUtils.isBlank(userCode)) {
                 log.warn("Cannot get GitHub token: current user code is blank");
                 return null;

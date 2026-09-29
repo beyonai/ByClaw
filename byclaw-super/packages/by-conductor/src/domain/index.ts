@@ -1,6 +1,7 @@
 export * from "./attachment-inspection.js";
 export * from "./delegable-agents.js";
 export * from "./execution-credentials.js";
+export * from "./execution-ownership.js";
 export * from "./group-chat-context.js";
 export * from "./orchestrator.js";
 export * from "./run-ingress-context.js";

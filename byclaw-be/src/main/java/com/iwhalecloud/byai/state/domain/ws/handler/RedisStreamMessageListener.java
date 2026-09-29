@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.ws.handler;
 
+import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -99,6 +101,7 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
 
     @Override
     public void onMessage(MapRecord<String, String, String> message) {
+        ChatChainLog.received(message);
         sessionStreamMetrics.recordReceived();
         if (closed) {
             return;

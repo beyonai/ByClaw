@@ -6,14 +6,14 @@ import lombok.RequiredArgsConstructor;
 /**
  * 资源状态枚举。
  * <p>
- * 数值约定：-1=已删除，0=草稿箱，1=待上架（已发布待上架），2=已上架，3=已下架，
+ * 数值约定：-1=已注销，0=草稿箱，1=待上架（已发布待上架），2=已上架，3=已下架，
  * 4=待上架（审核中），5=审核驳回，6=发布状态。
  */
 @RequiredArgsConstructor
 @Getter
 public enum ResourceStatus {
 
-    /** 已删除（逻辑删除标记） */
+    /** 已注销（逻辑删除标记，不允许恢复） */
     DELETE(-1),
 
     /** 草稿箱 */

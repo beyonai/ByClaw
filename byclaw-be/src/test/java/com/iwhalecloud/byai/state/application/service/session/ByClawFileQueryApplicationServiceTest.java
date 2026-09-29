@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -35,6 +38,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 class ByClawFileQueryApplicationServiceTest {
@@ -59,6 +63,7 @@ class ByClawFileQueryApplicationServiceTest {
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
         byClawFileQueryApplicationService = new ByClawFileQueryApplicationService();
+        ReflectionTestUtils.setField(byClawFileQueryApplicationService, "sessionService", mock(SessionService.class));
         ReflectionTestUtils.setField(byClawFileQueryApplicationService, "userFS", userFS);
         ReflectionTestUtils.setField(byClawFileQueryApplicationService, "objectStorage", objectStorage);
     }
@@ -66,6 +71,22 @@ class ByClawFileQueryApplicationServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    @Test
+    void shouldHideAssessmentFilesFromGlobalAndScopedListings() {
+        SessionService sessions = mock(SessionService.class);
+        ReflectionTestUtils.setField(byClawFileQueryApplicationService, "sessionService", sessions);
+        ByaiSession internal = new ByaiSession(); internal.setState("GROUP_CHAT_ROUTING");
+        when(sessions.findById(10014538L)).thenReturn(internal);
+        when(userFS.list(eq("/.sessions/"), isNull())).thenReturn(List.of(
+            SESSION_PREFIX + ".byclaw/group-chat-disposition.json", "/.sessions/99/report.md"));
+        when(userFS.list(eq(SESSION_PREFIX), isNull())).thenReturn(List.of(
+            SESSION_PREFIX + ".byclaw/group-chat-disposition.json"));
+        List<ByClawFileDto> all = byClawFileQueryApplicationService.qryByClawFileByUserCode(USER_CODE, null, null);
+        assertEquals(1, all.size());
+        assertEquals("/.sessions/99/report.md", all.get(0).getObjectKey());
+        assertEquals(0, byClawFileQueryApplicationService.qryByClawFileByUserCode(USER_CODE, null, SESSION_ID).size());
     }
 
     @Test

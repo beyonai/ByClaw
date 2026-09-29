@@ -104,7 +104,7 @@ export default {
   'sandboxMgr.profile.sortOrder': 'Sort',
   'sandboxMgr.profile.serviceTypePlaceholder': 'Enter service type, e.g. openclaw',
   'sandboxMgr.profile.profileKeyPlaceholder': 'Enter profile key, e.g. xs, s, m, l',
-  'sandboxMgr.profile.resourceRequestsPlaceholder': 'Enter requests JSON, e.g. {"cpu":"500m","memory":"1Gi"}',
+  'sandboxMgr.profile.resourceRequestsPlaceholder': 'Enter requests JSON, for example CPU 500m and memory 1Gi',
   'sandboxMgr.profile.resourceLimitsPlaceholder': 'Enter limits JSON, e.g. {"cpu":"2","memory":"4Gi"}',
   'sandboxMgr.profile.templatePatchJsonPlaceholder': 'Enter template patch JSON (optional)',
   'sandboxMgr.profile.serviceTypeRequired': 'Please enter service type',

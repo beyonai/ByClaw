@@ -322,4 +322,6 @@ public class ResourceAuthVo extends AuthVo {
 
     private Boolean canOffShelf;
 
+    private Boolean canPublishToEnterprise;
+
 }

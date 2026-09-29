@@ -211,12 +211,13 @@ public class AuthController {
             authApplicationService.queryUseApplyList(qo));
     }
 
-    /** 审核中心聚合查询个人及企业数字员工使用申请。 */
+    /** 审核中心聚合查询数字员工或资源中心使用申请。 */
     @PostMapping("/queryDigitalEmployeeUseApplyAudit")
     public ResponseUtil<List<DigitalEmployeeUseApplyAuditVo>> queryDigitalEmployeeUseApplyAudit(
         @RequestBody ResourceUseApplyHistoryQo qo) {
         return ResponseUtil.successResponse(I18nUtil.get("auth.use.apply.list.query.success"),
-            authApplicationService.queryDigitalEmployeeUseApplyAudit(qo == null ? null : qo.getHistory()));
+            authApplicationService.queryDigitalEmployeeUseApplyAudit(qo == null ? null : qo.getHistory(),
+                qo == null ? null : qo.getResourceBizTypeList()));
     }
 
     /**
@@ -430,6 +431,8 @@ public class AuthController {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
 
+        authApplicationService.validateEmployeeAuthorizationPermission(resource);
+
         // 检查publish_portal字段，给果为0则表示不发布到业务门户的数字员工，不能进行授权操作
         if (resource.getPublishPortal() != null && resource.getPublishPortal() == 0) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
@@ -504,6 +507,8 @@ public class AuthController {
         if (resourceUseAuthQo == null || CollectionUtils.isEmpty(resourceUseAuthQo.getResourceBizTypeList())) {
             return;
         }
+        // 可用列表即使筛选企业归属，也必须保留 mapper 中的创建人/使用授权约束。
+        resourceUseAuthQo.setIncludeAllEnterpriseOwnerType(false);
         boolean hasKnowledgeBizType = resourceUseAuthQo.getResourceBizTypeList().stream()
             .filter(StringUtils::isNotBlank).anyMatch(this::isKnowledgeBizType);
         boolean hasDigEmployeeBizType = resourceUseAuthQo.getResourceBizTypeList().stream()
@@ -525,7 +530,7 @@ public class AuthController {
         }
 
         if (StringUtils.equals(resourceUseAuthQo.getOwnerType(), OwnerType.ENTERPRISE)
-            && hasEnterpriseAllResourceBizType) {
+            && hasEnterpriseAllResourceBizType && !Boolean.TRUE.equals(resourceUseAuthQo.getAvailableOnly())) {
             resourceUseAuthQo.setIncludeAllEnterpriseOwnerType(true);
         }
     }

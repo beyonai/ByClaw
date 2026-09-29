@@ -35,6 +35,21 @@ export interface RunPage {
 }
 
 export interface RunRepository {
+  /** 仅用于可信传输入站路由恢复；无 owner 时必须拒绝多匹配，不能猜测所属用户。 */
+  findIngressRun?(input: {
+    externalSessionId: string;
+    externalMessageId: string;
+    userCode?: string;
+  }): Promise<Run | undefined>;
+  /** 外部会话绑定、首 Session 和消息幂等创建在同一事务完成，复用现有业务表。 */
+  createIngressRun?(input: {
+    session: Session;
+    run: Run;
+    event: Omit<RunEvent, "eventId">;
+    credential?: ExecutionCredential;
+    binding: { source: string; userCode: string; externalSessionId: string };
+    externalMessageId: string;
+  }): Promise<{ session: Session; run: Run; created: boolean }>;
   /** 新建或覆盖保存 Run。 */
   save(run: Run): Promise<void>;
   /**

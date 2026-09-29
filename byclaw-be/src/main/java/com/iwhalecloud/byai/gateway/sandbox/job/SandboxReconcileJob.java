@@ -31,7 +31,7 @@ public class SandboxReconcileJob {
     public void reconcileSandboxes() {
         try {
             SandboxLifecycleJobReport report = sandboxService.reconcileSandboxes();
-            LOGGER.info("沙箱一致性检测完成，候选 {} 个，扫描 {} 个，重拉 {} 个，保持 {} 个，失败 {} 个，重拉记录：{}，保持记录：{}，失败记录：{}",
+            LOGGER.debug("沙箱一致性检测完成，候选 {} 个，扫描 {} 个，重拉 {} 个，保持 {} 个，失败 {} 个，重拉记录：{}，保持记录：{}，失败记录：{}",
                 report.getTotalCandidates(), report.getScannedCount(), report.getAffectedCount(),
                 report.getSkippedCount(), report.getFailedCount(), report.getAffectedSandboxes(),
                 report.getSkippedSandboxes(), report.getFailedSandboxes());

@@ -66,7 +66,10 @@ test("resources uses session fallback and limits sections", async () => {
   await server.close();
 
   assert.equal(result.code, 0);
-  assert.deepEqual(server.requests[0].body, { sessionId: 99, sections: ["knowledge", "ontologies"] });
+  assert.deepEqual(server.requests[0].body, {
+    sessionId: 99,
+    sections: ["knowledge", "ontologies", "dataSources"],
+  });
 });
 
 test("files caps page size at 100", async () => {

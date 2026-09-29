@@ -5,6 +5,11 @@ import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSkillMapper;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONException;
+import com.alibaba.fastjson.JSONObject;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -100,6 +105,30 @@ public class SsResExtSkillService {
      */
     public List<SsResExtSkill> findByIds(Collection<Long> resourceIds) {
         return ssResExtSkillMapper.findByIds(resourceIds);
+    }
+
+    /** 按来源标记确认企业副本，避免同编码的手工导入技能影响按钮。空列表不查询数据库。 */
+    public Set<Long> findSourceIdsWithEnterpriseCopies(Collection<Long> sourceIds) {
+        if (sourceIds == null || sourceIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<Long> result = new HashSet<>();
+        for (SsResExtSkill copy : ssResExtSkillMapper.findExistingEnterpriseCopies(sourceIds)) {
+            if (!StringUtils.hasText(copy.getTargetContent())) {
+                continue;
+            }
+            try {
+                JSONObject content = JSON.parseObject(copy.getTargetContent());
+                Long sourceId = content == null ? null : content.getLong("sourceResourceId");
+                if (sourceId != null && sourceIds.contains(sourceId)) {
+                    result.add(sourceId);
+                }
+            }
+            catch (JSONException | IllegalArgumentException ignored) {
+                // 历史非 JSON 内容或无效来源 ID 不构成可识别的企业副本。
+            }
+        }
+        return result;
     }
 
     /**

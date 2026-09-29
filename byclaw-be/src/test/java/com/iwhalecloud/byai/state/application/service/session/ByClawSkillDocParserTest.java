@@ -7,6 +7,30 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ByClawSkillDocParserTest {
 
     @Test
+    void enterpriseCopyReplacesOnlyTopLevelNameAndPreservesBody() {
+        String original = "---\nname: original\ndescription: >\n  Keep this description\n"
+            + "metadata:\n  name: nested-name\n---\n# Original title\nRun scripts/start.sh\n";
+        String expected = "---\nname: enterprise-skill-7001\ndescription: >\n  Keep this description\n"
+            + "metadata:\n  name: nested-name\n---\n# Original title\nRun scripts/start.sh\n";
+        assertEquals(expected, ByClawSkillDocParser.withSkillName(original, "enterprise-skill-7001"));
+    }
+
+    @Test
+    void enterpriseCopyHandlesQuotedBlockNamesAndWindowsLineEndings() {
+        String original = "\uFEFF---\r\n\"name\": >\r\n  original-name\r\ndescription: keep\r\n...\r\nBody\r\n";
+        assertEquals("---\nname: enterprise-skill-7001\ndescription: keep\r\n---\nBody\r\n",
+            ByClawSkillDocParser.withSkillName(original, "enterprise-skill-7001"));
+    }
+
+    @Test
+    void enterpriseCopyAddsNameToDocumentsWithoutFrontMatter() {
+        assertEquals("---\nname: enterprise-skill-7001\n---\n# Original\nBody\n",
+            ByClawSkillDocParser.withSkillName("# Original\nBody\n", "enterprise-skill-7001"));
+        assertEquals("---\nname: enterprise-skill-7001\ndescription: keep\n---\nBody",
+            ByClawSkillDocParser.withSkillName("---\ndescription: keep\n---\nBody", "enterprise-skill-7001"));
+    }
+
+    @Test
     void shouldReadFoldedYamlDescriptionBodyInsteadOfBlockMarker() {
         String skillDoc = """
             ---

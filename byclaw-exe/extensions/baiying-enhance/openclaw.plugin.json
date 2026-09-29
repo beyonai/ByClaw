@@ -24,6 +24,11 @@
     "additionalProperties": true,
     "description": "Unknown keys are tolerated for backward compatibility (deprecated examples, typos in non-critical fields). Prefer documented properties only.",
     "properties": {
+      "thinkingProviderIds": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Internal: generated visually configured thinking provider membership for native plugin reload. Do not edit manually."
+      },
       "agentConfigDir": {
         "type": "string",
         "description": "Deprecated: ignored. Digital employee JSON is loaded from Redis key DIG_EMPLOYEE_{resourceId} using the auth Hash."
@@ -216,7 +221,7 @@
         "items": {
           "type": "string"
         },
-        "description": "Optional. Extra plugins.entries paths (plugin id or plugins.entries.<id>) to hot-reload when agent sync rewrites openclaw.json; omit to only register this plugin entry. Add entries your sync co-touches (e.g. byai-channel) to avoid full gateway restart."
+        "description": "Optional. Extra plugins.entries paths (plugin id or plugins.entries.<id>) to hot-reload when agent sync rewrites openclaw.json; agents/models are registered by default. This plugin's generated thinkingProviderIds always uses native plugin reload; broader overrides covering it are ignored."
       },
       "watchAgentDir": {
         "type": "boolean",

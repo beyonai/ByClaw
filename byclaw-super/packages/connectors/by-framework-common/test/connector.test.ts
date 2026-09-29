@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { RunCancellationRequestedError } from "@byclaw/by-conductor";
 import type { ConnectorRequest } from "@byclaw/by-conductor";
 import {
   ByFrameworkConnector,
@@ -46,6 +47,18 @@ function createHarness(
 }
 
 describe("ByFrameworkConnector", () => {
+  it("cancels by stable message ID when user cancellation races a lost dispatch acknowledgement", async () => {
+    const controller = new AbortController();
+    const harness = createHarness({ callAgent: async () => {
+      controller.abort(new RunCancellationRequestedError("run-1"));
+      throw new Error("dispatch acknowledgement lost");
+    } });
+    await expect(harness.connector.start(request(), { signal: controller.signal })).rejects.toThrow("acknowledgement lost");
+    expect(harness.cancelTask).toHaveBeenCalledWith(expect.objectContaining({
+      messageId: "delegation-1:request", sessionId: "external-session-1", cancelMode: "force",
+    }));
+  });
+
   it("passes project metadata without overriding cwd and uses the session for temporary files", async () => {
     const harness = createHarness();
     const req = request();

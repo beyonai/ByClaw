@@ -205,7 +205,9 @@ public class MemoryMessageService {
             messageDto.setInferLog(JSON.toJSONString(messageStruct.getReasonMessageList()));
         }
         // 设置完整的最终答案
-        messageDto.setMessageContent(messageStruct.returnAnswerText());
+        messageDto.setMessageContent(messageStruct.persistenceContent());
+        messageDto.setFinalContent(messageStruct.getExplicitFinalAnswer());
+        messageDto.setReplaceFinalContent(true);
         messageDto.setUsage(usage);
         // todo 待前端传
         messageDto.setAccessTerminal(assistantChatDto.getAccessTerminal());
@@ -258,7 +260,11 @@ public class MemoryMessageService {
                     content.append(sseContext);
                 }
             }
-            byaiMessageHotDto.setMessageContent(content.toString());
+            byaiMessageHotDto.setMessageContent(StringUtils.isNotBlank(messageStruct.getExplicitFinalAnswer())
+                ? messageStruct.getExplicitFinalAnswer() : content.toString());
+            // Selective updates must clear the old final when this attempt produced only streamed text.
+            byaiMessageHotDto.setFinalContent(messageStruct.getExplicitFinalAnswer());
+            byaiMessageHotDto.setReplaceFinalContent(true);
             if (StringUtils.isNotBlank(messageStruct.getCallLogs())) {
                 byaiMessageHotDto.setCallLogs(messageStruct.getCallLogs());
             }

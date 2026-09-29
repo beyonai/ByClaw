@@ -1,4 +1,7 @@
+import { setSessionModelPreparer } from "../../shared/src/session-model-runtime.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
+import { hasManagedProviderConfigDrift } from "./agent-registry.js";
+import type { ProviderBundle } from "./agent-adapter.js";
 import type { AimodelDefaultRunSyncDeps } from "./aimodel-default-run-sync.js";
 import {
     buildMainDefaultAimodelRuntimeSystemContext,
@@ -11,6 +14,8 @@ import {
 } from "./agent-session-model-reconcile.js";
 import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
 import { setActiveLangfuseSessionId } from "./langfuse-observation.js";
+import { resolveSessionModelOverride } from "./session-model-override.js";
+import { resolveSessionThinkingLevel, type RuntimeThinkingLevel } from "./session-thinking-level.js";
 import { resolveAgentIdFromSessionKey } from "./session-agent-id.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
@@ -161,9 +166,10 @@ const UNRESOLVED_SECRETREF_MARKER = "secretref-managed";
 
 export function hasManagedModelConfigDrift(params: {
   cfg: {
-    agents?: { list?: Array<{ id?: string; model?: { primary?: string } }> };
+    agents?: { list?: Array<{ id?: string; model?: { primary?: string } }>; defaults?: { compaction?: { timeoutSeconds?: number } } };
+    models?: { providers?: Record<string, { models?: Array<{ id?: string }> }> };
   };
-  managed: Array<{ agentId: string; modelRef?: string }>;
+  managed: Array<{ agentId: string; modelRef?: string; providerKey?: string; provider?: ProviderBundle }>;
 }): boolean {
   for (const agent of params.managed) {
     const expected = agent.modelRef?.trim();
@@ -175,9 +181,14 @@ export function hasManagedModelConfigDrift(params: {
     if (primary !== expected) {
       return true;
     }
+    if (agent.provider && agent.providerKey) {
+      if (hasManagedProviderConfigDrift(params.cfg, agent.providerKey, agent.provider)) return true;
+      if (params.cfg.agents?.defaults?.compaction?.timeoutSeconds === undefined) return true;
+    }
   }
   return false;
 }
+
 
 function isUnresolvedProviderApiKey(apiKey: unknown): boolean {
   if (typeof apiKey === "string") {
@@ -341,16 +352,28 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   api: OpenClawPluginApi;
   sessionKey?: string;
   agentId?: string;
+  /** 会话级模型覆盖的 `provider/model` 引用；提供时优先于数字员工配置模型。 */
+  modelRefOverride?: string;
 }): Promise<void> {
   const agentId = params.agentId?.trim() || resolveAgentIdFromSessionKey(params.sessionKey);
   if (!agentId?.startsWith(MANAGED_AGENT_PREFIX)) {
     return;
   }
-  const resolved = resolveManagedAgentModelFromConfig({
-    cfg: currentRuntimeConfig(params.api),
-    agentId,
-  });
-  if (!resolved) {
+  const overrideParsed = params.modelRefOverride
+    ? parseModelPrimaryRef(params.modelRefOverride.trim())
+    : null;
+  const resolved = overrideParsed
+    ? null
+    : resolveManagedAgentModelFromConfig({
+        cfg: currentRuntimeConfig(params.api),
+        agentId,
+      });
+  const parsed = overrideParsed
+    ? overrideParsed
+    : resolved
+      ? parseModelPrimaryRef(`${resolved.providerOverride}/${resolved.modelOverride}`)
+      : null;
+  if (!parsed) {
     return;
   }
   const sessionApi = params.api.runtime?.agent?.session;
@@ -363,15 +386,64 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   if (!storePath || !sessionKey) {
     return;
   }
-  const parsed = parseModelPrimaryRef(`${resolved.providerOverride}/${resolved.modelOverride}`);
-  if (!parsed) {
+  await sessionApi.updateSessionStoreEntry({
+    storePath,
+    sessionKey,
+    update: async (entry) => {
+      applySessionModelFromPrimary(entry as Record<string, unknown>, parsed);
+    },
+  });
+}
+
+/**
+ * 把本会话的最终思考档位写入 OpenClaw session store。
+ *
+ * <p>OpenClaw 的档位解析优先级是 `thinkingLevelOverride ?? /think 指令 ?? sessionEntry.thinkingLevel ?? 配置默认`
+ * （openclaw `dist/directive-handling.levels-*.js`），session entry 是插件可达的最高优先级来源；
+ * `before_dispatch` 早于本轮 reply resolver，因此写入后**同轮生效**。
+ *
+ * <p>写入门槛与模型同步一致：仅受管数字员工会话、仅当档位确实变化时落盘；
+ * 读取不到档位（Redis 缺失/非法）时保持会话原状，不误关思考。
+ */
+export async function syncManagedAgentThinkingLevelForInbound(params: {
+  api: OpenClawPluginApi;
+  sessionKey?: string;
+  agentId?: string;
+  thinkingLevel?: RuntimeThinkingLevel;
+}): Promise<void> {
+  const thinkingLevel = params.thinkingLevel;
+  if (!thinkingLevel) {
+    return;
+  }
+  const agentId = params.agentId?.trim() || resolveAgentIdFromSessionKey(params.sessionKey);
+  if (!agentId?.startsWith(MANAGED_AGENT_PREFIX)) {
+    return;
+  }
+  const sessionApi = params.api.runtime?.agent?.session;
+  if (!sessionApi?.updateSessionStoreEntry || !sessionApi?.resolveStorePath) {
+    return;
+  }
+  const sessionKey = params.sessionKey?.trim();
+  if (!sessionKey) {
+    return;
+  }
+  const storePath = sessionApi.resolveStorePath(currentRuntimeConfig(params.api).session?.store, {
+    agentId,
+  });
+  if (!storePath) {
     return;
   }
   await sessionApi.updateSessionStoreEntry({
     storePath,
     sessionKey,
     update: async (entry) => {
-      applySessionModelFromPrimary(entry as Record<string, unknown>, parsed);
+      const next = entry as Record<string, unknown>;
+      if (next.thinkingLevel === thinkingLevel) {
+        // OpenClaw 只在回调返回 falsy 时跳过落盘（updateSessionStoreEntry: patch == null → return existing）。
+        return undefined;
+      }
+      next.thinkingLevel = thinkingLevel;
+      return next;
     },
   });
 }
@@ -389,6 +461,18 @@ export function registerManagedAgentModelHooks(
     `baiying-enhance: registered typed hooks for main default LLM run-check (mainParentAgentId=${mainParentAgentId}, aimodelRunSync=${aimodelRunSync ? "on" : "off"})`,
   );
 
+  setSessionModelPreparer(
+    aimodelRunSync ? async (sessionId) => {
+      await resolveSessionModelOverride({
+        api,
+        pluginConfig: aimodelRunSync.pluginConfig,
+        sessionId,
+        aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
+        log: api.logger,
+      });
+    } : undefined,
+  );
+
   api.on("before_dispatch", async (event, ctx) => {
     const sessionKey = ctx.sessionKey?.trim() || event.sessionKey?.trim();
     const agentId = resolveAgentIdFromSessionKey(sessionKey) ?? ctx.agentId?.trim();
@@ -400,10 +484,46 @@ export function registerManagedAgentModelHooks(
         mainParentAgentId,
       });
     }
+    const sessionModelOverride = aimodelRunSync
+      ? await resolveSessionModelOverride({
+          api,
+          pluginConfig: aimodelRunSync.pluginConfig,
+          sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
+          aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
+          log: api.logger,
+        }).catch((error: unknown) => {
+          api.logger.warn(
+            `baiying-enhance: session model override resolve failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return undefined;
+        })
+      : undefined;
     await syncManagedAgentSessionModelForInbound({
       api,
       sessionKey,
       agentId,
+      ...(sessionModelOverride ? { modelRefOverride: sessionModelOverride.modelRef } : {}),
+    });
+    const sessionThinkingLevel = aimodelRunSync
+      ? await resolveSessionThinkingLevel({
+          sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
+          log: api.logger,
+        }).catch((error: unknown) => {
+          api.logger.warn(
+            `baiying-enhance: session thinking level resolve failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return undefined;
+        })
+      : undefined;
+    await syncManagedAgentThinkingLevelForInbound({
+      api,
+      sessionKey,
+      agentId,
+      ...(sessionThinkingLevel ? { thinkingLevel: sessionThinkingLevel } : {}),
     });
   }, { priority: BAIYING_ENHANCE_HOOK_PRIORITY });
 
@@ -411,6 +531,22 @@ export function registerManagedAgentModelHooks(
     await attachLangfuseSessionToActiveSpan(ctx);
     const agentId = ctx.agentId?.trim() || resolveAgentIdFromSessionKey(ctx.sessionKey);
     if (aimodelRunSync) {
+      const sessionOverride = await resolveSessionModelOverride({
+        api,
+        pluginConfig: aimodelRunSync.pluginConfig,
+        sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
+        aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
+        log: api.logger,
+      });
+      if (sessionOverride) {
+        api.logger.info(
+          `baiying-enhance: before_model_resolve selected session model ${sessionOverride.modelRef} for sessionId=${resolveLangfuseSessionIdFromHookContext(ctx)}`,
+        );
+        return {
+          providerOverride: sessionOverride.providerKey,
+          modelOverride: sessionOverride.model,
+        };
+      }
       const mainDefault = await resolveMainDefaultAimodelOnAgentRun(aimodelRunSync, agentId);
       if (mainDefault) {
         return mainDefault;

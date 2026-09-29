@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
+
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
@@ -62,6 +64,7 @@ import com.iwhalecloud.byai.state.domain.men.enums.TaskTypeEnum;
 import com.iwhalecloud.byai.state.domain.men.service.MenResComService;
 import com.iwhalecloud.byai.state.domain.men.service.MenTaskService;
 import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskChatGuard;
 import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.enums.UserRole;
@@ -126,6 +129,9 @@ public class AssistantChatService {
     @Autowired
     private TargetAgentResolver targetAgentResolver;
 
+    @Autowired
+    private SessionModelSelectionService sessionModelSelectionService;
+
     /**
      * 研发派发待接单放行钩子;manager 侧实现,未装配时聊天链路不受影响。
      * 必须延迟取:实现方 DevloopApplicationService 反过来依赖本类下发提示词,直接注入会构成 bean 环
@@ -134,6 +140,9 @@ public class AssistantChatService {
      */
     @Autowired
     private ObjectProvider<PendingTaskConfirmHook> pendingTaskConfirmHookProvider;
+
+    @Autowired
+    private ObjectProvider<GroupChatTaskChatGuard> groupChatTaskGuardProvider;
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
@@ -157,6 +166,8 @@ public class AssistantChatService {
     @WithSpan(value = "chat", inheritContext = false)
     public void chat(AssistantChatDto assistantChatDto, OutputStream outputStream, LoginInfo userInfo)
         throws IOException {
+        Long groupTaskTurnId = null;
+        boolean groupTaskStarted = false;
         Span span = Span.current();
         if (assistantChatDto != null && span != null && assistantChatDto.getSessionId() != null) {
             span.setAttribute("sessionId", assistantChatDto.getSessionId());
@@ -198,16 +209,34 @@ public class AssistantChatService {
             if (assistantChatDto != null) {
                 assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
                 applyCallAcpAgentDelegation(assistantChatDto);
+                // 会话标识与最终 agentId 已确定：解析本轮实际模型并维护会话级覆盖键（写/删）。
+                sessionModelSelectionService.resolveSelection(assistantChatDto);
+                sessionModelSelectionService.applySessionOverride(assistantChatDto);
             }
+
+            // 在解析实际执行 Agent 后校验接续权限，再原子占用任务 turn。
+            GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
+            groupTaskTurnId = taskGuard != null && assistantChatDto != null
+                ? taskGuard.beforeTurn(assistantChatDto.getSessionId(), assistantChatDto.getAgentId(),
+                    assistantChatDto.getTraceId()) : null;
+            assistantChatDto.setGroupTaskTurnId(groupTaskTurnId);
 
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
             executeChat(assistantChatDto, outputStream, firstTextStartTime);
+            groupTaskStarted = true;
         } catch (BdpRuntimeException e) {
             handleBdpRuntimeException(e, assistantChatDto, outputStream);
         } catch (Exception e) {
             handleGeneralException(e, outputStream);
         } finally {
+            // Asynchronous request return is not turn completion; only release a failed startup here.
+            if (groupTaskTurnId != null && !groupTaskStarted && assistantChatDto != null) {
+                GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
+                if (taskGuard != null) {
+                    taskGuard.failTurnStart(assistantChatDto.getSessionId(), groupTaskTurnId);
+                }
+            }
             cleanupResources(userInfo, outputStream);
         }
     }
@@ -557,6 +586,7 @@ public class AssistantChatService {
             CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.createSession,
                 JSON.toJSONString(membersDto));
         } else {
+            GroupChatInternalSessionAccess.requirePublic(sessionService.findById(assistantChatDto.getSessionId()));
             // sessionId不为空时，检查当前用户是否在群成员列表中
             checkUserMembershipInGroup(assistantChatDto.getSessionId(), currentUserId, assistantChatDto);
             ByaiSession updatedSession = sessionTitleService.resolveInitialTitle(assistantChatDto.getSessionId(),

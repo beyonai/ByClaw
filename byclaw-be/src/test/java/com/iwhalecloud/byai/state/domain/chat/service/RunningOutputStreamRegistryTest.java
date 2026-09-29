@@ -2,14 +2,19 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,6 +26,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
 
 class RunningOutputStreamRegistryTest {
 
+    private ApplicationEventPublisher events;
     private RedisTemplate<String, Object> redisTemplate;
     private ValueOperations<String, Object> valueOperations;
     private ChatRuntimeStateService chatRuntimeStateService;
@@ -36,6 +42,8 @@ class RunningOutputStreamRegistryTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
         runningOutputStreamRegistry = new RunningOutputStreamRegistry();
+        events = mock(ApplicationEventPublisher.class);
+        ReflectionTestUtils.setField(runningOutputStreamRegistry, "events", events);
         ReflectionTestUtils.setField(runningOutputStreamRegistry, "redisTemplate", redisTemplate);
         ReflectionTestUtils.setField(runningOutputStreamRegistry, "chatRuntimeStateService", chatRuntimeStateService);
         ReflectionTestUtils.setField(runningOutputStreamRegistry, "sessionRuntimeStateService",
@@ -83,9 +91,9 @@ class RunningOutputStreamRegistryTest {
         assertThat(ctx.concurrentGatewayTurn).isTrue();
         assertThat(ctx.runningOutputStreamToken).isEqualTo("followup-token");
         verify(chatRuntimeStateService).touch(ctx);
-        verify(chatRuntimeStateService, never()).saveConcurrent(org.mockito.ArgumentMatchers.any());
-        verify(chatRuntimeStateService, never()).save(org.mockito.ArgumentMatchers.any(), anyString());
-        verify(chatRuntimeStateService, never()).clearConcurrent(org.mockito.ArgumentMatchers.any());
+        verify(chatRuntimeStateService, never()).saveConcurrent(any());
+        verify(chatRuntimeStateService, never()).save(any(), anyString());
+        verify(chatRuntimeStateService, never()).clearConcurrent(any());
     }
 
     @Test
@@ -95,12 +103,12 @@ class RunningOutputStreamRegistryTest {
         ctx.traceId = "followup";
         ctx.modelAnswerMessageId = 21L;
         ctx.concurrentGatewayTurn = true;
-        org.mockito.Mockito.doThrow(new IllegalStateException("Redis write failed"))
+        doThrow(new IllegalStateException("Redis write failed"))
             .when(chatRuntimeStateService).touch(ctx);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> runningOutputStreamRegistry.markRunning(ctx))
+        assertThatThrownBy(() -> runningOutputStreamRegistry.markRunning(ctx))
             .hasMessage("Redis write failed");
         assertThat(ctx.concurrentGatewayTurn).isTrue();
-        verify(chatRuntimeStateService, never()).clearConcurrent(org.mockito.ArgumentMatchers.any());
+        verify(chatRuntimeStateService, never()).clearConcurrent(any());
     }
 
     @Test
@@ -112,6 +120,9 @@ class RunningOutputStreamRegistryTest {
 
         verify(redisTemplate).delete("byai:chat:running:10");
         verify(chatRuntimeStateService).delete(10L);
+        var order = inOrder(chatRuntimeStateService, events);
+        order.verify(chatRuntimeStateService).delete(10L);
+        order.verify(events).publishEvent(new ChatSessionReleased(10L));
     }
 
     @Test
@@ -123,6 +134,7 @@ class RunningOutputStreamRegistryTest {
 
         verify(redisTemplate, never()).delete(eq("byai:chat:running:10"));
         verify(chatRuntimeStateService, never()).delete(10L);
+        verify(events, never()).publishEvent(any(ChatSessionReleased.class));
     }
 
     /**
@@ -135,6 +147,7 @@ class RunningOutputStreamRegistryTest {
 
         verify(redisTemplate, never()).delete(anyString());
         verify(chatRuntimeStateService, never()).delete(anyLong());
+        verify(events, never()).publishEvent(any(ChatSessionReleased.class));
     }
 
     /**
@@ -152,6 +165,9 @@ class RunningOutputStreamRegistryTest {
         runningOutputStreamRegistry.release(10L, 20L);
 
         verify(chatRuntimeStateService).delete(10L);
+        var order = inOrder(chatRuntimeStateService, events);
+        order.verify(chatRuntimeStateService).delete(10L);
+        order.verify(events).publishEvent(new ChatSessionReleased(10L));
     }
 
     @Test
@@ -165,5 +181,6 @@ class RunningOutputStreamRegistryTest {
         runningOutputStreamRegistry.release(10L, 20L);
 
         verify(chatRuntimeStateService, never()).delete(anyLong());
+        verify(events, never()).publishEvent(any(ChatSessionReleased.class));
     }
 }

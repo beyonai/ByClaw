@@ -35,7 +35,12 @@ jest.mock('antd', () => ({
     <div>
       {children}
       {menu?.items?.map((item: any) => (
-        <button key={item.key} type="button" aria-label={item.label} onClick={() => item.onClick({ domEvent: { stopPropagation: jest.fn() } })}>
+        <button
+          key={item.key}
+          type="button"
+          aria-label={item.label}
+          onClick={() => item.onClick({ domEvent: { stopPropagation: jest.fn() } })}
+        >
           {item.label}
         </button>
       ))}
@@ -441,11 +446,11 @@ describe('SkillGroupCard', () => {
     const onEdit = jest.fn();
     const onDelete = jest.fn();
     const { rerender } = render(
-      <SkillGroupCard group={createGroup()} canDelete onEdit={onEdit} onDelete={onDelete} />
+      <SkillGroupCard group={createGroup({ resourceStatus: 3 })} canDelete onEdit={onEdit} onDelete={onDelete} />
     );
 
     expect(screen.getByRole('button', { name: 'resource.skillGroup.edit' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'resource.skillGroup.delete' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'resource.lifecycle.deleteData' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'resource.skillGroup.edit' }));
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ resourceId: 'group-1' }));
 

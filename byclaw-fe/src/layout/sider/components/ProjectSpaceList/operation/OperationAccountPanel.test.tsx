@@ -9,6 +9,24 @@ jest.mock('@umijs/max', () => ({
 import OperationAccountPanel from './OperationAccountPanel';
 
 describe('OperationAccountPanel', () => {
+  it('hides the external create-account button when account creation is disabled', () => {
+    const onToolbarChange = jest.fn();
+
+    render(
+      <OperationAccountPanel
+        allowAccountCreation={false}
+        onSaveAccount={jest.fn()}
+        onToolbarChange={onToolbarChange}
+        toolbarPlacement="external"
+      />
+    );
+
+    const toolbar = onToolbarChange.mock.calls.at(-1)?.[0];
+    expect(toolbar).toBeTruthy();
+    const { queryByRole } = render(toolbar);
+    expect(queryByRole('button', { name: 'projectSpace.operation.account.add' })).not.toBeInTheDocument();
+  });
+
   it('shows the custom url instead of the generated account code', () => {
     render(
       <OperationAccountPanel
@@ -105,8 +123,8 @@ describe('OperationAccountPanel', () => {
     );
 
     expect(screen.getByRole('button', { name: 'projectSpace.operation.accountLogin.cancel' })).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: /projectSpace\.operation\.accountLogin\.inlineComplete$/ })
-    ).toHaveClass('ant-btn-loading');
+    expect(screen.getByRole('button', { name: /projectSpace\.operation\.accountLogin\.inlineComplete$/ })).toHaveClass(
+      'ant-btn-loading'
+    );
   });
 });

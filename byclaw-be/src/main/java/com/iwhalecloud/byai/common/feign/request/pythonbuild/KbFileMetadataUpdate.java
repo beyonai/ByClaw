@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.common.feign.request.pythonbuild;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -37,6 +38,7 @@ public class KbFileMetadataUpdate {
      */
     @Getter
     @Setter
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class MetadataOperation {
 
         /**

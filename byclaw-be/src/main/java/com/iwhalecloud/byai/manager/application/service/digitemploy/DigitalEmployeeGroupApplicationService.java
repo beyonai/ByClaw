@@ -253,6 +253,47 @@ public class DigitalEmployeeGroupApplicationService {
         return buildRuntime(group, version, prompt, modelId, model, agents);
     }
 
+    /**
+     * 解析工作组模板绑定的数字员工资源。数字员工组展开当前运行快照，单个数字员工直接返回自身。
+     */
+    public OrchestratorRuntimeDTO resolveTemplateResource(Long resourceId) {
+        SsResource resource = ssResourceService.findById(resourceId);
+        SsResExtDigEmployee ext = ssResExtDigEmployeeService.findById(resourceId);
+        if (resource == null || ext == null
+            || !ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(resource.getResourceBizType())
+            || !Objects.equals(ResourceStatus.ON_SHELF.getNum(), resource.getResourceStatus())
+            || !Objects.equals(CurrentUserHolder.getEnterpriseId(), resource.getComAcctId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数字员工资源不存在或不可见");
+        }
+        if (isGroup(ext.getAgentType())) {
+            OrchestratorRuntimeRequestDTO request = new OrchestratorRuntimeRequestDTO();
+            request.setSchemaVersion(REQUEST_SCHEMA);
+            request.setKind(ORCHESTRATOR_KIND);
+            request.setOrchestratorId(String.valueOf(resourceId));
+            return resolveRuntime(request);
+        }
+        if (!authApplicationService.hasResourceUsePermission(resource)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前用户无数字员工使用权限");
+        }
+        ResourceExtDigEmployeeDto fact = loadMemberFacts(List.of(resourceId)).get(resourceId);
+        if (fact == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工配置不完整");
+        }
+
+        OrchestratorRuntimeDTO result = new OrchestratorRuntimeDTO();
+        result.setSchemaVersion(RUNTIME_SCHEMA);
+        result.setConfigVersion(resource.getResourceRVerid() == null
+            ? null : String.valueOf(resource.getResourceRVerid()));
+        result.setAgents(List.of(toRuntimeAgent(fact, null)));
+        OrchestratorRuntimeDTO.Orchestrator orchestrator = new OrchestratorRuntimeDTO.Orchestrator();
+        orchestrator.setId(String.valueOf(resourceId));
+        orchestrator.setKind("DIGITAL_EMPLOYEE");
+        orchestrator.setName(resource.getResourceName());
+        orchestrator.setAvatar(resource.getAvatar());
+        result.setOrchestrator(orchestrator);
+        return result;
+    }
+
     private void validateGroupResource(SsResource group, DigitalEmployeeDTO input) {
         if (group == null || input == null || !isGroup(input.getAgentType())) {
             throw invalidConfig("数字员工组类型必须为 017");
@@ -498,6 +539,7 @@ public class DigitalEmployeeGroupApplicationService {
         orchestrator.setId(String.valueOf(group.getResourceId()));
         orchestrator.setKind(ORCHESTRATOR_KIND);
         orchestrator.setName(group.getResourceName());
+        orchestrator.setAvatar(group.getAvatar());
         result.setOrchestrator(orchestrator);
 
         OrchestratorRuntimeDTO.Prompt promptDto = new OrchestratorRuntimeDTO.Prompt();

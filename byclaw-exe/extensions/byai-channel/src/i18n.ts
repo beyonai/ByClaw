@@ -407,14 +407,41 @@ export function buildCompactionNoticeText(language: string | undefined, params: 
 }): string {
     if (isEnglishLanguage(language)) {
         if (params.phase === "start") {
-            return "Automatic context compression started.";
+            return "Automatically compressing context.";
         }
-        return "Automatic context compression completed.";
+        return params.completed ? "Automatic context compression completed."
+            : params.willRetry ? "Context compression did not finish; retrying."
+            : "Automatic context compression failed.";
     }
     if (params.phase === "start") {
-        return "上下文自动压缩开始";
+        return "正在自动压缩上下文";
     }
-    return "上下文自动压缩完成";
+    return params.completed ? "上下文自动压缩完成"
+        : params.willRetry ? "上下文压缩未完成，正在重试" : "上下文自动压缩失败";
+}
+
+export function buildContextRecoveryText(language: string | undefined, phase: "start" | "retry" | "failed", attempt: number): string {
+    const english = isEnglishLanguage(language);
+    if (phase === "start") return english
+        ? `Automatically compressing context (recovery ${attempt}/3).`
+        : `正在自动压缩上下文（第 ${attempt}/3 次恢复）`;
+    if (phase === "retry") return english
+        ? "Context compressed. Automatically resending your question."
+        : "上下文已压缩，正在自动重新发送您的问题";
+    return buildContextFailureText(language, "recovery_failed");
+}
+
+export function buildContextFailureText(language: string | undefined, kind: "recovery_failed" | "input_too_large" | "operation_pending"): string {
+    const english = isEnglishLanguage(language);
+    if (kind === "input_too_large") return english
+        ? "This submission is too large. Reduce attachments or split your question and try again. Submit one question, one attachment, or the relevant sections first; provide the rest separately."
+        : "本次提交内容过多，请减少附件或拆分问题后重试。可以先提交一个问题、一个附件或相关章节，其余内容分次提供。";
+    if (kind === "operation_pending") return english
+        ? "The previous context operation has not been confirmed finished. To avoid overlapping work, this request cannot continue. Please wait or start a new conversation with the necessary background. If this message persists, contact an administrator. Your conversation history remains available."
+        : "上一次对话整理尚未确认结束，为避免重复处理，本次问题暂时无法继续。请稍后再试，或新建对话并补充必要背景；如持续出现此提示，请联系管理员处理。原会话历史仍可查看。";
+    return english
+        ? "The conversation could not be reorganized, so this request cannot continue. Your history is preserved. Start a new conversation and ask again; include the necessary background and key details if your question depends on earlier discussion."
+        : "本次对话内容整理未能完成，暂时无法继续回答。历史记录已保留。建议新建对话后重新提问；如果问题依赖之前的讨论，请补充必要的背景和关键条件。";
 }
 
 export function buildMaxTokenErrorText(language: string | undefined) {
@@ -440,8 +467,5 @@ export function buildContextOverflowContinueText(language: string | undefined) {
  * 明确此情形调高 maxToken 无效，引导用户精简问题或新开会话。
  */
 export function buildContextOverflowText(language: string | undefined) {
-    if (isEnglishLanguage(language)) {
-        return "The context is still too large to continue even after automatic compaction. Please simplify your question or start a new conversation.";
-    }
-    return "自动整理(压缩)后上下文仍然过大，无法继续生成。请精简问题或新开一个会话。";
+    return buildContextFailureText(language, "recovery_failed");
 }

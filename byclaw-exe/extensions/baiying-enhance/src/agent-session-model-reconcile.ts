@@ -98,14 +98,16 @@ export function applySessionModelFromPrimary(
         overrides.provider !== parsed.provider || overrides.model !== parsed.model;
 
     let changed = false;
+    // contextTokens is a cached runtime window, not a user model selection.
+    // A platform update can change the window without changing provider/model ID.
+    if (entry.contextTokens !== undefined) {
+        delete entry.contextTokens;
+        changed = true;
+    }
     if (runtimeChanged) {
         entry.modelProvider = parsed.provider;
         entry.model = parsed.model;
         changed = true;
-        if (entry.contextTokens !== undefined) {
-            delete entry.contextTokens;
-            changed = true;
-        }
     }
 
     if (overridesChanged) {
@@ -130,12 +132,12 @@ export function applySessionModelFromPrimary(
     }
 
     const liveSwitchRequested = runtimeChanged || overridesChanged;
-    if (!liveSwitchRequested && !changed) {
+    if (!liveSwitchRequested) {
         if (entry[LIVE_MODEL_SWITCH_PENDING_KEY] !== undefined) {
             delete entry[LIVE_MODEL_SWITCH_PENDING_KEY];
             return { changed: true, liveSwitchRequested: false };
         }
-        return { changed: false, liveSwitchRequested: false };
+        return { changed, liveSwitchRequested: false };
     }
 
     if (liveSwitchRequested) {

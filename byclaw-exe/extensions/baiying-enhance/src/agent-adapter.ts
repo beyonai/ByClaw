@@ -54,7 +54,10 @@ export type AimodelThinkingLevel =
     | "xhigh"
     | "adaptive"
     | "max";
-export type AimodelThinkingLevelMap = Partial<Record<AimodelThinkingLevel, string | null>>;
+/** OpenClaw's config schema treats `adaptive` as a runtime mode, not a thinkingLevelMap key. */
+export type AimodelThinkingLevelMap = Partial<
+    Record<Exclude<AimodelThinkingLevel, "adaptive">, string | null>
+>;
 export type AimodelThinkingBudgets = Partial<
     Record<Exclude<AimodelThinkingLevel, "off" | "xhigh" | "adaptive">, number>
 >;
@@ -64,6 +67,17 @@ export type AimodelModelCompat = {
     supportedReasoningEfforts?: string[];
     reasoningEffortMap?: Record<string, string>;
     supportsUsageInStreaming?: boolean;
+};
+
+export type BaiyingReasoningConfig = {
+    enabled: boolean;
+    defaultLevel: AimodelThinkingLevel;
+    capability: "unsupported" | "binary" | "effort" | "budget" | "adaptive";
+    /** Resolved explicit format; auto is resolved from configured provider/protocol only. */
+    compatFormat: string;
+    supportedEfforts?: string[];
+    effortMap?: Record<string, string>;
+    budgets?: AimodelThinkingBudgets;
 };
 
 export type ProviderBundle = {
@@ -78,6 +92,7 @@ export type ProviderBundle = {
     maxTokens?: number;
     input?: AimodelModelInput[];
     reasoning?: boolean;
+    reasoningConfig?: BaiyingReasoningConfig;
     thinkingLevelMap?: AimodelThinkingLevelMap;
     thinkingBudgets?: AimodelThinkingBudgets;
     compat?: AimodelModelCompat;

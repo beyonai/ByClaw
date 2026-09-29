@@ -181,7 +181,10 @@ const ModelFormFields: React.FC<Props> = ({
     label: intl.formatMessage({ id: `modelMgr.modal.reasoningCapability.${value}` }),
     value,
   }));
-  const thinkingCompatFormatOptions = THINKING_COMPAT_FORMAT_OPTIONS.map((value) => ({ label: value, value }));
+  const thinkingCompatFormatOptions = THINKING_COMPAT_FORMAT_OPTIONS.map((value) => ({
+    label: value === 'bailian' ? intl.formatMessage({ id: 'modelMgr.modal.reasoningCompatFormat.bailian' }) : value,
+    value,
+  }));
   // const sectionGuideItems = useMemo(
   //   () => [
   //     { key: 'basic', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.basicConfig' }) },

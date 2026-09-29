@@ -27,13 +27,17 @@ class ScopedProjectionOutboundTest {
     private final HeldWrites held = new HeldWrites();
     private final EmbeddedChannel slow = new EmbeddedChannel(held);
     private final EmbeddedChannel healthy = new EmbeddedChannel();
-    private final MultiDeviceBroadcastService service = new MultiDeviceBroadcastService();
+    private final ChannelManager manager = mock(ChannelManager.class);
+    private final MultiDeviceBroadcastService service = new MultiDeviceBroadcastService(
+        manager,
+        mock(org.springframework.data.redis.core.StringRedisTemplate.class),
+        mock(org.springframework.data.redis.listener.RedisMessageListenerContainer.class),
+        mock(com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeInstance.class),
+        MultiDeviceBroadcastService.DEFAULT_PUBSUB_TOPIC);
 
     @BeforeEach
     void setUp() {
-        ChannelManager manager = mock(ChannelManager.class);
         when(manager.getChannels(9L)).thenReturn(Set.of(slow, healthy));
-        ReflectionTestUtils.setField(service, "channelManager", manager);
     }
 
     @AfterEach

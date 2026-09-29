@@ -1,14 +1,20 @@
+import { openEmployeePublication, publicationEntryLabel } from '@/service/employeePublication';
+import { publicationErrorMessage } from '@/utils/publicationError';
+import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
+import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
 import { EllipsisOutlined, MessageOutlined, PlusOutlined } from '@ant-design/icons';
-import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin } from 'antd';
+import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin, Modal } from 'antd';
 import type { MenuProps } from 'antd';
 import { getLocale, useDispatch, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
-import { restoreResource } from '@/pages/manager/service/resources';
+import { publishSkillToEnterprise, restoreResource } from '@/pages/manager/service/resources';
+import type { EnterpriseSkillPublishResult } from '@/pages/manager/service/resources';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
+import { useSkillExport } from '../SkillExportButton';
 import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
@@ -56,12 +62,16 @@ export interface IResourceCardItem {
   hasUsePermission?: boolean;
   canViewDetail?: boolean;
   canEdit?: boolean;
+  officialPublication?: boolean;
+  canPublishEmployee?: boolean;
+  employeePublicationStatus?: string;
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canApplyUse?: boolean;
   canDelete?: boolean;
   canOnShelf?: boolean;
   canOffShelf?: boolean;
+  canPublishToEnterprise?: boolean;
   canUnShelf?: boolean;
   canDeleteData?: boolean;
   canSetDefault?: boolean;
@@ -76,6 +86,7 @@ export interface IResourceCardItem {
   openSuperHelper?: string;
   tagName?: string;
   displaySourceType?: string;
+  personalWorkspace?: boolean;
   skillType?: string;
   sourceType?: string;
   version?: string;
@@ -114,17 +125,34 @@ type ResourceCardActionConfig = {
   hiddenMenuItemKeys?: string[];
   onApplyUse?: () => void;
   onAuditUse?: () => void;
-  onDelete?: () => void;
-  onDeleteData?: () => void;
-  onShelf?: () => void;
-  onUnShelf?: () => void;
+  onDelete?: (feedback: ResourceActionFeedback) => void | Promise<void>;
+  onDeleteData?: (feedback: ResourceActionFeedback) => void | Promise<void>;
+  onShelf?: (feedback: ResourceActionFeedback) => void | Promise<void>;
+  onUnShelf?: (feedback: ResourceActionFeedback) => void | Promise<void>;
+
+  /** 品牌参数加载完成且非商业版时，由资源页开启此入口。 */
+  enablePublishToEnterprise?: boolean;
+  onEnterpriseSkillDetail?: (resource: EnterpriseSkillPublishResult['resource']) => void;
+
+  /** 资源中心使用独立的上下架和注销流程，工作空间技能仍走原有文件操作。 */
+  enableResourceLifecycle?: boolean;
+  lifecycleLoading?: boolean;
   enableDigitalEmployeeLifecycle?: boolean;
   enableDigitalEmployeeDelete?: boolean;
   showDigitalEmployeeTypeTag?: boolean;
+
+  /** 资源中心技能导出不依赖管理权限。 */
+  enableSkillExport?: boolean;
+
+  /** 资源浏览页展示个人/企业归属，管理页保留生命周期状态。 */
+  showResourceTypeTag?: boolean;
   onRestore?: () => void;
   onAuth?: (authType: 'useAuth' | 'mgrAuth') => void;
   onEdit?: () => void;
   onApply?: () => void;
+
+  /** 仅数字员工“我可用的”页签开启，其他使用卡片的场景默认隐藏。 */
+  enableSetDefault?: boolean;
   onSetDefault?: () => void;
   onChat?: () => void;
 };
@@ -273,6 +301,17 @@ const getInstallLabelId = (resource: IResourceCardItem, resourceType?: string) =
   return 'resource.installTool';
 };
 
+// 按资源所属模块展示删除文案，知识和工具的子类型使用相同的模块名称。
+const getDeleteLabelId = (resource: IResourceCardItem, resourceType?: string) => {
+  const bizType = resource?.resourceBizType || resourceType;
+  if (['KG_DOC', 'KG_QA', 'KG_TERM'].includes(bizType || '')) return 'resource.deleteKnowledge';
+  if (bizType === 'SKILL' || resourceType === 'SKILL') return 'resource.deleteSkill';
+  if (['TOOL', 'TOOLKIT', 'MCP', 'AGENT'].includes(bizType || '') || resourceType === 'TOOL') {
+    return 'resource.deleteTool';
+  }
+  return 'common.deleteResource';
+};
+
 const canInstallResource = (resource: IResourceCardItem, resourceType?: string) => {
   const bizType = resource?.resourceBizType || resourceType;
   if (bizType === 'SKILL' || resourceType === 'SKILL') {
@@ -328,37 +367,75 @@ const RenderContent = (props: ResourceCardProps) => {
     digitalEmployeeActionMode = false,
   } = props;
   const { ownerType } = resource || {};
+  const isWorkspaceSkillResource = isWorkspaceSkill(resource);
+  const enableResourceLifecycle = actionConfig?.enableResourceLifecycle === true && !isWorkspaceSkillResource;
+  const currentResourceStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
   const isDeletedDigitalEmployee =
     (resource?.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE ||
       resourceType === resourceBizTypeMap.DIG_EMPLOYEE) &&
-    `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` === '-1';
-  const canApplyUseForStatus =
-    `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` !== '3' &&
-    `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` !== '-1';
+    currentResourceStatus === '-1';
+  const canApplyUseForStatus = enableResourceLifecycle
+    ? currentResourceStatus === '2'
+    : currentResourceStatus !== '3' && currentResourceStatus !== '-1';
   const {
     onEdit = noop,
     onAuth = noop,
     onApplyUse = noop,
     onRestore = noop,
-    onDelete = noop,
-    onDeleteData = noop,
-    onShelf = noop,
-    onUnShelf = noop,
+    onDelete: onDeleteAction = noop,
+    onDeleteData: onDeleteDataAction = noop,
+    onShelf: onShelfAction = noop,
+    onUnShelf: onUnShelfAction = noop,
+    onEnterpriseSkillDetail,
     onSetDefault = noop,
     onChat = noop,
   } = actionConfig || {};
+  const intl = useIntl();
+  const lifecycleLock = useRef(false);
+  const [processingLifecycle, setProcessingLifecycle] = useState(false);
+  // 提示只覆盖当前操作，异步期间锁定本卡片，其他卡片和列表仍可交互。
+  const runLifecycle = useCallback(
+    async (action: (feedback: ResourceActionFeedback) => void | Promise<void>) => {
+      if (lifecycleLock.current) return;
+      lifecycleLock.current = true;
+      setProcessingLifecycle(true);
+      try {
+        await runWithResourceFeedback(
+          action,
+          intl.formatMessage({ id: 'common.processing' }),
+          intl.formatMessage({ id: 'common.operationFailed' })
+        );
+      } finally {
+        lifecycleLock.current = false;
+        setProcessingLifecycle(false);
+      }
+    },
+    [intl]
+  );
+  const onShelf = useCallback(() => runLifecycle(onShelfAction), [runLifecycle, onShelfAction]);
+  const onUnShelf = useCallback(() => runLifecycle(onUnShelfAction), [runLifecycle, onUnShelfAction]);
+  const onDeleteData = useCallback(() => runLifecycle(onDeleteDataAction), [runLifecycle, onDeleteDataAction]);
+  const onDelete = useCallback(() => runLifecycle(onDeleteAction), [runLifecycle, onDeleteAction]);
   const enableDigitalEmployeeLifecycle = actionConfig?.enableDigitalEmployeeLifecycle !== false;
   const enableDigitalEmployeeDelete = actionConfig?.enableDigitalEmployeeDelete === true;
   // Standalone cards keep the descriptive employee-type tag by default; list
   // views can explicitly opt into lifecycle status tags when needed.
   const showDigitalEmployeeTypeTag = actionConfig?.showDigitalEmployeeTypeTag ?? true;
 
-  const intl = useIntl();
   const dispatch = useDispatch();
   const { agentId, agentInfo, EventEmitter } = useGlobal();
   const [digitalEmployeeMenuOpen, setDigitalEmployeeMenuOpen] = useState(false);
   const [installDialogOpen, setInstallDialogOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [publishingToEnterprise, setPublishingToEnterprise] = useState(false);
+  const [openingPublication, setOpeningPublication] = useState(false);
+  const publicationFeedbackCleanup = useRef<() => void>();
+  useEffect(() => () => publicationFeedbackCleanup.current?.(), []);
+  const [enterpriseCopyCreated, setEnterpriseCopyCreated] = useState(false);
+  const publishToEnterpriseLock = useRef(false);
+  useEffect(() => {
+    setEnterpriseCopyCreated(false);
+  }, [resource]);
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -369,10 +446,9 @@ const RenderContent = (props: ResourceCardProps) => {
     agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
 
   // 工作空间(用户开发)技能：复用公共 hook 处理详情 / 分享(资源化) / 删除，与左边栏一致。
-  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
+  const { setDetailPanel, clearDetailPanel, openTemporaryDetailPanel } = useContext(SiderContentContext);
   // 与左边栏同源解析当前数字员工名，保证“使用它的数字员工”展示一致（agentInfo 在技能中心页常为空）。
   const activeSiderAgent = useActiveSiderAgent();
-  const isWorkspaceSkillResource = isWorkspaceSkill(resource);
   const [workspaceShareRecord, setWorkspaceShareRecord] = useState<WorkspaceSkillItem | null>(null);
   const notifySkillListReload = () => EventEmitter?.emit('beyond-resourceList-resourceType-reload', 'SKILL');
   const workspaceActions = useWorkspaceSkillActions({
@@ -380,6 +456,7 @@ const RenderContent = (props: ResourceCardProps) => {
     agentName: activeSiderAgent.name,
     setDetailPanel,
     clearDetailPanel,
+    openTemporaryDetailPanel,
     onShareAuth: (item) => setWorkspaceShareRecord(item),
     onChanged: notifySkillListReload,
   });
@@ -437,16 +514,25 @@ const RenderContent = (props: ResourceCardProps) => {
   const isPublishedDigitalEmployee =
     !isDigitalEmployeeResource || `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` === '2';
   const isPendingUseApproval =
-    isPublishedDigitalEmployee && (resource.approveStatus === 'S' || isTruthyFlag(resource.useApplyPending));
+    isPublishedDigitalEmployee &&
+    canApplyUseForStatus &&
+    (resource.approveStatus === 'S' || isTruthyFlag(resource.useApplyPending));
   const canApplyForUse =
-    isPublishedDigitalEmployee && !isTruthyFlag(resource.hasUsePermission) && isTruthyFlag(resource.canApplyUse);
+    isPublishedDigitalEmployee &&
+    canApplyUseForStatus &&
+    !isTruthyFlag(resource.hasUsePermission) &&
+    isTruthyFlag(resource.canApplyUse);
   const resourceIdentity = `${resource.resourceId ?? resource.id ?? ''}`;
   const defaultEmployeeIdentity = `${defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`;
   const isDefaultDigitalEmployee =
     isDigitalEmployeeResource &&
     (isTruthyFlag(resource.isDefault) ||
       (Boolean(defaultEmployeeIdentity) && resourceIdentity === defaultEmployeeIdentity));
+  const showResourceTypeTag = actionConfig?.showResourceTypeTag === true;
   const normalizedOwnerType = `${ownerType || ''}`.toLowerCase();
+  // 未资源化的工作空间技能来自个人技能列表，接口没有 ownerType。
+  const isPersonalResource = isWorkspaceSkillResource || ['personal', 'personal_default'].includes(normalizedOwnerType);
+  const showResourceStatusTag = enableResourceLifecycle && !showResourceTypeTag;
   const isPersonalDigitalEmployee =
     isDigitalEmployeeResource && (normalizedOwnerType === 'personal' || normalizedOwnerType === 'personal_default');
   const isDigitalEmployeeGroup = isDigitalEmployeeResource && `${resource.agentType || ''}` === '017';
@@ -464,10 +550,15 @@ const RenderContent = (props: ResourceCardProps) => {
   };
 
   const getDisplayTopRightTag = () => {
+    // 类型标签只改变展示，继续保留资源的上下架及权限操作逻辑。
+    if (showResourceTypeTag) {
+      const type = resourceType === 'SKILL' ? 'Skill' : resourceType === 'KG_DOC' ? 'Knowledge' : 'Tool';
+      return intl.formatMessage({ id: `resource.tag.${isPersonalResource ? 'personal' : 'enterprise'}${type}` });
+    }
     // 数字员工状态由后端 resourceStatus 返回，统一映射为卡片右上角状态标签。
-    if (isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) {
+    if ((isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) || showResourceStatusTag) {
       const statusLabelMap: Record<string, string> = {
-        '-1': 'resourceStatus.deleted',
+        '-1': enableResourceLifecycle ? 'resource.statusCancelled' : 'resourceStatus.deleted',
         '0': 'resourceStatus.draft',
         '1': 'resourceStatus.pendingShelf',
         '2': 'resourceStatus.published',
@@ -526,7 +617,8 @@ const RenderContent = (props: ResourceCardProps) => {
   const digitalEmployeeStatus = `${
     resource?.resourceStatus ?? resource?.metaStatus ?? resource?.publishStatus ?? resource?.status ?? ''
   }`;
-  const isCancelledResource = isDigitalEmployeeResource && digitalEmployeeStatus === '-1';
+  // 资源中心的注销记录与数字员工删除记录都进入只读终态；其他复用卡片继续保留原有行为。
+  const isCancelledResource = (enableResourceLifecycle || isDigitalEmployeeResource) && digitalEmployeeStatus === '-1';
   const statusTagTextMap: Record<string, string> = {
     已上架: '2',
     Published: '2',
@@ -538,7 +630,9 @@ const RenderContent = (props: ResourceCardProps) => {
     待上架: '1',
     'Pending publication': '1',
     已删除: '-1',
+    已注销: '-1',
     Deleted: '-1',
+    Cancelled: '-1',
     ON_SHELF: '2',
     OFF_SHELF: '3',
     PUBLISHED: '2',
@@ -553,12 +647,11 @@ const RenderContent = (props: ResourceCardProps) => {
     statusTagTextMap[rawStatusKey.toUpperCase()] ||
     statusTagTextMap[`${displayTopRightTag || ''}`] ||
     '';
-  const digitalEmployeeStatusClass =
-    isDigitalEmployeeResource && !showDigitalEmployeeTypeTag
-      ? normalizedStatus === '-1'
-        ? 'digitalEmployeeStatusDeleted'
-        : `digitalEmployeeStatus${normalizedStatus}`
-      : '';
+  let statusTagClass = '';
+  if (((isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) || showResourceStatusTag) && normalizedStatus) {
+    statusTagClass =
+      normalizedStatus === '-1' ? 'digitalEmployeeStatusDeleted' : `digitalEmployeeStatus${normalizedStatus}`;
+  }
   const topRightTag = displayTopRightTag;
   const isInnerSkill = isInnerSkillResource(resource, resourceType);
   const isInstalledResource = Boolean(
@@ -629,6 +722,104 @@ const RenderContent = (props: ResourceCardProps) => {
 
   useEffect(() => () => handleSetDefaultDebounced.cancel(), [handleSetDefaultDebounced]);
 
+  const handlePublishToEnterprise = useCallback(async () => {
+    if (!resource.resourceId || publishToEnterpriseLock.current) return;
+    publishToEnterpriseLock.current = true;
+    setPublishingToEnterprise(true);
+    const messageKey = `publish-enterprise-${resource.resourceId}`;
+    message.loading({ key: messageKey, content: intl.formatMessage({ id: 'common.processing' }), duration: 0 });
+    try {
+      // 工作空间技能没有真实资源 ID，复用现有资源化及同名覆盖确认后再复制到企业。
+      const sourceSkill = isWorkspaceSkillResource
+        ? await workspaceActions.resourceizeSkill(resource as WorkspaceSkillItem)
+        : resource;
+      if (!sourceSkill?.resourceId) {
+        message.destroy(messageKey);
+        return;
+      }
+      const result = await publishSkillToEnterprise(String(sourceSkill.resourceId));
+      // 关联个人资源只做提醒，提交已经成功，不要求用户再次确认。
+      if (result.personalDependencies?.length) {
+        Modal.warning({
+          title: intl.formatMessage({ id: 'resource.enterprisePersonalDependenciesTitle' }),
+          content: (
+            <div>
+              <p>{intl.formatMessage({ id: 'resource.enterprisePersonalDependenciesWarning' })}</p>
+              <ul>
+                {result.personalDependencies.map((item) => (
+                  <li key={item.resourceId}>{item.resourceName}</li>
+                ))}
+              </ul>
+            </div>
+          ),
+          okText: intl.formatMessage({ id: 'common.confirm' }),
+        });
+      }
+      // 仅更新当前卡片，不刷新或重新挂载列表，避免 loading 结束时列表短暂空白。
+      setEnterpriseCopyCreated(true);
+      message.success({
+        key: messageKey,
+        content: (
+          <span>
+            {intl.formatMessage({
+              id:
+                result.resource.resourceStatus === 4
+                  ? 'resource.enterpriseSkillPending'
+                  : result.alreadyExists
+                    ? 'resource.enterpriseSkillExists'
+                    : 'resource.publishToEnterpriseSuccess',
+            })}
+            {onEnterpriseSkillDetail && result.resource.resourceStatus !== 4 && (
+              <Button type="link" onClick={() => onEnterpriseSkillDetail(result.resource)}>
+                {intl.formatMessage({ id: 'resource.viewEnterpriseSkill' })}
+              </Button>
+            )}
+          </span>
+        ),
+        duration: 6,
+      });
+    } catch (error) {
+      let errorText = intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' });
+      if (typeof error === 'string') errorText = error;
+      else if (error instanceof Error) errorText = error.message;
+      message.error({ key: messageKey, content: errorText });
+    } finally {
+      publishToEnterpriseLock.current = false;
+      setPublishingToEnterprise(false);
+    }
+  }, [resource, isWorkspaceSkillResource, workspaceActions.resourceizeSkill, onEnterpriseSkillDetail, intl]);
+
+  const openPublication = useCallback(async () => {
+    if (publishToEnterpriseLock.current) return;
+    publishToEnterpriseLock.current = true;
+    setOpeningPublication(true);
+    const messageKey = `employee-publication-open-${resource.resourceId || resource.id || resource.agentId}`;
+    message.loading({ key: messageKey, content: '正在准备发布申请，请稍候…', duration: 0 });
+    const timer = setTimeout(() => {
+      message.loading({
+        key: messageKey,
+        content: '仍在准备发布配置，关联资源较多时可能需要更久，请勿重复点击。',
+        duration: 0,
+      });
+    }, 8000);
+    const clearFeedback = () => {
+      clearTimeout(timer);
+      message.destroy(messageKey);
+    };
+    publicationFeedbackCleanup.current = clearFeedback;
+    try {
+      const resourceId = String(resource.resourceId || resource.id || resource.agentId);
+      await openEmployeePublication(resourceId);
+    } catch (error: any) {
+      message.error(publicationErrorMessage(error, '无法发起发布申请'));
+    } finally {
+      clearFeedback();
+      publicationFeedbackCleanup.current = undefined;
+      publishToEnterpriseLock.current = false;
+      setOpeningPublication(false);
+    }
+  }, [resource.resourceId, resource.id, resource.agentId]);
+
   const menuItems = useMemo<MenuProps['items']>(() => {
     const {
       canEdit,
@@ -642,14 +833,17 @@ const RenderContent = (props: ResourceCardProps) => {
       canRestore,
     } = resource || {};
     const items: NonNullable<MenuProps['items']> = [];
+    // 注销为终态，即使列表中残留旧权限也不展示可操作入口。
+    if (isCancelledResource) return items;
     // 企业数字员工的操作权限接口以 canEdit 表示管理权限；兼容部分旧返回未带 canOffShelf 的情况。
     const canManageEnterpriseDigitalEmployee =
       isDigitalEmployeeResource && `${ownerType || ''}`.toLowerCase() === 'enterprise' && canEdit === true;
     const digitalEmployeeStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
 
-    // 设为默认必须同时具备使用权限，避免待申请员工因 canSetDefault 返回不一致而显示入口。
+    // 仅我可用的页签提供设为默认，同时保留使用权限和后端设置权限校验。
     if (
       isDigitalEmployeeResource &&
+      actionConfig?.enableSetDefault === true &&
       isTruthyFlag(resource.hasUsePermission) &&
       canSetDefault === true &&
       !isDefaultDigitalEmployee
@@ -672,19 +866,63 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
+    if (resource.canPublishEmployee && resource.agentType !== '017') {
+      items.push({
+        key: 'publishEmployee',
+        disabled: openingPublication,
+        label: (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={publicationEntryLabel(resource.employeePublicationStatus)}
+            loading={openingPublication}
+          />
+        ),
+        onClick: () => openPublication(),
+      });
+    }
+
     // 编辑信息
     if (canEdit && !isInnerSkill) {
       items.push({
         key: 'edit',
         label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'common.editInfo' })} />,
-        onClick: () => {
-          onEdit?.();
-        },
+        onClick: () => onEdit?.(),
       });
     }
 
+    // 独立发布权限由后端返回；可编辑/可使用不代表允许复制到企业。
+    if (
+      isSkillResource(resource, resourceType) &&
+      isPersonalResource &&
+      !isWorkspaceSkillResource &&
+      currentResourceStatus !== '-1' &&
+      resource.resourceId &&
+      !enterpriseCopyCreated &&
+      actionConfig?.enablePublishToEnterprise === true &&
+      resource.canPublishToEnterprise === true
+    ) {
+      items.push({
+        key: 'publishToEnterprise',
+        label: (
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
+            loading={publishingToEnterprise}
+            onConfirm={handlePublishToEnterprise}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Uploadshangchuan"
+              text={intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+              loading={publishingToEnterprise}
+            />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
+
+    // 下架记录不提供授权入口，兼容旧接口的状态文本；上架后仍按原权限展示。
+    const isOffShelf = rawStatusKey === '3' || normalizedStatus === '3';
     // 管理授权
-    if (canManageAuth) {
+    if (canManageAuth && !isOffShelf) {
       items.push({
         key: 'authorize',
         label: (
@@ -700,7 +938,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 使用授权
-    if (canUseAuth) {
+    if (canUseAuth && !isOffShelf) {
       items.push({
         key: 'use',
         label: (
@@ -735,6 +973,7 @@ const RenderContent = (props: ResourceCardProps) => {
     // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
     if (
       canInstallResource(resource, resourceType) &&
+      (!enableResourceLifecycle || `${resource.resourceStatus}` === '2') &&
       actionConfig?.canInstallToTarget !== false &&
       !isInstalledResource
     ) {
@@ -752,17 +991,70 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 数字员工下架使用“编辑信息”权限；我可用列表通过生命周期开关整体隐藏该操作。
+    if (enableResourceLifecycle && !isDigitalEmployeeResource) {
+      // 入口必须同时满足后端权限和当前状态，杜绝把下架与注销混为同一操作。
+      const enterprise = ownerType === 'enterprise';
+      const lifecycleItems = [
+        {
+          key: 'shelfData',
+          allowed: enterprise && canOnShelf && ['0', '3'].includes(digitalEmployeeStatus),
+          label: 'resource.lifecycle.shelfData',
+          icon: 'icon-a-Uploadshangchuan',
+          onConfirm: onShelf,
+        },
+        {
+          key: 'unShelfData',
+          allowed: enterprise && canOffShelf && digitalEmployeeStatus === '2',
+          label: 'resource.lifecycle.unShelfData',
+          icon: 'icon-a-Downloadxiazai',
+          onConfirm: onUnShelf,
+        },
+        {
+          key: 'deleteData',
+          allowed: canDelete && (ownerType === 'personal' || ['0', '3'].includes(digitalEmployeeStatus)),
+          label: 'resource.lifecycle.deleteData',
+          icon: 'icon-a-Deleteshanchu',
+          onConfirm: onDeleteData,
+        },
+      ];
+      lifecycleItems
+        .filter((item) => item.allowed)
+        .forEach((item) => {
+          items.push({
+            key: item.key,
+            disabled: processingLifecycle || actionConfig?.lifecycleLoading,
+            label: (
+              <ConfirmMenuLabel
+                title={intl.formatMessage({ id: `${item.label}Confirm` })}
+                disabled={processingLifecycle || actionConfig?.lifecycleLoading}
+                onConfirm={item.onConfirm}
+              >
+                <BuildMenuLabel icon={item.icon} text={intl.formatMessage({ id: item.label })} />
+              </ConfirmMenuLabel>
+            ),
+          });
+        });
+    }
+
+    const deleteLabelId = getDeleteLabelId(resource, resourceType);
+    const deleteConfirmId =
+      deleteLabelId === 'common.deleteResource' ? 'common.deactivateConfirm' : `${deleteLabelId}Confirm`;
+
+    // 数字员工下架沿用操作权限判断；页面通过生命周期开关隐藏个人员工的上下架入口。
     const canUnShelfDigitalEmployee =
       isDigitalEmployeeResource &&
-      (canOffShelf === true || (canManageEnterpriseDigitalEmployee && digitalEmployeeStatus === '2'));
-    if (enableDigitalEmployeeLifecycle && ((!isDigitalEmployeeResource && canDelete) || canUnShelfDigitalEmployee)) {
+      (canOffShelf === true ||
+        (canOffShelf === undefined && canManageEnterpriseDigitalEmployee && digitalEmployeeStatus === '2'));
+    if (
+      enableDigitalEmployeeLifecycle &&
+      ((!isDigitalEmployeeResource && !enableResourceLifecycle && canDelete) || canUnShelfDigitalEmployee)
+    ) {
       items.push({
         key: isDigitalEmployeeResource ? 'unShelfData' : 'delete',
         label: (
           <ConfirmMenuLabel
             title={intl.formatMessage({
-              id: isDigitalEmployeeResource ? 'resource.unShelfDataConfirm' : 'common.deactivateConfirm',
+              id: isDigitalEmployeeResource ? 'resource.unShelfDataConfirm' : deleteConfirmId,
             })}
             onConfirm={() => (isDigitalEmployeeResource ? onUnShelf() : onDelete())}
           >
@@ -771,7 +1063,7 @@ const RenderContent = (props: ResourceCardProps) => {
               text={
                 isDigitalEmployeeResource
                   ? intl.formatMessage({ id: 'resource.unShelfData' })
-                  : intl.formatMessage({ id: 'common.deleteResource' })
+                  : intl.formatMessage({ id: deleteLabelId })
               }
             />
           </ConfirmMenuLabel>
@@ -779,11 +1071,12 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 已下架数字员工始终提供“上架数据”，不再依赖恢复权限字段。
+    // 已下架数字员工始终提供“上架员工”，不再依赖恢复权限字段。
     if (
       enableDigitalEmployeeLifecycle &&
       isDigitalEmployeeResource &&
-      (canOnShelf === true || (canManageEnterpriseDigitalEmployee && ['0', '3'].includes(digitalEmployeeStatus)))
+      (canOnShelf === true ||
+        (canOnShelf === undefined && canManageEnterpriseDigitalEmployee && ['0', '3'].includes(digitalEmployeeStatus)))
     ) {
       items.push({
         key: 'shelfData',
@@ -795,7 +1088,7 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 我创建的已下架数字员工允许永久删除数据，操作与上下架生命周期菜单分开控制。
+    // 数字员工“注销员工”入口沿用删除权限和回调，与上下架生命周期菜单分开控制。
     if (isDigitalEmployeeResource && enableDigitalEmployeeDelete && canDelete === true) {
       items.push({
         key: 'deleteData',
@@ -811,7 +1104,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 其他资源继续使用原有恢复逻辑。
-    if (canRestore && !isDigitalEmployeeResource) {
+    if (canRestore && !isDigitalEmployeeResource && !enableResourceLifecycle) {
       items.push({
         key: 'restore',
         label: (
@@ -856,6 +1149,14 @@ const RenderContent = (props: ResourceCardProps) => {
     dispatch,
     EventEmitter,
     handleSetDefaultDebounced,
+    handlePublishToEnterprise,
+    publishingToEnterprise,
+    openingPublication,
+    processingLifecycle,
+    enterpriseCopyCreated,
+    isPersonalResource,
+    isWorkspaceSkillResource,
+    currentResourceStatus,
     intl,
     isDefaultDigitalEmployee,
     isDigitalEmployeeResource,
@@ -868,12 +1169,22 @@ const RenderContent = (props: ResourceCardProps) => {
     onShelf,
     onUnShelf,
     enableDigitalEmployeeLifecycle,
+    enableResourceLifecycle,
+    isCancelledResource,
+    rawStatusKey,
+    normalizedStatus,
     enableDigitalEmployeeDelete,
     showDigitalEmployeeTypeTag,
     onEdit,
     onRestore,
     onSetDefault,
+    resource?.resourceStatus,
+    resource?.metaStatus,
     resource?.canEdit,
+    resource?.officialPublication,
+    resource?.canPublishEmployee,
+    resource?.employeePublicationStatus,
+    openPublication,
     resource?.canManageAuth,
     resource?.canUseAuth,
     resource?.canApplyUse,
@@ -882,6 +1193,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canDelete,
     resource?.canOnShelf,
     resource?.canOffShelf,
+    resource?.canPublishToEnterprise,
     resource?.canUnShelf,
     resource?.canDeleteData,
     resource?.canRestore,
@@ -899,7 +1211,7 @@ const RenderContent = (props: ResourceCardProps) => {
     settingDefault,
   ]);
 
-  // 工作空间技能用独立菜单(详情/分享/删除)，不走权限驱动的 menuItems。
+  // 工作空间技能用独立菜单；个人管理页支持资源化后上架，浏览页遵循隐藏规则。
   const workspaceMenuItems = useMemo<MenuProps['items']>(() => {
     if (!isWorkspaceSkillResource) {
       return [];
@@ -916,23 +1228,76 @@ const RenderContent = (props: ResourceCardProps) => {
         onClick: () => workspaceActions.shareSkill(resource as WorkspaceSkillItem),
       },
     ];
-    // 仅当对该数字员工有管理权限时，才允许删除工作空间技能（后端同样校验）。
-    if (actionConfig?.canManageWorkspaceSkill) {
+    if (actionConfig?.enablePublishToEnterprise && actionConfig?.canManageWorkspaceSkill && !enterpriseCopyCreated) {
+      items.push({
+        key: 'publishToEnterprise',
+        label: (
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
+            loading={publishingToEnterprise}
+            onConfirm={handlePublishToEnterprise}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Uploadshangchuan"
+              text={intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+              loading={publishingToEnterprise}
+            />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
+    // 工作空间技能同样遵循浏览页隐藏规则，管理入口仍需员工管理权限（后端同样校验）。
+    if (actionConfig?.canManageWorkspaceSkill && !actionConfig?.hiddenMenuItemKeys?.includes('delete')) {
       items.push({
         key: 'delete',
-        label: (
-          <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
-        ),
+        label: <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'resource.deleteSkill' })} />,
         onClick: () => workspaceActions.removeSkill(resource as WorkspaceSkillItem),
       });
     }
-    return items;
-  }, [isWorkspaceSkillResource, intl, workspaceActions, resource, actionConfig?.canManageWorkspaceSkill]);
+    const hiddenKeys = new Set(actionConfig?.hiddenMenuItemKeys || []);
+    return items.filter((item) => item && !hiddenKeys.has(String(item.key)));
+  }, [
+    actionConfig?.enablePublishToEnterprise,
+    enterpriseCopyCreated,
+    publishingToEnterprise,
+    handlePublishToEnterprise,
+    isWorkspaceSkillResource,
+    intl,
+    workspaceActions,
+    resource,
+    actionConfig?.canManageWorkspaceSkill,
+    actionConfig?.hiddenMenuItemKeys,
+  ]);
 
-  const effectiveMenuItems = isWorkspaceSkillResource ? workspaceMenuItems : menuItems;
-  const effectiveTopRightTag = isWorkspaceSkillResource
-    ? intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })
-    : topRightTag;
+  const { loading: exportingSkill, exportSkills } = useSkillExport({
+    item: resource,
+    digitalEmployeeId: activeDigitalEmployeeId,
+  });
+  // 工作空间和资源化技能都在更多菜单中导出，不受管理权限限制。
+  const effectiveMenuItems: MenuProps['items'] = [
+    ...((isWorkspaceSkillResource ? workspaceMenuItems : menuItems) || []),
+    ...(actionConfig?.enableSkillExport && (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL')
+      ? [
+        {
+          key: 'exportSkill',
+          label: (
+            <BuildMenuLabel
+              icon="icon-a-Downloadxiazai"
+              text={intl.formatMessage({ id: 'resource.skillExport.single' })}
+            />
+          ),
+          disabled: exportingSkill,
+          onClick: () => {
+            void exportSkills();
+          },
+        },
+      ]
+      : []),
+  ];
+  const effectiveTopRightTag =
+    isWorkspaceSkillResource && !showResourceTypeTag
+      ? intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })
+      : topRightTag;
   const effectiveCardClick: ((resource?: IResourceCardItem) => void) | undefined = isWorkspaceSkillResource
     ? () => workspaceActions.openDetail(resource as WorkspaceSkillItem)
     : onCardClick;
@@ -1014,7 +1379,14 @@ const RenderContent = (props: ResourceCardProps) => {
               {displayTitle}
             </Paragraph>
             {effectiveTopRightTag ? (
-              <span className={classnames(styles.skillPosterTag, { [styles.cancelledTag]: isCancelledResource })}>
+              <span
+                className={classnames(styles.skillPosterTag, {
+                  [styles.digitalEmployeePersonalTag]: showResourceTypeTag && isPersonalResource,
+                  [styles.digitalEmployeeEnterpriseTag]: showResourceTypeTag && !isPersonalResource,
+                  [styles[statusTagClass]]: Boolean(statusTagClass),
+                  [styles.cancelledTag]: isCancelledResource,
+                })}
+              >
                 <span className={styles.tagText}>{effectiveTopRightTag}</span>
               </span>
             ) : null}
@@ -1133,35 +1505,22 @@ const RenderContent = (props: ResourceCardProps) => {
               {effectiveTopRightTag ? (
                 <span
                   className={classnames(styles.tag, {
-                    // 我可用列表按个人/企业及员工/员工组区分标签颜色；官方推荐仍沿用状态标签样式。
+                    // 同一归属的员工和员工组共用配色，具体类型由标签文案区分。
                     [styles.digitalEmployeePersonalTag]:
-                      isDigitalEmployeeResource &&
-                      showDigitalEmployeeTypeTag &&
-                      isPersonalDigitalEmployee &&
-                      !isDigitalEmployeeGroup,
-                    [styles.digitalEmployeePersonalGroupTag]:
-                      isDigitalEmployeeResource &&
-                      showDigitalEmployeeTypeTag &&
-                      isPersonalDigitalEmployee &&
-                      isDigitalEmployeeGroup,
+                      (isDigitalEmployeeResource && showDigitalEmployeeTypeTag && isPersonalDigitalEmployee) ||
+                      (showResourceTypeTag && isPersonalResource),
                     [styles.digitalEmployeeEnterpriseTag]:
-                      isDigitalEmployeeResource &&
-                      showDigitalEmployeeTypeTag &&
-                      !isPersonalDigitalEmployee &&
-                      !isDigitalEmployeeGroup,
-                    [styles.digitalEmployeeEnterpriseGroupTag]:
-                      isDigitalEmployeeResource &&
-                      showDigitalEmployeeTypeTag &&
-                      !isPersonalDigitalEmployee &&
-                      isDigitalEmployeeGroup,
+                      (isDigitalEmployeeResource && showDigitalEmployeeTypeTag && !isPersonalDigitalEmployee) ||
+                      (showResourceTypeTag && !isPersonalResource),
                     [styles.digitalEmployeeTag]:
                       isDigitalEmployeeResource &&
                       !isPersonalDigitalEmployee &&
                       !isDigitalEmployeeGroup &&
                       !showDigitalEmployeeTypeTag,
-                    [styles.digitalEmployeeStatusTag]: isDigitalEmployeeResource && !showDigitalEmployeeTypeTag,
+                    [styles.digitalEmployeeStatusTag]:
+                      (isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) || showResourceStatusTag,
                     [styles.digitalEmployeeTopRightTag]: isDigitalEmployeeResource,
-                    [styles[digitalEmployeeStatusClass]]: Boolean(digitalEmployeeStatusClass),
+                    [styles[statusTagClass]]: Boolean(statusTagClass),
                     [styles.cancelledTag]: isCancelledResource,
                   })}
                 >
@@ -1310,10 +1669,15 @@ function ResourceCard(props: ResourceCardProps) {
   const { resource, variant = 'default' } = props;
   const resourceCardRef = useRef<HTMLDivElement>(null);
   const displayResource = resource;
+  const isDigitalEmployeeResource =
+    displayResource?.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE ||
+    props.resourceType === resourceBizTypeMap.DIG_EMPLOYEE;
+  const isResourceLifecycleCard =
+    props.actionConfig?.enableResourceLifecycle === true && !isWorkspaceSkill(displayResource);
+  const displayStatus = `${displayResource?.resourceStatus ?? displayResource?.metaStatus ?? ''}`;
+  // 资源中心和数字员工统一将 -1 视为注销终态；旧复用卡片继续按历史 3 状态处理。
   const isCancelledResource =
-    displayResource?.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE
-      ? `${displayResource?.resourceStatus ?? displayResource?.metaStatus ?? ''}` === '-1'
-      : `${displayResource?.resourceStatus ?? ''}` === '3';
+    isResourceLifecycleCard || isDigitalEmployeeResource ? displayStatus === '-1' : displayStatus === '3';
   const isCardClickDisabled =
     typeof props.cardClickDisabled === 'function'
       ? props.cardClickDisabled(displayResource)

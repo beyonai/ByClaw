@@ -52,6 +52,8 @@ type IRef = {
 
 const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
   const { onSelect, searchName } = props;
+  // 侧栏和弹窗可以同时挂载，分页监听当前实例的容器。
+  const scrollContainerId = React.useId();
 
   const intl = useIntl();
   const { EventEmitter, platform } = useGlobal();
@@ -276,9 +278,10 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
       )}
       {!isLoading && (
         <div
-          id="allEmployeeListWrap"
+          id={scrollContainerId}
           className={classNames('full-height overflow-auto', pStyles.employeeListScrollWrap, {
             hideThumb: !isInput,
+            [pStyles.compactEmployeeScroll]: props.compactCard,
           })}
         >
           <InfiniteScroll
@@ -291,7 +294,6 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
             hasMore={hasMore}
             dataLength={employeesList.length}
             hasChildren={employeesList.length > 0}
-            height={props.compactCard ? '100%' : undefined}
             loader={
               <Skeleton avatar={{ size: 'default', shape: 'circle' }} paragraph={false} active style={{ padding: 8 }} />
             }
@@ -306,11 +308,11 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
                 </Divider>
               )
             }
-            scrollableTarget={props.compactCard ? undefined : 'allEmployeeListWrap'}
+            scrollableTarget={scrollContainerId}
             inverse={false}
             scrollThreshold="50px"
-            // 紧凑弹窗与技能列表一致，由 InfiniteScroll 自身承载列表滚动。
-            style={{ overflow: props.compactCard ? 'auto' : 'visible', paddingBottom: hasMore ? '20px' : 0 }}
+            // 外层统一承载滚动，内部按内容自然增高，避免百分比高度失效后被裁切。
+            style={{ overflow: 'visible', paddingBottom: hasMore ? '20px' : 0 }}
           >
             <List
               className={pStyles.employeesList}

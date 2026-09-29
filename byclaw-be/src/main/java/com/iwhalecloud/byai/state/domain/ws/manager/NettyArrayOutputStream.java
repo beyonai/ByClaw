@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.ws.manager;
 
+import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -18,12 +20,18 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
     private final String clientRequestId;
 
     private final String wrapperType;
+    private final String requestId;
 
     public NettyArrayOutputStream(ChannelHandlerContext ctx) {
         this(ctx, null, null);
     }
 
     public NettyArrayOutputStream(ChannelHandlerContext ctx, String clientRequestId, String wrapperType) {
+        this(ctx, clientRequestId, wrapperType, clientRequestId);
+    }
+
+    public NettyArrayOutputStream(ChannelHandlerContext ctx, String clientRequestId, String wrapperType, String requestId) {
+        this.requestId = requestId;
         this.ctx = ctx;
         this.clientRequestId = clientRequestId;
         this.wrapperType = wrapperType;
@@ -39,8 +47,13 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
         // 将数据转换为字符串
         String content = new String(newData, StandardCharsets.UTF_8);
         // 通过 WebSocket 发送数据
+        String frameText = wrapContent(content);
+        JSONObject terminal = ChatChainLog.terminalFrame(frameText);
+        long started = System.nanoTime();
         if (ctx.channel().isActive()) {
-            ctx.writeAndFlush(new TextWebSocketFrame(wrapContent(content)));
+            ChatChainLog.wsWritten(ctx.writeAndFlush(new TextWebSocketFrame(frameText)), terminal, started);
+        } else {
+            ChatChainLog.wsUnavailable(ctx.channel(), terminal);
         }
     }
 
@@ -57,6 +70,7 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
         JSONObject wrapper = new JSONObject();
         wrapper.put("type", wrapperType);
         wrapper.put("clientRequestId", clientRequestId);
+        wrapper.put("requestId", requestId);
 
         try {
             JSONObject payload = JSON.parseObject(content);

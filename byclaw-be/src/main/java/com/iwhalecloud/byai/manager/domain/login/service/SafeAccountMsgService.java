@@ -26,7 +26,9 @@ public class SafeAccountMsgService {
      * @param safeAccountMsg 短信信息
      */
     public void save(SafeAccountMsg safeAccountMsg) {
-        safeAccountMsgMapper.insert(safeAccountMsg);
+        if (safeAccountMsgMapper.insert(safeAccountMsg) != 1) {
+            throw new IllegalStateException("Failed to persist SMS verification record");
+        }
     }
 
     /***
@@ -35,7 +37,9 @@ public class SafeAccountMsgService {
      * @param safeAccountMsg 短信信息
      */
     public void update(SafeAccountMsg safeAccountMsg) {
-        safeAccountMsgMapper.updateById(safeAccountMsg);
+        if (safeAccountMsgMapper.updateById(safeAccountMsg) != 1) {
+            throw new IllegalStateException("Failed to update SMS verification record");
+        }
     }
 
     /**

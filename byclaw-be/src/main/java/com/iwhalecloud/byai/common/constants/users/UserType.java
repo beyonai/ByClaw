@@ -5,6 +5,19 @@ package com.iwhalecloud.byai.common.constants.users;
  */
 public final class UserType {
 
+    /** 仅在权限比较时忽略大小写，保留规范角色编码及原始数据。 */
+    public static boolean matchesAny(String userType, String... allowedTypes) {
+        if (userType == null) {
+            return false;
+        }
+        for (String allowedType : allowedTypes) {
+            if (allowedType != null && allowedType.equalsIgnoreCase(userType)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private UserType() {
     }
 

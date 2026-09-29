@@ -1,10 +1,26 @@
 .container {
-  width: 448px;
+  // 按最长一组选项的单行宽度展开，避免固定宽度留白；窄屏仍允许整项换行。
+  width: max-content;
+  max-width: calc(100vw - 32px);
   padding: 8px 12px 12px 12px;
   border-radius: 8px;
   border: 1px solid #e6ebf0;
   background: #fff;
   box-shadow: 0 6px 10px 0 rgba(42, 60, 79, 0.1);
+
+  // 分类较多时换行，防止筛选弹层横向铺满页面。
+  &.withCatalog {
+    width: 560px;
+
+    button.statusItem {
+      background: transparent;
+      font: inherit;
+
+      &.active {
+        background: rgba(22, 93, 255, 0.1);
+      }
+    }
+  }
 
   .filterTitle {
     font-size: 13px;
@@ -13,6 +29,8 @@
   }
   .statusItem,
   .belongItem {
+    flex-shrink: 0;
+    white-space: nowrap;
     padding: 3px 14px;
     border-radius: 30px;
     border: 1px solid #ced3d9;
@@ -60,7 +78,10 @@
 }
 
 .relatedToMeDropdown {
-  padding: 5px 8px;
+  // 固定外框高度，避免选中标签的内边距撑高工具栏控件。
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 8px;
   border-radius: 8px;
   border: 1px solid #ced3d9;
   min-width: 100px;

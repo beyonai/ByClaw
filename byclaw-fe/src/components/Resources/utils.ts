@@ -2,6 +2,10 @@ import { ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES, ALL_RESOURCE_BIZ_TYPE_VALUES } 
 
 const KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES = ['KG_DOC', 'KG_QA', 'KG_TERM'];
 
+type ResourceAuditRowLike = {
+  resourceBizType?: string | null;
+};
+
 export const SKILL_MARKETPLACE_INSTALLED_MESSAGE_TYPE = 'BYCLAW_SKILL_INSTALLED';
 
 export const buildSkillMarketplaceUrl = (
@@ -72,6 +76,20 @@ export const getBaseResourceBizTypeList = (resourceType: string) => {
   return resourceType === 'TOOL' ? [...ALL_RESOURCE_BIZ_TYPE_VALUES] : [resourceType];
 };
 
+/**
+ * 审核接口共用聚合查询，渲染前再次按当前资源中心的业务类型隔离数据，避免接口异常混入其他模块记录。
+ */
+export const filterResourceAuditRowsByType = <T extends ResourceAuditRowLike>(
+  rows: T[],
+  resourceBizTypeList: string[] = []
+) => {
+  const allowedTypes = new Set(
+    resourceBizTypeList.map((resourceBizType) => `${resourceBizType ?? ''}`.trim().toUpperCase()).filter(Boolean)
+  );
+  // 没有明确类型时不展示任何审核记录，避免退化为跨模块的全部数据。
+  return rows.filter((row) => allowedTypes.has(`${row?.resourceBizType ?? ''}`.trim().toUpperCase()));
+};
+
 export const buildResourceListFilterParam = (activeTab: string, filterParam?: Record<string, any>) => {
   const ignoredKeys = new Set(['deptBelong', 'customBelong']);
   if (activeTab === 'personal') {
@@ -87,4 +105,11 @@ export const buildResourceListFilterParam = (activeTab: string, filterParam?: Re
     acc[key] = value;
     return acc;
   }, {} as Record<string, any>);
+};
+
+/** 隐藏的筛选值不能继续参与查询，个人资源始终请求已上架数据。 */
+export const getResourceQueryStatus = (activeTab: string, myResourcesOnly: boolean, status?: unknown): string => {
+  if (!myResourcesOnly || activeTab === 'personal') return '2';
+  const value = `${status ?? '2'}`;
+  return ['', '0', '2', '3'].includes(value) ? value : '2';
 };

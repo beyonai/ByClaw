@@ -2,6 +2,7 @@
  * WebSocket 管理工具类 - 全局单例模式
  */
 
+import { isChatTerminal, recordChatChain, flushChatChainLogs, recordChatConnection } from '@/utils/chatChainLog';
 import { clearToken, getToken, loginRedirect } from './auth';
 import { getLocale } from '@umijs/max';
 
@@ -185,7 +186,7 @@ class WebSocketManager {
       });
       const wsUrl = this.getWebSocketUrl(`byaiService/ws?${params.toString()}`);
       debugLog('ws', 'chat WebSocket connecting', () => ({
-        url: wsUrl.replace(/([?&]token=)[^&]+/, '$1<redacted>'),
+        url: wsUrl.split('?')[0],
       }));
       const connectionId = this.connectionSeq + 1;
       this.connectionSeq = connectionId;
@@ -195,6 +196,8 @@ class WebSocketManager {
 
       // 设置请求头 - 在连接建立后发送认证信息
       ws.onopen = () => {
+        recordChatConnection(true);
+        void flushChatChainLogs();
         if (!this.isCurrentConnection(connectionId, ws)) {
           ws.close();
           return;
@@ -226,6 +229,7 @@ class WebSocketManager {
         }
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
+          if (isChatTerminal(message)) recordChatChain('fe.final_received', message);
           this.handleMessage(message);
         } catch (error) {
           console.error('WebSocket 消息解析失败:', error);
@@ -236,6 +240,7 @@ class WebSocketManager {
         if (!this.isCurrentConnection(connectionId, ws)) {
           return;
         }
+        recordChatConnection(false);
         console.log('WebSocket 连接关闭:', event.code, event.reason);
         this.ws = null;
         this.isConnecting = false;

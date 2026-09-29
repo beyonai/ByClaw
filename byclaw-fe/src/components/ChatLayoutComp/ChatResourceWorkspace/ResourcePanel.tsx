@@ -11,9 +11,9 @@ import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentB
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FileResourcePanel from './FileResourcePanel';
 import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
-import { querySessionDataSources } from '@/service/projectDataSources';
+import { useSessionDataSourcesVisible } from './useSessionDataSourcesVisible';
 import { useChatResourceProject } from './useChatResourceProject';
-import { getSessionFileTabKeys, type SessionFileTabKey } from './resourceTabUtils';
+import { getSessionResourceTabKeys, type SessionFileTabKey } from './resourceTabUtils';
 import styles from './index.module.less';
 
 type UpperScopeKey = 'session' | 'employee';
@@ -47,46 +47,22 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
   const resolvedProjectId = Number(project?.projectId ?? projectId);
-  const sessionFileTabKeys = useMemo(() => getSessionFileTabKeys(resolvedProjectId), [resolvedProjectId]);
-  const [dataSourceAvailability, setDataSourceAvailability] = useState<{
-    sessionId: string;
-    projectId: number;
-    hasData: boolean;
-  }>();
-  const showDataSources = Boolean(
-    sessionId &&
-      resolvedProjectId > 0 &&
-      dataSourceAvailability?.sessionId === sessionId &&
-      dataSourceAvailability?.projectId === resolvedProjectId &&
-      dataSourceAvailability?.hasData
+  const sessionResourceTabKeys = useMemo(
+    () => getSessionResourceTabKeys(resolvedProjectId, sessionId),
+    [resolvedProjectId, sessionId]
   );
+  const sessionFileTabKeys = useMemo(
+    () => sessionResourceTabKeys.filter((key): key is SessionFileTabKey => key !== 'code'),
+    [sessionResourceTabKeys]
+  );
+  const showDataSources = useSessionDataSourcesVisible(sessionId, resolvedProjectId, sessionResourceRefreshKey);
   const showProjectCloudDrive = sessionFileTabKeys.includes('projectFile');
   // 项目云盘只能使用项目知识库 ID；未初始化知识库时保留空值并展示对应空态。
   const rawProjectCloudResourceId = cloudResourceId ?? project?.cloudResourceId;
   const projectCloudResourceId = rawProjectCloudResourceId ? `${rawProjectCloudResourceId}` : undefined;
 
   // 项目空间展示项目目录本身，项目尚未配置仓库时也可以浏览普通文件。
-  const showCode = Boolean(sessionId && resolvedProjectId > 0);
-
-  // 按当前会话的实际可见数据决定入口；切换会话后不沿用上一个会话的结果。
-  useEffect(() => {
-    let disposed = false;
-    if (!sessionId || !Number.isFinite(resolvedProjectId) || resolvedProjectId <= 0) return;
-    void querySessionDataSources(sessionId)
-      .then((result) => {
-        if (!disposed) {
-          setDataSourceAvailability({ sessionId, projectId: resolvedProjectId, hasData: result.total > 0 });
-        }
-      })
-      .catch(() => {
-        if (!disposed) {
-          setDataSourceAvailability({ sessionId, projectId: resolvedProjectId, hasData: false });
-        }
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [resolvedProjectId, sessionId, sessionResourceRefreshKey]);
+  const showCode = sessionResourceTabKeys.includes('code');
 
   useEffect(() => {
     if (!showCode && secondaryState.session === 'code') {
@@ -191,13 +167,18 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     if (upperScopeKey === 'employee') {
       // 右侧资源面板保留与左侧小面板一致的中心入口，但不重复展示当前数字员工栏。
       if (upperSecondaryKey === 'knowledge') return <Knowledge embedded showRouter />;
-      if (upperSecondaryKey === 'skill') return <ResourceSiderPanel resourceType="SKILL" embedded showRouter />;
+
+      // 员工变化后重建技能列表，旧员工的在途请求不能回写新员工列表。
+      if (upperSecondaryKey === 'skill') {
+        return <ResourceSiderPanel key={activeEmployee.resourceId} resourceType="SKILL" embedded showRouter />;
+      }
       if (upperSecondaryKey === 'model') return <ModelSiderPanel embedded showRouter />;
       return empty;
     }
 
     return empty;
   }, [
+    activeEmployee.resourceId,
     empty,
     onOpenDetail,
     project,

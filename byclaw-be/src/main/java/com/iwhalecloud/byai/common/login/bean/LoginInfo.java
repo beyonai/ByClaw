@@ -29,6 +29,11 @@ public class LoginInfo implements Serializable {
 
     private String phone;
 
+    /**
+     * 用户头像预览地址。
+     */
+    private String avatar;
+
     private String memo;
 
     /**

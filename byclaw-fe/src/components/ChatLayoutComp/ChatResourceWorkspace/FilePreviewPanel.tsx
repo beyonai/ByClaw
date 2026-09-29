@@ -206,6 +206,11 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
     [resourceId, sessionId]
   );
 
+  const loadDatasetFile = useCallback(
+    (filePath: string) => downloadResourceFile({ resourceId: resourceId!, directoryPath: filePath }),
+    [resourceId]
+  );
+
   const resolveRelativeResource = useCallback<MarkdownImageResolver>(
     async (imagePath) => {
       if (isExternalImagePath(imagePath)) {
@@ -233,10 +238,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       const loadFromSourcePath = () =>
         source === 'fileBrowser'
           ? loadFileBrowserFile(resolvedPath)
-          : downloadResourceFile({
-            resourceId: resourceId!,
-            directoryPath: resolvedPath,
-          });
+          : loadDatasetFile(resolvedPath);
       const request = (
         previewFileUrl
           ? loadFromFileUrl().catch(() =>
@@ -258,7 +260,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       markdownImageCacheRef.current.set(cacheKey, request);
       return request;
     },
-    [loadFileBrowserFile, previewFileUrl, resourceId, source, sourcePath]
+    [loadDatasetFile, loadFileBrowserFile, previewFileUrl, resourceId, source, sourcePath]
   );
 
   useEffect(() => {
@@ -280,16 +282,13 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return response.blob();
       }
       if (resourceId && sourcePath) {
-        // 会话、项目文件来自文件空间；知识库文件按知识库来源下载。
+        // 会话文件来自文件空间；项目云盘按项目维度下载；其它知识库文件按知识库来源下载。
         let response: any;
         try {
           response =
             source === 'fileBrowser'
               ? await loadFileBrowserFile(sourcePath)
-              : await downloadResourceFile({
-                resourceId,
-                directoryPath: sourcePath,
-              });
+              : await loadDatasetFile(sourcePath);
         } catch (error) {
           if (!previewFileUrl) throw error;
           const previewResponse = await fetch(previewFileUrl, { cache: 'no-store' });
@@ -332,6 +331,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
     content?.binary,
     fileName,
     fileUrl,
+    loadDatasetFile,
     loadFileBrowserFile,
     previewFileUrl,
     resourceId,

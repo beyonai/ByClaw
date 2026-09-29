@@ -10,6 +10,7 @@
         <result column="user_code" property="userCode" />
         <result column="user_name" property="userName" />
         <result column="phone" property="phone" />
+        <result column="thumbnail_uri" property="avatar" />
         <result column="user_number" property="userNumber" />
         <result column="station_id" property="stationId" />
     </resultMap>

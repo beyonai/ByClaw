@@ -11,6 +11,7 @@ export interface ProjectCloudDriveItem {
   updatedAt?: string;
   createBy?: string | number | null;
   createStaffName?: string | null;
+  canManageItem?: boolean;
 }
 
 /** 统一项目云盘接口记录到文件树所使用的路径语义。 */
@@ -45,6 +46,7 @@ export const normalizeProjectCloudDriveItem = (item: any, fallbackDirectoryPath 
     updatedAt: item?.updatedAt,
     createBy: item?.createBy,
     createStaffName: item?.createStaffName,
+    canManageItem: item?.canManageItem === true,
   };
 };
 

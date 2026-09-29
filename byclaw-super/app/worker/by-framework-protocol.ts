@@ -155,11 +155,16 @@ export function commandSessionContext(command: {
   };
 }
 
-/** 思考等级属于调用业务参数，只从 AskAgent extraPayload 读取。 */
-export function commandThinkingLevel(command: AskAgentCommand): ThinkingLevel {
+/**
+ * 思考等级属于调用业务参数，只从 AskAgent extraPayload 读取。
+ *
+ * <p>调用方未下发时返回 undefined（而不是 "off"），交由 ingress 回落到 Leader 模型的
+ * reasoningConfig.defaultLevel —— 否则管理员配置的默认档位永远不会生效。
+ */
+export function commandThinkingLevel(command: AskAgentCommand): ThinkingLevel | undefined {
   const value = command.extraPayload.thinkingLevel;
   if (value === undefined) {
-    return "off";
+    return undefined;
   }
   if (isThinkingLevel(value)) {
     return value;
@@ -202,6 +207,18 @@ export function commandSourceAgentId(command: {
   const extra = command.extraPayload ?? {};
   const raw = recordScalar(extra, "agent_id") ?? recordScalar(extra, "agentId");
   return raw ?? "";
+}
+
+/**
+ * 读取会话级模型覆盖：Java 网关 params.rel_model_id（兼容 relModelId）。
+ * 仅接受正整数模型主键；缺失、-1（默认模型信号）或桌面本地模型 id 返回 undefined。
+ */
+export function commandRelModelId(command: {
+  extraPayload?: Readonly<Record<string, unknown>>;
+}): string | undefined {
+  const extra = command.extraPayload ?? {};
+  const raw = recordScalar(extra, "rel_model_id") ?? recordScalar(extra, "relModelId");
+  return raw && /^[1-9]\d*$/.test(raw) ? raw : undefined;
 }
 
 /** 从 by-framework 入站参数读取当前超级助手的展示名称。 */

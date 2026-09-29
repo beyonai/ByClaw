@@ -19,6 +19,7 @@ import {
   emitSdkChunkTracked,
   markActiveSdkDispatchSettled,
   registerActiveSdkRequest,
+  withActiveSdkRequestEmitMetadata,
   registerSdkEmitter,
   resolveChannelRequestContextBySessionKey,
   resolveActiveSdkRequestBySessionKey,
@@ -32,6 +33,7 @@ function registerLaneRequest(params: {
 }) {
   const sessionId = params.sessionId ?? "byclaw-session-1";
   return registerActiveSdkRequest({
+    requestId: "root-request",
     accountId: params.accountId,
     sessionKey: `agent:test:direct:${sessionId}:lane:${params.laneId}`,
     to: `test:${sessionId}:lane:${params.laneId}`,
@@ -54,6 +56,13 @@ function registerLaneRequest(params: {
 }
 
 describe("session-context multi-agent lanes", () => {
+  it("keeps one diagnostic request ID while preserving each lane identity", () => {
+    const request = registerLaneRequest({ accountId: "root-test", laneId: "two" });
+    const options = withActiveSdkRequestEmitMetadata(request, { eventType: "appStreamResponse" as never });
+    expect(options.metadata).toMatchObject({ requestId: "root-request", clientRequestId: "client-two", traceId: "trace-two" });
+    expect(resolveChannelRequestContextBySessionKey(request.sessionKey)?.fields.requestId).toBe("root-request");
+    clearActiveSdkRequestRecord(request);
+  });
   it("keeps the delegated-agent marker on the active and shared request contexts", () => {
     const request = registerActiveSdkRequest({
       accountId: "acct-delegated",

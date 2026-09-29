@@ -240,6 +240,28 @@ function useChat(props: IProps) {
   // 获取消息发送方法
   const { send } = useSend({ sessionId, agentType, chatUrl });
 
+  const requestLatestTaskPlan = usePersistFn((runningInfo: RunningChatInfo) => {
+    const targetSessionId = `${runningInfo.sessionId || sessionId || ''}`;
+    const targetMessageId = `${runningInfo.modelAnswerMessageId || ''}`;
+    if (!/^\d+$/.test(targetSessionId) || !/^\d+$/.test(targetMessageId)) {
+      return;
+    }
+
+    void webSocketManager
+      .sendMessageWhenReady({
+        type: 'TASK_PLAN_GET',
+        clientRequestId: runningInfo.clientRequestId,
+        sessionId: targetSessionId,
+        messageId: targetMessageId,
+        traceId: runningInfo.traceId,
+        laneId: runningInfo.laneId,
+      })
+      .catch((error) => {
+        // 任务计划可由历史消息恢复；查询失败不应阻断聊天运行态恢复。
+        console.error('同步任务计划快照失败:', error);
+      });
+  });
+
   // 获取消息相关方法和状态
   const {
     messageList,
@@ -323,6 +345,22 @@ function useChat(props: IProps) {
     answerCompletedHandler,
   } = useHandler({ addSession, setSessionId, onSessionCreated });
 
+  const taskPlanRecoveryHandler = usePersistFn((onionsProps: IOnionsProps) => {
+    const { sseRes, sseMsg, newAnswerMsg } = onionsProps;
+    if (sseMsg?.event !== 'initialization') {
+      return onionsProps;
+    }
+
+    requestLatestTaskPlan({
+      clientRequestId: sseMsg.clientRequestId,
+      sessionId: newAnswerMsg.sessionId || sseRes.sessionId || sessionId,
+      modelAnswerMessageId: newAnswerMsg.messageId || sseRes.messageId,
+      traceId: newAnswerMsg.traceId || sseRes.traceId,
+      laneId: newAnswerMsg.laneId || get(sseRes, 'laneId') || get(sseMsg, 'laneId'),
+    });
+    return onionsProps;
+  });
+
   const flowHandler = useMemo(
     () =>
       flow(
@@ -330,6 +368,7 @@ function useChat(props: IProps) {
           sessionInfoHandler,
           messageIdHandler,
           queryMessageIdHandler,
+          taskPlanRecoveryHandler,
           rewriteQuestionHandler,
           textHandler,
           messageHandler,
@@ -342,6 +381,7 @@ function useChat(props: IProps) {
       sessionInfoHandler,
       messageIdHandler,
       queryMessageIdHandler,
+      taskPlanRecoveryHandler,
       rewriteQuestionHandler,
       textHandler,
       messageHandler,
@@ -651,21 +691,21 @@ function useChat(props: IProps) {
 
       for (const runningInfo of runningInfos) {
         chatSessionRuntimeManager.hydrateRunning(runningInfo);
-        const snapshot = await getChatRunningSnapshot({
-          sessionId,
-          traceId: runningInfo.traceId,
-          modelAnswerMessageId: runningInfo.modelAnswerMessageId,
-        });
-        if (!snapshot?.messageId) {
-          continue;
-        }
-
         const answerMessage = messageListRef.current.find(
           (item) =>
             `${item.messageId || ''}` === `${runningInfo.modelAnswerMessageId || ''}` ||
             `${item.msgId || ''}` === `${getAnswerClientMsgId(runningInfo.clientRequestId)}`
         );
-        if (!answerMessage) {
+        if (answerMessage) {
+          requestLatestTaskPlan(runningInfo);
+        }
+
+        const snapshot = await getChatRunningSnapshot({
+          sessionId,
+          traceId: runningInfo.traceId,
+          modelAnswerMessageId: runningInfo.modelAnswerMessageId,
+        });
+        if (!snapshot?.messageId || !answerMessage) {
           continue;
         }
 
@@ -880,6 +920,7 @@ function useChat(props: IProps) {
             laneId: runningInfo.laneId,
             turnId: runningInfo.turnId,
           });
+          requestLatestTaskPlan(runningInfo);
 
           let snapshotAnswerMsg: IMessage | undefined;
           let snapshotTerminal = false;

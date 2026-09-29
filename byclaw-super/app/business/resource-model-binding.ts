@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import type { LeaderModelSelection, LlmProviderConfig } from "@byclaw/by-conductor";
+import { isThinkingLevel, type LeaderModelSelection } from "@byclaw/by-conductor";
 import type { RedisFirstLlmProvider } from "../llm-provider/index.js";
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
 import { normalizeBaseUrl, postByClawBeJson, type FetchLike } from "./byclaw-be-http.js";
@@ -14,7 +13,7 @@ export interface ByClawBeResourceModelResolverOptions {
   endpointResolver?: ByClawBeEndpointResolver;
 }
 
-/** 通过 BE 资源详情解析模型绑定，并用 Redis 模型配置生成不含密钥的选择指纹。 */
+/** 通过 BE 资源详情解析模型绑定，并确认 Redis 中的模型当前可用。 */
 export class ByClawBeResourceModelResolver {
   readonly #fallbackBaseUrl: URL;
   readonly #timeoutMs: number;
@@ -54,23 +53,27 @@ export class ByClawBeResourceModelResolver {
     const modelId = modelIdFromPrologue(data.prologue);
     return resolveLeaderModelSelection(this.#llmProvider, modelId);
   }
+
+  /** 会话级模型覆盖：直接按模型主键解析，跳过资源详情查询。 */
+  async resolveByModelId(modelId: string): Promise<LeaderModelSelection> {
+    return resolveLeaderModelSelection(this.#llmProvider, modelId);
+  }
 }
 
-/** 根据 BE 返回的模型主键生成不包含密钥的、可持久化的 Leader 选择快照。 */
+/** 根据 BE 返回的模型主键生成只包含资源 ID 和默认思考档位的选择快照。 */
 export async function resolveLeaderModelSelection(
   llmProvider: Pick<RedisFirstLlmProvider, "resolveByModelId">,
   rawModelId: unknown,
 ): Promise<LeaderModelSelection> {
   const modelId = requiredScalar(rawModelId, "modelId");
   const config = await llmProvider.resolveByModelId(modelId);
+  // 模型配置的默认思考档位随选择一起冻结：调用方未下发 thinkingLevel 时作为兜底，
+  // 使管理员的 defaultLevel 在缺少会话选择时同样生效（词表外取值一律丢弃）。
+  const defaultThinkingLevel = config.reasoning?.defaultLevel;
   return {
     modelId,
-    fingerprint: fingerprintModelConfig(config),
+    ...(isThinkingLevel(defaultThinkingLevel) ? { defaultThinkingLevel } : {}),
   };
-}
-
-export function fingerprintModelConfig(config: LlmProviderConfig): string {
-  return createHash("sha256").update(JSON.stringify(config)).digest("hex");
 }
 
 function modelIdFromPrologue(raw: unknown): string {

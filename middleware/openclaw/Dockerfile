@@ -268,15 +268,19 @@ COPY middleware/openclaw/dbcli/pyproject.toml /tmp/byclaw-python-clis/dbcli/pypr
 COPY middleware/openclaw/dbcli/src/ /tmp/byclaw-python-clis/dbcli/src/
 COPY middleware/openclaw/kbcli/pyproject.toml /tmp/byclaw-python-clis/kbcli/pyproject.toml
 COPY middleware/openclaw/kbcli/src/ /tmp/byclaw-python-clis/kbcli/src/
+COPY middleware/openclaw/groksearchcli/pyproject.toml /tmp/byclaw-python-clis/groksearchcli/pyproject.toml
+COPY middleware/openclaw/groksearchcli/src/ /tmp/byclaw-python-clis/groksearchcli/src/
 
 RUN set -eux; \
     python3 -m pip install --no-cache-dir \
         /tmp/byclaw-python-clis/callcli \
         "/tmp/byclaw-python-clis/dbcli[all]" \
-        /tmp/byclaw-python-clis/kbcli; \
+        /tmp/byclaw-python-clis/kbcli \
+        /tmp/byclaw-python-clis/groksearchcli; \
     callcli --help >/dev/null; \
     dbcli --help >/dev/null; \
     kbcli --help >/dev/null; \
+    groksearchcli --help >/dev/null; \
     rm -rf /tmp/byclaw-python-clis
 
 # searxng-cli is installed from the published PyPI wheel into an isolated

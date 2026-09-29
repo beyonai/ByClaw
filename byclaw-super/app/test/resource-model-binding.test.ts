@@ -58,9 +58,30 @@ describe("ByClaw BE resource model resolver", () => {
     expect(resolveByModelId).toHaveBeenCalledWith("10014488");
     expect(selection).toEqual({
       modelId: "10014488",
-      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(JSON.stringify(selection)).not.toContain("secret");
+  });
+
+  it("keeps the same model selection when its credential rotates", async () => {
+    const resolveByModelId = vi.fn()
+      .mockResolvedValueOnce(modelConfig())
+      .mockResolvedValueOnce({ ...modelConfig(), apiKey: "rotated-secret" });
+    const resolver = new ByClawBeResourceModelResolver({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn(async () => Response.json({
+        code: 0,
+        data: { prologue: JSON.stringify({ modelId: "10014488" }) },
+      })) as typeof fetch,
+      llmProvider: { resolveByModelId } as never,
+    });
+
+    const first = await resolver.resolve({ resourceId: "1", beyondToken: "token" });
+    const second = await resolver.resolve({ resourceId: "1", beyondToken: "token" });
+
+    expect(first).toEqual({ modelId: "10014488" });
+    expect(second).toEqual(first);
+    expect(resolveByModelId).toHaveBeenCalledTimes(2);
   });
 
   it("prefers the top-level modelId over the compatibility nested field", async () => {

@@ -282,6 +282,11 @@ public final class Constants {
      */
     public static final String BUCKET_NAME_PROJECT_SHARE = "byai-project-share";
 
+    /**
+     * 桌面端安装包桶名称
+     */
+    public static final String BUCKET_NAME_PACKAGE = "byai-package";
+
     public static final class ResourceBizType {
 
         public static final String DIG_EMPLOYEE = "DIG_EMPLOYEE";

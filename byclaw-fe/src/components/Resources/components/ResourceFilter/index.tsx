@@ -29,12 +29,15 @@ import {
   permissionOptions,
   digitalEmployeeStatusOptions,
   digitalEmployeeTypeOptions,
+  getResourceOwnerOptions,
 } from '../../constants';
 import { isAllResourceBizTypeSelected, normalizeResourceBizTypeList } from '../../utils';
 import styles from './index.module.less';
 
 export type IOnOkParams = {
   resourceStatus: string;
+  ownerType?: string;
+  catalogId?: string;
   belong?: string;
   deptBelong?: IOrgCache[];
   resourceBizTypeList?: string[];
@@ -75,6 +78,7 @@ export const getDefaultParams = (defaultParam: Partial<IOnOkParams> = {}) => {
     deptBelong: [],
     resourceBizTypeList: [],
     permission: '',
+    ownerType: '',
     ...defaultParam,
     // 数字员工类型默认选择“全部”，兼容调用方未传值或传入 undefined 的情况。
     digitalEmployeeType: defaultParam.digitalEmployeeType ?? '',
@@ -96,16 +100,22 @@ const ResourceFilterForm = ({
   activeTab,
   resourceType,
   showStatusFilter,
+  hidePermissionFilter,
   statusOptionsOverride,
   digitalEmployeeTypeFilter = false,
+  resourceOwnerFilter = false,
+  catalogOptions,
 }: {
   onOk: (param: IOnOkParams) => void;
   defaultParam: IOnOkParams;
   resourceType?: string;
   activeTab?: string;
   showStatusFilter?: boolean;
+  hidePermissionFilter?: boolean;
   statusOptionsOverride?: typeof statusOptions;
   digitalEmployeeTypeFilter?: boolean;
+  resourceOwnerFilter?: boolean;
+  catalogOptions?: Array<{ value: string; label: string }>;
 }) => {
   const intl = useIntl();
   const [filterParam, setFilterParam] = React.useReducer(filterReducer, getDefaultParams(defaultParam));
@@ -125,17 +135,20 @@ const ResourceFilterForm = ({
   const showTypeFilter = resourceType === 'TOOL' || resourceType === 'KG_DOC';
   const normalizedResourceBizTypeList = normalizeResourceBizTypeList(filterResourceBizTypeList, resourceType);
 
-  const visiblePermissionOptions =
-    activeTab === 'personal'
-      ? permissionOptions.filter((opt) => opt.value !== PERMISSION_APPLIED_BY_ME_VALUE)
-      : permissionOptions;
+  // 可用员工列表不包含待审批资源；其他资源页签保留原有申请筛选。
+  const hideAppliedPermission =
+    activeTab === 'personal' || (activeTab === 'available' && resourceType === 'DIG_EMPLOYEE');
 
-  // 切到 personal tab 时，如果残留 forbidden 权限值，自动复位为 ""，避免 UI 与 state 不一致。
+  const visiblePermissionOptions = hideAppliedPermission
+    ? permissionOptions.filter((opt) => opt.value !== PERMISSION_APPLIED_BY_ME_VALUE)
+    : permissionOptions;
+
+  // 隐藏申请筛选时清理旧值，避免回显与提交的条件不一致。
   React.useEffect(() => {
-    if (activeTab === 'personal' && filterPermission === PERMISSION_APPLIED_BY_ME_VALUE) {
+    if (hideAppliedPermission && filterPermission === PERMISSION_APPLIED_BY_ME_VALUE) {
       setFilterParam({ type: 'update', item: { permission: '' } });
     }
-  }, [activeTab, filterPermission]);
+  }, [hideAppliedPermission, filterPermission]);
   const buildOrgFilters = () => {
     if (filterBelong !== BELONG_DEPT_VALUE) {
       return [];
@@ -159,7 +172,9 @@ const ResourceFilterForm = ({
   const buildSubmitParams = () => {
     const baseParams = {
       resourceStatus: filterStatus,
+      ...(catalogOptions ? { catalogId: filterParam.catalogId || '' } : {}),
       permission: filterPermission,
+      ...(resourceOwnerFilter ? { ownerType: filterParam.ownerType || '' } : {}),
       ...(digitalEmployeeTypeFilter ? { digitalEmployeeType: filterDigitalEmployeeType } : {}),
     };
     const belongParams =
@@ -195,7 +210,48 @@ const ResourceFilterForm = ({
 
   return (
     <>
-      <div className={classnames(styles.container, 'ub gap16 ub-ver')}>
+      <div className={classnames(styles.container, 'ub gap16 ub-ver', { [styles.withCatalog]: catalogOptions })}>
+        {/* 分类与其他条件一起确认，避免选择过程中提前刷新列表。 */}
+        {catalogOptions && (
+          <div className="ub ub-ver gap8">
+            <p className={styles.filterTitle}>{intl.formatMessage({ id: 'resource.category' })}</p>
+            <div className="ub gap8 ub-wrap">
+              {catalogOptions.map((item) => (
+                <button
+                  type="button"
+                  key={item.value}
+                  aria-pressed={(filterParam.catalogId || '') === item.value}
+                  className={classnames(styles.statusItem, 'ub ub-ac pointer', {
+                    [styles.active]: (filterParam.catalogId || '') === item.value,
+                  })}
+                  onClick={() => setFilterParam({ type: 'update', item: { catalogId: item.value } })}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {resourceOwnerFilter && (
+          <div className="ub ub-ver gap8">
+            <p className={styles.filterTitle}>{intl.formatMessage({ id: 'resource.ownership' })}</p>
+            <div className="ub gap8 ub-wrap">
+              {getResourceOwnerOptions(resourceType).map((item) => (
+                <button
+                  type="button"
+                  key={item.value}
+                  aria-pressed={(filterParam.ownerType || '') === item.value}
+                  className={classnames(styles.statusItem, 'ub ub-ac pointer', {
+                    [styles.active]: (filterParam.ownerType || '') === item.value,
+                  })}
+                  onClick={() => setFilterParam({ type: 'update', item: { ownerType: item.value } })}
+                >
+                  {intl.formatMessage({ id: item.label })}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {/* 筛选-类型 */}
         {showTypeFilter && (
           <div className="ub ub-ver gap8">
@@ -271,30 +327,32 @@ const ResourceFilterForm = ({
           </div>
         )}
 
-        {/* 筛选-权限 */}
-        <div className="ub ub-ver gap8">
-          <p className={styles.filterTitle}>{intl.formatMessage({ id: 'resource.permission' })}</p>
-          <div className="ub gap8 ub-wrap">
-            {visiblePermissionOptions.map((item) => (
-              <div
-                key={item.value}
-                className={classnames(styles.statusItem, 'ub ub-ac pointer', {
-                  [styles.active]: filterPermission === item.value,
-                })}
-                onClick={() => {
-                  setFilterParam({
-                    type: 'update',
-                    item: {
-                      permission: item.value,
-                    },
-                  });
-                }}
-              >
-                {intl.formatMessage({ id: item.label })}
-              </div>
-            ))}
+        {/* 筛选-权限；“我的资源”由外层个人/企业范围承载，避免与通用权限筛选叠加。 */}
+        {!hidePermissionFilter && (
+          <div className="ub ub-ver gap8">
+            <p className={styles.filterTitle}>{intl.formatMessage({ id: 'resource.permission' })}</p>
+            <div className="ub gap8 ub-wrap">
+              {visiblePermissionOptions.map((item) => (
+                <div
+                  key={item.value}
+                  className={classnames(styles.statusItem, 'ub ub-ac pointer', {
+                    [styles.active]: filterPermission === item.value,
+                  })}
+                  onClick={() => {
+                    setFilterParam({
+                      type: 'update',
+                      item: {
+                        permission: item.value,
+                      },
+                    });
+                  }}
+                >
+                  {intl.formatMessage({ id: item.label })}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 筛选-归属（暂时隐藏，详见文件顶部 SHOW_BELONG_FILTER 注释） */}
         {SHOW_BELONG_FILTER && activeTab !== 'personal' && (
@@ -371,33 +429,39 @@ const ResourceFilterForm = ({
                 setFilterParam({
                   type: 'update',
                   item: {
+                    ...(catalogOptions ? { catalogId: '' } : {}),
                     resourceStatus: STATUS_IN_STOCK_VALUE,
                     digitalEmployeeType: '',
                     permission: '',
+                    ownerType: '',
                   },
                 });
               } else if (resourceType === 'TOOL') {
                 setFilterParam({
                   type: 'update',
                   item: {
+                    ...(catalogOptions ? { catalogId: '' } : {}),
                     resourceStatus: STATUS_IN_STOCK_VALUE,
                     belong: BELONG_ALL_VALUE,
                     deptBelong: [],
                     resourceBizTypeList: [],
                     digitalEmployeeType: '',
                     permission: '',
+                    ownerType: '',
                   },
                 });
               } else {
                 setFilterParam({
                   type: 'update',
                   item: {
+                    ...(catalogOptions ? { catalogId: '' } : {}),
                     resourceStatus: STATUS_IN_STOCK_VALUE,
                     belong: BELONG_ALL_VALUE,
                     deptBelong: [],
                     resourceBizTypeList: [],
                     digitalEmployeeType: '',
                     permission: '',
+                    ownerType: '',
                   },
                 });
               }
@@ -452,25 +516,33 @@ const ResourceFilterForm = ({
 };
 
 interface ResourceFilterWithDropdownProps {
+  className?: string;
   onOk: (param: IOnOkParams) => void;
   defaultParam: IOnOkParams;
   activeTab?: string;
   resourceType?: string;
   alwaysShowStatusFilter?: boolean;
   hideStatusFilter?: boolean;
+  hidePermissionFilter?: boolean;
   statusOptionsOverride?: typeof statusOptions;
   digitalEmployeeTypeFilter?: boolean;
+  resourceOwnerFilter?: boolean;
+  catalogOptions?: Array<{ value: string; label: string }>;
 }
 
 const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
+  className,
   onOk,
   defaultParam,
   activeTab,
   resourceType,
   alwaysShowStatusFilter,
   hideStatusFilter = false,
+  hidePermissionFilter = false,
   statusOptionsOverride,
   digitalEmployeeTypeFilter = false,
+  resourceOwnerFilter = false,
+  catalogOptions,
 }) => {
   const intl = useIntl();
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
@@ -506,8 +578,11 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
           defaultParam={defaultParam}
           activeTab={activeTab}
           showStatusFilter={showStatusFilter}
+          hidePermissionFilter={hidePermissionFilter}
           statusOptionsOverride={statusOptionsOverride}
           digitalEmployeeTypeFilter={digitalEmployeeTypeFilter}
+          resourceOwnerFilter={resourceOwnerFilter}
+          catalogOptions={catalogOptions}
         />
       )}
       getPopupContainer={() => window.document.body}
@@ -517,8 +592,25 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
         setDropdownOpen(isOpen);
       }}
     >
-      <div className={classnames(styles.relatedToMeDropdown, 'ub ub-ac ub-pj gap8 pointer')}>
+      <div className={classnames(styles.relatedToMeDropdown, 'ub ub-ac ub-pj gap8 pointer', className)}>
         <div className="textEllipsis ub ub-f1 gap6">
+          {catalogOptions && (
+            <div className={styles.selectedItem}>
+              {intl.formatMessage({ id: 'resource.category' })}：
+              {catalogOptions.find((item) => item.value === (defaultParam.catalogId || ''))?.label ||
+                intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' })}
+            </div>
+          )}
+          {resourceOwnerFilter && (
+            <div className={styles.selectedItem}>
+              {intl.formatMessage({ id: 'resource.ownership' })}：
+              {intl.formatMessage({
+                id:
+                  getResourceOwnerOptions(resourceType).find((item) => item.value === (defaultParam.ownerType || ''))
+                    ?.label || 'common.all',
+              })}
+            </div>
+          )}
           {/* 筛选-类型 */}
           {(resourceType === 'TOOL' || resourceType === 'KG_DOC') && (
             <div className={styles.selectedItem}>
@@ -557,27 +649,30 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
                 );
                 return selectedOption
                   ? intl.formatMessage({ id: selectedOption.label })
-                  : intl.formatMessage({ id: 'resource.statusActive' });
+                  : intl.formatMessage({ id: 'resourceStatus.published' });
               })()}
             </div>
           )}
           {/* 筛选-权限 */}
-          <div className={styles.selectedItem}>
-            {intl.formatMessage({ id: 'resource.permission' })}：
-            {(() => {
-              const currentPermission = get(defaultParam, 'permission');
-              // personal tab 下"待我审核 / 我申请中"两个值不展示——若残留按"全部"回显
-              const isHiddenInPersonal =
-                activeTab === 'personal' && currentPermission === PERMISSION_APPLIED_BY_ME_VALUE;
-              if (isHiddenInPersonal) {
-                return intl.formatMessage({ id: 'common.all' });
-              }
-              const selectedOption = permissionOptions.find((item) => item.value === currentPermission);
-              return selectedOption
-                ? intl.formatMessage({ id: selectedOption.label })
-                : intl.formatMessage({ id: 'common.all' });
-            })()}
-          </div>
+          {!hidePermissionFilter && (
+            <div className={styles.selectedItem}>
+              {intl.formatMessage({ id: 'resource.permission' })}：
+              {(() => {
+                const currentPermission = get(defaultParam, 'permission');
+                // 不支持申请筛选的页签将旧值按“全部”回显。
+                const isHiddenPermission =
+                  (activeTab === 'personal' || (activeTab === 'available' && resourceType === 'DIG_EMPLOYEE')) &&
+                  currentPermission === PERMISSION_APPLIED_BY_ME_VALUE;
+                if (isHiddenPermission) {
+                  return intl.formatMessage({ id: 'common.all' });
+                }
+                const selectedOption = permissionOptions.find((item) => item.value === currentPermission);
+                return selectedOption
+                  ? intl.formatMessage({ id: selectedOption.label })
+                  : intl.formatMessage({ id: 'common.all' });
+              })()}
+            </div>
+          )}
           {/* 筛选-归属（暂时隐藏，详见文件顶部 SHOW_BELONG_FILTER 注释） */}
           {SHOW_BELONG_FILTER && activeTab !== 'personal' && (
             <div className={styles.selectedItem}>

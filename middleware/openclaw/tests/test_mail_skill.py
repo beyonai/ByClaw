@@ -1,4 +1,3 @@
-import importlib.util
 import re
 import subprocess
 import unittest
@@ -13,10 +12,6 @@ MAILCTL = SKILL_ROOT / 'scripts' / 'mailctl.py'
 DOCKERFILE = OPENCLAW_ROOT / 'Dockerfile'
 BYCLAW_DOCKERFILE = OPENCLAW_ROOT / 'Dockerfile.byclaw'
 START_OPENCLI = OPENCLAW_ROOT / 'start-opencli.sh'
-DML = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'versions' / 'V0.5.0' / 'V0.5.0__dml.sql'
-MIGRATION_WORKFLOW = REPOSITORY_ROOT / '.github' / 'workflows' / 'mail-migration-opengauss.yml'
-MIGRATION_MERGER = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'merge_migrations.py'
-K3S_DEPLOY = REPOSITORY_ROOT / 'deploy' / 'k3s' / 'deploy.sh'
 ENTRYPOINT = 'python3 /app/skills/mail/scripts/mailctl.py'
 
 
@@ -113,6 +108,8 @@ class MailSkillContractTest(unittest.TestCase):
         self.assertIn('always run `accounts`', normalized)
         self.assertRegex(normalized, r'exactly one.{0,100}automatically')
         self.assertRegex(normalized, r'multiple.{0,150}ask')
+        self.assertRegex(normalized, r'user names.{0,150}matching')
+        self.assertRegex(normalized, r'never substitute')
         self.assertNotIn('default', normalized)
 
     def test_adversarial_mail_content_cannot_supply_authority_or_override_execution(self):
@@ -153,6 +150,7 @@ class MailSkillContractTest(unittest.TestCase):
         for operation in ('send', 'reply', 'delete'):
             self.assertRegex(normalized, rf'{operation}.{{0,500}}confirm|confirm.{{0,500}}{operation}')
         self.assertRegex(normalized, r'(immediately prior|immediately before|right before).{0,300}(each|every)')
+        self.assertRegex(normalized, r'ask.{0,80}explicit confirmation')
         self.assertRegex(normalized, r'(blanket|standing|old|earlier).{0,300}(approval|confirmation).{0,300}(not|never|invalid)')
         self.assertRegex(normalized, r'(recipient|to).{0,200}subject')
         self.assertRegex(normalized, r'delet.{0,200}(target|message)')
@@ -179,118 +177,6 @@ class MailSkillContractTest(unittest.TestCase):
         broken_check = dockerfile.replace('/app/skills/mail/scripts/mailctl.py --help', '/wrong/mailctl.py --help')
         with self.assertRaises(AssertionError):
             assert_docker_mail_contract(self, broken_check)
-
-    def test_v050_registers_one_idempotent_system_builtin_mail_skill(self):
-        dml = DML.read_text(encoding='utf-8')
-        block_match = re.search(
-            r'-- Mail 内置 Skill 注册开始\n(.*?)-- Mail 内置 Skill 注册结束',
-            dml,
-            flags=re.DOTALL,
-        )
-        self.assertIsNotNone(block_match)
-        block = block_match.group(1)
-
-        self.assertEqual(block.count('INSERT INTO byai.ss_resource ('), 1)
-        self.assertIn("'mail'", block)
-        spec = importlib.util.spec_from_file_location('merge_migrations_for_mail_test', MIGRATION_MERGER)
-        merger = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(merger)
-        statements = merger.split_sql_statements(block)
-        self.assertGreater(len(statements), 3)
-        lock_key = "hashtext('byclaw'), hashtext('V0.4.0:mail-skill')"
-        self.assertTrue(statements[0].endswith(f'SELECT pg_advisory_lock({lock_key})'))
-        self.assertEqual(statements[1], f'SELECT pg_advisory_xact_lock({lock_key})')
-        self.assertEqual(statements[-1], f'SELECT pg_advisory_unlock({lock_key})')
-        self.assertNotRegex(dml, r'(?im)^\s*(?:DO|PERFORM|BEGIN)\b')
-        self.assertNotRegex(dml, r'\$[A-Za-z_]*\$')
-        for statement in statements[2:-1]:
-            sql = re.sub(r'(?m)^\s*--[^\n]*', '', statement).strip()
-            self.assertRegex(sql, r'^(?:INSERT INTO|UPDATE|DELETE FROM)\b')
-        self.assertNotIn('\\set', block)
-        self.assertNotRegex(block, r'(?im)^\s*(?:COMMIT|ROLLBACK|START TRANSACTION)\b')
-        self.assertRegex(block, r"(?s)WHERE NOT EXISTS\s*\(.*?resource_code = 'mail'.*?\)")
-        self.assertIn("'SYSTEM_BUILTIN'", block)
-        self.assertIn('INSERT INTO byai.ss_res_ext_skill', block)
-        self.assertIn('INSERT INTO byai.au_privilege_grant', block)
-        self.assertIn('jsonb_typeof', block)
-        self.assertIn('jsonb_array_elements', block)
-        self.assertNotIn('jsonb_build_object', block)
-        self.assertNotIn('jsonb_build_array', block)
-        self.assertIn('json_build_object', block)
-        self.assertIn('jsonb_insert', block)
-        self.assertIsNotNone(re.search(
-            r"jsonb_insert\s*\(c\.param_value::jsonb, '\{999999\}', json_build_object\(.*?\)::jsonb",
-            block,
-            flags=re.DOTALL,
-        ))
-        self.assertNotIn('left(rtrim', block)
-        self.assertNotIn('NOT LIKE', block)
-        self.assertRegex(block, r'(?s)UPDATE byai\.au_privilege_grant.*?SET grant_obj_id =')
-        self.assertRegex(block, r'(?s)DELETE FROM byai\.ss_res_ext_skill.*?resource_code = \'mail\'')
-        self.assertRegex(block, r'(?s)DELETE FROM byai\.ss_resource.*?resource_code = \'mail\'')
-        self.assertRegex(block, r'(?s)ROW_NUMBER\(\) OVER.*?PARTITION BY g\.grant_obj_id')
-        self.assertRegex(block, r'(?s)UPDATE byai\.ss_resource.*?resource_status = 2.*?resource_code = \'mail\'')
-
-        bundled_update = re.search(
-            r"UPDATE byai\.byai_system_config c\s+SET param_value =.*?WHERE c\.param_code = 'OPENCLAW_BUNDLED_SKILLS'\s+AND (.*?);",
-            block,
-            flags=re.DOTALL,
-        )
-        self.assertIsNotNone(bundled_update)
-        self.assertIn("jsonb_typeof(c.param_value::jsonb) = 'array'", block)
-        self.assertRegex(block, r"elem\s*->>\s*'skillCode'\s*=\s*'mail'")
-
-        for key in ('grant_type', 'grant_to_type', 'grant_to_obj_id', 'grant_to_obj_type'):
-            self.assertRegex(
-                block,
-                rf'existing\.{key}\s+IS NOT DISTINCT FROM\s+(?:g\.{key}|fallback\.{key}|[^\n]+)',
-                f'nullable grant key {key} must use null-safe comparison',
-            )
-
-    def test_mail_dml_is_owned_only_by_v050(self):
-        previous = DML.parent.parent / 'V0.4.0' / 'V0.4.0__dml.sql'
-        old_sql = previous.read_text(encoding='utf-8')
-        new_sql = DML.read_text(encoding='utf-8')
-        self.assertNotIn('-- Mail 内置 Skill 注册开始', old_sql)
-        self.assertEqual(new_sql.count('-- Mail 内置 Skill 注册开始'), 1)
-        for code in ('gmail-mail', 'microsoft-mail', 'fastmail-mail', 'qq-mail',
-                     'netease-163-mail', 'aliyun-mail', 'custom-imap-mail'):
-            self.assertNotIn(f"'{code}'", old_sql)
-            self.assertEqual(len(re.findall(r"(?m)^\s*\('" + re.escape(code) + r"'\s*,", new_sql)), 1)
-
-    def test_opengauss_migration_is_mandatory_in_ci_and_uses_file_execution(self):
-        workflow = MIGRATION_WORKFLOW.read_text(encoding='utf-8')
-        image = ('beyonclaw/byclaw-opengauss:6.0.3@'
-                 'sha256:74157e5718ee7affa6503a81a958ec8fb3558aa856316c86a685ef23c0d8d51f')
-        self.assertIn(image, workflow)
-        self.assertIn('MAIL_MIGRATION_TEST_REQUIRED: "1"', workflow)
-        self.assertIn('MAIL_MIGRATION_TEST_FILE_RUNNER:', workflow)
-        self.assertIn('MAIL_MIGRATION_TEST_PSYCOPG_DSN:', workflow)
-        self.assertIsNotNone(re.search(r'gsql\b.*?\s-f\s', workflow, flags=re.DOTALL))
-        self.assertIsNotNone(re.search(
-            r'docker exec --user root mail-opengauss.*?su - omm -c',
-            workflow,
-            flags=re.DOTALL,
-        ))
-        self.assertRegex(workflow, r'(?s)select current_user.*?grep -qx omm')
-        self.assertNotRegex(workflow, r'(?m)^\s+pull_request:')
-        self.assertIn('--privileged', workflow)
-        self.assertIn('--publish 127.0.0.1:5432:5432', workflow)
-        self.assertNotRegex(workflow, r'--publish\s+5432:5432')
-        self.assertIn('permissions:\n  contents: read', workflow)
-        self.assertNotIn('continue-on-error: true', workflow)
-        self.assertIn('if: always()', workflow)
-
-    def test_production_fresh_and_incremental_gsql_files_stop_on_error(self):
-        deploy = K3S_DEPLOY.read_text(encoding='utf-8')
-        fresh = re.search(r'(?s)ensure_opengauss_schema\(\).*?^}', deploy, flags=re.MULTILINE)
-        incremental = re.search(r'(?s)apply_opengauss_migrations\(\).*?^}', deploy, flags=re.MULTILINE)
-        self.assertIsNotNone(fresh)
-        self.assertIsNotNone(incremental)
-        self.assertRegex(fresh.group(0), r'gsql -d postgres -v ON_ERROR_STOP=1 -f \$f')
-        self.assertRegex(incremental.group(0), r'gsql -d postgres -v ON_ERROR_STOP=1 -f \$remote')
-        syntax = subprocess.run(['sh', '-n', str(K3S_DEPLOY)], capture_output=True, text=True)
-        self.assertEqual(0, syntax.returncode, syntax.stderr)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { querySessionDataSources } from '@/service/projectDataSources';
 import ResourcePanel from '../ResourcePanel';
+import { DetailPanelContent, useDetailPanelState } from '@/layout/pcLayout/useDetailPanelState';
+
+let mockActiveEmployeeId: string | undefined;
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ locale: 'zh-CN', formatMessage: ({ id }: { id: string }) => id }),
@@ -8,11 +11,16 @@ jest.mock('@umijs/max', () => ({
 jest.mock('@/service/projectDataSources', () => ({ querySessionDataSources: jest.fn() }));
 jest.mock('@/service/devloop', () => ({ listAvailableProjectRepos: jest.fn().mockResolvedValue([]) }));
 jest.mock('../useChatResourceProject', () => ({ useChatResourceProject: () => ({ loading: false }) }));
-jest.mock('@/layout/sider/components/ActiveSiderAgentBar', () => ({ useActiveSiderAgent: () => ({}) }));
+jest.mock('@/layout/sider/components/ActiveSiderAgentBar', () => ({
+  useActiveSiderAgent: () => ({ resourceId: mockActiveEmployeeId }),
+}));
 jest.mock('@/utils/agent', () => ({ getAgentChatAvatar: jest.fn() }));
 jest.mock('@/layout/sider/components/Knowledge', () => () => null);
 jest.mock('@/layout/sider/components/ModelSiderPanel', () => () => null);
-jest.mock('@/layout/sider/components/ResourceSiderPanel', () => () => null);
+jest.mock('@/layout/sider/components/ResourceSiderPanel', () => () => {
+  const [keyword, setKeyword] = require('react').useState('');
+  return <input aria-label="skill search" value={keyword} onChange={(event) => setKeyword(event.target.value)} />;
+});
 jest.mock('@/layout/sider/components/ProjectSpaceList/CodesTab', () => () => null);
 jest.mock('../FileResourcePanel', () => () => <div>files</div>);
 jest.mock('@/components/ProjectDataSources', () => () => <div>datasource content</div>);
@@ -23,7 +31,12 @@ const panel = (sessionId = 'session-1') => (
   <ResourcePanel sessionId={sessionId} projectId={1} onOpenDetail={jest.fn()} />
 );
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockActiveEmployeeId = undefined;
+  // 清除上一用例未消费的一次性响应，避免延迟请求污染后续会话测试。
+  query.mockReset();
+});
 
 it('hides the project data tab when the session has no data', async () => {
   query.mockResolvedValue(page(0));
@@ -68,5 +81,52 @@ it('hides the tab when the availability query fails', async () => {
   await act(async () => {
     render(panel());
   });
+  expect(screen.queryByRole('tab', { name: 'dataSource.title' })).not.toBeInTheDocument();
+});
+
+it('keeps current employee and skill tabs mounted while a center detail covers the panel', async () => {
+  query.mockResolvedValue(page(0));
+  let panels!: ReturnType<typeof useDetailPanelState>;
+  const Host = () => {
+    panels = useDetailPanelState();
+    return <DetailPanelContent {...panels} />;
+  };
+  render(<Host />);
+  await act(async () => panels.openDetailPanel(panel()));
+  fireEvent.click(screen.getByRole('tab', { name: 'chatResource.currentEmployee' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'chatResource.skill' }));
+  const search = screen.getByRole('textbox', { name: 'skill search' });
+  fireEvent.change(search, { target: { value: 'report' } });
+  act(() => panels.openTemporaryDetailPanel((close) => <button onClick={close}>close skill</button>));
+  expect(search).not.toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'close skill' }));
+  expect(screen.getByRole('tab', { name: 'chatResource.currentEmployee' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'chatResource.skill' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('textbox', { name: 'skill search' })).toBe(search);
+  expect(search).toHaveValue('report');
+});
+
+it('replaces the old employee skill list when the selected employee changes', async () => {
+  query.mockResolvedValue(page(0));
+  mockActiveEmployeeId = 'employee-1';
+  const view = render(panel());
+  fireEvent.click(screen.getByRole('tab', { name: 'chatResource.currentEmployee' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'chatResource.skill' }));
+  const previousSearch = screen.getByRole('textbox', { name: 'skill search' });
+  fireEvent.change(previousSearch, { target: { value: 'old employee search' } });
+  mockActiveEmployeeId = 'employee-2';
+  await act(async () => view.rerender(panel()));
+  expect(screen.getByRole('textbox', { name: 'skill search' })).not.toBe(previousSearch);
+  expect(screen.getByRole('textbox', { name: 'skill search' })).toHaveValue('');
+});
+
+it.each([
+  { sessionId: '', projectId: 42 },
+  { sessionId: 'session-1', projectId: -1 },
+])('does not query project data for unavailable scope %j', async ({ sessionId, projectId }) => {
+  await act(async () => {
+    render(<ResourcePanel sessionId={sessionId} projectId={projectId} onOpenDetail={jest.fn()} />);
+  });
+  expect(query).not.toHaveBeenCalled();
   expect(screen.queryByRole('tab', { name: 'dataSource.title' })).not.toBeInTheDocument();
 });

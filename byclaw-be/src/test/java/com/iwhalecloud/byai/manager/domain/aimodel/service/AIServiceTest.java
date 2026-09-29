@@ -17,6 +17,31 @@ import org.springframework.web.client.RestTemplate;
 class AIServiceTest {
 
     @Test
+    void selectedModelUsesItsOwnEndpointCredentialsAndParameters() {
+        RequestFixture fixture = fixture("Qwen", "selected-model");
+        AiModelService models = org.mockito.Mockito.mock(AiModelService.class);
+        org.mockito.Mockito.when(models.getModelList()).thenReturn(java.util.List.of(fixture.model()));
+        ReflectionTestUtils.setField(fixture.service(), "aiModelService", models);
+        fixture.server().expect(requestTo("https://model.example/chat/completions"))
+            .andExpect(content().json("{\"model\":\"selected-model\"}", false))
+            .andRespond(withSuccess("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}", MediaType.APPLICATION_JSON));
+        assertThat(fixture.service().generateText("system", "user", "selected-model", 100)).isEqualTo("ok");
+        org.mockito.Mockito.verify(models, org.mockito.Mockito.never()).getDefaultChatModel();
+        fixture.server().verify();
+    }
+
+    @Test
+    void unavailableSelectedModelDoesNotFallBackToDefaultProvider() {
+        AIService service = new AIService();
+        AiModelService models = org.mockito.Mockito.mock(AiModelService.class);
+        org.mockito.Mockito.when(models.getModelList()).thenReturn(java.util.List.of());
+        ReflectionTestUtils.setField(service, "aiModelService", models);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.generateText("prompt", "missing"))
+            .isInstanceOf(AIService.ModelSelectionException.class);
+        org.mockito.Mockito.verify(models, org.mockito.Mockito.never()).getDefaultChatModel();
+    }
+
+    @Test
     void deepSeekJsonRequestsUseNativeThinkingSwitchAndIgnoreReasoningContent() {
         RequestFixture fixture = fixture("DeepSeek", "deepseek-v4");
         fixture.server().expect(requestTo("https://model.example/chat/completions"))

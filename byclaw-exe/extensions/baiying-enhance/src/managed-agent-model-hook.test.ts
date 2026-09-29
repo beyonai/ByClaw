@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { defaultModelDefinition } from "./agent-registry.js";
 import {
   buildManagedAgentRuntimeModelSystemContext,
   hasManagedModelConfigDrift,
@@ -44,6 +45,21 @@ const registeredCfg = {
 };
 
 describe("hasManagedModelConfigDrift", () => {
+  it("detects same-ID window and thinking drift without comparing resolved secrets", () => {
+    const provider = { modelId: "qwen3.6-plus", api: "openai-completions", baseUrl: "https://example.com/v1",
+      apiKey: "unused", contextWindow: 1_000_000, maxTokens: 65536, reasoning: true, compat: { thinkingFormat: "qwen" } } as const;
+    const managed = [{ agentId: "baiying-agent-test", modelRef: "baiying-m-test/qwen3.6-plus", providerKey: "baiying-m-test", provider }];
+    const cfg = {
+      agents: { list: [{ id: managed[0].agentId, model: { primary: managed[0].modelRef } }], defaults: { compaction: { timeoutSeconds: 300 } } },
+      models: { providers: { "baiying-m-test": { models: [defaultModelDefinition(provider)] } } },
+    };
+    expect(hasManagedModelConfigDrift({ cfg, managed })).toBe(false);
+    cfg.models.providers["baiying-m-test"].models[0]!.contextWindow = 202752;
+    expect(hasManagedModelConfigDrift({ cfg, managed })).toBe(true);
+    cfg.models.providers["baiying-m-test"].models[0]!.contextWindow = 1_000_000;
+    cfg.models.providers["baiying-m-test"].models[0]!.reasoning = false;
+    expect(hasManagedModelConfigDrift({ cfg, managed })).toBe(true);
+  });
   it("detects when agents.list primary lags Redis-managed modelRef", () => {
     expect(
       hasManagedModelConfigDrift({

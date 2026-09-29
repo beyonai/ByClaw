@@ -127,6 +127,38 @@ describe('utils/auth', () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
+  it.each(['adminvip', 'AdminVip', 'ADMINVIP'])(
+    'matches %s before and during AdminVip cache initialization',
+    (userCode) => {
+      const auth = loadAuthModule();
+      const { getDcSystemConfigValueByCodes } = require('@/service/layout');
+      getDcSystemConfigValueByCodes.mockResolvedValue([]);
+
+      expect(auth.isAdminVip({ userCode })).toBe(true);
+      expect(auth.isAdminVip({ userCode })).toBe(true);
+      expect(auth.isAdminVip({ userCode: 'alice' })).toBe(false);
+      expect(getDcSystemConfigValueByCodes).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each(['["Alice","BOB"]', 'Alice,BOB'])(
+    'matches default and configured AdminVip accounts case-insensitively for %s',
+    async (paramValue) => {
+      const auth = loadAuthModule();
+      const { getDcSystemConfigValueByCodes } = require('@/service/layout');
+      getDcSystemConfigValueByCodes.mockResolvedValue([{ paramCode: 'USERCODE_CONFIG', paramValue }]);
+
+      await auth.initAdminVipList();
+
+      for (const userCode of ['adminvip', 'AdminVip', 'ADMINVIP', 'alice', 'ALICE', 'Alice', 'bob', 'BOB']) {
+        expect(auth.isAdminVip({ userCode })).toBe(true);
+      }
+      for (const userCode of ['nobody', 'AdminVipExtra', 'Ali', '']) {
+        expect(auth.isAdminVip({ userCode })).toBe(false);
+      }
+    }
+  );
+
   it('isAdminVip triggers async init and uses adminvip fallback before cache is ready', () => {
     const auth = loadAuthModule();
     const { getDcSystemConfigValueByCodes } = require('@/service/layout');

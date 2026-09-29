@@ -4,6 +4,8 @@ import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceLifecyclePolicy;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import org.apache.commons.lang3.StringUtils;
 
@@ -28,6 +30,12 @@ public final class ResourceImportOwnerTypeValidator {
                                 String importResourceName, String importResourceBizType, String importSystemCode) {
         if (existing == null) {
             return;
+        }
+
+        // 注销是数字员工与资源中心共用的终态；重复导入只能新建其他编码，不能把原记录复活。
+        if (ResourceLifecyclePolicy.supports(existing)
+            && ResourceStatus.DELETE.getNum().equals(existing.getResourceStatus())) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
         }
 
         // 老智能体来源允许在重复导入时切换个人/企业归属，更新流程会将新 ownerType 写回原记录。

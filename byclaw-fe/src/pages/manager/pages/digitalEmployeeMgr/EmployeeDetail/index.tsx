@@ -1,4 +1,11 @@
 // @ts-nocheck
+import PublicationToolbar from '@/components/EmployeePublication/Toolbar';
+import PublicationEditionGuard from '@/components/EmployeePublication/EditionGuard';
+import PublicationLoading from '@/components/EmployeePublication/Loading';
+import usePublicationDetailLoader from '@/components/EmployeePublication/useDetailLoader';
+import useOfficialUpdate from '@/components/EmployeePublication/useOfficialUpdate';
+import { publicationErrorMessage } from '@/utils/publicationError';
+import { publicationAction, type PublicationDetail } from '@/service/employeePublication';
 /* eslint-disable no-param-reassign */
 /* eslint-disable indent */
 /* eslint-disable function-paren-newline */
@@ -14,7 +21,7 @@ import { showAuditConfirm } from '@/pages/manager/utils/auditConfirm';
 import { getIframeUrl, getValidValue } from '@/pages/manager/utils/managerUtils';
 import { agentHomeUrlHandler } from '@/pages/manager/utils/agent';
 import { ArrowLeftOutlined, ArrowRightOutlined, EllipsisOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
-import { Button, Divider, Form, message, Space, Spin, Tooltip } from 'antd';
+import { Alert, Button, Divider, Form, message, Modal, Result, Space, Spin, Tooltip } from 'antd';
 import classnames from 'classnames';
 import dayjs from 'dayjs';
 import { debounce, isEmpty, set, noop, isString, omit } from 'lodash';
@@ -433,6 +440,7 @@ const EmployeeDetail = ({ loading }) => {
 
   const {
     uuid,
+    publicationId,
     appId,
     digitalType = 'FROM_MANUALLY',
     resourceName: oldResourseName,
@@ -473,11 +481,29 @@ const EmployeeDetail = ({ loading }) => {
   const agentDevType = useRef(queryAgentDevType || 'byai');
 
   const isFrontAccess = _isFrontAccess === 'true';
-  const showLog = _log === 'true';
-  const readOnly = _readOnly === 'true';
-  const showManage = _manage === 'true';
+  const [publicationDetail, setPublicationDetail] = useState<PublicationDetail>();
+  const [publicationBusy, setPublicationBusy] = useState(false);
+  const [officialUpdateRequiresReview, setOfficialUpdateRequiresReview] = useState(false);
+  const [officialUpdateNotice, setOfficialUpdateNotice] = useState('');
+  const officialUpdate = useOfficialUpdate();
+  useEffect(() => {
+    setOfficialUpdateRequiresReview(false);
+    setOfficialUpdateNotice('');
+  }, [agentId]);
+  const {
+    loading: publicationLoading,
+    error: publicationLoadError,
+    load: loadPublication,
+    retry: retryPublication,
+  } = usePublicationDetailLoader(publicationId);
+  const showLog = !publicationId && _log === 'true';
+  const readOnly =
+    _readOnly === 'true' ||
+    officialUpdate.busy ||
+    (!!publicationId && (!publicationDetail?.canEdit || publicationBusy));
+  const showManage = !publicationId && _manage === 'true';
   const showConfig = _config === 'true';
-  const showOperation = _operation === 'true';
+  const showOperation = !publicationId && _operation === 'true';
 
   const [form] = Form.useForm();
   const selectedImageModelId = Form.useWatch('imageModelId', { form, preserve: true });
@@ -742,10 +768,11 @@ const EmployeeDetail = ({ loading }) => {
 
   const getCompositeAppInfo = useCallback(
     (type, callback) => {
-      dispatch({
+      const request = {
         type: 'employeeMgr/getCompositeAppInfo',
         payload: { resourceId: agentId },
         success: (res) => {
+          setOfficialUpdateRequiresReview(res?.operationPermissions?.officialUpdateRequiresReview === true);
           const {
             resourceName,
             resourceDesc,
@@ -1199,9 +1226,17 @@ const EmployeeDetail = ({ loading }) => {
             console.error(error);
           }
         },
-      });
+      };
+      if (publicationId) {
+        loadPublication((detail) => {
+          setPublicationDetail(detail);
+          request.success(detail.employee);
+        });
+      } else {
+        dispatch(request);
+      }
     },
-    [dispatch, form, resultDataRef, prologueRef, knowledgeBases, agentId]
+    [dispatch, form, resultDataRef, prologueRef, knowledgeBases, agentId, publicationId, loadPublication]
   );
 
   const fetchDefaultTemplate = useCallback(async () => {
@@ -1292,7 +1327,7 @@ const EmployeeDetail = ({ loading }) => {
   }, [agentType, effectiveAgentType, effectiveOwnerType]);
 
   useEffect(() => {
-    if (agentId) {
+    if (agentId || publicationId) {
       getCompositeAppInfo(undefined, (prologue) => {
         // 获取模型下拉列表、设置配置默认值
         dispatch({
@@ -1334,7 +1369,7 @@ const EmployeeDetail = ({ loading }) => {
 
       fetchDefaultTemplate();
     }
-  }, [agentId, fetchDefaultTemplate]);
+  }, [agentId, publicationId, fetchDefaultTemplate]);
 
   // 校验核心能力名称必填（依赖 ConfigForm 同步到表单的 coreCompetencies）
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1348,8 +1383,9 @@ const EmployeeDetail = ({ loading }) => {
     return true;
   };
 
-  const updateResource = useCallback(
-    debounce(async (params, _isFrontAccess = isFrontAccess) => {
+  const saveResource = useCallback(
+    async (params, _isFrontAccess = isFrontAccess) => {
+      if (publicationId && !publicationDetail?.canEdit) return;
       if (agentId && String(resultDataRef.current?.resourceId) !== String(agentId)) return;
 
       // 先做核心能力名称校验
@@ -1571,6 +1607,38 @@ const EmployeeDetail = ({ loading }) => {
           return;
         }
 
+        if (publicationId && publicationDetail) {
+          try {
+            const detail = await publicationAction('save', publicationDetail.publication, { employee: savePayload });
+            setIsConfigChanged(false);
+            return detail;
+          } finally {
+            setSubmitLoading(false);
+            setAuditLoading(false);
+          }
+        }
+
+        if (officialUpdateRequiresReview && currentResourceId) {
+          try {
+            const outcome = await officialUpdate.save(String(currentResourceId), savePayload);
+            if (outcome === 'submitted') {
+              setOfficialUpdateNotice('更新申请已提交，审核通过后生效。可在审核中心查看进度；当前展示的仍是在用版本。');
+              setIsConfigChanged(false);
+              getCompositeAppInfo('reload');
+              EventEmitter?.emit('digitalEmployees-refresh-list', { refresh: true });
+              message.success('更新申请已提交，等待管理员审核');
+            } else if (outcome === 'draft') {
+              setOfficialUpdateNotice('修改已存为更新草稿，尚未提交审核，在用版本保持不变。');
+            }
+          } catch (error) {
+            message.error(publicationErrorMessage(error, '无法提交员工更新，请稍后重试'));
+          } finally {
+            setSubmitLoading(false);
+            setAuditLoading(false);
+          }
+          return;
+        }
+
         dispatch({
           type: currentResourceId ? 'employeeMgr/updateResource' : 'employeeMgr/createDigitalEmployee',
           payload: currentResourceId
@@ -1669,7 +1737,7 @@ const EmployeeDetail = ({ loading }) => {
         // 展示合规校验全屏 Loading（在 effects 内会先进行合规校验）
         setAuditLoading(true);
       }
-    }, 400),
+    },
     [
       dispatch,
       resultDataRef,
@@ -1695,8 +1763,17 @@ const EmployeeDetail = ({ loading }) => {
       auditErrors,
       promptFieldMaxLength,
       employeeGroupMembers,
+      publicationId,
+      publicationDetail,
+      officialUpdateRequiresReview,
+      officialUpdate.save,
+      getCompositeAppInfo,
     ]
   );
+
+  // 普通编辑保留防抖保存；发布流程直接等待 saveResource，取得保存后的修订号再提交。
+  const updateResource = useMemo(() => debounce(saveResource, 400), [saveResource]);
+  useEffect(() => () => updateResource.cancel(), [updateResource]);
 
   const showBaseList = useCallback(
     (type: string) => {
@@ -1710,6 +1787,15 @@ const EmployeeDetail = ({ loading }) => {
   const onValuesChange = useCallback(() => {
     setIsConfigChanged(true);
   }, []);
+
+  // 资源选择、头像和引导问题通过独立状态更新，不会触发 Form.onValuesChange。
+  const updatePublicationField = useCallback(
+    (setter, value) => {
+      setter(value);
+      if (publicationId) setIsConfigChanged(true);
+    },
+    [publicationId]
+  );
 
   // 顶部
   const renderHeader = (
@@ -1796,7 +1882,7 @@ const EmployeeDetail = ({ loading }) => {
         </div>
       )}
       <Space className={styles.headerRight}>
-        {activeTab === 'config' && !readOnly && (
+        {activeTab === 'config' && _readOnly !== 'true' && !publicationId && (
           <>
             {issues.length > 0 && (
               <ExclamationCircleOutlined
@@ -1944,7 +2030,55 @@ const EmployeeDetail = ({ loading }) => {
 
   return (
     <div className={classnames(styles.container, 'ub ub-ver')}>
+      <Modal
+        open={!!publicationId && (publicationLoading || !!publicationLoadError)}
+        footer={null}
+        closable={false}
+        maskClosable={false}
+        keyboard={false}
+        centered
+        width={520}
+        destroyOnHidden
+      >
+        {publicationLoadError ? (
+          <Result
+            status="warning"
+            title="发布配置加载失败"
+            subTitle={publicationLoadError}
+            extra={[
+              <Button key="retry" type="primary" onClick={retryPublication}>
+                重新加载
+              </Button>,
+              <Button key="back" onClick={() => history.replace('/myEmployees')}>
+                返回员工列表
+              </Button>,
+            ]}
+          />
+        ) : (
+          <PublicationLoading title="正在加载待发布配置" onBack={() => history.replace('/myEmployees')} />
+        )}
+      </Modal>
       {renderHeader}
+      {officialUpdate.confirmationDialog}
+      {!publicationId && officialUpdateRequiresReview && _readOnly !== 'true' && (
+        <Alert
+          showIcon
+          type="info"
+          style={{ margin: '8px 24px' }}
+          message={
+            officialUpdateNotice || '你正在编辑官方员工的在用配置。保存后需提交更新审核，通过前不影响大家使用当前版本。'
+          }
+        />
+      )}
+      {publicationId && publicationDetail && (
+        <PublicationToolbar
+          detail={publicationDetail}
+          dirty={isConfigChanged}
+          onChange={setPublicationDetail}
+          onSave={() => saveResource()}
+          onBusyChange={setPublicationBusy}
+        />
+      )}
 
       <div className={classnames(styles.content, 'ub-f1')}>
         {activeTab === 'config' && (
@@ -1955,19 +2089,19 @@ const EmployeeDetail = ({ loading }) => {
                 agentId={agentId}
                 form={form}
                 questionList={questionList}
-                setQuestionList={setQuestionList}
+                setQuestionList={(value) => updatePublicationField(setQuestionList, value)}
                 digitalType={effectiveDigitalType}
                 employeeType={effectiveAgentType}
                 agentType={effectiveAgentType}
                 canConfigureResources={canConfigureResources}
                 onValuesChange={onValuesChange}
                 showBaseList={showBaseList}
-                updateResource={noop}
+                updateResource={publicationId ? onValuesChange : noop}
                 updateCompositeAppInfo={null}
                 selectedTools={selectedTools}
-                setSelectedTools={setSelectedTools}
+                setSelectedTools={(value) => updatePublicationField(setSelectedTools, value)}
                 knowledgeBases={knowledgeBases}
-                setKnowledgeBases={setKnowledgeBases}
+                setKnowledgeBases={(value) => updatePublicationField(setKnowledgeBases, value)}
                 tagOptions={tagOptions}
                 setTagOptions={setTagOptions}
                 managementAddresses={managementAddresses}
@@ -1977,6 +2111,7 @@ const EmployeeDetail = ({ loading }) => {
                 robotConfigs={robotConfigs}
                 setRobotConfigs={setRobotConfigs}
                 isReadOnly={readOnly}
+                publicationMode={!!publicationId || officialUpdateRequiresReview}
                 updateTime={updateTime}
                 modelName={modelName}
                 modelList={modelList}
@@ -1985,7 +2120,7 @@ const EmployeeDetail = ({ loading }) => {
                 resultDataRef={resultDataRef}
                 prologueRef={prologueRef}
                 setModelName={setModelName}
-                setAvatar={setAvatar}
+                setAvatar={(value) => updatePublicationField(setAvatar, value)}
                 setRefineModalOpen={setRefineModalOpen}
                 auditErrors={auditErrors}
                 terminalTypeList={terminalTypeList}
@@ -2022,7 +2157,7 @@ const EmployeeDetail = ({ loading }) => {
             {/* 右侧 */}
             <div
               className={styles.contentRight}
-              style={effectiveDigitalType === 'FROM_SANDBOX' ? { display: 'none' } : undefined}
+              style={publicationId || effectiveDigitalType === 'FROM_SANDBOX' ? { display: 'none' } : undefined}
             >
               <div className={styles.preViewTitle}>
                 {intl.formatMessage({ id: 'employeeDetail.dialoguePreview' })}
@@ -2030,8 +2165,8 @@ const EmployeeDetail = ({ loading }) => {
                   <span className={styles.debugTip}>{intl.formatMessage({ id: 'employeeDetail.debugTip' })}</span>
                 )}
               </div>
-              {!debugPage && renderChat}
-              {!!debugPage && (
+              {!publicationId && !debugPage && renderChat}
+              {!publicationId && !!debugPage && (
                 <iframe
                   title="debugPage"
                   ref={iframeRef}
@@ -2134,6 +2269,7 @@ const EmployeeDetail = ({ loading }) => {
           skills={selectedTools}
           knowledgeBases={knowledgeBases}
           handleSelect={(item) => {
+            if (publicationId) onValuesChange();
             if (baseListType === '005') {
               setSelectedTools((pre) => [...pre, item]);
             } else if (baseListType === '006') {
@@ -2151,6 +2287,7 @@ const EmployeeDetail = ({ loading }) => {
             }
           }}
           handleRemove={(item) => {
+            if (publicationId) onValuesChange();
             if (baseListType === '005') {
               setSelectedTools(selectedTools.filter((it) => it.resourceId !== item.resourceId));
             } else if (baseListType === '006') {
@@ -2174,6 +2311,7 @@ const EmployeeDetail = ({ loading }) => {
         resourceId={agentId}
         modelCode={modelName}
         onOk={(formValue, myQuestionList) => {
+          if (publicationId) onValuesChange();
           setQuestionList(myQuestionList);
           form.setFieldsValue(formValue);
           // 同步一键完善生成的核心能力到外层状态，用于 ConfigForm 回显
@@ -2192,6 +2330,12 @@ const EmployeeDetail = ({ loading }) => {
   );
 };
 
+const GuardedEmployeeDetail = (props) => (
+  <PublicationEditionGuard>
+    <EmployeeDetail {...props} />
+  </PublicationEditionGuard>
+);
+
 export default connect(({ loading }) => ({
   loading,
-}))(EmployeeDetail);
+}))(GuardedEmployeeDetail);

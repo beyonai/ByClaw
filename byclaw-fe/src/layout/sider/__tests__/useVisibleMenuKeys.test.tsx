@@ -65,8 +65,7 @@ describe('useVisibleMenuKeys', () => {
     });
   });
 
-  // 视图/对象已下线：MENU_NAME_TO_KEY_MAP 中不再有「视图」「对象」，因此远端即便下发
-  // 这两个菜单名也翻译不出 key，无法进入可见键集合（此前靠 TEMP_HIDDEN_MENU_KEYS 隐藏，该名单已删除）。
+  // 本体/视图/对象均已下线：远端即便下发旧菜单名，也不能进入可见键集合。
   it('ignores retired ontology and removed view/object entries even when remote config sends them', async () => {
     mockGetDcSystemConfigListByStandType.mockResolvedValue({
       data: [

@@ -1,21 +1,21 @@
+import { hasAnyUserRole } from '@/utils/userRole';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { PlusOutlined, SearchOutlined, UnorderedListOutlined } from '@ant-design/icons';
-import { useDispatch, useIntl, useNavigate, useSearchParams } from '@umijs/max';
+import { useDispatch, useIntl, useNavigate, useSearchParams, useSelector } from '@umijs/max';
 import { Badge, Button, Dropdown, Input, Menu, Modal, Popconfirm, Space, Spin, Tabs, Typography, message } from 'antd';
 import { trim, debounce } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import AllDigitalEmployees from './components/AllDigitalEmployees';
-import ResourceFilter, {
-  IOnOkParams,
-  getDefaultParams,
-  digitalEmployeeStatusOptions,
-} from '@/components/Resources/components/ResourceFilter';
-import { PERMISSION_AUTHORIZED_TO_ME_VALUE, PERMISSION_CREATED_BY_ME_VALUE } from '@/components/Resources/constants';
+import EmployeeTypeTag from './components/EmployeeTypeTag';
+import ResourceFilter, { IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
+import { buildDigitalEmployeeFilterParam } from './filterParams';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getAgentChatAvatar } from '@/utils/agent';
 import { navigateToEmployeeChat } from '@/utils/employeeChat';
 import AntdIcon from '@/components/AntdIcon';
 import { getFileUrl } from '@/utils/file';
+import { isAdminVip } from '@/utils/auth';
+import type { UserState } from '@/models/common/user';
 import useDigitalEmployeeAuditCount from '@/hooks/useDigitalEmployeeAuditCount';
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import EmployFormModal from '@/pages/manager/pages/digitalEmployeeMgr/components/EmployFormModal';
@@ -34,6 +34,9 @@ const getListOperationPermissions = (employee: any) => {
     hasUsePermission: employee.hasUsePermission === true,
     canViewDetail: employee.canViewDetail === true,
     canEdit: employee.canEdit === true,
+    officialPublication: employee.officialPublication === true,
+    canPublishEmployee: employee.canPublishEmployee === true,
+    employeePublicationStatus: employee.employeePublicationStatus,
     canManageAuth: employee.canManageAuth === true,
     canUseAuth: employee.canUseAuth === true,
     canDelete: employee.canDelete === true,
@@ -46,46 +49,15 @@ const getListOperationPermissions = (employee: any) => {
   };
 };
 
-const buildDigitalEmployeeFilterParam = (
-  _activeTab: string,
-  filterParam?: IOnOkParams,
-  source: 'official' | 'available' = 'available'
-) => {
-  const permission = filterParam?.permission;
-  const employeeType = filterParam?.digitalEmployeeType;
-  let type: string | undefined;
-  if (source === 'available') {
-    if (permission === PERMISSION_CREATED_BY_ME_VALUE) {
-      type = 'owner';
-    } else if (permission === PERMISSION_AUTHORIZED_TO_ME_VALUE) {
-      type = 'authorize';
-    }
-  }
-
-  const employeeTypeParams =
-    source === 'available' && employeeType
-      ? {
-        ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
-        ...(employeeType.includes('GROUP') ? { agentType: '017' } : { excludeEmployeeGroup: true }),
-      }
-      : {};
-
-  return {
-    // “我可用的”接口固定只查已上架；官方推荐选择“全部”时仍需查询除已删除外的全部状态。
-    ...(source === 'official' && filterParam?.resourceStatus === '' ? { includeAllResourceStatus: true } : {}),
-    // 官方推荐的“全部”不展示已删除数据；具体状态筛选仍由 resourceStatus 控制。
-    ...(source === 'official' ? { excludeDeleted: true } : {}),
-    ...(filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
-      ? { resourceStatus: filterParam.resourceStatus }
-      : {}),
-    // 我可用接口使用 type=owner/authorize；官方推荐 discover 接口使用通用 permission 枚举。
-    ...(source === 'official' && permission ? { permission } : {}),
-    ...(type ? { type } : {}),
-    ...employeeTypeParams,
-  };
-};
-
 const DigitalEmployeesPage: React.FC = () => {
+  const userInfo = useSelector(({ user }: { user: UserState }) => user.userInfo);
+  // 创建入口按登录角色展示，避免发布能力接口失败或缓存未更新时误隐藏平台管理员入口。
+  const canCreateEnterprise =
+    (userInfo ? isAdminVip(userInfo) : false) ||
+    hasAnyUserRole(
+      (userInfo?.usersOrganizations || []).map((organization) => organization.userType),
+      ['PLAT_MAN']
+    );
   const intl = useIntl();
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -181,11 +153,25 @@ const DigitalEmployeesPage: React.FC = () => {
     });
   }, []);
 
+  // 创建入口随页签区分归属；实际创建操作仍由后端校验权限。
+  const createMenuItems =
+    activeTab === 'available'
+      ? [
+        { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
+        { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
+      ]
+      : canCreateEnterprise
+        ? [
+          { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
+          { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) },
+        ]
+        : [];
+
   const tabBarExtraContent = (
-    <Space>
+    <Space className={styles.toolbar}>
       <ResourceFilter
+        className={styles.toolbarFilter}
         resourceType="DIG_EMPLOYEE"
-        statusOptionsOverride={digitalEmployeeStatusOptions.filter((item) => !['-1', '1'].includes(item.value))}
         // 按一级 tab 重建筛选组件，加载该 tab 上次保存的筛选条件。
         key={activeTab}
         onOk={(param: any) => {
@@ -194,10 +180,9 @@ const DigitalEmployeesPage: React.FC = () => {
         }}
         defaultParam={dropdownParam}
         activeTab={activeTab}
-        // 我可用的仅按权限筛选，不展示状态筛选；官方推荐仍保留状态筛选。
-        hideStatusFilter={activeTab === 'available'}
-        // 类型筛选已移除，列表仍按员工组/数字员工分块展示。
-        digitalEmployeeTypeFilter={false}
+        // 两个页签都只展示已上架员工，不再提供状态筛选。
+        hideStatusFilter
+        digitalEmployeeTypeFilter
       />
       <Input
         suffix={
@@ -218,37 +203,34 @@ const DigitalEmployeesPage: React.FC = () => {
           getSearch();
         }}
       />
-      <Dropdown
-        trigger={['click']}
-        overlay={
-          <Menu
-            items={[
-              { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
-              { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
-              { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
-              { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) },
-            ]}
-            onClick={({ key }) => {
-              if (key === 'enterprise') {
-                setEnterpriseCreateOpen(true);
-                return;
-              }
-              const [ownerType, group] = key.split('-');
-              const params = new URLSearchParams({ ownerType, digitalType: 'FROM_MANUALLY' });
-              if (group) params.set('agentType', '017');
-              sessionStorage.setItem(
-                'EmployeeDetail_prevRoute',
-                `${window.location.pathname}${window.location.search}`
-              );
-              navigate(`/digitalEmployeesCreate?${params.toString()}`);
-            }}
-          />
-        }
-      >
-        <Button type="primary" icon={<PlusOutlined />} id="guideStep2-6">
-          {intl.formatMessage({ id: 'digitalEmployees.create' })}
-        </Button>
-      </Dropdown>
+      {createMenuItems.length > 0 && (
+        <Dropdown
+          trigger={['click']}
+          overlay={
+            <Menu
+              items={createMenuItems}
+              onClick={({ key }) => {
+                if (key === 'enterprise') {
+                  setEnterpriseCreateOpen(true);
+                  return;
+                }
+                const [ownerType, group] = key.split('-');
+                const params = new URLSearchParams({ ownerType, digitalType: 'FROM_MANUALLY' });
+                if (group) params.set('agentType', '017');
+                sessionStorage.setItem(
+                  'EmployeeDetail_prevRoute',
+                  `${window.location.pathname}${window.location.search}`
+                );
+                navigate(`/digitalEmployeesCreate?${params.toString()}`);
+              }}
+            />
+          }
+        >
+          <Button type="primary" icon={<PlusOutlined />} id="guideStep2-6">
+            {intl.formatMessage({ id: 'digitalEmployees.create' })}
+          </Button>
+        </Dropdown>
+      )}
       <Badge count={auditCount} size="small" offset={[-2, 2]}>
         <Button
           icon={<UnorderedListOutlined />}
@@ -519,10 +501,6 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
   useEffect(() => {
     setResourceTab(detail?.agentType === '017' ? 'MEMBERS' : 'SKILL');
   }, [detail?.agentType, employee]);
-  let employeeTypeLabel = detail?.ownerType === 'personal' ? '个人数字员工' : '企业数字员工';
-  if (detail?.agentType === '017') {
-    employeeTypeLabel = detail?.ownerType === 'personal' ? '个人数字员工组' : '企业数字员工组';
-  }
   return (
     <Modal
       open={!!employee}
@@ -547,7 +525,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   <Typography.Title level={3} className={styles.employeePreviewTitle}>
                     {detail.name || detail.resourceName}
                   </Typography.Title>
-                  <span className={styles.employeePreviewTag}>{employeeTypeLabel}</span>
+                  <EmployeeTypeTag ownerType={detail.ownerType} agentType={detail.agentType} />
                 </div>
                 {isOffShelfEmployee ? null : hasUsePermission ? (
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateTask?.()}>

@@ -58,12 +58,34 @@ public class AIService {
         return defaultModel;
     }
 
+    /** 指定模型时同时解析供应商地址、凭据及参数，不能只覆盖默认模型的名称。 */
+    private ModelDto resolveModel(String modelCode) {
+        if (StringUtils.isBlank(modelCode)) {
+            return getDefaultModel();
+        }
+        List<ModelDto> models = aiModelService.getModelList();
+        if (models != null) {
+            for (ModelDto model : models) {
+                if (model != null && modelCode.equals(model.getModelCode())) {
+                    return model;
+                }
+            }
+        }
+        throw new ModelSelectionException();
+    }
+
+    public static class ModelSelectionException extends RuntimeException {
+        public ModelSelectionException() {
+            super("Selected model is unavailable");
+        }
+    }
+
     public String generateText(String prompt, String modelCode) {
         return generateText(null, prompt, modelCode, 4000);
     }
 
     public String generateText(String systemPrompt, String userPrompt, String modelCode, int maxTokens) {
-        ModelDto defaultModel = getDefaultModel();
+        ModelDto defaultModel = resolveModel(modelCode);
         return generateText(systemPrompt, userPrompt, defaultModel, modelCode, maxTokens);
     }
 
@@ -176,7 +198,7 @@ public class AIService {
 
     public String generateTextStream(String systemPrompt, String userPrompt, String modelCode, int maxTokens,
                                      TextChunkHandler chunkHandler) {
-        ModelDto defaultModel = getDefaultModel();
+        ModelDto defaultModel = resolveModel(modelCode);
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
         String model = defaultModel.getModelCode();
@@ -478,6 +500,21 @@ public class AIService {
         boolean enabled = Boolean.TRUE.equals(reasoningConfig.get("enabled"));
         String capability = normalizeString(reasoningConfig.get("capability"), "unsupported");
         String defaultLevel = normalizeString(reasoningConfig.get("defaultLevel"), "off");
+        if ("bailian".equals(normalizeString(reasoningConfig.get("compatFormat"), "auto"))) {
+            boolean thinking = enabled && !"unsupported".equals(capability) && !"off".equals(defaultLevel);
+            requestBody.put("enable_thinking", thinking);
+            if (thinking && "effort".equals(capability)) {
+                Object rawMap = reasoningConfig.get("effortMap");
+                Map<?, ?> effortMap = rawMap instanceof Map<?, ?> map ? map : Map.of();
+                String effort = normalizeString(effortMap.get(defaultLevel), defaultLevel);
+                if (!"adaptive".equals(effort)) {
+                    requestBody.put("reasoning_effort", effort);
+                }
+            } else if (thinking && "budget".equals(capability)) {
+                putThinkingBudget(requestBody, reasoningConfig, defaultLevel);
+            }
+            return;
+        }
         if (!enabled || "unsupported".equals(capability) || "off".equals(defaultLevel)) {
             requestBody.put("enable_thinking", false);
             requestBody.put("chat_template_kwargs", Map.of("enable_thinking", false));

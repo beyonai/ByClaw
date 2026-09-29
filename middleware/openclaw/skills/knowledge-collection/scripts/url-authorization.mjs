@@ -1,6 +1,6 @@
 'use strict';
 
-import { getDomain } from 'tldts';
+import { getDomain } from './vendor/tldts-7.4.11.mjs';
 
 const MAX_DIAGNOSTIC_URL_CHARS = 2_000;
 const SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:access-token|access_token|auth|authorization|code|cookie|credential|key|password|secret|session|sig|signature|token)(?:$|[_-])/iu;

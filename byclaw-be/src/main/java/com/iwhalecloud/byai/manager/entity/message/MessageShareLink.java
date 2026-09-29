@@ -8,7 +8,7 @@ import lombok.Setter;
 import lombok.experimental.SuperBuilder;
 
 /**
- * 消息分享链接实体
+ * 分享链接实体（消息分享及群聊邀请）
  * <p>
  * 对应数据库表：message_share_link
  * </p>
@@ -17,7 +17,7 @@ import lombok.experimental.SuperBuilder;
  * </p>
  * <ul>
  * <li>仅保存分享链接元数据，不包含具体消息内容。</li>
- * <li>具体关联的消息通过 message_share_link_message 表维护。</li>
+ * <li>消息分享通过 message_share_link_message 关联消息；群聊邀请直接以 linkId 关联 sessionId。</li>
  * </ul>
  */
 @Getter
@@ -28,9 +28,12 @@ import lombok.experimental.SuperBuilder;
 public class MessageShareLink {
 
     /**
-     * 主键ID
+     * 类型内唯一 ID；消息分享独立生成，群聊邀请使用 sessionId
      */
     private Long linkId;
+
+    /** MESSAGE（兼容历史 NULL）或 GROUP_INVITATION；群邀请的 linkId 为 sessionId。 */
+    private String linkType;
 
     /**
      * 分享链接标题
@@ -38,7 +41,7 @@ public class MessageShareLink {
     private String title;
 
     /**
-     * 分享链接唯一标识（UUID+Base64URL）
+     * 原始 token：消息分享为 UUID+Base64URL，群聊邀请为 8 位字母数字
      */
     private String linkToken;
 

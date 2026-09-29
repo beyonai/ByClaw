@@ -1,5 +1,6 @@
 import type {
     AimodelModelCompat,
+    BaiyingReasoningConfig,
     AimodelModelInput,
     AimodelProviderApi,
     AimodelThinkingBudgets,
@@ -27,6 +28,7 @@ const THINKING_FORMATS = new Set([
     "auto",
     "openai",
     "qwen",
+    "bailian",
     "qwen-chat-template",
     "deepseek",
     "openrouter",
@@ -56,16 +58,6 @@ type AiModelConfigRecord = {
     modelType?: unknown;
     status?: unknown;
     url?: unknown;
-};
-
-type BaiyingReasoningConfig = {
-    enabled: boolean;
-    defaultLevel: AimodelThinkingLevel;
-    capability: "unsupported" | "binary" | "effort" | "budget" | "adaptive";
-    compatFormat: string;
-    supportedEfforts?: string[];
-    effortMap?: Record<string, string>;
-    budgets?: AimodelThinkingBudgets;
 };
 
 export type ResolvedDefaultBaiyingAimodelProviderBundle = {
@@ -219,12 +211,12 @@ export function resolveAimodelProviderApiFromInstanceParam(
     instanceParam: Record<string, unknown>,
 ): AimodelProviderApi {
     const candidates = [
-        nonEmptyString(instanceParam.providerName),
         nonEmptyString(instanceParam.modelProtocol),
+        nonEmptyString(instanceParam.providerName),
     ];
     for (const candidate of candidates) {
         const normalized = candidate.toLowerCase();
-        if (normalized === "anthropic") {
+        if (normalized === "anthropic" || normalized === "anthropic-messages") {
             return "anthropic-messages";
         }
         if (
@@ -234,7 +226,7 @@ export function resolveAimodelProviderApiFromInstanceParam(
         ) {
             return "openai-responses";
         }
-        if (normalized === "openai") {
+        if (normalized === "openai" || normalized === "openai-completions") {
             return "openai-completions";
         }
     }
@@ -279,33 +271,24 @@ function inferThinkingFormat(params: {
     if (params.configuredFormat && params.configuredFormat !== "auto") {
         return params.configuredFormat;
     }
-    const haystack = [
-        params.baseUrl,
-        params.modelId,
-        nonEmptyString(params.providerName),
-        nonEmptyString(params.modelProtocol),
-    ]
-        .join(" ")
-        .toLowerCase();
-    if (params.api === "anthropic-messages" || haystack.includes("anthropic") || haystack.includes("claude")) {
-        return "anthropic";
+    if (params.api === "anthropic-messages") return "anthropic";
+    // DashScope's hybrid Qwen models default to thinking. OpenAI-compatible
+    // transport alone does not describe the provider's enable_thinking switch.
+    if (params.api === "openai-completions" && /^qwen3\.[56]-(plus|flash)(?:-|$)/i.test(params.modelId)) {
+        try {
+            if (/(^|\.)dashscope(?:-intl|-us)?\.aliyuncs\.com$/i.test(new URL(params.baseUrl).hostname)) {
+                return "qwen";
+            }
+        } catch { /* Invalid URLs are rejected by the model configuration path. */ }
     }
-    if (haystack.includes("deepseek")) {
-        return "deepseek";
-    }
-    if (haystack.includes("qwen") || haystack.includes("dashscope")) {
-        return "qwen";
-    }
-    if (haystack.includes("openrouter")) {
-        return "openrouter";
-    }
-    if (haystack.includes("together")) {
-        return "together";
-    }
-    if (haystack.includes("zai") || haystack.includes("glm")) {
-        return "zai";
-    }
-    return params.api === "openai-completions" || params.api === "openai-responses" ? "openai" : undefined;
+    const provider = nonEmptyString(params.providerName).toLowerCase();
+    const providerFormats: Record<string, string> = {
+        anthropic: "anthropic", deepseek: "deepseek", qwen: "qwen", dashscope: "qwen",
+        bailian: "bailian", aliyun: "bailian", "百炼": "bailian", "阿里云百炼": "bailian", "通义千问": "qwen",
+        openrouter: "openrouter", together: "together", zai: "zai", "z.ai": "zai",
+    };
+    return providerFormats[provider] ??
+        (params.api === "openai-completions" || params.api === "openai-responses" ? "openai" : undefined);
 }
 
 function defaultEffortMapForFormat(format?: string): Record<string, string> | undefined {
@@ -330,16 +313,71 @@ function defaultSupportedEffortsForFormat(format?: string): string[] | undefined
     return undefined;
 }
 
+/** 运行时档位词表，与 byclaw-super THINKING_LEVELS / ByClaw BE 保持一致（off 单独处理）。 */
+const RUNTIME_THINKING_LEVELS: readonly AimodelThinkingLevel[] = [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "adaptive",
+    "max",
+];
+
+/** 关闭思考时写入上游的 effort 值；不属于可启用档位，因此不会被当成开启信号。 */
+const OFF_THINKING_EFFORT = "none";
+
+/**
+ * 构造完整的「档位 → provider effort」映射。
+ *
+ * <p>`off` 必须是「不被识别为有效 effort」的值：OpenClaw 的 `resolveAgentReasoningOption` 在档位为 off 时
+ * 会把 `thinkingLevelMap.off` 当成 effort 发出（只要它属于 minimal/low/medium/high/xhigh/max），
+ * 因此旧的 `{ off: defaultLevel }` 会让「关闭」仍然请求高档位推理；映射为 `none` 后
+ * OpenAI 兼容端点会收到显式关闭，deepseek/qwen 等格式则走各自的 disabled 分支。
+ *
+ * <p>其余档位按管理员 `effortMap` 翻译（此前只写入无人消费的 `compat.reasoningEffortMap`），
+ * 缺失映射时退化为档位本身。`adaptive` 是会话运行时模式，但不是 OpenClaw 配置
+ * schema 允许的 `thinkingLevelMap` 键，因此必须保留在会话/compat 配置中而不写入该映射。
+ */
+function buildThinkingLevelMap(params: {
+    effortMap?: Record<string, string>;
+    levels?: string[];
+    defaultLevel?: string;
+}): AimodelThinkingLevelMap {
+    const levels = new Set<string>(RUNTIME_THINKING_LEVELS);
+    for (const level of params.levels ?? []) {
+        if (level) {
+            levels.add(level);
+        }
+    }
+    if (params.defaultLevel) {
+        levels.add(params.defaultLevel);
+    }
+    const map: AimodelThinkingLevelMap = { off: OFF_THINKING_EFFORT };
+    for (const level of levels) {
+        if (level === "off" || level === "adaptive" || !isAimodelThinkingLevel(level)) {
+            continue;
+        }
+        map[level] = params.effortMap?.[level] ?? level;
+    }
+    return map;
+}
+
+function isAimodelThinkingLevel(value: string): value is AimodelThinkingLevel {
+    return value === "adaptive" || (RUNTIME_THINKING_LEVELS as readonly string[]).includes(value);
+}
+
 function resolveReasoningModelOptions(params: {
     api: AimodelProviderApi;
     baseUrl: string;
     modelId: string;
     instanceParam: Record<string, unknown>;
-}): Pick<ProviderBundle, "reasoning" | "thinkingLevelMap" | "thinkingBudgets" | "compat"> {
+}): Pick<ProviderBundle, "reasoning" | "reasoningConfig" | "thinkingLevelMap" | "thinkingBudgets" | "compat"> {
     const config = parseReasoningConfig(params.instanceParam);
-    if (!config.enabled || config.defaultLevel === "off") {
-        return { reasoning: false };
-    }
+
+    // 注意：defaultLevel === "off" 仍要下发完整档位映射（reasoning: true）——
+    // 「默认关闭」只决定会话默认档位（由 ByClaw BE 每轮解析下发），不代表模型不支持档位；
+    // 否则会话选了档位也会被运行时的 off-only profile 夹回 off，而 metadata/角标却记为已选档位。
     const format = inferThinkingFormat({
         api: params.api,
         baseUrl: params.baseUrl,
@@ -348,14 +386,34 @@ function resolveReasoningModelOptions(params: {
         modelProtocol: params.instanceParam.modelProtocol,
         configuredFormat: config.compatFormat,
     });
-    const thinkingLevelMap: AimodelThinkingLevelMap = {
-        off: config.defaultLevel,
-    };
+    const reasoningConfig = params.instanceParam.reasoningConfig
+        ? { ...config, compatFormat: format ?? "auto" } : undefined;
+    if (!config.enabled) {
+        const hybridQwen = /^qwen3\.[56]-(plus|flash)(?:-|$)/i.test(params.modelId);
+        if (format === "qwen" && (hybridQwen || config.capability === "binary")) {
+            // SDK reasoning is a capability flag. Keep it enabled so the Qwen
+            // serializer sends enable_thinking:false, including summary calls.
+            // The platform switch stays off and every runtime level maps to off.
+            return {
+                reasoning: true,
+                reasoningConfig: { ...config, compatFormat: "qwen", defaultLevel: "off" },
+                thinkingLevelMap: buildThinkingLevelMap({
+                    effortMap: Object.fromEntries(RUNTIME_THINKING_LEVELS.map((level) => [level, OFF_THINKING_EFFORT])),
+                }),
+                compat: { thinkingFormat: "qwen" },
+            };
+        }
+        return { reasoning: false, ...(reasoningConfig ? { reasoningConfig } : {}) };
+    }
     const effortMap = config.effortMap ?? defaultEffortMapForFormat(format);
-    const supportedReasoningEfforts =
-        config.supportedEfforts ?? defaultSupportedEffortsForFormat(format);
+    const supportedReasoningEfforts = config.supportedEfforts ?? defaultSupportedEffortsForFormat(format);
+    const thinkingLevelMap = buildThinkingLevelMap({
+        effortMap,
+        levels: supportedReasoningEfforts,
+        defaultLevel: config.defaultLevel,
+    });
     const compat: AimodelModelCompat = {};
-    if (format && format !== "anthropic") {
+    if (format && format !== "anthropic" && format !== "bailian") {
         compat.thinkingFormat = format;
     }
     if (supportedReasoningEfforts?.length) {
@@ -366,6 +424,7 @@ function resolveReasoningModelOptions(params: {
     }
     return {
         reasoning: true,
+        reasoningConfig,
         thinkingLevelMap,
         thinkingBudgets: config.budgets,
         compat: Object.keys(compat).length > 0 ? compat : undefined,

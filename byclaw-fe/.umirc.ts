@@ -22,7 +22,7 @@ const sandboxTarget = process.env.BYCLAW_SANDBOX_BASE_URL?.trim() || 'http://127
 
 const isDev = process.env.NODE_ENV === 'development';
 const publicPath = argvOptions.publicPath || '/';
-const base = publicPath;
+const base = argvOptions.base || publicPath;
 const routerBase = base.endsWith('/') ? base : `${base}/`;
 
 const PrefixName = 'beyond';

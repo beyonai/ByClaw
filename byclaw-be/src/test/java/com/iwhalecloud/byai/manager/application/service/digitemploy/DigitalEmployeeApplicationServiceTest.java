@@ -148,6 +148,8 @@ class DigitalEmployeeApplicationServiceTest {
         MessageSource mockMessageSource = mock(MessageSource.class);
         when(mockMessageSource.getMessage(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(java.util.Locale.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mockMessageSource.getMessage(eq("digemployee.deleted.name.suffix"), any(), any(Locale.class)))
+            .thenReturn("（已删除）");
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", mockMessageSource);
 
         service = new DigitalEmployeeApplicationService();
@@ -278,6 +280,39 @@ class DigitalEmployeeApplicationServiceTest {
         order.verify(ssResourceService).update(resource);
         order.verify(authApplicationService).invalidateResourceAuthorizationCachesAfterCommit(200L,
             ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {OwnerType.PERSONAL, OwnerType.ENTERPRISE})
+    void deleteDigitalEmployee_marksNameAndDoesNotAppendSuffixAgain(String ownerType) {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, ownerType, 1L);
+        resource.setResourceName("研发助手");
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        service.deleteDigitalEmployee(dto);
+        assertThat(resource.getResourceName()).isEqualTo("研发助手（已删除）");
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.DELETE.getNum());
+        service.deleteDigitalEmployee(dto);
+        assertThat(resource.getResourceName()).isEqualTo("研发助手（已删除）");
+        verify(ssResourceService, times(2)).update(resource);
+    }
+
+    @Test
+    void deleteDigitalEmployee_reservesSpaceForSuffixAtNameLengthLimit() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.PERSONAL, 1L);
+        resource.setResourceName("员".repeat(300));
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        service.deleteDigitalEmployee(dto);
+
+        assertThat(resource.getResourceName()).isEqualTo("员".repeat(295) + "（已删除）");
+        verify(ssResourceService).update(resource);
     }
 
     @Test
@@ -456,6 +491,7 @@ class DigitalEmployeeApplicationServiceTest {
 
     @Test
     void saveDigitalEmployee_doesNotPersistEnterpriseTagNameByAgentType() {
+        CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
         List<DigitalEmployType> types = List.of(DigitalEmployType.AGENT_TYPE_ASSISTANT, DigitalEmployType.AGENT_TYPE_DATA,
             DigitalEmployType.AGENT_TYPE_QA, DigitalEmployType.AGENT_TYPE_DEBUG, DigitalEmployType.AGENT_TYPE_CODE);
         when(sequenceService.nextVal()).thenReturn(401L, 402L, 403L, 404L, 405L);
@@ -895,6 +931,7 @@ class DigitalEmployeeApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(400L);
         resource.setResourceBizType(resourceBizType);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
 
         when(ssResourceService.findByIdList(List.of(400L))).thenReturn(List.of(resource));
         when(ssResourceService.findById(100L)).thenReturn(boundDefaultEmployee);
@@ -1463,6 +1500,23 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void ordinarySkillUninstallRemovesLegacyRelationWithoutSourceMetadata() {
+        DigitalEmployeeApplicationService uninstallService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skill = buildSkillResource(301L, 2L);
+        SsResourceRelDetail relation = directSkillRelation(901L, 301L, null);
+        prepareOrdinarySkillUninstall(employee, skill, relation);
+        when(ssResourceRelDetailService.removeById(901L)).thenReturn(true);
+        doReturn(new DigitalEmployeeDetailsDTO()).when(uninstallService).findDetailsById(any(EmployeeIdDTO.class));
+
+        uninstallService.uninstallDigitalEmployeeRelResources(uninstallDto(301L));
+
+        verify(ssResourceRelDetailService).removeById(901L);
+        verify(ssResourceRelDetailService, never()).updateById(relation);
+        verifySnapshotRefresh(uninstallService, employee, 1);
+    }
+
+    @Test
     void ordinarySkillUninstallLeavesMalformedRelationUntouchedAndStillRefreshes() {
         DigitalEmployeeApplicationService uninstallService = snapshotServiceSpy();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
@@ -1476,6 +1530,7 @@ class DigitalEmployeeApplicationServiceTest {
         SsResourceDTO responseSkill = new SsResourceDTO();
         responseSkill.setResourceId(301L);
         responseSkill.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
+        responseSkill.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         responseSkill.setRelResourceInfo(malformedSource);
         when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(details);
         when(ssResourceService.findRelResource(100L)).thenReturn(List.of(responseSkill));
@@ -1525,17 +1580,18 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
-    void ordinaryNonSkillUninstallKeepsLegacyFullDeleteFlowWithoutEmployeeRowLock() {
+    void knowledgeUninstallSchedulesPostCommitRefreshWithoutEmployeeRowLock() {
         DigitalEmployeeApplicationService uninstallService = snapshotServiceSpy();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
-        SsResource object = new SsResource();
-        object.setResourceId(401L);
-        object.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        SsResource knowledge = new SsResource();
+        knowledge.setResourceId(401L);
+        knowledge.setResourceBizType(ResourceBizTypeEnum.KG_DOC.name());
+        knowledge.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         SsResourceRelDetail relation = new SsResourceRelDetail();
         relation.setResourceRelDetailId(901L);
         relation.setResourceId(100L);
         relation.setRelResourceId(401L);
-        when(ssResourceService.findByIdList(List.of(401L))).thenReturn(List.of(object));
+        when(ssResourceService.findByIdList(List.of(401L))).thenReturn(List.of(knowledge));
         when(ssResourceService.findById(100L)).thenReturn(employee);
         when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(relation));
@@ -1548,11 +1604,11 @@ class DigitalEmployeeApplicationServiceTest {
         verify(skillGroupMapper, never()).selectDigitalEmployeeSkillRelations(any(), any());
         verify(ssResourceRelDetailService).removeById(901L);
         verify(uninstallService).rebuildAndSaveDigitalEmployeeRelSkills(100L);
-        verify(uninstallService).synOpenClawWorkSpace(100L);
+        verify(uninstallService, never()).synOpenClawWorkSpace(100L);
         verify(operationLogService).recordOperationLog(employee, OperationTypeEnum.UPDATE);
         verify(robotChannelRegistryCoordinator).refreshForResource(100L);
-        verify(digEmployeeChangeEventPublisher).publishAfterCommitOrNow(any(), eq(100L));
-        verifyNoInteractions(digitalEmployeeRuntimeRefreshService);
+        verifyNoInteractions(digEmployeeChangeEventPublisher);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, null);
     }
 
     @Test
@@ -1862,23 +1918,46 @@ class DigitalEmployeeApplicationServiceTest {
             .containsEntry("versionUrl", "/byaiService/tool/getSkillVersion?skillId=301");
     }
 
-    @Test
-    void updateDigitalEmployeeOmittingManualAndGroupSkillRetainsOnlyGroupSource() {
-        DigitalEmployeeApplicationService updateService = updateServiceSpy();
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "{\"manual\":true,\"sourceGroupIds\":[700]}",
+        "{\"manual\":false,\"sourceGroupIds\":[700]}",
+        "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+            + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[2]}}"
+    })
+    void updateDigitalEmployeeOmittingGroupSkillDeletesRelationAndReloadsEmptySkills(String sourceInfo) {
         DigitalEmployeeDTO dto = updateDto();
+        dto.setSkills("[]");
+        dto.setRelSkills(List.of());
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
-        SsResourceRelDetail relation = directSkillRelation(901L, 301L,
-            "{\"manual\":true,\"sourceGroupIds\":[700]}");
-        prepareFullUpdate(employee, List.of(relation), List.of(relation));
-        when(ssResourceRelDetailService.updateById(relation)).thenReturn(true);
+        SsResourceRelDetail relation = directSkillRelation(901L, 301L, sourceInfo);
+        List<SsResourceRelDetail> persistedRelations = new ArrayList<>(List.of(relation));
+        prepareFullUpdate(employee, persistedRelations, List.of(relation));
+        when(ssResourceRelDetailService.removeById(901L)).thenAnswer(invocation -> persistedRelations.remove(relation));
 
-        updateService.updateDigitalEmployee(dto);
+        // 使用真实重建逻辑，验证保存后的技能 JSON 与再次查询的技能列表都不会复活。
+        service.updateDigitalEmployee(dto);
 
-        SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
-        assertThat(source.isManual()).isFalse();
-        assertThat(source.getSourceGroupIds()).containsExactly(700L);
-        verify(ssResourceRelDetailService).updateById(relation);
-        verify(ssResourceRelDetailService, never()).removeById(901L);
+        verify(ssResourceRelDetailService).removeById(901L);
+        verify(ssResourceRelDetailService, never()).updateById(relation);
+        ArgumentCaptor<SsResExtDigEmployee> extCaptor = ArgumentCaptor.forClass(SsResExtDigEmployee.class);
+        verify(ssResExtDigEmployeeService, atLeastOnce()).update(extCaptor.capture());
+        assertThat(extCaptor.getValue().getSkills()).isEqualTo("[]");
+        DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
+        details.setResourceId(100L);
+        details.setPrologue("{}");
+        details.setSkills(extCaptor.getValue().getSkills());
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(details);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L))
+            .thenReturn(List.of());
+        EmployeeIdDTO query = new EmployeeIdDTO();
+        query.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO reloaded = service.findDetailsById(query);
+
+        assertThat(reloaded.getSkills()).isEqualTo("[]");
+        assertThat(reloaded.getRelSkills()).isEmpty();
     }
 
     @Test
@@ -1924,19 +2003,42 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
-    void updateDigitalEmployeeOmittingMalformedSkillLeavesRelationUntouched() {
+    void updateDigitalEmployeeRemovesOnlyDeselectedSkill() {
+        DigitalEmployeeApplicationService updateService = updateServiceSpy();
+        DigitalEmployeeDTO dto = updateDto(302L);
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail removed = directSkillRelation(901L, 301L,
+            "{\"manual\":false,\"sourceGroupIds\":[700]}");
+        SsResourceRelDetail retained = directSkillRelation(902L, 302L,
+            "{\"manual\":true,\"sourceGroupIds\":[700]}");
+        prepareFullUpdate(employee, List.of(removed, retained), List.of(removed, retained));
+        when(ssResourceService.findByIdList(List.of(302L))).thenReturn(List.of(buildSkillResource(302L, 2L)));
+        when(ssResourceRelDetailService.removeById(901L)).thenReturn(true);
+        when(ssResourceRelDetailService.updateById(retained)).thenReturn(true);
+
+        updateService.updateDigitalEmployee(dto);
+
+        verify(ssResourceRelDetailService).removeById(901L);
+        verify(ssResourceRelDetailService, never()).removeById(902L);
+        verify(ssResourceRelDetailService).updateById(retained);
+        assertThat(SkillRelationSource.parse(retained.getRelResourceInfo()).getSourceGroupIds()).containsExactly(700L);
+    }
+
+    @Test
+    void updateDigitalEmployeeOmittingMalformedSkillDeletesRelation() {
         DigitalEmployeeApplicationService updateService = updateServiceSpy();
         DigitalEmployeeDTO dto = updateDto();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
         String malformedSource = "{not-json";
         SsResourceRelDetail relation = directSkillRelation(901L, 301L, malformedSource);
         prepareFullUpdate(employee, List.of(relation), List.of(relation));
+        when(ssResourceRelDetailService.removeById(901L)).thenReturn(true);
 
         updateService.updateDigitalEmployee(dto);
 
         assertThat(relation.getRelResourceInfo()).isEqualTo(malformedSource);
         verify(ssResourceRelDetailService, never()).updateById(relation);
-        verify(ssResourceRelDetailService, never()).removeById(901L);
+        verify(ssResourceRelDetailService).removeById(901L);
     }
 
     @Test
@@ -1950,16 +2052,14 @@ class DigitalEmployeeApplicationServiceTest {
             "{\"manual\":true,\"sourceGroupIds\":[700]}");
         prepareFullUpdate(employee, List.of(manualOnly, manualAndGroup), List.of(manualOnly, manualAndGroup));
         when(ssResourceRelDetailService.removeById(901L)).thenReturn(true);
-        when(ssResourceRelDetailService.updateById(manualAndGroup)).thenReturn(true);
+        when(ssResourceRelDetailService.removeById(902L)).thenReturn(true);
 
         updateService.updateDigitalEmployee(dto);
 
         InOrder order = inOrder(ssResourceRelDetailService);
         order.verify(ssResourceRelDetailService).removeById(901L);
-        order.verify(ssResourceRelDetailService).updateById(manualAndGroup);
-        assertThat(SkillRelationSource.parse(manualAndGroup.getRelResourceInfo()).isManual()).isFalse();
-        assertThat(SkillRelationSource.parse(manualAndGroup.getRelResourceInfo()).getSourceGroupIds())
-            .containsExactly(700L);
+        order.verify(ssResourceRelDetailService).removeById(902L);
+        verify(ssResourceRelDetailService, never()).updateById(any(SsResourceRelDetail.class));
     }
 
     @Test
@@ -2024,6 +2124,7 @@ class DigitalEmployeeApplicationServiceTest {
         SsResourceDTO skillResource = new SsResourceDTO();
         skillResource.setResourceId(300L);
         skillResource.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
+        skillResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         SkillRelationSource source = SkillRelationSource.manual();
         source.addGroup(700L);
         skillResource.setRelResourceInfo(source.toJson());
@@ -2050,10 +2151,12 @@ class DigitalEmployeeApplicationServiceTest {
         SsResourceDTO malformed = new SsResourceDTO();
         malformed.setResourceId(300L);
         malformed.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
+        malformed.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         malformed.setRelResourceInfo("{not-json");
         SsResourceDTO legacy = new SsResourceDTO();
         legacy.setResourceId(301L);
         legacy.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
+        legacy.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         legacy.setRelResourceInfo("{\"relId\":\"301\",\"activeResourceIds\":[\"1\",\"2\"]}");
         when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
         when(ssResourceService.findRelResource(100L)).thenReturn(List.of(malformed, legacy));
@@ -2320,10 +2423,23 @@ class DigitalEmployeeApplicationServiceTest {
         return resource;
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {3, -1})
+    void inactiveRelatedResourceIsNotRepublishedToRedisOrStorage(int status) {
+        SsResource resource = new SsResource();
+        resource.setResourceId(500L);
+        resource.setResourceBizType("TOOLKIT");
+        resource.setResourceStatus(status);
+        ReflectionTestUtils.invokeMethod(service, "syncSingleRelatedResourceJsonIfMissing", 100L, resource);
+        ReflectionTestUtils.invokeMethod(service, "syncSingleRelatedResourceConfigJsonToRedis", 100L, resource);
+        verify(resourceArtifactStorageService, never()).existsResourceJsonByBizType("TOOLKIT", 500L);
+    }
+
     private SsResource buildSkillResource(Long resourceId, Long createBy) {
         SsResource resource = new SsResource();
         resource.setResourceId(resourceId);
         resource.setResourceBizType("SKILL");
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setOwnerType(OwnerType.ENTERPRISE);
         resource.setCreateBy(createBy);
         return resource;

@@ -10,7 +10,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Component;
 
-import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.PhoneAccountRegistrationService;
 import com.iwhalecloud.byai.manager.domain.login.service.SafeAccountMsgService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.login.SafeAccountMsg;
@@ -34,7 +34,7 @@ public class PhoneRegisterAuthenticationProvider implements AuthenticationProvid
     private SafeAccountMsgService safeAccountMsgService;
 
     @Autowired
-    private UserApplicationService userApplicationService;
+    private PhoneAccountRegistrationService phoneAccountRegistrationService;
 
     public PhoneRegisterAuthenticationProvider() {
         super();
@@ -80,7 +80,7 @@ public class PhoneRegisterAuthenticationProvider implements AuthenticationProvid
             safeAccountMsgService.update(safeAccountMsg);
         }
 
-        users = userApplicationService.registerByPhone(phone);
+        users = phoneAccountRegistrationService.registerNew(phone);
 
         // 认证通过，返回token
         PhoneRegisterAuthentication token = new PhoneRegisterAuthentication();

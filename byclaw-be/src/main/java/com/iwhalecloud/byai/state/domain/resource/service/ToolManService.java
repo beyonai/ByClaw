@@ -26,6 +26,10 @@ import com.iwhalecloud.byai.manager.domain.resource.service.ResourceTargetJsonBu
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigEmployeeRedisSyncProperties;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceLifecyclePolicy;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
+import com.iwhalecloud.byai.manager.application.service.skillgroup.SkillGroupApplicationService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeRuntimeRefreshService;
 import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetImportDto;
@@ -157,6 +161,12 @@ public class ToolManService {
 
     @Autowired
     private DatasetApplicationService datasetApplicationService;
+
+    @Autowired
+    private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
+
+    @Autowired
+    private SkillGroupApplicationService skillGroupApplicationService;
 
     @Autowired
     private ResourceArtifactStorageService resourceArtifactStorageService;
@@ -341,6 +351,7 @@ public class ToolManService {
         // 新增走 createResource，更新走 update。
         SsResource resource = saveOrUpdateToolJsonNewMain(existing, resourceSourcePkId, resourceBizType, resourceCode,
             resourceName, resourceDesc, ownerType, systemCode, version, effectiveCatalogId, implType);
+        boolean runtimeAvailable = ResourceLifecyclePolicy.isRuntimeAvailable(resource);
 
         // 7. 子表统一保留两份内容：
         // source_content 存原始 JSON，
@@ -351,18 +362,22 @@ public class ToolManService {
         // 8. 与其他资源导入链保持一致，清空草稿/正式版本号痕迹后，
         // 再把最终 JSON 同步到开放资源目录。
         ssResourceService.clearResourceDraftAndReleaseVerIds(resource.getResourceId());
-        resourceArtifactStorageService.syncResourceJsonByBizType(finalJsonStr, resourceBizType,
-            resource.getResourceId());
-        ssResourceArtifactService.upsertStandardJsonArtifact(resource.getResourceId(), resourceBizType,
-            "tool-json-import");
+        // 下架或待上架资源允许更新源内容，但不能因为导入动作重新发布运行产物；
+        // 只有显式上架后才恢复开放目录和发现服务。
+        if (runtimeAvailable) {
+            resourceArtifactStorageService.syncResourceJsonByBizType(finalJsonStr, resourceBizType,
+                resource.getResourceId());
+            ssResourceArtifactService.upsertStandardJsonArtifact(resource.getResourceId(), resourceBizType,
+                "tool-json-import");
+        }
 
-        if (updated) {
+        if (updated && runtimeAvailable) {
             LOGGER.info("工具JSON导入完成，准备重注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType,
                 resource.getResourceId(), resourceCode);
             resourceDiscoveryRegistrationService.reregisterAfterCommit(resourceBizType, resource.getResourceId(),
                 resourceCode, oldTargetContent, finalJsonStr);
         }
-        else {
+        else if (!updated && runtimeAvailable) {
             LOGGER.info("工具JSON导入完成，准备注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType,
                 resource.getResourceId(), resourceCode);
             resourceDiscoveryRegistrationService.registerAfterCommit(resourceBizType, resource.getResourceId(),
@@ -669,6 +684,122 @@ public class ToolManService {
 
     // ==================== 资源生命周期 ====================
 
+    /** 上架资源中心数据：恢复发布产物，知识内容和技能包沿用下架前的数据。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void shelfResource(Long resourceId) {
+        changeResourceLifecycle(resourceId, ResourceStatus.ON_SHELF);
+    }
+
+    /** 下架仅停止发布与使用，不执行知识库删除或技能包物理删除。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void unShelfResource(Long resourceId) {
+        changeResourceLifecycle(resourceId, ResourceStatus.OFF_SHELF);
+    }
+
+    /** 注销保留资源主表和扩展信息，状态 -1 为不可恢复的终态。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void deregisterResource(Long resourceId) {
+        changeResourceLifecycle(resourceId, ResourceStatus.DELETE);
+    }
+
+    private void changeResourceLifecycle(Long resourceId, ResourceStatus targetStatus) {
+        if (resourceId == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.resourceid.notnull"));
+        }
+        SsResource resource = ssResourceService.findByIdForUpdate(resourceId);
+        if (resource == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        if (!ResourceLifecyclePolicy.supports(resource)) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.type.unsupported"));
+        }
+        // 技能组沿用租户行锁和快照引用校验，上下架不传播到组内技能。
+        if ("SKILL_GROUP".equals(resource.getResourceBizType())) {
+            if (targetStatus == ResourceStatus.DELETE) {
+                skillGroupApplicationService.delete(resourceId);
+            }
+            else {
+                skillGroupApplicationService.changeShelfStatus(resourceId, targetStatus == ResourceStatus.ON_SHELF);
+            }
+            return;
+        }
+        validateResourceManagePermission(resource);
+        validateInnerSkillReadonly(resource);
+        validateCommercialEditionKnowledgeOrToolWritable(resource);
+        // 任意第三方知识库模式都由外部系统维护，不能通过通用工具接口绕过限制。
+        if (isKnowledgeBizType(resource.getResourceBizType()) && StringUtils.isNotBlank(datasetSystem)) {
+            throw new IllegalArgumentException(I18nUtil.get("commercial.not.support.knowledge.operation"));
+        }
+        boolean validStatus = switch (targetStatus) {
+            case ON_SHELF -> ResourceLifecyclePolicy.canShelf(resource);
+            case OFF_SHELF -> ResourceLifecyclePolicy.canUnShelf(resource);
+            case DELETE -> ResourceLifecyclePolicy.canDeregister(resource);
+            default -> false;
+        };
+        if (!validStatus) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
+        ResourceOperationPermissionsVo permissions = authApplicationService.queryResourceOperationPermissions(resourceId);
+        boolean allowed = permissions != null && switch (targetStatus) {
+            case ON_SHELF -> permissions.isCanOnShelf();
+            case OFF_SHELF -> permissions.isCanOffShelf();
+            case DELETE -> permissions.isCanDelete();
+            default -> false;
+        };
+        if (!allowed) {
+            throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+        }
+        String resourceBizType = resource.getResourceBizType();
+        String targetContent = findTargetContentByBizType(resourceBizType, resourceId);
+        boolean knowledgeDeregistered = false;
+        if (targetStatus == ResourceStatus.DELETE) {
+            // 沿用资源引用校验，防止注销仍被数字员工使用的数据。
+            validateResourceCanDelete(resourceId, resource, resourceBizType);
+            if (isKnowledgeBizType(resourceBizType)) {
+                datasetApplicationService.deleteDataset(resourceId);
+                knowledgeDeregistered = true;
+            }
+        }
+        resource.setResourceStatus(targetStatus.getNum());
+        resource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        resource.setUpdateTime(new Date());
+        ssResourceService.updateResourceEntity(resource);
+        authApplicationService.invalidateResourceAuthorizationCachesAfterCommit(resourceId, resourceBizType);
+        RedisUtil.removeKey(DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId));
+
+        if (targetStatus == ResourceStatus.ON_SHELF) {
+            updateExtTargetContentAndSync(resource);
+            if (shouldRegisterDiscoveryService(resourceBizType)) {
+                resourceDiscoveryRegistrationService.registerAfterCommit(resourceBizType, resourceId,
+                    resource.getResourceCode(), targetContent);
+            }
+        }
+        else {
+            // 保留源知识、技能包和关联关系，只移除公开运行产物，支持下架后重新上架。
+            resourceArtifactStorageService.deleteResourceJsonByBizType(resourceBizType, resourceId);
+            if (shouldRegisterDiscoveryService(resourceBizType) && !knowledgeDeregistered) {
+                resourceDiscoveryRegistrationService.unregisterAfterCommit(resourceBizType, resourceId,
+                    resource.getResourceCode(), targetContent);
+            }
+        }
+        // 提交后让关联员工重建配置；状态过滤会排除已下架或已注销的资源。
+        List<SsResourceRelDetail> relations = ssResourceRelDetailService.list(
+            new LambdaQueryWrapper<SsResourceRelDetail>().eq(SsResourceRelDetail::getRelResourceId, resourceId));
+        if (!CollectionUtils.isEmpty(relations)) {
+            List<Long> relatedIds = relations.stream().map(SsResourceRelDetail::getResourceId)
+                .filter(Objects::nonNull).distinct().collect(Collectors.toList());
+            if (!relatedIds.isEmpty()) {
+                List<SsResource> relatedResources = ssResourceService.findByIdList(relatedIds);
+                if (!CollectionUtils.isEmpty(relatedResources)) {
+                    relatedResources.stream().filter(Objects::nonNull)
+                        .filter(item -> ResourceBizType.DIG_EMPLOYEE.getCode().equals(item.getResourceBizType()))
+                        .forEach(item -> digitalEmployeeRuntimeRefreshService.scheduleDigitalEmployeeUpdateRefreshAfterCommit(
+                            item.getResourceId(), null));
+                }
+            }
+        }
+    }
+
     /**
      * 删除资源。 删除前先校验是否被数字员工关联；若已关联，则提示先去数字员工管理界面解除关系。
      */
@@ -688,7 +819,7 @@ public class ToolManService {
     }
 
     /**
-     * 删除资源。 forceDelete=false 时会校验资源类型和资源引用关系；forceDelete=true 时跳过这些校验，直接清理主表、子表和资源关系。
+     * 删除资源。资源中心支持的类型统一转入注销流程；历史资源类型继续按 forceDelete 兼容参数处理。
      *
      * @author qin.guoquan
      * @date 2026-04-26 13:45:00
@@ -704,6 +835,10 @@ public class ToolManService {
         SsResource resource = ssResourceService.findById(resourceId);
         if (resource == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        if (ResourceLifecyclePolicy.supports(resource)) {
+            deregisterResource(resourceId);
+            return;
         }
         validateResourceManagePermission(resource);
         validateInnerSkillReadonly(resource);
@@ -723,8 +858,7 @@ public class ToolManService {
             validateResourceCanDelete(resourceId, resource, resourceBizType);
         }
 
-        // 5. 软删除：仅把 ss_resource.resource_status 置为 OFF_SHELF(3)，保留主表、扩展表与资源关系，
-        // 让前端"已注销"筛选项可以查询到这些记录；运行期副作用（产物/缓存/注册等）继续清理。
+        // 5. 兼容历史资源类型的旧删除逻辑：保留主表、扩展表与资源关系，清理运行期副作用。
         resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         resource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         resource.setUpdateTime(new Date());
@@ -823,11 +957,12 @@ public class ToolManService {
     }
 
     /**
-     * 恢复资源。 将已注销（状态3）的资源恢复为已上架（状态2），并重新生成产物、同步缓存和注册服务。
+     * 兼容历史资源类型的恢复入口；资源中心支持的类型统一走上架流程。
      *
      * @author liu.yafei
      * @date 2026-05-14
      */
+    @Transactional(rollbackFor = Exception.class)
     public void restoreManagedResource(Long resourceId) {
         restoreManagedResource(resourceId, false);
     }
@@ -850,6 +985,13 @@ public class ToolManService {
         if (resource == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
+        if (ResourceLifecyclePolicy.supports(resource)) {
+            shelfResource(resourceId);
+            return;
+        }
+        if (Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
         validateResourceManagePermission(resource);
         String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
         // 商业版本（dataset.system=WHALE_AGENT）下，知识/工具由智能体门户发布，本系统不允许恢复。
@@ -860,7 +1002,7 @@ public class ToolManService {
             validateResourceCanRestore(resourceId, resource, resourceBizType);
         }
 
-        // 5. 恢复：将资源状态从已注销（3）改为已上架（2）。
+        // 5. 兼容历史资源类型的恢复：将资源状态改为已上架（2）。
         resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         resource.setUpdateTime(new Date());
@@ -895,7 +1037,7 @@ public class ToolManService {
         if (!DELETE_RESOURCE_BIZ_TYPES.contains(resourceBizType)) {
             throw new IllegalArgumentException(I18nUtil.get("tool.resource.restore.type.unsupported"));
         }
-        // 校验资源状态必须是已注销（3），否则不能恢复。
+        // 历史资源类型沿用状态 3 的旧恢复约定；资源中心类型已在上方走统一上架流程。
         if (!Objects.equals(resource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())) {
             throw new IllegalArgumentException(I18nUtil.get("tool.resource.restore.status.invalid"));
         }
@@ -913,7 +1055,7 @@ public class ToolManService {
         }
 
         // 2. 根据资源ID查询资源主表，确保资源存在。
-        SsResource resource = ssResourceService.findById(resourceId);
+        SsResource resource = ssResourceService.findByIdForUpdate(resourceId);
         if (resource == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
@@ -921,6 +1063,11 @@ public class ToolManService {
         validateCommercialEditionKnowledgeOrToolWritable(resource);
         validateResourceManagePermission(resource);
         validateInnerSkillReadonly(resource);
+
+        if (ResourceLifecyclePolicy.supports(resource)
+            && Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+        }
 
         // 3. 更新资源名称、资源描述，以及本次修改的操作人和修改时间。
         resource.setResourceName(resourceName);
@@ -1097,6 +1244,9 @@ public class ToolManService {
             return;
         }
 
+        if (!ResourceLifecyclePolicy.isRuntimeAvailable(resource)) {
+            return;
+        }
         resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
         ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, "resource-basic-info-sync");
         LOGGER.info("资源基础信息更新后已同步targetContent到开放资源目录, resourceId={}, resourceBizType={}", resourceId, resourceBizType);
@@ -1204,10 +1354,10 @@ public class ToolManService {
             return;
         }
 
-        // 3. 批量查询主资源，并过滤出 resourceBizType = DIG_EMPLOYEE 且未删除的数字员工。
+        // 3. 批量查询主资源，并过滤出仍处于上架运行态的数字员工；已下架员工不会阻塞资源注销。
         List<SsResource> relResources = ssResourceService.findByIdList(digEmployeeIds);
         List<String> digEmployeeNames = relResources.stream().filter(Objects::nonNull)
-            .filter(item -> !Objects.equals(item.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum()))
+            .filter(item -> Objects.equals(item.getResourceStatus(), ResourceStatus.ON_SHELF.getNum()))
             .filter(item -> StringUtils.equals(item.getResourceBizType(), ResourceBizType.DIG_EMPLOYEE.getCode()))
             .map(SsResource::getResourceName).filter(StringUtils::isNotBlank).distinct().collect(Collectors.toList());
         if (CollectionUtils.isEmpty(digEmployeeNames)) {

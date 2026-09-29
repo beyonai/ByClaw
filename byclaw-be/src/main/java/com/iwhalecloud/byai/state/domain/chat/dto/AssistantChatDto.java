@@ -10,6 +10,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.common.constants.men.TaskOperateTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
+import com.iwhalecloud.byai.state.domain.chat.model.SessionModelSelection;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import io.netty.channel.Channel;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -22,6 +23,12 @@ import lombok.Setter;
 @Data
 @Schema(description = "数字助理对话请求参数")
 public class AssistantChatDto {
+
+    /** 服务端申请的任务轮次占位，仅在当前请求内传递，客户端不能指定。 */
+    @JsonIgnore
+    @com.alibaba.fastjson.annotation.JSONField(serialize = false, deserialize = false)
+    @Schema(hidden = true)
+    private transient Long groupTaskTurnId;
 
     /**
      * agentType配套使用，这种情况是指定了智能体回答的场景
@@ -55,16 +62,39 @@ public class AssistantChatDto {
     @Schema(description = "会话内容", example = "你好，请帮我分析一下这个数据")
     private String chatContent;
 
+    /** 当前消息的操作意图；用户正文单独保存，群任务出站请求按此追加 Agent 提示。 */
+    private String messageIntent;
+
     /**
      * 文件内容
      */
     private List<MessageFileDto> files;
 
     /**
-     * 使用回答的模型(用户选择)
+     * 使用回答的模型(用户选择)。正整数为模型主键；-1 表示使用数字员工配置模型（清除会话覆盖）；
+     * 非数字为桌面本地模型 id，服务端忽略（由桌面 bridge 处理）。
      */
-    @Schema(description = "使用的模型ID(用户选择)", example = "1")
-    private Long relModelId;
+    @Schema(description = "使用的模型ID(用户选择)；-1=默认模型", example = "1")
+    private String relModelId;
+
+    /**
+     * 会话级思考强度(用户选择)。取值见 THINKING_LEVELS；-1 表示「跟随默认」（清除会话档位覆盖）；
+     * 缺失表示本轮不改动已有覆盖。
+     */
+    @Schema(description = "思考强度(用户选择)；-1=跟随默认", example = "high")
+    private String relThinkingLevel;
+
+    /**
+     * 本轮实际使用的模型（服务端解析结果，含回退），仅进程内传递，不参与序列化。
+     */
+    @JsonIgnore
+    private transient SessionModelSelection sessionModelSelection;
+
+    /**
+     * 本轮是否已完成实际模型解析，避免额度判断与主流程重复解析。
+     */
+    @JsonIgnore
+    private transient boolean sessionModelResolved;
 
     /**
      * 是否搜索企业资料

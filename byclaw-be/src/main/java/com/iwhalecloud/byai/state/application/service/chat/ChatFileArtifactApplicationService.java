@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.chat;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
+
 import java.io.InputStream;
 import java.net.URLConnection;
 import java.util.ArrayList;
@@ -225,6 +227,7 @@ public class ChatFileArtifactApplicationService {
         if (session == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "chat.file.artifact.session.not.exist");
         }
+        GroupChatInternalSessionAccess.requirePublic(session);
         if (canViewSession(session)) {
             return session;
         }

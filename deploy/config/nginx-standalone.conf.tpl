@@ -7,7 +7,26 @@ map $http_upgrade $connection_upgrade {
     '' close;
 }
 
+# Request and upstream timings in seconds; omit query strings and credentials.
+log_format timing_json escape=json
+    '{"time":"$time_iso8601",'
+    '"request_id":"$request_id",'
+    '"method":"$request_method",'
+    '"uri":"$uri",'
+    '"status":$status,'
+    '"bytes":$body_bytes_sent,'
+    '"request_time":$request_time,'
+    '"upstream_addr":"$upstream_addr",'
+    '"upstream_status":"$upstream_status",'
+    '"upstream_connect_time":"$upstream_connect_time",'
+    '"upstream_header_time":"$upstream_header_time",'
+    '"upstream_response_time":"$upstream_response_time"}';
+
 server {
+    # Preserve the existing access log when overriding the http-level setting.
+    access_log /var/log/nginx/access.log main;
+    access_log /var/log/nginx/access-timing.log timing_json buffer=64k flush=1s;
+
     listen       8080;
     listen       8443 ssl;
     http2 on;

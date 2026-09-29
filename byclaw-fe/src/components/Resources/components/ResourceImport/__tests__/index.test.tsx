@@ -1,3 +1,4 @@
+import JSZip from 'jszip';
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
@@ -105,6 +106,11 @@ const defaultProps = {
   saveTool: jest.fn(),
 };
 
+const createSkillFile = async (name: string) =>
+  new File([await new JSZip().file('SKILL.md', 'description: Demo').generateAsync({ type: 'blob' })], name, {
+    type: 'application/zip',
+  });
+
 describe('ResourceImport', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -152,8 +158,9 @@ describe('ResourceImport', () => {
     render(<ResourceImport {...defaultProps} onCancel={jest.fn()} onSuccess={onSuccess} />);
 
     fireEvent.change(screen.getByLabelText('skill zip'), {
-      target: { files: [new File(['skill bundle'], 'skills.zip', { type: 'application/zip' })] },
+      target: { files: [await createSkillFile('skills.zip')] },
     });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' }));
 
     await screen.findByRole('button', { name: 'resource.import.finish' });
@@ -184,8 +191,9 @@ describe('ResourceImport', () => {
     render(<ResourceImport {...defaultProps} onCancel={jest.fn()} onSuccess={onSuccess} />);
 
     fireEvent.change(screen.getByLabelText('skill zip'), {
-      target: { files: [new File(['invalid bundle'], 'invalid.zip', { type: 'application/zip' })] },
+      target: { files: [await createSkillFile('invalid.zip')] },
     });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' }));
 
     await screen.findByRole('button', { name: 'resource.import.finish' });
@@ -217,8 +225,9 @@ describe('ResourceImport', () => {
     render(<ResourceImport {...defaultProps} onCancel={onCancel} onSuccess={onSuccess} />);
 
     fireEvent.change(screen.getByLabelText('skill zip'), {
-      target: { files: [new File(['invalid bundle'], 'invalid.zip', { type: 'application/zip' })] },
+      target: { files: [await createSkillFile('invalid.zip')] },
     });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' }));
 
     await screen.findByRole('button', { name: 'resource.import.finish' });
@@ -227,4 +236,37 @@ describe('ResourceImport', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSuccess).not.toHaveBeenCalled();
   });
+});
+
+it('restores original ZIP names before both conflict checking and importing an export bundle', async () => {
+  jest.clearAllMocks();
+  const bundle = new JSZip();
+  bundle.file('packages/0.zip', await createSkillFile('one.zip'));
+  bundle.file('packages/1.zip', await createSkillFile('two.zip'));
+  bundle.file(
+    'byclaw-skills.json',
+    JSON.stringify({
+      format: 'byclaw-skill-packages-v1',
+      packages: [
+        { path: 'packages/0.zip', fileName: 'one.zip' },
+        { path: 'packages/1.zip', fileName: 'two.zip' },
+      ],
+    })
+  );
+  mockCheckSkillImportConflicts.mockResolvedValue({ items: [], updatedItems: [] });
+  mockImportResource.mockResolvedValue({ items: [], updatedItems: [], createdItems: [] });
+  render(<ResourceImport {...defaultProps} onCancel={jest.fn()} onSuccess={jest.fn()} />);
+  fireEvent.change(screen.getByLabelText('skill zip'), {
+    target: { files: [new File([await bundle.generateAsync({ type: 'blob' })], 'skills.zip')] },
+  });
+  await screen.findByText('one.zip');
+  await screen.findByText('two.zip');
+  fireEvent.click(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' }));
+  await waitFor(() => expect(mockImportResource).toHaveBeenCalled());
+  const preflight = mockCheckSkillImportConflicts.mock.calls[
+    mockCheckSkillImportConflicts.mock.calls.length - 1
+  ][0] as FormData;
+  const imported = mockImportResource.mock.calls[mockImportResource.mock.calls.length - 1][2] as FormData;
+  expect((preflight.getAll('file') as File[]).map((file) => file.name)).toEqual(['one.zip', 'two.zip']);
+  expect(imported.getAll('file')).toEqual(preflight.getAll('file'));
 });

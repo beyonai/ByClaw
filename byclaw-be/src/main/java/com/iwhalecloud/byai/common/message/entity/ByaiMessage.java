@@ -25,6 +25,18 @@ public class ByaiMessage {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
+    /** 撤回仅改变公开展示状态，原始内容与关系保持不变。 */
+    @TableField("recalled_at")
+    private Date recalledAt;
+
+    @TableField("recalled_by")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long recalledBy;
+
+    public boolean isRecalled() {
+        return recalledAt != null;
+    }
+
     private String metadata;
 
     /**
@@ -98,6 +110,11 @@ public class ByaiMessage {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long messageRef;
 
+    /** 公开群消息的引用链根 ID；独立消息尚不对应话题表记录。 */
+    @TableField("topic_id")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long topicId;
+
     @TableField("message_struct")
     private String messageStruct;
 
@@ -130,7 +147,7 @@ public class ByaiMessage {
     private Date updateTime;
 
     /**
-     * 使用次数（usage int4）
+     * 消息用途：1 用户消息，2 助手消息，5 系统事件消息（不进入 Agent 上下文）。
      */
     private Integer usage;
 

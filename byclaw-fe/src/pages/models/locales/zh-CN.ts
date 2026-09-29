@@ -63,7 +63,7 @@ export default {
   'personalModel.add': '新增模型',
   'personalModel.edit': '编辑',
   'personalModel.debug': '调试',
-  'personalModel.delete': '删除',
+  'personalModel.delete': '删除模型',
   'personalModel.delete.confirm': '确定删除该模型？',
   'personalModel.delete.success': '删除成功',
   'personalModel.delete.failed': '删除失败',

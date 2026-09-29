@@ -11,7 +11,7 @@ const COMMAND_SECTIONS = {
   current: undefined,
   basic: ["basic"],
   repos: ["repositories"],
-  resources: ["knowledge", "ontologies"],
+  resources: ["knowledge", "ontologies", "dataSources"],
   members: ["members"],
   files: ["sharedFiles"],
 };

@@ -286,6 +286,8 @@ export function setProbeDiscoveryReservation(paths, runId, { query, channel, pha
       query: String(query),
       channel,
       phase,
+      ...(phase === 'reserved' && run.discoveryReservation?.channel === channel
+        && run.discoveryReservation?.recovery ? { recovery: run.discoveryReservation.recovery } : {}),
       reservedAt: run.discoveryReservation?.reservedAt || new Date().toISOString(),
       ...(phase === 'complete' ? { completedAt: new Date().toISOString() } : {}),
     };
@@ -369,7 +371,7 @@ export function blockProbeRun(paths, runId, block) {
   });
 }
 
-export function resumeProbeRun(paths, runId) {
+export function resumeProbeRun(paths, runId, { skip = false } = {}) {
   return withSessionLock(paths, 'public-collect-resume', () => {
     const session = loadSession(paths, { persistMigration: false }).session;
     const run = requireOwnedRun(session, runId);
@@ -377,6 +379,23 @@ export function resumeProbeRun(paths, runId) {
       throw new Error(`ORCHESTRATION_NOT_RESUMABLE: status=${run.status}`);
     }
     const attempt = run.attempts.find((entry) => entry.attemptId === run.pause?.attemptId);
+    if (skip && run.pause?.attemptId !== null && (!attempt || attempt.attemptState === 'terminal')) {
+      throw new Error('PROBE_ATTEMPT_NOT_ACTIVE: paused attempt missing');
+    }
+    if (run.pause?.attemptId === null) {
+      const reservation = run.discoveryReservation;
+      if (skip && (!reservation || reservation.round !== run.discoveryRounds.length + 1)) {
+        throw new Error('ORCHESTRATION_DISCOVERY_RESERVATION_MISSING');
+      }
+      if (reservation) {
+        // An injected/online discovery unit has no inner source cursor to continue.
+        // Hot runtime checkpoints own per-source skips within their stable wave.
+        const hotRuntime = reservation.channel === 'hot'
+          && (run.hotSourcePlan || run.hotDiscoveryExecution);
+        reservation.phase = skip && !hotRuntime ? 'complete' : 'reserved';
+        reservation.recovery = skip ? 'skip' : 'resume';
+      }
+    }
     if (attempt) attempt.attemptState = 'acquiring';
     run.status = 'running';
     run.pause = null;

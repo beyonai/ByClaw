@@ -146,6 +146,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     canSend,
     canQuote,
     mentionPopoverPlacement,
+    allowMultiAgentInExpertMode = true,
   } = props;
   const intl = useIntl();
   const [mentionPopoverData, setMentionPopoverData] = useState<Partial<MentionTriggerInfo>>({});
@@ -161,7 +162,15 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   /**
    * 在专家模式下，通过@切换某个agent后，需要显示一个默认的agent在输入框的最左侧
    */
-  const defaultAgentElement = useDefaultAgentElement({ agentType, agentId });
+  const sessionDefaultAgentElement = useDefaultAgentElement({ agentType, agentId });
+
+  // 进入会话时有草稿就以草稿为准，禁止历史员工（包括异步返回的员工）混入正文或发送资源。
+  // 固定本次编辑器的恢复策略，避免清空草稿或父组件重渲染时又自动补上历史员工。
+  const hasInitialDraft = useRef(!!props.inputDraft?.text || !!props.inputDraft?.resourceList?.length);
+  // 定时任务等业务表单以保存的正文和引用为准，即使正文为空也不能回退到历史员工。
+  const hasInitialInputValue = useRef(props.initialInputValue !== undefined);
+  const defaultAgentElement =
+    hasInitialInputValue.current || (hasInitialDraft.current && !inAgentRoute) ? undefined : sessionDefaultAgentElement;
 
   const [value, setValue] = useState<Descendant[]>([
     {
@@ -216,11 +225,22 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       return false;
     }
     if (chatMode === chatModeMap.expert) {
-      if (isInputting) {
+      if (isInputting && allowMultiAgentInExpertMode) {
         return true;
       }
-      // drop进来的，必须是没有内容
+      // 关闭多员工输入时，void 类型的员工节点也应视为已有输入。
+      if (
+        !allowMultiAgentInExpertMode &&
+        !Editor.nodes(editor, { at: [], match: isDigitalEmployeeMentionNode }).next().done
+      ) {
+        return false;
+      }
       const text = Editor.string(editor, []);
+      // 首次键入 @ 时，触发词本身不算已有正文。
+      if (isInputting && text === getCurrentTriggerText(editor)) {
+        return true;
+      }
+      // 拖入员工时，必须是没有正文的输入框。
       return !text;
     }
 
@@ -300,7 +320,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   // 触发发送后只清空本轮问题和其它引用，保留输入框中已 @ 的数字员工，便于继续追问。
   const clearAfterSend = () => replaceText('', true);
 
-  // 草稿保存输入框中的全部数字员工 mention，避免回答过程切换当前 agent 后丢失其中一个。
+  // 完整草稿保留编辑中的员工；仅自动带入的默认员工不构成用户草稿。
   const getPersistentMentionDraft = (includeQuestion = false) => {
     const mentionedEmployeeIds = new Set<string>();
     const mentionNodes = Array.from(
@@ -311,13 +331,21 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       })
     )
       .map(([node]) => node)
+      // 发送后的草稿只保留用户选择的员工，自动带入的历史员工继续在当前输入框展示即可。
+      .filter((node: any) => includeQuestion || !node.isDefaultAgent)
       .filter((node: any) => {
         const identityKeys = getAgentIdentityKeys(node);
         if (identityKeys.some((item) => mentionedEmployeeIds.has(item))) return false;
         identityKeys.forEach((item) => mentionedEmployeeIds.add(item));
         return true;
       });
-    let persistentValue = value;
+    const questionText = getInputText(editor.children, true).text;
+    // 默认员工不参与 questionText；正文、手动 @ 和引用都为空时，不把历史员工单独保存成会话草稿。
+    // 用户输入后又删空，也应回到无草稿状态，让下次打开的会话使用自己的员工。
+    if (includeQuestion && !questionText.trim()) {
+      return { text: '', resourceList: [] };
+    }
+    let persistentValue = editor.children;
     if (!includeQuestion) {
       persistentValue = [
         {
@@ -335,7 +363,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
     return {
       // 普通草稿还要带上问题文本；发送后的草稿只保留数字员工 mention。
-      text: includeQuestion ? `${defaultMentionText}${getInputText(value, true).text}` : mentionText,
+      text: includeQuestion ? `${defaultMentionText}${questionText}` : mentionText,
       resourceList,
     };
   };
@@ -386,7 +414,11 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   // 这个onchange不仅仅包括输入，光标的变化也会触发
   const myOnChange = (value: Descendant[]) => {
     setValue(value);
-    // 组合输入阶段（中文输入法等），只同步 Slate 内部 value，不做额外副作用，
+    // 草稿直接读取 Slate 最新节点，避免异步 onChange 尚未执行就切换会话而丢失最后一次输入。
+    if (editor.operations.some((operation) => operation.type !== 'set_selection')) {
+      props.onDraftChange?.(getPersistentMentionDraft(true));
+    }
+    // 组合输入阶段（中文输入法等），只同步 Slate value 和草稿，不触发弹窗等副作用，
     // 避免在 IME 尚未结束时频繁依赖 selection / DOM 导致光标错乱和字符丢失。
     if (isComposing.current) {
       return;
@@ -621,6 +653,14 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     getPersistentMentionDraft,
     insertItem,
     appendText: (text: string) => {
+      // 引用插入后的光标调整是异步的；连续追加文字时先移出不可编辑节点，避免 Slate 丢弃正文。
+      if (editor.selection && Range.isCollapsed(editor.selection)) {
+        const voidEntry = Editor.void(editor, { at: editor.selection.anchor });
+        if (voidEntry) {
+          const after = Editor.after(editor, voidEntry[1]);
+          Transforms.select(editor, after || Editor.end(editor, []));
+        }
+      }
       Transforms.insertText(editor, text);
     },
     getPayload,

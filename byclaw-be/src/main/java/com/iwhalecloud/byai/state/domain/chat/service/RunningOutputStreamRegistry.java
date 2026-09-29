@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -23,6 +24,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class RunningOutputStreamRegistry {
+
+    @Autowired
+    private ApplicationEventPublisher events;
 
     private static final String KEY_PREFIX = "byai:chat:running:";
 
@@ -169,6 +173,7 @@ public class RunningOutputStreamRegistry {
                 redisTemplate.delete(key);
                 if (chatRuntimeStateService != null) {
                     chatRuntimeStateService.delete(sessionId);
+                    publishSessionReleased(sessionId);
                 }
             }
         }
@@ -187,6 +192,18 @@ public class RunningOutputStreamRegistry {
         ChatRuntimeState state = chatRuntimeStateService.get(sessionId);
         if (state != null && modelAnswerMessageId.equals(state.getModelAnswerMessageId())) {
             chatRuntimeStateService.delete(sessionId);
+            publishSessionReleased(sessionId);
+        }
+    }
+
+    private void publishSessionReleased(Long sessionId) {
+        if (events == null) return;
+        try {
+            // 显式停止路径在运行态删除后通知；自然完成由 SessionStreamManager 清理完再通知。
+            events.publishEvent(new ChatSessionReleased(sessionId));
+        }
+        catch (RuntimeException error) {
+            log.warn("Unable to announce released chat session: sessionId={}", sessionId, error);
         }
     }
 

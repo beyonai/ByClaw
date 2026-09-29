@@ -22,7 +22,7 @@ public class ModelReasoningConfig implements Serializable {
     /** 能力类型：unsupported/binary/effort/budget/adaptive。 */
     private String capability;
 
-    /** Provider 兼容格式：auto/openai/qwen/qwen-chat-template/deepseek/openrouter/together/zai/anthropic。 */
+    /** Provider 兼容格式：auto/openai/bailian/qwen/qwen-chat-template/deepseek/openrouter/together/zai/anthropic。 */
     private String compatFormat;
 
     /** Provider 实际支持的 reasoning effort 列表。 */

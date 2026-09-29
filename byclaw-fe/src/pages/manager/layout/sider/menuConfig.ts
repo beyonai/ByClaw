@@ -1,10 +1,12 @@
 import {
   ApartmentOutlined,
   AppstoreOutlined,
+  CloudDownloadOutlined,
   CodeSandboxOutlined,
   ControlOutlined,
   // DashboardOutlined,
   ExperimentOutlined,
+  FolderOutlined,
   // RobotOutlined,
   SafetyCertificateOutlined,
   TeamOutlined,
@@ -14,6 +16,28 @@ import {
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 
 const MANAGER_MENU_PARAM_CODE = 'SYSTEM_BACKEND_MENU_MANAGE';
+export const FILE_MANAGEMENT_MENU = {
+  path: '/manager/files',
+  routePath: '/manager/files',
+  name: '系统文件管理',
+  nameEn: 'System File Management',
+  localeId: 'menu.fileManagement',
+  icon: FolderOutlined,
+};
+
+export const WORKGROUP_TEMPLATE_MENU = {
+  path: '/manager/workgroup-templates',
+  routePath: '/manager/workgroup-templates',
+  name: '工作组模板管理',
+  nameEn: 'Workgroup templates',
+  icon: TeamOutlined,
+};
+
+/**
+ * App 版本管理的菜单项由后台菜单配置（SYSTEM_BACKEND_MENU_MANAGE）提供，前端不写死；
+ * 这里只保留 path 用于按 capability 决定是否隐藏，以及菜单图标映射。
+ */
+export const APP_VERSION_MENU_PATH = '/manager/app-versions';
 let managerMenuConfigPromise: Promise<any[]> | null = null;
 let managerMenuConfigCache: any[] | null = null;
 
@@ -27,6 +51,8 @@ const iconByMenuCode: Record<string, any> = {
   menu_sandbox_config: CodeSandboxOutlined,
   menu_ui_agent: RadarChartOutlined,
   menu_system_feedback: CommentOutlined,
+  menu_app_version: CloudDownloadOutlined,
+  menu_file_management: FolderOutlined,
 };
 
 const localeIdByPath: Record<string, string> = {
@@ -39,6 +65,7 @@ const localeIdByPath: Record<string, string> = {
   '/manager/systemParams/sandbox': 'menu.systemParams.sandbox',
   '/manager/notification': 'menu.business.notification',
   '/manager/system/feedback': 'menu.systemFeedback',
+  '/manager/files': 'menu.fileManagement',
 };
 
 export const fallbackMenuConfig = [
@@ -97,6 +124,7 @@ export const fallbackMenuConfig = [
     localeId: 'menu.systemFeedback',
     icon: CommentOutlined,
   },
+  FILE_MANAGEMENT_MENU,
 ];
 
 const parseConfigList = (value: any) => {
@@ -117,6 +145,21 @@ const parseConfigList = (value: any) => {
 };
 
 const getMenuKey = (item: any) => item.path || item.menuUrl || item.menuCode;
+
+export const getManagerMenuLabel = (
+  item: { menuNameCn?: string; menuNameEn?: string; name?: string; nameEn?: string; localeId?: string },
+  intl: { locale: string; formatMessage: (descriptor: { id: string; defaultMessage?: string }) => string }
+) => {
+  const isEnglish = intl.locale.toLowerCase().startsWith('en');
+  // 参数中的名称由管理员维护，优先于内置语言包，避免已保存的名称被固定译文覆盖。
+  const configuredName = isEnglish ? item.menuNameEn || item.menuNameCn : item.menuNameCn || item.menuNameEn;
+  if (configuredName) {
+    return configuredName;
+  }
+
+  const name = (isEnglish ? item.nameEn || item.name : item.name) || '';
+  return item.localeId ? intl.formatMessage({ id: item.localeId, defaultMessage: name }) : name;
+};
 
 export const normalizeMenuUrl = (url?: string) => {
   if (!url) {
@@ -222,3 +265,14 @@ export const filterMenusByMenuDisplay = (menus: any[], userInfo: any): any[] => 
     return item.menuDisplay.some((role: string) => userTypeList.includes(role));
   });
 };
+
+export const withWorkgroupTemplateMenu = (menus: any[], allowed: boolean) => {
+  const filtered = menus.filter((item) => item.path !== WORKGROUP_TEMPLATE_MENU.path);
+  return allowed ? [...filtered, WORKGROUP_TEMPLATE_MENU] : filtered;
+};
+
+/**
+ * 菜单项本身来自后台菜单配置，前端只做「无管理权限时隐藏」的处理。
+ */
+export const filterAppVersionMenu = (menus: any[], allowed: boolean) =>
+  allowed ? menus : menus.filter((item) => item.path !== APP_VERSION_MENU_PATH);

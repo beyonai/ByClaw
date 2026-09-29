@@ -155,6 +155,45 @@ test('IMA unscoped search enumerates knowledge bases, filters locally, and never
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('IMA metadata discovery prioritizes authorized knowledge bases and failed inference preserves native order', async () => {
+  for (const failed of [false, true]) {
+    const { root, bin } = await fixture();
+    try {
+      const callsPath = join(root, 'calls.json');
+      const outputDir = join(root, 'search');
+      const result = await createImaAdapter({ bycliBin: bin,
+        env: { ...process.env, BYCLI_ENUMERATION_MODE: 'true', IMA_CALLS_PATH: callsPath, TYPESAFE_ENTERPRISE_ENABLED: 'true' },
+        callJev: failed ? async () => { throw new Error('unavailable'); } : async (payload) => ({
+          ok: true, document: { answers: Object.fromEntries(Object.keys(payload.questions).map((key, index) => [key,
+            { type: 'choice', choice: index === 1 ? 'high' : 'low', confidence: 0.95 }])) },
+        }),
+      }).search({ outputDir, query: 'roadmap', limit: 1, concurrency: 1, metadataOnly: true });
+      assert.equal(result.status, 'complete');
+      const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map(JSON.parse);
+      assert.equal(calls[1][2], failed ? 'kb-a' : 'kb-b');
+      const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+      assert.equal(metadata.collection.items[0].sourceItemId, failed ? 'alpha-title' : 'beta-introduction');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }
+});
+
+test('IMA all-target knowledge enumeration keeps original order without inference', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const callsPath = join(root, 'calls.json');
+    let inferenceCalls = 0;
+    await createImaAdapter({ bycliBin: bin,
+      env: { ...process.env, BYCLI_ENUMERATION_MODE: 'true', IMA_CALLS_PATH: callsPath, TYPESAFE_ENTERPRISE_ENABLED: 'true' },
+      callJev: async () => { inferenceCalls += 1; throw new Error('must not infer'); },
+    }).search({ outputDir: join(root, 'search'), query: 'roadmap', limit: 1, concurrency: 1,
+      metadataOnly: true, taskContract: { query: 'roadmap', materializationTarget: 'all',
+        requiredContentGranularity: 'any', deliveryRequested: false } });
+    const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.equal(inferenceCalls, 0);
+    assert.equal(calls[1][2], 'kb-a');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('IMA unscoped search reports partial while preserving successful knowledge bases', async () => {
   const { root, bin } = await fixture();
   try {

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMessageAckMapper">
+    <resultMap id="AckMap" type="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatMessageAck">
+        <result column="session_id" property="sessionId" />
+        <result column="message_id" property="messageId" />
+        <result column="user_id" property="userId" />
+        <result column="user_name" property="userName" />
+        <result column="acknowledged_at" property="acknowledgedAt" />
+    </resultMap>
+
+    <insert id="insertIfAbsent">
+        MERGE INTO byai_group_chat_message_ack target
+        USING (
+            SELECT CAST(#{sessionId} AS BIGINT) AS session_id,
+                   CAST(#{messageId} AS BIGINT) AS message_id,
+                   CAST(#{userId} AS BIGINT) AS user_id,
+                   CAST(#{userName} AS VARCHAR) AS user_name,
+                   CAST(#{acknowledgedAt} AS TIMESTAMP) AS acknowledged_at
+        ) source
+        ON (target.session_id = source.session_id
+            AND target.message_id = source.message_id
+            AND target.user_id = source.user_id)
+        WHEN NOT MATCHED THEN INSERT (
+            session_id, message_id, user_id, user_name, acknowledged_at
+        ) VALUES (
+            source.session_id, source.message_id, source.user_id,
+            source.user_name, source.acknowledged_at
+        )
+    </insert>
+
+    <delete id="deleteByMessageAndUser">
+        DELETE FROM byai_group_chat_message_ack
+        WHERE session_id = #{sessionId}
+          AND message_id = #{messageId}
+          AND user_id = #{userId}
+    </delete>
+
+    <select id="selectByMessageIds" resultMap="AckMap">
+        SELECT session_id, message_id, user_id, user_name, acknowledged_at
+        FROM byai_group_chat_message_ack
+        WHERE session_id = #{sessionId}
+          AND message_id IN
+          <foreach collection="messageIds" item="messageId" open="(" separator="," close=")">
+              #{messageId}
+          </foreach>
+        ORDER BY acknowledged_at ASC, user_id ASC
+    </select>
+</mapper>

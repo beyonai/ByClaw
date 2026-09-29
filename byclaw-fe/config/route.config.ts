@@ -91,6 +91,21 @@ export default [
             name: 'managerAdminConsole',
             component: './manager/pages/AdminConsole',
           },
+          {
+            path: '/manager/files',
+            name: 'managerFiles',
+            component: './manager/pages/FileMgr',
+          },
+          {
+            path: '/manager/workgroup-templates',
+            name: 'managerWorkgroupTemplates',
+            component: './manager/pages/WorkgroupTemplateMgr',
+          },
+          {
+            path: '/manager/app-versions',
+            name: 'managerAppVersions',
+            component: './manager/pages/AppVersionMgr',
+          },
         ],
       },
       {

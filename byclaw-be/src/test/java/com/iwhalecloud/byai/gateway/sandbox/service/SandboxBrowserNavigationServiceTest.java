@@ -144,10 +144,12 @@ class SandboxBrowserNavigationServiceTest {
     void navigate_usesHttp11WithoutH2cUpgrade() throws IOException {
         AtomicReference<String> protocol = new AtomicReference<>();
         AtomicReference<String> upgradeHeader = new AtomicReference<>();
+        AtomicReference<String> commandBody = new AtomicReference<>();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
             protocol.set(exchange.getProtocol());
             upgradeHeader.set(exchange.getRequestHeaders().getFirst("Upgrade"));
+            commandBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] response = "{\"id\":\"daemon-1\",\"ok\":true}".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, response.length);
             exchange.getResponseBody().write(response);
@@ -168,5 +170,9 @@ class SandboxBrowserNavigationServiceTest {
 
         assertThat(protocol.get()).isEqualTo("HTTP/1.1");
         assertThat(upgradeHeader.get()).isNull();
+        assertThat(commandBody.get())
+            .contains("\"action\":\"navigate\"")
+            .contains("\"session\":\"operation-account-1\"")
+            .doesNotContain("\"op\":\"new\"");
     }
 }

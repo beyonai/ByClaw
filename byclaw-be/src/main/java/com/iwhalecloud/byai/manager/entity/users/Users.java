@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.entity.users;
 
 import com.alibaba.fastjson.annotation.JSONField;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -51,6 +52,12 @@ public class Users {
      * 手机号码
      */
     private String phone;
+
+    /**
+     * 用户头像预览地址，对应 po_users.thumbnail_uri。
+     */
+    @TableField("thumbnail_uri")
+    private String avatar;
 
     /**
      * 用户编码

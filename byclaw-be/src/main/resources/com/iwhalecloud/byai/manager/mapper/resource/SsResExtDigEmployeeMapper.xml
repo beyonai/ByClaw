@@ -280,6 +280,10 @@
                         and k.allow_manage_count > 0
                         and (a.create_by is null or a.create_by != #{userId})
                     </when>
+                    <!-- 我的员工“全部”是创建与授权管理的并集，不沿用管理员角色的全局管理范围。 -->
+                    <when test="type != null and type == 'ownerOrManager'">
+                        and (a.create_by = #{userId} or k.allow_manage_count > 0)
+                    </when>
                     <when test="type != null and type == 'manageable'">
                         and (
                             a.create_by = #{userId}

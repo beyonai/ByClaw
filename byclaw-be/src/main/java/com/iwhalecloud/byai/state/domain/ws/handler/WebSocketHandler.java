@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.state.domain.ws.model.ChatMessage;
 import com.iwhalecloud.byai.state.domain.ws.service.ChatService;
 import com.iwhalecloud.byai.state.domain.ws.service.WebSocketI18nSupport;
 import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketService;
+import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatWebSocketService;
 import com.iwhalecloud.byai.state.infrastructure.utils.CloseUtil;
 import com.iwhalecloud.byai.state.infrastructure.utils.NettyResponse;
 import com.iwhalecloud.byai.state.infrastructure.utils.PushUtil;
@@ -40,6 +41,9 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
 
     @Autowired
     private TaskPlanWebSocketService taskPlanWebSocketService;
+
+    @Autowired
+    private GroupChatWebSocketService groupChatWebSocketService;
 
     @Autowired
     private NotificationService notificationService;
@@ -100,6 +104,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                     case NOTIFICATION -> notificationService.getRealTimeNotification(ctx, message);
                     case STOP_CHAT -> chatService.stopChat(ctx, chatMessage);
                     case TASK_PLAN_GET -> taskPlanWebSocketService.get(ctx, chatMessage);
+                    case GROUP_CHAT_SEND -> groupChatWebSocketService.send(ctx, chatMessage);
                     default -> throw new RuntimeException(
                         I18nUtil.get("ws.handler.unsupported.message.type", chatMessage.getType()));
                 }

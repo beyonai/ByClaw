@@ -21,6 +21,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.config.GitWorkspaceConfig;
+import com.iwhalecloud.byai.manager.domain.project.service.GitCommandExecutor;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
@@ -99,6 +100,30 @@ class ProjectInitServiceWorkspaceTest {
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service, "buildRepoPath", repo))
             .isInstanceOf(BaseException.class);
+    }
+
+    @Test
+    void asynchronousCloneUsesExplicitUserInsteadOfWorkerThreadUser() {
+        GitWorkspaceConfig gitWorkspaceConfig = mock(GitWorkspaceConfig.class);
+        GitCommandExecutor gitCommandExecutor = mock(GitCommandExecutor.class);
+        UserBucketNamingService userBucketNamingService = mock(UserBucketNamingService.class);
+        ProjectInitService service = new ProjectInitService();
+        ReflectionTestUtils.setField(service, "gitWorkspaceConfig", gitWorkspaceConfig);
+        ReflectionTestUtils.setField(service, "gitCommandExecutor", gitCommandExecutor);
+        ReflectionTestUtils.setField(service, "userBucketNamingService", userBucketNamingService);
+        Path projectRepos = tempDir.resolve("byclaw-user002/by/projects/1001/repos");
+        when(userBucketNamingService.buildUserBucketName("user002")).thenReturn("byclaw-user002");
+        when(gitWorkspaceConfig.getRoot(1001L, "byclaw-user002")).thenReturn(projectRepos.toString());
+        when(gitCommandExecutor.isGitRepository(projectRepos.resolve("repo"))).thenReturn(true);
+        ProjectRepo repo = new ProjectRepo();
+        repo.setRepoId(2001L);
+        repo.setProjectId(1001L);
+        repo.setRepoFullName("owner/repo");
+
+        service.cloneProjectRepositoryAsync(repo, 2002L, "user002");
+
+        verify(userBucketNamingService).buildUserBucketName("user002");
+        verify(gitCommandExecutor).isGitRepository(projectRepos.resolve("repo"));
     }
 
     @Test

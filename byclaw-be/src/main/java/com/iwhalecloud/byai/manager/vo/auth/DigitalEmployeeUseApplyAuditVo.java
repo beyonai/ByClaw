@@ -8,7 +8,7 @@ import lombok.Setter;
 
 import java.util.Date;
 
-/** 审核中心聚合返回的数字员工使用申请。 */
+/** 审核中心聚合返回的资源使用申请；保留原类名兼容数字员工审核调用方。 */
 @Getter
 @Setter
 public class DigitalEmployeeUseApplyAuditVo extends ResourceUseApplyItemVo {
@@ -30,6 +30,9 @@ public class DigitalEmployeeUseApplyAuditVo extends ResourceUseApplyItemVo {
     private String resourceName;
 
     private String resourceBizType;
+
+    /** 区分使用申请与技能上架申请，避免审核操作走错业务接口。 */
+    private String auditType;
 
     private String agentType;
 

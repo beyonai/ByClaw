@@ -27,6 +27,7 @@ import {
 import { parseAgentIdFromTo, parseSessionIdFromTo } from "./outbound-dedup.js";
 import { EventType } from "@byclaw/by-framework";
 import { emitOutOfBandSdkEvent, generateRandomId } from "./utils.js";
+import { publicContextErrorText } from "./context-errors.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 
@@ -85,7 +86,7 @@ async function emitOutOfBandSdkText(params: {
     return false;
   }
   console.log(
-    `[byai-channel] outbound out-of-band emit: to=${params.to} sessionId=${sessionId} text=${params.text.length > 40 ? `${params.text.slice(0, 20)}...${params.text.slice(-20)}` : params.text}`,
+    `[byai-channel] outbound out-of-band emit: sessionId=${sessionId} agentId=${agentId || ""} textLength=${params.text.length}`,
   );
   await emitOutOfBandSdkEvent({
     sessionId,
@@ -267,18 +268,8 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
     textChunkLimit: 10000,
 
     sendText: async (ctx: ChannelOutboundContext) => {
-      const sessionId = parseSessionIdFromTo(ctx.to);
-      console.log("=======================sendText==========================");
-      console.log({
-        sessionId,
-        to: ctx.to,
-        accountId: ctx.accountId,
-        replyToId: ctx.replyToId,
-        text: ctx.text && ctx.text.length > 40 ? `${ctx.text.slice(0, 20)}...${ctx.text.slice(-20)}` : ctx.text,
-      });
-
       const { to, accountId, replyToId } = ctx;
-      const text = ctx.text ?? "";
+      let text = ctx.text ?? "";
       const okResult = {
         channel: CHANNEL_ID,
         messageId: replyToId ?? `byai-${Date.now()}`,
@@ -300,10 +291,16 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
       const resolvedAccountId = accountId ?? "";
       const request = resolveActiveSdkRequestByTarget(resolvedAccountId, to);
 
+      // Only suppress a known error already correlated by lifecycle/agent_end.
+      // A normal answer discussing this error text must still be delivered.
+      if (request?.contextOverflowRecovery.errors?.has(text)) {
+        if (request.contextOverflowRecovery.dispatchPending) return suppressedResult;
+        text = publicContextErrorText(text, request.language);
+      }
+
       // out-of-band：无 active request（infra 注入等）。整段作为独立一条 emit。
       // cron/heartbeat 在源头不走 deliver，不会到达这里。
       if (!request) {
-        console.log("[byai-channel] ready to emit out-of-band text, sessionId: ", sessionId);
         await emitOutOfBandSdkText({ to, text });
         return okResult;
       }
@@ -338,8 +335,6 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
     },
 
     sendMedia: async (ctx: ChannelOutboundContext) => {
-      console.log("=======================sendMedia==========================");
-      console.log(ctx.text);
       const { to, text, mediaUrl, accountId } = ctx;
       const combined = mediaUrl ? `${text}\n\nAttachment: ${mediaUrl}` : text;
       const handled = await emitWebhookText({

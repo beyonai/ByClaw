@@ -40,7 +40,7 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
 
     @Override
     public Optional<SandboxRuntimeInstance> findReusable(String userCode, String sandboxType) {
-        log.info("OpenSandbox 查询可复用沙箱，userCode={}，sandboxType={}", userCode, sandboxType);
+        log.debug("OpenSandbox 查询可复用沙箱，userCode={}，sandboxType={}", userCode, sandboxType);
         List<SandboxDetail> sandboxes = openSandboxClient.listSandboxes(userCode, sandboxType);
         if (sandboxes == null || sandboxes.isEmpty()) {
             log.info("OpenSandbox 未找到可复用沙箱，userCode={}，sandboxType={}", userCode, sandboxType);
@@ -61,7 +61,7 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
                 .metadata(d.getMetadata())
                 .build())
             .findFirst();
-        log.info("OpenSandbox 可复用沙箱查询完成，userCode={}，sandboxType={}，selectedSandboxId={}",
+        log.debug("OpenSandbox 可复用沙箱查询完成，userCode={}，sandboxType={}，selectedSandboxId={}",
             userCode, sandboxType, reusable.map(SandboxRuntimeInstance::getSandboxId).orElse(null));
         return reusable;
     }
@@ -142,7 +142,7 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
         }
         RenewSandboxExpirationRequest request = SandboxRuntimeRequestFactory.buildOpenSandboxRenewRequest(sandboxInfo);
         if (request != null) {
-            log.info("OpenSandbox 续约沙箱，userCode={}，sandboxType={}，sandboxId={}，expiresAt={}",
+            log.debug("OpenSandbox 续约沙箱，userCode={}，sandboxType={}，sandboxId={}，expiresAt={}",
                 userCode, sandboxType, sandboxInfo.getSandboxId(), request.getExpiresAt());
             openSandboxClient.renewExpiration(sandboxInfo.getSandboxId(), request);
         }
@@ -162,7 +162,7 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
         }
         SandboxDetail detail = openSandboxClient.getSandboxIfExists(sandboxInfo.getSandboxId());
         boolean reusable = detail != null && SandboxRuntimeRequestFactory.isReusableSandboxState(detail.getStatus());
-        log.info("OpenSandbox 查询远端状态，userCode={}，sandboxType={}，sandboxId={}，exists={}，remoteState={}",
+        log.debug("OpenSandbox 查询远端状态，userCode={}，sandboxType={}，sandboxId={}，exists={}，remoteState={}",
             userCode, sandboxType, sandboxInfo.getSandboxId(), reusable,
             detail != null && detail.getStatus() != null ? detail.getStatus().getState() : null);
         if (detail == null) {

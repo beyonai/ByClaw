@@ -5,6 +5,7 @@ import { createArtifactWriter } from '../shared/artifact-writer.mjs';
 import { positiveEnv, runCli } from '../shared/cli-runner.mjs';
 import { copyResumeArtifacts, readResumeCandidates } from '../shared/resume.mjs';
 import { deriveCollectionStatus, SOURCE_IDENTITY, handledOutcome, inventoryCounts } from '../shared/status-model.mjs';
+import { prioritizeGroups } from '../../jev/group-selection.mjs';
 
 const identity = SOURCE_IDENTITY.ima;
 const MAX_CONTENT_BYTES = 50 * 1024 * 1024;
@@ -555,7 +556,7 @@ async function mapWithConcurrency(values, concurrency, operation) {
   return results;
 }
 
-async function discover(writer, request, bycliBin, env) {
+async function discover(writer, request, bycliBin, env, dependencies = {}) {
   const found = [];
   const seenSourceItems = new Set();
   const seenSourceUrls = new Set();
@@ -592,9 +593,18 @@ async function discover(writer, request, bycliBin, env) {
     seenSelectors.add(base.selector);
     return true;
   });
-  const bases = uniqueBases.slice(0, MAX_KNOWLEDGE_BASES);
+  let bases = uniqueBases.slice(0, MAX_KNOWLEDGE_BASES);
   if (uniqueBases.length > bases.length) {
     failures.push({ knowledgeBase: '*', reason: 'knowledge-base-budget-exhausted' });
+  }
+  if (request.metadataOnly && request.taskContract?.materializationTarget !== 'all') {
+    const selection = await prioritizeGroups(request.query, bases,
+      (base) => ({ key: base.selector, title: base.name || base.id }), {
+        privateData: true, environment: env, callJev: dependencies.callJev,
+        remainingBudgetMs: dependencies.remainingBudgetMs,
+        purpose: 'Choose which already authorized IMA knowledge base to inspect first. Retain every base.',
+      });
+    bases = selection.items;
   }
   const baseResults = [];
   let successfulBases = 0;
@@ -797,7 +807,7 @@ export function createImaAdapter(dependencies = {}) {
       limit: request.limit || 50,
     };
     try {
-      const discovery = await discover(writer, normalized, bycliBin, env);
+      const discovery = await discover(writer, normalized, bycliBin, env, dependencies);
       const inventory = normalized.metadataOnly ? discovery.found.map((item) => inventoryItem(item, item.rawArtifacts)) : [];
       const materialized = normalized.metadataOnly ? [] : await materializeItems(
         writer, discovery.found, bycliBin, env, fetchImpl, normalized.concurrency,

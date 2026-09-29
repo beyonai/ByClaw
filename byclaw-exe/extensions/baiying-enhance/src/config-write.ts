@@ -1,3 +1,4 @@
+import { withThinkingProviderReloadConfig } from "./configured-thinking.js";
 import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { MANAGED_PROVIDER_PREFIX } from "./types.js";
 
@@ -56,6 +57,7 @@ export async function writeBaiyingMergedConfig(
     next: OpenClawConfig,
     options?: WriteConfigOptions,
 ): Promise<void> {
+    next = withThinkingProviderReloadConfig(next);
     const explicitSetPaths = collectManagedProviderModelCompatExplicitSetPaths(next);
     await api.runtime.config.writeConfigFile(next, {
         ...options,

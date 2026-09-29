@@ -21,6 +21,8 @@ import java.util.List;
  */
 public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
 
+    ByaiSession selectByIdForUpdate(@Param("sessionId") Long sessionId);
+
     /**
      * 根据条件查询会话列表
      *

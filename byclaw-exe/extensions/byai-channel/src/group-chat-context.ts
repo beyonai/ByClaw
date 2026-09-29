@@ -43,6 +43,10 @@ export interface GroupChatRefV1 {
   schemaVersion: typeof GROUP_CHAT_REF_SCHEMA_VERSION;
   conversationKey: string;
   beforeMessageId: string;
+  contextToken?: string;
+  childSessionId?: string;
+  initiatorUserId?: string;
+  targetAgentId?: string;
 }
 
 export type GroupChatSpeakerV1 =
@@ -97,6 +101,10 @@ export interface GroupChatContextProvider {
     conversationKey: string;
     beforeMessageId: string;
     beyondToken: string;
+    contextToken?: string;
+    childSessionId?: string;
+    initiatorUserId?: string;
+    targetAgentId?: string;
     signal?: AbortSignal;
   }): Promise<GroupChatContextV1>;
 }
@@ -218,6 +226,10 @@ export class ByclawBeGroupChatContextProvider implements GroupChatContextProvide
     conversationKey: string;
     beforeMessageId: string;
     beyondToken: string;
+    contextToken?: string;
+    childSessionId?: string;
+    initiatorUserId?: string;
+    targetAgentId?: string;
     signal?: AbortSignal;
   }): Promise<GroupChatContextV1> {
     const baseUrl = await awaitWithAbort(this.#endpointResolver.resolve(), input.signal);
@@ -243,6 +255,10 @@ export class ByclawBeGroupChatContextProvider implements GroupChatContextProvide
           beforeMessageId: input.beforeMessageId,
           maxMessages: GROUP_CHAT_CONTEXT_MAX_MESSAGES,
           maxCharacters: GROUP_CHAT_CONTEXT_MAX_CHARACTERS,
+          ...(input.contextToken ? { contextToken: input.contextToken } : {}),
+          ...(input.childSessionId ? { childSessionId: input.childSessionId } : {}),
+          ...(input.initiatorUserId ? { initiatorUserId: input.initiatorUserId } : {}),
+          ...(input.targetAgentId ? { targetAgentId: input.targetAgentId } : {}),
         }),
         signal,
       });
@@ -303,9 +319,36 @@ export function parseOptionalGroupChatRef(
     schemaVersion: GROUP_CHAT_REF_SCHEMA_VERSION,
     conversationKey: boundedIdentifier(record.conversationKey, "groupChat.conversationKey", 512),
     beforeMessageId: boundedIdentifier(record.beforeMessageId, "groupChat.beforeMessageId", 512),
+    ...(record.contextToken == null
+      ? {}
+      : { contextToken: boundedString(record.contextToken, "groupChat.contextToken", 8192) }),
+    ...(record.childSessionId == null
+      ? {}
+      : { childSessionId: boundedIdentifier(record.childSessionId, "groupChat.childSessionId", 512) }),
+    ...(record.initiatorUserId == null
+      ? {}
+      : { initiatorUserId: boundedIdentifier(record.initiatorUserId, "groupChat.initiatorUserId", 512) }),
+    ...(record.targetAgentId == null
+      ? {}
+      : { targetAgentId: boundedIdentifier(record.targetAgentId, "groupChat.targetAgentId", 512) }),
   };
-  if (reference.conversationKey !== expectedConversationKey) {
-    throw new Error("groupChat.conversationKey must match the inbound sessionId");
+  const childAuthorizationFields = [
+    reference.childSessionId,
+    reference.contextToken,
+    reference.initiatorUserId,
+    reference.targetAgentId,
+  ];
+  const hasCompleteChildAuthorization = childAuthorizationFields.every(Boolean);
+  if (childAuthorizationFields.some(Boolean) && !hasCompleteChildAuthorization) {
+    throw new Error("groupChat child-session authorization fields must be provided together");
+  }
+  const matchesCurrentConversation = reference.conversationKey === expectedConversationKey;
+  const matchesAuthorizedChildSession =
+    hasCompleteChildAuthorization && reference.childSessionId === expectedConversationKey;
+  if (!matchesCurrentConversation && !matchesAuthorizedChildSession) {
+    throw new Error(
+      "groupChat.conversationKey must match the inbound sessionId or childSessionId must match with signed authorization",
+    );
   }
   return reference;
 }
@@ -355,6 +398,10 @@ export async function loadGroupChatContextForAgent(input: {
         conversationKey: reference.conversationKey,
         beforeMessageId: reference.beforeMessageId,
         beyondToken,
+        ...(reference.contextToken ? { contextToken: reference.contextToken } : {}),
+        ...(reference.childSessionId ? { childSessionId: reference.childSessionId } : {}),
+        ...(reference.initiatorUserId ? { initiatorUserId: reference.initiatorUserId } : {}),
+        ...(reference.targetAgentId ? { targetAgentId: reference.targetAgentId } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
       }),
       input.signal,

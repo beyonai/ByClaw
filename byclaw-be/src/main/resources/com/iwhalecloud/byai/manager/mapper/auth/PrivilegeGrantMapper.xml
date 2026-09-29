@@ -140,11 +140,12 @@
         <result column="allow_manage_count" property="allowManageCount"/>
     </resultMap>
 
-    <!-- 审核中心一次联表取回申请人、资源和员工类型，替代按全部数字员工逐条查询。 -->
+    <!-- 审核中心一次联表取回申请人、资源和资源类型，替代按全部资源逐条查询。 -->
     <!-- 历史审核的处理人和处理时间分别取权限记录的 update_staff、update_date。 -->
     <select id="queryDigitalEmployeeUseApplyAudit"
             resultType="com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo">
         select pg.privilege_grant_id as privilegeGrantId,
+               case when pg.grant_type = 'SKILL_PUBLICATION' then 'SKILL_PUBLICATION' else 'USE' end as auditType,
                pg.grant_to_obj_id as userId,
                coalesce(u.user_name, cast(pg.grant_to_obj_id as varchar)) as userName,
                pg.create_date as applyTime,
@@ -168,8 +169,21 @@
           left join ss_res_ext_dig_employee e on e.resource_id = r.resource_id
           left join po_users u on u.user_id = pg.grant_to_obj_id
           left join po_users auditor on auditor.user_id = pg.update_staff
-         where r.resource_biz_type = 'DIG_EMPLOYEE'
-           and pg.grant_type = 'AVAILABLE_USE'
+         where
+           <choose>
+               <when test="resourceBizTypeList != null and resourceBizTypeList.size() > 0">
+                   r.resource_biz_type in
+                   <foreach collection="resourceBizTypeList" item="resourceBizType" open="(" separator="," close=")">
+                       #{resourceBizType}
+                   </foreach>
+               </when>
+               <otherwise>
+                   r.resource_biz_type = 'DIG_EMPLOYEE'
+               </otherwise>
+           </choose>
+           and (pg.grant_type = 'AVAILABLE_USE'
+                or (pg.grant_type = 'SKILL_PUBLICATION' and r.resource_biz_type = 'SKILL'
+                    and r.owner_type = 'enterprise'))
            and pg.grant_to_obj_type = 'USER'
            and pg.grant_to_type = 'RED'
            and pg.oper_type = 'READ'
@@ -395,6 +409,10 @@
              ) p
                 on a.resource_id = p.grant_obj_id
         <where>
+            <!-- 在状态与默认个人资源的 OR 条件之外排除注销，避免全部状态或默认资源绕过。 -->
+            <if test="excludeDeleted == true">
+                and a.resource_status != -1
+            </if>
             <!-- 基础过滤条件 -->
             and (
                 <if test="defaultPersonalResourceId != null and (resourceStatus == null or resourceStatus == '' or resourceStatus == '2')">
@@ -466,6 +484,19 @@
             <choose>
                 <when test="permission != null and permission == 'CREATED_BY_ME'">
                     and a.create_by = #{userId}
+                </when>
+                <!-- 我的资源仅展示本人创建或授权管理的数据，管理员角色不扩大这两个筛选的范围。 -->
+                <when test="permission != null and permission == 'MANAGEABLE_BY_ME'">
+                    and (
+                        a.create_by = #{userId}
+                        or k.allow_manage_count > 0
+                    )
+                </when>
+                <when test="permission != null and permission == 'MANAGED_BY_ME'">
+                    and (a.create_by is null or a.create_by != #{userId})
+                    and (
+                        k.allow_manage_count > 0
+                    )
                 </when>
                 <when test="permission != null and permission == 'AUTHORIZED_TO_ME'">
                     and (a.create_by is null or a.create_by != #{userId})

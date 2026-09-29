@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.common.message.service;
 
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 import com.github.pagehelper.Page;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -141,7 +142,7 @@ public class ByaiMessageHotService {
         if (byaiMessage == null) {
             return null;
         }
-        return convertToHot(byaiMessage);
+        return convertToHot(new GroupChatRecallProjection().display(byaiMessage));
     }
 
     /**
@@ -153,6 +154,8 @@ public class ByaiMessageHotService {
     public PageInfo<ByaiMessage> selectByPageQo(MessageHotPageQo byaiMessageQo) {
         Page<ByaiMessage> page = PageHelper.startPage(byaiMessageQo.getPageNum(), byaiMessageQo.getPageSize());
         byaiMessageMapper.selectByPageQo(byaiMessageQo);
+        GroupChatRecallProjection projection = new GroupChatRecallProjection();
+        page.replaceAll(projection::display);
         return PageHelperUtil.toPageInfo(page);
     }
 
@@ -170,7 +173,8 @@ public class ByaiMessageHotService {
         if (records == null || records.isEmpty()) {
             return new ArrayList<>();
         }
-        return records.stream().map(this::convertToHot).collect(Collectors.toList());
+        GroupChatRecallProjection projection = new GroupChatRecallProjection();
+        return records.stream().map(projection::display).map(this::convertToHot).collect(Collectors.toList());
     }
 
     /***
@@ -223,7 +227,18 @@ public class ByaiMessageHotService {
         if (sessionId == null) {
             return Collections.emptyList();
         }
-        return byaiMessageMapper.selectConversationOutline(sessionId);
+        List<ConversationOutlineItem> items = byaiMessageMapper.selectConversationOutline(sessionId);
+        GroupChatRecallProjection projection = new GroupChatRecallProjection();
+        if (items != null) {
+            for (ConversationOutlineItem item : items) {
+                if (item.getRecalledAt() != null) {
+                    item.setContent(projection.content(item.getRecalledBy()));
+                    item.setDisplayContent(item.getContent());
+                    item.setRelatedResources(null);
+                }
+            }
+        }
+        return items;
     }
 
     /**

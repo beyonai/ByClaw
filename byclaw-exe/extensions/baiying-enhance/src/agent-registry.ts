@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 import type { AdaptedManagedAgent, ProviderBundle } from "./agent-adapter.js";
 import {
@@ -35,11 +36,12 @@ type DefaultAimodelBundle = {
   provider: ProviderBundle;
 };
 
-function defaultModelDefinition(provider: ProviderBundle) {
-  const params =
-    provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
-      ? { baiyingThinkingBudgets: provider.thinkingBudgets }
-      : undefined;
+export function defaultModelDefinition(provider: ProviderBundle) {
+  const params = {
+    ...(provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
+      ? { baiyingThinkingBudgets: provider.thinkingBudgets } : {}),
+    ...(provider.reasoningConfig ? { baiyingReasoningConfig: provider.reasoningConfig } : {}),
+  };
   const compat = {
     ...(provider.compat ?? {}),
     ...MANAGED_MODEL_STREAMING_USAGE_COMPAT,
@@ -51,7 +53,7 @@ function defaultModelDefinition(provider: ProviderBundle) {
     reasoning: provider.reasoning ?? false,
     ...(provider.thinkingLevelMap ? { thinkingLevelMap: provider.thinkingLevelMap } : {}),
     compat,
-    ...(params ? { params } : {}),
+    ...(Object.keys(params).length ? { params } : {}),
     input: provider.input ?? (["text"] as Array<"text" | "image">),
     cost: {
       input: 0,
@@ -62,6 +64,20 @@ function defaultModelDefinition(provider: ProviderBundle) {
     contextWindow: provider.contextWindow ?? 128000,
     maxTokens: provider.maxTokens ?? 8192,
   };
+}
+
+export function hasManagedProviderConfigDrift(
+  cfg: { models?: { providers?: Record<string, { models?: Array<{ id?: string }> }> } },
+  providerKey: string,
+  provider: ProviderBundle,
+): boolean {
+  const actual = cfg.models?.providers?.[providerKey]?.models?.find((model) => model.id === provider.modelId);
+  const expected = defaultModelDefinition(provider);
+  // Compare owned fields, never resolved credentials or unrelated overrides.
+  const keys = new Set([...Object.keys(expected), "thinkingLevelMap", "params"]);
+  return !actual || [...keys].some((key) => !isDeepStrictEqual(
+    (actual as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key],
+  ));
 }
 
 function buildAimodelSecretProviderConfig(params: {
@@ -119,6 +135,11 @@ function ensureConfigModelContainers(cfg: OpenClawConfig): void {
   if (!cfg.models.providers) {
     cfg.models.providers = {};
   }
+  cfg.agents.defaults ??= {};
+  cfg.agents.defaults.compaction ??= {};
+  // This bounds the entire summary pipeline, independently of provider timeout.
+  // Preserve an operator's explicit limit; new managed configs get five minutes.
+  cfg.agents.defaults.compaction.timeoutSeconds ??= 300;
 }
 
 function upsertDefaultAimodelProvider(
@@ -216,6 +237,34 @@ export function mergeDefaultAimodelIntoConfig(params: {
     mainParentAgentId: params.mainParentAgentId,
     modelRef: params.defaultModel.modelRef,
   });
+  upsertAimodelSecretProvider(cfg, params);
+  return cfg;
+}
+
+/**
+ * Merge one Redis-resolved model provider into a copy of the active OpenClaw config.
+ * Used by session-level model switching so a user-picked model becomes usable without
+ * a full watchdog flush; idempotent because the provider entry is fully replaced.
+ */
+export function mergeAimodelProviderIntoConfig(params: {
+  base: OpenClawConfig;
+  providerKey: string;
+  provider: ProviderBundle;
+  aimodelConfigRedisKey?: string;
+  aimodelTypeListRedisKey?: string;
+  aimodelSecretProviderName?: string;
+  aimodelSecretResolverCommand?: string;
+  aimodelSecretResolverArgs?: string[];
+}): OpenClawConfig {
+  const cfg = structuredClone(params.base);
+  ensureConfigModelContainers(cfg);
+  cfg.models!.providers![params.providerKey] = {
+    baseUrl: params.provider.baseUrl,
+    apiKey: params.provider.apiKey,
+    api: params.provider.api,
+    timeoutSeconds: params.provider.timeoutSeconds ?? DEFAULT_AIMODEL_TIMEOUT_SECONDS,
+    models: [defaultModelDefinition(params.provider)],
+  };
   upsertAimodelSecretProvider(cfg, params);
   return cfg;
 }

@@ -29,6 +29,9 @@
 }
 
 .agentDescription {
+  // 保留编辑页输入的换行和缩进，同时允许长文本在会话页自动折行。
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--beyond-color-text-secondary);
   font-size: var(--beyond-font-size);
   margin: 6px 0;
@@ -56,6 +59,9 @@
 }
 
 .prologueText {
+  // 开场白按原有段落显示，避免多行说明和列表被浏览器合并。
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 16px;
   margin-top: 24px;
   color: var(--beyond-color-text);

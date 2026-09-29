@@ -56,7 +56,13 @@
 }
 
 .sectionsContainer {
+  // 首次请求尚无卡片时也占满剩余空间，避免 Spin 的百分比高度随空容器塌缩。
+  flex: 1;
+  min-height: 0;
   margin: 20px 0;
+  // 滚动区域延伸到面板右边缘，内边距补回卡片原有的右侧留白。
+  margin-right: calc(0px - var(--resource-list-right-gutter, 0px));
+  padding-right: var(--resource-list-right-gutter, 0px);
   overflow-y: auto;
   position: relative;
 

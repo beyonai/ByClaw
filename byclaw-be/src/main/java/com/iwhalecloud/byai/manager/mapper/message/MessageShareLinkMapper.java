@@ -31,6 +31,12 @@ public interface MessageShareLinkMapper extends BaseMapper<MessageShareLink> {
      */
     MessageShareLink selectByLinkToken(@Param("linkToken") String linkToken);
 
+    MessageShareLink selectInvitationBySessionId(@Param("sessionId") Long sessionId);
+
+    MessageShareLink selectInvitationByToken(@Param("linkToken") String linkToken);
+
+    int updateInvitation(MessageShareLink record);
+
     /**
      * 更新访问次数与最近访问时间
      *

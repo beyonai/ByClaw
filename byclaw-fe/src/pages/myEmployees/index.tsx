@@ -1,9 +1,12 @@
+import PublicationAuditList from '@/components/EmployeePublication/AuditList';
+import useEmployeePublicationCapabilities from '@/hooks/useEmployeePublicationCapabilities';
+import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import useEmployeeRowRefresh, {
   employeeRowId,
   removeEmployeeRow,
   updateEmployeeRow,
 } from '@/hooks/useEmployeeRowRefresh';
-import { LeftOutlined } from '@ant-design/icons';
+import { LeftOutlined, SafetyCertificateOutlined, SearchOutlined, SendOutlined } from '@ant-design/icons';
 import { getIntl, useLocation, useNavigate, useIntl } from '@umijs/max';
 import { Badge, Button, Empty, Input, Popconfirm, Segmented, Space, Spin, Table, Tabs, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -30,10 +33,11 @@ import {
 import styles from './index.module.less';
 import { EmployeePreviewModal } from '@/pages/digitalEmployees';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
+import useAuditSearch from './useAuditSearch';
 
 type OwnerTab = 'personal' | 'enterprise' | 'audit';
 type ResourceFilter = 'all' | 'employee' | 'group';
-type EnterpriseScope = 'created' | 'managed';
+type EnterpriseScope = 'all' | 'created' | 'managed';
 type EmployeeStatusFilter = 'all' | '0' | '1' | '2' | '3' | '-1';
 type AuditFilter = 'pending' | 'history';
 
@@ -98,6 +102,8 @@ const normalizeAuditRows = (response: any, history: boolean): AuditRow[] => {
 const getAuditRowKey = (row: AuditRow) => `${row.privilegeGrantId || ''}-${row.resourceId || ''}-${row.userId || ''}`;
 
 const MyEmployeesPage: React.FC = () => {
+  const publicationCapabilities = useEmployeePublicationCapabilities();
+  const [auditKind, setAuditKind] = useState<string>('use');
   const intl = useIntl();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<OwnerTab>('personal');
@@ -106,7 +112,7 @@ const MyEmployeesPage: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<EmployeeStatusFilter>('all');
-  const [enterpriseScope, setEnterpriseScope] = useState<EnterpriseScope>('created');
+  const [enterpriseScope, setEnterpriseScope] = useState<EnterpriseScope>('all');
   const [loading, setLoading] = useState(false);
   const [historyAuditLoading, setHistoryAuditLoading] = useState(false);
   const [list, setList] = useState<IAgentCache[]>([]);
@@ -160,9 +166,10 @@ const MyEmployeesPage: React.FC = () => {
       }
       try {
         const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
-        // 个人页签只查本人创建的员工，历史管理授权不再作为列表入口。
-        const type =
-          activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'owner';
+        // 企业“全部”仅合并本人创建和授权管理的数据，不因管理员角色扩大为全库列表。
+        const scopedEnterpriseType = enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner';
+        const enterpriseQueryType = enterpriseScope === 'all' ? 'ownerOrManager' : scopedEnterpriseType;
+        const type = activeTab === 'enterprise' ? enterpriseQueryType : 'owner';
         const res = await request({
           pageNum: requestedPage,
           pageSize: PAGE_SIZE,
@@ -229,7 +236,11 @@ const MyEmployeesPage: React.FC = () => {
     }
   }, [auditFilter, historyAuditLoaded, loadHistoryAudit]);
 
-  const auditRows = auditFilter === 'pending' ? pendingAuditRows : historyAuditRows;
+  const {
+    auditKeyword,
+    setAuditKeyword,
+    filteredRows: auditRows,
+  } = useAuditSearch(auditFilter === 'pending' ? pendingAuditRows : historyAuditRows);
   const auditPendingCount = pendingAuditRows.length;
   const auditLoading = auditFilter === 'history' && historyAuditLoading;
 
@@ -318,20 +329,20 @@ const MyEmployeesPage: React.FC = () => {
     setAuthDrawerOpen(true);
   }, []);
 
-  const handleDelete = useCallback(async (employee: IAgentCache) => {
+  const handleDelete = useCallback(async (employee: IAgentCache, feedback: ResourceActionFeedback = message) => {
     const resourceId = employee.resourceId ?? employee.id;
     if (!resourceId) return;
     try {
       await deleteDigitalEmployee({ resourceId: String(resourceId) });
-      message.success(getIntl().formatMessage({ id: 'ui.employee.deleteSuccess' }));
+      feedback.success(getIntl().formatMessage({ id: 'ui.employee.deleteSuccess' }));
       removeEmployeeRow(employeeRowId(employee));
     } catch (error: any) {
-      message.error(error?.message || getIntl().formatMessage({ id: 'ui.employee.deleteFailed' }));
+      feedback.error(error?.message || getIntl().formatMessage({ id: 'ui.employee.deleteFailed' }));
     }
   }, []);
 
   const handleShelfStatusChange = useCallback(
-    async (employee: IAgentCache, action: 'shelf' | 'unShelf') => {
+    async (employee: IAgentCache, action: 'shelf' | 'unShelf', feedback: ResourceActionFeedback = message) => {
       const resourceId = employee.resourceId ?? employee.id ?? employee.agentId;
       if (!resourceId) return;
       try {
@@ -350,7 +361,7 @@ const MyEmployeesPage: React.FC = () => {
               )
           );
         }
-        message.success(
+        feedback.success(
           getIntl().formatMessage(
             { id: 'ui.employee.actionSuccess' },
             {
@@ -364,9 +375,11 @@ const MyEmployeesPage: React.FC = () => {
           resourceId: String(resourceId),
           resourceStatus: action === 'shelf' ? 2 : 3,
         });
-        await refreshPromise;
+        await refreshPromise.catch(() => {
+          feedback.warning(getIntl().formatMessage({ id: 'resource.rowRefreshFailed' }));
+        });
       } catch (error: any) {
-        message.error(
+        feedback.error(
           error?.message ||
             getIntl().formatMessage(
               { id: 'ui.employee.actionFailed' },
@@ -425,12 +438,8 @@ const MyEmployeesPage: React.FC = () => {
         const result = status === '审核通过' ? '通过' : status === '已驳回' ? '驳回' : status;
         const color = result === '通过' ? 'success' : result === '驳回' ? 'error' : 'default';
         // 状态比较沿用接口原值，仅翻译展示标签。
-        const label =
-          result === '通过'
-            ? intl.formatMessage({ id: 'ui.employee.approved' })
-            : result === '驳回'
-              ? intl.formatMessage({ id: 'ui.employee.rejected' })
-              : result;
+        const labelKey = { 通过: 'ui.employee.approved', 驳回: 'ui.employee.rejected' }[result];
+        const label = labelKey ? intl.formatMessage({ id: labelKey }) : result;
         return <Tag color={color}>{label || '-'}</Tag>;
       },
     });
@@ -462,6 +471,7 @@ const MyEmployeesPage: React.FC = () => {
     auditColumns.push({
       title: intl.formatMessage({ id: 'myEmployees.actions' }),
       width: 150,
+      fixed: 'right',
       render: (_: unknown, row: AuditRow) => (
         <Space>
           <Popconfirm
@@ -470,7 +480,7 @@ const MyEmployeesPage: React.FC = () => {
             cancelText={intl.formatMessage({ id: 'common.cancel' })}
             onConfirm={() => handleAudit(row, 'approve')}
           >
-            <Button type="link" size="small" loading={actionKey === `approve-${row.resourceId}-${row.userId}`}>
+            <Button type="primary" size="small" loading={actionKey === `approve-${row.resourceId}-${row.userId}`}>
               {intl.formatMessage({ id: 'myEmployees.approve' })}
             </Button>
           </Popconfirm>
@@ -504,6 +514,7 @@ const MyEmployeesPage: React.FC = () => {
     ],
     [auditPendingCount, intl]
   );
+  const auditEmptyMessage = auditFilter === 'pending' ? '暂无待审核的使用申请' : '暂无已处理的使用申请';
 
   return (
     <div
@@ -522,21 +533,22 @@ const MyEmployeesPage: React.FC = () => {
           setResourceFilter('all');
           setKeyword('');
           setStatusFilter('all');
-          setEnterpriseScope('created');
+          setEnterpriseScope('all');
         }}
       />
       {activeTab !== 'audit' ? (
         <>
           <div className={styles.toolbar}>
-            <Input.Search
+            <Input
               className={styles.employeeSearch}
+              suffix={<SearchOutlined onClick={() => void loadEmployees()} />}
               allowClear
               placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
               value={keyword}
               onChange={(event) => {
                 setKeyword(event.target.value);
               }}
-              onSearch={() => void loadEmployees()}
+              onPressEnter={() => void loadEmployees()}
             />
             <div className={styles.rightFilters}>
               <Segmented
@@ -555,6 +567,7 @@ const MyEmployeesPage: React.FC = () => {
                   <Segmented
                     value={enterpriseScope}
                     options={[
+                      { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
                       { value: 'created', label: intl.formatMessage({ id: 'myEmployees.createdByMe' }) },
                       { value: 'managed', label: intl.formatMessage({ id: 'myEmployees.managedByMe' }) },
                     ]}
@@ -603,18 +616,21 @@ const MyEmployeesPage: React.FC = () => {
                       digitalEmployeeActionMode
                       actionConfig={{
                         scene: activeTab,
+                        // 个人页签统一隐藏使用授权入口，企业页签仍按后端权限展示。
+                        hiddenMenuItemKeys: activeTab === 'personal' ? ['use'] : [],
                         onChat: () => handleChat(employee),
                         onApplyUse: () => handleApplyUse(employee),
                         onEdit: () => handleEdit(employee),
                         onAuth: (type) => handleAuth(employee, type),
-                        onDelete: () => handleDelete(employee),
+                        onDelete: (feedback) => handleDelete(employee, feedback),
                         // 删除数据使用独立回调，复用删除接口及成功后的列表移除逻辑。
-                        onDeleteData: () => handleDelete(employee),
-                        onShelf: () => handleShelfStatusChange(employee, 'shelf'),
-                        onUnShelf: () => handleShelfStatusChange(employee, 'unShelf'),
+                        onDeleteData: (feedback) => handleDelete(employee, feedback),
+                        onShelf: (feedback) => handleShelfStatusChange(employee, 'shelf', feedback),
+                        onUnShelf: (feedback) => handleShelfStatusChange(employee, 'unShelf', feedback),
                         // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
                         showDigitalEmployeeTypeTag: false,
-                        enableDigitalEmployeeLifecycle: true,
+                        // 个人页签不提供上下架操作，企业页签继续按权限展示。
+                        enableDigitalEmployeeLifecycle: activeTab === 'enterprise',
                         // 个人、企业页签统一按后端 canDelete 展示删除数据入口。
                         enableDigitalEmployeeDelete: true,
                       }}
@@ -631,37 +647,76 @@ const MyEmployeesPage: React.FC = () => {
         </>
       ) : (
         <div className={styles.auditPanel}>
-          <div className={styles.auditFilter}>
-            <Segmented
-              value={auditFilter}
-              options={[
-                { value: 'pending', label: intl.formatMessage({ id: 'myEmployees.unreviewed' }) },
-                { value: 'history', label: intl.formatMessage({ id: 'myEmployees.reviewHistory' }) },
-              ]}
-              onChange={(value) => setAuditFilter(value as AuditFilter)}
-            />
-          </div>
-          <Spin spinning={auditLoading} wrapperClassName={styles.auditTableSpin}>
-            <div className={styles.auditTableWrap}>
-              {/* 固定辅助列宽，窄屏横向滚动，避免名称列被挤压换行。 */}
-              <Table<AuditRow>
-                rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
-                dataSource={auditRows}
-                pagination={false}
-                sticky
-                tableLayout="fixed"
-                scroll={{ x: 1120 }}
-                columns={auditColumns}
-                locale={{
-                  emptyText: (
-                    <div className={styles.emptyState}>
-                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                    </div>
-                  ),
-                }}
+          {publicationCapabilities?.enabled && (
+            <div className={styles.auditKinds}>
+              <Segmented
+                value={auditKind}
+                options={[
+                  { label: '使用授权审核', value: 'use', icon: <SafetyCertificateOutlined /> },
+                  { label: '员工发布', value: 'publication', icon: <SendOutlined /> },
+                ]}
+                onChange={(value) => setAuditKind(String(value))}
               />
             </div>
-          </Spin>
+          )}
+          {auditKind === 'publication' && publicationCapabilities?.enabled ? (
+            <PublicationAuditList />
+          ) : (
+            <>
+              <div className={styles.auditHint}>处理数字员工的使用申请，或查看已处理的审核记录。</div>
+              <div className={styles.auditToolbar}>
+                <Input
+                  className={styles.auditSearch}
+                  suffix={<SearchOutlined />}
+                  allowClear
+                  aria-label={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+                  placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+                  value={auditKeyword}
+                  onChange={(event) => setAuditKeyword(event.target.value)}
+                />
+                <Segmented
+                  value={auditFilter}
+                  options={[
+                    {
+                      value: 'pending',
+                      label: (
+                        <Space size={6}>
+                          {intl.formatMessage({ id: 'myEmployees.unreviewed' })}
+                          <span className={styles.auditCount}>{auditPendingCount}</span>
+                        </Space>
+                      ),
+                    },
+                    { value: 'history', label: intl.formatMessage({ id: 'myEmployees.reviewHistory' }) },
+                  ]}
+                  onChange={(value) => setAuditFilter(value as AuditFilter)}
+                />
+              </div>
+              <Spin spinning={auditLoading} wrapperClassName={styles.auditTableSpin}>
+                <div className={styles.auditTableWrap}>
+                  {/* 固定辅助列宽，窄屏横向滚动，避免名称列被挤压换行。 */}
+                  <Table<AuditRow>
+                    rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
+                    dataSource={auditRows}
+                    pagination={false}
+                    sticky
+                    tableLayout="fixed"
+                    scroll={{ x: 1120 }}
+                    columns={auditColumns}
+                    locale={{
+                      emptyText: (
+                        <div className={styles.emptyState}>
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description={auditKeyword ? '没有匹配的数字员工，请调整搜索关键词' : auditEmptyMessage}
+                          />
+                        </div>
+                      ),
+                    }}
+                  />
+                </div>
+              </Spin>
+            </>
+          )}
         </div>
       )}
       <EmployeePreviewModal

@@ -70,11 +70,14 @@ export class ThirdPartyA2aConnector implements AgentConnector {
       expectedIntegrationType: "A2A",
       signal: context.signal,
     });
+    context.signal.throwIfAborted();
     const controller = new AbortController();
     const forwardAbort = () => controller.abort(context.signal.reason);
     context.signal.addEventListener("abort", forwardAbort, { once: true });
+    if (context.signal.aborted) forwardAbort();
     const cancel = async (reason: string) => {
       controller.abort(new Error(reason));
+      context.signal.removeEventListener("abort", forwardAbort);
     };
     return {
       ref: {

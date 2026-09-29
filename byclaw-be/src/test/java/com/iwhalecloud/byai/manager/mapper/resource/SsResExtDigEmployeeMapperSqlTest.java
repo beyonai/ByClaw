@@ -12,6 +12,34 @@ import org.junit.jupiter.api.Test;
 
 class SsResExtDigEmployeeMapperSqlTest {
 
+    /** 我的员工的全部范围必须是创建与授权管理的并集，即使当前用户有管理员角色。 */
+    @Test
+    void enterpriseOwnerOrManagerQuery_doesNotExpandForAdminRoles() throws IOException {
+        String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
+        try (var input = getClass().getResourceAsStream(resourcePath)) {
+            assertThat(input).isNotNull();
+            String query = selectBody(new String(input.readAllBytes(), StandardCharsets.UTF_8),
+                "selectDigitalEmployeeByQo");
+            String script = "<script>" + query.substring(query.indexOf('>') + 1) + "</script>";
+            var source = new XMLLanguageDriver().createSqlSource(new Configuration(), script, DigitalEmployeeQo.class);
+            DigitalEmployeeQo qo = new DigitalEmployeeQo();
+            qo.setUserId(2L);
+            qo.setType("ownerOrManager");
+            qo.setManagerOrgPathCodes(List.of("-1.100"));
+            for (boolean platformManager : List.of(false, true)) {
+                qo.setPlatformManager(platformManager);
+                String sql = source.getBoundSql(qo).getSql().replaceAll("\\s+", " ");
+                assertThat(sql).contains("and (a.create_by = ? or k.allow_manage_count > 0)")
+                    .contains("a.owner_type = 'enterprise'")
+                    .doesNotContain("or 1 = 1")
+                    .doesNotContain("org.path_code");
+            }
+            // 保留其他调用方的全局管理权限语义，避免收窄后台管理功能。
+            qo.setType("manageable");
+            assertThat(source.getBoundSql(qo).getSql()).contains("or 1 = 1");
+        }
+    }
+
     /** 真实展开个人列表 SQL，确保历史授权、默认绑定和角色分支不能绕过创建者限定。 */
     @Test
     void personalOwnerQuery_alwaysRestrictsCreatorRegardlessOfRoleAndDefaultBinding() throws IOException {

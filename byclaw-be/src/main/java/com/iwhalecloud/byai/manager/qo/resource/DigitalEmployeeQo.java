@@ -31,7 +31,7 @@ public class DigitalEmployeeQo extends AuthQo {
 
     /**
      * all:全部,authorize-授权给我,owner-我创建的,manager-管理,managerExcludingOwner-授权我管理且非我创建,
-     * manageable-我创建的或我能管理的
+     * manageable-我创建的或我能管理的（含管理员角色），ownerOrManager-我创建的或授权我管理的
      */
     private String type;
 

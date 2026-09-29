@@ -2,17 +2,17 @@ import { Button, message, Tooltip } from 'antd';
 import copy from 'copy-to-clipboard';
 import DOMPurify from 'dompurify';
 // tslint:disable:ordered-imports
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import { useIntl } from '@umijs/max';
 
 import { debounce } from 'lodash';
 
 import AntdIcon from '@/components/AntdIcon';
 import btnStyles from '@/components/MessageList/index.module.less';
-import useQryResourceList from '@/components/QueryInput/components/ResourceQuestion/useQryResourceList';
 import showdownKatex from '@/components/Markdown/katex/showdown-katex';
 import { fixUnclosedCodeBlock, replaceFilePrefixInMarkdown, replaceMdString } from '@/components/Markdown/utils';
 import { getFileUrl } from '@/utils/file';
+import { getQuestionCopyText } from './utils';
 
 const showdown = require('@/components/Markdown/showdown');
 
@@ -119,17 +119,7 @@ const htmlToPlainText = (html: string, fallback: string) => {
   return (container.innerText || container.textContent || fallback).trim();
 };
 
-const copyRichContent = ({
-  text,
-  richText,
-  resourceList,
-  onCopied,
-}: {
-  text: string;
-  richText?: string;
-  resourceList?: unknown[];
-  onCopied: () => void;
-}) => {
+const copyRichContent = ({ text, onCopied }: { text: string; onCopied: () => void }) => {
   const html = markdownToClipboardHtml(text);
   const plainText = htmlToPlainText(html, text) || text;
 
@@ -139,19 +129,6 @@ const copyRichContent = ({
       if (html) {
         clipboard.setData('text/html', html);
       }
-      if (richText && resourceList?.length) {
-        clipboard.setData(
-          'application/x-byai-slate',
-          window.btoa(
-            encodeURIComponent(
-              JSON.stringify({
-                text: richText,
-                resourceList,
-              })
-            )
-          )
-        );
-      }
       clipboard.setData('text/plain', plainText);
       onCopied();
     },
@@ -160,8 +137,6 @@ const copyRichContent = ({
 
 function Copy({ text, richText, showText = false }: { text?: string; richText?: string; showText?: boolean }) {
   const intl = useIntl();
-  const [loading, setLoading] = useState(false);
-  const qryResourceList = useQryResourceList();
 
   const showToast = useCallback(() => {
     message.destroy();
@@ -170,28 +145,22 @@ function Copy({ text, richText, showText = false }: { text?: string; richText?: 
 
   const handleCopy = useCallback(
     debounce(() => {
-      if (!text) return;
-      if (richText && /\{\{.+\}\}/g.test(richText)) {
-        setLoading(true);
-        qryResourceList(richText, true)
-          .then((resourceList) => {
-            if (!resourceList || !resourceList.length) {
-              copyRichContent({ text, onCopied: showToast });
-              return;
-            }
-            copyRichContent({ text, richText, resourceList, onCopied: showToast });
-          })
-          .finally(() => {
-            setLoading(false);
-          });
-      } else {
+      if (richText !== undefined) {
+        // 用户消息只复制正文，避免粘贴时重新带入 @ 员工、资源引用或富文本节点。
+        const plainText = getQuestionCopyText(richText);
+        if (plainText && copy(plainText, { format: 'text/plain' })) {
+          showToast();
+        }
+        return;
+      }
+      if (text) {
         copyRichContent({ text, onCopied: showToast });
       }
     }, 300),
-    [text, richText, qryResourceList, showToast]
+    [text, richText, showToast]
   );
 
-  if (!text && !richText) return null;
+  if (richText !== undefined ? !getQuestionCopyText(richText) : !text) return null;
 
   const title = intl.formatMessage({ id: 'messageList.copyMessage' });
 
@@ -200,7 +169,6 @@ function Copy({ text, richText, showText = false }: { text?: string; richText?: 
       <Button
         type="text"
         size="small"
-        loading={loading}
         icon={<AntdIcon type="icon-a-Copyfuzhi" className={btnStyles.copyIcon} />}
         onClick={handleCopy}
       >

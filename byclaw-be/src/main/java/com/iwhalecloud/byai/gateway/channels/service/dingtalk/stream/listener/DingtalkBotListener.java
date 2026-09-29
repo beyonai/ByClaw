@@ -372,7 +372,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         // assistantChatDto.setAssistantId(-1L);
         assistantChatDto.setAccessTerminal(ChannelType.DINGTALK.getCode());
         assistantChatDto.setChatContent(userText == null || userText.isBlank() ? "" : userText);
-        assistantChatDto.setRelModelId(-1L);
+        assistantChatDto.setRelModelId("-1");
         assistantChatDto.setAgentId(digitEmployVo.getId());
         assistantChatDto.setAgentType(digitEmployVo.getAgentType());
         assistantChatDto.setSessionId(dingtalkSessionService.resolveSessionId(

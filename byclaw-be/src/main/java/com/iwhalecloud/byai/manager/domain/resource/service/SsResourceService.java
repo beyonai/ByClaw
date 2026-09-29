@@ -158,6 +158,12 @@ public class SsResourceService {
         ssResourceMapper.deleteById(resourceId);
     }
 
+    /** 生命周期事务先锁定资源，防止并发上架覆盖已经提交的注销状态。 */
+    public SsResource findByIdForUpdate(Long resourceId) {
+        return ssResourceMapper.selectOne(new LambdaQueryWrapper<SsResource>()
+            .eq(SsResource::getResourceId, resourceId).last("FOR UPDATE"));
+    }
+
     /**
      * 按主键查询资源
      *
@@ -189,6 +195,15 @@ public class SsResourceService {
             queryWrapper.eq(SsResource::getResourceCode, resourceCode);
         }
         return ssResourceMapper.selectOne(queryWrapper, false);
+    }
+
+    /** 个人目录技能只枚举本人创建的工作空间，不使用默认员工或授权给我的员工。 */
+    public List<SsResource> findCreatedDigitalEmployees(Long userId) {
+        if (userId == null) return Collections.emptyList();
+        return ssResourceMapper.selectList(new LambdaQueryWrapper<SsResource>()
+            .eq(SsResource::getCreateBy, userId)
+            .eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name())
+            .ne(SsResource::getResourceStatus, ResourceStatus.DELETE.getNum()));
     }
 
     /**
@@ -273,6 +288,17 @@ public class SsResourceService {
         return ssResourceMapper.selectList(queryWrapper);
     }
 
+    /** 企业技能重名判断不受当前用户可见范围限制，下架技能也计入，注销记录不占用名称。 */
+    public boolean existsEnterpriseSkillByName(String resourceName) {
+        QueryWrapper<SsResource> query = new QueryWrapper<>();
+        query.eq("resource_biz_type", ResourceBizTypeEnum.SKILL.name())
+            .eq("owner_type", OwnerType.ENTERPRISE)
+            .eq("resource_name", resourceName)
+            .and(status -> status.isNull("resource_status")
+                .or().ne("resource_status", ResourceStatus.DELETE.getNum()));
+        return ssResourceMapper.selectCount(query) > 0;
+    }
+
     /**
      * 按系统来源、资源类型和资源编码查询资源。
      *
@@ -352,7 +378,7 @@ public class SsResourceService {
         }
 
         // 排除删除状态的
-        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.DELETE);
+        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.DELETE.getNum());
 
         return ssResourceMapper.selectCount(queryWrapper);
     }
@@ -712,7 +738,7 @@ public class SsResourceService {
     }
 
     /**
-     * 分页查询未注销的数字员工资源（用于启动时 Redis 全量同步等批处理场景）。
+     * 分页查询未下架且未注销的数字员工资源（用于启动时 Redis 全量同步等批处理场景）。
      *
      * @param pageNum  页码，从 1 开始
      * @param pageSize 每页条数
@@ -723,7 +749,8 @@ public class SsResourceService {
         int safePageSize = pageSize > 0 ? pageSize : 1000;
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum());
+        queryWrapper.notIn(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum(),
+            ResourceStatus.DELETE.getNum());
         queryWrapper.orderByAsc(SsResource::getResourceId);
         com.baomidou.mybatisplus.extension.plugins.pagination.Page<SsResource> page =
             new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(safePageNum, safePageSize, false);
@@ -731,12 +758,13 @@ public class SsResourceService {
     }
 
     /**
-     * 查询未注销的全部数字员工资源，用于按当前用户权限二次筛选的轻量列表场景。
+     * 查询未下架且未注销的全部数字员工资源，用于按当前用户权限二次筛选的轻量列表场景。
      */
     public List<SsResource> listActiveDigitalEmployees() {
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum());
+        queryWrapper.notIn(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum(),
+            ResourceStatus.DELETE.getNum());
         queryWrapper.orderByAsc(SsResource::getResourceName);
         queryWrapper.orderByAsc(SsResource::getResourceId);
         return ssResourceMapper.selectList(queryWrapper);

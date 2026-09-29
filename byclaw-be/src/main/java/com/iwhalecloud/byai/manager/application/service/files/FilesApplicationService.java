@@ -3,7 +3,6 @@ package com.iwhalecloud.byai.manager.application.service.files;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.impl.WhaleAgentStorageService;
-import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.DateUtils;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
@@ -21,6 +20,7 @@ import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.state.application.service.session.ByClawUserWorkspacePaths;
 import com.iwhalecloud.byai.common.feign.request.knowledge.OpenFileTagDTO;
 import com.iwhalecloud.byai.common.storage.FileIngressService;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
@@ -444,8 +444,20 @@ public class FilesApplicationService {
      * @return 输入流
      */
     public InputStream openCommonFileInputStream(String bucketName, String filePath) {
+        return openCommonFileInputStream(bucketName, filePath, null);
+    }
+
+    /**
+     * 打开公共文件输入流，并兼容历史与 UserFS 路径差异。
+     *
+     * @param bucketName 桶名称
+     * @param filePath 文件路径
+     * @param shareType 分享类型，为空时使用存储后端默认值
+     * @return 输入流
+     */
+    private InputStream openCommonFileInputStream(String bucketName, String filePath, String shareType) {
         try {
-            return commonFileStorage.read(commonFilePathResolver.arbitrary(bucketName, filePath));
+            return readCommonFile(bucketName, filePath, shareType);
         }
         catch (RuntimeException primaryException) {
             if (StringUtils.isBlank(bucketName)) {
@@ -453,7 +465,7 @@ public class FilesApplicationService {
             }
             String fallbackPath = stripBucketPrefix(filePath, bucketName);
             String userFsFallbackPath = prefixUserFsRootPath(fallbackPath);
-            InputStream userFsInputStream = tryReadCommonFile(bucketName, userFsFallbackPath);
+            InputStream userFsInputStream = tryReadCommonFile(bucketName, userFsFallbackPath, shareType);
             if (userFsInputStream != null) {
                 logger.warn(
                     "Common file preview fallback succeeded with UserFS root prefix, bucketName={}, filePath={}, fallbackPath={}",
@@ -461,7 +473,7 @@ public class FilesApplicationService {
                 return userFsInputStream;
             }
             try {
-                InputStream inputStream = commonFileStorage.read(commonFilePathResolver.arbitrary(null, fallbackPath));
+                InputStream inputStream = readCommonFile(null, fallbackPath, shareType);
                 logger.warn(
                     "Common file preview fallback succeeded without bucket prefix, bucketName={}, filePath={}, fallbackPath={}",
                     bucketName, filePath, fallbackPath);
@@ -474,6 +486,10 @@ public class FilesApplicationService {
         }
     }
 
+    private InputStream readCommonFile(String bucketName, String filePath, String shareType) {
+        return commonFileStorage.read(commonFilePathResolver.arbitrary(bucketName, filePath, shareType));
+    }
+
     /**
      * 尝试读取公共文件，失败时返回空用于后续兜底路径继续尝试。
      *
@@ -481,11 +497,12 @@ public class FilesApplicationService {
      * @date 2026-05-09 135953
      * @param bucketName 桶名称
      * @param filePath 文件路径
+     * @param shareType 分享类型，为空时使用存储后端默认值
      * @return 输入流
      */
-    private InputStream tryReadCommonFile(String bucketName, String filePath) {
+    private InputStream tryReadCommonFile(String bucketName, String filePath, String shareType) {
         try {
-            return commonFileStorage.read(commonFilePathResolver.arbitrary(bucketName, filePath));
+            return readCommonFile(bucketName, filePath, shareType);
         }
         catch (RuntimeException e) {
             return null;
@@ -501,17 +518,18 @@ public class FilesApplicationService {
      * @return UserFS 底层路径
      */
     private String prefixUserFsRootPath(String filePath) {
+        String rootPrefix = ByClawUserWorkspacePaths.USER_FS_OBJECT_KEY_ROOT_PREFIX;
         String normalizedPath = StringUtils.defaultString(filePath).trim().replace('\\', '/').replaceAll("/+", "/");
         if (StringUtils.isBlank(normalizedPath) || StringUtils.equals(normalizedPath, "/")) {
-            return "/by";
+            return rootPrefix;
         }
         if (!normalizedPath.startsWith("/")) {
             normalizedPath = "/" + normalizedPath;
         }
-        if (StringUtils.equals(normalizedPath, "/by") || normalizedPath.startsWith("/by/")) {
+        if (StringUtils.equals(normalizedPath, rootPrefix) || normalizedPath.startsWith(rootPrefix + "/")) {
             return normalizedPath;
         }
-        return "/by" + normalizedPath;
+        return rootPrefix + normalizedPath;
     }
 
     /**
@@ -561,10 +579,8 @@ public class FilesApplicationService {
         String bucketName = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams().getFirst("bucketName");
         String filePath = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams().getFirst("filePath");
 
-        StorageLocation arbitrary = commonFilePathResolver.arbitrary(bucketName, filePath,
-            WhaleAgentStorageService.SHARE_TYPE_PUBLIC);
-
-        try (InputStream inputStream = commonFileStorage.read(arbitrary);) {
+        try (InputStream inputStream = openCommonFileInputStream(bucketName, filePath,
+            WhaleAgentStorageService.SHARE_TYPE_PUBLIC);) {
 
             // 设置ContentType，响应内容为二进制数据流，编码为utf-8，此处设定的编码是文件内容的编码
             response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);

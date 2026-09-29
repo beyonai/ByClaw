@@ -12,29 +12,17 @@ import styles from './index.module.less';
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6);
 
-const ALL_SECTIONS = ['desc', 'abilities', 'tags', 'persona', 'greeting', 'questions'];
+const ALL_SECTIONS = ['desc', 'abilities', 'tags', 'greeting', 'questions'];
 const WORK_PROMPT_KEY = 'agent';
 const PERSONA_PROMPT_KEY = 'soul';
 const TOOL_PROMPT_KEY = 'tools';
 const STREAM_FIELD_LABELS = {
-  agentDescription: '角色描述',
-  characterDescription: '角色定义',
-  openingRemark: '开场白',
-  commonQuestions: '常见问题',
-  agentTags: '标签',
-  corePersonaDefinition: '核心提示词',
-  coreCompetencies: '核心能力',
-  faqs: '问题示例',
-  roleAttributes: '角色属性',
-  processingFlow: '处理流程',
-  personalityDimensions: '性格维度',
-  wordPreferences: '用词偏好',
-  sentenceAndTone: '句式语气',
-  routingDescription: '路由描述',
-  acceptBoundary: '适用边界',
-  rejectBoundary: '拒绝边界',
-  recommendedResources: '建议资源',
-  generationNotes: '生成说明',
+  agentDescription: 'employeeDetail.digitalEmployeeDescription',
+  openingRemark: 'refineModal.opening',
+  commonQuestions: 'refineModal.questions',
+  agentTags: 'employeeDetail.tags',
+  corePersonaDefinition: 'employeeDetail.configDetails',
+  coreCompetencies: 'employeeDetail.coreAbility',
 };
 
 const normalizePromptKey = (key?: string, item: any = {}) => {
@@ -129,144 +117,15 @@ const toPersistPromptItem = (item: any) => {
   return Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'normalizedKey'));
 };
 
-const mergePromptConfigs = (baseConfigs: any[] = [], generatedConfigs: any[] = []) => {
-  if (!baseConfigs.length) return generatedConfigs;
-  if (!generatedConfigs.length) return baseConfigs;
-
-  const generatedMap = new Map(generatedConfigs.map((item) => [item.normalizedKey || item.key, item]));
-  const merged = baseConfigs.map((item) => {
-    const generated = generatedMap.get(item.normalizedKey || item.key);
-    if (!generated) return item;
-    return {
-      ...item,
-      value: getPromptItemText(generated),
-    };
-  });
-
-  generatedConfigs.forEach((item) => {
-    if (
-      !baseConfigs.some((baseItem) => (baseItem.normalizedKey || baseItem.key) === (item.normalizedKey || item.key))
-    ) {
-      merged.push(item);
-    }
-  });
-
-  return merged;
-};
-
-const isPersonaPrompt = (item: any) =>
-  item?.normalizedKey === PERSONA_PROMPT_KEY ||
-  item?.key === PERSONA_PROMPT_KEY ||
-  item?.key === 'persona' ||
-  item?.key === 'corePersonaDefinition' ||
-  item?.name === '人格定义' ||
-  item?.nameEn === 'Persona' ||
-  item?.nameEn === 'Personality Definition';
-
-const extractPersonaDefinitionText = (value: any) => {
-  const promptList = parsePromptConfigList(value);
-  if (!promptList.length) return value || '';
-
-  const personaItem = promptList.find(isPersonaPrompt);
-  return personaItem ? getPromptItemText(personaItem) : '';
-};
-
-const isWorkPrompt = (item: any) =>
-  item?.normalizedKey === WORK_PROMPT_KEY ||
-  item?.key === WORK_PROMPT_KEY ||
-  item?.name === '工作规范' ||
-  item?.nameEn === 'Work Standard';
-
-const isToolPrompt = (item: any) =>
-  item?.normalizedKey === TOOL_PROMPT_KEY ||
-  item?.key === TOOL_PROMPT_KEY ||
-  item?.name === '工具规范' ||
-  item?.nameEn === 'Tool Standard';
-
-const isMemoryPrompt = (item: any) =>
-  item?.normalizedKey === 'memory' ||
-  item?.key === 'memory' ||
-  item?.name === '记忆规范' ||
-  item?.nameEn === 'Memory Standard';
-
-const getPromptTextByMatcher = (value: any, matcher: (item: any) => boolean) => {
-  const promptList = parsePromptConfigList(value);
-  const item = promptList.find(matcher);
-  return item ? getPromptItemText(item) : '';
-};
-
-const buildPromptItem = (name: string, key: string, value: string, nameEn?: string) => ({
-  name,
-  nameEn,
-  key,
-  normalizedKey: normalizePromptKey(key, { name, nameEn }),
-  value,
-});
-
-const mergePromptTextFields = (
-  promptConfigs: any[],
-  values: {
-    personaText?: string;
-    workStandardText?: string;
-    toolStandardText?: string;
-    memoryStandardText?: string;
-  },
-  intl: any
-) => {
-  const ensuredConfigs = [...promptConfigs];
-  const ensureItem = (matcher: (item: any) => boolean, item: any) => {
-    if (!ensuredConfigs.some(matcher) && item.value) {
-      ensuredConfigs.push(item);
-    }
-  };
-
-  ensureItem(
-    isPersonaPrompt,
-    buildPromptItem(
-      intl.formatMessage({ id: 'employeeDetail.personalityDefinition', defaultMessage: '人格定义' }),
-      PERSONA_PROMPT_KEY,
-      values.personaText || '',
-      'Persona'
-    )
-  );
-  ensureItem(
-    isWorkPrompt,
-    buildPromptItem('工作规范', WORK_PROMPT_KEY, values.workStandardText || '', 'Work Standard')
-  );
-  ensureItem(
-    isToolPrompt,
-    buildPromptItem('工具规范', TOOL_PROMPT_KEY, values.toolStandardText || '', 'Tool Standard')
-  );
-  ensureItem(isMemoryPrompt, buildPromptItem('记忆规范', 'memory', values.memoryStandardText || '', 'Memory Standard'));
-
-  return ensuredConfigs.map((item) => {
-    if (isPersonaPrompt(item)) return { ...item, value: values.personaText || '' };
-    if (isWorkPrompt(item)) return { ...item, value: values.workStandardText || '' };
-    if (isToolPrompt(item)) return { ...item, value: values.toolStandardText || '' };
-    if (isMemoryPrompt(item)) return { ...item, value: values.memoryStandardText || '' };
-    return item;
-  });
-};
-
 const stripListMarker = (value: any) =>
   String(value || '')
     .replace(/^\s*(?:[-*•]|\d+[.)、]|[（(]?\d+[）)])\s*/, '')
     .trim();
 
-const splitAbilityText = (value: any, index: number) => {
+const splitAbilityText = (value: any) => {
   const text = stripListMarker(value);
-  const matched = text.match(/^([^：:；;。]{2,16})[：:]\s*([\s\S]+)$/);
-  if (matched) {
-    return {
-      name: matched[1].trim(),
-      description: matched[2].trim(),
-    };
-  }
-
-  return {
-    name: text.length > 12 ? text.slice(0, 12) : text || `能力${index + 1}`,
-    description: text,
-  };
+  // 岗位职责是完整的单行文本，不能按冒号或字数截成旧版能力标题。
+  return { name: text, description: '' };
 };
 
 const parseListLike = (value: any) => {
@@ -284,19 +143,6 @@ const parseListLike = (value: any) => {
     .split(/\n+/)
     .map((s) => s.trim())
     .filter(Boolean);
-};
-
-const extractWorkPromptAbilities = (corePersonaDefinition: any) => {
-  const promptConfigs = parsePromptConfigList(corePersonaDefinition);
-  const workPrompt = promptConfigs.find(isWorkPrompt);
-  if (!workPrompt) return [];
-
-  return parseListLike(getPromptItemText(workPrompt))
-    .map(stripListMarker)
-    .filter(Boolean)
-    .filter((line) => !/^#+\s*/.test(line))
-    .slice(0, 5)
-    .map((line, index) => splitAbilityText(line, index));
 };
 
 const parseSseBlock = (block: string) => {
@@ -379,50 +225,37 @@ const RefineModal = ({
       const values = await myForm.validateFields();
       const has = (key) => selectedSections.has(key);
 
+      if (has('abilities') && coreAbilities.some((item) => !item.name?.trim())) {
+        message.warning(intl.formatMessage({ id: 'employeeDetail.abilityNameRequired' }));
+        return;
+      }
       const result = {};
 
-      const currentPromptConfigs = parsePromptConfigList(form.getFieldValue('corePersonaDefinition'));
-      const promptConfigs = mergePromptConfigs(currentPromptConfigs, generatedPromptConfigs);
-      const personaText = values?.corePersonaDefinition || '';
-      const workStandardText = values?.workStandard || '';
-      const toolStandardText = values?.toolStandard || '';
-      const memoryStandardText = values?.memoryStandard || '';
-      let nextPromptConfigs = promptConfigs;
-
+      // 使用与页面相同的动态配置键；未勾选的字段不写回，也不修改隐藏的旧字段。
+      const currentPromptConfigs = parsePromptConfigList(form.getFieldValue('corePersonaDefinition')).map((item) => ({
+        ...item,
+        value: form.getFieldValue(item.key) ?? getPromptItemText(item),
+      }));
+      const nextPromptConfigs = generatedPromptConfigs.map((item) => ({
+        ...item,
+        value: values.promptValues?.[item.key] ?? getPromptItemText(item),
+      }));
       if (has('desc')) result.resourceDesc = values.resourceDesc;
-      if (has('persona')) {
-        nextPromptConfigs = mergePromptTextFields(
-          promptConfigs,
-          {
-            personaText,
-            workStandardText,
-            toolStandardText,
-            memoryStandardText,
-          },
-          intl
-        );
-        if (nextPromptConfigs.length) {
-          result.corePersonaDefinition = JSON.stringify(nextPromptConfigs.map(toPersistPromptItem));
-          nextPromptConfigs.forEach((item) => {
-            if (item?.key) {
-              result[item.key] = getPromptItemText(item);
-            }
-          });
-          const workPrompt = nextPromptConfigs.find((item) => (item.normalizedKey || item.key) === WORK_PROMPT_KEY);
-          const toolPrompt = nextPromptConfigs.find((item) => (item.normalizedKey || item.key) === TOOL_PROMPT_KEY);
-          if (workPrompt) {
-            result.workStandard = getPromptItemText(workPrompt);
-          }
-          if (toolPrompt) {
-            result.toolStandard = getPromptItemText(toolPrompt);
-          }
-          const memoryPrompt = nextPromptConfigs.find(isMemoryPrompt);
-          if (memoryPrompt) {
-            result.memoryStandard = getPromptItemText(memoryPrompt);
-          }
-        } else {
-          result.corePersonaDefinition = personaText;
-        }
+      if (nextPromptConfigs.some((item) => has(`prompt:${item.key}`))) {
+        const selectedConfigs = nextPromptConfigs.filter((item) => has(`prompt:${item.key}`));
+        const merged = currentPromptConfigs.length
+          ? currentPromptConfigs.map((item) => selectedConfigs.find((next) => next.key === item.key) || item)
+          : selectedConfigs;
+        result.corePersonaDefinition = JSON.stringify(merged.map(toPersistPromptItem));
+        let roleObj = parseJsonRecursively(form.getFieldValue('role'));
+        if (!roleObj || typeof roleObj !== 'object' || Array.isArray(roleObj)) roleObj = {};
+        merged.forEach((item) => {
+          result[item.key] = getPromptItemText(item);
+          roleObj[item.key] = getPromptItemText(item);
+        });
+        roleObj.corePersonaDefinition = result.corePersonaDefinition;
+        roleObj.personalityDefinition = result.corePersonaDefinition;
+        result.role = JSON.stringify(roleObj);
       }
       if (has('greeting')) result.descText = values.descText;
       if (has('tags')) result.tags = values.tags;
@@ -435,58 +268,8 @@ const RefineModal = ({
           rejectBoundary: Array.isArray(item.rejectBoundary) ? item.rejectBoundary : [],
           example: Array.isArray(item.example) ? item.example : [],
         }));
-        result.coreAbility = '';
-        result.abilityDesc = JSON.stringify({
-          ability: '',
-          constraints: '',
-          faqs: '',
-        });
+        result.coreAbility = coreAbilities.map((item) => `${item.name}: ${item.description || ''}`).join('\n');
       }
-
-      let roleObj = {};
-      try {
-        roleObj = JSON.parse(form.getFieldValue('role') || '{}');
-      } catch {
-        roleObj = {};
-      }
-
-      Object.assign(roleObj, {
-        roleAttributes: values?.roleAttributes || '',
-        processingFlow: values?.processingFlow || '',
-        personalityDimensions: values?.personalityDimensions || '',
-        wordPreferences: values?.wordPreferences || '',
-        sentenceAndTone: values?.sentenceAndTone || '',
-        corePersonaDefinition:
-          result.corePersonaDefinition || form.getFieldValue('corePersonaDefinition') || personaText,
-        personalityDefinition:
-          result.corePersonaDefinition || form.getFieldValue('corePersonaDefinition') || personaText,
-      });
-      if (nextPromptConfigs.length) {
-        nextPromptConfigs.forEach((item) => {
-          if (item?.key) {
-            roleObj[item.key] = result[item.key] || getPromptItemText(item);
-          }
-        });
-      }
-      if (nextPromptConfigs.length && has('persona')) {
-        roleObj[PERSONA_PROMPT_KEY] = personaText;
-        roleObj[WORK_PROMPT_KEY] = workStandardText;
-        roleObj[TOOL_PROMPT_KEY] = toolStandardText;
-        roleObj.memory = memoryStandardText;
-      }
-      const workPrompt = nextPromptConfigs.find(isWorkPrompt);
-      const toolPrompt = nextPromptConfigs.find(isToolPrompt);
-      const memoryPrompt = nextPromptConfigs.find(isMemoryPrompt);
-      if (workPrompt) {
-        roleObj.workStandard = roleObj[workPrompt.key] || workStandardText || roleObj.workStandard || '';
-      }
-      if (toolPrompt) {
-        roleObj.toolStandard = roleObj[toolPrompt.key] || toolStandardText || roleObj.toolStandard || '';
-      }
-      if (memoryPrompt) {
-        roleObj.memoryStandard = roleObj[memoryPrompt.key] || memoryStandardText || roleObj.memoryStandard || '';
-      }
-      result.role = JSON.stringify(roleObj);
 
       const questionsToPass = has('questions') ? myQuestionList : questionList;
       onOk(result, questionsToPass);
@@ -496,20 +279,8 @@ const RefineModal = ({
   };
 
   const applyAllFields = (fields: Record<string, any>) => {
-    const {
-      agentDescription,
-      characterDescription,
-      commonQuestions,
-      openingRemark,
-      agentTags,
-      roleAttributes,
-      processingFlow,
-      personalityDimensions,
-      wordPreferences,
-      sentenceAndTone,
-      coreCompetencies,
-      corePersonaDefinition,
-    } = fields;
+    const { agentDescription, commonQuestions, openingRemark, agentTags, coreCompetencies, corePersonaDefinition } =
+      fields;
 
     const arr = parseListLike(agentTags);
 
@@ -518,8 +289,16 @@ const RefineModal = ({
       value: typeof it === 'string' ? it : JSON.stringify(it),
     }));
 
-    const normalizeText = (v) => parseListLike(v).join('\n');
-    const promptConfigs = parsePromptConfigList(corePersonaDefinition);
+    const currentConfigValue = form.getFieldValue('corePersonaDefinition');
+    const baseConfigs = parsePromptConfigList(currentConfigValue);
+    const returnedConfigs = parsePromptConfigList(corePersonaDefinition);
+    // 保持页面的配置顺序和元信息，不恢复用户已删除的配置项。
+    const promptConfigs = Array.isArray(parseJsonRecursively(currentConfigValue))
+      ? baseConfigs.map((item) => ({
+        ...item,
+        value: getPromptItemText(returnedConfigs.find((next) => next.normalizedKey === item.normalizedKey) || item),
+      }))
+      : returnedConfigs;
 
     let parsedCoreAbilities = [];
     const abilityIcons = [
@@ -539,12 +318,11 @@ const RefineModal = ({
       { value: '#FF5A5A', label: '红色' },
     ];
     const competencyList = parseListLike(coreCompetencies);
-    const abilitySource = competencyList.length ? competencyList : extractWorkPromptAbilities(corePersonaDefinition);
+    const abilitySource = competencyList;
     parsedCoreAbilities = abilitySource
       .map((item, index) => {
         const fallback = splitAbilityText(
-          typeof item === 'string' ? item : item?.description || item?.desc || item?.content || '',
-          index
+          typeof item === 'string' ? item : item?.description || item?.desc || item?.content || ''
         );
         return {
           id: nanoid(),
@@ -583,22 +361,13 @@ const RefineModal = ({
 
     myForm.setFieldsValue({
       resourceDesc: agentDescription,
-      role: characterDescription,
-      corePersonaDefinition: extractPersonaDefinitionText(corePersonaDefinition),
-      workStandard: getPromptTextByMatcher(corePersonaDefinition, isWorkPrompt),
-      toolStandard: getPromptTextByMatcher(corePersonaDefinition, isToolPrompt),
-      memoryStandard: getPromptTextByMatcher(corePersonaDefinition, isMemoryPrompt),
+      promptValues: Object.fromEntries(promptConfigs.map((item) => [item.key, getPromptItemText(item)])),
       descText: openingRemark,
       tags: tagList?.map((it) => it.value),
-      roleAttributes: normalizeText(roleAttributes),
-      processingFlow: normalizeText(processingFlow),
-      personalityDimensions: normalizeText(personalityDimensions),
-      wordPreferences: normalizeText(wordPreferences),
-      sentenceAndTone: normalizeText(sentenceAndTone),
     });
 
     setTags(tagList);
-    setSelectedSections(new Set(ALL_SECTIONS));
+    setSelectedSections(new Set([...ALL_SECTIONS, ...promptConfigs.map((item) => `prompt:${item.key}`)]));
 
     const commonQArr = parseListLike(commonQuestions);
     setMyQuestionList(
@@ -614,8 +383,8 @@ const RefineModal = ({
     );
   };
 
-  const onRegenerate = async (formValue, questionListValue) => {
-    const { resourceName, resourceDesc, descText, role } = formValue;
+  const onRegenerate = async (formValue, questionListValue, initial = false) => {
+    const { resourceName, resourceDesc, descText } = formValue;
     if (!mountedRef.current) return;
 
     streamAbortRef.current?.abort();
@@ -623,28 +392,18 @@ const RefineModal = ({
     streamAbortRef.current = abortController;
 
     setIsLoading(true);
-    setGeneratedPromptConfigs([]);
     setStreamingFields({});
     setStreamingTextLength(0);
 
-    const outerFormValues = form.getFieldsValue();
-    const {
-      abilityBoundary,
-      exampleQuestions,
-      roleAttributes,
-      processingFlow,
-      personalityDimensions,
-      wordPreferences,
-      sentenceAndTone,
-      corePersonaDefinition,
-    } = outerFormValues;
+    const outerFormValues = form.getFieldsValue(true);
+    const { corePersonaDefinition } = outerFormValues;
 
     const relIds = [];
     skills.forEach((it) => {
       relIds.push(`${it.resourceId}`);
     });
     knowledgeBases.forEach((it) => {
-      it.items.forEach((i) => {
+      (it.items || []).forEach((i) => {
         relIds.push(`${i.resourceId}`);
       });
     });
@@ -652,22 +411,30 @@ const RefineModal = ({
     const body = {
       agentName: resourceName,
       agentDescription: resourceDesc,
-      characterDescription: role,
       openingRemark: descText,
       commonQuestions: questionListValue.map((i) => i.infoContent).join('\n'),
       agentType: agentType || outerFormValues.agentType || '',
       resourceId: resourceId || outerFormValues.resourceId || undefined,
       modelCode: modelCode || outerFormValues.modelCode || '',
-      corePersonaDefinition: corePersonaDefinition || formValue?.corePersonaDefinition || '',
-      constraints: abilityBoundary || '',
-      faqs: exampleQuestions || '',
-      roleAttributes: roleAttributes || '',
-      processingFlow: processingFlow || '',
-      personalityDimensions: personalityDimensions || '',
-      wordPreferences: wordPreferences || '',
-      sentenceAndTone: sentenceAndTone || '',
+      corePersonaDefinition: JSON.stringify(
+        (initial ? parsePromptConfigList(corePersonaDefinition) : generatedPromptConfigs).map((item) =>
+          toPersistPromptItem({
+            ...item,
+            value: formValue.promptValues?.[item.key] ?? outerFormValues[item.key] ?? getPromptItemText(item),
+          })
+        )
+      ),
+      coreCompetencies: JSON.stringify(
+        (initial ? parseListLike(formValue.coreCompetencies) : coreAbilities).map((item) => ({
+          coreCompetency: item.coreCompetency ?? item.name,
+          description: item.description || '',
+          acceptBoundary: item.acceptBoundary || [],
+          rejectBoundary: item.rejectBoundary || [],
+          example: item.example || [],
+        }))
+      ),
+      agentTags: JSON.stringify(formValue.tags || []),
       relIds,
-      OptimizeTypeEnum: '',
     };
 
     try {
@@ -711,7 +478,16 @@ const RefineModal = ({
         if (event === 'error') {
           try {
             const payload = JSON.parse(data);
-            streamError = payload?.message || intl.formatMessage({ id: 'refineModal.generateFailed' });
+            const errorId =
+              payload?.code === 'MODEL_NOT_AVAILABLE'
+                ? 'refineModal.modelUnavailable'
+                : payload?.code === 'MODEL_GENERATION_FAILED'
+                  ? 'refineModal.modelGenerationFailed'
+                  : '';
+            streamError = errorId
+              ? intl.formatMessage({ id: errorId })
+              : payload?.message || intl.formatMessage({ id: 'refineModal.generateFailed' });
+            if (payload?.diagnosticId) streamError += ` (${payload.diagnosticId})`;
           } catch {
             streamError = intl.formatMessage({ id: 'refineModal.generateFailed' });
           }
@@ -797,7 +573,7 @@ const RefineModal = ({
           }));
         }
       }
-      if (streamError && (!fields.agentDescription || !fields.corePersonaDefinition)) {
+      if (streamError) {
         throw new Error(streamError);
       }
       if (!fields.agentDescription || !fields.corePersonaDefinition) {
@@ -823,6 +599,7 @@ const RefineModal = ({
 
   useEffect(() => {
     if (!visible) {
+      hasGeneratedRef.current = false;
       mountedRef.current = false;
       streamAbortRef.current?.abort();
       streamAbortRef.current = null;
@@ -841,8 +618,26 @@ const RefineModal = ({
       setCoreAbilities([]);
     }
     if (!hasGeneratedRef.current) {
-      const v = form.getFieldsValue();
-      myForm.setFieldsValue(v);
+      const v = form.getFieldsValue(true);
+      // 失败时仍保留页面当前配置，避免空草稿覆盖外层内容。
+      const promptConfigs = parsePromptConfigList(v.corePersonaDefinition).map((item) => ({
+        ...item,
+        value: v[item.key] ?? getPromptItemText(item),
+      }));
+      setGeneratedPromptConfigs(promptConfigs);
+      setCoreAbilities(
+        parseListLike(v.coreCompetencies).map((item) => ({
+          ...item,
+          id: nanoid(),
+          name: typeof item === 'string' ? item : item.coreCompetency || '',
+        }))
+      );
+      setSelectedSections(new Set([...ALL_SECTIONS, ...promptConfigs.map((item) => `prompt:${item.key}`)]));
+      myForm.setFieldsValue({
+        ...v,
+        promptValues: Object.fromEntries(promptConfigs.map((item) => [item.key, getPromptItemText(item)])),
+      });
+      setTags((v.tags || []).map((value) => ({ label: value, value })));
       setMyQuestionList(questionList);
 
       if (timerRef.current) {
@@ -850,8 +645,8 @@ const RefineModal = ({
       }
       timerRef.current = setTimeout(() => {
         if (!mountedRef.current) return;
-        const current = myForm.getFieldsValue();
-        onRegenerate(current, questionList);
+        const current = myForm.getFieldsValue(true);
+        onRegenerate(current, questionList, true);
       }, 0);
     }
     return () => {
@@ -904,12 +699,16 @@ const RefineModal = ({
                   })}
                 </div>
               )}
-              {Object.entries(streamingFields).map(([field, value]) => (
-                <div className={styles.streamResultItem} key={field}>
-                  <div className={styles.streamResultTitle}>{STREAM_FIELD_LABELS[field] || field}</div>
-                  <div className={styles.streamResultText}>{previewStreamValue(value)}</div>
-                </div>
-              ))}
+              {Object.entries(streamingFields)
+                .filter(([field]) => STREAM_FIELD_LABELS[field])
+                .map(([field, value]) => (
+                  <div className={styles.streamResultItem} key={field}>
+                    <div className={styles.streamResultTitle}>
+                      {intl.formatMessage({ id: STREAM_FIELD_LABELS[field] })}
+                    </div>
+                    <div className={styles.streamResultText}>{previewStreamValue(value)}</div>
+                  </div>
+                ))}
             </div>
           </div>
         )}
@@ -917,6 +716,7 @@ const RefineModal = ({
           <div className={classNames(styles.formContainer, 'hideThumb')}>
             <MyForm
               form={myForm}
+              promptConfigs={generatedPromptConfigs}
               questionList={myQuestionList}
               setQuestionList={setMyQuestionList}
               tagsOptions={tags}
@@ -939,8 +739,8 @@ const RefineModal = ({
           </Button>
           <Button
             onClick={async () => {
-              const current = myForm.getFieldsValue();
-              onRegenerate(current, questionList);
+              const current = myForm.getFieldsValue(true);
+              onRegenerate(current, myQuestionList);
             }}
             style={{ margin: '0 8px' }}
             loading={isLoading}

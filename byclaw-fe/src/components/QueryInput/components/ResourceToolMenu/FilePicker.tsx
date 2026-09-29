@@ -2,6 +2,10 @@ import { useEffect, useRef, useState, type Key } from 'react';
 import { message } from 'antd';
 import { useIntl } from '@umijs/max';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import {
+  DISPLAY_FILE_PATH_PREFIX,
+  SHARED_FILE_PATH,
+} from '@/layout/sider/components/FileSiderPanel/constants';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import {
   ensureDirectoryPath,
@@ -12,6 +16,9 @@ import {
 import { listFiles, type FileBrowserItem } from '@/service/fileBrowser';
 import { ResourceType } from '../../RichInput/utils/constants';
 import styles from './FilePicker.module.less';
+
+// 加号菜单中的文件引用与右侧“本地共享”Tab保持同一目录范围，避免误把共享目录外的文件暴露到引用入口。
+const LOCAL_SHARED_FILE_PATH = `${DISPLAY_FILE_PATH_PREFIX}${SHARED_FILE_PATH}`;
 
 interface Props {
   onSelect: (item: any, type: any) => void;
@@ -26,7 +33,6 @@ const FilePicker: React.FC<Props> = ({ onSelect }) => {
   const [loadedKeys, setLoadedKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
   const generation = useRef(0);
 
   useEffect(() => {
@@ -38,7 +44,7 @@ const FilePicker: React.FC<Props> = ({ onSelect }) => {
     setFailed(false);
     setLoading(!!resourceId);
     if (resourceId) {
-      listFiles({ resourceId, path: '/' })
+      listFiles({ resourceId, path: LOCAL_SHARED_FILE_PATH })
         .then((response) => {
           if (generation.current === requestGeneration) setItems(unwrapListResponse<FileBrowserItem>(response));
         })
@@ -52,7 +58,7 @@ const FilePicker: React.FC<Props> = ({ onSelect }) => {
     return () => {
       generation.current++;
     };
-  }, [resourceId, refreshKey]);
+  }, [resourceId]);
 
   const quoteFile = (item: FileBrowserItem) => {
     if (!resourceId) return;
@@ -64,17 +70,18 @@ const FilePicker: React.FC<Props> = ({ onSelect }) => {
 
   return (
     <FileSpaceBlock
-      title={intl.formatMessage({ id: 'fileBrowser.root' })}
+      title={intl.formatMessage({ id: 'chatResource.localSharedFile' })}
+      // 左侧分类已标明本地共享，引用弹窗不再重复展示标题及刷新栏。
+      hideHeader
       fillContainer
       items={items}
-      currentPath="/"
+      currentPath={LOCAL_SHARED_FILE_PATH}
       loading={loading}
       emptyText={intl.formatMessage({ id: failed ? 'fileBrowser.error.loadFailed' : 'common.noData' })}
       childrenByPath={childrenByPath}
       expandedKeys={expandedKeys}
       loadedKeys={loadedKeys}
       showActions
-      onRefresh={() => setRefreshKey((current) => current + 1)}
       onExpand={setExpandedKeys}
       onLoadData={async (node) => {
         if (!resourceId || !isDirectory(node)) return;

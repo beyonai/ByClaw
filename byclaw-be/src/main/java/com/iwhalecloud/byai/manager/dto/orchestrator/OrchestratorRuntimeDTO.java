@@ -36,6 +36,7 @@ public class OrchestratorRuntimeDTO {
         private String id;
         private String kind;
         private String name;
+        private String avatar;
     }
 
     @Getter

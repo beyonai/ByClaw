@@ -26,6 +26,7 @@ import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.util.UserBucketNameResolver;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.common.util.MultipartFileUtil;
@@ -97,8 +98,8 @@ public class FsOperationApplicationService {
         MultipartFile file) {
         FsSpaceType spaceType = FsSpaceType.of(spaceTypeValue);
         String normalizedPath = normalizeFilePath(spaceType, path);
-        // USER 空间只要求当前登录用户；RESOURCE 空间必须校验资源管理权限。
-        checkWritePermission(spaceType, resourceId, normalizedPath);
+        // QA 回调写入项目云盘文件时，与上传入口使用同一项目访问权限。
+        checkWritePermission(spaceType, resourceId, normalizedPath, true);
         MultipartFile uploadFile = adaptContentType(file, normalizedPath, contentType);
         FileMetadata metadata = write(spaceType, uploadFile, normalizedPath);
         return toFileMetadataVo(spaceType, resourceId, normalizedPath, metadata);
@@ -210,7 +211,7 @@ public class FsOperationApplicationService {
         String newPath = normalizeFilePath(spaceType, request.getNewPath());
         checkWritePermission(spaceType, request.getResourceId(), oldPath);
         if (spaceType == FsSpaceType.RESOURCE) {
-            validateResourcePath(request.getResourceId(), newPath);
+            checkWritePermission(spaceType, request.getResourceId(), newPath);
         }
         ensureTargetWritable(spaceType, newPath, Boolean.TRUE.equals(request.getOverwrite()));
         copyFile(spaceType, oldPath, newPath);
@@ -231,7 +232,7 @@ public class FsOperationApplicationService {
         String newPath = normalizeDirectoryPath(spaceType, request.getNewPath());
         checkWritePermission(spaceType, request.getResourceId(), oldPath);
         if (spaceType == FsSpaceType.RESOURCE) {
-            validateResourcePath(request.getResourceId(), newPath);
+            checkWritePermission(spaceType, request.getResourceId(), newPath);
         }
 
         List<String> sourcePaths = list(spaceType, oldPath);
@@ -289,12 +290,27 @@ public class FsOperationApplicationService {
     }
 
     private void checkWritePermission(FsSpaceType spaceType, Long resourceId, String path) {
+        checkWritePermission(spaceType, resourceId, path, false);
+    }
+
+    private void checkWritePermission(FsSpaceType spaceType, Long resourceId, String path,
+        boolean fileUpload) {
         checkLogin();
         assertNotResourceManagedPath(path);
         if (spaceType == FsSpaceType.RESOURCE) {
-            // 写、删除、重命名都会改变资源内容，必须具备资源管理权限。
             validateResourcePath(resourceId, path);
             SsResource resource = findResource(resourceId);
+            // 仅云盘文件上传按项目成员权限放行；资源配置及其他维护操作仍要求管理权限。
+            if (fileUpload && isKnowledgeResourcePath(path)
+                && ResourceBizTypeEnum.KG_CLOUD.name().equals(resource.getResourceBizType())) {
+                if (!authApplicationService.hasResourceAccessPermission(resource)) {
+                    throw new BaseException("dataset.cloud.access.denied");
+                }
+                return;
+            }
+            if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(resource)) {
+                throw new BaseException("请通过发布流程修改官方数字员工配置");
+            }
             if (!authApplicationService.hasResourceManagePermission(resource)) {
                 throw new BaseException("byclaw.fs.resource.manage.denied");
             }
@@ -325,12 +341,12 @@ public class FsOperationApplicationService {
         if (resourceId == null) {
             return;
         }
+        // 资源 ID 必须位于固定的第三段根节点，不能匹配任意子目录或文件名里的 ID。
+        String[] segments = path.split("/", 5);
+        String root = segments.length >= 4 ? segments[3] : "";
         String resourceIdText = String.valueOf(resourceId);
-        boolean belongsToResource = StringUtils.contains(path, "_" + resourceIdText + "/")
-            || StringUtils.endsWith(path, "_" + resourceIdText)
-            || StringUtils.endsWith(path, "_" + resourceIdText + ".json")
-            || StringUtils.contains(path, "/" + resourceIdText + "/")
-            || StringUtils.endsWith(path, "/" + resourceIdText);
+        boolean belongsToResource = root.equals(resourceIdText)
+            || root.matches("[A-Za-z][A-Za-z0-9_]*_" + resourceIdText + "(?:\\.json)?");
         if (!belongsToResource) {
             // resourceId 决定权限，path 决定实际对象；两者必须一致，避免用 A 资源权限操作 B 资源文件。
             throw new BaseException("byclaw.fs.resource.path.not.belong.resource");

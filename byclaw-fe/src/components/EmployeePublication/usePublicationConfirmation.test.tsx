@@ -1,0 +1,88 @@
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import usePublicationConfirmation from './usePublicationConfirmation';
+import type { PublicationDetail } from '@/service/employeePublication';
+
+let confirm: ReturnType<typeof usePublicationConfirmation>['confirmPublication'];
+function Confirmation() {
+  const result = usePublicationConfirmation();
+  confirm = result.confirmPublication;
+  return result.confirmationDialog;
+}
+const detail = {
+  publication: { requestId: '100', employeeName: '客服(企业)' },
+  dependencies: [
+    {
+      resourceId: '20',
+      name: '个人客户库',
+      action: 'OMIT_RESOURCE',
+      resourceType: 'KG_DOC',
+      warning: '个人知识不带入',
+    },
+    {
+      resourceId: '21',
+      name: '客户分析技能',
+      action: 'OMIT_RESOURCE',
+      resourceType: 'SKILL',
+      warning: '客户查询工具：个人工具',
+    },
+    { resourceId: '*', name: '全部工具', action: 'BUILTIN_TOOL', resourceType: 'TOOL' },
+    { resourceId: '22', name: '文本分析', action: 'COPY_SKILL', resourceType: 'SKILL' },
+    {
+      resourceId: '23',
+      name: '部门知识库',
+      action: 'REFERENCE_RESOURCE',
+      resourceType: 'KG_DOC',
+      warning: '仅授权用户可用',
+    },
+  ],
+} as PublicationDetail;
+
+it('explains exact omissions separately from retained restrictions and permits publishing', async () => {
+  render(<Confirmation />);
+  let pending: ReturnType<typeof confirm>;
+  act(() => {
+    pending = confirm(detail);
+  });
+  const dialog = within(await screen.findByRole('dialog'));
+  expect(dialog.getByText('发布后保留 3 项资源，2 项不会带入')).toBeInTheDocument();
+  expect(dialog.getByText('个人客户库')).toBeInTheDocument();
+  expect(dialog.getByText('客户查询工具：个人工具')).toBeInTheDocument();
+  expect(dialog.getAllByText('不会带入')).toHaveLength(2);
+  expect(dialog.getByText('保留关联，但使用范围受限（1 项）')).toBeInTheDocument();
+  expect(dialog.getByText('部门知识库')).toBeInTheDocument();
+  fireEvent.click(dialog.getByText('查看其余资源（2 项，无使用限制提醒）'));
+  expect(await dialog.findByText('全部工具')).toBeInTheDocument();
+  expect(dialog.getByText('生成企业技能副本')).toBeInTheDocument();
+  const submit = dialog.getByRole('button', { name: '确认并继续发布' });
+  expect(submit).toBeEnabled();
+  await act(async () => {
+    fireEvent.click(submit);
+    expect(await pending).toBe('publish');
+  });
+});
+
+it('allows publishing an employee even when every associated resource is omitted', async () => {
+  render(<Confirmation />);
+  let pending: ReturnType<typeof confirm>;
+  act(() => {
+    pending = confirm({ ...detail, dependencies: detail.dependencies.slice(0, 2) });
+  });
+  expect(await screen.findByText('发布后保留 0 项资源，2 项不会带入')).toBeInTheDocument();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '确认并继续发布' }));
+    expect(await pending).toBe('publish');
+  });
+});
+
+it('returns to editing without consenting to publication', async () => {
+  render(<Confirmation />);
+  let pending: ReturnType<typeof confirm>;
+  act(() => {
+    pending = confirm(detail);
+  });
+  await screen.findByRole('dialog');
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '返回修改' }));
+    expect(await pending).toBe('edit');
+  });
+});

@@ -241,7 +241,7 @@ public class SuasSuperassistApplicationService {
             String relToolCodes = jsonObject.getString("relToolCodes");
             String relSkillCodes = jsonObject.getString("relSkillCodes");
             String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
-
+            String isDefaultDigEmployee = jsonObject.getString("isDefaultDigEmployee");
 
             // 如果已经存在了，不再进行初始化
             SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
@@ -281,8 +281,8 @@ public class SuasSuperassistApplicationService {
             // 保存数字员工
             ssResource = digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
 
-            // 如果是超级助手
-            if (Constants.YES_VALUE_T.equalsIgnoreCase(digitalEmployeeDTO.getOpenSuperHelper())) {
+            // 如果默认数字员工
+            if (Constants.YES_VALUE_T.equalsIgnoreCase(isDefaultDigEmployee) || Constants.YES_VALUE_Y.equalsIgnoreCase(isDefaultDigEmployee)) {
                 defaultDigEmployeeId = ssResource.getResourceId();
             }
 

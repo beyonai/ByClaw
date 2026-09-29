@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -133,7 +134,7 @@ class SessionStreamRecoveryLocalOwnerTest {
      * live listener 活跃且无 ACK 失败：不与其并发 claim，扫描直接跳过。
      */
     @Test
-    void skipsClaimForHealthyLiveListener() {
+    void skipsClaimForHealthyLiveListener() throws InterruptedException {
         long now = System.currentTimeMillis();
         when(chatRuntimeStateService.listRunningStates()).thenReturn(Collections.singletonList(localState(now)));
         when(outputStreamManager.getContext("10")).thenReturn(liveCtx());
@@ -141,10 +142,15 @@ class SessionStreamRecoveryLocalOwnerTest {
 
         scan();
 
-        verify(outputStreamManager, timeout(1000)).getContext("10");
+        // 等整轮 worker 执行完再验证否定断言，避免机器繁忙时的一秒超时和过早通过。
+        ExecutorService workers = (ExecutorService) ReflectionTestUtils.getField(recoveryService, "recoveryWorkers");
+        workers.shutdown();
+        org.junit.jupiter.api.Assertions.assertTrue(workers.awaitTermination(5, TimeUnit.SECONDS));
+        verify(outputStreamManager).getContext("10");
         verify(redisTemplate.opsForStream(), never())
             .pending(anyString(), anyString(), any(org.springframework.data.domain.Range.class),
                 org.mockito.ArgumentMatchers.anyLong());
+        verify(chatRuntimeStateService, never()).tryAcquireRecoveryLock(any());
         verify(sessionStreamManager, never()).startSessionListener(any(), any());
     }
 

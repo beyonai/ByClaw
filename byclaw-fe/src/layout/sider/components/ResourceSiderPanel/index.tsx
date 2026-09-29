@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Button, Dropdown, Empty, Input, message, Modal } from 'antd';
+import { Alert, Button, Dropdown, Empty, Input, message, Modal } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -37,6 +37,8 @@ import ResourceSiderListItem, {
   type ResourceSiderType,
 } from './ResourceSiderListItem';
 import styles from './index.module.less';
+import { useEnterpriseSkillPublication } from './useEnterpriseSkillPublication';
+import { useWorkspaceSkillCenterSync } from './useWorkspaceSkillCenterSync';
 const PAGE_SIZE = 30;
 
 interface Props {
@@ -155,6 +157,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   });
   const [searchValue, setSearchValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [resourceList, setResourceList] = useState<ResourceItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
@@ -187,6 +190,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     async (options?: { reset?: boolean; queryKeyword?: string }) => {
       if (listFetchRef.current) return;
       const { reset = false, queryKeyword = keywordRef.current } = options || {};
+      setLoadFailed(false);
       if (!activeSiderAgent.resourceId) {
         if (reset) {
           resourceListRef.current = [];
@@ -257,6 +261,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
             : rows.length >= PAGE_SIZE && hasNewUniqueRows
         );
       } catch {
+        setLoadFailed(true);
         if (reset) {
           resourceListRef.current = [];
           setResourceList([]);
@@ -526,6 +531,19 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     resourceType === 'SKILL' ? activeSiderAgent.resourceId : undefined
   );
 
+  const workspaceCenterSync = useWorkspaceSkillCenterSync({
+    employeeId: activeSiderAgent.resourceId,
+    enabled: resourceType === 'SKILL' && canManageActiveAgent,
+    rows: resourceList,
+    onChanged: (item, sourceDeleted) => {
+      if (sourceDeleted) {
+        resourceListRef.current = resourceListRef.current.filter((row) => row.skillPath !== item.skillPath);
+        setResourceList(resourceListRef.current);
+      }
+      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+    },
+  });
+
   // 工作空间(用户开发)技能的详情 / 分享(资源化) 复用公共 hook，保证与右侧个人技能 tab 行为一致。
   // 卸载仍走本地 handleUninstallSkill（左侧按数字员工维度，文案为“卸载”）。
   const workspaceActions = useWorkspaceSkillActions({
@@ -626,6 +644,17 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       }
     );
   };
+
+  const { canPublish, publishingId, publish } = useEnterpriseSkillPublication({
+    enabled: resourceType === 'SKILL',
+    onDetail: handleDetail,
+    onPublished: (resourceId) => {
+      // 仅更新源技能的操作权限，保留当前分页和滚动位置。
+      setResourceList((rows) =>
+        rows.map((row) => (String(row.resourceId) === resourceId ? { ...row, canPublishToEnterprise: false } : row))
+      );
+    },
+  });
 
   const handleShare = async (item: ResourceItem) => {
     if (!isWorkspaceSkill(item)) {
@@ -756,7 +785,9 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   };
 
   const renderDetailDropdown = (item: ResourceItem) => {
-    const menuItems: { key: string; label: React.ReactNode }[] = [];
+    const menuItems: { key: string; label: React.ReactNode; disabled?: boolean }[] = [];
+    const workspaceCenterItem = workspaceCenterSync.menuItem(item);
+    if (workspaceCenterItem) menuItems.push(workspaceCenterItem);
     if (!item.quoteDisabled) {
       menuItems.push({
         key: 'quote',
@@ -767,10 +798,21 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       key: 'detail',
       label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
     });
-    if (item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
+    if (resourceType !== 'SKILL' && item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
       menuItems.push({
         key: 'share',
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.share' })}</div>,
+      });
+    }
+    if (canPublish(item)) {
+      menuItems.push({
+        key: 'publishToEnterprise',
+        disabled: publishingId === String(item.resourceId),
+        label: (
+          <div className={employeeStyles.dropdownMenuItem}>
+            {intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+          </div>
+        ),
       });
     }
     if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL && canManageActiveAgent) {
@@ -786,14 +828,25 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       <Dropdown
         key="detail"
         trigger={['hover']}
+        onOpenChange={(open) => {
+          if (open) workspaceCenterSync.onOpen(item);
+        }}
         overlayClassName={employeeStyles.mydropdown}
         menu={{
           items: menuItems,
           onClick: ({ key, domEvent }) => {
             domEvent.preventDefault();
             domEvent.stopPropagation();
+            if (key === 'workspaceCenter') {
+              workspaceCenterSync.onClick(item);
+              return;
+            }
             if (key === 'quote') {
               handleQuoteResource(item);
+              return;
+            }
+            if (key === 'publishToEnterprise') {
+              publish(item);
               return;
             }
             if (key === 'share') {
@@ -935,6 +988,18 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
         </>
       )}
       <div className={styles.listContainer}>
+        {loadFailed && (
+          <Alert
+            type="error"
+            showIcon
+            message={intl.formatMessage({ id: 'resourceTabs.loadFailed' })}
+            action={
+              <Button size="small" onClick={() => loadResources({ reset: true })}>
+                {intl.formatMessage({ id: 'workspaceSider.retry' })}
+              </Button>
+            }
+          />
+        )}
         <InfiniteScrollAntdList
           className={employeeStyles.employeesList}
           dataSource={resourceList}

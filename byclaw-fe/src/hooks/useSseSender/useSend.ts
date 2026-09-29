@@ -5,6 +5,7 @@
  * 封装了SendHelper实例，提供统一的消息发送接口
  * 主要用于聊天功能，支持会话管理和回调处理
  */
+import { recordChatChain } from '@/utils/chatChainLog';
 import { useCallback } from 'react';
 import DOMPurify from 'dompurify'; // HTML 净化器
 
@@ -23,9 +24,7 @@ export { formatStreamPayload } from './chatStream';
  * @property {Function} [hooks.onConnect] - 连接建立时的回调函数
  */
 type IParam = {
-
-  /** 自定义聊天地址 */
-  chatUrl?: string;
+  chatUrl?: string; // 自定义聊天地址
   language?: string;
   sessionId?: string;
   hooks?: {
@@ -54,7 +53,7 @@ export default function useSend(params: IParam) {
    */
   const send = useCallback(
     (text: string, payload?: any) => {
-      console.log('useSend payload---', payload);
+      const requestId = payload?.clientRequestId || payload?.extParams?.requestId;
 
       // 从选项中提取callback回调函数
       // const { callback, ...optsRest } = opts;
@@ -78,9 +77,18 @@ export default function useSend(params: IParam) {
           sessionId,
           chatId: sessionId,
           ...(payload || {}),
+          extParams: { ...(payload?.extParams || {}), requestId },
         })
-        .then(() => ({}))
+        .then(() => {
+          recordChatChain('fe.sent', {
+            requestId,
+            sessionId: payload?.sessionId || sessionId,
+            laneIds: payload?.extParams?.multiAgent?.lanes?.map((lane: any) => lane.clientRequestId),
+          });
+          return {};
+        })
         .catch((error) => {
+          recordChatChain('fe.sent', { requestId, sessionId: payload?.sessionId || sessionId }, 'failed');
           // WS 连接失败（本地开发后端未启动等）属预期情况：记录但不抛出，避免 Unhandled Rejection。
           console.error('WebSocket 发送消息失败:', error);
           return {};

@@ -18,6 +18,23 @@ const required = {
 };
 
 describe("应用配置", () => {
+  it("未设置 Worker 并发时不限制并发", () => {
+    expect(loadConfig(required).worker.maxConcurrency).toBe(Infinity);
+  });
+
+  it.each(["1", "10", "1000"])("显式 Worker 并发上限 %s 生效", (value) => {
+    expect(loadConfig({ ...required, BYCLAW_WORKER_MAX_CONCURRENCY: value }).worker.maxConcurrency)
+      .toBe(Number(value));
+  });
+
+  it.each(["", "0", "-1", "1.5", "1001", "Infinity", "abc"])(
+    "拒绝非法 Worker 并发配置 %s",
+    (value) => {
+      expect(() => loadConfig({ ...required, BYCLAW_WORKER_MAX_CONCURRENCY: value }))
+        .toThrow("BYCLAW_WORKER_MAX_CONCURRENCY");
+    },
+  );
+
   it("默认实例 ID 包含 hostname 和 pid，避免不同 Pod 都使用 pid=1 时碰撞", () => {
     const config = loadConfig(required);
 

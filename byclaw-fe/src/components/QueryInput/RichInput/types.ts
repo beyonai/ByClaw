@@ -58,11 +58,16 @@ export interface DefaultValueSchema {
 }
 export interface Props {
   inAgentRoute?: boolean;
+
+  /** 显式业务初始值存在时，不自动补入会话历史员工。 */
+  initialInputValue?: DefaultValueSchema;
+  inputDraft?: DefaultValueSchema;
   style?: React.CSSProperties;
   agentId?: string;
   agentType?: IAgentType;
   chatMode?: IChatModeType;
   onChange?: (payload: PayloadType) => void;
+  onDraftChange?: (draft: DefaultValueSchema) => void;
   onSend?: (payload: PayloadType) => void;
   isInputAtBottom?: boolean;
   defaultPlaceholder?: string;
@@ -74,6 +79,7 @@ export interface Props {
   projectId?: number;
   mentionPopoverPlacement?: PopoverProps['placement'];
   onResourcePopoverChange?: (state: { open: boolean; inputText?: string; width?: number }) => void;
+  allowMultiAgentInExpertMode?: boolean;
 }
 
 export interface MentionTriggerInfo {

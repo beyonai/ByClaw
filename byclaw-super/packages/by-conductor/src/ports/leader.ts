@@ -106,7 +106,7 @@ export interface LeaderRunResult {
   text: string;
 }
 
-/** 每个业务 Session 独享并复用的 Pi Leader 会话协议。 */
+/** 单次执行独享的 Pi Leader；每次从数据库恢复业务 Session 的连续上下文。 */
 export interface LeaderSession {
   /** 当前实例加载的数据库 committed context revision。 */
   readonly contextRevision: number;
@@ -114,7 +114,7 @@ export interface LeaderSession {
   run(input: LeaderRunInput): Promise<LeaderRunResult>;
   /** Pi settled 后导出原生 header + append-only entries。 */
   checkpoint(): PiSessionCheckpoint | undefined;
-  /** checkpoint 原子提交成功后推进本地缓存版本。 */
+  /** checkpoint 原子提交成功后记录本次执行已提交的版本。 */
   markCommitted(revision: number): void;
   /** 中止当前模型生成和正在执行的工具。 */
   abort(): Promise<void>;
@@ -122,17 +122,20 @@ export interface LeaderSession {
   dispose(): Promise<void> | void;
 }
 
-/** Run 入站时冻结的 Leader 模型选择；不包含 URL、Token 等敏感配置。 */
+/** Run 入站时选定的 Leader 模型资源；恢复时读取该资源的当前有效配置。 */
 export interface LeaderModelSelection {
   /** ByAI 模型实例主键，对应 byai:aimodel:config 的 Hash field。 */
   modelId: string;
-  /** 模型运行配置指纹；同一模型配置变更时也会触发 Session 热切换。 */
-  fingerprint: string;
+  /**
+   * 模型 reasoningConfig.defaultLevel。调用方未下发 thinkingLevel 时作为兜底档位，
+   * 使管理员配置的思考强度在缺少会话选择时同样生效。
+   */
+  defaultThinkingLevel?: ThinkingLevel;
 }
 
 /** Leader 会话的创建和健康检查 Port。 */
 export interface LeaderSessionFactory {
-  /** 为指定业务 Session 创建独立、可复用的 Pi 会话。 */
+  /** 为指定业务 Session 从权威存储创建独立的执行会话。 */
   create(
     sessionId: string,
     model?: LeaderModelSelection,

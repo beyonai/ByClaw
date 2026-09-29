@@ -67,8 +67,7 @@ public class SandboxBrowserNavigationService {
         String operationId = "operation_account_" + UUID.randomUUID().toString().replace("-", "");
         Map<String, Object> command = new LinkedHashMap<>();
         command.put("id", operationId);
-        command.put("action", "tabs");
-        command.put("op", "new");
+        command.put("action", "navigate");
         command.put("url", targetUrl);
         command.put("session", sessionKey);
         command.put("surface", "browser");

@@ -3,7 +3,9 @@
  * 类似于 message-processor.ts，但通过 Redis 输出
  */
 
+import { chatChainLog } from "./chat-chain-log.js";
 import path from "node:path";
+import { prepareSessionModelForDispatch } from "../../shared/src/session-model-runtime.js";
 import {
   detectMime,
   fetchRemoteMedia,
@@ -23,10 +25,11 @@ import {
   registerAgentRunEndPromise,
   markActiveSdkCompactionRetryPending,
   markActiveSdkDispatchSettled,
+  markActiveSdkRootLifecycleFinished,
+  isActiveSdkRequestReadyForTaskPlanContinuation,
   markActiveSdkOverflowContinuePending,
   resolveActiveSdkRequestBySessionKey,
   withSdkEmitMetadata,
-  type ActiveSdkRequest,
 } from "./session-context.js";
 import { recordByclawChatContextMessage } from "./chat-context-store.js";
 import { ensureSessionReasoningStream, shouldForceReasoningStream } from "./reasoning-stream.js";
@@ -51,6 +54,8 @@ import { getAgentNameById } from "./utils.js";
 import {
   buildAgentReadyTitle,
   buildContextOverflowText,
+  buildContextRecoveryText,
+  buildContextFailureText,
 } from "./i18n.js";
 import {
   createByaiSdkDiagnosticTrace,
@@ -62,7 +67,12 @@ import {
 import {
   formatDispatchError,
   isOpenClawContextOverflowDispatchError,
+  isRecoverableContextPreflightError,
 } from "./dispatch-error.js";
+import { enqueueAfterAgentEvents } from "./agent-event-serial.js";
+import { compactSessionForRecovery, dispatchWithContextOverflowRecovery } from "./context-overflow-recovery.js";
+import { classifyContextFailure, toPublicContextError } from "./context-errors.js";
+import { assertContextRecoveryIdle, retainUnsettledContextDispatch, withTrackedContextCompaction } from "./context-recovery-operations.js";
 import {
   BYAI_CHANNEL_ID,
   buildBroadcastSessionKey,
@@ -163,17 +173,26 @@ function resolveManagedAgentPrimaryModel(
   return { ...parsed, primary };
 }
 
-async function alignManagedAgentSessionModel(params: {
+export async function alignManagedAgentSessionModel(params: {
   rt: ReturnType<typeof getByaiRuntime>;
   cfg: import("openclaw/plugin-sdk").OpenClawConfig;
   sessionAgentId: string;
   sessionKey: string;
   signal?: AbortSignal;
+  /**
+   * 网关透传的会话级模型选择信号（params.rel_model_id）。
+   * 正整数表示用户在对话框选定了模型：对齐工作交给 baiying-enhance（它负责按需注册 provider），
+   * 这里必须跳过，否则会把会话模型打回数字员工配置值。
+   */
+  relModelId?: string;
   log?: {
     info?: (msg: string) => void;
     warn?: (msg: string) => void;
   };
 }): Promise<void> {
+  if (params.relModelId && /^-?[1-9]\d*$/.test(params.relModelId.trim()) && params.relModelId.trim() !== "-1") {
+    return;
+  }
   const target = resolveManagedAgentPrimaryModel(params.cfg, params.sessionAgentId);
   if (!target) {
     return;
@@ -181,7 +200,7 @@ async function alignManagedAgentSessionModel(params: {
   const sessionApi = params.rt.agent?.session;
   if (!sessionApi?.patchSessionEntry || !sessionApi.resolveStorePath) {
     params.log?.warn?.(
-      `[diagnose-sdk] managed agent session model alignment skipped: runtime session patch API unavailable, agent=${params.sessionAgentId}`,
+      `[diagnose-sdk] managed agent session model alignment skipped: runtime session patch API unavailable, agent=${params.sessionAgentId}, sessionKey=${params.sessionKey}`,
     );
     return;
   }
@@ -220,9 +239,6 @@ async function alignManagedAgentSessionModel(params: {
       return Object.keys(patch).length > 0 ? patch : null;
     },
   }), params.signal);
-  params.log?.info?.(
-    `[diagnose-sdk] aligned managed agent session model before dispatch: agent=${params.sessionAgentId}, session=${params.sessionKey}, model=${target.primary}`,
-  );
 }
 
 /**
@@ -342,7 +358,7 @@ async function resolveSdkInboundMediaPayload(params: {
   }
 
   params.log?.info?.(
-    `[diagnose-sdk] attached inbound session files: sessionId=${params.sessionId}, count=${mediaPaths.length}, paths=${JSON.stringify(mediaPaths)}`,
+    `[diagnose-sdk] attached inbound session files: sessionId=${params.sessionId}, count=${mediaPaths.length}`,
   );
 
   return {
@@ -413,6 +429,13 @@ export async function deliverReplyToAgentViaSdk(
   const sessionKey = baseSessionKey;
 
   const { result, meta, release } = await runSessionDispatchExclusiveLeased(sessionKey, async () => {
+    assertContextRecoveryIdle(sessionKey, message.language);
+    // Provider registration can replace the runtime config. Complete it before
+    // taking the snapshot that OpenClaw retains throughout this dispatch.
+    await awaitWithAbort(
+      prepareSessionModelForDispatch(message.sessionId),
+      deps.abortController?.signal,
+    );
     const dispatchCfg = await waitForBaiyingAgentConfig({
       runtime: rt,
       cfg,
@@ -434,7 +457,7 @@ export async function deliverReplyToAgentViaSdk(
 
   if (meta.queued) {
     log?.info?.(
-      `[diagnose-sdk] session dispatch dequeued: sessionKey=${sessionKey}, queueDepthBefore=${meta.queueDepthBefore}, gateWaitMs=${meta.waitMs}`,
+      `[diagnose-sdk] session dispatch dequeued: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, queueDepthBefore=${meta.queueDepthBefore}, gateWaitMs=${meta.waitMs}`,
     );
   }
   let finalized = false;
@@ -469,6 +492,16 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
     agent_id?: unknown;
     agent_code?: unknown;
     agent_name?: unknown;
+    /** Java 网关透传的会话级模型选择（非零模型主键，-1 表示默认模型）。 */
+    rel_model_id?: unknown;
+    rel_model_code?: unknown;
+    rel_model_name?: unknown;
+    /**
+     * Java 网关透传的会话级思考档位（camelCase，词表与 byclaw-super THINKING_LEVELS 一致）。
+     * 运行时真正消费的是 Redis 会话记录的档位轴（baiying-enhance 写入 session store），
+     * 这里仅用于派发诊断日志，避免形成第二条事实来源。
+     */
+    thinkingLevel?: unknown;
   };
   laneMetadata?: ByaiLaneMetadata;
 };
@@ -526,11 +559,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     });
     if (reasoningSession.changed) {
       log?.info?.(
-        `[diagnose-sdk] forced session reasoningLevel=stream, session=${sessionKey}, sessionId=${reasoningSession.sessionId}, created=${String(reasoningSession.created)}, healed=${String(reasoningSession.healed)}, agent=${sessionAgentId}`,
-      );
-    } else {
-      log?.info?.(
-        `[diagnose-sdk] session reasoningLevel already stream, session=${sessionKey}, sessionId=${reasoningSession.sessionId}, agent=${sessionAgentId}`,
+        `[diagnose-sdk] forced session reasoningLevel=stream, sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, openclawSessionId=${reasoningSession.sessionId}, created=${String(reasoningSession.created)}, healed=${String(reasoningSession.healed)}, agent=${sessionAgentId}`,
       );
     }
   }
@@ -540,15 +569,21 @@ async function deliverReplyToAgentViaSdkUnderGate(
     cfg,
     sessionAgentId,
     sessionKey,
+    ...(stringValue(extraPayload.rel_model_id).trim()
+      ? { relModelId: stringValue(extraPayload.rel_model_id).trim() }
+      : {}),
     signal: deps.abortController?.signal,
     log,
   });
+
+  const sessionThinkingLevel = stringValue(extraPayload.thinkingLevel).trim();
 
   const { accountId } = account;
   const To = appendByaiLaneToTarget(`${sessionAgentId}:${message.sessionId}`, laneMetadata);
   const receivedAt = emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
 
   const activeRequest = registerActiveSdkRequest({
+    requestId: message.requestId,
     accountId,
     sessionKey,
     to: To,
@@ -636,14 +671,29 @@ async function deliverReplyToAgentViaSdkUnderGate(
   // agent-events 自动重绑到同一 activeRequest。`bodyText` 为本次投给 core 的提示文本。
   async function runOneDispatch(
     bodyText: string,
-    options?: { includeMedia?: boolean },
+    options?: { includeMedia?: boolean; signal?: AbortSignal },
   ): Promise<void> {
+    const dispatchConfig = rt.config?.current?.() ?? cfg;
+    const recovery = activeRequest.contextOverflowRecovery;
+    if (recovery.dispatchRunId) (recovery.retiredRunIds ??= new Set()).add(recovery.dispatchRunId);
+    const generation = recovery.generation = (recovery.generation ?? 0) + 1;
+    const isCurrentDispatch = () => recovery.generation === generation &&
+      resolveActiveSdkRequestBySessionKey(sessionKey) === activeRequest;
+    activeRequest.dispatchSettled = false;
+    activeRequest.contextOverflowRecovery.dispatchRunId = undefined;
+    setPromptInjectionSnapshot(sessionKey, buildPromptInjectionSnapshot({
+      request: activeRequest,
+      currentUserText: bodyText,
+      ...(groupChatContext ? { groupChatContext } : {}),
+      workspaceDir,
+      includeUserMdReloadHint,
+    }));
     const includeMedia = options?.includeMedia ?? true;
     const envelopeBody = rt.channel.reply.formatAgentEnvelope({
       channel: CHANNEL_ID,
       from: `${CHANNEL_ID}:${message.userId}`,
       timestamp: new Date(),
-      envelope: rt.channel.reply.resolveEnvelopeFormatOptions(cfg),
+      envelope: rt.channel.reply.resolveEnvelopeFormatOptions(dispatchConfig),
       body: bodyText,
     });
     const ctxPayload = {
@@ -677,11 +727,24 @@ async function deliverReplyToAgentViaSdkUnderGate(
     let dispatchStartedAt = 0;
     try {
       const { dispatcher, replyOptions } = rt.channel.reply.createReplyDispatcherWithTyping({
-        deliver: () => {},
+        deliver: async (payload: { isError?: boolean; text?: string }) => {
+          // Some preflight failures have only an error ReplyPayload, no lifecycle
+          // or agent_end event. The per-dispatch callback supplies its identity.
+          if (!isCurrentDispatch() || !payload.isError || !payload.text || !classifyContextFailure(payload.text)) return;
+          recovery.contextFailure = payload.text;
+          (recovery.errors ??= new Set()).add(payload.text);
+          if (recovery.replaySafe && !/mid-turn precheck/i.test(payload.text) &&
+              (isRecoverableContextPreflightError(payload.text) || isOpenClawContextOverflowDispatchError(payload.text))) {
+            recovery.precheckError = payload.text;
+            recovery.onContextFailure?.();
+          }
+        },
       });
 
       const finalizedCtx = rt.channel.reply.finalizeInboundContext(ctxPayload);
-      log?.info?.(`[diagnose-sdk] finalized ctx, SessionKey: ${finalizedCtx.SessionKey}, To: ${To}`);
+      chatChainLog(log, "openclaw.started", {
+        requestId: message.requestId || message.traceId, sessionId: message.sessionId, traceId: message.traceId,
+      });
 
       dispatchStartedAt = emitByaiSdkDispatchStarted(diagnosticRef, diagnosticTrace);
       const turnResult = await runWithByaiSdkDiagnosticTrace(diagnosticTrace, () =>
@@ -689,7 +752,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
           channel: CHANNEL_ID,
           accountId,
           routeSessionKey: sessionKey,
-          storePath: rt.channel.session.resolveStorePath(cfg.session?.store, {
+          storePath: rt.channel.session.resolveStorePath(dispatchConfig.session?.store, {
             agentId: sessionAgentId,
           }),
           ctxPayload: finalizedCtx,
@@ -704,16 +767,20 @@ async function deliverReplyToAgentViaSdkUnderGate(
                   runWithByaiSdkDiagnosticTrace(diagnosticTrace, () =>
                     rt.channel.reply.dispatchReplyFromConfig({
                       ctx: finalizedCtx,
-                      cfg,
+                      cfg: dispatchConfig,
                       dispatcher,
                       replyOptions: {
                         ...replyOptions,
-                        abortSignal: deps.abortController?.signal,
+                        abortSignal: options?.signal ?? deps.abortController?.signal,
                         disableBlockStreaming: true,
                         onAgentRunStart: async (runId: string) => {
+                          if (!isCurrentDispatch()) return;
+                          activeRequest.contextOverflowRecovery.dispatchRunId = runId;
                           bindActiveSdkRequestRunId(sessionKey, runId);
                           registerAgentRunEndPromise(runId);
-                          log?.info?.(`[diagnose-sdk] onAgentRunStart called, runId: ${runId}`);
+                          log?.debug?.(
+                            `[diagnose-sdk] agent run started: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, runId=${runId}`,
+                          );
                           await onReply(
                           buildAgentReadyTitle(message.language, sessionAgentName),
                           withSdkEmitMetadata(
@@ -736,6 +803,8 @@ async function deliverReplyToAgentViaSdkUnderGate(
                         onReasoningEnd: () => {},
                         onPartialReply: () => {},
                         onCompactionStart: async () => {
+                          if (!isCurrentDispatch()) return;
+                          recovery.onNativeCompaction?.("start");
                           markActiveSdkCompactionRetryPending(sessionKey, true);
                           await onReply("", {
                             parentMessageId: activeRequest.parentMessageId,
@@ -744,6 +813,8 @@ async function deliverReplyToAgentViaSdkUnderGate(
                           });
                         },
                         onCompactionEnd: async () => {
+                          if (!isCurrentDispatch()) return;
+                          recovery.onNativeCompaction?.("end");
                           markActiveSdkCompactionRetryPending(sessionKey, false);
                         },
                       },
@@ -758,14 +829,17 @@ async function deliverReplyToAgentViaSdkUnderGate(
         startedAt: dispatchStartedAt,
         outcome: "completed",
       });
-      log?.info?.(
-        `[diagnose-sdk] dispatch finished, queuedFinal=${String(dispatchResult.queuedFinal)}, counts=${JSON.stringify(dispatchResult.counts)}`,
+      log?.debug?.(
+        `[diagnose-sdk] dispatch finished: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, messageId=${message.messageId}, sessionKey=${sessionKey}, durationMs=${Math.max(0, Date.now() - dispatchStartedAt)}, queuedFinal=${String(dispatchResult.queuedFinal)}, counts=${JSON.stringify(dispatchResult.counts)}`,
       );
       // The prepared dispatch promise is authoritative for the no-run
       // (precheck-blocked) path. Root runs with lifecycle events ignore this
       // flag and continue to use rootLifecyclePhase as their drain signal.
-      markActiveSdkDispatchSettled(sessionKey);
+      if (isCurrentDispatch()) markActiveSdkDispatchSettled(sessionKey);
     } catch (err) {
+      if (isCurrentDispatch() && isRecoverableContextPreflightError(err)) {
+        activeRequest.contextOverflowRecovery.precheckError = formatDispatchError(err);
+      }
       if (dispatchStartedAt > 0) {
         emitByaiSdkDispatchCompleted(diagnosticRef, diagnosticTrace, {
           startedAt: dispatchStartedAt,
@@ -774,13 +848,68 @@ async function deliverReplyToAgentViaSdkUnderGate(
         });
       }
       throw err;
+    } finally {
+      // Agent bus events are deferred with setImmediate. Drain them before
+      // deciding whether a failed precheck is safe to replay or starting RPC.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await enqueueAfterAgentEvents("context recovery dispatch drain", async () => {});
+      if (isCurrentDispatch() && options?.signal?.aborted && isRecoverableContextPreflightError(options.signal.reason)) {
+        recovery.precheckError = formatDispatchError(options.signal.reason);
+      }
+      if (isCurrentDispatch() && activeRequest.contextOverflowRecovery.precheckError) {
+        markActiveSdkDispatchSettled(sessionKey);
+        markActiveSdkCompactionRetryPending(sessionKey, false);
+        if (activeRequest.boundRunIds.size > 0 && !activeRequest.rootLifecyclePhase) {
+          markActiveSdkRootLifecycleFinished(sessionKey, "error", [...activeRequest.boundRunIds].at(-1));
+        }
+      }
     }
   }
 
-  let deferDispatchSettleToAgentEvents = false;
   let settleTimedOut = false;
+  // Hold finalization from the first dispatch through recovery. Native lifecycle
+  // end/error must not close the user's stream between compression and replay.
+  activeRequest.contextOverflowRecovery.dispatchPending = true;
   try {
-    await runOneDispatch(message.text);
+    await dispatchWithContextOverflowRecovery({
+      state: activeRequest.contextOverflowRecovery,
+      signal: deps.abortController?.signal,
+      nativeCompactionTimeoutMs: () => ((rt.config?.current?.() ?? cfg).agents?.defaults?.compaction?.timeoutSeconds ?? 180) * 1000,
+      onUnsettledDispatch: (operation) => {
+        activeRequest.contextOverflowRecovery.generation = (activeRequest.contextOverflowRecovery.generation ?? 0) + 1;
+        const runId = activeRequest.contextOverflowRecovery.dispatchRunId;
+        if (runId) (activeRequest.contextOverflowRecovery.retiredRunIds ??= new Set()).add(runId);
+        retainUnsettledContextDispatch(sessionKey, operation, message.language);
+      },
+      dispatch: (signal) => runOneDispatch(message.text, { signal }),
+      compact: (signal, remainingMs) => {
+        if (!isActiveSdkRequestReadyForTaskPlanContinuation(activeRequest)) {
+          throw new Error("Session still has active work; automatic compaction cancelled");
+        }
+        return compactSessionForRecovery({
+          runtime: rt,
+          sessionKey,
+          signal,
+          timeoutMs: Math.min(remainingMs, ((rt.config?.current?.() ?? cfg).agents?.defaults?.compaction?.timeoutSeconds ?? 180) * 1000 + 30_000),
+          trackOperation: (run) => withTrackedContextCompaction(sessionKey, run, message.language),
+        });
+      },
+      notice: async (phase, attempt, failureKind) => {
+        const text = phase === "failed" && failureKind
+          ? buildContextFailureText(message.language, failureKind)
+          : buildContextRecoveryText(message.language, phase, attempt);
+        await onReply(text, {
+          parentMessageId: activeRequest.parentMessageId,
+          eventType: EventType.REASONING_LOG_DELTA,
+          contentType: SseReasonMessageType.think_status_title,
+          objectType: "compaction",
+          status: phase === "failed" ? "_ERROR_" : phase === "retry" ? "_DONE_" : "_START_",
+          metadata: { isCompactionNotice: true, recoveryAttempt: attempt, recoveryPhase: phase },
+        });
+      },
+      failureText: buildContextRecoveryText(message.language, "failed", 3),
+      logger: log,
+    });
     await maybeContinueAfterOverflow();
     await continueActiveTaskPlan({
       request: activeRequest,
@@ -794,28 +923,34 @@ async function deliverReplyToAgentViaSdkUnderGate(
     });
   } catch (err) {
     const errorText = formatDispatchError(err);
-    if (isOpenClawContextOverflowDispatchError(err)) {
-      deferDispatchSettleToAgentEvents = true;
-      log?.warn?.(
-        `[diagnose-sdk] Message dispatch reported context overflow; keeping SDK stream open for OpenClaw recovery: ${errorText}`,
-      );
+    if (classifyContextFailure(err)) {
+      log?.warn?.(`[context-overflow-recovery] request failed: traceId=${message.traceId || ""}, error=${errorText}`);
+      activeRequest.contextOverflowRecovery.contextFailure = err;
+      if (activeRequest.contextOverflowRecovery.replaySafe ||
+          isActiveSdkRequestReadyForTaskPlanContinuation(activeRequest)) {
+        // No business work to drain. Do not wait for a recovery run that will never start.
+        if (resolveActiveSdkRequestBySessionKey(sessionKey) === activeRequest) clearActiveSdkRequestByTarget(accountId, To);
+        throw toPublicContextError(err, message.language);
+      }
+      // Tools/children may already be running: keep the existing completion gates
+      // and let their normal follow-ups drain. Never replay or clear those gates.
     } else {
-      log?.error?.(`[diagnose-sdk] Message dispatch failed: ${errorText}`);
-      clearActiveSdkRequestByTarget(accountId, To);
+      log?.error?.(
+        `[diagnose-sdk] Message dispatch failed: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, error=${errorText}`,
+      );
+      if (resolveActiveSdkRequestBySessionKey(sessionKey) === activeRequest) clearActiveSdkRequestByTarget(accountId, To);
       throw err;
     }
   } finally {
-    if (deferDispatchSettleToAgentEvents) {
-      log?.info?.(
-        `[diagnose-sdk] session dispatch settle deferred to OpenClaw recovery events: sessionKey=${sessionKey}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
-      );
-    } else {
+    activeRequest.contextOverflowRecovery.dispatchPending = false;
+    if (resolveActiveSdkRequestBySessionKey(sessionKey) === activeRequest) {
       const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
+        log,
         abortSignal: deps.abortController?.signal,
       });
       settleTimedOut = settle.timedOut;
-      log?.info?.(
-        `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+      log?.debug?.(
+        `[diagnose-sdk] session dispatch settled: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
       );
     }
   }
@@ -840,7 +975,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
           const runIds = [...request.boundRunIds];
           const finalRunId = runIds[runIds.length - 1] ?? "";
           log?.info?.(
-            `context-overflow continuation trigger finished: sessionKey=${sessionKey}, ` +
+            `context-overflow continuation trigger finished: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, ` +
               `attempts=${request.overflowContinueCount}, finalRunId=${finalRunId}, ` +
               `compactionObserved=${String(request.overflowContinuationCompactionObserved)}`,
           );
@@ -875,7 +1010,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
       request.overflowContinuationCompactionObserved = false;
       const overflowDiagnostic = request.lastRunOverflowDiagnostic;
       log?.info?.(
-        `context-overflow continuation trigger: sessionKey=${sessionKey}, ` +
+        `context-overflow continuation trigger: sessionId=${message.sessionId}, traceId=${message.traceId || ""}, sessionKey=${sessionKey}, ` +
           `attempt=${request.overflowContinueCount}, ` +
           `trigger=length_context_pressure, ` +
           `stopReason=${overflowDiagnostic?.stopReason ?? "length"}, ` +
@@ -894,23 +1029,21 @@ async function deliverReplyToAgentViaSdkUnderGate(
   }
 
   if (settleTimedOut) {
-    clearActiveSdkRequestByTarget(accountId, To);
+    if (resolveActiveSdkRequestBySessionKey(sessionKey) === activeRequest) clearActiveSdkRequestByTarget(accountId, To);
+    if (activeRequest.contextOverflowRecovery.contextFailure) {
+      throw toPublicContextError(activeRequest.contextOverflowRecovery.contextFailure, message.language);
+    }
     throw new Error(`byai-channel business completion timed out: sessionKey=${sessionKey}`);
   }
-  if (deferDispatchSettleToAgentEvents) {
-    try {
-      await waitForPreparedFrameworkCompletion(activeRequest, deps.abortController?.signal);
-    } catch (error) {
-      clearActiveSdkRequestByTarget(accountId, To);
-      throw error;
-    }
-  }
   if (!activeRequest.frameworkCompletionPrepared) {
-    clearActiveSdkRequestByTarget(accountId, To);
+    if (resolveActiveSdkRequestBySessionKey(sessionKey) === activeRequest) clearActiveSdkRequestByTarget(accountId, To);
     throw new Error(`byai-channel business completion did not prepare a result: sessionKey=${sessionKey}`);
   }
   if (activeRequest.frameworkFinalAnswerTerminalOutcome === "failure") {
-    clearActiveSdkRequestByTarget(accountId, To);
+    if (resolveActiveSdkRequestBySessionKey(sessionKey) === activeRequest) clearActiveSdkRequestByTarget(accountId, To);
+    if (activeRequest.contextOverflowRecovery.contextFailure) {
+      throw toPublicContextError(activeRequest.contextOverflowRecovery.contextFailure, message.language);
+    }
     throw new Error(`byai-channel root agent run failed: sessionKey=${sessionKey}`);
   }
   return {
@@ -922,25 +1055,4 @@ async function deliverReplyToAgentViaSdkUnderGate(
       }
     },
   };
-}
-
-async function waitForPreparedFrameworkCompletion(
-  request: ActiveSdkRequest,
-  abortSignal?: AbortSignal,
-): Promise<void> {
-  const startedAt = Date.now();
-  const timeoutMs = 30 * 60 * 1000;
-  while (!request.frameworkCompletionPrepared) {
-    if (abortSignal?.aborted) {
-      throw abortSignal.reason instanceof Error
-        ? abortSignal.reason
-        : new Error(String(abortSignal.reason || "task cancelled"));
-    }
-    if (Date.now() - startedAt >= timeoutMs) {
-      throw new Error(
-        `byai-channel deferred business completion timed out: sessionKey=${request.sessionKey}`,
-      );
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
-  }
 }

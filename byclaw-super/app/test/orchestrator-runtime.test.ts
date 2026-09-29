@@ -76,7 +76,6 @@ describe("ByClaw BE orchestrator runtime provider", () => {
     expect(resolveByModelId).toHaveBeenCalledWith("10023");
     expect(resolved.leaderModel).toEqual({
       modelId: "10023",
-      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(JSON.stringify(resolved)).not.toContain("secret");
   });

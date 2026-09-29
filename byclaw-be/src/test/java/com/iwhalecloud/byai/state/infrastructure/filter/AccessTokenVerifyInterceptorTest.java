@@ -24,6 +24,51 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 class AccessTokenVerifyInterceptorTest {
 
+    @Test
+    void allowsInvitationValidationThroughUrlMatcher() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+        var login = new LoginInfo();
+        login.setUserId(99L);
+        CurrentUserHolder.setLoginInfo(login);
+        var request = new MockHttpServletRequest("GET", "/byaiService/group-chats/invitations/validate");
+        request.setContextPath("/byaiService");
+        request.setServletPath("/group-chats/invitations/validate");
+        request.addHeader("accessToken", "invalid-token");
+        var response = new MockHttpServletResponse();
+
+        assertTrue(interceptor.preHandle(request, response, new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(99L);
+    }
+
+    @Test
+    void allowsOnlyExactAnonymousCaptchaAndSmsMethods() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+        for (String context : List.of("", "/byaiService")) {
+            assertTrue(interceptor.preHandle(request("GET", context + "/system/session/captcha", context),
+                new MockHttpServletResponse(), new Object()));
+            assertTrue(interceptor.preHandle(request("POST", context + "/system/session/captcha", context),
+                new MockHttpServletResponse(), new Object()));
+            assertTrue(interceptor.preHandle(request("POST", context + "/system/session/sms/send", context),
+                new MockHttpServletResponse(), new Object()));
+            for (String[] route : List.of(
+                    new String[]{"GET", "/system/session/sms/send"},
+                    new String[]{"GET", "/system/session/captcha/"},
+                    new String[]{"GET", "/system/session/captcha/extra"},
+                    new String[]{"GET", "/other/system/session/captcha"},
+                    new String[]{"POST", "/system/session/sms/sendExtra"},
+                    new String[]{"POST", "/system/session/sms/send/"},
+                    new String[]{"POST", "/other/system/session/sms/send"},
+                    new String[]{"GET", "/system/session/currentUser"})) {
+                MockHttpServletResponse response = new MockHttpServletResponse();
+                assertFalse(interceptor.preHandle(request(route[0], context + route[1], context),
+                    response, new Object()), route[0] + " " + route[1]);
+                assertThat(response.getStatus()).isEqualTo(401);
+            }
+        }
+    }
+
     @AfterEach
     void clearCurrentUser() {
         CurrentUserHolder.clearLoginInfo();
@@ -42,6 +87,33 @@ class AccessTokenVerifyInterceptorTest {
             "http://localhost:8086/byaiService/tool/installThirdPartySkill"));
         assertFalse(interceptor.checkUrlByRegex(
             "http://localhost:8086/system/session/currentUser"));
+    }
+
+    @Test
+    void allowsAnonymousDesktopVersionDiscoveryAndPackageDownloadOnly() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+
+        assertTrue(interceptor.preHandle(request("GET",
+            "/byaiService/api/v1/appVersion/latest", "/byaiService"),
+            new MockHttpServletResponse(), new Object()));
+        assertTrue(interceptor.preHandle(request("GET",
+            "/byaiService/api/v1/appVersion/package/20096802", "/byaiService"),
+            new MockHttpServletResponse(), new Object()));
+
+        for (String path : List.of(
+                "/api/v1/appVersion/package/not-a-number",
+                "/api/v1/appVersion/package/20096802/extra",
+                "/api/v1/appVersion/admin/page")) {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            assertFalse(interceptor.preHandle(request("GET", "/byaiService" + path, "/byaiService"),
+                response, new Object()));
+            assertThat(response.getStatus()).isEqualTo(401);
+        }
+        MockHttpServletResponse postResponse = new MockHttpServletResponse();
+        assertFalse(interceptor.preHandle(request("POST",
+            "/byaiService/api/v1/appVersion/latest", "/byaiService"), postResponse, new Object()));
+        assertThat(postResponse.getStatus()).isEqualTo(401);
     }
 
     @Test

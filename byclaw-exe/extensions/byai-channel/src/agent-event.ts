@@ -1,3 +1,4 @@
+import { chatChainLog } from "./chat-chain-log.js";
 import { EmitOptions, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
   ActiveSdkRequest,
@@ -22,7 +23,8 @@ import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
-import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
+import { isOpenClawContextOverflowDispatchError, isRecoverableContextPreflightError } from "./dispatch-error.js";
+import { classifyContextFailure, publicContextErrorText } from "./context-errors.js";
 import { reportNativeChildRunTerminal } from "./native-child-run.js";
 import {
   resolveAssistantDisplayStream,
@@ -157,6 +159,10 @@ async function handleToolEvent(
   resolvedSessionKey: string | undefined,
 ) {
   const data = event.data as ToolEventData;
+  if (data?.phase === "start") {
+    request.contextOverflowRecovery.replaySafe = false;
+    request.contextOverflowRecovery.onExecutionProgress?.();
+  }
   if (!shouldEmitToolCard(data?.name)) {
     return;
   }
@@ -326,6 +332,10 @@ async function handleAssistantEvent(
   const cumulativeText = stringValue(event.data?.text);
   const isReplacement = event.data?.replace === true;
   const emitAnswerDelta = async (answerDelta: string) => {
+    if (answerDelta.trim()) {
+      request.contextOverflowRecovery.replaySafe = false;
+      request.contextOverflowRecovery.onExecutionProgress?.();
+    }
     appendByclawAssistantContextDelta({
       request,
       id: request.laneMetadata?.answerMessageId ?? `${event.runId}:assistant`,
@@ -446,6 +456,9 @@ async function handleLifecycleEvent(
       data.fallbackStepFinalOutcome,
     ) ?? request;
     if (data.fallbackStepFinalOutcome === "next_fallback") {
+      request.contextOverflowRecovery.precheckError = undefined;
+      request.contextOverflowRecovery.contextFailure = undefined;
+      request.contextOverflowRecovery.onExecutionProgress?.();
       cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
       return;
     }
@@ -472,11 +485,37 @@ async function handleLifecycleEvent(
     );
     return;
   }
+  chatChainLog(api.logger, "openclaw.ended", {
+    requestId: activeRequest.requestId || activeRequest.traceId,
+    sessionId: activeRequest.sessionId, traceId: activeRequest.traceId,
+    runId: event.runId, phase,
+  }, phase === "error" ? "failed" : "ok");
   if (phase === "error") {
     const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
-    await emitSdkChunk(request, errorText, {
-      eventType: EventType.ANSWER_DELTA,
-    });
+    // 2026.7.1 can return before llm_input/agent_end and expose only a
+    // normalized lifecycle overflow. Correlate it to this dispatch and require
+    // no tool execution/visible answer before deferring it to recovery.
+    const recoverableOverflow = request.contextOverflowRecovery.dispatchPending &&
+      request.contextOverflowRecovery.replaySafe &&
+      request.contextOverflowRecovery.dispatchRunId === event.runId &&
+      (isOpenClawContextOverflowDispatchError(errorText) || isRecoverableContextPreflightError(errorText)) &&
+      !/mid-turn precheck/i.test(errorText);
+    if (recoverableOverflow) {
+      request.contextOverflowRecovery.precheckError = errorText;
+      request.contextOverflowRecovery.onContextFailure?.();
+    }
+    const contextFailure = classifyContextFailure(errorText);
+    if (contextFailure) {
+      (request.contextOverflowRecovery.errors ??= new Set()).add(errorText);
+      if (!request.contextOverflowRecovery.dispatchPending ||
+          request.contextOverflowRecovery.dispatchRunId === event.runId) {
+        request.contextOverflowRecovery.contextFailure = errorText;
+      }
+      api.logger.warn?.(`[context-overflow-recovery] lifecycle failure: traceId=${request.traceId}, runId=${event.runId}, error=${errorText}`);
+    }
+    if (!recoverableOverflow && !(contextFailure && request.contextOverflowRecovery.dispatchPending)) {
+      await emitSdkChunk(request, publicContextErrorText(errorText, request.language), { eventType: EventType.ANSWER_DELTA });
+    }
   }
   clearIncrementalTextSnapshot(`${event.runId}:`);
   const completionReason =
@@ -500,6 +539,10 @@ async function handleCompactionEvent(
     return;
   }
   const activeSessionKey = sessionKey ?? request.sessionKey;
+  if (activeSessionKey === request.sessionKey && event.runId === request.contextOverflowRecovery.dispatchRunId &&
+      (phase === "start" || phase === "end")) {
+    request.contextOverflowRecovery.onNativeCompaction?.(phase);
+  }
   if (phase === "start") {
     markActiveSdkCompactionRetryPending(activeSessionKey, true);
     await emitSdkChunk(request, buildCompactionNoticeText(request.language, {
@@ -586,9 +629,6 @@ async function emitReasoningText(
 }
 
 export default async function handleAgentEvent(api: OpenClawPluginApi, event: AgentEvent) {
-  api.logger.info(
-    `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
-  );
   const { seq, sessionKey, runId } = event;
   const runBinding = resolveActiveSdkRunBinding(runId);
   const resolvedSessionKey = sessionKey ?? runBinding?.sessionKey;
@@ -607,6 +647,7 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   if (!request) {
     return;
   }
+  if (request.contextOverflowRecovery.retiredRunIds?.has(runId)) return;
   // direct-path 汇总 / announce 续跑等 turn 的 runId 不经 onAgentRunStart/subagent_spawned
   // 绑定，但其事件能经 sessionKey 解析到本 request。补绑定使 boundRunIds 完整，request
   // 清理时能回收其在 activeSdkRequestsByRun 的条目。

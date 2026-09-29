@@ -1,3 +1,4 @@
+import { registerConfiguredThinkingAdapter } from "./configured-thinking.js";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -190,7 +191,8 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
   });
   registerManagePermissionGuard({ api, store: managePermissionStore });
 
-  registerBaiyingAimodelRuntimeProvider(api, pluginCfg);
+  const aimodelProvider = registerBaiyingAimodelRuntimeProvider(api, pluginCfg);
+  registerConfiguredThinkingAdapter(api, aimodelProvider.resolveSyntheticAuth);
 
   registerBaiyingHttpRoutes({ api, registry });
 

@@ -9,6 +9,16 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisCluster;
+import redis.clients.jedis.HostAndPort;
+import redis.clients.jedis.ConnectionPool;
+import redis.clients.jedis.params.ScanParams;
+import org.springframework.data.redis.connection.RedisClusterConnection;
+import org.springframework.data.redis.connection.RedisClusterNode;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.RedisConnectionUtils;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -389,6 +399,20 @@ public class RedisUtil {
         return result != null ? result : 0L;
     }
 
+    /** Atomically reserve an attempt in a fixed window; Redis failures fail closed. */
+    public static boolean reserveAttempt(String key, int limit, long seconds) {
+        if (limit <= 0 || seconds <= 0) {
+            throw new IllegalArgumentException("Invalid rate limit configuration");
+        }
+        String script = "local n = tonumber(redis.call('get', KEYS[1]) or '0'); "
+            + "if n >= tonumber(ARGV[1]) then return 0 end; "
+            + "redis.call('incr', KEYS[1]); "
+            + "if redis.call('ttl', KEYS[1]) < 0 then redis.call('expire', KEYS[1], ARGV[2]) end; return 1";
+        Long result = instance.stringRedisTemplate.execute(new DefaultRedisScript<>(script, Long.class),
+            Collections.singletonList(key), String.valueOf(limit), String.valueOf(seconds));
+        return Long.valueOf(1).equals(result);
+    }
+
     /**
      * 删除指定的键 对应Redis的DEL命令
      *
@@ -412,19 +436,72 @@ public class RedisUtil {
         }
         Set<String> keys = new java.util.HashSet<>();
         ScanOptions options = ScanOptions.scanOptions().match(prefix + "*").count(100).build();
-        try (Cursor<byte[]> cursor = instance.stringRedisTemplate
-            .executeWithStickyConnection(connection -> connection.keyCommands().scan(options))) {
-            while (cursor != null && cursor.hasNext()) {
-                keys.add(new String(cursor.next()));
+        RedisConnectionFactory factory = instance.stringRedisTemplate.getRequiredConnectionFactory();
+        RedisConnection connection = RedisConnectionUtils.getConnection(factory);
+        boolean releaseConnection = true;
+        try {
+            // StringRedisTemplate wraps connections; use the factory connection to detect Cluster.
+            if (connection instanceof RedisClusterConnection cluster) {
+                for (RedisClusterNode node : cluster.clusterGetNodes()) {
+                    if (node.isMaster()) {
+                        if (cluster.getNativeConnection() instanceof JedisCluster jedisCluster) {
+                            collectJedisClusterKeys(jedisCluster, node, prefix, keys);
+                        }
+                        else {
+                            collectKeys(cluster.scan(node, options), keys);
+                        }
+                    }
+                }
+            }
+            else {
+                // A regular Jedis SCAN cursor owns its connection. Preserve sticky-connection
+                // ownership instead of releasing the same pooled connection twice.
+                releaseConnection = false;
+                RedisConnectionUtils.releaseConnection(connection, factory);
+                collectKeys(instance.stringRedisTemplate.executeWithStickyConnection(
+                    scanConnection -> scanConnection.keyCommands().scan(options)), keys);
             }
         }
         catch (Exception e) {
             throw new IllegalStateException("Scan redis keys by prefix failed, prefix=" + prefix, e);
         }
-        if (keys == null || keys.isEmpty()) {
-            return;
+        finally {
+            if (releaseConnection) {
+                RedisConnectionUtils.releaseConnection(connection, factory);
+            }
         }
-        instance.stringRedisTemplate.delete(keys);
+        // Keys can belong to different hash slots. Route each DEL independently.
+        for (String key : keys) {
+            instance.stringRedisTemplate.delete(key);
+        }
+    }
+
+    private static void collectJedisClusterKeys(JedisCluster cluster, RedisClusterNode node,
+            String prefix, Set<String> keys) {
+        String address = new HostAndPort(node.getHost(), node.getPort()).toString();
+        ConnectionPool pool = cluster.getClusterNodes().get(address);
+        if (pool == null) {
+            throw new IllegalStateException("Redis cluster primary connection pool not found: " + address);
+        }
+        // Keep the borrowed connection until every page is consumed. Spring's Jedis
+        // node SCAN cursor returns its connection before subsequent pages are read.
+        try (Jedis client = new Jedis(pool.getResource())) {
+            ScanParams params = new ScanParams().match(prefix + "*").count(100);
+            String cursor = ScanParams.SCAN_POINTER_START;
+            do {
+                var page = client.scan(cursor, params);
+                keys.addAll(page.getResult());
+                cursor = page.getCursor();
+            } while (!ScanParams.SCAN_POINTER_START.equals(cursor));
+        }
+    }
+
+    private static void collectKeys(Cursor<byte[]> cursor, Set<String> keys) {
+        try (cursor) {
+            while (cursor.hasNext()) {
+                keys.add(new String(cursor.next(), StandardCharsets.UTF_8));
+            }
+        }
     }
 
     /**

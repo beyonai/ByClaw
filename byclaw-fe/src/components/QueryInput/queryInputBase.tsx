@@ -24,6 +24,7 @@ import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig'
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
 import { getLastMentionedDigitalEmployeeId } from './utils/mention';
+import { getInputResourceProject } from './utils/resourceProject';
 import MentionPopover from './RichInput/mentionPopover';
 import { getResourcePopoverAdapter } from './RichInput/mentionPopover/resourcePopoverAdapter';
 
@@ -54,6 +55,9 @@ export type IProps = {
   uploadFileConfig?: IAgentFileUploadConf;
   employeesList?: IAgentCache[];
   defaultDigEmployeeId?: string | number;
+
+  /** 业务表单的初始值，优先于草稿，空值也必须按原样回填。 */
+  initialInputValue?: DefaultValueSchema;
   inputDraft?: DefaultValueSchema;
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
   contextUsed?: ContextUsed;
@@ -176,7 +180,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   componentDidUpdate(prevProps: IProps) {
     if (`${prevProps.sessionId || ''}` !== `${this.props.sessionId || ''}`) {
-      // 新会话取得真实 sessionId 后重新读取已迁移的草稿，保证所有 @ 员工都恢复到输入框。
+      // 新会话取得真实 sessionId 后恢复该会话草稿，保证未发送内容和所有 @ 员工仍在输入框。
       this.restoreInputDraft();
     }
   }
@@ -197,8 +201,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   restoreInputDraft = () => {
-    const { inputDraft } = this.props;
-    if (!inputDraft || (!inputDraft.text && isEmpty(inputDraft.resourceList))) {
+    const { initialInputValue } = this.props;
+    const inputDraft = initialInputValue ?? this.props.inputDraft;
+    if (!inputDraft || (!initialInputValue && !inputDraft.text && isEmpty(inputDraft.resourceList))) {
       this.syncSiderAgent([]);
       return;
     }
@@ -730,7 +735,10 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           ref={this.richInputRef}
           defaultPlaceholder={placeholder}
           inAgentRoute={this.chechCannotAt()}
+          initialInputValue={this.props.initialInputValue}
+          inputDraft={this.props.inputDraft}
           onPasteFiles={this.onPasteFiles}
+          onDraftChange={this.props.onInputDraftChange}
           onChange={(inputSchema) => {
             const { text, agentId: currentAgentId, agentType, resourceList, displayText } = inputSchema;
             this.displayQuestion = displayText;
@@ -740,11 +748,6 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               inputValue: text,
               connectNet: resourceList.some((item) => `${item.resourceId}` === `${connectNetAgentId}`),
             }));
-            // 只要存在数字员工，就保存完整 mention 草稿，防止回答过程中默认 agent 变化后丢失其它员工。
-            const draft = resourceList.some((item) => `${item.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
-              ? this.getPersistentMentionDraft(true)
-              : { text, resourceList };
-            this.props.onInputDraftChange?.(draft);
             this.syncSiderAgent(resourceList);
             if (!cannotAt && `${agentId || ''}` !== `${currentAgentId || ''}`) {
               let nextAgentType = agentType;
@@ -767,8 +770,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           }}
           canQuote={this.checkCanQuote()}
           resourceAgentIds={this.getResourceAgentIds()}
-          projectId={this.props.projectId}
-          projectCloudResourceId={this.props.projectCloudResourceId}
+          {...getInputResourceProject(this.props)}
           mentionPopoverPlacement={this.props.mentionPopoverPlacement}
           onResourcePopoverChange={({ open, inputText, width }) => {
             if (!open) {
@@ -849,8 +851,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           type="@"
           chatMode={this.props.chatMode}
           sessionId={this.props.sessionId}
-          projectId={this.props.projectId}
-          projectCloudResourceId={this.props.projectCloudResourceId}
+          {...getInputResourceProject(this.props)}
           agentId={this.getQuoteAgentId()}
           resourceAgentIds={this.getResourceAgentIds()}
           excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
@@ -860,6 +861,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
             open: this.state.toolsPopoverOpen === true,
             width: this.state.toolsPopoverWidth,
             isInputAtBottom: this.props.isBottom,
+            placement: this.props.mentionPopoverPlacement,
           })}
           onClose={() =>
             this.setState({ toolsPopoverOpen: false, toolsPopoverWidth: undefined, toolsPopoverKeyword: undefined })

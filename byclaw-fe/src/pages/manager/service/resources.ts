@@ -279,14 +279,20 @@ export interface ResourceUseApplyParams {
 }
 
 /**
- * 资源使用申请审核项
+ * 资源使用申请审核项；聚合审核中心同时返回资源基础信息。
  * 记录单个资源使用申请的详细信息
  */
 export interface ResourceUseApplyAuditItem {
+  auditType?: 'SKILL_PUBLICATION';
   privilegeGrantId: string; // 权限授权ID
   userId: string; // 用户ID
   userName: string; // 用户名称
   applyTime: string; // 申请时间
+  resourceId?: string; // 资源ID，聚合审核中心返回
+  resourceName?: string; // 资源名称，聚合审核中心返回
+  resourceBizType?: string; // 资源业务类型，聚合审核中心返回
+  avatar?: string; // 资源头像，聚合审核中心返回
+  agentType?: string; // 数字员工/员工组类型，数字员工审核中心返回
   auditTime?: string; // 审核通过或驳回的处理时间
   auditUserId?: string; // 审核人ID
   auditUserName?: string; // 审核人名称
@@ -297,6 +303,7 @@ export interface ResourceUseApplyAuditItem {
  * 审批资源使用申请参数
  */
 export interface ApproveResourceUseApplyParams {
+  auditType?: 'SKILL_PUBLICATION'; // 上架审核复用审核接口，保持与使用权限审核分流
   resourceId: string | number; // 资源ID
   applyUserId: string | number; // 申请用户ID
 }
@@ -429,12 +436,26 @@ export function queryUseApplyList(params: ResourceUseApplyParams) {
 }
 
 /**
- * 聚合查询数字员工审核数据；false 或不传返回待审核，true 返回历史审核。
+ * 聚合查询资源审核数据；false 或不传返回待审核，true 返回历史审核。
  */
-export function queryDigitalEmployeeUseApplyAudit(params: { history?: boolean } = {}) {
-  return POST<any[]>('/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit', params, {
-    responseCfg: { customHandle: true },
-  });
+export interface ResourceUseApplyAuditQueryParams {
+  history?: boolean;
+  resourceBizTypeList?: string[];
+}
+
+export function queryResourceUseApplyAudit(params: ResourceUseApplyAuditQueryParams = {}) {
+  return POST<ResourceUseApplyAuditItem[]>(
+    '/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit',
+    params,
+    {
+      responseCfg: { customHandle: true },
+    }
+  );
+}
+
+/** 数字员工页面继续使用兼容命名，资源中心复用同一个聚合审核接口。 */
+export function queryDigitalEmployeeUseApplyAudit(params: ResourceUseApplyAuditQueryParams = {}) {
+  return queryResourceUseApplyAudit(params);
 }
 
 /**
@@ -542,6 +563,19 @@ export async function queryResourceMembers(params: any) {
  * @param params 删除参数（包含resourceId资源ID）
  * @returns Promise 删除结果
  */
+// 资源中心上下架与注销使用独立接口，避免将下架误调用为知识/技能删除。
+export function shelfResource(params: { resourceId: string | number }) {
+  return POST<any>('/byaiService/tool/shelfResource', params);
+}
+
+export function unShelfResource(params: { resourceId: string | number }) {
+  return POST<any>('/byaiService/tool/unShelfResource', params);
+}
+
+export function deregisterResource(params: { resourceId: string | number }) {
+  return POST<any>('/byaiService/tool/deregisterResource', params);
+}
+
 export function deleteResource(params: any) {
   return POST<any>('/byaiService/tool/deleteResourceById', params);
 }
@@ -609,8 +643,29 @@ export interface ResourceOperationPermissions {
   canRestore: boolean; // 是否有恢复权限
   canOnShelf?: boolean; // 是否可上架
   canOffShelf?: boolean; // 是否可下架
+  canPublishToEnterprise?: boolean; // 是否可将个人技能复制上架到企业
   useApplyPending?: boolean; // 使用申请是否待审核
 }
+
+export interface EnterpriseSkillPublishResult {
+  personalDependencies?: { resourceId: string; resourceName: string; resourceBizType: string }[];
+  resource: {
+    resourceId: string;
+    resourceName: string;
+    resourceBizType: string;
+    ownerType: string;
+    resourceStatus: number;
+  };
+  alreadyExists: boolean;
+}
+
+/** 独立复制接口，不使用会按技能编码覆盖原资源的导入接口。 */
+export const publishSkillToEnterprise = (resourceId: string) =>
+  POST<EnterpriseSkillPublishResult>(
+    '/byaiService/tool/publishSkillToEnterprise',
+    { resourceId },
+    { responseCfg: { hideErrorTips: true } }
+  );
 
 /**
  * 文件/文件夹项
@@ -671,9 +726,11 @@ export interface UploadSkillZipResponse {
   skillDesc?: string;
   displaySourceType?: string;
   resourceBacked?: boolean;
+  personalWorkspace?: boolean;
 }
 
 export interface QuerySkillListParams {
+  personalWorkspace?: boolean;
   userCode?: string;
   resourceId?: string | number;
   keyword?: string;
@@ -710,6 +767,23 @@ export const queryWorkspaceSkillList = (params: QuerySkillListParams) => {
 
 export const queryLobsterInstalledSkillList = queryWorkspaceSkillList;
 
+export interface WorkspaceSkillCenterStatus {
+  action: 'INSTALL' | 'UPDATE' | 'NONE';
+  ownerType: 'personal' | 'enterprise';
+  targetResourceId?: string | number;
+  revision: string;
+}
+
+/** 员工目录同步使用当前登录身份；目标归属与匹配范围由后端解析。 */
+export const queryWorkspaceSkillCenterStatus = (params: { resourceId: string; skillPath: string }) =>
+  POST<WorkspaceSkillCenterStatus>('/byaiService/tool/queryWorkspaceSkillCenterStatus', params);
+
+export const syncWorkspaceSkillToCenter = (params: { resourceId: string; skillPath: string; revision: string }) =>
+  POST<{ resourceId: string | number; action: 'INSTALL' | 'UPDATE'; sourceDeleted: boolean }>(
+    '/byaiService/tool/syncWorkspaceSkillToCenter',
+    params
+  );
+
 /**
  * 查询当前数字员工 workspace 中、尚未进入个人技能资源列表的目录技能（用户开发）。
  * 与 queryWorkspaceSkillList 的区别：去重口径为“个人 tab 已资源化技能”，供首页右侧个人技能 tab 合并展示。
@@ -722,6 +796,7 @@ export const queryWorkspacePersonalSkillList = (params: QuerySkillListParams) =>
 };
 
 export interface WorkspaceSkillParams {
+  personalWorkspace?: boolean;
   skillPath: string;
   resourceId?: string | number;
   userCode?: string;
@@ -752,6 +827,7 @@ export const resourceizeWorkspaceSkill = (params: WorkspaceSkillParams) => {
 export const downloadSkillZip = (params: {
   skillPath?: string;
   skillId?: string | number;
+  personalWorkspace?: boolean;
   resourceId?: string | number;
   userCode?: string;
 }) => {
@@ -767,7 +843,7 @@ export const downloadSkillZip = (params: {
  * @param params 参数（包含skillPath技能路径、resourceId资源ID和可选的userCode用户编码）
  * @returns Promise 删除结果
  */
-export const deleteSkill = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
+export const deleteSkill = (params: WorkspaceSkillParams) => {
   return POST<any>('/byaiService/tool/deleteSkill', params, {
     responseCfg: {
       hideErrorTips: true,

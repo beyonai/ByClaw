@@ -192,11 +192,21 @@ public class ProjectApplicationService {
      */
     @Transactional
     public Project createProject(ProjectDTO dto) {
+        return createProject(dto, ProjectType.NORMAL);
+    }
+
+    /** 创建群聊关联项目，沿用普通项目的成员、云盘和工作目录初始化流程。 */
+    @Transactional
+    public Project createGroupChatProject(ProjectDTO dto) {
+        return createProject(dto, ProjectType.HACU);
+    }
+
+    private Project createProject(ProjectDTO dto, String projectType) {
         String projectName = normalizeProjectName(dto.getProjectName());
         if (projectName.isEmpty()) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.required");
         }
-        if (projectService.existsProjectName(projectName, null)) {
+        if (projectService.existsProjectName(projectName, CurrentUserHolder.getCurrentUserId(), null)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
         }
         this.validateProjectDescription(dto.getDescription());
@@ -207,8 +217,7 @@ public class ProjectApplicationService {
         project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
-        // 项目类型字段已废弃，所有新项目统一按普通项目处理。
-        project.setProjectType(ProjectType.NORMAL);
+        project.setProjectType(projectType);
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : Constants.NO_VALUE_N);
         project.setInitStatus("ready");
         project.setBuildIndex(Constants.NO_VALUE_N);
@@ -351,7 +360,7 @@ public class ProjectApplicationService {
             if (projectName.isEmpty()) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.required");
             }
-            if (projectService.existsProjectName(projectName, dto.getProjectId())) {
+            if (projectService.existsProjectName(projectName, project.getCreateBy(), dto.getProjectId())) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
             }
             project.setProjectName(projectName);
@@ -692,6 +701,8 @@ public class ProjectApplicationService {
         map.put("projectName", project.getProjectName());
         map.put("description", project.getDescription());
         map.put("resourceId", project.getResourceId());
+        // 项目云盘页签依赖详情接口返回知识库资源 ID；缺失该字段会把已初始化项目误判为未初始化。
+        map.put("cloudResourceId", project.getCloudResourceId());
         map.put("isShare", project.getIsShare());
         // 研发项目初始化状态与配置:前端据此拦截建需求/启动任务并展示初始化中指示。
         map.put("initStatus", project.getInitStatus());
@@ -900,7 +911,9 @@ public class ProjectApplicationService {
         }
         ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
         // 新增仓库只负责保存配置并异步克隆，不触发项目初始化、.gitmodules 同步或架构会话流程。
-        projectInitService.cloneProjectRepositoryAsync(repo);
+        Long cloneUserId = CurrentUserHolder.getCurrentUserId();
+        String cloneUserCode = CurrentUserHolder.getCurrentUserCode();
+        projectInitService.cloneProjectRepositoryAsync(repo, cloneUserId, cloneUserCode);
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("repoFullName", repo.getRepoFullName());
@@ -949,7 +962,9 @@ public class ProjectApplicationService {
             projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
         }
         if (projectInitService != null && !"ready".equals(projectInitService.getCloneStatus(repo))) {
-            projectInitService.cloneProjectRepositoryAsync(repo);
+            Long cloneUserId = CurrentUserHolder.getCurrentUserId();
+            String cloneUserCode = CurrentUserHolder.getCurrentUserCode();
+            projectInitService.cloneProjectRepositoryAsync(repo, cloneUserId, cloneUserCode);
         }
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());

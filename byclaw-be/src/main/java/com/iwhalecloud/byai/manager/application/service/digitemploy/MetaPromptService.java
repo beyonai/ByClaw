@@ -76,6 +76,7 @@ public class MetaPromptService {
             isChinese);
 
         MetaPromptGenerateResult result = new MetaPromptGenerateResult();
+        alignPromptConfigsWithRequest(fields, request);
         result.setFields(fields);
         result.setContextSummary(buildContextSummary(resources, bundledSkills));
         return result;
@@ -100,8 +101,10 @@ public class MetaPromptService {
         Map<String, Object> startPayload = Map.of("contextSummary", buildContextSummary(resources, bundledSkills));
         writeSseEvent(outputStream, "start", OBJECT_MAPPER.writeValueAsString(startPayload));
 
-        streamGeneratedFields(request, skeleton, contextBlock, specs, resourceContext, systemPrompt, modelCode,
-            isChinese, outputStream);
+        if (!streamGeneratedFields(request, skeleton, contextBlock, specs, resourceContext, systemPrompt, modelCode,
+            isChinese, outputStream)) {
+            return;
+        }
 
         writeSseEvent(outputStream, "done", "[DONE]");
     }
@@ -146,7 +149,7 @@ public class MetaPromptService {
         return Collections.emptyMap();
     }
 
-    private void streamGeneratedFields(MetaPromptGenerateRequest request, MetaPromptSkeleton skeleton,
+    private boolean streamGeneratedFields(MetaPromptGenerateRequest request, MetaPromptSkeleton skeleton,
         String contextBlock, List<FieldSpec> specs, ResourceContext resourceContext, String systemPrompt,
         String modelCode, boolean isChinese, OutputStream outputStream) throws IOException {
         long startTime = System.currentTimeMillis();
@@ -161,6 +164,7 @@ public class MetaPromptService {
             Map<String, Object> generatedFields = parseOrRepairGeneratedFields(content, modelCode, isChinese);
             Map<String, Object> normalizedFields = normalizeGeneratedFields(generatedFields, specs, skeleton,
                 resourceContext, isChinese);
+            alignPromptConfigsWithRequest(normalizedFields, request);
             writeSseEvent(outputStream, "finalFields", OBJECT_MAPPER.writeValueAsString(normalizedFields));
             for (FieldSpec spec : specs) {
                 Map<String, String> payload = Map.of(
@@ -170,14 +174,21 @@ public class MetaPromptService {
                 writeSseEvent(outputStream, "fieldDelta", OBJECT_MAPPER.writeValueAsString(payload));
             }
             log.info("Meta prompt streamed all fields in {} ms", System.currentTimeMillis() - startTime);
+            return true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("Meta prompt stream interrupted", e);
         } catch (Exception e) {
-            log.warn("Failed to stream meta prompt fields", e);
-            writeSseEvent(outputStream, "error",
-                OBJECT_MAPPER.writeValueAsString(Map.of("message", isChinese ? "生成失败，请重试" : "Generation failed, please retry")));
-            throw new IOException("Failed to stream meta prompt fields", e);
+            String diagnosticId = UUID.randomUUID().toString();
+            log.warn("Failed to stream meta prompt fields, diagnosticId={}", diagnosticId, e);
+            // 流已开始后仅发送 SSE 错误，避免全局异常处理器向流中追加 JSON；不暴露供应商响应和凭据。
+            String code = e instanceof AIService.ModelSelectionException ? "MODEL_NOT_AVAILABLE" : "MODEL_GENERATION_FAILED";
+            writeSseEvent(outputStream, "error", OBJECT_MAPPER.writeValueAsString(Map.of(
+                "code", code,
+                "diagnosticId", diagnosticId,
+                "message", isChinese ? "模型生成失败，请检查所选模型配置后重试" : "Model generation failed. Check the selected model configuration and retry"
+            )));
+            return false;
         } finally {
             if (acquired) {
                 LLM_SEMAPHORE.release();
@@ -251,6 +262,9 @@ public class MetaPromptService {
             sb.append("Do not change agentType; do not invent resource IDs; recommended resources must come from the resource reference.\n\n");
         }
 
+        sb.append(isChinese
+            ? "如果已有核心提示词配置是数组，必须严格沿用其 key、名称和顺序，优化每项 value（包括记忆和自定义配置），不增加或恢复已删除项；空数组保持为空。此规则优先于下面的默认配置要求。\n"
+            : "When existing core prompt configuration is an array, preserve its keys, names and order exactly; optimize every value including memory and custom items. Do not add or restore removed items. Preserve an empty array. This overrides the default configuration requirements below.\n");
         for (FieldSpec spec : specs) {
             sb.append("- ").append(spec.fieldCode).append(": ")
                 .append(isChinese ? spec.zhInstruction : spec.enInstruction)
@@ -325,6 +339,8 @@ public class MetaPromptService {
         appendInputField(sb, isChinese ? "角色定义草稿" : "Role Draft", request.getCharacterDescription());
         appendInputField(sb, isChinese ? "开场白草稿" : "Opening Remark Draft", request.getOpeningRemark());
         appendInputField(sb, isChinese ? "常见问题草稿" : "Common Questions Draft", request.getCommonQuestions());
+        appendInputField(sb, isChinese ? "岗位职责草稿" : "Job Responsibilities Draft", request.getCoreCompetencies());
+        appendInputField(sb, isChinese ? "标签草稿" : "Tags Draft", request.getAgentTags());
         appendInputField(sb, isChinese ? "能力边界草稿" : "Boundary Draft", request.getConstraints());
         appendInputField(sb, isChinese ? "示例问法草稿" : "FAQ / Example Draft", request.getFaqs());
         appendInputField(sb, isChinese ? "角色属性草稿" : "Role Attributes Draft", request.getRoleAttributes());
@@ -392,6 +408,36 @@ public class MetaPromptService {
         fields.put("recommendedResources",
             normalizeRecommendedResources(fields.get("recommendedResources"), resourceContext, isChinese));
         return fields;
+    }
+
+    /** 页面配置列表是编辑契约：保留其顺序和元数据，不恢复已删除项，不丢失自定义项。 */
+    private void alignPromptConfigsWithRequest(Map<String, Object> fields, MetaPromptGenerateRequest request) {
+        Object existing = parseJsonRecursively(request.getCorePersonaDefinition(), 5);
+        if (!(existing instanceof Collection<?> requested)) {
+            return;
+        }
+        Object generated = parseJsonRecursively(fields.get("corePersonaDefinition"), 5);
+        Map<String, Object> values = new LinkedHashMap<>();
+        if (generated instanceof Collection<?> items) {
+            for (Object item : items) {
+                if (item instanceof Map<?, ?> map) {
+                    values.put(String.valueOf(map.get("key")), map.get("value"));
+                }
+            }
+        }
+        List<Map<String, Object>> configs = new ArrayList<>();
+        for (Object item : requested) {
+            if (item instanceof Map<?, ?> map) {
+                Map<String, Object> config = new LinkedHashMap<>();
+                map.forEach((key, value) -> config.put(String.valueOf(key), value));
+                String key = normalizePromptConfigKey(config);
+                if (StringUtils.isNotBlank(key)) {
+                    config.put("value", values.getOrDefault(key, config.getOrDefault("value", "")));
+                    configs.add(config);
+                }
+            }
+        }
+        fields.put("corePersonaDefinition", toJsonString(configs));
     }
 
     private Object normalizeGeneratedFieldValue(String fieldCode, Object value, MetaPromptSkeleton skeleton,
@@ -823,8 +869,8 @@ public class MetaPromptService {
                 "Generate core prompt configuration as a JSON array string. Each item must contain name, key, value. Include exactly these core items: (1) name:\"Work Standard\", key:\"agent\", value follows AGENTS.md thinking with responsibilities, workflow, boundaries, routing rules, and 5-8 actionable rules; when platform resources are involved, describe resource dependency, applicable scenarios, and limitations when unmounted/unavailable, but do not write concrete invocation entry points; (2) name:\"Persona\", key:\"soul\", value describes style and collaboration temperament; (3) name:\"Tool Standard\", key:\"tools\", value follows TOOL.md thinking with recommended resource types, usage boundaries, input/output requirements, and failure-message principles. Resource binding and invocation are injected by the platform runtime. Values cannot be empty."),
 
             new FieldSpec("coreCompetencies",
-                "生成3-5组核心能力，用于主编排 Agent 路由。严格返回JSON数组字符串。每组包含coreCompetency(8字内动作短语)、description(30字内)、acceptBoundary(用户会说出的问法/关键词3-5条)、rejectBoundary(清晰拒绝边界2-4条)、example(口语化示例2-3条)。能力必须符合固定骨架，不要写成泛泛能力名。",
-                "Generate 3-5 core competencies for orchestrator routing as a JSON array string. Each item includes coreCompetency(action phrase within 8 chars), description(within 30 chars), acceptBoundary(actual user phrases/keywords, 3-5), rejectBoundary(sharp boundaries, 2-4), example(spoken examples, 2-3). Must follow the skeleton; avoid generic ability names."),
+                "生成3-5项岗位职责，与页面单行职责输入一致，用于主编排 Agent 路由。严格返回JSON数组字符串。每组包含coreCompetency(完整、具体的岗位职责，不能截断为能力名)、description(30字内)、acceptBoundary(用户会说出的问法/关键词3-5条)、rejectBoundary(清晰拒绝边界2-4条)、example(口语化示例2-3条)。能力必须符合固定骨架，不要写成泛泛能力名。",
+                "Generate 3-5 job responsibilities matching the single-line responsibility editor for orchestrator routing as a JSON array string. Each item includes coreCompetency(complete, specific job responsibility, never a truncated ability name), description(within 30 chars), acceptBoundary(actual user phrases/keywords, 3-5), rejectBoundary(sharp boundaries, 2-4), example(spoken examples, 2-3). Must follow the skeleton; avoid generic ability names."),
 
             new FieldSpec("faqs",
                 "生成5-8个典型用户问题示例，严格返回JSON数组字符串，覆盖主要适用场景，并避免超出拒绝边界。",

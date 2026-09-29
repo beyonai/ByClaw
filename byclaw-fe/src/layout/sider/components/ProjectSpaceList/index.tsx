@@ -22,12 +22,8 @@ import {
   updateProject,
 } from '@/pages/projectSpace/service';
 import type { ProjectMember, ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import {
-  getArrayData,
-  normalizeProjectDetail,
-  normalizeProjectSession,
-} from '@/pages/projectSpace/utils';
-import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { getProjectMutationErrorMessage, hasDuplicateProjectName } from '@/pages/projectSpace/projectMutation';
+import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { saveProjectMembers, saveProjectResources, type DevloopProjectSessionSearchMode } from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
@@ -35,23 +31,6 @@ import ProjectDetailPanel from './ProjectDetailModal';
 import styles from './index.module.less';
 
 const PROJECT_SESSION_PAGE_SIZE = 30;
-
-// 请求层会把业务 code 非 0 的响应以字符串 reject；这里优先展示接口 msg，避免创建失败只显示通用文案。
-const getProjectMutationErrorMessage = (error: unknown, fallback: string) => {
-  if (typeof error === 'string' && error.trim()) return error;
-  if (error && typeof error === 'object') {
-    const record = error as Record<string, any>;
-    return (
-      record.msg ||
-      record.data?.msg ||
-      record.response?.data?.msg ||
-      record.message ||
-      record.response?.data?.message ||
-      fallback
-    );
-  }
-  return fallback;
-};
 
 type ProjectSessionPageState = {
   pageNum: number;
@@ -748,9 +727,7 @@ const ProjectSpaceList: React.FC = () => {
       message.warning(t('message.projectNameRequired'));
       return '';
     }
-    const duplicateProject = mergedProjects.find(
-      (project) => normalizeProjectName(project.projectName) === projectName
-    );
+    const duplicateProject = hasDuplicateProjectName(mergedProjects, projectName, currentUserId);
     if (duplicateProject) {
       message.warning(t('message.projectNameDuplicate'));
       return '';
@@ -1059,10 +1036,12 @@ const ProjectSpaceList: React.FC = () => {
       return;
     }
 
-    const duplicateProject = mergedProjects.find((project) => {
-      const isCurrentEditingProject = editingProject && project.projectId === editingProject.projectId;
-      return !isCurrentEditingProject && normalizeProjectName(project.projectName) === projectName;
-    });
+    const duplicateProject = hasDuplicateProjectName(
+      mergedProjects,
+      projectName,
+      editingProject ? editingProject.createBy : currentUserId,
+      editingProject?.projectId
+    );
     if (duplicateProject) {
       message.warning(t('message.projectNameDuplicate'));
       return;
@@ -1188,8 +1167,6 @@ const ProjectSpaceList: React.FC = () => {
     }
 
     clearDetailPanel?.();
-    // 每次打开项目会话都以该会话详情返回的员工为准，清除目标会话上次遗留的多员工输入草稿。
-    clearEasyConfirmInputDraft(session.sessionId);
 
     if (Array.isArray(session.sessionExts) && session.sessionExts.length > 0) {
       dispatch({

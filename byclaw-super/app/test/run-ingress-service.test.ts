@@ -373,7 +373,6 @@ describe("RunIngressService group chat snapshot", () => {
     const runService = fakeRunService();
     const resolve = vi.fn(async () => ({
       modelId: "11000161",
-      fingerprint: "a".repeat(64),
     }));
     const ingress = new RunIngressService(
       runService.impl,
@@ -399,16 +398,53 @@ describe("RunIngressService group chat snapshot", () => {
     expect(runService.createSessionRun.mock.calls[0][0].ingressContext).toEqual({
       leaderModel: {
         modelId: "11000161",
-        fingerprint: "a".repeat(64),
       },
     });
   });
 
-  it("retains the last known resource model when a later BE lookup fails", async () => {
+  it.each([undefined, "low"] as const)("refreshes selected models and fallback models with thinking override %s", async (thinkingLevel) => {
+    const runService = fakeRunService();
+    const selected = { modelId: "selected", defaultThinkingLevel: "adaptive" };
+    const current = { modelId: "current", defaultThinkingLevel: "high" };
+    const resolveByModelId = vi.fn().mockResolvedValueOnce(selected).mockRejectedValue(new Error("selected unavailable"));
+    const resolve = vi.fn().mockResolvedValueOnce(current).mockRejectedValue(new Error("BE unavailable"));
+    const ingress = new RunIngressService(
+      runService.impl,
+      async () => ({ userCode: "creator" }),
+      catalog([]),
+      undefined,
+      { info: vi.fn(), warn: vi.fn() },
+      { resolve, resolveByModelId },
+    );
+    const input = {
+      beyondToken: PRINCIPAL_TOKEN,
+      sourceAgentId: "10000249",
+      relModelId: "selected",
+      message: "hello",
+      ...(thinkingLevel ? { thinkingLevel } : {}),
+    };
+
+    await ingress.createSessionRun(input);
+    await ingress.createSessionRun(input);
+    expect(runService.createSessionRun.mock.calls[0][0]).toMatchObject({
+      ingressContext: { leaderModel: selected },
+      thinkingLevel: thinkingLevel ?? "adaptive",
+    });
+    expect(runService.createSessionRun.mock.calls[1][0]).toMatchObject({
+      ingressContext: { leaderModel: current },
+      thinkingLevel: thinkingLevel ?? "high",
+    });
+    await expect(ingress.createSessionRun(input)).rejects.toThrow("BE unavailable");
+    expect(runService.createSessionRun).toHaveBeenCalledTimes(2);
+    expect(resolveByModelId).toHaveBeenCalledTimes(3);
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects unavailable resource models instead of reusing instance-local configuration", async () => {
     const runService = fakeRunService();
     const resolve = vi
       .fn()
-      .mockResolvedValueOnce({ modelId: "100", fingerprint: "b".repeat(64) })
+      .mockResolvedValueOnce({ modelId: "100" })
       .mockRejectedValueOnce(new Error("BE unavailable"));
     const warn = vi.fn();
     const ingress = new RunIngressService(
@@ -426,19 +462,8 @@ describe("RunIngressService group chat snapshot", () => {
     };
 
     await ingress.createSessionRun(input);
-    await ingress.createRun({ ...input, sessionId: "session-1" });
-
-    expect(runService.createRun.mock.calls[0][0].ingressContext.leaderModel).toEqual({
-      modelId: "100",
-      fingerprint: "b".repeat(64),
-    });
-    expect(warn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        resourceId: "10000249",
-        retainedLastKnownModel: true,
-      }),
-      "超级助手模型绑定不可用，本次沿用最后一次有效模型",
-    );
+    await expect(ingress.createRun({ ...input, sessionId: "session-1" })).rejects.toThrow("BE unavailable");
+    expect(runService.createRun).not.toHaveBeenCalled();
   });
 });
 
@@ -457,7 +482,7 @@ describe("RunIngressService expert-team orchestration", () => {
         configVersion: "5",
       },
       agents: [agent("team-member")],
-      leaderModel: { modelId: "model-1", fingerprint: "c".repeat(64) },
+      leaderModel: { modelId: "model-1" },
     }));
     const ingress = new RunIngressService(
       runService.impl,
@@ -497,7 +522,7 @@ describe("RunIngressService expert-team orchestration", () => {
     ]);
     expect(created.ingressContext).toEqual({
       orchestrator: expect.objectContaining({ id: "team-1", configVersion: "5" }),
-      leaderModel: { modelId: "model-1", fingerprint: "c".repeat(64) },
+      leaderModel: { modelId: "model-1" },
     });
   });
 

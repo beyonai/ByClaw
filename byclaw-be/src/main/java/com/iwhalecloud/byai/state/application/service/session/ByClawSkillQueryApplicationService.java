@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.application.service.session;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -140,21 +141,79 @@ public class ByClawSkillQueryApplicationService {
      * 取当前用户个人 tab 下已资源化 SKILL 技能的去重 key（resourceCode / resourceName 经归一化）。
      */
     private Set<String> queryPersonalResourcedSkillKeys() {
+        return queryPersonalResourcedSkillKeys(false);
+    }
+
+    private Set<String> queryPersonalResourcedSkillKeys(boolean createdOnly) {
         ResourceUseAuthQo qo = new ResourceUseAuthQo();
         qo.setOwnerType(OwnerType.PERSONAL);
+        if (createdOnly) qo.setPermission("CREATED_BY_ME");
         qo.setResourceBizTypeList(Collections.singletonList(ResourceBizTypeEnum.SKILL.name()));
         qo.setPageNum(1);
         qo.setPageSize(PERSONAL_SKILL_EXCLUDE_PAGE_SIZE);
-        PageInfo<ResourceAuthVo> page = resourceAuthApplicationService.listResourceAuth(qo);
         Set<String> keys = new HashSet<>();
-        if (page == null || page.getList() == null) {
-            return keys;
+        while (true) {
+            PageInfo<ResourceAuthVo> page = resourceAuthApplicationService.listResourceAuth(qo);
+            if (page == null || page.getList() == null || page.getList().isEmpty()) break;
+            page.getList().forEach(vo -> {
+                addBoundKey(keys, vo.getResourceCode());
+                addBoundKey(keys, vo.getResourceName());
+            });
+            if (!createdOnly || (long) qo.getPageNum() * qo.getPageSize() >= page.getTotal()) break;
+            qo.setPageNum(qo.getPageNum() + 1);
         }
-        page.getList().forEach(vo -> {
-            addBoundKey(keys, vo.getResourceCode());
-            addBoundKey(keys, vo.getResourceName());
-        });
         return keys;
+    }
+
+    /**
+     * 个人目录技能按用户隔离的存储空间查询。员工目录仅纳入本人创建的员工；
+     * 已安装/已登记技能不再作为未登记目录技能重复展示。默认员工变化不影响结果。
+     */
+    public List<ByClawSkillDto> qryMyDirectorySkills(String keyword) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        Set<String> personalKeys = queryPersonalResourcedSkillKeys(true);
+        Map<String, ByClawSkillDto> skills = new LinkedHashMap<>();
+        personalSkillRoots().forEach((root, employeeId) -> {
+            Set<String> installedKeys = employeeId == null ? Collections.emptySet() : queryBoundSkillKeys(employeeId);
+            qrySkillListByUserCode(userCode, employeeId, keyword).stream()
+                .filter(skill -> !personalKeys.contains(normalizeKey(skill.getSkillName())))
+                .filter(skill -> !installedKeys.contains(normalizeKey(skill.getSkillName())))
+                .forEach(skill -> {
+                    skill.setPersonalWorkspace(true);
+                    skill.setDisplaySourceType(ByClawSkillDto.DISPLAY_SOURCE_TYPE_USER_DEVELOPED);
+                    skills.putIfAbsent(skill.getSkillPath(), skill);
+                });
+        });
+        return skills.values().stream().sorted(Comparator.comparing(ByClawSkillDto::getSkillName))
+            .collect(Collectors.toList());
+    }
+
+    private Map<String, Long> personalSkillRoots() {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (CurrentUserHolder.getCurrentUserId() == null || StringUtils.isBlank(userCode)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
+        }
+        Map<String, Long> roots = new LinkedHashMap<>();
+        roots.put(skillPathResolver.resolveSkillRootPrefix(userCode, null), null);
+        for (SsResource employee : ssResourceService.findCreatedDigitalEmployees(CurrentUserHolder.getCurrentUserId())) {
+            String root = skillPathResolver.resolveSkillRootPrefix(userCode, employee.getResourceId());
+            // 主助手可能与个人根目录重合：只扫描一次，并用实际来源排除已安装技能。
+            roots.putIfAbsent(root, employee.getResourceId());
+        }
+        return roots;
+    }
+
+    /** 服务端重新验证来源，拒绝伪造他人员工路径及父目录穿越；null 表示个人根目录。 */
+    public Long resolveMySkillSource(String skillPath) {
+        String path = StringUtils.removeEnd(StringUtils.trimToEmpty(skillPath).replace('\\', '/'), "/");
+        for (Map.Entry<String, Long> root : personalSkillRoots().entrySet()) {
+            if (!path.startsWith(root.getKey())) continue;
+            String name = path.substring(root.getKey().length());
+            if (StringUtils.isNotBlank(name) && !name.contains("/") && !"..".equals(name) && !".".equals(name)) {
+                return root.getValue();
+            }
+        }
+        throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
     }
 
     public ByClawSkillDto getWorkspaceSkillDetail(String userCode, Long resourceId, String skillPath) {

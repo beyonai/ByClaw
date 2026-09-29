@@ -1,10 +1,13 @@
 import path from "node:path";
+import type { ContextOverflowRecoveryState } from "./context-overflow-recovery.js";
+import { isRecoverableContextPreflightError } from "./dispatch-error.js";
+import { classifyContextFailure, publicContextErrorText } from "./context-errors.js";
 import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-framework";
 import type { ByaiInboundMessage, ByaiLaneMetadata, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 import { clearDeliveredAnswerText } from "./answer-text-ledger.js";
 import { generateRandomId } from "./utils.js";
-import { buildContextOverflowText, resolveInboundLanguage } from "./i18n.js";
+import { resolveInboundLanguage } from "./i18n.js";
 import { emitByaiSdkFirstResponse } from "./diagnostics.js";
 import { SESSION_FILES_ROOT, getSessionPathBySessionId } from "./session-path.js";
 import {
@@ -156,6 +159,7 @@ export type NativeChildRunTerminalSource =
   | "subagent_progress";
 
 export interface ActiveSdkRequest {
+  requestId?: string;
   accountId: string;
   sessionKey: string;
   to: string;
@@ -209,6 +213,7 @@ export interface ActiveSdkRequest {
    * 进入完成判定前置位此标记，避免完成门被伪信号永久挡住。
    */
   dispatchSettled: boolean;
+  contextOverflowRecovery: ContextOverflowRecoveryState;
   /**
    * 最近一次 model 调用的有效上下文窗口 / token 预算快照，由 model_call_started hook 捕获。
    * core 不把 contextTokenBudget 透传进 agent_end 的 ctx，故在此按 sessionKey 暂存，供 agent_end
@@ -579,12 +584,14 @@ export function resetByclawChatContextForTest(): void {
 }
 
 export function buildSdkEmitMetadata(params: {
+    requestId?: string;
     laneMetadata?: ByaiLaneMetadata;
     traceId?: string;
     agentId?: string;
     agentName?: string;
 }): Record<string, any> {
     const metadata: Record<string, any> = {};
+    setMetadataField(metadata, "requestId", params.requestId || (params.traceId ? resolveActiveSdkRequestByTraceId(params.traceId)?.requestId : undefined));
     const lane = params.laneMetadata;
     setMetadataField(metadata, "laneId", lane?.laneId);
     setMetadataField(metadata, "turnId", lane?.turnId);
@@ -602,6 +609,7 @@ export function buildSdkEmitMetadata(params: {
 export function withSdkEmitMetadata(
     options: EmitOptions | undefined,
     params: {
+        requestId?: string;
         laneMetadata?: ByaiLaneMetadata;
         traceId?: string;
         agentId?: string;
@@ -635,6 +643,7 @@ export function withActiveSdkRequestEmitMetadata(
     options?: EmitOptions,
 ): EmitOptions {
     return withSdkEmitMetadata(options, {
+        requestId: request.requestId,
         laneMetadata: request.laneMetadata,
         traceId: request.traceId,
         parentMessageId: request.parentMessageId,
@@ -901,6 +910,7 @@ export function resolveChannelRequestContextBySessionKey(
 }
 
 export function registerActiveSdkRequest(params: {
+    requestId?: string;
     accountId: string;
     sessionKey: string;
     to: string;
@@ -940,6 +950,7 @@ export function registerActiveSdkRequest(params: {
         clearActiveSdkRequestRecord(existingRequestByTraceId);
     }
     const request: ActiveSdkRequest = {
+        requestId: params.requestId || params.traceId,
         accountId: normalizeAccountId(params.accountId),
         sessionKey: params.sessionKey,
         to: params.to,
@@ -962,6 +973,7 @@ export function registerActiveSdkRequest(params: {
         modelFallbackPending: false,
         rootLifecyclePhase: undefined,
         dispatchSettled: false,
+        contextOverflowRecovery: { dispatchPending: false, replaySafe: true, attempts: 0 },
         lastRunOverflowLength: false,
         overflowContinuePending: false,
         overflowContinuationCompactionObserved: false,
@@ -995,6 +1007,7 @@ export function registerActiveSdkRequest(params: {
         accountId: request.accountId,
         createdAt: request.createdAt,
         fields: {
+            requestId: request.requestId,
             sessionId: request.sessionId,
             messageId: request.messageId,
             parentMessageId: request.parentMessageId,
@@ -1326,15 +1339,8 @@ export function markActiveSdkOverflowContinuePending(
     return request;
 }
 
-function isCoreContextOverflowPrecheckError(error: string): boolean {
-    return /Context overflow: prompt too large for the model \(precheck\)\.?/i.test(error);
-}
-
 function mapAgentEndErrorForSdk(request: ActiveSdkRequest, error: string): string {
-    if (isCoreContextOverflowPrecheckError(error)) {
-        return buildContextOverflowText(request.language);
-    }
-    return error;
+    return publicContextErrorText(error, request.language);
 }
 
 /**
@@ -1451,6 +1457,7 @@ export function isActiveSdkRequestReadyForTaskPlanContinuation(
 
 export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
   return Boolean(
+    !request.contextOverflowRecovery.dispatchPending &&
     isActiveSdkRequestReadyForTaskPlanContinuation(request) &&
       !isTaskPlanContinuationPending(request.sessionKey),
   );
@@ -1490,7 +1497,7 @@ export async function completeActiveSdkRequest(
             if (latest.abortController?.signal.aborted) {
                 return false;
             }
-            if (result?.error) {
+            if (result?.error && !(latest.deferFrameworkFinalization && classifyContextFailure(result.error))) {
                 const errorText = mapAgentEndErrorForSdk(latest, result.error);
                 const errorOptions = withActiveSdkRequestEmitMetadata(latest, {
                     eventType: EventType.ANSWER_DELTA,
@@ -1580,17 +1587,49 @@ export function recordActiveSdkRootStreamAnswer(params: {
     );
 }
 
+/** llm_input also runs before a blocked precheck, which has no lifecycle start. */
+export function recordActiveSdkDispatchRunId(sessionKey: string | undefined, runId: string | undefined): void {
+    const request = sessionKey ? resolveActiveSdkRequestBySessionKey(sessionKey) : undefined;
+    if (request?.sessionKey === sessionKey && request?.contextOverflowRecovery.dispatchPending && runId &&
+        !request.contextOverflowRecovery.retiredRunIds?.has(runId)) {
+        request.contextOverflowRecovery.dispatchRunId = runId;
+    }
+}
+
 export function recordActiveSdkRootAgentEnd(params: {
     runId: string | undefined;
     success: boolean;
     messages: unknown[];
+    error?: string;
+    sessionKey?: string;
 }): void {
     const normalizedRunId = normalizeAlias(params.runId);
     if (!normalizedRunId) {
         return;
     }
     const binding = activeSdkRequestsByRun.get(normalizedRunId);
+    const request = binding?.request ?? (params.sessionKey
+        ? resolveActiveSdkRequestBySessionKey(params.sessionKey) : undefined);
+    const isCurrentDispatch = request?.contextOverflowRecovery.dispatchRunId === normalizedRunId;
+    if (request && isCurrentDispatch && (!binding || binding.sessionKey === request.sessionKey)) {
+        if (params.success) {
+            request.contextOverflowRecovery.precheckError = undefined;
+            request.contextOverflowRecovery.contextFailure = undefined;
+            request.contextOverflowRecovery.onExecutionProgress?.();
+        }
+        if (!params.success && classifyContextFailure(params.error)) {
+            request.contextOverflowRecovery.contextFailure = params.error;
+            (request.contextOverflowRecovery.errors ??= new Set()).add(params.error!);
+        }
+        if (!params.success && isRecoverableContextPreflightError(params.error)) {
+            request.contextOverflowRecovery.precheckError = params.error;
+            request.contextOverflowRecovery.onContextFailure?.();
+        }
+    }
     if (!binding || binding.sessionKey !== binding.request.sessionKey) {
+        if (request && isCurrentDispatch && params.sessionKey === request.sessionKey) {
+            recordRootRunAgentEnd(request.frameworkFinalAnswerLedger, params);
+        }
         return;
     }
     recordRootRunAgentEnd(binding.request.frameworkFinalAnswerLedger, params);

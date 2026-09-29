@@ -8,6 +8,7 @@ import {
   mergeDocuments,
   normalizeUrl,
   parseDeclarations,
+  selectAdaptersForDimensions,
 } from '../references/online-search/references/hot_discovery/scripts/hot_discovery.mjs';
 import {
   annotateMergedCandidates,
@@ -25,6 +26,13 @@ import { loadSession, persistSession, withSessionLock } from './session.mjs';
 import { assertSessionWorkflowAllowsCommand } from './probe-state.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
 import { runOnlineSearch as defaultRunOnlineSearch } from './online-search/provider.mjs';
+import { planDiscovery as defaultPlanDiscovery } from './jev/query-planner.mjs';
+import { rankCandidates as defaultRankCandidates } from './jev/candidate-ranker.mjs';
+import { collectionFeedback, collectedPublicCandidates } from './jev/delivery-policy.mjs';
+import { runHotDiscoveryWave } from './hot-discovery-runtime.mjs';
+import { planSourceWaves, sourcePlanIdentity } from './jev/source-plan.mjs';
+import { researchEvidenceContext } from './jev/research-evidence.mjs';
+import { resolveTypeSafeCapability } from './jev/typesafe.mjs';
 
 export { resolveSearxngRuntime } from './online-search/searxng.mjs';
 
@@ -126,10 +134,17 @@ function summarize(outcome, document, durationMs = 0) {
     };
   }
   const summary = {
-    status: document ? 'success' : 'failed',
+    status: document ? (document.status === 'partial' ? 'partial' : 'success') : 'failed',
     exitCode: Number.isInteger(outcome?.code) ? outcome.code : 1,
     durationMs,
   };
+  if (document?.recoveredFromCheckpoint) {
+    summary.recoveredFromCheckpoint = true;
+    summary.exitCode = document.processDiagnostic?.exitCode ?? summary.exitCode;
+    summary.timedOut = Boolean(document.processDiagnostic?.timedOut);
+  }
+  if (document?.stopReason) summary.stopReason = document.stopReason;
+  if (document?.timing) summary.timing = document.timing;
   if (!document) {
     summary.timedOut = Boolean(outcome?.timedOut);
     const stderr = safeDiagnosticStderr(outcome?.stderr);
@@ -171,6 +186,19 @@ function mergeHotWaves(documents, query) {
     candidates: valid.flatMap((document) => Array.isArray(document.candidates) ? document.candidates : []),
     adapterStats: Object.assign({}, ...valid.map((document) => document.adapterStats || {})),
     warnings: valid.flatMap((document) => Array.isArray(document.warnings) ? document.warnings : []),
+    status: valid.some((document) => document.status === 'partial') ? 'partial' : 'complete',
+    stopReason: valid.find((document) => document.status === 'partial')?.stopReason
+      || valid.at(-1).stopReason || 'sources_exhausted',
+    timing: {
+      runtimeMs: valid.reduce((total, doc) => total + (doc.timing?.runtimeMs || 0), 0),
+      bridgeMs: valid.reduce((total, doc) => total + (doc.timing?.bridgeMs || 0), 0),
+      runtimeCacheHits: valid.filter((doc) => doc.timing?.runtimeCacheHit).length,
+      waves: valid.length,
+    },
+    ...(valid.some((doc) => doc.recoveredFromCheckpoint) ? {
+      recoveredFromCheckpoint: true,
+      processDiagnostic: valid.find((doc) => doc.recoveredFromCheckpoint).processDiagnostic,
+    } : {}),
     ...(valid.find((document) => document.requiresUserAction)?.requiresUserAction
       ? { requiresUserAction: valid.find((document) => document.requiresUserAction).requiresUserAction }
       : {}),
@@ -186,6 +214,45 @@ function attemptedAdapterCount(hotDoc) {
     .filter((stats) => stats?.status && !skipped.has(stats.status)).length;
 }
 
+function applyCandidateRanking(document, rankedCandidates) {
+  const order = new Map();
+  const ranking = new Map();
+  rankedCandidates.forEach((candidate, index) => {
+    if (typeof candidate?.url !== 'string') return;
+    order.set(candidate.url, index);
+    if (candidate.ranking) ranking.set(candidate.url, candidate.ranking);
+  });
+  const decorate = (candidates) => (Array.isArray(candidates) ? candidates : [])
+    .map((candidate) => ranking.has(candidate?.url)
+      ? { ...candidate, ranking: ranking.get(candidate.url) }
+      : candidate)
+    .sort((a, b) => (order.get(a?.url) ?? Number.MAX_SAFE_INTEGER)
+      - (order.get(b?.url) ?? Number.MAX_SAFE_INTEGER));
+  const groups = document?.groups && typeof document.groups === 'object' ? document.groups : {};
+  return {
+    ...document,
+    groups: {
+      ...groups,
+      bothChannels: decorate(groups.bothChannels),
+      searxngTop: decorate(groups.searxngTop),
+      agentReachTop: decorate(groups.agentReachTop),
+      hotBySource: Object.fromEntries(Object.entries(groups.hotBySource || {})
+        .map(([source, candidates]) => [source, decorate(candidates)])),
+      hotWithoutPopularity: decorate(groups.hotWithoutPopularity),
+      unverified: decorate(groups.unverified),
+    },
+  };
+}
+
+function validSourcePlan(plan, sources) {
+  if (plan?.diagnostic?.status !== 'used' || !Array.isArray(plan.waves) || !plan.waves.length
+    || !Number.isInteger(plan.cursor) || plan.cursor < 0 || plan.cursor > plan.waves.length
+    || plan.waves.some((wave) => !Array.isArray(wave) || wave.length < 1 || wave.length > 3)) return false;
+  const values = plan.waves.flat();
+  return values.length === sources.length && new Set(values).size === values.length
+    && values.every((value) => sources.includes(value));
+}
+
 export async function runPublicDiscover(paths, args, options = {}) {
   const now = options.now || (() => performance.now());
   const totalStartedAt = now();
@@ -194,8 +261,22 @@ export async function runPublicDiscover(paths, args, options = {}) {
   if (!sourceScope.includes('public-internet')) {
     throw new Error('session task.sourceScope 必须包含 public-internet 才能执行公共发现');
   }
-  const query = requireText(args?.query, '--query');
-  const category = typeof args?.category === 'string' && args.category.trim() ? args.category.trim() : 'general';
+  let query = requireText(args?.query, '--query');
+  let category = typeof args?.category === 'string' && args.category.trim() ? args.category.trim() : 'general';
+  // Search planning must never change the parent workflow's reservation identity.
+  const reservationIdentity = { query, category };
+  const budgetNow = options.budgetNow || (() => performance.now());
+  const budgetStartedAt = budgetNow();
+  const discoveryBudgetMs = Math.max(1, Number(args?.timeout || DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS) * 1_000);
+  const remainingBudgetMs = () => Math.max(0, Math.min(
+    discoveryBudgetMs - (budgetNow() - budgetStartedAt),
+    options.remainingBudgetMs ? options.remainingBudgetMs() : Infinity,
+  ));
+  // Optional inference leaves most of the remaining budget for discovery and verification.
+  const enhancementBudget = () => {
+    const deadline = budgetNow() + Math.min(10_000, remainingBudgetMs() / 10);
+    return () => Math.max(0, Math.min(deadline - budgetNow(), remainingBudgetMs()));
+  };
   withSessionLock(paths, 'public-discover-reserve', () => {
     const current = loadSession(paths, { persistMigration: false }).session;
     if (!current.task.discoveryGate) {
@@ -233,17 +314,181 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const effectiveMaxResults = profileEnabled ? String(profileStopAfter)
     : (options.orchestrationRunId !== undefined ? maxResults : (requestedCount || maxResults));
   const processTimeout = String(args?.timeout || DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS);
-  const timeRange = typeof args?.['time-range'] === 'string' && args['time-range'].trim()
+  let timeRange = typeof args?.['time-range'] === 'string' && args['time-range'].trim()
     ? args['time-range'].trim() : null;
+  const planner = options.planDiscovery || defaultPlanDiscovery;
+  const planningInput = {
+    request: session.task?.query || query,
+    query,
+    category,
+    language,
+    timeRange,
+    queryCandidates: [...new Set([query, session.task?.query].filter((value) => typeof value === 'string' && value.trim()))],
+    categoryCandidates: args?.category?.trim() ? [category] : [...new Set([category, 'general', 'news', 'it', 'science'])],
+    timeRangeCandidates: timeRange ? [timeRange] : [null, 'day', 'week', 'month', 'year'],
+    sourceCandidates: ['automatic', 'github', 'arxiv'],
+    ...(profileEnabled ? { hotSourceCandidates: [...CHINESE_ARTICLE_SOURCES] } : {}),
+  };
+  const capability = resolveTypeSafeCapability(options.environment || process.env);
   const tiers = typeof args?.tiers === 'string' && args.tiers.trim() ? args.tiers.trim() : '1,2,3';
+  const channelMode = options.channelMode || 'all';
+  const executionIdentity = sourcePlanIdentity({ ...reservationIdentity, language, tiers, requestedCount,
+    sources: args.sources || null, limit: args.limit || '20', profileEnabled,
+    round: session.task.publicCollectRun?.discoveryRounds.length });
+  const previousExecution = channelMode === 'hot'
+    && session.task.publicCollectRun?.hotDiscoveryExecution?.identity === executionIdentity
+    ? session.task.publicCollectRun.hotDiscoveryExecution : null;
+  const recovery = options.orchestrationRunId !== undefined
+    ? session.task.publicCollectRun?.discoveryReservation?.recovery : null;
+  const onlineReservation = session.task.publicCollectRun?.discoveryReservation;
+  const ownsOnlineReservation = options.orchestrationRunId !== undefined && channelMode === 'online'
+    && onlineReservation?.channel === 'online' && onlineReservation.phase === 'reserved'
+    && onlineReservation.query === reservationIdentity.query
+    && onlineReservation.round === session.task.publicCollectRun.discoveryRounds.length + 1;
+  const onlineIdentity = sourcePlanIdentity({ runId: options.orchestrationRunId,
+    round: onlineReservation?.round, planningInput, sourceScope, topicContract,
+    pageno, effectiveMaxResults, requestedCount, profileEnabled });
+  const validOnlineEffective = (effective) => effective
+    && planningInput.queryCandidates.includes(effective.query)
+    && planningInput.categoryCandidates.includes(effective.category)
+    && planningInput.timeRangeCandidates.includes(effective.timeRange)
+    && planningInput.sourceCandidates.includes(effective.source)
+    && effective.language === language;
+  const savedOnlineExecution = ownsOnlineReservation && recovery === 'resume'
+    ? session.task.publicCollectRun.onlineDiscoveryExecution : null;
+  if (savedOnlineExecution && (savedOnlineExecution.identity !== onlineIdentity
+    || !validOnlineEffective(savedOnlineExecution.effective))) {
+    throw new Error('ONLINE_DISCOVERY_EXECUTION_INVALID: continuation does not match the authorized request');
+  }
+  const sourcePlanEligible = channelMode !== 'online' && requestedCount !== null
+    && session.task.materializationTarget !== 'all';
+  let sourcePlan = null;
+  let sourcePlanning = { status: 'skipped', code: 'SOURCE_PLAN_NOT_REQUIRED' };
+  let sourcePlanInput = null;
+  let sourcePlanInputForCategory = null;
+  let authorizedSources = null;
+  let sourceMetadata = null;
+  const previous = session.task.publicCollectRun?.hotSourcePlan;
+  // A dispatched legacy wave is authoritative too: new advice cannot replace its
+  // checkpoint identity, source progress, skip target, or remaining budget.
+  const freshSourcePlanning = !previousExecution && capability.status !== 'disabled'
+    && (capability.status === 'configured' || options.planSourceWaves || options.callJev);
+  if (sourcePlanEligible && (previous || freshSourcePlanning)) {
+    const declarations = parseDeclarations(await readFile(adaptersPath, 'utf8'));
+    sourceMetadata = declarations.adapters;
+    const explicit = typeof args.sources === 'string' ? args.sources.split(',').map((value) => value.trim()) : null;
+    // An admitted source plan is execution state. Its identity excludes later
+    // optional answers and the current model. The admitted category determines
+    // complete source membership, while the original request remains immutable.
+    const sourcesForCategory = (selectedCategory) => {
+      const dimensions = [...new Set([...(profileEnabled ? ['general', 'news', 'blogs'] : [selectedCategory]), 'general'])];
+      const allowed = selectAdaptersForDimensions(declarations.adapters, dimensions,
+        new Set(tiers.split(',').map((value) => Number(value.trim())))).selected.map((adapter) => adapter.site);
+      return (explicit || (profileEnabled ? [...CHINESE_ARTICLE_SOURCES] : allowed))
+        .filter((source) => allowed.includes(source));
+    };
+    sourcePlanInputForCategory = (selectedCategory) => ({
+      query: reservationIdentity.query,
+      effectiveCategory: selectedCategory,
+      sources: sourcesForCategory(selectedCategory),
+      constraints: {
+        category: reservationIdentity.category, tiers, explicit, language, requestedCount,
+        taskQuery: session.task.query, sourceScope, topicContract,
+        declarationIdentity: sourcePlanIdentity(declarations),
+      },
+    });
+    if (previous && planningInput.categoryCandidates.includes(previous.effective?.category)) {
+      sourcePlanInput = sourcePlanInputForCategory(previous.effective.category);
+      authorizedSources = sourcePlanInput.sources;
+    }
+    if (sourcePlanInput && previous?.identity === sourcePlanIdentity(sourcePlanInput)
+      && validSourcePlan(previous, authorizedSources)
+      && planningInput.queryCandidates.includes(previous.effective?.query)
+      && planningInput.timeRangeCandidates.includes(previous.effective?.timeRange)
+      && planningInput.sourceCandidates.includes(previous.effective?.source || 'automatic')
+      && (!previous.effective?.hotSource || planningInput.hotSourceCandidates?.includes(previous.effective.hotSource))
+      && Array.isArray(previous.waveIds) && previous.waveIds.length === previous.waves.length
+      && new Set(previous.waveIds).size === previous.waveIds.length
+      && previous.waveIds.every((id) => typeof id === 'string'
+        && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))) {
+      sourcePlan = previous;
+    }
+  }
+  if (sourcePlanEligible && previous && !sourcePlan) {
+    sourcePlanning = { status: 'fallback', code: 'SOURCE_PLAN_INVALID' };
+  }
+  let planned = savedOnlineExecution
+    ? { effective: savedOnlineExecution.effective, jev: { status: 'skipped', code: 'ONLINE_DISCOVERY_RESUMED' } }
+    : sourcePlan
+    ? { effective: sourcePlan.effective, jev: { status: 'skipped', code: 'SOURCE_PLAN_RESUMED' } }
+    : previousExecution
+      ? { effective: previousExecution.effective, jev: { status: 'skipped', code: 'HOT_DISCOVERY_RESUMED' } }
+    : sourcePlanEligible && previous
+      ? { effective: { query: planningInput.query, category: planningInput.category,
+        language, timeRange, source: 'automatic' },
+      jev: { status: 'fallback', code: 'SOURCE_PLAN_INVALID' } }
+      : await planner(planningInput, { environment: options.environment || process.env,
+        signal: options.signal, callJev: options.callJev, remainingBudgetMs: enhancementBudget(),
+        deferHotSource: (channelMode === 'online' && profileEnabled)
+          || Boolean(sourcePlanEligible && freshSourcePlanning) });
+  query = planned.effective.query;
+  category = planned.effective.category;
+  timeRange = planned.effective.timeRange;
+  if (sourcePlanEligible && !sourcePlan && !previous && freshSourcePlanning) {
+      sourcePlanInput = sourcePlanInputForCategory(category);
+      authorizedSources = sourcePlanInput.sources;
+      const selected = await (options.planSourceWaves || planSourceWaves)(sourcePlanInput, {
+        environment: options.environment || process.env, signal: options.signal,
+        callJev: options.callJev, remainingBudgetMs,
+        sourceMetadata: sourceMetadata.filter((adapter) => authorizedSources.includes(adapter.site))
+          .map(({ site, tier, dimensions }) => ({ site, tier, dimensions })),
+      });
+      sourcePlanning = selected.diagnostic;
+      if (selected.identity === sourcePlanIdentity(sourcePlanInput)
+        && validSourcePlan({ ...selected, cursor: 0 }, authorizedSources)) {
+        sourcePlan = { ...selected, cursor: 0, nextWave: true, createdAt: Date.now(),
+          effective: { query, category, timeRange, source: planned.effective.source,
+            ...(planned.effective.hotSource ? { hotSource: planned.effective.hotSource } : {}) },
+          waveIds: selected.waves.map(() => randomUUID()) };
+        if (options.orchestrationRunId !== undefined) withSessionLock(paths, 'public-discover-source-plan', () => {
+          const current = loadSession(paths, { persistMigration: false }).session;
+          if (current.task.activeOrchestrationRunId !== options.orchestrationRunId) throw new Error('ORCHESTRATION_OWNER_MISMATCH');
+          current.task.publicCollectRun.hotSourcePlan = sourcePlan;
+          persistSession(paths, current);
+        });
+      }
+  }
+  if (!sourcePlan && sourcePlanEligible && !previous && freshSourcePlanning
+    && profileEnabled && !planned.effective.hotSource) {
+    const hotOnlyInput = { ...planningInput, query, category, timeRange,
+      queryCandidates: [query], categoryCandidates: [category], timeRangeCandidates: [timeRange],
+      sourceCandidates: [planned.effective.source] };
+    const hotOnly = await planner(hotOnlyInput, { environment: options.environment || process.env,
+      signal: options.signal, callJev: options.callJev, remainingBudgetMs: enhancementBudget() });
+    if (planningInput.hotSourceCandidates.includes(hotOnly.effective?.hotSource)) {
+      planned = { ...planned, effective: { ...planned.effective, hotSource: hotOnly.effective.hotSource } };
+    }
+  }
+  if (sourcePlan) {
+    ({ query, category, timeRange } = sourcePlan.effective);
+    sourcePlanning = sourcePlan.diagnostic;
+  }
+  const hotSources = [...CHINESE_ARTICLE_SOURCES];
+  if (hotSources.includes(planned.effective.hotSource)) {
+    hotSources.splice(hotSources.indexOf(planned.effective.hotSource), 1);
+    hotSources.unshift(planned.effective.hotSource);
+  }
   const limit = String(args?.limit || '20');
   const inputDir = requireText(paths?.inputDir, '会话 inputDir');
   const prefix = `public-discovery-${Date.now()}-${randomUUID()}`;
+  const runtimeRunId = options.orchestrationRunId || prefix;
   const searxngSnapshot = snapshotPath(inputDir, `${prefix}-searxng.json`);
   const hotSnapshot = snapshotPath(inputDir, `${prefix}-hot-discovery.json`);
   const mergedSnapshot = snapshotPath(inputDir, `${prefix}-merged.json`);
   const runOnlineSearch = options.runOnlineSearch || defaultRunOnlineSearch;
-  const runHotDiscoveryProcess = options.runProcess || runPublicProcess;
+  const runHotDiscoveryProcess = (spec, runOptions) => runHotDiscoveryWave(
+    spec, options.runProcess || runPublicProcess, { ...runOptions, recovery },
+  );
   const processTimeoutMs = Math.max(1, Math.ceil(Number(processTimeout) * 1_000));
 
   const onlineSearchArgs = {
@@ -252,19 +497,44 @@ export async function runPublicDiscover(paths, args, options = {}) {
     language,
     pageno,
     'max-results': effectiveMaxResults,
+    ...(planned.effective.source !== 'automatic' ? { source: planned.effective.source } : {}),
     ...(requestedCount && options.orchestrationRunId === undefined
       ? { 'requested-count': requestedCount } : {}),
     ...(timeRange ? { 'time-range': timeRange } : {}),
   };
+  if (ownsOnlineReservation) {
+    if (!validOnlineEffective(planned.effective)) {
+      throw new Error('ONLINE_DISCOVERY_EXECUTION_INVALID: effective parameters exceed the authorized request');
+    }
+    withSessionLock(paths, 'public-discover-online-execution', () => {
+      const current = loadSession(paths, { persistMigration: false }).session;
+      const run = current.task.publicCollectRun;
+      const reservation = run?.discoveryReservation;
+      if (current.task.activeOrchestrationRunId !== options.orchestrationRunId
+        || run?.runId !== options.orchestrationRunId || run.status !== 'running'
+        || reservation?.channel !== 'online' || reservation.phase !== 'reserved'
+        || reservation.query !== reservationIdentity.query
+        || reservation.round !== onlineReservation.round
+        || reservation.round !== run.discoveryRounds.length + 1) {
+        throw new Error('ORCHESTRATION_OWNER_MISMATCH');
+      }
+      run.onlineDiscoveryExecution = { identity: onlineIdentity, effective: {
+        query, category, language, timeRange, source: planned.effective.source,
+      } };
+      persistSession(paths, current);
+    });
+  }
   const runOnlineSearchChannel = async (_spec, { timeoutMs }) => {
     const result = await runOnlineSearch(onlineSearchArgs, {
       timeoutMs,
+      signal: options.signal,
       environment: options.environment || process.env,
       runProcess: options.runProcess || runPublicProcess,
       pythonExecutable: options.pythonExecutable,
       searxngScript: options.searxngScript,
       wsaClient: options.wsaClient,
       wsaCapabilities: options.wsaCapabilities,
+      coverageRequired: session.task.materializationTarget === 'all',
     });
     return result?.ok && result.document
       ? { code: 0, stdout: JSON.stringify(result.document), stderr: '' }
@@ -279,29 +549,53 @@ export async function runPublicDiscover(paths, args, options = {}) {
       };
   };
   const onlineSearchSpec = { channel: 'online-search' };
-  const hotDiscoverySpec = (sources = null, minimumAttempts = null, totalBudgetMs = null) => ({
-    channel: 'hot-discovery',
-    executable: process.execPath,
-    args: [hotDiscoveryScript, 'search', '--query', query, '--tiers', tiers,
-      '--limit', requestedCount || limit,
-      '--dimensions', profileEnabled ? 'general,news,blogs' : category,
-      ...(sources ? [
-        '--sources', sources.join(','),
+  const hotExecution = previousExecution || { identity: executionIdentity, effective: planned.effective, waveIds: {} };
+  const hotDiscoverySpec = (sources = null, minimumAttempts = null, totalBudgetMs = null, waveId = null) => {
+    if (!waveId && options.orchestrationRunId !== undefined) {
+      const key = sourcePlanIdentity({ sources, minimumAttempts });
+      waveId = hotExecution.waveIds[key] ||= randomUUID();
+      withSessionLock(paths, 'public-discover-hot-execution', () => {
+        const current = loadSession(paths, { persistMigration: false }).session;
+        if (current.task.activeOrchestrationRunId !== options.orchestrationRunId) throw new Error('ORCHESTRATION_OWNER_MISMATCH');
+        current.task.publicCollectRun.hotDiscoveryExecution = hotExecution;
+        persistSession(paths, current);
+      });
+    }
+    return {
+      channel: 'hot-discovery',
+      executable: process.execPath,
+      args: [hotDiscoveryScript, 'search', '--query', query, '--tiers', tiers,
+        '--limit', requestedCount || limit,
+        '--dimensions', profileEnabled ? 'general,news,blogs' : category,
+        ...(sources ? ['--sources', sources.join(',')] : args.sources ? ['--sources', args.sources] : []),
+        '--state-dir', inputDir, '--run-id', runtimeRunId, '--wave-id', waveId || randomUUID(),
         '--adapter-timeout-ms', '10000',
         ...(minimumAttempts ? ['--minimum-attempts', String(minimumAttempts)] : []),
-        ...(totalBudgetMs ? ['--total-budget-ms', String(totalBudgetMs)] : []),
-      ] : [])],
-  });
+        '--total-budget-ms', String(Math.max(1, Math.floor(Math.min(
+          totalBudgetMs ?? 90_000,
+          processTimeoutMs * 0.75,
+          remainingBudgetMs() * 0.75,
+        ))))],
+    };
+  };
   let searxngOutcome;
   let hotOutcome;
   let searxngMs = 0;
   let hotDiscoveryMs = 0;
-  const channelMode = options.channelMode || 'all';
+  let nextHotWave = false;
+  let completedSourceCursor = sourcePlan?.cursor || 0;
   const runTimed = async (runner, spec, timeoutMs = processTimeoutMs) => {
     const startedAt = now();
     let outcome;
     try {
-      outcome = await runner(spec, { timeoutMs });
+      const remaining = remainingBudgetMs();
+      const boundedTimeout = Math.floor(Math.min(timeoutMs, remaining - Math.min(250, remaining * 0.05)));
+      outcome = boundedTimeout < 1
+        ? { skipped: true, skipReason: 'budget_exhausted' }
+        : await runner(spec, {
+        timeoutMs: boundedTimeout,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
     } catch (error) {
       outcome = { code: 1, stdout: '', stderr: error.message };
     }
@@ -312,7 +606,36 @@ export async function runPublicDiscover(paths, args, options = {}) {
     searxngOutcome = onlineRun.outcome;
     searxngMs = onlineRun.durationMs;
     hotOutcome = { skipped: true, skipReason: 'channel_mode_online' };
-  } else if (channelMode === 'hot') {
+  } else if (sourcePlan) {
+    const onlineRun = channelMode === 'hot'
+      ? { outcome: { skipped: true, skipReason: 'channel_mode_hot' }, durationMs: 0 }
+      : await runTimed(runOnlineSearchChannel, onlineSearchSpec);
+    searxngOutcome = onlineRun.outcome;
+    searxngMs = onlineRun.durationMs;
+    const documents = [];
+    const onlineEnough = channelMode !== 'hot' && !options.forceHotDiscovery
+      && countUniqueEligibleArticles(parseSuccess(searxngOutcome)?.results || [], topicContract) >= Number(requestedCount);
+    if (onlineEnough) hotOutcome = { skipped: true, skipReason: 'sufficient_article_candidates' };
+    for (let cursor = sourcePlan.cursor; !onlineEnough && cursor < sourcePlan.waves.length; cursor++) {
+      const wave = await runTimed(runHotDiscoveryProcess,
+        hotDiscoverySpec(sourcePlan.waves[cursor], sourcePlan.waves[cursor].length, null, sourcePlan.waveIds[cursor]));
+      hotDiscoveryMs += wave.durationMs;
+      hotOutcome = wave.outcome;
+      const document = parseSuccess(wave.outcome);
+      if (!document) break;
+      documents.push(document);
+      const interrupted = ['in_progress', 'process_interrupted'].includes(document.stopReason);
+      completedSourceCursor = document.requiresUserAction || interrupted ? cursor : cursor + 1;
+      nextHotWave = completedSourceCursor < sourcePlan.waves.length
+        && document.status !== 'partial' && !document.requiresUserAction && remainingBudgetMs() > 0;
+      if (options.orchestrationRunId !== undefined || !nextHotWave) break;
+      const candidates = [...(parseSuccess(searxngOutcome)?.results || []), ...documents.flatMap((doc) => doc.candidates || [])];
+      if (countUniqueEligibleArticles(candidates, topicContract) >= Number(requestedCount)) { nextHotWave = false; break; }
+    }
+    const combined = mergeHotWaves(documents, query);
+    if (combined) hotOutcome = { code: 0, stdout: JSON.stringify(combined), stderr: '' };
+    if (sourcePlan.cursor === sourcePlan.waves.length) hotOutcome = { code: 0, stdout: JSON.stringify({ candidates: [] }), stderr: '' };
+  } else if (channelMode === 'hot' && !profileEnabled) {
     searxngOutcome = { skipped: true, skipReason: 'channel_mode_hot' };
     const hotRun = await runTimed(runHotDiscoveryProcess, hotDiscoverySpec());
     hotOutcome = hotRun.outcome;
@@ -322,23 +645,25 @@ export async function runPublicDiscover(paths, args, options = {}) {
       1,
       HARD_DISCOVERY_BUDGET_MS - elapsedMilliseconds(totalStartedAt, now()),
     );
-    const firstWaveSources = CHINESE_ARTICLE_SOURCES.slice(0, 3);
+    const firstWaveSources = hotSources.slice(0, 3);
     const firstWaveSpec = hotDiscoverySpec(
       firstWaveSources,
       3,
       Math.max(1, SOFT_DISCOVERY_BUDGET_MS - elapsedMilliseconds(totalStartedAt, now())),
     );
     const [searxngRun, hotRun] = await Promise.all([
-      runTimed(runOnlineSearchChannel, onlineSearchSpec, remainingHardMs),
+      channelMode === 'hot'
+        ? Promise.resolve({ outcome: { skipped: true, skipReason: 'channel_mode_hot' }, durationMs: 0 })
+        : runTimed(runOnlineSearchChannel, onlineSearchSpec, remainingHardMs),
       runTimed(runHotDiscoveryProcess, firstWaveSpec, remainingHardMs),
     ]);
     searxngOutcome = searxngRun.outcome;
     searxngMs = searxngRun.durationMs;
     hotDiscoveryMs = hotRun.durationMs;
     const waveDocuments = [parseSuccess(hotRun.outcome)].filter(Boolean);
-    for (const source of CHINESE_ARTICLE_SOURCES.slice(3)) {
+    for (const source of hotSources.slice(3)) {
       const combined = mergeHotWaves(waveDocuments, query);
-      if (combined?.requiresUserAction) break;
+      if (combined?.requiresUserAction || combined?.status === 'partial') break;
       const candidates = [
         ...(Array.isArray(parseSuccess(searxngOutcome)?.results) ? parseSuccess(searxngOutcome).results : []),
         ...(Array.isArray(combined?.candidates) ? combined.candidates : []),
@@ -388,6 +713,9 @@ export async function runPublicDiscover(paths, args, options = {}) {
 
   const sxDoc = parseSuccess(searxngOutcome);
   const hotDoc = parseSuccess(hotOutcome);
+  const requiresUserAction = hotDoc?.requiresUserAction || sxDoc?.requiresUserAction;
+  const infrastructureBlocked = options.orchestrationRunId !== undefined
+    && ['in_progress', 'process_interrupted'].includes(hotDoc?.stopReason);
   if (!sxDoc && !hotDoc) {
     const failure = hotOutcome?.skipped
       ? 'SearXNG 未返回有效结果'
@@ -395,7 +723,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     if (options.orchestrationRunId === undefined) {
       withSessionLock(paths, 'public-discover-failed', () => {
         const current = loadSession(paths, { persistMigration: false }).session;
-        recordDiscoveryResult(current.task.discoveryGate, { query, category, candidates: [], error: failure });
+        recordDiscoveryResult(current.task.discoveryGate, { ...reservationIdentity, candidates: [], error: failure });
         persistSession(paths, current);
       });
     }
@@ -425,9 +753,23 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const mergeStartedAt = now();
   const mergedDocument = await merge({ hotDoc, sxDoc, warnings });
   const annotatedMerged = annotateMergedCandidates(mergedDocument, topicContract);
+  const ranker = options.rankCandidates || defaultRankCandidates;
+  const ranked = options.deferCandidateRanking
+    ? { candidates: mergedCandidates(annotatedMerged), diagnostic: { status: 'skipped', code: 'RANKING_OWNED_BY_UNIFIED_SEARCH' } }
+    : await ranker(session.task?.query || query, mergedCandidates(annotatedMerged), {
+    optimizeDelivery: true,
+    feedback: collectionFeedback(session, session.task.publicCollectRun),
+    collectedCandidates: collectedPublicCandidates(session),
+    evidenceContext: researchEvidenceContext(session, options.environment || process.env),
+    environment: options.environment || process.env,
+    signal: options.signal,
+    remainingBudgetMs: enhancementBudget(),
+  });
+  const rankedMerged = ranked.diagnostic?.status === 'used'
+    ? applyCandidateRanking(annotatedMerged, ranked.candidates) : annotatedMerged;
   const candidateQuality = {
     searxng: classifyCandidates(Array.isArray(sxDoc?.results) ? sxDoc.results : [], topicContract),
-    merged: summarizeMergedQuality(annotatedMerged),
+    merged: summarizeMergedQuality(rankedMerged),
   };
   candidateQuality.onlineSearch = candidateQuality.searxng;
   const mergeAndClassifyMs = elapsedMilliseconds(mergeStartedAt, now());
@@ -441,26 +783,32 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const authorization = withSessionLock(paths, 'public-discover-record', () => {
     const current = loadSession(paths, { persistMigration: false }).session;
     const result = recordDiscoveryResult(current.task.discoveryGate, {
-      query,
-      category,
-      candidates: mergedCandidates(annotatedMerged),
-      keepOpen: options.orchestrationRunId !== undefined && options.channelMode === 'online',
+      ...reservationIdentity,
+      candidates: ranked.diagnostic?.status === 'used' ? ranked.candidates : mergedCandidates(annotatedMerged),
+      keepOpen: options.orchestrationRunId !== undefined
+        && (options.channelMode === 'online' || nextHotWave || Boolean(requiresUserAction) || infrastructureBlocked),
     });
+    if (sourcePlan && options.orchestrationRunId !== undefined) {
+      current.task.publicCollectRun.hotSourcePlan = { ...sourcePlan, cursor: completedSourceCursor, nextWave: nextHotWave };
+    }
     persistSession(paths, current);
     return { state: current.task.discoveryGate, result };
   });
   const discoveryProfile = profileEnabled ? {
     name: 'chinese-article',
-    sources: [...CHINESE_ARTICLE_SOURCES],
+    sources: hotSources,
     stopAfter: profileStopAfter,
     minimumAttempts: 3,
     budget: { softMs: SOFT_DISCOVERY_BUDGET_MS, hardMs: HARD_DISCOVERY_BUDGET_MS },
   } : null;
   const selectedCandidate = authorization.result.articleCandidates[0] || null;
   const merged = {
-    ...annotatedMerged,
+    ...rankedMerged,
     channelDiagnostics,
     candidateQuality,
+    queryPlanning: planned.jev,
+    candidateRanking: ranked.diagnostic,
+    sourcePlanning,
     timing,
     selectedCandidate,
     ...(discoveryProfile ? { discoveryProfile } : {}),
@@ -470,6 +818,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
     return {
     ok: true,
     action: 'public-discover',
+    nextHotWave: options.orchestrationRunId !== undefined && nextHotWave,
+    sourcePlanning,
     query,
     category,
     requestedDimensions: [category],
@@ -479,6 +829,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
     } : null,
     channels: channelDiagnostics,
     candidateQuality,
+    queryPlanning: planned.jev,
+    candidateRanking: ranked.diagnostic,
     discoveryAuthorization: {
       attemptCount: authorization.state.attemptCount,
       maxAttempts: authorization.state.maxAttempts,
@@ -502,7 +854,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
       merged: mergedSnapshot,
     },
     merged,
-    ...(merged.requiresUserAction ? { requiresUserAction: merged.requiresUserAction } : {}),
+    ...(requiresUserAction ? { requiresUserAction: merged.requiresUserAction || requiresUserAction } : {}),
+    ...(infrastructureBlocked ? { infrastructureBlocked: true } : {}),
     warnings,
     };
   } catch (error) {
@@ -511,8 +864,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
       const running = current.task.discoveryGate?.runs?.at(-1)?.status === 'running';
       if (running && options.orchestrationRunId === undefined) {
         recordDiscoveryResult(current.task.discoveryGate, {
-          query,
-          category,
+          ...reservationIdentity,
           candidates: [],
           error: error instanceof Error ? error.message : String(error),
         });

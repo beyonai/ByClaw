@@ -170,6 +170,9 @@ export interface AgentConnector {
     },
   ): Promise<ConnectorExecution>;
 
+  /** 取消可能已发布但 externalRef 尚未入库的委派；绝不能以 start 重投来找回句柄。 */
+  cancelPending?(delegationId: string, reason: string): Promise<void>;
+
   /** 检查 Connector 自身依赖是否可用；具体目标 Agent 的在线性仍在投递时校验。 */
   health(): Promise<ConnectorHealth>;
 }

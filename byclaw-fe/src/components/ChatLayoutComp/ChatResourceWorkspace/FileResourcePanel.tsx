@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
+import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
 import { Button, Dropdown, Empty, Modal, Spin, Tooltip, Tree, Typography, Upload, message, type MenuProps } from 'antd';
 import { EllipsisOutlined, FolderAddOutlined, UploadOutlined } from '@ant-design/icons';
-import { getLocale, useIntl, useSelector } from '@umijs/max';
+import { getLocale, useIntl } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import { FilePathTooltip } from '@/layout/sider/components/FileSiderPanel/components/FileTreeList';
 import CreateFolderModal from '@/layout/sider/components/FileSiderPanel/components/CreateFolderModal';
@@ -50,7 +50,7 @@ import {
   moveKnowledgeItems,
   removeFile,
   renameFolder,
-  updateFileInfo,
+  renameKnowledgeFile,
   uploadFiles as uploadKnowledgeFiles,
 } from '@/service/knowledgeCenter';
 import { downloadFile as downloadUrlFile } from '@/utils/file';
@@ -70,6 +70,7 @@ type ProjectFileItem = FileBrowserItem & {
   updatedAt?: string;
   createBy?: string | number | null;
   createStaffName?: string | null;
+  canManageItem?: boolean;
 };
 
 interface FileResourcePanelProps {
@@ -116,7 +117,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const { project: loadedProject } = useChatResourceProject(!project && projectIdProp ? projectIdProp : undefined);
   const resolvedProject = project || loadedProject;
   const { EventEmitter } = useGlobal();
-  const userInfo = useSelector((state: any) => state.user.userInfo);
   const [items, setItems] = useState<FileBrowserItem[]>([]);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   // Tree 会缓存已触发过 loadData 的目录；刷新时必须同步清空，否则再次展开不会发起请求。
@@ -135,6 +135,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [moveTargetDirectory, setMoveTargetDirectory] = useState('/');
   const [moving, setMoving] = useState(false);
   const [moveTreeData, setMoveTreeData] = useState<any[]>([]);
+  // 根节点异步到达时仍保持展开；Tree 需关闭 defaultExpandParent，避免过滤尚未加载的根键。
+  // 每次打开移动弹窗重新初始化，后续由用户控制目录展开状态。
+  const [moveExpandedKeys, setMoveExpandedKeys] = useState<Key[]>(['/']);
   const [moveTreeLoading, setMoveTreeLoading] = useState(false);
   const [saveDestination, setSaveDestination] = useState<'project' | 'shared'>('project');
   const [saveTarget, setSaveTarget] = useState<FileBrowserItem | null>(null);
@@ -158,31 +161,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     scope === 'project'
       ? '/'
       : `${DISPLAY_FILE_PATH_PREFIX}${scope === 'shared' ? SHARED_FILE_PATH : getSessionFilePath(sessionId)}`;
-  const canManageProjectFiles = useMemo(() => {
-    const currentUserId = userInfo?.userId ?? userInfo?.id;
-    return (
-      currentUserId !== undefined &&
-      project?.createBy !== undefined &&
-      project.createBy !== null &&
-      `${currentUserId}` === `${project.createBy}`
-    );
-  }, [project?.createBy, userInfo?.id, userInfo?.userId]);
-
-  const canDeleteProjectItem = useCallback(
-    (item: FileBrowserItem) => {
-      if (scope !== 'project') return true;
-      const creatorName = (item as ProjectFileItem).createStaffName?.trim();
-      if (!creatorName) return true;
-      const currentUserId = userInfo?.userId ?? userInfo?.id;
-      const creatorId = (item as ProjectFileItem).createBy;
-      if (creatorId !== null && creatorId !== undefined && currentUserId !== undefined) {
-        return `${creatorId}` === `${currentUserId}`;
-      }
-      return creatorName === `${userInfo?.userName || userInfo?.name || ''}`;
-    },
-    [scope, userInfo?.id, userInfo?.name, userInfo?.userId, userInfo?.userName]
-  );
-
   const loadRoot = useCallback(async () => {
     if (scope === 'session' && (!resourceId || !sessionId)) {
       setItems([]);
@@ -361,10 +339,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       });
       try {
         if (scope === 'project') {
-          const response: any = await downloadResourceFile({
-            resourceId,
-            directoryPath: item.path,
-          });
+          const response: any = await downloadResourceFile({ resourceId, directoryPath: item.path });
           const blob = response?.file instanceof Blob ? response.file : new Blob([response?.file || response]);
           downloadUrlFile({ file: blob, fileName: response?.fileName || item.name });
           message.destroy(messageKey);
@@ -384,7 +359,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.download.failed' }));
       }
     },
-    [intl, resourceId]
+    [intl, resourceId, scope]
   );
 
   const deleteResource = useCallback(
@@ -413,7 +388,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.delete.failed' }));
       }
     },
-    [intl, loadDirectory, loadRoot, projectId, resourceId, rootPath]
+    [intl, loadDirectory, loadRoot, projectId, resourceId, rootPath, scope]
   );
 
   const loadSaveDirectories = useCallback(
@@ -607,8 +582,26 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     [language, resourceId, scope, usesFileBrowser]
   );
 
+  const handleLoadMoveData = useCallback(
+    async (node: { key: Key; children?: unknown[] }) => {
+      if (node.children) return;
+      const children = await loadMoveDirectories(String(node.key));
+      // Tree 回调节点不是 state 中的原始节点，需递归更新目录树才能展示任意层级的子目录。
+      const updateChildren = (nodes: any[]): any[] =>
+        nodes.map((item) => {
+          if (item.key === node.key) {
+            return { ...item, children, isLeaf: children.length === 0 };
+          }
+          return item.children ? { ...item, children: updateChildren(item.children) } : item;
+        });
+      setMoveTreeData((current) => updateChildren(current));
+    },
+    [loadMoveDirectories]
+  );
+
   useEffect(() => {
     if (!moveTarget || !resourceId) return;
+    setMoveExpandedKeys(['/']);
     setMoveTreeLoading(true);
     loadMoveDirectories('/')
       .then((children) =>
@@ -628,12 +621,10 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         'download',
         ...(resourceId && isDirectory(item) ? ['upload', 'createSibling', 'createChild'] : []),
         ...(scope === 'project' && resourceId ? ['move'] : []),
-        ...(usesFileBrowser || canManageProjectFiles ? ['rename'] : []),
-        // 项目云盘的重命名和删除由知识库接口执行，菜单始终展示，最终权限由后端校验。
-        ...(scope === 'project' && resourceId && !canManageProjectFiles ? ['rename', 'delete'] : []),
+        // 项目云盘由后端按条目创建人、项目创建人及 adminvip 返回操作权限。
+        ...(usesFileBrowser || (scope === 'project' && resourceId) ? ['rename', 'delete'] : []),
         ...(scope === 'session' && projectId && projectId !== -1 ? ['saveToProject'] : []),
         ...(scope === 'session' && resourceId ? ['saveToShared'] : []),
-        ...(usesFileBrowser || canManageProjectFiles ? ['delete'] : []),
       ];
       const labels: Record<string, string> = {
         quote: intl.formatMessage({ id: 'common.quote' }),
@@ -651,18 +642,14 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       return keys.map((key) => ({
         key,
         danger: key === 'delete',
-        disabled: key === 'delete' && !canDeleteProjectItem(item),
-        label:
-          key === 'delete' && !canDeleteProjectItem(item) ? (
-            <Tooltip title={intl.formatMessage({ id: 'chatResource.deleteNotAllowed' })}>
-              <div className={employeeStyles.dropdownMenuItem}>{labels[key]}</div>
-            </Tooltip>
-          ) : (
-            <div className={employeeStyles.dropdownMenuItem}>{labels[key]}</div>
-          ),
+        disabled:
+          scope === 'project' &&
+          (key === 'rename' || key === 'delete' || key === 'move') &&
+          (item as ProjectFileItem).canManageItem !== true,
+        label: <div className={employeeStyles.dropdownMenuItem}>{labels[key]}</div>,
       }));
     },
-    [canDeleteProjectItem, canManageProjectFiles, intl, projectId, resourceId, scope, usesFileBrowser]
+    [intl, projectId, resourceId, scope, usesFileBrowser]
   );
 
   const handleUpload = useCallback(
@@ -693,7 +680,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setUploading(false);
       }
     },
-    [intl, loadRoot, resourceId, rootPath, uploading]
+    [intl, loadRoot, resourceId, rootPath, scope, uploading]
   );
 
   const handleCreateFolder = useCallback(async () => {
@@ -724,11 +711,18 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     } finally {
       setCreatingFolder(false);
     }
-  }, [createFolderName, createFolderPath, intl, loadRoot, resourceId]);
+  }, [createFolderName, createFolderPath, intl, loadRoot, resourceId, scope]);
 
   const handleAction = useCallback(
     (key: Key, item: FileBrowserItem) => {
       if (key === 'quote') quoteFile(item);
+      if (
+        scope === 'project' &&
+        (key === 'rename' || key === 'delete' || key === 'move') &&
+        (item as ProjectFileItem).canManageItem !== true
+      ) {
+        return;
+      }
       if (key === 'preview') openPreview(item);
       if (key === 'download') void downloadResource(item);
       if (key === 'move') {
@@ -754,10 +748,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (key === 'saveToProject') void openSaveResource(item, 'project');
       if (key === 'saveToShared') void openSaveResource(item, 'shared');
       if (key === 'delete') {
-        if (!canDeleteProjectItem(item)) {
-          message.info(intl.formatMessage({ id: 'chatResource.deleteNotAllowed' }));
-          return;
-        }
         Modal.confirm({
           title: intl.formatMessage({ id: 'fileBrowser.delete.confirm' }),
           content: intl.formatMessage({ id: 'fileBrowser.delete.confirmName' }, { name: item.name }),
@@ -766,17 +756,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         });
       }
     },
-    [
-      canDeleteProjectItem,
-      deleteResource,
-      downloadResource,
-      handleUpload,
-      intl,
-      openPreview,
-      quoteFile,
-      rootPath,
-      openSaveResource,
-    ]
+    [deleteResource, downloadResource, handleUpload, intl, openPreview, quoteFile, rootPath, openSaveResource, scope]
   );
 
   const handleRename = useCallback(
@@ -784,7 +764,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (!renameTarget) return;
       setRenameLoading(true);
       try {
-        // 项目云盘与知识库目录管理保持一致：文件夹调用 renameFolder，文件调用 updateFileInfo。
+        // 项目云盘文件以完整路径改名，目录列表可能没有 fileId。
         if (scope === 'project' && resourceId) {
           if (renameTarget.isDir) {
             await renameFolder({
@@ -793,7 +773,15 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
               directoryPath: ensureDirectoryPath(renameTarget.path),
             });
           } else {
-            await updateFileInfo({ fileId: (renameTarget as any).fileId, fileName: newName });
+            const result = await renameKnowledgeFile({
+              resourceId: Number(resourceId),
+              filePath: renameTarget.path,
+              fileName: newName,
+            });
+            const failedItem = result?.data?.find((item) => item.success === false);
+            if (failedItem || Number(result?.summary?.failed || 0) > 0) {
+              throw new Error(failedItem?.error || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
+            }
           }
           await loadDirectory(getParentDirectoryPath(renameTarget.path));
         } else if (isProjectFile(renameTarget)) {
@@ -822,7 +810,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setRenameLoading(false);
       }
     },
-    [intl, loadDirectory, loadRoot, projectId, renameTarget, resourceId, rootPath]
+    [intl, loadDirectory, loadRoot, projectId, renameTarget, resourceId, rootPath, scope]
   );
 
   const handleNodeClick = useCallback(
@@ -967,17 +955,14 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           <Spin spinning={moveTreeLoading}>
             <Tree
               treeData={moveTreeData}
-              defaultExpandedKeys={['/']}
+              defaultExpandParent={false}
+              expandedKeys={moveExpandedKeys}
+              onExpand={setMoveExpandedKeys}
               selectedKeys={[moveTargetDirectory]}
               onSelect={(keys) => {
                 if (keys.length) setMoveTargetDirectory(String(keys[0]));
               }}
-              loadData={async (node: any) => {
-                if (node.children?.length) return;
-                const children = await loadMoveDirectories(String(node.key));
-                node.children = children;
-                setMoveTreeData((current) => [...current]);
-              }}
+              loadData={handleLoadMoveData}
               blockNode
               showIcon
             />
@@ -1126,17 +1111,14 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         <Spin spinning={moveTreeLoading}>
           <Tree
             treeData={moveTreeData}
-            defaultExpandedKeys={['/']}
+            defaultExpandParent={false}
+            expandedKeys={moveExpandedKeys}
+            onExpand={setMoveExpandedKeys}
             selectedKeys={[moveTargetDirectory]}
             onSelect={(keys) => {
               if (keys.length) setMoveTargetDirectory(String(keys[0]));
             }}
-            loadData={async (node: any) => {
-              if (node.children?.length) return;
-              const children = await loadMoveDirectories(String(node.key));
-              node.children = children;
-              setMoveTreeData((current) => [...current]);
-            }}
+            loadData={handleLoadMoveData}
             blockNode
             showIcon
           />

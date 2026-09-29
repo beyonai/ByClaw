@@ -4,8 +4,9 @@
 递归树状研究 —— 从宽问题出发,拆成若干子问题,逐个子问题完整研究,再用发现与 follow-up 深入一层,
 直到达到配置深度,最后聚合为带引用的报告。
 
-研究判断(搜什么、什么相关、学到什么、怎么写报告)全部由 Agent 负责;
-本技能只提供流程纪律与持久状态。所有状态写入 <session-dir>/session.json,
+研究问题生成、学习结论和报告写作由 Agent 负责。Runner 可用 Jev 对已有 follow-up 给出优先级建议，并在上下文超预算时选择已有证据片段；失败或低置信度时保留原有顺序与裁剪逻辑。已登记研究分支的覆盖/缺失子题可为公网候选增量排序提供上下文；混合或企业资料仅在 `TYPESAFE_ENTERPRISE_ENABLED=true` 时发送。建议不改变研究深度、来源授权或完成标准，原始上下文在成功筛选时另存为 `research.contextArchive`。
+成功的 follow-up、上下文和 crawl 顺序建议可在本会话的 60 秒 sidecar 中复用。sidecar 只含完整会话及候选输入的哈希、原候选索引排列和时间戳；每次命中前重查模型配置、隐私授权、取消及预算。输入变化、超时、文件错误或 Jev 失败时沿用原流程，不把 sidecar 当作研究进度、引用或完成证据。这个优化仍未经过真实联网提速基准。
+本技能提供流程纪律与持久状态。所有状态写入 <session-dir>/session.json,
 由 `scripts/knowledge-collection.mjs` 统一管理(研究维度: init / plan / branch / aggregate / report)。
 
 ## 触发场景

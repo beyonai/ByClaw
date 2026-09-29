@@ -55,6 +55,12 @@ public class ProjectService {
         return projectMapper.selectById(projectId);
     }
 
+    /** 按实际绑定的云盘资源反查项目，避免相信客户端传入的项目身份。 */
+    public List<Project> findByCloudResourceId(Long resourceId) {
+        return projectMapper.selectList(new LambdaQueryWrapper<Project>()
+            .eq(Project::getCloudResourceId, resourceId));
+    }
+
 
     /**
      * 按项目编码查询。
@@ -85,18 +91,21 @@ public class ProjectService {
 
 
     /**
-     * 判断项目名称是否已存在。
+     * 判断同一创建者的未删除项目中是否已有该名称。
      *
      * @param projectName      项目名称
+     * @param createBy         项目创建者，共享项目不占用其他用户的名称
      * @param excludeProjectId 编辑时排除自身，可为 null
      */
-    public boolean existsProjectName(String projectName, Long excludeProjectId) {
+    public boolean existsProjectName(String projectName, Long createBy, Long excludeProjectId) {
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Project::getDeleteFlag, DELETE_FLAG_NORMAL).eq(Project::getProjectName, projectName);
+        wrapper.eq(Project::getDeleteFlag, DELETE_FLAG_NORMAL)
+            .eq(Project::getCreateBy, createBy)
+            .eq(Project::getProjectName, projectName);
         if (excludeProjectId != null) {
             wrapper.ne(Project::getProjectId, excludeProjectId);
         }
-        // 新建/编辑统一以后端最终入库名称为准查重，避免并发或绕过前端导致同名项目。
+        // 新建和编辑统一按创建者查重，避免他人的同名项目阻止保存。
         Long count = projectMapper.selectCount(wrapper);
         return count != null && count > 0;
     }

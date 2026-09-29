@@ -28,6 +28,25 @@ type IProps = {
   onSessionCreated?: (params: { sessionId: string; clientRequestId?: string; session: ISession }) => void;
 };
 
+const mergeMessageMetadata = (current: unknown, incoming: unknown) => {
+  const parseMetadata = (value: unknown) => {
+    if (isPlainObject(value)) return value as Record<string, unknown>;
+    if (!isString(value)) return null;
+    try {
+      const parsed = JSON.parse(value);
+      return isPlainObject(parsed) ? (parsed as Record<string, unknown>) : null;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const incomingMetadata = parseMetadata(incoming);
+  if (!incomingMetadata) return incoming;
+
+  const currentMetadata = parseMetadata(current);
+  return JSON.stringify({ ...(currentMetadata || {}), ...incomingMetadata });
+};
+
 function useHandler(props: IProps) {
   const { addSession, setSessionId, onSessionCreated } = props;
 
@@ -216,9 +235,10 @@ function useHandler(props: IProps) {
   const messageIdHandler = useCallback((onionsProps: IOnionsProps) => {
     const { sseRes, newAnswerMsg, sseMsg, newQueryMsg } = onionsProps;
 
-    // 任意带 messageId 的包都可能带完整 metadata（不仅 initialization）；需在后续逻辑前写入
+    // 任意带 messageId 的包都可能带 metadata（不仅 initialization）。流式事件通常只携带部分字段，
+    // 因此需要合并已收到的 metadata，避免完成事件把前序事件中的 usedModel 等字段覆盖掉。
     if (!isNil(sseRes.metadata) && sseRes.metadata !== '') {
-      newAnswerMsg.metadata = sseRes.metadata;
+      newAnswerMsg.metadata = mergeMessageMetadata(newAnswerMsg.metadata, sseRes.metadata);
     }
 
     if (!sseRes.messageId) return onionsProps;

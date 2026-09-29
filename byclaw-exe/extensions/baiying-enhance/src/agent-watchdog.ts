@@ -1,7 +1,6 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { loadAgentContentIndex, saveAgentContentIndex } from "./agent-content-index.js";
 import {
-    isManagedModelRegisteredInConfig,
     parseModelPrimaryRef,
 } from "./agent-session-model-reconcile.js";
 import {
@@ -11,7 +10,7 @@ import {
     warnUnregisteredManagedModelPrimaries,
 } from "./managed-agent-model-hook.js";
 import { adaptAgentJson, type AdaptedManagedAgent } from "./agent-adapter.js";
-import { mergeDefaultAimodelIntoConfig, mergeManagedAgentsIntoConfig } from "./agent-registry.js";
+import { hasManagedProviderConfigDrift, mergeDefaultAimodelIntoConfig, mergeManagedAgentsIntoConfig } from "./agent-registry.js";
 import { AgentRegistryState } from "./agent-state.js";
 import { mutateOpenClawConfigFile } from "./config-writer.js";
 import {
@@ -245,7 +244,7 @@ function retainedDefaultAimodelBundleFromConfig(cfg: {
 
 function hasDefaultModelConfigDrift(params: {
     cfg: {
-        agents?: { defaults?: { model?: { primary?: string } } };
+        agents?: { defaults?: { model?: { primary?: string }; compaction?: { timeoutSeconds?: number } } };
         models?: {
             providers?: Record<string, { models?: Array<{ id?: string }> }>;
         };
@@ -263,7 +262,8 @@ function hasDefaultModelConfigDrift(params: {
     if (!parsed) {
         return true;
     }
-    return !isManagedModelRegisteredInConfig(params.cfg, parsed.provider, parsed.model);
+    return hasManagedProviderConfigDrift(params.cfg, parsed.provider, params.defaultModel.provider) ||
+        params.cfg.agents?.defaults?.compaction?.timeoutSeconds === undefined;
 }
 
 export async function loadManagedAgentsFromRedis(params: {

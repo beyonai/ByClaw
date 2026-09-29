@@ -85,13 +85,18 @@ jest.mock('../useChat/useMessage', () => ({
 jest.mock('../useChat/useHandler', () => ({
   __esModule: true,
   default: jest.fn(() => ({
-    sessionInfoHandler: jest.fn(),
-    messageIdHandler: jest.fn(),
-    queryMessageIdHandler: jest.fn(),
-    messageHandler: jest.fn(),
-    resComIdsHandler: jest.fn(),
-    textHandler: jest.fn(),
-    rewriteQuestionHandler: jest.fn(),
+    sessionInfoHandler: jest.fn((props: any) => props),
+    messageIdHandler: jest.fn((props: any) => {
+      if (props.sseRes?.messageId) {
+        props.newAnswerMsg.messageId = `${props.sseRes.messageId}`;
+      }
+      return props;
+    }),
+    queryMessageIdHandler: jest.fn((props: any) => props),
+    messageHandler: jest.fn((props: any) => props),
+    resComIdsHandler: jest.fn((props: any) => props),
+    textHandler: jest.fn((props: any) => props),
+    rewriteQuestionHandler: jest.fn((props: any) => props),
   })),
 }));
 
@@ -121,7 +126,7 @@ import { getChatRunningSnapshot, getChatRunningStatus } from '@/service/message'
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import webSocketManager from '@/utils/websocket';
 import { IMessageState, SSEMessageType } from '@/constants/message';
-import { clearChatRuntime } from '../useChat/chatRuntime';
+import { clearChatRuntime, handleParsedChatStream } from '../useChat/chatRuntime';
 
 import useChat from '../useChat';
 
@@ -130,6 +135,7 @@ const mockUseSelector = useSelector as jest.Mock;
 const mockUseAppStore = useAppStore as unknown as jest.Mock;
 const mockGetChatRunningStatus = getChatRunningStatus as jest.MockedFunction<typeof getChatRunningStatus>;
 const mockGetChatRunningSnapshot = getChatRunningSnapshot as jest.MockedFunction<typeof getChatRunningSnapshot>;
+const mockSendMessageWhenReady = webSocketManager.sendMessageWhenReady as jest.Mock;
 
 describe('hooks/useChat/index', () => {
   beforeEach(() => {
@@ -183,11 +189,11 @@ describe('hooks/useChat/index', () => {
     mockWaitForSessionMessageLoaded.mockReturnValue(sessionMessagesPromise);
     mockGetChatRunningStatus.mockResolvedValue([
       {
-        sessionId: 's1',
+        sessionId: '101',
         running: true,
         traceId: 'trace-1',
         clientRequestId: 'client-1',
-        modelAnswerMessageId: 'answer-1',
+        modelAnswerMessageId: '201',
         userMessageId: 'query-1',
         chatContent: 'hello',
       },
@@ -195,7 +201,7 @@ describe('hooks/useChat/index', () => {
 
     renderHook(() =>
       useChat({
-        sessionId: 's1',
+        sessionId: '101',
         addSession: jest.fn(),
       } as any)
     );
@@ -204,7 +210,7 @@ describe('hooks/useChat/index', () => {
       await Promise.resolve();
     });
 
-    expect(mockWaitForSessionMessageLoaded).toHaveBeenCalledWith('s1');
+    expect(mockWaitForSessionMessageLoaded).toHaveBeenCalledWith('101');
     expect(mockGetChatRunningStatus).not.toHaveBeenCalled();
     expect(mockUpdateMessage).not.toHaveBeenCalled();
 
@@ -215,14 +221,135 @@ describe('hooks/useChat/index', () => {
       await Promise.resolve();
     });
 
-    expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['s1'] });
+    expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['101'] });
     expect(mockUpdateMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        messageId: 'answer-1',
-        sessionId: 's1',
+        messageId: '201',
+        sessionId: '101',
       }),
       { isAssign: true }
     );
+    expect(mockSendMessageWhenReady).toHaveBeenCalledWith({
+      type: 'TASK_PLAN_GET',
+      clientRequestId: 'client-1',
+      sessionId: '101',
+      messageId: '201',
+      traceId: 'trace-1',
+      laneId: undefined,
+    });
+  });
+
+  it('requests the latest task plan after websocket reconnect', async () => {
+    mockMessageList = [
+      {
+        messageId: '201',
+        msgId: 'answer_client-1',
+        messageState: IMessageState.Answer,
+        sessionId: '101',
+      },
+    ];
+    mockGetChatRunningStatus.mockResolvedValue([]);
+
+    renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    mockSendMessageWhenReady.mockClear();
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: '101',
+        running: true,
+        traceId: 'trace-1',
+        clientRequestId: 'client-1',
+        modelAnswerMessageId: '201',
+      },
+    ] as any);
+
+    await act(async () => {
+      mockReconnectHandler?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockSendMessageWhenReady).toHaveBeenCalledWith({
+      type: 'TASK_PLAN_GET',
+      clientRequestId: 'client-1',
+      sessionId: '101',
+      messageId: '201',
+      traceId: 'trace-1',
+      laneId: undefined,
+    });
+  });
+
+  it('requests the latest task plan after another device initializes its answer message', async () => {
+    renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const newMessageHandler = (webSocketManager.onMessage as jest.Mock).mock.calls.find(
+      ([type]) => type === 'NEW_MESSAGE'
+    )![1];
+    await act(async () => {
+      await newMessageHandler({
+        type: 'NEW_MESSAGE',
+        clientRequestId: 'client-1',
+        sessionId: '101',
+        agentId: 'agent-1',
+        data: {
+          creatorId: 'u1',
+          usage: 1,
+          sessionId: '101',
+          messageId: '111',
+          messageContent: '{"text":"hello"}',
+        },
+      });
+    });
+
+    mockSendMessageWhenReady.mockClear();
+    act(() => {
+      handleParsedChatStream({
+        eventName: 'initialization',
+        formattedPayload: {
+          sessionId: '101',
+          messageId: '201',
+          queryMessageId: '111',
+          traceId: 'trace-1',
+        },
+        res: {
+          sessionId: '101',
+          messageId: '201',
+          queryMessageId: '111',
+          traceId: 'trace-1',
+        },
+        clientRequestId: 'client-1',
+        sseMsg: {
+          event: 'initialization',
+          data: '{}',
+        },
+        rawMessage: {
+          type: 'CHAT_STREAM',
+          clientRequestId: 'client-1',
+          sessionId: '101',
+          event: 'initialization',
+          data: {},
+        },
+        isError: false,
+        isDone: false,
+      } as any);
+    });
+
+    expect(mockSendMessageWhenReady).toHaveBeenCalledWith({
+      type: 'TASK_PLAN_GET',
+      clientRequestId: 'client-1',
+      sessionId: '101',
+      messageId: '201',
+      traceId: 'trace-1',
+      laneId: undefined,
+    });
   });
 
   it('clears the scoped child content subscription while a root session is active', async () => {

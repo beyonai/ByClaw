@@ -13,13 +13,25 @@ export interface SkillGroupCardProps {
   canDelete?: boolean;
   onDelete?: (group: SkillGroup) => void;
   onEdit?: (group: SkillGroup) => void;
+  onShelf?: (group: SkillGroup) => void;
+  onUnShelf?: (group: SkillGroup) => void;
 }
 
 export const isReadableCreator = (creator?: string) => Boolean(creator && !/^\d+$/.test(creator.trim()));
 
-const SkillGroupCard: React.FC<SkillGroupCardProps> = ({ group, onClick, canDelete = false, onDelete, onEdit }) => {
+const SkillGroupCard: React.FC<SkillGroupCardProps> = ({
+  group,
+  onClick,
+  canDelete = false,
+  onDelete,
+  onEdit,
+  onShelf,
+  onUnShelf,
+}) => {
   const intl = useIntl();
-  const isInteractive = Boolean(onClick);
+  const status = `${group.resourceStatus}`;
+  const isDeregistered = status === '-1';
+  const isInteractive = Boolean(onClick) && !isDeregistered;
   const [coverError, setCoverError] = useState(false);
   const creator = `${group.createBy || ''}`.trim();
   const memberCount = group.memberCount ?? group.members?.length ?? 0;
@@ -35,7 +47,7 @@ const SkillGroupCard: React.FC<SkillGroupCardProps> = ({ group, onClick, canDele
   };
   const deleteMenuItems: MenuProps['items'] = [];
   const deleteHandler = onDelete;
-  if (canDelete && onEdit) {
+  if (canDelete && !isDeregistered && onEdit) {
     deleteMenuItems.push({
       key: 'edit',
       label: intl.formatMessage({ id: 'resource.skillGroup.edit' }),
@@ -45,17 +57,51 @@ const SkillGroupCard: React.FC<SkillGroupCardProps> = ({ group, onClick, canDele
       },
     });
   }
-  if (canDelete && deleteHandler) {
+  if (
+    canDelete &&
+    !isDeregistered &&
+    (group.ownerType?.toLowerCase() === 'personal' || ['0', '3'].includes(status)) &&
+    deleteHandler
+  ) {
     deleteMenuItems.push({
       key: 'delete',
       danger: true,
-      label: intl.formatMessage({ id: 'resource.skillGroup.delete' }),
+      label: intl.formatMessage({ id: 'resource.lifecycle.deleteData' }),
       onClick: ({ domEvent }) => {
         domEvent.stopPropagation();
         deleteHandler(group);
       },
     });
   }
+
+  // 技能组上下架只影响组入口，保持成员技能和既有安装快照独立。
+  if (canDelete && group.ownerType === 'enterprise' && ['0', '3'].includes(status) && onShelf) {
+    deleteMenuItems.push({
+      key: 'shelf',
+      label: intl.formatMessage({ id: 'resource.lifecycle.shelfData' }),
+      onClick: ({ domEvent }) => {
+        domEvent.stopPropagation();
+        onShelf(group);
+      },
+    });
+  }
+  if (canDelete && group.ownerType === 'enterprise' && status === '2' && onUnShelf) {
+    deleteMenuItems.push({
+      key: 'unShelf',
+      label: intl.formatMessage({ id: 'resource.lifecycle.unShelfData' }),
+      onClick: ({ domEvent }) => {
+        domEvent.stopPropagation();
+        onUnShelf(group);
+      },
+    });
+  }
+  const statusLabels: Record<string, string> = {
+    '0': 'resourceStatus.draft',
+    '1': 'resourceStatus.pendingShelf',
+    '2': 'resourceStatus.published',
+    '3': 'resourceStatus.unpublished',
+    '-1': 'resource.statusCancelled',
+  };
 
   return (
     <div
@@ -103,6 +149,7 @@ const SkillGroupCard: React.FC<SkillGroupCardProps> = ({ group, onClick, canDele
           {group.resourceDesc || intl.formatMessage({ id: 'common.none' })}
         </div>
         <div className={styles.meta}>
+          {statusLabels[status] && <span>{intl.formatMessage({ id: statusLabels[status] })}</span>}
           {isReadableCreator(creator) ? <span className={styles.creator}>{creator}</span> : null}
           <span>{intl.formatMessage({ id: 'resource.skillGroup.memberCount' }, { count: memberCount })}</span>
         </div>

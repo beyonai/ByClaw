@@ -48,6 +48,16 @@ describe("parseModelPrimaryRef", () => {
 });
 
 describe("applySessionModelFromPrimary", () => {
+    it("invalidates a cached window even when the model ID stays the same", () => {
+        const entry: Record<string, unknown> = {
+            modelProvider: "provider", providerOverride: "provider",
+            model: "model", modelOverride: "model", contextTokens: 202752, liveModelSwitchPending: true,
+        };
+        expect(applySessionModelFromPrimary(entry, { provider: "provider", model: "model" }))
+            .toEqual({ changed: true, liveSwitchRequested: false });
+        expect(entry.contextTokens).toBeUndefined();
+        expect(entry.liveModelSwitchPending).toBeUndefined();
+    });
     it("sets overrides and liveModelSwitchPending when runtime model changes", () => {
         const entry: Record<string, unknown> = {
             modelProvider: "baiying-m-10004014",

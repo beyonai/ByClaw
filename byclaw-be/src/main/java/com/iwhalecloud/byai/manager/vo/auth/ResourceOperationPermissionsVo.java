@@ -22,6 +22,14 @@ public class ResourceOperationPermissionsVo {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long resourceId;
 
+    /** 是否由个人发布生成的官方副本。 */
+    private boolean officialPublication;
+    /** 普通编辑页保存时，是否必须提交官方副本更新审核。 */
+    private boolean officialUpdateRequiresReview;
+    private boolean canPublishEmployee;
+    /** 当前活动申请或最近一次发布结果，用于列表入口展示。 */
+    private String employeePublicationStatus;
+
     /**
      * 资源归属类型：personal / personal_default / enterprise。
      */
@@ -83,17 +91,20 @@ public class ResourceOperationPermissionsVo {
     private boolean canSetDefault;
 
     /**
-     * 是否可恢复资源（仅当资源状态为已注销时为 true）。
+     * 旧客户端上架兼容字段；已注销数据永远为 false。
      */
     private boolean canRestore;
 
     /**
-     * 是否可上架。仅数字员工且当前为已下架、具备管理权限时为 true。
+     * 是否可上架。企业数字员工或资源中心数据处于草稿/已下架且有权限时为 true。
      */
     private boolean canOnShelf;
 
     /**
-     * 是否可下架。仅数字员工且当前为已上架、具备管理权限时为 true。
+     * 是否可下架。企业数字员工或资源中心数据已上架且有权限时为 true。
      */
     private boolean canOffShelf;
+
+    /** 是否可将个人技能复制并上架为独立企业技能。 */
+    private boolean canPublishToEnterprise;
 }

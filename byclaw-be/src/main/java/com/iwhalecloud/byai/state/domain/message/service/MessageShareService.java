@@ -125,7 +125,7 @@ public class MessageShareService {
         Long creatorId = CurrentUserHolder.getCurrentUserId();
         Long enterpriseId = CurrentUserHolder.getEnterpriseId();
 
-        MessageShareLink linkRecord = MessageShareLink.builder().linkId(linkId).linkToken(linkToken)
+        MessageShareLink linkRecord = MessageShareLink.builder().linkId(linkId).linkType("MESSAGE").linkToken(linkToken)
             .creatorId(creatorId).status(LINK_STATUS_ACTIVE).title(title).accessPermission(resolvedPermission)
             .expireTime(expireTime).maxAccessCount(maxAccessCount).currentAccessCount(0L).lastAccessTime(null)
             .createTime(now).updateTime(now).comAcctId(enterpriseId).build();

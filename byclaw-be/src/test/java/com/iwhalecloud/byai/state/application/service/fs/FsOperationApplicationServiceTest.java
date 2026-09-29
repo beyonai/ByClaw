@@ -26,6 +26,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.common.util.MultipartFileUtil;
+import com.iwhalecloud.byai.state.domain.fs.dto.FsFileDeleteRequest;
 import com.iwhalecloud.byai.state.domain.fs.dto.FsRenameRequest;
 import com.iwhalecloud.byai.state.domain.fs.vo.FsDirectoryRenameResultVo;
 import com.iwhalecloud.byai.state.domain.fs.vo.FsFileMetadataVo;
@@ -210,6 +211,102 @@ class FsOperationApplicationServiceTest {
     }
 
     @Test
+    void putFile_allowsProjectCloudMemberWithoutResourceManagePermission() {
+        // 项目成员通过上传入口后，QA 的 RESOURCE 写入不能再次要求整库管理权限。
+        FsOperationApplicationService service = service();
+        SsResource resource = new SsResource();
+        resource.setResourceId(10001L);
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(10001L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        when(knowledgeResourceFS.write(any(MultipartFile.class), anyString())).thenReturn(new FileMetadata());
+
+        service.putFile("RESOURCE", 10001L,
+            "/resource/kg_doc/KG_DOC_10001/.bykc/KB001/raw/origin/a.txt", "text/plain",
+            new MultipartFileUtil("file", "a.txt", "text/plain", "demo".getBytes(StandardCharsets.UTF_8)));
+
+        verify(knowledgeResourceFS).write(any(MultipartFile.class),
+            eq("/resource/kg_doc/KG_DOC_10001/.bykc/KB001/raw/origin/a.txt"));
+        verify(authApplicationService, never()).hasResourceManagePermission(any());
+        verify(resourceFS, never()).write(any(MultipartFile.class), anyString());
+    }
+
+    @Test
+    void putFile_rejectsProjectCloudWithoutProjectAccess() {
+        FsOperationApplicationService service = service();
+        SsResource resource = new SsResource();
+        resource.setResourceId(10001L);
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(10001L)).thenReturn(resource);
+
+        assertThatThrownBy(() -> service.putFile("RESOURCE", 10001L,
+            "/resource/kg_doc/KG_DOC_10001/a.txt", "text/plain",
+            new MultipartFileUtil("file", "a.txt", "text/plain", new byte[]{1})))
+            .isInstanceOf(BaseException.class);
+
+        verify(authApplicationService).hasResourceAccessPermission(resource);
+        verify(authApplicationService, never()).hasResourceManagePermission(any());
+        verify(knowledgeResourceFS, never()).init();
+        verify(knowledgeResourceFS, never()).write(any(MultipartFile.class), anyString());
+    }
+
+    @Test
+    void putFile_stillRequiresManagePermissionForOrdinaryKnowledgeResource() {
+        FsOperationApplicationService service = service();
+        SsResource resource = new SsResource();
+        resource.setResourceId(10001L);
+        resource.setResourceBizType("KG_DOC");
+        when(ssResourceService.findById(10001L)).thenReturn(resource);
+
+        assertThatThrownBy(() -> service.putFile("RESOURCE", 10001L,
+            "/resource/kg_doc/KG_DOC_10001/a.txt", "text/plain",
+            new MultipartFileUtil("file", "a.txt", "text/plain", new byte[]{1})))
+            .isInstanceOf(BaseException.class);
+
+        verify(authApplicationService).hasResourceManagePermission(resource);
+        verify(authApplicationService, never()).hasResourceAccessPermission(any());
+        verify(knowledgeResourceFS, never()).write(any(MultipartFile.class), anyString());
+    }
+
+    @Test
+    void putFile_stillRequiresManagePermissionForProjectCloudConfig() {
+        // 云盘成员上传文件的权限不能扩展到资源配置文件。
+        FsOperationApplicationService service = service();
+        SsResource resource = new SsResource();
+        resource.setResourceId(10001L);
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(10001L)).thenReturn(resource);
+
+        assertThatThrownBy(() -> service.putFile("RESOURCE", 10001L,
+            "/resource/doc/KG_DOC_10001.json", "application/json",
+            new MultipartFileUtil("file", "config.json", "application/json", new byte[]{1})))
+            .isInstanceOf(BaseException.class);
+
+        verify(authApplicationService).hasResourceManagePermission(resource);
+        verify(authApplicationService, never()).hasResourceAccessPermission(any());
+        verify(resourceFS, never()).write(any(MultipartFile.class), anyString());
+    }
+
+    @Test
+    void deleteFile_doesNotInheritProjectCloudUploadPermission() {
+        FsOperationApplicationService service = service();
+        SsResource resource = new SsResource();
+        resource.setResourceId(10001L);
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(10001L)).thenReturn(resource);
+        FsFileDeleteRequest request = new FsFileDeleteRequest();
+        request.setSpaceType("RESOURCE");
+        request.setResourceId(10001L);
+        request.setPath("/resource/kg_doc/KG_DOC_10001/a.txt");
+
+        assertThatThrownBy(() -> service.deleteFile(request)).isInstanceOf(BaseException.class);
+
+        verify(authApplicationService).hasResourceManagePermission(resource);
+        verify(authApplicationService, never()).hasResourceAccessPermission(any());
+        verify(knowledgeResourceFS, never()).delete(anyString());
+    }
+
+    @Test
     void renameDirectory_deletesOnlyCopiedSourceFilesWhenPartialCopyFails() {
         // 目录 rename 是 copy + delete；当中途失败时，只允许删除已经复制成功的源对象。
         FsOperationApplicationService service = service();
@@ -244,6 +341,14 @@ class FsOperationApplicationServiceTest {
             eq("/resource/doc/KG_DOC_10001/new/a.txt"));
         verify(resourceFS).delete("/resource/doc/KG_DOC_10001/old/a.txt");
         verify(resourceFS, never()).delete("/resource/doc/KG_DOC_10001/old/b.txt");
+    }
+
+    @Test
+    void nestedAuthorizedIdCannotDisguiseAnotherResourceRoot() {
+        assertThatThrownBy(() -> service().downloadFile("RESOURCE", 10001L,
+            "/resource/kg_doc/KG_DOC_20002/sub/10001/private.md"))
+            .isInstanceOf(BaseException.class);
+        org.mockito.Mockito.verifyNoInteractions(resourceFS, knowledgeResourceFS, ssResourceService);
     }
 
     private FsOperationApplicationService service() {

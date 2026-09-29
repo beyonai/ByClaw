@@ -56,6 +56,16 @@ describe('File Service', () => {
   });
 
   describe('downloadResourceFile', () => {
+    it.each(['/联网搜索API.md', '/资料/'])('uses the shared download endpoint for cloud path %s', (directoryPath) => {
+      downloadResourceFile({ resourceId: 20037762, directoryPath });
+
+      expect(mockGET).toHaveBeenCalledWith(
+        '/byaiService/datasetController/download',
+        { resourceId: 20037762, directoryPath },
+        { responseType: 'blob' }
+      );
+    });
+
     it('should call GET with correct endpoint, params and config', () => {
       const params = { resourceId: 10053191, directoryPath: '/测试.docx' };
 

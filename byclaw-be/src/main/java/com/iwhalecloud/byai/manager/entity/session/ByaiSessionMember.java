@@ -22,6 +22,11 @@ import java.util.Date;
 @TableName("byai_session_member")
 public class ByaiSessionMember {
 
+    /** 展示头像，由群详情补充，不对应数据库字段。 */
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String avatar;
+
+
     /**
      * 主键标识
      */
@@ -68,6 +73,17 @@ public class ByaiSessionMember {
      * 请求次数
      */
     private Long requestCount;
+
+    /**
+     * 已实际展示给该用户的最新群消息标识
+     */
+    private Long lastReadMessageId;
+
+    /**
+     * 读取游标最近一次向前推进的时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
+    private Date lastReadTime;
 
     /**
      * 所属企业

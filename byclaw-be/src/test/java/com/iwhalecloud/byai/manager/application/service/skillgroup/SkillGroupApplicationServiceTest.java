@@ -22,6 +22,7 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.bean.UsersOrganization;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.constants.users.UserType;
+import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.domain.auth.model.UseApplyOutcome;
@@ -53,6 +54,8 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -188,9 +191,10 @@ class SkillGroupApplicationServiceTest {
         verify(resourceService, never()).saveResource(any());
     }
 
-    @Test
-    void createEnterpriseAllowsConfiguredAdminVip() {
-        setCurrentUser("alice", UserType.ORD_USER);
+    @ParameterizedTest
+    @ValueSource(strings = {"alice", "ALICE", "Alice"})
+    void createEnterpriseAllowsConfiguredAdminVip(String userCode) {
+        setCurrentUser(userCode, UserType.ORD_USER);
         when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG"))
                 .thenReturn("[\"alice\",\"bob\"]");
         stubResourceSave();
@@ -200,9 +204,10 @@ class SkillGroupApplicationServiceTest {
         verify(resourceService).saveResource(any(SsResource.class));
     }
 
-    @Test
-    void createEnterpriseAllowsAdminVip() {
-        setCurrentUser("adminvip", UserType.ORD_USER);
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", "AdminVip", "ADMINVIP"})
+    void createEnterpriseAllowsAdminVip(String userCode) {
+        setCurrentUser(userCode, UserType.ORD_USER);
         when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG"))
                 .thenThrow(new IllegalStateException("config unavailable"));
         stubResourceSave();
@@ -313,7 +318,7 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceManagePermission(group)).thenReturn(false);
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         List<SkillGroupMemberVo> members = List.of(
                 statusMember(502L, SkillGroupMemberStatus.INSTALLABLE),
                 statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
@@ -367,7 +372,7 @@ class SkillGroupApplicationServiceTest {
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.install(installQo(401L, GROUP_ID)))
@@ -398,7 +403,7 @@ class SkillGroupApplicationServiceTest {
 
         SsResource employee = digitalEmployee(401L);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(false);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(false);
         assertThatThrownBy(() -> service.install(installQo(401L, GROUP_ID)))
                 .isInstanceOf(BaseException.class);
 
@@ -414,7 +419,7 @@ class SkillGroupApplicationServiceTest {
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         SkillGroupInstallResultVo delegated = new SkillGroupInstallResultVo();
         delegated.setTotalSkillIds(List.of(599L));
         delegated.setRemovedSkillIds(List.of(599L));
@@ -533,7 +538,7 @@ class SkillGroupApplicationServiceTest {
         when(mapper.selectDetail(GROUP_ID, TENANT_ID, USER_ID)).thenReturn(visible);
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(List.of(member));
         when(resourceService.findById(401L)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(memberStatusService.evaluate(any(), eq(401L))).thenReturn(List.of(member));
         SkillGroupIdQo qo = new SkillGroupIdQo();
         qo.setGroupId(GROUP_ID);
@@ -590,7 +595,7 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(inactiveEmployee);
-        when(authService.hasResourceManagePermission(inactiveEmployee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(inactiveEmployee)).thenReturn(true);
 
         assertThatThrownBy(() -> service.preflightInstall(installQo(401L, GROUP_ID)))
                 .isInstanceOf(BaseException.class);
@@ -611,7 +616,7 @@ class SkillGroupApplicationServiceTest {
         List<SkillGroupMemberVo> members = List.of(statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
         when(resourceService.findById(GROUP_ID)).thenReturn(group);
         when(resourceService.findById(401L)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(skill(501L)));
         when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
@@ -648,7 +653,7 @@ class SkillGroupApplicationServiceTest {
         when(resourceService.findById(GROUP_ID)).thenReturn(group);
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
         when(resourceService.findById(401L)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
         when(resourceService.findByIdList(List.of(501L, 502L))).thenReturn(List.of(skill(501L), skill(502L)));
         when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
@@ -1133,9 +1138,12 @@ class SkillGroupApplicationServiceTest {
         verify(resourceService, never()).removeById(any());
     }
 
-    @Test
-    void deleteTreatsMalformedLegacyAsManualAndDeletesOnlyMembershipRelationsAndGroup() {
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", "AdminVip", "ADMINVIP", "ALICE"})
+    void deleteTreatsMalformedLegacyAsManualAndDeletesOnlyMembershipRelationsAndGroup(String userCode) {
         prepareLockedManagedGroup();
+        setCurrentUser(userCode, UserType.ORD_USER);
+        when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG")).thenReturn("alice");
         SsResourceRelDetail malformed = relation(21L, 501L, 1);
         malformed.setRelResourceInfo("{not-json");
         when(mapper.selectSkillRelationsWithSourceInfoByTenant(TENANT_ID)).thenReturn(List.of(malformed));
@@ -1148,14 +1156,16 @@ class SkillGroupApplicationServiceTest {
         assertThat(wrapperCaptor.getValue().getSqlSegment()).contains("resource_id", "rel_type_name");
         assertThat(wrapperCaptor.getValue().getParamNameValuePairs().values())
                 .contains(GROUP_ID, "SKILL_GROUP_MEMBER");
-        verify(resourceService).removeById(GROUP_ID);
+        verify(resourceService).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
+            group -> group.getResourceId().equals(GROUP_ID) && group.getResourceStatus() == -1));
+        verify(resourceService, never()).removeById(GROUP_ID);
         verify(resourceService, never()).removeById(501L);
         verify(relationService, never()).removeById(21L);
         InOrder order = inOrder(mapper, relationService, resourceService);
         order.verify(mapper).selectGroupForUpdate(GROUP_ID, TENANT_ID);
         order.verify(mapper).selectSkillRelationsWithSourceInfoByTenant(TENANT_ID);
         order.verify(relationService).remove(any());
-        order.verify(resourceService).removeById(GROUP_ID);
+        order.verify(resourceService).updateResourceEntity(any());
     }
 
     private void prepareManagedGroup() {
@@ -1172,12 +1182,28 @@ class SkillGroupApplicationServiceTest {
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(employeeId, TENANT_ID)).thenReturn(employee);
-        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", "AdminVip", "ADMINVIP", "ALICE"})
+    void shelfChangesOnlyGroupStatusAndPreservesInstalledSnapshots(String userCode) {
+        prepareLockedManagedGroup();
+        setCurrentUser(userCode, UserType.ORD_USER);
+        when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG")).thenReturn("alice");
+        service.changeShelfStatus(GROUP_ID, true);
+        verify(resourceService).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
+            group -> group.getResourceStatus() == 2));
+        verifyNoInteractions(relationService);
+        service.changeShelfStatus(GROUP_ID, false);
+        verify(authService, org.mockito.Mockito.times(2)).invalidateResourceAuthorizationCachesAfterCommit(GROUP_ID, "SKILL_GROUP");
     }
 
     private void prepareLockedManagedGroup() {
         setCurrentUser("adminvip", UserType.ORD_USER);
         SsResource group = group();
+        group.setOwnerType(OwnerType.ENTERPRISE);
+        group.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
     }

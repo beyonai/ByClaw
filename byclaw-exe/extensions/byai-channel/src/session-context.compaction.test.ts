@@ -7,6 +7,8 @@ import {
   markActiveSdkRequestSubagentSpawned,
   markActiveSdkRootLifecycleFinished,
   registerActiveSdkRequest,
+  recordActiveSdkDispatchRunId,
+  recordActiveSdkRootAgentEnd,
   shouldCompleteActiveSdkRequest,
 } from "./session-context.js";
 
@@ -36,6 +38,39 @@ function setupRequest(sessionId: string, options?: { bindRunId?: boolean }) {
 }
 
 describe("session-context compaction completion gate", () => {
+  it("accepts a no-lifecycle precheck hook only for the current dispatch run", () => {
+    const request = setupRequest("precheck-run-correlation", { bindRunId: false });
+    const error = "Context overflow: prompt too large for the model (precheck).";
+    request.contextOverflowRecovery.dispatchPending = true;
+    recordActiveSdkDispatchRunId(request.sessionKey, "run-original");
+    recordActiveSdkRootAgentEnd({ runId: "run-original", sessionKey: request.sessionKey,
+      success: false, messages: [], error });
+    expect(request.contextOverflowRecovery.precheckError).toBe(error);
+
+    request.contextOverflowRecovery.precheckError = undefined;
+    recordActiveSdkDispatchRunId(request.sessionKey, "run-replay");
+    recordActiveSdkRootAgentEnd({ runId: "run-original", sessionKey: request.sessionKey,
+      success: false, messages: [], error });
+    expect(request.contextOverflowRecovery.precheckError).toBeUndefined();
+    recordActiveSdkRootAgentEnd({ runId: "run-replay", sessionKey: request.sessionKey,
+      success: false, messages: [], error });
+    recordActiveSdkRootAgentEnd({ runId: "run-original", sessionKey: request.sessionKey,
+      success: true, messages: [] });
+    expect(request.contextOverflowRecovery.precheckError).toBe(error);
+    clearActiveSdkRequestByTarget(request.accountId, request.to);
+  });
+  it("keeps channel recovery open across native lifecycle and compaction endings", () => {
+    const request = setupRequest("channel-recovery");
+    request.contextOverflowRecovery.dispatchPending = true;
+    markActiveSdkCompactionRetryPending(request.sessionKey, true);
+    markActiveSdkRootLifecycleFinished(request.sessionKey, "error");
+    markActiveSdkDispatchSettled(request.sessionKey);
+    expect(request.compactionRetryPending).toBe(false);
+    expect(shouldCompleteActiveSdkRequest(request)).toBe(false);
+    request.contextOverflowRecovery.dispatchPending = false;
+    expect(shouldCompleteActiveSdkRequest(request)).toBe(true);
+    clearActiveSdkRequestByTarget(request.accountId, request.to);
+  });
   it("releases compactionRetryPending on terminal lifecycle end (2026.6.1 silent retry)", () => {
     const request = setupRequest("compaction-end");
     const sessionKey = request.sessionKey;

@@ -35,7 +35,7 @@ const api = { logger: { info: () => {} } } as never;
  * 装一个 in-band 场景：注册 emitter + active request，返回 sendText 的实参与已 emit 列表。
  * 走真实 outbound.sendText，不绕过 channel 层，去重判定才是被真正验证的那条路径。
  */
-function setupInbandChannel(suffix: string) {
+function setupInbandChannel(suffix: string, language: "zh_CN" | "en_US" = "zh_CN") {
   const emitted: EmittedChunk[] = [];
   const accountId = `acct-${suffix}`;
   const to = `test:${suffix}`;
@@ -57,7 +57,7 @@ function setupInbandChannel(suffix: string) {
     to,
     sessionId: suffix,
     traceId: `trace-${suffix}`,
-    language: "zh_CN",
+    language,
     languageProvided: true,
   });
   return { accountId, emitted, request, to };
@@ -96,6 +96,23 @@ async function sendText(params: { to: string; accountId: string; text: string })
 }
 
 describe("byai-channel outbound.sendText dedupe", () => {
+  it.each(["zh_CN", "en_US"] as const)("localizes correlated recovery errors while preserving ordinary discussion (%s)", async (language) => {
+    const { accountId, emitted, request, to } = setupInbandChannel("context-error", language);
+    const text = "Context overflow: prompt too large for the model.";
+    try {
+      await sendText({ to, accountId, text });
+      expect(emitted[0]?.text).toBe(text);
+      emitted.length = 0;
+      request.contextOverflowRecovery.errors = new Set([text]);
+      request.contextOverflowRecovery.dispatchPending = true;
+      expect((await sendText({ to, accountId, text }))?.messageId).toBe("suppressed");
+      expect(emitted).toHaveLength(0);
+      request.contextOverflowRecovery.dispatchPending = false;
+      await sendText({ to, accountId, text });
+      expect(emitted[0]?.text).toContain(language === "en_US" ? "Your history is preserved" : "历史记录已保留");
+      if (language === "en_US") expect(emitted[0]?.text).not.toMatch(/\p{Script=Han}/u);
+    } finally { clearActiveSdkRequestRecord(request); }
+  });
   it("suppresses the deliver echo of an answer already streamed, and reports it honestly", async () => {
     const { accountId, emitted, request, to } = setupInbandChannel("echo");
     try {

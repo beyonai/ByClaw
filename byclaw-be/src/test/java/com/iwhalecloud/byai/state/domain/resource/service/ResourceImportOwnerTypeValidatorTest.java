@@ -31,6 +31,8 @@ class ResourceImportOwnerTypeValidatorTest {
         messageSource.addMessage("resource.label.object", Locale.SIMPLIFIED_CHINESE, "对象");
         messageSource.addMessage("resource.label.view", Locale.SIMPLIFIED_CHINESE, "视图");
         messageSource.addMessage("resource.label.tool", Locale.SIMPLIFIED_CHINESE, "工具");
+        messageSource.addMessage("resource.lifecycle.status.invalid", Locale.SIMPLIFIED_CHINESE,
+            "资源状态不允许执行此操作");
         messageSource.addMessage("resource.import.owner.type.mismatch", Locale.SIMPLIFIED_CHINESE,
             "已有相同编码（{0}）的{1}是在{2}的{3}下，请到{2}的{3}下导入或修改");
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
@@ -67,6 +69,17 @@ class ResourceImportOwnerTypeValidatorTest {
 
         assertThatCode(() -> ResourceImportOwnerTypeValidator.validate(existing, OwnerType.PERSONAL, "R001",
             "导入知识", ResourceBizType.KG_DOC.getCode(), "WHALE_AGENT")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void validate_rejectsDeregisteredResourceInsteadOfResurrectingIt() {
+        SsResource existing = buildResource(OwnerType.ENTERPRISE, ResourceBizType.TOOLKIT.getCode());
+        existing.setResourceStatus(-1);
+
+        assertThatThrownBy(() -> ResourceImportOwnerTypeValidator.validate(existing, OwnerType.ENTERPRISE, "R001",
+            "导入工具", ResourceBizType.TOOLKIT.getCode()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("资源状态不允许执行此操作");
     }
 
     private SsResource buildResource(String ownerType, String resourceBizType) {

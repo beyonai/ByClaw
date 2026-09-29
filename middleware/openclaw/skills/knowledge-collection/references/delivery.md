@@ -10,6 +10,7 @@
 - 扩展名为 `.md`；
 - 是可读、非空的普通文件；
 - 已由 `scripts/collection-state.mjs` 根据 inventory 和实际文件状态验证。
+- 若正文来自 probe 晋升，其验证回执、正文哈希、内容指纹及全文证据在读取状态时仍有效。
 
 `raw/`、`markdown/`、`collection-result.json`、`sanitized/metadata.json`、候选摘要和不存在的路径都不是正文输入。任何 Agent 都不得自行从这些位置补选正文。
 
@@ -26,8 +27,9 @@
 ```
 
 `directory` 始终指向当前会话的 `sanitized/items/`。`files` 只包含验证通过的 materialized Markdown；pending 或 failed 项不得进入该数组。没有有效正文时，`files` 是空数组，采集状态及失败原因仍需照常交付。
+probe 晋升后的正文即使仍可读取、仍匹配主题，只要正文或回执失效，也不得进入 `files`；其他验证通过的正文可以继续留在清单中。`status` 只计算这份清单，不改写会话 inventory 或正文文件；失效项会阻止完成判定和发布。
 
-`status.collection.deliveryComplete` 是唯一完成判定。collection 为 `partial`/`failed` 时始终为 `false`；`selected` 和 `all` 至少包含一个条目，还要求正文没有 pending/failed，且已有 crawl 时没有 pending/failed 或 fetched-but-unmaterialized 页面；`all` 另外要求 `status.crawl.coverage.overCap` 为 0。`candidates` 可以交付空正文数组，但发现阶段本身不得失败。用户明确要求完整正文时，初始化必须使用 `--required-content-granularity full-text`，每个交付条目都必须为 `full-text`；摘要或节选不能满足全文要求。
+`status.collection.deliveryComplete` 是唯一完成判定。统一搜索和直接云知识流程显式记录 `task.selectedDelivery` 后，`selected` 的完成判定只检查累积选中的条目；未选的 pending/failed 来源记录仍留在完整 inventory，已知来源失败仍阻止完成。`status.downstreamInput.files` 和 `publish` 只包含选中且验证通过的 Markdown，即使其他条目此前已物化也不会进入本次交付。没有显式选择的旧会话、`all` 和普通 `selected` 会话仍要求所有条目完成；`all` 还要求 crawl 覆盖没有 overCap。`candidates` 可以交付空正文数组，但发现阶段本身不得失败。用户明确要求完整正文时，初始化必须使用 `--required-content-granularity full-text`，每个交付条目都必须为 `full-text`；摘要或节选不能满足全文要求。
 
 ## 用户指定目录的发布
 

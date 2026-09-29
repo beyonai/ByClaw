@@ -1256,6 +1256,14 @@
             <version>${sqlite-jdbc.version}</version>
         </dependency>
 
+        <!-- 行锁并发测试使用独立内存数据库，不依赖开发环境服务。 -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>2.3.232</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- java email -->
         <dependency>
             <groupId>com.sun.mail</groupId>

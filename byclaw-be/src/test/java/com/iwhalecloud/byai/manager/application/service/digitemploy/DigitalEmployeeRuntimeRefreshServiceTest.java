@@ -17,6 +17,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class DigitalEmployeeRuntimeRefreshServiceTest {
@@ -83,6 +84,41 @@ class DigitalEmployeeRuntimeRefreshServiceTest {
         verify(postCommitRefreshExecutor).refresh(42L, inputDto);
         verify(digEmployeeChangeEventPublisher).publishNowQuietly(
             DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED, 42L, "manager-api");
+    }
+
+    @Test
+    void scheduleDigitalEmployeeUpdateRefreshAfterCommit_withoutInputDefersRefreshAndNotificationUntilCommit() {
+        when(postCommitRefreshExecutor.refresh(42L, null)).thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            // 卸载没有编辑 DTO，必须在关联事务提交后按数据库最新状态刷新。
+            service.scheduleDigitalEmployeeUpdateRefreshAfterCommit(42L, null);
+            verifyNoInteractions(postCommitRefreshExecutor, digEmployeeChangeEventPublisher);
+
+            List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            synchronizations.forEach(TransactionSynchronization::afterCommit);
+
+            InOrder order = inOrder(postCommitRefreshExecutor, digEmployeeChangeEventPublisher);
+            order.verify(postCommitRefreshExecutor).refresh(42L, null);
+            order.verify(digEmployeeChangeEventPublisher).publishNowQuietly(
+                DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED, 42L, "manager-api");
+        } finally {
+            TransactionSynchronizationManager.getSynchronizations()
+                .forEach(item -> item.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+        }
+    }
+
+    @Test
+    void scheduleDigitalEmployeeUpdateRefreshAfterCommit_withoutInputDoesNotRefreshOrNotifyOnRollback() {
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.scheduleDigitalEmployeeUpdateRefreshAfterCommit(42L, null);
+        } finally {
+            TransactionSynchronizationManager.getSynchronizations()
+                .forEach(item -> item.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+        }
+
+        verifyNoInteractions(postCommitRefreshExecutor, digEmployeeChangeEventPublisher);
     }
 
     @Test

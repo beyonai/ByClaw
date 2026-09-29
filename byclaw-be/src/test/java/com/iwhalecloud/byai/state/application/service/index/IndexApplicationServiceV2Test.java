@@ -45,6 +45,8 @@ class IndexApplicationServiceV2Test {
         SandboxService sandboxService = mock(SandboxService.class);
         SsResourceCatalogService ssResourceCatalogService = mock(SsResourceCatalogService.class);
         SuasSuperassistService suasSuperassistService = mock(SuasSuperassistService.class);
+        when(authApplicationService.queryResourceOperationPermissionsBatch(any()))
+            .thenReturn(Collections.emptyMap());
 
         MessageSource mockMessageSource = mock(MessageSource.class);
         when(mockMessageSource.getMessage(any(String.class), any(), any(java.util.Locale.class)))
@@ -61,8 +63,6 @@ class IndexApplicationServiceV2Test {
         ReflectionTestUtils.setField(service, "sandboxService", sandboxService);
         ReflectionTestUtils.setField(service, "ssResourceCatalogService", ssResourceCatalogService);
         ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
-        when(authApplicationService.queryResourceOperationPermissionsBatch(any()))
-            .thenReturn(Collections.emptyMap());
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);

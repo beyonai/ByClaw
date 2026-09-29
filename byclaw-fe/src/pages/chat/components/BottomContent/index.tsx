@@ -4,6 +4,7 @@ import { useIntl, useSelector } from '@umijs/max';
 import { isEmpty, compact } from 'lodash';
 
 import useGlobal from '@/hooks/useGlobal';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 
 import RecommendQuestion from './recommendQuestion';
 import RecommendTabs from './recommendTabs';
@@ -14,6 +15,7 @@ import type { TabsProps } from 'antd/lib/tabs';
 import styles from './index.module.less';
 
 const emptyObj: Record<string, unknown> = {};
+const BRAND_VERSION_PARAM_CODE = 'BYAI_BRAND_VERSION';
 
 export default function BottomContent() {
   const intl = useIntl();
@@ -23,24 +25,46 @@ export default function BottomContent() {
 
   const [relatedQuestions, setRelatedQuestions] = useState<string[]>([]);
   const [currentTab, setCurrentTab] = useState('suggestQuestion');
+  const [isCommercial, setIsCommercial] = useState<boolean | null>(null);
   const oldTabKeyRef = useRef('suggestQuestion');
 
   const userInfo = useSelector(({ user }) => user.userInfo);
 
+  useEffect(() => {
+    let disposed = false;
+    getDcSystemConfig({ paramCode: BRAND_VERSION_PARAM_CODE })
+      .then((result) => {
+        if (disposed) return;
+        const brandVersion = result?.paramValue ?? result?.data?.paramValue;
+        setIsCommercial(brandVersion === 'commercial');
+      })
+      .catch(() => {
+        if (!disposed) {
+          // 配置读取失败时保留非商用版入口，避免配置服务短暂异常导致功能误隐藏。
+          setIsCommercial(false);
+        }
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
   const tabList = useMemo<TabsProps['items']>(() => {
-    const items: TabsProps['items'] = [
-      {
+    const items: TabsProps['items'] = [];
+    // 商用版不提供推荐问题和系统通知，配置尚未返回时也先隐藏受限入口，避免出现闪烁。
+    if (isCommercial === false) {
+      items.push({
         key: 'suggestQuestion',
         label: intl.formatMessage({ id: 'chat.bottomContent.suggestQuestion' }),
         children: <RecommendQuestion relatedQuestions={relatedQuestions} />,
         // destroyOnHidden: true,
-      },
-      {
-        key: 'suggestReplay',
-        label: intl.formatMessage({ id: 'chat.bottomContent.suggestReplay' }),
-        children: <RecommendTabs />,
-      },
-    ];
+      });
+    }
+    items.push({
+      key: 'suggestReplay',
+      label: intl.formatMessage({ id: 'chat.bottomContent.suggestReplay' }),
+      children: <RecommendTabs />,
+    });
     // 仅在存在 agentId 时展示「推荐技能」tab
     if (agentId) {
       items.push({
@@ -51,7 +75,7 @@ export default function BottomContent() {
       });
     }
 
-    if (userInfo) {
+    if (userInfo && isCommercial === false) {
       items.push({
         key: 'systemNotification',
         label: intl.formatMessage({ id: 'chat.bottomContent.systemNotification' }),
@@ -60,7 +84,7 @@ export default function BottomContent() {
     }
 
     return items;
-  }, [intl, agentId, userInfo, relatedQuestions]);
+  }, [intl, agentId, userInfo, relatedQuestions, isCommercial]);
 
   useEffect(() => {
     const { agentId, prologue } = agentInfo || emptyObj;
@@ -90,11 +114,13 @@ export default function BottomContent() {
     setCurrentTab(oldTabKeyRef.current === 'suggestSkill' ? 'suggestQuestion' : oldTabKeyRef.current);
   }, [agentInfo]);
 
+  const visibleCurrentTab = tabList?.some((item) => item?.key === currentTab) ? currentTab : tabList?.[0]?.key;
+
   return (
     <div className={styles.bottomContent}>
       <Tabs
         centered
-        activeKey={currentTab}
+        activeKey={visibleCurrentTab}
         onChange={(key) => {
           setCurrentTab(key);
           oldTabKeyRef.current = key;

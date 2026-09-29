@@ -19,7 +19,15 @@ let reconnectHandler: (() => void) | undefined;
 const messages: Record<string, string> = {
   'ui.team.openChildren': '打开子会话列表',
   'ui.team.childCount': '{count} 个子代理',
+  'ui.team.childAgent': '子代理',
+  'ui.team.idle': '待命',
   'ui.team.running': '执行中',
+  'ui.team.inProgress': '进行中',
+  'ui.team.failed': '失败',
+  'ui.team.cancelled': '已取消',
+  'ui.team.stopped': '已停止',
+  'ui.team.waiting': '等待',
+  'ui.team.parent': '主会话',
   'ui.team.completed': '已完成',
 };
 const formatMessage = ({ id }: { id: string }, values?: Record<string, unknown>) =>

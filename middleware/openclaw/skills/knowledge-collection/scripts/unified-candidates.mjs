@@ -1,6 +1,7 @@
 'use strict';
 
 import crypto from 'node:crypto';
+import { prioritizeItems } from './jev/selection.mjs';
 
 export const UNIFIED_CANDIDATE_SCHEMA_VERSION = '1.0';
 
@@ -41,12 +42,28 @@ export function normalizePublicCandidate(candidate, query) {
     title,
     sourceUrl,
     snippet: text(candidate?.content || candidate?.passage || candidate?.snippet),
+    provider: text(candidate?.provider || candidate?.engine),
+    providerVersion: text(candidate?.providerVersion),
+    requestId: text(candidate?.requestId),
+    publishedAt: text(candidate?.publishedAt),
+    site: text(candidate?.site),
+    evidenceLevel: text(candidate?.evidenceLevel),
+    freshnessStatus: text(candidate?.freshnessStatus),
+    timeRange: text(candidate?.timeRange),
     sourceScore: Number(candidate?.score || candidate?.sourceScore || 0),
     contentGranularity: text(candidate?.contentGranularity) || 'unknown',
     materializable: candidate?.discoveryDisposition === 'probe' || candidate?.eligibleArticle === true,
     matchedTerms: matchedTerms(query, [title, candidate?.content, candidate?.passage]),
+    ...(candidate?.ranking ? { ranking: candidate.ranking } : {}),
   };
   return { ...normalized, relevanceScore: scoreUnifiedCandidate(normalized, query) };
+}
+
+export async function prioritizeUnifiedCandidates(query, candidates, options = {}) {
+  return prioritizeItems(query, candidates, { ...options,
+    privateData: candidates.some((candidate) => candidate.source !== 'public-internet'),
+    purpose: 'Recommend relevant complementary public and enterprise documents before download. Prefer obtainable full text and lower conversion cost; do not remove any item.',
+  });
 }
 
 export function normalizeCloudCandidate(candidate, query) {
@@ -65,6 +82,9 @@ export function normalizeCloudCandidate(candidate, query) {
     fileType: text(candidate?.fileType),
     fileSize: candidate?.fileSize,
     fileSignature: text(candidate?.fileSignature),
+    updatedAt: text(candidate?.updatedAt),
+    freshnessStatus: text(candidate?.freshnessStatus),
+    timeRange: text(candidate?.timeRange),
     duplicateGroupKey: text(candidate?.duplicateGroupKey),
     matchedTerms: matchedTerms(query, [candidate?.title, candidate?.originalFileName, candidate?.filePath]),
   };
@@ -90,4 +110,3 @@ export function mergeUnifiedCandidates(query, { publicCandidates = [], cloudCand
     || a.sourceUrl.localeCompare(b.sourceUrl)
   ));
 }
-

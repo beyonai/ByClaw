@@ -4,6 +4,20 @@ import { describe, expect, it, vi } from "vitest";
 import { ThirdPartyInterfaceSseConnector } from "../src/index.js";
 
 describe("ThirdPartyInterfaceSseConnector", () => {
+  it("does not begin an external request when ownership is lost during descriptor loading", async () => {
+    const controller = new AbortController();
+    const descriptors = {
+      get: vi.fn(async () => {
+        controller.abort(new Error("execution ownership lost"));
+        return { resourceId: "1001", integrationType: "INTERFACE", endpoint: "https://vendor.example.test", headers: {} };
+      }),
+    } as unknown as ExecutionDescriptorClient;
+    const fetchImpl = vi.fn();
+    const connector = new ThirdPartyInterfaceSseConnector({ descriptors, fetchImpl });
+    await expect(connector.start(request(), { signal: controller.signal })).rejects.toThrow("execution ownership lost");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("posts the compatibility request and normalizes streamed deltas", async () => {
     const descriptors = descriptorClient("INTERFACE", "https://vendor.example.test/stream");
     const fetchImpl = vi.fn(async () =>

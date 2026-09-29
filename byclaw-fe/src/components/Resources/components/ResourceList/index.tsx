@@ -1,23 +1,29 @@
+import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { Spin, message } from 'antd';
-import { useIntl, useSelector } from '@umijs/max';
+import { useIntl } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
+import SkillExportButton from '../SkillExportButton';
+import { createPortal } from 'react-dom';
 import {
   listResourceUseAuth,
-  deleteResource,
-  deleteKnowledge,
+  queryResourceDetail,
+  shelfResource,
+  unShelfResource,
+  deregisterResource,
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
 import { queryInstalledResourceIds } from '@/pages/manager/service/DigitalEmployeeMgr';
-import { useRequest } from '@/hooks/useRequest';
-import useGlobal from '@/hooks/useGlobal';
-import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { KnowledgeCapability } from '@/service/knowledgeCenter';
-import { buildResourceListFilterParam, getBaseResourceBizTypeList } from '../../utils';
+import { buildResourceListFilterParam, getBaseResourceBizTypeList, getResourceQueryStatus } from '../../utils';
+import {
+  PERMISSION_CREATED_BY_ME_VALUE,
+  PERMISSION_MANAGEABLE_BY_ME_VALUE,
+  PERMISSION_MANAGED_BY_ME_VALUE,
+} from '../../constants';
 import { isWorkspaceSkill, mapWorkspaceSkillRows } from '../../workspaceSkill/utils';
-import { useDigitalEmployeeManagePermission } from '../../workspaceSkill/useDigitalEmployeeManagePermission';
 import styles from './index.module.less';
 import useResourceInstallTargetContext from '../../useResourceInstallTargetContext';
 
@@ -36,7 +42,17 @@ interface IResourceItem {
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canDelete?: boolean;
+  canOnShelf?: boolean;
+  canOffShelf?: boolean;
+  canPublishToEnterprise?: boolean;
+  canRestore?: boolean;
   canApplyUse?: boolean;
+  hasUsePermission?: boolean;
+  approveStatus?: string;
+  useApplyPending?: boolean;
+  resourceStatus?: number | string;
+  metaStatus?: number | string;
+  canSetDefault?: boolean;
   skillType?: string;
   sourceType?: string;
   version?: string;
@@ -51,11 +67,15 @@ interface IResourceItem {
   lastSyncTime?: string;
   useCount?: number | string;
   ownerType?: string;
+  personalWorkspace?: boolean;
 }
 
 interface ResourceListProps {
+  exportContainer?: HTMLElement | null;
   resourceType: string;
   activeTab: string;
+  myResourcesOnly?: boolean;
+  myResourceScope?: 'all' | 'created' | 'managed';
   searchValue: string;
   catalogId: string;
   dropdownParam: any;
@@ -69,6 +89,7 @@ interface ResourceListProps {
   onAuditUse: (item: IResourceItem) => void;
   onRefresh: () => void;
   skillCardViewMode?: 'current' | 'new';
+  enablePublishToEnterprise?: boolean;
 }
 
 const PAGE_SIZE_DEFAULT = 30;
@@ -88,8 +109,12 @@ const collectInstalledResourceIds = (response: any) => {
 };
 
 const ResourceList: React.FC<ResourceListProps> = ({
+  exportContainer,
   resourceType,
   activeTab,
+  myResourcesOnly = false,
+  enablePublishToEnterprise = false,
+  myResourceScope = 'all',
   searchValue,
   catalogId,
   dropdownParam,
@@ -106,27 +131,10 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   const intl = useIntl();
   const installTargetContext = useResourceInstallTargetContext();
-  const { agentId, agentInfo } = useGlobal();
-  const { userInfo, defaultDigEmployeeId } = useSelector(
-    ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
-      userInfo: user.userInfo,
-      defaultDigEmployeeId: employees.defaultDigEmployeeId,
-    })
-  );
-  const activeDigitalEmployeeId =
-    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
-  const userCode = userInfo?.userCode;
-  // 通过 ref 读取，避免把 activeDigitalEmployeeId/userCode 放进 getList 依赖；
-  // 否则切换数字员工会让所有资源类型(含 KG_DOC/TOOL/...)的列表都触发一次冗余刷新。
-  const activeDigitalEmployeeIdRef = useRef(activeDigitalEmployeeId);
-  activeDigitalEmployeeIdRef.current = activeDigitalEmployeeId;
-  const userCodeRef = useRef(userCode);
-  userCodeRef.current = userCode;
-  // 工作空间技能删除入口需当前用户对该数字员工有管理权限，无权限时隐藏（后端同样会拦截）。
-  const canManageActiveEmployee = useDigitalEmployeeManagePermission(
-    resourceType === 'SKILL' ? activeDigitalEmployeeId : undefined
-  );
-  const [loading, setLoading] = useState(false);
+  // 资源中心以当前用户为列表主体；安装目标只用于用户主动发起的安装操作。
+  // 列表挂载后立即请求，首帧先展示加载态，避免请求开始前闪现空状态。
+  const [loading, setLoading] = useState(true);
+  const listGeneration = useRef(0);
   const [list, setList] = useState<IResourceItem[]>([]);
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
   const [canManageInstallTarget, setCanManageInstallTarget] = useState(false);
@@ -145,32 +153,70 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const useWideCardLayout = WIDE_CARD_RESOURCE_TYPES.has(resourceType);
 
   const getList = useCallback(
-    async (params?: Record<string, any>, append = false) => {
+    async function fetchPage(
+      params?: Record<string, any>,
+      append = false,
+      exportOnly = false
+    ): Promise<IResourceItem[]> {
       const pageNum = params?.pageIndex ?? params?.pageNum ?? 1;
       const pageSize = params?.pageSize ?? 30; // 直接使用固定值，避免依赖pageInfo.pageSize
       const keyword = `${params?.searchValue ?? searchValue ?? ''}`.trim();
-      const selectedCatalogId = `${params?.catalogId ?? catalogId ?? ''}`;
-      const filterParam = params?.dropdownParam ?? dropdownParam;
-      setLoading(true);
+      // 我的个人和企业资源不按分类筛选，丢弃旧筛选及翻页参数中的分类值。
+      const selectedCatalogId = myResourcesOnly ? '' : `${params?.catalogId ?? catalogId ?? ''}`;
+      const rawFilterParam = params?.dropdownParam ?? dropdownParam;
+      const filterParam = {
+        ...rawFilterParam,
+        resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, rawFilterParam?.resourceStatus),
+      };
+      const availableOnly = !myResourcesOnly && activeTab === 'personal';
+      const selectedOwnerType =
+        availableOnly && ['personal', 'enterprise'].includes(rawFilterParam?.ownerType)
+          ? rawFilterParam.ownerType
+          : undefined;
+      if (!exportOnly) {
+        if (!append) listGeneration.current += 1;
+        setLoading(true);
+      }
       try {
-        // “我可用的”包含当前用户创建及被授权的全部资源，不限定 owner_type；
-        // “官方推荐”沿用企业资源口径。
-        const ownerTypes = activeTab === 'installed' ? ['personal', 'enterprise'] : [activeTab];
+        // 普通资源中心保留原有“我可用的/官方推荐”查询口径；“我的资源”改为后端权限筛选，
+        // 个人只查创建人资源，企业按“全部/我创建的/我管理的”映射到统一管理权限。
+        const ownerTypes = myResourcesOnly
+          ? [activeTab]
+          : activeTab === 'installed'
+            ? ['personal', 'enterprise']
+            : [activeTab];
         const responses = await Promise.all(
           ownerTypes.map(async (ownerType) => {
             const ownerFilterParam = buildResourceListFilterParam(ownerType, filterParam);
+            // 归属只在我可用的生效，管理页与官方页继续使用各自固定范围。
+            delete ownerFilterParam.ownerType;
+            if (myResourcesOnly) delete ownerFilterParam.catalogId;
+            const myResourcePermission =
+              myResourcesOnly && ownerType === 'personal'
+                ? PERMISSION_CREATED_BY_ME_VALUE
+                : myResourcesOnly && myResourceScope === 'created'
+                  ? PERMISSION_CREATED_BY_ME_VALUE
+                  : myResourcesOnly && myResourceScope === 'managed'
+                    ? PERMISSION_MANAGED_BY_ME_VALUE
+                    : myResourcesOnly
+                      ? PERMISSION_MANAGEABLE_BY_ME_VALUE
+                      : undefined;
             const response = await listResourceUseAuth({
               keyword,
               pageNum,
               pageSize,
-              ...(activeTab === 'personal' ? {} : { ownerType }),
+              ...(availableOnly ? { ownerType: selectedOwnerType, availableOnly: true } : { ownerType }),
               catalogId: selectedCatalogId || undefined,
               ...ownerFilterParam,
+              ...(myResourcesOnly ? { excludeDeleted: true } : {}),
+              // 我可用的和官方推荐只显示上架资源；管理列表保留状态筛选。
+              ...(!myResourcesOnly ? { resourceStatus: '2' } : {}),
+              ...(myResourcePermission ? { permission: myResourcePermission } : {}),
               resourceBizTypeList: ownerFilterParam.resourceBizTypeList?.length
                 ? ownerFilterParam.resourceBizTypeList
                 : baseResourceBizTypeList,
             });
-            return { ownerType, pageData: response?.data || response || {} };
+            return { ownerType: selectedOwnerType || ownerType, pageData: response?.data || response || {} };
           })
         );
 
@@ -188,27 +234,39 @@ const ResourceList: React.FC<ResourceListProps> = ({
         let workspaceRows: IResourceItem[] = [];
         const shouldLoadWorkspaceSkills =
           resourceType === 'SKILL' &&
-          (activeTab === 'personal' || activeTab === 'installed') &&
+          activeTab === 'personal' &&
+          selectedOwnerType !== 'enterprise' &&
           !append &&
           pageNum === 1 &&
-          !selectedCatalogId;
-        if (shouldLoadWorkspaceSkills && activeDigitalEmployeeIdRef.current) {
+          !selectedCatalogId &&
+          (!myResourcesOnly ||
+            filterParam?.resourceStatus === null ||
+            filterParam?.resourceStatus === undefined ||
+            filterParam.resourceStatus === '' ||
+            `${filterParam.resourceStatus}` === '2');
+        if (shouldLoadWorkspaceSkills) {
           try {
             const workspaceRes = await queryWorkspacePersonalSkillList({
               keyword,
-              resourceId: `${activeDigitalEmployeeIdRef.current}`,
-              userCode: userCodeRef.current,
+              personalWorkspace: true,
             });
             const workspaceData = (workspaceRes as any)?.data ?? workspaceRes;
             workspaceRows = mapWorkspaceSkillRows(
               Array.isArray(workspaceData) ? workspaceData : workspaceData?.list || workspaceData?.rows || []
             ) as IResourceItem[];
           } catch (error) {
+            if (exportOnly) throw error;
             console.warn('query workspace personal skills failed', error);
           }
         }
 
         const nextRows = workspaceRows.length ? [...workspaceRows, ...rows] : rows;
+        if (exportOnly) {
+          if (pageNum * pageSize < total) {
+            return [...nextRows, ...(await fetchPage({ ...params, pageNum: pageNum + 1, pageSize }, true, true))];
+          }
+          return nextRows;
+        }
         setList((prev) => {
           const mergedRows = append ? [...prev, ...rows] : nextRows;
           return Array.from(
@@ -220,29 +278,83 @@ const ResourceList: React.FC<ResourceListProps> = ({
           pageSize,
           total,
         });
+        return nextRows;
       } finally {
-        setLoading(false);
+        if (!exportOnly) setLoading(false);
       }
     },
-    [activeTab, baseResourceBizTypeList, catalogId, dropdownParam, resourceType, searchValue]
+    [
+      activeTab,
+      baseResourceBizTypeList,
+      catalogId,
+      dropdownParam,
+      myResourceScope,
+      myResourcesOnly,
+      resourceType,
+      searchValue,
+    ]
   );
 
-  const { mutate: handleDel } = useRequest({
-    mutationFn: (params: any) => {
-      if (resourceType === 'KG_DOC') {
-        return deleteKnowledge({ resourceId: params.resourceId });
+  const handleLifecycle = async ({
+    resourceId,
+    action,
+    feedback = message,
+  }: {
+    resourceId: string;
+    action: 'shelf' | 'unShelf' | 'deregister';
+    feedback?: ResourceActionFeedback;
+  }) => {
+    const generation = listGeneration.current;
+    const operations = { shelf: shelfResource, unShelf: unShelfResource, deregister: deregisterResource };
+    try {
+      const response = await operations[action]({ resourceId });
+      if (response?.success === false || (response?.code !== undefined && response.code !== 0)) {
+        throw new Error(response?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
       }
-      return deleteResource({ resourceId: params.resourceId });
-    },
-    onSuccess: () => {
-      message.success(intl.formatMessage({ id: 'common.deactivateSuccess' }));
-      onRefresh();
-    },
-  });
+    } catch (error: any) {
+      feedback.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
+      return;
+    }
+
+    feedback.success(intl.formatMessage({ id: 'common.operationSuccess' }));
+    const resourceStatus = action === 'shelf' ? '2' : action === 'unShelf' ? '3' : '-1';
+    let updatedRow: Record<string, any> = { resourceStatus };
+    // 注销是终态，无需再次查询已注销资源；上下架查询单条详情以取得最新权限。
+    if (action === 'deregister') {
+      updatedRow = {
+        ...updatedRow,
+        canOnShelf: false,
+        canOffShelf: false,
+        canDelete: false,
+        canPublishToEnterprise: false,
+      };
+    } else {
+      try {
+        const response = await queryResourceDetail({ resourceId });
+        const detail = response?.data || response;
+        if (`${detail?.resourceId}` !== `${resourceId}`) throw new Error('Missing resource detail');
+        updatedRow = { ...detail, ...detail.operationPermissions, resourceStatus };
+      } catch {
+        // 操作已经成功，详情失败不能回滚状态或触发整表刷新。
+        feedback.warning(intl.formatMessage({ id: 'resource.rowRefreshFailed' }));
+      }
+    }
+    // 等待期间如果用户切换筛选或分页，不把旧请求写回新列表。
+    if (generation !== listGeneration.current) return;
+    const statusFilter = getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam?.resourceStatus);
+    // 注销后立即移除当前行，与后端排除注销的分页查询口径一致。
+    const keepRow = resourceStatus !== '-1' && (!statusFilter || `${statusFilter}` === resourceStatus);
+    setList((current) =>
+      current.flatMap((row) =>
+        `${row.resourceId}` !== `${resourceId}` ? [row] : keepRow ? [{ ...row, ...updatedRow }] : []
+      )
+    );
+    if (!keepRow) setPageInfo((current) => ({ ...current, total: Math.max(0, current.total - 1) }));
+  };
 
   useEffect(() => {
     getList({ pageIndex: 1 });
-  }, [baseResourceBizTypeList, activeTab, catalogId, dropdownParam, getList]);
+  }, [baseResourceBizTypeList, activeTab, catalogId, dropdownParam, getList, myResourceScope, myResourcesOnly]);
 
   const fixedInstallTargetId =
     installTargetContext.mode === 'fixed' ? installTargetContext.digitalEmployeeId : undefined;
@@ -367,22 +479,46 @@ const ResourceList: React.FC<ResourceListProps> = ({
       onCardClick={() => onDetail(item)}
       actionConfig={{
         scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
-        hiddenMenuItemKeys: activeTab === 'personal' ? ['authorize', 'use'] : [],
+        // 浏览页隐藏生命周期操作；我的资源仍沿用原有权限和状态判断。
+        hiddenMenuItemKeys: [
+          ...(activeTab === 'personal' ? ['authorize', 'use'] : []),
+          ...(resourceType === 'SKILL' && activeTab === 'personal' ? ['share'] : []),
+          ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete', 'publishToEnterprise'] : []),
+        ],
         installedResourceIds,
         canInstallToTarget: installTargetContext.mode !== 'fixed' || canManageInstallTarget,
         installTargetContext,
-        canManageWorkspaceSkill: canManageActiveEmployee,
+        canManageWorkspaceSkill: item.personalWorkspace === true,
         onEdit: () => onEdit(item),
+        enablePublishToEnterprise,
+        onEnterpriseSkillDetail: (enterpriseSkill) => onDetail(enterpriseSkill),
         onAuth: (authType) => onAuth(item, authType),
         onApplyUse: () => onApplyUse(item),
         onAuditUse: () => onAuditUse(item),
-        onDelete: () => handleDel(item),
+        enableResourceLifecycle: true,
+        enableSkillExport: resourceType === 'SKILL',
+        showResourceTypeTag: !myResourcesOnly,
+        onShelf: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'shelf', feedback }),
+        onUnShelf: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'unShelf', feedback }),
+        onDeleteData: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'deregister', feedback }),
       }}
     />
   );
 
   return (
     <div id={getScrollableTarget} className={styles.sectionsContainer}>
+      {resourceType === 'SKILL' &&
+        exportContainer &&
+        createPortal(
+          <SkillExportButton
+            loadAll={async () => {
+              // 导出入口在工具栏，分页查询仍复用列表的当前筛选。
+              const rows = await getList({ pageNum: 1, pageSize: PAGE_SIZE_DEFAULT }, false, true);
+              return Array.from(new Map(rows.map((row) => [String(row.resourceId), row])).values());
+            }}
+          />,
+          exportContainer
+        )}
       <Spin
         wrapperClassName={styles.spinningWrapper}
         tip={intl.formatMessage({ id: 'common.loading' })}

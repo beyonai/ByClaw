@@ -66,16 +66,15 @@ function resolveModelIdFromProviderId(providerId: string): string | null {
 export function registerBaiyingAimodelRuntimeProvider(
     api: OpenClawPluginApi,
     pluginConfig: BaiyingEnhancePluginConfig,
-): void {
+): Parameters<OpenClawPluginApi["registerProvider"]>[0] {
     const secretProviderName = resolveAimodelSecretProviderName(
         pluginConfig.aimodelSecretProviderName,
     );
-    api.registerProvider({
+    const provider: Parameters<OpenClawPluginApi["registerProvider"]>[0] = {
         id: BAIYING_AIMODEL_PROVIDER_API,
         label: "Baiying AI Model",
-        // Dynamic Baiying providers use the built-in OpenAI-compatible or Anthropic
-        // transport. Route providerConfig.api through this hook, then guard inside
-        // resolveSyntheticAuth so unrelated providers are left alone.
+        // Legacy API aliases remain for auth compatibility. On 7.1 they do not
+        // claim arbitrary dynamic provider IDs; targeted adapters register exact IDs.
         hookAliases: ["openai-completions", "openai-responses", "anthropic-messages"],
         auth: [],
         resolveSyntheticAuth: ({ provider, providerConfig }) => {
@@ -101,7 +100,9 @@ export function registerBaiyingAimodelRuntimeProvider(
                 mode: "api-key" as const,
             };
         },
-    });
+    };
+    api.registerProvider(provider);
+    return provider;
 }
 
 export { BAIYING_AIMODEL_PROVIDER_API };

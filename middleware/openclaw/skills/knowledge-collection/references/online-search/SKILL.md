@@ -1,24 +1,25 @@
 ---
 name: online-search
-description: 公共网页 URL 发现通道，腾讯 WSA 主用且仅在通道级故障时降级到镜像内置 SearXNG；与 hot-discovery 协同但不负责正文抓取。
+description: 公共网页 URL 发现通道；用于可选 TypeSafe Jev、腾讯 WSA、Search1API、SearXNG 与 hot-discovery 的受控检索场景。
 ---
 
-# Online Search（腾讯 WSA 主用、SearXNG 故障降级）
+# Online Search（可选 Jev、WSA/Search1API 与 SearXNG 降级）
 
-> `knowledge-collection public-discover` 必须通过统一 online-search provider 调用本能力。WSA 凭据齐全且未显式
-> 关闭时优先使用 WSA；只有 WSA 通道级故障才使用 SearXNG。WSA 合法空结果或候选不足不触发 SearXNG，
-> 而是继续既有 hot-discovery 判断。直接运行 `searxng-cli` 仅用于独立调试。
+> `knowledge-collection public-discover` 必须通过统一 online-search provider 调用本能力。已配置的 WSA 与
+> Search1API 并发执行；两者均不可用或失败时使用 SearXNG。合法空结果不得改写为基础设施故障，
+> 后续仍由既有 hot-discovery 判断。直接运行 `searxng-cli` 仅用于独立调试。
 
 > **入口与使用前提（必读）**：被调用时，若本会话尚未读过本文件，**必须先打开完整通读本文**
 > （含参数表、输出格式、实测引擎可用性），再按其中命令面执行；禁止把技能名当作平台工具名调用
 > （如直接调 `online-search` 工具会报 "Tool not found"），禁止凭名称猜测 CLI 用法。
 > 本技能只负责**发现 URL**，取内容一律委派来源执行器（公共网页 `bycli`）。通过
 > `knowledge-collection` 采集公共 URL 时，必须使用 `public-discover`，该命令会让统一
-> online-search provider（WSA 主用、SearXNG 故障降级）与 `hot_discovery` 并行运行；
+> online-search provider（可选 WSA/Search1API、SearXNG 降级）与 `hot_discovery` 并行运行；
 > 直接运行 `searxng-cli` 仅用于独立调试降级通道。
 
-统一 online-search provider 的主通道是腾讯 WSA。仅当 WSA 未启用、凭据缺失、超时、鉴权失败、
-限流或响应无效等通道级故障时，才调用基于 SearXNG（249 引擎元搜索内核）的进程内 CLI。
+统一 online-search provider 会探测 WSA 与 Search1API 能力并合并跨 provider 的 URL 命中证据。
+两者未启用、凭据缺失、超时、鉴权失败、限流或响应无效等情况下，调用基于 SearXNG（249 引擎元搜索内核）的进程内 CLI。
+若配置 `TYPESAFE_API_KEY`，TypeSafe Jev 可在检索前做有界规划，并在硬过滤后进行候选重排；缺失、关闭或失败时必须原样保留现有输入和排序。Jev 不能授权 URL 或替代正文验证。
 SearXNG 每次调用起一个进程，完成搜索后向 stdout 输出单个 JSON 对象并退出；**不启动 Web 服务、
 不监听端口、不写缓存**。
 

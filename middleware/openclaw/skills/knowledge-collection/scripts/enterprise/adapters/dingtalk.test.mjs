@@ -106,6 +106,20 @@ if (args[0] === 'doc' && args[1] === 'read') {
 }
 if (args[0] === 'drive' && args[1] === 'list') {
   const parent = value('--folder');
+  if (process.env.FIXTURE_MODE === 'drive-priority') {
+    if (parent === 'folder-root') console.log(JSON.stringify({ items: [
+      { dentryUuid: 'folder-alpha', name: 'Alpha', type: 'folder' },
+      { dentryUuid: 'folder-beta', name: 'Beta', type: 'folder' },
+    ] }));
+    else if (parent === 'folder-alpha') console.log(JSON.stringify({ items: [
+      { dentryUuid: 'file-alpha', name: 'quarterly plan Alpha', type: 'doc' },
+    ] }));
+    else if (parent === 'folder-beta') console.log(JSON.stringify({ items: [
+      { dentryUuid: 'file-beta', name: 'quarterly plan Beta', type: 'doc' },
+    ] }));
+    else process.exit(31);
+    process.exit(0);
+  }
   if (parent === 'folder-root') console.log(JSON.stringify({ items: [
     { dentryUuid: 'folder-child', name: 'child', type: 'folder' },
     { dentryUuid: 'file-root', name: 'quarterly plan root.pdf', type: 'file' }
@@ -162,11 +176,13 @@ async function collect(mode, request = {}) {
   const dwsHome = join(testCase.root, 'dws-home');
   await mkdir(dwsHome, { mode: 0o700 });
   const converterBin = mode === 'missing-converter' ? undefined : await converterFixture(testCase.root);
-  const { rateLimitRetryDelay, ...searchRequest } = request;
+  const { rateLimitRetryDelay, jevCall, enterpriseEnabled, ...searchRequest } = request;
   const adapter = createDingtalkAdapter({
     bin,
     ...(mode === 'missing-converter' ? { converterBin: null } : { converterBin }),
-    env: { FIXTURE_MODE: mode, FIXTURE_LOG: log, DWS_HOME: dwsHome },
+    env: { FIXTURE_MODE: mode, FIXTURE_LOG: log, DWS_HOME: dwsHome,
+      ...(enterpriseEnabled ? { TYPESAFE_ENTERPRISE_ENABLED: 'true' } : {}) },
+    ...(jevCall ? { callJev: jevCall } : {}),
     ...(rateLimitRetryDelay ? { rateLimitRetryDelay } : {}),
   });
   const result = await adapter.search({
@@ -236,6 +252,39 @@ test('folder-scoped DWS discovery traverses drive safely and avoids cycles', asy
       call.args.includes('--folder') && call.args.includes('--limit') && !call.args.includes('--parent-id') && !call.args.includes('--max')
     )), true);
     assert.equal((await runNode(knowledgeCollectionScript, ['inspect', '--session-dir', fixture.outputDir, '--full'])).code, 0);
+  } finally { await rm(fixture.root, { recursive: true, force: true }); }
+});
+
+test('DWS selected metadata traversal chooses a named folder, while disabled inference preserves queue order', async () => {
+  const chooseSecond = async (payload) => ({ ok: true, document: { answers: Object.fromEntries(
+    Object.keys(payload.questions).map((key, index) => [key,
+      { type: 'choice', choice: index === 1 ? 'high' : 'low', confidence: 0.95 }]),
+  ) } });
+  for (const enterpriseEnabled of [true, false]) {
+    const fixture = await collect('drive-priority', { folderId: 'folder-root', limit: 1,
+      metadataOnly: true, enterpriseEnabled, jevCall: chooseSecond });
+    try {
+      assert.equal(fixture.result.status, 'complete', fixture.result.reason);
+      const folders = fixture.calls.filter((call) => call.args[0] === 'drive' && call.args[1] === 'list')
+        .map((call) => call.args[call.args.indexOf('--folder') + 1]);
+      assert.deepEqual(folders, ['folder-root', enterpriseEnabled ? 'folder-beta' : 'folder-alpha']);
+      const metadata = await readJson(join(fixture.outputDir, 'sanitized/metadata.json'));
+      assert.equal(metadata.collection.items[0].sourceItemId, enterpriseEnabled ? 'file-beta' : 'file-alpha');
+    } finally { await rm(fixture.root, { recursive: true, force: true }); }
+  }
+});
+
+test('DWS all-target folder traversal skips inference and preserves queue order', async () => {
+  let inferenceCalls = 0;
+  const fixture = await collect('drive-priority', { folderId: 'folder-root', limit: 1,
+    metadataOnly: true, enterpriseEnabled: true,
+    taskContract: { materializationTarget: 'all' },
+    jevCall: async () => { inferenceCalls += 1; throw new Error('must not infer'); } });
+  try {
+    const folders = fixture.calls.filter((call) => call.args[0] === 'drive' && call.args[1] === 'list')
+      .map((call) => call.args[call.args.indexOf('--folder') + 1]);
+    assert.equal(inferenceCalls, 0);
+    assert.deepEqual(folders, ['folder-root', 'folder-alpha']);
   } finally { await rm(fixture.root, { recursive: true, force: true }); }
 });
 

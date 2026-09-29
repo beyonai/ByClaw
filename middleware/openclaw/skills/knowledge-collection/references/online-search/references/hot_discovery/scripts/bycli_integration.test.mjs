@@ -9,6 +9,35 @@ const ok = (stdout = '') => ({ code: 0, stdout, stderr: '', timedOut: false, kil
 const failed = (code, stderr = '', stdout = '') => ({ code, stdout, stderr, timedOut: false, killed: false, rawErrorCode: null });
 const bridgeScript = '/test/bridge-bootstrap.mjs';
 
+test('runtime and bridge commands consume one decreasing budget', async () => {
+  let remaining = 100;
+  const timeouts = [];
+  const bycli = createBycliIntegration({
+    remainingBudgetMs: () => remaining,
+    run: async (_cmd, args, timeoutMs) => {
+      timeouts.push(timeoutMs);
+      remaining -= 30;
+      return ok(args[0] === '--version' ? 'test' : args[0] === 'list' ? '[]'
+        : JSON.stringify({ ok: true, code: 'BRIDGE_READY' }));
+    },
+  });
+  await bycli.loadRuntime();
+  await bycli.ensureBridge();
+  assert.deepEqual(timeouts, [100, 70, 40]);
+});
+
+test('expired runtime budget never starts list or bridge', async () => {
+  let remaining = 10;
+  const calls = [];
+  const bycli = createBycliIntegration({
+    remainingBudgetMs: () => remaining,
+    run: async (_cmd, args) => { calls.push(args); remaining = 0; return ok('v1'); },
+  });
+  await assert.rejects(bycli.loadRuntime(), { code: 'HOT_DISCOVERY_BUDGET_EXHAUSTED' });
+  await assert.rejects(bycli.ensureBridge(), { code: 'HOT_DISCOVERY_BUDGET_EXHAUSTED' });
+  assert.deepEqual(calls, [['--version']]);
+});
+
 function scriptedRunner(steps) {
   const calls = [];
   const timeouts = [];

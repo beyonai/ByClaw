@@ -90,6 +90,11 @@ public class SessionService {
      * @param sessionId 会话信息
      * @return ResponseUtil
      */
+    /** 必须在写事务内使用，锁持有到事务结束。 */
+    public ByaiSession lockById(Long sessionId) {
+        return byaiSessionMapper.selectByIdForUpdate(sessionId);
+    }
+
     public ByaiSession findById(Long sessionId) {
         return byaiSessionMapper.selectById(sessionId);
     }

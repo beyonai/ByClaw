@@ -57,11 +57,18 @@ const isCancelledRequest = (error) =>
   error?.name === 'CanceledError' || error?.name === 'AbortError' || error?.code === 'ERR_CANCELED';
 
 export default function EmployeeGroupMembers({
-  value = [],
+  value = [] as any[],
   onChange,
   disabled = false,
   agentTypeOptions = [],
   ownerType = 'personal',
+  candidateLoader,
+  showTeamRole = true,
+  title,
+  hint,
+  addText,
+  selectorTitle,
+  candidateTypeLabel,
 }) {
   const intl = useIntl();
   const [open, setOpen] = useState(false);
@@ -102,7 +109,8 @@ export default function EmployeeGroupMembers({
     requestRef.current = requestController;
     loadingRef.current = true;
     setLoading(true);
-    queryEmployeeGroupMemberCandidates(
+    const loadCandidates = candidateLoader || queryEmployeeGroupMemberCandidates;
+    loadCandidates(
       {
         pageNum,
         pageSize: CANDIDATE_PAGE_SIZE,
@@ -144,7 +152,7 @@ export default function EmployeeGroupMembers({
     return () => {
       requestController.abort();
     };
-  }, [intl, keyword, open, ownerType, pageNum]);
+  }, [candidateLoader, intl, keyword, open, ownerType, pageNum]);
 
   const loadMoreCandidates = useCallback(() => {
     if (!open || loadingRef.current || !hasMore) return;
@@ -210,14 +218,16 @@ export default function EmployeeGroupMembers({
       <div className={styles.header}>
         <div className={styles.titleWrap}>
           <span className={styles.required}>*</span>
-          <span className={styles.title}>{intl.formatMessage({ id: 'employeeDetail.groupMember.title' })}</span>
+          <span className={styles.title}>
+            {title || intl.formatMessage({ id: 'employeeDetail.groupMember.title' })}
+          </span>
           <Typography.Text type="secondary" className={styles.hint}>
-            {intl.formatMessage({ id: 'employeeDetail.groupMember.hint' })}
+            {hint || intl.formatMessage({ id: 'employeeDetail.groupMember.hint' })}
           </Typography.Text>
         </div>
         {!disabled && (
           <Button type="link" size="small" className={styles.selectButton} onClick={openSelector}>
-            + {intl.formatMessage({ id: 'employeeDetail.groupMember.add' })}
+            + {addText || intl.formatMessage({ id: 'employeeDetail.groupMember.add' })}
           </Button>
         )}
       </div>
@@ -245,19 +255,21 @@ export default function EmployeeGroupMembers({
                     {member.name}
                   </Typography.Text>
                 </Tooltip>
-                <Input
-                  className={styles.roleInput}
-                  maxLength={100}
-                  size="small"
-                  disabled={disabled}
-                  placeholder={intl.formatMessage({ id: 'employeeDetail.groupMember.rolePlaceholder' })}
-                  value={member.teamRole}
-                  onChange={(event) => {
-                    const next = [...members];
-                    next[index] = { ...member, teamRole: event.target.value };
-                    updateMembers(next);
-                  }}
-                />
+                {showTeamRole && (
+                  <Input
+                    className={styles.roleInput}
+                    maxLength={100}
+                    size="small"
+                    disabled={disabled}
+                    placeholder={intl.formatMessage({ id: 'employeeDetail.groupMember.rolePlaceholder' })}
+                    value={member.teamRole}
+                    onChange={(event) => {
+                      const next = [...members];
+                      next[index] = { ...member, teamRole: event.target.value };
+                      updateMembers(next);
+                    }}
+                  />
+                )}
               </div>
               {!disabled && (
                 <div className={styles.actions}>
@@ -281,7 +293,7 @@ export default function EmployeeGroupMembers({
         width={880}
         className={styles.memberSelectorModal}
         wrapClassName={styles.memberSelectorModalWrap}
-        title={intl.formatMessage({ id: 'employeeDetail.groupMember.select' })}
+        title={selectorTitle || intl.formatMessage({ id: 'employeeDetail.groupMember.select' })}
         onCancel={() => setOpen(false)}
         onOk={() => {
           if (selectedKeys.length > MAX_GROUP_MEMBER_COUNT) {
@@ -402,10 +414,11 @@ export default function EmployeeGroupMembers({
               dataIndex: 'name',
               width: '100%',
               render: (name, record) => {
-                const typeLabel =
-                  agentTypeOptions.find((item) => `${item?.value ?? ''}` === `${record?.agentType ?? ''}`)?.label ||
-                  record?.agentType ||
-                  '';
+                const typeLabel = candidateTypeLabel
+                  ? candidateTypeLabel(record)
+                  : agentTypeOptions.find((item) => `${item?.value ?? ''}` === `${record?.agentType ?? ''}`)?.label ||
+                    record?.agentType ||
+                    '';
                 return (
                   <div className={styles.candidateEmployeeCell}>
                     <span className={styles.candidateAvatar}>

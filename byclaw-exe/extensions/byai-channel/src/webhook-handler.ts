@@ -45,8 +45,6 @@ export function createWebhookHandler(deps: WebhookHandlerDeps) {
   const { account, cfg, log, onMessage } = deps;
 
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    log?.info?.(`[byai-channel] Received ${req.method} ${req.url}`);
-
     if (req.method !== "POST") {
       log?.warn?.(`[byai-channel] Method not allowed: ${req.method}`);
       respond(res, 405, { error: `[byai-channel] Method not allowed: ${req.method}` });
@@ -96,7 +94,9 @@ export function createWebhookHandler(deps: WebhookHandlerDeps) {
       return;
     }
 
-    log?.info?.(`[byai-channel] Message from ${userId}: ${payload.message.slice(0, 100)}...`);
+    log?.info?.(
+      `[byai-channel] webhook request received: requestId=${payload.requestId}, sessionId=${payload.sessionId ?? payload.requestId}, textLength=${payload.message.length}`,
+    );
 
     // 构建入站消息对象
     const message: ByaiInboundMessage = {
@@ -117,7 +117,9 @@ export function createWebhookHandler(deps: WebhookHandlerDeps) {
     try {
       await onMessage(message);
     } catch (err) {
-      log?.error?.(`[byai-channel] Failed to process message: ${String(err)}`);
+      log?.error?.(
+        `[byai-channel] Failed to process message: requestId=${message.requestId}, sessionId=${message.sessionId}, error=${String(err)}`,
+      );
       // 发送错误回调
       await sendReplyCallback(
         message.callbackUrl,
