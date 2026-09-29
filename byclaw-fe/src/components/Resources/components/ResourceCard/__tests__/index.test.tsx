@@ -1268,8 +1268,8 @@ describe('digital employee publication entry', () => {
     );
     expect(screen.queryByText('发布到官方推荐')).not.toBeInTheDocument();
   });
-  it('opens an official copy through its candidate workflow', async () => {
-    (openEmployeePublication as jest.Mock).mockResolvedValue(undefined);
+  it('opens an official copy in its ordinary editor without preparing a publication', async () => {
+    (openEmployeePublication as jest.Mock).mockReset();
     const onEdit = jest.fn();
     renderWithQueryClient(
       <ResourceCard
@@ -1284,8 +1284,8 @@ describe('digital employee publication entry', () => {
       />
     );
     fireEvent.click(screen.getByText('common.editInfo'));
-    await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('10', 'editOfficial'));
-    expect(onEdit).not.toHaveBeenCalled();
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(openEmployeePublication).not.toHaveBeenCalled();
   });
 });
 

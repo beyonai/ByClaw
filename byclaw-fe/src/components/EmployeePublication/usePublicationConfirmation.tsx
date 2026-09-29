@@ -1,11 +1,12 @@
 import type { PublicationDetail } from '@/service/employeePublication';
 import { Alert, Button, Collapse, Modal, Typography } from 'antd';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ResourceAvailabilityList from './ResourceAvailabilityList';
 
 type Decision = 'publish' | 'edit' | 'cancel';
 
-export default function usePublicationConfirmation() {
+export default function usePublicationConfirmation(mode: 'publish' | 'update' = 'publish') {
+  const updating = mode === 'update';
   const [candidate, setCandidate] = useState<PublicationDetail>();
   const resolveRef = useRef<(decision: Decision) => void>();
   useEffect(
@@ -21,13 +22,13 @@ export default function usePublicationConfirmation() {
     setCandidate(undefined);
     resolve?.(decision);
   };
-  const confirmPublication = (detail: PublicationDetail) => {
+  const confirmPublication = useCallback((detail: PublicationDetail) => {
     if (resolveRef.current) return Promise.resolve<Decision>('cancel');
     setCandidate(detail);
     return new Promise<Decision>((resolve) => {
       resolveRef.current = resolve;
     });
-  };
+  }, []);
   const warnings = candidate?.dependencies.filter((dependency) => dependency.warning) || [];
   const others = candidate?.dependencies.filter((dependency) => !dependency.warning) || [];
   const noWarningsDescription = others.length
@@ -35,7 +36,7 @@ export default function usePublicationConfirmation() {
     : '这位员工暂未关联工具、知识或技能。';
   const confirmationDialog = (
     <Modal
-      title="确认发布到官方推荐"
+      title={updating ? '确认提交员工更新' : '确认发布到官方推荐'}
       open={!!candidate}
       width={760}
       style={{ maxWidth: 'calc(100vw - 32px)' }}
@@ -47,7 +48,7 @@ export default function usePublicationConfirmation() {
           返回修改
         </Button>,
         <Button key="publish" type="primary" onClick={() => settle('publish')}>
-          继续发布
+          {updating ? '提交更新审核' : '继续发布'}
         </Button>,
       ]}
     >
@@ -56,14 +57,20 @@ export default function usePublicationConfirmation() {
           <Typography.Paragraph style={{ overflowWrap: 'anywhere' }}>
             <strong>{candidate.publication.employeeName}</strong>
             <br />
-            <Typography.Text type="secondary">发布后，当前企业的所有成员都能使用这位数字员工。</Typography.Text>
+            <Typography.Text type="secondary">
+              {updating
+                ? '审核通过后更新官方员工，审核期间大家继续使用当前版本。'
+                : '发布后，当前企业的所有成员都能使用这位数字员工。'}
+            </Typography.Text>
           </Typography.Paragraph>
           <Alert
             showIcon
             type={warnings.length ? 'warning' : 'success'}
             style={{ marginBottom: 16 }}
             message={
-              warnings.length ? `可以继续发布，有 ${warnings.length} 项资源需要留意` : '资源检查完成，可以继续发布'
+              warnings.length
+                ? `可以继续${updating ? '提交' : '发布'}，有 ${warnings.length} 项资源需要留意`
+                : `资源检查完成，可以继续${updating ? '提交' : '发布'}`
             }
             description={
               warnings.length
@@ -87,7 +94,9 @@ export default function usePublicationConfirmation() {
             />
           )}
           <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-            配置已保存。继续后按现有规则提交审核或直接发布；返回修改不会提交。
+            {updating
+              ? '修改已存为更新草稿，提交后等待管理员审核；返回修改不会提交，也不会改变在用版本。'
+              : '配置已保存。继续后按现有规则提交审核或直接发布；返回修改不会提交。'}
             关联资源保留原有权限，可正常复制的个人技能会生成全员可用的副本。资源实际可用性以使用时的权限和状态为准。
           </Typography.Paragraph>
         </>

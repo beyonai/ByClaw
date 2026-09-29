@@ -82,6 +82,20 @@ export const publicationAction = (
   });
 export const publicationUrl = (detail: PublicationDetail) =>
   `/digitalEmployeesCreate?publicationId=${detail.publication.requestId}&appId=${detail.employee.resourceId}&log=false&manage=false`;
+export const preparePublication = (resourceId: string) => POST<PublicationDetail>(`${base}/prepare`, { resourceId });
+
+/** 普通编辑页只在保存时建立更新草稿，进入页面本身不会产生申请。 */
+export const saveOfficialUpdateDraft = async (resourceId: string, employee: any) => {
+  let detail = await preparePublication(resourceId);
+  if (String(detail.publication.officialId) !== String(resourceId)) {
+    throw new Error('官方副本已变化，请刷新页面后重试');
+  }
+  if (detail.canRevise) detail = await publicationAction('revise', detail.publication);
+  if (detail.publication.status !== 'DRAFT' || !detail.canEdit) {
+    throw new Error('该员工已有未完成的更新申请，请先在审核中心处理或撤回申请后再保存');
+  }
+  return publicationAction('save', detail.publication, { employee });
+};
 export const openEmployeePublication = async (resourceId: string, intent: 'view' | 'editOfficial' = 'view') => {
   const current = intent === 'view' ? await getCurrentPublication(resourceId) : null;
   const detail = current || (await POST<PublicationDetail>(`${base}/prepare`, { resourceId }));

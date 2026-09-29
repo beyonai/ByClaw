@@ -17,7 +17,8 @@ import static org.mockito.Mockito.*;
 
 class DigitalEmployeeGovernanceServiceTest {
     UserService users = mock(UserService.class);
-    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, mock(ByaiSystemConfigService.class));
+    com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper publications = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
+    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, mock(ByaiSystemConfigService.class), publications);
     AuthApplicationService auth = new AuthApplicationService();
     PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
     @BeforeEach void setup() {
@@ -49,8 +50,47 @@ class DigitalEmployeeGovernanceServiceTest {
         assertThat(auth.hasResourceManagePermission(resource)).isTrue();
         assertThat(auth.hasResourceUseSettingPermission(resource)).isFalse();
         assertThat(auth.hasResourceInstallTargetManagePermission(resource)).isFalse();
-        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("发布流程");
+        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("更新审核");
         assertThatThrownBy(() -> auth.validateEmployeeAuthorizationPermission(resource)).hasMessageContaining("仅官方管理员");
+    }
+    @ParameterizedTest @ValueSource(strings = {"adminvip", "PLAT_MAN"})
+    void administratorsCanSaveOfficialCopyDirectly(String identity) {
+        EmployeePublicationApplicationServiceTest.login(identity, 2L, List.of(identity));
+        SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 7L);
+        resource.setOwnerType("enterprise"); resource.setPublicationSourceId(9L);
+        assertThatCode(() -> governance.requireDirectMutationAllowed(resource)).doesNotThrowAnyException();
+        var permissions = new com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo();
+        ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", resource, permissions);
+        assertThat(permissions.isOfficialPublication()).isTrue();
+        assertThat(permissions.isOfficialUpdateRequiresReview()).isFalse();
+    }
+    @ParameterizedTest @ValueSource(strings = {"DRAFT", "PENDING", "APPLYING", "FAILED"})
+    void directSaveCannotRaceOutstandingOfficialUpdate(String state) {
+        EmployeePublicationApplicationServiceTest.login("adminvip", 2L, List.of());
+        SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 7L);
+        resource.setPublicationSourceId(9L);
+        var active = new com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication();
+        active.setStatus(state);
+        when(publications.active(9L, 1L)).thenReturn(active);
+        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("未完成的更新申请");
+    }
+    @ParameterizedTest @ValueSource(strings = {"USER", "ORG_MAN", "BUSINESS_MAN"})
+    void officialAuthorSavesRequireReviewRegardlessOfNonPlatformRole(String role) {
+        EmployeePublicationApplicationServiceTest.login("author", 7L, List.of(role));
+        SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 7L);
+        resource.setPublicationSourceId(9L);
+        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("更新审核");
+        var permissions = new com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo();
+        ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", resource, permissions);
+        assertThat(permissions.isOfficialUpdateRequiresReview()).isTrue();
+    }
+    @Test void directOfficialSaveStillProtectsAdminvipAndTenantBoundary() {
+        EmployeePublicationApplicationServiceTest.login("platform", 2L, List.of("PLAT_MAN"));
+        SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
+        resource.setPublicationSourceId(9L);
+        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("adminvip");
+        resource.setCreateBy(7L); resource.setComAcctId(99L);
+        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource));
     }
     @Test void ordinaryAndBusinessAdministratorsCannotCreateEnterpriseEmployees() {
         for (String role : List.of("COMMON", "BUSINESS_MAN", "ORG_MAN", "PLAT_DEVOPS")) {

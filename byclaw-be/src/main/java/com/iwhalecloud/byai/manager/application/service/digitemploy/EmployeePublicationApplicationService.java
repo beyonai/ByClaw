@@ -213,6 +213,7 @@ public class EmployeePublicationApplicationService {
             next.setAuthorId(previous.getAuthorId());
             next.setAuthorName(previous.getAuthorName());
             SsResource official = publications.official(previous.getSourceId(), tenant);
+            if (official != null) publications.lockResource(official.getResourceId(), tenant);
             next.setOfficialId(official == null ? null : official.getResourceId());
             next.setStatus("DRAFT"); next.setRevision(1L); next.setCreatedAt(new Date());
             setSnapshot(next, sanitize(JSON.parseObject(previous.getSnapshotJson(), DigitalEmployeeDTO.class), basis(next)));

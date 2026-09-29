@@ -31,7 +31,7 @@ class EmployeePublicationApplicationServiceTest {
     SsResourceMapper resources = mock(SsResourceMapper.class);
     UserService users = mock(UserService.class);
     ByaiSystemConfigService config = mock(ByaiSystemConfigService.class);
-    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, config);
+    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, config, publications);
     DigitalEmployeeApplicationService employees = mock(DigitalEmployeeApplicationService.class);
     EmployeePublicationResources dependencies = mock(EmployeePublicationResources.class);
     SsResExtDigEmployeeService extensions = mock(SsResExtDigEmployeeService.class);
