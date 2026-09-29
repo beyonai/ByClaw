@@ -461,11 +461,11 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     return true;
   }, [activeTab, brandVersion, brandVersionLoaded, fixedEntryCapability, resourceType]);
 
-  // 官方推荐技能独立使用品牌和角色规则，其他资源保留原有的开源版入口限制。
+  // 我可用的技能在所有版本开放导入；官方推荐保留品牌和角色规则，其他资源仍限制为开源版。
   const showImportEntry =
     resourceType === 'SKILL' && activeTab === 'enterprise'
       ? canImportCurrentEnterpriseResource
-      : brandVersion === 'openSource';
+      : (resourceType === 'SKILL' && activeTab === 'personal') || brandVersion === 'openSource';
 
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
