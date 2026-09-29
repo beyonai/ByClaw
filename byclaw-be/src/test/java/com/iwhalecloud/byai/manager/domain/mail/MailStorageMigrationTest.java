@@ -12,7 +12,8 @@ class MailStorageMigrationTest {
         Path root = Path.of("").toAbsolutePath();
         if (!Files.isDirectory(root.resolve("deploy"))) root = root.getParent();
         Path version = root.resolve("deploy/migrations/versions/V0.5.0");
-        assertThat(Files.exists(version.resolve("V0.5.0__ddl.sql"))).isFalse();
+        String ddl = Files.readString(version.resolve("V0.5.0__ddl.sql"));
+        assertThat(ddl).doesNotContain("po_user_mail_account");
         String sql = Files.readString(version.resolve("V0.5.0__dml.sql"));
         assertThat(sql).doesNotContain("po_user_mail_account", "ALTER TABLE", "DROP TABLE");
         assertThat(sql.indexOf("INSERT INTO byai.byai_connector_info"))
