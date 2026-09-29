@@ -5,6 +5,7 @@ export interface TenantItem {
   enterpriseName: string;
   packageName: string;
   provisionState: string;
+  provisionStage?: string;
   createdAt: string | null;
   openedAt: string | null;
   failureReason: string | null;
@@ -47,6 +48,10 @@ export const createTenant = (data: { enterpriseName: string; packageId: number; 
   POST<TenantItem>('/byaiService/admin/tenants/create', data);
 export const provisionTenant = (enterpriseId: string) =>
   POST<string>('/byaiService/admin/tenants/provision', { enterpriseId });
+export const deleteTenant = (enterpriseId: string, enterpriseName: string) =>
+  POST<string>('/byaiService/admin/tenants/delete', { enterpriseId, enterpriseName });
+export const restartTenantSandbox = (data: { enterpriseId: string; sandboxType: string; recordId: number }) =>
+  POST<string>('/byaiService/admin/tenants/sandboxes/restart', data);
 export const addTenantMember = (enterpriseId: string, userCode: string) =>
   POST('/byaiService/admin/tenants/members/add', { enterpriseId, userCode });
 export const listTenantOrganizations = (enterpriseId: string) =>

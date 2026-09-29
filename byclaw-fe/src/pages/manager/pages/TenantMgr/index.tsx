@@ -3,19 +3,24 @@ import { useSelector } from '@umijs/max';
 import { Alert, Button, DatePicker, Form, Input, Modal, Popover, Select, Space, Table, Tag, message } from 'antd';
 import {
   createTenant,
+  deleteTenant,
   listTenantPackages,
   listTenants,
+  provisionTenant,
   type TenantItem,
   type TenantListFilter,
   type TenantPackage,
 } from '../../service/TenantMgr';
 import TenantOrganizationModal from './TenantOrganizationModal';
+import TenantProvisionProgress from './TenantProvisionProgress';
 import { tenantProvisionDisplayStatus } from './provisionStatus';
 
 const stateColor: Record<string, string> = {
   已开通: 'green',
   失败: 'red',
   开通中: 'blue',
+  删除中: 'orange',
+  删除失败: 'red',
 };
 
 export default function TenantMgr() {
@@ -25,8 +30,13 @@ export default function TenantMgr() {
   const [packages, setPackages] = useState<TenantPackage[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<TenantItem | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [orgTenant, setOrgTenant] = useState<TenantItem | null>(null);
+  const [progressTenant, setProgressTenant] = useState<TenantItem | null>(null);
   const [nameFilter, setNameFilter] = useState('');
   const [createdRange, setCreatedRange] = useState<[string, string] | null>(null);
   const [sortField, setSortField] = useState<TenantListFilter['sortField']>('createdAt');
@@ -48,7 +58,9 @@ export default function TenantMgr() {
         sortField: nextSortField,
         sortOrder: nextSortOrder,
       });
-      setTenants(Array.isArray(result) ? result : []);
+      const items = Array.isArray(result) ? result : [];
+      setTenants(items);
+      setProgressTenant((current) => items.find((item) => item.enterpriseId === current?.enterpriseId) || current);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -63,7 +75,7 @@ export default function TenantMgr() {
   }, [isPlatformAdmin]);
 
   const hasProvisioningTenant = tenants.some(
-    (tenant) => tenantProvisionDisplayStatus(tenant.provisionState) === '开通中'
+    (tenant) => !['READY', 'FAILED', 'UNAVAILABLE'].includes(tenant.provisionState)
   );
   useEffect(() => {
     if (!isPlatformAdmin || !hasProvisioningTenant) return;
@@ -79,18 +91,54 @@ export default function TenantMgr() {
     const values = await createForm.validateFields();
     setCreating(true);
     try {
-      await createTenant({
+      const tenant = await createTenant({
         enterpriseName: values.enterpriseName.trim(),
         packageId: values.packageId,
         requestId: requestIdRef.current,
       });
-      message.success('租户已创建，正在初始化数据库沙箱');
+      message.success('租户已创建，正在执行开通流程');
       setCreateOpen(false);
+      setProgressTenant(tenant);
       createForm.resetFields();
       requestIdRef.current = '';
       await refresh();
     } finally {
       setCreating(false);
+    }
+  };
+
+  const retryProvision = async () => {
+    if (!progressTenant) return;
+    setRetrying(true);
+    try {
+      await provisionTenant(progressTenant.enterpriseId);
+      message.success('已重新提交开通任务');
+      const resumed = {
+        ...progressTenant,
+        provisionState: progressTenant.provisionStage || 'DB_CREATING',
+        failureReason: null,
+      };
+      setProgressTenant(resumed);
+      setTenants((items) => items.map((item) => (item.enterpriseId === resumed.enterpriseId ? resumed : item)));
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const submitDelete = async () => {
+    if (!deleteTarget || deleteConfirmation !== deleteTarget.enterpriseName) return;
+    setDeleting(true);
+    try {
+      await deleteTenant(deleteTarget.enterpriseId, deleteTarget.enterpriseName);
+      message.success('已提交租户删除，正在清理沙箱和数据');
+      setTenants((items) => items.map((item) => item.enterpriseId === deleteTarget.enterpriseId
+        ? { ...item, provisionState: 'DELETING', failureReason: null } : item));
+      setDeleteTarget(null);
+      setDeleteConfirmation('');
+      setProgressTenant(null);
+      await refresh();
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -103,7 +151,8 @@ export default function TenantMgr() {
           <Button
             type="primary"
             onClick={() => {
-              requestIdRef.current = crypto.randomUUID();
+              requestIdRef.current =
+                globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
               setCreateOpen(true);
             }}
           >
@@ -182,9 +231,18 @@ export default function TenantMgr() {
             title: '开通状态',
             dataIndex: 'provisionState',
             width: 110,
-            render: (state: string) => {
+            render: (state: string, tenant: TenantItem) => {
               const label = tenantProvisionDisplayStatus(state);
-              return <Tag color={stateColor[label] || 'default'}>{label}</Tag>;
+              return (
+                <Button type="link" style={{ padding: 0 }}
+                  onClick={() => {
+                    if (!['DELETING', 'DELETE_FAILED'].includes(state)) setProgressTenant(tenant);
+                  }}>
+                  <Tag color={stateColor[label] || 'default'} style={{ cursor: 'pointer' }}>
+                    {label}
+                  </Tag>
+                </Button>
+              );
             },
           },
           {
@@ -222,16 +280,49 @@ export default function TenantMgr() {
           },
           {
             title: '操作',
-            width: 130,
+            width: 190,
             render: (_, tenant) => (
-              <Button type="link" onClick={() => setOrgTenant(tenant)}>
-                添加成员
-              </Button>
+              <Space size={0}>
+                <Button type="link" onClick={() => setOrgTenant(tenant)} disabled={tenant.provisionState === 'DELETING'}>
+                  添加成员
+                </Button>
+                <Button type="link" danger disabled={tenant.provisionState === 'DELETING'}
+                  onClick={() => {
+                    setDeleteConfirmation('');
+                    setDeleteTarget(tenant);
+                  }}>
+                  {tenant.provisionState === 'DELETE_FAILED' ? '重试删除' : '删除租户'}
+                </Button>
+              </Space>
             ),
           },
         ]}
       />
       <TenantOrganizationModal tenant={orgTenant} onClose={() => setOrgTenant(null)} />
+      <TenantProvisionProgress
+        tenant={progressTenant}
+        onClose={() => setProgressTenant(null)}
+        onRetry={() => void retryProvision()}
+        retrying={retrying}
+      />
+      <Modal
+        title={`删除租户：${deleteTarget?.enterpriseName || ''}`}
+        open={!!deleteTarget}
+        okText="确认删除"
+        okButtonProps={{ danger: true, disabled: deleteConfirmation !== deleteTarget?.enterpriseName, loading: deleting }}
+        onOk={() => void submitDelete()}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+            setDeleteConfirmation('');
+          }
+        }}
+      >
+        <p>删除后将释放该租户的数据库和数据服务沙箱，并删除其私有持久化数据。此操作不可撤销。</p>
+        <p>请输入租户名称 <strong>{deleteTarget?.enterpriseName}</strong> 以确认：</p>
+        <Input aria-label="输入租户名称确认删除" value={deleteConfirmation}
+          onChange={(event) => setDeleteConfirmation(event.target.value)} />
+      </Modal>
       <Modal
         title="创建租户"
         open={createOpen}
