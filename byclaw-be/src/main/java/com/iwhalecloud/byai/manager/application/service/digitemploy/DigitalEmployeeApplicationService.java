@@ -3673,6 +3673,21 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
+     * 查询详情（对外输出安全版本）。
+     *
+     * <p>既有 {@link #findDetailsById(EmployeeIdDTO)} 的签名与语义保持不变（内部调用方仍拿到原始
+     * {@code targetContent}）；本方法只在其结果上做对外净化：清空内部 {@code targetContent} 并剔除停用类型关联资源。
+     *
+     * @param employeeIdDTO 查询对象
+     * @return 可直接对外输出的员工详情
+     */
+    public DigitalEmployeeDetailsDTO findDetailsByIdForOutput(EmployeeIdDTO employeeIdDTO) {
+        DigitalEmployeeDetailsDTO details = findDetailsById(employeeIdDTO);
+        DigitalEmployeeOutputSanitizer.sanitizeForOutput(details);
+        return details;
+    }
+
+    /**
      * 查询详情
      *
      * @param employeeIdDTO 查询对象
@@ -4144,6 +4159,12 @@ public class DigitalEmployeeApplicationService {
             relResourceList = ssResourceService.findByIdList(relIds);
         }
 
+        // 四类已下线资源业务类型统一停用：按真实类型过滤（不改共用的 findByIdList）。
+        relResourceList = relResourceList.stream()
+            .filter(relResource -> relResource == null
+                || !DisabledResourceBizTypes.isDisabled(relResource.getResourceBizType()))
+            .collect(Collectors.toList());
+
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.rel.resource.query.success"), relResourceList);
     }
 
@@ -4261,7 +4282,15 @@ public class DigitalEmployeeApplicationService {
             return null;
         }
 
-        return ssResourceService.getResourceListByCode(codes);
+        List<SsResource> resourceList = ssResourceService.getResourceListByCode(codes);
+        if (CollectionUtils.isEmpty(resourceList)) {
+            return resourceList;
+        }
+        // 四类已下线资源业务类型统一停用：默认配置资源同样按真实类型过滤（不改共用的 getResourceListByCode）。
+        return resourceList.stream()
+            .filter(resource -> resource == null
+                || !DisabledResourceBizTypes.isDisabled(resource.getResourceBizType()))
+            .collect(Collectors.toList());
     }
 
     /**

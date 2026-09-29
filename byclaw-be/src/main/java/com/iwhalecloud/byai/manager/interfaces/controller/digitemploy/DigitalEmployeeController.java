@@ -273,7 +273,7 @@ public class DigitalEmployeeController {
      */
     @RequestMapping(value = "/findDetailsById", method = RequestMethod.POST)
     public ResponseUtil findDetailsById(@RequestBody EmployeeIdDTO employeeIdDTO) {
-        DigitalEmployeeDetailsDTO digEmployeeDetails = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
+        DigitalEmployeeDetailsDTO digEmployeeDetails = digitalEmployeeApplicationService.findDetailsByIdForOutput(employeeIdDTO);
         if (digEmployeeDetails != null) {
             digEmployeeDetails.setOperationPermissions(authApplicationService.queryResourceOperationPermissionsBatch(
                 Collections.singletonList(employeeIdDTO.getResourceId())).get(employeeIdDTO.getResourceId()));

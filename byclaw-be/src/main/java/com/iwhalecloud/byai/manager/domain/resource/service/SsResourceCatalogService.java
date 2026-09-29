@@ -2,6 +2,8 @@ package com.iwhalecloud.byai.manager.domain.resource.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes;
+import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.slf4j.Logger;
@@ -342,8 +344,12 @@ public class SsResourceCatalogService {
      * @return 资源目录关联树形结构列表
      */
     public List<ResourceCatalogTreeVO> queryResourceCatalogTree(Integer catalogType) {
+        // 资源节点类型由统一停用规则派生：四类已下线类型全部停用后，对象目录树不再挂任何资源节点，仅保留目录层级。
+        List<String> resourceNodeBizTypes =
+            DisabledResourceBizTypes.enabledOnly(List.of(ResourceBizType.OBJECT.getCode()));
+
         // 查询平铺数据
-        List<ResourceCatalogTreeVO> flatList = ssResourceCatalogMapper.queryResourceCatalogTree(catalogType);
+        List<ResourceCatalogTreeVO> flatList = ssResourceCatalogMapper.queryResourceCatalogTree(catalogType, resourceNodeBizTypes);
 
         // 构建树形结构
         return buildTree(flatList);

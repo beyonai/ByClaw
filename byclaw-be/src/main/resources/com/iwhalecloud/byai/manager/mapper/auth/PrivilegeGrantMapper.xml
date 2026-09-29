@@ -301,6 +301,9 @@
     </select>
 
     <select id="listResourceAuth" resultMap="resourceAuthVoResultMap">
+        <!-- 四类已下线资源业务类型统一停用：单一事实来源 DisabledResourceBizTypes，禁止在此写类型清单。 -->
+        <bind name="disabledBizTypes"
+              value="@com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes@codes()"/>
         select a.resource_id,
                a.system_code,
                a.resource_source_pk_id,
@@ -432,6 +435,13 @@
                 </choose>
             )
             and (k.black_count = 0 or k.black_count is null)
+            <!-- 四类已下线资源业务类型统一停用：无条件下发（不放进任何 <if>），保证分页 count 与 select 同源。 -->
+            and (a.resource_biz_type is null
+                 or upper(trim(a.resource_biz_type)) not in
+                 <foreach collection="disabledBizTypes" item="disabledBizType" open="(" separator="," close=")">
+                     #{disabledBizType}
+                 </foreach>
+            )
             <choose>
                 <when test="includeAllEnterpriseOwnerType == true">
                     and a.owner_type = 'enterprise'

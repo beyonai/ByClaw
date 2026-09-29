@@ -42,10 +42,13 @@ public interface SsResourceCatalogMapper extends BaseMapper<SsResourceCatalog> {
     /**
      * 查询资源目录关联树
      * 关联查询 ss_resource 和 ss_resource_catalog 表
-     * 查询条件：resource_biz_type = 'OBJECT'，catalog_type IN (6, 7)
-     * 
+     * 资源节点类型由 {@code resourceNodeBizTypes} 传入（不再硬编码 {@code OBJECT}），
+     * 传入空列表时不挂任何资源节点，仅保留目录层级。
+     *
      * @param catalogType 目录类型（可选，6-领域活动对象，7-核心业务对象）
+     * @param resourceNodeBizTypes 允许作为资源节点挂载的资源业务类型（已过滤停用类型）
      * @return 资源目录关联列表
      */
-    List<ResourceCatalogTreeVO> queryResourceCatalogTree(@Param("catalogType") Integer catalogType);
+    List<ResourceCatalogTreeVO> queryResourceCatalogTree(@Param("catalogType") Integer catalogType,
+                                                         @Param("resourceNodeBizTypes") List<String> resourceNodeBizTypes);
 }

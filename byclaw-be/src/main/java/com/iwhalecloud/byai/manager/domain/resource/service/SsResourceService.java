@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes;
 import com.iwhalecloud.byai.common.constants.resource.ImplType;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
@@ -723,6 +724,11 @@ public class SsResourceService {
         if (ListUtil.isNotEmpty(resourceQo.getResourceBizTypes())) {
             queryWrapper.in("resource_biz_type", resourceQo.getResourceBizTypes());
         }
+
+        // 四类已下线资源业务类型统一停用：无条件下发（未传类型时同样生效），规则见 DisabledResourceBizTypes。
+        // 保留 resource_biz_type 为 null 的历史行（与 SQL 入口的 `is null or ... not in` 语义一致）。
+        queryWrapper.and(wrapper -> wrapper.isNull("resource_biz_type")
+            .or().notIn("resource_biz_type", DisabledResourceBizTypes.codes()));
 
         if (StringUtil.isNotEmpty(resourceQo.getKeyword())) {
             queryWrapper.like("resource_name", resourceQo.getKeyword());

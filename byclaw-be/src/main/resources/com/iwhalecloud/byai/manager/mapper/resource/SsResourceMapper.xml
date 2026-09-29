@@ -123,6 +123,12 @@
     </resultMap>
 
     <select id="getResourceListByPage" resultMap="pageDto">
+        <!-- 四类已下线资源业务类型统一停用：单一事实来源 DisabledResourceBizTypes，禁止在此写类型清单。 -->
+        <bind name="disabledBizTypes"
+              value="@com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes@codes()"/>
+        <!-- 请求是否显式要求停用类型：用于保持基线 parent_resource_id 豁免语义（不再书写 OBJECT/VIEW 字面量）。 -->
+        <bind name="requestsDisabledBizType"
+              value="@com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes@isDisabled(query.resourceBizType) or @com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes@containsAnyDisabled(query.resourceBizTypeList)"/>
         SELECT
         <if test="query.suasSuperassistSubAgent != null and query.suasSuperassistSubAgent != ''">
             agent.is_top,
@@ -196,14 +202,17 @@
         ) t2 ON t1.resource_id = t2.resource_id AND t1.task_id = t2.max_task_id
         ) t ON t.resource_id = r.resource_id
         <where>
-            <if test="!(
-                query.resourceBizType == 'OBJECT'
-                or query.resourceBizType == 'VIEW'
-                or (query.resourceBizTypeList != null and (query.resourceBizTypeList.contains('OBJECT') or query.resourceBizTypeList.contains('VIEW')))
-            )">
+            <if test="requestsDisabledBizType != true">
                 and r.parent_resource_id = -1
             </if>
                 and resource_status !=6
+            <!-- 四类已下线资源业务类型统一停用：无条件下发（不放进任何 <if>），过滤在分页前完成。 -->
+            and (r.resource_biz_type is null
+                 or upper(trim(r.resource_biz_type)) not in
+                 <foreach collection="disabledBizTypes" item="disabledBizType" open="(" separator="," close=")">
+                     #{disabledBizType}
+                 </foreach>
+            )
             <if test="query.resourceName != null and query.resourceName != ''">
                 and r.resource_name like concat('%', concat(#{query.resourceName}, '%'))
             </if>
@@ -1027,6 +1036,9 @@
     </select>
 
     <select id="queryDigEmployeeRelResourceAuthList" resultType="com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo">
+        <!-- 四类已下线资源业务类型统一停用：单一事实来源 DisabledResourceBizTypes，禁止在此写类型清单。 -->
+        <bind name="disabledBizTypes"
+              value="@com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes@codes()"/>
         SELECT
             a.resource_id,
             a.resource_source_pk_id,
@@ -1094,6 +1106,13 @@
                  ) uc ON a.resource_id = uc.rel_resource_id
         WHERE 1 = 1
           AND a.resource_status = 2
+          <!-- 四类已下线资源业务类型统一停用：无条件下发（不在 <choose> 内），保证分页 count 与 select 同源。 -->
+          AND (a.resource_biz_type is null
+               or upper(trim(a.resource_biz_type)) not in
+               <foreach collection="disabledBizTypes" item="disabledBizType" open="(" separator="," close=")">
+                   #{disabledBizType}
+               </foreach>
+          )
           <choose>
               <when test="resourceBizTypeList != null and resourceBizTypeList.size() > 0">
                   AND a.resource_biz_type IN
@@ -1102,7 +1121,7 @@
                   </foreach>
               </when>
               <otherwise>
-                  AND a.resource_biz_type IN ('KG_DOC', 'KG_QA', 'OBJECT', 'VIEW', 'TOOLKIT', 'MCP', 'AGENT')
+                  AND a.resource_biz_type IN ('KG_DOC', 'KG_QA', 'TOOLKIT', 'MCP', 'AGENT')
               </otherwise>
           </choose>
           <if test="catalogIds != null and catalogIds.size() > 0">

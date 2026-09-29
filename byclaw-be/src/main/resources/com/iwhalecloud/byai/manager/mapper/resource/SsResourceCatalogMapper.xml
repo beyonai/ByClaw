@@ -88,6 +88,9 @@
     </select>
 
     <select id="queryResourceListByCatalogId" resultMap="ResourceCatalogDtoResultMap">
+        <!-- 四类已下线资源业务类型统一停用：单一事实来源 DisabledResourceBizTypes，禁止在此写类型清单。 -->
+        <bind name="disabledBizTypes"
+              value="@com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes@codes()"/>
         select
             a.resource_id as resourceId,
             a.resource_source_pk_id as resourceSourcePkId,
@@ -125,6 +128,13 @@
                     and a.parent_resource_id > 0
                 </if>
             </if>
+            <!-- 四类已下线资源业务类型统一停用：无条件下发（不放进任何 <if>），保证分页 count 与 select 同源。 -->
+            and (a.resource_biz_type is null
+                 or upper(trim(a.resource_biz_type)) not in
+                 <foreach collection="disabledBizTypes" item="disabledBizType" open="(" separator="," close=")">
+                     #{disabledBizType}
+                 </foreach>
+            )
             <if test="catalogDto.resourceStatusList != null and catalogDto.resourceStatusList.size()>0">
                 and a.resource_status in
                 <foreach collection="catalogDto.resourceStatusList" open="(" item="item" close=")" separator=",">
@@ -236,7 +246,17 @@
         FROM
             ss_resource_catalog c
         LEFT JOIN
-            ss_resource r ON c.catalog_id = r.catalog_id AND r.resource_biz_type = 'OBJECT'
+            ss_resource r ON c.catalog_id = r.catalog_id
+        <if test="resourceNodeBizTypes != null and resourceNodeBizTypes.size() > 0">
+            AND r.resource_biz_type IN
+            <foreach collection="resourceNodeBizTypes" item="resourceNodeBizType" open="(" separator="," close=")">
+                #{resourceNodeBizType}
+            </foreach>
+        </if>
+        <!-- 可用资源节点类型为空时（四类已下线类型全部停用）不挂任何资源节点，同时保留全部目录行。 -->
+        <if test="resourceNodeBizTypes == null or resourceNodeBizTypes.size() == 0">
+            AND 1 = 0
+        </if>
         WHERE
              c.catalog_type = #{catalogType}
     </select>
