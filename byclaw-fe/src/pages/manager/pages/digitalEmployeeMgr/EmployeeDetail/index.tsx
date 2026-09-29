@@ -1,11 +1,11 @@
 // @ts-nocheck
 import PublicationToolbar from '@/components/EmployeePublication/Toolbar';
-import {
-  getPublication,
-  openEmployeePublication,
-  publicationAction,
-  type PublicationDetail,
-} from '@/service/employeePublication';
+import PublicationEditionGuard from '@/components/EmployeePublication/EditionGuard';
+import PublicationLoading from '@/components/EmployeePublication/Loading';
+import usePublicationDetailLoader from '@/components/EmployeePublication/useDetailLoader';
+import useOfficialUpdate from '@/components/EmployeePublication/useOfficialUpdate';
+import { publicationErrorMessage } from '@/utils/publicationError';
+import { publicationAction, type PublicationDetail } from '@/service/employeePublication';
 /* eslint-disable no-param-reassign */
 /* eslint-disable indent */
 /* eslint-disable function-paren-newline */
@@ -21,7 +21,7 @@ import { showAuditConfirm } from '@/pages/manager/utils/auditConfirm';
 import { getIframeUrl, getValidValue } from '@/pages/manager/utils/managerUtils';
 import { agentHomeUrlHandler } from '@/pages/manager/utils/agent';
 import { ArrowLeftOutlined, ArrowRightOutlined, EllipsisOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
-import { Button, Divider, Form, message, Space, Spin, Tooltip } from 'antd';
+import { Alert, Button, Divider, Form, message, Modal, Result, Space, Spin, Tooltip } from 'antd';
 import classnames from 'classnames';
 import dayjs from 'dayjs';
 import { debounce, isEmpty, set, noop, isString, omit } from 'lodash';
@@ -483,8 +483,24 @@ const EmployeeDetail = ({ loading }) => {
   const isFrontAccess = _isFrontAccess === 'true';
   const [publicationDetail, setPublicationDetail] = useState<PublicationDetail>();
   const [publicationBusy, setPublicationBusy] = useState(false);
+  const [officialUpdateRequiresReview, setOfficialUpdateRequiresReview] = useState(false);
+  const [officialUpdateNotice, setOfficialUpdateNotice] = useState('');
+  const officialUpdate = useOfficialUpdate();
+  useEffect(() => {
+    setOfficialUpdateRequiresReview(false);
+    setOfficialUpdateNotice('');
+  }, [agentId]);
+  const {
+    loading: publicationLoading,
+    error: publicationLoadError,
+    load: loadPublication,
+    retry: retryPublication,
+  } = usePublicationDetailLoader(publicationId);
   const showLog = !publicationId && _log === 'true';
-  const readOnly = _readOnly === 'true' || (!!publicationId && (!publicationDetail?.canEdit || publicationBusy));
+  const readOnly =
+    _readOnly === 'true' ||
+    officialUpdate.busy ||
+    (!!publicationId && (!publicationDetail?.canEdit || publicationBusy));
   const showManage = !publicationId && _manage === 'true';
   const showConfig = _config === 'true';
   const showOperation = !publicationId && _operation === 'true';
@@ -756,17 +772,7 @@ const EmployeeDetail = ({ loading }) => {
         type: 'employeeMgr/getCompositeAppInfo',
         payload: { resourceId: agentId },
         success: (res) => {
-          if (
-            !publicationId &&
-            _readOnly !== 'true' &&
-            res?.operationPermissions?.officialPublication &&
-            res?.operationPermissions?.canEdit
-          ) {
-            openEmployeePublication(String(agentId), 'editOfficial').catch((error) =>
-              message.error(error?.message || '无法编辑官方副本')
-            );
-            return;
-          }
+          setOfficialUpdateRequiresReview(res?.operationPermissions?.officialUpdateRequiresReview === true);
           const {
             resourceName,
             resourceDesc,
@@ -1222,17 +1228,15 @@ const EmployeeDetail = ({ loading }) => {
         },
       };
       if (publicationId) {
-        getPublication(publicationId)
-          .then((detail) => {
-            setPublicationDetail(detail);
-            request.success(detail.employee);
-          })
-          .catch((error) => message.error(error?.message || '发布申请加载失败'));
+        loadPublication((detail) => {
+          setPublicationDetail(detail);
+          request.success(detail.employee);
+        });
       } else {
         dispatch(request);
       }
     },
-    [dispatch, form, resultDataRef, prologueRef, knowledgeBases, agentId, publicationId]
+    [dispatch, form, resultDataRef, prologueRef, knowledgeBases, agentId, publicationId, loadPublication]
   );
 
   const fetchDefaultTemplate = useCallback(async () => {
@@ -1323,7 +1327,7 @@ const EmployeeDetail = ({ loading }) => {
   }, [agentType, effectiveAgentType, effectiveOwnerType]);
 
   useEffect(() => {
-    if (agentId) {
+    if (agentId || publicationId) {
       getCompositeAppInfo(undefined, (prologue) => {
         // 获取模型下拉列表、设置配置默认值
         dispatch({
@@ -1614,6 +1618,27 @@ const EmployeeDetail = ({ loading }) => {
           }
         }
 
+        if (officialUpdateRequiresReview && currentResourceId) {
+          try {
+            const outcome = await officialUpdate.save(String(currentResourceId), savePayload);
+            if (outcome === 'submitted') {
+              setOfficialUpdateNotice('更新申请已提交，审核通过后生效。可在审核中心查看进度；当前展示的仍是在用版本。');
+              setIsConfigChanged(false);
+              getCompositeAppInfo('reload');
+              EventEmitter?.emit('digitalEmployees-refresh-list', { refresh: true });
+              message.success('更新申请已提交，等待管理员审核');
+            } else if (outcome === 'draft') {
+              setOfficialUpdateNotice('修改已存为更新草稿，尚未提交审核，在用版本保持不变。');
+            }
+          } catch (error) {
+            message.error(publicationErrorMessage(error, '无法提交员工更新，请稍后重试'));
+          } finally {
+            setSubmitLoading(false);
+            setAuditLoading(false);
+          }
+          return;
+        }
+
         dispatch({
           type: currentResourceId ? 'employeeMgr/updateResource' : 'employeeMgr/createDigitalEmployee',
           payload: currentResourceId
@@ -1740,6 +1765,9 @@ const EmployeeDetail = ({ loading }) => {
       employeeGroupMembers,
       publicationId,
       publicationDetail,
+      officialUpdateRequiresReview,
+      officialUpdate.save,
+      getCompositeAppInfo,
     ]
   );
 
@@ -1854,7 +1882,7 @@ const EmployeeDetail = ({ loading }) => {
         </div>
       )}
       <Space className={styles.headerRight}>
-        {activeTab === 'config' && !readOnly && !publicationId && (
+        {activeTab === 'config' && _readOnly !== 'true' && !publicationId && (
           <>
             {issues.length > 0 && (
               <ExclamationCircleOutlined
@@ -2002,8 +2030,47 @@ const EmployeeDetail = ({ loading }) => {
 
   return (
     <div className={classnames(styles.container, 'ub ub-ver')}>
+      <Modal
+        open={!!publicationId && (publicationLoading || !!publicationLoadError)}
+        footer={null}
+        closable={false}
+        maskClosable={false}
+        keyboard={false}
+        centered
+        width={520}
+        destroyOnHidden
+      >
+        {publicationLoadError ? (
+          <Result
+            status="warning"
+            title="发布配置加载失败"
+            subTitle={publicationLoadError}
+            extra={[
+              <Button key="retry" type="primary" onClick={retryPublication}>
+                重新加载
+              </Button>,
+              <Button key="back" onClick={() => history.replace('/myEmployees')}>
+                返回员工列表
+              </Button>,
+            ]}
+          />
+        ) : (
+          <PublicationLoading title="正在加载待发布配置" onBack={() => history.replace('/myEmployees')} />
+        )}
+      </Modal>
       {renderHeader}
-      {publicationDetail && (
+      {officialUpdate.confirmationDialog}
+      {!publicationId && officialUpdateRequiresReview && _readOnly !== 'true' && (
+        <Alert
+          showIcon
+          type="info"
+          style={{ margin: '8px 24px' }}
+          message={
+            officialUpdateNotice || '你正在编辑官方员工的在用配置。保存后需提交更新审核，通过前不影响大家使用当前版本。'
+          }
+        />
+      )}
+      {publicationId && publicationDetail && (
         <PublicationToolbar
           detail={publicationDetail}
           dirty={isConfigChanged}
@@ -2044,7 +2111,7 @@ const EmployeeDetail = ({ loading }) => {
                 robotConfigs={robotConfigs}
                 setRobotConfigs={setRobotConfigs}
                 isReadOnly={readOnly}
-                publicationMode={!!publicationId}
+                publicationMode={!!publicationId || officialUpdateRequiresReview}
                 updateTime={updateTime}
                 modelName={modelName}
                 modelList={modelList}
@@ -2263,6 +2330,12 @@ const EmployeeDetail = ({ loading }) => {
   );
 };
 
+const GuardedEmployeeDetail = (props) => (
+  <PublicationEditionGuard>
+    <EmployeeDetail {...props} />
+  </PublicationEditionGuard>
+);
+
 export default connect(({ loading }) => ({
   loading,
-}))(EmployeeDetail);
+}))(GuardedEmployeeDetail);

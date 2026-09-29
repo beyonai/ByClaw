@@ -25,6 +25,21 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 class TransactionAdviceConfigTest {
 
     @Test
+    void workspaceSkillCenterOwnsItsCommitBeforeFileCleanup() throws Exception {
+        TransactionAdviceConfig config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));
+        var source = config.getAdvisor().getTransactionAttributeSource();
+        var service = com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService.class;
+        var request = com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo.class;
+        for (String method : new String[] {"preview", "sync"}) {
+            assertThat(source.getTransactionAttribute(service.getMethod(method, request), service).getPropagationBehavior())
+                .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        }
+        assertThat(resolvePropagation(source, "createSomethingElse"))
+            .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+    }
+
+    @Test
     void publicationTransactionsDoNotChangeOrdinaryEmployeeSync() throws Exception {
         TransactionAdviceConfig config = new TransactionAdviceConfig();
         ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));

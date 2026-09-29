@@ -103,6 +103,13 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - 新表迁移位于 `deploy/migrations/versions/V0.4.1/V0.4.1__ddl.sql`，启动新版后端前须执行对应迁移。既有 execution 保留为会话入口和旧记录恢复依据，不重放已完成历史调用。
 - 后端重启可恢复领取后尚未绑定 trace 的 turn，事务锁和 trace 条件更新防止重复发送。确定发生在 Gateway 路由前的准备失败会结束该 turn；已绑定 trace 且送达情况未知的请求不盲目重发，因此异常远端调用可能继续占用队列，需沿原运行恢复流程处理。
 
+## 群聊发送确认与错误
+
+- `GROUP_CHAT_SEND` 成功完成接收事务后，向发送端返回 `GROUP_CHAT_ACCEPTED`，包含 `sessionId`、`clientRequestId` 和 `messageId`；相同请求 ID 的重试复用原消息，不要求 Agent 执行完成。
+- 参数或成员校验失败返回 `GROUP_CHAT_REJECTED`，携带原请求身份、`code` 和具体业务原因 `message`。活动任务冲突保留 `ACTIVE_TASK_REQUIRES_TASK_ENTRY`、`taskId` 和 `agentId`；其他业务校验使用 `GROUP_CHAT_VALIDATION_FAILED`，入口参数缺失使用 `INVALID_GROUP_MESSAGE`。
+- 数据库或内部异常返回 WebSocket `ERROR` 帧，使用 `GROUP_CHAT_STORAGE_ERROR` 或 `GROUP_CHAT_INTERNAL_ERROR`，并携带 `clientRequestId`、可用的 `sessionId` 和可展示的错误原因。详细异常只记入服务端日志，前端可立即结束等待、保留重试，并接受迟到的 ACK；消息事务提交后的广播异常也走此路径，避免把已入库消息标记为不可重试的拒绝。
+- 请求缺少 `sessionId` 时使用 `ERROR / INVALID_GROUP_MESSAGE`，让前端按 `clientRequestId` 关联；缺少请求 ID 或连接已经断开时无法保证前端关联或收到响应。ACK 写回失败不转换为业务拒绝。
+
 ## 群聊上传附件
 
 - 群历史、Agent 群上下文、消息定位和话题根消息/回复/引用均保留正文为 `NULL` 但有 `related_resources` 的历史消息，分页计数采用同一条件。消息搜索排除 `NULL` 正文，关键词仅匹配正文，不搜索附件文件名；LIKE 使用 `ESCAPE CHR(92)`，兼容 Druid PostgreSQL 解析器并按字面匹配 `%`、`_` 和反斜杠。
@@ -528,6 +535,9 @@ BE 的 `config/application.properties`（部署时为 `deploy/config/application
 `GET /group-chat/tasks/{taskId}/delivery-status` 仅供仍在群内的任务发起人查询，返回字符串 taskId 和布尔 delivered。
 无文件/无效协议返回 false，存储故障返回可重试错误；不增加数据库状态、不直接授权或触发发布。
 前端进入、重连和每轮结束查询，按钮发送“确认完成并发布”，后续沿用现有发布卡片确认流程。
+任务页确认按钮发送的 `LLM_MESSAGE` 可携带 `messageIntent=prepare_group_task_publication`。
+BE 仅在有效私有群任务的 Gateway 出站请求中追加准备待发布成果的 Agent 指令；`chatContent`、已保存的用户消息和多端广播仍是按钮原文。
+该指令要求 Agent 调用同名工具创建待发布卡片，最终发布仍由用户在卡片中确认；普通消息和其他会话不触发此指令。
 
 ### 群成员批量添加
 

@@ -43,6 +43,7 @@ interface ResourceDetailProps {
   onCancel: () => void;
   onEdit: () => void;
   panel?: boolean;
+  loading?: boolean;
 }
 
 const ResourceDetail: React.FC<ResourceDetailProps> = ({
@@ -52,6 +53,7 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
   item,
   onCancel,
   panel = false,
+  loading: externalLoading = false,
 }) => {
   const intl = useIntl();
   const [loading, setLoading] = useState(false);
@@ -169,7 +171,9 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
       return null;
     }
     // 标题展示关联数字员工数量，便于用户一眼判断当前技能被多少员工使用。
-    const usedEmployeeTitle = `${intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' })}（${employees.length}）`;
+    const usedEmployeeTitle = `${intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' })}（${
+      employees.length
+    }）`;
 
     return renderDetailField(
       usedEmployeeTitle,
@@ -233,7 +237,7 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
   const title = `${resourceName}${intl.formatMessage({ id: 'common.detail' })}`;
   const detailContent = (
     <>
-      {loading ? (
+      {loading || externalLoading ? (
         <div className={styles.loadingContainer}>
           <Spin />
         </div>

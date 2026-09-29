@@ -1,5 +1,6 @@
 import {
   getPublication,
+  previewPublication,
   listPublications,
   publicationAction,
   publicationStatus,
@@ -18,10 +19,12 @@ import {
   SyncOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from '@umijs/max';
-import { Alert, Button, Empty, Popconfirm, Segmented, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Empty, Segmented, Space, Table, Tag, Typography, message } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import styles from './AuditList.module.less';
+import { publicationErrorMessage } from '@/utils/publicationError';
+import usePublicationConfirmation from './usePublicationConfirmation';
 
 const statusAppearance = {
   DRAFT: { color: 'default', icon: <EditOutlined /> },
@@ -66,8 +69,7 @@ function PublicationNote({ text, error = false }: { text: string; error?: boolea
   );
 }
 
-export default function PublicationAuditList() {
-  const capabilities = useEmployeePublicationCapabilities();
+function EnabledPublicationAuditList({ capabilities }: { capabilities: { administrator: boolean } }) {
   const navigate = useNavigate();
   const [review, setReview] = useState(false);
   const [page, setPage] = useState(1);
@@ -78,6 +80,7 @@ export default function PublicationAuditList() {
   const [approvingId, setApprovingId] = useState<string>();
   const approvalInFlight = useRef(false);
   const loadSequence = useRef(0);
+  const { confirmPublication, confirmationDialog } = usePublicationConfirmation();
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
     setLoading(true);
@@ -91,7 +94,7 @@ export default function PublicationAuditList() {
       if (sequence !== loadSequence.current) return;
       setRows([]);
       setTotal(0);
-      setLoadError(error?.message || '请稍后重试');
+      setLoadError(publicationErrorMessage(error, '请稍后重试'));
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
@@ -108,7 +111,7 @@ export default function PublicationAuditList() {
       sessionStorage.setItem('EmployeeDetail_prevRoute', '/myEmployees');
       navigate(publicationUrl(detail));
     } catch (error: any) {
-      message.error(error?.message || '无法查看此申请');
+      message.error(publicationErrorMessage(error, '无法查看此申请'));
     }
   };
   const approve = async (row: Publication) => {
@@ -116,12 +119,23 @@ export default function PublicationAuditList() {
     approvalInFlight.current = true;
     setApprovingId(row.requestId);
     try {
-      // 使用列表中已确认的修订号；后台会拒绝已被他人修改或处理的申请。
-      const result = await publicationAction('approve', row);
-      if (result.publication.status === 'PUBLISHED') message.success('审核通过，已发布到官方推荐');
-      else message.error(result.publication.publishError || '发布失败，请查看申请详情后重试');
+      // 预览验证列表修订号，并在实际通过前展示最新资源可用性。
+      const current = await previewPublication(row);
+      const decision = await confirmPublication(current);
+      if (decision === 'edit') {
+        sessionStorage.setItem('EmployeeDetail_prevRoute', '/myEmployees');
+        navigate(publicationUrl(current));
+      }
+      if (decision !== 'publish') return;
+      const result = await publicationAction('approve', current.publication);
+      if (result.publication.status === 'PUBLISHED') {
+        message.success('审核通过，已发布到官方推荐');
+        if (result.dependencies.some((dependency) => dependency.warning)) {
+          message.warning('部分关联资源可能不可用，请进入申请详情查看可用性提醒');
+        }
+      } else message.error(result.publication.publishError || '发布失败，请查看申请详情后重试');
     } catch (error: any) {
-      message.error(error?.message || '审批失败，请刷新后重试');
+      message.error(publicationErrorMessage(error, '审批失败，请刷新后重试'));
     } finally {
       await load();
       approvalInFlight.current = false;
@@ -130,6 +144,7 @@ export default function PublicationAuditList() {
   };
   return (
     <div className={styles.container}>
+      {confirmationDialog}
       <div className={styles.toolbar}>
         <Segmented
           disabled={!!approvingId}
@@ -260,23 +275,15 @@ export default function PublicationAuditList() {
                       {detailLabel(row, review, capabilities?.administrator)}
                     </Button>
                     {capabilities?.administrator && row.canReview && (
-                      <Popconfirm
-                        title={`确认通过并发布“${row.employeeName}”？`}
-                        description="将以已保存的待审配置发布，供当前企业全员使用。"
-                        okText="确认发布"
-                        cancelText="取消"
-                        onConfirm={() => approve(row)}
+                      <Button
+                        type="primary"
+                        size="small"
+                        loading={approvingId === row.requestId}
                         disabled={loading || !!approvingId}
+                        onClick={() => approve(row)}
                       >
-                        <Button
-                          type="primary"
-                          size="small"
-                          loading={approvingId === row.requestId}
-                          disabled={loading || !!approvingId}
-                        >
-                          {['FAILED', 'APPLYING'].includes(row.status) ? '重试发布' : '通过并发布'}
-                        </Button>
-                      </Popconfirm>
+                        {['FAILED', 'APPLYING'].includes(row.status) ? '重试发布' : '通过并发布'}
+                      </Button>
                     )}
                   </Space>
                 ),
@@ -287,4 +294,10 @@ export default function PublicationAuditList() {
       )}
     </div>
   );
+}
+
+export default function PublicationAuditList() {
+  const capabilities = useEmployeePublicationCapabilities();
+  if (capabilities?.enabled !== true) return null;
+  return <EnabledPublicationAuditList capabilities={capabilities} />;
 }

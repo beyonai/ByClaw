@@ -54,6 +54,8 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -189,9 +191,10 @@ class SkillGroupApplicationServiceTest {
         verify(resourceService, never()).saveResource(any());
     }
 
-    @Test
-    void createEnterpriseAllowsConfiguredAdminVip() {
-        setCurrentUser("alice", UserType.ORD_USER);
+    @ParameterizedTest
+    @ValueSource(strings = {"alice", "ALICE", "Alice"})
+    void createEnterpriseAllowsConfiguredAdminVip(String userCode) {
+        setCurrentUser(userCode, UserType.ORD_USER);
         when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG"))
                 .thenReturn("[\"alice\",\"bob\"]");
         stubResourceSave();
@@ -201,9 +204,10 @@ class SkillGroupApplicationServiceTest {
         verify(resourceService).saveResource(any(SsResource.class));
     }
 
-    @Test
-    void createEnterpriseAllowsAdminVip() {
-        setCurrentUser("adminvip", UserType.ORD_USER);
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", "AdminVip", "ADMINVIP"})
+    void createEnterpriseAllowsAdminVip(String userCode) {
+        setCurrentUser(userCode, UserType.ORD_USER);
         when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG"))
                 .thenThrow(new IllegalStateException("config unavailable"));
         stubResourceSave();
@@ -1134,9 +1138,12 @@ class SkillGroupApplicationServiceTest {
         verify(resourceService, never()).removeById(any());
     }
 
-    @Test
-    void deleteTreatsMalformedLegacyAsManualAndDeletesOnlyMembershipRelationsAndGroup() {
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", "AdminVip", "ADMINVIP", "ALICE"})
+    void deleteTreatsMalformedLegacyAsManualAndDeletesOnlyMembershipRelationsAndGroup(String userCode) {
         prepareLockedManagedGroup();
+        setCurrentUser(userCode, UserType.ORD_USER);
+        when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG")).thenReturn("alice");
         SsResourceRelDetail malformed = relation(21L, 501L, 1);
         malformed.setRelResourceInfo("{not-json");
         when(mapper.selectSkillRelationsWithSourceInfoByTenant(TENANT_ID)).thenReturn(List.of(malformed));
@@ -1178,9 +1185,12 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
     }
 
-    @Test
-    void shelfChangesOnlyGroupStatusAndPreservesInstalledSnapshots() {
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", "AdminVip", "ADMINVIP", "ALICE"})
+    void shelfChangesOnlyGroupStatusAndPreservesInstalledSnapshots(String userCode) {
         prepareLockedManagedGroup();
+        setCurrentUser(userCode, UserType.ORD_USER);
+        when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG")).thenReturn("alice");
         service.changeShelfStatus(GROUP_ID, true);
         verify(resourceService).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
             group -> group.getResourceStatus() == 2));

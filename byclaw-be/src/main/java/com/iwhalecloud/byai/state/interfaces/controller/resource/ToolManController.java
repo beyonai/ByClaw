@@ -50,6 +50,8 @@ import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteA
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDownloadApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillQueryApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
+import com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService;
+import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillUploadApplicationService;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -133,6 +135,9 @@ public class ToolManController {
 
     @Autowired
     private ByClawSkillResourceApplicationService byClawSkillResourceApplicationService;
+
+    @Autowired
+    private WorkspaceSkillCenterApplicationService workspaceSkillCenterApplicationService;
 
     @Autowired
     private ByClawSkillDownloadApplicationService byClawSkillDownloadApplicationService;
@@ -1275,6 +1280,34 @@ public class ToolManController {
                 request == null ? null : request.getSkillPath(), e);
             return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
                 : I18nUtil.get("byclaw.skill.import.conflict.query.failed"));
+        }
+    }
+
+    /** 查询目录技能在资源中心的安装/更新状态，范围由当前员工归属决定。 */
+    @PostMapping("/queryWorkspaceSkillCenterStatus")
+    public ResponseUtil<WorkspaceSkillCenterApplicationService.Status> queryWorkspaceSkillCenterStatus(
+        @RequestBody WorkspaceSkillCenterQo request) {
+        try {
+            return ResponseUtil.success(workspaceSkillCenterApplicationService.preview(request));
+        } catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        } catch (Exception e) {
+            logger.error("查询目录技能资源中心状态失败", e);
+            return ResponseUtil.fail(I18nUtil.get("byclaw.skill.center.failed"));
+        }
+    }
+
+    /** 安装/更新提交成功后删除源目录，清理失败通过 sourceDeleted 单独返回。 */
+    @PostMapping("/syncWorkspaceSkillToCenter")
+    public ResponseUtil<WorkspaceSkillCenterApplicationService.Result> syncWorkspaceSkillToCenter(
+        @RequestBody WorkspaceSkillCenterQo request) {
+        try {
+            return ResponseUtil.success(workspaceSkillCenterApplicationService.sync(request));
+        } catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        } catch (Exception e) {
+            logger.error("目录技能同步到资源中心失败", e);
+            return ResponseUtil.fail(I18nUtil.get("byclaw.skill.center.failed"));
         }
     }
 

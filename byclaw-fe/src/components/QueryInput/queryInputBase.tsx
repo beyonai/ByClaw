@@ -861,6 +861,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
             open: this.state.toolsPopoverOpen === true,
             width: this.state.toolsPopoverWidth,
             isInputAtBottom: this.props.isBottom,
+            placement: this.props.mentionPopoverPlacement,
           })}
           onClose={() =>
             this.setState({ toolsPopoverOpen: false, toolsPopoverWidth: undefined, toolsPopoverKeyword: undefined })

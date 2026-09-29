@@ -31,6 +31,9 @@ public class DigitalEmployeeUseApplyAuditVo extends ResourceUseApplyItemVo {
 
     private String resourceBizType;
 
+    /** 区分使用申请与技能上架申请，避免审核操作走错业务接口。 */
+    private String auditType;
+
     private String agentType;
 
     private String avatar;

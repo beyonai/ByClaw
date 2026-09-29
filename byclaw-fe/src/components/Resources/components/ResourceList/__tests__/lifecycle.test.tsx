@@ -430,7 +430,7 @@ it('exports all filtered pages and workspace skills without changing the display
     exportContainer,
   });
   await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(2));
-  const exportButton = screen.getByRole('button', { name: 'resource.skillExport.all' });
+  const exportButton = screen.getByRole('button', { name: /resource\.skillExport\.all/ });
   expect(exportContainer).toContainElement(exportButton);
   expect(document.getElementById('SKILLListScroller')).not.toContainElement(exportButton);
   fireEvent.click(exportButton);
@@ -466,7 +466,6 @@ it.each([false, true])(
     expect(card).toHaveAttribute('data-enterprise-publication', 'true');
   }
 );
-
 
 it('loads personal directories without a default employee and trusts their personal scope for management', async () => {
   (listResourceUseAuth as jest.Mock).mockResolvedValue({ data: { list: [], total: 0 } });

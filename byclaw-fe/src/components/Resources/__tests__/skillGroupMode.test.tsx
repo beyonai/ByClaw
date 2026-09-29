@@ -3,6 +3,8 @@ const mockResourceFilterProps = jest.fn();
 let mockAdminVip = true;
 let mockSkillGroupMountCount = 0;
 const mockSkillGroupProps = jest.fn();
+const mockOpenTemporaryDetailPanel = jest.fn();
+const mockClearDetailPanel = jest.fn();
 const mockEventHandlers: Record<string, (payload?: unknown) => void> = {};
 const mockEventEmitter = {
   on: jest.fn((event: string, handler: (payload?: unknown) => void) => {
@@ -187,13 +189,15 @@ jest.mock('@/components/CommonTabs', () => ({
 jest.mock('@/components/AntdIcon', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/components/Resources/components/ResourceList', () => ({
   __esModule: true,
-  default: ({ catalogId, enablePublishToEnterprise, dropdownParam }: any) => (
+  default: ({ catalogId, enablePublishToEnterprise, dropdownParam, onDetail }: any) => (
     <div
       data-testid="resource-list"
       data-catalog-id={catalogId}
       data-status={dropdownParam?.resourceStatus}
       data-enterprise-publication={String(enablePublishToEnterprise)}
-    />
+    >
+      <button onClick={() => onDetail({ resourceBizType: 'SKILL', resourceId: 'skill-1' })}>open skill</button>
+    </div>
   ),
 }));
 jest.mock('@/components/Resources/components/ResourceAuditCenter', () => ({
@@ -247,7 +251,11 @@ jest.mock('@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer', (
   useSkillDetailDrawer: () => ({ placeholder: null, show: jest.fn() }),
 }));
 jest.mock('@/layout/sider/siderContentContext', () => ({
-  SiderContentContext: require('react').createContext({ setDetailPanel: jest.fn(), clearDetailPanel: jest.fn() }),
+  SiderContentContext: require('react').createContext({
+    setDetailPanel: jest.fn(),
+    clearDetailPanel: () => mockClearDetailPanel(),
+    openTemporaryDetailPanel: (...args: any[]) => mockOpenTemporaryDetailPanel(...args),
+  }),
 }));
 jest.mock('@/hooks/useModuleEvent', () => ({ __esModule: true, default: () => ({ logoutModuleEvent: jest.fn() }) }));
 jest.mock('@/hooks/useGlobal', () => ({
@@ -300,6 +308,8 @@ describe('Resources enterprise skill mode', () => {
     mockEventEmitter.on.mockClear();
     mockEventEmitter.off.mockClear();
     mockEventEmitter.emit.mockClear();
+    mockOpenTemporaryDetailPanel.mockClear();
+    mockClearDetailPanel.mockClear();
   });
 
   const renderAt = (search: string) => {
@@ -312,6 +322,19 @@ describe('Resources enterprise skill mode', () => {
       Promise.resolve(paramCode === 'BYAI_BRAND_VERSION' ? { paramValue: version } : {})
     );
   };
+
+  it('opens skill details as temporary panels and closes only that detail', async () => {
+    renderAt('?tab=enterprise');
+    fireEvent.click(await screen.findByRole('button', { name: 'open skill' }));
+    expect(mockOpenTemporaryDetailPanel).toHaveBeenCalledWith(expect.any(Function), { width: 350 });
+    const closeTemporary = jest.fn();
+    const detail = mockOpenTemporaryDetailPanel.mock.calls[0][0](closeTemporary);
+    expect(detail.props.resourceId).toBe('skill-1');
+    detail.props.onClose();
+    expect(closeTemporary).toHaveBeenCalledTimes(1);
+    expect(mockClearDetailPanel).not.toHaveBeenCalled();
+    expect(screen.getByTestId('resource-list')).toBeInTheDocument();
+  });
 
   it.each([true, false])('shows noncommercial skill import for authorized users (AdminVip: %s)', async (adminVip) => {
     setBrandVersion('openSource');
@@ -357,16 +380,26 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
   });
 
-  it('keeps personal skill import available without official import permission', async () => {
-    mockAdminVip = false;
-    (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: false });
-    renderAt('?tab=personal');
+  it.each(['openSource', 'commercial', 'custom', '', undefined, null])(
+    'keeps personal skill import available without official import permission for brand: %s',
+    async (version) => {
+      setBrandVersion(version);
+      mockAdminVip = false;
+      (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: false });
+      renderAt('?tab=personal');
 
-    const importButton = await screen.findByRole('button', { name: 'common.import' });
-    expect(importButton).toBeEnabled();
-    const exportToolbar = screen.getByTestId('skill-export-toolbar');
-    expect(importButton.compareDocumentPosition(exportToolbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
+      // 等待版本和权限返回，确认普通用户在配置加载后仍可打开导入弹窗。
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const importButton = screen.getByRole('button', { name: 'common.import' });
+      expect(importButton).toBeEnabled();
+      const exportToolbar = screen.getByTestId('skill-export-toolbar');
+      expect(importButton.compareDocumentPosition(exportToolbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      fireEvent.click(importButton);
+      expect(screen.getByTestId('resource-import-modal')).toBeInTheDocument();
+    }
+  );
 
   it.each(['openSource', 'custom', '', undefined, null])(
     'hides official skill import from ordinary users for noncommercial brand: %s',
@@ -488,37 +521,50 @@ describe('Resources enterprise skill mode', () => {
     );
   });
 
-  it.each(['SKILL', 'KG_DOC', 'TOOL'])('only shows supported status filters in my enterprise %s resources', (resourceType) => {
-    window.history.pushState({}, '', '/resourceCenter?tab=personal');
-    render(<Resources resourceType={resourceType} myResourcesOnly />);
+  it.each(['SKILL', 'KG_DOC', 'TOOL'])(
+    'only shows supported status filters in my enterprise %s resources',
+    (resourceType) => {
+      window.history.pushState({}, '', '/resourceCenter?tab=personal');
+      render(<Resources resourceType={resourceType} myResourcesOnly />);
 
-    if (resourceType === 'SKILL') {
-      expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
-    } else {
-      expect(mockResourceFilterProps).toHaveBeenLastCalledWith(expect.objectContaining({
-        activeTab: 'personal', hideStatusFilter: true, catalogOptions: undefined,
-      }));
+      if (resourceType === 'SKILL') {
+        expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
+      } else {
+        expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            activeTab: 'personal',
+            hideStatusFilter: true,
+            catalogOptions: undefined,
+          })
+        );
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'resourceCenter.enterprise' }));
+      if (resourceType === 'SKILL') {
+        expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
+      } else {
+        expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            activeTab: 'enterprise',
+            hideStatusFilter: true,
+            catalogOptions: undefined,
+          })
+        );
+      }
+      expect(screen.queryByRole('button', { name: 'resourceStatus.pendingShelf' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'resource.statusCancelled' })).toBeNull();
+      for (const [label, value] of [
+        ['common.all', ''],
+        ['resourceStatus.draft', '0'],
+        ['resourceStatus.published', '2'],
+        ['resourceStatus.unpublished', '3'],
+      ]) {
+        const button = screen.getByRole('button', { name: label });
+        fireEvent.click(button);
+        expect(button).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByTestId('resource-list')).toHaveAttribute('data-status', value);
+      }
     }
-    fireEvent.click(screen.getByRole('button', { name: 'resourceCenter.enterprise' }));
-    if (resourceType === 'SKILL') {
-      expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
-    } else {
-      expect(mockResourceFilterProps).toHaveBeenLastCalledWith(expect.objectContaining({
-        activeTab: 'enterprise', hideStatusFilter: true, catalogOptions: undefined,
-      }));
-    }
-    expect(screen.queryByRole('button', { name: 'resourceStatus.pendingShelf' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'resource.statusCancelled' })).toBeNull();
-    for (const [label, value] of [
-      ['common.all', ''], ['resourceStatus.draft', '0'],
-      ['resourceStatus.published', '2'], ['resourceStatus.unpublished', '3'],
-    ]) {
-      const button = screen.getByRole('button', { name: label });
-      fireEvent.click(button);
-      expect(button).toHaveAttribute('aria-pressed', 'true');
-      expect(screen.getByTestId('resource-list')).toHaveAttribute('data-status', value);
-    }
-  });
+  );
 
   it.each([
     ['KG_DOC', 'KG_DOC', 'resourceCenter.myKnowledge'],

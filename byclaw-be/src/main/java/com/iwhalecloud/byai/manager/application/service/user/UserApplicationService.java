@@ -40,6 +40,8 @@ import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.entity.users.UsersOrganization;
 import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
+import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.common.qo.QueryObject;
 import com.iwhalecloud.byai.manager.qo.users.SearchUserQo;
 import com.iwhalecloud.byai.manager.qo.users.UsersByOrgIdQo;
@@ -74,6 +76,9 @@ public class UserApplicationService extends BaseUserApplicationService {
 
     @Autowired
     private UsersMapper usersMapper;
+
+    @Autowired
+    private ByaiSessionMemberMapper byaiSessionMemberMapper;
 
     @Autowired
     private UserService userService;
@@ -751,7 +756,7 @@ public class UserApplicationService extends BaseUserApplicationService {
      * @return ResponseUtil
      */
 
-    public ResponseUtil getUserSuas(Long userId) {
+    public ResponseUtil getUserSuas(Long userId, Long groupSessionId) {
 
         Users user = userService.findById(userId);
 
@@ -776,6 +781,12 @@ public class UserApplicationService extends BaseUserApplicationService {
         result.put("userId", user.getUserId());
 
         result.put("userName", user.getUserName());
+
+        if (groupSessionId != null) {
+            ByaiSessionMember groupMember = byaiSessionMemberMapper.findSessionMember(
+                groupSessionId, "USER", userId);
+            result.put("groupNickname", groupMember == null ? null : groupMember.getMemName());
+        }
 
         result.put("userCode", user.getUserCode());
 

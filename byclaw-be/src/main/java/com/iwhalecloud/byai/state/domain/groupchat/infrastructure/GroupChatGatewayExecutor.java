@@ -365,8 +365,14 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             });
         }
         // 私有任务续聊不重复分类，文件提示和交付提醒只作用于出站请求。
-        return task == null ? decorated : decorateText(decorated,
-            text -> promptBuilder.appendTaskDeliveryReminder(text, context.sessionId));
+        if (task == null) {
+            return decorated;
+        }
+        return decorateText(decorated, text -> {
+            String taskContent = promptBuilder.appendTaskDeliveryReminder(text, context.sessionId);
+            return "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())
+                ? promptBuilder.appendPublicationPreparation(taskContent, context.sessionId) : taskContent;
+        });
     }
 
     /** 比较最近实际回答者而非初始归属，确保 B 连续对话不重复交接，切回 A 时仍会交接。 */

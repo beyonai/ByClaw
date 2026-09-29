@@ -283,6 +283,7 @@ export interface ResourceUseApplyParams {
  * 记录单个资源使用申请的详细信息
  */
 export interface ResourceUseApplyAuditItem {
+  auditType?: 'SKILL_PUBLICATION';
   privilegeGrantId: string; // 权限授权ID
   userId: string; // 用户ID
   userName: string; // 用户名称
@@ -302,6 +303,7 @@ export interface ResourceUseApplyAuditItem {
  * 审批资源使用申请参数
  */
 export interface ApproveResourceUseApplyParams {
+  auditType?: 'SKILL_PUBLICATION'; // 上架审核复用审核接口，保持与使用权限审核分流
   resourceId: string | number; // 资源ID
   applyUserId: string | number; // 申请用户ID
 }
@@ -646,6 +648,7 @@ export interface ResourceOperationPermissions {
 }
 
 export interface EnterpriseSkillPublishResult {
+  personalDependencies?: { resourceId: string; resourceName: string; resourceBizType: string }[];
   resource: {
     resourceId: string;
     resourceName: string;
@@ -763,6 +766,23 @@ export const queryWorkspaceSkillList = (params: QuerySkillListParams) => {
 };
 
 export const queryLobsterInstalledSkillList = queryWorkspaceSkillList;
+
+export interface WorkspaceSkillCenterStatus {
+  action: 'INSTALL' | 'UPDATE' | 'NONE';
+  ownerType: 'personal' | 'enterprise';
+  targetResourceId?: string | number;
+  revision: string;
+}
+
+/** 员工目录同步使用当前登录身份；目标归属与匹配范围由后端解析。 */
+export const queryWorkspaceSkillCenterStatus = (params: { resourceId: string; skillPath: string }) =>
+  POST<WorkspaceSkillCenterStatus>('/byaiService/tool/queryWorkspaceSkillCenterStatus', params);
+
+export const syncWorkspaceSkillToCenter = (params: { resourceId: string; skillPath: string; revision: string }) =>
+  POST<{ resourceId: string | number; action: 'INSTALL' | 'UPDATE'; sourceDeleted: boolean }>(
+    '/byaiService/tool/syncWorkspaceSkillToCenter',
+    params
+  );
 
 /**
  * 查询当前数字员工 workspace 中、尚未进入个人技能资源列表的目录技能（用户开发）。

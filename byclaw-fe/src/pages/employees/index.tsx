@@ -244,9 +244,8 @@ const Employees = () => {
     }
 
     const detailPermissions = appInfo?.operationPermissions;
-    const permissions = `${detailPermissions?.resourceId ?? ''}` === employeeResourceId
-      ? detailPermissions
-      : detailAgentInfo;
+    const permissions =
+      `${detailPermissions?.resourceId ?? ''}` === employeeResourceId ? detailPermissions : detailAgentInfo;
     setEmployeeUsePermission({
       resourceId: employeeResourceId,
       hasUsePermission: permissions?.hasUsePermission === true,
@@ -425,6 +424,8 @@ const Employees = () => {
                 agentType={detailAgentInfo?.agentType || agentTypeMap.agent}
                 queryInputProps={{
                   placeholder: '',
+                  // 详情态输入框也位于页面底部，资源弹层需向上展开，避免被视口底部裁切。
+                  mentionPopoverPlacement: 'topLeft',
                   // 网页端个人数字员工会话展示模型选择器。
                   enableModelSelect: true,
                   onMounted: () => {

@@ -62,6 +62,9 @@ class PrivilegeGrantMapperSqlTest {
                 .contains("when pg.status_cd = 'R' then '已驳回'")
                 .contains("left join po_users auditor on auditor.user_id = pg.update_staff")
                 .contains("and pg.status_cd in ('X', 'R')")
+                .contains("pg.grant_type = 'SKILL_PUBLICATION'")
+                .contains("end as auditType")
+                .contains("pg.grant_type = 'AVAILABLE_USE'")
                 .contains("resourceBizTypeList")
                 .contains("r.resource_biz_type in");
         }

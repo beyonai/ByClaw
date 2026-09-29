@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
@@ -23,6 +24,7 @@ import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
@@ -101,9 +103,39 @@ class ProjectApplicationServiceCreateTest {
         Project result = service.createProject(dto);
 
         assertThat(result.getProjectType()).isEqualTo("normal");
+        verify(projectService).existsProjectName("workspace", 88L, null);
         verify(projectInitService).initProjectWorkspace(1001L);
         verify(projectWorkspaceManifestService).syncProjectGitmodules(1001L);
         verify(datasetApplicationService).createDataset(any());
+    }
+
+    @Test
+    void rejectsDuplicateNamesWithinCurrentUsersProjectsBeforeSaving() {
+        when(projectService.existsProjectName("workspace", 88L, null)).thenReturn(true);
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectName(" workspace ");
+
+        assertThatThrownBy(() -> service().createProject(dto)).isInstanceOf(BaseException.class);
+
+        verify(projectService, never()).save(any());
+    }
+
+    @Test
+    void checksOriginalCreatorWhenUpdatingAProject() {
+        Project project = new Project();
+        project.setProjectId(1001L);
+        project.setCreateBy(99L);
+        project.setCloudResourceId(9001L);
+        when(projectService.findById(1001L)).thenReturn(project);
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectId(1001L);
+        dto.setProjectName(" renamed workspace ");
+
+        service().updateProject(dto);
+
+        verify(projectService).existsProjectName("renamed workspace", 99L, 1001L);
+        verify(projectService).update(project);
+        assertThat(project.getProjectName()).isEqualTo("renamed workspace");
     }
 
     @Test

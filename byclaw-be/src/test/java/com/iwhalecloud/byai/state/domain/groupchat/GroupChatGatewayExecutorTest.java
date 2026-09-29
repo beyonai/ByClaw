@@ -202,6 +202,39 @@ class GroupChatGatewayExecutorTest {
     }
 
     @Test
+    void publicationIntentReachesAgentOnlyForAnActivePrivateTask() {
+        execution.setStatus("CONVERSATION");
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus("ACTIVE");
+        when(tasks.selectById(60L)).thenReturn(task);
+        AssistantChatDto request = JSON.parseObject("{\"chatContent\":\"确认完成并发布到群聊\","
+            + "\"messageIntent\":\"prepare_group_task_publication\"}", AssistantChatDto.class);
+        request.setAgentId(40L);
+        ChatProcessContext context = new ChatProcessContext(null, request);
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.userMessageId = 81L;
+        context.traceId = ScriptService.getTraceId(81L, 82L);
+
+        String outbound = (String) executor.decorate(context, request.getChatContent(), new HashMap<>());
+        assertThat(outbound).contains("prepare_group_task_publication", "待发布成果", "不要直接发布");
+        assertThat(request.getChatContent()).isEqualTo("确认完成并发布到群聊");
+        request = JSON.parseObject("{\"chatContent\":\"确认完成并发布到群聊\"}", AssistantChatDto.class);
+        request.setAgentId(40L);
+        context.assistantChatDto = request;
+        assertThat((String) executor.decorate(context, request.getChatContent(), new HashMap<>()))
+            .doesNotContain("prepare_group_task_publication");
+
+        request = JSON.parseObject("{\"chatContent\":\"确认完成并发布到群聊\","
+            + "\"messageIntent\":\"prepare_group_task_publication\"}", AssistantChatDto.class);
+        request.setAgentId(40L);
+        context.assistantChatDto = request;
+        when(tasks.selectById(60L)).thenReturn(null);
+        assertThat((String) executor.decorate(context, request.getChatContent(), new HashMap<>()))
+            .doesNotContain("prepare_group_task_publication");
+    }
+
+    @Test
     void privateTaskCanSwitchAgentsWhileKeepingOriginalGroupReferenceAndPublicationOwner() {
         execution.setStatus("CONVERSATION");
         execution.setTraceId(ScriptService.getTraceId(61L, 70L));

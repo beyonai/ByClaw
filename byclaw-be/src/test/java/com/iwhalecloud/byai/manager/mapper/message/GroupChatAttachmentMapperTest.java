@@ -91,7 +91,7 @@ class GroupChatAttachmentMapperTest {
                 .extracting(ByaiMessage::getMessageId).containsExactly(1L);
             assertThat(mapper.selectVisibleGroupMessagesByIds(10L, List.of(1L, 2L, 3L, 6L, 7L, 8L)))
                 .extracting(ByaiMessage::getMessageId).containsExactlyInAnyOrder(1L, 2L);
-            assertThat(mapper.searchVisibleGroupMessages(10L, null, "ALL", "ALL", 7L, null, null, null, 10))
+            assertThat(mapper.searchVisibleGroupMessages(10L, null, "ALL", "ALL", "ALL", 7L, null, null, null, 10))
                 .extracting(ByaiMessage::getMessageId).containsExactly(2L);
             // SQLite 补齐 PostgreSQL CHR 函数，仅用于执行真实 LIKE 条件；方言解析另由 PGWallProvider 验证。
             Function.create(session.getConnection(), "CHR", new Function() {
@@ -110,10 +110,10 @@ class GroupChatAttachmentMapperTest {
                 insert.executeUpdate();
             }
             for (String keyword : List.of("\\%", "\\_", "\\\\")) {
-                assertThat(mapper.searchVisibleGroupMessages(10L, keyword, "ALL", "ALL", 7L, null, null, null, 10))
+                assertThat(mapper.searchVisibleGroupMessages(10L, keyword, "ALL", "ALL", "ALL", 7L, null, null, null, 10))
                     .extracting(ByaiMessage::getMessageId).containsExactly(9L);
             }
-            assertThat(mapper.searchVisibleGroupMessages(10L, "report", "ALL", "ALL", 7L, null, null, null, 10))
+            assertThat(mapper.searchVisibleGroupMessages(10L, "report", "ALL", "ALL", "ALL", 7L, null, null, null, 10))
                 .extracting(ByaiMessage::getMessageId).containsExactly(10L, 9L);
 
         }

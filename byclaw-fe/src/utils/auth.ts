@@ -194,14 +194,17 @@ export const isAdminVip = (userInfo: { userCode: string }) => {
     return false;
   }
 
+  // 默认账号与配置名单均忽略大小写，避免登录账号大小写差异导致管理入口隐藏。
+  const userCode = userInfo.userCode?.toLowerCase();
+
   // 如果缓存未初始化，触发初始化（异步，不阻塞）
   if (adminVipListCache === null && !isLoadingAdminVipList) {
     initAdminVipList();
     // 初始化期间使用默认值，只判断 'adminvip'
-    return userInfo.userCode === 'adminvip';
+    return userCode === 'adminvip';
   }
 
   // 使用缓存的值进行判断
   const adminVipList = adminVipListCache || ['adminvip'];
-  return adminVipList.includes(userInfo.userCode);
+  return adminVipList.some((adminUserCode) => adminUserCode.toLowerCase() === userCode);
 };

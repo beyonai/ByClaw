@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -312,7 +313,11 @@ public class GroupChatApplicationService {
     }
 
     /**
-     * 群聊只接受成员类型资源。数字员工会触发委派，普通用户仅保留在消息资源信息中。
+     * 校验群成员引用并解析需要委派的数字员工。
+     *
+     * 文件引用也会随 resourceList 一起提交（例如工作组云盘的 KG_DOC_FILE/KG_DOC_FOLDER，
+     * 以及对话上传的 COMMON_FILE）。它们只是消息内容的一部分，不是群成员，不能参与成员
+     * 校验、ID 转换或 Agent 委派；原始 resourceList 会继续保存到消息元数据并广播给客户端。
      */
     private Set<Long> validateAndResolveMemberResources(Long sessionId, List<ResourceVo> resourceList) {
         Set<Long> agentIds = new LinkedHashSet<>();
@@ -322,7 +327,7 @@ public class GroupChatApplicationService {
         }
         for (ResourceVo resource : resourceList) {
             if (resource == null || resource.getResourceType() == null) {
-                throw new IllegalArgumentException("Invalid group member resource");
+                throw new GroupChatMessageRejectedException("Invalid group member resource");
             }
             String memberType;
             if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
@@ -331,16 +336,19 @@ public class GroupChatApplicationService {
             else if (AgentMetaEnum.HUMAN.equals(resource.getResourceType())) {
                 memberType = MemObjType.USER.name();
             }
+            else if (isMessageResourceType(resource.getResourceType())) {
+                continue;
+            }
             else {
-                throw new IllegalArgumentException("Unsupported group member resource type");
+                throw new GroupChatMessageRejectedException("Unsupported group member resource type");
             }
             Long memberId = parseResourceId(resource.getResourceId());
             String existingMemberType = referencedMemberTypes.putIfAbsent(memberId, memberType);
             if (existingMemberType != null && !existingMemberType.equals(memberType)) {
-                throw new IllegalArgumentException("Conflicting group member resource types");
+                throw new GroupChatMessageRejectedException("Conflicting group member resource types");
             }
             if (memberService.findSessionMember(sessionId, memberType, memberId) == null) {
-                throw new IllegalArgumentException("Referenced resource is not a group member");
+                throw new GroupChatMessageRejectedException("Referenced resource is not a group member");
             }
             if (MemObjType.AGENT.name().equals(memberType)) {
                 agentIds.add(memberId);
@@ -349,15 +357,22 @@ public class GroupChatApplicationService {
         return agentIds;
     }
 
+    private boolean isMessageResourceType(AgentMetaEnum resourceType) {
+        return AgentMetaEnum.COMMON_FILE.equals(resourceType)
+            || AgentMetaEnum.COMMON_FOLDER.equals(resourceType)
+            || AgentMetaEnum.KG_DOC_FILE.equals(resourceType)
+            || AgentMetaEnum.KG_DOC_FOLDER.equals(resourceType);
+    }
+
     private Long parseResourceId(String resourceId) {
         if (resourceId == null || resourceId.isBlank()) {
-            throw new IllegalArgumentException("Invalid group member resource ID");
+            throw new GroupChatMessageRejectedException("Invalid group member resource ID");
         }
         try {
             return Long.valueOf(resourceId);
         }
         catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("Invalid group member resource ID", exception);
+            throw new GroupChatMessageRejectedException("Invalid group member resource ID", exception);
         }
     }
 

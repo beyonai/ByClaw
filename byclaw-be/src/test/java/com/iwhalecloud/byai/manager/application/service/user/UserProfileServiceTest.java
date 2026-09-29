@@ -33,13 +33,13 @@ class UserProfileServiceTest {
         user.setStationId(9L);
         when(users.findById(42L)).thenReturn(user);
 
-        var response = service.getUserSuas(42L);
+        var response = service.getUserSuas(42L, null);
         assertThat(response.getCode()).isZero();
         Map<?, ?> data = (Map<?, ?>) response.getData();
         assertThat(data.get("userName")).isEqualTo("Alice");
         assertThat(data.get("userCode")).isEqualTo("E42");
         assertThat(data.containsKey("phone")).isTrue();
         assertThat(data.containsKey("pathName")).isTrue();
-        assertThat(service.getUserSuas(99L).getCode()).isEqualTo(-1);
+        assertThat(service.getUserSuas(99L, null).getCode()).isEqualTo(-1);
     }
 }

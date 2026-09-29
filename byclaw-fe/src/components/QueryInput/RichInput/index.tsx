@@ -146,6 +146,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     canSend,
     canQuote,
     mentionPopoverPlacement,
+    allowMultiAgentInExpertMode = true,
   } = props;
   const intl = useIntl();
   const [mentionPopoverData, setMentionPopoverData] = useState<Partial<MentionTriggerInfo>>({});
@@ -224,11 +225,22 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       return false;
     }
     if (chatMode === chatModeMap.expert) {
-      if (isInputting) {
+      if (isInputting && allowMultiAgentInExpertMode) {
         return true;
       }
-      // drop进来的，必须是没有内容
+      // 关闭多员工输入时，void 类型的员工节点也应视为已有输入。
+      if (
+        !allowMultiAgentInExpertMode &&
+        !Editor.nodes(editor, { at: [], match: isDigitalEmployeeMentionNode }).next().done
+      ) {
+        return false;
+      }
       const text = Editor.string(editor, []);
+      // 首次键入 @ 时，触发词本身不算已有正文。
+      if (isInputting && text === getCurrentTriggerText(editor)) {
+        return true;
+      }
+      // 拖入员工时，必须是没有正文的输入框。
       return !text;
     }
 

@@ -31,7 +31,7 @@ class EmployeePublicationApplicationServiceTest {
     SsResourceMapper resources = mock(SsResourceMapper.class);
     UserService users = mock(UserService.class);
     ByaiSystemConfigService config = mock(ByaiSystemConfigService.class);
-    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, config);
+    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, config, publications);
     DigitalEmployeeApplicationService employees = mock(DigitalEmployeeApplicationService.class);
     EmployeePublicationResources dependencies = mock(EmployeePublicationResources.class);
     SsResExtDigEmployeeService extensions = mock(SsResExtDigEmployeeService.class);
@@ -56,7 +56,7 @@ class EmployeePublicationApplicationServiceTest {
         when(publications.lockResource(10L, 1L)).thenReturn(source);
         when(publications.creatorName(7L)).thenReturn("作者");
         when(dependencies.capture(any(), anyLong(), anyLong(), anyLong())).thenReturn(List.of());
-        when(dependencies.materialize(anyList(), eq(1L))).thenReturn(Map.of());
+        when(dependencies.materialize(anyList(), eq(1L), anyLong())).thenReturn(Map.of());
         when(dependencies.audienceRoots(1L)).thenReturn(List.of(1L));
         DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
         details.setAgentType("001"); details.setResourceName("员工"); details.setOwnerType("personal");
@@ -92,6 +92,42 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(result.publication().getStatus()).isEqualTo("PENDING");
         verify(resources, never()).insert(any(SsResource.class));
         verify(employees, never()).syncPublicationOpenClawWorkSpace(anyLong(), any());
+    }
+
+    @Test void previewChecksResourcesWithoutSavingOrSubmittingCandidate() {
+        String storedDependencies = publication.getDependenciesJson();
+        doAnswer(invocation -> {
+            List<EmployeePublicationResources.Dependency> deps = invocation.getArgument(0);
+            var dependency = new EmployeePublicationResources.Dependency();
+            dependency.setLabel("受限知识库"); dependency.setResourceType("KG_DOC");
+            dependency.setWarning("未向全员授权"); dependency.setAvailabilityScope("原有授权用户");
+            dependency.setImpact("未获授权的其他人无法使用"); dependency.setAction("REFERENCE_RESOURCE");
+            deps.add(dependency);
+            return null;
+        }).when(dependencies).validate(anyList(), eq(7L), eq(1L));
+        var preview = service.preview(request());
+        assertThat(preview.publication().getStatus()).isEqualTo("DRAFT");
+        assertThat(preview.publication().getRevision()).isEqualTo(1L);
+        assertThat(preview.dependencies().getFirst().resourceType()).isEqualTo("KG_DOC");
+        assertThat(preview.dependencies().getFirst().availabilityScope()).isEqualTo("原有授权用户");
+        assertThat(preview.dependencies().getFirst().reason()).isEqualTo("未向全员授权");
+        assertThat(preview.dependencies().getFirst().impact()).contains("其他人无法使用");
+        assertThat(publication.getDependenciesJson()).isEqualTo(storedDependencies);
+        verify(publications, never()).update(isNull(), any());
+        verify(publications, never()).insert(any(DigitalEmployeePublication.class));
+        verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
+        verifyNoInteractions(extensions);
+    }
+
+    @Test void staleOrUnauthorizedPreviewCannotBeConfirmed() {
+        EmployeePublicationRequest stale = request(); stale.setRevision(0L);
+        assertThatThrownBy(() -> service.preview(stale)).hasMessageContaining("申请已被修改");
+        publication.setStatus("PENDING");
+        assertThatThrownBy(() -> service.preview(request())).hasMessageContaining("仅 adminvip");
+        login("admin", 8L, List.of("PLAT_MAN"));
+        assertThat(service.preview(request()).canReview()).isTrue();
+        publication.setStatus("PUBLISHED");
+        assertThatThrownBy(() -> service.preview(request())).hasMessageContaining("当前申请状态");
     }
     @Test void adminSubmissionPublishesNewCopyAndDoesNotMutateSource() {
         login("admin", 7L, List.of("PLAT_MAN"));
@@ -138,7 +174,7 @@ class EmployeePublicationApplicationServiceTest {
         login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PUBLISHED");
         assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PUBLISHED");
         verify(resources, never()).insert(any(SsResource.class));
-        verify(dependencies, never()).materialize(anyList(), anyLong());
+        verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
     }
     @Test void failedRuntimeRollsBackAndRestoresCommittedRuntime() {
         login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
@@ -161,7 +197,7 @@ class EmployeePublicationApplicationServiceTest {
         DigitalEmployeeDTO dto = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
         dto.setResourceName("修改后名称"); request.setEmployee(dto);
         service.save(request);
-        assertThat(publication.getEmployeeName()).isEqualTo("修改后名称");
+        assertThat(publication.getEmployeeName()).isEqualTo("修改后名称(企业)");
         verify(resources, never()).updateById(any(SsResource.class));
         verifyNoInteractions(extensions);
     }
@@ -170,11 +206,15 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(service.prepare(10L).publication().getRequestId()).isEqualTo(100L);
         verify(publications, never()).insert(any(DigitalEmployeePublication.class));
     }
-    @Test void commercialAndMissingEditionFailClosed() {
-        for (String edition : new String[]{"commercial", null, ""}) {
+    @Test void publicationIsAvailableInBothEditionsWithoutChangingRoleRules() {
+        for (String edition : new String[]{"commercial", "openSource", null, "", "unknown"}) {
             when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn(edition);
-            assertThatThrownBy(() -> service.prepare(10L)).hasMessageContaining("仅在开源版本");
+            assertThat(service.capabilities()).containsEntry("enabled", true).containsEntry("administrator", false);
+            assertThat(service.current(10L).publication()).isSameAs(publication);
+            assertThat(service.detail(100L).canSubmit()).isTrue();
         }
+        login("adminvip", 7L, List.of());
+        assertThat(service.capabilities()).containsEntry("enabled", true).containsEntry("administrator", true);
     }
     @Test void tenantMismatchRejectedBeforeReadingSnapshot() {
         publication.setTenantId(2L);
@@ -232,13 +272,59 @@ class EmployeePublicationApplicationServiceTest {
         verify(publications).insert(any(DigitalEmployeePublication.class));
     }
 
+    @Test void draftCanOpenWithEditableConfigurationErrors() {
+        when(publications.current(10L, 1L)).thenReturn(null);
+        DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
+        details.setAgentType("001"); details.setResourceId(10L); details.setResourceName("");
+        when(employees.findDetailsById(any())).thenReturn(details);
+        when(dependencies.capture(any(), anyLong(), anyLong(), anyLong()))
+            .thenReturn(List.of(EmployeePublicationResources.blocker("技能配置", "请重新关联技能")));
+        var draft = service.prepare(10L);
+        assertThat(draft.canEdit()).isTrue();
+        assertThat(draft.dependencies()).extracting(EmployeePublicationApplicationService.DependencyView::error)
+            .contains("请重新关联技能", "员工名称必填且不能超过 300 个字符");
+        verify(publications).insert(draft.publication());
+        verify(dependencies, never()).validate(anyList(), anyLong(), anyLong());
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"MCP", "KG_DOC", "SKILL"})
+    void legacyPrivateResourceBlockerBecomesOmissionAndPublishedRuntimeExcludesIt(String type) {
+        SsResource tool = employee(20L, 7L); tool.setResourceBizType(type); tool.setResourceName("个人资源");
+        var dependency = new EmployeePublicationResources.Dependency();
+        dependency.setResource(tool); dependency.setTargetId(20L); dependency.setAction("BLOCKED");
+        dependency.setError("私有资源请先完成官方化");
+        publication.setDependenciesJson(JSON.toJSONString(List.of(dependency)));
+        var dto = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
+        dto.setRelTools(List.of("*", "unknown")); dto.setRelIds(List.of(20L));
+        publication.setSnapshotJson(JSON.toJSONString(dto));
+        var draft = service.detail(100L);
+        assertThat(draft.dependencies().getFirst().error()).isNull();
+        assertThat(draft.dependencies().getFirst().warning()).contains("当前发布规则");
+        service.submit(request());
+        login("admin", 8L, List.of("PLAT_MAN"));
+        doAnswer(call -> {
+            List<EmployeePublicationResources.Dependency> rows = call.getArgument(0);
+            rows.forEach(row -> { row.setAction("OMIT_RESOURCE"); row.setWarning("个人资源不带入企业员工"); });
+            return null;
+        }).when(dependencies).validate(anyList(), anyLong(), anyLong());
+        doCallRealMethod().when(dependencies).applyPublishedResources(any(), anyList(), anyMap());
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        var result = service.approve(request());
+        assertThat(result.publication().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(result.dependencies().getFirst().action()).isEqualTo("OMIT_RESOURCE");
+        verify(employees).syncPublicationOpenClawWorkSpace(anyLong(), argThat(snapshot ->
+            snapshot.getRelTools().isEmpty() && snapshot.getRelIds().isEmpty() && snapshot.getRelSkills().isEmpty()));
+        verify(relations, never()).save(any());
+        assertThat(source.getOwnerType()).isEqualTo("personal");
+    }
+
     @Test void newDraftKeepsLastReviewVisibleAndCopiesRejectedConfiguration() {
         publication.setStatus("REJECTED"); publication.setCreatedAt(new java.util.Date(1));
         publication.setReviewerName("审核管理员"); publication.setReviewedAt(new java.util.Date(2));
         publication.setComment("请修改岗位描述");
         when(publications.previousRejection(eq(10L), eq(1L), any(), eq(101L))).thenReturn(publication);
         var next = service.revise(request());
-        assertThat(next.employee().getResourceName()).isEqualTo("员工");
+        assertThat(next.employee().getResourceName()).isEqualTo("员工(企业)");
         assertThat(next.previousReview().requestId()).isEqualTo("100");
         assertThat(next.previousReview().reviewerName()).isEqualTo("审核管理员");
         assertThat(next.previousReview().comment()).isEqualTo("请修改岗位描述");
@@ -280,7 +366,7 @@ class EmployeePublicationApplicationServiceTest {
         login("adminvip", 7L, List.of()); source.setComAcctId(2L);
         assertThatThrownBy(() -> service.current(10L)).hasMessageContaining("不存在");
         source.setComAcctId(1L); when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn("commercial");
-        assertThatThrownBy(() -> service.current(10L)).hasMessageContaining("仅在开源版本");
+        assertThat(service.current(10L).publication()).isSameAs(publication);
     }
 
     @Test void applyingAttemptCannotBeStartedTwice() {
@@ -392,7 +478,7 @@ class EmployeePublicationApplicationServiceTest {
         when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenAnswer(call -> {
             assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
             assertThat(committed.queryForObject("SELECT status FROM request", String.class)).isEqualTo("APPLYING");
-            assertThat(resources.selectById((Long) call.getArgument(0)).getResourceName()).isEqualTo("员工");
+            assertThat(resources.selectById((Long) call.getArgument(0)).getResourceName()).isEqualTo(existing ? "员工" : "员工(企业)");
             return succeeding.get();
         });
         doAnswer(call -> {
@@ -414,7 +500,7 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(read.get().getStatus()).isEqualTo("PUBLISHED");
         assertThat(read.get().getPublishError()).isNull();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM resource", Integer.class)).isEqualTo(2);
-        assertThat(resources.selectById(published.getOfficialId()).getResourceName()).isEqualTo("员工");
+        assertThat(resources.selectById(published.getOfficialId()).getResourceName()).isEqualTo(existing ? "员工" : "员工(企业)");
         if (existing) assertThat(published.getOfficialId()).isEqualTo(90L);
     }
 }

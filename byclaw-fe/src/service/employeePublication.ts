@@ -16,10 +16,21 @@ export interface Publication {
   publishError?: string;
   canReview?: boolean;
 }
+export interface PublicationDependency {
+  resourceId: string;
+  name: string;
+  action: string;
+  error?: string;
+  warning?: string;
+  resourceType?: string;
+  availabilityScope?: string;
+  reason?: string;
+  impact?: string;
+}
 export interface PublicationDetail {
   publication: Publication;
   employee: any;
-  dependencies: { resourceId: string; name: string; action: string; error?: string }[];
+  dependencies: PublicationDependency[];
   canEdit: boolean;
   canSubmit: boolean;
   canReview: boolean;
@@ -53,6 +64,8 @@ export const getPublicationPendingCount = () => GET<number>(`${base}/pendingCoun
 export const getPublicationCapabilities = () =>
   GET<{ enabled: boolean; administrator: boolean; canCreateEnterprise: boolean }>(`${base}/capabilities`);
 export const getPublication = (requestId: string) => GET<PublicationDetail>(`${base}/detail`, { requestId });
+export const previewPublication = (publication: Pick<Publication, 'requestId' | 'revision'>) =>
+  POST<PublicationDetail>(`${base}/preview`, { requestId: publication.requestId, revision: publication.revision });
 export const getCurrentPublication = (resourceId: string) =>
   GET<PublicationDetail | null>(`${base}/current`, { resourceId });
 export const listPublications = (review: boolean, page = 1) =>
@@ -69,6 +82,20 @@ export const publicationAction = (
   });
 export const publicationUrl = (detail: PublicationDetail) =>
   `/digitalEmployeesCreate?publicationId=${detail.publication.requestId}&appId=${detail.employee.resourceId}&log=false&manage=false`;
+export const preparePublication = (resourceId: string) => POST<PublicationDetail>(`${base}/prepare`, { resourceId });
+
+/** 普通编辑页只在保存时建立更新草稿，进入页面本身不会产生申请。 */
+export const saveOfficialUpdateDraft = async (resourceId: string, employee: any) => {
+  let detail = await preparePublication(resourceId);
+  if (String(detail.publication.officialId) !== String(resourceId)) {
+    throw new Error('官方副本已变化，请刷新页面后重试');
+  }
+  if (detail.canRevise) detail = await publicationAction('revise', detail.publication);
+  if (detail.publication.status !== 'DRAFT' || !detail.canEdit) {
+    throw new Error('该员工已有未完成的更新申请，请先在审核中心处理或撤回申请后再保存');
+  }
+  return publicationAction('save', detail.publication, { employee });
+};
 export const openEmployeePublication = async (resourceId: string, intent: 'view' | 'editOfficial' = 'view') => {
   const current = intent === 'view' ? await getCurrentPublication(resourceId) : null;
   const detail = current || (await POST<PublicationDetail>(`${base}/prepare`, { resourceId }));

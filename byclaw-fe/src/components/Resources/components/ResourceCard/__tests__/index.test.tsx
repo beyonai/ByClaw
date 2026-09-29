@@ -57,6 +57,8 @@ jest.mock('@/pages/manager/service/resources', () => ({
   publishSkillToEnterprise: jest.fn(),
   checkWorkspaceSkillShareConflicts: jest.fn(),
   resourceizeWorkspaceSkill: jest.fn(),
+  queryWorkspaceSkillDetail: jest.fn(),
+  queryResourceMembers: jest.fn(),
 }));
 
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({
@@ -77,10 +79,13 @@ import {
   publishSkillToEnterprise,
   checkWorkspaceSkillShareConflicts,
   resourceizeWorkspaceSkill,
+  queryWorkspaceSkillDetail,
 } from '@/pages/manager/service/resources';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceCard from '..';
 import * as globalHook from '@/hooks/useGlobal';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import { DetailPanelContent, useDetailPanelState } from '@/layout/pcLayout/useDetailPanelState';
 
 const renderWithQueryClient = (ui: React.ReactElement) => {
   const queryClient = new QueryClient({
@@ -1100,6 +1105,23 @@ describe('personal skill enterprise publication', () => {
     expect(personalSkill.ownerType).toBe('personal');
   });
 
+  it('shows pending review and a non-blocking personal dependency notice', async () => {
+    (publishSkillToEnterprise as jest.Mock).mockResolvedValue({
+      resource: { ...enterpriseSkill, resourceStatus: 4 },
+      alreadyExists: false,
+      personalDependencies: [{ resourceId: 'knowledge-1', resourceName: '个人知识库', resourceBizType: 'KG_DOC' }],
+    });
+    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    expect(await screen.findByText('resource.enterpriseSkillPending')).toBeInTheDocument();
+    expect(await screen.findByText('个人知识库')).toBeInTheDocument();
+    expect(screen.getByText('resource.enterprisePersonalDependenciesWarning')).toBeInTheDocument();
+    expect(publishSkillToEnterprise).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('resource.viewEnterpriseSkill')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+  });
+
   it('restores the entry when refreshed permissions allow publication after copy removal', () => {
     const client = new QueryClient();
     const card = (allowed: boolean) => (
@@ -1125,6 +1147,20 @@ describe('personal skill enterprise publication', () => {
     expect(await screen.findByText('Publication permission revoked')).toBeInTheDocument();
     expect(success).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+  });
+
+  it('shows manifest dependency rejection and keeps publication available for retry', async () => {
+    const success = jest.spyOn(message, 'success');
+    const reason = '无法发布到官方推荐：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。';
+    (publishSkillToEnterprise as jest.Mock).mockRejectedValue(reason);
+    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    expect(success).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+    expect(screen.getByText('resource.publishToEnterprise')).toBeInTheDocument();
   });
 
   it('blocks repeated confirmation while publication is pending', async () => {
@@ -1157,6 +1193,57 @@ describe('personal skill enterprise publication', () => {
 });
 
 describe('digital employee publication entry', () => {
+  it('keeps preparation feedback visible and blocks duplicate clicks until navigation is ready', async () => {
+    let finish!: () => void;
+    (openEmployeePublication as jest.Mock).mockClear().mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      })
+    );
+    const loading = jest.spyOn(message, 'loading').mockImplementation(jest.fn());
+    const destroy = jest.spyOn(message, 'destroy').mockImplementation(jest.fn());
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: true,
+        }}
+      />
+    );
+    const entry = screen.getByText('发布到官方推荐');
+    fireEvent.click(entry);
+    fireEvent.click(entry);
+    expect(openEmployeePublication).toHaveBeenCalledTimes(1);
+    expect(loading).toHaveBeenCalledWith(
+      expect.objectContaining({ content: '正在准备发布申请，请稍候…', duration: 0 })
+    );
+    expect(destroy).not.toHaveBeenCalled();
+    await act(async () => {
+      finish();
+    });
+    expect(destroy).toHaveBeenCalledWith('employee-publication-open-10');
+    loading.mockRestore();
+    destroy.mockRestore();
+  });
+  it('displays the concrete server message when draft preparation rejects a string', async () => {
+    (openEmployeePublication as jest.Mock).mockRejectedValueOnce('仅在用数字员工支持发起发布或更新');
+    const error = jest.spyOn(message, 'error').mockImplementation(jest.fn());
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: true,
+        }}
+      />
+    );
+    fireEvent.click(screen.getByText('发布到官方推荐'));
+    await waitFor(() => expect(error).toHaveBeenCalledWith('仅在用数字员工支持发起发布或更新'));
+    error.mockRestore();
+  });
   it.each([
     [undefined, '发布到官方推荐'],
     ['DRAFT', '继续发布'],
@@ -1195,8 +1282,8 @@ describe('digital employee publication entry', () => {
     );
     expect(screen.queryByText('发布到官方推荐')).not.toBeInTheDocument();
   });
-  it('opens an official copy through its candidate workflow', async () => {
-    (openEmployeePublication as jest.Mock).mockResolvedValue(undefined);
+  it('opens an official copy in its ordinary editor without preparing a publication', async () => {
+    (openEmployeePublication as jest.Mock).mockReset();
     const onEdit = jest.fn();
     renderWithQueryClient(
       <ResourceCard
@@ -1211,8 +1298,8 @@ describe('digital employee publication entry', () => {
       />
     );
     fireEvent.click(screen.getByText('common.editInfo'));
-    await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('10', 'editOfficial'));
-    expect(onEdit).not.toHaveBeenCalled();
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(openEmployeePublication).not.toHaveBeenCalled();
   });
 });
 
@@ -1268,6 +1355,50 @@ describe('workspace skill enterprise publication', () => {
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it('restores the current employee panel after closing a personal workspace skill card detail', async () => {
+    (queryWorkspaceSkillDetail as jest.Mock).mockResolvedValue({ skillName: 'fws4', skillDesc: 'Personal skill' });
+    const onCardClick = jest.fn();
+    const Host = () => {
+      const panels = useDetailPanelState();
+      React.useEffect(() => {
+        panels.openDetailPanel(<input aria-label="employee skill search" defaultValue="saved search" />);
+      }, [panels.openDetailPanel]);
+      return (
+        <SiderContentContext.Provider
+          value={{
+            siderContentWidth: 240,
+            setSiderContentWidth: jest.fn(),
+            setDetailPanel: panels.openDetailPanel,
+            clearDetailPanel: panels.clearDetailPanel,
+            openTemporaryDetailPanel: panels.openTemporaryDetailPanel,
+          }}
+        >
+          <ResourceCard
+            resource={{ ...workspaceSkill, personalWorkspace: true }}
+            resourceType="SKILL"
+            onCardClick={onCardClick}
+          />
+          <div data-testid="right-panel">
+            <DetailPanelContent {...panels} />
+          </div>
+        </SiderContentContext.Provider>
+      );
+    };
+    renderWithQueryClient(<Host />);
+    const originalSearch = screen.getByRole('textbox', { name: 'employee skill search' });
+    fireEvent.click(screen.getByText('Workspace skill'));
+    expect((await screen.findAllByText('fws4')).length).toBeGreaterThan(0);
+    expect(onCardClick).not.toHaveBeenCalled();
+    expect(originalSearch).not.toBeVisible();
+    fireEvent.click(within(screen.getByTestId('right-panel')).getByRole('button'));
+    expect(screen.getByRole('textbox', { name: 'employee skill search' })).toBe(originalSearch);
+    expect(originalSearch).toHaveValue('saved search');
+    expect(queryWorkspaceSkillDetail).toHaveBeenCalledWith({
+      skillPath: '/skills/example',
+      personalWorkspace: true,
+    });
+  });
 
   it.each([
     { hiddenMenuItemKeys: ['share', 'publishToEnterprise'] },

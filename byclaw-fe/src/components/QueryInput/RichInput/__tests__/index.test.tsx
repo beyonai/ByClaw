@@ -1,5 +1,5 @@
 import React, { createRef } from 'react';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { chatModeMap } from '@/constants/query';
 import RichInput, { RichInputRef } from '../index';
 import { ResourceType } from '../utils/constants';
@@ -371,6 +371,57 @@ describe('RichInput', () => {
       expect(payload?.displayText).toContain('@Employee One');
       expect(payload?.displayText).toContain('@Employee Two');
       expect(payload?.displayText).not.toContain('Please handle this task');
+    });
+  });
+
+  it('rejects a second employee mention when multi-agent input is disabled', async () => {
+    const inputRef = createRef<RichInputRef>();
+    const { getByLabelText } = render(
+      <RichInput ref={inputRef} chatMode={chatModeMap.expert} allowMultiAgentInExpertMode={false} />
+    );
+
+    await act(async () => {
+      inputRef.current?.insertItem({ agentId: 'agent-1', name: 'Employee One' }, ResourceType.digitalEmployee);
+    });
+    expect(inputRef.current?.getPayload().resourceList.map((item) => item.resourceId)).toEqual(['agent-1']);
+
+    const editable = getByLabelText('byai-input');
+    editable.addEventListener('drop', (event) => event.preventDefault(), { capture: true });
+    await act(async () => {
+      fireEvent.drop(editable, {
+        dataTransfer: {
+          getData: () =>
+            JSON.stringify(getElementData(ResourceType.digitalEmployee, { agentId: 'agent-2', name: 'Employee Two' })),
+        },
+      });
+    });
+
+    expect(inputRef.current?.getPayload().resourceList.map((item) => item.resourceId)).toEqual(['agent-1']);
+  });
+
+  it('opens the first employee mention from an empty input when multi-agent input is disabled', async () => {
+    const inputRef = createRef<RichInputRef>();
+    const onResourcePopoverChange = jest.fn();
+    const { getByLabelText } = render(
+      <RichInput
+        ref={inputRef}
+        chatMode={chatModeMap.expert}
+        allowMultiAgentInExpertMode={false}
+        onResourcePopoverChange={onResourcePopoverChange}
+      />
+    );
+
+    const range = document.createRange();
+    range.selectNodeContents(getByLabelText('byai-input'));
+    range.collapse(true);
+    range.getBoundingClientRect = () => ({ left: 0, top: 0, height: 0 } as DOMRect);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+
+    await act(async () => inputRef.current?.appendText('@'));
+
+    await waitFor(() => {
+      expect(onResourcePopoverChange).toHaveBeenCalledWith(expect.objectContaining({ open: true, inputText: '' }));
     });
   });
 

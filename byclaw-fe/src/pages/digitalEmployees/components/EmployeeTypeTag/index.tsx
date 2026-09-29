@@ -11,8 +11,8 @@ const EmployeeTypeTag = ({ ownerType, agentType }: { ownerType?: string; agentTy
       ? 'digitalEmployees.tag.personalGroup'
       : 'digitalEmployees.tag.personalEmployee'
     : isGroup
-    ? 'digitalEmployees.tag.enterpriseGroup'
-    : 'digitalEmployees.tag.enterpriseEmployee';
+      ? 'digitalEmployees.tag.enterpriseGroup'
+      : 'digitalEmployees.tag.enterpriseEmployee';
 
   // 复用外部卡片的标签样式和翻译，不带卡片右上角的绝对定位。
   return (

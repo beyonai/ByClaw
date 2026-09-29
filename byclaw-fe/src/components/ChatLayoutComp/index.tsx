@@ -142,7 +142,9 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const resourceWorkspaceOwnedRef = useRef(false);
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
 
-  const { EventEmitter, setAgentId, setSessionId: setGlobalSessionId, platform, agentId } = useGlobal();
+  const { EventEmitter, setAgentId, setSessionId: setGlobalSessionId, platform, agentId, siderAgentId } = useGlobal();
+  const resourceEmployeeId = siderAgentId || agentId || '';
+  const previousResourceEmployeeIdRef = useRef(resourceEmployeeId);
   const isPC = platform === Platform.pc;
   const { getSandboxesInfoUrl } = useAppStore();
 
@@ -412,6 +414,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     closeResourceTab,
     closeResourceTabs,
     openResourceDetailFromResourceList,
+    resourceEmployeeId,
     resourceListOpen,
     resourceTabs,
     resourceWorkspaceVisible,
@@ -424,10 +427,12 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   ]);
 
   useLayoutEffect(() => {
-    // 每次进入另一个已有会话详情时关闭旧预览并默认打开资源列表；新建会话尚无 sessionId 时不展示。
+    // 会话或当前员工变化时关闭旧预览并重新注册工作区，避免布局清理后留下空面板。
     const previousSessionId = previousResourceSessionIdRef.current;
+    const previousEmployeeId = previousResourceEmployeeIdRef.current;
     previousResourceSessionIdRef.current = sessionId;
-    if (`${previousSessionId}` === `${sessionId}`) {
+    previousResourceEmployeeIdRef.current = resourceEmployeeId;
+    if (`${previousSessionId}` === `${sessionId}` && previousEmployeeId === resourceEmployeeId) {
       // 上传文件提前创建的会话在新建任务页暂不打开资源面板；用户发送消息后再进入详情时补开。
       if (sessionId && isBottom) setResourceListOpen(true);
       return;
@@ -436,7 +441,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     setResourceTabs([]);
     setActiveResourceTabKey('');
     setResourceListOpen(Boolean(sessionId && isBottom));
-  }, [isBottom, sessionId]);
+  }, [isBottom, resourceEmployeeId, sessionId]);
 
   useEffect(() => {
     // 会话详情切换时兜底打开一次资源列表，避免路由切换和详情面板清理的异步时序导致右侧面板偶发保持关闭。

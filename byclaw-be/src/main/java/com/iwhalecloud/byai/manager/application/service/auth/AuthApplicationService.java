@@ -17,7 +17,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjTypeMapping;
-import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
+import com.iwhalecloud.byai.common.constants.auth.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantTypeRangeMapping;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.ResourceTypeValueMapping;
@@ -134,6 +134,10 @@ public class AuthApplicationService {
     @Autowired
     private com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper employeePublications;
 
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService skillPublicationService;
+
+
     private static final Logger logger = LoggerFactory.getLogger(AuthApplicationService.class);
 
     private static final String USE_APPLY_PENDING_STATUS = "P";
@@ -163,6 +167,9 @@ public class AuthApplicationService {
 
     @Autowired
     private ProjectMemberService projectMemberService;
+
+    @Autowired
+    private DigitalEmployeeGroupAuthorizationService employeeGroupAuthorizationService;
 
     @Autowired
     private PrivilegeGrantMapper privilegeGrantMapper;
@@ -617,6 +624,7 @@ public class AuthApplicationService {
      *
      * @param qo 设置入参
      */
+    @Transactional(rollbackFor = Exception.class)
     public void setResourceManagers(ResourceMemberSettingQo qo) {
         // 1. 校验资源存在并拿到真实资源类型。
         SsResource ssResource = getRequiredResource(qo.getResourceId());
@@ -629,7 +637,7 @@ public class AuthApplicationService {
 
         // 3. 构造统一授权对象，并交给 handleAuth 做差异化更新。
         AuthRedBlackDTO authDto = buildResourceMemberAuthDto(ssResource, GrantType.ALLOW_MANAGE, qo);
-        handleAuth(authDto);
+        applyResourceMemberAuthorization(ssResource, authDto);
     }
 
     /**
@@ -637,6 +645,7 @@ public class AuthApplicationService {
      *
      * @param qo 设置入参
      */
+    @Transactional(rollbackFor = Exception.class)
     public void setResourceUsers(ResourceMemberSettingQo qo) {
         // 1. 校验资源存在并拿到真实资源类型。
         SsResource ssResource = getRequiredResource(qo.getResourceId());
@@ -647,11 +656,30 @@ public class AuthApplicationService {
 
         // 3. 使用人员设置按后台直接授权口径写入 FORCE_USE。
         AuthRedBlackDTO authDto = buildResourceMemberAuthDto(ssResource, GrantType.FORCE_USE, qo);
-        handleAuth(authDto);
+        applyResourceMemberAuthorization(ssResource, authDto);
 
         // 4. 同步撤销本次授权用户在该资源上的待审申请（status_cd: P -> X），
         //    避免"用户已被直接授权但仍显示在审核列表/我申请中"的脏数据，与 approveUseApply 行为一致。
         autoCancelPendingApplyForGrantedUsers(ssResource, qo);
+    }
+
+    /** 员工组及当前成员在同一事务内授权，成员失败时不留下部分成功的授权。 */
+    private void applyResourceMemberAuthorization(SsResource resource, AuthRedBlackDTO authDto) {
+        // 必须在组授权被覆盖前读取旧名单，才能识别本次撤销的对象。
+        List<AuthRedBlackDTO> memberAuths = employeeGroupAuthorizationService.buildMemberAuthorizations(resource,
+            authDto);
+        for (AuthRedBlackDTO memberAuth : memberAuths) {
+            validateEmployeeAuthorizationPermission(getRequiredResource(memberAuth.getGrantObjId()));
+        }
+        handleAuth(authDto);
+        for (AuthRedBlackDTO memberAuth : memberAuths) {
+            handleAuth(memberAuth);
+            if (GrantType.FORCE_USE.equals(memberAuth.getGrantType())) {
+                ResourceMemberSettingQo memberQo = new ResourceMemberSettingQo();
+                memberQo.setRedList(memberAuth.getRedList());
+                autoCancelPendingApplyForGrantedUsers(getRequiredResource(memberAuth.getGrantObjId()), memberQo);
+            }
+        }
     }
 
     /**
@@ -842,8 +870,18 @@ public class AuthApplicationService {
                 // 无审核权限的资源跳过，继续处理其他可审核资源。
             }
         }
-        return candidates.stream().filter(item -> auditableResourceIds.contains(item.getResourceId()))
-            .collect(Collectors.toList());
+        // 同一审核列表按申请类型校验权限，不能让资源管理人借使用审核权限审核上架。
+        return candidates.stream().filter(item -> {
+            if (GrantType.SKILL_PUBLICATION.equals(item.getAuditType())) {
+                SsResource resource = resourceMap.get(item.getResourceId());
+                return skillPublicationService.canReview() && resource != null
+                    && "SKILL".equals(resource.getResourceBizType())
+                    && OwnerType.ENTERPRISE.equals(resource.getOwnerType())
+                    && CurrentUserHolder.getEnterpriseId() != null
+                    && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId());
+            }
+            return auditableResourceIds.contains(item.getResourceId());
+        }).collect(Collectors.toList());
     }
 
     private List<String> normalizeAuditBizTypes(List<String> resourceBizTypeList) {
@@ -893,6 +931,10 @@ public class AuthApplicationService {
      * @date 2026-04-25 16:20:00
      */
     public void approveUseApply(ResourceUseApplyApproveQo qo) {
+        if (GrantType.SKILL_PUBLICATION.equals(qo.getAuditType())) {
+            skillPublicationService.review(qo.getResourceId(), qo.getApplyUserId(), true);
+            return;
+        }
         SsResource ssResource = getRequiredResource(qo.getResourceId());
         validateResourceUseApplyAuditAllowed(ssResource);
         validateResourceUseSettingPermission(ssResource);
@@ -931,6 +973,10 @@ public class AuthApplicationService {
      * @date 2026-04-27 00:00:00
      */
     public void rejectUseApply(ResourceUseApplyApproveQo qo) {
+        if (GrantType.SKILL_PUBLICATION.equals(qo.getAuditType())) {
+            skillPublicationService.review(qo.getResourceId(), qo.getApplyUserId(), false);
+            return;
+        }
         SsResource ssResource = getRequiredResource(qo.getResourceId());
         validateResourceUseApplyAuditAllowed(ssResource);
         validateResourceUseSettingPermission(ssResource);
@@ -1196,7 +1242,7 @@ public class AuthApplicationService {
      */
     public boolean isCurrentUserGlobalResourceManager() {
         boolean hasGlobalAdminRole = CurrentUserHolder.getUsersOrganizations().stream()
-            .anyMatch(item -> StringUtils.equalsAny(item.getUserType(), UserType.PLAT_MAN, UserType.PLAT_DEVOPS,
+            .anyMatch(item -> UserType.matchesAny(item.getUserType(), UserType.PLAT_MAN, UserType.PLAT_DEVOPS,
                 UserType.BUSINESS_MAN));
         return hasGlobalAdminRole
             || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
@@ -1225,7 +1271,7 @@ public class AuthApplicationService {
         if (CollectionUtils.isEmpty(userOrgs)) {
             return false;
         }
-        return userOrgs.stream().anyMatch(item -> StringUtils.equalsAny(item.getUserType(), UserType.PLAT_MAN,
+        return userOrgs.stream().anyMatch(item -> UserType.matchesAny(item.getUserType(), UserType.PLAT_MAN,
             UserType.PLAT_DEVOPS, UserType.BUSINESS_MAN));
     }
 
@@ -1237,6 +1283,8 @@ public class AuthApplicationService {
      * @date 2026-04-24 18:08:00
      */
     public boolean hasResourceManagePermission(SsResource ssResource) {
+        // 审核快照保持只读，防止审核期间修改内容或通过导入覆盖直接变为已上架。
+        if (isSkillPublicationUnderReview(ssResource)) return false;
         if (ssResource == null) {
             return false;
         }
@@ -2120,7 +2168,13 @@ public class AuthApplicationService {
         useAuthDto.setSourceSystem(authRedBlackDTO.getSourceSystem());
         useAuthDto.setAllowUnSubscribe(authRedBlackDTO.isAllowUnSubscribe());
         useAuthDto.setOrgId(authRedBlackDTO.getOrgId());
-        useAuthDto.setRedList(forceUseTargets);
+        // 管理授权补使用权限是增量操作，不能清空成员原有的使用人员或黑名单。
+        useAuthDto.setRedList(DigitalEmployeeGroupAuthorizationService.mergeTargets(
+            privilegeGrantService.findPrivilegeGrant(GrantType.FORCE_USE, authRedBlackDTO.getGrantObjType(),
+                authRedBlackDTO.getGrantObjId(), Color.RED), Collections.emptyList(), forceUseTargets));
+        useAuthDto.setBlackList(DigitalEmployeeGroupAuthorizationService.mergeTargets(
+            privilegeGrantService.findPrivilegeGrant(GrantType.FORCE_USE, authRedBlackDTO.getGrantObjType(),
+                authRedBlackDTO.getGrantObjId(), Color.BLACK), Collections.emptyList(), Collections.emptyList()));
         handleAuth(useAuthDto);
     }
 
@@ -2618,6 +2672,20 @@ public class AuthApplicationService {
         historyPrivilegeGrant.setAllowUnsubscribe(currentPrivilegeGrant.getAllowUnsubscribe());
     }
 
+    /** 组授权任一成员写入失败时，Redis 也不能残留已回滚的授权。 */
+    private void afterAuthorizationCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
+    }
+
     /**
      * 权限写入redis，现在只有使用类型会写入redis
      *
@@ -2628,7 +2696,7 @@ public class AuthApplicationService {
     private void writeRedis(String grantType, String key, String... values) {
         if (GrantType.AVAILABLE_USE.equalsIgnoreCase(grantType) || GrantType.SHARE_USE.equalsIgnoreCase(grantType)
             || GrantType.FORCE_USE.equalsIgnoreCase(grantType)) {
-            RedisUtil.addSet(key, values);
+            afterAuthorizationCommit(() -> RedisUtil.addSet(key, values));
         }
     }
 
@@ -2642,7 +2710,7 @@ public class AuthApplicationService {
     private void removeRedis(String grantType, String key, String... values) {
         if (GrantType.AVAILABLE_USE.equalsIgnoreCase(grantType) || GrantType.SHARE_USE.equalsIgnoreCase(grantType)
             || GrantType.FORCE_USE.equalsIgnoreCase(grantType)) {
-            RedisUtil.removeSet(key, values);
+            afterAuthorizationCommit(() -> RedisUtil.removeSet(key, values));
         }
     }
 
@@ -3690,6 +3758,7 @@ public class AuthApplicationService {
         vo.setCanPublishEmployee(employeeGovernance.canPublish(resource));
         if (official) {
             boolean admin = employeeGovernance.canAdministerOfficial(resource);
+            vo.setOfficialUpdateRequiresReview(!admin && employeeGovernance.canMaintainOfficial(resource));
             vo.setCanManageAuth(admin);
             vo.setCanUseAuth(admin);
             vo.setCanOffShelf(admin && Objects.equals(resource.getResourceStatus(), 2));
@@ -3707,11 +3776,24 @@ public class AuthApplicationService {
         }
     }
 
+    private boolean isSkillPublicationUnderReview(SsResource resource) {
+        return resource != null && "SKILL".equals(resource.getResourceBizType())
+            && OwnerType.ENTERPRISE.equals(resource.getOwnerType())
+            && (Objects.equals(resource.getResourceStatus(), ResourceStatus.AUDIT.getNum())
+                || Objects.equals(resource.getResourceStatus(), ResourceStatus.AUDIT_REJECT.getNum()));
+    }
+
     /** 列表与详情共享生命周期权限，保留内置资源和外部托管资源的只读限制。 */
     private void applyResourceCenterLifecyclePermissions(SsResource resource, ResourceOperationPermissionsVo vo,
                                                          Long currentUserId) {
         if (!ResourceLifecyclePolicy.supports(resource)) {
             return;
+        }
+        if (isSkillPublicationUnderReview(resource)) {
+            vo.setCanEdit(false);
+            vo.setHasManagePermission(false);
+            vo.setCanManageAuth(false);
+            vo.setCanUseAuth(false);
         }
         boolean writable = vo.isCanDelete()
             && !(StringUtils.startsWith(resource.getResourceBizType(), "KG_") && StringUtils.isNotBlank(datasetSystem));
