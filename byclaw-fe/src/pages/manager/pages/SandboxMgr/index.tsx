@@ -43,7 +43,7 @@ import { useIntl, useDispatch, useSelector } from '@umijs/max';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
-import { listTenants, type TenantItem } from '@/pages/manager/service/TenantMgr';
+import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } from '@/pages/manager/service/TenantMgr';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { buildServiceSpecPayload, isServiceSpecAutoStartEnabled, type ServiceSpecConfig } from './serviceSpecUtils';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
@@ -137,6 +137,7 @@ interface SsSandboxRecord {
   sandboxId?: string;
   chatId: string;
   status: string;
+  providerStatus?: 'RUNNING' | 'STOPPED' | 'MISSING' | 'UNKNOWN';
   autoRelease: number;
   leasePolicy?: string;
   timeoutSeconds?: number;
@@ -234,7 +235,7 @@ const SandboxMgr = () => {
   const showLaunchButton = isAdminVip(userInfo);
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState('RUNNING');
   const [ownerScope, setOwnerScope] = useState<'USER' | 'TENANT'>('TENANT');
   const [enterpriseId, setEnterpriseId] = useState<string | undefined>();
   const [tenantOptions, setTenantOptions] = useState<TenantItem[]>([]);
@@ -243,6 +244,10 @@ const SandboxMgr = () => {
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [manualLoading, setManualLoading] = useState(false);
+  const [tenantLaunchOpen, setTenantLaunchOpen] = useState(false);
+  const [tenantLaunching, setTenantLaunching] = useState(false);
+  const [tenantLaunchForm] = Form.useForm();
+  const [restartingId, setRestartingId] = useState<number | null>(null);
 
   // 沙箱配置抽屉相关状态
   const [specDrawerOpen, setSpecDrawerOpen] = useState(false);
@@ -1229,6 +1234,44 @@ const SandboxMgr = () => {
     });
   }, [dispatch, launchForm]);
 
+  const handleLaunchTenant = useCallback(async () => {
+    try {
+      const { tenantId } = await tenantLaunchForm.validateFields();
+      setTenantLaunching(true);
+      await provisionTenant(tenantId);
+      message.success(intl.formatMessage({ id: 'sandboxMgr.tenant.launchAccepted' }));
+      setTenantLaunchOpen(false);
+      loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, 'TENANT', tenantId);
+      setEnterpriseId(tenantId);
+    } catch (error) {
+      if ((error as { errorFields?: unknown[] })?.errorFields) return;
+      message.error(intl.formatMessage({ id: 'sandboxMgr.tenant.actionFailed' }));
+    } finally {
+      setTenantLaunching(false);
+    }
+  }, [intl, keyword, loadData, pageInfo, status, tenantLaunchForm]);
+
+  const handleRestartTenant = useCallback(
+    async (record: SsSandboxRecord) => {
+      if (record.enterpriseId === undefined || record.enterpriseId === null) return;
+      setRestartingId(record.id);
+      try {
+        await restartTenantSandbox({
+          enterpriseId: String(record.enterpriseId),
+          sandboxType: record.sandboxType,
+          recordId: record.id,
+        });
+        message.success(intl.formatMessage({ id: 'sandboxMgr.tenant.restartAccepted' }));
+        loadData({ ...pageInfo }, keyword, status);
+      } catch {
+        message.error(intl.formatMessage({ id: 'sandboxMgr.tenant.actionFailed' }));
+      } finally {
+        setRestartingId(null);
+      }
+    },
+    [intl, keyword, loadData, pageInfo, status]
+  );
+
   const handleLaunchSandbox = useCallback(() => {
     launchForm.validateFields().then((values) => {
       setLaunching(true);
@@ -1373,7 +1416,15 @@ const SandboxMgr = () => {
       dataIndex: 'status',
       align: 'center' as const,
       width: 110,
-      render: (value: string) => {
+      render: (value: string, record: SsSandboxRecord) => {
+        if (record.ownerScope === 'TENANT' && value === 'RUNNING') {
+          if (record.providerStatus === 'MISSING' || record.providerStatus === 'STOPPED') {
+            return <Tag color="red">{intl.formatMessage({ id: 'sandboxMgr.tenant.providerAbnormal' })}</Tag>;
+          }
+          if (record.providerStatus !== 'RUNNING') {
+            return <Tag color="orange">{intl.formatMessage({ id: 'sandboxMgr.tenant.providerUnknown' })}</Tag>;
+          }
+        }
         if (value === 'RUNNING') {
           return <Tag color="green">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Tag>;
         }
@@ -1505,6 +1556,31 @@ const SandboxMgr = () => {
       fixed: 'right' as const,
       width: 160,
       render: (_: any, record: SsSandboxRecord) => {
+        if (record.ownerScope === 'TENANT') {
+          if (!showLaunchButton || !['RUNNING', 'FAILED'].includes(record.status)) return null;
+          return (
+            <Popconfirm
+              title={intl.formatMessage({ id: 'sandboxMgr.tenant.restartConfirm' })}
+              description={intl.formatMessage({
+                id:
+                  record.sandboxType === 'tenant-opengauss'
+                    ? 'sandboxMgr.tenant.restartDbDescription'
+                    : 'sandboxMgr.tenant.restartNodeDescription',
+              })}
+              onConfirm={() => handleRestartTenant(record)}
+            >
+              <Button
+                size="small"
+                type="link"
+                icon={<ReloadOutlined />}
+                loading={restartingId === record.id}
+                disabled={restartingId !== null}
+              >
+                {intl.formatMessage({ id: 'sandboxMgr.tenant.restart' })}
+              </Button>
+            </Popconfirm>
+          );
+        }
         if (!canReleaseSandbox(record)) return null;
 
         return (
@@ -1889,6 +1965,7 @@ const SandboxMgr = () => {
     'createTime',
     'releaseTime',
     'releaseReason',
+    'action',
   ]);
   const visibleColumns =
     ownerScope === 'TENANT'
@@ -1929,7 +2006,11 @@ const SandboxMgr = () => {
             <Select value={status} onChange={handleStatusChange} style={{ width: 150 }}>
               <Option value="">{intl.formatMessage({ id: 'sandboxMgr.status.all' })}</Option>
               <Option value="STARTING">{intl.formatMessage({ id: 'sandboxMgr.status.starting' })}</Option>
-              <Option value="RUNNING">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Option>
+              <Option value="RUNNING">
+                {ownerScope === 'TENANT'
+                  ? intl.formatMessage({ id: 'sandboxMgr.tenant.recordRunning' })
+                  : intl.formatMessage({ id: 'sandboxMgr.status.running' })}
+              </Option>
               <Option value="RELEASING">{intl.formatMessage({ id: 'sandboxMgr.status.releasing' })}</Option>
               <Option value="RELEASED">{intl.formatMessage({ id: 'sandboxMgr.status.released' })}</Option>
               <Option value="FAILED">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Option>
@@ -1956,6 +2037,18 @@ const SandboxMgr = () => {
         </Col>
         <Col>
           <Space size="middle">
+            {showLaunchButton && ownerScope === 'TENANT' && (
+              <Button
+                type="primary"
+                icon={<RocketOutlined />}
+                onClick={() => {
+                  tenantLaunchForm.resetFields();
+                  setTenantLaunchOpen(true);
+                }}
+              >
+                {intl.formatMessage({ id: 'sandboxMgr.tenant.launch' })}
+              </Button>
+            )}
             {showLaunchButton && ownerScope === 'USER' && (
               <Button type="primary" icon={<RocketOutlined />} onClick={handleOpenLaunchModal}>
                 {intl.formatMessage({ id: 'sandboxMgr.launch.button' })}
@@ -1996,7 +2089,7 @@ const SandboxMgr = () => {
             showTotal: (total: number) => intl.formatMessage({ id: 'sandboxMgr.pagination.total' }, { total }),
             onChange: handlePaginationChange,
           }}
-          scroll={{ x: ownerScope === 'TENANT' ? 1440 : 2690, y: 'calc(100vh - 280px)' }}
+          scroll={{ x: ownerScope === 'TENANT' ? 1600 : 2690, y: 'calc(100vh - 280px)' }}
           loading={manualLoading}
           className={styles.table}
         />
@@ -3045,6 +3138,32 @@ const SandboxMgr = () => {
       </ModalDrawer>
 
       {/* 指定用户沙箱弹窗 */}
+      <Modal
+        title={intl.formatMessage({ id: 'sandboxMgr.tenant.launchTitle' })}
+        open={tenantLaunchOpen}
+        onCancel={() => setTenantLaunchOpen(false)}
+        onOk={handleLaunchTenant}
+        confirmLoading={tenantLaunching}
+        destroyOnClose
+      >
+        <Form form={tenantLaunchForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="tenantId"
+            label={intl.formatMessage({ id: 'sandboxMgr.tenant.select' })}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'sandboxMgr.tenant.selectRequired' }) }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder={intl.formatMessage({ id: 'sandboxMgr.tenant.select' })}
+              options={tenantOptions.map((item) => ({
+                label: `${item.enterpriseName} (${item.enterpriseId})`,
+                value: item.enterpriseId,
+              }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Modal
         title={intl.formatMessage({ id: 'sandboxMgr.launch.title' })}
         open={launchModalOpen}

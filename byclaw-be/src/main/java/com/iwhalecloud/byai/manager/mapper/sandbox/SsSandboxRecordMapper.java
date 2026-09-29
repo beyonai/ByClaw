@@ -40,6 +40,11 @@ public interface SsSandboxRecordMapper {
     SsSandboxRecord selectActiveTenantByResourceAndType(@Param("enterpriseId") Long enterpriseId,
                                                          @Param("sandboxType") String sandboxType);
 
+    SsSandboxRecord selectLatestTenantByResourceAndType(@Param("enterpriseId") Long enterpriseId,
+                                                         @Param("sandboxType") String sandboxType);
+
+    List<SsSandboxRecord> selectTenantRecords(@Param("enterpriseId") Long enterpriseId);
+
     /**
      * 根据用户编码和资源ID列表批量查询运行中的沙箱记录
      *

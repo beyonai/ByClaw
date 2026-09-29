@@ -141,11 +141,31 @@
         WHERE owner_scope = 'TENANT'
           AND enterprise_id = #{enterpriseId,jdbcType=BIGINT}
           AND resource_id = #{enterpriseId,jdbcType=BIGINT}
-          AND user_code = CONCAT('tenant-', CAST(#{enterpriseId,jdbcType=BIGINT} AS VARCHAR))
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
           AND status IN ('STARTING', 'RUNNING', 'RELEASING')
         ORDER BY create_time DESC
         LIMIT 1
+    </select>
+
+    <select id="selectLatestTenantByResourceAndType" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE owner_scope = 'TENANT'
+          AND enterprise_id = #{enterpriseId,jdbcType=BIGINT}
+          AND resource_id = #{enterpriseId,jdbcType=BIGINT}
+          AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+        ORDER BY create_time DESC, id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectTenantRecords" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE owner_scope = 'TENANT'
+          AND enterprise_id = #{enterpriseId,jdbcType=BIGINT}
+          AND resource_id = #{enterpriseId,jdbcType=BIGINT}
+          AND sandbox_type IN ('tenant-data-node', 'tenant-opengauss')
+        ORDER BY CASE WHEN sandbox_type = 'tenant-data-node' THEN 0 ELSE 1 END, create_time DESC, id DESC
     </select>
 
     <!-- 批量查询运行中的沙箱记录 -->

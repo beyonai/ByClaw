@@ -26,6 +26,7 @@ import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxBrowserNavigationService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -148,14 +149,17 @@ class SandboxControllerTest {
         SandboxService sandboxService = mock(SandboxService.class);
         SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
         ByaiSystemConfigService configService = mock(ByaiSystemConfigService.class);
+        TenantSandboxService tenantSandboxService = mock(TenantSandboxService.class);
         ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
         ReflectionTestUtils.setField(controller, "byaiSystemConfigService", configService);
+        ReflectionTestUtils.setField(controller, "tenantSandboxService", tenantSandboxService);
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(2L);
         record.setSandboxType("tenant-opengauss");
         record.setOwnerScope("TENANT");
         record.setEnterpriseId(11220513L);
+        record.setStatus("RUNNING");
         when(mapper.selectByPage(null, null, "TENANT", 11220513L, 0, 20)).thenReturn(List.of(record));
         when(mapper.countByCondition(null, null, "TENANT", 11220513L)).thenReturn(1);
         SandboxRecordView view = new SandboxRecordView();
@@ -165,6 +169,7 @@ class SandboxControllerTest {
         view.setEnterpriseId(11220513L);
         view.setEndpoint("tcp://db-host:5432");
         when(sandboxService.buildRecordView(record)).thenReturn(view);
+        when(tenantSandboxService.providerStatus(record)).thenReturn("MISSING");
 
         ResponseUtil response = controller.listRecords(Map.of("ownerScope", "TENANT", "enterpriseId", "11220513"));
 
@@ -175,6 +180,7 @@ class SandboxControllerTest {
         List<SandboxRecordView> list = (List<SandboxRecordView>) data.get("list");
         assertThat(list).hasSize(1);
         assertThat(list.get(0).getEndpoint()).isEqualTo("tcp://db-host:5432");
+        assertThat(list.get(0).getProviderStatus()).isEqualTo("MISSING");
         verify(mapper).countByCondition(null, null, "TENANT", 11220513L);
     }
 

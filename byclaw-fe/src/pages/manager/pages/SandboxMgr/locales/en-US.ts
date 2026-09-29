@@ -250,4 +250,20 @@ export default {
   'sandboxMgr.launch.clearPreferred': 'Clear',
   'sandboxMgr.launch.preferredCleared': 'Cached service spec cleared',
   'sandboxMgr.launch.preferredClearFailed': 'Failed to clear cached spec',
+  'sandboxMgr.tenant.launch': 'Start tenant sandbox',
+  'sandboxMgr.tenant.launchTitle': 'Start tenant sandbox',
+  'sandboxMgr.tenant.select': 'Select tenant',
+  'sandboxMgr.tenant.selectRequired': 'Select a tenant',
+  'sandboxMgr.tenant.launchAccepted': 'Start requested. Refresh to check progress.',
+  'sandboxMgr.tenant.restart': 'Restart',
+  'sandboxMgr.tenant.restartConfirm': 'Release and recreate this sandbox?',
+  'sandboxMgr.tenant.restartDbDescription':
+    'The data node will also be rebuilt. The tenant database volume is retained.',
+  'sandboxMgr.tenant.restartNodeDescription':
+    'The data node will be rebuilt from the configured image; the database stays running.',
+  'sandboxMgr.tenant.restartAccepted': 'Restart requested. Refresh to check progress.',
+  'sandboxMgr.tenant.actionFailed': 'Operation failed. Please try again.',
+  'sandboxMgr.tenant.recordRunning': 'Recorded as running',
+  'sandboxMgr.tenant.providerAbnormal': 'Sandbox unhealthy',
+  'sandboxMgr.tenant.providerUnknown': 'Status unverified',
 };

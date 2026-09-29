@@ -38,6 +38,7 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxBrowserNavigationServ
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxResizeService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -66,6 +67,9 @@ public class SandboxController {
 
     @Autowired
     private SandboxService sandboxService;
+
+    @Autowired
+    private TenantSandboxService tenantSandboxService;
 
     @Autowired
     private SandboxBrowserNavigationService sandboxBrowserNavigationService;
@@ -435,7 +439,14 @@ public class SandboxController {
         int offset = (pageIndex - 1) * pageSize;
         List<SandboxRecordView> list = sandboxRecordMapper.selectByPage(keyword, status, ownerScope, enterpriseId,
                 offset, pageSize).stream()
-            .map(sandboxService::buildRecordView)
+            .map(record -> {
+                SandboxRecordView view = sandboxService.buildRecordView(record);
+                if (view != null && "TENANT".equals(record.getOwnerScope())
+                    && ("RUNNING".equals(record.getStatus()) || "FAILED".equals(record.getStatus()))) {
+                    view.setProviderStatus(tenantSandboxService.providerStatus(record));
+                }
+                return view;
+            })
             .collect(Collectors.toList());
         // 动态端口的 openclaw 控制台外网不可达；配置了 WEB_BASE_URL 时改写为经网关整页代理的对外地址，
         // 未配置则保持原始 endpoint（原逻辑）。
