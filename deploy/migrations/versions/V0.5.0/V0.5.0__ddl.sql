@@ -154,6 +154,18 @@ SELECT byai._v041_add_column_if_missing(
 COMMENT ON COLUMN byai.byai_message.recalled_at IS '撤回时间；空值表示未撤回';
 COMMENT ON COLUMN byai.byai_message.recalled_by IS '撤回操作人用户ID，用户名从Redis共享用户信息读取';
 
+-- 当前轮次绑定只由新请求写入，不回填历史任务的运行状态。
+SELECT byai._v041_add_column_if_missing(
+    'byai', 'byai_group_chat_task', 'current_turn_id', 'BIGINT'
+);
+SELECT byai._v041_add_column_if_missing(
+    'byai', 'byai_group_chat_task', 'current_turn_trace_id', 'VARCHAR(255)'
+);
+COMMENT ON COLUMN byai.byai_group_chat_task.current_turn_id IS '当前轮次启动占位标识，用于隔离迟到的启动失败回调';
+COMMENT ON COLUMN byai.byai_group_chat_task.current_turn_trace_id IS '当前轮次实际trace，用于完成回调与落库结果补偿';
+CREATE INDEX IF NOT EXISTS idx_group_chat_task_running_turn
+    ON byai.byai_group_chat_task (status, turn_status, task_session_id);
+
 DROP FUNCTION IF EXISTS byai._v041_add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 CREATE TABLE IF NOT EXISTS byai.byai_group_chat_mention (

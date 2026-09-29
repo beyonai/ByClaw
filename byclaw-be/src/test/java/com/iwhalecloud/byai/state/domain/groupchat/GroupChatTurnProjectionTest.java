@@ -43,7 +43,6 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
-import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidateSessionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
@@ -73,7 +72,7 @@ class GroupChatTurnProjectionTest {
     private final GroupChatExecutionEventHandler handler = new GroupChatExecutionEventHandler(messages, publisher,
         sequence, mock(ByaiGroupChatExecutionMapper.class), coordinator,
         mock(SsResourceService.class), users, reader, tasks, mock(GroupChatCandidateSessionService.class), parser,
-        mock(GroupChatMentionService.class), mock(ChatRuntimeStateService.class));
+        mock(GroupChatMentionService.class));
     private ByaiGroupChatTurn turn;
     private ChatProcessContext context;
     private ByaiMessage answer;
@@ -198,7 +197,7 @@ class GroupChatTurnProjectionTest {
         turn.setDisposition("TASK");
         when(parser.parse(1L, 8L, "reply")).thenReturn(new GroupChatAgentMention("reply", List.of()));
         handler.afterPersisted(context);
-        verify(tasks).updateTurnStatus(60L, "WAITING_USER");
+        verify(tasks).completeTurn(60L, context.traceId, false);
         verify(turns).markSucceeded(eq(10L), eq(30L), any());
         verify(messages, never()).insert(any());
         verifyNoInteractions(publisher);

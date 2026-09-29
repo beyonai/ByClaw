@@ -76,6 +76,7 @@ import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.SYSTEM_RESPONSE;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.USER_INPUT;
 import lombok.extern.slf4j.Slf4j;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskChatGuard;
 
 @Slf4j
 @Service
@@ -83,6 +84,9 @@ public class ScriptService extends AbstractChatProcess {
 
     @Autowired
     private ObjectProvider<ChatTurnPersistenceObserver> turnPersistenceObservers;
+
+    @Autowired
+    private ObjectProvider<GroupChatTaskChatGuard> groupChatTaskGuardProvider;
 
     private static final Logger logger = LoggerFactory.getLogger(ScriptService.class);
 
@@ -230,6 +234,12 @@ public class ScriptService extends AbstractChatProcess {
         }
         if (!ctx.continueRunningTrace) {
             ctx.traceId = getTraceId(ctx.userMessageId, ctx.modelAnswerMessageId);
+        }
+
+        // 先绑定实际 trace 再下发，避免极快的完成回调早于任务轮次落库。
+        if (ctx.assistantChatDto.getGroupTaskTurnId() != null) {
+            groupChatTaskGuardProvider.getObject().bindTurn(ctx.sessionId,
+                ctx.assistantChatDto.getGroupTaskTurnId(), ctx.traceId);
         }
 
         if (ctx.existingUserMessage != null) {
