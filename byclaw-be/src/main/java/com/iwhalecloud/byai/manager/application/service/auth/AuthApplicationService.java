@@ -3758,6 +3758,7 @@ public class AuthApplicationService {
         vo.setCanPublishEmployee(employeeGovernance.canPublish(resource));
         if (official) {
             boolean admin = employeeGovernance.canAdministerOfficial(resource);
+            vo.setOfficialUpdateRequiresReview(!admin && employeeGovernance.canMaintainOfficial(resource));
             vo.setCanManageAuth(admin);
             vo.setCanUseAuth(admin);
             vo.setCanOffShelf(admin && Objects.equals(resource.getResourceStatus(), 2));

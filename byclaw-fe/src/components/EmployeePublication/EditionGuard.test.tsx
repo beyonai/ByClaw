@@ -42,7 +42,7 @@ it('waits for an explicit enabled response before mounting the publication edito
 });
 
 it.each([{ enabled: false }, {}, null])(
-  'blocks disabled or unknown editions even through an old publication link',
+  'blocks unavailable or unknown capabilities even through an old publication link',
   async (capabilities) => {
     (getPublicationCapabilities as jest.Mock).mockResolvedValue(capabilities);
     render(
@@ -50,7 +50,7 @@ it.each([{ enabled: false }, {}, null])(
         <Editor />
       </PublicationEditionGuard>
     );
-    await screen.findByText('当前版本不支持发布到官方推荐');
+    await screen.findByText('当前暂不可使用发布功能');
     expect(mockLoadEditor).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '返回员工列表' }));
     expect(mockNavigate).toHaveBeenCalledWith('/myEmployees');

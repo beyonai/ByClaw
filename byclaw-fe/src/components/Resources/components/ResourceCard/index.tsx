@@ -789,40 +789,36 @@ const RenderContent = (props: ResourceCardProps) => {
     }
   }, [resource, isWorkspaceSkillResource, workspaceActions.resourceizeSkill, onEnterpriseSkillDetail, intl]);
 
-  const openPublication = useCallback(
-    async (editOfficial = false) => {
-      if (publishToEnterpriseLock.current) return;
-      publishToEnterpriseLock.current = true;
-      setOpeningPublication(true);
-      const messageKey = `employee-publication-open-${resource.resourceId || resource.id || resource.agentId}`;
-      message.loading({ key: messageKey, content: '正在准备发布申请，请稍候…', duration: 0 });
-      const timer = setTimeout(() => {
-        message.loading({
-          key: messageKey,
-          content: '仍在准备发布配置，关联资源较多时可能需要更久，请勿重复点击。',
-          duration: 0,
-        });
-      }, 8000);
-      const clearFeedback = () => {
-        clearTimeout(timer);
-        message.destroy(messageKey);
-      };
-      publicationFeedbackCleanup.current = clearFeedback;
-      try {
-        const resourceId = String(resource.resourceId || resource.id || resource.agentId);
-        if (editOfficial) await openEmployeePublication(resourceId, 'editOfficial');
-        else await openEmployeePublication(resourceId);
-      } catch (error: any) {
-        message.error(publicationErrorMessage(error, '无法发起发布申请'));
-      } finally {
-        clearFeedback();
-        publicationFeedbackCleanup.current = undefined;
-        publishToEnterpriseLock.current = false;
-        setOpeningPublication(false);
-      }
-    },
-    [resource.resourceId, resource.id, resource.agentId]
-  );
+  const openPublication = useCallback(async () => {
+    if (publishToEnterpriseLock.current) return;
+    publishToEnterpriseLock.current = true;
+    setOpeningPublication(true);
+    const messageKey = `employee-publication-open-${resource.resourceId || resource.id || resource.agentId}`;
+    message.loading({ key: messageKey, content: '正在准备发布申请，请稍候…', duration: 0 });
+    const timer = setTimeout(() => {
+      message.loading({
+        key: messageKey,
+        content: '仍在准备发布配置，关联资源较多时可能需要更久，请勿重复点击。',
+        duration: 0,
+      });
+    }, 8000);
+    const clearFeedback = () => {
+      clearTimeout(timer);
+      message.destroy(messageKey);
+    };
+    publicationFeedbackCleanup.current = clearFeedback;
+    try {
+      const resourceId = String(resource.resourceId || resource.id || resource.agentId);
+      await openEmployeePublication(resourceId);
+    } catch (error: any) {
+      message.error(publicationErrorMessage(error, '无法发起发布申请'));
+    } finally {
+      clearFeedback();
+      publicationFeedbackCleanup.current = undefined;
+      publishToEnterpriseLock.current = false;
+      setOpeningPublication(false);
+    }
+  }, [resource.resourceId, resource.id, resource.agentId]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const {
@@ -889,18 +885,8 @@ const RenderContent = (props: ResourceCardProps) => {
     if (canEdit && !isInnerSkill) {
       items.push({
         key: 'edit',
-        disabled: !!resource.officialPublication && openingPublication,
-        label: (
-          <BuildMenuLabel
-            icon="icon-a-Editorbianji"
-            text={intl.formatMessage({ id: 'common.editInfo' })}
-            loading={!!resource.officialPublication && openingPublication}
-          />
-        ),
-        onClick: () => {
-          if (resource.officialPublication) openPublication(true);
-          else onEdit?.();
-        },
+        label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'common.editInfo' })} />,
+        onClick: () => onEdit?.(),
       });
     }
 

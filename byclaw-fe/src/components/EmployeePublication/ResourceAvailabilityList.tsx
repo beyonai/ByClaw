@@ -15,6 +15,9 @@ const resourceTypeLabels: Record<string, string> = {
   KG_CLOUD: '知识',
 };
 
+export const resourceIsOmitted = (row: PublicationDependency) =>
+  ['OMIT_RESOURCE', 'UNAVAILABLE_RESOURCE'].includes(row.action);
+
 export default function ResourceAvailabilityList({ dependencies }: { dependencies: PublicationDependency[] }) {
   const { token } = theme.useToken();
   return (
@@ -33,10 +36,15 @@ export default function ResourceAvailabilityList({ dependencies }: { dependencie
           <Space wrap size={8} style={{ marginBottom: 8, maxWidth: '100%' }}>
             <Tag style={{ marginInlineEnd: 0 }}>{resourceTypeLabels[row.resourceType || ''] || '资源'}</Tag>
             <Typography.Text strong>{row.name}</Typography.Text>
+            <Tag color={resourceIsOmitted(row) ? 'orange' : row.action === 'COPY_SKILL' ? 'blue' : undefined}>
+              {resourceIsOmitted(row) ? '不会带入' : row.action === 'COPY_SKILL' ? '生成企业技能副本' : '保留关联'}
+            </Tag>
           </Space>
           <div style={{ marginBottom: 6 }}>
             <Typography.Text type="secondary">谁可以使用：</Typography.Text>
-            <span>{row.availabilityScope || '尚未确认，沿用原授权范围'}</span>
+            <span>
+              {resourceIsOmitted(row) ? '新企业员工中不可用' : row.availabilityScope || '尚未确认，沿用原授权范围'}
+            </span>
           </div>
           <div style={{ marginBottom: 6 }}>
             <Typography.Text type="secondary">原因：</Typography.Text>
@@ -44,7 +52,11 @@ export default function ResourceAvailabilityList({ dependencies }: { dependencie
           </div>
           <div>
             <Typography.Text type="secondary">发布后：</Typography.Text>
-            <span>{row.impact || '未获授权或资源不可用时，用户无法使用此资源；不影响员工发布'}</span>
+            <span>
+              {resourceIsOmitted(row)
+                ? '此资源不会出现在企业员工中，依赖它的能力不可用；原个人员工保持不变。'
+                : row.impact || '按原有资源权限使用，实际可用性取决于资源状态。'}
+            </span>
           </div>
         </li>
       ))}

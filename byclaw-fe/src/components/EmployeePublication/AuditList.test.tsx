@@ -91,7 +91,7 @@ describe('publication approval in the audit list', () => {
     expect(dialog.getByText('原有授权用户')).toBeInTheDocument();
     expect(dialog.getByText('无法生成技能副本')).toBeInTheDocument();
     expect(dialog.getByText('保留原技能，未获授权的用户无法使用')).toBeInTheDocument();
-    expect(dialog.getByRole('button', { name: '继续发布' })).toBeEnabled();
+    expect(dialog.getByRole('button', { name: '确认并继续发布' })).toBeEnabled();
     fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/digitalEmployeesCreate?publicationId=100'));
     expect(publicationAction).not.toHaveBeenCalled();
@@ -115,7 +115,7 @@ describe('publication approval in the audit list', () => {
     });
     render(<PublicationAuditList />);
     fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
-    fireEvent.click(await screen.findByRole('button', { name: '继续发布' }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
     await waitFor(() => expect(warning).toHaveBeenCalledWith('部分关联资源可能不可用，请进入申请详情查看可用性提醒'));
     expect(message.error).not.toHaveBeenCalled();
   });
@@ -127,7 +127,7 @@ describe('publication approval in the audit list', () => {
     fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
     expect(publicationAction).not.toHaveBeenCalled();
     (listPublications as jest.Mock).mockResolvedValue({ list: [published], total: 1 });
-    fireEvent.click(await screen.findByRole('button', { name: '继续发布' }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
     await waitFor(() => expect(publicationAction).toHaveBeenCalledWith('approve', pending));
     await screen.findByText('已发布');
     expect(screen.queryByRole('button', { name: '通过并发布' })).not.toBeInTheDocument();
@@ -162,7 +162,7 @@ describe('publication approval in the audit list', () => {
     render(<PublicationAuditList />);
     fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
     (listPublications as jest.Mock).mockResolvedValue({ list: [failed], total: 1 });
-    const confirm = await screen.findByRole('button', { name: '继续发布' });
+    const confirm = await screen.findByRole('button', { name: '确认并继续发布' });
     await act(async () => {
       fireEvent.click(confirm);
     });
@@ -176,7 +176,7 @@ describe('publication approval in the audit list', () => {
     (publicationAction as jest.Mock).mockRejectedValue(new Error('申请已被修改，请刷新后再操作'));
     render(<PublicationAuditList />);
     fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
-    fireEvent.click(await screen.findByRole('button', { name: '继续发布' }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
     await waitFor(() => expect(listPublications).toHaveBeenCalledTimes(2));
     expect(message.error).toHaveBeenCalledWith('申请已被修改，请刷新后再操作');
     expect(message.success).not.toHaveBeenCalled();
