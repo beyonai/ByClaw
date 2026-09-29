@@ -53,11 +53,11 @@ public class GroupChatReadService {
     }
 
     @Transactional(readOnly = true)
-    public PageInfo<GroupChatListItemResponse> listMyGroups(Integer pageNum, Integer pageSize) {
+    public PageInfo<GroupChatListItemResponse> listMyGroups(Integer pageNum, Integer pageSize, Long enterpriseId) {
         int normalizedPageNum = pageNum == null || pageNum < 1 ? 1 : pageNum;
         int normalizedPageSize = pageSize == null || pageSize < 1 ? 20 : Math.min(pageSize, 100);
         Page<GroupChatListItemResponse> page = PageHelper.startPage(normalizedPageNum, normalizedPageSize);
-        List<GroupChatListItemResponse> groups = mentionMapper.selectMyGroups(CurrentUserHolder.getCurrentUserId());
+        List<GroupChatListItemResponse> groups = mentionMapper.selectMyGroups(CurrentUserHolder.getCurrentUserId(), enterpriseId);
         List<Long> sessionIds = groups.stream().map(GroupChatListItemResponse::getSessionId).toList();
         Map<Long, List<GroupChatMemberSummary>> membersBySession = sessionIds.isEmpty()
             ? Collections.emptyMap()

@@ -132,6 +132,9 @@
         WHERE member.mem_obj_type = 'USER'
           AND member.mem_obj_id = #{userId}
           AND session.session_type = 'hs_as'
+          <if test="enterpriseId != null">
+              AND session.enterprise_id = #{enterpriseId}
+          </if>
           AND (session.state IS NULL OR session.state != 'GROUP_DISSOLVED'
                OR (member.user_role != 'OWNER' AND NOT EXISTS (
                    SELECT 1 FROM byai_session_ext acknowledgment

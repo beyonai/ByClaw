@@ -90,7 +90,7 @@ class GroupChatReadServiceTest {
             {"resourceList":[{"resourceType":"DIG_EMPLOYEE","resourceId":"20010807","resourceName":"官网助手"}]}
             """);
         String storedMetadata = item.getLatestMessageMetadata();
-        when(mentionMapper.selectMyGroups(30L)).thenAnswer(invocation -> {
+        when(mentionMapper.selectMyGroups(30L, 100L)).thenAnswer(invocation -> {
             Page<GroupChatListItemResponse> page = PageHelper.getLocalPage();
             page.setTotal(21L);
             page.add(item);
@@ -104,7 +104,7 @@ class GroupChatReadServiceTest {
         member.setAvatar("avatar.png");
         when(memberMapper.findGroupMemberSummaries(List.of(10L), 9)).thenReturn(List.of(member));
         try {
-            PageInfo<GroupChatListItemResponse> result = service.listMyGroups(1, 20);
+            PageInfo<GroupChatListItemResponse> result = service.listMyGroups(1, 20, 100L);
             assertThat(result.getPageNum()).isEqualTo(1);
             assertThat(result.getPageSize()).isEqualTo(20);
             assertThat(result.getTotal()).isEqualTo(21L);
@@ -130,14 +130,14 @@ class GroupChatReadServiceTest {
         item.setLatestMessageMetadata("SECRET");
         item.setLatestMessageRecalledAt(new Date(200));
         item.setLatestMessageRecalledBy(30L);
-        when(mentionMapper.selectMyGroups(30L)).thenAnswer(invocation -> {
+        when(mentionMapper.selectMyGroups(30L, 100L)).thenAnswer(invocation -> {
             Page<GroupChatListItemResponse> page = PageHelper.getLocalPage();
             page.add(item);
             return page;
         });
         when(memberMapper.findGroupMemberSummaries(List.of(10L), 9)).thenReturn(List.of());
         try {
-            var result = service.listMyGroups(1, 20).getList().get(0);
+            var result = service.listMyGroups(1, 20, 100L).getList().get(0);
             assertThat(result.isLatestMessageRecalled()).isTrue();
             assertThat(result.getLatestMessageId()).isEqualTo(20L);
             assertThat(result.getLatestMessageTime()).isEqualTo(new Date(100));

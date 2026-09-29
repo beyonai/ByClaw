@@ -96,8 +96,9 @@ public class GroupChatController {
     @GetMapping
     public ResponseUtil<PageInfo<GroupChatListItemResponse>> list(
         @RequestParam(defaultValue = "1") Integer pageNum,
-        @RequestParam(defaultValue = "20") Integer pageSize) {
-        return ResponseUtil.successResponse(readService.listMyGroups(pageNum, pageSize));
+        @RequestParam(defaultValue = "20") Integer pageSize,
+        @RequestParam(required = false) Long enterpriseId) {
+        return ResponseUtil.successResponse(readService.listMyGroups(pageNum, pageSize, enterpriseId));
     }
 
     /** 只把前端已实际展示的群消息推进为已读位置。 */

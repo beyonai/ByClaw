@@ -13,7 +13,8 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse
 public interface ByaiGroupChatMentionMapper {
     int insertIfAbsent(ByaiGroupChatMention mention);
 
-    List<GroupChatListItemResponse> selectMyGroups(@Param("userId") Long userId);
+    List<GroupChatListItemResponse> selectMyGroups(@Param("userId") Long userId,
+        @Param("enterpriseId") Long enterpriseId);
 
     GroupChatListItemResponse selectMentionState(@Param("sessionId") Long sessionId,
         @Param("userId") Long userId);
