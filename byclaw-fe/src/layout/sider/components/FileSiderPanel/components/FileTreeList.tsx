@@ -202,6 +202,8 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
               onDoubleClick={(_, node) => onNodeDoubleClick(node as unknown as FileTreeItem)}
               titleRender={(item) => {
                 const treeItem = item as FileTreeItem;
+                // 只调用一次：既作为行尾额外节点的渲染结果，也作为「本行是否需要预留右侧空间」的判据。
+                const nodeExtra = getNodeExtra?.(treeItem);
                 const hasItemMeta =
                   showItemMeta &&
                   Boolean(
@@ -223,6 +225,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                   <span
                     className={[
                       styles.treeTitleContent,
+                      nodeExtra ? styles.treeTitleContentWithExtra : '',
                       directoryExpanded ? styles.treeTitleContentExpanded : '',
                       directoryCurrent ? styles.treeTitleContentCurrent : '',
                     ]
@@ -273,7 +276,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                         </span>
                       </Dropdown>
                     ) : null}
-                    {getNodeExtra?.(treeItem)}
+                    {nodeExtra}
                   </span>
                 );
               }}
