@@ -442,8 +442,6 @@ COMMENT ON COLUMN byai.byai_project.enterprise_id IS '项目所属企业租户ID
 COMMENT ON COLUMN byai.byai_project.group_create_request_id IS '群聊创建幂等请求ID';
 COMMENT ON COLUMN byai.byai_project.group_create_status IS '跨平台库和租户库建群状态';
 
-update byai_project set enterprise_id = (select min(enterprise_id) from po_enterprise_info) where enterprise_id is null;
-
 -- 既有企业 ID 在正式迁移前先检查空值和重复值。
 ALTER TABLE byai.po_enterprise_info ALTER COLUMN enterprise_id SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_po_enterprise_info_enterprise_id
@@ -647,6 +645,5 @@ BEGIN
     END IF;
 END;
 $$;
-
 
 

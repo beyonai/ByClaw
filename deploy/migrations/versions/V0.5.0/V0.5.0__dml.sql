@@ -382,6 +382,11 @@ WHERE connector_id IN (
 
 DELETE FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi';
 
+-- 存量项目补齐默认企业归属。
+UPDATE byai.byai_project
+SET enterprise_id = (SELECT MIN(enterprise_id) FROM byai.po_enterprise_info)
+WHERE enterprise_id IS NULL;
+
 -- PLATFORM __dml.sql / 套餐目录：仅删除本方案的固定种子 ID
 DELETE FROM byai.tenant_package_spec WHERE id IN (1, 2, 3);
 INSERT INTO byai.tenant_package_spec
