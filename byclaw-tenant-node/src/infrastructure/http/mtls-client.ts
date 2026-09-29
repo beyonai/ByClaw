@@ -1,32 +1,43 @@
-import { request, Agent } from "node:https";
+import { request as httpRequest, Agent as HttpAgent } from "node:http";
+import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
 import { readFile } from "node:fs/promises";
 import type { SecureContextOptions } from "node:tls";
 import { DomainError } from "../../domain/errors.js";
 import type { Config } from "../../config.js";
 
-export async function loadTls(config: Config): Promise<SecureContextOptions> {
+export async function loadTls(config: Config): Promise<SecureContextOptions | undefined> {
+  if (config.transport === "http") return undefined;
+  if (!config.tls) throw new Error("TLS configuration is missing");
   const [cert, key, ca] = await Promise.all(
     [config.tls.certFile, config.tls.keyFile, config.tls.caFile].map((file) => readFile(file)),
   );
   return { cert, key, ca, minVersion: "TLSv1.2" };
 }
 export class MtlsClient {
-  private readonly agent: Agent;
-  constructor(tls: SecureContextOptions) {
-    this.agent = new Agent({ ...tls, rejectUnauthorized: true, keepAlive: true });
+  private readonly agent: HttpAgent | HttpsAgent;
+  constructor(
+    tls: SecureContextOptions | undefined,
+    private readonly token?: string,
+  ) {
+    this.agent = tls
+      ? new HttpsAgent({ ...tls, rejectUnauthorized: true, keepAlive: true })
+      : new HttpAgent({ keepAlive: true });
   }
   async json<T>(url: string, method = "GET", body?: unknown): Promise<T> {
     const bytes = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
     return new Promise<T>((resolve, reject) => {
-      const req = request(
+      const req = (url.startsWith("https:") ? httpsRequest : httpRequest)(
         url,
         {
           agent: this.agent,
           method,
           timeout: 5000,
-          headers: bytes
-            ? { "content-type": "application/json", "content-length": bytes.length }
-            : {},
+          headers: {
+            ...(bytes
+              ? { "content-type": "application/json", "content-length": bytes.length }
+              : {}),
+            ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+          },
         },
         (res) => {
           const chunks: Buffer[] = [];

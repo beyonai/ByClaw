@@ -34,7 +34,7 @@ DB_SANDBOX_RECORD_ID DB_CREDENTIAL_VERSION PROVISION_STATE
 
 库名严格为 `byclaw_t_<E>`，账号严格为 `bc_t_<E>_admin`。实例、代际、凭证版本、fencingToken 和 leaseUntil 都校验。支持 `PROVISION_STATE.status=PROVISIONING` 配合 `step=REDIS_PUBLISHED/NODE_CREATING/ADMIN_ONLY/SCHEMA_INIT/VERIFYING`，也支持对应的阶段状态；停用/降级不开放写入。版本下限以原子文件持久化，防止重启后的配置回退。
 
-密码必须为 SM4-GCM JSON 信封 `{alg,keyId,nonce,ciphertext,tag}`，后三项使用规范带填充 Base64，nonce 12 字节、tag 16 字节。Node 通过租户工作负载 mTLS 身份调用 KMS，AAD 为 UTF-8 `byclaw:tenant-db:v1:<E>:<db_name>`；主密钥不进入进程配置。此处 KMS HTTP **适配器约定**为：
+密码必须为 SM4-GCM JSON 信封 `{alg,keyId,nonce,ciphertext,tag}`，后三项使用规范带填充 Base64，nonce 12 字节、tag 16 字节。Node 通过配置的内部认证方式调用 KMS，AAD 为 UTF-8 `byclaw:tenant-db:v1:<E>:<db_name>`；主密钥不进入进程配置。此处 KMS HTTP **适配器约定**为：
 
 ```json
 {
@@ -55,7 +55,7 @@ DB_SANDBOX_RECORD_ID DB_CREDENTIAL_VERSION PROVISION_STATE
 
 新池先核验实际库、账号、schema 权限和只读状态，再替换旧池。每个业务事务在获取共享 Schema 锁后及 COMMIT 前重新核验 Redis 权威配置，捕获的池已更换则拒绝提交。Redis/KMS/DB 故障保持未就绪。
 
-HTTPS 验证客户端证书链，并将证书 CN 固定为 `BE_CLIENT_IDENTITY`。除 live 外要求 `X-Enterprise-Id`、`X-Tenant-Generation`；业务请求还要求真实用户 `X-Actor-User-Id`。这些内部接口不得直接对浏览器开放。
+默认 HTTPS 验证客户端证书链，并将证书 CN 固定为 `BE_CLIENT_IDENTITY`。203 本地联调可显式设置 `INTERNAL_TRANSPORT=http`，此时 BE、KMS、Node 走 HTTP，并用 `INTERNAL_API_TOKEN` 认证：直连可使用 Bearer，经过 OpenSandbox HTTP 代理时使用 `X-Byclaw-Internal-Token`，因为代理不会转发 `Authorization`；`REDIS_TLS=false` 允许连接本地 Redis。除 live 外仍要求 `X-Enterprise-Id`、`X-Tenant-Generation`；业务请求还要求真实用户 `X-Actor-User-Id`。这些内部接口不得直接对浏览器开放。
 
 - `/internal/v1/health/live`：进程存活，无需客户端证书。
 - `/internal/v1/health/db`：受保护；返回最近一次运行时身份/可写探测的状态。
@@ -69,7 +69,7 @@ HTTPS 验证客户端证书链，并将证书 CN 固定为 `BE_CLIENT_IDENTITY`�
 
 | API                                                   | 含义                                                                              |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `POST /internal/v1/schema-tasks`                      | mTLS multipart：`task` 为 application/json 字段，`bundle` 为 application/zip 文件 |
+| `POST /internal/v1/schema-tasks`                      | 内部认证 multipart：`task` 为 application/json 字段，`bundle` 为 application/zip 文件 |
 | `GET /internal/v1/schema-tasks/{auditId}`             | 返回原/目标/实测版本、阶段、脱敏错误和清理状态                                    |
 | `GET /internal/v1/schema`                             | 最近对账的本地版本、BE 审计版本和 verified 状态                                   |
 | `POST /internal/v1/schema-tasks/{auditId}/report-ack` | BE 轮询落库后的确认：`{attemptNo,status}`                                         |
@@ -101,10 +101,12 @@ objects 是本版允许操作的对象清单（table/index/sequence）；catalog
 
 Schema 独占数据库锁覆盖整条链；每版独立事务，DDL 与 `COMMENT ON SCHEMA byai` 版本标记同时提交。新 INIT 检查 byai/public 及租户账号自有 schema 无对象；UPDATE 在锁内检查 fromVersion、BE 审计与指纹。提交后用新连接核验结构与标记；COMMIT 结果不明或核验失败进入 RECONCILING，恢复先查标记和指纹，避免重复 SQL。
 
-Node 使用 mTLS 调用：
+Node 使用配置的内部认证方式调用：
 
 - `GET <BE_INTERNAL_URL>/internal/v1/tenants/<E>/schema/current`：当前行 `{auditId,observedVersion,isCurrent:true}`；首次 INIT `{currentVersion:null}`。
 - `POST <BE_INTERNAL_URL>/internal/v1/tenantSchemaTaskReports`：回报扁平 task/result 字段、steps、脱敏错误码/SQLSTATE，BE 按 auditId+attemptNo+generation 幂等落库，成功返回 204。
+
+`V0.5.0` 的 baseline SQL 保存在 `deploy/migrations/versions/V0.5.0/tenant/`；供 BE 上传的 ZIP 与 manifest 放在本模块 `baseline/`，避免生成制品进入版本迁移目录。BE 从 `BYCLAW_TENANT_BASELINE_BUNDLE` 指向的 ZIP 读取制品。
 
 VERIFIED 立即删除 ZIP，只保留结果；报告失败仍持续重试。FAILED/NEEDS_ATTENTION 的 ZIP 在 BE 报告确认或 report-ack 后清理；RECONCILING 未查清前保留。删除失败记 PENDING_RETRY，独立重试不重跑 DDL。ZIP 在内存解析，不生成解压 SQL 文件。
 

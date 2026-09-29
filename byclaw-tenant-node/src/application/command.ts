@@ -20,6 +20,7 @@ export const operations = [
   "SAVE_PENDING_PUBLICATION",
   "DELETE_PENDING_PUBLICATION",
   "RECALL_MESSAGE",
+  "SEND_GROUP_MESSAGE",
 ] as const;
 export type Operation = (typeof operations)[number];
 export interface TenantCommand extends TenantIdentity {

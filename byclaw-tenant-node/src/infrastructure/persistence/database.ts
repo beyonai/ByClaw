@@ -31,8 +31,12 @@ export class Database implements TenantDatabase {
   }
   async verifyIdentity(): Promise<void> {
     const [row] = await this.query(`SELECT current_database() AS database, current_user AS username,
-      has_schema_privilege(current_user, 'byai', 'USAGE') AS readable,
-      has_schema_privilege(current_user, 'byai', 'CREATE') AS writable,
+      CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'byai')
+        THEN has_schema_privilege(current_user, 'byai', 'USAGE')
+        ELSE has_database_privilege(current_user, current_database(), 'CREATE') END AS readable,
+      CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'byai')
+        THEN has_schema_privilege(current_user, 'byai', 'CREATE')
+        ELSE has_database_privilege(current_user, current_database(), 'CREATE') END AS writable,
       current_setting('transaction_read_only') AS read_only`);
     if (
       row?.database !== this.snapshot.database ||

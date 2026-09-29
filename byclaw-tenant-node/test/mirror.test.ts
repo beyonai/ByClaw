@@ -3,7 +3,24 @@ import { reduceAnswer } from "../src/domain/mirror.js";
 import { MirrorService } from "../src/application/mirror-service.js";
 import type { MirrorTransaction } from "../src/application/mirror-ports.js";
 import { answer, event } from "./fixtures.js";
+import { answerFields } from "../src/infrastructure/persistence/message-fields.js";
 describe("answer state machine", () => {
+  it("keeps rich history fields for the stored assistant reply", () => {
+    expect(
+      answerFields(
+        {
+          creatorName: "陈舵主的超级助手",
+          messageStruct: [{ contentType: 3015, choices: [] }],
+          inferLog: [{ contentType: 1001, choices: [] }],
+        },
+        true,
+      ),
+    ).toMatchObject({
+      creator_name: "陈舵主的超级助手",
+      message_struct: JSON.stringify([{ contentType: 3015, choices: [] }]),
+      infer_log: JSON.stringify([{ contentType: 1001, choices: [] }]),
+    });
+  });
   it("appends once and ignores an identical retry", () => {
     const e = event(),
       next = reduceAnswer(answer(), e)!;

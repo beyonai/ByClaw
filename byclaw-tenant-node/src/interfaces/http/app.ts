@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import type { SecureContextOptions } from "node:tls";
 import type { Config } from "../../config.js";
 import type { CommandService } from "../../application/command-service.js";
+import type { MirrorService } from "../../application/mirror-service.js";
 import type { HistoryService } from "../../application/history.js";
 import type { SessionQueries } from "../../application/session-queries.js";
 import type { SchemaTaskService } from "../../application/schema/task-service.js";
@@ -12,10 +13,12 @@ import { authenticate, assertHeaders } from "./auth.js";
 import { historyRoutes } from "./data-routes.js";
 import { commandRoutes } from "./command-routes.js";
 import { sessionRoutes } from "./session-routes.js";
+import { mirrorRoutes } from "./mirror-routes.js";
 import { schemaRoutes } from "./schema-routes.js";
 
 export interface HttpServices {
   commands: CommandService;
+  mirror?: MirrorService;
   history: HistoryService;
   sessions: SessionQueries;
   schema: SchemaTaskService;
@@ -28,12 +31,12 @@ export interface HttpServices {
 export function createApp(
   config: Config,
   services: HttpServices,
-  tls: SecureContextOptions,
+  tls: SecureContextOptions | undefined,
   options: { verifyClient?: typeof authenticate; logger?: boolean } = {},
 ) {
   const verifyClient = options.verifyClient ?? authenticate;
   const app = Fastify({
-    https: { ...tls, requestCert: true, rejectUnauthorized: false },
+    ...(tls ? { https: { ...tls, requestCert: true, rejectUnauthorized: false } } : {}),
     bodyLimit: 2 * 1024 * 1024,
     logger:
       options.logger === false
@@ -85,6 +88,7 @@ export function createApp(
   historyRoutes(app, services.history);
   commandRoutes(app, config, services.commands);
   sessionRoutes(app, services.sessions, services.history);
+  if (services.mirror) mirrorRoutes(app, config, services.mirror);
   return app;
 }
 function configIdentity(config: Config) {

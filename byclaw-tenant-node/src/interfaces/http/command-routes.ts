@@ -33,6 +33,7 @@ export function commandRoutes(
     ["POST", "/group-chats/:id/tasks/:taskId/pending-publication", "SAVE_PENDING_PUBLICATION"],
     ["DELETE", "/group-chats/:id/tasks/:taskId/pending-publication", "DELETE_PENDING_PUBLICATION"],
     ["POST", "/sessions/:id/messages/:messageId/recall", "RECALL_MESSAGE"],
+    ["POST", "/group-chats/:id/messages", "SEND_GROUP_MESSAGE"],
   ];
   for (const [method, path, operation] of routes)
     app.route<{ Params: Record<string, string> }>({

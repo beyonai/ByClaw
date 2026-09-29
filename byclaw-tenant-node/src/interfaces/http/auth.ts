@@ -1,9 +1,27 @@
 import type { FastifyRequest } from "fastify";
 import type { TLSSocket } from "node:tls";
+import { timingSafeEqual } from "node:crypto";
 import type { Config } from "../../config.js";
 import { ServiceError } from "../contracts/errors.js";
 
 export function authenticate(req: FastifyRequest, config: Config): void {
+  if (config.transport === "http") {
+    const forwardedToken = req.headers["x-byclaw-internal-token"];
+    const actual =
+      typeof forwardedToken === "string"
+        ? forwardedToken
+        : (req.headers.authorization?.replace(/^Bearer /, "") ?? "");
+    const expected = config.internalToken ?? "";
+    const actualBytes = Buffer.from(actual);
+    const expectedBytes = Buffer.from(expected);
+    if (
+      !expected ||
+      actualBytes.length !== expectedBytes.length ||
+      !timingSafeEqual(actualBytes, expectedBytes)
+    )
+      throw new ServiceError(401, "UNAUTHORIZED");
+    return;
+  }
   const socket = req.raw.socket as TLSSocket;
   if (!socket.authorized || typeof socket.getPeerCertificate !== "function")
     throw new ServiceError(401, "UNAUTHORIZED");

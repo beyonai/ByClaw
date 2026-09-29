@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS build
+FROM node:22-slim AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
@@ -7,7 +7,7 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN pnpm build && pnpm prune --prod
 
-FROM node:22-bookworm-slim
+FROM node:22-slim
 ENV NODE_ENV=production
 ENV NODE_STATE_DIR=/var/lib/byclaw-tenant
 WORKDIR /app

@@ -5,16 +5,28 @@ export class SqlSessionRepository implements SessionRepository {
     private readonly db: SqlSession,
     private readonly enterpriseId: string,
   ) {}
-  async list(actor: string, page: number, size: number, keyword: string) {
-    const params = [this.enterpriseId, actor, `%${keyword}%`];
+  async list(
+    actor: string,
+    page: number,
+    size: number,
+    keyword: string,
+    types: string[],
+    projectId?: string,
+  ) {
+    const params = projectId
+      ? [this.enterpriseId, actor, `%${keyword}%`, types, projectId]
+      : [this.enterpriseId, actor, `%${keyword}%`, types];
     const where =
-      "enterprise_id=$1 AND creator_id=$2 AND session_type='h_as' AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING') AND session_name LIKE $3 ESCAPE '\\' AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_task t WHERE t.task_session_id=byai_session.session_id)";
+      "enterprise_id=$1 AND session_type=ANY($4::text[]) AND (creator_id=$2 OR EXISTS(SELECT 1 FROM byai.byai_session_member m WHERE m.session_id=byai_session.session_id AND m.mem_obj_type='USER' AND m.mem_obj_id=$2 AND m.com_acct_id=$1)) AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING') AND COALESCE(session_name,'') LIKE $3 ESCAPE '\\' AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_task t WHERE t.task_session_id=byai_session.session_id)" +
+      (projectId ? " AND project_id::text=$5" : "");
+    const limitParam = projectId ? 6 : 5;
+    const offsetParam = projectId ? 7 : 6;
     const [total] = await this.db.query(
       `SELECT COUNT(*) AS count FROM byai.byai_session WHERE ${where}`,
       params,
     );
     const list = await this.db.query(
-      `SELECT session_id::text AS "sessionId",session_name AS "sessionName",session_type AS "sessionType",create_time AS "createTime",update_time AS "updateTime" FROM byai.byai_session WHERE ${where} ORDER BY update_time DESC,session_id DESC LIMIT $4 OFFSET $5`,
+      `SELECT session_id::text AS "sessionId",session_name AS "sessionName",session_type AS "sessionType",session_content AS "sessionContent",creator_id::text AS "creatorId",enterprise_id::text AS "enterpriseId",project_id::text AS "projectId",create_time AS "createTime",update_time AS "updateTime" FROM byai.byai_session WHERE ${where} ORDER BY update_time DESC,session_id DESC LIMIT $${limitParam} OFFSET $${offsetParam}`,
       [...params, size, (page - 1) * size],
     );
     return { list, total: Number(total?.count ?? 0), pageNum: page, pageSize: size };

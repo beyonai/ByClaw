@@ -97,4 +97,18 @@ describe("database transaction adapter without a database", () => {
     ]);
     await expect(db.verifyIdentity()).rejects.toThrow("DATABASE_IDENTITY_MISMATCH");
   });
+  it("accepts a fresh tenant database when its owner can create the missing schema", async () => {
+    const db = await Database.open(snapshot(), "test");
+    fake.query.mockResolvedValue([
+      {
+        database: "byclaw_t_10",
+        username: "bc_t_10_admin",
+        readable: true,
+        writable: true,
+        read_only: "off",
+      },
+    ]);
+    await expect(db.verifyIdentity()).resolves.toBeUndefined();
+    expect(fake.query.mock.calls[0]?.[0]).toContain("has_database_privilege");
+  });
 });

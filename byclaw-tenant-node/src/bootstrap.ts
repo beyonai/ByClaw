@@ -28,7 +28,7 @@ import { createApp } from "./interfaces/http/app.js";
 
 export async function bootstrap(config: Config) {
   const tls = await loadTls(config),
-    client = new MtlsClient(tls);
+    client = new MtlsClient(tls, config.internalToken);
   const redis = new Redis({ ...config.redis, lazyConnect: true, maxRetriesPerRequest: 1 });
   redis.on("error", () => {});
   const state = new JsonStore(config.stateDir);
@@ -63,11 +63,8 @@ export async function bootstrap(config: Config) {
       be,
     ),
   );
-  const streams = new StreamSupervisor(
-    config,
-    new MirrorService(new SqlMirrorTransactions(connection)),
-    () => connection.ready,
-  );
+  const mirror = new MirrorService(new SqlMirrorTransactions(connection));
+  const streams = new StreamSupervisor(config, mirror, () => connection.ready);
   const discovery = new Discovery(redis, config);
   const worker = new TenantWorker(redis, config, {
     commands,
@@ -88,6 +85,7 @@ export async function bootstrap(config: Config) {
     config,
     {
       commands,
+      mirror,
       history,
       schema,
       sessions: new SessionQueries(new SqlSessionRepository(read, config.enterpriseId)),

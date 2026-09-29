@@ -93,7 +93,10 @@ export class SchemaReadiness {
     ];
     if (required.some((name) => !indexes.some((row) => row.name === name)))
       throw new DomainError("BUSINESS_SCHEMA_INCOMPATIBLE");
-    const [sequence] = await db.query("SELECT to_regclass('byai.seq_any_table') AS id_sequence");
+    const [sequence] = await db.query(
+      "SELECT c.oid AS id_sequence FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace " +
+        "WHERE n.nspname='byai' AND c.relname='seq_any_table' AND c.relkind='S'",
+    );
     if (!sequence?.id_sequence) throw new DomainError("BUSINESS_SCHEMA_INCOMPATIBLE");
   }
 }

@@ -28,7 +28,7 @@ export class Discovery {
       protocolVersion: 1,
       mode: ready ? "READY" : "ADMIN_ONLY",
       schemaVersion,
-      endpoint: `https://${c.advertiseHost}:${c.port}`,
+      endpoint: `${c.transport === "http" ? "http" : "https"}://${c.advertiseHost}:${c.port}`,
       agentType: `TENANT_DATA_${c.enterpriseId}`,
     };
     const signature = JSON.stringify(metadata);

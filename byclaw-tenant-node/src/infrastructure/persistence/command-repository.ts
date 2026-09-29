@@ -9,6 +9,7 @@ import { createSession, changeSession, readState, recallMessage } from "./sessio
 import { addMembers, removeMember, changeRole, groupSettings } from "./member-writer.js";
 import { publishTask } from "./task-publication.js";
 import { createTask, changeTask } from "./task-writer.js";
+import { sendGroupMessage } from "./group-message-writer.js";
 
 const handlers = {
   CREATE_SESSION: createSession,
@@ -31,6 +32,7 @@ const handlers = {
   SAVE_PENDING_PUBLICATION: changeTask,
   DELETE_PENDING_PUBLICATION: changeTask,
   RECALL_MESSAGE: recallMessage,
+  SEND_GROUP_MESSAGE: sendGroupMessage,
 };
 export class SqlCommandTransactions implements CommandTransactions {
   constructor(private readonly connection: ConnectionManager) {}
@@ -55,11 +57,12 @@ class SqlCommandTransaction implements CommandTransaction {
     return row ? JSON.parse(row.extParamValue) : null;
   }
   async apply(command: TenantCommand): Promise<Record<string, any>> {
-    await handlers[command.operation](new CommandContext(this.db, command));
+    const messageId = await handlers[command.operation](new CommandContext(this.db, command));
     return {
       sessionId: command.sessionId,
       requestId: command.requestId,
       operation: command.operation,
+      ...(typeof messageId === "string" ? { messageId } : {}),
     };
   }
   async record(command: TenantCommand, result: Record<string, any>): Promise<void> {

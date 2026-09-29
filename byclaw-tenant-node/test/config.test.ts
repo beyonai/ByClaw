@@ -43,9 +43,22 @@ describe("fixed tenant configuration", () => {
   ])("requires %s", (key) => {
     expect(() => readConfig({ ...env, [key]: "" })).toThrow();
   });
-  it("rejects plain HTTP and non-TLS Redis", () => {
+  it("rejects plain HTTP unless explicitly selected", () => {
     expect(() => readConfig({ ...env, KMS_DECRYPT_URL: "http://kms" })).toThrow();
-    expect(() => readConfig({ ...env, REDIS_TLS: "false" })).toThrow();
+  });
+  it("allows explicitly selected HTTP with an internal token and plain Redis", () => {
+    const { TLS_CERT_FILE, TLS_KEY_FILE, TLS_CA_FILE, BE_CLIENT_IDENTITY, ...withoutTls } = env;
+    const local = readConfig({
+      ...withoutTls,
+      INTERNAL_TRANSPORT: "http",
+      INTERNAL_API_TOKEN: "test-internal-token",
+      BE_INTERNAL_URL: "http://be/byaiService",
+      KMS_DECRYPT_URL: "http://be/byaiService/internal/v1/tenantKms/decrypt",
+      REDIS_TLS: "false",
+    });
+    expect(local.transport).toBe("http");
+    expect(local.tls).toBeUndefined();
+    expect(local.redis.tls).toBeUndefined();
   });
   it("reads all eight connection fields in one HMGET", async () => {
     const hmget = vi.fn(async () => [

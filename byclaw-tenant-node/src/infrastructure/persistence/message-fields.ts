@@ -27,6 +27,7 @@ export function answerFields(
   }
   for (const [key, column] of [
     ["messageStruct", "message_struct"],
+    ["inferLog", "infer_log"],
     ["relatedResources", "related_resources"],
   ]) {
     if (payload[key!] !== undefined || inserting)

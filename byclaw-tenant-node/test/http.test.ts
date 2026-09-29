@@ -8,8 +8,10 @@ afterEach(async () => {
 });
 function setup(ready = true) {
   const execute = vi.fn(async () => ({ committed: true }));
+  const apply = vi.fn(async () => undefined);
   const services = {
     commands: { execute },
+    mirror: { apply },
     history: { detail: vi.fn(async () => ({ sessionId: "30" })) },
     sessions: {},
     schema: { accept: vi.fn(async () => ({ status: "PENDING" })) },
@@ -22,7 +24,7 @@ function setup(ready = true) {
   const verify = vi.fn();
   const app = createApp(config, services, {}, { verifyClient: verify, logger: false });
   apps.push(app);
-  return { app, execute, verify };
+  return { app, execute, apply, verify };
 }
 const headers = { "x-enterprise-id": "10", "x-tenant-generation": "7", "x-actor-user-id": "20" };
 describe("protected tenant HTTP", () => {
@@ -46,6 +48,25 @@ describe("protected tenant HTTP", () => {
         config,
       ),
     ).toThrow("CLIENT_IDENTITY_MISMATCH");
+  });
+  it("authenticates the explicit HTTP mode with a bearer or forwarded token", () => {
+    const httpConfig = {
+      ...config,
+      transport: "http" as const,
+      internalToken: "test-internal-token",
+    };
+    expect(() =>
+      authenticate({ headers: { authorization: "Bearer wrong" } } as any, httpConfig),
+    ).toThrow("UNAUTHORIZED");
+    expect(() =>
+      authenticate({ headers: { authorization: "Bearer test-internal-token" } } as any, httpConfig),
+    ).not.toThrow();
+    expect(() =>
+      authenticate(
+        { headers: { "x-byclaw-internal-token": "test-internal-token" } } as any,
+        httpConfig,
+      ),
+    ).not.toThrow();
   });
   it("rejects foreign enterprise and generation headers", async () => {
     const s = setup();
@@ -99,6 +120,46 @@ describe("protected tenant HTTP", () => {
     });
     expect(denied.statusCode).toBe(409);
     expect(s.execute).toHaveBeenCalledOnce();
+  });
+  it("commits a tenant chat input through the authenticated REST boundary", async () => {
+    const s = setup();
+    const payload = {
+      sessionId: "30",
+      clientRequestId: "turn-1",
+      runId: "run-1",
+      traceId: "trace-1",
+      userMessageId: "101",
+      answerMessageId: "102",
+      eventId: "event-1",
+      sourceStreamId: null,
+      childOrdinal: 0,
+      eventSeq: "0",
+      eventType: "INPUT",
+      payload: { id: "101", userId: "20", messageContent: "你好" },
+    };
+    const response = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/chat/mirror",
+      headers,
+      payload,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ eventId: "event-1", committed: true });
+    expect(s.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enterpriseId: "10",
+        generation: "7",
+        payloadHash: expect.any(String),
+      }),
+    );
+    const denied = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/chat/mirror",
+      headers,
+      payload: { ...payload, eventId: "event-2", payload: { ...payload.payload, userId: "21" } },
+    });
+    expect(denied.statusCode).toBe(404);
+    expect(s.apply).toHaveBeenCalledOnce();
   });
   it("removes raw SQL/bootstrap and mutable message routes", async () => {
     const s = setup();

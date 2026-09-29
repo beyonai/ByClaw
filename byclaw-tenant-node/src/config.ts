@@ -12,7 +12,9 @@ export interface Config extends TenantIdentity {
   beUrl: string;
   kmsUrl: string;
   beClientIdentity: string;
-  tls: { certFile: string; keyFile: string; caFile: string };
+  transport?: "http" | "https";
+  internalToken?: string;
+  tls?: { certFile: string; keyFile: string; caFile: string };
   redis: { host: string; port: number; db: number; username: string; password: string; tls?: {} };
 }
 export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -26,10 +28,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (!Number.isSafeInteger(value) || value < 0 || value > max) throw new Error(`Invalid ${key}`);
     return value;
   };
+  const transport = env.INTERNAL_TRANSPORT === "http" ? "http" : "https";
   const secureUrl = (key: string): string => {
     const value = new URL(required(key));
     if (
-      value.protocol !== "https:" ||
+      value.protocol !== `${transport}:` ||
       value.username ||
       value.password ||
       value.search ||
@@ -40,7 +43,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   };
   const enterpriseId = requireId(required("ENTERPRISE_ID"));
   if (requireId(required("TENANT_ID")) !== enterpriseId) throw new Error("Tenant IDs must match");
-  if (required("REDIS_TLS") !== "true") throw new Error("REDIS_TLS must be true");
+  if (env.REDIS_TLS !== "true" && env.REDIS_TLS !== "false")
+    throw new Error("REDIS_TLS must be true or false");
+  if (transport === "http" && !env.INTERNAL_API_TOKEN)
+    throw new Error("Missing configuration: INTERNAL_API_TOKEN");
   const port = integer("PORT", 3100),
     redisPort = integer("REDIS_PORT", 6379);
   if (!port || !redisPort) throw new Error("Ports must be positive");
@@ -56,19 +62,24 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     stateDir: required("NODE_STATE_DIR"),
     beUrl: secureUrl("BE_INTERNAL_URL"),
     kmsUrl: secureUrl("KMS_DECRYPT_URL"),
-    beClientIdentity: required("BE_CLIENT_IDENTITY"),
-    tls: {
-      certFile: required("TLS_CERT_FILE"),
-      keyFile: required("TLS_KEY_FILE"),
-      caFile: required("TLS_CA_FILE"),
-    },
+    beClientIdentity: transport === "https" ? required("BE_CLIENT_IDENTITY") : "",
+    transport,
+    internalToken: transport === "http" ? required("INTERNAL_API_TOKEN") : undefined,
+    tls:
+      transport === "https"
+        ? {
+            certFile: required("TLS_CERT_FILE"),
+            keyFile: required("TLS_KEY_FILE"),
+            caFile: required("TLS_CA_FILE"),
+          }
+        : undefined,
     redis: {
       host: required("REDIS_HOST"),
       port: redisPort,
       db: integer("REDIS_DATABASE", 0),
       username: required("REDIS_USERNAME"),
       password: required("REDIS_PASSWORD"),
-      tls: {},
+      tls: env.REDIS_TLS === "true" ? {} : undefined,
     },
   };
 }
