@@ -1,4 +1,5 @@
 import { parseCorePersonaDefinition } from "./core-persona-definition.js";
+import { isDisabledRelResource } from "./executor/disabled-resource-type.js";
 import {
     MANAGED_AGENT_PREFIX,
     type AgentListEntry,
@@ -41,6 +42,16 @@ const UPDATE_TASK_PLAN_TOOL_NAME = "updateTaskPlan";
 function isSkillRelResource(raw: Record<string, unknown>): boolean {
     const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
     return t === "SKILL";
+}
+
+/**
+ * Associated resources injected into the model context exclude SKILL entries
+ * (existing behaviour) and the four retired resource types (`OBJECT` / `VIEW` /
+ * `ONTOLOGY_BASE` / `SCENE`). The retired-type check lives in a single module so
+ * the conversation path and the context-injection path cannot drift apart.
+ */
+function isExcludedRelResource(raw: Record<string, unknown>): boolean {
+    return isSkillRelResource(raw) || isDisabledRelResource(raw);
 }
 
 export type AimodelProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
@@ -426,7 +437,7 @@ function adaptRawBaiyingDetail(params: {
                 r &&
                 typeof r === "object" &&
                 typeof (r as Record<string, unknown>).resourceId === "string" &&
-                !isSkillRelResource(r as Record<string, unknown>),
+                !isExcludedRelResource(r as Record<string, unknown>),
         )
         .map((r: Record<string, unknown>) => ({
             resourceId: String(r.resourceId),

@@ -29,6 +29,14 @@ import {
   type BaiyingEnhanceLogger,
 } from "./executor/debug-channel.js";
 import type { ResourceContext } from "./executor/types.js";
+import {
+  DISABLED_RESOURCE_GUIDANCE,
+  DISABLED_RESOURCE_MESSAGE,
+  RESOURCE_NOT_FOUND,
+  RESOURCE_TYPE_DISABLED,
+  isDisabledRelResource,
+  isDisabledResourceBizType,
+} from "./executor/disabled-resource-type.js";
 import { getDelegatedTaskToolDetails, isAsyncModeResult } from "../../shared/src/delegated-tool-details.js";
 
 function normalizeResourceType(resource: BaiyingAssociatedResource | undefined): string {
@@ -233,7 +241,9 @@ export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent
       `Pass agent_id = ${params.agent.sourceKey}, resource_id = ${params.agent.agentId} to \`baiying_call\``
     ].filter(Boolean).join("\n");
   }
-  const resources = params.agent.associatedResources ?? [];
+  const resources = (params.agent.associatedResources ?? []).filter(
+    (resource) => !isDisabledRelResource(resource),
+  );
   const summaryNames = resources
     .slice(0, 3)
     .map((resource) => resource.resourceName)
@@ -281,23 +291,12 @@ export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent
   }
 
   descParts.push(
-    "Use `resource_id` to choose a parent resource and `action` to choose a TOOLKIT/MCP child tool when needed; OBJECT/VIEW resources are dispatched through callAgent and usually do not need `action`.",
+    "Use `resource_id` to choose a parent resource and `action` to choose a TOOLKIT/MCP child tool when needed.",
   );
   descParts.push(
     "For DOC resources (`KG_DOC`/`KG_DB`/`KG_QA`), `agent_id` is required by executor. This plugin auto-populates `agent_id` from agent.json `resourceId` (current agent sourceKey) and forwards it in the top-level payload.",
   );
-  descParts.push(
-    "Pass structured backend parameters in `arguments`; OBJECT and VIEW resources are dispatched to `BYCLAW_DATA` with the selected resource code in `call_object_ids` or `call_view_ids`, plus the selected resource id in `resource_ids`.",
-  );
-  descParts.push(
-    "For OBJECT/VIEW calls with large payloads, backend may return `file_url` in response data; `file_url` is a local file path. Treat this local path as the authoritative payload reference and read it to process the full business data before producing final conclusions.",
-  );
-  descParts.push(
-    "When both inline summary fields and `file_url` exist, prefer the local-file content pointed to by `file_url` for detailed analysis, and clearly state any limitation if the local path cannot be accessed.",
-  );
-  descParts.push(
-    "IMPORTANT: reading data from `file_url` is mandatory when provided, but file publication may be delayed after tool execution; you must retry at least 3 times with a 1-2 second interval before concluding the file is unavailable.",
-  );
+  descParts.push(DISABLED_RESOURCE_GUIDANCE);
 
   return descParts.join("\n");
 }
@@ -389,7 +388,7 @@ export function createBaiyingCallToolFactory(params: {
         ),
         resource_type: Type.Optional(
           Type.String({
-            description: "Resource type filter (for example KG_DOC, TOOLKIT, MCP, OBJECT, VIEW)",
+            description: "Resource type filter (for example KG_DOC, TOOLKIT, TOOL, MCP, AGENT)",
           }),
         ),
         resource_name: Type.Optional(
@@ -400,7 +399,7 @@ export function createBaiyingCallToolFactory(params: {
         action: Type.Optional(
           Type.String({
             description:
-              "Child action/tool name for TOOLKIT, MCP, OBJECT, or VIEW resources; optional for DOC/AGENT/TOOL. For DOC async, use `get_doc_async_result` then `compose_doc_async_answer`.",
+              "Child action/tool name for TOOLKIT or MCP resources; optional for DOC/AGENT/TOOL. For DOC async, use `get_doc_async_result` then `compose_doc_async_answer`.",
           }),
         ),
         arguments: Type.Optional(
@@ -409,7 +408,7 @@ export function createBaiyingCallToolFactory(params: {
             {
               additionalProperties: true,
               description:
-                "Structured backend arguments. Required for TOOLKIT / TOOL / MCP / OBJECT / VIEW child-tool execution.",
+                "Structured backend arguments. Required for TOOLKIT / TOOL / MCP child-tool execution.",
             },
           ),
         ),
@@ -429,6 +428,63 @@ export function createBaiyingCallToolFactory(params: {
           normalizeText((ctx as any)?.SessionKey) ||
           normalizeText((ctx as any)?.session_id) ||
           "agent:main:main";
+
+        // Resource + type resolution is hoisted ahead of the channel/langfuse
+        // block below on purpose: that block reads Redis (and retries), while
+        // this block only reads `agent` / `toolParams`. Hoisting it lets the
+        // retired-resource gate reject a request before any Redis, Langfuse or
+        // network access happens.
+        const resources = agent.associatedResources ?? [];
+        const requestedResourceId = normalizeText(toolParams.resource_id);
+        const hasRootAgentResource = !!(agent.agentSseUrl || agent.agentHomeUrl);
+        const isRootAgentRequest = hasRootAgentResource && requestedResourceId === agent.sourceKey;
+        let selectedResource: BaiyingAssociatedResource | undefined;
+        if (isRootAgentRequest) {
+          selectedResource = undefined;
+        } else if (requestedResourceId) {
+          // An explicitly named resource must match exactly: never fall back to
+          // the first associated resource, which may be a different (or a
+          // retired) resource.
+          selectedResource = resources.find((resource) => resource.resourceId === requestedResourceId);
+          if (!selectedResource) {
+            return {
+              success: false,
+              error_code: RESOURCE_NOT_FOUND,
+              error: `Resource ${requestedResourceId} is not associated with this agent`,
+              target: {
+                requester_session_key: requesterSessionKey,
+                resource_id: requestedResourceId,
+              },
+            };
+          }
+        } else {
+          selectedResource = resources[0];
+        }
+
+        const resourceId = requestedResourceId || selectedResource?.resourceId || agent.sourceKey;
+        const selectedResourceType = selectedResource ? normalizeResourceType(selectedResource) : "";
+        let resourceType =
+          normalizeText(toolParams.resource_type) ||
+          selectedResourceType ||
+          (hasRootAgentResource ? "AGENT" : "UNKNOWN");
+        if (!selectedResource && resourceId === agent.sourceKey && hasRootAgentResource) {
+          resourceType = "AGENT";
+        }
+
+        // Retired resource types are rejected here, before any Redis read.
+        if (isDisabledResourceBizType(resourceType)) {
+          return {
+            success: false,
+            error_code: RESOURCE_TYPE_DISABLED,
+            error: DISABLED_RESOURCE_MESSAGE,
+            target: {
+              requester_session_key: requesterSessionKey,
+              resource_id: resourceId,
+              resource_type: resourceType,
+            },
+          };
+        }
+
         const channelResolve = resolveChannelSessionIdForTool(ctx, requesterSessionKey);
         await setActiveLangfuseSessionId(channelResolve.sessionId);
         const langfuseObservationContext = {
@@ -520,29 +576,6 @@ export function createBaiyingCallToolFactory(params: {
             error_code: "INVALID_PARAMETERS",
             error: "`query` is required when `arguments` do not contain a natural-language request",
           };
-        }
-
-        const resources = agent.associatedResources ?? [];
-        const requestedResourceId = normalizeText(toolParams.resource_id);
-        const hasRootAgentResource = !!(agent.agentSseUrl || agent.agentHomeUrl);
-        const isRootAgentRequest = hasRootAgentResource && requestedResourceId === agent.sourceKey;
-        let selectedResource: BaiyingAssociatedResource | undefined =
-          (requestedResourceId && !isRootAgentRequest
-            ? resources.find((resource) => resource.resourceId === requestedResourceId)
-            : undefined) ?? resources[0];
-        if (isRootAgentRequest) {
-          selectedResource = undefined;
-        }
-
-        let resourceId = requestedResourceId || selectedResource?.resourceId || agent.sourceKey;
-        const selectedResourceType = selectedResource ? normalizeResourceType(selectedResource) : "";
-        let resourceType =
-          normalizeText(toolParams.resource_type) ||
-          selectedResourceType ||
-          (hasRootAgentResource ? "AGENT" : "UNKNOWN");
-
-        if (!selectedResource && resourceId === agent.sourceKey && hasRootAgentResource) {
-          resourceType = "AGENT";
         }
 
         /** No metadataOnly prefetch: executor `resolveCapability` reads snapshot files by `resourceId` on each execute. */

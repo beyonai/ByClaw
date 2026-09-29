@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import { parseCorePersonaDefinition } from "./core-persona-definition.js";
+import { isDisabledRelResource } from "./executor/disabled-resource-type.js";
 import { MANAGED_AGENT_PREFIX, type BaiyingCoreCompetency } from "./types.js";
 
 export const SUBAGENT_ROUTING_MARKER = "<!-- baiying-enhance: subagent routing seed -->";
@@ -343,6 +344,7 @@ function collectResourceFragments(adapted: AdaptedManagedAgent): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const resource of resources) {
+    if (isDisabledRelResource(resource)) continue;
     const type = (resource.resourceBizType || resource.resourceType || "UNKNOWN").trim();
     const name = resource.resourceName?.trim() || resource.resourceId;
     pushUniqueFragment({

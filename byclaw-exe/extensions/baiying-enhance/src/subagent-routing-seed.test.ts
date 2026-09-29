@@ -38,8 +38,14 @@ describe("buildSubagentRoutingMarkdown", () => {
         {
           resourceId: "r1",
           resourceName: "Sales DB",
-          resourceType: "OBJECT",
+          resourceType: "KG_DOC",
           resourceDesc: "Query sales",
+        },
+        {
+          resourceId: "r2",
+          resourceName: "Sales view",
+          resourceType: "VIEW",
+          resourceDesc: "Retired view",
         },
       ],
     };
@@ -51,7 +57,10 @@ describe("buildSubagentRoutingMarkdown", () => {
     expect(md).toContain("**avoid**: password resets");
     expect(md).toContain("**dispatch**: 派发一个边界清晰的子任务");
     expect(md).toContain("**evidence**: 结构化结论");
-    expect(md).toContain("**resources**: OBJECT: Sales DB");
+    expect(md).toContain("**resources**: KG_DOC: Sales DB");
+    // Retired resource types never appear in the routing summary.
+    expect(md).not.toContain("Sales view");
+    expect(md).not.toContain("VIEW:");
     expect(md).not.toContain("**persona**:");
     expect(md).not.toMatch(/\*\*res\*\*:/);
   });
