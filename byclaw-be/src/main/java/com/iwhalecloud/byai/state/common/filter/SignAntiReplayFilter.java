@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.common.filter;
 
+import com.iwhalecloud.byai.common.constants.ConversationSearchConstants;
+
 
 import java.io.IOException;
 import java.util.List;
@@ -87,6 +89,11 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
         throws ServletException, IOException {
         log.debug("SignAntiReplayFilter start");
+        // This read-only skill uses the caller's Beyond-Token plus its own server-side allowlist.
+        if (this.isExactPostRequestPath(request, ConversationSearchConstants.QUERY_PATH)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
         // 未开启，直接放行
         if (!signProperties.getEnabled()) {
             log.debug("SignAntiReplayFilter disable");

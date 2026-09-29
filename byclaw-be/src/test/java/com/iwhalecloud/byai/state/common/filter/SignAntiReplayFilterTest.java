@@ -13,6 +13,27 @@ import org.springframework.test.util.ReflectionTestUtils;
 class SignAntiReplayFilterTest {
 
     @Test
+    void conversationSearchTokenEndpointSkipsOnlyExactPostSignatureCheck() throws Exception {
+        for (String suffix : java.util.List.of("", "/")) {
+            MockHttpServletRequest request = request("POST",
+                "/byaiService/skills/conversation-search/query" + suffix, "/byaiService");
+            MockFilterChain chain = new MockFilterChain();
+            enabledFilter().doFilter(request, new MockHttpServletResponse(), chain);
+            assertThat(chain.getRequest()).isSameAs(request);
+        }
+        for (MockHttpServletRequest request : java.util.List.of(
+            request("GET", "/byaiService/skills/conversation-search/query", "/byaiService"),
+            request("POST", "/byaiService/skills/conversation-search/query/other", "/byaiService"),
+            request("POST", "/other/skills/conversation-search/query", "/byaiService"))) {
+            MockFilterChain chain = new MockFilterChain();
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> enabledFilter().doFilter(request, new MockHttpServletResponse(), chain))
+                .isInstanceOf(RuntimeException.class);
+            assertThat(chain.getRequest()).isNull();
+        }
+    }
+
+    @Test
     void letsExactWechatPhoneLoginReachItsOneTimeCodeAuthenticatorWhenSigningIsEnabled() throws Exception {
         SignAntiReplayFilter filter = enabledFilter();
         MockHttpServletRequest request = request("POST",

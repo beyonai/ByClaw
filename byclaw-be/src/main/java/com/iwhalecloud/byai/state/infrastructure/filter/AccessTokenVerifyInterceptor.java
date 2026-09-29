@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.infrastructure.filter;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.constants.ConversationSearchConstants;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
@@ -155,6 +156,14 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
             // 例外的地址
             String url = request.getRequestURL().toString();
+            // Run before configurable anonymous URL rules; cookies and query filters cannot select the caller.
+            if (this.isExactPostRequestPath(request, ConversationSearchConstants.QUERY_PATH)) {
+                CurrentUserHolder.clearLoginInfo();
+                if (!this.authenticateBeyondTokenOnlyRequest(request, "对话记录搜索技能")) {
+                    throw new RuntimeException("对话记录搜索技能身份认证失败");
+                }
+                return true;
+            }
             // 飞书/微信开放平台事件回调从外部匿名推送，不会携带系统登录态。
             // 这里使用 servlet 原始路径做后缀判断，兼容 /byaiService 等 context-path/代理前缀。
             if (this.isFeishuBotEventCallback(request) || this.isWeixinOpenPlatformEventCallback(request)) {
