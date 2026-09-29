@@ -89,43 +89,13 @@ CREATE TABLE IF NOT EXISTS byai.byai_group_chat_task_publication (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_session_member_object
     ON byai.byai_session_member (session_id, mem_obj_type, mem_obj_id);
 
--- OpenGauss 不支持 ALTER TABLE ... ADD COLUMN IF NOT EXISTS，使用迁移内临时函数保持幂等。
-CREATE OR REPLACE FUNCTION byai._v041_add_column_if_missing(
-    p_schema_name TEXT,
-    p_table_name TEXT,
-    p_column_name TEXT,
-    p_column_definition TEXT
-) RETURNS VOID AS $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = p_schema_name
-          AND table_name = p_table_name
-          AND column_name = p_column_name
-    ) THEN
-        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
-            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
+ALTER TABLE byai.byai_session_member ADD COLUMN last_read_message_id BIGINT;
+ALTER TABLE byai.byai_session_member ADD COLUMN last_read_time TIMESTAMP;
 
-SELECT byai._v041_add_column_if_missing(
-    'byai', 'byai_session_member', 'last_read_message_id', 'BIGINT'
-);
-SELECT byai._v041_add_column_if_missing(
-    'byai', 'byai_session_member', 'last_read_time', 'TIMESTAMP'
-);
-
--- 发布关联字段沿用同一兼容函数，兼容已建表环境并保持重复执行安全。
-SELECT byai._v041_add_column_if_missing(
-    'byai', 'byai_group_chat_task_publication', 'pending_publication_id', 'BIGINT'
-);
+ALTER TABLE byai.byai_group_chat_task_publication ADD COLUMN pending_publication_id BIGINT;
 
 -- 复用分享主表存储群邀请。NULL 类型兼容历史消息分享，群邀请 link_id = session_id。
-SELECT byai._v041_add_column_if_missing(
-    'byai', 'message_share_link', 'link_type', 'VARCHAR(32) DEFAULT ''MESSAGE'''
-);
+ALTER TABLE byai.message_share_link ADD COLUMN link_type VARCHAR(32) DEFAULT 'MESSAGE';
 ALTER TABLE byai.message_share_link ALTER COLUMN link_type SET DEFAULT 'MESSAGE';
 ALTER TABLE byai.message_share_link ALTER COLUMN link_type DROP NOT NULL;
 
@@ -140,33 +110,21 @@ COMMENT ON COLUMN byai.message_share_link.link_type IS
     'MESSAGE（NULL 兼容历史消息分享）/ GROUP_INVITATION（link_id 为群 session_id）';
 
 -- 群消息话题归属允许为空：私有消息、系统事件和待核查的历史异常不分配话题。
-SELECT byai._v041_add_column_if_missing(
-    'byai', 'byai_message', 'topic_id', 'BIGINT'
-);
+ALTER TABLE byai.byai_message ADD COLUMN topic_id BIGINT;
 
 -- 群消息撤回只记录状态与操作人，原文、引用和业务数据保持不变。
-SELECT byai._v041_add_column_if_missing(
-    'byai', 'byai_message', 'recalled_at', 'TIMESTAMP(3)'
-);
-SELECT byai._v041_add_column_if_missing(
-    'byai', 'byai_message', 'recalled_by', 'BIGINT'
-);
+ALTER TABLE byai.byai_message ADD COLUMN recalled_at TIMESTAMP(3);
+ALTER TABLE byai.byai_message ADD COLUMN recalled_by BIGINT;
 COMMENT ON COLUMN byai.byai_message.recalled_at IS '撤回时间；空值表示未撤回';
 COMMENT ON COLUMN byai.byai_message.recalled_by IS '撤回操作人用户ID，用户名从Redis共享用户信息读取';
 
 -- 当前轮次绑定只由新请求写入，不回填历史任务的运行状态。
-SELECT byai._v041_add_column_if_missing(
-    'byai', 'byai_group_chat_task', 'current_turn_id', 'BIGINT'
-);
-SELECT byai._v041_add_column_if_missing(
-    'byai', 'byai_group_chat_task', 'current_turn_trace_id', 'VARCHAR(255)'
-);
+ALTER TABLE byai.byai_group_chat_task ADD COLUMN current_turn_id BIGINT;
+ALTER TABLE byai.byai_group_chat_task ADD COLUMN current_turn_trace_id VARCHAR(255);
 COMMENT ON COLUMN byai.byai_group_chat_task.current_turn_id IS '当前轮次启动占位标识，用于隔离迟到的启动失败回调';
 COMMENT ON COLUMN byai.byai_group_chat_task.current_turn_trace_id IS '当前轮次实际trace，用于完成回调与落库结果补偿';
 CREATE INDEX IF NOT EXISTS idx_group_chat_task_running_turn
     ON byai.byai_group_chat_task (status, turn_status, task_session_id);
-
-DROP FUNCTION IF EXISTS byai._v041_add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 CREATE TABLE IF NOT EXISTS byai.byai_group_chat_mention (
     message_id           BIGINT      NOT NULL,
