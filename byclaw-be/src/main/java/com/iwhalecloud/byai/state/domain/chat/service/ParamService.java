@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,6 +29,7 @@ import com.google.common.collect.Sets;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.env.EnvConfigKey;
 import com.iwhalecloud.byai.common.constants.men.TaskOperateTypeEnum;
+import com.iwhalecloud.byai.common.constants.resource.DisabledResourceBizTypes;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.request.manager.AgentResourceChatInfoDto;
@@ -152,6 +154,19 @@ public class ParamService {
         Integer isDebug = assistantChatDto.getIsDebug();
         List<ResourceVo> resourceList = assistantChatDto.getResourceList();
 
+        // 层③：请求体 resource_list 是客户端可控的会话参数通道（无占位符也会进入 params）。
+        // 先剔除停用类型并回写 DTO，使 params 与 RouteService 的文本替换输入同时收口。
+        List<ResourceVo> keptResourceList = removeDisabledResourceVo(resourceList);
+        int removedResourceVoCount = (resourceList == null ? 0 : resourceList.size()) - keptResourceList.size();
+        if (removedResourceVoCount > 0) {
+            // Q-5：本路径调用方是平台自身的会话装配逻辑，日志带 id 不涉及向最终用户泄露存在性。
+            logger.warn("聊天参数剔除停用类型资源: agentId={}, removedResourceIds={}, count={}, reason={}",
+                assistantChatDto.getAgentId(), disabledResourceIds(resourceList), removedResourceVoCount,
+                DisabledResourceBizTypes.REASON_CODE);
+            assistantChatDto.setResourceList(keptResourceList);
+        }
+        resourceList = keptResourceList;
+
         List<AgentResourceChatInfoDto> chatAgentResourceInfo = Lists.newArrayList();
         Map<String, Object> params = new HashMap<>();
         if (CollectionUtils.isNotEmpty(resourceList)) {
@@ -235,6 +250,11 @@ public class ParamService {
 
         // 过滤数字员工关联没有权限的资源
         this.filterUnAuthAgentResources(chatAgentResourceInfo, authContextBo);
+
+        // 层②：停用类型不得随 agent_list 进入会话参数 —— 无条件剪枝，覆盖客户端不使用占位符的路径
+        // （占位符筛选链只在 chatContent 含 {{}} 时才执行，故双关卡无法覆盖该路径）。
+        // 放在鉴权过滤之后，保持"先鉴权、后停用"的既有顺序。
+        this.pruneDisabledMcpServers(chatAgentResourceInfo);
 
         // 过滤chatAgentResourceInfo里面的数据
         filterUnChoosedResource(chatAgentResourceInfo, assistantChatDto);
@@ -561,12 +581,35 @@ public class ParamService {
             return;
         }
 
+        // Gate 1（输入侧关卡）：停用类型键不作为有效筛选输入。
+        // 注意落点：空判断信号已在上方（filterAgentResourceInfo 的 MapUtil.isNotEmpty）消费完毕，
+        // 故此处剔除不会把"有选中技能"反转成"未选中"（后者会跳过整条筛选链、放大暴露面）。
+        Map<String, List<Long>> effectiveSkills = enabledSkillsOnly(selectedSkills);
+
         // 过滤各类型的资源
-        filterAgentList(agentInfo, selectedSkills);
-        filterDatabaseIdList(agentInfo, selectedSkills);
-        filterDatasetList(agentInfo, selectedSkills);
-        filterPlugTools(agentInfo, selectedSkills);
-        filterMcpServerList(agentInfo, selectedSkills);
+        filterAgentList(agentInfo, effectiveSkills);
+        filterDatabaseIdList(agentInfo, effectiveSkills);
+        filterDatasetList(agentInfo, effectiveSkills);
+        filterPlugTools(agentInfo, effectiveSkills);
+        filterMcpServerList(agentInfo, effectiveSkills);
+    }
+
+    /**
+     * 剔除四类已下线资源业务类型（含大小写/空白变体）的键，只保留正常类型的筛选输入。
+     *
+     * <p>无停用键时原样返回入参（快路径，避免无谓分配）。
+     *
+     * @param selectedSkills 原始技能映射，格式如 {"OBJECT": [999L], "MCP": [888L]}
+     * @return 只含正常类型键的映射
+     */
+    private Map<String, List<Long>> enabledSkillsOnly(Map<String, List<Long>> selectedSkills) {
+        Map<String, List<Long>> enabled = new LinkedHashMap<>(selectedSkills.size());
+        for (Map.Entry<String, List<Long>> entry : selectedSkills.entrySet()) {
+            if (!DisabledResourceBizTypes.isDisabled(entry.getKey())) {
+                enabled.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return enabled.size() == selectedSkills.size() ? selectedSkills : enabled;
     }
 
     /**
@@ -686,19 +729,94 @@ public class ParamService {
 
     private List<Long> getAllMcpIds(Map<String, List<Long>> selectedSkills) {
         List<Long> serverIds = new ArrayList<>();
-        List<Long> mcpIds = selectedSkills.get("MCP");
-        List<Long> objectIds = selectedSkills.get("OBJECT");
-        List<Long> viewIds = selectedSkills.get("VIEW");
-        if (mcpIds != null && !mcpIds.isEmpty()) {
-            serverIds.addAll(mcpIds);
-        }
-        if (objectIds != null && !objectIds.isEmpty()) {
-            serverIds.addAll(objectIds);
-        }
-        if (viewIds != null && !viewIds.isEmpty()) {
-            serverIds.addAll(viewIds);
+        for (Map.Entry<String, List<Long>> entry : selectedSkills.entrySet()) {
+            // Gate 2（消费点二次校验）：键先归一化（trim + 大写），使大小写/空白变体与规范形同判定。
+            String normalizedType = DisabledResourceBizTypes.normalize(entry.getKey());
+            // 四类停用类型（含变体）绝不并入 MCP 白名单：单一事实来源 DisabledResourceBizTypes。
+            if (normalizedType.isEmpty() || DisabledResourceBizTypes.isDisabled(normalizedType)) {
+                continue;
+            }
+            // 与基线一致：只有 MCP 类型的 id 会并入（其余类型键不贡献 id）。
+            if (!ResourceBizType.MCP.getCode().equals(normalizedType) || CollectionUtils.isEmpty(entry.getValue())) {
+                continue;
+            }
+            serverIds.addAll(entry.getValue());
         }
         return serverIds;
+    }
+
+    /**
+     * 层②：无条件剪枝 `agent_list[].mcpServerList` 中属停用类型的 MCP 端点。
+     *
+     * <p>与是否使用占位符无关 —— 占位符筛选链只在 chatContent 含 {@code {{}}} 时执行，本方法覆盖"客户端不发占位符"
+     * 这条路径（此时构造侧仍会为 OBJECT/VIEW 产出条目）。
+     *
+     * <p>判定输入是构造侧赋值的真实业务类型 {@code mcpResourceBizType}（非名称/关键词）。
+     *
+     * @param chatAgentResourceInfo 数字员工关联信息（已过鉴权过滤）
+     */
+    private void pruneDisabledMcpServers(List<AgentResourceChatInfoDto> chatAgentResourceInfo) {
+        if (CollectionUtils.isEmpty(chatAgentResourceInfo)) {
+            return;
+        }
+        for (AgentResourceChatInfoDto agentInfo : chatAgentResourceInfo) {
+            if (agentInfo == null || CollectionUtils.isEmpty(agentInfo.getMcpServerList())) {
+                continue;
+            }
+            List<Long> removedIds = new ArrayList<>();
+            agentInfo.getMcpServerList().removeIf(mcp -> {
+                boolean disabled = mcp != null && DisabledResourceBizTypes.isDisabled(mcp.getMcpResourceBizType());
+                if (disabled) {
+                    removedIds.add(mcp.getMcpResourceId());
+                }
+                return disabled;
+            });
+            if (!removedIds.isEmpty()) {
+                // Q-5：本路径调用方是平台自身的会话装配逻辑，日志带 id 不涉及向最终用户泄露存在性。
+                logger.warn("聊天参数剔除停用类型 MCP 端点: agentId={}, removedMcpResourceIds={}, reason={}",
+                    agentInfo.getId(), removedIds, DisabledResourceBizTypes.REASON_CODE);
+            }
+        }
+    }
+
+    /**
+     * 层③：剔除 {@code resource_list} 中属停用类型的条目。
+     *
+     * <p>返回**新建列表**，不原地修改入参（客户端传入的集合可能是不可变实现）；无剔除时原样返回入参。
+     *
+     * @param resourceList 请求体资源列表（客户端可控）
+     * @return 只含正常类型（与类型为空/未知）条目的列表
+     */
+    private List<ResourceVo> removeDisabledResourceVo(List<ResourceVo> resourceList) {
+        if (ListUtil.isEmpty(resourceList)) {
+            return resourceList == null ? Collections.emptyList() : resourceList;
+        }
+        List<ResourceVo> kept = new ArrayList<>(resourceList.size());
+        for (ResourceVo resourceVo : resourceList) {
+            if (resourceVo != null && resourceVo.getResourceType() != null
+                && DisabledResourceBizTypes.isDisabled(resourceVo.getResourceType().getCode())) {
+                continue;
+            }
+            kept.add(resourceVo);
+        }
+        return kept.size() == resourceList.size() ? resourceList : kept;
+    }
+
+    /**
+     * 取出被剔除的 {@code resource_list} 条目 id，仅用于服务端日志。
+     */
+    private List<String> disabledResourceIds(List<ResourceVo> resourceList) {
+        List<String> removedIds = new ArrayList<>();
+        if (ListUtil.isEmpty(resourceList)) {
+            return removedIds;
+        }
+        for (ResourceVo resourceVo : resourceList) {
+            if (resourceVo != null && resourceVo.getResourceType() != null
+                && DisabledResourceBizTypes.isDisabled(resourceVo.getResourceType().getCode())) {
+                removedIds.add(resourceVo.getResourceId());
+            }
+        }
+        return removedIds;
     }
 
     /**
