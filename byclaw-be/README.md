@@ -535,6 +535,9 @@ BE 的 `config/application.properties`（部署时为 `deploy/config/application
 `GET /group-chat/tasks/{taskId}/delivery-status` 仅供仍在群内的任务发起人查询，返回字符串 taskId 和布尔 delivered。
 无文件/无效协议返回 false，存储故障返回可重试错误；不增加数据库状态、不直接授权或触发发布。
 前端进入、重连和每轮结束查询，按钮发送“确认完成并发布”，后续沿用现有发布卡片确认流程。
+任务页确认按钮发送的 `LLM_MESSAGE` 可携带 `messageIntent=prepare_group_task_publication`。
+BE 仅在有效私有群任务的 Gateway 出站请求中追加准备待发布成果的 Agent 指令；`chatContent`、已保存的用户消息和多端广播仍是按钮原文。
+该指令要求 Agent 调用同名工具创建待发布卡片，最终发布仍由用户在卡片中确认；普通消息和其他会话不触发此指令。
 
 ### 群成员批量添加
 

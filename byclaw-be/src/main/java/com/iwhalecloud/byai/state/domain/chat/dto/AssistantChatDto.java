@@ -62,6 +62,9 @@ public class AssistantChatDto {
     @Schema(description = "会话内容", example = "你好，请帮我分析一下这个数据")
     private String chatContent;
 
+    /** 当前消息的操作意图；用户正文单独保存，群任务出站请求按此追加 Agent 提示。 */
+    private String messageIntent;
+
     /**
      * 文件内容
      */
