@@ -399,8 +399,13 @@ class WebSocketManager {
   }
 
   /** Switch context on the current connection and store the selection only after server confirmation. */
-  public async switchTenant(enterpriseId: string | null): Promise<void> {
+  public async switchTenant(
+    enterpriseId: string | null,
+    tenantContextToken?: string,
+    expiresAt?: string
+  ): Promise<void> {
     if (this.pendingTenantSwitchId) throw new Error('Tenant switch already in progress');
+    if (enterpriseId && (!tenantContextToken || !expiresAt)) throw new Error('Tenant context is required');
     await this.waitUntilConnected();
     const requestId = `tenant-switch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     this.pendingTenantSwitchId = requestId;
@@ -420,7 +425,7 @@ class WebSocketManager {
           return;
         }
         this.scopedSessionId = '';
-        if (enterpriseId) selectEnterprise(enterpriseId);
+        if (enterpriseId) selectEnterprise(enterpriseId, tenantContextToken!, expiresAt!);
         else clearSelectedEnterprise();
         resolve();
       };

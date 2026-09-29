@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import TenantSwitcher from '../TenantSwitcher';
 import { getAvailableTenants, validateTenantSwitch } from '@/service/tenantContext';
 import webSocketManager from '@/utils/websocket';
+import { reloadChatForSpaceSwitch } from '@/utils/tenantContext';
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
@@ -20,6 +21,11 @@ jest.mock('@/utils/websocket', () => ({
 
 jest.mock('@/utils/tenantContext', () => ({
   getSelectedEnterpriseId: () => null,
+  getTenantContext: () => null,
+  hasStoredTenantSelection: () => false,
+  clearSelectedEnterprise: jest.fn(),
+  selectEnterprise: jest.fn(),
+  reloadChatForSpaceSwitch: jest.fn(),
 }));
 
 describe('TenantSwitcher', () => {
@@ -28,7 +34,13 @@ describe('TenantSwitcher', () => {
     (getAvailableTenants as jest.Mock).mockResolvedValue([
       { enterpriseId: '123', enterpriseName: '测试租户', role: 'OWNER', provisionState: 'READY' },
     ]);
-    (validateTenantSwitch as jest.Mock).mockResolvedValue({ enterpriseId: '123', role: 'OWNER' });
+    (validateTenantSwitch as jest.Mock).mockResolvedValue({
+      enterpriseId: '123',
+      role: 'OWNER',
+      tenantContextToken: 'context-token',
+      expiresAt: '2099-01-01T00:00:00Z',
+      contextVersion: 1,
+    });
     (webSocketManager.switchTenant as jest.Mock).mockResolvedValue(undefined);
   });
 
@@ -41,7 +53,8 @@ describe('TenantSwitcher', () => {
 
     await waitFor(() => {
       expect(validateTenantSwitch).toHaveBeenCalledWith('123');
-      expect(webSocketManager.switchTenant).toHaveBeenCalledWith('123');
+      expect(webSocketManager.switchTenant).toHaveBeenCalledWith('123', 'context-token', '2099-01-01T00:00:00Z');
+      expect(reloadChatForSpaceSwitch).toHaveBeenCalled();
     });
   });
 });

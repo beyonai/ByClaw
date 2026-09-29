@@ -189,7 +189,7 @@ describe('utils/websocket', () => {
     ws.init();
     socketInstance.onopen();
     const originalSocket = socketInstance;
-    const switching = ws.switchTenant('123');
+    const switching = ws.switchTenant('123', 'context-token', '2099-01-01T00:00:00Z');
     await Promise.resolve();
     const outbound = JSON.parse(socketInstance.send.mock.calls[socketInstance.send.mock.calls.length - 1][0]);
     expect(outbound).toMatchObject({ type: 'SWITCH_TENANT', enterpriseId: '123' });
@@ -225,7 +225,7 @@ describe('utils/websocket', () => {
     mockGetToken.mockReturnValue('token-1');
     window.localStorage.setItem('SESSION', 'session-1');
     const { selectEnterprise } = require('../tenantContext');
-    selectEnterprise('123');
+    selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
     const ws = require('../websocket').default;
 
     ws.disconnect();

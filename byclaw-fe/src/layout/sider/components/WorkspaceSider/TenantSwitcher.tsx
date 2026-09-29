@@ -5,7 +5,14 @@ import type { MenuProps } from 'antd';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
 import { getAvailableTenants, validateTenantSwitch, type TenantAvailableItem } from '@/service/tenantContext';
-import { getSelectedEnterpriseId } from '@/utils/tenantContext';
+import {
+  clearSelectedEnterprise,
+  getSelectedEnterpriseId,
+  getTenantContext,
+  hasStoredTenantSelection,
+  reloadChatForSpaceSwitch,
+  selectEnterprise,
+} from '@/utils/tenantContext';
 import webSocketManager from '@/utils/websocket';
 import styles from './index.module.less';
 
@@ -15,6 +22,36 @@ const TenantSwitcher: React.FC = () => {
   const [selectedId, setSelectedId] = useState<string | null>(() => getSelectedEnterpriseId());
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
+  const [contextRevision, setContextRevision] = useState(0);
+
+  useEffect(() => {
+    if (hasStoredTenantSelection() && !getTenantContext()) {
+      clearSelectedEnterprise();
+      reloadChatForSpaceSwitch();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const context = getTenantContext();
+    if (!context || context.enterpriseId !== selectedId) return;
+    const delay = Math.max(0, Date.parse(context.expiresAt) - Date.now() - 5 * 60 * 1000);
+    const timer = window.setTimeout(async () => {
+      try {
+        const renewed = await validateTenantSwitch(selectedId);
+        if (getSelectedEnterpriseId() === selectedId) {
+          selectEnterprise(selectedId, renewed.tenantContextToken, renewed.expiresAt);
+          setContextRevision((revision) => revision + 1);
+        }
+      } catch {
+        if (getSelectedEnterpriseId() === selectedId) {
+          clearSelectedEnterprise();
+          reloadChatForSpaceSwitch();
+        }
+      }
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [selectedId, contextRevision]);
 
   useEffect(() => {
     let mounted = true;
@@ -65,12 +102,17 @@ const TenantSwitcher: React.FC = () => {
       if (key === 'personal') {
         await webSocketManager.switchTenant(null);
         setSelectedId(null);
+        reloadChatForSpaceSwitch();
       } else {
-        await validateTenantSwitch(key);
-        await webSocketManager.switchTenant(key);
+        const context = await validateTenantSwitch(key);
+        console.info('租户切换校验完成', { enterpriseId: key, hasContext: Boolean(context.tenantContextToken) });
+        await webSocketManager.switchTenant(key, context.tenantContextToken, context.expiresAt);
+        console.info('租户 WebSocket 切换完成', { enterpriseId: key });
         setSelectedId(key);
+        reloadChatForSpaceSwitch();
       }
-    } catch {
+    } catch (error) {
+      console.error('租户空间切换失败:', error);
       message.error(intl.formatMessage({ id: 'tenantSwitcher.switchFailed' }));
     } finally {
       setSwitching(false);
