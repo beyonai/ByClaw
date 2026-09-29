@@ -247,7 +247,8 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            {resolveHtmlResource ? (
+            {/* PDF 必须保留二进制 URL 交给浏览器预览，避免被 HTML 资源解析分支读取为文本而显示乱码。 */}
+            {type !== 'pdf' && resolveHtmlResource ? (
               <HtmlRenderComponent
                 content={content?.[1]}
                 data={data instanceof Blob ? data : undefined}
