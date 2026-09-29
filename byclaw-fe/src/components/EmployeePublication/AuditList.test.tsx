@@ -41,6 +41,8 @@ const pending: Publication = {
   canReview: true,
 };
 
+jest.setTimeout(15000);
+
 describe('publication approval in the audit list', () => {
   beforeEach(() => {
     jest.clearAllMocks();

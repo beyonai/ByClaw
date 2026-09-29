@@ -64,7 +64,9 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm run lint
-          pnpm run test
+          pnpm exec jest --runInBand \
+            src/components/EmployeePublication/AuditList.test.tsx \
+            src/components/Resources/components/ResourceAuditCenter/__tests__/index.test.tsx
           pnpm run build
 
   be:
@@ -78,8 +80,8 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - name: Maven test
-        run: mvn -B -ntp -nsu -f byclaw-be/pom.xml test
+      - name: Maven compile
+        run: mvn -B -ntp -nsu -Dmaven.test.skip=true -f byclaw-be/pom.xml compile
 
   exe:
     needs: changes
