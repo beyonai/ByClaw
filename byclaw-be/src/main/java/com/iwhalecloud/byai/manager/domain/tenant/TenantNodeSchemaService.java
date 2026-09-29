@@ -2,6 +2,8 @@ package com.iwhalecloud.byai.manager.domain.tenant;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.math.BigInteger;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -23,11 +25,15 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService.TenantSandboxView;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Service;
 
 /** Sends the versioned baseline bundle to the tenant Node and waits for its audited result. */
 @Service
 public class TenantNodeSchemaService {
+
+    private static final String BUNDLED_BASELINES = "classpath*:tenant/baseline/*__baseline.zip";
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -51,19 +57,21 @@ public class TenantNodeSchemaService {
     }
 
     public boolean initialized(long enterpriseId) {
+        String version;
+        try { version = metadata(readBundle()).version(); }
+        catch (IOException e) { throw new IllegalStateException("cannot read tenant baseline bundle", e); }
         Integer count = jdbc.queryForObject("SELECT count(*) FROM byai.tenant_schema_audit "
-            + "WHERE enterprise_id=? AND is_current=TRUE AND status='VERIFIED' AND observed_version='V0.5.0'",
-            Integer.class, enterpriseId);
+            + "WHERE enterprise_id=? AND is_current=TRUE AND status='VERIFIED' AND observed_version=?",
+            Integer.class, enterpriseId, version);
         return count != null && count > 0;
     }
 
     public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
                            String requestId) throws Exception {
-        if (bundlePath == null || !Files.isRegularFile(bundlePath) || internalToken == null
-            || internalToken.isBlank() || sandboxBaseUrl == null || sandboxBaseUrl.isBlank()) {
-            throw new IllegalStateException("tenant schema bundle or internal HTTP configuration is missing");
+        if (internalToken == null || internalToken.isBlank() || sandboxBaseUrl == null || sandboxBaseUrl.isBlank()) {
+            throw new IllegalStateException("tenant schema internal HTTP configuration is missing");
         }
-        byte[] bundle = Files.readAllBytes(bundlePath);
+        byte[] bundle = readBundle();
         BundleMetadata metadata = metadata(bundle);
         String auditId = UUID.randomUUID().toString().replace("-", "");
         Integer lastAttempt = jdbc.queryForObject("SELECT COALESCE(MAX(attempt_no),0) FROM byai.tenant_schema_audit "
@@ -73,7 +81,7 @@ public class TenantNodeSchemaService {
         jdbc.update("INSERT INTO byai.tenant_schema_audit (audit_id,enterprise_id,request_id,operation_type,"
                 + "trigger_type,byclaw_release_version,attempt_no,target_version,bundle_digest,"
                 + "db_sandbox_record_id,generation,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            auditId, enterpriseId, requestId, "INIT", "AUTO_PROVISION", "V0.5.0", attemptNo,
+            auditId, enterpriseId, requestId, "INIT", "AUTO_PROVISION", metadata.version(), attemptNo,
             metadata.version(), bundleDigest, dbRecordId, generation, "PENDING");
         ObjectNode task = objectMapper.createObjectNode();
         task.put("protocolVersion", 1);
@@ -86,7 +94,7 @@ public class TenantNodeSchemaService {
         task.put("fencingToken", "1");
         task.put("operationType", "INIT");
         task.put("triggerType", "AUTO_PROVISION");
-        task.put("byclawReleaseVersion", "V0.5.0");
+        task.put("byclawReleaseVersion", metadata.version());
         task.putNull("fromVersion");
         task.put("targetVersion", metadata.version());
         task.put("bundleDigest", bundleDigest);
@@ -136,6 +144,42 @@ public class TenantNodeSchemaService {
                 reason.substring(0, Math.min(reason.length(), 500)), java.sql.Timestamp.from(Instant.now()), auditId);
             throw e;
         }
+    }
+
+    byte[] readBundle() throws IOException {
+        if (bundlePath != null) {
+            if (!Files.isRegularFile(bundlePath)) {
+                throw new IllegalStateException("tenant schema bundle file is missing: " + bundlePath);
+            }
+            return Files.readAllBytes(bundlePath);
+        }
+        Resource selected = null;
+        String selectedVersion = null;
+        for (Resource resource : new PathMatchingResourcePatternResolver().getResources(BUNDLED_BASELINES)) {
+            String filename = resource.getFilename();
+            if (filename == null || !filename.matches("V[0-9]+(\\.[0-9]+)*__baseline\\.zip")) continue;
+            String version = filename.substring(0, filename.indexOf("__baseline.zip"));
+            if (selectedVersion == null || compareVersions(version, selectedVersion) > 0) {
+                selected = resource;
+                selectedVersion = version;
+            }
+        }
+        if (selected == null) throw new IllegalStateException("bundled tenant schema baseline is missing");
+        try (InputStream input = selected.getInputStream()) {
+            return input.readAllBytes();
+        }
+    }
+
+    static int compareVersions(String left, String right) {
+        String[] a = left.substring(1).split("\\.");
+        String[] b = right.substring(1).split("\\.");
+        for (int i = 0; i < Math.max(a.length, b.length); i++) {
+            BigInteger x = new BigInteger(i < a.length ? a[i] : "0");
+            BigInteger y = new BigInteger(i < b.length ? b[i] : "0");
+            int comparison = x.compareTo(y);
+            if (comparison != 0) return comparison;
+        }
+        return 0;
     }
 
     private URI nodeUri(String endpoint) {
@@ -195,7 +239,20 @@ public class TenantNodeSchemaService {
     }
 
     private BundleMetadata metadata(byte[] bundle) throws IOException {
-        String version = "V0.5.0";
+        String version = null;
+        byte[] manifest = null;
+        try (ZipInputStream zip = new ZipInputStream(new java.io.ByteArrayInputStream(bundle))) {
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                if (entry.getName().matches("baseline/V[0-9]+(\\.[0-9]+)*/manifest\\.json")) {
+                    manifest = zip.readAllBytes();
+                    break;
+                }
+            }
+        }
+        if (manifest != null) version = objectMapper.readTree(manifest).path("version").asText();
+        if (version == null || !version.matches("V[0-9]+(\\.[0-9]+)*")) {
+            throw new IllegalStateException("tenant baseline bundle has no valid version manifest");
+        }
         String sqlPath = "baseline/" + version + "/__ddl.sql";
         byte[] sql = null;
         try (ZipInputStream zip = new ZipInputStream(new java.io.ByteArrayInputStream(bundle))) {

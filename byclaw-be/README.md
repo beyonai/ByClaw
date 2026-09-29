@@ -569,7 +569,7 @@ root message ID. Deploy this endpoint before enabling the topic modal frontend.
 
 ## 租户开通联调
 
-平台管理员选择套餐创建租户后，BE 异步创建独立 OpenGauss 沙箱、校验数据库身份、发布 Redis 配置、启动 `tenant-data-node`，并向 Node 的 `/internal/v1/schema-tasks` 上传 `BYCLAW_TENANT_BASELINE_BUNDLE`。Node 完成 `V0.5.0` baseline 后回报 `/internal/v1/tenantSchemaTaskReports`，BE 将 `tenant_schema_audit` 置为 `VERIFIED` 并发布 `READY`。失败可从租户管理的阶段进度弹窗重试；每次初始化尝试保留独立审计行。
+平台管理员选择套餐创建租户后，BE 异步创建独立 OpenGauss 沙箱、校验数据库身份、发布 Redis 配置、启动 `tenant-data-node`，并向 Node 的 `/internal/v1/schema-tasks` 上传 JAR 内置的最新版本 baseline ZIP。Maven 构建时自动把 `byclaw-tenant-node/baseline/*__baseline.zip` 纳入 BE JAR；新增版本的 ZIP 无需修改 BE 路径或版本常量。需要覆盖内置制品时，可设置 `BYCLAW_TENANT_BASELINE_BUNDLE` 为 BE 容器内可读的 ZIP 绝对路径。Node 完成 baseline 后回报 `/internal/v1/tenantSchemaTaskReports`，BE 将 `tenant_schema_audit` 置为 `VERIFIED` 并发布 `READY`。失败可从租户管理的阶段进度弹窗重试；每次初始化尝试保留独立审计行。
 
 数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。
 

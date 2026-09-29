@@ -1550,6 +1550,13 @@
                     <include>**/**</include>
                 </includes>
             </resource>
+            <resource>
+                <directory>../byclaw-tenant-node/baseline</directory>
+                <targetPath>tenant/baseline</targetPath>
+                <includes>
+                    <include>*__baseline.zip</include>
+                </includes>
+            </resource>
         </resources>
 
         <pluginManagement>
