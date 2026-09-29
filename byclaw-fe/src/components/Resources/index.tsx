@@ -182,7 +182,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const marketplaceIframeRef = useRef<HTMLIFrameElement>(null);
   const [skillMarketplaceBaseUrl, setSkillMarketplaceBaseUrl] = useState('');
   const [skillMarketplaceConfigLoaded, setSkillMarketplaceConfigLoaded] = useState(resourceType !== 'SKILL');
-  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
+  const { setDetailPanel, clearDetailPanel, openTemporaryDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
@@ -473,16 +473,22 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
 
       if (resourceBizType === 'SKILL') {
         if (resourceId) {
-          setDetailPanel?.(
+          const renderDetail = (onClose: () => void) => (
             <SkillDetailDrawer
               resourceId={resourceId}
               title={intl.formatMessage({ id: 'common.skill' })}
               open
               panel
-              onClose={() => clearDetailPanel?.()}
-            />,
-            { width: 350 }
+              onClose={onClose}
+            />
           );
+
+          // 中心页与右侧工作区并存，详情只暂时覆盖工作区，关闭后恢复同一个实例。
+          if (openTemporaryDetailPanel) {
+            openTemporaryDetailPanel(renderDetail, { width: 350 });
+          } else {
+            setDetailPanel?.(renderDetail(() => clearDetailPanel?.()), { width: 350 });
+          }
         }
         return;
       }
@@ -547,7 +553,17 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
         { width: 350 }
       );
     },
-    [activeTab, clearDetailPanel, intl, navigate, resourceName, resourceType, setDetailPanel, showSkillDetailDrawer]
+    [
+      activeTab,
+      clearDetailPanel,
+      intl,
+      navigate,
+      openTemporaryDetailPanel,
+      resourceName,
+      resourceType,
+      setDetailPanel,
+      showSkillDetailDrawer,
+    ]
   );
 
   const handleEditItem = (item: IResourceItem) => {

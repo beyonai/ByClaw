@@ -27,6 +27,7 @@ export default {
   'menu.systemParams.sandbox': '沙箱配置管理',
   'menu.business.notification': '通知管理',
   'menu.systemFeedback': '系统反馈管理',
+  'menu.fileManagement': '系统文件管理',
   'common.add': '新增',
   'common.edit': '编辑',
   'common.view': '查看',

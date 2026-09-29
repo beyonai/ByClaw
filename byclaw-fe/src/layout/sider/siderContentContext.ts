@@ -19,6 +19,11 @@ interface SiderContentContextValue {
   siderContentWidth: number;
   setSiderContentWidth: React.Dispatch<React.SetStateAction<number>>;
   setDetailPanel?: (panel: React.ReactNode, options?: DetailPanelOptions) => void;
+  // 临时详情覆盖现有面板；传入的关闭回调只关闭本次详情，不清理原面板。
+  openTemporaryDetailPanel?: (
+    render: (onClose: () => void) => React.ReactNode,
+    options?: DetailPanelOptions
+  ) => void;
   clearDetailPanel?: () => void;
 }
 

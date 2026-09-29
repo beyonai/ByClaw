@@ -446,7 +446,7 @@ const RenderContent = (props: ResourceCardProps) => {
     agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
 
   // 工作空间(用户开发)技能：复用公共 hook 处理详情 / 分享(资源化) / 删除，与左边栏一致。
-  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
+  const { setDetailPanel, clearDetailPanel, openTemporaryDetailPanel } = useContext(SiderContentContext);
   // 与左边栏同源解析当前数字员工名，保证“使用它的数字员工”展示一致（agentInfo 在技能中心页常为空）。
   const activeSiderAgent = useActiveSiderAgent();
   const [workspaceShareRecord, setWorkspaceShareRecord] = useState<WorkspaceSkillItem | null>(null);
@@ -456,6 +456,7 @@ const RenderContent = (props: ResourceCardProps) => {
     agentName: activeSiderAgent.name,
     setDetailPanel,
     clearDetailPanel,
+    openTemporaryDetailPanel,
     onShareAuth: (item) => setWorkspaceShareRecord(item),
     onChanged: notifySkillListReload,
   });

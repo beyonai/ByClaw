@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Button, Dropdown, Empty, Input, message, Modal } from 'antd';
+import { Alert, Button, Dropdown, Empty, Input, message, Modal } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -156,6 +156,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   });
   const [searchValue, setSearchValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [resourceList, setResourceList] = useState<ResourceItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
@@ -188,6 +189,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     async (options?: { reset?: boolean; queryKeyword?: string }) => {
       if (listFetchRef.current) return;
       const { reset = false, queryKeyword = keywordRef.current } = options || {};
+      setLoadFailed(false);
       if (!activeSiderAgent.resourceId) {
         if (reset) {
           resourceListRef.current = [];
@@ -258,6 +260,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
             : rows.length >= PAGE_SIZE && hasNewUniqueRows
         );
       } catch {
+        setLoadFailed(true);
         if (reset) {
           resourceListRef.current = [];
           setResourceList([]);
@@ -962,6 +965,18 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
         </>
       )}
       <div className={styles.listContainer}>
+        {loadFailed && (
+          <Alert
+            type="error"
+            showIcon
+            message={intl.formatMessage({ id: 'resourceTabs.loadFailed' })}
+            action={
+              <Button size="small" onClick={() => loadResources({ reset: true })}>
+                {intl.formatMessage({ id: 'workspaceSider.retry' })}
+              </Button>
+            }
+          />
+        )}
         <InfiniteScrollAntdList
           className={employeeStyles.employeesList}
           dataSource={resourceList}

@@ -3,6 +3,8 @@ const mockResourceFilterProps = jest.fn();
 let mockAdminVip = true;
 let mockSkillGroupMountCount = 0;
 const mockSkillGroupProps = jest.fn();
+const mockOpenTemporaryDetailPanel = jest.fn();
+const mockClearDetailPanel = jest.fn();
 const mockEventHandlers: Record<string, (payload?: unknown) => void> = {};
 const mockEventEmitter = {
   on: jest.fn((event: string, handler: (payload?: unknown) => void) => {
@@ -187,13 +189,15 @@ jest.mock('@/components/CommonTabs', () => ({
 jest.mock('@/components/AntdIcon', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/components/Resources/components/ResourceList', () => ({
   __esModule: true,
-  default: ({ catalogId, enablePublishToEnterprise, dropdownParam }: any) => (
+  default: ({ catalogId, enablePublishToEnterprise, dropdownParam, onDetail }: any) => (
     <div
       data-testid="resource-list"
       data-catalog-id={catalogId}
       data-status={dropdownParam?.resourceStatus}
       data-enterprise-publication={String(enablePublishToEnterprise)}
-    />
+    >
+      <button onClick={() => onDetail({ resourceBizType: 'SKILL', resourceId: 'skill-1' })}>open skill</button>
+    </div>
   ),
 }));
 jest.mock('@/components/Resources/components/ResourceAuditCenter', () => ({
@@ -247,7 +251,11 @@ jest.mock('@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer', (
   useSkillDetailDrawer: () => ({ placeholder: null, show: jest.fn() }),
 }));
 jest.mock('@/layout/sider/siderContentContext', () => ({
-  SiderContentContext: require('react').createContext({ setDetailPanel: jest.fn(), clearDetailPanel: jest.fn() }),
+  SiderContentContext: require('react').createContext({
+    setDetailPanel: jest.fn(),
+    clearDetailPanel: () => mockClearDetailPanel(),
+    openTemporaryDetailPanel: (...args: any[]) => mockOpenTemporaryDetailPanel(...args),
+  }),
 }));
 jest.mock('@/hooks/useModuleEvent', () => ({ __esModule: true, default: () => ({ logoutModuleEvent: jest.fn() }) }));
 jest.mock('@/hooks/useGlobal', () => ({
@@ -300,6 +308,8 @@ describe('Resources enterprise skill mode', () => {
     mockEventEmitter.on.mockClear();
     mockEventEmitter.off.mockClear();
     mockEventEmitter.emit.mockClear();
+    mockOpenTemporaryDetailPanel.mockClear();
+    mockClearDetailPanel.mockClear();
   });
 
   const renderAt = (search: string) => {
@@ -312,6 +322,19 @@ describe('Resources enterprise skill mode', () => {
       Promise.resolve(paramCode === 'BYAI_BRAND_VERSION' ? { paramValue: version } : {})
     );
   };
+
+  it('opens skill details as temporary panels and closes only that detail', async () => {
+    renderAt('?tab=enterprise');
+    fireEvent.click(await screen.findByRole('button', { name: 'open skill' }));
+    expect(mockOpenTemporaryDetailPanel).toHaveBeenCalledWith(expect.any(Function), { width: 350 });
+    const closeTemporary = jest.fn();
+    const detail = mockOpenTemporaryDetailPanel.mock.calls[0][0](closeTemporary);
+    expect(detail.props.resourceId).toBe('skill-1');
+    detail.props.onClose();
+    expect(closeTemporary).toHaveBeenCalledTimes(1);
+    expect(mockClearDetailPanel).not.toHaveBeenCalled();
+    expect(screen.getByTestId('resource-list')).toBeInTheDocument();
+  });
 
   it.each([true, false])('shows noncommercial skill import for authorized users (AdminVip: %s)', async (adminVip) => {
     setBrandVersion('openSource');

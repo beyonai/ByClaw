@@ -3466,6 +3466,7 @@ export default {
   'resourceTabs.knowledgeCenter': 'Knowledge Center',
   'resourceTabs.toolCenter': 'Tool Center',
   'resourceTabs.skillCenter': 'Skill Center',
+  'resourceTabs.loadFailed': 'Failed to load resources',
   'resourceTabs.skillUpload.uploadButton': 'Upload',
   'resourceTabs.skillUpload.onlyZip': 'Only .zip files are supported',
   'resourceTabs.skillUpload.noUserCode': 'Unable to get user code, please login again',

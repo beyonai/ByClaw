@@ -57,6 +57,8 @@ jest.mock('@/pages/manager/service/resources', () => ({
   publishSkillToEnterprise: jest.fn(),
   checkWorkspaceSkillShareConflicts: jest.fn(),
   resourceizeWorkspaceSkill: jest.fn(),
+  queryWorkspaceSkillDetail: jest.fn(),
+  queryResourceMembers: jest.fn(),
 }));
 
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({
@@ -77,10 +79,13 @@ import {
   publishSkillToEnterprise,
   checkWorkspaceSkillShareConflicts,
   resourceizeWorkspaceSkill,
+  queryWorkspaceSkillDetail,
 } from '@/pages/manager/service/resources';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceCard from '..';
 import * as globalHook from '@/hooks/useGlobal';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import { DetailPanelContent, useDetailPanelState } from '@/layout/pcLayout/useDetailPanelState';
 
 const renderWithQueryClient = (ui: React.ReactElement) => {
   const queryClient = new QueryClient({
@@ -1336,6 +1341,50 @@ describe('workspace skill enterprise publication', () => {
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it('restores the current employee panel after closing a personal workspace skill card detail', async () => {
+    (queryWorkspaceSkillDetail as jest.Mock).mockResolvedValue({ skillName: 'fws4', skillDesc: 'Personal skill' });
+    const onCardClick = jest.fn();
+    const Host = () => {
+      const panels = useDetailPanelState();
+      React.useEffect(() => {
+        panels.openDetailPanel(<input aria-label="employee skill search" defaultValue="saved search" />);
+      }, [panels.openDetailPanel]);
+      return (
+        <SiderContentContext.Provider
+          value={{
+            siderContentWidth: 240,
+            setSiderContentWidth: jest.fn(),
+            setDetailPanel: panels.openDetailPanel,
+            clearDetailPanel: panels.clearDetailPanel,
+            openTemporaryDetailPanel: panels.openTemporaryDetailPanel,
+          }}
+        >
+          <ResourceCard
+            resource={{ ...workspaceSkill, personalWorkspace: true }}
+            resourceType="SKILL"
+            onCardClick={onCardClick}
+          />
+          <div data-testid="right-panel">
+            <DetailPanelContent {...panels} />
+          </div>
+        </SiderContentContext.Provider>
+      );
+    };
+    renderWithQueryClient(<Host />);
+    const originalSearch = screen.getByRole('textbox', { name: 'employee skill search' });
+    fireEvent.click(screen.getByText('Workspace skill'));
+    expect((await screen.findAllByText('fws4')).length).toBeGreaterThan(0);
+    expect(onCardClick).not.toHaveBeenCalled();
+    expect(originalSearch).not.toBeVisible();
+    fireEvent.click(within(screen.getByTestId('right-panel')).getByRole('button'));
+    expect(screen.getByRole('textbox', { name: 'employee skill search' })).toBe(originalSearch);
+    expect(originalSearch).toHaveValue('saved search');
+    expect(queryWorkspaceSkillDetail).toHaveBeenCalledWith({
+      skillPath: '/skills/example',
+      personalWorkspace: true,
+    });
+  });
 
   it.each([
     { hiddenMenuItemKeys: ['share', 'publishToEnterprise'] },
