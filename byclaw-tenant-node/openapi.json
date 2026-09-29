@@ -4852,6 +4852,145 @@
           }
         }
       }
+    },
+    "/internal/v1/messages/by-command/{commandId}": {
+      "get": {
+        "operationId": "getMessageByCommand",
+        "summary": "按持久化命令 ID 查询当前消息",
+        "description": "commandId 对应镜像 eventId 写入的 persist_command_id。需要 mTLS、固定租户/代际及真实用户身份，并复核会话访问权限。输入消息保存 INPUT 的 ID；回答只保存最近一次已提交的出站事件 ID。旧出站 ID 可能已被覆盖，本接口不提供事件审计历史，404 不表示事件从未提交。撤回消息返回脱敏投影。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "commandId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9:_-]{1,64}$"
+            },
+            "description": "稳定的消息镜像 eventId；对应 persist_command_id，区分大小写。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前匹配消息，沿用历史消息字段与撤回脱敏投影。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["messageId", "sessionId", "enterpriseId", "complete"],
+                  "properties": {
+                    "messageId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "enterpriseId": {
+                      "type": "string"
+                    },
+                    "persistCommandId": {
+                      "type": "string"
+                    },
+                    "complete": {
+                      "type": "boolean"
+                    },
+                    "recalled": {
+                      "type": "boolean"
+                    },
+                    "messageContent": {
+                      "type": ["string", "null"]
+                    },
+                    "usage": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "example": {
+                  "messageId": "100",
+                  "sessionId": "30",
+                  "enterpriseId": "10",
+                  "persistCommandId": "evt-001",
+                  "messageContent": "hello",
+                  "usage": 1,
+                  "complete": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未匹配当前消息或用户无权访问；不能据此判断事件从未落库。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

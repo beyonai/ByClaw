@@ -8,6 +8,7 @@ import { opaqueId, record } from "../contracts/validation.js";
 import { publicResult } from "../../application/schema/result-view.js";
 import { DomainError } from "../../domain/errors.js";
 
+/** 仅接收 BE 的 task JSON 与 ZIP；受理、查询、审计确认使用同一持久任务记录。 */
 export async function schemaRoutes(
   app: FastifyInstance,
   identity: TenantIdentity,

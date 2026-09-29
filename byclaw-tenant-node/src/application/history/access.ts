@@ -2,6 +2,7 @@ import { DomainError } from "../../domain/errors.js";
 import { requireId } from "../../domain/values.js";
 import type { HistoryRepository, Row } from "./contracts.js";
 
+/** 历史读取的共享权限规则；子会话沿父链授权，群任务同时校验原群与发起人。 */
 export class HistoryAccess {
   constructor(
     protected readonly tenantId: string,

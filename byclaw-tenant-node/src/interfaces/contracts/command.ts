@@ -3,6 +3,7 @@ import { DomainError } from "../../domain/errors.js";
 import { assertTenant, type TenantIdentity } from "../../domain/tenant.js";
 import { requireId } from "../../domain/values.js";
 import { canonical, digest, opaqueId, record, sha256 } from "./validation.js";
+/** 业务摘要排除代际、实例和成员断言；这些单独鉴权，重发同一业务仍可命中幂等结果。 */
 export function commandHash(input: Omit<TenantCommand, "requestHash"> | TenantCommand): string {
   const {
     requestHash: _,
@@ -13,6 +14,7 @@ export function commandHash(input: Omit<TenantCommand, "requestHash"> | TenantCo
   } = input as TenantCommand;
   return sha256(canonical(command));
 }
+/** 入口核验固定身份、协议、真实 actor 与完整命令摘要；具体资源权限留给事务内判断。 */
 export function validateTenantCommand(
   input: unknown,
   identity: TenantIdentity,

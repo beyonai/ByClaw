@@ -4,6 +4,7 @@ import { bounded } from "../../application/history.js";
 import { requireId } from "../../domain/values.js";
 import { DomainError } from "../../domain/errors.js";
 
+/** 历史 HTTP 适配：解析参数和 actor，权限及投影由 HistoryService 统一处理。 */
 export function historyRoutes(app: FastifyInstance, service: HistoryService) {
   const actor = (req: any) => requireId(req.headers["x-actor-user-id"]);
   const session = (req: any) => requireId(req.params.id);
@@ -19,6 +20,10 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
   };
   const queryLimit = (req: any) =>
     bounded(req.query.limit === undefined ? undefined : Number(req.query.limit), 20, 50);
+  app.get<{ Params: { commandId: string } }>(
+    "/internal/v1/messages/by-command/:commandId",
+    async (req) => service.byCommand(actor(req), req.params.commandId),
+  );
   app.post("/internal/v1/assiman/getMessages", async (req) => {
     const b = body(req);
     return service.traditional(

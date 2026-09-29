@@ -17,6 +17,10 @@ public interface ByaiGroupChatMentionMapper {
         return selectMyGroupsScoped(userId, null);
     }
 
+    default List<GroupChatListItemResponse> selectMyGroups(Long userId, Long enterpriseId) {
+        return selectMyGroupsScoped(userId, enterpriseId);
+    }
+
     List<GroupChatListItemResponse> selectMyGroupsScoped(@Param("userId") Long userId,
         @Param("enterpriseId") Long enterpriseId);
 

@@ -4,6 +4,7 @@ import type { SchemaResult } from "../../application/schema/types.js";
 import { DomainError } from "../../domain/errors.js";
 import type { MtlsClient } from "../http/mtls-client.js";
 
+/** mTLS 读取平台审计当前版本并回报任务结果；平台 tenant_schema_audit 由 BE 落库。 */
 export class BeSchemaClient {
   constructor(
     private readonly config: Config,

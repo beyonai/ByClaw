@@ -17,6 +17,7 @@ function base64(value: unknown, length?: number): Buffer {
     throw new DomainError("INVALID_CREDENTIAL_ENVELOPE");
   return bytes;
 }
+/** 校验 SM4-GCM 信封及规范 Base64；主密钥不进入 Node 配置。 */
 export function credentialEnvelope(json: string): CredentialEnvelope {
   let value: CredentialEnvelope;
   try {
@@ -36,7 +37,7 @@ export function credentialEnvelope(json: string): CredentialEnvelope {
   base64(value.ciphertext);
   return value;
 }
-/** The workload-authenticated KMS decrypts SM4-GCM; no master key enters Node. */
+/** 以工作负载 mTLS 身份调用 KMS，并绑定租户/库名 AAD；解密结果仅用于建立连接。 */
 export async function decryptPassword(
   client: MtlsClient,
   url: string,

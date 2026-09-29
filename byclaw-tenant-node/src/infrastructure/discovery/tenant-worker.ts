@@ -11,6 +11,7 @@ import type { WorkerServices } from "../../interfaces/worker/dispatch.js";
 import { dispatchWorker } from "../../interfaces/worker/dispatch.js";
 import { DomainError } from "../../domain/errors.js";
 
+/** 管理实际 by-framework Worker 的注册、消费与停止；共享 Redis 的最终关闭由 bootstrap 负责。 */
 export class TenantWorker {
   private runner?: WorkerRunner;
   private loop?: Promise<void>;
@@ -51,6 +52,7 @@ export class TenantWorker {
           );
         } catch (error) {
           return {
+            // SDK 根据 status 判定任务成功，业务错误必须明确返回 FAILED。
             status: AgentState.FAILED,
             replyData: {
               ok: false,

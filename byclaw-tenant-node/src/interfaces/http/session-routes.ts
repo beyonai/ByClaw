@@ -5,6 +5,7 @@ import type { SessionQueries } from "../../application/session-queries.js";
 import { requireId } from "../../domain/values.js";
 import { record } from "../contracts/validation.js";
 
+/** 个人会话查询的 HTTP 适配；写操作复用命令路由，保持统一幂等语义。 */
 export function sessionRoutes(
   app: FastifyInstance,
   queries: SessionQueries,

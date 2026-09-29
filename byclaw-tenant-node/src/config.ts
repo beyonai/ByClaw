@@ -17,6 +17,7 @@ export interface Config extends TenantIdentity {
   tls?: { certFile: string; keyFile: string; caFile: string };
   redis: { host: string; port: number; db: number; username: string; password: string; tls?: {} };
 }
+/** 读取并校验启动配置；租户身份由 BE 创建容器时注入，本地 .env 用于模拟这一过程。 */
 export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const required = (key: string): string => {
     const value = env[key];
@@ -42,6 +43,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     return value.toString().replace(/\/$/, "");
   };
   const enterpriseId = requireId(required("ENTERPRISE_ID"));
+  // 方案约定两个环境变量是同一个 enterprise_id，拒绝部署注入错配。
   if (requireId(required("TENANT_ID")) !== enterpriseId) throw new Error("Tenant IDs must match");
   if (env.REDIS_TLS !== "true" && env.REDIS_TLS !== "false")
     throw new Error("REDIS_TLS must be true or false");

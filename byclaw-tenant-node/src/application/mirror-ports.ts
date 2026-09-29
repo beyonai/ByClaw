@@ -8,6 +8,7 @@ export interface InputState {
   userId: string;
   content: string;
 }
+/** 镜像事务端口；INPUT、回答版本及问答关系都复用既有租户表。 */
 export interface MirrorTransaction {
   lock(sessionId: string): Promise<void>;
   input(event: MirrorEnvelope): Promise<InputState | null>;

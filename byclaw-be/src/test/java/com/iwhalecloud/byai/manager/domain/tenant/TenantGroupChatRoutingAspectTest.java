@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -57,13 +58,21 @@ class TenantGroupChatRoutingAspectTest {
             "sessionId", "9000000000000000001", "name", "联调测试工作组")), "total", 1,
             "pageNum", 1, "pageSize", 20, "totalPages", 1));
 
-        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("list", 1, 20));
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("list", 1, 20, 11221076L));
 
         assertThat(response.getCode()).isZero();
         @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) response.getData();
         assertThat(data.get("total")).isEqualTo(2L);
         assertThat((List<?>) data.get("list")).hasSize(2);
+    }
+
+    @Test
+    void tenantListRejectsAnotherEnterpriseId() {
+        TenantRequestContextHolder.set(new TenantRequestContext(27L, 11221076L, "MEMBER"));
+
+        assertThatThrownBy(() -> aspect.route(call("list", 1, 20, 11221859L)))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
     }
 
     @Test
@@ -161,7 +170,7 @@ class TenantGroupChatRoutingAspectTest {
         MethodSignature signature = mock(MethodSignature.class);
         when(signature.getMethod()).thenAnswer(invocation -> {
             Class<?>[] parameters = switch (method) {
-                case "list" -> new Class<?>[]{Integer.class, Integer.class};
+                case "list" -> new Class<?>[]{Integer.class, Integer.class, Long.class};
                 case "create" -> new Class<?>[]{GroupChatCreateRequest.class};
                 case "invite" -> new Class<?>[]{Long.class, GroupChatMemberRequest.class};
                 case "remove" -> new Class<?>[]{Long.class, String.class, Long.class};

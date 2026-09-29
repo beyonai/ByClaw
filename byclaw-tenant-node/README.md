@@ -154,6 +154,10 @@ BE 每次核验 ACTIVE 租户成员，并生成 tenantMemberUserIds；邀请/转
 
 API 路径对应 `command-routes.ts` 和 OpenAPI。HTTP 正常结果是**事务已提交**的原始结果；同 requestId 同内容不重做，冲突拒绝。命令结果使用既有 byai_session_ext 的 `node_command:<requestId>` 保存，与业务变更同事务；不新增幂等/回执表。重投离群/删除命令也可返回原结果。
 
+`GET /internal/v1/messages/by-command/{commandId}` 按既有 `byai_message.persist_command_id` 查询当前消息。commandId 是镜像 eventId，允许 1–64 个 ASCII 字母、数字、冒号、下划线和连字符。接口要求 mTLS、固定租户/代际头与真实 `X-Actor-User-Id`，查询同时限定消息和会话的企业，返回前复核个人会话所有者、群成员或私有任务发起人权限；撤回消息仍做脱敏。200 返回沿用历史字段的单条消息及 complete；未匹配或无权访问均返回 404 RESOURCE_NOT_ACCESSIBLE。
+
+输入消息保留 INPUT 的 commandId；回答行只保留最近一次已提交的出站 commandId，后续事件会覆盖旧 ID。该接口查询当前行，不保存逐事件审计历史，404 不能作为“事件从未落库”的证明。旧出站事件应结合稳定 answerMessageId、后续消息状态和源流记录对账。
+
 历史保留既有 assiman、群列表/详情/上下文/搜索、话题、任务与待发布查询，撤回内容做脱敏投影。任务状态沿用 ACTIVE/PUBLISHED/CANCELLED 与 RUNNING/WAITING_USER/FAILED。群消息沿引用链写 topic_id，首次公开回复形成话题；真人提及投影至既有 mention 表。
 
 BE 仍负责平台项目 PENDING→READY 编排、过滤未 READY 项目、租户权限、资源/云文件授权、上传、AI 调度与实时广播。Node 的群创建结果提交后 BE 才能发布项目 READY；上传/文件元数据未租户化的入口不能靠本模块绕开。
@@ -186,6 +190,18 @@ hash 的字节约定：递归按 JSON 对象键的 UTF-16 字典顺序排序，�
 
 ## 验证与联调边界
 
+启动入口自动读取模块根目录的 `.env`，不依赖调试器工作目录，已有环境变量优先。
+
+本地填写 `.env` 后运行 `pnpm dev`，或调试 `src/dev.ts`。开发入口默认监听 `127.0.0.1`，把示例状态目录改为模块内 `.tenant-state/`；TLS 路径未填写或仍为 `/run/secrets/` 时，用 OpenSSL 自动生成本地 CA、Node 证书和 BE 客户端证书，保存至 `.tenant-state/dev-tls/`，有效证书重复启动会复用。自定义证书路径保持不变。私钥仅当前用户可读，目录已被 gitignore 排除；不会安装系统信任证书。
+
+本地仍使用 HTTPS/mTLS，受保护接口须带开发 BE 客户端证书、租户与代际头。进程存活检查可使用：
+
+```bash
+curl --cacert .tenant-state/dev-tls/ca.crt https://localhost:3100/internal/v1/health/live
+```
+
+本地开发入口不会模拟 Redis、BE、KMS 或数据库；这些配置仍需填写，就绪取决于依赖和租户结构。`pnpm start` 使用正式入口，不生成开发证书或修改监听/状态目录，部署时由 BE 注入环境和真实证书。
+
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
@@ -193,7 +209,7 @@ pnpm test
 pnpm build
 pnpm format:check
 # 配置证书与真实环境后，由联调人员启动：
-node --env-file=.env dist/main.js
+pnpm start
 ```
 
 本次仅做离线类型、构建、格式和 mock 单元/HTTP/ZIP 测试，没有连接真实数据库、Redis 或 KMS，也没有执行任何迁移。

@@ -8,7 +8,7 @@ export type { HistoryRepository, MessageFilter, Row } from "./history/contracts.
 export { safeMessage, objectJson } from "./history/message-format.js";
 export { bounded } from "./history/paging.js";
 
-/** Small facade preserves the external query contract; each query family owns its logic. */
+/** 历史查询统一入口；权限与各类投影交由小型用例类处理，保持 HTTP 和 Worker 语义一致。 */
 export class HistoryService {
   private readonly permission: HistoryAccess;
   private readonly basic: TraditionalHistory;
@@ -26,6 +26,8 @@ export class HistoryService {
   traditional = (...args: Parameters<TraditionalHistory["traditional"]>) =>
     this.basic.traditional(...args);
   byIds = (...args: Parameters<TraditionalHistory["byIds"]>) => this.basic.byIds(...args);
+  byCommand = (...args: Parameters<TraditionalHistory["byCommand"]>) =>
+    this.basic.byCommand(...args);
   forward = (...args: Parameters<TraditionalHistory["forward"]>) => this.basic.forward(...args);
   outline = (...args: Parameters<TraditionalHistory["outline"]>) => this.basic.outline(...args);
   groups = (...args: Parameters<GroupHistory["groups"]>) => this.group.groups(...args);

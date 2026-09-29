@@ -13,6 +13,7 @@ export async function loadTls(config: Config): Promise<SecureContextOptions | un
   );
   return { cert, key, ca, minVersion: "TLSv1.2" };
 }
+/** BE/KMS 内部 JSON 请求适配器；验证服务端证书并限制响应大小和请求时长。 */
 export class MtlsClient {
   private readonly agent: HttpAgent | HttpsAgent;
   constructor(

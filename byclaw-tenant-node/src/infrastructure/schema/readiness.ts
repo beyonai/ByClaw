@@ -32,6 +32,7 @@ const requiredColumns: Record<string, string[]> = {
   byai_group_chat_topic: ["topic_id", "group_session_id"],
   byai_group_chat_mention: ["group_session_id", "message_id", "mentioned_user_id"],
 };
+/** 业务结构门禁：BE 审计、库内标记、完整指纹及运行所需字段/索引都一致才放行。 */
 export class SchemaReadiness {
   state: SchemaState = { observedVersion: null, auditedVersion: null, verified: false };
   constructor(

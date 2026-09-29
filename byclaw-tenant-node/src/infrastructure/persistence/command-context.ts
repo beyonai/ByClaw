@@ -3,6 +3,7 @@ import type { SqlRow, SqlSession } from "../../application/database-ports.js";
 import { DomainError } from "../../domain/errors.js";
 import { first, insert, nextId } from "./sql-utils.js";
 
+/** 命令事务内的资源与权限上下文；BE 已验租户成员，Node 再验会话归属和群内角色。 */
 export class CommandContext {
   constructor(
     readonly db: SqlSession,
@@ -22,6 +23,7 @@ export class CommandContext {
       [this.command.sessionId, userId, this.command.enterpriseId],
     );
   }
+  /** 个人会话验所有者；私有群任务还验原群成员及发起人，解散群仅开放生命周期操作。 */
   async authorize(): Promise<void> {
     const session = await this.session();
     if (!session) {

@@ -4,6 +4,7 @@ import { digest, sha256 } from "../../interfaces/contracts/validation.js";
 import { unzipBundle } from "./zip-bundle.js";
 import { validateScript } from "./script-validator.js";
 
+/** 核验 ZIP 总摘要、逐版 manifest/SQL 摘要与协议范围，输出可执行的白名单语句。 */
 export async function validateBundle(
   task: SchemaTask,
   bytes: Uint8Array,

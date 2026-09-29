@@ -15,6 +15,7 @@ export interface WorkerServices {
   ready(): boolean;
   schemaState(): unknown;
 }
+/** 按固定租户分派 SDK 内容；业务 actor 必须匹配 header.userCode，管理查询可在 ADMIN_ONLY 执行。 */
 export async function dispatchWorker(
   input: unknown,
   identity: TenantIdentity,

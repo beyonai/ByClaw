@@ -15,6 +15,7 @@ import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseQueryDTO;
 import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseRemoveDTO;
 import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseSwitchDTO;
 import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;
+import com.iwhalecloud.byai.manager.entity.enterprise.TenantUserMembership;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
 import com.iwhalecloud.byai.manager.vo.enterprise.UserEnterpriseVo;
@@ -93,14 +94,14 @@ public class EnterpriseInfoApplicationService {
     }
 
     /**
-     * 修改企业信息。
+     * 修改企业信息。仅该企业的 OWNER 可以修改。
      *
      * @param enterpriseInfoDTO 修改入参
      */
     @Transactional(rollbackFor = Exception.class)
     public void update(EnterpriseInfoDTO enterpriseInfoDTO) {
-        assertPlatformManager();
         Long enterpriseId = enterpriseInfoDTO.getEnterpriseId();
+        assertEnterpriseOwner(enterpriseId);
         requireEnterprise(enterpriseId);
         assertComAcctCodeUnique(enterpriseInfoDTO.getComAcctCode(), enterpriseId);
 
@@ -108,14 +109,14 @@ public class EnterpriseInfoApplicationService {
     }
 
     /**
-     * 删除企业信息，并清理该企业下的租户成员关系；系统预置默认企业不允许删除。
+     * 删除企业信息，并清理该企业下的租户成员关系。仅该企业的 OWNER 可以删除；系统预置默认企业不允许删除。
      *
      * @param removeDTO 删除入参
      */
     @Transactional(rollbackFor = Exception.class)
     public void remove(EnterpriseRemoveDTO removeDTO) {
-        assertPlatformManager();
         Long enterpriseId = removeDTO.getEnterpriseId();
+        assertEnterpriseOwner(enterpriseId);
         if (DEFAULT_ENTERPRISE_ID.equals(enterpriseId)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("enterprise.delete.default.forbidden"));
@@ -241,10 +242,14 @@ public class EnterpriseInfoApplicationService {
     }
 
     /**
-     * 校验当前用户为平台管理员，否则抛出业务异常。
+     * 校验当前用户是该企业的有效 OWNER，否则抛出业务异常。
+     *
+     * @param enterpriseId 企业标识
      */
-    private void assertPlatformManager() {
-        if (!CurrentUserHolder.isPlatformManager()) {
+    private void assertEnterpriseOwner(Long enterpriseId) {
+        TenantUserMembership membership = tenantUserMembershipService.findActiveByUserIdAndEnterpriseId(
+            CurrentUserHolder.getCurrentUserId(), enterpriseId);
+        if (membership == null || !TenantUserMembershipRole.OWNER.equals(membership.getRole())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("enterprise.edit.permission.deny"));
         }
     }

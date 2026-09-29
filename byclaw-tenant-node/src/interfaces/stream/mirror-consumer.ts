@@ -12,6 +12,7 @@ export interface StreamMetrics {
   oldestPendingMs: number;
   lag: number | null;
 }
+/** 单流消费者：取得分片租约后先处理最老 pending，旧记录未解决时不读取新记录。 */
 export class MirrorConsumer {
   readonly metrics: StreamMetrics = {
     committed: 0,
@@ -62,6 +63,7 @@ export class MirrorConsumer {
   process(id: string, fields: string[]) {
     return this.delivery.process(id, fields);
   }
+  /** null 表示没有积压，false 表示最老记录尚不可处理；后者必须阻止读取新消息。 */
   private async pending(): Promise<[string, string[]] | null | false> {
     const oldest = (await this.redis.xpending(this.stream, this.group, "-", "+", 1)) as [
       string,
@@ -132,6 +134,7 @@ export class MirrorConsumer {
       }
     }
   }
+  /** 采集消费组积压与延迟；指标只反映镜像持久化，不改变原 AI 实时流。 */
   async sample(): Promise<void> {
     const summary = (await this.redis.xpending(this.stream, this.group)) as [number, string | null];
     this.metrics.pending = summary[0];

@@ -37,7 +37,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
         try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
             Page<GroupChatListItemResponse> page = PageHelper.startPage(1, 1);
             List<GroupChatListItemResponse> groups = session.getMapper(ByaiGroupChatMentionMapper.class)
-                .selectMyGroups(30L);
+                .selectMyGroups(30L, 100L);
 
             // 分页总数应排除已确认解散的群，同时兼容历史 state 为空的群。
             assertThat(page.getTotal()).isEqualTo(2L);
@@ -66,16 +66,16 @@ class ByaiGroupChatMentionMapperPaginationTest {
         }
         try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
             ByaiGroupChatMentionMapper mapper = session.getMapper(ByaiGroupChatMentionMapper.class);
-            assertThat(mapper.selectMyGroups(31L)).extracting(GroupChatListItemResponse::getSessionId).contains(30L);
-            assertThat(mapper.selectMyGroups(30L)).extracting(GroupChatListItemResponse::getSessionId).doesNotContain(30L);
-            assertThat(mapper.selectMyGroups(32L)).isEmpty();
+            assertThat(mapper.selectMyGroups(31L, 100L)).extracting(GroupChatListItemResponse::getSessionId).contains(30L);
+            assertThat(mapper.selectMyGroups(30L, 100L)).extracting(GroupChatListItemResponse::getSessionId).doesNotContain(30L);
+            assertThat(mapper.selectMyGroups(32L, 100L)).isEmpty();
         }
         try (Connection connection = DriverManager.getConnection(jdbcUrl);
             Statement statement = connection.createStatement()) {
             statement.execute("INSERT INTO byai_session_ext VALUES (30, 'group_dissolution_ack_31', 'true')");
         }
         try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
-            assertThat(session.getMapper(ByaiGroupChatMentionMapper.class).selectMyGroups(31L)).isEmpty();
+            assertThat(session.getMapper(ByaiGroupChatMentionMapper.class).selectMyGroups(31L, 100L)).isEmpty();
         }
     }
 
@@ -86,7 +86,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
 
         try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
             List<GroupChatListItemResponse> groups = session.getMapper(ByaiGroupChatMentionMapper.class)
-                .selectMyGroups(30L);
+                .selectMyGroups(30L, 100L);
 
             GroupChatListItemResponse groupWithReadCursor = groups.stream()
                 .filter(group -> group.getSessionId().equals(10L))
@@ -108,15 +108,56 @@ class ByaiGroupChatMentionMapperPaginationTest {
     void legacyGroupsAreScopedToTheirOwningEnterprise() throws Exception {
         String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-tenant-scope.sqlite").toAbsolutePath();
         initializeSchema(jdbcUrl);
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+            Statement statement = connection.createStatement()) {
+            statement.execute("UPDATE byai_session SET enterprise_id = 200 WHERE session_id = 20");
+        }
         try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
             ByaiGroupChatMentionMapper mapper = session.getMapper(ByaiGroupChatMentionMapper.class);
-            assertThat(mapper.selectMyGroupsScoped(30L, 11221076L))
+            assertThat(mapper.selectMyGroupsScoped(30L, 100L))
                 .extracting(GroupChatListItemResponse::getSessionId).containsExactly(10L);
-            assertThat(mapper.selectMyGroupsScoped(30L, 11221859L))
+            assertThat(mapper.selectMyGroupsScoped(30L, 200L))
                 .extracting(GroupChatListItemResponse::getSessionId).containsExactly(20L);
-            assertThat(mapper.isLegacyGroupMember(10L, 30L, 11221076L)).isTrue();
-            assertThat(mapper.isLegacyGroupMember(10L, 30L, 11221859L)).isFalse();
-            assertThat(mapper.isLegacyGroupMember(10L, 31L, 11221076L)).isFalse();
+            assertThat(mapper.isLegacyGroupMember(10L, 30L, 100L)).isTrue();
+            assertThat(mapper.isLegacyGroupMember(10L, 30L, 200L)).isFalse();
+            assertThat(mapper.isLegacyGroupMember(10L, 31L, 100L)).isFalse();
+        }
+    }
+
+    @Test
+    void selectMyGroupsFiltersByEnterpriseId() throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-enterprise-filter.sqlite").toAbsolutePath();
+        initializeSchema(jdbcUrl);
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+            Statement statement = connection.createStatement()) {
+            statement.execute("UPDATE byai_session SET enterprise_id = 200 WHERE session_id = 20");
+        }
+
+        try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
+            ByaiGroupChatMentionMapper mapper = session.getMapper(ByaiGroupChatMentionMapper.class);
+
+            assertThat(mapper.selectMyGroups(30L, 100L))
+                .extracting(GroupChatListItemResponse::getSessionId)
+                .containsExactly(10L);
+            assertThat(mapper.selectMyGroups(30L, 200L))
+                .extracting(GroupChatListItemResponse::getSessionId)
+                .containsExactly(20L);
+        }
+    }
+
+    @Test
+    void selectMyGroupsDoesNotFilterWhenEnterpriseIdIsAbsent() throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-enterprise-optional.sqlite").toAbsolutePath();
+        initializeSchema(jdbcUrl);
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+            Statement statement = connection.createStatement()) {
+            statement.execute("UPDATE byai_session SET enterprise_id = 200 WHERE session_id = 20");
+        }
+
+        try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
+            assertThat(session.getMapper(ByaiGroupChatMentionMapper.class).selectMyGroups(30L, null))
+                .extracting(GroupChatListItemResponse::getSessionId)
+                .containsExactly(10L, 20L);
         }
     }
 
@@ -128,8 +169,8 @@ class ByaiGroupChatMentionMapperPaginationTest {
                     session_id INTEGER PRIMARY KEY,
                     session_name TEXT,
                     project_id INTEGER,
-                    session_type TEXT,
                     enterprise_id INTEGER,
+                    session_type TEXT,
                     state TEXT,
                     update_time TEXT,
                     create_time TEXT
@@ -176,10 +217,10 @@ class ByaiGroupChatMentionMapperPaginationTest {
                 )
                 """);
             statement.execute("""
-                INSERT INTO byai_session(session_id, session_name, project_id, session_type, enterprise_id, state, update_time, create_time)
-                VALUES (10, 'group 10', 1, 'hs_as', 11221076, NULL, '2026-09-11 12:00:00', '2026-09-11 10:00:00'),
-                       (20, 'group 20', 1, 'hs_as', 11221859, 'GROUP_ACTIVE', '2026-09-11 11:00:00', '2026-09-11 09:00:00'),
-                       (30, 'dissolved group', 1, 'hs_as', 11221076, 'GROUP_DISSOLVED', '2026-09-11 14:00:00', '2026-09-11 08:00:00')
+                INSERT INTO byai_session(session_id, session_name, project_id, enterprise_id, session_type, state, update_time, create_time)
+                VALUES (10, 'group 10', 1, 100, 'hs_as', NULL, '2026-09-11 12:00:00', '2026-09-11 10:00:00'),
+                       (20, 'group 20', 1, 100, 'hs_as', 'GROUP_ACTIVE', '2026-09-11 11:00:00', '2026-09-11 09:00:00'),
+                       (30, 'dissolved group', 1, 100, 'hs_as', 'GROUP_DISSOLVED', '2026-09-11 14:00:00', '2026-09-11 08:00:00')
                 """);
             statement.execute("""
                 INSERT INTO byai_session_member(

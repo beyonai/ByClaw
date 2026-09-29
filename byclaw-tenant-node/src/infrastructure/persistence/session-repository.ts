@@ -1,5 +1,6 @@
 import type { SessionRepository } from "../../application/session-queries.js";
 import type { SqlSession } from "../../application/database-ports.js";
+/** 个人会话 SQL 查询；排除关闭、路由中及群任务私有会话，避免混入普通列表。 */
 export class SqlSessionRepository implements SessionRepository {
   constructor(
     private readonly db: SqlSession,

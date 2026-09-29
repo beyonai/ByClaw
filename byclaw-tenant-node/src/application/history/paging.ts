@@ -9,6 +9,7 @@ export function bounded(value: unknown, fallback: number, max: number) {
 }
 export const encodeCursor = (values: string[]) =>
   Buffer.from(values.join(":"), "utf8").toString("base64url");
+/** 校验游标的会话/话题绑定、时间和 ID 格式，拒绝跨上下文复用。 */
 export function decodeCursor(
   cursor: string | undefined,
   sessionId: string,

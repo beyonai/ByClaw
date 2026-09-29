@@ -26,6 +26,7 @@ import { Discovery } from "./infrastructure/discovery/by-framework-discovery.js"
 import { TenantWorker } from "./infrastructure/discovery/tenant-worker.js";
 import { createApp } from "./interfaces/http/app.js";
 
+/** 组装应用端口与基础设施；连接池、Redis、HTTPS 客户端的关闭由这里统一负责。 */
 export async function bootstrap(config: Config) {
   const tls = await loadTls(config),
     client = new MtlsClient(tls, config.internalToken);
@@ -57,6 +58,7 @@ export async function bootstrap(config: Config) {
   const schema = new SchemaTaskService(
     schemaPorts(
       connection,
+      // 文档要求任务落 Node 持久卷；每代际目录独立，旧代际结果保留供 BE 对账。
       new SchemaTaskFiles(
         new JsonStore(join(config.stateDir, "schema-tasks", `g${config.generation}`)),
       ),

@@ -6,6 +6,7 @@ import { DomainError } from "../../domain/errors.js";
 import { text } from "../../domain/values.js";
 import { first, insert } from "./sql-utils.js";
 import { nextSequence } from "./message-fields.js";
+/** 复用用户消息行保存 INPUT 身份与摘要，校验会话访问后同步更新群话题和提及索引。 */
 export class MirrorInputWriter {
   constructor(
     private readonly db: SqlSession,

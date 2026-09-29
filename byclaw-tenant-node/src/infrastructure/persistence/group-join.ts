@@ -2,6 +2,7 @@ import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { text } from "../../domain/values.js";
 import { first, insert, nextId } from "./sql-utils.js";
+/** BE 验证链接后，Node 再检查群状态与链接开关，仅把当前用户加入为 MEMBER。 */
 export async function joinGroup(context: CommandContext): Promise<void> {
   const { command, db } = context;
   if (command.payload.joinLinkAuthorized !== true) throw new DomainError("FORBIDDEN");

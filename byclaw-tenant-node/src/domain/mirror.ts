@@ -18,6 +18,7 @@ export interface MirrorEnvelope extends TenantIdentity {
   payloadHash: string;
   payload: Record<string, any>;
 }
+/** 回答的持久化状态；排序位置和摘要用于重投判断，version 用于数据库乐观并发控制。 */
 export interface AnswerState {
   id: string;
   messageId: string;
@@ -37,6 +38,7 @@ export interface AnswerState {
 function sourceParts(value: string): bigint[] {
   return value.split(/[-:]/).map(BigInt);
 }
+/** 按毫秒、Stream 序号和子事件序号逐段比较，避免字符串比较造成顺序错误。 */
 function compareSource(left: string, right: string): number {
   const a = sourceParts(left),
     b = sourceParts(right);
@@ -46,6 +48,7 @@ function compareSource(left: string, right: string): number {
   }
   return 0;
 }
+/** 纯状态转换：重复或旧事件返回 null；序号缺口与冲突抛错；delta 追加，终态覆盖正文。 */
 export function reduceAnswer(state: AnswerState, event: MirrorEnvelope): AnswerState | null {
   const source = event.sourceStreamId ? `${event.sourceStreamId}:${event.childOrdinal}` : null;
   if (state.version !== "0" && Boolean(source) !== Boolean(state.lastSourceId))

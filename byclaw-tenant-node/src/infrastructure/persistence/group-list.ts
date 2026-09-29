@@ -1,6 +1,7 @@
 import type { Row } from "../../application/history.js";
 type ReadRows = (sql: string, args?: unknown[]) => Promise<Row[]>;
 
+/** 按租户和当前群成员查询摘要、未读与提及统计；权限过滤与分页在 SQL 内完成。 */
 export async function groupList(
   read: ReadRows,
   tenantId: string,

@@ -5,7 +5,7 @@ import { first, insert } from "./sql-utils.js";
 import { nextSequence } from "./message-fields.js";
 import { indexGroupMessage } from "./group-message-index.js";
 
-/** BE uploads and authorizes files; Node commits the publication and group message together. */
+/** BE 负责文件上传与授权；Node 原子写入群消息、publication、PUBLISHED 状态并清理待发布卡片。 */
 export async function publishTask(context: CommandContext): Promise<void> {
   const { db, command } = context,
     p = command.payload,

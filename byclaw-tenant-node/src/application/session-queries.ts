@@ -12,6 +12,7 @@ export interface SessionRepository {
     projectId?: string,
   ): Promise<unknown>;
 }
+/** 个人会话查询入口；校验分页及类型，按当前用户查询；私有任务过滤由仓储完成。 */
 export class SessionQueries {
   constructor(private readonly repository: SessionRepository) {}
   async list(actor: string, input: Record<string, any>) {

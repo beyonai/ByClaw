@@ -64,8 +64,10 @@ public class TenantGroupChatRoutingAspect {
             context.userId(), context.enterpriseId())) return call.proceed();
         switch (method) {
             case "list": {
-                if (args.length == 2 && args[0] instanceof Integer pageNum && args[1] instanceof Integer pageSize) {
+                if (args.length == 3 && args[0] instanceof Integer pageNum && args[1] instanceof Integer pageSize) {
                     if (pageNum < 1 || pageSize < 1 || pageSize > 100) throw unsupported();
+                    if (args[2] != null && (!(args[2] instanceof Long enterpriseId)
+                        || !enterpriseId.equals(context.enterpriseId()))) throw unsupported();
                     return ResponseUtil.successResponse(list(context, pageNum, pageSize));
                 }
                 if (path != null && args.length == 3) {

@@ -9,6 +9,7 @@ import {
   outboundStream,
 } from "../../interfaces/stream/stream-keys.js";
 
+/** 管理入站控制流与 16 个出站分片；每流使用独立 Redis 读连接，防止阻塞读取互相占用。 */
 export class StreamSupervisor {
   private readonly readers: Redis[] = [];
   private readonly consumers: MirrorConsumer[] = [];

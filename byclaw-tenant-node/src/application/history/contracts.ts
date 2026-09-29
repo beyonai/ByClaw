@@ -1,6 +1,7 @@
 export type Row = Record<string, any>;
 export interface MessageFilter {
   sessionId?: string;
+  commandId?: string;
   ids?: string[];
   before?: string;
   after?: string;

@@ -1,5 +1,6 @@
 import type { SqlSession } from "../../application/database-ports.js";
 import { first } from "./sql-utils.js";
+/** 在外层消息事务中递增会话 last_seq，分配稳定的 created_seq。 */
 export async function nextSequence(
   db: SqlSession,
   enterpriseId: string,
@@ -12,6 +13,7 @@ export async function nextSequence(
   );
   return row!.lastSeq;
 }
+/** 更新时只写 payload 显式提供的可选字段，防止后续 delta 清空作者或附件。 */
 export function answerFields(
   payload: Record<string, any>,
   inserting: boolean,
