@@ -407,33 +407,88 @@ COMMENT ON COLUMN byai.sys_app_version.url IS '安装包存储地址；http 开�
 COMMENT ON COLUMN byai.sys_app_version.release_status IS 'draft/published/offline；只有 published 会被 /latest 返回';
 
 
-ALTER TABLE byai.sandbox_service_spec ADD COLUMN owner_scope VARCHAR(16) NOT NULL DEFAULT 'USER';
-COMMENT ON COLUMN byai.sandbox_service_spec.owner_scope IS '服务规格归属维度：用户或企业租户';
+-- 多租户平台基础：现有业务表只增列，新表保留既有数据并可安全重放。
+CREATE OR REPLACE FUNCTION byai._v050_tenant_add_column_if_missing(
+    p_table_name TEXT,
+    p_column_name TEXT,
+    p_definition TEXT
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'byai' AND table_name = p_table_name AND column_name = p_column_name
+    ) THEN
+        EXECUTE 'ALTER TABLE byai.' || quote_ident(p_table_name)
+            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_definition;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
-ALTER TABLE byai.ss_sandbox_record ADD COLUMN owner_scope VARCHAR(16) NOT NULL DEFAULT 'USER';
-COMMENT ON COLUMN byai.ss_sandbox_record.owner_scope IS '沙箱实例归属维度：用户或企业租户';
+SELECT byai._v050_tenant_add_column_if_missing('sandbox_service_spec', 'owner_scope',
+    'VARCHAR(16) NOT NULL DEFAULT ''USER''');
+SELECT byai._v050_tenant_add_column_if_missing('ss_sandbox_record', 'owner_scope',
+    'VARCHAR(16) NOT NULL DEFAULT ''USER''');
+SELECT byai._v050_tenant_add_column_if_missing('ss_sandbox_record', 'enterprise_id', 'BIGINT');
+SELECT byai._v050_tenant_add_column_if_missing('byai_project', 'enterprise_id', 'BIGINT');
+SELECT byai._v050_tenant_add_column_if_missing('byai_project', 'group_create_request_id', 'VARCHAR(64)');
+SELECT byai._v050_tenant_add_column_if_missing('byai_project', 'group_create_status', 'VARCHAR(16)');
 
-ALTER TABLE byai.po_enterprise_info ADD PRIMARY KEY (enterprise_id);
+DROP FUNCTION byai._v050_tenant_add_column_if_missing(TEXT, TEXT, TEXT);
 
-ALTER TABLE byai.byai_project ADD COLUMN enterprise_id BIGINT;
+COMMENT ON COLUMN byai.sandbox_service_spec.owner_scope IS '服务规格归属维度：USER个人或TENANT企业租户';
+COMMENT ON COLUMN byai.ss_sandbox_record.owner_scope IS '沙箱实例归属维度：USER个人或TENANT企业租户';
+COMMENT ON COLUMN byai.ss_sandbox_record.enterprise_id IS '租户沙箱所属企业ID；个人沙箱为空';
 COMMENT ON COLUMN byai.byai_project.enterprise_id IS '项目所属企业租户ID，存量项目待归属回填';
-
-ALTER TABLE byai.byai_project ADD COLUMN group_create_request_id VARCHAR(64);
 COMMENT ON COLUMN byai.byai_project.group_create_request_id IS '群聊创建幂等请求ID';
+COMMENT ON COLUMN byai.byai_project.group_create_status IS '跨平台库和租户库建群状态';
 
-ALTER TABLE byai.byai_project ADD COLUMN group_create_status VARCHAR(16);
-COMMENT ON COLUMN byai.byai_project.group_create_status IS '跨平台库和租户库建群状态：待创建、就绪或失败';
+-- 既有企业 ID 在正式迁移前先检查空值和重复值。
+ALTER TABLE byai.po_enterprise_info ALTER COLUMN enterprise_id SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_po_enterprise_info_enterprise_id
+    ON byai.po_enterprise_info (enterprise_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_byai_project_tenant_group_request
+    ON byai.byai_project (enterprise_id, group_create_request_id)
+    WHERE group_create_request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_byai_project_enterprise_id
+    ON byai.byai_project (enterprise_id);
+CREATE INDEX IF NOT EXISTS ix_ss_sandbox_record_tenant_state
+    ON byai.ss_sandbox_record (enterprise_id, status, create_time DESC)
+    WHERE owner_scope = 'TENANT';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ss_sandbox_record_tenant_active
+    ON byai.ss_sandbox_record (enterprise_id, sandbox_type)
+    WHERE owner_scope = 'TENANT' AND status IN ('STARTING', 'RUNNING', 'RELEASING');
+CREATE INDEX IF NOT EXISTS ix_ss_sandbox_record_scope_id
+    ON byai.ss_sandbox_record (owner_scope, id DESC);
 
-CREATE TABLE IF NOT EXISTS byai.tenant_package_spec
-(
-    id              BIGINT PRIMARY KEY,
-    package_name    VARCHAR(64) NOT NULL,
-    package_content TEXT        NOT NULL,
-    enabled         BOOLEAN     NOT NULL DEFAULT TRUE,
-    sort_order      INTEGER     NOT NULL DEFAULT 0,
-    created_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
+-- Older user-sandbox reconcilers on a shared platform database do not know
+-- tenant ownership and can mistake a local, persistent tenant DB for a missing
+-- user sandbox. Ignore only that legacy automatic release transition.
+CREATE OR REPLACE FUNCTION byai.prevent_legacy_tenant_sandbox_release()
+RETURNS trigger AS $$
+BEGIN
+    IF OLD.owner_scope = 'TENANT'
+       AND OLD.status IN ('STARTING', 'RUNNING')
+       AND NEW.status = 'RELEASED'
+       AND NEW.release_reason = 'release.remote.missing' THEN
+        RETURN NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS tr_prevent_legacy_tenant_sandbox_release ON byai.ss_sandbox_record;
+CREATE TRIGGER tr_prevent_legacy_tenant_sandbox_release
+BEFORE UPDATE OF status ON byai.ss_sandbox_record
+FOR EACH ROW EXECUTE PROCEDURE byai.prevent_legacy_tenant_sandbox_release();
+
+CREATE TABLE IF NOT EXISTS byai.tenant_package_spec (
+  id BIGINT PRIMARY KEY,
+  package_name VARCHAR(64) NOT NULL,
+  package_content TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 COMMENT ON TABLE byai.tenant_package_spec IS '企业租户业务套餐规格';
 COMMENT ON COLUMN byai.tenant_package_spec.id IS '套餐主键ID';
 COMMENT ON COLUMN byai.tenant_package_spec.package_name IS '套餐展示名称';
@@ -443,39 +498,62 @@ COMMENT ON COLUMN byai.tenant_package_spec.sort_order IS '套餐展示顺序';
 COMMENT ON COLUMN byai.tenant_package_spec.created_at IS '创建时间';
 COMMENT ON COLUMN byai.tenant_package_spec.updated_at IS '更新时间';
 
-
-CREATE TABLE IF NOT EXISTS byai.tenant_user_membership
-(
-    membership_id BIGINT PRIMARY KEY,
-    enterprise_id BIGINT      NOT NULL,
-    user_id       BIGINT      NOT NULL,
-    role          VARCHAR(16) NOT NULL,
-    status        VARCHAR(16) NOT NULL,
-    created_by    BIGINT      NOT NULL,
-    joined_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
+CREATE TABLE IF NOT EXISTS byai.tenant_user_membership (
+  membership_id BIGINT PRIMARY KEY DEFAULT nextval('byai.seq_any_table'::regclass),
+  enterprise_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  role VARCHAR(16) NOT NULL CHECK (role IN ('OWNER','ADMIN','MEMBER')),
+  status VARCHAR(16) NOT NULL CHECK (status IN ('ACTIVE','DISABLED')),
+  created_by BIGINT NOT NULL,
+  joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_tenant_user UNIQUE (enterprise_id,user_id)
+);
+ALTER TABLE byai.tenant_user_membership
+  ALTER COLUMN membership_id SET DEFAULT nextval('byai.seq_any_table'::regclass);
+CREATE INDEX IF NOT EXISTS ix_tenant_user_membership_user
+  ON byai.tenant_user_membership(user_id,status,enterprise_id);
 COMMENT ON TABLE byai.tenant_user_membership IS '用户与企业租户的成员关系、角色和状态';
 COMMENT ON COLUMN byai.tenant_user_membership.membership_id IS '成员关系主键ID';
 COMMENT ON COLUMN byai.tenant_user_membership.enterprise_id IS '所属企业租户ID';
 COMMENT ON COLUMN byai.tenant_user_membership.user_id IS '平台用户ID';
-COMMENT ON COLUMN byai.tenant_user_membership.role IS '租户角色：OWNER-所有者 ADMIN-管理员 MEMBER-普通成员';
-COMMENT ON COLUMN byai.tenant_user_membership.status IS '成员状态：ACTIVE-有效 DISABLED-禁用';
+COMMENT ON COLUMN byai.tenant_user_membership.role IS '租户角色：所有者、管理员或普通成员';
+COMMENT ON COLUMN byai.tenant_user_membership.status IS '成员状态：有效或禁用';
 COMMENT ON COLUMN byai.tenant_user_membership.created_by IS '添加该租户成员的操作人ID';
 COMMENT ON COLUMN byai.tenant_user_membership.joined_at IS '加入租户时间';
 COMMENT ON COLUMN byai.tenant_user_membership.updated_at IS '成员关系最近更新时间';
 
+CREATE TABLE IF NOT EXISTS byai.tenant_organization (
+  enterprise_id BIGINT NOT NULL REFERENCES byai.po_enterprise_info(enterprise_id),
+  org_id BIGINT NOT NULL,
+  added_by BIGINT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (enterprise_id, org_id)
+);
+CREATE INDEX IF NOT EXISTS ix_tenant_organization_org
+  ON byai.tenant_organization(org_id, enterprise_id);
+COMMENT ON TABLE byai.tenant_organization IS '企业租户与平台组织的关联；同一组织可挂靠多个租户';
+COMMENT ON COLUMN byai.tenant_organization.enterprise_id IS '所属企业租户ID';
+COMMENT ON COLUMN byai.tenant_organization.org_id IS '挂靠的平台组织ID';
+COMMENT ON COLUMN byai.tenant_organization.added_by IS '挂靠操作人用户ID';
 
-CREATE TABLE IF NOT EXISTS byai.tenant_config
-(
-    id             BIGINT PRIMARY KEY,
-    enterprise_id  BIGINT      NOT NULL,
-    params_code    VARCHAR(64) NOT NULL,
-    params_value   TEXT        NOT NULL,
-    params_version BIGINT      NOT NULL DEFAULT 1,
-    created_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
+CREATE TABLE IF NOT EXISTS byai.tenant_config (
+  id BIGINT PRIMARY KEY DEFAULT nextval('byai.seq_any_table'::regclass),
+  enterprise_id BIGINT NOT NULL REFERENCES byai.po_enterprise_info(enterprise_id),
+  params_code VARCHAR(64) NOT NULL,
+  params_value TEXT NOT NULL,
+  params_version BIGINT NOT NULL DEFAULT 1 CHECK (params_version > 0),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_tenant_config_param UNIQUE (enterprise_id,params_code)
+);
+ALTER TABLE byai.tenant_config
+  ALTER COLUMN id SET DEFAULT nextval('byai.seq_any_table'::regclass);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_config_provision_request
+  ON byai.tenant_config(params_value)
+  WHERE params_code='PROVISION_REQUEST_ID';
+CREATE INDEX IF NOT EXISTS ix_tenant_config_code_value
+  ON byai.tenant_config(params_code,enterprise_id);
 COMMENT ON TABLE byai.tenant_config IS '企业租户配置纵表；每企业每参数一行，敏感值仅保存SM4密文';
 COMMENT ON COLUMN byai.tenant_config.id IS '配置行主键ID';
 COMMENT ON COLUMN byai.tenant_config.enterprise_id IS '企业租户ID，等于po_enterprise_info.enterprise_id';
@@ -485,42 +563,52 @@ COMMENT ON COLUMN byai.tenant_config.params_version IS '配置行乐观锁版本
 COMMENT ON COLUMN byai.tenant_config.created_at IS '创建时间';
 COMMENT ON COLUMN byai.tenant_config.updated_at IS '更新时间';
 
-
-
-CREATE TABLE IF NOT EXISTS byai.tenant_schema_audit
-(
-    audit_id               VARCHAR(64) PRIMARY KEY,
-    enterprise_id          BIGINT      NOT NULL,
-    batch_id               VARCHAR(64),
-    request_id             VARCHAR(64) NOT NULL,
-    operation_type         VARCHAR(8)  NOT NULL,
-    trigger_type           VARCHAR(32) NOT NULL,
-    byclaw_release_version VARCHAR(64) NOT NULL,
-    attempt_no             INTEGER     NOT NULL,
-    from_version           VARCHAR(64),
-    target_version         VARCHAR(64) NOT NULL,
-    observed_version       VARCHAR(64),
-    is_current             BOOLEAN     NOT NULL DEFAULT FALSE,
-    bundle_digest          CHAR(64),
-    db_sandbox_record_id   BIGINT,
-    generation             BIGINT      NOT NULL,
-    status                 VARCHAR(24) NOT NULL,
-    step_details_json      JSONB,
-    sqlstate               VARCHAR(8),
-    error_code             VARCHAR(64),
-    failure_reason         TEXT,
-    operator_user_id       BIGINT,
-    created_at             TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    started_at             TIMESTAMP,
-    finished_at            TIMESTAMP
-    );
+CREATE TABLE IF NOT EXISTS byai.tenant_schema_audit (
+  audit_id VARCHAR(64) PRIMARY KEY,
+  enterprise_id BIGINT NOT NULL REFERENCES byai.po_enterprise_info(enterprise_id),
+  batch_id VARCHAR(64),
+  request_id VARCHAR(64) NOT NULL,
+  operation_type VARCHAR(8) NOT NULL CHECK (operation_type IN ('INIT','UPDATE')),
+  trigger_type VARCHAR(32) NOT NULL CHECK (trigger_type IN ('MANUAL','AUTO_PROVISION','AUTO_RELEASE_UPGRADE')),
+  byclaw_release_version VARCHAR(64) NOT NULL,
+  attempt_no INTEGER NOT NULL CHECK (attempt_no > 0),
+  from_version VARCHAR(64),
+  target_version VARCHAR(64) NOT NULL,
+  observed_version VARCHAR(64),
+  is_current BOOLEAN NOT NULL DEFAULT FALSE,
+  bundle_digest CHAR(64),
+  db_sandbox_record_id BIGINT REFERENCES byai.ss_sandbox_record(id),
+  generation BIGINT NOT NULL,
+  status VARCHAR(24) NOT NULL,
+  step_details_json JSONB,
+  sqlstate VARCHAR(8),
+  error_code VARCHAR(64),
+  failure_reason TEXT,
+  operator_user_id BIGINT,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at TIMESTAMP,
+  finished_at TIMESTAMP,
+  CONSTRAINT uq_tenant_schema_attempt UNIQUE (enterprise_id,request_id,attempt_no),
+  CONSTRAINT ck_tenant_schema_manual_operator CHECK
+    (trigger_type <> 'MANUAL' OR operator_user_id IS NOT NULL),
+  CONSTRAINT ck_tenant_schema_init_from CHECK
+    (operation_type <> 'INIT' OR from_version IS NULL),
+  CONSTRAINT ck_tenant_schema_current_observed CHECK
+    (is_current = FALSE OR observed_version IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS ix_tenant_schema_audit_batch
+  ON byai.tenant_schema_audit(batch_id,status);
+CREATE INDEX IF NOT EXISTS ix_tenant_schema_audit_tenant_time
+  ON byai.tenant_schema_audit(enterprise_id,created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_schema_audit_current
+  ON byai.tenant_schema_audit(enterprise_id) WHERE is_current = TRUE;
 COMMENT ON TABLE byai.tenant_schema_audit IS '租户数据库DDL初始化和升级执行审计';
 COMMENT ON COLUMN byai.tenant_schema_audit.audit_id IS '单次执行尝试审计ID';
 COMMENT ON COLUMN byai.tenant_schema_audit.enterprise_id IS '目标企业ID';
 COMMENT ON COLUMN byai.tenant_schema_audit.batch_id IS '一键同步批次ID';
 COMMENT ON COLUMN byai.tenant_schema_audit.request_id IS '操作幂等请求ID';
-COMMENT ON COLUMN byai.tenant_schema_audit.operation_type IS 'DDL行为：INIT-初始化 UPDATE-更新';
-COMMENT ON COLUMN byai.tenant_schema_audit.trigger_type IS '触发类型：MANUAL-手动 AUTO_PROVISION-开通自动初始化 AUTO_RELEASE_UPGRADE-ByClaw发布自动升级迭代';
+COMMENT ON COLUMN byai.tenant_schema_audit.operation_type IS 'DDL行为：初始化或更新';
+COMMENT ON COLUMN byai.tenant_schema_audit.trigger_type IS '触发类型：手动、开通自动初始化或ByClaw发布自动升级迭代';
 COMMENT ON COLUMN byai.tenant_schema_audit.byclaw_release_version IS '触发该次DDL任务的ByClaw BE发布版本';
 COMMENT ON COLUMN byai.tenant_schema_audit.attempt_no IS '同一操作的重试序号';
 COMMENT ON COLUMN byai.tenant_schema_audit.from_version IS '执行前实测版本，INIT为空';
@@ -539,3 +627,21 @@ COMMENT ON COLUMN byai.tenant_schema_audit.operator_user_id IS '手动DDL操作�
 COMMENT ON COLUMN byai.tenant_schema_audit.created_at IS '审计记录创建时间';
 COMMENT ON COLUMN byai.tenant_schema_audit.started_at IS '开始执行时间';
 COMMENT ON COLUMN byai.tenant_schema_audit.finished_at IS '执行结束时间';
+
+-- 旧表只加受限检查，不清理任何存量记录。
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_sandbox_service_spec_owner_scope') THEN
+        ALTER TABLE byai.sandbox_service_spec ADD CONSTRAINT ck_sandbox_service_spec_owner_scope
+            CHECK (owner_scope IN ('USER', 'TENANT'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_ss_sandbox_record_owner_scope') THEN
+        ALTER TABLE byai.ss_sandbox_record ADD CONSTRAINT ck_ss_sandbox_record_owner_scope
+            CHECK (owner_scope IN ('USER', 'TENANT'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_byai_project_group_create_status') THEN
+        ALTER TABLE byai.byai_project ADD CONSTRAINT ck_byai_project_group_create_status
+            CHECK (group_create_status IS NULL OR group_create_status IN ('PENDING', 'READY', 'FAILED'));
+    END IF;
+END;
+$$;
