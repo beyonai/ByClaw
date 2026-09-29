@@ -22,6 +22,18 @@ export const WORKGROUP_TEMPLATE_MENU = {
   nameEn: 'Workgroup templates',
   icon: TeamOutlined,
 };
+export const TENANT_ADMIN_MENU = {
+  path: '/manager/tenants',
+  routePath: '/manager/tenants',
+  name: '租户管理',
+  nameEn: 'Tenants',
+  icon: ApartmentOutlined,
+};
+
+export const withTenantAdminMenu = (menus: any[], allowed: boolean): any[] => {
+  const filtered = menus.filter((item) => item.path !== TENANT_ADMIN_MENU.path);
+  return allowed ? [...filtered, TENANT_ADMIN_MENU] : filtered;
+};
 
 /**
  * App 版本管理的菜单项由后台菜单配置（SYSTEM_BACKEND_MENU_MANAGE）提供，前端不写死；

@@ -4,12 +4,16 @@ package com.iwhalecloud.byai.common.ecrypt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.Key;
 import java.security.Security;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import javax.crypto.Cipher;
+import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -44,6 +48,23 @@ public class Sm4Util {
      * DEFAULT_KEY_HEX = Hex.toHexString(DEFAULT_KEY.getBytes(ENCODING))
      */
     private static final String DEFAULT_KEY_HEX = "7734484041394b6c6d214530364f5e38";
+
+    /** Compatibility only: decrypts tenant credential v1 envelopes created with the old shared key. */
+    public static byte[] deriveTenantCredentialKey(long enterpriseId) {
+        if (enterpriseId <= 0) {
+            throw new IllegalArgumentException("enterprise ID must be positive");
+        }
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(Hex.decode(DEFAULT_KEY_HEX), "HmacSHA256"));
+            byte[] derived = mac.doFinal(("byclaw:tenant-db-credential:v1:" + enterpriseId)
+                .getBytes(StandardCharsets.UTF_8));
+            return Arrays.copyOf(derived, 16);
+        }
+        catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Unable to derive tenant credential key", e);
+        }
+    }
 
     /**
      * 加密-加密模式：ECB，密文长度不固定，会随着被加密字符串长度的变化而变化 使用默认key进行加密

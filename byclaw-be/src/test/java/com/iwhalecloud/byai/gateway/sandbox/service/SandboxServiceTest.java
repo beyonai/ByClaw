@@ -33,6 +33,7 @@ import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.WorkerRegistry;
 import redis.clients.jedis.Jedis;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -42,9 +43,56 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SandboxServiceTest {
+
+    @Test
+    void userLaunch_rejectsTenantSandboxSpecBeforeCreatingRecord() {
+        SandboxLaunchContextFactory contextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxServiceSpecRepository specRepository = mock(SandboxServiceSpecRepository.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", contextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxServiceSpecRepository", specRepository);
+        SandboxServiceSpec tenantSpec = new SandboxServiceSpec();
+        tenantSpec.setOwnerScope("TENANT");
+        SandboxLaunchRouting routing = new SandboxLaunchRouting("custom-tenant",
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        when(contextFactory.buildContext("user001", 100L, "custom-tenant"))
+            .thenReturn(new SandboxLaunchContext("custom-tenant", Map.of(), Map.of(), "gateway-token"));
+        when(specRepository.findByServiceKeyAndProfile("custom-tenant", null))
+            .thenReturn(Optional.of(tenantSpec));
+
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(sandboxService,
+            "rejectTenantSpecFromUserLaunch", "tenant-opengauss", null))
+            .hasMessageContaining("租户沙箱");
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(sandboxService,
+            "doLaunchSandbox", "user001", 100L, routing))
+            .hasMessageContaining("租户沙箱");
+        verify(recordMapper, never()).insert(any(SsSandboxRecord.class));
+    }
+
+    @Test
+    void personalRecordActions_rejectTenantInstance() {
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        SsSandboxRecord tenantRecord = new SsSandboxRecord();
+        tenantRecord.setId(42L);
+        tenantRecord.setOwnerScope("TENANT");
+        tenantRecord.setStatus("RUNNING");
+        when(recordMapper.selectById(42L)).thenReturn(tenantRecord);
+
+        assertThatThrownBy(() -> sandboxService.removeSandboxById(42L))
+            .hasMessageContaining("租户沙箱");
+        assertThatThrownBy(() -> sandboxService.updateSandboxById(42L, 1))
+            .hasMessageContaining("租户沙箱");
+        verify(recordMapper, never()).updateAutoRelease(any(), any(), any());
+        verify(recordMapper, never()).markReleased(any(), any(), any(), any());
+    }
 
     @AfterEach
     void tearDown() {
@@ -338,6 +386,29 @@ class SandboxServiceTest {
         assertThat(view.getWorkerOnline()).isTrue();
         assertThat(view.getWorkerLastSeen()).isEqualTo(2_000L);
         assertThat(view.getWorkerLeaseTtlSeconds()).isEqualTo(13L);
+    }
+
+    @Test
+    void buildRecordViewSkipsWorkerLookupsForTenantAndHistoricalRecords() {
+        WorkerRegistry workerRegistry = mock(WorkerRegistry.class);
+        RedisClient redisClient = mock(RedisClient.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "gatewayWorkerRegistry", workerRegistry);
+        ReflectionTestUtils.setField(sandboxService, "redisClient", redisClient);
+        SsSandboxRecord tenantRecord = new SsSandboxRecord();
+        tenantRecord.setId(12L);
+        tenantRecord.setOwnerScope("TENANT");
+        tenantRecord.setStatus("RUNNING");
+        tenantRecord.setUserCode("tenant-12");
+        tenantRecord.setSandboxType("tenant-opengauss");
+        SsSandboxRecord releasedRecord = new SsSandboxRecord();
+        releasedRecord.setId(13L);
+        releasedRecord.setStatus("RELEASED");
+        releasedRecord.setUserCode("user001");
+
+        assertThat(sandboxService.buildRecordView(tenantRecord).getStatus()).isEqualTo("RUNNING");
+        assertThat(sandboxService.buildRecordView(releasedRecord).getStatus()).isEqualTo("RELEASED");
+        verifyNoInteractions(workerRegistry, redisClient);
     }
 
     @Test

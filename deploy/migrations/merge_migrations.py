@@ -264,12 +264,16 @@ def first_line(stmt: str) -> str:
 def validate_content() -> list[str]:
     """校验文件内容与文件类型一致：__ddl.sql 里不应有 DML，__dml.sql 里不应有 DDL。
 
-    baseline 文件不校验（全量快照可能 DDL/DML 混排）。
+    平台 baseline 不校验（历史全量快照可能 DDL/DML 混排）；tenant/ 脚本仍须严格分置。
     'other'（SET / 注释 / 函数调用等）不报错，避免误杀。
     """
     errors: list[str] = []
     for version in discover_versions():
         checks = [(f, "ddl") for f in version.ddl_files] + [(f, "dml") for f in version.dml_files]
+        tenant_directory = version.directory / "tenant"
+        if tenant_directory.is_dir():
+            checks.extend((f, "ddl") for f in tenant_directory.glob("*__ddl.sql"))
+            checks.extend((f, "dml") for f in tenant_directory.glob("*__dml.sql"))
         for filepath, expected in checks:
             try:
                 content = filepath.read_text(encoding="utf-8")
@@ -318,7 +322,16 @@ def validate_layout() -> list[str]:
             errors.append(f"{rel}/ 为空，没有任何 .sql 文件")
         for f in sorted(entry.iterdir()):
             if f.is_dir():
-                errors.append(f"{rel}/ 下不应有子目录: {f.name}")
+                if f.name == "tenant":
+                    tenant_files = list(f.iterdir())
+                    if not tenant_files:
+                        errors.append(f"{rel}/tenant/ 为空")
+                    for tenant_file in tenant_files:
+                        if (not tenant_file.is_file() or not tenant_file.name.startswith(rel + "__")
+                                or not tenant_file.name.endswith(_ALLOWED_SUFFIXES)):
+                            errors.append(f"{rel}/tenant/{tenant_file.name} 文件名不规范")
+                else:
+                    errors.append(f"{rel}/ 下不应有子目录: {f.name}")
                 continue
             if not f.name.endswith(".sql"):
                 errors.append(f"{rel}/{f.name} 不是 .sql 文件")

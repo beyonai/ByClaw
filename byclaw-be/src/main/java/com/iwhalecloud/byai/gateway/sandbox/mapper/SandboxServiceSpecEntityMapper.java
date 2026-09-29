@@ -16,6 +16,7 @@ public interface SandboxServiceSpecEntityMapper extends BaseMapper<SandboxServic
 
     @Select("""
         SELECT service_key AS "serviceKey",
+               owner_scope AS "ownerScope",
                spec_json AS "specJson",
                template_json AS "templateJson"
         FROM sandbox_service_spec
@@ -26,6 +27,7 @@ public interface SandboxServiceSpecEntityMapper extends BaseMapper<SandboxServic
 
     @Select("""
         SELECT service_key AS "serviceKey",
+               owner_scope AS "ownerScope",
                spec_json AS "specJson",
                template_json AS "templateJson",
                service_type AS "serviceType",
@@ -41,6 +43,7 @@ public interface SandboxServiceSpecEntityMapper extends BaseMapper<SandboxServic
 
     @Select("""
         SELECT service_key AS "serviceKey",
+               owner_scope AS "ownerScope",
                spec_json AS "specJson",
                template_json AS "templateJson",
                service_type AS "serviceType",
@@ -66,6 +69,7 @@ public interface SandboxServiceSpecEntityMapper extends BaseMapper<SandboxServic
                autoscale_enabled AS "autoscaleEnabled"
         FROM sandbox_service_spec
         WHERE COALESCE(enabled, 1) = 1
+          AND owner_scope = 'USER'
         ORDER BY service_key ASC
         """)
     List<SandboxServiceSpecEntity> selectAutoStartSpecs();

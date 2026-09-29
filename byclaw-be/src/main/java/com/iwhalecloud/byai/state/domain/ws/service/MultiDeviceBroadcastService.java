@@ -134,6 +134,9 @@ public class MultiDeviceBroadcastService implements MessageListener {
             if (!channel.isActive()) {
                 continue;
             }
+            if (channel.attr(Constant.ATT_ENTERPRISE_ID).get() != null) {
+                continue;
+            }
             ScopedOutboundState state = channel.attr(SCOPED_OUTBOUND).get();
             if (state == null) {
                 ScopedOutboundState candidate = new ScopedOutboundState(channel, userId, supportsScopedDelta(channel));
@@ -539,6 +542,9 @@ public class MultiDeviceBroadcastService implements MessageListener {
             if (!channel.isActive()) {
                 continue;
             }
+            if (channel.attr(Constant.ATT_ENTERPRISE_ID).get() != null) {
+                continue;
+            }
             try {
                 long started = System.nanoTime();
                 ChatChainLog.wsWritten(channel.writeAndFlush(new TextWebSocketFrame(frameText)), terminal, started);
@@ -550,6 +556,14 @@ public class MultiDeviceBroadcastService implements MessageListener {
             }
         }
         return sentCount;
+    }
+
+    /** Drop personal projection frames retained for a channel before acknowledging a tenant switch. */
+    public void clearChannelSubscription(Channel channel) {
+        ScopedOutboundState state = channel.attr(SCOPED_OUTBOUND).getAndSet(null);
+        if (state != null) {
+            state.discard();
+        }
     }
 
     private void publish(Long userId, String frameText, String messageType) {

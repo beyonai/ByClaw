@@ -18,6 +18,7 @@ import {
   filterMenusByAdminVip,
   filterMenusByMenuDisplay,
   getManagerMenuConfig,
+  withTenantAdminMenu,
   getManagerMenuLabel,
   normalizeMenuUrl,
   withWorkgroupTemplateMenu,
@@ -92,12 +93,24 @@ const Sider: React.FC = () => {
         if (!mounted) return;
         const baseMenus = menus.length > 0 ? menus.filter((item) => item.routePath) : fallbackMenuConfig;
         // App 版本管理菜单项来自后台菜单配置，这里只按管理权限隐藏。
-        setMenuConfig(filterAppVersionMenu(withWorkgroupTemplateMenu(baseMenus, templateAllowed), appVersionAllowed));
+        const platformAdmin = (userInfo.usersOrganizations || []).some((org: any) => org.userType === 'PLAT_MAN');
+        setMenuConfig(
+          filterAppVersionMenu(
+            withTenantAdminMenu(withWorkgroupTemplateMenu(baseMenus, templateAllowed), platformAdmin),
+            appVersionAllowed
+          )
+        );
         setMenuConfigReady(true);
       })
       .catch(() => {
         if (!mounted) return;
-        setMenuConfig(filterAppVersionMenu(withWorkgroupTemplateMenu(fallbackMenuConfig, false), false));
+        const platformAdmin = (userInfo.usersOrganizations || []).some((org: any) => org.userType === 'PLAT_MAN');
+        setMenuConfig(
+          filterAppVersionMenu(
+            withTenantAdminMenu(withWorkgroupTemplateMenu(fallbackMenuConfig, false), platformAdmin),
+            false
+          )
+        );
         setMenuConfigReady(true);
       });
 

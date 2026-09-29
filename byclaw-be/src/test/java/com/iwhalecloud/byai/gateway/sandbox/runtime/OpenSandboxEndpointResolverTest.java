@@ -86,6 +86,22 @@ class OpenSandboxEndpointResolverTest {
             .containsEntry("svc-2000", "/v1/sandboxes/sb-3/proxy/2000");
     }
 
+    @Test
+    void resolve_tcpPortUsesPublishedHostPortForJdbc() {
+        OpenSandboxClient client = mock(OpenSandboxClient.class);
+        when(client.getSandboxEndpoint("db-1", 5432))
+            .thenReturn(new SandboxEndpoint("127.0.0.1:57865", null));
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setServicePort(5432);
+        spec.setPorts(List.of(port(5432, "opengauss", "tcp")));
+        SandboxRuntimeInstance instance = SandboxRuntimeInstance.builder().sandboxId("db-1").build();
+
+        List<String> endpoints = new OpenSandboxEndpointResolver(client, new SandboxProperties()).resolve(instance, spec);
+
+        assertThat(endpoints).containsExactly("tcp://127.0.0.1:57865");
+        assertThat(instance.getInstanceEndpoints()).containsEntry("opengauss", "tcp://127.0.0.1:57865");
+    }
+
     private PortSpec port(int value, String instance, String protocol) {
         PortSpec portSpec = new PortSpec();
         portSpec.setPort(value);

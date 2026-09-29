@@ -381,3 +381,35 @@ WHERE connector_id IN (
 );
 
 DELETE FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi';
+
+-- PLATFORM __dml.sql / 套餐目录：仅删除本方案的固定种子 ID
+DELETE FROM byai.tenant_package_spec WHERE id IN (1, 2, 3);
+INSERT INTO byai.tenant_package_spec
+  (id,package_name,sort_order,package_content,enabled)
+VALUES
+  (1,'基础版',10,'{"profileKey":"s","memberLimit":10,"dbStorageGiB":20,"cpuRequestCores":1,"cpuLimitCores":2,"memoryRequestGiB":2,"memoryLimitGiB":4}',TRUE),
+  (2,'标准版',20,'{"profileKey":"m","memberLimit":50,"dbStorageGiB":100,"cpuRequestCores":2,"cpuLimitCores":4,"memoryRequestGiB":4,"memoryLimitGiB":8}',TRUE),
+  (3,'扩展版',30,'{"profileKey":"l","memberLimit":100,"dbStorageGiB":300,"cpuRequestCores":4,"cpuLimitCores":8,"memoryRequestGiB":8,"memoryLimitGiB":16}',TRUE);
+
+-- PLATFORM __dml.sql / 两组件各三档；资源各占套餐总额一半
+DELETE FROM byai.sandbox_service_profile
+WHERE service_type IN ('tenant-opengauss','tenant-data-node')
+  AND profile_key IN ('s','m','l');
+INSERT INTO byai.sandbox_service_profile
+  (service_type,profile_key,resource_requests,resource_limits,resize_enabled,enabled,sort_order)
+VALUES
+  ('tenant-opengauss','s','{"cpu":"500m","memory":"1Gi"}'::jsonb,'{"cpu":"1","memory":"2Gi"}'::jsonb,0,1,10),
+  ('tenant-data-node','s','{"cpu":"500m","memory":"1Gi"}'::jsonb,'{"cpu":"1","memory":"2Gi"}'::jsonb,0,1,10),
+  ('tenant-opengauss','m','{"cpu":"1","memory":"2Gi"}'::jsonb,'{"cpu":"2","memory":"4Gi"}'::jsonb,0,1,20),
+  ('tenant-data-node','m','{"cpu":"1","memory":"2Gi"}'::jsonb,'{"cpu":"2","memory":"4Gi"}'::jsonb,0,1,20),
+  ('tenant-opengauss','l','{"cpu":"2","memory":"4Gi"}'::jsonb,'{"cpu":"4","memory":"8Gi"}'::jsonb,0,1,30),
+  ('tenant-data-node','l','{"cpu":"2","memory":"4Gi"}'::jsonb,'{"cpu":"4","memory":"8Gi"}'::jsonb,0,1,30);
+
+-- PLATFORM __dml.sql / 独立租户 OpenGauss 服务规格；镜像、凭证和共享卷路径由 BE 运行时注入。
+DELETE FROM byai.sandbox_service_spec WHERE service_key = 'tenant-opengauss';
+INSERT INTO byai.sandbox_service_spec
+  (service_key,spec_json,service_type,display_name,enabled,default_profile_key,autoscale_enabled,owner_scope)
+VALUES
+  ('tenant-opengauss',
+   '{"image":"${envVars.IMAGE_OPENGAUSS}","startup":{"entrypoint":["python3","/var/lib/opengauss/byclaw-tenant-entrypoint.py","gaussdb"]},"ports":[{"port":5432,"instance":"opengauss","protocol":"tcp"}],"servicePort":5432,"env":{"GS_USERNAME":"${envVars.DB_USER}","GS_PASSWORD":"${envVars.DB_PASSWORD}","GS_PORT":"5432","GS_DB":"${envVars.DB_NAME}"},"volumes":[{"key":"database","scope":"PRIVATE","subPath":"tenants/${envVars.TENANT_ID}/opengauss","hostPath":"${envVars.BYCLAW_SANDBOX_FILE_VOLUME_ROOT}","readOnly":false,"mountPath":"/var/lib/opengauss"}]}',
+   'tenant-opengauss','租户 OpenGauss 数据库',1,'s',0,'TENANT');

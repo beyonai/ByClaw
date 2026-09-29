@@ -72,6 +72,9 @@ class OpenSandboxEndpointResolver {
         SandboxEndpoint endpoint = openSandboxClient.getSandboxEndpoint(instance.getSandboxId(), port);
         captureEndpointHeaders(instance, endpoint);
         String rawEndpoint = endpoint != null ? endpoint.getEndpoint() : null;
+        if (StringUtils.equalsIgnoreCase(portSpec.getProtocol(), "tcp")) {
+            return applyProtocol(rawEndpoint, "tcp");
+        }
         if (StringUtils.equalsIgnoreCase(instanceName, SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)) {
             return applyProtocol(rawEndpoint, portSpec.getProtocol());
         }

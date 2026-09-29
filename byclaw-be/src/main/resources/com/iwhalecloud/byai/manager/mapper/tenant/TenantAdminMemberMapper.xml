@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminMemberMapper">
+
+    <resultMap id="memberRow" type="com.iwhalecloud.byai.manager.mapper.tenant.TenantMemberRow">
+        <id property="userId" column="user_id"/>
+        <result property="userCode" column="user_code"/>
+        <result property="userName" column="user_name"/>
+        <result property="role" column="role"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <select id="selectMembers" resultMap="memberRow">
+        SELECT m.user_id, u.user_code, u.user_name, m.role, m.status
+        FROM byai.tenant_user_membership m
+        JOIN byai.po_users u ON u.user_id = m.user_id
+        WHERE m.enterprise_id = #{enterpriseId}
+        ORDER BY m.joined_at, m.user_id
+    </select>
+
+    <select id="selectPackageSnapshotForUpdate" resultType="string">
+        SELECT params_value FROM byai.tenant_config
+        WHERE enterprise_id = #{enterpriseId} AND params_code = 'PACKAGE_CONTENT_SNAPSHOT'
+        FOR UPDATE
+    </select>
+
+    <select id="selectProvisionState" resultType="string">
+        SELECT params_value FROM byai.tenant_config
+        WHERE enterprise_id = #{enterpriseId} AND params_code = 'PROVISION_STATE'
+    </select>
+
+    <select id="selectActiveUserByCode" resultMap="memberRow">
+        SELECT user_id, user_code, user_name
+        FROM byai.po_users
+        WHERE user_code = #{userCode} AND state = 'A'
+    </select>
+
+    <select id="selectMember" resultMap="memberRow">
+        SELECT m.user_id, u.user_code, u.user_name, m.role, m.status
+        FROM byai.tenant_user_membership m
+        JOIN byai.po_users u ON u.user_id = m.user_id
+        WHERE m.enterprise_id = #{enterpriseId} AND m.user_id = #{userId}
+    </select>
+
+    <select id="countActiveMembers" resultType="int">
+        SELECT COUNT(*) FROM byai.tenant_user_membership
+        WHERE enterprise_id = #{enterpriseId} AND status = 'ACTIVE'
+    </select>
+
+    <insert id="insertMember">
+        INSERT INTO byai.tenant_user_membership
+          (membership_id, enterprise_id, user_id, role, status, created_by)
+        VALUES (#{membershipId}, #{enterpriseId}, #{userId}, 'MEMBER', 'ACTIVE', #{createdBy})
+    </insert>
+
+</mapper>

@@ -25,6 +25,9 @@ public class ChatMessage extends AssistantChatDto {
 
     private String language;
 
+    /** Enterprise selected for this frame. Empty only when switching back to personal context. */
+    private String enterpriseId;
+
     /** Selected external child whose full projection this WebSocket wants to receive. */
     private String scopedSessionId;
 
