@@ -183,8 +183,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
         const ownerTypes = myResourcesOnly
           ? [activeTab]
           : activeTab === 'installed'
-          ? ['personal', 'enterprise']
-          : [activeTab];
+            ? ['personal', 'enterprise']
+            : [activeTab];
         const responses = await Promise.all(
           ownerTypes.map(async (ownerType) => {
             const ownerFilterParam = buildResourceListFilterParam(ownerType, filterParam);
@@ -195,12 +195,12 @@ const ResourceList: React.FC<ResourceListProps> = ({
               myResourcesOnly && ownerType === 'personal'
                 ? PERMISSION_CREATED_BY_ME_VALUE
                 : myResourcesOnly && myResourceScope === 'created'
-                ? PERMISSION_CREATED_BY_ME_VALUE
-                : myResourcesOnly && myResourceScope === 'managed'
-                ? PERMISSION_MANAGED_BY_ME_VALUE
-                : myResourcesOnly
-                ? PERMISSION_MANAGEABLE_BY_ME_VALUE
-                : undefined;
+                  ? PERMISSION_CREATED_BY_ME_VALUE
+                  : myResourcesOnly && myResourceScope === 'managed'
+                    ? PERMISSION_MANAGED_BY_ME_VALUE
+                    : myResourcesOnly
+                      ? PERMISSION_MANAGEABLE_BY_ME_VALUE
+                      : undefined;
             const response = await listResourceUseAuth({
               keyword,
               pageNum,

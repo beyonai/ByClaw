@@ -14,6 +14,7 @@ import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import { getCurrentUserDisplayName, type WorkspaceSkillItem } from './utils';
 
 interface UseWorkspaceSkillActionsParams {
+
   /** 当前数字员工 ID，用于定位工作空间路径。 */
   resourceId?: string | number;
 
@@ -21,10 +22,7 @@ interface UseWorkspaceSkillActionsParams {
   agentName?: string;
   setDetailPanel?: (panel: React.ReactNode, options?: DetailPanelOptions) => void;
   clearDetailPanel?: () => void;
-  openTemporaryDetailPanel?: (
-    render: (onClose: () => void) => React.ReactNode,
-    options?: DetailPanelOptions
-  ) => void;
+  openTemporaryDetailPanel?: (render: (onClose: () => void) => React.ReactNode, options?: DetailPanelOptions) => void;
 
   /** 资源化成功后回调，宿主据此打开使用授权弹窗。 */
   onShareAuth?: (resourceItem: WorkspaceSkillItem) => void;
@@ -123,9 +121,7 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
   const loadDetail = useCallback(
     async (item: WorkspaceSkillItem, skillPath: string) => {
       const detail = await queryWorkspaceSkillDetail(
-        item.personalWorkspace
-          ? { skillPath, personalWorkspace: true }
-          : { skillPath, resourceId, userCode }
+        item.personalWorkspace ? { skillPath, personalWorkspace: true } : { skillPath, resourceId, userCode }
       );
       const detailData = (detail as any)?.data || detail;
 
@@ -205,7 +201,10 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
         openTemporaryDetailPanel(renderDetail, options);
       } else {
         // 右侧工作区内部已有页签管理，继续使用宿主提供的打开/关闭回调。
-        setDetailPanel?.(renderDetail(() => clearDetailPanel?.()), options);
+        setDetailPanel?.(
+          renderDetail(() => clearDetailPanel?.()),
+          options
+        );
       }
     },
     [clearDetailPanel, intl, loadDetail, openTemporaryDetailPanel, setDetailPanel]

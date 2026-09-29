@@ -19,14 +19,14 @@ export const buildDigitalEmployeeFilterParam = (
 
   const employeeTypeParams = employeeType
     ? {
-        ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
-        // discover 通过 includeEmployeeGroup 排除员工组，可用列表使用 excludeEmployeeGroup。
-        ...(employeeType.includes('GROUP')
-          ? { agentType: '017' }
-          : source === 'official'
+      ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
+      // discover 通过 includeEmployeeGroup 排除员工组，可用列表使用 excludeEmployeeGroup。
+      ...(employeeType.includes('GROUP')
+        ? { agentType: '017' }
+        : source === 'official'
           ? { includeEmployeeGroup: false }
           : { excludeEmployeeGroup: true }),
-      }
+    }
     : {};
 
   return {
@@ -34,8 +34,8 @@ export const buildDigitalEmployeeFilterParam = (
     ...(source === 'official'
       ? { resourceStatus: '2', excludeDeleted: true }
       : filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
-      ? { resourceStatus: filterParam.resourceStatus }
-      : {}),
+        ? { resourceStatus: filterParam.resourceStatus }
+        : {}),
     // 我可用接口使用 type=owner/authorize；官方推荐 discover 接口使用通用 permission 枚举。
     ...(source === 'official' && permission ? { permission } : {}),
     ...(type ? { type } : {}),

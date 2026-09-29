@@ -100,7 +100,7 @@ describe('ResourceAuditCenter', () => {
       render(<ResourceAuditCenter resourceBizTypeList={['SKILL']} />);
       await screen.findByText('上架申请');
       expect(screen.getByText('resource.skillPublicationAudit')).toBeInTheDocument();
-      fireEvent.click(screen.getByText(`resourceCenter.${action}`));
+      fireEvent.click(screen.getByRole('button', { name: `resourceCenter.${action}` }));
       fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
       await waitFor(() =>
         expect(action === 'approve' ? approveUseApply : rejectUseApply).toHaveBeenCalledWith({
