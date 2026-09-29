@@ -268,13 +268,10 @@ public class TenantDbProvisioningService {
         setState(enterpriseId, "DB_CREATING");
         TenantSandboxView sandbox = sandboxService.launchOpenGauss(enterpriseId, profileKey, dbName, dbUser, password);
         setState(enterpriseId, "DB_PROVIDER_READY");
-        HostPort endpoint = parseEndpoint(sandbox.endpoint());
+        HostPort endpoint = parseEndpoint(sandbox.endpoint(), sandbox.sandboxId());
         probeDatabase(endpoint, dbName, dbUser, password);
-        // Workloads in the shared container network use the stable sandbox container
-        // identity, while this process probes through the host-published TCP endpoint.
-        upsertConfig(enterpriseId, "DB_HOST", "tenant-db-" + enterpriseId + "-"
-            + sandbox.sandboxId().replace("-", ""));
-        upsertConfig(enterpriseId, "DB_PORT", "5432");
+        upsertConfig(enterpriseId, "DB_HOST", endpoint.host());
+        upsertConfig(enterpriseId, "DB_PORT", Integer.toString(endpoint.port()));
         upsertConfig(enterpriseId, "DB_SANDBOX_RECORD_ID", Long.toString(sandbox.recordId()));
         setState(enterpriseId, "DB_ADMIN_VERIFIED");
         tenantMapper.deleteConfig(enterpriseId, "PROVISION_FAILURE_REASON");
@@ -343,11 +340,19 @@ public class TenantDbProvisioningService {
         throw new IllegalStateException("tenant DB connection probe failed", lastFailure);
     }
 
-    private HostPort parseEndpoint(String value) {
+    static HostPort parseEndpoint(String value, String sandboxId) {
         if (value == null || value.isBlank()) throw new IllegalArgumentException("tenant DB endpoint is missing");
         URI uri = URI.create(value.contains("://") ? value : "tcp://" + value);
         if (uri.getHost() == null || uri.getPort() <= 0) {
             throw new IllegalArgumentException("tenant DB endpoint is not a TCP host and port");
+        }
+        if ("/proxy/5432".equals(uri.getPath())) {
+            if (sandboxId == null) throw new IllegalArgumentException("tenant DB sandbox ID is missing");
+            UUID.fromString(sandboxId);
+            return new HostPort("sandbox-" + sandboxId, 5432);
+        }
+        if (uri.getPath() != null && !uri.getPath().isBlank() && !"/".equals(uri.getPath())) {
+            throw new IllegalArgumentException("tenant DB endpoint has an unsupported path");
         }
         return new HostPort(uri.getHost(), uri.getPort());
     }
@@ -406,6 +411,6 @@ public class TenantDbProvisioningService {
         }
     }
 
-    private record HostPort(String host, int port) {
+    record HostPort(String host, int port) {
     }
 }
