@@ -39,6 +39,17 @@ const getMessageIdValue = (message: any) => {
   return Number.isFinite(numericMessageId) ? numericMessageId : Number.MAX_SAFE_INTEGER;
 };
 
+/**
+ * 时间线升序 —— 消息列表的唯一排序契约。
+ *
+ * 契约（改动前请先看这里）：
+ * - **返回新数组，不就地修改入参**（lodash `orderBy` 语义），调用方可安全传入 store 中既有的数组，
+ *   不会污染旧 state；已加回归测试锁定该性质。
+ * - 排序键：先 `createTime`（归一化为毫秒）升序，**同刻再按 `messageId` 升序**。
+ * - `createTime` 接受 number 毫秒、数字字符串、`YYYY-MM-DD HH:mm:ss` 与 ISO 字符串；
+ *   缺失或空串统一视为 `Number.MAX_SAFE_INTEGER`，因此排在最后。
+ * - 排序稳定：键完全相同时保持入参原有相对顺序（lodash 以原索引兜底）。
+ */
 export const sortMessagesByTimeline = <T extends { createTime?: any; messageId?: any }>(list: T[] = []) =>
   orderBy(list, [getMessageCreateTimeValue, getMessageIdValue], ['asc', 'asc']);
 
@@ -349,8 +360,16 @@ export default {
 
       const oldMessageInfo = oldSessionListMap.get(sessionId);
       const oldMessageList = oldMessageInfo?.list || [];
-      const messageList =
+      const rawMessageList =
         typeof messageListUpdater === 'function' ? messageListUpdater(oldMessageList) : messageListUpdater;
+      // 消息回显乱序（issue #234）：增量写入路径（用户提问、SSE 分片、AgentTeams 多 lane 并发推送、
+      // 子会话投影）按「到达顺序」写入列表，而到达顺序不等于时间线顺序；历史加载路径
+      // （fetchMessage / getMoreSessionMessage）已用 sortMessagesByTimeline 归一。
+      // 这里在 store 这一唯一持有列表的边界补上同一不变量，保证刷新前/刷新后顺序一致，
+      // 渲染层无需再做二次排序。
+      // 防御：updater 的契约是返回数组；若返回非数组（undefined/null 等异常值），保留旧列表，
+      // 而不是让 orderBy 把列表静默清空。
+      const messageList = sortMessagesByTimeline(Array.isArray(rawMessageList) ? rawMessageList : oldMessageList);
       // 复制一个新的 sessionListMap，避免React不更新的问题
       let newSessionListMap = action.silent ? oldSessionListMap : new Map(oldSessionListMap);
 
@@ -397,7 +416,9 @@ export default {
 
       sessionListMap.set(`${sessionId}`, {
         ...messageInfo,
-        list,
+        // 与 updateSessionMessageList 同一不变量：迟到的子会话投影必须落到它的时间线位置，
+        // 不能因为「后到达」而被追加到列表末尾（issue #234）。
+        list: sortMessagesByTimeline(list),
         total: messageInfo.total + (messageIndex >= 0 ? 0 : 1),
         childRun,
       });
