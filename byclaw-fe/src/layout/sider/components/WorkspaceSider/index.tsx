@@ -20,7 +20,7 @@ import useAppStore from '@/models/common/useAppStore';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, getPageTotal, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { getArrayData, getPageTotal, normalizeProjectSession, resolveProjectScopeId } from '@/pages/projectSpace/utils';
 import { listProjectSessionsByQo } from '@/service/devloop';
 import { getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
@@ -163,7 +163,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const dispatch = useDispatch();
   const { EventEmitter, sessionId, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = useContext(SiderContentContext);
-  const { projects, loading, fetchProjects } = useProjectList();
+  const { projects, loading, fetchProjects, hasMore, loadMoreProjects } = useProjectList();
   const { setSiderCollapsed } = useAppStore();
   const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(readExpandedProjectIds);
@@ -411,10 +411,23 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   useEffect(() => {
     if (initializedProjectRef.current || !projects.length) return;
 
+    // 已选项目仍在列表里就直接沿用；否则交给 resolveProjectScopeId 区分「未选择」与「不在当前页」。
     const activeProject = projects.find((project) => normalizeProjectId(project.projectId) === projectScopeId);
-    const defaultProject = projects.find((project) => project.projectType === 'default') || projects[0];
-    const project = activeProject || defaultProject;
-    if (!project) return;
+    const resolvedProjectId = activeProject
+      ? normalizeProjectId(activeProject.projectId)
+      : resolveProjectScopeId({ projects, requestedId: projectScopeId });
+    // 作用域指向的项目不在已加载列表里：不写回、不回退，也不置 initializedProjectRef ——
+    // 该 ref 正是本 effect 的守卫，一旦置位 effect 就永不再执行，注释所称「等列表刷新/翻页后再解析」便不成立。
+    // 列表每页 30 条，目标项目可能在第 2 页，因此这里继续翻页补齐；页数耗尽（hasMore 为 false）后不再请求。
+    if (!resolvedProjectId) {
+      if (hasMore) void loadMoreProjects();
+      return;
+    }
+    const project = projects.find((item) => normalizeProjectId(item.projectId) === resolvedProjectId);
+    if (!project) {
+      if (hasMore) void loadMoreProjects();
+      return;
+    }
 
     initializedProjectRef.current = true;
     const projectId = normalizeProjectId(project.projectId);
@@ -433,7 +446,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         void fetchProjectSessions(itemProjectId);
       }
     });
-  }, [fetchProjectSessions, projectScopeId, projects, selectProject]);
+  }, [fetchProjectSessions, hasMore, loadMoreProjects, projectScopeId, projects, selectProject]);
 
   useEffect(() => {
     const handleProjectListRefresh = (payload?: { projectId?: string | number }) => {
@@ -663,9 +676,17 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
   const handleProjectClick = useCallback(
     (project: ProjectSpace) => {
-      handleProjectExpandToggle(project);
+      // 点项目名 = 切到该项目并进入它的详情页；展开/收起只由右侧箭头按钮负责。
+      // 这里必须同时改共享作用域，否则聊天面包屑和「新建任务」仍会带着默认项目。
+      selectProject(project);
+      const projectId = normalizeProjectId(project.projectId);
+      if (projectId) {
+        navigate(`/projectSpace?projectId=${encodeURIComponent(projectId)}`, {
+          state: { openProjectDetail: true, projectId },
+        });
+      }
     },
-    [handleProjectExpandToggle]
+    [navigate, selectProject]
   );
 
   const handleNewProjectSession = useCallback(
