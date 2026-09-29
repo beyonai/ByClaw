@@ -1,3 +1,5 @@
+import { getRuntimeActualUrl } from './index';
+
 const STORAGE_KEY = 'BYCLAW_TAB_ENTERPRISE';
 
 type StoredTenant = {
@@ -62,5 +64,5 @@ export const clearSelectedEnterprise = (): void => {
 
 /** A fresh chat mount discards every session, message, project and realtime cache from the prior space. */
 export const reloadChatForSpaceSwitch = (): void => {
-  if (typeof window !== 'undefined') window.location.assign('/chat');
+  if (typeof window !== 'undefined') window.location.assign(getRuntimeActualUrl('/chat'));
 };
