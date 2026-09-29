@@ -75,6 +75,10 @@ resource/doc/KG_QA_1006.json
 
 ## 3. OBJECT 压缩包资源
 
+> **运行态状态**：本节描述的布局是**历史产物**，已落盘的 bundle **保留不删除**；
+> 该类型能力已停用，运行态**不再新增**（导出侧的过滤由 `0009` 交付的分支生效，尚未合并）。
+> 停用范围与复验方式见 [已下线资源能力说明](../disabled-resource-capabilities.md)。
+
 OBJECT 不是单文件，而是一个 bundle 目录。
 
 ### 3.1 统一规则
@@ -104,6 +108,9 @@ resource/object/OBJECT_10817662.json
 ```
 
 ## 4. VIEW 压缩包资源
+
+> **运行态状态**：同第 3 节——历史产物**保留**，该类型能力已停用，运行态**不再新增**。
+> 停用范围与复验方式见 [已下线资源能力说明](../disabled-resource-capabilities.md)。
 
 VIEW 和 OBJECT 一样，也是 bundle 目录结构。
 

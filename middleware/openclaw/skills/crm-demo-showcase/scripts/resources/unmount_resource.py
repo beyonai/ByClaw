@@ -1,5 +1,5 @@
 #!/usr/local/bin/python3
-"""将当前数字员工/个人助理的对象/视图资源卸载。
+"""将当前数字员工/个人助理已挂载的资源卸载。
 
 I/O 协议：stdin JSON → stdout JSON
 

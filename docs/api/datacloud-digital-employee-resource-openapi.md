@@ -49,6 +49,11 @@ Content-Type: application/json
 | `resourceBizType` / `relResourceBizType` | 被校验或被绑定资源的业务类型，例如 `OBJECT`、`VIEW`、`SCENE`、`ONTOLOGY_BASE` |
 | `ontologyBaseCode` | 所属本体库编码。对象、视图、场景按编码定位时必填 |
 
+> **停用标注**：上表中的四类业务类型（`OBJECT`、`VIEW`、`SCENE`、`ONTOLOGY_BASE`）在
+> **ByClaw 侧已停用**，不再作为可查询/可装配资源；本文档描述的是 **DataCloud 侧接口契约**，
+> 该契约**未变更**，示例字段保留（见未覆盖清单 N-6）。
+> 停用范围与复验方式见 [已下线资源能力说明](../disabled-resource-capabilities.md)。
+
 ## 3. 校验数字员工管理权限
 
 ### 3.1 接口信息
