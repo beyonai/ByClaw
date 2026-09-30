@@ -18,6 +18,7 @@ const skill = {
   resourceName: 'demo',
   resourceBizType: 'SKILL',
   resourceBacked: false,
+  displaySourceType: 'USER_DEVELOPED',
   skillPath: '/skills/demo',
 };
 const rows = [skill];
@@ -169,24 +170,13 @@ it('discards comparison responses and confirmations from a previous employee', a
   expect(sync).not.toHaveBeenCalled();
 });
 
-// 已安装资源没有 skillPath 也要检查，目标路径由后端根据绑定资源解析。
-it('checks and updates an installed skill by resource ID while retaining its directory', async () => {
-  const bound = { ...skill, resourceId: '123', resourceBacked: true, skillPath: undefined };
-  const onChanged = jest.fn();
-  query.mockResolvedValue(status('UPDATE'));
-  sync.mockResolvedValue({ resourceId: '123', action: 'UPDATE', sourceDeleted: false });
-  const boundRows = [bound];
-  const { result } = renderHook(() =>
-    useWorkspaceSkillCenterSync({ employeeId: 'employee-1', enabled: true, rows: boundRows, onChanged })
-  );
+it('does not check or synchronize a non-user-developed installed skill', async () => {
+  const bound = { ...skill, resourceId: '123', resourceBacked: true, displaySourceType: undefined };
+  const { result } = setup();
   await act(async () => result.current.onOpen(bound));
-  expect(query).toHaveBeenCalledWith({ resourceId: 'employee-1', targetResourceId: '123' });
-  expect(result.current.menuItem(bound)?.label).toBe('resource.workspaceCenter.update');
+  expect(query).not.toHaveBeenCalled();
+  expect(result.current.menuItem(bound)).toBeUndefined();
   act(() => result.current.onClick(bound));
-  expect((Modal.confirm as jest.Mock).mock.calls[0][0].content).toBe('resource.workspaceCenter.updateInstalledConfirm');
-  await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
-  expect(sync).toHaveBeenCalledWith({ resourceId: 'employee-1', targetResourceId: '123', revision: 'revision-1' });
-  expect(onChanged).toHaveBeenCalledWith(bound, false);
-  expect(message.success).toHaveBeenCalledWith('resource.workspaceCenter.updatedInstalled');
-  expect(message.warning).not.toHaveBeenCalled();
+  expect(sync).not.toHaveBeenCalled();
+  expect(Modal.confirm).not.toHaveBeenCalled();
 });

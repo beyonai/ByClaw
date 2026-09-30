@@ -404,7 +404,7 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     @Test
-    void centerSaveCreatesScopedResourceWithoutBindingTheSourceEmployee() {
+    void centerSaveCreatesScopedResourceAndBindsTheSourceEmployee() {
         byte[] bytes = skillZipBytes("demo");
         when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> {
             SsResource resource = invocation.getArgument(0);
@@ -412,7 +412,7 @@ class ByClawSkillResourceApplicationServiceTest {
             resource.setCreateBy(10001L);
             return resource;
         });
-        var result = service.saveWorkspaceSkillCenterPackage(bytes, "personal", "workspace-scoped-demo", "demo", null);
+        var result = service.saveWorkspaceSkillCenterPackage(bytes, "personal", "workspace-scoped-demo", "demo", null, 9001L);
         assertThat(result.resource().getResourceCode()).isEqualTo("workspace-scoped-demo");
         assertThat(result.resource().getResourceName()).isEqualTo("demo");
         assertThat(result.resource().getOwnerType()).isEqualTo("personal");
@@ -421,8 +421,30 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(resourceArtifactStorageService).uploadToSubdirectory(eq(bytes),
             eq("skill/user001-hub/directory-sync/7101/" + DigestUtils.sha256Hex(bytes)),
             eq("demo.zip"), eq("application/zip"));
-        org.mockito.Mockito.verifyNoInteractions(digitalEmployeeApplicationService, digitalEmployeeRuntimeRefreshService);
+        var relation = org.mockito.ArgumentCaptor.forClass(SsResourceRelDetail.class);
+        var order = org.mockito.Mockito.inOrder(ssResourceRelDetailService, digitalEmployeeApplicationService,
+            digitalEmployeeRuntimeRefreshService);
+        order.verify(ssResourceRelDetailService).save(relation.capture());
+        assertThat(relation.getValue().getResourceId()).isEqualTo(9001L);
+        assertThat(relation.getValue().getRelResourceId()).isEqualTo(7101L);
+        order.verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        order.verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
+            org.mockito.ArgumentMatchers.argThat(ids -> ids.contains(9001L)));
+    }
+
+    @Test
+    void centerSaveDoesNotDuplicateAnExistingEmployeeBinding() {
+        byte[] bytes = skillZipBytes("demo");
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> {
+            SsResource resource = invocation.getArgument(0);
+            resource.setResourceId(7101L);
+            resource.setCreateBy(10001L);
+            return resource;
+        });
+        when(ssResourceRelDetailService.find(9001L, 7101L)).thenReturn(List.of(new SsResourceRelDetail()));
+        service.saveWorkspaceSkillCenterPackage(bytes, "personal", "demo", "demo", null, 9001L);
         verify(ssResourceRelDetailService, never()).save(any(SsResourceRelDetail.class));
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
     }
 
     @Test

@@ -74,7 +74,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         when(files.list(PATH + "/", Integer.MAX_VALUE))
             .thenAnswer(call -> source.keySet().stream().map(key -> PATH + "/" + key).toList());
         when(files.delete(PATH + "/")).thenAnswer(call -> { source.clear(); return true; });
-        when(packages.saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any()))
+        when(packages.saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L)))
             .thenReturn(new ByClawSkillResourceApplicationService.SkillImportResult(resource(20L, "personal", 1L), null, false));
         service = new WorkspaceSkillCenterApplicationService(resources, auth, files, paths, packages, transactions, relations);
         request = new WorkspaceSkillCenterQo();
@@ -97,11 +97,11 @@ class WorkspaceSkillCenterApplicationServiceTest {
         var result = service.sync(request);
         assertThat(result.sourceDeleted()).isTrue();
         var order = inOrder(packages, transactions, files);
-        order.verify(packages).saveWorkspaceSkillCenterPackage(any(), eq("personal"), eq("demo"), eq("demo"), isNull());
+        order.verify(packages).saveWorkspaceSkillCenterPackage(any(), eq("personal"), eq("demo"), eq("demo"), isNull(), eq(10L));
         order.verify(transactions).commit(any());
         order.verify(files).delete(PATH + "/");
         var archive = ArgumentCaptor.forClass(byte[].class);
-        verify(packages).saveWorkspaceSkillCenterPackage(archive.capture(), eq("personal"), eq("demo"), eq("demo"), isNull());
+        verify(packages).saveWorkspaceSkillCenterPackage(archive.capture(), eq("personal"), eq("demo"), eq("demo"), isNull(), eq(10L));
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive.getValue()))) {
             assertThat(zip.getNextEntry().getName()).isEqualTo("demo/SKILL.md");
             assertThat(new String(zip.readAllBytes(), StandardCharsets.UTF_8)).contains("new body");
@@ -119,7 +119,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         request.setRevision(preview.revision());
         service.sync(request);
         verify(packages).saveWorkspaceSkillCenterPackage(any(), eq("personal"),
-            org.mockito.ArgumentMatchers.startsWith("workspace-"), eq("demo"), isNull());
+            org.mockito.ArgumentMatchers.startsWith("workspace-"), eq("demo"), isNull(), eq(10L));
         verify(packages, never()).readCenterSkillPackage(any());
     }
 
@@ -138,7 +138,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         when(packages.replaceCenterSkillDocument(any(), any())).thenReturn(new byte[] {9});
         service.sync(request);
         verify(packages, times(2)).assertSkillManagePermission(target);
-        verify(packages).saveWorkspaceSkillCenterPackage(eq(new byte[] {9}), eq("enterprise"), eq("demo"), eq("demo"), eq(target));
+        verify(packages).saveWorkspaceSkillCenterPackage(eq(new byte[] {9}), eq("enterprise"), eq("demo"), eq("demo"), eq(target), eq(10L));
     }
 
     @Test
@@ -150,7 +150,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         request.setRevision(preview.revision());
         assertThatThrownBy(() -> service.sync(request)).hasMessageContaining("unchanged");
         verify(files, never()).delete(anyString());
-        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any());
+        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L));
     }
 
     @Test
@@ -165,7 +165,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         source.put("SKILL.md", "changed".getBytes(StandardCharsets.UTF_8));
         assertThatThrownBy(() -> service.sync(request)).hasMessageContaining("changed");
         verify(files, never()).delete(anyString());
-        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any());
+        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L));
     }
 
     @Test
@@ -178,7 +178,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         doThrow(new IllegalArgumentException("permission")).when(packages).assertSkillManagePermission(target);
         assertThatThrownBy(() -> service.preview(request)).hasMessageContaining("permission");
         verify(files, never()).delete(anyString());
-        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any());
+        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L));
     }
 
     @Test
@@ -193,12 +193,24 @@ class WorkspaceSkillCenterApplicationServiceTest {
     @Test
     void savingFailureRollsBackWithoutDeletingSource() {
         request.setRevision(service.preview(request).revision());
-        when(packages.saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any()))
+        when(packages.saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L)))
             .thenThrow(new IllegalStateException("storage failed"));
         assertThatThrownBy(() -> service.sync(request)).hasMessageContaining("storage failed");
         verify(transactions).rollback(any());
         verify(transactions, never()).commit(any());
         verify(files, never()).delete(anyString());
+    }
+
+    @Test
+    void bindingFailureRollsBackAndRetainsSourceDirectory() {
+        request.setRevision(service.preview(request).revision());
+        when(packages.saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L)))
+            .thenThrow(new IllegalStateException("employee binding failed"));
+        assertThatThrownBy(() -> service.sync(request)).hasMessageContaining("employee binding failed");
+        verify(transactions).rollback(any());
+        verify(transactions, never()).commit(any());
+        verify(files, never()).delete(anyString());
+        assertThat(source).containsKey("SKILL.md");
     }
 
     @Test
@@ -254,7 +266,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         request.setRevision(preview.revision());
         when(packages.replaceCenterSkillDocument(any(), any())).thenReturn(new byte[] {9});
         assertThat(service.sync(request).sourceDeleted()).isFalse();
-        verify(packages).saveWorkspaceSkillCenterPackage(eq(new byte[] {9}), eq("personal"), eq("demo"), eq("demo"), eq(target));
+        verify(packages).saveWorkspaceSkillCenterPackage(eq(new byte[] {9}), eq("personal"), eq("demo"), eq("demo"), eq(target), eq(10L));
         verify(files, never()).delete(anyString());
         verify(resources, never()).getResourceListByCode(any());
         assertThat(source).containsKey("SKILL.md");
@@ -278,7 +290,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         when(relations.findByResourceId(10L)).thenReturn(List.of());
         assertThatThrownBy(() -> service.preview(request)).hasMessageContaining("permission");
         verify(files, never()).delete(anyString());
-        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any());
+        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L));
     }
 
     private SsResource installed(String document) {

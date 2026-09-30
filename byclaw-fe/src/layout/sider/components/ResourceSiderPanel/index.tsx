@@ -716,7 +716,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
 
   const handleUninstallSkill = (item: ResourceItem) => {
     // 目录存在不代表已安装，不能通过卸载操作删除尚未入库的开发文件。
-    if (isWorkspaceSkill(item)) return;
+    if (isWorkspaceSkill(item) || item.displaySourceType === SKILL_DISPLAY_SOURCE_USER_DEVELOPED) return;
     if (!activeSiderAgent.resourceId) {
       message.error(intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' }));
       return;
@@ -815,8 +815,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       resourceType === 'SKILL' &&
       item.resourceBizType === ResourceTypeMap.SKILL &&
       canManageActiveAgent &&
-      // 安装/更新（含检查中、失败重试）与卸载互斥，目录存在本身不代表已安装。
-      !workspaceCenterItem &&
+      // 非用户开发技能的卸载仅解除员工关联，不依赖目录内容检查。
+      item.displaySourceType !== SKILL_DISPLAY_SOURCE_USER_DEVELOPED &&
       !isWorkspaceSkill(item)
     ) {
       menuItems.push({

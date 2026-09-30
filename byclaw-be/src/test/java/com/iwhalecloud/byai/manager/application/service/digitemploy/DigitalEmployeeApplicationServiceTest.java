@@ -1699,7 +1699,7 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
-    void uninstallDigitalEmployeeRelResources_deletesLegacyChatUploadWorkspaceCopy() {
+    void uninstallDigitalEmployeeRelResources_preservesLegacyChatUploadWorkspaceCopy() {
         DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
         dto.setDigitalEmployeeId(100L);
         dto.setRelIds(List.of(300L));
@@ -1740,8 +1740,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         service.uninstallDigitalEmployeeRelResources(dto);
 
-        verify(byClawSkillDeleteApplicationService).deleteSkillIfExists("zhangsan", 100L,
-            "/.openclaw/workspace-baiying-agent-100/skills/dws");
+        verify(byClawSkillDeleteApplicationService, never()).deleteSkillIfExists(any(), any(), any());
         verify(ssResourceRelDetailService).removeById(900L);
     }
 

@@ -544,9 +544,15 @@ public class ByClawSkillResourceApplicationService {
         }
     }
 
-    /** 调用方提供事务；目录同步不绑定员工，更新保留资源 ID、归属、目录及上下架状态。 */
+    /** 调用方提供事务；更新保留资源 ID、归属、目录及上下架状态。 */
     SkillImportResult saveWorkspaceSkillCenterPackage(byte[] bytes, String ownerType, String resourceCode,
         String skillName, SsResource existing) {
+        return saveWorkspaceSkillCenterPackage(bytes, ownerType, resourceCode, skillName, existing, null);
+    }
+
+    /** 保存、绑定和关系快照在同一事务内完成，提交成功后沿用现有运行时刷新流程。 */
+    SkillImportResult saveWorkspaceSkillCenterPackage(byte[] bytes, String ownerType, String resourceCode,
+        String skillName, SsResource existing, Long employeeId) {
         SkillPackageMetadata inspected = inspectSkillPackage(
             new ByteArrayMultipartFile(skillName + ".zip", bytes, PACKAGE_CONTENT_TYPE));
         SkillPackageMetadata metadata = new SkillPackageMetadata(skillName, resourceCode, inspected.skillDesc(),
@@ -565,6 +571,10 @@ public class ByClawSkillResourceApplicationService {
             SOURCE_TYPE_WORKSPACE_CENTER_SYNC);
         syncSkillTargetContent(userCode, resource, ext, true);
         Set<Long> affectedEmployees = new LinkedHashSet<>();
+        if (employeeId != null) {
+            bindSkillToDigitalEmployee(employeeId, resource.getResourceId());
+            affectedEmployees.add(employeeId);
+        }
         addBoundDigitalEmployeeIds(affectedEmployees, resource.getResourceId());
         rebuildAndScheduleSkillRuntimeRefresh(affectedEmployees);
         return new SkillImportResult(resource, ext, existing != null);

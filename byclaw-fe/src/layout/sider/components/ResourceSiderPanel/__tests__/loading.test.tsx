@@ -214,6 +214,7 @@ it.each(['INSTALL', 'UPDATE', 'NONE'])(
       resourceName: 'weather-query',
       resourceBizType: 'SKILL',
       resourceBacked: false,
+      displaySourceType: 'USER_DEVELOPED',
       skillPath: '/skills/weather-query',
     };
     jest.mocked(queryDigitalEmployeeSkillResources).mockResolvedValue({
@@ -250,7 +251,7 @@ it.each(['INSTALL', 'UPDATE', 'NONE'])(
   }
 );
 
-it.each(['NONE', 'UPDATE'])('checks installed resource library skills before showing %s actions', async (action) => {
+it('shows uninstall immediately for non-user-developed skills without checking MD5', async () => {
   mockCanManage = true;
   const row = { resourceId: 'skill-1', resourceName: 'installed', resourceBizType: 'SKILL', resourceBacked: true };
   jest.mocked(queryDigitalEmployeeSkillResources).mockResolvedValue({
@@ -260,18 +261,10 @@ it.each(['NONE', 'UPDATE'])('checks installed resource library skills before sho
     total: 1,
   });
   render(<ResourceSiderPanel resourceType="SKILL" embedded showRouter />);
-  jest.mocked(queryWorkspaceSkillCenterStatus).mockResolvedValue({ action, revision: 'r1', ownerType: 'personal' });
-  await screen.findByText('installed');
-  expect(screen.queryByText('resource.uninstallSkill')).not.toBeInTheDocument();
+  expect(await screen.findByText('resource.uninstallSkill')).toBeInTheDocument();
   fireEvent.click(screen.getByText('open skill menu'));
-  await waitFor(() => expect(screen.queryByText('resource.workspaceCenter.checking')).not.toBeInTheDocument());
-  expect(queryWorkspaceSkillCenterStatus).toHaveBeenCalledWith({ resourceId: 'employee-1', targetResourceId: 'skill-1' });
+  expect(queryWorkspaceSkillCenterStatus).not.toHaveBeenCalled();
   expect(screen.queryByText('resource.workspaceCenter.install')).not.toBeInTheDocument();
-  if (action === 'NONE') {
-    expect(screen.getByText('resource.uninstallSkill')).toBeInTheDocument();
-    expect(screen.queryByText('resource.workspaceCenter.update')).not.toBeInTheDocument();
-  } else {
-    expect(screen.getByText('resource.workspaceCenter.update')).toBeInTheDocument();
-    expect(screen.queryByText('resource.uninstallSkill')).not.toBeInTheDocument();
-  }
+  expect(screen.queryByText('resource.workspaceCenter.update')).not.toBeInTheDocument();
+  expect(screen.queryByText('resource.workspaceCenter.checking')).not.toBeInTheDocument();
 });

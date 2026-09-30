@@ -29,7 +29,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** 工作空间技能向资源中心的单向同步：保存提交后才清理源目录，不新增员工关联。 */
+/** 工作空间技能向资源中心的单向同步：保存并绑定当前员工，提交后才清理未入库源目录。 */
 @Service
 public class WorkspaceSkillCenterApplicationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(WorkspaceSkillCenterApplicationService.class);
@@ -75,7 +75,7 @@ public class WorkspaceSkillCenterApplicationService {
                 ? zip(inspection.name(), source)
                 : packages.replaceCenterSkillDocument(inspection.targetPackage(), inspection.document());
             var result = packages.saveWorkspaceSkillCenterPackage(bytes, inspection.status().ownerType(),
-                inspection.resourceCode(), inspection.name(), inspection.existing());
+                inspection.resourceCode(), inspection.name(), inspection.existing(), request.getResourceId());
             return new Saved(result.resource().getResourceId(), inspection, source);
         });
         if (saved == null) throw failure("failed");
