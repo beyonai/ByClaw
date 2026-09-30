@@ -498,6 +498,7 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setOfficialPublication(permissions.isOfficialPublication());
         digitalEmployee.setCanPublishEmployee(permissions.isCanPublishEmployee());
         digitalEmployee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
+        digitalEmployee.setEmployeePublicationUpdate(permissions.isEmployeePublicationUpdate());
         digitalEmployee.setCanManageAuth(permissions.isCanManageAuth());
         digitalEmployee.setCanUseAuth(permissions.isCanUseAuth());
         digitalEmployee.setCanDelete(permissions.isCanDelete());
@@ -525,6 +526,7 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setOfficialPublication(permissions.isOfficialPublication());
         digitalEmployee.setCanPublishEmployee(permissions.isCanPublishEmployee());
         digitalEmployee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
+        digitalEmployee.setEmployeePublicationUpdate(permissions.isEmployeePublicationUpdate());
         digitalEmployee.setCanManageAuth(permissions.isCanManageAuth());
         digitalEmployee.setCanUseAuth(permissions.isCanUseAuth());
         digitalEmployee.setCanDelete(permissions.isCanDelete());

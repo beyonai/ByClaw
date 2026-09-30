@@ -74,6 +74,7 @@ const emptyResult = { rows: [], boundRows: [], workspaceRows: [], pageNum: 1, to
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(queryDigitalEmployeeSkillResources).mockReset();
+  jest.mocked(queryWorkspaceSkillCenterStatus).mockReset();
   mockEmployeeId = 'employee-1';
   mockCanManage = false;
 });
@@ -251,7 +252,7 @@ it.each(['INSTALL', 'UPDATE', 'NONE'])(
   }
 );
 
-it('shows uninstall immediately for non-user-developed skills without checking MD5', async () => {
+it('keeps uninstall available while checking installed skills by resource ID', async () => {
   mockCanManage = true;
   const row = { resourceId: 'skill-1', resourceName: 'installed', resourceBizType: 'SKILL', resourceBacked: true };
   jest.mocked(queryDigitalEmployeeSkillResources).mockResolvedValue({
@@ -260,10 +261,20 @@ it('shows uninstall immediately for non-user-developed skills without checking M
     boundRows: [row],
     total: 1,
   });
+  jest.mocked(queryWorkspaceSkillCenterStatus).mockResolvedValue({
+    action: 'NONE',
+    ownerType: 'personal',
+    revision: 'revision-1',
+  } as any);
   render(<ResourceSiderPanel resourceType="SKILL" embedded showRouter />);
   expect(await screen.findByText('resource.uninstallSkill')).toBeInTheDocument();
-  fireEvent.click(screen.getByText('open skill menu'));
-  expect(queryWorkspaceSkillCenterStatus).not.toHaveBeenCalled();
+  await act(async () => fireEvent.click(screen.getByText('open skill menu')));
+  expect(queryWorkspaceSkillCenterStatus).toHaveBeenCalledTimes(1);
+  expect(queryWorkspaceSkillCenterStatus).toHaveBeenCalledWith({
+    resourceId: 'employee-1',
+    targetResourceId: 'skill-1',
+  });
+  expect(screen.getByText('resource.uninstallSkill')).toBeInTheDocument();
   expect(screen.queryByText('resource.workspaceCenter.install')).not.toBeInTheDocument();
   expect(screen.queryByText('resource.workspaceCenter.update')).not.toBeInTheDocument();
   expect(screen.queryByText('resource.workspaceCenter.checking')).not.toBeInTheDocument();

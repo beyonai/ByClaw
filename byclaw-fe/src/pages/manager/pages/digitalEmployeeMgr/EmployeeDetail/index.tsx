@@ -4,6 +4,7 @@ import PublicationEditionGuard from '@/components/EmployeePublication/EditionGua
 import PublicationLoading from '@/components/EmployeePublication/Loading';
 import usePublicationDetailLoader from '@/components/EmployeePublication/useDetailLoader';
 import useOfficialUpdate from '@/components/EmployeePublication/useOfficialUpdate';
+import { requiresOfficialUpdateReview } from '@/components/EmployeePublication/identity';
 import { publicationErrorMessage } from '@/utils/publicationError';
 import { publicationAction, type PublicationDetail } from '@/service/employeePublication';
 /* eslint-disable no-param-reassign */
@@ -772,7 +773,7 @@ const EmployeeDetail = ({ loading }) => {
         type: 'employeeMgr/getCompositeAppInfo',
         payload: { resourceId: agentId },
         success: (res) => {
-          setOfficialUpdateRequiresReview(res?.operationPermissions?.officialUpdateRequiresReview === true);
+          setOfficialUpdateRequiresReview(requiresOfficialUpdateReview(res || {}));
           const {
             resourceName,
             resourceDesc,
@@ -1618,7 +1619,7 @@ const EmployeeDetail = ({ loading }) => {
           }
         }
 
-        if (officialUpdateRequiresReview && currentResourceId) {
+        if (officialUpdateRequiresReview && effectiveOwnerType === 'enterprise' && currentResourceId) {
           try {
             const outcome = await officialUpdate.save(String(currentResourceId), savePayload);
             if (outcome === 'submitted') {

@@ -70,6 +70,7 @@ export interface IResourceCardItem {
   officialPublication?: boolean;
   canPublishEmployee?: boolean;
   employeePublicationStatus?: string;
+  employeePublicationUpdate?: boolean;
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canApplyUse?: boolean;
@@ -782,8 +783,8 @@ const RenderContent = (props: ResourceCardProps) => {
                 result.resource.resourceStatus === 4
                   ? 'resource.enterpriseSkillPending'
                   : result.alreadyExists
-                  ? 'resource.enterpriseSkillExists'
-                  : 'resource.publishToEnterpriseSuccess',
+                    ? 'resource.enterpriseSkillExists'
+                    : 'resource.publishToEnterpriseSuccess',
             })}
             {onEnterpriseSkillDetail && result.resource.resourceStatus === 2 && (
               <Button type="link" onClick={() => onEnterpriseSkillDetail(result.resource)}>
@@ -861,7 +862,11 @@ const RenderContent = (props: ResourceCardProps) => {
     publicationFeedbackCleanup.current = clearFeedback;
     try {
       const resourceId = String(resource.resourceId || resource.id || resource.agentId);
-      await openEmployeePublication(resourceId);
+      if (resource.employeePublicationStatus === 'PUBLISHED') {
+        await openEmployeePublication(resourceId, 'publishUpdate');
+      } else {
+        await openEmployeePublication(resourceId);
+      }
     } catch (error: any) {
       message.error(publicationErrorMessage(error, '无法发起发布申请'));
     } finally {
@@ -870,7 +875,7 @@ const RenderContent = (props: ResourceCardProps) => {
       publishToEnterpriseLock.current = false;
       setOpeningPublication(false);
     }
-  }, [resource.resourceId, resource.id, resource.agentId]);
+  }, [resource.resourceId, resource.id, resource.agentId, resource.employeePublicationStatus]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const {
@@ -925,12 +930,22 @@ const RenderContent = (props: ResourceCardProps) => {
         label: (
           <BuildMenuLabel
             icon="icon-a-Uploadshangchuan"
-            text={publicationEntryLabel(resource.employeePublicationStatus)}
+            text={publicationEntryLabel(resource.employeePublicationStatus, resource.employeePublicationUpdate)}
             loading={openingPublication}
           />
         ),
         onClick: () => openPublication(),
       });
+      if (resource.employeePublicationStatus === 'PUBLISHED') {
+        items.push({
+          key: 'viewEmployeePublication',
+          label: <BuildMenuLabel icon="icon-a-Uploadshangchuan" text="查看发布记录" />,
+          onClick: () =>
+            openEmployeePublication(String(resource.resourceId || resource.id || resource.agentId)).catch((error) =>
+              message.error(publicationErrorMessage(error, '无法查看发布记录'))
+            ),
+        });
+      }
     }
 
     // 编辑信息
@@ -1245,6 +1260,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.officialPublication,
     resource?.canPublishEmployee,
     resource?.employeePublicationStatus,
+    resource?.employeePublicationUpdate,
     openPublication,
     resource?.canManageAuth,
     resource?.canUseAuth,
@@ -1349,20 +1365,20 @@ const RenderContent = (props: ResourceCardProps) => {
     ...((isWorkspaceSkillResource ? workspaceMenuItems : menuItems) || []),
     ...(actionConfig?.enableSkillExport && (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL')
       ? [
-          {
-            key: 'exportSkill',
-            label: (
-              <BuildMenuLabel
-                icon="icon-a-Downloadxiazai"
-                text={intl.formatMessage({ id: 'resource.skillExport.single' })}
-              />
-            ),
-            disabled: exportingSkill,
-            onClick: () => {
-              void exportSkills();
-            },
+        {
+          key: 'exportSkill',
+          label: (
+            <BuildMenuLabel
+              icon="icon-a-Downloadxiazai"
+              text={intl.formatMessage({ id: 'resource.skillExport.single' })}
+            />
+          ),
+          disabled: exportingSkill,
+          onClick: () => {
+            void exportSkills();
           },
-        ]
+        },
+      ]
       : []),
   ];
   const effectiveTopRightTag =

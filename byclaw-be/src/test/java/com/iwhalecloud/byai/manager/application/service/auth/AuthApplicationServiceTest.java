@@ -194,10 +194,13 @@ class AuthApplicationServiceTest {
         when(governance.canPublish(own)).thenReturn(true);
         var rejected = new com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication();
         rejected.setSourceId(601L); rejected.setStatus("REJECTED");
+        rejected.setOfficialId(901L);
         when(publicationMapper.currentStatuses(List.of(601L), 1L)).thenReturn(List.of(rejected));
         var result = service.queryResourceOperationPermissionsBatch(List.of(601L, 602L));
         assertThat(result.get(601L).getEmployeePublicationStatus()).isEqualTo("REJECTED");
+        assertThat(result.get(601L).isEmployeePublicationUpdate()).isTrue();
         assertThat(result.get(602L).getEmployeePublicationStatus()).isNull();
+        assertThat(result.get(602L).isEmployeePublicationUpdate()).isFalse();
         verify(publicationMapper).currentStatuses(List.of(601L), 1L);
     }
 

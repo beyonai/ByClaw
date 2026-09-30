@@ -3745,7 +3745,10 @@ public class AuthApplicationService {
         // 列表只查询一次当前申请状态，不按卡片逐条读取审核记录，也不向无发布权限的人返回记录。
         employeePublications.currentStatuses(sourceIds, CurrentUserHolder.getEnterpriseId()).forEach(publication -> {
             ResourceOperationPermissionsVo permission = permissions.get(publication.getSourceId());
-            if (permission != null) permission.setEmployeePublicationStatus(publication.getStatus());
+            if (permission != null) {
+                permission.setEmployeePublicationStatus(publication.getStatus());
+                permission.setEmployeePublicationUpdate(publication.getOfficialId() != null);
+            }
         });
     }
 

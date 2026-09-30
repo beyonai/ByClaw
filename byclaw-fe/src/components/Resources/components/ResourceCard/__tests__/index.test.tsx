@@ -1360,7 +1360,7 @@ describe('digital employee publication entry', () => {
     ['REJECTED', '查看审核结果'],
     ['WITHDRAWN', '查看发布申请'],
     ['FAILED', '查看发布结果'],
-    ['PUBLISHED', '查看发布结果'],
+    ['PUBLISHED', '发布更新'],
   ])('shows the entry for %s and opens the existing request', async (status, label) => {
     (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
     renderWithQueryClient(
@@ -1375,7 +1375,45 @@ describe('digital employee publication entry', () => {
       />
     );
     fireEvent.click(screen.getByText(label!));
+    await waitFor(() => {
+      if (status === 'PUBLISHED') expect(openEmployeePublication).toHaveBeenCalledWith('10', 'publishUpdate');
+      else expect(openEmployeePublication).toHaveBeenCalledWith('10');
+    });
+  });
+  it('views a published record without preparing another update', async () => {
+    (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: true,
+          employeePublicationStatus: 'PUBLISHED',
+        }}
+      />
+    );
+    fireEvent.click(screen.getByText('查看发布记录'));
     await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('10'));
+    expect(openEmployeePublication).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ['DRAFT', '继续发布更新'],
+    ['PENDING', '查看更新进度'],
+  ])('identifies a %s update candidate separately from an initial publication', (status, label) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          canPublishEmployee: true,
+          employeePublicationStatus: status,
+          employeePublicationUpdate: true,
+        }}
+      />
+    );
+    expect(screen.getByText(label)).toBeInTheDocument();
   });
   it('only offers publication when the backend allows it', () => {
     renderWithQueryClient(

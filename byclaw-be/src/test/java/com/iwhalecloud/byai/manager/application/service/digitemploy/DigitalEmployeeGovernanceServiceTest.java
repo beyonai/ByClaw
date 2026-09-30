@@ -128,6 +128,7 @@ class DigitalEmployeeGovernanceServiceTest {
     void directSaveCannotRaceOutstandingOfficialUpdate(String state) {
         EmployeePublicationApplicationServiceTest.login("adminvip", 2L, List.of());
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 7L);
+        resource.setOwnerType("enterprise");
         resource.setPublicationSourceId(9L);
         var active = new com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication();
         active.setStatus(state);
@@ -138,6 +139,7 @@ class DigitalEmployeeGovernanceServiceTest {
     void officialAuthorSavesRequireReviewRegardlessOfNonPlatformRole(String role) {
         EmployeePublicationApplicationServiceTest.login("author", 7L, List.of(role));
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 7L);
+        resource.setOwnerType("enterprise");
         resource.setPublicationSourceId(9L);
         assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("更新审核");
         var permissions = new com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo();
@@ -147,10 +149,28 @@ class DigitalEmployeeGovernanceServiceTest {
     @Test void directOfficialSaveIgnoresCreatorIdentityButStillEnforcesTenantBoundary() {
         EmployeePublicationApplicationServiceTest.login("platform", 2L, List.of("PLAT_MAN"));
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
+        resource.setOwnerType("enterprise");
         resource.setPublicationSourceId(9L);
         assertThatCode(() -> governance.requireDirectMutationAllowed(resource)).doesNotThrowAnyException();
         resource.setCreateBy(7L); resource.setComAcctId(99L);
         assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource));
+    }
+    @ParameterizedTest @ValueSource(strings = {"DRAFT", "PENDING", "REJECTED", "PUBLISHED"})
+    void personalSavesNeverEnterOfficialReviewEvenWithLegacyPublicationMarkers(String state) {
+        EmployeePublicationApplicationServiceTest.login("author", 7L, List.of());
+        SsResource personal = EmployeePublicationApplicationServiceTest.employee(10L, 7L);
+        personal.setPublicationSourceId(9L);
+        personal.setPublicationRequestId(100L);
+        var active = new com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication();
+        active.setStatus(state);
+        when(publications.active(10L, 1L)).thenReturn(active);
+        assertThatCode(() -> governance.requireDirectMutationAllowed(personal)).doesNotThrowAnyException();
+        var permissions = new com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo();
+        ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", personal, permissions);
+        assertThat(permissions.isOfficialPublication()).isFalse();
+        assertThat(permissions.isOfficialUpdateRequiresReview()).isFalse();
+        assertThat(permissions.isCanPublishEmployee()).isTrue();
+        verifyNoInteractions(publications);
     }
     @Test void ordinaryAndBusinessAdministratorsCannotCreateEnterpriseEmployees() {
         for (String role : List.of("COMMON", "BUSINESS_MAN", "ORG_MAN", "PLAT_DEVOPS")) {

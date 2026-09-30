@@ -554,6 +554,7 @@ public class DigitalEmployeeApplicationService {
         employee.setOfficialPublication(permissions.isOfficialPublication());
         employee.setCanPublishEmployee(permissions.isCanPublishEmployee());
         employee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
+        employee.setEmployeePublicationUpdate(permissions.isEmployeePublicationUpdate());
         employee.setCanManageAuth(permissions.isCanManageAuth());
         employee.setCanUseAuth(permissions.isCanUseAuth());
         employee.setCanDelete(permissions.isCanDelete());
@@ -581,6 +582,7 @@ public class DigitalEmployeeApplicationService {
         employee.setOfficialPublication(permissions.isOfficialPublication());
         employee.setCanPublishEmployee(permissions.isCanPublishEmployee());
         employee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
+        employee.setEmployeePublicationUpdate(permissions.isEmployeePublicationUpdate());
         employee.setCanManageAuth(permissions.isCanManageAuth());
         employee.setCanUseAuth(permissions.isCanUseAuth());
         employee.setCanDelete(permissions.isCanDelete());

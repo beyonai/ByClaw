@@ -202,6 +202,7 @@ class EmployeePublicationApplicationServiceTest {
         when(publications.lockResource(90L, 1L)).thenReturn(official);
         when(publications.official(10L, 1L)).thenReturn(official);
         when(employees.syncPublicationOpenClawWorkSpace(eq(90L), any())).thenReturn(true);
+        service.refreshTarget(request());
         var result = service.approve(request());
         assertThat(result.publication().getOfficialId()).isEqualTo(90L);
         verify(resources, never()).insert(any(SsResource.class));
@@ -478,6 +479,152 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(draft.getRequestId()).isNotEqualTo(publication.getRequestId());
     }
 
+    SsResource publishedCopyForPersonalUpdate() {
+        publication.setStatus("PUBLISHED"); publication.setOfficialId(90L);
+        SsResource official = employee(90L, 7L);
+        official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
+        official.setResourceName("官方维护名称(企业)");
+        when(resources.selectById(90L)).thenReturn(official);
+        when(publications.lockResource(90L, 1L)).thenReturn(official);
+        when(publications.official(10L, 1L)).thenReturn(official);
+        DigitalEmployeeDetailsDTO personal = new DigitalEmployeeDetailsDTO();
+        personal.setResourceId(10L); personal.setAgentType("001"); personal.setOwnerType("personal");
+        personal.setResourceName("最新个人名称"); personal.setResourceDesc("最新个人配置"); personal.setRelIds(List.of(20L));
+        DigitalEmployeeDetailsDTO enterprise = new DigitalEmployeeDetailsDTO();
+        enterprise.setResourceId(90L); enterprise.setAgentType("001"); enterprise.setOwnerType("enterprise");
+        enterprise.setResourceName(official.getResourceName()); enterprise.setResourceDesc("官方独立配置"); enterprise.setRelIds(List.of());
+        when(employees.findDetailsById(any())).thenAnswer(call -> {
+            EmployeeIdDTO id = call.getArgument(0);
+            return id.getResourceId().equals(10L) ? personal : enterprise;
+        });
+        return official;
+    }
+
+    EmployeePublicationRequest requestFor(DigitalEmployeePublication draft) {
+        when(publications.lock(draft.getRequestId(), 1L)).thenReturn(draft);
+        when(publications.selectById(draft.getRequestId())).thenReturn(draft);
+        EmployeePublicationRequest request = new EmployeePublicationRequest();
+        request.setRequestId(draft.getRequestId()); request.setRevision(draft.getRevision());
+        return request;
+    }
+
+    @Test void explicitPersonalUpdateCapturesLatestAAndKeepsBIdentityNameAndPermissions() {
+        SsResource official = publishedCopyForPersonalUpdate();
+        assertThat(service.current(10L).publication()).isSameAs(publication);
+        verify(publications, never()).insert(any(DigitalEmployeePublication.class));
+        var candidate = service.prepareUpdate(10L);
+        assertThat(candidate.publication().getSourceId()).isEqualTo(10L);
+        assertThat(candidate.publication().getOfficialId()).isEqualTo(90L);
+        assertThat(candidate.employee().getResourceId()).isEqualTo(90L);
+        assertThat(candidate.employee().getOwnerType()).isEqualTo("enterprise");
+        assertThat(candidate.employee().getResourceName()).isEqualTo(official.getResourceName());
+        assertThat(candidate.employee().getResourceDesc()).isEqualTo("最新个人配置");
+        assertThat(candidate.employee().getRelIds()).containsExactly(20L);
+        assertThat(candidate.updateTarget().fromPersonal()).isTrue();
+        assertThat(candidate.updateTarget().changed()).isFalse();
+        assertThat(publication.getStatus()).isEqualTo("PUBLISHED");
+        verify(resources, never()).updateById(any(SsResource.class));
+        verifyNoInteractions(auth, relations, extensions);
+        var request = requestFor(candidate.publication());
+        assertThat(service.submit(request).publication().getStatus()).isEqualTo("PENDING");
+        // 后续 A 改动不改变待审快照，审核只将已提交候选更新到原 B。
+        source.setResourceDesc("个人又修改了");
+        login("reviewer", 8L, List.of("PLAT_MAN"));
+        request.setRevision(candidate.publication().getRevision());
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        var approved = service.approve(request);
+        assertThat(approved.publication().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(approved.publication().getOfficialId()).isEqualTo(90L);
+        assertThat(official.getResourceDesc()).isEqualTo("最新个人配置");
+        assertThat(source.getResourceDesc()).isEqualTo("个人又修改了");
+        verify(resources, never()).insert(any(SsResource.class));
+        verify(dependencies, never()).grantAudience(any(), anyLong());
+        verify(auth, never()).ensureCreatorDefaultPrivileges(any());
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"DRAFT", "PENDING", "FAILED", "REJECTED", "WITHDRAWN"})
+    void personalUpdateRestoresExistingCandidateOrResultWithoutReplacingIt(String state) {
+        publishedCopyForPersonalUpdate(); publication.setStatus(state);
+        if (List.of("DRAFT", "PENDING", "FAILED").contains(state)) when(publications.active(10L, 1L)).thenReturn(publication);
+        clearInvocations(employees);
+        assertThat(service.prepareUpdate(10L).publication()).isSameAs(publication);
+        verify(employees, never()).findDetailsById(any());
+        verify(publications, never()).insert(any(DigitalEmployeePublication.class));
+    }
+
+    @Test void personalUpdateRequiresExistingAvailableCopyAndTheOriginalAuthorOrAdministrator() {
+        publication.setStatus("PUBLISHED");
+        assertThatThrownBy(() -> service.prepareUpdate(10L)).hasMessageContaining("尚无官方副本");
+        SsResource official = publishedCopyForPersonalUpdate();
+        login("other", 8L, List.of());
+        assertThatThrownBy(() -> service.prepareUpdate(10L)).hasMessageContaining("只能发布自己");
+        login("user", 7L, List.of()); official.setResourceStatus(3);
+        assertThatThrownBy(() -> service.prepareUpdate(10L)).hasMessageContaining("已下架");
+        official.setResourceStatus(2);
+        assertThatThrownBy(() -> service.prepareUpdate(90L)).hasMessageContaining("原个人员工");
+    }
+
+    @Test void changedOfficialConfigurationNeedsExplicitRefreshBeforeSubmission() {
+        SsResource official = publishedCopyForPersonalUpdate();
+        var draft = service.prepareUpdate(10L).publication();
+        var request = requestFor(draft);
+        official.setResourceDesc("管理员另行维护");
+        assertThat(service.preview(request).updateTarget().changed()).isTrue();
+        assertThatThrownBy(() -> service.submit(request)).hasMessageContaining("官方员工配置已变化");
+        assertThat(draft.getStatus()).isEqualTo("DRAFT");
+        request.setEmployee(JSON.parseObject(draft.getSnapshotJson(), DigitalEmployeeDTO.class));
+        service.save(request); request.setRevision(draft.getRevision());
+        // 保存候选不能暗中重置对照信息。
+        assertThat(service.detail(draft.getRequestId()).updateTarget().changed()).isTrue();
+        String configuration = JSON.parseObject(draft.getSnapshotJson()).getString("resourceDesc");
+        var refreshed = service.refreshTarget(request);
+        assertThat(refreshed.updateTarget().changed()).isFalse();
+        assertThat(refreshed.updateTarget().fromPersonal()).isTrue();
+        assertThat(refreshed.employee().getResourceDesc()).isEqualTo(configuration);
+        request.setRevision(draft.getRevision());
+        assertThat(service.submit(request).publication().getStatus()).isEqualTo("PENDING");
+        verify(resources, never()).updateById(any(SsResource.class));
+    }
+
+    @Test void changingOnlyTheOrderOfQueriedRelationsDoesNotRequireRenewedComparison() {
+        publishedCopyForPersonalUpdate();
+        EmployeeIdDTO id = new EmployeeIdDTO(); id.setResourceId(90L);
+        DigitalEmployeeDetailsDTO details = employees.findDetailsById(id);
+        details.setRelIds(List.of(20L, 30L));
+        var draft = service.prepareUpdate(10L).publication();
+        details.setRelIds(List.of(30L, 20L));
+        assertThat(service.preview(requestFor(draft)).updateTarget().changed()).isFalse();
+    }
+
+    @Test void approvalNeverSilentlyOverwritesOfficialChangesAfterSubmission() {
+        SsResource official = publishedCopyForPersonalUpdate();
+        var draft = service.prepareUpdate(10L).publication();
+        var request = requestFor(draft);
+        service.submit(request); request.setRevision(draft.getRevision());
+        official.setResourceDesc("提交后的官方变更");
+        login("reviewer", 8L, List.of("PLAT_MAN"));
+        var failed = service.approve(request);
+        assertThat(failed.publication().getStatus()).isEqualTo("FAILED");
+        assertThat(failed.publication().getPublishError()).contains("官方员工配置已变化");
+        assertThat(official.getResourceDesc()).isEqualTo("提交后的官方变更");
+        verify(resources, never()).updateById(any(SsResource.class));
+        verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
+        // 失败后审核员也能显式重新对照并重试，不会卡死在失败状态。
+        request.setRevision(draft.getRevision());
+        assertThat(service.refreshTarget(request).updateTarget().changed()).isFalse();
+        assertThat(draft.getStatus()).isEqualTo("FAILED");
+    }
+
+    @Test void legacyUpdateCannotOverwriteAnOfficialCopyWithoutRenewedComparison() {
+        publishedCopyForPersonalUpdate(); publication.setStatus("PENDING");
+        login("reviewer", 8L, List.of("PLAT_MAN"));
+        assertThat(service.preview(request()).updateTarget().changed()).isTrue();
+        var failed = service.approve(request());
+        assertThat(failed.publication().getPublishError()).contains("尚未对照官方配置");
+        verify(resources, never()).updateById(any(SsResource.class));
+        assertThat(service.refreshTarget(request()).updateTarget().changed()).isFalse();
+    }
+
     @Test void readonlyCurrentEntryEnforcesTenantAuthorEditionAndAdminvipProtection() {
         login("outsider", 9L, List.of());
         assertThatThrownBy(() -> service.current(10L)).isInstanceOf(BaseException.class);
@@ -549,9 +696,9 @@ class EmployeePublicationApplicationServiceTest {
         // A distinct DataSource reads through a separate connection, outside the transaction under test.
         var committed = new org.springframework.jdbc.core.JdbcTemplate(
             new org.apache.ibatis.datasource.unpooled.UnpooledDataSource("org.sqlite.JDBC", url, null, null));
-        jdbc.execute("CREATE TABLE request (status TEXT, revision BIGINT, official_id BIGINT, error TEXT)");
+        jdbc.execute("CREATE TABLE request (status TEXT, revision BIGINT, official_id BIGINT, error TEXT, snapshot TEXT)");
         jdbc.execute("CREATE TABLE resource (id BIGINT PRIMARY KEY, body TEXT)");
-        jdbc.update("INSERT INTO request VALUES ('PENDING', 1, ?, NULL)", existing ? 90L : null);
+        jdbc.update("INSERT INTO request VALUES ('PENDING', 1, ?, NULL, ?)", existing ? 90L : null, publication.getSnapshotJson());
         jdbc.update("INSERT INTO resource VALUES (10, ?)", JSON.toJSONString(source));
         if (existing) {
             SsResource official = employee(90L, 7L); official.setOwnerType("enterprise");
@@ -564,14 +711,15 @@ class EmployeePublicationApplicationServiceTest {
             org.springframework.beans.BeanUtils.copyProperties(publication, row);
             row.setStatus(rs.getString("status")); row.setRevision(rs.getLong("revision"));
             row.setOfficialId(rs.getObject("official_id") == null ? null : rs.getLong("official_id"));
+            row.setSnapshotJson(rs.getString("snapshot"));
             row.setPublishError(rs.getString("error")); return row;
         });
         when(publications.selectById(100L)).thenAnswer(call -> read.get());
         when(publications.lock(100L, 1L)).thenAnswer(call -> { locked.set(read.get()); return locked.get(); });
         when(publications.update(isNull(), any())).thenAnswer(call -> {
             var row = locked.get();
-            return jdbc.update("UPDATE request SET status=?, revision=?, official_id=?, error=?",
-                row.getStatus(), row.getRevision(), row.getOfficialId(), row.getPublishError());
+            return jdbc.update("UPDATE request SET status=?, revision=?, official_id=?, error=?, snapshot=?",
+                row.getStatus(), row.getRevision(), row.getOfficialId(), row.getPublishError(), row.getSnapshotJson());
         });
         when(resources.selectById(anyLong())).thenAnswer(call -> jdbc.query("SELECT body FROM resource WHERE id=?",
             (rs, n) -> JSON.parseObject(rs.getString(1), SsResource.class), (Long) call.getArgument(0)).stream().findFirst().orElse(null));
@@ -610,7 +758,9 @@ class EmployeePublicationApplicationServiceTest {
             else assertThat(resources.selectById((Long) call.getArgument(0))).isNull();
             throw new IllegalStateException("模拟补偿服务不可用，失败记录仍须提交");
         }).when(employees).restorePublicationRuntimeAfterRollback(anyLong());
-        var failed = proxied.approve(request());
+        if (existing) proxied.refreshTarget(request());
+        EmployeePublicationRequest approval = request(); approval.setRevision(read.get().getRevision());
+        var failed = proxied.approve(approval);
         assertThat(failed.publication().getStatus()).isEqualTo("FAILED");
         assertThat(read.get().getStatus()).isEqualTo("FAILED");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM resource", Integer.class)).isEqualTo(existing ? 2 : 1);

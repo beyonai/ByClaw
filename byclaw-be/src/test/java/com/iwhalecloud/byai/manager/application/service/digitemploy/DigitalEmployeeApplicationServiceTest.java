@@ -1977,6 +1977,28 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void publishedPersonalEmployeeStillSavesThroughTheNormalUpdateAndRefreshesOnlyItself() {
+        DigitalEmployeeApplicationService updateService = updateServiceSpy();
+        DigitalEmployeeDTO dto = updateDto(); dto.setResourceName("个人修改已保存");
+        SsResource personal = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        personal.setComAcctId(201L);
+        // 兼容历史错误标记：个人归属仍决定普通保存行为。
+        personal.setPublicationSourceId(90L); personal.setPublicationRequestId(1000L);
+        var publications = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
+        var governance = new DigitalEmployeeGovernanceService(userService,
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class), publications);
+        ReflectionTestUtils.setField(updateService, "employeeGovernance", governance);
+        prepareFullUpdate(personal, List.of(), List.of());
+        updateService.updateDigitalEmployee(dto);
+        assertThat(personal.getResourceName()).isEqualTo("个人修改已保存");
+        assertThat(personal.getOwnerType()).isEqualTo(OwnerType.PERSONAL);
+        verify(ssResourceService).updateResourceEntity(personal);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, dto);
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleDigitalEmployeeUpdateRefreshAfterCommit(eq(90L), any());
+        verifyNoInteractions(publications);
+    }
+
+    @Test
     void updateDigitalEmployeeIncludingGroupOnlySkillAddsManualSourceAndPreservesGroup() {
         DigitalEmployeeApplicationService updateService = updateServiceSpy();
         DigitalEmployeeDTO dto = updateDto(301L);

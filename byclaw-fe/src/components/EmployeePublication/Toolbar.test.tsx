@@ -282,6 +282,22 @@ describe('employee publication controls', () => {
     expect(openOfficialEmployee).toHaveBeenCalledWith('90');
   });
 
+  it('refreshes the official comparison without submitting or replacing the candidate', async () => {
+    const detail = {
+      ...candidate,
+      updateTarget: { resourceId: '90', name: '官方 B', fromPersonal: true, changed: true },
+    };
+    const refreshed = { ...detail, updateTarget: { ...detail.updateTarget, changed: false } };
+    (publicationAction as jest.Mock).mockResolvedValue(refreshed);
+    const onChange = jest.fn();
+    render(<PublicationToolbar detail={detail} dirty={false} onChange={onChange} onSave={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '重新对照官方配置' }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(refreshed));
+    expect(publicationAction).toHaveBeenCalledTimes(1);
+    expect(publicationAction).toHaveBeenCalledWith('refreshTarget', candidate.publication, { comment: '' });
+    expect(previewPublication).not.toHaveBeenCalled();
+  });
+
   it('offers saving in the publication toolbar and allows automatic saving on submission', () => {
     render(<PublicationToolbar detail={candidate} dirty onChange={jest.fn()} onSave={jest.fn()} />);
     expect(screen.getByRole('button', { name: '保存待发布配置' })).toBeEnabled();

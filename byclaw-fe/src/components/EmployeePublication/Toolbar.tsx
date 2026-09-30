@@ -17,9 +17,10 @@ import dayjs from 'dayjs';
 import { publicationErrorMessage } from '@/utils/publicationError';
 import PublicationResourceSummary from './ResourceSummary';
 import usePublicationConfirmation from './usePublicationConfirmation';
+import UpdateTargetNotice from './UpdateTargetNotice';
 import styles from './Toolbar.module.less';
 
-type PublicationAction = 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'revise';
+type PublicationAction = 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'revise' | 'refreshTarget';
 
 export default function PublicationToolbar({
   detail,
@@ -71,6 +72,10 @@ export default function PublicationToolbar({
       }
       const next = await publicationAction(action, current.publication, { comment });
       onChange(next);
+      if (action === 'refreshTarget') {
+        message.success('已重新对照官方配置，请确认覆盖范围后再提交或审核');
+        return;
+      }
       if (action === 'revise') history.replace(publicationUrl(next));
       setRejecting(false);
       if (next.publication.status === 'FAILED') message.error(next.publication.publishError || '发布失败');
@@ -156,7 +161,19 @@ export default function PublicationToolbar({
             </Button>
           )}
           {detail.publication.status === 'PUBLISHED' && detail.publication.officialId && (
-            <Button onClick={() => openOfficialEmployee(detail.publication.officialId!)}>查看官方副本</Button>
+            <>
+              <Button onClick={() => openOfficialEmployee(detail.publication.officialId!)}>查看官方副本</Button>
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  openEmployeePublication(detail.publication.sourceId, 'publishUpdate').catch((error) =>
+                    message.error(publicationErrorMessage(error, '无法发起发布更新'))
+                  )
+                }
+              >
+                发布更新
+              </Button>
+            </>
           )}
           {detail.canWithdraw && (
             <Button disabled={busy} onClick={() => run('withdraw')}>
@@ -190,6 +207,11 @@ export default function PublicationToolbar({
           </Popover>
         </div>
       </section>
+      <UpdateTargetNotice
+        detail={detail}
+        busy={busy || dirty}
+        onRefresh={detail.canEdit || detail.canReview ? () => run('refreshTarget') : undefined}
+      />
       {reviewed && (
         <Alert
           style={{ marginTop: 8 }}

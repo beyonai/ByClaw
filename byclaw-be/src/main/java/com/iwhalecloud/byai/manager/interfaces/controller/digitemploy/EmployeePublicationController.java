@@ -60,6 +60,12 @@ public class EmployeePublicationController {
     @PostMapping("/prepare")
     public ResponseUtil<Detail> prepare(@RequestBody EmployeeIdDTO request) { return ResponseUtil.successResponse(publication.prepare(request.getResourceId())); }
 
+    @PostMapping("/prepareUpdate")
+    public ResponseUtil<Detail> prepareUpdate(@RequestBody EmployeeIdDTO request) { return ResponseUtil.successResponse(publication.prepareUpdate(request.getResourceId())); }
+
+    @PostMapping("/refreshTarget")
+    public ResponseUtil<Detail> refreshTarget(@Valid @RequestBody EmployeePublicationRequest request) { return ResponseUtil.successResponse(publication.refreshTarget(request)); }
+
     @PostMapping("/preview")
     public ResponseUtil<Detail> preview(@Valid @RequestBody EmployeePublicationRequest request) { return ResponseUtil.successResponse(publication.preview(request)); }
 

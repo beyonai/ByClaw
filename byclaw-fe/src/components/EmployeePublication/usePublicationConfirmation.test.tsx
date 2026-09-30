@@ -86,3 +86,26 @@ it('returns to editing without consenting to publication', async () => {
     expect(await pending).toBe('edit');
   });
 });
+
+it('explains which official employee and settings are replaced and requires renewed confirmation after an official change', async () => {
+  render(<Confirmation />);
+  let pending: ReturnType<typeof confirm>;
+  act(() => {
+    pending = confirm({
+      ...detail,
+      updateTarget: { resourceId: '90', name: '官方客服(企业)', fromPersonal: true, changed: true },
+    });
+  });
+  const dialog = within(await screen.findByRole('dialog'));
+  expect(dialog.getByText(/企业副本单独调整过的这些内容也可能被替换/)).toBeInTheDocument();
+  expect(dialog.getByText('官方员工配置已变化，需要重新确认')).toBeInTheDocument();
+  expect(dialog.getByRole('link', { name: '查看当前官方配置' })).toHaveAttribute(
+    'href',
+    '/digitalEmployeesCreate?appId=90&readOnly=true&log=false&manage=false'
+  );
+  expect(dialog.getByRole('button', { name: '确认并继续发布' })).toBeDisabled();
+  await act(async () => {
+    fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
+    expect(await pending).toBe('edit');
+  });
+});

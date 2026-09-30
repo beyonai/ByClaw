@@ -38,6 +38,7 @@ export interface PublicationDetail {
   canWithdraw: boolean;
   canRevise?: boolean;
   previousReview?: { requestId: string; reviewerName?: string; reviewedAt?: string; comment?: string };
+  updateTarget?: { resourceId: string; name: string; fromPersonal: boolean; changed: boolean };
 }
 export const publicationStatus: Record<string, string> = {
   DRAFT: '草稿',
@@ -48,8 +49,12 @@ export const publicationStatus: Record<string, string> = {
   WITHDRAWN: '已撤回',
   FAILED: '发布失败',
 };
-export const publicationEntryLabel = (status?: string) =>
-  ((
+export const publicationEntryLabel = (status?: string, updating = false) =>
+  (updating &&
+    ({ DRAFT: '继续发布更新', PENDING: '查看更新进度', APPLYING: '查看更新进度' } as Record<string, string>)[
+      status || ''
+    ]) ||
+  (
     {
       DRAFT: '继续发布',
       PENDING: '查看发布进度',
@@ -57,9 +62,10 @@ export const publicationEntryLabel = (status?: string) =>
       REJECTED: '查看审核结果',
       WITHDRAWN: '查看发布申请',
       FAILED: '查看发布结果',
-      PUBLISHED: '查看发布结果',
+      PUBLISHED: '发布更新',
     } as Record<string, string>
-  )[status || ''] || '发布到官方推荐');
+  )[status || ''] ||
+  '发布到官方推荐';
 const base = '/byaiService/digitalEmployeePublication';
 export const getPublicationPendingCount = () => GET<number>(`${base}/pendingCount`);
 export const getPublicationCapabilities = () =>
@@ -72,7 +78,7 @@ export const getCurrentPublication = (resourceId: string) =>
 export const listPublications = (review: boolean, page = 1) =>
   GET<{ list: Publication[]; total: number }>(`${base}/list`, { review, page, size: 20 });
 export const publicationAction = (
-  action: 'revise' | 'save' | 'submit' | 'approve' | 'reject' | 'withdraw',
+  action: 'revise' | 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'refreshTarget',
   publication: Pick<Publication, 'requestId' | 'revision'>,
   extra: { employee?: any; comment?: string } = {}
 ) =>
@@ -97,9 +103,16 @@ export const saveOfficialUpdateDraft = async (resourceId: string, employee: any)
   }
   return publicationAction('save', detail.publication, { employee });
 };
-export const openEmployeePublication = async (resourceId: string, intent: 'view' | 'editOfficial' = 'view') => {
+export const openEmployeePublication = async (
+  resourceId: string,
+  intent: 'view' | 'editOfficial' | 'publishUpdate' = 'view'
+) => {
   const current = intent === 'view' ? await getCurrentPublication(resourceId) : null;
-  const detail = current || (await POST<PublicationDetail>(`${base}/prepare`, { resourceId }));
+  const detail =
+    current ||
+    (await POST<PublicationDetail>(`${base}/${intent === 'publishUpdate' ? 'prepareUpdate' : 'prepare'}`, {
+      resourceId,
+    }));
   sessionStorage.setItem('EmployeeDetail_prevRoute', `${window.location.pathname}${window.location.search}`);
   history.push(publicationUrl(detail));
 };

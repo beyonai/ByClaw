@@ -40,7 +40,9 @@ public class DigitalEmployeeGovernanceService {
     }
 
     public static boolean isOfficialCopy(SsResource resource) {
-        return isEmployee(resource) && resource.getPublicationSourceId() != null;
+        return isEmployee(resource) && "enterprise".equals(resource.getOwnerType())
+            && resource.getPublicationSourceId() != null
+            && !Objects.equals(resource.getResourceId(), resource.getPublicationSourceId());
     }
 
     public static boolean isPublicationSkill(SsResource resource) {
