@@ -107,6 +107,46 @@ class DigitalEmployeeGroupAuthorizationServiceTest {
         verifyNoInteractions(resources, grants);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {GrantType.ALLOW_MANAGE, GrantType.FORCE_USE})
+    void groupAuthorizationIncludesDirectAndMemberSkills(String grantType) {
+        SsResource group = resource(1L, 10L);
+        SsResExtDigEmployee ext = new SsResExtDigEmployee();
+        ext.setAgentType("017");
+        when(employees.findById(1L)).thenReturn(ext);
+        when(relations.list(any(LambdaQueryWrapper.class))).thenReturn(List.of(relation(2L)));
+        when(resources.selectById(2L)).thenReturn(resource(2L, 10L));
+        SsResource directSkill = resource(7L, 10L);
+        directSkill.setResourceBizType("SKILL");
+        directSkill.setResourceStatus(2);
+        SsResource memberSkill = resource(8L, 10L);
+        memberSkill.setResourceBizType("SKILL");
+        memberSkill.setResourceStatus(2);
+        when(resources.selectById(7L)).thenReturn(directSkill);
+        when(resources.selectById(8L)).thenReturn(memberSkill);
+        when(relations.findByResourceId(1L)).thenReturn(List.of(relation(7L)));
+        when(relations.findByResourceId(2L)).thenReturn(List.of(relation(7L), relation(8L)));
+        when(grants.findPrivilegeGrant(grantType, "DIG_EMPLOYEE", 1L, Color.RED))
+            .thenReturn(List.of(grant("ORG", 200L, grantType)));
+        when(grants.findPrivilegeGrant(grantType, "SKILL", 7L, Color.RED))
+            .thenReturn(List.of(grant("USER", 999L, grantType), grant("ORG", 200L, grantType)));
+        AuthRedBlackDTO input = authorization(grantType);
+        input.setRedList(List.of(target("ORG", 201L)));
+
+        List<AuthRedBlackDTO> result = service.buildMemberAuthorizations(group, input);
+
+        assertThat(result).extracting(AuthRedBlackDTO::getGrantObjId).containsExactly(2L, 7L, 8L);
+        assertThat(result.get(1).getGrantObjType()).isEqualTo("SKILL");
+        assertThat(result.get(1).getRedList()).extracting(AuthDTO::getGrantToObjId)
+            .containsExactly(999L, 201L);
+        assertThat(result.get(2).getGrantObjType()).isEqualTo("SKILL");
+        assertThat(result.get(2).getRedList()).extracting(AuthDTO::getGrantToObjId).containsExactly(201L);
+
+        input.setRedList(List.of());
+        result = service.buildMemberAuthorizations(group, input);
+        assertThat(result.get(1).getRedList()).extracting(AuthDTO::getGrantToObjId).containsExactly(999L);
+    }
+
     private static AuthRedBlackDTO authorization(String type) {
         AuthRedBlackDTO dto = new AuthRedBlackDTO();
         dto.setGrantObjId(1L);

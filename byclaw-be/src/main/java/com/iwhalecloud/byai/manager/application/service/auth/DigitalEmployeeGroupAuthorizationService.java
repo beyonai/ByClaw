@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmplo
 import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
@@ -17,9 +18,11 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,12 +58,15 @@ public class DigitalEmployeeGroupAuthorizationService {
             .eq(SsResourceRelDetail::getRelStatus, 1))
             .stream().map(SsResourceRelDetail::getRelResourceId).filter(Objects::nonNull)
             .filter(id -> !id.equals(group.getResourceId())).distinct().collect(Collectors.toList());
-        if (memberIds.isEmpty()) {
+        List<SsResourceRelDetail> groupRelations = relationService.findByResourceId(group.getResourceId());
+        if (memberIds.isEmpty() && (groupRelations == null || groupRelations.isEmpty())) {
             return Collections.emptyList();
         }
         List<PrivilegeGrant> oldRed = grants(authorization, group.getResourceId(), Color.RED);
         List<PrivilegeGrant> oldBlack = grants(authorization, group.getResourceId(), Color.BLACK);
         List<AuthRedBlackDTO> result = new ArrayList<>();
+        Set<Long> relatedOwners = new LinkedHashSet<>();
+        relatedOwners.add(group.getResourceId());
         for (Long memberId : memberIds) {
             SsResource member = resourceMapper.selectById(memberId);
             // 只同步当前企业内真实的数字员工，忽略失效或跨企业的脏关联。
@@ -76,6 +82,39 @@ public class DigitalEmployeeGroupAuthorizationService {
             memberAuth.setBlackList(mergeTargets(grants(authorization, memberId, Color.BLACK), oldBlack,
                 authorization.getBlackList()));
             result.add(memberAuth);
+            relatedOwners.add(memberId);
+        }
+
+        Set<Long> relatedResourceIds = new LinkedHashSet<>();
+        for (Long ownerId : relatedOwners) {
+            List<SsResourceRelDetail> relations = Objects.equals(ownerId, group.getResourceId())
+                ? groupRelations : relationService.findByResourceId(ownerId);
+            if (relations == null) {
+                continue;
+            }
+            for (SsResourceRelDetail relation : relations) {
+                if (relation != null && relation.getRelResourceId() != null
+                    && (relation.getRelStatus() == null || relation.getRelStatus() == 1)) {
+                    relatedResourceIds.add(relation.getRelResourceId());
+                }
+            }
+        }
+        for (Long relatedId : relatedResourceIds) {
+            SsResource related = resourceMapper.selectById(relatedId);
+            if (related == null || !Objects.equals(group.getComAcctId(), related.getComAcctId())
+                || ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(related.getResourceBizType())
+                || !Objects.equals(ResourceStatus.ON_SHELF.getNum(), related.getResourceStatus())) {
+                continue;
+            }
+            AuthRedBlackDTO relatedAuth = new AuthRedBlackDTO();
+            BeanUtils.copyProperties(authorization, relatedAuth);
+            relatedAuth.setGrantObjId(relatedId);
+            relatedAuth.setGrantObjType(related.getResourceBizType());
+            relatedAuth.setRedList(mergeTargets(grants(relatedAuth, relatedId, Color.RED), oldRed,
+                authorization.getRedList()));
+            relatedAuth.setBlackList(mergeTargets(grants(relatedAuth, relatedId, Color.BLACK), oldBlack,
+                authorization.getBlackList()));
+            result.add(relatedAuth);
         }
         return result;
     }
