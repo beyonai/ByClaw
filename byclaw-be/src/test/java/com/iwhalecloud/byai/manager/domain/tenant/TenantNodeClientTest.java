@@ -44,19 +44,18 @@ class TenantNodeClientTest {
     }
 
     @Test
-    void routesAnIdentityCheckedTenantNodeThroughItsSandboxProxy() {
+    void routesAnIdentityCheckedTenantNodeThroughItsContainerNetwork() {
         URI registered = URI.create("http://host.containers.internal:3100");
-        assertThat(TenantNodeClient.proxyEndpoint(registered, "sandbox-123",
-            "/v1/sandboxes/sandbox-123/proxy/3100", "http://127.0.0.1:9005"))
-            .hasToString("http://127.0.0.1:9005/v1/sandboxes/sandbox-123/proxy/3100");
+        assertThat(TenantNodeClient.containerEndpoint(registered,
+            "a8bc9cb9-dd5f-48cc-8bdd-81ab69e20c47"))
+            .hasToString("http://sandbox-a8bc9cb9-dd5f-48cc-8bdd-81ab69e20c47:3100");
     }
 
     @Test
-    void rejectsProxyPathForAnotherSandbox() {
+    void rejectsInvalidTenantNodeSandboxIdentity() {
         URI registered = URI.create("http://host.containers.internal:3100");
-        assertThatThrownBy(() -> TenantNodeClient.proxyEndpoint(registered, "sandbox-123",
-            "/v1/sandboxes/sandbox-456/proxy/3100", "http://127.0.0.1:9005"))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("sandbox proxy mismatch");
+        assertThatThrownBy(() -> TenantNodeClient.containerEndpoint(registered, "sandbox-other"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("sandbox identity is invalid");
     }
 
     @Test

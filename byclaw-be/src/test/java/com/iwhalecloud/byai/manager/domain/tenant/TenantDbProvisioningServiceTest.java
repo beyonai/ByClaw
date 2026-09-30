@@ -45,6 +45,15 @@ class TenantDbProvisioningServiceTest {
     }
 
     @Test
+    void dockerProxyEndpointInJsonRecordUsesDatabaseContainerAddress() {
+        TenantDbProvisioningService.HostPort endpoint = TenantDbProvisioningService.parseEndpoint(
+            "{\"openclaw\":\"tcp://192.168.0.83:57571/proxy/5432\"}", SANDBOX_ID);
+
+        assertEquals("sandbox-" + SANDBOX_ID, endpoint.host());
+        assertEquals(5432, endpoint.port());
+    }
+
+    @Test
     void directTcpEndpointKeepsItsHostAndPort() {
         TenantDbProvisioningService.HostPort endpoint = TenantDbProvisioningService.parseEndpoint(
             "tcp://db.internal:15432", SANDBOX_ID);

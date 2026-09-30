@@ -575,7 +575,7 @@ root message ID. Deploy this endpoint before enabling the topic modal frontend.
 
 数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。
 
-本地 Podman 联调时，OpenSandbox 的 TCP endpoint 可能返回容器网段地址。Docker 模式返回的 `/proxy/5432` 地址由 BE 的连接探测和租户数据源管理统一转换为数据库容器名与原生 5432 端口。`BYCLAW_TENANT_DB_PROBE_HOST=127.0.0.1` 可覆盖 BE 连接租户数据库时使用的主机；Node 仍使用同一 Podman 网络内的数据库容器名。Node 到 BE 的 `BYCLAW_TENANT_BE_INTERNAL_URL`、Redis 地址和 `BYCLAW_TENANT_INTERNAL_TOKEN` 由部署环境注入。HTTP 模式下 BE 经 OpenSandbox 代理访问 Node 时使用 `X-Byclaw-Internal-Token`；Node 直连 BE 的三个内部接口使用 Bearer 令牌。这些接口由控制器核验专用令牌。
+本地 Podman 联调时，OpenSandbox 的 TCP endpoint 可能返回容器网段地址。Docker 模式返回的 `/proxy/5432` 地址由 BE 的连接探测和租户数据源管理统一转换为数据库容器名与原生 5432 端口；两者也兼容沙箱记录中的 `openclaw` JSON endpoint。`BYCLAW_TENANT_DB_PROBE_HOST=127.0.0.1` 可覆盖 BE 连接租户数据库时使用的主机；Node 仍使用同一 Podman 网络内的数据库容器名。Node 到 BE 的 `BYCLAW_TENANT_BE_INTERNAL_URL`、Redis 地址和 `BYCLAW_TENANT_INTERNAL_TOKEN` 由部署环境注入。HTTP 模式下 BE 通过已核验沙箱 ID 对应的容器名和注册端口直连 Node，使用 `X-Byclaw-Internal-Token`；Node 直连 BE 的三个内部接口使用 Bearer 令牌。这些接口由控制器核验专用令牌。
 
 更新租户 Node 镜像后，平台管理员可调用 `POST /admin/tenants/recreate-node`（请求体 `{"enterpriseId":"…"}`）经 OpenSandbox 删除旧 Node 沙箱并从当前 `IMAGE_TENANT_NODE` 镜像重建，租户数据库沙箱和业务数据保留。接口更新 Node 沙箱记录及租户配置；替换失败时进入可重试的开通失败状态。仅重启已有容器不会应用新镜像。
 
@@ -585,7 +585,7 @@ root message ID. Deploy this endpoint before enabling the topic modal frontend.
 
 本地 OpenSandbox v0.1.9 在删除已停止容器时会错误地再次 `kill` 并返回 500。`deploy/middleware/opensandbox-server.Dockerfile` 在镜像构建时应用 `patch-local-opensandbox-tcp.py`，只对实际运行中的容器执行 `kill`，然后释放容器。修改补丁后从 `deploy/middleware` 运行 `podman compose --env-file ../../.env -f docker-compose.yml up -d --no-deps --build opensandbox-server`（本机使用额外的 rootful override 时保留对应 `-f` 参数），让正在运行的服务使用新镜像；不要仅替换容器内脚本。
 
-HACU 切换企业时，登录 Token 负责认证用户，当前企业保存在该用户的 HTTP 会话中。后续带同一用户 Token 的请求会沿用会话里的企业 ID，避免旧 Token 把切换结果覆盖；浏览器 Cookie 属于其他用户时仍以 Token 身份为准。BE 访问租户 Node 时会校验服务注册记录与沙箱 ID，并使用配置的 OpenSandbox 基址和该沙箱的代理路径，避免依赖宿主机无法解析的容器域名。
+HACU 切换企业时，登录 Token 负责认证用户，当前企业保存在该用户的 HTTP 会话中。后续带同一用户 Token 的请求会沿用会话里的企业 ID，避免旧 Token 把切换结果覆盖；浏览器 Cookie 属于其他用户时仍以 Token 身份为准。BE 访问租户 Node 时校验服务注册记录与沙箱 ID，再通过容器网络的 `sandbox-<沙箱 ID>` 和注册端口直连，不依赖沙箱记录 endpoint 的存储格式。
 
 租户聊天继续使用现有 `/assiman/qryConversations` 和 `/assiman/getMessages` 协议。BE 根据租户上下文将会话精确查询、列表和历史消息转发到对应 Node；对尚无 `messageStruct` 的 worker 纯文本历史回答，在响应中投影为原有前端可渲染的回答片段，并将成对的 `<think>` 内容投影为思考片段。投影不改写租户数据库中的原始消息。个人空间沿用原处理链路。
 

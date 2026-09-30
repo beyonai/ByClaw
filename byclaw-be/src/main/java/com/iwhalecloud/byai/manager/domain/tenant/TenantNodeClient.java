@@ -32,7 +32,6 @@ import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import jakarta.annotation.PreDestroy;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -50,10 +49,6 @@ public class TenantNodeClient {
     private final ObjectMapper mapper;
     private final DiscoveryClient discovery;
     private final String internalToken;
-    @Value("${BYCLAW_TENANT_NODE_HOST_OVERRIDE:}")
-    private String localHostOverride;
-    @Value("${byclaw.sandbox.opensandbox.base-url}")
-    private String sandboxBaseUrl;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
     public TenantNodeClient(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
@@ -182,30 +177,21 @@ public class TenantNodeClient {
                          SsSandboxRecord record) {
         String name = "TENANT_DATA_" + context.enterpriseId();
         List<ServiceInstance> instances = discovery.getInstances(name);
-        URI endpoint = registeredEndpoint(name, context.enterpriseId(), generation, dbRecordId, instances);
-        URI proxy = proxyEndpoint(endpoint, record.getSandboxId(), record.getEndpoint(), sandboxBaseUrl);
-        if (!proxy.equals(endpoint)) return proxy;
-        if ("127.0.0.1".equals(localHostOverride)
-            && "host.containers.internal".equals(endpoint.getHost())) {
-            return URI.create("http://127.0.0.1:" + endpoint.getPort() + endpoint.getPath());
-        }
-        return endpoint;
+        URI registered = registeredEndpoint(name, context.enterpriseId(), generation, dbRecordId, instances);
+        return containerEndpoint(registered, record.getSandboxId());
     }
 
-    static URI proxyEndpoint(URI registered, String sandboxId, String sandboxEndpoint,
-                             String sandboxBaseUrl) {
-        if (sandboxEndpoint == null || !sandboxEndpoint.startsWith("/v1/sandboxes/")) return registered;
-        if (sandboxId == null || !sandboxId.matches("[A-Za-z0-9-]{1,128}")
-            || !sandboxEndpoint.equals("/v1/sandboxes/" + sandboxId + "/proxy/" + registered.getPort())) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant Node sandbox proxy mismatch");
+    static URI containerEndpoint(URI registered, String sandboxId) {
+        try {
+            if (sandboxId == null || !UUID.fromString(sandboxId).toString().equals(sandboxId)) {
+                throw new IllegalArgumentException("invalid sandbox ID");
+            }
         }
-        URI base = URI.create(sandboxBaseUrl);
-        if (!("http".equals(base.getScheme()) || "https".equals(base.getScheme()))
-            || base.getHost() == null || base.getUserInfo() != null
-            || base.getQuery() != null || base.getFragment() != null) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant Node proxy is unavailable");
+        catch (IllegalArgumentException error) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "tenant Node sandbox identity is invalid");
         }
-        return URI.create(sandboxBaseUrl.replaceAll("/+$", "") + sandboxEndpoint);
+        return URI.create("http://sandbox-" + sandboxId + ":" + registered.getPort());
     }
 
     static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,
