@@ -68,6 +68,7 @@ import okhttp3.ResponseBody;
 
 import lombok.extern.slf4j.Slf4j;
 
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import java.io.IOException;
 import java.util.*;
 
@@ -293,7 +294,7 @@ public class AssistantChatApplicationService {
             return null;
         }
 
-        try (Response response = com.iwhalecloud.byai.common.util.OkHttpUtil.getHttpClient()
+        try (Response response = OkHttpUtil.getHttpClient()
             .newCall(requestBuilder.get().build()).execute()) {
             ResponseBody body = response.body();
             String responseBody = body == null ? null : body.string();
@@ -363,6 +364,15 @@ public class AssistantChatApplicationService {
      * @param stopChatDto 入参
      */
     public void stopChat(StopChatDto stopChatDto) {
+        stopChat(stopChatDto, false);
+    }
+
+    /** 撤回补偿需要感知下游失败，只有成功返回才能清除持久化停止意图。 */
+    public void stopChatForRecall(StopChatDto stopChatDto) {
+        stopChat(stopChatDto, true);
+    }
+
+    private void stopChat(StopChatDto stopChatDto, boolean propagateFailure) {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
             return;
         }
@@ -412,7 +422,11 @@ public class AssistantChatApplicationService {
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
         */
         try {
-            gatewayClient.cancelSession(String.valueOf(stopChatDto.getSessionId()), "user cancel task");
+            GatewayClient.CancelSessionResponse response = gatewayClient.cancelSession(
+                String.valueOf(stopChatDto.getSessionId()), "user cancel task");
+            if (propagateFailure && (response == null || !response.isSuccess())) {
+                throw new IllegalStateException(response == null ? "Missing STOP_CHAT response" : response.getError());
+            }
             SessionRuntimeState cancelledRuntime = sessionRuntimeStateService.cancel(stopChatDto.getSessionId());
             if (cancelledRuntime != null) {
                 JSONObject event = new JSONObject();
@@ -424,6 +438,7 @@ public class AssistantChatApplicationService {
             }
         }
         catch (Exception e) {
+            if (propagateFailure) throw new IllegalStateException("Recall STOP_CHAT failed", e);
             log.warn("stopChat 下游取消失败，计划已由 BE 更新为 CANCELLED, sessionId: {}",
                 stopChatDto.getSessionId(), e);
         }

@@ -1,10 +1,12 @@
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { Spin, message } from 'antd';
-import { useIntl, useSelector } from '@umijs/max';
+import { useIntl } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
+import SkillExportButton from '../SkillExportButton';
+import { createPortal } from 'react-dom';
 import {
   listResourceUseAuth,
   queryResourceDetail,
@@ -14,8 +16,6 @@ import {
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
 import { queryInstalledResourceIds } from '@/pages/manager/service/DigitalEmployeeMgr';
-import useGlobal from '@/hooks/useGlobal';
-import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { KnowledgeCapability } from '@/service/knowledgeCenter';
 import { buildResourceListFilterParam, getBaseResourceBizTypeList, getResourceQueryStatus } from '../../utils';
 import {
@@ -24,7 +24,6 @@ import {
   PERMISSION_MANAGED_BY_ME_VALUE,
 } from '../../constants';
 import { isWorkspaceSkill, mapWorkspaceSkillRows } from '../../workspaceSkill/utils';
-import { useDigitalEmployeeManagePermission } from '../../workspaceSkill/useDigitalEmployeeManagePermission';
 import styles from './index.module.less';
 import useResourceInstallTargetContext from '../../useResourceInstallTargetContext';
 
@@ -68,9 +67,11 @@ interface IResourceItem {
   lastSyncTime?: string;
   useCount?: number | string;
   ownerType?: string;
+  personalWorkspace?: boolean;
 }
 
 interface ResourceListProps {
+  exportContainer?: HTMLElement | null;
   resourceType: string;
   activeTab: string;
   myResourcesOnly?: boolean;
@@ -108,6 +109,7 @@ const collectInstalledResourceIds = (response: any) => {
 };
 
 const ResourceList: React.FC<ResourceListProps> = ({
+  exportContainer,
   resourceType,
   activeTab,
   myResourcesOnly = false,
@@ -129,26 +131,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   const intl = useIntl();
   const installTargetContext = useResourceInstallTargetContext();
-  const { agentId, agentInfo } = useGlobal();
-  const { userInfo, defaultDigEmployeeId } = useSelector(
-    ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
-      userInfo: user.userInfo,
-      defaultDigEmployeeId: employees.defaultDigEmployeeId,
-    })
-  );
-  const activeDigitalEmployeeId =
-    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
-  const userCode = userInfo?.userCode;
-  // 通过 ref 读取，避免把 activeDigitalEmployeeId/userCode 放进 getList 依赖；
-  // 否则切换数字员工会让所有资源类型(含 KG_DOC/TOOL/...)的列表都触发一次冗余刷新。
-  const activeDigitalEmployeeIdRef = useRef(activeDigitalEmployeeId);
-  activeDigitalEmployeeIdRef.current = activeDigitalEmployeeId;
-  const userCodeRef = useRef(userCode);
-  userCodeRef.current = userCode;
-  // 工作空间技能删除入口需当前用户对该数字员工有管理权限，无权限时隐藏（后端同样会拦截）。
-  const canManageActiveEmployee = useDigitalEmployeeManagePermission(
-    resourceType === 'SKILL' ? activeDigitalEmployeeId : undefined
-  );
+  // 资源中心以当前用户为列表主体；安装目标只用于用户主动发起的安装操作。
   // 列表挂载后立即请求，首帧先展示加载态，避免请求开始前闪现空状态。
   const [loading, setLoading] = useState(true);
   const listGeneration = useRef(0);
@@ -170,7 +153,11 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const useWideCardLayout = WIDE_CARD_RESOURCE_TYPES.has(resourceType);
 
   const getList = useCallback(
-    async (params?: Record<string, any>, append = false) => {
+    async function fetchPage(
+      params?: Record<string, any>,
+      append = false,
+      exportOnly = false
+    ): Promise<IResourceItem[]> {
       const pageNum = params?.pageIndex ?? params?.pageNum ?? 1;
       const pageSize = params?.pageSize ?? 30; // 直接使用固定值，避免依赖pageInfo.pageSize
       const keyword = `${params?.searchValue ?? searchValue ?? ''}`.trim();
@@ -186,8 +173,10 @@ const ResourceList: React.FC<ResourceListProps> = ({
         availableOnly && ['personal', 'enterprise'].includes(rawFilterParam?.ownerType)
           ? rawFilterParam.ownerType
           : undefined;
-      if (!append) listGeneration.current += 1;
-      setLoading(true);
+      if (!exportOnly) {
+        if (!append) listGeneration.current += 1;
+        setLoading(true);
+      }
       try {
         // 普通资源中心保留原有“我可用的/官方推荐”查询口径；“我的资源”改为后端权限筛选，
         // 个人只查创建人资源，企业按“全部/我创建的/我管理的”映射到统一管理权限。
@@ -255,23 +244,29 @@ const ResourceList: React.FC<ResourceListProps> = ({
             filterParam?.resourceStatus === undefined ||
             filterParam.resourceStatus === '' ||
             `${filterParam.resourceStatus}` === '2');
-        if (shouldLoadWorkspaceSkills && activeDigitalEmployeeIdRef.current) {
+        if (shouldLoadWorkspaceSkills) {
           try {
             const workspaceRes = await queryWorkspacePersonalSkillList({
               keyword,
-              resourceId: `${activeDigitalEmployeeIdRef.current}`,
-              userCode: userCodeRef.current,
+              personalWorkspace: true,
             });
             const workspaceData = (workspaceRes as any)?.data ?? workspaceRes;
             workspaceRows = mapWorkspaceSkillRows(
               Array.isArray(workspaceData) ? workspaceData : workspaceData?.list || workspaceData?.rows || []
             ) as IResourceItem[];
           } catch (error) {
+            if (exportOnly) throw error;
             console.warn('query workspace personal skills failed', error);
           }
         }
 
         const nextRows = workspaceRows.length ? [...workspaceRows, ...rows] : rows;
+        if (exportOnly) {
+          if (pageNum * pageSize < total) {
+            return [...nextRows, ...(await fetchPage({ ...params, pageNum: pageNum + 1, pageSize }, true, true))];
+          }
+          return nextRows;
+        }
         setList((prev) => {
           const mergedRows = append ? [...prev, ...rows] : nextRows;
           return Array.from(
@@ -283,8 +278,9 @@ const ResourceList: React.FC<ResourceListProps> = ({
           pageSize,
           total,
         });
+        return nextRows;
       } finally {
-        setLoading(false);
+        if (!exportOnly) setLoading(false);
       }
     },
     [
@@ -486,12 +482,13 @@ const ResourceList: React.FC<ResourceListProps> = ({
         // 浏览页隐藏生命周期操作；我的资源仍沿用原有权限和状态判断。
         hiddenMenuItemKeys: [
           ...(activeTab === 'personal' ? ['authorize', 'use'] : []),
+          ...(resourceType === 'SKILL' && activeTab === 'personal' ? ['share'] : []),
           ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete', 'publishToEnterprise'] : []),
         ],
         installedResourceIds,
         canInstallToTarget: installTargetContext.mode !== 'fixed' || canManageInstallTarget,
         installTargetContext,
-        canManageWorkspaceSkill: canManageActiveEmployee,
+        canManageWorkspaceSkill: item.personalWorkspace === true,
         onEdit: () => onEdit(item),
         enablePublishToEnterprise,
         onEnterpriseSkillDetail: (enterpriseSkill) => onDetail(enterpriseSkill),
@@ -499,6 +496,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
         onApplyUse: () => onApplyUse(item),
         onAuditUse: () => onAuditUse(item),
         enableResourceLifecycle: true,
+        enableSkillExport: resourceType === 'SKILL',
         showResourceTypeTag: !myResourcesOnly,
         onShelf: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'shelf', feedback }),
         onUnShelf: (feedback) => handleLifecycle({ resourceId: item.resourceId, action: 'unShelf', feedback }),
@@ -509,6 +507,18 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   return (
     <div id={getScrollableTarget} className={styles.sectionsContainer}>
+      {resourceType === 'SKILL' &&
+        exportContainer &&
+        createPortal(
+          <SkillExportButton
+            loadAll={async () => {
+              // 导出入口在工具栏，分页查询仍复用列表的当前筛选。
+              const rows = await getList({ pageNum: 1, pageSize: PAGE_SIZE_DEFAULT }, false, true);
+              return Array.from(new Map(rows.map((row) => [String(row.resourceId), row])).values());
+            }}
+          />,
+          exportContainer
+        )}
       <Spin
         wrapperClassName={styles.spinningWrapper}
         tip={intl.formatMessage({ id: 'common.loading' })}

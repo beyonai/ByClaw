@@ -240,6 +240,15 @@ public class SysAppVersionService {
             && !Constants.BUCKET_NAME_PACKAGE.equals(fileInfo.getBucketName())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "安装包不存在");
         }
+        String storageUrl = url;
+        if (StringUtils.isBlank(fileInfo.getFilePath())) {
+            // Local/file storage returns the object key directly (for example
+            // /file/user_10001/20260923/app.dmg), while FileIngressService expects
+            // a storage URL carrying both bucketName and fileName. App packages
+            // always live in the dedicated package bucket, so restore that context
+            // before delegating to the configured storage backend.
+            storageUrl = FileUtil.generateFileAccessUrl(Constants.BUCKET_NAME_PACKAGE, url, "file");
+        }
 
         String fileName = StringUtils.defaultIfBlank(entity.getFileName(), "byclaw-update");
         response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
@@ -248,7 +257,7 @@ public class SysAppVersionService {
         }
         response.setHeader("Content-Disposition",
             "attachment;filename=" + URLEncoder.encode(fileName, StandardCharsets.UTF_8));
-        try (InputStream inputStream = fileIngressService.downloadFile(url)) {
+        try (InputStream inputStream = fileIngressService.downloadFile(storageUrl)) {
             IOUtils.copy(inputStream, response.getOutputStream());
         }
     }

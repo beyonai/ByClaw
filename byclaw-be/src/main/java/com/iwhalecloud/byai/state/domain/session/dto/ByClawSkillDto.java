@@ -60,6 +60,9 @@ public class ByClawSkillDto {
      */
     private Boolean resourceBacked;
 
+    /** 当前用户个人目录技能，操作时按来源路径鉴权，不跟随默认数字员工。 */
+    private Boolean personalWorkspace;
+
     public ByClawSkillDto(String skillName, String skillPath, String skillDocObjectKey) {
         this(skillName, skillPath, skillDocObjectKey, null, null);
     }

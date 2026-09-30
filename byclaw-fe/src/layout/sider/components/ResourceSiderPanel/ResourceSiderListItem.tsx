@@ -33,6 +33,9 @@ export interface ResourceItem {
   sourceType?: string;
   displaySourceType?: string;
   resourceBacked?: boolean;
+  ownerType?: string;
+  resourceStatus?: string | number;
+  canPublishToEnterprise?: boolean;
   skillPath?: string;
   skillDocObjectKey?: string;
   useStartTime?: string;

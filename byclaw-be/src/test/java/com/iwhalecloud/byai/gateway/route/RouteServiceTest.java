@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.route;
 
+import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.JSONArray;
 import com.iwhaleai.byai.framework.client.GatewayClient;
@@ -24,6 +25,7 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatGatewayRequestDecorator;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatGatewaySendGuard;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
 import org.springframework.beans.factory.ObjectProvider;
 import java.util.stream.Stream;
@@ -179,11 +181,51 @@ class RouteServiceTest {
     }
 
     @Test
+    void recallDuringSandboxRestartPreventsRetryAndReleasesSendScope() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ChatGatewaySendGuard guard = mock(ChatGatewaySendGuard.class);
+        ChatGatewaySendGuard.Lease lease = mock(ChatGatewaySendGuard.Lease.class);
+        ObjectProvider<ChatGatewaySendGuard> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(guard);
+        when(guard.open(ctx)).thenReturn(lease);
+        ReflectionTestUtils.setField(routeService, "sendGuardProvider", provider);
+        doNothing().doThrow(new IllegalStateException("recalled")).when(guard).beforeSend(ctx);
+        when(sequenceService.nextVal()).thenReturn(100L);
+        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+            .thenReturn(new SandboxLaunchData());
+        when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenReturn(failedResponse(ExecutionStatus.ERR_WORKER_NOT_ONLINE, "worker offline"));
+        assertThatThrownBy(() -> routeService.route(ctx)).hasMessage("recalled");
+        verify(gatewayClient, times(1)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), any(), any());
+        verify(guard, times(2)).beforeSend(ctx);
+        verify(lease).close();
+        var order = inOrder(guard, chatStreamRuntimeCoordinator);
+        order.verify(guard).open(ctx);
+        order.verify(chatStreamRuntimeCoordinator).startIfNecessary(ctx);
+    }
+
+    @Test
+    void recallBeforeRuntimeRegistrationDoesNotStartListenerOrSend() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ChatGatewaySendGuard guard = mock(ChatGatewaySendGuard.class);
+        ObjectProvider<ChatGatewaySendGuard> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(guard);
+        when(guard.open(ctx)).thenThrow(new IllegalStateException("recalled"));
+        ReflectionTestUtils.setField(routeService, "sendGuardProvider", provider);
+        assertThatThrownBy(() -> routeService.route(ctx)).hasMessage("recalled");
+        verify(chatStreamRuntimeCoordinator, never()).startIfNecessary(any());
+        verifyNoInteractions(gatewayClient);
+    }
+
+    @Test
     void route_retriesOnceAfterSandboxReady_whenGatewaySendFailsWithRetriableError() throws Exception {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L);
         when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
-                .thenReturn(new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData());
+                .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
@@ -224,7 +266,7 @@ class RouteServiceTest {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L);
         when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
-                .thenReturn(new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData());
+                .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
@@ -246,7 +288,7 @@ class RouteServiceTest {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L, 101L, 102L, 103L);
         when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
-                .thenReturn(new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData());
+                .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(false, false, false);
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
@@ -297,7 +339,7 @@ class RouteServiceTest {
         ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
         when(sequenceService.nextVal()).thenReturn(100L);
         when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1"))
-                .thenReturn(new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData());
+                .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),

@@ -158,6 +158,44 @@ class GroupChatQueuedGatewayTest {
     }
 
     @Test
+    void userTurnSendsAttachedFilesToGatewayRequest() throws Exception {
+        turn.setSenderType("USER");
+        turn.setTriggerMessageId(69L);
+        ByaiMessage source = new ByaiMessage();
+        source.setSessionId(10L);
+        source.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"input.pdf\",\"fileUrl\":\"/files/input.pdf\"}]}");
+        when(messages.selectByMessageId(69L)).thenReturn(source);
+
+        executor.executeTurn(turn);
+
+        ArgumentCaptor<AssistantChatDto> request = ArgumentCaptor.forClass(AssistantChatDto.class);
+        ArgumentCaptor<ByaiMessage> persisted = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(script).startExistingMessageTurn(request.capture(), any());
+        verify(messages).insert(persisted.capture());
+        assertThat(request.getValue().getFiles()).singleElement().satisfies(file -> {
+            assertThat(file.getFileId()).isEqualTo("501");
+            assertThat(file.getFileUrl()).isEqualTo("/files/input.pdf");
+        });
+        assertThat(persisted.getValue().getRelatedResources()).isEqualTo(source.getRelatedResources());
+    }
+
+    @Test
+    void malformedStoredFilesDoNotPreventSendingTheCurrentText() throws Exception {
+        turn.setSenderType("USER");
+        ByaiMessage source = new ByaiMessage();
+        source.setSessionId(10L);
+        source.setRelatedResources("invalid-json");
+        when(messages.selectByMessageId(69L)).thenReturn(source);
+
+        executor.executeTurn(turn);
+
+        ArgumentCaptor<AssistantChatDto> request = ArgumentCaptor.forClass(AssistantChatDto.class);
+        verify(script).startExistingMessageTurn(request.capture(), any());
+        assertThat(request.getValue().getChatContent()).isEqualTo(CURRENT_MESSAGE);
+        assertThat(request.getValue().getFiles()).isNull();
+    }
+
+    @Test
     void completedTaskReplyRunsDirectlyInOriginalSessionWithVisibleTransport() throws Exception {
         JSONObject input = JSON.parseObject(turn.getInputContent());
         input.put("已完成任务的公开成果", "先前发布的新闻报告");

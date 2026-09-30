@@ -192,11 +192,21 @@ public class ProjectApplicationService {
      */
     @Transactional
     public Project createProject(ProjectDTO dto) {
+        return createProject(dto, ProjectType.NORMAL);
+    }
+
+    /** 创建群聊关联项目，沿用普通项目的成员、云盘和工作目录初始化流程。 */
+    @Transactional
+    public Project createGroupChatProject(ProjectDTO dto) {
+        return createProject(dto, ProjectType.HACU);
+    }
+
+    private Project createProject(ProjectDTO dto, String projectType) {
         String projectName = normalizeProjectName(dto.getProjectName());
         if (projectName.isEmpty()) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.required");
         }
-        if (projectService.existsProjectName(projectName, null)) {
+        if (projectService.existsProjectName(projectName, CurrentUserHolder.getCurrentUserId(), null)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
         }
         this.validateProjectDescription(dto.getDescription());
@@ -207,8 +217,7 @@ public class ProjectApplicationService {
         project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
-        // 项目类型字段已废弃，所有新项目统一按普通项目处理。
-        project.setProjectType(ProjectType.NORMAL);
+        project.setProjectType(projectType);
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : Constants.NO_VALUE_N);
         project.setInitStatus("ready");
         project.setBuildIndex(Constants.NO_VALUE_N);
@@ -352,7 +361,7 @@ public class ProjectApplicationService {
             if (projectName.isEmpty()) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.required");
             }
-            if (projectService.existsProjectName(projectName, dto.getProjectId())) {
+            if (projectService.existsProjectName(projectName, project.getCreateBy(), dto.getProjectId())) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
             }
             project.setProjectName(projectName);

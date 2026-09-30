@@ -3,8 +3,12 @@ jest.mock('@/pages/manager/service/session', () => ({
 }));
 
 import { getDcSystemConfig } from '@/pages/manager/service/session';
+import { filterRoutesByBlockedPaths } from '@/pages/manager/utils/menu';
 import {
+  FILE_MANAGEMENT_MENU,
   fallbackMenuConfig,
+  filterMenusByAdminVip,
+  filterMenusByMenuDisplay,
   getManagerMenuConfig,
   getManagerMenuLabel,
   normalizeManagerMenuConfig,
@@ -103,6 +107,65 @@ describe('manager/layout/sider/menuConfig', () => {
         name: '组织结构管理',
       },
     ]);
+  });
+
+  it('does not add file management when it is absent from configured menus', async () => {
+    mockGetDcSystemConfig.mockResolvedValue({
+      data: { paramValue: JSON.stringify([{ path: '/manager/admin-console', menuCode: 'redis' }]) },
+    });
+
+    const menus = await getManagerMenuConfig();
+
+    expect(menus.map((item) => item.path)).toEqual(['/manager/admin-console']);
+    expect(fallbackMenuConfig).toContainEqual(FILE_MANAGEMENT_MENU);
+  });
+
+  it('preserves a configured file menu and its role restrictions without appending a duplicate', async () => {
+    mockGetDcSystemConfig.mockResolvedValue({
+      data: {
+        paramValue: JSON.stringify([
+          {
+            path: '/manager/files',
+            menuCode: 'menu_file_management',
+            menuNameCn: '企业文件',
+            menuNameEn: 'Enterprise Files',
+            menuDisplay: ['PLAT_MAN'],
+            menuOrder: 1,
+          },
+        ]),
+      },
+    });
+
+    const menus = await getManagerMenuConfig();
+
+    expect(menus).toHaveLength(1);
+    expect(getManagerMenuLabel(menus[0], { locale: 'zh-CN', formatMessage: jest.fn() })).toBe('企业文件');
+    expect(filterMenusByMenuDisplay(menus, { usersOrganizations: [{ userType: 'ORG_MAN' }] })).toEqual([]);
+    expect(filterMenusByMenuDisplay(menus, { usersOrganizations: [{ userType: 'PLAT_MAN' }] })).toHaveLength(1);
+    expect(filterRoutesByBlockedPaths(menus, ['/manager/files'])).toEqual([]);
+  });
+
+  it.each([false, true])(
+    'uses the same admin-only filtering as sibling menus when adminVipOnly is %s',
+    (adminVipOnly) => {
+      const menus = normalizeManagerMenuConfig([
+        { path: '/manager/system/feedback', menuCode: 'menu_system_feedback', adminVipOnly },
+        { path: '/manager/files', menuCode: 'menu_file_management', adminVipOnly },
+      ]);
+
+      expect(filterMenusByAdminVip(menus, false)).toHaveLength(adminVipOnly ? 0 : 2);
+      expect(filterMenusByAdminVip(menus, true)).toHaveLength(2);
+    }
+  );
+
+  it.each(['zh-CN', 'en-US'])('localizes the built-in file management menu for %s', (locale) => {
+    const intl = { locale, formatMessage: jest.fn(() => 'translated file management') };
+
+    expect(getManagerMenuLabel(FILE_MANAGEMENT_MENU, intl)).toBe('translated file management');
+    expect(intl.formatMessage).toHaveBeenCalledWith({
+      id: 'menu.fileManagement',
+      defaultMessage: locale === 'en-US' ? 'System File Management' : '系统文件管理',
+    });
   });
 
   it('normalizes the system feedback menu like the organization menu', () => {

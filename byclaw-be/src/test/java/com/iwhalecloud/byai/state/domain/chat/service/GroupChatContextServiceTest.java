@@ -21,6 +21,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatMessageAck;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMessageAckMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -122,6 +124,33 @@ class GroupChatContextServiceTest {
         assertThat(response.getMessages().get(1).getSpeaker().getAgentId()).isEqualTo("1001");
         assertThat(response.getMessages().get(1).getSpeaker().getAgentName()).isEqualTo("Agent A");
         assertThat(response.getTruncation().getTruncated()).isFalse();
+    }
+
+    @Test
+    void acknowledgementsRemainBoundToTheirExactMessage() {
+        ByaiGroupChatMessageAckMapper acknowledgements = mock(ByaiGroupChatMessageAckMapper.class);
+        service = new GroupChatContextService(messageMapper, sessionService, resourceService, null, null,
+            acknowledgements);
+        ReflectionTestUtils.setField(service, "taskMapper", tasks);
+        ByaiMessage first = message(10L, 1, "@张三 第一条", 10L);
+        ByaiMessage second = message(20L, 1, "@张三 第二条", 20L);
+        ByaiMessage third = message(30L, 1, "@张三 第三条", 30L);
+        ByaiGroupChatMessageAck ack = new ByaiGroupChatMessageAck();
+        ack.setSessionId(3L);
+        ack.setMessageId(20L);
+        ack.setUserId(100L);
+        ack.setUserName("张三");
+        ack.setAcknowledgedAt(new Date(40L));
+        when(acknowledgements.selectByMessageIds(3L, List.of(10L, 20L, 30L))).thenReturn(List.of(ack));
+
+        List<GroupChatContextResponse.Message> projected = service.toMessages(List.of(first, second, third));
+
+        assertThat(projected.get(0).getAcknowledgements()).isEmpty();
+        assertThat(projected.get(1).getAcknowledgements()).singleElement().satisfies(item -> {
+            assertThat(item.getMessageId()).isEqualTo("20");
+            assertThat(item.getUserId()).isEqualTo("100");
+        });
+        assertThat(projected.get(2).getAcknowledgements()).isEmpty();
     }
 
     @Test

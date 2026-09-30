@@ -140,7 +140,8 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
 
     List<ByaiMessage> searchVisibleGroupMessages(@Param("sessionId") Long sessionId,
         @Param("keyword") String keyword, @Param("scope") String scope,
-        @Param("senderType") String senderType, @Param("userId") Long userId,
+        @Param("senderType") String senderType, @Param("contentType") String contentType,
+        @Param("userId") Long userId,
         @Param("startTime") Date startTime, @Param("endTime") Date endTime,
         @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
 

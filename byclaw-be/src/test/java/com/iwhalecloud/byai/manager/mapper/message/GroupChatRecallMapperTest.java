@@ -64,7 +64,7 @@ class GroupChatRecallMapperTest {
                 .extracting(ByaiMessage::getMessageId).containsExactly(3L, 2L, 1L);
             assertThat(mapper.selectTopicMessages(10L, 1L, 1L, 1L, 10))
                 .extracting(ByaiMessage::getMessageId).containsExactly(2L);
-            assertThat(mapper.searchVisibleGroupMessages(10L, null, "ALL", "ALL", 7L, null, null, null, 1))
+            assertThat(mapper.searchVisibleGroupMessages(10L, null, "ALL", "ALL", "ALL", 7L, null, null, null, 1))
                 .extracting(ByaiMessage::getMessageId).containsExactly(2L);
             assertThat(mapper.selectVisibleGroupMessagesByIds(10L, List.of(1L)).get(0).isRecalled()).isTrue();
         }

@@ -43,6 +43,7 @@ interface ResourceDetailProps {
   onCancel: () => void;
   onEdit: () => void;
   panel?: boolean;
+  loading?: boolean;
 }
 
 const ResourceDetail: React.FC<ResourceDetailProps> = ({
@@ -52,6 +53,7 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
   item,
   onCancel,
   panel = false,
+  loading: externalLoading = false,
 }) => {
   const intl = useIntl();
   const [loading, setLoading] = useState(false);
@@ -233,7 +235,7 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
   const title = `${resourceName}${intl.formatMessage({ id: 'common.detail' })}`;
   const detailContent = (
     <>
-      {loading ? (
+      {loading || externalLoading ? (
         <div className={styles.loadingContainer}>
           <Spin />
         </div>

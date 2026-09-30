@@ -55,6 +55,7 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatGatewaySendGuard;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
@@ -94,6 +95,9 @@ public class RouteService {
 
     @Autowired
     private ChatStreamRuntimeCoordinator chatStreamRuntimeCoordinator;
+
+    @Autowired
+    private ObjectProvider<ChatGatewaySendGuard> sendGuardProvider;
 
     @Autowired
     private SandboxService sandboxService;
@@ -222,54 +226,59 @@ public class RouteService {
         registerMultiAgentContext(ctx, laneRoutes);
 
         long dispatchStarted = System.nanoTime();
-        boolean runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
-        try {
-            ensureWorkerReadyBeforeFirstSend(ctx, userCode, agentId, targetAgentType);
-            long readyMs = (System.nanoTime() - dispatchStarted) / 1_000_000;
-            ChatChainLog.record("be.worker_ready", ChatChainLog.requestId(ctx), sessionId, "ok",
-                "traceId", traceId, "targetAgentType", targetAgentType, "readyMs", readyMs);
-            if (laneRoutes.isEmpty()) {
-                GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
-                    userCode,
-                    sessionId,
-                    content,
-                    chatDto,
-                    ctx.getParams(),
-                    answerMessageId,
-                    traceId,
-                    reqMetadata,
-                    targetAgentType,
-                    agentId,
-                    ctx
-                );
-                ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "ok",
-                    "traceId", traceId, "workerId", response.getTargetWorkerId(), "readyMs", readyMs,
-                    "dispatchMs", (System.nanoTime() - dispatchStarted) / 1_000_000 - readyMs);
-            } else {
-                Map<String, Object> multiAgentParams = buildMultiAgentGatewayParams(ctx.getParams(),
-                    multiAgentMetadata, laneRoutes);
-                GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
-                    userCode,
-                    sessionId,
-                    content,
-                    chatDto,
-                    multiAgentParams,
-                    answerMessageId,
-                    traceId,
-                    reqMetadata,
-                    targetAgentType,
-                    agentId,
-                    ctx
-                );
-                ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "ok",
-                    "traceId", traceId, "workerId", response.getTargetWorkerId(), "readyMs", readyMs,
-                    "dispatchMs", (System.nanoTime() - dispatchStarted) / 1_000_000 - readyMs, "lanes", laneRoutes.size());
+        ChatGatewaySendGuard sendGuard = sendGuardProvider == null ? null : sendGuardProvider.getIfAvailable();
+        boolean runtimeStarted = false;
+        // 先获取发送作用域再登记运行态，防止后续轮次覆盖待停止执行的 trace。
+        try (ChatGatewaySendGuard.Lease lease = sendGuard == null ? () -> { } : sendGuard.open(ctx)) {
+            runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
+            try {
+                ensureWorkerReadyBeforeFirstSend(ctx, userCode, agentId, targetAgentType);
+                long readyMs = (System.nanoTime() - dispatchStarted) / 1_000_000;
+                ChatChainLog.record("be.worker_ready", ChatChainLog.requestId(ctx), sessionId, "ok",
+                    "traceId", traceId, "targetAgentType", targetAgentType, "readyMs", readyMs);
+                if (laneRoutes.isEmpty()) {
+                    GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
+                        userCode,
+                        sessionId,
+                        content,
+                        chatDto,
+                        ctx.getParams(),
+                        answerMessageId,
+                        traceId,
+                        reqMetadata,
+                        targetAgentType,
+                        agentId,
+                        ctx
+                    );
+                    ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "ok",
+                        "traceId", traceId, "workerId", response.getTargetWorkerId(), "readyMs", readyMs,
+                        "dispatchMs", (System.nanoTime() - dispatchStarted) / 1_000_000 - readyMs);
+                } else {
+                    Map<String, Object> multiAgentParams = buildMultiAgentGatewayParams(ctx.getParams(),
+                        multiAgentMetadata, laneRoutes);
+                    GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
+                        userCode,
+                        sessionId,
+                        content,
+                        chatDto,
+                        multiAgentParams,
+                        answerMessageId,
+                        traceId,
+                        reqMetadata,
+                        targetAgentType,
+                        agentId,
+                        ctx
+                    );
+                    ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "ok",
+                        "traceId", traceId, "workerId", response.getTargetWorkerId(), "readyMs", readyMs,
+                        "dispatchMs", (System.nanoTime() - dispatchStarted) / 1_000_000 - readyMs, "lanes", laneRoutes.size());
+                }
+            } catch (Exception e) {
+                ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "failed",
+                    "durationMs", (System.nanoTime() - dispatchStarted) / 1_000_000, "errorType", e.getClass().getSimpleName());
+                chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
+                throw e;
             }
-        } catch (Exception e) {
-            ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "failed",
-                "durationMs", (System.nanoTime() - dispatchStarted) / 1_000_000, "errorType", e.getClass().getSimpleName());
-            chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
-            throw e;
         }
 
         if (ctx.sendByFrameworkMsgOnly) {
@@ -751,6 +760,9 @@ public class RouteService {
         }
 
         while (true) {
+            // 沙箱重启后的每次重试都重新读撤回屏障，不复用 decorator 的检查结果。
+            ChatGatewaySendGuard sendGuard = sendGuardProvider == null ? null : sendGuardProvider.getIfAvailable();
+            if (sendGuard != null) sendGuard.beforeSend(ctx);
             ResumeRoutingTraceLogger.logGatewayEgress(chatDto, sessionId, traceId, targetAgentType, answerMessageId,
                 parentMessageId, messageContent, gatewayParams, metadata, retryAttemptsAfterWorkerReady + 1);
             GatewayClient.SendResponse response = gatewayClient.sendMessage(

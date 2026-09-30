@@ -25,18 +25,87 @@ import org.springframework.test.util.ReflectionTestUtils;
 class AccessTokenVerifyInterceptorTest {
 
     @Test
-    void allowsOnlyAnonymousTokenPreviewAndClearsThreadIdentity() {
+    void conversationSearchRequiresTokenEvenWithCookieAnonymousPatternOrSpoofedUserHeader() {
         AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        ReflectionTestUtils.setField(interceptor, "urlPattenrs", ".*");
+        interceptor.init();
+        SessionFilter session = mock(SessionFilter.class);
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", session);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        for (String suffix : List.of("", "/")) {
+            MockHttpServletRequest request = request("POST",
+                "/byaiService/skills/conversation-search/query" + suffix, "/byaiService");
+            MockHttpSession cookie = new MockHttpSession();
+            cookie.setAttribute("USER_CODE", "allowed-admin");
+            request.setSession(cookie);
+            request.addHeader("X-User-Id", "allowed-admin");
+            var response = new MockHttpServletResponse();
+            assertFalse(interceptor.preHandle(request, response, new Object()));
+            assertThat(response.getStatus()).isEqualTo(401);
+            assertThat(CurrentUserHolder.getLoginInfo()).isNull();
+        }
+        verifyNoInteractions(session, jwt);
+    }
+
+    @Test
+    void conversationSearchUsesTokenIdentityInsteadOfCookieOrTargetUser() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+        SessionFilter session = mock(SessionFilter.class);
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        LoginApplicationService loginService = mock(LoginApplicationService.class);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", session);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        ReflectionTestUtils.setField(interceptor, "loginApplicationService", loginService);
+        LoginInfo caller = new LoginInfo();
+        caller.setUserId(99L);
+        caller.setUserCode("actual-caller");
+        when(jwt.doFilter(null, "caller-token")).thenAnswer(invocation -> {
+            CurrentUserHolder.setLoginInfo(caller);
+            return true;
+        });
+        when(loginService.getLoginInfo("actual-caller")).thenReturn(caller);
+        MockHttpServletRequest request = request("POST", "/byaiService/skills/conversation-search/query", "/byaiService");
+        MockHttpSession cookie = new MockHttpSession();
+        cookie.setAttribute("USER_CODE", "allowed-admin");
+        request.setSession(cookie);
+        request.addHeader("Beyond-Token", "caller-token");
+        request.addHeader("X-User-Id", "allowed-admin");
+        request.setContent("{\"userCode\":\"allowed-admin\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("actual-caller");
+        verifyNoInteractions(session);
+    }
+
+    @Test
+    void conversationSearchInvalidTokenReturnsUnauthorized() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        MockHttpServletRequest request = request("POST", "/byaiService/skills/conversation-search/query", "/byaiService");
+        request.addHeader("Beyond-Token", "invalid");
+        var response = new MockHttpServletResponse();
+        assertFalse(interceptor.preHandle(request, response, new Object()));
+        assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    void allowsInvitationValidationThroughUrlMatcher() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
         var login = new LoginInfo();
         login.setUserId(99L);
         CurrentUserHolder.setLoginInfo(login);
-        var request = new MockHttpServletRequest("POST", "/byaiService/group-chats/invitations/validate");
+        var request = new MockHttpServletRequest("GET", "/byaiService/group-chats/invitations/validate");
         request.setContextPath("/byaiService");
         request.setServletPath("/group-chats/invitations/validate");
+        request.addHeader("accessToken", "invalid-token");
         var response = new MockHttpServletResponse();
+
         assertTrue(interceptor.preHandle(request, response, new Object()));
-        assertThat(CurrentUserHolder.getCurrentUserId()).isLessThanOrEqualTo(0L);
-        assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(99L);
     }
 
     @Test
@@ -46,10 +115,11 @@ class AccessTokenVerifyInterceptorTest {
         for (String context : List.of("", "/byaiService")) {
             assertTrue(interceptor.preHandle(request("GET", context + "/system/session/captcha", context),
                 new MockHttpServletResponse(), new Object()));
+            assertTrue(interceptor.preHandle(request("POST", context + "/system/session/captcha", context),
+                new MockHttpServletResponse(), new Object()));
             assertTrue(interceptor.preHandle(request("POST", context + "/system/session/sms/send", context),
                 new MockHttpServletResponse(), new Object()));
             for (String[] route : List.of(
-                    new String[]{"POST", "/system/session/captcha"},
                     new String[]{"GET", "/system/session/sms/send"},
                     new String[]{"GET", "/system/session/captcha/"},
                     new String[]{"GET", "/system/session/captcha/extra"},
@@ -84,6 +154,33 @@ class AccessTokenVerifyInterceptorTest {
             "http://localhost:8086/byaiService/tool/installThirdPartySkill"));
         assertFalse(interceptor.checkUrlByRegex(
             "http://localhost:8086/system/session/currentUser"));
+    }
+
+    @Test
+    void allowsAnonymousDesktopVersionDiscoveryAndPackageDownloadOnly() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+
+        assertTrue(interceptor.preHandle(request("GET",
+            "/byaiService/api/v1/appVersion/latest", "/byaiService"),
+            new MockHttpServletResponse(), new Object()));
+        assertTrue(interceptor.preHandle(request("GET",
+            "/byaiService/api/v1/appVersion/package/20096802", "/byaiService"),
+            new MockHttpServletResponse(), new Object()));
+
+        for (String path : List.of(
+                "/api/v1/appVersion/package/not-a-number",
+                "/api/v1/appVersion/package/20096802/extra",
+                "/api/v1/appVersion/admin/page")) {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            assertFalse(interceptor.preHandle(request("GET", "/byaiService" + path, "/byaiService"),
+                response, new Object()));
+            assertThat(response.getStatus()).isEqualTo(401);
+        }
+        MockHttpServletResponse postResponse = new MockHttpServletResponse();
+        assertFalse(interceptor.preHandle(request("POST",
+            "/byaiService/api/v1/appVersion/latest", "/byaiService"), postResponse, new Object()));
+        assertThat(postResponse.getStatus()).isEqualTo(401);
     }
 
     @Test

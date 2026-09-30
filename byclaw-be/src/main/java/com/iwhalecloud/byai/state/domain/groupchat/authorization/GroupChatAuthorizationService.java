@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.authorization;
 
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
+
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 
 import org.springframework.stereotype.Service;
@@ -33,7 +35,7 @@ public class GroupChatAuthorizationService {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || !SessionType.HS_AS.getCode().equals(session.getSessionType())
             || DISSOLVED_STATE.equals(session.getState())) {
-            throw new IllegalArgumentException("Group chat not found");
+            throw new GroupChatMessageRejectedException("Group chat not found");
         }
         return session;
     }
@@ -42,7 +44,7 @@ public class GroupChatAuthorizationService {
         requireGroup(sessionId);
         ByaiSessionMember member = memberService.findSessionMember(sessionId, MemObjType.USER.name(), userId);
         if (member == null) {
-            throw new IllegalArgumentException("User is not a group member");
+            throw new GroupChatMessageRejectedException("User is not a group member");
         }
         return member;
     }
@@ -50,7 +52,7 @@ public class GroupChatAuthorizationService {
     public ByaiSessionMember requireCurrentUserMember(Long sessionId) {
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null) {
-            throw new IllegalArgumentException("User is not authenticated");
+            throw new GroupChatMessageRejectedException("User is not authenticated");
         }
         return requireUserMember(sessionId, userId);
     }

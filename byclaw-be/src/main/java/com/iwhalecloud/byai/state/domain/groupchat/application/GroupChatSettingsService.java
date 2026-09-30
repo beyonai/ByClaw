@@ -3,6 +3,9 @@ package com.iwhalecloud.byai.state.domain.groupchat.application;
 import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
 
 import java.util.Date;
+import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,18 +59,23 @@ public class GroupChatSettingsService {
     }
 
     private GroupChatSettingsResponse readSettings(Long sessionId) {
+        Map<String, ByaiSessionExt> settings = new HashMap<>();
+        for (ByaiSessionExt ext : extService.findByExtParamCodes(sessionId, List.of(
+            LINK_ENABLED, GroupChatAuthorizationService.MEMBER_ADD_AGENT, GroupChatAuthorizationService.MEMBER_INVITE_USER))) {
+            settings.putIfAbsent(ext.getExtParamCode(), ext);
+        }
         GroupChatSettingsResponse response = new GroupChatSettingsResponse();
         response.setGroupNumber(String.valueOf(sessionId));
-        response.setAllowJoinByLink(enabled(sessionId, LINK_ENABLED));
-        response.setAllowMemberAddAgent(authorizationService.memberPermissionEnabled(sessionId, GroupChatAuthorizationService.MEMBER_ADD_AGENT));
-        response.setAllowMemberInviteUser(authorizationService.memberPermissionEnabled(sessionId, GroupChatAuthorizationService.MEMBER_INVITE_USER));
+        response.setAllowJoinByLink(enabled(settings, LINK_ENABLED, true));
+        response.setAllowMemberAddAgent(enabled(settings, GroupChatAuthorizationService.MEMBER_ADD_AGENT, false));
+        response.setAllowMemberInviteUser(enabled(settings, GroupChatAuthorizationService.MEMBER_INVITE_USER, false));
         return response;
     }
 
-    private boolean enabled(Long sessionId, String code) {
-        ByaiSessionExt ext = extService.findOneByExtParamCode(sessionId, code);
+    private boolean enabled(Map<String, ByaiSessionExt> settings, String code, boolean defaultValue) {
+        ByaiSessionExt ext = settings.get(code);
         // 存量群默认允许链接加入；实际入群仍须验证邀请 token。
-        return ext == null || "true".equals(ext.getExtParamValue());
+        return ext == null ? defaultValue : "true".equals(ext.getExtParamValue());
     }
 
     @Transactional

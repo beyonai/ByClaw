@@ -399,6 +399,20 @@ public class RedisUtil {
         return result != null ? result : 0L;
     }
 
+    /** Atomically reserve an attempt in a fixed window; Redis failures fail closed. */
+    public static boolean reserveAttempt(String key, int limit, long seconds) {
+        if (limit <= 0 || seconds <= 0) {
+            throw new IllegalArgumentException("Invalid rate limit configuration");
+        }
+        String script = "local n = tonumber(redis.call('get', KEYS[1]) or '0'); "
+            + "if n >= tonumber(ARGV[1]) then return 0 end; "
+            + "redis.call('incr', KEYS[1]); "
+            + "if redis.call('ttl', KEYS[1]) < 0 then redis.call('expire', KEYS[1], ARGV[2]) end; return 1";
+        Long result = instance.stringRedisTemplate.execute(new DefaultRedisScript<>(script, Long.class),
+            Collections.singletonList(key), String.valueOf(limit), String.valueOf(seconds));
+        return Long.valueOf(1).equals(result);
+    }
+
     /**
      * 删除指定的键 对应Redis的DEL命令
      *

@@ -200,8 +200,9 @@ public class UserController {
      * @return ResponseUtil
      */
     @RequestMapping(value = "/getUserSuas", method = RequestMethod.GET)
-    public ResponseUtil getUserSuas(@RequestParam(value = "userId") Long userId) {
-        return userApplicationService.getUserSuas(userId);
+    public ResponseUtil getUserSuas(@RequestParam(value = "userId") Long userId,
+        @RequestParam(value = "groupSessionId", required = false) Long groupSessionId) {
+        return userApplicationService.getUserSuas(userId, groupSessionId);
     }
 
     /**

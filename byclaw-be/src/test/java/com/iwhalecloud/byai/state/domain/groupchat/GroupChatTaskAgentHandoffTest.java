@@ -7,6 +7,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import java.util.Map;
 import java.util.Set;
 
@@ -38,7 +40,8 @@ class GroupChatTaskAgentHandoffTest {
     private final GroupChatTaskService lifecycle = mock(GroupChatTaskService.class);
     private final GroupChatTaskAuthorizationService authorization = new GroupChatTaskAuthorizationService(
         tasks, groups, members, permissions, resources);
-    private final GroupChatTaskChatGuard guard = new GroupChatTaskChatGuard(tasks, authorization, lifecycle);
+    private final RunningOutputStreamRegistry running = mock(RunningOutputStreamRegistry.class);
+    private final GroupChatTaskChatGuard guard = new GroupChatTaskChatGuard(tasks, authorization, lifecycle, running);
     private ByaiGroupChatTask task;
 
     @BeforeEach
@@ -56,7 +59,7 @@ class GroupChatTaskAgentHandoffTest {
         when(members.findSessionMember(10L, "AGENT", 41L)).thenReturn(new ByaiSessionMember());
         when(resources.findById(41L)).thenReturn(new SsResource());
         when(permissions.getAuthContextBo()).thenReturn(new AuthContextBo(Set.of(41L), Map.of()));
-        when(lifecycle.startTurn(60L)).thenReturn(true);
+        when(lifecycle.startTurn(60L)).thenReturn(101L);
     }
 
     @AfterEach
@@ -66,7 +69,7 @@ class GroupChatTaskAgentHandoffTest {
 
     @Test
     void authorizedMemberCanTakeOverWithoutChangingTaskOwner() {
-        assertThat(guard.beforeTurn(60L, 41L)).isTrue();
+        assertThat(guard.beforeTurn(60L, 41L, null)).isEqualTo(101L);
         assertThat(task.getTargetAgentId()).isEqualTo(40L);
         verify(groups).requireCurrentUserMember(10L);
         verify(lifecycle).startTurn(60L);
@@ -74,44 +77,80 @@ class GroupChatTaskAgentHandoffTest {
 
     @Test
     void nonMemberCannotOccupyTaskTurn() {
-        assertThatThrownBy(() -> guard.beforeTurn(60L, 42L)).hasMessageContaining("authorized group member");
+        assertThatThrownBy(() -> guard.beforeTurn(60L, 42L, null)).hasMessageContaining("authorized group member");
         verify(lifecycle, never()).startTurn(60L);
     }
 
     @Test
     void revokedResourcePermissionCannotOccupyTaskTurn() {
         when(permissions.getAuthContextBo()).thenReturn(new AuthContextBo(Set.of(), Map.of()));
-        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L)).hasMessageContaining("authorized group member");
+        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, null)).hasMessageContaining("authorized group member");
         verify(lifecycle, never()).startTurn(60L);
     }
 
     @Test
     void anotherGroupMemberCannotTakeOverPrivateTask() {
         task.setInitiatorUserId(31L);
-        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L)).hasMessageContaining("Only task initiator");
+        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, null)).hasMessageContaining("Only task initiator");
         verify(lifecycle, never()).startTurn(60L);
     }
 
     @Test
     void terminalTaskAndConcurrentTurnAreRejected() {
         task.setStatus("PUBLISHED");
-        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L)).hasMessageContaining("does not accept");
+        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, null)).hasMessageContaining("does not accept");
         verify(lifecycle, never()).startTurn(60L);
         task.setStatus("ACTIVE");
-        when(lifecycle.startTurn(60L)).thenReturn(false);
-        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L)).hasMessageContaining("does not accept");
+        when(lifecycle.startTurn(60L)).thenReturn((Long) null);
+        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, null)).hasMessageContaining("does not accept");
+    }
+
+    @Test
+    void backgroundResumeDoesNotAcquireOrReplaceTaskTurn() {
+        RunningChatInfo background = new RunningChatInfo();
+        background.setRunning(true);
+        background.setTraceId("background-trace");
+        when(running.getRunning(60L)).thenReturn(background);
+        task.setTurnStatus("WAITING_USER");
+        task.setCurrentTurnId(100L);
+        task.setCurrentTurnTraceId("background-trace");
+
+        assertThat(guard.beforeTurn(60L, 41L, "background-trace")).isNull();
+        assertThat(task.getTurnStatus()).isEqualTo("WAITING_USER");
+
+        task.setTurnStatus("RUNNING");
+        task.setCurrentTurnId(101L);
+        task.setCurrentTurnTraceId("foreground-trace");
+        assertThat(guard.beforeTurn(60L, 41L, "background-trace")).isNull();
+        assertThat(task.getCurrentTurnId()).isEqualTo(101L);
+        assertThat(task.getCurrentTurnTraceId()).isEqualTo("foreground-trace");
+        verify(lifecycle, never()).startTurn(60L);
+    }
+
+    @Test
+    void staleResumeCannotCreateANewTaskReservation() {
+        RunningChatInfo idle = new RunningChatInfo();
+        idle.setRunning(false);
+        when(running.getRunning(60L)).thenReturn(idle);
+        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, "finished-trace"))
+            .hasMessageContaining("no longer running");
+        idle.setRunning(true);
+        idle.setTraceId("other-trace");
+        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, "finished-trace"))
+            .hasMessageContaining("no longer running");
+        verify(lifecycle, never()).startTurn(60L);
     }
 
     @Test
     void preparationFailureReleasesTaskForRetry() {
-        guard.beforeTurn(60L, 41L);
-        guard.afterTurn(60L, false);
-        verify(lifecycle).updateTurnStatus(60L, "FAILED");
+        guard.beforeTurn(60L, 41L, null);
+        guard.failTurnStart(60L, 101L);
+        verify(lifecycle).failTurnStart(60L, 101L);
     }
 
     @Test
     void ordinarySessionDoesNotAcquireTaskSlot() {
-        assertThat(guard.beforeTurn(99L, 41L)).isFalse();
+        assertThat(guard.beforeTurn(99L, 41L, null)).isNull();
         verify(lifecycle, never()).startTurn(99L);
     }
 }

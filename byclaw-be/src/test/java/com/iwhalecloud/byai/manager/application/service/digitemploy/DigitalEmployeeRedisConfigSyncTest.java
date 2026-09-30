@@ -162,4 +162,61 @@ class DigitalEmployeeRedisConfigSyncTest {
         assertThat(persistedJson.getString("imageModelId")).isEqualTo("9007199254740993");
         assertThat(redisJson.getString("imageModelId")).isEqualTo(persistedJson.getString("imageModelId"));
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void publicationSyncReadsUncommittedVersionAndRollsBackArtifactWithEmployee(boolean existing,
+        @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) {
+        var dataSource = new org.apache.ibatis.datasource.unpooled.UnpooledDataSource("org.sqlite.JDBC",
+            "jdbc:sqlite:" + directory.resolve("sync.sqlite"), null, null);
+        var jdbc = new org.springframework.jdbc.core.JdbcTemplate(dataSource);
+        jdbc.execute("CREATE TABLE employee (id BIGINT PRIMARY KEY, name TEXT)");
+        jdbc.execute("CREATE TABLE artifact (resource_id BIGINT, path TEXT)");
+        if (existing) jdbc.update("INSERT INTO employee VALUES (9, '旧版本')");
+        var manager = new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource);
+        var advice = new com.iwhalecloud.byai.common.config.TransactionAdviceConfig();
+        ReflectionTestUtils.setField(advice, "transactionManager", manager);
+        var syncingService = spy(service);
+        org.mockito.Mockito.doAnswer(call -> jdbc.queryForObject("SELECT name FROM employee WHERE id=9", (rs, n) -> {
+            var details = new DigitalEmployeeDetailsDTO(); details.setResourceId(9L);
+            details.setResourceName(rs.getString(1)); return details;
+        })).when(syncingService).findDetailsById(any());
+        var extension = new SsResExtDigEmployee(); extension.setResourceId(9L);
+        when(ssResExtDigEmployeeService.findById(9L)).thenReturn(extension);
+        ReflectionTestUtils.setField(syncingService, "ssResourceService", mock(SsResourceService.class));
+        ReflectionTestUtils.setField(syncingService, "ssResourceRelDetailService", mock(SsResourceRelDetailService.class));
+        var storage = mock(ResourceArtifactStorageService.class);
+        ReflectionTestUtils.setField(syncingService, "resourceArtifactStorageService", storage);
+        var artifactMapper = mock(com.iwhalecloud.byai.manager.mapper.resource.SsResourceArtifactMapper.class);
+        when(artifactMapper.insert(any(com.iwhalecloud.byai.manager.entity.resource.SsResourceArtifact.class)))
+            .thenAnswer(call -> {
+                com.iwhalecloud.byai.manager.entity.resource.SsResourceArtifact artifact = call.getArgument(0);
+                return jdbc.update("INSERT INTO artifact VALUES (?,?)", artifact.getResourceId(), artifact.getArtifactPath());
+            });
+        var artifacts = new SsResourceArtifactService();
+        ReflectionTestUtils.setField(artifacts, "ssResourceArtifactMapper", artifactMapper);
+        ReflectionTestUtils.setField(artifacts, "sequenceService", mock(com.iwhalecloud.byai.state.domain.sys.service.SequenceService.class));
+        ReflectionTestUtils.setField(artifacts, "resourceArtifactPathResolver",
+            new com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactPathResolver());
+        var artifactFactory = new org.springframework.aop.framework.ProxyFactory(artifacts);
+        artifactFactory.addAdvice(advice.getAdvisor());
+        ReflectionTestUtils.setField(syncingService, "ssResourceArtifactService", artifactFactory.getProxy());
+        var factory = new org.springframework.aop.framework.ProxyFactory(syncingService);
+        factory.addAdvice(advice.getAdvisor());
+        var proxied = (DigitalEmployeeApplicationService) factory.getProxy();
+        new org.springframework.transaction.support.TransactionTemplate(manager).executeWithoutResult(status -> {
+            if (existing) jdbc.update("UPDATE employee SET name='本次待发布版本' WHERE id=9");
+            else jdbc.update("INSERT INTO employee VALUES (9, '本次待发布版本')");
+            assertThat(proxied.syncPublicationOpenClawWorkSpace(9L, new DigitalEmployeeDTO())).isTrue();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM artifact", Integer.class)).isEqualTo(1);
+            status.setRollbackOnly();
+        });
+        var json = ArgumentCaptor.forClass(String.class);
+        verify(storage).syncResourceJsonByBizType(json.capture(), eq("DIG_EMPLOYEE"), eq(9L));
+        assertThat(JSONObject.parseObject(json.getValue()).getString("resourceName")).isEqualTo("本次待发布版本");
+        verify(valueOperations).set(DigEmployeeRedisKeys.configJsonKey(9L), json.getValue());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM artifact", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM employee", Integer.class)).isEqualTo(existing ? 1 : 0);
+        if (existing) assertThat(jdbc.queryForObject("SELECT name FROM employee WHERE id=9", String.class)).isEqualTo("旧版本");
+    }
 }

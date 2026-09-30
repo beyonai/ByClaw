@@ -491,6 +491,7 @@ class DigitalEmployeeApplicationServiceTest {
 
     @Test
     void saveDigitalEmployee_doesNotPersistEnterpriseTagNameByAgentType() {
+        CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
         List<DigitalEmployType> types = List.of(DigitalEmployType.AGENT_TYPE_ASSISTANT, DigitalEmployType.AGENT_TYPE_DATA,
             DigitalEmployType.AGENT_TYPE_QA, DigitalEmployType.AGENT_TYPE_DEBUG, DigitalEmployType.AGENT_TYPE_CODE);
         when(sequenceService.nextVal()).thenReturn(401L, 402L, 403L, 404L, 405L);

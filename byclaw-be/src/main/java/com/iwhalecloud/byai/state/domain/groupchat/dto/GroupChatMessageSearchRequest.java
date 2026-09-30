@@ -8,6 +8,7 @@ public class GroupChatMessageSearchRequest {
     private String keyword;
     private String scope;
     private String senderType;
+    private String contentType;
     private Long startTime;
     private Long endTime;
     private String beforeMessageId;

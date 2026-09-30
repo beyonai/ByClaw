@@ -46,6 +46,7 @@ class AnonymousSmsFlowTest extends LoginMessageSourceTestSupport {
     @Test
     void anonymousCaptchaAndSameSessionSmsWorkAndCaptchaCannotBeReused() throws Exception {
         try (var redis = mockStatic(RedisUtil.class, withSettings().mockMaker("mock-maker-inline"))) {
+            CaptchaServiceTest.allowRedis(redis);
             when(sender.sendSms(anyString(), anyString(), eq("register"))).thenReturn(true);
             MockHttpSession session = captcha();
             String code = (String) session.getAttribute("VERIFICATION_CODE");
@@ -71,14 +72,14 @@ class AnonymousSmsFlowTest extends LoginMessageSourceTestSupport {
     }
 
     @Test
-    void phoneCooldownAndIpLimitRemainEnforcedAnonymously() throws Exception {
+    void phoneCooldownAndPhoneLimitRemainEnforcedAnonymously() throws Exception {
         when(records.qryInterval(anyString(), eq("2"), anyInt())).thenReturn(List.of(new SafeAccountMsg()));
         MockHttpSession repeated = captcha();
         send(repeated, (String) repeated.getAttribute("VERIFICATION_CODE"), -1)
             .andExpect(jsonPath("$.msg").value("captcha.sms.repeat.send"));
         when(records.qryInterval(anyString(), eq("2"), anyInt())).thenReturn(List.of());
         try (var redis = mockStatic(RedisUtil.class, withSettings().mockMaker("mock-maker-inline"))) {
-            redis.when(() -> RedisUtil.getString("sms:ip:type:count:127.0.0.1:2")).thenReturn("3");
+            redis.when(() -> RedisUtil.reserveAttempt("sms:phone:count:13800000000", 3, 300)).thenReturn(false);
             MockHttpSession limited = captcha();
             send(limited, (String) limited.getAttribute("VERIFICATION_CODE"), -1)
                 .andExpect(jsonPath("$.msg").value("sms.send.too.frequent"));

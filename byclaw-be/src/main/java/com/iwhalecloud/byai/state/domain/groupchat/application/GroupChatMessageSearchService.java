@@ -44,6 +44,7 @@ public class GroupChatMessageSearchService {
         }
         String scope = normalize(input.getScope(), "ALL", List.of("ALL", "MINE", "MENTIONED_ME"));
         String senderType = normalize(input.getSenderType(), "ALL", List.of("ALL", "USER", "AGENT"));
+        String contentType = normalize(input.getContentType(), "ALL", List.of("ALL", "FILE", "IMAGE", "LINK"));
         Long beforeMessageId = parseOptionalId(input.getBeforeMessageId());
         int limit = input.getLimit() == null ? DEFAULT_LIMIT : Math.max(1, Math.min(MAX_LIMIT, input.getLimit()));
         Date startTime = input.getStartTime() == null ? null : new Date(input.getStartTime());
@@ -53,7 +54,7 @@ public class GroupChatMessageSearchService {
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
         List<ByaiMessage> rows = messageMapper.searchVisibleGroupMessages(sessionId, escapeLike(keyword), scope,
-            senderType, userId, startTime, endTime, beforeMessageId, limit + 1);
+            senderType, contentType, userId, startTime, endTime, beforeMessageId, limit + 1);
         if (rows == null) rows = Collections.emptyList();
         boolean hasMore = rows.size() > limit;
         List<ByaiMessage> page = new ArrayList<>(rows.subList(0, Math.min(limit, rows.size())));

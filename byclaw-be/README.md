@@ -65,6 +65,18 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - `GET /group-chats?pageNum=1&pageSize=20` 仅在返回时将 `latestMessageContent` 中的 `{{DIG_EMPLOYEE_资源ID}}`、`{{HUMAN_资源ID}}` 转成 `@名称`，名称取最新消息 metadata 中 `resourceList.resourceName` 的快照。
 - Agent 的 `[@成员名称](uid=成员UID)` 同样转成 `@名称`；优先使用资源快照名称，没有快照时使用链接中的成员名称。无法找到名称的占位符和其他资源占位符保留原文。
 - 该转换适用于已有消息，不修改数据库正文、WebSocket 消息或 Agent 调度；查询所需的消息 metadata 不包含在接口响应中。
+- 每个列表项的 `latestMessageAttachments` 返回最后一条消息的附件，字段结构与群消息时间线的 `attachments` 一致；无附件或最后一条消息已撤回时返回空数组。原始关联资源字段不包含在响应中。
+
+## 群详情查询成本
+
+- `GET /group-chats/{sessionId}` 获取成员后，按 USER / AGENT 各批量查询一次名称和头像，保持成员顺序、群昵称优先及缺失成员快照。用户批量查询与原主键查询一致，不额外过滤停用用户。
+- 群详情中的 `settings` 与 `GET /group-chats/{sessionId}/settings` 共用设置读取逻辑：用一次 `session_id + ext_param_code IN (...)` 查询读取三个开关。未配置时允许链接加入、禁止普通成员添加员工和邀请用户；显式 `false` 保持关闭。
+- 群及当前成员校验不变；这里减少 SQL 调用次数，不涉及数据库结构变更，也不代表已经测量生产耗时。
+
+## 群聊关联项目
+
+- 新建群聊时同步创建 `project_type=hacu` 的关联项目，复用项目成员、云盘和工作目录初始化流程；普通项目创建仍使用 `normal`。
+- `POST /project/list` 不返回 `hacu` 项目，分页总数同样排除它们。群聊仍通过自身的会话和项目关联访问该项目。
 
 ## 群聊入群授权
 
@@ -84,7 +96,8 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 
 ## 群聊引用续聊与自动协作
 
-- 用户非引用 `@` 创建新的协作链；引用群消息或 Agent 之间 `@` 时，在该链中复用目标助理的子会话。每个助理保留自己的 session，首次参与时创建；重复消息只登记一次 turn。
+- 用户非引用 `@` 创建新的协作链；引用已有 Agent 会话关联的群消息或 Agent 之间 `@` 时，在该链中复用目标助理的子会话。引用尚无 Agent 会话的普通用户消息并 `@` 数字员工时，以被引用消息建立协作链；同一发起人再次引用该消息给同一员工时复用子会话。每个助理保留自己的 session，首次参与时创建；重复消息只登记一次 turn。
+- 引用已撤回的普通用户消息并 `@` 数字员工时，以本次消息建立新协作链；调度快照只保留被引用消息已撤回的标记，不恢复原正文或附件。
 - 每轮输入保存原始用户需求、本次实际发送者类型/ID/名称、接收者以及本次完整正文；Agent 委派传入其最终回复，资源列表同时保留背景和当前正文中的成员引用。
 - 上述完整上下文只保存在 turn 调度快照中。子会话消息正文及普通聊天请求只保留“本次消息”的原文；首次执行和普通追问均在 Gateway 出站时追加上下文，Agent 仍可读取原始需求、参与者和已发布成果。此调整适用于新写入的消息，不自动改写历史消息。
 - `byai_group_chat_turn` 持久化逐轮身份、输入、分类、trace 和队列状态。同一 session 串行执行，不同 session 并行；自动 Agent 调用每条分支最多 6 跳，用户新消息重新开始自动计数，重试和等待不增加次数。
@@ -94,11 +107,19 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - 新表迁移位于 `deploy/migrations/versions/V0.4.1/V0.4.1__ddl.sql`，启动新版后端前须执行对应迁移。既有 execution 保留为会话入口和旧记录恢复依据，不重放已完成历史调用。
 - 后端重启可恢复领取后尚未绑定 trace 的 turn，事务锁和 trace 条件更新防止重复发送。确定发生在 Gateway 路由前的准备失败会结束该 turn；已绑定 trace 且送达情况未知的请求不盲目重发，因此异常远端调用可能继续占用队列，需沿原运行恢复流程处理。
 
+## 群聊发送确认与错误
+
+- `GROUP_CHAT_SEND` 成功完成接收事务后，向发送端返回 `GROUP_CHAT_ACCEPTED`，包含 `sessionId`、`clientRequestId` 和 `messageId`；相同请求 ID 的重试复用原消息，不要求 Agent 执行完成。
+- 参数或成员校验失败返回 `GROUP_CHAT_REJECTED`，携带原请求身份、`code` 和具体业务原因 `message`。活动任务冲突保留 `ACTIVE_TASK_REQUIRES_TASK_ENTRY`、`taskId` 和 `agentId`；其他业务校验使用 `GROUP_CHAT_VALIDATION_FAILED`，入口参数缺失使用 `INVALID_GROUP_MESSAGE`。
+- 数据库或内部异常返回 WebSocket `ERROR` 帧，使用 `GROUP_CHAT_STORAGE_ERROR` 或 `GROUP_CHAT_INTERNAL_ERROR`，并携带 `clientRequestId`、可用的 `sessionId` 和可展示的错误原因。详细异常只记入服务端日志，前端可立即结束等待、保留重试，并接受迟到的 ACK；消息事务提交后的广播异常也走此路径，避免把已入库消息标记为不可重试的拒绝。
+- 请求缺少 `sessionId` 时使用 `ERROR / INVALID_GROUP_MESSAGE`，让前端按 `clientRequestId` 关联；缺少请求 ID 或连接已经断开时无法保证前端关联或收到响应。ACK 写回失败不转换为业务拒绝。
+
 ## 群聊上传附件
 
 - 群历史、Agent 群上下文、消息定位和话题根消息/回复/引用均保留正文为 `NULL` 但有 `related_resources` 的历史消息，分页计数采用同一条件。消息搜索排除 `NULL` 正文，关键词仅匹配正文，不搜索附件文件名；LIKE 使用 `ESCAPE CHR(92)`，兼容 Druid PostgreSQL 解析器并按字面匹配 `%`、`_` 和反斜杠。
 
 - `GROUP_CHAT_SEND` 的 `files` 与正文一同保存到消息的 `relatedResources.files`，并随 `MESSAGE_CREATED` 广播返回。仅附件消息和正文带附件消息均支持发送确认后的展示及历史加载。
+- 群聊消息 @ 数字员工时，本次消息的 `relatedResources.files` 会恢复到派发请求的 `files`，由 Gateway 作为 `text/files` 内容发送。若本次消息引用了其他群消息，派发提示词中的“本次引用消息”会明确给出引用 ID、正文、发言者和附件；已撤回的引用不会透出原正文或附件。
 - `files` 非空时，`chatContent` 支持空字符串、纯空白、`null` 或省略；`null` 和省略正文按空字符串保存并广播，成功后返回 `GROUP_CHAT_ACCEPTED`。
 - 此修复无需数据库迁移。修复前未保存附件关联的旧消息不会自动恢复，需要重新发送附件。
 
@@ -425,6 +446,14 @@ Endpoint 默认使用 `dysmsapi.aliyuncs.com`，登录和注册模板均须包�
 发送接口要求有效的图形验证码及同一 Session，并依赖数据库与 Redis。
 `GET /system/session/captcha` 与 `POST /system/session/sms/send` 允许匿名访问，部署时加上配置的 context-path（例如 `/byaiService`）。放行按 HTTP 方法和完整路径匹配；图形验证码仍为两分钟有效且只能使用一次，手机号重复发送间隔和按 IP、业务类型计数的限流仍然生效。
 
+### 微信小程序手机号登录配置
+
+BE 的 `config/application.properties`（部署时为 `deploy/config/application.properties`）从服务端环境变量读取 `WECHAT_MINIAPP_APP_ID` 和 `WECHAT_MINIAPP_APP_SECRET`，绑定为 `wechat.miniapp.app-id`、`wechat.miniapp.app-secret`。二者必须属于发起手机号授权的同一个微信小程序，不能放进小程序包。可选的 `WECHAT_MINIAPP_LOGIN_RATE_LIMIT_PER_MINUTE` 默认为 300。
+
+本地运行时将变量放在项目根目录 `.env`；Standalone Docker Compose 通过 `env_file` 读取该文件。K3s 部署需从 Secret 等服务端密钥来源注入这两个环境变量。未配置时 BE 可以启动，但 `POST /system/session/loginByWechatPhone` 会返回受控登录失败，不会尝试兑换手机号。
+
+该接口接受 JSON `{"phoneCode":"..."}`，兼容公共请求客户端附带的可选 `language` 字符串（例如 `zh-CN`）。手机号只能由服务端向微信兑换获得，请求体中的 `phone`、`verifyCode` 等其他身份字段仍会被拒绝。
+
 ## 技术栈
 
 - **框架**: Spring Boot 3.x, Spring Cloud, MyBatis-Plus
@@ -472,7 +501,7 @@ Endpoint 默认使用 `dysmsapi.aliyuncs.com`，登录和注册模板均须包�
 
 - `POST /group-chats/{sessionId}/invitations`：已登录群主/管理员获取会话邀请；有效 token 复用并从当前时间续期 7 天，缺失或过期则新建；返回 `token`、`expiresAt`（毫秒）。
 - `POST /group-chats/invitations/validate`：请求体 `{"token":"…"}`；允许匿名预览，返回工作组名称/号码、邀请人、企业、成员数量、最多四位 `memberPreviews`（`displayName`/`type`/`avatar`）、有效期、加入开关和当前成员状态。失败原因通过现有错误响应区分：`Invitation has expired`、`Invitation has been revoked`、`Group link joining is disabled`、`Group has been dissolved`；不包含原始 token。旧邀请码被替换后因不保留历史，只能报告无效。
-- `POST /group-chats/invitations/join`：登录后提交 `{token}`，由服务端解析绑定群 ID，复用 `GroupChatApplicationService.acceptInvitation(sessionId, token)`，锁群后重新校验有效期、群状态、开关、邀请人角色/账户状态及企业限制；返回成员信息，重复加入不重复写入。
+- `POST /group-chats/invitations/join`：登录后提交 `{token}`，由服务端解析绑定群 ID，复用 `GroupChatApplicationService.acceptInvitation(sessionId, token)`，锁群后重新校验有效期、群状态、开关及邀请人角色/账户状态；不同企业的登录用户也可通过有效链接入群。返回成员信息，重复加入不重复写入。
 
 凭证使用 SecureRandom 从大小写字母和数字共 62 个字符中逐位均匀选取，固定 8 位，默认有效期 7 天。V0.4.1 起持久化到 `message_share_link`：`link_type=GROUP_INVITATION`、`link_id=session_id`、`link_token` 保存原始邀请码，`creator_id`/`com_acct_id`/`expire_time` 保存邀请人、企业和有效期；一群一行，过期重建更新原行，不保留历史，不写消息关联表。
 前端链接只使用 `/hacu/invite#token=…`，不得拼接展示资料或群 ID。创建和预览响应禁止缓存。邀请码不再依赖 Redis 或 RSA 配置，原 Redis 邀请不会自动迁移，上线后需重新获取。数据库中的原始邀请码属于访问凭证，避免输出到日志。
@@ -510,6 +539,9 @@ Endpoint 默认使用 `dysmsapi.aliyuncs.com`，登录和注册模板均须包�
 `GET /group-chat/tasks/{taskId}/delivery-status` 仅供仍在群内的任务发起人查询，返回字符串 taskId 和布尔 delivered。
 无文件/无效协议返回 false，存储故障返回可重试错误；不增加数据库状态、不直接授权或触发发布。
 前端进入、重连和每轮结束查询，按钮发送“确认完成并发布”，后续沿用现有发布卡片确认流程。
+任务页确认按钮发送的 `LLM_MESSAGE` 可携带 `messageIntent=prepare_group_task_publication`。
+BE 仅在有效私有群任务的 Gateway 出站请求中追加准备待发布成果的 Agent 指令；`chatContent`、已保存的用户消息和多端广播仍是按钮原文。
+该指令要求 Agent 调用同名工具创建待发布卡片，最终发布仍由用户在卡片中确认；普通消息和其他会话不触发此指令。
 
 ### 群成员批量添加
 

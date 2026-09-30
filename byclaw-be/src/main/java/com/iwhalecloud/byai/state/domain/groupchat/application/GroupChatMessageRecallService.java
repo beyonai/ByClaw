@@ -6,6 +6,7 @@ import java.util.Date;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -20,10 +21,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProject
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.session.enums.UserRole;
 
-/** 撤回仅更新原消息状态，不创建系统消息、不修改话题或关联任务。 */
+/** 撤回仅更新原消息状态，不创建系统消息、不修改话题关系；关联执行通过持久化补偿停止。 */
 @Slf4j
 @Service
 public class GroupChatMessageRecallService {
+    @Autowired
+    private GroupChatRecallCancellationService cancellations;
     private final GroupChatAuthorizationService authorization;
     private final GroupChatTopicService topics;
     private final ByaiMessageMapper messages;
@@ -56,13 +59,17 @@ public class GroupChatMessageRecallService {
         if (userId == null || (!administrator && !author)) {
             throw new IllegalArgumentException("Only the author or group administrator can recall this message");
         }
-        if (message.isRecalled()) return response(message);
+        if (message.isRecalled()) {
+            cancellations.cancel(sessionId, messageId);
+            return response(message);
+        }
         Date now = new Date();
         if (messages.recallGroupMessage(sessionId, messageId, userId, now) != 1) {
             throw new IllegalStateException("Group message recall was not persisted");
         }
         message.setRecalledAt(now);
         message.setRecalledBy(userId);
+        cancellations.cancel(sessionId, messageId);
         JSONObject result = response(message);
         JSONObject event = new JSONObject();
         event.putAll(result);

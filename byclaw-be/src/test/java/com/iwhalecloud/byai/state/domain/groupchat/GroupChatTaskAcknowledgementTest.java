@@ -67,6 +67,7 @@ class GroupChatTaskAcknowledgementTest {
         turn.setSourceMessageId(2L);
         turn.setInitiatorUserId(10L);
         turn.setTargetAgentId(4L);
+        turn.setTraceId("initial-task-trace");
         when(turns.decideDisposition(eq(8L), eq("TASK"), eq("采集新闻"), eq("正在采集"), any()))
             .thenReturn(1);
         when(sequence.nextVal()).thenReturn(100L);
@@ -76,6 +77,8 @@ class GroupChatTaskAcknowledgementTest {
         ByaiGroupChatTask task = service.promote(turn, "采集新闻", "正在采集");
 
         assertThat(task.getTaskSessionId()).isEqualTo(60L);
+        assertThat(task.getCurrentTurnId()).isEqualTo(8L);
+        assertThat(task.getCurrentTurnTraceId()).isEqualTo("initial-task-trace");
         verify(tasks).insert(task);
         verify(candidates).promote(60L, "采集新闻");
         verify(turns).setAckMessage(8L, 100L);

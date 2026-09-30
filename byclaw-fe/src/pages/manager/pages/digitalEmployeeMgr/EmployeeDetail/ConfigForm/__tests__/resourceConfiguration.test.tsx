@@ -60,9 +60,9 @@ jest.mock('../RobotModal', () => () => null);
 jest.mock('../../EmployeeGroupMembers', () => () => <div>Configure Group Members</div>);
 
 // 完整配置表单保留真实 antd 交互，全量并行运行时为渲染和多次切换预留时间。
-// waitFor 仍使用默认超时，接口或状态断言失败不会被延长掩盖。
+// 弹窗可见性单独等待最多 5 秒，其他接口或状态断言仍使用默认超时。
 jest.setTimeout(15000);
-// 日志中全量运行已使这两个多步表单用例超过 15 秒；仅扩大总预算，waitFor 仍保持默认值。
+// 日志中全量运行已使这两个多步表单用例超过 15 秒；为它们单独扩大总预算。
 const multiStepFormTimeout = 30000;
 
 const labels = [
@@ -80,7 +80,7 @@ const knowledge = [
 ];
 let editorForm: ReturnType<typeof Form.useForm>[0];
 
-function Editor({ employee, canConfigureResources, agentType = '001' }: any) {
+function Editor({ employee, canConfigureResources, agentType = '001', scrollWithPage = false }: any) {
   const [form] = Form.useForm();
   editorForm = form;
   return (
@@ -89,6 +89,7 @@ function Editor({ employee, canConfigureResources, agentType = '001' }: any) {
       agentType={agentType}
       employeeType={agentType}
       ownerType={employee.ownerType}
+      scrollWithPage={scrollWithPage}
       canConfigureResources={canConfigureResources ?? !isSuperAssistant(employee)}
       form={form}
       digitalType="FROM_MANUALLY"
@@ -120,6 +121,21 @@ describe('employee editor resource configuration entries', () => {
   beforeEach(() => {
     mockShowBaseList.mockClear();
     mockUpdateResource.mockReset();
+  });
+
+  it('allows page scrolling only when requested and retains the ordinary editor height constraints', async () => {
+    const employee = { ownerType: 'personal', resourceCode: 'alice_helper' };
+    const { container, rerender } = render(<Editor employee={employee} scrollWithPage />);
+    await screen.findByText('employeeDetail.basicSettings');
+    expect(container.querySelector('.pageScroll')).toBeInTheDocument();
+    expect(container.querySelector('form')).not.toHaveClass('full-height');
+    expect(container.querySelector('.basicSettings')).not.toHaveClass('full-height');
+    expect(container.querySelector('.configurationDetails')).not.toHaveClass('full-height');
+    rerender(<Editor employee={employee} />);
+    expect(container.querySelector('.pageScroll')).not.toBeInTheDocument();
+    expect(container.querySelector('form')).toHaveClass('full-height');
+    expect(container.querySelector('.basicSettings')).toHaveClass('full-height');
+    expect(container.querySelector('.configurationDetails')).toHaveClass('full-height');
   });
 
   it.each(['personal', 'personal_default'])(
@@ -154,7 +170,7 @@ describe('employee editor resource configuration entries', () => {
       fireEvent.click(within(screen.getByText(labels[1]).parentElement!).getByRole('button'));
       expect(mockShowBaseList).toHaveBeenLastCalledWith('005');
       fireEvent.click(within(screen.getByText(labels[2]).parentElement!).getByRole('button'));
-      await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible(), { timeout: 5000 });
+      await waitFor(() => expect(screen.getByRole('dialog', { hidden: true })).toBeVisible(), { timeout: 5000 });
     },
     multiStepFormTimeout
   );

@@ -40,6 +40,8 @@ import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.entity.users.UsersOrganization;
 import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
+import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.common.qo.QueryObject;
 import com.iwhalecloud.byai.manager.qo.users.SearchUserQo;
 import com.iwhalecloud.byai.manager.qo.users.UsersByOrgIdQo;
@@ -74,6 +76,9 @@ public class UserApplicationService extends BaseUserApplicationService {
 
     @Autowired
     private UsersMapper usersMapper;
+
+    @Autowired
+    private ByaiSessionMemberMapper byaiSessionMemberMapper;
 
     @Autowired
     private UserService userService;
@@ -751,7 +756,7 @@ public class UserApplicationService extends BaseUserApplicationService {
      * @return ResponseUtil
      */
 
-    public ResponseUtil getUserSuas(Long userId) {
+    public ResponseUtil getUserSuas(Long userId, Long groupSessionId) {
 
         Users user = userService.findById(userId);
 
@@ -776,6 +781,12 @@ public class UserApplicationService extends BaseUserApplicationService {
         result.put("userId", user.getUserId());
 
         result.put("userName", user.getUserName());
+
+        if (groupSessionId != null) {
+            ByaiSessionMember groupMember = byaiSessionMemberMapper.findSessionMember(
+                groupSessionId, "USER", userId);
+            result.put("groupNickname", groupMember == null ? null : groupMember.getMemName());
+        }
 
         result.put("userCode", user.getUserCode());
 
@@ -915,9 +926,12 @@ public class UserApplicationService extends BaseUserApplicationService {
 
         users.setPwd(MD5Utils.encrypt(this.getDefaultPwd(), users.getUserCode()));
 
-        users.setPhone(phone);
+        // 手机号查询使用确定性 SM4 密文，新注册账号需写入相同格式。
+        users.setPhone(Sm4Util.encrypt(phone));
 
         users.setIsLocked(IsLocked.NO);
+
+        users.setState(UserState.ACTIVE);
 
         users.setAssistantId(users.getUserId());
 

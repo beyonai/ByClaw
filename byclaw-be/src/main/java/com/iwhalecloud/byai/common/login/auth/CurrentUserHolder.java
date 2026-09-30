@@ -126,7 +126,7 @@ public final class CurrentUserHolder {
 
         // 查看是否平台管理员
         for (UsersOrganization usersOrganization : usersOrganizations) {
-            if (UserType.PLAT_MAN.equals(usersOrganization.getUserType())) {
+            if (UserType.matchesAny(usersOrganization.getUserType(), UserType.PLAT_MAN)) {
                 return true;
             }
         }
@@ -182,22 +182,20 @@ public final class CurrentUserHolder {
         if (userTypes == null || userTypes.isEmpty()) {
             return false;
         }
-        if (userTypes.contains(UserType.PLAT_MAN) || userTypes.contains(UserType.PLAT_DEVOPS)) {
-            return true;
-        }
-        return false;
+        return userTypes.stream()
+            .anyMatch(type -> UserType.matchesAny(type, UserType.PLAT_MAN, UserType.PLAT_DEVOPS));
     }
 
     // 判断是否是组织管理员
     public static boolean isOrganizationAdmin() {
         List<String> userTypes = getUserTypes();
-        return userTypes.contains(UserType.ORG_MAN);
+        return userTypes.stream().anyMatch(type -> UserType.matchesAny(type, UserType.ORG_MAN));
     }
 
     // 判断是否是业务管理员
     public static boolean isBusinessAdmin() {
         List<String> userTypes = getUserTypes();
-        return userTypes.contains(UserType.BUSINESS_MAN);
+        return userTypes.stream().anyMatch(type -> UserType.matchesAny(type, UserType.BUSINESS_MAN));
     }
 
     // 获取用户的最高权限角色
@@ -207,16 +205,16 @@ public final class CurrentUserHolder {
             return UserType.ORD_USER;
         }
         // 按照权限从高到低的顺序检查
-        if (userTypes.contains(UserType.PLAT_MAN)) {
+        if (userTypes.stream().anyMatch(type -> UserType.matchesAny(type, UserType.PLAT_MAN))) {
             return UserType.PLAT_MAN;
         }
-        if (userTypes.contains(UserType.PLAT_DEVOPS)) {
+        if (userTypes.stream().anyMatch(type -> UserType.matchesAny(type, UserType.PLAT_DEVOPS))) {
             return UserType.PLAT_DEVOPS;
         }
-        if (userTypes.contains(UserType.ORG_MAN)) {
+        if (userTypes.stream().anyMatch(type -> UserType.matchesAny(type, UserType.ORG_MAN))) {
             return UserType.ORG_MAN;
         }
-        if (userTypes.contains(UserType.BUSINESS_MAN)) {
+        if (userTypes.stream().anyMatch(type -> UserType.matchesAny(type, UserType.BUSINESS_MAN))) {
             return UserType.BUSINESS_MAN;
         }
         // 如果没有匹配到预定义的角色，则返回普通用户

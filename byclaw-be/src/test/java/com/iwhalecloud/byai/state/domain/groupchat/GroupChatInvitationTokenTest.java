@@ -136,6 +136,8 @@ class GroupChatInvitationTokenTest {
             mock(ByaiGroupChatTaskMapper.class),
             mock(ByaiGroupChatExecutionMapper.class), events);
         Map<String, ByaiSessionExt> stored = new HashMap<>();
+        when(extensions.findByExtParamCodes(eq(20L), anyList()))
+            .thenAnswer(call -> List.copyOf(stored.values()));
         when(extensions.findOneByExtParamCode(eq(20L), anyString()))
             .thenAnswer(call -> stored.get(call.getArgument(1)));
         doAnswer(call -> {
@@ -167,6 +169,30 @@ class GroupChatInvitationTokenTest {
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
+    }
+
+    @Test void settingsReadUsesOneBatchAndPreservesExplicitFalseAndMissingDefaults() {
+        var settings = new GroupChatSettingsService(sessions, extensions, members, auth, sequence,
+            mock(ByaiGroupChatTaskMapper.class), mock(ByaiGroupChatExecutionMapper.class), events);
+        ByaiSessionExt link = new ByaiSessionExt();
+        link.setExtParamCode("group_join_link_enabled");
+        link.setExtParamValue("false");
+        ByaiSessionExt agent = new ByaiSessionExt();
+        agent.setExtParamCode(GroupChatAuthorizationService.MEMBER_ADD_AGENT);
+        agent.setExtParamValue("true");
+        when(extensions.findByExtParamCodes(eq(20L), anyList())).thenReturn(List.of(link, agent));
+
+        var result = settings.settings(20L);
+
+        assertThat(result.getGroupNumber()).isEqualTo("20");
+        assertThat(result.isAllowJoinByLink()).isFalse();
+        assertThat(result.isAllowMemberAddAgent()).isTrue();
+        assertThat(result.isAllowMemberInviteUser()).isFalse();
+        verify(extensions).findByExtParamCodes(20L, List.of("group_join_link_enabled",
+            GroupChatAuthorizationService.MEMBER_ADD_AGENT, GroupChatAuthorizationService.MEMBER_INVITE_USER));
+        verify(extensions, never()).findOneByExtParamCode(anyLong(), anyString());
+        when(members.findSessionMember(20L, "USER", 10L)).thenReturn(null);
+        assertThatThrownBy(() -> settings.settings(20L)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test void rejectsSymbolsInToken() {
@@ -362,11 +388,17 @@ class GroupChatInvitationTokenTest {
         assertThatThrownBy(() -> service.preview(token)).isInstanceOf(IllegalArgumentException.class);
         verify(members, never()).save(any());
     }
-    @Test void crossEnterpriseCannotJoin() {
+    @Test void crossEnterpriseUserCanJoinByLink() {
         var token = service.create(20L).getToken();
+        CurrentUserHolder.getLoginInfo().setUserId(11L);
         CurrentUserHolder.getLoginInfo().setEnterpriseId(4L);
-        assertThatThrownBy(() -> application.acceptInvitation(20L, token)).isInstanceOf(IllegalArgumentException.class);
-        verify(members, never()).save(any());
+        when(users.findById(11L)).thenReturn(new Users());
+
+        ByaiSessionMember joined = application.acceptInvitation(20L, token);
+
+        assertThat(joined.getSessionId()).isEqualTo(20L);
+        assertThat(joined.getMemObjId()).isEqualTo(11L);
+        verify(members).save(joined);
     }
     @Test void successfulJoinUsesServerBoundGroupAndIsIdempotent() {
         var token = service.create(20L).getToken();

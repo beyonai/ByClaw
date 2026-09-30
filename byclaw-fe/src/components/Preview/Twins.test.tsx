@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { PreViewFile } from './Twins';
 
+const mockHtmlRender = jest.fn();
+
 jest.mock('@/components/AntdIcon', () => ({ onClick, type }: { onClick?: () => void; type: string }) => (
   <button data-testid={type} onClick={onClick} type="button" />
 ));
@@ -13,7 +15,10 @@ jest.mock('@/components/Preview/Office', () => ({
   Office: () => null,
 }));
 jest.mock('@/components/Preview/Html', () => ({
-  HtmlRender: () => null,
+  HtmlRender: (props: any) => {
+    mockHtmlRender(props);
+    return null;
+  },
 }));
 jest.mock('@/components/Preview/TextHighlight', () => () => null);
 jest.mock('@/components/Preview/Md', () => ({ content }: { content?: string }) => (
@@ -21,12 +26,13 @@ jest.mock('@/components/Preview/Md', () => ({ content }: { content?: string }) =
 ));
 jest.mock('@/components/Preview/Image', () => () => null);
 
-describe('PreViewFile Office data handling', () => {
+describe('PreViewFile binary and relative resource handling', () => {
   let createObjectURL: jest.Mock;
   let revokeObjectURL: jest.Mock;
   let createElement: typeof document.createElement;
 
   beforeEach(() => {
+    mockHtmlRender.mockClear();
     createObjectURL = jest.fn(() => 'blob:office-preview');
     revokeObjectURL = jest.fn();
     createElement = document.createElement.bind(document);
@@ -53,6 +59,67 @@ describe('PreViewFile Office data handling', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it.each([true, false])('keeps PDF binary with a relative resource resolver: %s', async (withResolver) => {
+    const pdf = new Blob(['%PDF-1.4\n'], { type: 'application/octet-stream' });
+    const resolveResource = jest.fn();
+    const { unmount } = render(
+      <PreViewFile
+        data={pdf}
+        type="pdf"
+        title="滴滴电子发票.pdf"
+        resolveHtmlResource={withResolver ? resolveResource : undefined}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockHtmlRender).toHaveBeenLastCalledWith(expect.objectContaining({ href: 'blob:office-preview' }));
+    });
+    const renderProps = mockHtmlRender.mock.calls[mockHtmlRender.mock.calls.length - 1][0];
+    expect(renderProps.data).toBeUndefined();
+    expect(renderProps.resolveResource).toBeUndefined();
+    expect(createObjectURL.mock.calls[0][0].type).toBe('application/pdf');
+    expect(createObjectURL.mock.calls[0][0].size).toBe(pdf.size);
+    unmount();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:office-preview');
+  });
+
+  it.each(['html', 'h5'])('preserves relative resource resolution for %s', async (type) => {
+    const html = new Blob(['<img src="./cover.png">'], { type: 'text/html' });
+    Object.defineProperty(html, 'text', { value: () => Promise.resolve('<img src="./cover.png">') });
+    const resolveResource = jest.fn();
+    render(<PreViewFile data={html} type={type} title="report.html" resolveHtmlResource={resolveResource} />);
+
+    await waitFor(() => {
+      expect(mockHtmlRender).toHaveBeenLastCalledWith(expect.objectContaining({ data: html, resolveResource }));
+    });
+    expect(mockHtmlRender.mock.calls[mockHtmlRender.mock.calls.length - 1][0].href).toBeUndefined();
+  });
+
+  it('previews a Markdown blob with the existing resource resolver after switching from PDF', async () => {
+    const resolveResource = jest.fn();
+    const { rerender } = render(
+      <PreViewFile data={new Blob(['%PDF-1.4'])} type="pdf" title="invoice.pdf" resolveHtmlResource={resolveResource} />
+    );
+    const markdown = new Blob(['# Markdown content']);
+    Object.defineProperty(markdown, 'text', { value: () => Promise.resolve('# Markdown content') });
+    rerender(
+      <PreViewFile
+        data={markdown}
+        type="md"
+        title="联网搜索API(4).md"
+        resolveHtmlResource={resolveResource}
+        resolveMarkdownImage={resolveResource}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown-preview')).toBeVisible();
+      expect(screen.getByTestId('markdown-preview')).toHaveTextContent('# Markdown content');
+      expect(mockHtmlRender).toHaveBeenLastCalledWith(expect.objectContaining({ data: markdown, resolveResource }));
+    });
+    expect(mockHtmlRender.mock.calls[mockHtmlRender.mock.calls.length - 1][0].href).toBeUndefined();
   });
 
   it('does not create an unused object URL for Office blob previews', async () => {

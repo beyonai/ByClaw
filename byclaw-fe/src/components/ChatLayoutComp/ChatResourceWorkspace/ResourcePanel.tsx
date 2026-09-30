@@ -167,13 +167,18 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     if (upperScopeKey === 'employee') {
       // 右侧资源面板保留与左侧小面板一致的中心入口，但不重复展示当前数字员工栏。
       if (upperSecondaryKey === 'knowledge') return <Knowledge embedded showRouter />;
-      if (upperSecondaryKey === 'skill') return <ResourceSiderPanel resourceType="SKILL" embedded showRouter />;
+
+      // 员工变化后重建技能列表，旧员工的在途请求不能回写新员工列表。
+      if (upperSecondaryKey === 'skill') {
+        return <ResourceSiderPanel key={activeEmployee.resourceId} resourceType="SKILL" embedded showRouter />;
+      }
       if (upperSecondaryKey === 'model') return <ModelSiderPanel embedded showRouter />;
       return empty;
     }
 
     return empty;
   }, [
+    activeEmployee.resourceId,
     empty,
     onOpenDetail,
     project,

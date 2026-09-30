@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -144,7 +145,7 @@ public class GroupChatApplicationService {
         ProjectDTO projectRequest = new ProjectDTO();
         projectRequest.setProjectName(request.getName());
         projectRequest.setDescription(request.getGoal());
-        Project project = projectApplicationService.createProject(projectRequest);
+        Project project = projectApplicationService.createGroupChatProject(projectRequest);
         Set<Long> userIds = new LinkedHashSet<>();
         if (request.getUserIds() != null) {
             userIds.addAll(request.getUserIds());
@@ -172,6 +173,12 @@ public class GroupChatApplicationService {
                 UserRole.MEMBER.name()));
         }
         memberService.batchSave(members);
+        // 建群批量写入不会经过 insertMember；复用入群授权，补齐默认助手及所选员工的使用权限。
+        // 从最终成员列表取真人，包含创建人且避免重复授权；授权写入与建群共用当前事务。
+        if (!agentIds.isEmpty()) {
+            members.stream().filter(member -> MemObjType.USER.name().equals(member.getMemObjType()))
+                .forEach(member -> authApplicationService.grantDigitalEmployeesToUser(agentIds, member.getMemObjId()));
+        }
         initializeMemberPermissions(session.getSessionId());
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
@@ -303,14 +310,18 @@ public class GroupChatApplicationService {
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
         List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
-        members.forEach(this::fillMemberPresentation);
+        fillMemberPresentations(members);
         response.setMembers(members);
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
     }
 
     /**
-     * 群聊只接受成员类型资源。数字员工会触发委派，普通用户仅保留在消息资源信息中。
+     * 校验群成员引用并解析需要委派的数字员工。
+     *
+     * 文件引用也会随 resourceList 一起提交（例如工作组云盘的 KG_DOC_FILE/KG_DOC_FOLDER，
+     * 以及对话上传的 COMMON_FILE）。它们只是消息内容的一部分，不是群成员，不能参与成员
+     * 校验、ID 转换或 Agent 委派；原始 resourceList 会继续保存到消息元数据并广播给客户端。
      */
     private Set<Long> validateAndResolveMemberResources(Long sessionId, List<ResourceVo> resourceList) {
         Set<Long> agentIds = new LinkedHashSet<>();
@@ -320,7 +331,7 @@ public class GroupChatApplicationService {
         }
         for (ResourceVo resource : resourceList) {
             if (resource == null || resource.getResourceType() == null) {
-                throw new IllegalArgumentException("Invalid group member resource");
+                throw new GroupChatMessageRejectedException("Invalid group member resource");
             }
             String memberType;
             if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
@@ -329,16 +340,19 @@ public class GroupChatApplicationService {
             else if (AgentMetaEnum.HUMAN.equals(resource.getResourceType())) {
                 memberType = MemObjType.USER.name();
             }
+            else if (isMessageResourceType(resource.getResourceType())) {
+                continue;
+            }
             else {
-                throw new IllegalArgumentException("Unsupported group member resource type");
+                throw new GroupChatMessageRejectedException("Unsupported group member resource type");
             }
             Long memberId = parseResourceId(resource.getResourceId());
             String existingMemberType = referencedMemberTypes.putIfAbsent(memberId, memberType);
             if (existingMemberType != null && !existingMemberType.equals(memberType)) {
-                throw new IllegalArgumentException("Conflicting group member resource types");
+                throw new GroupChatMessageRejectedException("Conflicting group member resource types");
             }
             if (memberService.findSessionMember(sessionId, memberType, memberId) == null) {
-                throw new IllegalArgumentException("Referenced resource is not a group member");
+                throw new GroupChatMessageRejectedException("Referenced resource is not a group member");
             }
             if (MemObjType.AGENT.name().equals(memberType)) {
                 agentIds.add(memberId);
@@ -347,15 +361,22 @@ public class GroupChatApplicationService {
         return agentIds;
     }
 
+    private boolean isMessageResourceType(AgentMetaEnum resourceType) {
+        return AgentMetaEnum.COMMON_FILE.equals(resourceType)
+            || AgentMetaEnum.COMMON_FOLDER.equals(resourceType)
+            || AgentMetaEnum.KG_DOC_FILE.equals(resourceType)
+            || AgentMetaEnum.KG_DOC_FOLDER.equals(resourceType);
+    }
+
     private Long parseResourceId(String resourceId) {
         if (resourceId == null || resourceId.isBlank()) {
-            throw new IllegalArgumentException("Invalid group member resource ID");
+            throw new GroupChatMessageRejectedException("Invalid group member resource ID");
         }
         try {
             return Long.valueOf(resourceId);
         }
         catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("Invalid group member resource ID", exception);
+            throw new GroupChatMessageRejectedException("Invalid group member resource ID", exception);
         }
     }
 
@@ -482,6 +503,40 @@ public class GroupChatApplicationService {
     }
 
     /** 使用当前用户资料和数字员工资源补齐接口返回的成员展示信息。 */
+    /** 详情一次批量读取每种成员，保留列表顺序、群昵称及已删除成员的快照。 */
+    private void fillMemberPresentations(List<ByaiSessionMember> members) {
+        Set<Long> userIds = new LinkedHashSet<>();
+        Set<Long> agentIds = new LinkedHashSet<>();
+        for (ByaiSessionMember member : members) {
+            if (member.getMemObjId() == null) continue;
+            if (MemObjType.USER.name().equals(member.getMemObjType())) userIds.add(member.getMemObjId());
+            else if (MemObjType.AGENT.name().equals(member.getMemObjType())) agentIds.add(member.getMemObjId());
+        }
+        Map<Long, Users> users = new HashMap<>();
+        Map<Long, SsResource> agents = new HashMap<>();
+        if (userService != null && !userIds.isEmpty()) {
+            userService.findByIds(userIds).forEach(user -> users.put(user.getUserId(), user));
+        }
+        if (resourceService != null && !agentIds.isEmpty()) {
+            resourceService.findByIdList(agentIds).forEach(agent -> agents.put(agent.getResourceId(), agent));
+        }
+        for (ByaiSessionMember member : members) {
+            if (MemObjType.USER.name().equals(member.getMemObjType())) {
+                Users user = users.get(member.getMemObjId());
+                if (user != null) {
+                    if (member.getMemName() == null || member.getMemName().isBlank()) member.setMemName(user.getUserName());
+                    member.setAvatar(user.getAvatar());
+                }
+            } else if (MemObjType.AGENT.name().equals(member.getMemObjType())) {
+                SsResource agent = agents.get(member.getMemObjId());
+                if (agent != null) {
+                    member.setMemName(agent.getResourceName());
+                    member.setAvatar(agent.getAvatar());
+                }
+            }
+        }
+    }
+
     private void fillMemberPresentation(ByaiSessionMember member) {
         if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null) {
             Users user = userService.findById(member.getMemObjId());

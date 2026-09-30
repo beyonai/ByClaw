@@ -49,6 +49,7 @@ class ByClawSkillQueryApplicationServiceTest {
         StaticMessageSource messageSource = new StaticMessageSource();
         messageSource.addMessage("byclaw.user.code.notempty", Locale.SIMPLIFIED_CHINESE, "userCode不能为空");
         messageSource.addMessage("resource.resourceid.notnull", Locale.SIMPLIFIED_CHINESE, "资源ID不能为空");
+        messageSource.addMessage("byclaw.skill.download.path.invalid", Locale.SIMPLIFIED_CHINESE, "技能路径不合法");
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
@@ -60,6 +61,50 @@ class ByClawSkillQueryApplicationServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    @Test
+    void personalDirectoriesUseOwnedSourcesInsteadOfDefaultEmployee() {
+        var login = new com.iwhalecloud.byai.common.login.bean.LoginInfo();
+        login.setUserId(11L);
+        login.setUserCode(USER_CODE);
+        login.setDefaultDigEmployeeId(999L);
+        CurrentUserHolder.setLoginInfo(login);
+        var resources = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class);
+        var relations = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService.class);
+        var auth = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.manager.domain.resource.service.ResourceAuthApplicationService.class);
+        var ownEmployee = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        ownEmployee.setResourceId(RESOURCE_ID);
+        when(resources.findCreatedDigitalEmployees(11L)).thenReturn(List.of(ownEmployee));
+        ReflectionTestUtils.setField(byClawSkillQueryApplicationService, "ssResourceService", resources);
+        ReflectionTestUtils.setField(byClawSkillQueryApplicationService, "ssResourceRelDetailService", relations);
+        ReflectionTestUtils.setField(byClawSkillQueryApplicationService, "resourceAuthApplicationService", auth);
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, null)).thenReturn(WORKSPACE_SKILL_ROOT_PREFIX);
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
+        var service = org.mockito.Mockito.spy(byClawSkillQueryApplicationService);
+        var personal = new ByClawSkillDto("mine", WORKSPACE_SKILL_ROOT_PREFIX + "mine", null);
+        var employeeSkill = new ByClawSkillDto("created", AGENT_SKILL_ROOT_PREFIX + "created", null);
+        org.mockito.Mockito.doReturn(List.of(personal)).when(service).qrySkillListByUserCode(USER_CODE, null, "");
+        org.mockito.Mockito.doReturn(List.of(employeeSkill)).when(service)
+            .qrySkillListByUserCode(USER_CODE, RESOURCE_ID, "");
+
+        List<ByClawSkillDto> result = service.qryMyDirectorySkills("");
+        assertEquals(2, result.size());
+        org.junit.jupiter.api.Assertions.assertTrue(result.stream().allMatch(s -> Boolean.TRUE.equals(s.getPersonalWorkspace())));
+        verify(skillPathResolver, org.mockito.Mockito.never()).resolveSkillRootPrefix(USER_CODE, 999L);
+        org.mockito.ArgumentCaptor<com.iwhalecloud.byai.manager.domain.resource.request.ResourceUseAuthQo> query =
+            org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.domain.resource.request.ResourceUseAuthQo.class);
+        verify(auth).listResourceAuth(query.capture());
+        assertEquals("CREATED_BY_ME", query.getValue().getPermission());
+        assertEquals(RESOURCE_ID, service.resolveMySkillSource(AGENT_SKILL_ROOT_PREFIX + "created"));
+        org.junit.jupiter.api.Assertions.assertNull(service.resolveMySkillSource(WORKSPACE_SKILL_ROOT_PREFIX + "mine"));
+        assertThrows(IllegalArgumentException.class,
+            () -> service.resolveMySkillSource("/.openclaw/workspace-baiying-agent-999/skills/other"));
+        assertThrows(IllegalArgumentException.class,
+            () -> service.resolveMySkillSource(WORKSPACE_SKILL_ROOT_PREFIX + "../secret"));
     }
 
     @Test

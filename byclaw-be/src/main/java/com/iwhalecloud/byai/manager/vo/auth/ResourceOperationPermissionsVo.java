@@ -22,6 +22,14 @@ public class ResourceOperationPermissionsVo {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long resourceId;
 
+    /** 是否由个人发布生成的官方副本。 */
+    private boolean officialPublication;
+    /** 普通编辑页保存时，是否必须提交官方副本更新审核。 */
+    private boolean officialUpdateRequiresReview;
+    private boolean canPublishEmployee;
+    /** 当前活动申请或最近一次发布结果，用于列表入口展示。 */
+    private String employeePublicationStatus;
+
     /**
      * 资源归属类型：personal / personal_default / enterprise。
      */

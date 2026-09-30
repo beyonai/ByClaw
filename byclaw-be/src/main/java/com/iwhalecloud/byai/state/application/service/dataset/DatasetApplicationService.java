@@ -671,8 +671,7 @@ public class DatasetApplicationService {
             // 上传文件到知识库
             KbFileImport kbFileImport = new KbFileImport();
             kbFileImport.setKnCode(ssResource.getResourceCode());
-            // 云盘新上传只创建不存在的条目，并发重名时也不得隐式覆盖。
-            kbFileImport.setSkipIfDuplicate(projectCloud || skipIfDuplicate);
+            kbFileImport.setSkipIfDuplicate(skipIfDuplicate);
 
             boolean zipUpload = isZipUpload(multipartFile);
             if (projectCloud && zipUpload) {

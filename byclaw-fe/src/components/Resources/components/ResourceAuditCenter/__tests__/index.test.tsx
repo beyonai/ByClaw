@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ResourceAuditCenter from '..';
 import { getBaseResourceBizTypeList } from '../../../utils';
-import { approveUseApply, queryResourceUseApplyAudit } from '@/pages/manager/service/resources';
+import { approveUseApply, queryResourceUseApplyAudit, rejectUseApply } from '@/pages/manager/service/resources';
 
 jest.mock('@umijs/max', () => {
   const intl = { formatMessage: ({ id }: { id: string }) => id };
@@ -80,6 +80,39 @@ describe('ResourceAuditCenter', () => {
     // 接口调用发生在 await 之前，需等待成功后的列表状态更新完成。
     await waitFor(() => expect(screen.queryByText('待审核技能')).not.toBeInTheDocument());
   });
+
+  it.each(['approve', 'reject'])(
+    'routes publication %s through the shared audit endpoint with its type',
+    async (action) => {
+      mockQueryResourceUseApplyAudit.mockResolvedValue({
+        data: [
+          {
+            privilegeGrantId: 'publication-1',
+            auditType: 'SKILL_PUBLICATION',
+            resourceId: 'enterprise-snapshot',
+            resourceName: '上架申请',
+            resourceBizType: 'SKILL',
+            userId: 'publisher',
+            applyStatus: 'PENDING',
+          },
+        ],
+      });
+      render(<ResourceAuditCenter resourceBizTypeList={['SKILL']} />);
+      await screen.findByText('上架申请');
+      expect(screen.getByText('resource.skillPublicationAudit')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: `resourceCenter.${action}` }));
+      fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+      await waitFor(() =>
+        expect(action === 'approve' ? approveUseApply : rejectUseApply).toHaveBeenCalledWith({
+          resourceId: 'enterprise-snapshot',
+          applyUserId: 'publisher',
+          auditType: 'SKILL_PUBLICATION',
+        })
+      );
+      expect(action === 'approve' ? rejectUseApply : approveUseApply).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByText('上架申请')).not.toBeInTheDocument());
+    }
+  );
 
   it.each(['SKILL', 'KG_DOC', 'TOOL'])('isolates pending, history and counts for %s', async (resourceType) => {
     const resourceBizTypeList = getBaseResourceBizTypeList(resourceType);

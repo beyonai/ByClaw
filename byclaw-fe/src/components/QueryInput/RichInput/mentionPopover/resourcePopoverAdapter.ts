@@ -5,6 +5,7 @@ export interface ResourcePopoverAdapterOptions {
   open: boolean;
   width?: number;
   isInputAtBottom?: boolean;
+  placement?: PopoverProps['placement'];
 }
 
 /** 资源弹窗统一定位：历史会话在输入框上方，新会话/任务在输入框下方。 */
@@ -28,8 +29,8 @@ export const getResourcePopoverPanelHeight = (
 export const getResourcePopoverPosition = (open: boolean, width?: number): CSSProperties | undefined =>
   open ? { width } : undefined;
 
-/** 两个入口共用的弹窗状态适配，调用方只需提供打开状态、宽度和输入框所在位置。 */
-export const getResourcePopoverAdapter = ({ open, width, isInputAtBottom }: ResourcePopoverAdapterOptions) => ({
+/** 优先使用页面指定的展开方向，兼容尚未发起会话但输入框已位于底部的员工详情页。 */
+export const getResourcePopoverAdapter = ({ open, width, isInputAtBottom, placement }: ResourcePopoverAdapterOptions) => ({
   popoverPos: getResourcePopoverPosition(open, width),
-  placement: getResourcePopoverPlacement(isInputAtBottom),
+  placement: placement ?? getResourcePopoverPlacement(isInputAtBottom),
 });

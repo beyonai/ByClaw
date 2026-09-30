@@ -50,6 +50,8 @@ import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteA
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDownloadApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillQueryApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
+import com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService;
+import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillUploadApplicationService;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -66,6 +68,7 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ToolSaveRequest;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteResourceQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
+import com.iwhalecloud.byai.state.application.service.session.ByClawBuiltinSkillExportService;
 import com.iwhalecloud.byai.state.domain.resource.qo.GenerateResourceImageQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.PersonalAgentArchiveQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
@@ -93,6 +96,9 @@ import jakarta.servlet.http.HttpSession;
 public class ToolManController {
 
     private static final Logger logger = LoggerFactory.getLogger(ToolManController.class);
+
+    @Autowired
+    private ByClawBuiltinSkillExportService builtinSkillExportService;
 
     @Autowired
     private ToolManService toolManService;
@@ -129,6 +135,9 @@ public class ToolManController {
 
     @Autowired
     private ByClawSkillResourceApplicationService byClawSkillResourceApplicationService;
+
+    @Autowired
+    private WorkspaceSkillCenterApplicationService workspaceSkillCenterApplicationService;
 
     @Autowired
     private ByClawSkillDownloadApplicationService byClawSkillDownloadApplicationService;
@@ -1169,6 +1178,10 @@ public class ToolManController {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
             }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.list.query.success"),
+                    byClawSkillQueryApplicationService.qryMyDirectorySkills(request.getKeyword()));
+            }
             String requestUserCode = request.getUserCode();
             String resolvedUserCode = StringUtils.isNotBlank(requestUserCode) ? requestUserCode
                 : CurrentUserHolder.getCurrentUserCode();
@@ -1203,6 +1216,12 @@ public class ToolManController {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
             }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                Long sourceId = byClawSkillQueryApplicationService.resolveMySkillSource(request.getSkillPath());
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.detail.query.success"),
+                    byClawSkillQueryApplicationService.getWorkspaceSkillDetail(CurrentUserHolder.getCurrentUserCode(),
+                        sourceId, request.getSkillPath()));
+            }
             String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
                 : CurrentUserHolder.getCurrentUserCode();
             Long resolvedResourceId = request.getResourceId() == null
@@ -1236,6 +1255,10 @@ public class ToolManController {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
             }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.import.conflict.query.success"),
+                    byClawSkillResourceApplicationService.previewMyDirectorySkillConflicts(request.getSkillPath()));
+            }
             String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
                 : CurrentUserHolder.getCurrentUserCode();
             Long resolvedResourceId = request.getResourceId() == null
@@ -1260,6 +1283,34 @@ public class ToolManController {
         }
     }
 
+    /** 查询目录技能在资源中心的安装/更新状态，范围由当前员工归属决定。 */
+    @PostMapping("/queryWorkspaceSkillCenterStatus")
+    public ResponseUtil<WorkspaceSkillCenterApplicationService.Status> queryWorkspaceSkillCenterStatus(
+        @RequestBody WorkspaceSkillCenterQo request) {
+        try {
+            return ResponseUtil.success(workspaceSkillCenterApplicationService.preview(request));
+        } catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        } catch (Exception e) {
+            logger.error("查询目录技能资源中心状态失败", e);
+            return ResponseUtil.fail(I18nUtil.get("byclaw.skill.center.failed"));
+        }
+    }
+
+    /** 安装/更新提交成功后删除源目录，清理失败通过 sourceDeleted 单独返回。 */
+    @PostMapping("/syncWorkspaceSkillToCenter")
+    public ResponseUtil<WorkspaceSkillCenterApplicationService.Result> syncWorkspaceSkillToCenter(
+        @RequestBody WorkspaceSkillCenterQo request) {
+        try {
+            return ResponseUtil.success(workspaceSkillCenterApplicationService.sync(request));
+        } catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        } catch (Exception e) {
+            logger.error("目录技能同步到资源中心失败", e);
+            return ResponseUtil.fail(I18nUtil.get("byclaw.skill.center.failed"));
+        }
+    }
+
     /**
      * 将工作空间目录技能资源化为个人技能、绑定当前数字员工，并返回导入结果。
      */
@@ -1268,6 +1319,13 @@ public class ToolManController {
         try {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                ByClawSkillResourceApplicationService.SkillImportResult result =
+                    byClawSkillResourceApplicationService.resourceizeMyDirectorySkill(request.getSkillPath(),
+                        Boolean.TRUE.equals(request.getOverwriteConfirmed()));
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.resourceize.success"),
+                    byClawSkillResourceApplicationService.buildSingleSkillImportResult(result));
             }
             String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
                 : CurrentUserHolder.getCurrentUserCode();
@@ -1445,7 +1503,12 @@ public class ToolManController {
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
             : CurrentUserHolder.getCurrentUserCode();
         try {
-            logSkillDownloadRequest(resolvedUserCode, finalResourceId, finalSkillId, finalSkillPath);
+            if (request != null && Boolean.TRUE.equals(request.getPersonalWorkspace()) && finalSkillId == null) {
+                resolvedUserCode = CurrentUserHolder.getCurrentUserCode();
+                finalResourceId = byClawSkillQueryApplicationService.resolveMySkillSource(finalSkillPath);
+            } else {
+                logSkillDownloadRequest(resolvedUserCode, finalResourceId, finalSkillId, finalSkillPath);
+            }
             if (finalSkillId != null) {
                 return downloadManagedSkillZip(finalSkillId);
             }
@@ -1508,7 +1571,18 @@ public class ToolManController {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.resource.notfound"));
         }
         if (StringUtils.equalsIgnoreCase(extSkill.getSkillType(), SsResExtSkillService.INNER_SKILL_TYPE)) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.inner.download.unneeded"));
+            SsResource resource = ssResourceService.findById(skillId);
+            if (resource == null) {
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.resource.notfound"));
+            }
+            // 导出无需管理权限；完整文件取自当前登录用户的运行镜像。
+            byte[] bytes = builtinSkillExportService.exportPackage(CurrentUserHolder.getCurrentUserCode(),
+                resource.getResourceCode());
+            String encoded = UriUtils.encode(resource.getResourceCode() + ".zip",
+                java.nio.charset.StandardCharsets.UTF_8);
+            return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip"))
+                .header("Content-Disposition", "attachment; filename*=UTF-8''" + encoded)
+                .body(out -> out.write(bytes));
         }
         String relativePath = stripResourcePrefix(extSkill.getSkillUrl());
         if (StringUtils.isBlank(relativePath)) {
@@ -1574,6 +1648,12 @@ public class ToolManController {
         try {
             if (request == null) {
                 return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            if (Boolean.TRUE.equals(request.getPersonalWorkspace())) {
+                Long sourceId = byClawSkillQueryApplicationService.resolveMySkillSource(request.getSkillPath());
+                ByClawSkillDto data = byClawSkillDeleteApplicationService.deleteSkill(
+                    CurrentUserHolder.getCurrentUserCode(), sourceId, request.getSkillPath());
+                return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.delete.success"), data);
             }
             String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
                 : CurrentUserHolder.getCurrentUserCode();

@@ -18,6 +18,7 @@ export interface WorkspaceSkillItem {
   resourceId?: string | number;
   resourceBizType?: string;
   resourceBacked?: boolean;
+  personalWorkspace?: boolean;
   displaySourceType?: string;
   skillPath?: string;
   [key: string]: any;
@@ -44,6 +45,7 @@ export const mapWorkspaceSkillRows = (rows: any[] = []): WorkspaceSkillItem[] =>
     resourceBizType: ResourceTypeMap.SKILL,
     displaySourceType: item.displaySourceType || SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
     resourceBacked: false,
+    personalWorkspace: item.personalWorkspace === true,
     skillPath: item.skillPath,
     skillDocObjectKey: item.skillDocObjectKey,
     useStartTime: item.useStartTime,
