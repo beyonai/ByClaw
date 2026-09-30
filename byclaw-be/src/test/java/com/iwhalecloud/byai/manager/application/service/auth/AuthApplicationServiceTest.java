@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationServ
 import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
@@ -235,6 +236,9 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
         if (ReflectionTestUtils.getField(service, "privilegeGrantMapper") == null) {
             ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
+        }
+        if (ReflectionTestUtils.getField(service, "ssResExtSkillService") == null) {
+            ReflectionTestUtils.setField(service, "ssResExtSkillService", mock(SsResExtSkillService.class));
         }
         when(privilegeGrantService.findPrivilegeByQo(any())).thenReturn(new ArrayList<>());
         when(organizationService.findEffectiveOrganizationIdsByUserId(any())).thenReturn(Set.of());

@@ -187,7 +187,7 @@ public class EmployeePublicationApplicationService {
             DigitalEmployeeDTO snapshot = sanitize(details, requested);
             DigitalEmployeePublication publication = new DigitalEmployeePublication();
             publication.setRequestId(sequence.nextVal());
-            publication.setTenantId(tenant);
+            publication.setTenantId(requested.getComAcctId());
             publication.setSourceId(sourceId);
             publication.setAuthorId(requested.getCreateBy());
             // Attribution follows the original resource creator, never the reviewing administrator.
@@ -319,12 +319,19 @@ public class EmployeePublicationApplicationService {
                 DigitalEmployeePublication publication = locked(request);
                 requireReviewer(publication);
                 requireState(publication, "APPLYING");
-                publications.lockResource(publication.getSourceId(), tenant);
+                SsResource source = publications.lockResource(publication.getSourceId(), tenant);
+                requireEmployee(source);
+                if (!Objects.equals(source.getComAcctId(), publication.getTenantId())) {
+                    throw new BaseException("发布申请与原员工的企业归属不一致");
+                }
                 validateCandidate(publication);
                 requireReviewer(publication);
                 SsResource official = publications.official(publication.getSourceId(), tenant);
                 boolean fresh = official == null;
                 if (!fresh) official = publications.lockResource(official.getResourceId(), tenant);
+                if (!fresh && (official == null || !Objects.equals(official.getComAcctId(), source.getComAcctId()))) {
+                    throw new BaseException("官方副本与原员工的企业归属不一致");
+                }
                 if (!fresh && !Objects.equals(official.getResourceStatus(), 2)) throw new BaseException("官方副本已下架或注销，请先处理其状态");
                 DigitalEmployeeDTO snapshot = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
                 if (fresh) {
@@ -333,7 +340,7 @@ public class EmployeePublicationApplicationService {
                     official.setResourceCode("official-employee-" + official.getResourceId());
                     official.setCreateBy(publication.getAuthorId());
                     official.setCreateTime(new Date());
-                    official.setComAcctId(tenant);
+                    official.setComAcctId(source.getComAcctId());
                     official.setResourceBizType("DIG_EMPLOYEE");
                     official.setResourceType("COMBIN");
                     official.setSystemCode("BYAI");

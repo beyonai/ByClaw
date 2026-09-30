@@ -2,7 +2,6 @@ package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
-import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.*;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
@@ -30,7 +29,6 @@ class EmployeePublicationResourcesTest {
     ResourceArtifactStorageService storage = mock(ResourceArtifactStorageService.class);
     AuthApplicationService auth = mock(AuthApplicationService.class);
     PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
-    EnterpriseInfoService enterprise = mock(EnterpriseInfoService.class);
     OrganizationService organizations = mock(OrganizationService.class);
     DigitalEmployeePublicationMapper publications = mock(DigitalEmployeePublicationMapper.class);
     ByaiSystemConfigService config = mock(ByaiSystemConfigService.class);
@@ -42,12 +40,11 @@ class EmployeePublicationResourcesTest {
 
     @BeforeEach void setup() {
         EmployeePublicationApplicationServiceTest.login("author", 7L, List.of());
-        when(enterprise.getEnterpriseId()).thenReturn(1L);
         when(organizations.getTopOrgList()).thenReturn(List.of(1L));
         when(provider.getIfAvailable()).thenReturn(bridge);
         when(bridge.check(any(), any(), any(), any())).thenReturn(new EmployeePublicationSkillBridge.CheckResult(true, List.of()));
         service = new EmployeePublicationResources(resources, skills, storage, auth, grants,
-            organizations, enterprise, publications, config, provider);
+            organizations, publications, config, provider);
         dto = new DigitalEmployeeDTO(); dto.setRelIds(List.of(20L)); dto.setRelTools(List.of()); dto.setRelResourceInfoList(List.of());
         resource = EmployeePublicationApplicationServiceTest.employee(20L, 7L);
         resource.setResourceBizType("SKILL"); resource.setResourceName("技能");
@@ -57,6 +54,21 @@ class EmployeePublicationResourcesTest {
     @AfterEach void cleanup() {
         CurrentUserHolder.clearLoginInfo();
         org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
+    }
+    @Test void audienceUsesTheSourceAndLoginTenantWithoutInferringADefaultEnterprise() {
+        assertThat(service.audienceRoots(1L)).containsExactly(1L);
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(37L);
+        assertThat(service.audienceRoots(37L)).containsExactly(1L);
+        assertThatThrownBy(() -> service.audienceRoots(1L)).hasMessageContaining("当前登录企业");
+        assertThatThrownBy(() -> service.audienceRoots(null)).hasMessageContaining("当前登录企业");
+        CurrentUserHolder.clearLoginInfo();
+        assertThatThrownBy(() -> service.audienceRoots(37L)).hasMessageContaining("当前登录企业");
+    }
+    @Test void audienceGrantRejectsResourcesFromAnotherEnterprise() {
+        resource.setComAcctId(2L);
+        assertThatThrownBy(() -> service.grantAudience(resource, 1L)).hasMessageContaining("企业归属不一致");
+        verify(auth, never()).handleAuth(any());
+        verifyNoInteractions(organizations);
     }
     @Test void sharedPersonalSkillPreservesItsCreatorAndFreezesLocalizedCopyName() {
         resource.setCreateBy(9L);

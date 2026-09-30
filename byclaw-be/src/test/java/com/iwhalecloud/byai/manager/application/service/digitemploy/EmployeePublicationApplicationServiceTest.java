@@ -132,15 +132,50 @@ class EmployeePublicationApplicationServiceTest {
         publication.setStatus("PUBLISHED");
         assertThatThrownBy(() -> service.preview(request())).hasMessageContaining("当前申请状态");
     }
-    @Test void adminSubmissionPublishesNewCopyAndDoesNotMutateSource() {
+    @ParameterizedTest @ValueSource(longs = {1L, 37L})
+    void adminSubmissionPublishesNewCopyInTheSourceTenantAndDoesNotMutateSource(long tenantId) {
         login("admin", 7L, List.of("PLAT_MAN"));
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(tenantId);
+        source.setComAcctId(tenantId);
+        publication.setTenantId(tenantId);
+        when(publications.lock(100L, tenantId)).thenReturn(publication);
+        when(publications.lockResource(10L, tenantId)).thenReturn(source);
+        when(dependencies.audienceRoots(tenantId)).thenReturn(List.of(1L));
+        when(dependencies.materialize(anyList(), eq(tenantId), anyLong())).thenReturn(Map.of());
         when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
         var result = service.submit(request());
         assertThat(result.publication().getStatus()).isEqualTo("PUBLISHED");
         verify(resources).insert(argThat((SsResource copy) -> copy.getResourceId() != 10L && copy.getCreateBy() == 7L
-            && copy.getPublicationSourceId() == 10L && "enterprise".equals(copy.getOwnerType())));
+            && copy.getPublicationSourceId() == 10L && "enterprise".equals(copy.getOwnerType())
+            && copy.getComAcctId().equals(source.getComAcctId())));
         assertThat(source.getOwnerType()).isEqualTo("personal");
-        verify(dependencies).grantAudience(any(), eq(1L));
+        verify(dependencies).grantAudience(any(), eq(tenantId));
+    }
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void changedOrMissingSourceTenantCannotCreateOfficialCopyOrGrantAccess(boolean missing) {
+        login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
+        SsResource moved = employee(10L, 7L); moved.setComAcctId(2L);
+        when(publications.lockResource(10L, 1L)).thenReturn(missing ? null : moved);
+        var result = service.approve(request());
+        assertThat(result.publication().getStatus()).isEqualTo("FAILED");
+        assertThat(result.publication().getPublishError()).contains(missing ? "数字员工不存在" : "企业归属不一致");
+        verify(resources, never()).insert(any(SsResource.class));
+        verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
+        verify(dependencies, never()).grantAudience(any(), anyLong());
+    }
+    @Test void officialCopyCannotBeUpdatedAfterItsTenantChanges() {
+        login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
+        SsResource official = employee(90L, 7L);
+        official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
+        when(publications.official(10L, 1L)).thenReturn(official);
+        SsResource moved = employee(90L, 7L); moved.setComAcctId(2L);
+        when(publications.lockResource(90L, 1L)).thenReturn(moved);
+        var result = service.approve(request());
+        assertThat(result.publication().getStatus()).isEqualTo("FAILED");
+        assertThat(result.publication().getPublishError()).contains("官方副本与原员工的企业归属不一致");
+        verify(resources, never()).updateById(any(SsResource.class));
+        verify(resources, never()).insert(any(SsResource.class));
+        verify(dependencies, never()).grantAudience(any(), anyLong());
     }
     @ParameterizedTest @ValueSource(strings = {"ORG_MAN", "BUSINESS_MAN", "PLAT_DEVOPS"})
     void otherAdminRolesCannotApprove(String role) {
@@ -260,6 +295,8 @@ class EmployeePublicationApplicationServiceTest {
         try (var messages = mockStatic(com.iwhalecloud.byai.common.i18n.I18nUtil.class)) {
             messages.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get("employee.publication.adminvip.skill.review"))
                 .thenReturn("adminvip skill review required");
+            messages.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get("adminvip skill review required"))
+                .thenReturn("adminvip skill review required");
             assertThatThrownBy(() -> service.approve(request())).hasMessage("adminvip skill review required");
         }
         when(publications.selectList(any())).thenReturn(List.of(publication));
@@ -349,6 +386,27 @@ class EmployeePublicationApplicationServiceTest {
             .contains("请重新关联技能", "员工名称必填且不能超过 300 个字符");
         verify(publications).insert(draft.publication());
         verify(dependencies, never()).validate(anyList(), anyLong(), anyLong());
+    }
+
+    @Test void newDraftUsesTheOriginalEmployeesTenantAndRejectsAnotherLoginTenant() {
+        source.setComAcctId(37L);
+        assertThatThrownBy(() -> service.prepare(10L)).hasMessageContaining("不存在");
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(37L);
+        when(publications.lockResource(10L, 37L)).thenReturn(source);
+        var draft = service.prepare(10L);
+        assertThat(draft.publication().getTenantId()).isEqualTo(source.getComAcctId());
+        verify(dependencies).capture(any(), eq(7L), eq(37L), anyLong());
+    }
+
+    @Test void savingDraftReplacesTheObsoleteDeploymentScopeError() {
+        publication.setDependenciesJson(JSON.toJSONString(List.of(
+            EmployeePublicationResources.blocker("发布范围", "发布范围与当前部署企业不一致"))));
+        EmployeePublicationRequest update = request();
+        update.setEmployee(JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class));
+        var saved = service.save(update);
+        assertThat(saved.dependencies()).isEmpty();
+        assertThat(publication.getDependenciesJson()).isEqualTo("[]");
+        assertThat(service.submit(request()).publication().getStatus()).isEqualTo("PENDING");
     }
 
     @ParameterizedTest @ValueSource(strings = {"MCP", "KG_DOC", "SKILL"})

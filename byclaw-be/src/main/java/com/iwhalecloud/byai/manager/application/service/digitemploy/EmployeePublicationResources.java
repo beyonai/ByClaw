@@ -6,7 +6,6 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
-import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -48,14 +47,13 @@ public class EmployeePublicationResources {
     private final AuthApplicationService auth;
     private final PrivilegeGrantMapper grants;
     private final OrganizationService organizations;
-    private final EnterpriseInfoService enterprise;
     private final DigitalEmployeePublicationMapper publications;
     private final ObjectProvider<EmployeePublicationSkillBridge> skillBridge;
     private final com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService config;
 
     public EmployeePublicationResources(SsResourceService resources,
         SsResExtSkillService skills, ResourceArtifactStorageService storage, AuthApplicationService auth,
-        PrivilegeGrantMapper grants, OrganizationService organizations, EnterpriseInfoService enterprise,
+        PrivilegeGrantMapper grants, OrganizationService organizations,
         DigitalEmployeePublicationMapper publications,
         com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService config,
         ObjectProvider<EmployeePublicationSkillBridge> skillBridge) {
@@ -65,7 +63,6 @@ public class EmployeePublicationResources {
         this.auth = auth;
         this.grants = grants;
         this.organizations = organizations;
-        this.enterprise = enterprise;
         this.publications = publications;
         this.config = config;
         this.skillBridge = skillBridge;
@@ -92,9 +89,10 @@ public class EmployeePublicationResources {
     }
 
     public List<Long> audienceRoots(Long tenantId) {
-        // 版本开放不改变本部署的组织授权边界；不能将另一企业授权到当前部署的根组织。
-        if (tenantId == null || !Objects.equals(tenantId, enterprise.getEnterpriseId())) {
-            throw new BaseException("发布范围与当前部署企业不一致");
+        // 发布归属沿用源员工，并与当前登录企业一致，不以企业信息表的最大 ID 推断归属。
+        // 当前组织模型是部署级组织树；这里继续沿用既有根组织授权。
+        if (tenantId == null || !Objects.equals(tenantId, CurrentUserHolder.getEnterpriseId())) {
+            throw new BaseException("发布企业与当前登录企业不一致");
         }
         List<Long> roots = organizations.getTopOrgList();
         if (roots == null || roots.isEmpty()) throw new BaseException("企业尚未配置根组织，无法建立全员使用授权");
@@ -357,6 +355,9 @@ public class EmployeePublicationResources {
     }
 
     public void grantAudience(SsResource resource, Long tenantId) {
+        if (resource == null || tenantId == null || !Objects.equals(resource.getComAcctId(), tenantId)) {
+            throw new BaseException("发布资源与原员工的企业归属不一致");
+        }
         List<AuthDTO> subjects = audienceRoots(tenantId).stream().map(id -> {
             AuthDTO dto = new AuthDTO();
             dto.setGrantToObjType("ORG");

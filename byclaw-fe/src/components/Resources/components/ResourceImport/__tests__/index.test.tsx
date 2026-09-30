@@ -23,8 +23,8 @@ jest.mock('antd', () => {
   return {
     Alert: ({ message, description }: any) => (
       <div>
-        {message}
-        {description}
+        <div>{message}</div>
+        <div>{description}</div>
       </div>
     ),
     Button,

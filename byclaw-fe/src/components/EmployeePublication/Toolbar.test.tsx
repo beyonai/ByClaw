@@ -151,7 +151,7 @@ describe('employee publication controls', () => {
     });
     render(<PublicationToolbar detail={detail} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
     expect(screen.getByText('3 项使用范围受限')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '保留关联（4）' }));
+    fireEvent.click(screen.getByRole('tab', { name: '将发布到新数字员工的（4）' }));
     expect(screen.getByText('全部工具')).toBeInTheDocument();
     expect(screen.getByText('部分使用者无权使用')).toBeInTheDocument();
     expect(screen.getByText('技能文件不存在')).toBeInTheDocument();

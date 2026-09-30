@@ -223,7 +223,7 @@ describe('ResourceCard', () => {
             canManageAuth: allowed,
             canUseAuth: true,
           }}
-          onAuth={onAuth}
+          actionConfig={{ onAuth }}
         />
       );
       if (allowed) {
