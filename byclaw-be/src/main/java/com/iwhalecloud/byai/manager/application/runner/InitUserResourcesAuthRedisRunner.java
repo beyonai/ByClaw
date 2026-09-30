@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthRedisApplicationService;
+import com.iwhalecloud.byai.manager.application.service.auth.DigitalEmployeeGroupAuthorizationBackfillService;
 import com.iwhalecloud.byai.common.constants.users.UserState;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -63,24 +64,35 @@ public class InitUserResourcesAuthRedisRunner implements ApplicationRunner {
     @Autowired
     private AuthRedisApplicationService authRedisApplicationService;
 
+    @Autowired
+    private DigitalEmployeeGroupAuthorizationBackfillService groupAuthorizationBackfillService;
+
     /**
      * 应用启动后异步全量写入 Redis，Order 设为最低优先级确保其它 Runner 先执行
      */
     @Override
     public void run(ApplicationArguments args) {
-        if (!loadUserAuthEnabled) {
-            logger.info("用户资源权限Redis缓存初始化开关 INIT_USER_AUTH_RESOURCES_REDIS_ENABLED={}，跳过初始化", loadUserAuthEnabled);
-            return;
-        }
-
         if (!initialized.compareAndSet(false, true)) {
             logger.info("用户权限Redis全量初始化已执行过，跳过重复执行");
             return;
         }
 
         // 异步执行，不阻塞服务启动
-        CompletableFuture.runAsync(this::doFullInit);
+        CompletableFuture.runAsync(this::initialize);
         logger.debug("用户权限Redis全量初始化已提交异步执行");
+    }
+
+    void initialize() {
+        try {
+            groupAuthorizationBackfillService.backfill();
+        } catch (Exception e) {
+            logger.error("数字员工组存量授权补齐失败", e);
+        }
+        if (loadUserAuthEnabled) {
+            doFullInit();
+        } else {
+            logger.info("用户资源权限Redis缓存初始化开关 INIT_USER_AUTH_RESOURCES_REDIS_ENABLED={}，跳过全量缓存初始化", loadUserAuthEnabled);
+        }
     }
 
     /**
