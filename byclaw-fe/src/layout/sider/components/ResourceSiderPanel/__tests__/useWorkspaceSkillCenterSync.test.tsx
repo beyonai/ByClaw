@@ -55,7 +55,7 @@ it.each(['INSTALL', 'UPDATE'])(
   }
 );
 
-it('hides both actions for identical markdown', async () => {
+it('hides both actions for identical packages', async () => {
   query.mockResolvedValue(status('NONE'));
   const { result } = setup();
   await act(async () => result.current.onOpen(skill));
@@ -170,13 +170,63 @@ it('discards comparison responses and confirmations from a previous employee', a
   expect(sync).not.toHaveBeenCalled();
 });
 
-it('does not check or synchronize a non-user-developed installed skill', async () => {
-  const bound = { ...skill, resourceId: '123', resourceBacked: true, displaySourceType: undefined };
+it('compares and updates an installed skill without the user-developed label', async () => {
+  const bound = { ...skill, resourceId: '123', resourceBacked: true, displaySourceType: undefined, skillPath: undefined };
+  query.mockResolvedValue(status('UPDATE'));
+  sync.mockResolvedValue({ resourceId: '123', action: 'UPDATE', sourceDeleted: false });
+  const { result, onChanged } = setup();
+  await act(async () => result.current.onOpen(bound));
+  expect(query).toHaveBeenCalledWith({ resourceId: 'employee-1', targetResourceId: '123' });
+  expect(result.current.menuItem(bound)?.label).toBe('resource.workspaceCenter.update');
+  act(() => result.current.onClick(bound));
+  const confirmation = (Modal.confirm as jest.Mock).mock.calls[0][0];
+  expect(confirmation.content).toBe('resource.workspaceCenter.updateInstalledConfirm');
+  await act(async () => confirmation.onOk());
+  expect(sync).toHaveBeenCalledWith({
+    resourceId: 'employee-1',
+    targetResourceId: '123',
+    revision: 'revision-1',
+  });
+  expect(onChanged).toHaveBeenCalledWith(bound, false);
+  expect(message.success).toHaveBeenCalledWith('resource.workspaceCenter.updatedInstalled');
+  expect(message.warning).not.toHaveBeenCalled();
+  expect(result.current.menuItem(bound)).toBeUndefined();
+});
+
+it('hides update for an installed skill when the complete packages match', async () => {
+  const bound = { ...skill, resourceId: '123', resourceBacked: true, displaySourceType: undefined, skillPath: undefined };
+  query.mockResolvedValue(status('NONE'));
   const { result } = setup();
+  await act(async () => result.current.onOpen(bound));
+  expect(query).toHaveBeenCalledWith({ resourceId: 'employee-1', targetResourceId: '123' });
+  expect(result.current.menuItem(bound)).toBeUndefined();
+});
+
+it('compares directory skills independently of their display label', async () => {
+  const directory = { ...skill, displaySourceType: undefined };
+  query.mockResolvedValue(status('UPDATE'));
+  const { result } = setup();
+  await act(async () => result.current.onOpen(directory));
+  expect(query).toHaveBeenCalledWith({ resourceId: 'employee-1', skillPath: '/skills/demo' });
+  expect(result.current.menuItem(directory)?.label).toBe('resource.workspaceCenter.update');
+});
+
+it.each([
+  { ...skill, skillPath: undefined },
+  { resourceId: '-1', resourceBizType: 'SKILL' },
+  { resourceBizType: 'SKILL' },
+  { resourceId: '123', resourceBizType: 'TOOL' },
+])('does not check an invalid skill target: %o', async (item) => {
+  const { result } = setup();
+  await act(async () => result.current.onOpen(item));
+  expect(query).not.toHaveBeenCalled();
+  expect(result.current.menuItem(item)).toBeUndefined();
+});
+
+it('does not check installed skills without employee management permission', async () => {
+  const bound = { resourceId: '123', resourceBizType: 'SKILL' };
+  const { result } = setup(false);
   await act(async () => result.current.onOpen(bound));
   expect(query).not.toHaveBeenCalled();
   expect(result.current.menuItem(bound)).toBeUndefined();
-  act(() => result.current.onClick(bound));
-  expect(sync).not.toHaveBeenCalled();
-  expect(Modal.confirm).not.toHaveBeenCalled();
 });

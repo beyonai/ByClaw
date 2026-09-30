@@ -6,7 +6,7 @@ import {
   syncWorkspaceSkillToCenter,
   type WorkspaceSkillCenterStatus,
 } from '@/pages/manager/service/resources';
-import { isWorkspaceSkill, SKILL_DISPLAY_SOURCE_USER_DEVELOPED, type WorkspaceSkillItem } from '@/components/Resources/workspaceSkill/utils';
+import { isWorkspaceSkill, type WorkspaceSkillItem } from '@/components/Resources/workspaceSkill/utils';
 
 type State = { loading?: boolean; error?: boolean; status?: WorkspaceSkillCenterStatus };
 
@@ -57,8 +57,11 @@ export const useWorkspaceSkillCenterSync = ({
   const targetParams = (item: WorkspaceSkillItem) =>
     isWorkspaceSkill(item) ? { skillPath: item.skillPath! } : { targetResourceId: item.resourceId! };
   const eligible = (item: WorkspaceSkillItem) =>
-    // 仅“用户开发”目录技能提供入库操作；已绑定技能直接走解除关联，不做内容检查。
-    enabled && employeeId && item.displaySourceType === SKILL_DISPLAY_SOURCE_USER_DEVELOPED && !!item.skillPath;
+    // 更新不按来源标签过滤；目录技能传路径，已绑定技能传真实资源 ID，由后端定位并比较完整技能包。
+    enabled &&
+    employeeId &&
+    item.resourceBizType === 'SKILL' &&
+    (isWorkspaceSkill(item) ? !!item.skillPath : !!item.resourceId && String(item.resourceId) !== '-1');
 
   const load = async (item: WorkspaceSkillItem) => {
     if (!eligible(item)) return;
