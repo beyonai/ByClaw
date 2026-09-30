@@ -4,6 +4,9 @@ import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  'resource.skillExport.single': '导出技能',
+  'resource.skillExport.all': '导出',
+  'resource.skillExport.invalidBundle': '技能 ZIP 或批量导出包无效，请检查文件',
   'ui.resource.listSeparator': '、',
   'ui.employee.publish': '上架',
   'ui.employee.unpublish': '下架',
@@ -262,12 +265,34 @@ export default {
   'resource.tool': '工具',
   'resource.installTool': '安装工具',
   'resource.rowRefreshFailed': '操作已成功，当前资源详情刷新失败，请稍后重试',
-  'resource.publishToEnterprise': '上架到企业',
-  'resource.publishToEnterpriseConfirm': '将复制当前技能并上架为企业技能。原个人技能保留，两份技能后续独立维护。',
-  'resource.publishToEnterpriseSuccess': '已上架到企业',
+  'resource.publishToEnterprise': '发布到官方推荐',
+  'resource.skillPublicationProgress': '查看发布进度',
+  'resource.skillPublicationReviewResult': '查看审核结果',
+  'resource.skillPublicationResult': '查看发布结果',
+  'resource.retrySkillPublication': '重试发布',
+  'resource.skillPublicationResubmit': '重新提交发布申请',
+  'resource.skillPublicationPendingDescription': '发布申请已提交，等待管理员审核。可在审核中心查看申请记录。',
+  'resource.skillPublicationRejectedDescription':
+    '发布申请已被驳回。可修改个人技能后重新提交，系统将创建新的企业快照并保留原审核记录。',
+  'resource.skillPublicationPublishedDescription': '该技能已发布到官方推荐。',
+  'resource.skillPublicationOffShelfDescription': '企业副本已下架，请从企业技能中处理上架；不会重复创建发布副本。',
+  'resource.skillPublicationRemovedDescription': '当前没有有效的企业副本，可以重新提交发布申请。',
+  'resource.skillPublicationUnknownDescription': '当前企业副本状态不支持重新发布，请刷新列表或联系管理员处理。',
+  'resource.skillPublicationUnavailable': '当前无权查看或提交此技能的发布申请，请刷新列表。',
+  'resource.skillPublicationLoadFailed': '发布状态加载失败，请稍后重试',
+  'resource.publishToEnterpriseConfirm':
+    '确认发布企业技能副本？管理员符合免审条件时直接发布并留存审核记录；平台管理员发布 adminvip 创建的技能，需由 adminvip 审核。',
+  'resource.enterpriseSkillPending': '已提交发布申请，等待审核',
+  'resource.enterprisePersonalDependenciesTitle': '关联个人资源提醒',
+  'resource.enterprisePersonalDependenciesWarning':
+    '发布申请已提交。以下关联的个人数字员工、个人知识或个人工具在企业技能中不可用；企业关联数据不受影响，仍可按原有权限使用。此提醒不影响发布审核。',
+  'resource.auditApplicationType': '申请类型',
+  'resource.skillPublicationAudit': '技能发布',
+  'resource.resourceUseAudit': '使用权限',
+  'resource.publishToEnterpriseSuccess': '已发布到官方推荐',
   'resource.enterpriseSkillExists': '该技能已有企业副本，请到企业技能中查看或管理',
   'resource.viewEnterpriseSkill': '查看企业技能',
-  'resource.publishToEnterpriseFailed': '上架到企业失败，请稍后重试',
+  'resource.publishToEnterpriseFailed': '发布到官方推荐失败，请稍后重试',
   'resource.installSkill': '安装技能',
   'resource.skillGroup.fallbackCover': '技能组成员封面',
   'resource.skillGroup.memberCount': '{count}个成员',
@@ -569,6 +594,7 @@ export default {
   'common.previewNoUrl': '该文件暂不支持预览',
   'common.previewFailed': '预览失败，请稍后重试',
   'common.digitalEmployee': '数字员工',
+  'common.digitalEmployeeGroup': '数字员工组',
   'common.companyEmployee': '企业员工',
   'common.tool': '工具',
   'common.skill': '技能',
@@ -3392,6 +3418,7 @@ export default {
   'resourceTabs.knowledgeCenter': '知识中心',
   'resourceTabs.toolCenter': '工具中心',
   'resourceTabs.skillCenter': '技能中心',
+  'resourceTabs.loadFailed': '资源列表加载失败',
   'resourceTabs.skillUpload.uploadButton': '上传',
   'resourceTabs.skillUpload.onlyZip': '仅支持上传.zip格式的文件',
   'resourceTabs.skillUpload.noUserCode': '无法获取用户编码，请重新登录',
@@ -3537,4 +3564,23 @@ export default {
   'editDiff.binary': '二进制文件已变更',
 
   ...secondEdition,
+  'resource.workspaceCenter.install': '安装',
+  'resource.workspaceCenter.update': '更新',
+  'resource.workspaceCenter.personal': '个人技能',
+  'resource.workspaceCenter.enterprise': '企业技能',
+  'resource.workspaceCenter.checking': '正在检查资源中心…',
+  'resource.workspaceCenter.retry': '检查失败，点击重试',
+  'resource.workspaceCenter.confirm':
+    '将“{name}”{action}到资源中心的{scope}。成功后将删除当前员工工作空间中的该技能文件夹及全部文件。',
+  'resource.workspaceCenter.updateInstalledConfirm': '将“{name}”的当前员工目录内容更新到资源中心的{scope}，保留员工目录和安装关联。',
+  'resource.workspaceCenter.updatedInstalled': '技能已更新到资源中心',
+  'resource.workspaceCenter.success': '技能已保存到资源中心，源目录已删除',
+  'resource.workspaceCenter.cleanupFailed': '技能已保存到资源中心，但源目录清理失败或文件已变化，请检查后手动清理',
+  'resource.workspaceCenter.failed': '技能同步失败，请刷新后确认状态',
+  'resource.import.skillPublicationSummary':
+    '已上架 {publishedCount} 个，待审核 {pendingReviewCount} 个，失败 {failedCount} 个',
+  'resource.import.skillReviewHint':
+    '导入已提交审核，通过后才会出现在官方推荐中。可在“我的技能 → 企业”筛选“审核中”或“审核不通过”查看；驳回后可重新导入。',
+  'resource.import.skillReviewOverwriteConfirmDesc':
+    '本次更新将提交审核，审核通过前保留当前版本；审核通过后替换原技能。是否继续？',
 };

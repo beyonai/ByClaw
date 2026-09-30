@@ -574,6 +574,8 @@ const ConfigForm = (props) => {
     robotConfigs = [],
     setRobotConfigs,
     isReadOnly = false,
+    publicationMode = false,
+    scrollWithPage = false,
     canConfigureResources = true,
     className,
     employeeType,
@@ -2088,7 +2090,12 @@ const ConfigForm = (props) => {
   // （已上移至文件前部）
 
   return (
-    <div className={classnames('ub-f1 full-width full-height', className, styles.paddingHorizontal16)}>
+    <div
+      className={classnames('full-width', className, styles.paddingHorizontal16, {
+        'ub-f1 full-height': !scrollWithPage,
+        [styles.pageScroll]: scrollWithPage,
+      })}
+    >
       <Form
         form={form}
         layout="vertical"
@@ -2136,7 +2143,7 @@ const ConfigForm = (props) => {
             updateResource();
           }
         }}
-        className={classnames(styles.formSection, 'full-height')}
+        className={classnames(styles.formSection, { 'full-height': !scrollWithPage })}
       >
         <Form.Item name="customPromptTabs" hidden>
           <Input />
@@ -2144,8 +2151,8 @@ const ConfigForm = (props) => {
         <Form.Item name="customPromptValues" hidden>
           <Input />
         </Form.Item>
-        <div className="ub full-height">
-          <div className={classnames(styles.basicSettings, 'full-height')}>
+        <div className={classnames('ub', styles.formColumns, { 'full-height': !scrollWithPage })}>
+          <div className={classnames(styles.basicSettings, { 'full-height': !scrollWithPage })}>
             <p className={styles.fontSize16Weight500}>{intl.formatMessage({ id: 'employeeDetail.basicSettings' })}</p>
             <div className={pStyles.avatarSection}>
               <Dropdown
@@ -2427,7 +2434,7 @@ const ConfigForm = (props) => {
               </Modal>
             </div>
           </div>
-          <div className={classnames(styles.configurationDetails, 'full-height')}>
+          <div className={classnames(styles.configurationDetails, { 'full-height': !scrollWithPage })}>
             <div className={styles.configurationHeader}>
               <div className={styles.fontSize16Weight500}>
                 {intl.formatMessage({ id: 'employeeDetail.configDetails' })}
@@ -2928,7 +2935,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置机器人 */}
-              {robotChannelOptions.length > 0 && (
+              {!publicationMode && robotChannelOptions.length > 0 && (
                 <div className={styles.robotSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -3484,7 +3491,7 @@ const ConfigForm = (props) => {
         }}
       />
       <MemoryConfigModal
-        open={memoryModalOpen}
+        open={!publicationMode && memoryModalOpen}
         onClose={() => setMemoryModalOpen(false)}
         onAdd={(rule) => {
           // 检查是否已添加（同时比较 id 和 templateId，确保类型一致性）

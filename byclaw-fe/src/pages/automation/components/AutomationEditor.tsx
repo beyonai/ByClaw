@@ -45,9 +45,14 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
   const intl = useIntl();
   const [form] = Form.useForm<AutomationFormValues>();
   const [saving, setSaving] = useState(false);
-  const [promptDraft, setPromptDraft] = useState<DefaultValueSchema>(
-    () => (!source && getAutomationCreationDraft(template?.key)?.prompt) || { text: '', resourceList: [] }
-  );
+  const [promptDraft, setPromptDraft] = useState<DefaultValueSchema>(() => {
+    // 编辑从首次渲染就使用任务详情，避免空值初始化期间混入会话默认员工。
+    if (source) {
+      const config = parseAutomationConfig(source.config);
+      return { text: config.chatContent, resourceList: config.resourceList };
+    }
+    return getAutomationCreationDraft(template?.key)?.prompt || { text: '', resourceList: [] };
+  });
   const promptDraftRef = useRef(promptDraft);
   const persistCreationDraft = useCallback(
     (values: AutomationFormValues = form.getFieldsValue(true)) => {
@@ -310,7 +315,9 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
               enableTaskTemplate={false}
               mentionPopoverPlacement="bottomRight"
               cannotSend
-              inputDraft={promptDraft}
+              // 编辑提示词只从任务详情初始化；草稿恢复仅用于新建任务。
+              initialInputValue={source ? promptDraft : undefined}
+              inputDraft={source ? undefined : promptDraft}
               onInputDraftChange={(draft) =>
                 updatePromptDraft({ text: draft?.text || '', resourceList: draft?.resourceList || [] })
               }

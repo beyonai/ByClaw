@@ -73,7 +73,8 @@ const getAuditRows = (response: any, history: boolean, resourceBizTypeList: stri
     });
 };
 
-const getAuditRowKey = (row: AuditRow) => `${row.privilegeGrantId || ''}-${row.resourceId || ''}-${row.userId || ''}`;
+const getAuditRowKey = (row: AuditRow) =>
+  `${row.auditType || 'USE'}-${row.privilegeGrantId || ''}-${row.resourceId}-${row.userId}`;
 
 const getResourceTypeMessageId = (resourceBizType: string) => {
   if (resourceBizType === 'SKILL') return 'common.skill';
@@ -146,7 +147,11 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
       const key = `${action}-${getAuditRowKey(row)}`;
       setActionKey(key);
       try {
-        const params = { resourceId: row.resourceId, applyUserId: row.userId };
+        const params = {
+          resourceId: row.resourceId,
+          applyUserId: row.userId,
+          ...(row.auditType === 'SKILL_PUBLICATION' ? { auditType: row.auditType } : {}),
+        };
         if (action === 'approve') {
           await approveUseApply(params);
           message.success(intl.formatMessage({ id: 'resourceCenter.approve' }));
@@ -192,6 +197,15 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
           const messageId = getResourceTypeMessageId(row.resourceBizType);
           return messageId ? intl.formatMessage({ id: messageId }) : row.resourceBizType;
         },
+      },
+      {
+        title: intl.formatMessage({ id: 'resource.auditApplicationType' }),
+        key: 'auditType',
+        width: 150,
+        render: (_, row) =>
+          intl.formatMessage({
+            id: row.auditType === 'SKILL_PUBLICATION' ? 'resource.skillPublicationAudit' : 'resource.resourceUseAudit',
+          }),
       },
       {
         title: intl.formatMessage({ id: 'resourceCenter.applicant' }),

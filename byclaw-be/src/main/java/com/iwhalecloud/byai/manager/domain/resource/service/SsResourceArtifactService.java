@@ -38,6 +38,11 @@ public class SsResourceArtifactService {
     @Autowired
     private ResourceArtifactPathResolver resourceArtifactPathResolver;
 
+    /** 发布产物映射与员工副本一同提交或回滚，不能走通用同步入口的 NOT_SUPPORTED 事务代理。 */
+    public void upsertPublicationJsonArtifact(Long resourceId, String resourceBizType, String remark) {
+        upsertStandardJsonArtifact(resourceId, resourceBizType, remark);
+    }
+
     public void upsertStandardJsonArtifact(Long resourceId, String resourceBizType, String remark) {
         if (resourceId == null || StringUtils.isBlank(resourceBizType)) {
             return;

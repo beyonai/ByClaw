@@ -26,6 +26,7 @@ export default {
   'menu.systemParams.sandbox': 'Sandbox',
   'menu.business.notification': 'Notification',
   'menu.systemFeedback': 'System Feedback Management',
+  'menu.fileManagement': 'System File Management',
   'common.add': 'Add',
   'common.edit': 'Edit',
   'common.view': 'View',

@@ -81,7 +81,7 @@
         UPDATE byai_group_chat_execution
         SET disposition = #{disposition}, task_name = #{taskName}, ack_text = #{ackText},
             disposition_time = #{now}
-        WHERE execution_id = #{executionId} AND disposition = 'UNKNOWN'
+        WHERE execution_id = #{executionId} AND disposition = 'UNKNOWN' AND status != 'CANCELLED'
     </update>
 
     <update id="setAckMessage">

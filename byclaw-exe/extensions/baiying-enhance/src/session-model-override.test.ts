@@ -37,12 +37,15 @@ describe("session model configuration refresh", () => {
     await resolveSessionModelOverride(params);
     expect(mutateConfigFile).toHaveBeenCalledTimes(1);
 
-    // A timeout-only config change must also wait for the runtime reload.
-    vi.useFakeTimers();
+    // Compaction defaults are unrelated to whether a selected model is ready.
     delete cfg.agents!.defaults!.compaction!.timeoutSeconds;
-    mutateConfigFile.mockImplementation(async () => {});
-    const pending = expect(resolveSessionModelOverride(params)).rejects.toThrow("configuration reload timed out");
-    await vi.advanceTimersByTimeAsync(3100);
-    await pending;
+    await resolveSessionModelOverride(params);
+    expect(mutateConfigFile).toHaveBeenCalledTimes(1);
+
+    // A config reload is allowed to replace the plugin runtime snapshot after
+    // this function returns; it must not block the dispatch on the old object.
+    cfg.models!.providers!["baiying-m-42"]!.models[0]!.contextWindow = 202752;
+    mutateConfigFile.mockImplementation(async ({ mutate }: any) => { cfg = await mutate(cfg); });
+    await expect(resolveSessionModelOverride(params)).resolves.toMatchObject({ modelRef: "baiying-m-42/qwen3.6-plus" });
   });
 });

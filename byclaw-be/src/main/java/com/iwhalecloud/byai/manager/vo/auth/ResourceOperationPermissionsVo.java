@@ -22,6 +22,14 @@ public class ResourceOperationPermissionsVo {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long resourceId;
 
+    /** 是否由个人发布生成的官方副本。 */
+    private boolean officialPublication;
+    /** 普通编辑页保存时，是否必须提交官方副本更新审核。 */
+    private boolean officialUpdateRequiresReview;
+    private boolean canPublishEmployee;
+    /** 当前活动申请或最近一次发布结果，用于列表入口展示。 */
+    private String employeePublicationStatus;
+
     /**
      * 资源归属类型：personal / personal_default / enterprise。
      */
@@ -99,4 +107,7 @@ public class ResourceOperationPermissionsVo {
 
     /** 是否可将个人技能复制并上架为独立企业技能。 */
     private boolean canPublishToEnterprise;
+
+    /** 已有申请也保留入口，供用户查看进度、结果或在驳回后重新提交。 */
+    private SkillPublicationVo skillPublication;
 }

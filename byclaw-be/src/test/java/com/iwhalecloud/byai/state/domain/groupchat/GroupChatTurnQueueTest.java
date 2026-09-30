@@ -76,7 +76,8 @@ class GroupChatTurnQueueTest {
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         coordinator = new GroupChatTurnCoordinator(turns, anchors, tasks, mock(ByaiMessageMapper.class),
             mock(GroupChatCandidateSessionService.class), mock(SequenceService.class), members, sessions,
-            mock(UserService.class), mock(SsResourceService.class), runtime, gateway, transactions);
+            mock(UserService.class), mock(SsResourceService.class), runtime, gateway,
+            mock(com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService.class), transactions);
         // Inline executor makes scheduling deterministic; persisted row state still survives each poll.
         ExecutorService workers = mock(ExecutorService.class);
         doAnswer(call -> {

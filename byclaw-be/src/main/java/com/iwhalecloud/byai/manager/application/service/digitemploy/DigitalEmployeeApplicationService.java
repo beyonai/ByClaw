@@ -167,6 +167,9 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 @Service
 public class DigitalEmployeeApplicationService {
 
+    @Autowired
+    private DigitalEmployeeGovernanceService employeeGovernance;
+
     public static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeApplicationService.class);
 
     private static final String RESOURCE_BIZ_TYPE_SKILL = "SKILL";
@@ -548,6 +551,9 @@ public class DigitalEmployeeApplicationService {
         employee.setHasUsePermission(permissions.isHasUsePermission());
         employee.setCanViewDetail(permissions.isCanViewDetail());
         employee.setCanEdit(permissions.isCanEdit());
+        employee.setOfficialPublication(permissions.isOfficialPublication());
+        employee.setCanPublishEmployee(permissions.isCanPublishEmployee());
+        employee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
         employee.setCanManageAuth(permissions.isCanManageAuth());
         employee.setCanUseAuth(permissions.isCanUseAuth());
         employee.setCanDelete(permissions.isCanDelete());
@@ -572,6 +578,9 @@ public class DigitalEmployeeApplicationService {
         employee.setHasUsePermission(permissions.isHasUsePermission());
         employee.setCanViewDetail(permissions.isCanViewDetail());
         employee.setCanEdit(permissions.isCanEdit());
+        employee.setOfficialPublication(permissions.isOfficialPublication());
+        employee.setCanPublishEmployee(permissions.isCanPublishEmployee());
+        employee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
         employee.setCanManageAuth(permissions.isCanManageAuth());
         employee.setCanUseAuth(permissions.isCanUseAuth());
         employee.setCanDelete(permissions.isCanDelete());
@@ -873,6 +882,7 @@ public class DigitalEmployeeApplicationService {
      * @return ResponseUtil
      */
     public ResourceExtDigEmployeeDto saveDigitalEmployee(DigitalEmployeeDTO digitalEmployeeDTO) {
+        DigitalEmployeeGovernanceService.requireEnterpriseCreationAllowed(digitalEmployeeDTO.getOwnerType());
 
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
         boolean isEmployeeGroup = digitalEmployeeGroupApplicationService.isGroup(digitalEmployeeDTO.getAgentType());
@@ -1158,6 +1168,10 @@ public class DigitalEmployeeApplicationService {
         // 全量编辑可能改变技能关系，必须与技能组快照安装/卸载串行化。
         SsResource ssResource = this.lockDigitalEmployeeForSkillRelationMutation(resourceId);
         this.validateDigitalEmployeeUpdatePermission(ssResource);
+        if (digitalEmployeeDTO.getOwnerType() == null) digitalEmployeeDTO.setOwnerType(ssResource.getOwnerType());
+        if (!Objects.equals(ssResource.getOwnerType(), digitalEmployeeDTO.getOwnerType())) {
+            throw new BaseException("数字员工归属不可直接修改，请使用发布到官方推荐流程");
+        }
         SsResExtDigEmployee originalExt = ssResExtDigEmployeeService.findById(resourceId);
         boolean wasEmployeeGroup = originalExt != null
             && digitalEmployeeGroupApplicationService.isGroup(originalExt.getAgentType());
@@ -1179,7 +1193,7 @@ public class DigitalEmployeeApplicationService {
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
         ssResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
-        // 更新时允许前端同步调整资源归属类型,避免个人资源仍保留旧的 owner_type.
+        // 归属不可通过编辑变更，个人到企业必须经过发布流程。
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
         if (harnessRuntime) {
             ssResource.setImplType(ImplType.ASK_AGENT.getCode());
@@ -1686,18 +1700,14 @@ public class DigitalEmployeeApplicationService {
 
         List<SsResourceRelDetail> skillRelations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
             digitalEmployee.getResourceId(), new ArrayList<>(orderedSkillIds));
-        LinkedHashSet<Long> deletedSkillIds = new LinkedHashSet<>();
-        LinkedHashSet<Long> preservedSkillIds = new LinkedHashSet<>();
         Date now = new Date();
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         for (SsResourceRelDetail relation : this.safeRelations(skillRelations)) {
-            Long skillId = relation.getRelResourceId();
             SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
             // 兼容来源字段为空的历史直接安装技能：旧版本没有写入来源元数据，应按手工来源卸载。
             // 带有内容但无法解析的元数据仍保守保留，避免把未知的技能组来源误删。
             if (!source.isManual()
                 || (source.isMalformed() && StringUtils.isNotBlank(relation.getRelResourceInfo()))) {
-                preservedSkillIds.add(skillId);
                 continue;
             }
             SkillRelationSource remainingSource = source.withoutManual();
@@ -1707,14 +1717,9 @@ public class DigitalEmployeeApplicationService {
                 if (!ssResourceRelDetailService.updateById(relation)) {
                     throw new BaseException("数字员工技能关系更新失败");
                 }
-                preservedSkillIds.add(skillId);
-                deletedSkillIds.remove(skillId);
             } else {
                 if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
                     throw new BaseException("数字员工技能关系删除失败");
-                }
-                if (!preservedSkillIds.contains(skillId)) {
-                    deletedSkillIds.add(skillId);
                 }
             }
         }
@@ -1730,14 +1735,7 @@ public class DigitalEmployeeApplicationService {
             }
         }
 
-        deletedSkillIds.removeAll(preservedSkillIds);
-        if (!deletedSkillIds.isEmpty()) {
-            List<SsResource> removedSkills = uninstallRelResources.stream()
-                .filter(resource -> resource != null && deletedSkillIds.contains(resource.getResourceId()))
-                .distinct()
-                .collect(Collectors.toList());
-            this.deleteLegacyWorkspaceSkills(this.findLegacyWorkspaceSkillsToDelete(digitalEmployee, removedSkills));
-        }
+        // 卸载只移除安装来源/关联，保留资源库技能及历史工作区文件。
     }
 
     /**
@@ -2277,6 +2275,13 @@ public class DigitalEmployeeApplicationService {
      * 校验数字员工管理权限。
      */
     private void validateDigitalEmployeeManagePermission(SsResource ssResource) {
+        if (employeeGovernance != null) {
+            employeeGovernance.requireNotProtected(ssResource);
+            if (DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
+                if (employeeGovernance.canAdministerOfficial(ssResource)) return;
+                throw new BaseException("仅官方管理员可以上下架官方副本");
+            }
+        }
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
@@ -2342,6 +2347,7 @@ public class DigitalEmployeeApplicationService {
      * validateDigitalEmployeeUpdatePermission。
      */
     private void validateDigitalEmployeeUpdatePermission(SsResource ssResource) {
+        if (employeeGovernance != null) employeeGovernance.requireDirectMutationAllowed(ssResource);
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
@@ -2516,11 +2522,16 @@ public class DigitalEmployeeApplicationService {
      */
     public boolean synOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
         try {
-            return this.doSyncOpenClawWorkSpace(resourceId, inputDto);
+            return this.doSyncOpenClawWorkSpace(resourceId, inputDto, false);
         } catch (Exception e) {
             logger.error("同步数字员工资源文件失败,resourceId: {}, error: {}", resourceId, e.getMessage(), e);
             return false;
         }
+    }
+
+    /** 发布同步必须参与官方副本事务，读取本次尚未提交的员工与依赖；失败由发布流程回滚并补偿。 */
+    public boolean syncPublicationOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
+        return this.doSyncOpenClawWorkSpace(resourceId, inputDto, true);
     }
 
     /**
@@ -2649,10 +2660,21 @@ public class DigitalEmployeeApplicationService {
         return com.alibaba.fastjson.JSON.toJSONString(details);
     }
 
+    /** 恢复发布事务回滚后的已提交运行配置。 */
+    public void restorePublicationRuntimeAfterRollback(Long resourceId) {
+        SsResource committed = ssResourceService.findById(resourceId);
+        if (committed == null) {
+            removeDigEmployeeFromRedisQuietly(resourceId);
+            removeDigEmployeeJsonFromResourceStorageQuietly(resourceId);
+        } else {
+            synOpenClawWorkSpace(resourceId);
+        }
+    }
+
     /**
      * 同步数字员工配置到开放资源目录与 Redis。
      */
-    private boolean doSyncOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
+    private boolean doSyncOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto, boolean publication) {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(resourceId);
         DigitalEmployeeDetailsDTO details = this.findDetailsById(employeeIdDTO);
@@ -2679,8 +2701,13 @@ public class DigitalEmployeeApplicationService {
 
         resourceArtifactStorageService.syncResourceJsonByBizType(jsonContent, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
             resourceId);
-        ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
-            "dig-employee-sync");
+        if (publication) {
+            ssResourceArtifactService.upsertPublicationJsonArtifact(resourceId, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
+                "dig-employee-publication");
+        } else {
+            ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
+                "dig-employee-sync");
+        }
 
         boolean redisSyncSucceeded = this.syncDigEmployeeConfigJsonToRedisQuietly(resourceId, jsonContent);
 

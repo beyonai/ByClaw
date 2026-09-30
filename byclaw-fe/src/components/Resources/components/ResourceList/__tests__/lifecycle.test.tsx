@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { message } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceList from '..';
@@ -11,6 +11,11 @@ import {
   deregisterResource,
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
+
+jest.mock('../../../skillExport', () => ({
+  buildSkillBundle: jest.fn().mockResolvedValue(new Blob(['zip'])),
+  saveSkillFile: jest.fn(),
+}));
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
@@ -53,6 +58,7 @@ jest.mock('../../ResourceCard', () => ({
       data-hidden-menu-keys={JSON.stringify(actionConfig.hiddenMenuItemKeys)}
       data-type-tag={String(actionConfig.showResourceTypeTag)}
       data-enterprise-publication={String(actionConfig.enablePublishToEnterprise)}
+      data-manage-workspace={String(actionConfig.canManageWorkspaceSkill)}
     >
       <button onClick={() => actionConfig.onShelf()}>publish</button>
       <button onClick={() => actionConfig.onUnShelf()}>unpublish</button>
@@ -122,7 +128,7 @@ it.each(['SKILL', 'KG_DOC', 'TOOL'])('shows loading while the initial %s request
   expect(screen.queryByText('common.loading')).toBeNull();
 });
 
-it('keeps loading visible until workspace skills finish loading', async () => {
+it('keeps my personal resources loading until workspace skills finish loading', async () => {
   let finish!: (value: any) => void;
   (queryWorkspacePersonalSkillList as jest.Mock).mockImplementation(
     () =>
@@ -130,7 +136,7 @@ it('keeps loading visible until workspace skills finish loading', async () => {
         finish = resolve;
       })
   );
-  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: true });
   await waitFor(() => expect(queryWorkspacePersonalSkillList).toHaveBeenCalled());
   expect(screen.getByText('common.loading')).toBeInTheDocument();
   expect(screen.queryByTestId('resource-card')).toBeNull();
@@ -317,10 +323,7 @@ it.each(
       resourceStatus: '2',
     })
   );
-  if (resourceType === 'SKILL') {
-    if (ownerType === 'enterprise') expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
-    else expect(queryWorkspacePersonalSkillList).toHaveBeenCalled();
-  }
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
 });
 
 it.each([true, false])(
@@ -403,3 +406,103 @@ it.each(
     );
   }
 );
+
+it('exports only resource library skills across filtered pages without changing the displayed list', async () => {
+  const { buildSkillBundle, saveSkillFile } = jest.requireMock('../../../skillExport');
+  (listResourceUseAuth as jest.Mock).mockImplementation(({ pageNum }) =>
+    Promise.resolve({
+      data: { list: [{ resourceId: pageNum === 1 ? '1' : '2', resourceBizType: 'SKILL' }], total: 31 },
+    })
+  );
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'local', skillPath: '/workspace/skills/local' }],
+  });
+  const exportContainer = document.createElement('span');
+  document.body.appendChild(exportContainer);
+  renderList({
+    resourceType: 'SKILL',
+    activeTab: 'personal',
+    myResourcesOnly: false,
+    searchValue: 'demo',
+    exportContainer,
+  });
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(1));
+  const exportButton = screen.getByRole('button', { name: /resource\.skillExport\.all/ });
+  expect(exportContainer).toContainElement(exportButton);
+  expect(document.getElementById('SKILLListScroller')).not.toContainElement(exportButton);
+  fireEvent.click(exportButton);
+  await waitFor(() => expect(saveSkillFile).toHaveBeenCalled());
+  expect(listResourceUseAuth).toHaveBeenCalledWith(
+    expect.objectContaining({
+      pageNum: 2,
+      keyword: 'demo',
+      availableOnly: true,
+      resourceStatus: '2',
+    })
+  );
+  expect(buildSkillBundle).toHaveBeenCalledWith(
+    [expect.objectContaining({ resourceId: '1' }), expect.objectContaining({ resourceId: '2' })],
+    undefined
+  );
+  expect(screen.getAllByTestId('resource-card')).toHaveLength(1);
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
+  exportContainer.remove();
+});
+
+it.each([false, true])(
+  'hides skill sharing and allows publication only in my personal skills: %s',
+  async (myResourcesOnly) => {
+    renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly, enablePublishToEnterprise: true });
+    const card = await screen.findByTestId('resource-card');
+    const hiddenKeys = JSON.parse(card.getAttribute('data-hidden-menu-keys') || '[]');
+    expect(hiddenKeys).toContain('share');
+    expect(hiddenKeys.includes('publishToEnterprise')).toBe(!myResourcesOnly);
+    expect(card).toHaveAttribute('data-enterprise-publication', 'true');
+  }
+);
+
+it('loads personal directories without a default employee and trusts their personal scope for management', async () => {
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({ data: { list: [], total: 0 } });
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'mine', skillPath: '/.openclaw/workspace/skills/mine', personalWorkspace: true }],
+  });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: true });
+  expect(await screen.findByTestId('resource-card')).toHaveAttribute('data-manage-workspace', 'true');
+  expect(queryWorkspacePersonalSkillList).toHaveBeenCalledWith({ keyword: '', personalWorkspace: true });
+  const { queryInstalledResourceIds } = jest.requireMock('@/pages/manager/service/DigitalEmployeeMgr');
+  expect(queryInstalledResourceIds).not.toHaveBeenCalled();
+});
+
+// 目录中有技能也不能补入“我可用的”，空状态应完全由资源库结果决定。
+it('shows an empty available skill list when only personal directory skills exist', async () => {
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({ data: { list: [], total: 0 } });
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'local', skillPath: '/workspace/skills/local', personalWorkspace: true }],
+  });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false });
+  expect(await screen.findByText('common.noData')).toBeInTheDocument();
+  expect(screen.queryByTestId('resource-card')).toBeNull();
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
+});
+
+// 模拟离开资源中心后员工目录新增技能，再返回中心；目录数据不能随员工上下文混入。
+it('keeps available skills resource-backed after leaving and reopening the center', async () => {
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({
+    data: { list: [{ resourceId: 'center-skill', resourceBizType: 'SKILL' }], total: 1 },
+  });
+  const props = { resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false };
+  renderList(props);
+  expect(await screen.findAllByTestId('resource-card')).toHaveLength(1);
+  cleanup();
+
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'weather-query', skillPath: '/skills/weather-query', personalWorkspace: true }],
+  });
+  renderList(props);
+  expect(await screen.findAllByTestId('resource-card')).toHaveLength(1);
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(2);
+  expect(listResourceUseAuth).toHaveBeenLastCalledWith(
+    expect.objectContaining({ availableOnly: true, resourceBizTypeList: ['SKILL'], resourceStatus: '2' })
+  );
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
+});

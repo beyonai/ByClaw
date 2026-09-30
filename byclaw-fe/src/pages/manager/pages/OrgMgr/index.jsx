@@ -1,3 +1,4 @@
+import { hasAnyUserRole } from '@/utils/userRole';
 import React, { useEffect, useState, useCallback, createContext } from 'react';
 import { debounce } from 'lodash';
 import { message, Radio } from 'antd';
@@ -50,8 +51,7 @@ const OrgMgr = () => {
         const { orgIds, userType } = data || {};
         setUserInfo({ orgIds, userType });
         if (
-          userType === 'PLAT_MAN' ||
-          userType === 'PLAT_DEVOPS' ||
+          hasAnyUserRole([userType], ['PLAT_MAN', 'PLAT_DEVOPS']) ||
           (orgIds && selectedOrg?.orgId && orgIds.includes(selectedOrg.orgId))
         ) {
           setCanEdit(true);

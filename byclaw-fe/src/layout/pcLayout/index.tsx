@@ -1,5 +1,5 @@
 // tslint:disable:ordered-imports
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import classNames from 'classnames';
 
 // @ts-ignore
@@ -15,8 +15,8 @@ import {
   SiderContentContext,
   DEFAULT_SIDER_CONTENT_WIDTH,
   HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH,
-  type DetailPanelOptions,
 } from '../sider/siderContentContext';
+import { DetailPanelContent, useDetailPanelLifecycle, useDetailPanelState } from './useDetailPanelState';
 import WorkspaceSider from '../sider/components/WorkspaceSider';
 
 import PasswordModal from '@/pages/settings/components/PasswordModal';
@@ -90,32 +90,29 @@ const PCLayout = () => {
 
   // 检查当前路由是否需要隐藏侧边栏
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
-  const [detailPanel, setDetailPanel] = React.useState<React.ReactNode>(null);
-  const [detailPanelWidth, setDetailPanelWidth] = React.useState<React.CSSProperties['width']>();
-  const [detailPanelOverlay, setDetailPanelOverlay] = React.useState(false);
-  const openDetailPanel = useCallback((panel: React.ReactNode, options?: DetailPanelOptions) => {
-    setDetailPanel(panel);
-    setDetailPanelWidth(options?.width);
-    setDetailPanelOverlay(!!options?.overlay);
-  }, []);
-  const clearDetailPanel = useCallback(() => {
-    setDetailPanel(null);
-    setDetailPanelWidth(undefined);
-    setDetailPanelOverlay(false);
-  }, []);
+  const {
+    basePanel,
+    temporaryPanel,
+    activePanel,
+    openDetailPanel,
+    openTemporaryDetailPanel,
+    dismissTemporaryDetailPanel,
+    clearDetailPanel,
+  } = useDetailPanelState();
+  const detailPanelWidth = activePanel?.options.width;
+  const detailPanelOverlay = activePanel?.options.overlay;
+  const detailPanel = activePanel ? (
+    <DetailPanelContent basePanel={basePanel} temporaryPanel={temporaryPanel} />
+  ) : null;
 
   React.useEffect(() => {
-    // 从右侧资源入口进入中心页时，主内容切换但保留当前资源工作区。
-    if (!preserveDetailPanel) {
-      clearDetailPanel();
-    }
     // 新侧栏是全局工作区导航，资源中心和设置页都保留它；只有明确配置的页面才隐藏侧栏。
     if (isPcHideSiderContentRoute(pathname)) {
       setSiderContentWidth(0);
     } else {
       setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
     }
-  }, [clearDetailPanel, pathname, preserveDetailPanel]);
+  }, [pathname]);
 
   React.useEffect(() => {
     const handleMainDriverOpen = (payload: any) => {
@@ -206,10 +203,20 @@ const PCLayout = () => {
   }, []);
 
   const { userInfo } = useSelector(({ user }) => ({ userInfo: user.userInfo }));
-  const { agentList, employeesList } = useSelector(({ employees }) => ({
+  const { agentList, employeesList, defaultDigEmployeeId } = useSelector(({ employees }) => ({
     agentList: employees.agentList || [],
     employeesList: employees.employeesList,
+    defaultDigEmployeeId: employees.defaultDigEmployeeId,
   }));
+  const panelEmployeeId = siderAgentId || agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || '';
+  const panelScope = JSON.stringify([sessionId, `${panelEmployeeId}`]);
+  useDetailPanelLifecycle({
+    scope: panelScope,
+    pathname,
+    preserveDetailPanel,
+    clearDetailPanel,
+    dismissTemporaryDetailPanel,
+  });
 
   const curAgentInfo = React.useMemo(() => {
     return [...(agentList || []), ...(employeesList || [])].find(
@@ -374,6 +381,7 @@ const PCLayout = () => {
                       siderContentWidth: visibleSiderContentWidth,
                       setSiderContentWidth,
                       setDetailPanel: openDetailPanel,
+                      openTemporaryDetailPanel,
                       clearDetailPanel,
                     }}
                   >

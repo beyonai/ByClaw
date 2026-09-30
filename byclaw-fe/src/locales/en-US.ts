@@ -4,6 +4,9 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  'resource.skillExport.single': 'Export skill',
+  'resource.skillExport.all': 'Export',
+  'resource.skillExport.invalidBundle': 'Invalid skill ZIP or export bundle. Please check the file.',
   'ui.resource.listSeparator': ', ',
   'ui.employee.publish': 'publish',
   'ui.employee.unpublish': 'unpublish',
@@ -272,13 +275,39 @@ export default {
   'resource.tool': 'Tool',
   'resource.installTool': 'Install Tool',
   'resource.rowRefreshFailed': 'Operation succeeded, but this resource could not be refreshed. Please try again later.',
-  'resource.publishToEnterprise': 'Publish to enterprise',
+  'resource.publishToEnterprise': 'Publish to official recommendations',
+  'resource.skillPublicationProgress': 'View publication progress',
+  'resource.skillPublicationReviewResult': 'View review result',
+  'resource.skillPublicationResult': 'View publication result',
+  'resource.retrySkillPublication': 'Retry publication',
+  'resource.skillPublicationResubmit': 'Resubmit publication request',
+  'resource.skillPublicationPendingDescription':
+    'Your publication request is awaiting administrator review. You can find the request in the review center.',
+  'resource.skillPublicationRejectedDescription':
+    'The request was rejected. Edit the personal skill and resubmit to create a new enterprise snapshot while keeping the previous review record.',
+  'resource.skillPublicationPublishedDescription': 'This skill has been published to official recommendations.',
+  'resource.skillPublicationOffShelfDescription':
+    'The enterprise copy is off shelf. Manage it in enterprise skills to put it back on shelf; no duplicate copy will be created.',
+  'resource.skillPublicationRemovedDescription':
+    'There is no active enterprise copy. You can submit a new publication request.',
+  'resource.skillPublicationUnknownDescription':
+    'The current enterprise copy cannot be republished in this state. Refresh the list or contact an administrator.',
+  'resource.skillPublicationUnavailable':
+    'You no longer have permission to view or submit this publication request. Refresh the list.',
+  'resource.skillPublicationLoadFailed': 'Unable to load publication status. Please try again later',
   'resource.publishToEnterpriseConfirm':
-    'Create and publish an independent enterprise copy. The original personal skill will be retained; future changes will not be synchronized.',
-  'resource.publishToEnterpriseSuccess': 'Published to enterprise',
+    'Publish an enterprise skill copy? Eligible administrators publish immediately with a review record. A platform administrator publishing a skill created by adminvip requires adminvip approval.',
+  'resource.enterpriseSkillPending': 'Publication submitted for review',
+  'resource.enterprisePersonalDependenciesTitle': 'Personal resource dependencies',
+  'resource.enterprisePersonalDependenciesWarning':
+    'Publication submitted. The following linked personal employees, knowledge or tools are unavailable in the enterprise skill. Enterprise resources retain their existing access permissions. This notice does not block publication review.',
+  'resource.auditApplicationType': 'Application type',
+  'resource.skillPublicationAudit': 'Skill publication',
+  'resource.resourceUseAudit': 'Resource access',
+  'resource.publishToEnterpriseSuccess': 'Published to official recommendations',
   'resource.enterpriseSkillExists': 'An enterprise copy already exists. View or manage it in enterprise skills.',
   'resource.viewEnterpriseSkill': 'View enterprise skill',
-  'resource.publishToEnterpriseFailed': 'Failed to publish to enterprise. Please try again.',
+  'resource.publishToEnterpriseFailed': 'Failed to publish to official recommendations. Please try again.',
   'resource.installSkill': 'Install Skill',
   'resource.skillGroup.fallbackCover': 'Skill group member cover',
   'resource.skillGroup.memberCount': '{count} members',
@@ -587,6 +616,7 @@ export default {
   'common.previewNoUrl': 'This file does not support preview',
   'common.previewFailed': 'Preview failed, please try again later',
   'common.digitalEmployee': 'Employee',
+  'common.digitalEmployeeGroup': 'Employee Group',
   'common.companyEmployee': 'Company Employee',
   'common.tool': 'Tool',
   'common.skill': 'Skill',
@@ -3460,6 +3490,7 @@ export default {
   'resourceTabs.knowledgeCenter': 'Knowledge Center',
   'resourceTabs.toolCenter': 'Tool Center',
   'resourceTabs.skillCenter': 'Skill Center',
+  'resourceTabs.loadFailed': 'Failed to load resources',
   'resourceTabs.skillUpload.uploadButton': 'Upload',
   'resourceTabs.skillUpload.onlyZip': 'Only .zip files are supported',
   'resourceTabs.skillUpload.noUserCode': 'Unable to get user code, please login again',
@@ -3610,4 +3641,25 @@ export default {
   'editDiff.binary': 'Binary file changed',
 
   ...secondEdition,
+  'resource.workspaceCenter.install': 'Install',
+  'resource.workspaceCenter.update': 'Update',
+  'resource.workspaceCenter.personal': 'personal skills',
+  'resource.workspaceCenter.enterprise': 'enterprise skills',
+  'resource.workspaceCenter.checking': 'Checking Resource Center…',
+  'resource.workspaceCenter.retry': 'Check failed. Click to retry',
+  'resource.workspaceCenter.confirm':
+    '{action} “{name}” in Resource Center {scope}. After saving, its folder and all files in the current employee workspace will be deleted.',
+  'resource.workspaceCenter.updateInstalledConfirm':
+    'Update “{name}” in Resource Center ({scope}) using this employee’s directory. Keep the employee directory and installation.',
+  'resource.workspaceCenter.updatedInstalled': 'Skill updated in Resource Center',
+  'resource.workspaceCenter.success': 'Skill saved to Resource Center and source folder deleted',
+  'resource.workspaceCenter.cleanupFailed':
+    'Skill saved to Resource Center, but source cleanup failed or files changed. Review the folder before deleting it manually.',
+  'resource.workspaceCenter.failed': 'Skill sync failed. Refresh to check its current state.',
+  'resource.import.skillPublicationSummary':
+    'Published: {publishedCount}; awaiting review: {pendingReviewCount}; failed: {failedCount}',
+  'resource.import.skillReviewHint':
+    'The import is awaiting review and will appear in Official Recommendations after approval. Check Under Review or Not Passed in My Skills → Enterprise. Rejected imports can be submitted again.',
+  'resource.import.skillReviewOverwriteConfirmDesc':
+    'This update will be submitted for review. The current version remains available until approval, when it will be replaced. Continue?',
 };

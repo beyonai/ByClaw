@@ -1,5 +1,10 @@
 package com.iwhalecloud.byai.state.application.service.chat;
 
+import org.mockito.ArgumentMatchers;
+import org.assertj.core.api.Assertions;
+import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
+import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionRuntimeStateService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -69,8 +74,8 @@ class AssistantChatApplicationServiceTest {
 
     @BeforeEach
     void setUp() {
-        sessionRuntimeStateService = mock(com.iwhalecloud.byai.state.domain.chat.service.SessionRuntimeStateService.class);
-        multiDeviceBroadcastService = mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
+        sessionRuntimeStateService = mock(SessionRuntimeStateService.class);
+        multiDeviceBroadcastService = mock(MultiDeviceBroadcastService.class);
         gatewayClient = mock(GatewayClient.class);
         runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         runningChatSnapshotService = mock(RunningChatSnapshotService.class);
@@ -110,9 +115,9 @@ class AssistantChatApplicationServiceTest {
         CurrentUserHolder.clearLoginInfo();
     }
 
-    private com.iwhalecloud.byai.state.domain.chat.service.SessionRuntimeStateService sessionRuntimeStateService;
+    private SessionRuntimeStateService sessionRuntimeStateService;
 
-    private com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService multiDeviceBroadcastService;
+    private MultiDeviceBroadcastService multiDeviceBroadcastService;
 
     @Test
     void stopChat_clearsRunningStateAfterCancelSession() {
@@ -141,7 +146,7 @@ class AssistantChatApplicationServiceTest {
     void stopChatKeepsRuntimeListenerForMemberShutdownAndBroadcastsCancelledRuntime() {
         StopChatDto dto = new StopChatDto();
         dto.setSessionId(10L);
-        var runtime = new com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState();
+        var runtime = new SessionRuntimeState();
         runtime.setSessionId(10L);
         runtime.setSource("test-engine");
         runtime.setTraceId("trace-1");
@@ -155,12 +160,12 @@ class AssistantChatApplicationServiceTest {
         assistantChatApplicationService.stopChat(dto);
 
         verify(gatewayClient).cancelSession("10", "user cancel task");
-        verify(scriptService, never()).flushFromSnapshot(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(scriptService, never()).flushFromSnapshot(ArgumentMatchers.any(), ArgumentMatchers.any());
         verify(streams, never()).stopSessionListener(anyString());
         verify(multiDeviceBroadcastService).broadcastRawToUser(eq(1L),
-            org.mockito.ArgumentMatchers.argThat(event -> "SESSION_RUNTIME_STATUS".equals(event.getString("type"))
+            ArgumentMatchers.argThat(event -> "SESSION_RUNTIME_STATUS".equals(event.getString("type"))
                 && "cancelled".equals(event.getJSONObject("data").getString("status"))),
-            org.mockito.ArgumentMatchers.isNull());
+            ArgumentMatchers.isNull());
     }
 
     @Test
@@ -298,4 +303,15 @@ class AssistantChatApplicationServiceTest {
             return putEntered.await(1, TimeUnit.SECONDS);
         }
     }
+    @Test
+    void recallStopPropagatesNegativeGatewayResponseForDurableRetry() {
+        StopChatDto request = new StopChatDto();
+        request.setSessionId(10L);
+        when(gatewayClient.cancelSession("10", "user cancel task"))
+            .thenReturn(GatewayClient.CancelSessionResponse.builder().success(false).error("offline").build());
+        Assertions.assertThatThrownBy(() -> assistantChatApplicationService.stopChatForRecall(request))
+            .hasMessage("Recall STOP_CHAT failed");
+        verify(sessionRuntimeStateService, never()).cancel(10L);
+    }
+
 }

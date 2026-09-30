@@ -61,7 +61,7 @@ class GroupChatExecutionEventHandlerTest {
     private final SequenceService sequence = mock(SequenceService.class);
     private final GroupChatExecutionEventHandler handler = new GroupChatExecutionEventHandler(messages, publisher,
         sequence, executions, coordinator, mock(SsResourceService.class), users, reader, tasks, candidates,
-        parser, mentions, runtime);
+        parser, mentions);
     private ByaiGroupChatExecution execution;
     private ByaiMessage answer;
 
@@ -103,7 +103,7 @@ class GroupChatExecutionEventHandlerTest {
         handler.afterPersisted(context(60L, execution.getTraceId(), 30L));
 
         verify(messages, never()).insert(any(ByaiMessage.class));
-        verify(tasks).updateTurnStatus(60L, "WAITING_USER");
+        verify(tasks).completeTurn(60L, execution.getTraceId(), false);
         verify(executions).markSucceeded(eq(6L), eq(30L), any());
         verifyNoInteractions(publisher);
     }
@@ -121,7 +121,7 @@ class GroupChatExecutionEventHandlerTest {
         handler.reconcile(60L);
 
         verify(tasks).promote(execution, "采集新闻", "正在采集");
-        verify(tasks, never()).updateTurnStatus(any(), any());
+        verify(tasks, never()).completeTurn(any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
         verify(messages, never()).insert(any(ByaiMessage.class));
     }
 
@@ -205,7 +205,7 @@ class GroupChatExecutionEventHandlerTest {
     void failedPersistedTurnRemainsFailedAfterRecovery() {
         answer.setMetadata("{\"turnFailed\":true}");
         handler.reconcile(60L);
-        verify(tasks).updateTurnStatus(60L, "FAILED");
+        verify(tasks).completeTurn(60L, execution.getTraceId(), true);
         verify(executions).markFailed(eq(6L), eq("TURN_FAILED"), any(), any());
         verifyNoInteractions(publisher);
     }
@@ -234,18 +234,33 @@ class GroupChatExecutionEventHandlerTest {
     }
 
     @Test
-    void subsequentTurnCompletesOnlyMatchingRuntimeTrace() {
+    void completedFollowupIsNotBlockedByBackgroundRuntimeOwner() {
+        execution.setStatus("SUCCEEDED");
+        ChatRuntimeState background = new ChatRuntimeState();
+        background.setTraceId("background-trace");
+        when(runtime.get(60L)).thenReturn(background);
+        ChatProcessContext followup = context(60L, "followup-trace", 32L);
+        followup.concurrentGatewayTurn = true;
+
+        handler.afterPersisted(followup);
+
+        verify(tasks).completeTurn(60L, "followup-trace", false);
+        verifyNoInteractions(runtime);
+    }
+
+    @Test
+    void subsequentTurnPassesItsTraceToDatabaseFence() {
         execution.setStatus("SUCCEEDED");
         ChatRuntimeState current = new ChatRuntimeState();
         current.setTraceId("new-trace");
         when(runtime.get(60L)).thenReturn(current);
         handler.afterPersisted(context(60L, "old-trace", 31L));
-        verifyNoInteractions(tasks);
+        verify(tasks).completeTurn(60L, "old-trace", false);
 
         handler.afterPersisted(context(60L, "new-trace", 32L));
 
-        verify(tasks).updateTurnStatus(60L, "WAITING_USER");
-        verifyNoInteractions(messages, publisher, coordinator);
+        verify(tasks).completeTurn(60L, "new-trace", false);
+        verifyNoInteractions(messages, publisher, coordinator, runtime);
     }
 
     @Test
@@ -273,8 +288,8 @@ class GroupChatExecutionEventHandlerTest {
 
         verify(executions).markSucceeded(eq(8L), eq(31L), any());
         verify(executions).markSucceeded(eq(6L), eq(30L), any());
-        verify(tasks).updateTurnStatus(80L, "WAITING_USER");
-        verify(tasks).updateTurnStatus(60L, "WAITING_USER");
+        verify(tasks).completeTurn(80L, second.getTraceId(), false);
+        verify(tasks).completeTurn(60L, execution.getTraceId(), false);
         verify(messages, never()).insert(any(ByaiMessage.class));
     }
 

@@ -1,6 +1,7 @@
 /* eslint-disable function-paren-newline */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable indent */
+import { hasAnyUserRole } from '@/utils/userRole';
 import React, { useEffect, useState, useRef, forwardRef, useImperativeHandle, useMemo } from 'react';
 import {
   Button,
@@ -178,7 +179,7 @@ const OrgMember = (props, ref) => {
 
   const filterRef = useRef(filter);
   const canOperateMember = (record) => {
-    const isPlatformManager = userInfo.userType === 'PLAT_MAN' || userInfo.userType === 'PLAT_DEVOPS';
+    const isPlatformManager = hasAnyUserRole([userInfo.userType], ['PLAT_MAN', 'PLAT_DEVOPS']);
     const managedOrgIds = (userInfo.orgIds || []).map((orgId) => `${orgId}`);
     return canEdit || isPlatformManager || managedOrgIds.includes(`${record?.orgId}`);
   };

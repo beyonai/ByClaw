@@ -102,6 +102,11 @@ export default [
             component: './manager/pages/AdminConsole',
           },
           {
+            path: '/manager/files',
+            name: 'managerFiles',
+            component: './manager/pages/FileMgr',
+          },
+          {
             path: '/manager/workgroup-templates',
             name: 'managerWorkgroupTemplates',
             component: './manager/pages/WorkgroupTemplateMgr',

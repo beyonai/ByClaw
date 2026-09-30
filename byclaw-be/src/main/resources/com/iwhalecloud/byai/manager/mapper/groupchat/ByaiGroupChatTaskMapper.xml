@@ -7,16 +7,39 @@
         ORDER BY create_time DESC, task_session_id DESC
     </select>
 
-    <update id="updateTurnStatus">
+    <update id="completeTurn">
         UPDATE byai_group_chat_task SET turn_status = #{turnStatus}, update_time = #{now}
         WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE'
+          AND turn_status = 'RUNNING' AND current_turn_trace_id = #{traceId}
     </update>
 
     <update id="claimTurn">
-        UPDATE byai_group_chat_task SET turn_status = 'RUNNING', update_time = #{now}
+        UPDATE byai_group_chat_task SET turn_status = 'RUNNING', current_turn_id = #{turnId},
+            current_turn_trace_id = NULL, update_time = #{now}
         WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE'
           AND turn_status IN ('WAITING_USER', 'FAILED')
     </update>
+
+    <update id="bindTurn">
+        UPDATE byai_group_chat_task SET current_turn_trace_id = #{traceId}, update_time = #{now}
+        WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE' AND turn_status = 'RUNNING'
+          AND current_turn_id = #{turnId}
+          AND (current_turn_trace_id IS NULL OR current_turn_trace_id = #{traceId})
+    </update>
+
+    <update id="failTurnStart">
+        UPDATE byai_group_chat_task SET turn_status = 'FAILED', update_time = #{now}
+        WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE' AND turn_status = 'RUNNING'
+          AND current_turn_id = #{turnId}
+    </update>
+
+    <select id="selectBoundRunningPage" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask">
+        SELECT task_session_id, current_turn_id, current_turn_trace_id FROM byai_group_chat_task
+        WHERE status = 'ACTIVE' AND turn_status = 'RUNNING'
+          AND current_turn_id IS NOT NULL AND current_turn_trace_id IS NOT NULL
+          AND task_session_id &gt; #{afterId}
+        ORDER BY task_session_id LIMIT #{limit}
+    </select>
 
     <update id="publish">
         UPDATE byai_group_chat_task

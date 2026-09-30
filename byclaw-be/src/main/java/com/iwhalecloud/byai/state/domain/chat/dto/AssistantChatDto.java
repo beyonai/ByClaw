@@ -24,6 +24,12 @@ import lombok.Setter;
 @Schema(description = "数字助理对话请求参数")
 public class AssistantChatDto {
 
+    /** 服务端申请的任务轮次占位，仅在当前请求内传递，客户端不能指定。 */
+    @JsonIgnore
+    @com.alibaba.fastjson.annotation.JSONField(serialize = false, deserialize = false)
+    @Schema(hidden = true)
+    private transient Long groupTaskTurnId;
+
     /**
      * agentType配套使用，这种情况是指定了智能体回答的场景
      */
@@ -55,6 +61,9 @@ public class AssistantChatDto {
      */
     @Schema(description = "会话内容", example = "你好，请帮我分析一下这个数据")
     private String chatContent;
+
+    /** 当前消息的操作意图；用户正文单独保存，群任务出站请求按此追加 Agent 提示。 */
+    private String messageIntent;
 
     /**
      * 文件内容

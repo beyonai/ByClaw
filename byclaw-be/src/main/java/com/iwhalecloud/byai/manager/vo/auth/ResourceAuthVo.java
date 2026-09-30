@@ -324,4 +324,6 @@ public class ResourceAuthVo extends AuthVo {
 
     private Boolean canPublishToEnterprise;
 
+    private SkillPublicationVo skillPublication;
+
 }

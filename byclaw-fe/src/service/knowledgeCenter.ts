@@ -78,6 +78,7 @@ export interface QueryDirAndFileByLevelParams {
 
 /** queryDirAndFileByLevel 单条记录 */
 export interface QueryDirAndFileByLevelItem {
+
   /** 项目云盘条目的改名、删除权限。 */
   canManageItem?: boolean;
 

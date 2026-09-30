@@ -6,6 +6,7 @@ import AntdIcon from '@/components/AntdIcon';
 import { parseCurl } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getRuntimeActualUrl } from '@/utils';
 import styles from './index.module.less';
+import { expandSkillImportFiles } from '../../skillExport';
 
 import type {
   ResourceImportDiffItem,
@@ -45,6 +46,8 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const intl = useIntl();
   const [importLoading, setImportLoading] = useState(false);
   const [localFiles, setLocalFiles] = useState<File[]>([]);
+  const [parsingCount, setParsingCount] = useState(0);
+  const importGeneration = useRef(0);
   const [importTab, setImportTab] = useState('localFile');
   const [curlText, setCurlText] = useState('');
   const [curlPanelLoading, setCurlPanelLoading] = useState(false);
@@ -98,6 +101,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   // 当弹窗关闭时重置状态
   useEffect(() => {
     if (!visible) {
+      importGeneration.current += 1;
       setLocalFiles([]);
       setImportTab('localFile');
       setCurlText('');
@@ -150,8 +154,9 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
     return acceptedTypes.includes(fileExtension);
   };
 
-  const addLocalFiles = (fileList: File[]) => {
-    const acceptedFiles = fileList.filter(isAcceptedFile);
+  const addLocalFiles = async (fileList: File[]) => {
+    const generation = importGeneration.current;
+    let acceptedFiles = fileList.filter(isAcceptedFile);
 
     if (acceptedFiles.length !== fileList.length) {
       showUnsupportedFileTypeMessage();
@@ -161,6 +166,18 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
       return;
     }
 
+    if (resourceType === 'SKILL') {
+      setParsingCount((count) => count + 1);
+      try {
+        acceptedFiles = await expandSkillImportFiles(acceptedFiles);
+      } catch {
+        message.error(intl.formatMessage({ id: 'resource.skillExport.invalidBundle' }));
+        return;
+      } finally {
+        setParsingCount((count) => count - 1);
+      }
+    }
+    if (generation !== importGeneration.current) return;
     setLocalFiles((prevFiles) => {
       const mergedFiles = [...prevFiles];
       acceptedFiles.forEach((nextFile) => {
@@ -186,7 +203,8 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
     items
       .map((item) => {
         const catalogSuffix = item.catalogName ? `（${item.catalogName}）` : '';
-        return `${item.resourceCode}：${item.resourceName}${catalogSuffix}`;
+        const reviewSuffix = item.reviewRequired ? `（${intl.formatMessage({ id: 'resourceStatus.reviewing' })}）` : '';
+        return `${item.resourceCode}：${item.resourceName}${catalogSuffix}${reviewSuffix}`;
       })
       .join('、');
 
@@ -211,7 +229,13 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
         title: intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmTitle' }),
         content: (
           <div>
-            <div>{intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmDesc' })}</div>
+            <div>
+              {intl.formatMessage({
+                id: updatedItems.some((item) => item.reviewRequired)
+                  ? 'resource.import.skillReviewOverwriteConfirmDesc'
+                  : 'resource.import.skillOverwriteConfirmDesc',
+              })}
+            </div>
             <div className={styles.confirmConflictList}>{buildRangeText(updatedItems)}</div>
           </div>
         ),
@@ -333,6 +357,12 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const secondaryButtonText = isImportSummaryMode ? cancelText : currentStep === 'curlConfig' ? backText : cancelText;
   const secondaryButtonAction = isImportSummaryMode ? onCancel : currentStep === 'curlConfig' ? handleBack : onCancel;
   const failedCount = importResult?.failed || failedItems.length;
+  // 预检查结果不代表导入完成；审核统计只使用正式导入接口返回的结果。
+  const importedItems = completedImportResult?.items || [];
+  const pendingReviewCount = importedItems.filter((item) => item.success && item.reviewRequired).length;
+  const publishedCount = importedItems.filter((item) => item.success && !item.reviewRequired).length;
+  const showSkillPublicationSummary =
+    resourceType === 'SKILL' && !!completedImportResult && (activeTab === 'enterprise' || pendingReviewCount > 0);
   const failedSummaryDescription = failedItems.length
     ? intl.formatMessage({ id: 'resource.import.failedSummary' }, { failedCount })
     : undefined;
@@ -359,9 +389,10 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
           loading={currentStep === 'import' ? importLoading : curlPanelLoading}
           onClick={currentStep === 'import' ? handleImportSubmit : handleCurlSave}
           disabled={
-            !isImportSummaryMode &&
-            currentStep === 'import' &&
-            ((importTab === 'localFile' && !localFiles.length) || (importTab === 'curlImport' && !curlText.trim()))
+            parsingCount > 0 ||
+            (!isImportSummaryMode &&
+              currentStep === 'import' &&
+              ((importTab === 'localFile' && !localFiles.length) || (importTab === 'curlImport' && !curlText.trim())))
           }
         >
           {primaryButtonText}
@@ -374,13 +405,23 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
             type={failedItems.length ? 'warning' : 'success'}
             showIcon
             message={intl.formatMessage(
-              { id: 'resource.import.summary' },
+              {
+                id: showSkillPublicationSummary ? 'resource.import.skillPublicationSummary' : 'resource.import.summary',
+              },
               {
                 createdCount: importResult?.createdCount || 0,
                 updatedCount: importResult?.updatedCount || 0,
+                publishedCount,
+                pendingReviewCount,
+                failedCount,
               }
             )}
-            description={failedSummaryDescription}
+            description={[
+              pendingReviewCount > 0 ? intl.formatMessage({ id: 'resource.import.skillReviewHint' }) : '',
+              failedSummaryDescription,
+            ]
+              .filter(Boolean)
+              .join(' ')}
           />
           <div className={styles.rangeBlock}>
             <div className={styles.rangeTitle}>{intl.formatMessage({ id: 'resource.import.createdRange' })}</div>

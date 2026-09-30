@@ -7,6 +7,7 @@ import {
   DatabaseOutlined,
   // DashboardOutlined,
   ExperimentOutlined,
+  FolderOutlined,
   // RobotOutlined,
   SafetyCertificateOutlined,
   TeamOutlined,
@@ -16,6 +17,15 @@ import {
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 
 const MANAGER_MENU_PARAM_CODE = 'SYSTEM_BACKEND_MENU_MANAGE';
+export const FILE_MANAGEMENT_MENU = {
+  path: '/manager/files',
+  routePath: '/manager/files',
+  name: '系统文件管理',
+  nameEn: 'System File Management',
+  localeId: 'menu.fileManagement',
+  icon: FolderOutlined,
+};
+
 export const WORKGROUP_TEMPLATE_MENU = {
   path: '/manager/workgroup-templates',
   routePath: '/manager/workgroup-templates',
@@ -64,6 +74,7 @@ const iconByMenuCode: Record<string, any> = {
   menu_ui_agent: RadarChartOutlined,
   menu_system_feedback: CommentOutlined,
   menu_app_version: CloudDownloadOutlined,
+  menu_file_management: FolderOutlined,
 };
 
 const localeIdByPath: Record<string, string> = {
@@ -76,6 +87,7 @@ const localeIdByPath: Record<string, string> = {
   '/manager/systemParams/sandbox': 'menu.systemParams.sandbox',
   '/manager/notification': 'menu.business.notification',
   '/manager/system/feedback': 'menu.systemFeedback',
+  '/manager/files': 'menu.fileManagement',
 };
 
 export const fallbackMenuConfig = [
@@ -134,6 +146,7 @@ export const fallbackMenuConfig = [
     localeId: 'menu.systemFeedback',
     icon: CommentOutlined,
   },
+  FILE_MANAGEMENT_MENU,
 ];
 
 const parseConfigList = (value: any) => {

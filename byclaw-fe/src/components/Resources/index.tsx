@@ -1,3 +1,4 @@
+import { hasAnyUserRole } from '@/utils/userRole';
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
 import {
   CheckOutlined,
@@ -48,7 +49,7 @@ import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { getToken, isAdminVip } from '@/utils/auth';
-import { get, trim, intersection, isEmpty } from 'lodash';
+import { get, trim } from 'lodash';
 import {
   buildSkillMarketplaceUrl,
   filterResourceAuditRowsByType,
@@ -141,6 +142,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [skillExportContainer, setSkillExportContainer] = useState<HTMLSpanElement | null>(null);
   const [skillGroupCreateModalOpen, setSkillGroupCreateModalOpen] = useState(false);
   const [skillGroupEditing, setSkillGroupEditing] = useState<SkillGroup | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -180,7 +182,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const marketplaceIframeRef = useRef<HTMLIFrameElement>(null);
   const [skillMarketplaceBaseUrl, setSkillMarketplaceBaseUrl] = useState('');
   const [skillMarketplaceConfigLoaded, setSkillMarketplaceConfigLoaded] = useState(resourceType !== 'SKILL');
-  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
+  const { setDetailPanel, clearDetailPanel, openTemporaryDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
@@ -223,7 +225,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   );
   const usersOrganizations = get(userInfo, 'usersOrganizations') || [];
   const userTypeList = usersOrganizations.map((item: any) => item.userType);
-  const isAdmin = !isEmpty(intersection(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']));
+  const isAdmin = hasAnyUserRole(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']);
 
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
   const [selectRecord, setSelectRecord] = useState<any>(null);
@@ -441,6 +443,12 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     if (activeTab !== 'enterprise') {
       return true;
     }
+    // 商用版官方技能对所有用户开放；其他版本按角色控制，等待版本加载后再展示入口。
+    if (resourceType === 'SKILL') {
+      return (
+        brandVersionLoaded && (brandVersion === 'commercial' || fixedEntryCapability?.canImportEnterpriseSkill === true)
+      );
+    }
     if (!fixedEntryCapability) {
       return false;
     }
@@ -450,11 +458,14 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     if (resourceType === 'TOOL') {
       return fixedEntryCapability.canImportEnterpriseToolkit;
     }
-    if (resourceType === 'SKILL') {
-      return fixedEntryCapability.canImportEnterpriseSkill === true;
-    }
     return true;
-  }, [activeTab, fixedEntryCapability, resourceType]);
+  }, [activeTab, brandVersion, brandVersionLoaded, fixedEntryCapability, resourceType]);
+
+  // 我可用的技能在所有版本开放导入；官方推荐保留品牌和角色规则，其他资源仍限制为开源版。
+  const showImportEntry =
+    resourceType === 'SKILL' && activeTab === 'enterprise'
+      ? canImportCurrentEnterpriseResource
+      : (resourceType === 'SKILL' && activeTab === 'personal') || brandVersion === 'openSource';
 
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
@@ -462,16 +473,22 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
 
       if (resourceBizType === 'SKILL') {
         if (resourceId) {
-          setDetailPanel?.(
+          const renderDetail = (onClose: () => void) => (
             <SkillDetailDrawer
               resourceId={resourceId}
               title={intl.formatMessage({ id: 'common.skill' })}
               open
               panel
-              onClose={() => clearDetailPanel?.()}
-            />,
-            { width: 350 }
+              onClose={onClose}
+            />
           );
+
+          // 中心页与右侧工作区并存，详情只暂时覆盖工作区，关闭后恢复同一个实例。
+          if (openTemporaryDetailPanel) {
+            openTemporaryDetailPanel(renderDetail, { width: 350 });
+          } else {
+            setDetailPanel?.(renderDetail(() => clearDetailPanel?.()), { width: 350 });
+          }
         }
         return;
       }
@@ -536,7 +553,17 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
         { width: 350 }
       );
     },
-    [activeTab, clearDetailPanel, intl, navigate, resourceName, resourceType, setDetailPanel, showSkillDetailDrawer]
+    [
+      activeTab,
+      clearDetailPanel,
+      intl,
+      navigate,
+      openTemporaryDetailPanel,
+      resourceName,
+      resourceType,
+      setDetailPanel,
+      showSkillDetailDrawer,
+    ]
   );
 
   const handleEditItem = (item: IResourceItem) => {
@@ -606,6 +633,15 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     />
   );
   const isMyEnterpriseResources = myResourcesOnly && activeTab === 'enterprise';
+  // 技能申请人可在自己的企业资源中查看待审核和驳回项，官方推荐仍只查询已上架资源。
+  const currentMyResourceStatusOptions =
+    resourceType === 'SKILL'
+      ? [
+          ...myResourceStatusOptions,
+          { label: 'resourceStatus.reviewing', value: '4' },
+          { label: 'resourceStatus.notPassed', value: '5' },
+        ]
+      : myResourceStatusOptions;
   const tabBarExtraContent =
     activeTab === 'audit' ? undefined : (
       <Space>
@@ -622,8 +658,8 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
         )}
         {isMyEnterpriseResources && (
           <Segmented
-            value={getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus)}
-            options={myResourceStatusOptions.map((item) => ({
+            value={getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus, resourceType)}
+            options={currentMyResourceStatusOptions.map((item) => ({
               ...item,
               label: intl.formatMessage({ id: item.label }),
             }))}
@@ -646,7 +682,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             onOk={(param: any) => {
               setDropdownParam({
                 ...param,
-                resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, param.resourceStatus),
+                resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, param.resourceStatus, resourceType),
               });
               setCatalogId(param.catalogId || '');
               // 刷新逻辑由ResourceList组件内部处理
@@ -654,25 +690,30 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             defaultParam={{
               ...dropdownParam,
               catalogId,
-              resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus),
+              resourceStatus: getResourceQueryStatus(
+                activeTab,
+                myResourcesOnly,
+                dropdownParam.resourceStatus,
+                resourceType
+              ),
             }}
             catalogOptions={
               myResourcesOnly
                 ? undefined
                 : [
-                    { value: '', label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }) },
-                    ...topLevelCatalogList.map((item) => ({
-                      value: `${item.catalogId}`,
-                      label: getLocalizedCatalogName(item, intl.locale),
-                    })),
-                  ]
+                  { value: '', label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }) },
+                  ...topLevelCatalogList.map((item) => ({
+                    value: `${item.catalogId}`,
+                    label: getLocalizedCatalogName(item, intl.locale),
+                  })),
+                ]
             }
             activeTab={activeTab}
             resourceOwnerFilter={!myResourcesOnly && activeTab === 'personal'}
             // 企业状态已移到外层分段控件，个人页固定查询已上架。
             hideStatusFilter
             alwaysShowStatusFilter={false}
-            statusOptionsOverride={myResourcesOnly ? myResourceStatusOptions : undefined}
+            statusOptionsOverride={myResourcesOnly ? currentMyResourceStatusOptions : undefined}
             hidePermissionFilter={myResourcesOnly}
           />
         )}
@@ -704,7 +745,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           </Tooltip>
         )}
 
-        {!myResourcesOnly && brandVersion === 'openSource' && (!isEnterpriseSkillGroupMode || isAdminVip(userInfo)) && (
+        {!myResourcesOnly && showImportEntry && (
           <Tooltip
             title={
               !canImportCurrentEnterpriseResource
@@ -733,6 +774,10 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
               </Button>
             </span>
           </Tooltip>
+        )}
+        {resourceType === 'SKILL' && !isEnterpriseSkillGroupMode && (
+          // 独立于导入权限，确保普通用户也可从工具栏导出。
+          <span ref={setSkillExportContainer} data-testid="skill-export-toolbar" />
         )}
         {!myResourcesOnly && onMyResourcesOnlyChange && (
           <Badge count={myResourceAuditPendingCount} size="small" offset={[-2, 2]}>
@@ -1016,6 +1061,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           ) : (
             <ResourceList
               key={refreshKey}
+              exportContainer={skillExportContainer}
               resourceType={resourceType}
               activeTab={activeTab}
               myResourcesOnly={myResourcesOnly}

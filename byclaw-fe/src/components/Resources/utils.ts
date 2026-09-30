@@ -108,8 +108,14 @@ export const buildResourceListFilterParam = (activeTab: string, filterParam?: Re
 };
 
 /** 隐藏的筛选值不能继续参与查询，个人资源始终请求已上架数据。 */
-export const getResourceQueryStatus = (activeTab: string, myResourcesOnly: boolean, status?: unknown): string => {
+export const getResourceQueryStatus = (
+  activeTab: string,
+  myResourcesOnly: boolean,
+  status?: unknown,
+  resourceType?: string
+): string => {
   if (!myResourcesOnly || activeTab === 'personal') return '2';
   const value = `${status ?? '2'}`;
-  return ['', '0', '2', '3'].includes(value) ? value : '2';
+  const allowedStatuses = resourceType === 'SKILL' ? ['', '0', '2', '3', '4', '5'] : ['', '0', '2', '3'];
+  return allowedStatuses.includes(value) ? value : '2';
 };

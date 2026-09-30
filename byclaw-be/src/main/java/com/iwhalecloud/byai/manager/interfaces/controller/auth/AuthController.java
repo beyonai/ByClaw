@@ -431,6 +431,8 @@ public class AuthController {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
 
+        authApplicationService.validateEmployeeAuthorizationPermission(resource);
+
         // 检查publish_portal字段，给果为0则表示不发布到业务门户的数字员工，不能进行授权操作
         if (resource.getPublishPortal() != null && resource.getPublishPortal() == 0) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,

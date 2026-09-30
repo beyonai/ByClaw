@@ -17,6 +17,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.test.util.ReflectionTestUtils;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatRecallCancellationService;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
@@ -34,6 +36,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEvent
 
 /** 真实 Spring 事务代理验证提交边界，JDBC 替身不代表目标数据库并发验证。 */
 class GroupChatMessageRecallTest {
+    private final GroupChatRecallCancellationService cancellations = mock(GroupChatRecallCancellationService.class);
     private final GroupChatAuthorizationService auth = mock(GroupChatAuthorizationService.class);
     private final GroupChatTopicService topics = mock(GroupChatTopicService.class);
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
@@ -68,7 +71,9 @@ class GroupChatMessageRecallTest {
         TransactionInterceptor interceptor = new TransactionInterceptor();
         interceptor.setTransactionManager(new DataSourceTransactionManager(dataSource));
         interceptor.setTransactionAttributeSource(new AnnotationTransactionAttributeSource());
-        ProxyFactory factory = new ProxyFactory(new GroupChatMessageRecallService(auth, topics, messages, events));
+        GroupChatMessageRecallService target = new GroupChatMessageRecallService(auth, topics, messages, events);
+        ReflectionTestUtils.setField(target, "cancellations", cancellations);
+        ProxyFactory factory = new ProxyFactory(target);
         factory.setProxyTargetClass(true);
         factory.addAdvice(interceptor);
         service = (GroupChatMessageRecallService) factory.getProxy();
@@ -108,6 +113,7 @@ class GroupChatMessageRecallTest {
         verify(messages, never()).recallGroupMessage(any(), any(), any(), any());
         verifyNoInteractions(events);
         assertThat(source.getRecalledBy()).isEqualTo(99L);
+        verify(cancellations).cancel(20L, 30L);
     }
 
     @Test
@@ -166,4 +172,12 @@ class GroupChatMessageRecallTest {
         assertThatThrownBy(() -> service.recall(20L, 30L)).isInstanceOf(RuntimeException.class);
         verifyNoInteractions(events);
     }
+    @Test
+    void cancellationFailureRollsBackRecall() throws Exception {
+        doThrow(new IllegalStateException("cannot persist cancellation")).when(cancellations).cancel(20L, 30L);
+        assertThatThrownBy(() -> service.recall(20L, 30L)).hasMessage("cannot persist cancellation");
+        verify(connection).rollback();
+        verifyNoInteractions(events);
+    }
+
 }

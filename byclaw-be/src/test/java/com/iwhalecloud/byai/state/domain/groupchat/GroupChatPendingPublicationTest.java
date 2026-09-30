@@ -45,6 +45,7 @@ import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatPendingPublication;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTaskPublication;
@@ -89,6 +90,7 @@ class GroupChatPendingPublicationTest {
     private final SessionService sessions = mock(SessionService.class);
     private final ProjectService projects = mock(ProjectService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
+    private final AuthApplicationService auth = mock(AuthApplicationService.class);
     private final FeignPythonBuildService cloud = mock(FeignPythonBuildService.class);
     // 使用真实目录服务和 DTO 映射，仅模拟远端边界，覆盖发布与云盘查询的接线。
     private final DatasetApplicationService datasets = new DatasetApplicationService();
@@ -120,6 +122,7 @@ class GroupChatPendingPublicationTest {
         when(tasks.publish(eq(60L), any(), eq(10L), any())).thenReturn(1);
         when(store.response(any())).thenCallRealMethod();
         ReflectionTestUtils.setField(datasets, "ssResourceService", resources);
+        ReflectionTestUtils.setField(datasets, "authApplicationService", auth);
         ReflectionTestUtils.setField(datasets, "feignPythonBuildService", cloud);
         pending = new GroupChatPendingPublicationService(authorization, tasks, store, sequence);
         completion = new GroupChatTaskService(tasks, publications, executions, messages, sequence, null, authorization,
@@ -391,6 +394,8 @@ class GroupChatPendingPublicationTest {
         SsResource resource = new SsResource();
         resource.setResourceCode("project-cloud");
         when(resources.findById(777L)).thenReturn(resource);
+        // 目录查询仍走真实读取鉴权，此处只模拟测试用户拥有项目云盘的访问权限。
+        when(auth.hasResourceAccessPermission(resource)).thenReturn(true);
         DirOrFile item = new DirOrFile();
         item.setName("/group-task-results/60/100/0/a.md");
         item.setType(type);

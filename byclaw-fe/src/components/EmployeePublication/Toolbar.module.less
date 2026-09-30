@@ -1,0 +1,31 @@
+.toolbar {
+  min-width: 0;
+  padding: 12px 24px;
+}
+
+.overview {
+  padding: 12px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.policy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-top: 8px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.rules {
+  width: min(480px, calc(100vw - 64px));
+  line-height: 1.8;
+}
+
+@media (max-width: 760px) {
+  .toolbar {
+    padding: 12px;
+  }
+}

@@ -1,10 +1,12 @@
+import PublicationAuditList from '@/components/EmployeePublication/AuditList';
+import useEmployeePublicationCapabilities from '@/hooks/useEmployeePublicationCapabilities';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import useEmployeeRowRefresh, {
   employeeRowId,
   removeEmployeeRow,
   updateEmployeeRow,
 } from '@/hooks/useEmployeeRowRefresh';
-import { LeftOutlined, SearchOutlined } from '@ant-design/icons';
+import { LeftOutlined, SafetyCertificateOutlined, SearchOutlined, SendOutlined } from '@ant-design/icons';
 import { getIntl, useLocation, useNavigate, useIntl } from '@umijs/max';
 import { Badge, Button, Empty, Input, Popconfirm, Segmented, Space, Spin, Table, Tabs, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -100,6 +102,8 @@ const normalizeAuditRows = (response: any, history: boolean): AuditRow[] => {
 const getAuditRowKey = (row: AuditRow) => `${row.privilegeGrantId || ''}-${row.resourceId || ''}-${row.userId || ''}`;
 
 const MyEmployeesPage: React.FC = () => {
+  const publicationCapabilities = useEmployeePublicationCapabilities();
+  const [auditKind, setAuditKind] = useState<string>('use');
   const intl = useIntl();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<OwnerTab>('personal');
@@ -163,14 +167,9 @@ const MyEmployeesPage: React.FC = () => {
       try {
         const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
         // 企业“全部”仅合并本人创建和授权管理的数据，不因管理员角色扩大为全库列表。
-        const type =
-          activeTab !== 'enterprise'
-            ? 'owner'
-            : enterpriseScope === 'all'
-            ? 'ownerOrManager'
-            : enterpriseScope === 'created'
-            ? 'owner'
-            : 'managerExcludingOwner';
+        const scopedEnterpriseType = enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner';
+        const enterpriseQueryType = enterpriseScope === 'all' ? 'ownerOrManager' : scopedEnterpriseType;
+        const type = activeTab === 'enterprise' ? enterpriseQueryType : 'owner';
         const res = await request({
           pageNum: requestedPage,
           pageSize: PAGE_SIZE,
@@ -439,12 +438,8 @@ const MyEmployeesPage: React.FC = () => {
         const result = status === '审核通过' ? '通过' : status === '已驳回' ? '驳回' : status;
         const color = result === '通过' ? 'success' : result === '驳回' ? 'error' : 'default';
         // 状态比较沿用接口原值，仅翻译展示标签。
-        const label =
-          result === '通过'
-            ? intl.formatMessage({ id: 'ui.employee.approved' })
-            : result === '驳回'
-              ? intl.formatMessage({ id: 'ui.employee.rejected' })
-              : result;
+        const labelKey = { 通过: 'ui.employee.approved', 驳回: 'ui.employee.rejected' }[result];
+        const label = labelKey ? intl.formatMessage({ id: labelKey }) : result;
         return <Tag color={color}>{label || '-'}</Tag>;
       },
     });
@@ -476,6 +471,7 @@ const MyEmployeesPage: React.FC = () => {
     auditColumns.push({
       title: intl.formatMessage({ id: 'myEmployees.actions' }),
       width: 150,
+      fixed: 'right',
       render: (_: unknown, row: AuditRow) => (
         <Space>
           <Popconfirm
@@ -484,7 +480,7 @@ const MyEmployeesPage: React.FC = () => {
             cancelText={intl.formatMessage({ id: 'common.cancel' })}
             onConfirm={() => handleAudit(row, 'approve')}
           >
-            <Button type="link" size="small" loading={actionKey === `approve-${row.resourceId}-${row.userId}`}>
+            <Button type="primary" size="small" loading={actionKey === `approve-${row.resourceId}-${row.userId}`}>
               {intl.formatMessage({ id: 'myEmployees.approve' })}
             </Button>
           </Popconfirm>
@@ -518,6 +514,7 @@ const MyEmployeesPage: React.FC = () => {
     ],
     [auditPendingCount, intl]
   );
+  const auditEmptyMessage = auditFilter === 'pending' ? '暂无待审核的使用申请' : '暂无已处理的使用申请';
 
   return (
     <div
@@ -650,46 +647,76 @@ const MyEmployeesPage: React.FC = () => {
         </>
       ) : (
         <div className={styles.auditPanel}>
-          <div className={styles.auditToolbar}>
-            <Input
-              className={styles.auditSearch}
-              suffix={<SearchOutlined />}
-              allowClear
-              aria-label={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
-              placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
-              value={auditKeyword}
-              onChange={(event) => setAuditKeyword(event.target.value)}
-            />
-            <Segmented
-              value={auditFilter}
-              options={[
-                { value: 'pending', label: intl.formatMessage({ id: 'myEmployees.unreviewed' }) },
-                { value: 'history', label: intl.formatMessage({ id: 'myEmployees.reviewHistory' }) },
-              ]}
-              onChange={(value) => setAuditFilter(value as AuditFilter)}
-            />
-          </div>
-          <Spin spinning={auditLoading} wrapperClassName={styles.auditTableSpin}>
-            <div className={styles.auditTableWrap}>
-              {/* 固定辅助列宽，窄屏横向滚动，避免名称列被挤压换行。 */}
-              <Table<AuditRow>
-                rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
-                dataSource={auditRows}
-                pagination={false}
-                sticky
-                tableLayout="fixed"
-                scroll={{ x: 1120 }}
-                columns={auditColumns}
-                locale={{
-                  emptyText: (
-                    <div className={styles.emptyState}>
-                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                    </div>
-                  ),
-                }}
+          {publicationCapabilities?.enabled && (
+            <div className={styles.auditKinds}>
+              <Segmented
+                value={auditKind}
+                options={[
+                  { label: '使用授权审核', value: 'use', icon: <SafetyCertificateOutlined /> },
+                  { label: '员工发布', value: 'publication', icon: <SendOutlined /> },
+                ]}
+                onChange={(value) => setAuditKind(String(value))}
               />
             </div>
-          </Spin>
+          )}
+          {auditKind === 'publication' && publicationCapabilities?.enabled ? (
+            <PublicationAuditList />
+          ) : (
+            <>
+              <div className={styles.auditHint}>处理数字员工的使用申请，或查看已处理的审核记录。</div>
+              <div className={styles.auditToolbar}>
+                <Input
+                  className={styles.auditSearch}
+                  suffix={<SearchOutlined />}
+                  allowClear
+                  aria-label={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+                  placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+                  value={auditKeyword}
+                  onChange={(event) => setAuditKeyword(event.target.value)}
+                />
+                <Segmented
+                  value={auditFilter}
+                  options={[
+                    {
+                      value: 'pending',
+                      label: (
+                        <Space size={6}>
+                          {intl.formatMessage({ id: 'myEmployees.unreviewed' })}
+                          <span className={styles.auditCount}>{auditPendingCount}</span>
+                        </Space>
+                      ),
+                    },
+                    { value: 'history', label: intl.formatMessage({ id: 'myEmployees.reviewHistory' }) },
+                  ]}
+                  onChange={(value) => setAuditFilter(value as AuditFilter)}
+                />
+              </div>
+              <Spin spinning={auditLoading} wrapperClassName={styles.auditTableSpin}>
+                <div className={styles.auditTableWrap}>
+                  {/* 固定辅助列宽，窄屏横向滚动，避免名称列被挤压换行。 */}
+                  <Table<AuditRow>
+                    rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
+                    dataSource={auditRows}
+                    pagination={false}
+                    sticky
+                    tableLayout="fixed"
+                    scroll={{ x: 1120 }}
+                    columns={auditColumns}
+                    locale={{
+                      emptyText: (
+                        <div className={styles.emptyState}>
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description={auditKeyword ? '没有匹配的数字员工，请调整搜索关键词' : auditEmptyMessage}
+                          />
+                        </div>
+                      ),
+                    }}
+                  />
+                </div>
+              </Spin>
+            </>
+          )}
         </div>
       )}
       <EmployeePreviewModal

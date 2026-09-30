@@ -1,7 +1,8 @@
+import { hasAnyUserRole } from '@/utils/userRole';
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
 import { Input, Dropdown, message, Modal } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { trim, get, isEmpty, intersection, debounce } from 'lodash';
+import { trim, get, debounce } from 'lodash';
 import { useIntl, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import ResourceDetail from '@/components/Resources/components/ResourceDetail';
@@ -93,7 +94,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   }));
   const usersOrganizations = get(userInfo, 'usersOrganizations') || [];
   const userTypeList = usersOrganizations.map((item: any) => item.userType);
-  const isUser = isEmpty(intersection(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']));
+  const isUser = !hasAnyUserRole(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']);
 
   const intl = useIntl();
   const canManageActiveEmployee = useDigitalEmployeeManagePermission(activeAgentResourceId);

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -139,10 +140,12 @@ class GroupChatMemberGrantTest {
         verify(projectMembers).addMember(100L, 20L, "member");
         verify(connection).commit();
         verify(connection, never()).rollback();
-        verify(redis).add("DATASET:AUTHORITY:2_RED_READ_PERSON_20", "DIG_EMPLOYEE_30");
-        verify(redis).add("DATASET:AUTHORITY:2_RED_READ_PERSON_20", "DIG_EMPLOYEE_40");
-        verify(cacheSync).asyncSyncAuthChangedUsers(Set.of(20L), "FORCE_USE");
-        verify(cacheSync).asyncSyncManageAuthChangedUsers(Set.of(20L), "FORCE_USE");
+        // 当前授权缓存通过提交后的同步服务重建，验证事务边界而非旧集合的逐项写入。
+        var committedSync = inOrder(connection, cacheSync);
+        committedSync.verify(connection).commit();
+        committedSync.verify(cacheSync).asyncSyncAuthChangedUsers(Set.of(20L), "FORCE_USE");
+        committedSync.verify(cacheSync).asyncSyncManageAuthChangedUsers(Set.of(20L), "FORCE_USE");
+        verifyNoMoreInteractions(cacheSync);
     }
 
     @Test
@@ -230,8 +233,9 @@ class GroupChatMemberGrantTest {
         authService.grantDigitalEmployeesToUser(List.of(30L, 30L), 20L);
         authService.grantDigitalEmployeesToUser(List.of(30L), 20L);
         assertGrantTargets(20L, 30L);
-        verify(redis, times(1)).add("DATASET:AUTHORITY:2_RED_READ_PERSON_20", "DIG_EMPLOYEE_30");
         verify(cacheSync, times(1)).asyncSyncAuthChangedUsers(Set.of(20L), "FORCE_USE");
+        verify(cacheSync, times(1)).asyncSyncManageAuthChangedUsers(Set.of(20L), "FORCE_USE");
+        verifyNoMoreInteractions(cacheSync);
     }
 
     @Test

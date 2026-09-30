@@ -1,6 +1,6 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Button, Dropdown, Empty, Input, message, Modal } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { Alert, Button, Dropdown, Empty, Input, message, Modal } from 'antd';
+import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
@@ -9,7 +9,7 @@ import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import PropertyDetail from '@/components/Resources/components/PropertyDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
-import { deleteSkill, queryDigEmployeeRelResourceAuth, uploadSkillZip } from '@/pages/manager/service/resources';
+import { queryDigEmployeeRelResourceAuth, uploadSkillZip } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import {
@@ -37,6 +37,8 @@ import ResourceSiderListItem, {
   type ResourceSiderType,
 } from './ResourceSiderListItem';
 import styles from './index.module.less';
+import { useEnterpriseSkillPublication } from './useEnterpriseSkillPublication';
+import { useWorkspaceSkillCenterSync } from './useWorkspaceSkillCenterSync';
 const PAGE_SIZE = 30;
 
 interface Props {
@@ -155,6 +157,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   });
   const [searchValue, setSearchValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [resourceList, setResourceList] = useState<ResourceItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
@@ -187,6 +190,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     async (options?: { reset?: boolean; queryKeyword?: string }) => {
       if (listFetchRef.current) return;
       const { reset = false, queryKeyword = keywordRef.current } = options || {};
+      setLoadFailed(false);
       if (!activeSiderAgent.resourceId) {
         if (reset) {
           resourceListRef.current = [];
@@ -257,6 +261,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
             : rows.length >= PAGE_SIZE && hasNewUniqueRows
         );
       } catch {
+        setLoadFailed(true);
         if (reset) {
           resourceListRef.current = [];
           setResourceList([]);
@@ -371,6 +376,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       loadedCount: 0,
     };
     loadResources({ reset: true, queryKeyword: nextKeyword });
+  };
+
+  const handleSkillRefresh = () => {
+    // 按已生效的搜索条件从首页重载，同时重新读取员工工作空间中的技能。
+    void loadResources({ reset: true, queryKeyword: keywordRef.current });
   };
 
   const handleSkillImportClick = () => {
@@ -526,8 +536,21 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     resourceType === 'SKILL' ? activeSiderAgent.resourceId : undefined
   );
 
+  const workspaceCenterSync = useWorkspaceSkillCenterSync({
+    employeeId: activeSiderAgent.resourceId,
+    enabled: resourceType === 'SKILL' && canManageActiveAgent,
+    rows: resourceList,
+    onChanged: (item, sourceDeleted) => {
+      if (sourceDeleted) {
+        resourceListRef.current = resourceListRef.current.filter((row) => row.skillPath !== item.skillPath);
+        setResourceList(resourceListRef.current);
+      }
+      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+    },
+  });
+
   // 工作空间(用户开发)技能的详情 / 分享(资源化) 复用公共 hook，保证与右侧个人技能 tab 行为一致。
-  // 卸载仍走本地 handleUninstallSkill（左侧按数字员工维度，文案为“卸载”）。
+  // 目录技能通过资源中心同步入口安装；卸载只用于已绑定的资源库技能。
   const workspaceActions = useWorkspaceSkillActions({
     resourceId: activeSiderAgent.resourceId,
     agentName: activeSiderAgent.name,
@@ -627,6 +650,17 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     );
   };
 
+  const { canPublish, publishingId, publish, entryLabel } = useEnterpriseSkillPublication({
+    enabled: resourceType === 'SKILL',
+    onDetail: handleDetail,
+    onPublished: (resourceId, skillPublication) => {
+      // 仅更新源技能的发布摘要，保留查看入口、当前分页和滚动位置。
+      setResourceList((rows) =>
+        rows.map((row) => (String(row.resourceId) === resourceId ? { ...row, skillPublication } : row))
+      );
+    },
+  });
+
   const handleShare = async (item: ResourceItem) => {
     if (!isWorkspaceSkill(item)) {
       await openShareAuthModal(item);
@@ -681,18 +715,19 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   };
 
   const handleUninstallSkill = (item: ResourceItem) => {
+    // 目录存在不代表已安装，不能通过卸载操作删除尚未入库的开发文件。
+    if (isWorkspaceSkill(item) || item.displaySourceType === SKILL_DISPLAY_SOURCE_USER_DEVELOPED) return;
     if (!activeSiderAgent.resourceId) {
       message.error(intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' }));
       return;
     }
     const employeeName = activeSiderAgent.name || intl.formatMessage({ id: 'resource.currentDigitalEmployee' });
-    const workspaceSkill = isWorkspaceSkill(item);
 
     Modal.confirm({
       title: intl.formatMessage({ id: 'resource.uninstallSkill' }),
       content: intl.formatMessage(
         {
-          id: workspaceSkill ? 'resource.uninstallWorkspaceSkillConfirm' : 'resource.uninstallSkillConfirm',
+          id: 'resource.uninstallSkillConfirm',
         },
         { employeeName, skillName: item.resourceName }
       ),
@@ -700,26 +735,14 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       cancelText: intl.formatMessage({ id: 'common.cancel' }),
       async onOk() {
         try {
-          if (workspaceSkill) {
-            if (!item.skillPath) {
-              message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
-              return;
-            }
-            await deleteSkill({
-              skillPath: item.skillPath,
-              resourceId: activeSiderAgent.resourceId,
-              userCode: userInfo?.userCode,
-            });
-          } else {
-            // uninstallRelResources 走 customHandle，业务失败（如无管理权限 code!==0）也会 resolve，必须显式校验 code。
-            const res: any = await uninstallDigitalEmployeeRelResources({
-              digitalEmployeeId: activeSiderAgent.resourceId!,
-              relIds: [item.resourceId],
-            });
-            if (res && res.code !== 0) {
-              message.error(res.msg || intl.formatMessage({ id: 'common.operationFailed' }));
-              return;
-            }
+          // 卸载接口业务失败也会 resolve，必须显式检查返回码。
+          const res: any = await uninstallDigitalEmployeeRelResources({
+            digitalEmployeeId: activeSiderAgent.resourceId!,
+            relIds: [item.resourceId],
+          });
+          if (res && res.code !== 0) {
+            message.error(res.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+            return;
           }
           message.success(intl.formatMessage({ id: 'resource.uninstallSuccess' }));
           window.dispatchEvent(
@@ -756,7 +779,15 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   };
 
   const renderDetailDropdown = (item: ResourceItem) => {
-    const menuItems: { key: string; label: React.ReactNode }[] = [];
+    const menuItems: { key: string; label: React.ReactNode; disabled?: boolean }[] = [];
+    const workspaceCenterItem = workspaceCenterSync.menuItem(item);
+    if (workspaceCenterItem) {
+      // 下拉菜单已清除默认 padding，安装、更新和状态提示需复用其余菜单项的容器。
+      menuItems.push({
+        ...workspaceCenterItem,
+        label: <div className={employeeStyles.dropdownMenuItem}>{workspaceCenterItem.label}</div>,
+      });
+    }
     if (!item.quoteDisabled) {
       menuItems.push({
         key: 'quote',
@@ -767,13 +798,27 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       key: 'detail',
       label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
     });
-    if (item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
+    if (resourceType !== 'SKILL' && item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
       menuItems.push({
         key: 'share',
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.share' })}</div>,
       });
     }
-    if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL && canManageActiveAgent) {
+    if (canPublish(item)) {
+      menuItems.push({
+        key: 'publishToEnterprise',
+        disabled: publishingId === String(item.resourceId),
+        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: entryLabel(item) })}</div>,
+      });
+    }
+    if (
+      resourceType === 'SKILL' &&
+      item.resourceBizType === ResourceTypeMap.SKILL &&
+      canManageActiveAgent &&
+      // 非用户开发技能的卸载仅解除员工关联，不依赖目录内容检查。
+      item.displaySourceType !== SKILL_DISPLAY_SOURCE_USER_DEVELOPED &&
+      !isWorkspaceSkill(item)
+    ) {
       menuItems.push({
         key: 'uninstall',
         label: (
@@ -786,14 +831,25 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       <Dropdown
         key="detail"
         trigger={['hover']}
+        onOpenChange={(open) => {
+          if (open) workspaceCenterSync.onOpen(item);
+        }}
         overlayClassName={employeeStyles.mydropdown}
         menu={{
           items: menuItems,
           onClick: ({ key, domEvent }) => {
             domEvent.preventDefault();
             domEvent.stopPropagation();
+            if (key === 'workspaceCenter') {
+              workspaceCenterSync.onClick(item);
+              return;
+            }
             if (key === 'quote') {
               handleQuoteResource(item);
+              return;
+            }
+            if (key === 'publishToEnterprise') {
+              publish(item);
               return;
             }
             if (key === 'share') {
@@ -901,6 +957,18 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
             {intl.formatMessage({ id: 'resourceTabs.skillUpload.uploadButton' })}
           </Button>
         )}
+        {resourceType === 'SKILL' && (
+          <Button
+            size="small"
+            className={styles.skillRefreshButton}
+            icon={<ReloadOutlined />}
+            title={intl.formatMessage({ id: 'common.refresh' })}
+            aria-label={intl.formatMessage({ id: 'common.refresh' })}
+            loading={loading}
+            disabled={loading || !activeSiderAgent.resourceId}
+            onClick={handleSkillRefresh}
+          />
+        )}
       </div>
       {resourceType === 'SKILL' && (
         <>
@@ -935,6 +1003,18 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
         </>
       )}
       <div className={styles.listContainer}>
+        {loadFailed && (
+          <Alert
+            type="error"
+            showIcon
+            message={intl.formatMessage({ id: 'resourceTabs.loadFailed' })}
+            action={
+              <Button size="small" onClick={() => loadResources({ reset: true })}>
+                {intl.formatMessage({ id: 'workspaceSider.retry' })}
+              </Button>
+            }
+          />
+        )}
         <InfiniteScrollAntdList
           className={employeeStyles.employeesList}
           dataSource={resourceList}

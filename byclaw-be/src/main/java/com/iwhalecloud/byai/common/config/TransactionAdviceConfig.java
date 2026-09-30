@@ -128,6 +128,23 @@ public class TransactionAdviceConfig {
         NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                // 目录技能同步自行提交保存事务，随后清理文件；清理失败不得被外层事务转为提交失败。
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService")) {
+                    return notSurpportedTx;
+                }
+                // 发布流程通过 TransactionTemplate 分别提交执行租约、官方副本和失败记录。
+                // 外层不得再包裹 REQUIRED 事务，否则这些阶段会合并，失败状态也会被回滚。
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationApplicationService")) {
+                    return notSurpportedTx;
+                }
+                // 回滚补偿是尽力恢复外部运行态；它的失败不能污染用于记录 FAILED 的事务。
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService")
+                    && "restorePublicationRuntimeAfterRollback".equals(method.getName())) {
+                    return notSurpportedTx;
+                }
                 // Stream projections use memory/Redis and must not borrow a JDBC connection for each chunk.
                 // Match the owning class as well as the method so ordinary business writes keep their transactions.
                 if (isStreamProjectionMethod(method, targetClass)) {

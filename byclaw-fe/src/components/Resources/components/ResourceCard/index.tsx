@@ -1,17 +1,25 @@
+import { openEmployeePublication, publicationEntryLabel } from '@/service/employeePublication';
+import { publicationErrorMessage } from '@/utils/publicationError';
+import { showSkillPublication, skillPublicationEntryLabel } from '../../skillPublication';
 import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
 import { EllipsisOutlined, MessageOutlined, PlusOutlined } from '@ant-design/icons';
-import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin } from 'antd';
+import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin, Modal } from 'antd';
 import type { MenuProps } from 'antd';
 import { getLocale, useDispatch, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
-import { publishSkillToEnterprise, restoreResource } from '@/pages/manager/service/resources';
-import type { EnterpriseSkillPublishResult } from '@/pages/manager/service/resources';
+import {
+  getSkillPublicationPermissions,
+  publishSkillToEnterprise,
+  restoreResource,
+} from '@/pages/manager/service/resources';
+import type { EnterpriseSkillPublishResult, SkillPublicationSummary } from '@/pages/manager/service/resources';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
+import { useSkillExport } from '../SkillExportButton';
 import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
@@ -59,6 +67,9 @@ export interface IResourceCardItem {
   hasUsePermission?: boolean;
   canViewDetail?: boolean;
   canEdit?: boolean;
+  officialPublication?: boolean;
+  canPublishEmployee?: boolean;
+  employeePublicationStatus?: string;
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canApplyUse?: boolean;
@@ -66,6 +77,7 @@ export interface IResourceCardItem {
   canOnShelf?: boolean;
   canOffShelf?: boolean;
   canPublishToEnterprise?: boolean;
+  skillPublication?: SkillPublicationSummary;
   canUnShelf?: boolean;
   canDeleteData?: boolean;
   canSetDefault?: boolean;
@@ -80,6 +92,7 @@ export interface IResourceCardItem {
   openSuperHelper?: string;
   tagName?: string;
   displaySourceType?: string;
+  personalWorkspace?: boolean;
   skillType?: string;
   sourceType?: string;
   version?: string;
@@ -134,12 +147,16 @@ type ResourceCardActionConfig = {
   enableDigitalEmployeeDelete?: boolean;
   showDigitalEmployeeTypeTag?: boolean;
 
+  /** 资源中心技能导出不依赖管理权限。 */
+  enableSkillExport?: boolean;
+
   /** 资源浏览页展示个人/企业归属，管理页保留生命周期状态。 */
   showResourceTypeTag?: boolean;
   onRestore?: () => void;
   onAuth?: (authType: 'useAuth' | 'mgrAuth') => void;
   onEdit?: () => void;
   onApply?: () => void;
+
   /** 仅数字员工“我可用的”页签开启，其他使用卡片的场景默认隐藏。 */
   enableSetDefault?: boolean;
   onSetDefault?: () => void;
@@ -417,11 +434,18 @@ const RenderContent = (props: ResourceCardProps) => {
   const [installDialogOpen, setInstallDialogOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [publishingToEnterprise, setPublishingToEnterprise] = useState(false);
-  const [enterpriseCopyCreated, setEnterpriseCopyCreated] = useState(false);
+  const [openingPublication, setOpeningPublication] = useState(false);
+  const publicationFeedbackCleanup = useRef<() => void>();
+  useEffect(() => () => publicationFeedbackCleanup.current?.(), []);
+  const [skillPublication, setSkillPublication] = useState(resource.skillPublication);
+  const [skillPublicationFailed, setSkillPublicationFailed] = useState(false);
+  const [publicationSourceId, setPublicationSourceId] = useState(resource.resourceId);
   const publishToEnterpriseLock = useRef(false);
   useEffect(() => {
-    setEnterpriseCopyCreated(false);
-  }, [resource]);
+    setSkillPublication(resource.skillPublication);
+    setSkillPublicationFailed(false);
+    setPublicationSourceId(resource.resourceId);
+  }, [resource.resourceId, resource.skillPublication]);
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -432,7 +456,7 @@ const RenderContent = (props: ResourceCardProps) => {
     agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
 
   // 工作空间(用户开发)技能：复用公共 hook 处理详情 / 分享(资源化) / 删除，与左边栏一致。
-  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
+  const { setDetailPanel, clearDetailPanel, openTemporaryDetailPanel } = useContext(SiderContentContext);
   // 与左边栏同源解析当前数字员工名，保证“使用它的数字员工”展示一致（agentInfo 在技能中心页常为空）。
   const activeSiderAgent = useActiveSiderAgent();
   const [workspaceShareRecord, setWorkspaceShareRecord] = useState<WorkspaceSkillItem | null>(null);
@@ -442,6 +466,7 @@ const RenderContent = (props: ResourceCardProps) => {
     agentName: activeSiderAgent.name,
     setDetailPanel,
     clearDetailPanel,
+    openTemporaryDetailPanel,
     onShareAuth: (item) => setWorkspaceShareRecord(item),
     onChanged: notifySkillListReload,
   });
@@ -548,6 +573,8 @@ const RenderContent = (props: ResourceCardProps) => {
         '1': 'resourceStatus.pendingShelf',
         '2': 'resourceStatus.published',
         '3': 'resourceStatus.unpublished',
+        '4': 'resourceStatus.reviewing',
+        '5': 'resourceStatus.notPassed',
       };
       // 员工组与数字员工接口的状态字段可能不同，统一按同一组回退字段取值。
       const statusMessageId =
@@ -632,14 +659,11 @@ const RenderContent = (props: ResourceCardProps) => {
     statusTagTextMap[rawStatusKey.toUpperCase()] ||
     statusTagTextMap[`${displayTopRightTag || ''}`] ||
     '';
-  const statusTagClass =
-    (isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) || showResourceStatusTag
-      ? normalizedStatus === '-1'
-        ? 'digitalEmployeeStatusDeleted'
-        : normalizedStatus
-          ? `digitalEmployeeStatus${normalizedStatus}`
-          : ''
-      : '';
+  let statusTagClass = '';
+  if (((isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) || showResourceStatusTag) && normalizedStatus) {
+    statusTagClass =
+      normalizedStatus === '-1' ? 'digitalEmployeeStatusDeleted' : `digitalEmployeeStatus${normalizedStatus}`;
+  }
   const topRightTag = displayTopRightTag;
   const isInnerSkill = isInnerSkillResource(resource, resourceType);
   const isInstalledResource = Boolean(
@@ -716,18 +740,52 @@ const RenderContent = (props: ResourceCardProps) => {
     setPublishingToEnterprise(true);
     const messageKey = `publish-enterprise-${resource.resourceId}`;
     message.loading({ key: messageKey, content: intl.formatMessage({ id: 'common.processing' }), duration: 0 });
+    let sourceId = publicationSourceId;
     try {
-      const result = await publishSkillToEnterprise(resource.resourceId);
+      // 工作空间技能没有真实资源 ID，复用现有资源化及同名覆盖确认后再复制到企业。
+      const sourceSkill = isWorkspaceSkillResource
+        ? await workspaceActions.resourceizeSkill(resource as WorkspaceSkillItem)
+        : resource;
+      if (!sourceSkill?.resourceId) {
+        message.destroy(messageKey);
+        return;
+      }
+      sourceId = String(sourceSkill.resourceId);
+      setPublicationSourceId(sourceId);
+      const result = await publishSkillToEnterprise(sourceId);
+      // 关联个人资源只做提醒，提交已经成功，不要求用户再次确认。
+      if (result.personalDependencies?.length) {
+        Modal.warning({
+          title: intl.formatMessage({ id: 'resource.enterprisePersonalDependenciesTitle' }),
+          content: (
+            <div>
+              <p>{intl.formatMessage({ id: 'resource.enterprisePersonalDependenciesWarning' })}</p>
+              <ul>
+                {result.personalDependencies.map((item) => (
+                  <li key={item.resourceId}>{item.resourceName}</li>
+                ))}
+              </ul>
+            </div>
+          ),
+          okText: intl.formatMessage({ id: 'common.confirm' }),
+        });
+      }
       // 仅更新当前卡片，不刷新或重新挂载列表，避免 loading 结束时列表短暂空白。
-      setEnterpriseCopyCreated(true);
+      setSkillPublication(result.resource);
+      setSkillPublicationFailed(false);
       message.success({
         key: messageKey,
         content: (
           <span>
             {intl.formatMessage({
-              id: result.alreadyExists ? 'resource.enterpriseSkillExists' : 'resource.publishToEnterpriseSuccess',
+              id:
+                result.resource.resourceStatus === 4
+                  ? 'resource.enterpriseSkillPending'
+                  : result.alreadyExists
+                  ? 'resource.enterpriseSkillExists'
+                  : 'resource.publishToEnterpriseSuccess',
             })}
-            {onEnterpriseSkillDetail && (
+            {onEnterpriseSkillDetail && result.resource.resourceStatus === 2 && (
               <Button type="link" onClick={() => onEnterpriseSkillDetail(result.resource)}>
                 {intl.formatMessage({ id: 'resource.viewEnterpriseSkill' })}
               </Button>
@@ -737,20 +795,82 @@ const RenderContent = (props: ResourceCardProps) => {
         duration: 6,
       });
     } catch (error) {
+      setSkillPublicationFailed(true);
       message.error({
         key: messageKey,
-        content:
-          typeof error === 'string'
-            ? error
-            : error instanceof Error
-              ? error.message
-              : intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' }),
+        content: publicationErrorMessage(error, intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' })),
       });
+      // 响应丢失不代表事务失败；只读核对已提交申请，避免误导用户反复创建。
+      if (sourceId && (!isWorkspaceSkillResource || sourceId !== resource.resourceId)) {
+        try {
+          const permissions = await getSkillPublicationPermissions(sourceId);
+          setSkillPublication(permissions.skillPublication);
+        } catch {
+          // 状态核对失败保留重试入口，写接口仍负责幂等。
+        }
+      }
     } finally {
       publishToEnterpriseLock.current = false;
       setPublishingToEnterprise(false);
     }
-  }, [resource.resourceId, onEnterpriseSkillDetail, intl]);
+  }, [
+    resource,
+    publicationSourceId,
+    isWorkspaceSkillResource,
+    workspaceActions.resourceizeSkill,
+    onEnterpriseSkillDetail,
+    intl,
+  ]);
+
+  const viewSkillPublication = useCallback(async () => {
+    if (!publicationSourceId || publishToEnterpriseLock.current) return;
+    publishToEnterpriseLock.current = true;
+    setPublishingToEnterprise(true);
+    try {
+      await showSkillPublication({
+        sourceId: publicationSourceId,
+        onChange: setSkillPublication,
+        onPublish: handlePublishToEnterprise,
+        onDetail: onEnterpriseSkillDetail,
+      });
+    } catch (error) {
+      message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'resource.skillPublicationLoadFailed' })));
+    } finally {
+      publishToEnterpriseLock.current = false;
+      setPublishingToEnterprise(false);
+    }
+  }, [publicationSourceId, handlePublishToEnterprise, onEnterpriseSkillDetail, intl]);
+
+  const openPublication = useCallback(async () => {
+    if (publishToEnterpriseLock.current) return;
+    publishToEnterpriseLock.current = true;
+    setOpeningPublication(true);
+    const messageKey = `employee-publication-open-${resource.resourceId || resource.id || resource.agentId}`;
+    message.loading({ key: messageKey, content: '正在准备发布申请，请稍候…', duration: 0 });
+    const timer = setTimeout(() => {
+      message.loading({
+        key: messageKey,
+        content: '仍在准备发布配置，关联资源较多时可能需要更久，请勿重复点击。',
+        duration: 0,
+      });
+    }, 8000);
+    const clearFeedback = () => {
+      clearTimeout(timer);
+      message.destroy(messageKey);
+    };
+    publicationFeedbackCleanup.current = clearFeedback;
+    try {
+      const resourceId = String(resource.resourceId || resource.id || resource.agentId);
+      await openEmployeePublication(resourceId);
+    } catch (error: any) {
+      message.error(publicationErrorMessage(error, '无法发起发布申请'));
+    } finally {
+      clearFeedback();
+      publicationFeedbackCleanup.current = undefined;
+      publishToEnterpriseLock.current = false;
+      setOpeningPublication(false);
+    }
+  }, [resource.resourceId, resource.id, resource.agentId]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const {
@@ -798,14 +918,27 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
+    if (resource.canPublishEmployee && resource.agentType !== '017') {
+      items.push({
+        key: 'publishEmployee',
+        disabled: openingPublication,
+        label: (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={publicationEntryLabel(resource.employeePublicationStatus)}
+            loading={openingPublication}
+          />
+        ),
+        onClick: () => openPublication(),
+      });
+    }
+
     // 编辑信息
     if (canEdit && !isInnerSkill) {
       items.push({
         key: 'edit',
         label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'common.editInfo' })} />,
-        onClick: () => {
-          onEdit?.();
-        },
+        onClick: () => onEdit?.(),
       });
     }
 
@@ -816,13 +949,19 @@ const RenderContent = (props: ResourceCardProps) => {
       !isWorkspaceSkillResource &&
       currentResourceStatus !== '-1' &&
       resource.resourceId &&
-      !enterpriseCopyCreated &&
       actionConfig?.enablePublishToEnterprise === true &&
       resource.canPublishToEnterprise === true
     ) {
       items.push({
         key: 'publishToEnterprise',
-        label: (
+        disabled: publishingToEnterprise,
+        label: skillPublication ? (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={intl.formatMessage({ id: skillPublicationEntryLabel(skillPublication) })}
+            loading={publishingToEnterprise}
+          />
+        ) : (
           <ConfirmMenuLabel
             title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
             loading={publishingToEnterprise}
@@ -830,11 +969,12 @@ const RenderContent = (props: ResourceCardProps) => {
           >
             <BuildMenuLabel
               icon="icon-a-Uploadshangchuan"
-              text={intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+              text={intl.formatMessage({ id: skillPublicationEntryLabel(undefined, skillPublicationFailed) })}
               loading={publishingToEnterprise}
             />
           </ConfirmMenuLabel>
         ),
+        onClick: skillPublication ? () => void viewSkillPublication() : undefined,
       });
     }
 
@@ -962,7 +1102,8 @@ const RenderContent = (props: ResourceCardProps) => {
     // 数字员工下架沿用操作权限判断；页面通过生命周期开关隐藏个人员工的上下架入口。
     const canUnShelfDigitalEmployee =
       isDigitalEmployeeResource &&
-      (canOffShelf === true || (canManageEnterpriseDigitalEmployee && digitalEmployeeStatus === '2'));
+      (canOffShelf === true ||
+        (canOffShelf === undefined && canManageEnterpriseDigitalEmployee && digitalEmployeeStatus === '2'));
     if (
       enableDigitalEmployeeLifecycle &&
       ((!isDigitalEmployeeResource && !enableResourceLifecycle && canDelete) || canUnShelfDigitalEmployee)
@@ -993,7 +1134,8 @@ const RenderContent = (props: ResourceCardProps) => {
     if (
       enableDigitalEmployeeLifecycle &&
       isDigitalEmployeeResource &&
-      (canOnShelf === true || (canManageEnterpriseDigitalEmployee && ['0', '3'].includes(digitalEmployeeStatus)))
+      (canOnShelf === true ||
+        (canOnShelf === undefined && canManageEnterpriseDigitalEmployee && ['0', '3'].includes(digitalEmployeeStatus)))
     ) {
       items.push({
         key: 'shelfData',
@@ -1068,8 +1210,11 @@ const RenderContent = (props: ResourceCardProps) => {
     handleSetDefaultDebounced,
     handlePublishToEnterprise,
     publishingToEnterprise,
+    openingPublication,
     processingLifecycle,
-    enterpriseCopyCreated,
+    skillPublication,
+    skillPublicationFailed,
+    viewSkillPublication,
     isPersonalResource,
     isWorkspaceSkillResource,
     currentResourceStatus,
@@ -1097,6 +1242,10 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.resourceStatus,
     resource?.metaStatus,
     resource?.canEdit,
+    resource?.officialPublication,
+    resource?.canPublishEmployee,
+    resource?.employeePublicationStatus,
+    openPublication,
     resource?.canManageAuth,
     resource?.canUseAuth,
     resource?.canApplyUse,
@@ -1123,7 +1272,7 @@ const RenderContent = (props: ResourceCardProps) => {
     settingDefault,
   ]);
 
-  // 工作空间技能用独立菜单(详情/分享/删除)，不走权限驱动的 menuItems。
+  // 工作空间技能用独立菜单；个人管理页支持资源化后上架，浏览页遵循隐藏规则。
   const workspaceMenuItems = useMemo<MenuProps['items']>(() => {
     if (!isWorkspaceSkillResource) {
       return [];
@@ -1140,6 +1289,32 @@ const RenderContent = (props: ResourceCardProps) => {
         onClick: () => workspaceActions.shareSkill(resource as WorkspaceSkillItem),
       },
     ];
+    if (actionConfig?.enablePublishToEnterprise && actionConfig?.canManageWorkspaceSkill) {
+      items.push({
+        key: 'publishToEnterprise',
+        disabled: publishingToEnterprise,
+        label: skillPublication ? (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={intl.formatMessage({ id: skillPublicationEntryLabel(skillPublication) })}
+            loading={publishingToEnterprise}
+          />
+        ) : (
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
+            loading={publishingToEnterprise}
+            onConfirm={handlePublishToEnterprise}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Uploadshangchuan"
+              text={intl.formatMessage({ id: skillPublicationEntryLabel(undefined, skillPublicationFailed) })}
+              loading={publishingToEnterprise}
+            />
+          </ConfirmMenuLabel>
+        ),
+        onClick: skillPublication ? () => void viewSkillPublication() : undefined,
+      });
+    }
     // 工作空间技能同样遵循浏览页隐藏规则，管理入口仍需员工管理权限（后端同样校验）。
     if (actionConfig?.canManageWorkspaceSkill && !actionConfig?.hiddenMenuItemKeys?.includes('delete')) {
       items.push({
@@ -1148,8 +1323,15 @@ const RenderContent = (props: ResourceCardProps) => {
         onClick: () => workspaceActions.removeSkill(resource as WorkspaceSkillItem),
       });
     }
-    return items;
+    const hiddenKeys = new Set(actionConfig?.hiddenMenuItemKeys || []);
+    return items.filter((item) => item && !hiddenKeys.has(String(item.key)));
   }, [
+    actionConfig?.enablePublishToEnterprise,
+    skillPublication,
+    skillPublicationFailed,
+    viewSkillPublication,
+    publishingToEnterprise,
+    handlePublishToEnterprise,
     isWorkspaceSkillResource,
     intl,
     workspaceActions,
@@ -1158,7 +1340,31 @@ const RenderContent = (props: ResourceCardProps) => {
     actionConfig?.hiddenMenuItemKeys,
   ]);
 
-  const effectiveMenuItems = isWorkspaceSkillResource ? workspaceMenuItems : menuItems;
+  const { loading: exportingSkill, exportSkills } = useSkillExport({
+    item: resource,
+    digitalEmployeeId: activeDigitalEmployeeId,
+  });
+  // 工作空间和资源化技能都在更多菜单中导出，不受管理权限限制。
+  const effectiveMenuItems: MenuProps['items'] = [
+    ...((isWorkspaceSkillResource ? workspaceMenuItems : menuItems) || []),
+    ...(actionConfig?.enableSkillExport && (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL')
+      ? [
+          {
+            key: 'exportSkill',
+            label: (
+              <BuildMenuLabel
+                icon="icon-a-Downloadxiazai"
+                text={intl.formatMessage({ id: 'resource.skillExport.single' })}
+              />
+            ),
+            disabled: exportingSkill,
+            onClick: () => {
+              void exportSkills();
+            },
+          },
+        ]
+      : []),
+  ];
   const effectiveTopRightTag =
     isWorkspaceSkillResource && !showResourceTypeTag
       ? intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })

@@ -20,6 +20,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -35,6 +42,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
@@ -49,6 +57,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEvent
 import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatWebSocketService;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
+import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
@@ -59,6 +68,7 @@ import com.iwhalecloud.byai.state.domain.ws.handler.WebSocketHandler;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.util.ReferenceCountUtil;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
 class GroupChatApplicationServiceResourceListTest {
@@ -309,19 +319,23 @@ class GroupChatApplicationServiceResourceListTest {
     }
 
     @Test
-    void missingSessionOrNullContentWithoutFilesIsRejected() {
-        GroupChatWebSocketService socket = new GroupChatWebSocketService(service);
-        ChannelHandlerContext channel = mock(ChannelHandlerContext.class);
-        ChatMessage command = command(List.of());
-        command.setChatContent(null);
-        assertThatThrownBy(() -> socket.send(channel, command)).isInstanceOf(IllegalArgumentException.class);
-        command.setFiles(List.of());
-        assertThatThrownBy(() -> socket.send(channel, command)).isInstanceOf(IllegalArgumentException.class);
-        command.setFiles(List.of(new MessageFileDto()));
-        command.setSessionId(null);
-        assertThatThrownBy(() -> socket.send(channel, command)).isInstanceOf(IllegalArgumentException.class);
+    void missingSessionOrNullContentWithoutFilesReturnsCorrelatedError() {
+        ChatMessage request = command(List.of());
+        request.setChatContent(null);
+        JSONObject response = sendThroughWebSocket(service, request);
+        assertThat(response.getString("type")).isEqualTo("GROUP_CHAT_REJECTED");
+        assertThat(response.getString("code")).isEqualTo("INVALID_GROUP_MESSAGE");
+        assertThat(response.getString("message")).isEqualTo("Group chat session and content are required");
+
+        request.setFiles(List.of());
+        assertThat(sendThroughWebSocket(service, request).getString("type")).isEqualTo("GROUP_CHAT_REJECTED");
+        request.setFiles(List.of(new MessageFileDto()));
+        request.setSessionId(null);
+        response = sendThroughWebSocket(service, request);
+        // FE 的拒绝处理要求 sessionId；缺失时用 ERROR 按请求 ID 结束等待。
+        assertThat(response.getString("type")).isEqualTo("ERROR");
+        assertThat(response.getString("code")).isEqualTo("INVALID_GROUP_MESSAGE");
         verify(messageMapper, never()).insert(any(ByaiMessage.class));
-        verify(channel, never()).writeAndFlush(any());
     }
 
     @Test
@@ -369,6 +383,36 @@ class GroupChatApplicationServiceResourceListTest {
     }
 
     @Test
+    void messageFileReferencesArePersistedWithoutMemberValidationOrAgentDispatch() {
+        ResourceVo uploadedFile = resource(AgentMetaEnum.COMMON_FILE, "file-701", "COMMON_FILE_file-701");
+        ResourceVo cloudFile = resource(AgentMetaEnum.KG_DOC_FILE, "/资料/报告.pdf", "KG_DOC_FILE_/资料/报告.pdf");
+        ResourceVo cloudFolder = resource(AgentMetaEnum.KG_DOC_FOLDER, "/资料/", "KG_DOC_FOLDER_/资料/");
+
+        service.acceptUserMessage(command(List.of(uploadedFile, cloudFile, cloudFolder)));
+
+        ArgumentCaptor<ByaiMessage> saved = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(messageMapper).insert(saved.capture());
+        JSONObject metadata = JSON.parseObject(saved.getValue().getMetadata());
+        assertThat(metadata.getJSONArray("resourceList")).hasSize(3);
+        verify(memberService, never()).findSessionMember(any(), any(), any());
+        verify(executionCoordinator, never()).enqueue(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void mixedMemberAndFileReferencesValidateOnlyMembersAndDispatchAgents() {
+        when(memberService.findSessionMember(GROUP_ID, MemObjType.AGENT.name(), 501L))
+            .thenReturn(new ByaiSessionMember());
+        ResourceVo agent = resource(AgentMetaEnum.DIG_EMPLOYEE, "501", "DIG_EMPLOYEE_501");
+        ResourceVo file = resource(AgentMetaEnum.COMMON_FILE, "not-a-number", "COMMON_FILE_not-a-number");
+
+        service.acceptUserMessage(command(List.of(agent, file)));
+
+        verify(memberService).findSessionMember(GROUP_ID, MemObjType.AGENT.name(), 501L);
+        verify(executionCoordinator).enqueue(GROUP_ID, MESSAGE_ID, null, USER_ID, 501L, null, MESSAGE_ID);
+        verify(messageMapper).insert(any(ByaiMessage.class));
+    }
+
+    @Test
     void rejectsMissingOrNonNumericResourceIdBeforePersisting() {
         assertThatThrownBy(() -> service.acceptUserMessage(
             command(List.of(resource(AgentMetaEnum.DIG_EMPLOYEE, "not-a-number", "DIG_EMPLOYEE_501")))))
@@ -408,6 +452,129 @@ class GroupChatApplicationServiceResourceListTest {
                 .hasMessage("Conflicting group member resource types");
 
         verify(messageMapper, never()).insert(any(ByaiMessage.class));
+    }
+
+    @Test
+    void nonMemberReceivesSpecificRejectionThroughWebSocketHandler() {
+        SessionService sessions = mock(SessionService.class);
+        ByaiSession groupSession = new ByaiSession();
+        groupSession.setSessionId(GROUP_ID);
+        groupSession.setSessionType(SessionType.HS_AS.getCode());
+        when(sessions.findById(GROUP_ID)).thenReturn(groupSession);
+        // 使用真实授权校验，保证只有明确的业务拒绝才会对外展示原始原因。
+        ReflectionTestUtils.setField(service, "authorizationService",
+            new GroupChatAuthorizationService(sessions, memberService, mock(SessionExtService.class)));
+        JSONObject response = sendThroughWebSocket(service, command(List.of()));
+        assertThat(response.getString("type")).isEqualTo("GROUP_CHAT_REJECTED");
+        assertThat(response.getString("code")).isEqualTo("GROUP_CHAT_VALIDATION_FAILED");
+        assertThat(response.getString("message")).isEqualTo("User is not a group member");
+        verify(messageMapper, never()).insert(any(ByaiMessage.class));
+    }
+
+    @Test
+    void invalidResourceReceivesSpecificRejectionThroughWebSocketHandler() {
+        JSONObject response = sendThroughWebSocket(service,
+            command(List.of(resource(AgentMetaEnum.DIG_EMPLOYEE, "bad-id", "DIG_EMPLOYEE_bad-id"))));
+        assertThat(response.getString("type")).isEqualTo("GROUP_CHAT_REJECTED");
+        assertThat(response.getString("message")).isEqualTo("Invalid group member resource ID");
+        verify(messageMapper, never()).insert(any(ByaiMessage.class));
+    }
+
+    @Test
+    void databaseFailureReturnsRetryableErrorWithoutLeakingDatabaseDetails() {
+        when(messageMapper.insert(any(ByaiMessage.class)))
+            .thenThrow(new DataAccessResourceFailureException("internal database diagnostic"));
+        JSONObject response = sendThroughWebSocket(service, command(List.of()));
+        assertThat(response.getString("type")).isEqualTo("ERROR");
+        assertThat(response.getString("code")).isEqualTo("GROUP_CHAT_STORAGE_ERROR");
+        assertThat(response.getString("message")).contains("数据库").doesNotContain("internal database diagnostic");
+        verify(eventPublisher, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void unexpectedFailureReturnsRetryableErrorWithRequestIdentity() {
+        when(sequenceService.nextVal()).thenThrow(new IllegalStateException("internal service diagnostic"));
+        JSONObject response = sendThroughWebSocket(service, command(List.of()));
+        assertThat(response.getString("type")).isEqualTo("ERROR");
+        assertThat(response.getString("code")).isEqualTo("GROUP_CHAT_INTERNAL_ERROR");
+        assertThat(response.getString("message")).isNotBlank().doesNotContain("internal service diagnostic");
+    }
+
+    @Test
+    void internalArgumentFailureIsRetryableAndDoesNotExposeDiagnostic() {
+        when(sequenceService.nextVal()).thenThrow(new IllegalArgumentException("internal conversion diagnostic"));
+        JSONObject response = sendThroughWebSocket(service, command(List.of()));
+        assertThat(response.getString("type")).isEqualTo("ERROR");
+        assertThat(response.getString("code")).isEqualTo("GROUP_CHAT_INTERNAL_ERROR");
+        assertThat(response.getString("message")).isNotBlank().doesNotContain("internal conversion diagnostic");
+    }
+
+    @Test
+    void exceptionAfterCommitDoesNotRejectAlreadyPersistedMessage() {
+        // 真实事务代理执行提交回调，验证提交后的 IllegalArgumentException 不被当作业务拒绝。
+        var transactions = new TestTransactionManager();
+        var proxy = new ProxyFactory(service);
+        proxy.addAdvice(new TransactionInterceptor(transactions,
+            new AnnotationTransactionAttributeSource()));
+        when(eventPublisher.publish(eq(GROUP_ID), any(JSONObject.class), isNull()))
+            .thenThrow(new IllegalArgumentException("internal broadcast diagnostic"));
+
+        JSONObject response = sendThroughWebSocket((GroupChatApplicationService) proxy.getProxy(), command(List.of()));
+
+        assertThat(transactions.committed).isTrue();
+        assertThat(response.getString("type")).isEqualTo("ERROR");
+        assertThat(response.getString("message")).doesNotContain("internal broadcast diagnostic");
+        verify(messageMapper).insert(any(ByaiMessage.class));
+    }
+
+    private JSONObject sendThroughWebSocket(GroupChatApplicationService applicationService, ChatMessage request) {
+        request.setType(MessageType.GROUP_CHAT_SEND);
+        request.setClientRequestId("request-send-result");
+        WebSocketHandler handler = new WebSocketHandler();
+        ReflectionTestUtils.setField(handler, "groupChatWebSocketService", new GroupChatWebSocketService(applicationService));
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(Constant.ATT_USER_INFO).set(CurrentUserHolder.getLoginInfo());
+        try {
+            channel.writeInbound(new TextWebSocketFrame(JSON.toJSONString(request)));
+            Object outbound = channel.readOutbound();
+            try {
+                assertThat(outbound).isInstanceOf(TextWebSocketFrame.class);
+                JSONObject response = JSON.parseObject(((TextWebSocketFrame) outbound).text());
+                assertThat(response.getString("clientRequestId")).isEqualTo("request-send-result");
+                if (request.getSessionId() != null) {
+                    assertThat(response.getString("sessionId")).isEqualTo(String.valueOf(GROUP_ID));
+                }
+                assertThat(response.containsKey("messageId")).isFalse();
+                assertThat((Object) channel.readOutbound()).isNull();
+                return response;
+            }
+            finally {
+                ReferenceCountUtil.release(outbound);
+            }
+        }
+        finally {
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    private static class TestTransactionManager extends AbstractPlatformTransactionManager {
+        private boolean committed;
+
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(Object transaction, TransactionDefinition definition) {}
+
+        @Override
+        protected void doCommit(DefaultTransactionStatus status) {
+            committed = true;
+        }
+
+        @Override
+        protected void doRollback(DefaultTransactionStatus status) {}
     }
 
     private ChatMessage command(List<ResourceVo> resources) {

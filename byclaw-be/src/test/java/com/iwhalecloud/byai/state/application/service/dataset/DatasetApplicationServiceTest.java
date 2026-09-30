@@ -125,7 +125,7 @@ class DatasetApplicationServiceTest {
         for (String key : List.of("dataset.cloud.access.denied", "dataset.file.rename.name.invalid",
             "dataset.file.rename.path.invalid", "dataset.cloud.item.manage.denied",
             "resource.lifecycle.status.invalid", "dataset.creator.immutable", "dataset.file.exists")) {
-            messageSource.addMessage(key, Locale.getDefault(), key);
+            messageSource.addMessage(key, TEST_LOCALE, key);
         }
         ApplicationContext applicationContext = org.mockito.Mockito.mock(ApplicationContext.class);
         org.mockito.Mockito.when(applicationContext.getBean(org.springframework.context.MessageSource.class))

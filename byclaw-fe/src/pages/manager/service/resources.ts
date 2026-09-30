@@ -249,6 +249,7 @@ export interface ResourceImportItem {
   resourceId?: string; // 资源ID
   updated: boolean; // 是否为更新操作
   success: boolean; // 是否导入成功
+  reviewRequired?: boolean; // 导入已接收，审核通过后才上架
   message?: string; // 导入消息/错误信息
   diffSummary?: string; // 差异摘要
   diffDetails?: ResourceImportDiffItem[]; // 差异详情列表
@@ -283,6 +284,7 @@ export interface ResourceUseApplyParams {
  * 记录单个资源使用申请的详细信息
  */
 export interface ResourceUseApplyAuditItem {
+  auditType?: 'SKILL_PUBLICATION';
   privilegeGrantId: string; // 权限授权ID
   userId: string; // 用户ID
   userName: string; // 用户名称
@@ -302,6 +304,7 @@ export interface ResourceUseApplyAuditItem {
  * 审批资源使用申请参数
  */
 export interface ApproveResourceUseApplyParams {
+  auditType?: 'SKILL_PUBLICATION'; // 上架审核复用审核接口，保持与使用权限审核分流
   resourceId: string | number; // 资源ID
   applyUserId: string | number; // 申请用户ID
 }
@@ -642,10 +645,12 @@ export interface ResourceOperationPermissions {
   canOnShelf?: boolean; // 是否可上架
   canOffShelf?: boolean; // 是否可下架
   canPublishToEnterprise?: boolean; // 是否可将个人技能复制上架到企业
+  skillPublication?: SkillPublicationSummary; // 当前发布快照，包含待审核及驳回结果
   useApplyPending?: boolean; // 使用申请是否待审核
 }
 
 export interface EnterpriseSkillPublishResult {
+  personalDependencies?: { resourceId: string; resourceName: string; resourceBizType: string }[];
   resource: {
     resourceId: string;
     resourceName: string;
@@ -655,6 +660,20 @@ export interface EnterpriseSkillPublishResult {
   };
   alreadyExists: boolean;
 }
+
+export interface SkillPublicationSummary {
+  resourceId: string;
+  resourceName: string;
+  resourceStatus: number;
+}
+
+/** 只读查询发布状态，不能通过重复调用发布接口来查看结果。 */
+export const getSkillPublicationPermissions = (resourceId: string) =>
+  POST<ResourceOperationPermissions>(
+    '/byaiService/auth/privilegeGrant/queryResourceOperationPermissions',
+    { resourceId },
+    { responseCfg: { hideErrorTips: true } }
+  );
 
 /** 独立复制接口，不使用会按技能编码覆盖原资源的导入接口。 */
 export const publishSkillToEnterprise = (resourceId: string) =>
@@ -723,9 +742,11 @@ export interface UploadSkillZipResponse {
   skillDesc?: string;
   displaySourceType?: string;
   resourceBacked?: boolean;
+  personalWorkspace?: boolean;
 }
 
 export interface QuerySkillListParams {
+  personalWorkspace?: boolean;
   userCode?: string;
   resourceId?: string | number;
   keyword?: string;
@@ -762,6 +783,29 @@ export const queryWorkspaceSkillList = (params: QuerySkillListParams) => {
 
 export const queryLobsterInstalledSkillList = queryWorkspaceSkillList;
 
+export interface WorkspaceSkillCenterStatus {
+  action: 'INSTALL' | 'UPDATE' | 'NONE';
+  ownerType: 'personal' | 'enterprise';
+  targetResourceId?: string | number;
+  revision: string;
+}
+
+/** 员工目录同步使用当前登录身份；目标归属与匹配范围由后端解析。 */
+export interface WorkspaceSkillCenterParams {
+  resourceId: string;
+  skillPath?: string;
+  targetResourceId?: string | number;
+}
+
+export const queryWorkspaceSkillCenterStatus = (params: WorkspaceSkillCenterParams) =>
+  POST<WorkspaceSkillCenterStatus>('/byaiService/tool/queryWorkspaceSkillCenterStatus', params);
+
+export const syncWorkspaceSkillToCenter = (params: WorkspaceSkillCenterParams & { revision: string }) =>
+  POST<{ resourceId: string | number; action: 'INSTALL' | 'UPDATE'; sourceDeleted: boolean }>(
+    '/byaiService/tool/syncWorkspaceSkillToCenter',
+    params
+  );
+
 /**
  * 查询当前数字员工 workspace 中、尚未进入个人技能资源列表的目录技能（用户开发）。
  * 与 queryWorkspaceSkillList 的区别：去重口径为“个人 tab 已资源化技能”，供首页右侧个人技能 tab 合并展示。
@@ -774,6 +818,7 @@ export const queryWorkspacePersonalSkillList = (params: QuerySkillListParams) =>
 };
 
 export interface WorkspaceSkillParams {
+  personalWorkspace?: boolean;
   skillPath: string;
   resourceId?: string | number;
   userCode?: string;
@@ -804,6 +849,7 @@ export const resourceizeWorkspaceSkill = (params: WorkspaceSkillParams) => {
 export const downloadSkillZip = (params: {
   skillPath?: string;
   skillId?: string | number;
+  personalWorkspace?: boolean;
   resourceId?: string | number;
   userCode?: string;
 }) => {
@@ -819,7 +865,7 @@ export const downloadSkillZip = (params: {
  * @param params 参数（包含skillPath技能路径、resourceId资源ID和可选的userCode用户编码）
  * @returns Promise 删除结果
  */
-export const deleteSkill = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
+export const deleteSkill = (params: WorkspaceSkillParams) => {
   return POST<any>('/byaiService/tool/deleteSkill', params, {
     responseCfg: {
       hideErrorTips: true,

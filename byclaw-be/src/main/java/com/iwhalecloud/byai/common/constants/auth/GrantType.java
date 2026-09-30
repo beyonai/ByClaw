@@ -15,6 +15,9 @@ public final class GrantType {
      */
     public static final String AVAILABLE_USE = "AVAILABLE_USE";
 
+    /** 技能上架审核申请，不属于任何有效授权类型。 */
+    public static final String SKILL_PUBLICATION = "SKILL_PUBLICATION";
+
     /**
      * 管理授权
      */

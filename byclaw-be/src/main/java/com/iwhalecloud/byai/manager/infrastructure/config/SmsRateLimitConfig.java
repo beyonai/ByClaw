@@ -6,14 +6,13 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @ConfigurationProperties(prefix = "sms.rate.limit")
 public class SmsRateLimitConfig {
-    
     /**
-     * IP限制时间窗口(分钟)
+     * 手机号限制时间窗口(分钟)
      */
     private int intervalMinutes = 5;
     
     /**
-     * IP时间窗口内最大发送次数
+     * 同一手机号时间窗口内最大发送尝试次数（登录、注册共用）
      */
     private int maxCount = 3;
     

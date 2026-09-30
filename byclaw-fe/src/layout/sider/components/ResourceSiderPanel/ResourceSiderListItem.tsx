@@ -1,3 +1,4 @@
+import type { SkillPublicationSummary } from '@/pages/manager/service/resources';
 import React from 'react';
 import { List, Tooltip } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
@@ -33,6 +34,10 @@ export interface ResourceItem {
   sourceType?: string;
   displaySourceType?: string;
   resourceBacked?: boolean;
+  ownerType?: string;
+  resourceStatus?: string | number;
+  canPublishToEnterprise?: boolean;
+  skillPublication?: SkillPublicationSummary;
   skillPath?: string;
   skillDocObjectKey?: string;
   useStartTime?: string;
