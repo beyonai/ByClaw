@@ -898,8 +898,8 @@ class ByClawSkillResourceApplicationServiceTest {
                 publicationResource(3001L, "KG_DOC", owner, "产品资料")));
 
         assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
-            .hasMessageContaining("个人工具「订单查询」（ID：2001）")
-            .hasMessageContaining("个人知识「产品资料」（ID：3001）");
+            .hasMessageContaining("个人工具「订单查询」（code：resource-2001，ID：2001，类型：MCP，归属：")
+            .hasMessageContaining("个人知识库「产品资料」（code：resource-3001，ID：3001，类型：KG_DOC，归属：");
         verifyPublicationRejectedBeforeWrites();
     }
 
@@ -914,14 +914,31 @@ class ByClawSkillResourceApplicationServiceTest {
             .thenReturn(List.of(publicationResource(2001L, "TOOL", "enterprise", "企业工具"),
                 publicationResource(3001L, "KG_DB", "personal", "个人数据")));
         assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
-            .hasMessageContaining("个人知识「个人数据」（ID：3001）")
+            .hasMessageContaining("个人知识库「个人数据」（code：resource-3001，ID：3001，类型：KG_DB，归属：personal）")
             .hasMessageNotContaining("企业工具");
         verifyPublicationRejectedBeforeWrites();
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"deleted", "other-enterprise", "type-mismatch"})
+    void publicationStillBlocksKnownPersonalResources(String scenario) throws Exception {
+        prepareEnterpriseCopy();
+        stubPublicationManifest("", "{\"resources\":[{\"resourceId\":2001,\"resourceType\":\"TOOL\"}]}");
+        var resource = publicationResource(2001L, "MCP", "personal", "个人查询工具");
+        if ("deleted".equals(scenario)) resource.setResourceStatus(-1);
+        if ("other-enterprise".equals(scenario)) resource.setComAcctId(2L);
+        if ("type-mismatch".equals(scenario)) resource.setResourceBizType("KG_DOC");
+        when(ssResourceService.findByIdList(java.util.Set.of(2001L))).thenReturn(List.of(resource));
+        assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
+            .hasMessageContaining("个人查询工具").hasMessageContaining("code：resource-2001")
+            .hasMessageContaining("ID：2001").hasMessageContaining("类型：" + resource.getResourceBizType())
+            .hasMessageContaining("归属：personal");
+        verifyPublicationRejectedBeforeWrites();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"missing", "deleted", "other-enterprise", "type-mismatch", "unknown-owner"})
-    void publicationRejectsUnresolvableOrInconsistentResources(String scenario) throws Exception {
+    void publicationAllowsDependenciesUnlessTheyAreKnownPersonalResources(String scenario) throws Exception {
         prepareEnterpriseCopy();
         stubPublicationManifest("", "{\"resources\":[{\"resourceId\":2001,\"resourceType\":\"TOOL\"}]}");
         var resource = publicationResource(2001L, "TOOL", "enterprise", "依赖资源");
@@ -932,14 +949,8 @@ class ByClawSkillResourceApplicationServiceTest {
         when(ssResourceService.findByIdList(java.util.Set.of(2001L)))
             .thenReturn("missing".equals(scenario) ? List.of() : List.of(resource));
 
-        assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
-            .hasMessageContaining("无法发布到官方推荐").hasMessageContaining("2001")
-            .satisfies(error -> {
-                if ("other-enterprise".equals(scenario)) {
-                    assertThat(error.getMessage()).doesNotContain("依赖资源");
-                }
-            });
-        verifyPublicationRejectedBeforeWrites();
+        var result = service.publishSkillToEnterprise(7001L);
+        verify(publications).submit(any(), eq(result.resource()));
     }
 
     @ParameterizedTest
@@ -980,6 +991,7 @@ class ByClawSkillResourceApplicationServiceTest {
         resource.setResourceBizType(type);
         resource.setOwnerType(owner);
         resource.setResourceName(name);
+        resource.setResourceCode("resource-" + id);
         resource.setComAcctId(1L);
         resource.setResourceStatus(2);
         return resource;

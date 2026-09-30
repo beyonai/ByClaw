@@ -724,29 +724,18 @@ public class ByClawSkillResourceApplicationService {
         for (Map.Entry<Long, String> dependency : dependencies.entrySet()) {
             Long id = dependency.getKey();
             SsResource resource = resources.get(id);
-            // 不暴露其他企业的资源名称，已注销资源也按查不到处理。
-            if (resource == null || CurrentUserHolder.getEnterpriseId() == null
-                || !Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
-                || Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
-                failures.add(I18nUtil.get("byclaw.skill.publication.resource.missing", id.toString()));
+            // 此处只拦截实际查到的个人依赖；查不到、跨企业及其他归属不扩大阻断范围。
+            if (resource == null || !(OwnerType.PERSONAL.equals(resource.getOwnerType())
+                || "personal_default".equals(resource.getOwnerType()))) {
                 continue;
             }
-            String name = StringUtils.defaultIfBlank(resource.getResourceName(), id.toString());
-            boolean knowledge = "KNOWLEDGE_BASE".equals(dependency.getValue());
-            boolean typeMatches = knowledge
-                ? Set.of("KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "KG_CLOUD").contains(
-                    StringUtils.defaultString(resource.getResourceBizType()))
-                : Set.of("TOOL", "TOOLKIT", "MCP", "MCP_TOOL").contains(
-                    StringUtils.defaultString(resource.getResourceBizType()));
-            if (!typeMatches) {
-                failures.add(I18nUtil.get("byclaw.skill.publication.resource.type.mismatch", name, id.toString()));
-            } else if (OwnerType.PERSONAL.equals(resource.getOwnerType())
-                || "personal_default".equals(resource.getOwnerType())) {
-                failures.add(I18nUtil.get(knowledge ? "byclaw.skill.publication.personal.knowledge"
-                    : "byclaw.skill.publication.personal.tool", name, id.toString()));
-            } else if (!OwnerType.ENTERPRISE.equals(resource.getOwnerType())) {
-                failures.add(I18nUtil.get("byclaw.skill.publication.resource.owner.invalid", name, id.toString()));
-            }
+            String type = StringUtils.defaultIfBlank(resource.getResourceBizType(), "-");
+            String key = type.startsWith("KG_") ? "byclaw.skill.publication.personal.knowledge"
+                : Set.of("TOOL", "TOOLKIT", "MCP", "MCP_TOOL").contains(type)
+                    ? "byclaw.skill.publication.personal.tool" : "byclaw.skill.publication.personal.resource";
+            failures.add(I18nUtil.get(key, StringUtils.defaultIfBlank(resource.getResourceName(), "-"),
+                id.toString(), StringUtils.defaultIfBlank(resource.getResourceCode(), "-"), type,
+                resource.getOwnerType()));
         }
         if (!failures.isEmpty()) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.publication.dependencies.blocked",
