@@ -195,6 +195,89 @@ class SessionRuntimeStateServiceTest {
         }
     }
 
+    @Test
+    void confirmWaitingInteractionClearsWaitingAndPersistsRunningDerivedFromActiveAgents() {
+        Map<String, String> storage = new ConcurrentHashMap<>();
+        when(valueOperations.get(anyString())).thenAnswer(invocation -> storage.get(invocation.getArgument(0)));
+        doAnswer(invocation -> {
+            storage.put(invocation.getArgument(0), invocation.getArgument(1));
+            return null;
+        }).when(valueOperations).set(anyString(), any(), eq(24L * 60L * 60L), eq(TimeUnit.SECONDS));
+        SessionRuntimeState waiting = state("integration-a", "trace-1", "waiting_user", 5L, 1000L);
+        waiting.setActiveAgentCount(2L);
+        waiting.setActiveChildCount(1L);
+        waiting.setWaitingInteractionCount(3L);
+        storage.put("byai:chat:session-runtime:10", JSON.toJSONString(waiting));
+
+        SessionRuntimeState confirmed = service.confirmWaitingInteraction(10L);
+
+        assertThat(confirmed).isNotNull();
+        assertThat(confirmed.getWaitingInteractionCount()).isZero();
+        assertThat(confirmed.getStatus()).isEqualTo("running");
+        assertThat(confirmed.getRevision()).isEqualTo(6L);
+        assertThat(confirmed.getChangedAt()).isGreaterThanOrEqualTo(1000L);
+        // 权威投影确实被改写：回读到的 Redis 态不再满足「等待用户输入」。
+        SessionRuntimeState persisted = service.get(10L);
+        assertThat(persisted.getStatus()).isEqualTo("running");
+        assertThat(persisted.getWaitingInteractionCount()).isZero();
+        assertThat(persisted.getRevision()).isEqualTo(6L);
+    }
+
+    @Test
+    void confirmWaitingInteractionFallsBackToIdleWhenNoAgentIsActive() {
+        Map<String, String> storage = new ConcurrentHashMap<>();
+        when(valueOperations.get(anyString())).thenAnswer(invocation -> storage.get(invocation.getArgument(0)));
+        doAnswer(invocation -> {
+            storage.put(invocation.getArgument(0), invocation.getArgument(1));
+            return null;
+        }).when(valueOperations).set(anyString(), any(), eq(24L * 60L * 60L), eq(TimeUnit.SECONDS));
+        SessionRuntimeState waiting = state("integration-a", "trace-1", "waiting_user", 5L, 1000L);
+        waiting.setActiveAgentCount(0L);
+        waiting.setActiveChildCount(0L);
+        waiting.setWaitingInteractionCount(1L);
+        storage.put("byai:chat:session-runtime:10", JSON.toJSONString(waiting));
+
+        SessionRuntimeState confirmed = service.confirmWaitingInteraction(10L);
+
+        assertThat(confirmed.getStatus()).isEqualTo("idle");
+        assertThat(confirmed.getWaitingInteractionCount()).isZero();
+        assertThat(confirmed.isActive()).isFalse();
+    }
+
+    @Test
+    void confirmWaitingInteractionOnlyClearsTheCountWhenStatusIsNotWaiting() {
+        SessionRuntimeState running = state("integration-a", "trace-1", "running", 5L, 1000L);
+        running.setActiveAgentCount(1L);
+        running.setWaitingInteractionCount(2L);
+        when(valueOperations.get("byai:chat:session-runtime:10")).thenReturn(JSON.toJSONString(running));
+
+        SessionRuntimeState confirmed = service.confirmWaitingInteraction(10L);
+
+        assertThat(confirmed.getStatus()).isEqualTo("running");
+        assertThat(confirmed.getWaitingInteractionCount()).isZero();
+        assertThat(confirmed.getRevision()).isEqualTo(6L);
+    }
+
+    @Test
+    void confirmWaitingInteractionIsIdempotentAndLeavesNonWaitingStateUntouched() {
+        SessionRuntimeState idle = state("integration-a", "trace-1", "idle", 5L, 1000L);
+        idle.setActiveAgentCount(0L);
+        idle.setActiveChildCount(0L);
+        idle.setWaitingInteractionCount(0L);
+        when(valueOperations.get("byai:chat:session-runtime:10")).thenReturn(JSON.toJSONString(idle));
+
+        SessionRuntimeState confirmed = service.confirmWaitingInteraction(10L);
+
+        assertThat(confirmed.getRevision()).isEqualTo(5L);
+        assertThat(confirmed.getChangedAt()).isEqualTo(1000L);
+        verify(valueOperations, never()).set(anyString(), any(), eq(24L * 60L * 60L), eq(TimeUnit.SECONDS));
+    }
+
+    @Test
+    void confirmWaitingInteractionReturnsNullWithoutASessionId() {
+        assertThat(service.confirmWaitingInteraction(null)).isNull();
+    }
+
     private SessionRuntimeState state(String source, String traceId, String status, Long revision, Long changedAt) {
         SessionRuntimeState state = new SessionRuntimeState();
         state.setSessionId(10L);

@@ -48,9 +48,11 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.util.SpanUtil;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.spi.PendingTaskConfirmHook;
 import com.iwhalecloud.byai.state.domain.chat.dto.MessageTaskDto;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
@@ -131,6 +133,12 @@ public class AssistantChatService {
 
     @Autowired
     private SessionModelSelectionService sessionModelSelectionService;
+
+    @Autowired
+    private SessionRuntimeStateService sessionRuntimeStateService;
+
+    @Autowired
+    private SessionStreamEventRouter sessionStreamEventRouter;
 
     /**
      * 研发派发待接单放行钩子;manager 侧实现,未装配时聊天链路不受影响。
@@ -221,6 +229,9 @@ public class AssistantChatService {
                     assistantChatDto.getTraceId()) : null;
             assistantChatDto.setGroupTaskTurnId(groupTaskTurnId);
 
+            // 用户确认交互（RESUME 轮次）后先收敛权威运行态，避免侧边栏「需要用户输入」标识在刷新后复活。
+            confirmWaitingInteractionOnResume(assistantChatDto);
+
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
             executeChat(assistantChatDto, outputStream, firstTextStartTime);
@@ -238,6 +249,28 @@ public class AssistantChatService {
                 }
             }
             cleanupResources(userInfo, outputStream);
+        }
+    }
+
+    /**
+     * RESUME 轮次代表用户已确认交互（ask_user_question / 表单 / 审批等确认路径均以 RESUME 发起）。
+     * 收敛 Redis 投影中的等待条件并广播，使刷新后回读到的权威态不再满足「等待用户输入」。
+     */
+    private void confirmWaitingInteractionOnResume(AssistantChatDto assistantChatDto) {
+        if (assistantChatDto == null || assistantChatDto.getSessionId() == null
+            || !ActionType.RESUME.equalsIgnoreCase(assistantChatDto.getActionType())) {
+            return;
+        }
+        try {
+            SessionRuntimeState runtime =
+                sessionRuntimeStateService.confirmWaitingInteraction(assistantChatDto.getSessionId());
+            if (runtime != null) {
+                sessionStreamEventRouter.broadcastRuntimeState(runtime);
+            }
+        }
+        catch (Exception e) {
+            // 收敛失败不得阻断本轮对话。
+            logger.warn("收敛会话等待态失败, sessionId: {}", assistantChatDto.getSessionId(), e);
         }
     }
 

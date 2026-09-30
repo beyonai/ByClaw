@@ -106,6 +106,47 @@ public class SessionRuntimeStateService {
         return state;
     }
 
+    /**
+     * 用户已确认交互（提交 ask_user_question 等）后收敛等待条件：等待计数归零、状态按活跃计数派生、
+     * revision 递增、changedAt 刷新。不满足等待条件时原样返回，保证幂等。
+     */
+    public SessionRuntimeState confirmWaitingInteraction(Long sessionId) {
+        if (sessionId == null) {
+            return null;
+        }
+        return lifecycleLocks.withLock(String.valueOf(sessionId), () -> confirmWaitingInteractionLocked(sessionId));
+    }
+
+    private SessionRuntimeState confirmWaitingInteractionLocked(Long sessionId) {
+        SessionRuntimeState state = get(sessionId);
+        if (state == null || !isWaitingForInteraction(state)) {
+            return state;
+        }
+        state.setWaitingInteractionCount(0L);
+        if (SessionRuntimeState.STATUS_WAITING_USER.equals(state.getStatus())) {
+            state.setStatus(hasActiveAgent(state) ? SessionRuntimeState.STATUS_RUNNING : "idle");
+        }
+        state.setRevision(state.getRevision() == null ? 1L : state.getRevision() + 1L);
+        state.setChangedAt(System.currentTimeMillis());
+        redisTemplate.opsForValue().set(buildKey(sessionId), JSON.toJSONString(state),
+            RUNTIME_TTL_SECONDS, TimeUnit.SECONDS);
+        return state;
+    }
+
+    private boolean isWaitingForInteraction(SessionRuntimeState state) {
+        return SessionRuntimeState.STATUS_WAITING_USER.equals(state.getStatus())
+            || (state.getWaitingInteractionCount() != null && state.getWaitingInteractionCount() > 0);
+    }
+
+    /** 只按活跃计数派生，不把 waiting_user 本身算作活跃，否则状态永远迁不出等待。 */
+    private boolean hasActiveAgent(SessionRuntimeState state) {
+        return positive(state.getActiveAgentCount()) || positive(state.getActiveChildCount());
+    }
+
+    private boolean positive(Long value) {
+        return value != null && value > 0;
+    }
+
     private SessionRuntimeState fromEvent(Long sessionId, JSONObject dataJson) {
         JSONObject metadata = dataJson.getJSONObject("metadata");
         SessionRuntimeState state = new SessionRuntimeState();

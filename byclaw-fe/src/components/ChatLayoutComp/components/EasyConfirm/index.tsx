@@ -221,6 +221,10 @@ const EasyConfirm = (props: IProps) => {
 
     // 用户提交交互内容后同步清除会话暂停标记，侧边栏随运行时状态立即恢复。
     chatSessionRuntimeManager.setSessionWaitingForUserInput(sessionId, list.length > 0);
+    // 待处理项归零即「用户已确认」：同时收敛服务端投影来源，避免刷新后标识复活。
+    if (!list.length) {
+      chatSessionRuntimeManager.markWaitingForUserInputConfirmed(sessionId);
+    }
   }, [list.length, sessionId]);
 
   useEffect(() => {
