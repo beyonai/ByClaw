@@ -678,10 +678,9 @@ public class ByClawSkillResourceApplicationService {
         }
 
         // 已有快照直接复用；只有新建或驳回后重提才检查当前源包，避免源包变化阻断查看和幂等重试。
-        validatePublicationResourceManifest(source);
+        byte[] sourcePackage = validatePublicationResourceManifest(source);
 
         SsResExtSkill sourceExt = ssResExtSkillService.findById(sourceId);
-        // 校验读取原包；副本仍只复制数据库记录及文件引用，不重打包或上传文件。
         // 复用公共命名规则，保留已存在的语言后缀，避免重复追加企业标记。
         String targetName = com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames
             .enterpriseName(source.getResourceName(), null);
@@ -696,9 +695,14 @@ public class ByClawSkillResourceApplicationService {
             targetName = com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames
                 .enterpriseName(baseName + "（" + publisherName + "）", targetName);
         }
+        // 包内名称与企业副本展示名保持一致；JSON 引号也是合法 YAML，避免名称中的冒号等破坏元数据。
+        String document = ByClawSkillDocParser.withSkillName(
+            new String(readCenterSkillDocument(sourcePackage), StandardCharsets.UTF_8), JSON.toJSONString(targetName));
+        byte[] targetPackage = replaceCenterSkillDocument(sourcePackage, document.getBytes(StandardCharsets.UTF_8));
+        String packageFilename = StringUtils.defaultIfBlank(
+            sourceExt == null ? null : sourceExt.getSkillOriginalFilename(), targetCode + ".zip");
         SkillPackageMetadata metadata = new SkillPackageMetadata(targetName, targetCode,
-            source.getResourceDesc(), sourceExt == null ? null : sourceExt.getSkillOriginalFilename(),
-            sourceExt == null || sourceExt.getSkillPackageSize() == null ? 0 : sourceExt.getSkillPackageSize());
+            source.getResourceDesc(), packageFilename, targetPackage.length);
         SsResource target = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, source.getCatalogId(), null);
         target.setResourceStatus(ResourceStatus.AUDIT.getNum());
         target.setAvatar(source.getAvatar());
@@ -717,10 +721,22 @@ public class ByClawSkillResourceApplicationService {
         }
         targetExt.setResourceId(target.getResourceId());
         targetExt.setSourceType(SOURCE_TYPE_ENTERPRISE_COPY);
-        // 继承源文件地址、版本和已有文件状态，不创建新的 PENDING 同步流程。
-        targetExt.setTargetContent(buildTargetContent(target, targetExt,
-            sourceExt == null ? null : extractString(sourceExt.getTargetContent(), "skillPath"),
-            sourceExt == null ? null : extractString(sourceExt.getTargetContent(), "skillDocObjectKey")));
+        // 按副本资源 ID 隔离存储，不能覆盖个人原包；后续下载、安装均读取改名后的独立 ZIP。
+        String packageDirectory = buildSkillHubDirectory(OwnerType.ENTERPRISE,
+            CurrentUserHolder.getCurrentUserCode()) + "/" + target.getResourceId();
+        resourceArtifactStorageService.uploadToSubdirectory(targetPackage, packageDirectory, packageFilename,
+            PACKAGE_CONTENT_TYPE);
+        targetExt.setSkillType(SsResExtSkillService.DEFAULT_SKILL_TYPE);
+        targetExt.setSkillUrl(normalizeResourceObjectKey(EXTERNAL_RESOURCE_ROOT + "/" + packageDirectory + "/"
+            + packageFilename));
+        targetExt.setSkillOriginalFilename(packageFilename);
+        targetExt.setSkillPackageFormat(SsResExtSkillService.DEFAULT_PACKAGE_FORMAT);
+        targetExt.setSkillPackageSize((long)targetPackage.length);
+        targetExt.setSkillPackageHash(DigestUtils.sha256Hex(targetPackage));
+        targetExt.setSyncStatus("SUCCESS");
+        targetExt.setSyncError(null);
+        targetExt.setLastSyncTime(LocalDateTime.now());
+        targetExt.setTargetContent(buildTargetContent(target, targetExt, null, null));
         Map<String, Object> content = JSON.parseObject(targetExt.getTargetContent());
         content.put("sourceResourceId", String.valueOf(sourceId));
         content.put("sourceCreatorId", source.getCreateBy() == null ? null : String.valueOf(source.getCreateBy()));
@@ -730,10 +746,10 @@ public class ByClawSkillResourceApplicationService {
         ssResExtSkillService.saveOrUpdate(targetExt);
         authApplicationService.ensureCreatorDefaultPrivileges(target);
         if (StringUtils.isNotBlank(targetExt.getSkillUrl())) {
-            // 文件关联也是数据库记录，沿用原引用，不写入不存在的新 ZIP 或标准 JSON 路径。
+            // 文件关联指向企业独立包，与扩展记录中的下载地址保持一致。
             ssResourceArtifactService.upsertArtifact(target.getResourceId(), ResourceBizTypeEnum.SKILL.name(),
                 ResourceArtifactTypeEnum.IMPORT_ZIP.name(), "minio", stripResourcePrefix(targetExt.getSkillUrl()),
-                "enterprise-skill-file-reference");
+                "enterprise-skill-package");
         }
         copyEnterpriseSkillRelations(sourceId, target.getResourceId());
         skillPublicationService.submit(source, target);
@@ -743,11 +759,13 @@ public class ByClawSkillResourceApplicationService {
     }
 
     /** 包内声明是发布依赖的判断依据；数据库安装关系不能代替 references/resourceMate.json。 */
-    private void validatePublicationResourceManifest(SsResource source) {
+    private byte[] validatePublicationResourceManifest(SsResource source) {
+        byte[] packageBytes;
         List<ZipEntryInfo> entries;
         String skillRoot;
         try {
-            entries = readZipEntries(readCenterSkillPackage(source));
+            packageBytes = readCenterSkillPackage(source);
+            entries = readZipEntries(packageBytes);
             skillRoot = parentDirOf(findSkillDoc(entries).name());
         } catch (Exception e) {
             // 无法读取整个包时不能推断为“没有声明文件”。
@@ -755,12 +773,12 @@ public class ByClawSkillResourceApplicationService {
         }
         String manifestPath = (skillRoot.isEmpty() ? "" : skillRoot + "/") + PUBLICATION_RESOURCE_MANIFEST;
         List<ZipEntryInfo> manifests = entries.stream().filter(entry -> manifestPath.equals(entry.name())).toList();
-        if (manifests.isEmpty()) return;
+        if (manifests.isEmpty()) return packageBytes;
         if (manifests.size() != 1) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.publication.manifest.invalid"));
         }
         Map<Long, String> dependencies = parsePublicationResourceManifest(manifests.get(0).content());
-        if (dependencies.isEmpty()) return;
+        if (dependencies.isEmpty()) return packageBytes;
 
         Map<Long, SsResource> resources = ssResourceService.findByIdList(dependencies.keySet()).stream()
             .collect(Collectors.toMap(SsResource::getResourceId, resource -> resource));
@@ -785,6 +803,7 @@ public class ByClawSkillResourceApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.publication.dependencies.blocked",
                 String.join("; ", failures)));
         }
+        return packageBytes;
     }
 
     /** 缺失文件或空数组允许发布；存在文件时必须提供完整且类型明确的资源声明。 */
