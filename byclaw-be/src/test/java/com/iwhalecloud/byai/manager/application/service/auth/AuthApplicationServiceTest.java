@@ -302,7 +302,7 @@ class AuthApplicationServiceTest {
     }
 
     @Test
-    void enterpriseCopyExistenceControlsListAndDetailWithoutChangingWritePermission() {
+    void enterprisePublicationSummaryKeepsListAndDetailEntryAvailable() {
         AuthApplicationService service = new AuthApplicationService();
         mockEmptyUsePermissionDependencies(service);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -317,16 +317,27 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "ssResExtSkillService", skills);
         when(mapper.selectBatchIds(any())).thenReturn(List.of(source));
         when(resources.findById(601L)).thenReturn(source);
-        when(skills.findSourceIdsWithEnterpriseCopies(List.of(601L))).thenReturn(Set.of(601L));
+        for (int status : List.of(2, 3, 4, 5, -1)) {
+            var summary = new com.iwhalecloud.byai.manager.vo.auth.SkillPublicationVo();
+            summary.setResourceId(701L); summary.setResourceName("企业副本"); summary.setResourceStatus(status);
+            when(skills.findCurrentPublications(List.of(601L))).thenReturn(java.util.Map.of(601L, summary));
+            var detail = service.queryResourceOperationPermissions(601L);
+            var row = service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L);
+            assertThat(detail.isCanPublishToEnterprise()).isTrue();
+            assertThat(row.isCanPublishToEnterprise()).isTrue();
+            assertThat(detail.getSkillPublication()).isSameAs(summary);
+            assertThat(row.getSkillPublication()).isSameAs(summary);
+        }
+        assertThat(service.canPublishSkillToEnterprise(source)).isTrue();
+        when(skills.findCurrentPublications(List.of(601L))).thenReturn(java.util.Map.of());
+        assertThat(service.queryResourceOperationPermissions(601L).getSkillPublication()).isNull();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L)
+            .getSkillPublication()).isNull();
+        // 发布摘要不能使仅有使用权限的用户获得发布入口或看到管理信息。
+        source.setCreateBy(3L);
         assertThat(service.queryResourceOperationPermissions(601L).isCanPublishToEnterprise()).isFalse();
         assertThat(service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L)
-            .isCanPublishToEnterprise()).isFalse();
-        // 并发请求仍可进入写接口，由已有事务逻辑返回同一副本。
-        assertThat(service.canPublishSkillToEnterprise(source)).isTrue();
-        when(skills.findSourceIdsWithEnterpriseCopies(List.of(601L))).thenReturn(Set.of());
-        assertThat(service.queryResourceOperationPermissions(601L).isCanPublishToEnterprise()).isTrue();
-        assertThat(service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L)
-            .isCanPublishToEnterprise()).isTrue();
+            .getSkillPublication()).isNull();
     }
 
     @Test

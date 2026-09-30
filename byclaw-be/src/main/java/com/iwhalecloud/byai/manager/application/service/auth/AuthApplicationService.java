@@ -3401,8 +3401,7 @@ public class AuthApplicationService {
         // 当前页一次查询副本状态，包含用户看不到或已下架的企业副本。
         List<Long> personalSkillSourceIds = resources.stream().filter(this::isPersonalSkillPublishSource)
             .map(SsResource::getResourceId).collect(Collectors.toList());
-        Set<Long> publishedSkillSourceIds = personalSkillSourceIds.isEmpty() ? Collections.emptySet()
-            : ssResExtSkillService.findSourceIdsWithEnterpriseCopies(personalSkillSourceIds);
+        var skillPublications = ssResExtSkillService.findCurrentPublications(personalSkillSourceIds);
         Map<Long, ResourceOperationPermissionsVo> result = new LinkedHashMap<>();
         resources.forEach(resource -> {
             if (resource == null || resource.getResourceId() == null) {
@@ -3410,7 +3409,11 @@ public class AuthApplicationService {
             }
             result.put(resource.getResourceId(), buildResourceOperationPermissions(resource, currentUserId,
                 managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds,
-                defaultDigitalEmployeeId, innerSkillResourceIds, publishedSkillSourceIds));
+                defaultDigitalEmployeeId, innerSkillResourceIds));
+            ResourceOperationPermissionsVo permission = result.get(resource.getResourceId());
+            if (permission.isCanPublishToEnterprise()) {
+                permission.setSkillPublication(skillPublications.get(resource.getResourceId()));
+            }
         });
         populateEmployeePublicationStatuses(result);
         return result;
@@ -3419,7 +3422,7 @@ public class AuthApplicationService {
     private ResourceOperationPermissionsVo buildResourceOperationPermissions(SsResource ssResource,
                                                                              Long currentUserId, Set<Long> managePrivilegeIds, Set<Long> useBlacklistedIds, Set<Long> usePermittedIds,
                                                                              Set<Long> pendingUseApplyIds, Long defaultDigitalEmployeeId,
-                                                                             Set<Long> innerSkillResourceIds, Set<Long> publishedSkillSourceIds) {
+                                                                             Set<Long> innerSkillResourceIds) {
         ResourceOperationPermissionsVo vo = new ResourceOperationPermissionsVo();
         Long resourceId = ssResource.getResourceId();
         vo.setResourceId(resourceId);
@@ -3438,12 +3441,13 @@ public class AuthApplicationService {
         vo.setUseApplyPending(useApplyPending);
         vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
 
-        // 使用已批量计算的有效管理授权，避免列表逐条查询，也不将全局管理角色混入发布权限。
+        // 使用已批量计算的管理授权；平台管理员代发布与单资源接口保持相同的企业范围。
         vo.setCanPublishToEnterprise(isPersonalSkillPublishSource(ssResource)
-            && !publishedSkillSourceIds.contains(resourceId)
             && (ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode())
                 || (currentUserId != null && currentUserId.equals(ssResource.getCreateBy()))
-                || managePrivilegeIds.contains(resourceId)));
+                || managePrivilegeIds.contains(resourceId)
+                || CurrentUserHolder.isPlatformManager() && CurrentUserHolder.getEnterpriseId() != null
+                    && Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())));
 
         if (isResourceRemoved) {
             vo.setCanEdit(false);
@@ -3665,9 +3669,11 @@ public class AuthApplicationService {
         vo.setHasUsePermission(hasUsePermission);
         vo.setUseApplyPending(useApplyPending);
         vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
-        // 写接口保留幂等权限校验；展示入口还要求没有未注销的企业副本。
-        vo.setCanPublishToEnterprise(canPublishSkillToEnterprise(ssResource)
-            && ssResExtSkillService.findSourceIdsWithEnterpriseCopies(List.of(ssResource.getResourceId())).isEmpty());
+        // 入口权限与发布资格一致，已有副本通过状态摘要切换为查看操作。
+        vo.setCanPublishToEnterprise(canPublishSkillToEnterprise(ssResource));
+        if (vo.isCanPublishToEnterprise()) {
+            vo.setSkillPublication(ssResExtSkillService.findCurrentPublications(List.of(resourceId)).get(resourceId));
+        }
 
         // 注销是终态，不能通过旧恢复入口重新启用。
         if (isResourceRemoved) {
@@ -3767,6 +3773,12 @@ public class AuthApplicationService {
             vo.setCanOffShelf(admin && Objects.equals(resource.getResourceStatus(), 2));
             vo.setCanOnShelf(admin && Objects.equals(resource.getResourceStatus(), 3));
             vo.setCanDelete(admin && Objects.equals(resource.getResourceStatus(), 3));
+        }
+        // adminvip 创建的员工不可通过管理授权交给其他账号维护，包含 adminvip 本人也隐藏此入口。
+        // 列表和详情共用此能力值；使用授权及 adminvip 的维护权限继续按原规则计算。
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isEmployee(resource)
+            && employeeGovernance.isAdminVipCreator(resource.getCreateBy())) {
+            vo.setCanManageAuth(false);
         }
         if (employeeGovernance.isProtected(resource) || com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) {
             vo.setHasManagePermission(false);

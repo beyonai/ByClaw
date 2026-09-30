@@ -1,7 +1,10 @@
 import JSZip from 'jszip';
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({
-    formatMessage: ({ id }: { id: string }) => id,
+    formatMessage: ({ id }: { id: string }, values?: Record<string, number>) =>
+      id === 'resource.import.skillPublicationSummary'
+        ? `${id}:${values?.publishedCount}/${values?.pendingReviewCount}/${values?.failedCount}`
+        : id,
   }),
 }));
 
@@ -88,6 +91,7 @@ jest.mock('@/pages/manager/service/resources', () => ({
 }));
 
 import React from 'react';
+import { Modal } from 'antd';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ResourceImport from '..';
 import type { ResourceImportResult } from '@/pages/manager/service/resources';
@@ -115,6 +119,68 @@ describe('ResourceImport', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockCheckSkillImportConflicts.mockResolvedValue({ total: 0, success: 0, failed: 0, items: [] });
+  });
+
+  it.each([false, true])('distinguishes published and pending imports (pending=%s)', async (pending) => {
+    const item = {
+      resourceId: 'skill-1',
+      resourceCode: 'demo',
+      resourceName: 'Demo',
+      updated: false,
+      success: true,
+      reviewRequired: pending,
+    };
+    mockImportResource.mockResolvedValue({
+      total: 2,
+      success: 1,
+      failed: 1,
+      createdCount: 1,
+      createdItems: [item],
+      items: [item, { resourceCode: 'bad', resourceName: 'Bad', success: false, message: 'invalid package' }],
+    });
+    render(<ResourceImport {...defaultProps} activeTab="enterprise" onCancel={jest.fn()} onSuccess={jest.fn()} />);
+    fireEvent.change(screen.getByLabelText('skill zip'), {
+      target: { files: [await createSkillFile('demo.zip')] },
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' }));
+    expect(
+      await screen.findByText(`resource.import.skillPublicationSummary:${pending ? '0/1' : '1/0'}/1`)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/resource.import.skillReviewHint/) !== null).toBe(pending);
+    expect(mockImportResource.mock.calls[0][2].get('ownerType')).toBe('enterprise');
+  });
+
+  it('explains that an overwrite awaits review before importing', async () => {
+    const item = {
+      resourceId: 'old',
+      resourceCode: 'demo',
+      resourceName: 'Demo',
+      updated: true,
+      success: true,
+      reviewRequired: true,
+    };
+    mockCheckSkillImportConflicts.mockResolvedValue({
+      total: 1,
+      success: 1,
+      failed: 0,
+      items: [item],
+      updatedItems: [item],
+    });
+    mockImportResource.mockResolvedValue({ total: 1, success: 1, failed: 0, items: [item], updatedItems: [item] });
+    (Modal.confirm as jest.Mock).mockImplementationOnce(({ content, onOk }) => {
+      render(content);
+      expect(screen.getByText('resource.import.skillReviewOverwriteConfirmDesc')).toBeInTheDocument();
+      onOk();
+    });
+    render(<ResourceImport {...defaultProps} activeTab="enterprise" onCancel={jest.fn()} onSuccess={jest.fn()} />);
+    fireEvent.change(screen.getByLabelText('skill zip'), {
+      target: { files: [await createSkillFile('demo.zip')] },
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' }));
+    await screen.findByText('resource.import.skillPublicationSummary:0/1/0');
+    expect(Modal.confirm).toHaveBeenCalledTimes(1);
   });
 
   it('returns the completed SKILL import summary through onSuccess', async () => {

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
@@ -16,14 +17,20 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -122,6 +129,58 @@ class SsResourceServiceTest {
         assertThat(saved.getUpdateTime()).isEqualTo(saved.getCreateTime());
         assertThat(saved.getCreateBy()).isEqualTo(11L);
         assertThat(saved.getUpdateBy()).isEqualTo(saved.getCreateBy());
+    }
+
+    @Test
+    void saveResource_reusesDeregisteredSkillCodeWithNewIdAndPreservesHistory() {
+        SsResource deleted = resourceWithIdentity(1000L, "BYAI", "SKILL", -1);
+        when(ssResourceMapper.selectList(any())).thenReturn(List.of(deleted));
+        when(sequenceService.nextVal()).thenReturn(1001L);
+        SsResource replacement = resourceWithIdentity(null, "BYAI", "SKILL", 2);
+
+        assertThat(service.saveResource(replacement)).isSameAs(replacement);
+
+        verify(ssResourceMapper).insert(replacement);
+        assertThat(replacement.getResourceId()).isEqualTo(1001L);
+        assertThat(deleted.getResourceId()).isEqualTo(1000L);
+        assertThat(deleted.getResourceStatus()).isEqualTo(-1);
+        verify(ssResourceMapper, never()).updateById(any(SsResource.class));
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(ints = {0, 1, 2, 3, 4, 5, 6})
+    void saveResource_nonDeregisteredSkillStillReservesCodeAlongsideDeletedHistory(Integer status) {
+        SsResource deleted = resourceWithIdentity(1000L, "BYAI", "SKILL", -1);
+        SsResource existing = resourceWithIdentity(1001L, "BYAI", "SKILL", status);
+        when(ssResourceMapper.selectList(any())).thenReturn(List.of(deleted, existing));
+
+        assertThat(service.findUniqueBySystemCodeAndBizTypeAndResourceCode("BYAI", "SKILL", "demo"))
+            .isSameAs(existing);
+        assertThatThrownBy(() -> service.saveResource(resourceWithIdentity(null, "BYAI", "SKILL", 2)))
+            .isInstanceOf(BaseException.class).hasMessageContaining("资源已存在");
+        verify(ssResourceMapper, never()).insert(any(SsResource.class));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"BYAI, TOOLKIT", "BYAI, KG_DOC", "EXTERNAL, SKILL"})
+    void saveResource_preservesCodeReservationForOtherResourceIdentities(String systemCode, String bizType) {
+        SsResource deleted = resourceWithIdentity(1000L, systemCode, bizType, -1);
+        when(ssResourceMapper.selectList(any())).thenReturn(List.of(deleted));
+
+        assertThatThrownBy(() -> service.saveResource(resourceWithIdentity(null, systemCode, bizType, 2)))
+            .isInstanceOf(BaseException.class).hasMessageContaining("资源已存在");
+        verify(ssResourceMapper, never()).insert(any(SsResource.class));
+    }
+
+    private SsResource resourceWithIdentity(Long id, String systemCode, String bizType, Integer status) {
+        SsResource resource = new SsResource();
+        resource.setResourceId(id);
+        resource.setSystemCode(systemCode);
+        resource.setResourceBizType(bizType);
+        resource.setResourceCode("demo");
+        resource.setResourceStatus(status);
+        return resource;
     }
 
     @Test

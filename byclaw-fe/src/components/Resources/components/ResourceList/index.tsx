@@ -166,7 +166,12 @@ const ResourceList: React.FC<ResourceListProps> = ({
       const rawFilterParam = params?.dropdownParam ?? dropdownParam;
       const filterParam = {
         ...rawFilterParam,
-        resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, rawFilterParam?.resourceStatus),
+        resourceStatus: getResourceQueryStatus(
+          activeTab,
+          myResourcesOnly,
+          rawFilterParam?.resourceStatus,
+          resourceType
+        ),
       };
       const availableOnly = !myResourcesOnly && activeTab === 'personal';
       const selectedOwnerType =
@@ -341,7 +346,12 @@ const ResourceList: React.FC<ResourceListProps> = ({
     }
     // 等待期间如果用户切换筛选或分页，不把旧请求写回新列表。
     if (generation !== listGeneration.current) return;
-    const statusFilter = getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam?.resourceStatus);
+    const statusFilter = getResourceQueryStatus(
+      activeTab,
+      myResourcesOnly,
+      dropdownParam?.resourceStatus,
+      resourceType
+    );
     // 注销后立即移除当前行，与后端排除注销的分页查询口径一致。
     const keepRow = resourceStatus !== '-1' && (!statusFilter || `${statusFilter}` === resourceStatus);
     setList((current) =>

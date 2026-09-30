@@ -266,6 +266,20 @@ export default {
   'resource.installTool': '安装工具',
   'resource.rowRefreshFailed': '操作已成功，当前资源详情刷新失败，请稍后重试',
   'resource.publishToEnterprise': '发布到官方推荐',
+  'resource.skillPublicationProgress': '查看发布进度',
+  'resource.skillPublicationReviewResult': '查看审核结果',
+  'resource.skillPublicationResult': '查看发布结果',
+  'resource.retrySkillPublication': '重试发布',
+  'resource.skillPublicationResubmit': '重新提交发布申请',
+  'resource.skillPublicationPendingDescription': '发布申请已提交，等待管理员审核。可在审核中心查看申请记录。',
+  'resource.skillPublicationRejectedDescription':
+    '发布申请已被驳回。可修改个人技能后重新提交，系统将创建新的企业快照并保留原审核记录。',
+  'resource.skillPublicationPublishedDescription': '该技能已发布到官方推荐。',
+  'resource.skillPublicationOffShelfDescription': '企业副本已下架，请从企业技能中处理上架；不会重复创建发布副本。',
+  'resource.skillPublicationRemovedDescription': '当前没有有效的企业副本，可以重新提交发布申请。',
+  'resource.skillPublicationUnknownDescription': '当前企业副本状态不支持重新发布，请刷新列表或联系管理员处理。',
+  'resource.skillPublicationUnavailable': '当前无权查看或提交此技能的发布申请，请刷新列表。',
+  'resource.skillPublicationLoadFailed': '发布状态加载失败，请稍后重试',
   'resource.publishToEnterpriseConfirm':
     '确认发布企业技能副本？管理员符合免审条件时直接发布并留存审核记录；平台管理员发布 adminvip 创建的技能，需由 adminvip 审核。',
   'resource.enterpriseSkillPending': '已提交发布申请，等待审核',
@@ -580,6 +594,7 @@ export default {
   'common.previewNoUrl': '该文件暂不支持预览',
   'common.previewFailed': '预览失败，请稍后重试',
   'common.digitalEmployee': '数字员工',
+  'common.digitalEmployeeGroup': '数字员工组',
   'common.companyEmployee': '企业员工',
   'common.tool': '工具',
   'common.skill': '技能',
@@ -3556,4 +3571,10 @@ export default {
   'resource.workspaceCenter.success': '技能已保存到资源中心，源目录已删除',
   'resource.workspaceCenter.cleanupFailed': '技能已保存到资源中心，但源目录清理失败或文件已变化，请检查后手动清理',
   'resource.workspaceCenter.failed': '技能同步失败，请刷新后确认状态',
+  'resource.import.skillPublicationSummary':
+    '已上架 {publishedCount} 个，待审核 {pendingReviewCount} 个，失败 {failedCount} 个',
+  'resource.import.skillReviewHint':
+    '导入已提交审核，通过后才会出现在官方推荐中。可在“我的技能 → 企业”筛选“审核中”或“审核不通过”查看；驳回后可重新导入。',
+  'resource.import.skillReviewOverwriteConfirmDesc':
+    '本次更新将提交审核，审核通过前保留当前版本；审核通过后替换原技能。是否继续？',
 };

@@ -633,6 +633,15 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     />
   );
   const isMyEnterpriseResources = myResourcesOnly && activeTab === 'enterprise';
+  // 技能申请人可在自己的企业资源中查看待审核和驳回项，官方推荐仍只查询已上架资源。
+  const currentMyResourceStatusOptions =
+    resourceType === 'SKILL'
+      ? [
+          ...myResourceStatusOptions,
+          { label: 'resourceStatus.reviewing', value: '4' },
+          { label: 'resourceStatus.notPassed', value: '5' },
+        ]
+      : myResourceStatusOptions;
   const tabBarExtraContent =
     activeTab === 'audit' ? undefined : (
       <Space>
@@ -649,8 +658,8 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
         )}
         {isMyEnterpriseResources && (
           <Segmented
-            value={getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus)}
-            options={myResourceStatusOptions.map((item) => ({
+            value={getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus, resourceType)}
+            options={currentMyResourceStatusOptions.map((item) => ({
               ...item,
               label: intl.formatMessage({ id: item.label }),
             }))}
@@ -673,7 +682,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             onOk={(param: any) => {
               setDropdownParam({
                 ...param,
-                resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, param.resourceStatus),
+                resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, param.resourceStatus, resourceType),
               });
               setCatalogId(param.catalogId || '');
               // 刷新逻辑由ResourceList组件内部处理
@@ -681,7 +690,12 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             defaultParam={{
               ...dropdownParam,
               catalogId,
-              resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus),
+              resourceStatus: getResourceQueryStatus(
+                activeTab,
+                myResourcesOnly,
+                dropdownParam.resourceStatus,
+                resourceType
+              ),
             }}
             catalogOptions={
               myResourcesOnly
@@ -699,7 +713,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             // 企业状态已移到外层分段控件，个人页固定查询已上架。
             hideStatusFilter
             alwaysShowStatusFilter={false}
-            statusOptionsOverride={myResourcesOnly ? myResourceStatusOptions : undefined}
+            statusOptionsOverride={myResourcesOnly ? currentMyResourceStatusOptions : undefined}
             hidePermissionFilter={myResourcesOnly}
           />
         )}

@@ -645,13 +645,13 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     );
   };
 
-  const { canPublish, publishingId, publish } = useEnterpriseSkillPublication({
+  const { canPublish, publishingId, publish, entryLabel } = useEnterpriseSkillPublication({
     enabled: resourceType === 'SKILL',
     onDetail: handleDetail,
-    onPublished: (resourceId) => {
-      // 仅更新源技能的操作权限，保留当前分页和滚动位置。
+    onPublished: (resourceId, skillPublication) => {
+      // 仅更新源技能的发布摘要，保留查看入口、当前分页和滚动位置。
       setResourceList((rows) =>
-        rows.map((row) => (String(row.resourceId) === resourceId ? { ...row, canPublishToEnterprise: false } : row))
+        rows.map((row) => (String(row.resourceId) === resourceId ? { ...row, skillPublication } : row))
       );
     },
   });
@@ -808,11 +808,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       menuItems.push({
         key: 'publishToEnterprise',
         disabled: publishingId === String(item.resourceId),
-        label: (
-          <div className={employeeStyles.dropdownMenuItem}>
-            {intl.formatMessage({ id: 'resource.publishToEnterprise' })}
-          </div>
-        ),
+        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: entryLabel(item) })}</div>,
       });
     }
     if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL && canManageActiveAgent) {

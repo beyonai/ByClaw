@@ -32,8 +32,12 @@ class SkillPublicationServiceTest {
         mock(com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.class);
     private final SkillPublicationService service = new SkillPublicationService(mapper, resources, sequence, skills, governance);
 
+    private final com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService skillResources =
+        mock(com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class);
+
     @BeforeEach
     void setup() {
+        ReflectionTestUtils.setField(service, "skillResources", skillResources);
         LoginInfo login = new LoginInfo();
         login.setUserId(10L);
         login.setEnterpriseId(1L);
@@ -143,7 +147,23 @@ class SkillPublicationServiceTest {
         assertThat(request.getUpdateStaff()).isEqualTo(10L);
         assertThat(request.getUpdateDate()).isNotNull();
         verify(mapper).updateById(request);
+        verify(skillResources).applySkillImportReview(target, approve);
         assertThatThrownBy(() -> service.review(101L, 10L, approve)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void failedImportApprovalDoesNotCompleteAuditRequest() {
+        SsResource target = pendingTarget();
+        PrivilegeGrant request = new PrivilegeGrant();
+        request.setStatusCd("P");
+        when(mapper.selectOne(any())).thenReturn(request);
+        when(resources.findByIdForUpdate(101L)).thenReturn(target);
+        doThrow(new IllegalArgumentException("stale import"))
+            .when(skillResources).applySkillImportReview(target, true);
+        assertThatThrownBy(() -> service.review(101L, 10L, true)).hasMessage("stale import");
+        assertThat(request.getStatusCd()).isEqualTo("P");
+        verify(resources, never()).updateResourceEntity(any());
+        verify(mapper, never()).updateById(any(PrivilegeGrant.class));
     }
 
     @Test

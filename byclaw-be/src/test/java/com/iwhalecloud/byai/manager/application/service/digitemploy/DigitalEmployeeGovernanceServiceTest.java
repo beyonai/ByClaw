@@ -43,6 +43,37 @@ class DigitalEmployeeGovernanceServiceTest {
         assertThat(auth.hasResourceManagePermission(resource)).isTrue();
         assertThat(auth.hasResourceUseSettingPermission(resource)).isTrue();
     }
+
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void adminvipCreatedEmployeeHidesManageAuthorizationEvenForAdminvip(boolean official) {
+        EmployeePublicationApplicationServiceTest.login("adminvip", 1L, List.of());
+        SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
+        resource.setOwnerType("enterprise");
+        if (official) resource.setPublicationSourceId(9L);
+        var permissions = new com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo();
+        permissions.setCanManageAuth(true);
+        permissions.setCanUseAuth(true);
+        permissions.setCanEdit(true);
+        permissions.setHasManagePermission(true);
+        ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", resource, permissions);
+        assertThat(permissions.isCanManageAuth()).isFalse();
+        assertThat(permissions.isCanUseAuth()).isTrue();
+        assertThat(permissions.isCanEdit()).isTrue();
+        assertThat(permissions.isHasManagePermission()).isTrue();
+    }
+
+    @Test void manageAuthorizationVisibilityDoesNotChangeForOtherCreatorsOrNonEmployees() {
+        EmployeePublicationApplicationServiceTest.login("adminvip", 1L, List.of());
+        SsResource ordinaryEmployee = EmployeePublicationApplicationServiceTest.employee(10L, 7L);
+        SsResource skill = EmployeePublicationApplicationServiceTest.employee(11L, 1L);
+        skill.setResourceBizType("SKILL");
+        for (SsResource resource : List.of(ordinaryEmployee, skill)) {
+            var permissions = new com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo();
+            permissions.setCanManageAuth(true);
+            ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", resource, permissions);
+            assertThat(permissions.isCanManageAuth()).isTrue();
+        }
+    }
     @Test void platformCanProposePublicationOfAdminvipEmployeeWithoutGettingMaintenancePermissions() {
         EmployeePublicationApplicationServiceTest.login("platform", 2L, List.of("PLAT_MAN"));
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);

@@ -1,5 +1,6 @@
 import { openEmployeePublication, publicationEntryLabel } from '@/service/employeePublication';
 import { publicationErrorMessage } from '@/utils/publicationError';
+import { showSkillPublication, skillPublicationEntryLabel } from '../../skillPublication';
 import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
@@ -10,8 +11,12 @@ import { getLocale, useDispatch, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
-import { publishSkillToEnterprise, restoreResource } from '@/pages/manager/service/resources';
-import type { EnterpriseSkillPublishResult } from '@/pages/manager/service/resources';
+import {
+  getSkillPublicationPermissions,
+  publishSkillToEnterprise,
+  restoreResource,
+} from '@/pages/manager/service/resources';
+import type { EnterpriseSkillPublishResult, SkillPublicationSummary } from '@/pages/manager/service/resources';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
 import { useSkillExport } from '../SkillExportButton';
@@ -72,6 +77,7 @@ export interface IResourceCardItem {
   canOnShelf?: boolean;
   canOffShelf?: boolean;
   canPublishToEnterprise?: boolean;
+  skillPublication?: SkillPublicationSummary;
   canUnShelf?: boolean;
   canDeleteData?: boolean;
   canSetDefault?: boolean;
@@ -431,11 +437,15 @@ const RenderContent = (props: ResourceCardProps) => {
   const [openingPublication, setOpeningPublication] = useState(false);
   const publicationFeedbackCleanup = useRef<() => void>();
   useEffect(() => () => publicationFeedbackCleanup.current?.(), []);
-  const [enterpriseCopyCreated, setEnterpriseCopyCreated] = useState(false);
+  const [skillPublication, setSkillPublication] = useState(resource.skillPublication);
+  const [skillPublicationFailed, setSkillPublicationFailed] = useState(false);
+  const [publicationSourceId, setPublicationSourceId] = useState(resource.resourceId);
   const publishToEnterpriseLock = useRef(false);
   useEffect(() => {
-    setEnterpriseCopyCreated(false);
-  }, [resource]);
+    setSkillPublication(resource.skillPublication);
+    setSkillPublicationFailed(false);
+    setPublicationSourceId(resource.resourceId);
+  }, [resource.resourceId, resource.skillPublication]);
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -563,6 +573,8 @@ const RenderContent = (props: ResourceCardProps) => {
         '1': 'resourceStatus.pendingShelf',
         '2': 'resourceStatus.published',
         '3': 'resourceStatus.unpublished',
+        '4': 'resourceStatus.reviewing',
+        '5': 'resourceStatus.notPassed',
       };
       // 员工组与数字员工接口的状态字段可能不同，统一按同一组回退字段取值。
       const statusMessageId =
@@ -728,6 +740,7 @@ const RenderContent = (props: ResourceCardProps) => {
     setPublishingToEnterprise(true);
     const messageKey = `publish-enterprise-${resource.resourceId}`;
     message.loading({ key: messageKey, content: intl.formatMessage({ id: 'common.processing' }), duration: 0 });
+    let sourceId = publicationSourceId;
     try {
       // 工作空间技能没有真实资源 ID，复用现有资源化及同名覆盖确认后再复制到企业。
       const sourceSkill = isWorkspaceSkillResource
@@ -737,7 +750,9 @@ const RenderContent = (props: ResourceCardProps) => {
         message.destroy(messageKey);
         return;
       }
-      const result = await publishSkillToEnterprise(String(sourceSkill.resourceId));
+      sourceId = String(sourceSkill.resourceId);
+      setPublicationSourceId(sourceId);
+      const result = await publishSkillToEnterprise(sourceId);
       // 关联个人资源只做提醒，提交已经成功，不要求用户再次确认。
       if (result.personalDependencies?.length) {
         Modal.warning({
@@ -756,7 +771,8 @@ const RenderContent = (props: ResourceCardProps) => {
         });
       }
       // 仅更新当前卡片，不刷新或重新挂载列表，避免 loading 结束时列表短暂空白。
-      setEnterpriseCopyCreated(true);
+      setSkillPublication(result.resource);
+      setSkillPublicationFailed(false);
       message.success({
         key: messageKey,
         content: (
@@ -766,10 +782,10 @@ const RenderContent = (props: ResourceCardProps) => {
                 result.resource.resourceStatus === 4
                   ? 'resource.enterpriseSkillPending'
                   : result.alreadyExists
-                    ? 'resource.enterpriseSkillExists'
-                    : 'resource.publishToEnterpriseSuccess',
+                  ? 'resource.enterpriseSkillExists'
+                  : 'resource.publishToEnterpriseSuccess',
             })}
-            {onEnterpriseSkillDetail && result.resource.resourceStatus !== 4 && (
+            {onEnterpriseSkillDetail && result.resource.resourceStatus === 2 && (
               <Button type="link" onClick={() => onEnterpriseSkillDetail(result.resource)}>
                 {intl.formatMessage({ id: 'resource.viewEnterpriseSkill' })}
               </Button>
@@ -779,15 +795,51 @@ const RenderContent = (props: ResourceCardProps) => {
         duration: 6,
       });
     } catch (error) {
-      let errorText = intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' });
-      if (typeof error === 'string') errorText = error;
-      else if (error instanceof Error) errorText = error.message;
-      message.error({ key: messageKey, content: errorText });
+      setSkillPublicationFailed(true);
+      message.error({
+        key: messageKey,
+        content: publicationErrorMessage(error, intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' })),
+      });
+      // 响应丢失不代表事务失败；只读核对已提交申请，避免误导用户反复创建。
+      if (sourceId && (!isWorkspaceSkillResource || sourceId !== resource.resourceId)) {
+        try {
+          const permissions = await getSkillPublicationPermissions(sourceId);
+          setSkillPublication(permissions.skillPublication);
+        } catch {
+          // 状态核对失败保留重试入口，写接口仍负责幂等。
+        }
+      }
     } finally {
       publishToEnterpriseLock.current = false;
       setPublishingToEnterprise(false);
     }
-  }, [resource, isWorkspaceSkillResource, workspaceActions.resourceizeSkill, onEnterpriseSkillDetail, intl]);
+  }, [
+    resource,
+    publicationSourceId,
+    isWorkspaceSkillResource,
+    workspaceActions.resourceizeSkill,
+    onEnterpriseSkillDetail,
+    intl,
+  ]);
+
+  const viewSkillPublication = useCallback(async () => {
+    if (!publicationSourceId || publishToEnterpriseLock.current) return;
+    publishToEnterpriseLock.current = true;
+    setPublishingToEnterprise(true);
+    try {
+      await showSkillPublication({
+        sourceId: publicationSourceId,
+        onChange: setSkillPublication,
+        onPublish: handlePublishToEnterprise,
+        onDetail: onEnterpriseSkillDetail,
+      });
+    } catch (error) {
+      message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'resource.skillPublicationLoadFailed' })));
+    } finally {
+      publishToEnterpriseLock.current = false;
+      setPublishingToEnterprise(false);
+    }
+  }, [publicationSourceId, handlePublishToEnterprise, onEnterpriseSkillDetail, intl]);
 
   const openPublication = useCallback(async () => {
     if (publishToEnterpriseLock.current) return;
@@ -897,13 +949,19 @@ const RenderContent = (props: ResourceCardProps) => {
       !isWorkspaceSkillResource &&
       currentResourceStatus !== '-1' &&
       resource.resourceId &&
-      !enterpriseCopyCreated &&
       actionConfig?.enablePublishToEnterprise === true &&
       resource.canPublishToEnterprise === true
     ) {
       items.push({
         key: 'publishToEnterprise',
-        label: (
+        disabled: publishingToEnterprise,
+        label: skillPublication ? (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={intl.formatMessage({ id: skillPublicationEntryLabel(skillPublication) })}
+            loading={publishingToEnterprise}
+          />
+        ) : (
           <ConfirmMenuLabel
             title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
             loading={publishingToEnterprise}
@@ -911,11 +969,12 @@ const RenderContent = (props: ResourceCardProps) => {
           >
             <BuildMenuLabel
               icon="icon-a-Uploadshangchuan"
-              text={intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+              text={intl.formatMessage({ id: skillPublicationEntryLabel(undefined, skillPublicationFailed) })}
               loading={publishingToEnterprise}
             />
           </ConfirmMenuLabel>
         ),
+        onClick: skillPublication ? () => void viewSkillPublication() : undefined,
       });
     }
 
@@ -1153,7 +1212,9 @@ const RenderContent = (props: ResourceCardProps) => {
     publishingToEnterprise,
     openingPublication,
     processingLifecycle,
-    enterpriseCopyCreated,
+    skillPublication,
+    skillPublicationFailed,
+    viewSkillPublication,
     isPersonalResource,
     isWorkspaceSkillResource,
     currentResourceStatus,
@@ -1228,10 +1289,17 @@ const RenderContent = (props: ResourceCardProps) => {
         onClick: () => workspaceActions.shareSkill(resource as WorkspaceSkillItem),
       },
     ];
-    if (actionConfig?.enablePublishToEnterprise && actionConfig?.canManageWorkspaceSkill && !enterpriseCopyCreated) {
+    if (actionConfig?.enablePublishToEnterprise && actionConfig?.canManageWorkspaceSkill) {
       items.push({
         key: 'publishToEnterprise',
-        label: (
+        disabled: publishingToEnterprise,
+        label: skillPublication ? (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={intl.formatMessage({ id: skillPublicationEntryLabel(skillPublication) })}
+            loading={publishingToEnterprise}
+          />
+        ) : (
           <ConfirmMenuLabel
             title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
             loading={publishingToEnterprise}
@@ -1239,11 +1307,12 @@ const RenderContent = (props: ResourceCardProps) => {
           >
             <BuildMenuLabel
               icon="icon-a-Uploadshangchuan"
-              text={intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+              text={intl.formatMessage({ id: skillPublicationEntryLabel(undefined, skillPublicationFailed) })}
               loading={publishingToEnterprise}
             />
           </ConfirmMenuLabel>
         ),
+        onClick: skillPublication ? () => void viewSkillPublication() : undefined,
       });
     }
     // 工作空间技能同样遵循浏览页隐藏规则，管理入口仍需员工管理权限（后端同样校验）。
@@ -1258,7 +1327,9 @@ const RenderContent = (props: ResourceCardProps) => {
     return items.filter((item) => item && !hiddenKeys.has(String(item.key)));
   }, [
     actionConfig?.enablePublishToEnterprise,
-    enterpriseCopyCreated,
+    skillPublication,
+    skillPublicationFailed,
+    viewSkillPublication,
     publishingToEnterprise,
     handlePublishToEnterprise,
     isWorkspaceSkillResource,
@@ -1278,20 +1349,20 @@ const RenderContent = (props: ResourceCardProps) => {
     ...((isWorkspaceSkillResource ? workspaceMenuItems : menuItems) || []),
     ...(actionConfig?.enableSkillExport && (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL')
       ? [
-        {
-          key: 'exportSkill',
-          label: (
-            <BuildMenuLabel
-              icon="icon-a-Downloadxiazai"
-              text={intl.formatMessage({ id: 'resource.skillExport.single' })}
-            />
-          ),
-          disabled: exportingSkill,
-          onClick: () => {
-            void exportSkills();
+          {
+            key: 'exportSkill',
+            label: (
+              <BuildMenuLabel
+                icon="icon-a-Downloadxiazai"
+                text={intl.formatMessage({ id: 'resource.skillExport.single' })}
+              />
+            ),
+            disabled: exportingSkill,
+            onClick: () => {
+              void exportSkills();
+            },
           },
-        },
-      ]
+        ]
       : []),
   ];
   const effectiveTopRightTag =

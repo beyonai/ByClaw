@@ -276,6 +276,25 @@ export default {
   'resource.installTool': 'Install Tool',
   'resource.rowRefreshFailed': 'Operation succeeded, but this resource could not be refreshed. Please try again later.',
   'resource.publishToEnterprise': 'Publish to official recommendations',
+  'resource.skillPublicationProgress': 'View publication progress',
+  'resource.skillPublicationReviewResult': 'View review result',
+  'resource.skillPublicationResult': 'View publication result',
+  'resource.retrySkillPublication': 'Retry publication',
+  'resource.skillPublicationResubmit': 'Resubmit publication request',
+  'resource.skillPublicationPendingDescription':
+    'Your publication request is awaiting administrator review. You can find the request in the review center.',
+  'resource.skillPublicationRejectedDescription':
+    'The request was rejected. Edit the personal skill and resubmit to create a new enterprise snapshot while keeping the previous review record.',
+  'resource.skillPublicationPublishedDescription': 'This skill has been published to official recommendations.',
+  'resource.skillPublicationOffShelfDescription':
+    'The enterprise copy is off shelf. Manage it in enterprise skills to put it back on shelf; no duplicate copy will be created.',
+  'resource.skillPublicationRemovedDescription':
+    'There is no active enterprise copy. You can submit a new publication request.',
+  'resource.skillPublicationUnknownDescription':
+    'The current enterprise copy cannot be republished in this state. Refresh the list or contact an administrator.',
+  'resource.skillPublicationUnavailable':
+    'You no longer have permission to view or submit this publication request. Refresh the list.',
+  'resource.skillPublicationLoadFailed': 'Unable to load publication status. Please try again later',
   'resource.publishToEnterpriseConfirm':
     'Publish an enterprise skill copy? Eligible administrators publish immediately with a review record. A platform administrator publishing a skill created by adminvip requires adminvip approval.',
   'resource.enterpriseSkillPending': 'Publication submitted for review',
@@ -597,6 +616,7 @@ export default {
   'common.previewNoUrl': 'This file does not support preview',
   'common.previewFailed': 'Preview failed, please try again later',
   'common.digitalEmployee': 'Employee',
+  'common.digitalEmployeeGroup': 'Employee Group',
   'common.companyEmployee': 'Company Employee',
   'common.tool': 'Tool',
   'common.skill': 'Skill',
@@ -3629,4 +3649,10 @@ export default {
   'resource.workspaceCenter.cleanupFailed':
     'Skill saved to Resource Center, but source cleanup failed or files changed. Review the folder before deleting it manually.',
   'resource.workspaceCenter.failed': 'Skill sync failed. Refresh to check its current state.',
+  'resource.import.skillPublicationSummary':
+    'Published: {publishedCount}; awaiting review: {pendingReviewCount}; failed: {failedCount}',
+  'resource.import.skillReviewHint':
+    'The import is awaiting review and will appear in Official Recommendations after approval. Check Under Review or Not Passed in My Skills → Enterprise. Rejected imports can be submitted again.',
+  'resource.import.skillReviewOverwriteConfirmDesc':
+    'This update will be submitted for review. The current version remains available until approval, when it will be replaced. Continue?',
 };

@@ -107,4 +107,7 @@ public class ResourceOperationPermissionsVo {
 
     /** 是否可将个人技能复制并上架为独立企业技能。 */
     private boolean canPublishToEnterprise;
+
+    /** 已有申请也保留入口，供用户查看进度、结果或在驳回后重新提交。 */
+    private SkillPublicationVo skillPublication;
 }
