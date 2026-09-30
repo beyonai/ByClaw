@@ -128,7 +128,7 @@ it.each(['SKILL', 'KG_DOC', 'TOOL'])('shows loading while the initial %s request
   expect(screen.queryByText('common.loading')).toBeNull();
 });
 
-it('keeps loading visible until workspace skills finish loading', async () => {
+it('keeps my personal resources loading until workspace skills finish loading', async () => {
   let finish!: (value: any) => void;
   (queryWorkspacePersonalSkillList as jest.Mock).mockImplementation(
     () =>
@@ -136,7 +136,7 @@ it('keeps loading visible until workspace skills finish loading', async () => {
         finish = resolve;
       })
   );
-  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: true });
   await waitFor(() => expect(queryWorkspacePersonalSkillList).toHaveBeenCalled());
   expect(screen.getByText('common.loading')).toBeInTheDocument();
   expect(screen.queryByTestId('resource-card')).toBeNull();
@@ -323,10 +323,7 @@ it.each(
       resourceStatus: '2',
     })
   );
-  if (resourceType === 'SKILL') {
-    if (ownerType === 'enterprise') expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
-    else expect(queryWorkspacePersonalSkillList).toHaveBeenCalled();
-  }
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
 });
 
 it.each([true, false])(
@@ -410,7 +407,7 @@ it.each(
   }
 );
 
-it('exports all filtered pages and workspace skills without changing the displayed list', async () => {
+it('exports only resource library skills across filtered pages without changing the displayed list', async () => {
   const { buildSkillBundle, saveSkillFile } = jest.requireMock('../../../skillExport');
   (listResourceUseAuth as jest.Mock).mockImplementation(({ pageNum }) =>
     Promise.resolve({
@@ -429,7 +426,7 @@ it('exports all filtered pages and workspace skills without changing the display
     searchValue: 'demo',
     exportContainer,
   });
-  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(2));
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(1));
   const exportButton = screen.getByRole('button', { name: /resource\.skillExport\.all/ });
   expect(exportContainer).toContainElement(exportButton);
   expect(document.getElementById('SKILLListScroller')).not.toContainElement(exportButton);
@@ -444,14 +441,11 @@ it('exports all filtered pages and workspace skills without changing the display
     })
   );
   expect(buildSkillBundle).toHaveBeenCalledWith(
-    [
-      expect.objectContaining({ resourceBacked: false }),
-      expect.objectContaining({ resourceId: '1' }),
-      expect.objectContaining({ resourceId: '2' }),
-    ],
+    [expect.objectContaining({ resourceId: '1' }), expect.objectContaining({ resourceId: '2' })],
     undefined
   );
-  expect(screen.getAllByTestId('resource-card')).toHaveLength(2);
+  expect(screen.getAllByTestId('resource-card')).toHaveLength(1);
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
   exportContainer.remove();
 });
 
@@ -477,4 +471,16 @@ it('loads personal directories without a default employee and trusts their perso
   expect(queryWorkspacePersonalSkillList).toHaveBeenCalledWith({ keyword: '', personalWorkspace: true });
   const { queryInstalledResourceIds } = jest.requireMock('@/pages/manager/service/DigitalEmployeeMgr');
   expect(queryInstalledResourceIds).not.toHaveBeenCalled();
+});
+
+// 目录中有技能也不能补入“我可用的”，空状态应完全由资源库结果决定。
+it('shows an empty available skill list when only personal directory skills exist', async () => {
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({ data: { list: [], total: 0 } });
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'local', skillPath: '/workspace/skills/local', personalWorkspace: true }],
+  });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false });
+  expect(await screen.findByText('common.noData')).toBeInTheDocument();
+  expect(screen.queryByTestId('resource-card')).toBeNull();
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
 });

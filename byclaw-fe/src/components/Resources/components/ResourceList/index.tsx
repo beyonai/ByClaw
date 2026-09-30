@@ -234,18 +234,18 @@ const ResourceList: React.FC<ResourceListProps> = ({
         );
         const total = responses.reduce((sum, { pageData }) => sum + Number(pageData?.total || 0), 0);
 
-        // 个人技能 tab 首页追加“用户开发(工作空间)技能”。仅在第一页、无目录筛选时拉取，
+        // 仅“我的资源”的个人技能首页补充目录技能；资源中心“我可用的”只展示资源库技能。
         // 翻页只走 listResourceUseAuth；后端已按个人已资源化技能去重，前端无需再去重。
         let workspaceRows: IResourceItem[] = [];
         const shouldLoadWorkspaceSkills =
+          myResourcesOnly &&
           resourceType === 'SKILL' &&
           activeTab === 'personal' &&
           selectedOwnerType !== 'enterprise' &&
           !append &&
           pageNum === 1 &&
           !selectedCatalogId &&
-          (!myResourcesOnly ||
-            filterParam?.resourceStatus === null ||
+          (filterParam?.resourceStatus === null ||
             filterParam?.resourceStatus === undefined ||
             filterParam.resourceStatus === '' ||
             `${filterParam.resourceStatus}` === '2');

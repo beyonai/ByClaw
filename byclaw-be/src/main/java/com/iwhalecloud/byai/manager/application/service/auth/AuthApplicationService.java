@@ -3774,13 +3774,14 @@ public class AuthApplicationService {
             vo.setCanOnShelf(admin && Objects.equals(resource.getResourceStatus(), 3));
             vo.setCanDelete(admin && Objects.equals(resource.getResourceStatus(), 3));
         }
-        // adminvip 创建的员工不可通过管理授权交给其他账号维护，包含 adminvip 本人也隐藏此入口。
-        // 列表和详情共用此能力值；使用授权及 adminvip 的维护权限继续按原规则计算。
-        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isEmployee(resource)
-            && employeeGovernance.isAdminVipCreator(resource.getCreateBy())) {
-            vo.setCanManageAuth(false);
-        }
-        if (employeeGovernance.isProtected(resource) || com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) {
+        // 停用按 adminvip 创建者身份隐藏“管理授权”的规则，保留原代码供追溯。
+        // if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isEmployee(resource)
+        //     && employeeGovernance.isAdminVipCreator(resource.getCreateBy())) {
+        //     vo.setCanManageAuth(false);
+        // }
+        // 停用受保护员工的按钮覆盖（包括“编辑信息”），仍保留发布技能快照的只读规则。
+        if (/* employeeGovernance.isProtected(resource) || */
+            com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) {
             vo.setHasManagePermission(false);
             vo.setCanEdit(false);
             vo.setCanManageAuth(false);

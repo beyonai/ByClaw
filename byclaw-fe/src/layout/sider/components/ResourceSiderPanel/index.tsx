@@ -1,6 +1,6 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Dropdown, Empty, Input, message, Modal } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
@@ -376,6 +376,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       loadedCount: 0,
     };
     loadResources({ reset: true, queryKeyword: nextKeyword });
+  };
+
+  const handleSkillRefresh = () => {
+    // 按已生效的搜索条件从首页重载，同时重新读取员工工作空间中的技能。
+    void loadResources({ reset: true, queryKeyword: keywordRef.current });
   };
 
   const handleSkillImportClick = () => {
@@ -949,6 +954,18 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
           >
             {intl.formatMessage({ id: 'resourceTabs.skillUpload.uploadButton' })}
           </Button>
+        )}
+        {resourceType === 'SKILL' && (
+          <Button
+            size="small"
+            className={styles.skillRefreshButton}
+            icon={<ReloadOutlined />}
+            title={intl.formatMessage({ id: 'common.refresh' })}
+            aria-label={intl.formatMessage({ id: 'common.refresh' })}
+            loading={loading}
+            disabled={loading || !activeSiderAgent.resourceId}
+            onClick={handleSkillRefresh}
+          />
         )}
       </div>
       {resourceType === 'SKILL' && (
