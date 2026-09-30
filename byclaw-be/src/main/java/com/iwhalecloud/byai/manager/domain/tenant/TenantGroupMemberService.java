@@ -112,6 +112,26 @@ public class TenantGroupMemberService {
             .toList();
     }
 
+    /** Validate initial digital employees before the Node's atomic CREATE_GROUP command. */
+    public List<TenantNodeModels.GroupMember> initialAgents(TenantRequestContext context, List<Long> ids) {
+        if (ids == null || ids.size() > 999 || ids.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid initial digital employees");
+        }
+        return ids.stream().distinct().map(id -> {
+            SsResource resource = resources.findById(id);
+            if (resource == null || !("DIG_EMPLOYEE".equals(resource.getResourceBizType())
+                || "EXPERT_TEAM".equals(resource.getResourceBizType()))
+                || !Objects.equals(resource.getResourceStatus(), 2)
+                || !("enterprise".equalsIgnoreCase(resource.getOwnerType())
+                    && Objects.equals(resource.getComAcctId(), context.enterpriseId())
+                    || resourceAuthorization.hasResourceAccessPermission(resource))) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "digital employee is not accessible");
+            }
+            return new TenantNodeModels.GroupMember("AGENT", id.toString(), "MEMBER",
+                resource.getResourceName(), true);
+        }).toList();
+    }
+
     private Map<String, Object> requireInvite(TenantRequestContext context, Long sessionId, String type) {
         if (sessionId == null || sessionId <= 0 || !("AGENT".equals(type) || "USER".equals(type))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid group invitation");

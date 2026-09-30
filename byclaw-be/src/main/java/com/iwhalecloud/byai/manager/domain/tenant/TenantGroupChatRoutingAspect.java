@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageId;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.WorkgroupTemplateService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
@@ -20,6 +21,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -38,14 +40,17 @@ public class TenantGroupChatRoutingAspect {
     private final ByaiGroupChatMentionMapper mentionMapper;
     private final ObjectMapper mapper;
     private final TenantGroupMemberService memberService;
+    private final WorkgroupTemplateService templates;
 
     public TenantGroupChatRoutingAspect(TenantNodeClient node, GroupChatReadService legacy,
-        ByaiGroupChatMentionMapper mentionMapper, ObjectMapper mapper, TenantGroupMemberService memberService) {
+        ByaiGroupChatMentionMapper mentionMapper, ObjectMapper mapper, TenantGroupMemberService memberService,
+        WorkgroupTemplateService templates) {
         this.node = node;
         this.legacy = legacy;
         this.mentionMapper = mentionMapper;
         this.mapper = mapper;
         this.memberService = memberService;
+        this.templates = templates;
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController.*(..))"
@@ -132,16 +137,19 @@ public class TenantGroupChatRoutingAspect {
         if (request == null || request.getName() == null || request.getName().isBlank()
             || request.getGoal() == null || request.getGoal().isBlank()
             || request.getUserIds() != null && !request.getUserIds().isEmpty()
-            || request.getAgentIds() != null && !request.getAgentIds().isEmpty()
-            || request.getTemplateId() != null) throw unsupported();
+            || request.getTemplateId() == null && request.getExpectedTemplateVersion() != null) throw unsupported();
+        LinkedHashSet<Long> agentIds = new LinkedHashSet<>();
+        if (request.getAgentIds() != null) agentIds.addAll(request.getAgentIds());
+        if (request.getTemplateId() != null) agentIds.addAll(templates.resolveResourceIds(
+            request.getTemplateId(), request.getExpectedTemplateVersion()));
+        List<GroupMember> members = new ArrayList<>();
         String sessionId = Long.toString(IdUtil.getSnowflakeNextId());
         String name = CurrentUserHolder.getLoginInfo() == null ? ""
             : CurrentUserHolder.getLoginInfo().getUserName();
+        members.add(new GroupMember("USER", Long.toString(context.userId()), "OWNER", name));
+        if (!agentIds.isEmpty()) members.addAll(memberService.initialAgents(context, new ArrayList<>(agentIds)));
         node.command(context, "POST", "/internal/v1/group-chats", sessionId, "CREATE_GROUP",
-            new GroupCreate(request.getName(), sessionId,
-                List.of(new GroupMember("USER", Long.toString(context.userId()), "OWNER", name))));
-        node.command(context, "PATCH", "/internal/v1/group-chats/" + sessionId, sessionId,
-            "UPDATE_SESSION", new TenantNodeModels.SessionUpdate(null, request.getGoal()));
+            new GroupCreate(request.getName(), request.getGoal(), sessionId, members));
         return read(context, "/internal/v1/group-chats/" + sessionId);
     }
 

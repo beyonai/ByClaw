@@ -15,10 +15,12 @@ import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupCreate;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupMember;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.RemoveMember;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandResult;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.WorkgroupTemplateService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
@@ -34,8 +36,9 @@ class TenantGroupChatRoutingAspectTest {
     private final GroupChatReadService legacy = mock(GroupChatReadService.class);
     private final ByaiGroupChatMentionMapper memberships = mock(ByaiGroupChatMentionMapper.class);
     private final TenantGroupMemberService memberService = mock(TenantGroupMemberService.class);
+    private final WorkgroupTemplateService templates = mock(WorkgroupTemplateService.class);
     private final TenantGroupChatRoutingAspect aspect = new TenantGroupChatRoutingAspect(node, legacy, memberships,
-        new ObjectMapper(), memberService);
+        new ObjectMapper(), memberService, templates);
 
     @AfterEach
     void clear() {
@@ -93,6 +96,34 @@ class TenantGroupChatRoutingAspectTest {
         assertThat(response.getCode()).isZero();
         verify(node).command(eq(context), eq("POST"), eq("/internal/v1/group-chats"), any(),
             eq("CREATE_GROUP"), any(GroupCreate.class));
+        ArgumentCaptor<GroupCreate> payload = ArgumentCaptor.forClass(GroupCreate.class);
+        verify(node).command(eq(context), eq("POST"), eq("/internal/v1/group-chats"), any(),
+            eq("CREATE_GROUP"), payload.capture());
+        assertThat(payload.getValue().sessionContent()).isEqualTo("验证租户隔离");
+        verify(node, org.mockito.Mockito.never()).command(eq(context), eq("PATCH"), any(), any(),
+            eq("UPDATE_SESSION"), any());
+    }
+
+    @Test
+    void tenantCreateIncludesValidatedDigitalEmployeesInTheAtomicGroupCommand() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221859L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        GroupChatCreateRequest request = new GroupChatCreateRequest();
+        request.setName("数字员工协作组");
+        request.setGoal("验证租户建组");
+        request.setAgentIds(List.of(10000713L));
+        when(memberService.initialAgents(context, List.of(10000713L))).thenReturn(
+            List.of(new GroupMember("AGENT", "10000713", "MEMBER", "文章创作助手", true)));
+        when(node.request(eq(context), eq("GET"), any(), eq(null), any())).thenReturn(
+            Map.of("session", Map.of("sessionId", "9000000000000000001")));
+
+        aspect.route(call("create", request));
+
+        ArgumentCaptor<GroupCreate> payload = ArgumentCaptor.forClass(GroupCreate.class);
+        verify(node).command(eq(context), eq("POST"), eq("/internal/v1/group-chats"), any(),
+            eq("CREATE_GROUP"), payload.capture());
+        assertThat(payload.getValue().members()).contains(
+            new GroupMember("AGENT", "10000713", "MEMBER", "文章创作助手", true));
     }
 
     @Test

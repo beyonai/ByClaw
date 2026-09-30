@@ -77,6 +77,33 @@ class TenantGroupMemberServiceTest {
     }
 
     @Test
+    void initialAgentValidationMarksAccessibleResourcesForNodeCreate() {
+        SsResource resource = new SsResource();
+        resource.setResourceId(10000713L);
+        resource.setResourceBizType("DIG_EMPLOYEE");
+        resource.setResourceStatus(2);
+        resource.setResourceName("文章创作助手");
+        resource.setOwnerType("enterprise");
+        resource.setComAcctId(context.enterpriseId());
+        when(resources.findById(10000713L)).thenReturn(resource);
+
+        assertThat(service.initialAgents(context, List.of(10000713L))).containsExactly(
+            new TenantNodeModels.GroupMember("AGENT", "10000713", "MEMBER", "文章创作助手", true));
+    }
+
+    @Test
+    void initialAgentValidationRejectsInaccessibleResources() {
+        SsResource resource = new SsResource();
+        resource.setResourceBizType("DIG_EMPLOYEE");
+        resource.setResourceStatus(2);
+        resource.setOwnerType("personal");
+        when(resources.findById(10000713L)).thenReturn(resource);
+
+        assertThatThrownBy(() -> service.initialAgents(context, List.of(10000713L)))
+            .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
     void privateAgentWithoutAccessCannotBeAdded() {
         when(node.request(eq(context), eq("GET"), eq(path()), eq(null), any())).thenReturn(detail());
         SsResource resource = new SsResource();

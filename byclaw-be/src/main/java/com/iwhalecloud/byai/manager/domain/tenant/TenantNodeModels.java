@@ -104,10 +104,15 @@ public final class TenantNodeModels {
     public record SessionCreate(String sessionName, String sessionType) implements CommandPayload {
     }
 
-    public record GroupMember(String memObjType, String memObjId, String userRole, String memName) {
+    public record GroupMember(String memObjType, String memObjId, String userRole, String memName,
+                              boolean resourceAuthorized) {
+        public GroupMember(String memObjType, String memObjId, String userRole, String memName) {
+            this(memObjType, memObjId, userRole, memName, false);
+        }
     }
 
-    public record GroupCreate(String sessionName, String projectId, List<GroupMember> members)
+    public record GroupCreate(String sessionName, String sessionContent, String projectId,
+                              List<GroupMember> members)
         implements CommandPayload {
     }
 
