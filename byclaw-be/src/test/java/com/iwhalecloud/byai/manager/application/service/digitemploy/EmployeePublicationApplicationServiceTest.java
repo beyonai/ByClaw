@@ -228,43 +228,40 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(service.prepare(10L).canSubmit()).isTrue();
         verify(resources, never()).updateById(any(SsResource.class));
     }
-    @Test void adminvipOwnershipOverridesPlatformRole() {
+    @Test void adminvipEmployeeOwnershipDoesNotOverridePlatformReviewerPermission() {
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
         login("platform", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
-        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("仅允许 adminvip");
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PUBLISHED");
     }
 
-    @Test void platformSubmissionOfAdminvipEmployeeWaitsForAdminvipAndCannotBypassReview() {
+    @Test void platformSubmissionOfAdminvipEmployeeUsesNormalImmediatePublication() {
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
         login("platform", 8L, List.of("PLAT_MAN"));
         assertThat(service.prepare(10L).canSubmit()).isTrue();
-        var pending = service.submit(request());
-        assertThat(pending.publication().getStatus()).isEqualTo("PENDING");
-        assertThat(pending.publication().isRequiresAdminVipReview()).isTrue();
-        assertThat(pending.canReview()).isFalse();
-        assertThat(pending.canEdit()).isFalse();
-        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("仅允许 adminvip");
-        assertThatThrownBy(() -> service.reject(request())).hasMessageContaining("仅允许 adminvip");
-        assertThatThrownBy(() -> service.save(request())).hasMessageContaining("审核期间不可编辑");
-        verify(resources, never()).insert(any(SsResource.class));
-        assertThat(publication.getStatus()).isEqualTo("PENDING");
-        login("adminvip", 7L, List.of());
         when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
-        assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PUBLISHED");
-        assertThat(publication.getReviewerId()).isEqualTo(7L);
+        var result = service.submit(request());
+        assertThat(result.publication().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(result.publication().isRequiresAdminVipReview()).isFalse();
+        assertThat(publication.getReviewerId()).isEqualTo(8L);
         assertThat(publication.getReviewedAt()).isNotNull();
     }
 
-    @Test void copiedAdminvipSkillRequiresAdminvipEvenWhenEmployeeBelongsToPlatformManager() {
-        Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(9L)).thenReturn(creator);
-        var skill = employee(20L, 9L); skill.setResourceBizType("SKILL");
+    @ParameterizedTest @ValueSource(longs = {7L, 9L})
+    void copiedAdminvipSkillStillRequiresAdminvipRegardlessOfEmployeeCreator(Long skillCreator) {
+        Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(skillCreator)).thenReturn(creator);
+        var skill = employee(20L, skillCreator); skill.setResourceBizType("SKILL");
         var dependency = new EmployeePublicationResources.Dependency();
         dependency.setResource(skill); dependency.setAction("COPY_SKILL"); dependency.setCopyName("技能(企业)");
         publication.setDependenciesJson(JSON.toJSONString(List.of(dependency)));
         login("platform", 7L, List.of("PLAT_MAN"));
         assertThat(service.submit(request()).canReview()).isFalse();
         assertThat(publication.getStatus()).isEqualTo("PENDING");
-        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("仅允许 adminvip");
+        try (var messages = mockStatic(com.iwhalecloud.byai.common.i18n.I18nUtil.class)) {
+            messages.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get("employee.publication.adminvip.skill.review"))
+                .thenReturn("adminvip skill review required");
+            assertThatThrownBy(() -> service.approve(request())).hasMessage("adminvip skill review required");
+        }
         when(publications.selectList(any())).thenReturn(List.of(publication));
         assertThat(service.pendingCount()).isZero();
         assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isFalse();
@@ -430,7 +427,7 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(service.current(10L).publication()).isSameAs(publication);
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
         assertThat(service.current(10L).canSubmit()).isTrue();
-        assertThat(service.current(10L).publication().isRequiresAdminVipReview()).isTrue();
+        assertThat(service.current(10L).publication().isRequiresAdminVipReview()).isFalse();
         login("adminvip", 7L, List.of()); source.setComAcctId(2L);
         assertThatThrownBy(() -> service.current(10L)).hasMessageContaining("不存在");
         source.setComAcctId(1L); when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn("commercial");
@@ -479,7 +476,7 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isFalse();
         publication.setStatus("FAILED");
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
-        assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isFalse();
+        assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isTrue();
         login("adminvip", 7L, List.of());
         assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isTrue();
     }

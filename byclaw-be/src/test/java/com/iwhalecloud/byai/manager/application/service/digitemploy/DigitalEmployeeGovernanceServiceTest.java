@@ -19,23 +19,43 @@ class DigitalEmployeeGovernanceServiceTest {
     UserService users = mock(UserService.class);
     com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper publications = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
     DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, mock(ByaiSystemConfigService.class), publications);
-    AuthApplicationService auth = new AuthApplicationService();
+    AuthApplicationService auth = spy(new AuthApplicationService());
     PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
     @BeforeEach void setup() {
         ReflectionTestUtils.setField(auth, "employeeGovernance", governance);
         ReflectionTestUtils.setField(auth, "privilegeGrantService", grants);
+        doReturn(List.of()).when(auth).listAuthPrivilegeGrant(anyString(), any(), anyString(), anyLong(), isNull());
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(1L)).thenReturn(creator);
     }
     @AfterEach void cleanup() { CurrentUserHolder.clearLoginInfo(); }
-    @ParameterizedTest @ValueSource(strings = {"PLAT_MAN", "BUSINESS_MAN", "ORG_MAN", "PLAT_DEVOPS"})
-    void protectedOwnershipPrecedesExplicitGrantAndRole(String role) {
+    @ParameterizedTest @ValueSource(strings = {"COMMON", "PLAT_MAN", "BUSINESS_MAN", "ORG_MAN", "PLAT_DEVOPS"})
+    void adminvipOwnershipUsesNormalExplicitManagementGrant(String role) {
         EmployeePublicationApplicationServiceTest.login("manager", 2L, List.of(role));
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
         assertThat(auth.hasResourceManagePermission(resource)).isFalse();
         assertThat(auth.hasResourceUseSettingPermission(resource)).isFalse();
         assertThat(auth.hasResourceInstallTargetManagePermission(resource)).isFalse();
-        assertThatThrownBy(() -> auth.validateEmployeeAuthorizationPermission(resource)).hasMessageContaining("adminvip");
-        verifyNoInteractions(grants); // An explicit grant cannot override the ownership rule.
+        assertThat(governance.isProtected(resource)).isFalse();
+        var grant = new com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant();
+        grant.setGrantObjId(10L);
+        grant.setGrantToType("RED");
+        grant.setStatusCd("A");
+        doReturn(List.of(grant)).when(auth).listAuthPrivilegeGrant(anyString(), any(), anyString(), anyLong(), isNull());
+        assertThat(auth.hasResourceManagePermission(resource)).isTrue();
+        assertThat(auth.hasResourceUseSettingPermission(resource)).isTrue();
+        assertThat(auth.hasResourceInstallTargetManagePermission(resource)).isTrue();
+        assertThatCode(() -> auth.validateEmployeeAuthorizationPermission(resource)).doesNotThrowAnyException();
+        assertThatCode(() -> governance.requireDirectMutationAllowed(resource)).doesNotThrowAnyException();
+        // 相同入口的批量权限也不因创建者为 adminvip 而覆盖管理授权。
+        Boolean batchManage = ReflectionTestUtils.invokeMethod(auth, "hasResourceMemberSettingPermission",
+            resource, 2L, java.util.Set.of(10L));
+        assertThat(batchManage).isTrue();
+        var permissions = new com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo();
+        permissions.setCanEdit(true);
+        permissions.setCanManageAuth(true);
+        ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", resource, permissions);
+        assertThat(permissions.isCanEdit()).isTrue();
+        assertThat(permissions.isCanManageAuth()).isTrue();
     }
     @Test void adminvipRetainsMaintenanceRights() {
         EmployeePublicationApplicationServiceTest.login("adminvip", 1L, List.of());
@@ -45,7 +65,7 @@ class DigitalEmployeeGovernanceServiceTest {
     }
 
     @ParameterizedTest @ValueSource(booleans = {false, true})
-    void adminvipCreatedEmployeeHidesManageAuthorizationEvenForAdminvip(boolean official) {
+    void adminvipCreatedEmployeeKeepsNormalAuthorizationForAdminvip(boolean official) {
         EmployeePublicationApplicationServiceTest.login("adminvip", 1L, List.of());
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
         resource.setOwnerType("enterprise");
@@ -56,7 +76,7 @@ class DigitalEmployeeGovernanceServiceTest {
         permissions.setCanEdit(true);
         permissions.setHasManagePermission(true);
         ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", resource, permissions);
-        assertThat(permissions.isCanManageAuth()).isFalse();
+        assertThat(permissions.isCanManageAuth()).isTrue();
         assertThat(permissions.isCanUseAuth()).isTrue();
         assertThat(permissions.isCanEdit()).isTrue();
         assertThat(permissions.isHasManagePermission()).isTrue();
@@ -79,7 +99,7 @@ class DigitalEmployeeGovernanceServiceTest {
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
         assertThat(governance.canPublish(resource)).isTrue();
         assertThat(auth.hasResourceManagePermission(resource)).isFalse();
-        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("adminvip");
+        assertThatCode(() -> governance.requireDirectMutationAllowed(resource)).doesNotThrowAnyException();
         resource.setComAcctId(2L);
         assertThat(governance.canPublish(resource)).isFalse();
     }
@@ -124,11 +144,11 @@ class DigitalEmployeeGovernanceServiceTest {
         ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", resource, permissions);
         assertThat(permissions.isOfficialUpdateRequiresReview()).isTrue();
     }
-    @Test void directOfficialSaveStillProtectsAdminvipAndTenantBoundary() {
+    @Test void directOfficialSaveIgnoresCreatorIdentityButStillEnforcesTenantBoundary() {
         EmployeePublicationApplicationServiceTest.login("platform", 2L, List.of("PLAT_MAN"));
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
         resource.setPublicationSourceId(9L);
-        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("adminvip");
+        assertThatCode(() -> governance.requireDirectMutationAllowed(resource)).doesNotThrowAnyException();
         resource.setCreateBy(7L); resource.setComAcctId(99L);
         assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource));
     }

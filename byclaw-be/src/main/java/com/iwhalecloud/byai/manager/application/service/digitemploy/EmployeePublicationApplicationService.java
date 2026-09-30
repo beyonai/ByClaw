@@ -557,10 +557,13 @@ public class EmployeePublicationApplicationService {
     }
 
     private boolean requiresAdminVipReview(DigitalEmployeePublication publication) {
-        if (governance.isAdminVipCreator(publication.getAuthorId())) return true;
+        // 员工创建者不再触发特殊审核；保留原判断，关联个人技能仍按自身规则审核。
+        // if (governance.isAdminVipCreator(publication.getAuthorId())) return true;
         return dependencyList(publication).stream().filter(d -> "COPY_SKILL".equals(d.getAction()))
             .map(Dependency::getResource).filter(Objects::nonNull)
-            .map(SsResource::getCreateBy).filter(creatorId -> !Objects.equals(creatorId, publication.getAuthorId()))
+            .map(SsResource::getCreateBy)
+            // 原先作者已在上方判断，现在技能作者与员工作者相同时也需检查技能规则。
+            // .filter(creatorId -> !Objects.equals(creatorId, publication.getAuthorId()))
             .distinct().anyMatch(governance::isAdminVipCreator);
     }
 
@@ -614,7 +617,8 @@ public class EmployeePublicationApplicationService {
         if (!DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("仅 adminvip 和平台管理员可以审核");
         basis(publication);
         if (!CurrentUserHolder.isAdminVip() && requiresAdminVipReview(publication)) {
-            throw new BaseException("申请包含 adminvip 创建的员工或个人技能，仅允许 adminvip 审核");
+            // throw new BaseException("申请包含 adminvip 创建的员工或个人技能，仅允许 adminvip 审核");
+            throw new BaseException(com.iwhalecloud.byai.common.i18n.I18nUtil.get("employee.publication.adminvip.skill.review"));
         }
     }
     private void requireState(DigitalEmployeePublication publication, String... states) {

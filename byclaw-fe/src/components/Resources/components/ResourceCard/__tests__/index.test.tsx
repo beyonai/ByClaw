@@ -206,28 +206,38 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('common.useAuthorization')).toBeNull();
   });
 
-  it('hides management authorization while keeping use authorization for an adminvip-created employee', () => {
-    const onAuth = jest.fn();
-    renderWithQueryClient(
-      <ResourceCard
-        resourceType="DIG_EMPLOYEE"
-        resource={{
-          resourceId: 'adminvip-employee',
-          resourceBizType: 'DIG_EMPLOYEE',
-          ownerType: 'enterprise',
-          resourceStatus: '2',
-          canEdit: true,
-          hasManagePermission: true,
-          canManageAuth: false,
-          canUseAuth: true,
-        }}
-        onAuth={onAuth}
-      />
-    );
-    expect(screen.queryByTestId('resource-menu-authorize')).toBeNull();
-    fireEvent.click(screen.getByText('common.useAuthorization'));
-    expect(onAuth).toHaveBeenCalledWith('useAuth');
-  });
+  it.each([true, false])(
+    'uses normal edit and management authorization permissions for adminvip-created employees: %s',
+    (allowed) => {
+      const onAuth = jest.fn();
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType="DIG_EMPLOYEE"
+          resource={{
+            resourceId: 'adminvip-employee',
+            resourceBizType: 'DIG_EMPLOYEE',
+            ownerType: 'enterprise',
+            resourceStatus: '2',
+            canEdit: allowed,
+            hasManagePermission: allowed,
+            canManageAuth: allowed,
+            canUseAuth: true,
+          }}
+          onAuth={onAuth}
+        />
+      );
+      if (allowed) {
+        expect(screen.getByText('common.editInfo')).toBeInTheDocument();
+        fireEvent.click(screen.getByText('common.manageAuthorization'));
+        expect(onAuth).toHaveBeenCalledWith('mgrAuth');
+      } else {
+        expect(screen.queryByText('common.editInfo')).toBeNull();
+        expect(screen.queryByTestId('resource-menu-authorize')).toBeNull();
+      }
+      fireEvent.click(screen.getByText('common.useAuthorization'));
+      expect(onAuth).toHaveBeenCalledWith('useAuth');
+    }
+  );
 
   // 员工和资源共用轻量提示；确认后不阻塞其他卡片，失败也须结束提示并允许重试。
   it.each([

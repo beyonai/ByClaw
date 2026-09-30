@@ -1,12 +1,25 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { queryDigitalEmployeeSkillResources } from '@/components/Resources/workspaceSkill/queryDigitalEmployeeSkillResources';
 import ResourceSiderPanel from '../index';
+import { queryWorkspaceSkillCenterStatus } from '@/pages/manager/service/resources';
 
 const mockEventEmitter = { on: jest.fn(), off: jest.fn() };
+let mockCanManage = false;
 let mockEmployeeId: string | undefined = 'employee-1';
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: any) => id }),
   useSelector: () => ({ userInfo: { userCode: 'user-1' } }),
+}));
+jest.mock('antd', () => ({
+  ...jest.requireActual('antd'),
+  Dropdown: ({ menu, onOpenChange }: any) => (
+    <div>
+      <button onClick={() => onOpenChange?.(true)}>open skill menu</button>
+      {menu.items.map((item: any) => (
+        <div key={item.key}>{item.label}</div>
+      ))}
+    </div>
+  ),
 }));
 jest.mock('@/hooks/useGlobal', () => () => ({ EventEmitter: mockEventEmitter }));
 jest.mock('@/components/AntdIcon', () => () => null);
@@ -17,6 +30,7 @@ jest.mock('@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer', () =
 jest.mock('@/pages/manager/components/AuthListDrawer/AddAuthModal', () => () => null);
 jest.mock('@/pages/manager/service/resources', () => ({
   queryDigEmployeeRelResourceAuth: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
+  queryWorkspaceSkillCenterStatus: jest.fn(),
 }));
 jest.mock('@/pages/manager/service/DigitalResourceMgr', () => ({}));
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({}));
@@ -30,7 +44,7 @@ jest.mock('@/components/Resources/workspaceSkill/useWorkspaceSkillActions', () =
   useWorkspaceSkillActions: () => ({}),
 }));
 jest.mock('@/components/Resources/workspaceSkill/useDigitalEmployeeManagePermission', () => ({
-  useDigitalEmployeeManagePermission: () => false,
+  useDigitalEmployeeManagePermission: () => mockCanManage,
 }));
 jest.mock('../useEnterpriseSkillPublication', () => ({
   useEnterpriseSkillPublication: () => ({ canPublish: () => false }),
@@ -42,7 +56,12 @@ jest.mock('../../ActiveSiderAgentBar', () => ({
 jest.mock('../ResourceSiderListItem', () => ({
   __esModule: true,
   PROPERTY_RESOURCE_TYPE: 'PROPERTY',
-  default: ({ item }: any) => <div>{item.resourceName}</div>,
+  default: ({ item, actions }: any) => (
+    <div>
+      {item.resourceName}
+      {actions}
+    </div>
+  ),
 }));
 jest.mock('../../InfiniteScrollAntdList', () => ({
   __esModule: true,
@@ -55,6 +74,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(queryDigitalEmployeeSkillResources).mockReset();
   mockEmployeeId = 'employee-1';
+  mockCanManage = false;
 });
 
 it('shows a retry action after failure and retries with the current search keyword', async () => {
@@ -181,4 +201,60 @@ it('does not add the skill refresh action to the tool list', async () => {
   });
   expect(screen.queryByRole('button', { name: 'common.refresh' })).not.toBeInTheDocument();
   expect(queryDigitalEmployeeSkillResources).not.toHaveBeenCalled();
+});
+
+// 目录技能允许安装到中心，但不能仅凭文件存在就提供卸载入口。
+it.each(['INSTALL', 'UPDATE', 'NONE'])(
+  'uses resource center status %s for directory skills without offering uninstall',
+  async (action) => {
+    mockCanManage = true;
+    const row = {
+      resourceId: 'WORKSPACE_SKILL:/skills/weather-query',
+      resourceName: 'weather-query',
+      resourceBizType: 'SKILL',
+      resourceBacked: false,
+      skillPath: '/skills/weather-query',
+    };
+    jest.mocked(queryDigitalEmployeeSkillResources).mockResolvedValue({
+      ...emptyResult,
+      rows: [row],
+      workspaceRows: [row],
+    });
+    jest.mocked(queryWorkspaceSkillCenterStatus).mockResolvedValue({
+      action,
+      ownerType: 'personal',
+      revision: 'revision-1',
+    } as any);
+    render(<ResourceSiderPanel resourceType="SKILL" embedded showRouter />);
+    await screen.findByText('weather-query');
+    expect(screen.queryByText('resource.uninstallSkill')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('open skill menu'));
+    await waitFor(() => expect(screen.queryByText('resource.workspaceCenter.checking')).not.toBeInTheDocument());
+    expect(queryWorkspaceSkillCenterStatus).toHaveBeenCalledWith({
+      resourceId: 'employee-1',
+      skillPath: '/skills/weather-query',
+    });
+    if (action !== 'NONE') {
+      expect(screen.getByText(`resource.workspaceCenter.${action.toLowerCase()}`)).toBeInTheDocument();
+    } else {
+      expect(screen.queryByText('resource.workspaceCenter.install')).not.toBeInTheDocument();
+      expect(screen.queryByText('resource.workspaceCenter.update')).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText('resource.uninstallSkill')).not.toBeInTheDocument();
+  }
+);
+
+it('keeps uninstall for installed resource library skills', async () => {
+  mockCanManage = true;
+  const row = { resourceId: 'skill-1', resourceName: 'installed', resourceBizType: 'SKILL', resourceBacked: true };
+  jest.mocked(queryDigitalEmployeeSkillResources).mockResolvedValue({
+    ...emptyResult,
+    rows: [row],
+    boundRows: [row],
+    total: 1,
+  });
+  render(<ResourceSiderPanel resourceType="SKILL" embedded showRouter />);
+  expect(await screen.findByText('resource.uninstallSkill')).toBeInTheDocument();
+  fireEvent.click(screen.getByText('open skill menu'));
+  expect(queryWorkspaceSkillCenterStatus).not.toHaveBeenCalled();
 });

@@ -9,7 +9,7 @@ import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import PropertyDetail from '@/components/Resources/components/PropertyDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
-import { deleteSkill, queryDigEmployeeRelResourceAuth, uploadSkillZip } from '@/pages/manager/service/resources';
+import { queryDigEmployeeRelResourceAuth, uploadSkillZip } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import {
@@ -550,7 +550,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   });
 
   // 工作空间(用户开发)技能的详情 / 分享(资源化) 复用公共 hook，保证与右侧个人技能 tab 行为一致。
-  // 卸载仍走本地 handleUninstallSkill（左侧按数字员工维度，文案为“卸载”）。
+  // 目录技能通过资源中心同步入口安装；卸载只用于已绑定的资源库技能。
   const workspaceActions = useWorkspaceSkillActions({
     resourceId: activeSiderAgent.resourceId,
     agentName: activeSiderAgent.name,
@@ -715,18 +715,19 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   };
 
   const handleUninstallSkill = (item: ResourceItem) => {
+    // 目录存在不代表已安装，不能通过卸载操作删除尚未入库的开发文件。
+    if (isWorkspaceSkill(item)) return;
     if (!activeSiderAgent.resourceId) {
       message.error(intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' }));
       return;
     }
     const employeeName = activeSiderAgent.name || intl.formatMessage({ id: 'resource.currentDigitalEmployee' });
-    const workspaceSkill = isWorkspaceSkill(item);
 
     Modal.confirm({
       title: intl.formatMessage({ id: 'resource.uninstallSkill' }),
       content: intl.formatMessage(
         {
-          id: workspaceSkill ? 'resource.uninstallWorkspaceSkillConfirm' : 'resource.uninstallSkillConfirm',
+          id: 'resource.uninstallSkillConfirm',
         },
         { employeeName, skillName: item.resourceName }
       ),
@@ -734,26 +735,14 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       cancelText: intl.formatMessage({ id: 'common.cancel' }),
       async onOk() {
         try {
-          if (workspaceSkill) {
-            if (!item.skillPath) {
-              message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
-              return;
-            }
-            await deleteSkill({
-              skillPath: item.skillPath,
-              resourceId: activeSiderAgent.resourceId,
-              userCode: userInfo?.userCode,
-            });
-          } else {
-            // uninstallRelResources 走 customHandle，业务失败（如无管理权限 code!==0）也会 resolve，必须显式校验 code。
-            const res: any = await uninstallDigitalEmployeeRelResources({
-              digitalEmployeeId: activeSiderAgent.resourceId!,
-              relIds: [item.resourceId],
-            });
-            if (res && res.code !== 0) {
-              message.error(res.msg || intl.formatMessage({ id: 'common.operationFailed' }));
-              return;
-            }
+          // 卸载接口业务失败也会 resolve，必须显式检查返回码。
+          const res: any = await uninstallDigitalEmployeeRelResources({
+            digitalEmployeeId: activeSiderAgent.resourceId!,
+            relIds: [item.resourceId],
+          });
+          if (res && res.code !== 0) {
+            message.error(res.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+            return;
           }
           message.success(intl.formatMessage({ id: 'resource.uninstallSuccess' }));
           window.dispatchEvent(
@@ -816,7 +805,12 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: entryLabel(item) })}</div>,
       });
     }
-    if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL && canManageActiveAgent) {
+    if (
+      resourceType === 'SKILL' &&
+      item.resourceBizType === ResourceTypeMap.SKILL &&
+      canManageActiveAgent &&
+      !isWorkspaceSkill(item)
+    ) {
       menuItems.push({
         key: 'uninstall',
         label: (

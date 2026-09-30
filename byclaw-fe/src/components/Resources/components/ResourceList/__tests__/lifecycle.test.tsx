@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { message } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceList from '..';
@@ -482,5 +482,27 @@ it('shows an empty available skill list when only personal directory skills exis
   renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false });
   expect(await screen.findByText('common.noData')).toBeInTheDocument();
   expect(screen.queryByTestId('resource-card')).toBeNull();
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
+});
+
+// 模拟离开资源中心后员工目录新增技能，再返回中心；目录数据不能随员工上下文混入。
+it('keeps available skills resource-backed after leaving and reopening the center', async () => {
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({
+    data: { list: [{ resourceId: 'center-skill', resourceBizType: 'SKILL' }], total: 1 },
+  });
+  const props = { resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false };
+  renderList(props);
+  expect(await screen.findAllByTestId('resource-card')).toHaveLength(1);
+  cleanup();
+
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'weather-query', skillPath: '/skills/weather-query', personalWorkspace: true }],
+  });
+  renderList(props);
+  expect(await screen.findAllByTestId('resource-card')).toHaveLength(1);
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(2);
+  expect(listResourceUseAuth).toHaveBeenLastCalledWith(
+    expect.objectContaining({ availableOnly: true, resourceBizTypeList: ['SKILL'], resourceStatus: '2' })
+  );
   expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
 });
