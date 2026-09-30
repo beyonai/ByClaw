@@ -3568,6 +3568,8 @@ export default {
   'resource.workspaceCenter.retry': '检查失败，点击重试',
   'resource.workspaceCenter.confirm':
     '将“{name}”{action}到资源中心的{scope}。成功后将删除当前员工工作空间中的该技能文件夹及全部文件。',
+  'resource.workspaceCenter.updateInstalledConfirm': '将“{name}”的当前员工目录内容更新到资源中心的{scope}，保留员工目录和安装关联。',
+  'resource.workspaceCenter.updatedInstalled': '技能已更新到资源中心',
   'resource.workspaceCenter.success': '技能已保存到资源中心，源目录已删除',
   'resource.workspaceCenter.cleanupFailed': '技能已保存到资源中心，但源目录清理失败或文件已变化，请检查后手动清理',
   'resource.workspaceCenter.failed': '技能同步失败，请刷新后确认状态',

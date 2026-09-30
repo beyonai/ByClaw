@@ -791,10 +791,16 @@ export interface WorkspaceSkillCenterStatus {
 }
 
 /** 员工目录同步使用当前登录身份；目标归属与匹配范围由后端解析。 */
-export const queryWorkspaceSkillCenterStatus = (params: { resourceId: string; skillPath: string }) =>
+export interface WorkspaceSkillCenterParams {
+  resourceId: string;
+  skillPath?: string;
+  targetResourceId?: string | number;
+}
+
+export const queryWorkspaceSkillCenterStatus = (params: WorkspaceSkillCenterParams) =>
   POST<WorkspaceSkillCenterStatus>('/byaiService/tool/queryWorkspaceSkillCenterStatus', params);
 
-export const syncWorkspaceSkillToCenter = (params: { resourceId: string; skillPath: string; revision: string }) =>
+export const syncWorkspaceSkillToCenter = (params: WorkspaceSkillCenterParams & { revision: string }) =>
   POST<{ resourceId: string | number; action: 'INSTALL' | 'UPDATE'; sourceDeleted: boolean }>(
     '/byaiService/tool/syncWorkspaceSkillToCenter',
     params

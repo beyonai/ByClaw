@@ -384,6 +384,8 @@ class ByClawSkillResourceApplicationServiceTest {
             original = bytes.toByteArray();
         }
         byte[] document = "---\nname: demo\n---\nnew content\n".getBytes(StandardCharsets.UTF_8);
+        // 安装后的目录按包内根目录定位，不使用可能已变化的资源编码。
+        assertThat(service.readCenterSkillDirectoryName(original, "workspace-scoped-code")).isEqualTo("demo");
         byte[] updated = service.replaceCenterSkillDocument(original, document);
         assertThat(service.readCenterSkillDocument(updated)).isEqualTo(document);
         try (var channel = new org.apache.commons.compress.utils.SeekableInMemoryByteChannel(updated);

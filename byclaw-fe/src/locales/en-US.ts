@@ -3645,6 +3645,9 @@ export default {
   'resource.workspaceCenter.retry': 'Check failed. Click to retry',
   'resource.workspaceCenter.confirm':
     '{action} “{name}” in Resource Center {scope}. After saving, its folder and all files in the current employee workspace will be deleted.',
+  'resource.workspaceCenter.updateInstalledConfirm':
+    'Update “{name}” in Resource Center ({scope}) using this employee’s directory. Keep the employee directory and installation.',
+  'resource.workspaceCenter.updatedInstalled': 'Skill updated in Resource Center',
   'resource.workspaceCenter.success': 'Skill saved to Resource Center and source folder deleted',
   'resource.workspaceCenter.cleanupFailed':
     'Skill saved to Resource Center, but source cleanup failed or files changed. Review the folder before deleting it manually.',

@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo;
 import java.io.ByteArrayOutputStream;
@@ -33,6 +34,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class WorkspaceSkillCenterApplicationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(WorkspaceSkillCenterApplicationService.class);
     private final SsResourceService resources;
+    private final SsResourceRelDetailService relations;
     private final AuthApplicationService auth;
     private final UserFS files;
     private final ByClawSkillPathResolver paths;
@@ -41,7 +43,8 @@ public class WorkspaceSkillCenterApplicationService {
 
     public WorkspaceSkillCenterApplicationService(SsResourceService resources, AuthApplicationService auth,
         UserFS files, ByClawSkillPathResolver paths, ByClawSkillResourceApplicationService packages,
-        PlatformTransactionManager transactionManager) {
+        PlatformTransactionManager transactionManager, SsResourceRelDetailService relations) {
+        this.relations = relations;
         this.resources = resources;
         this.auth = auth;
         this.files = files;
@@ -77,6 +80,10 @@ public class WorkspaceSkillCenterApplicationService {
         });
         if (saved == null) throw failure("failed");
 
+        // 已安装技能仍由员工使用；更新资源包后保留工作目录和安装关联。
+        if (request.getTargetResourceId() != null) {
+            return new Result(saved.resourceId(), saved.inspection().status().action(), false);
+        }
         boolean cleaned = false;
         try {
             // 存储没有数据库事务：若保存期间源文件发生变化，保留整个目录，避免删掉未同步的新文件。
@@ -101,6 +108,7 @@ public class WorkspaceSkillCenterApplicationService {
         if (employee == null || !"DIG_EMPLOYEE".equals(employee.getResourceBizType())
             || Objects.equals(employee.getResourceStatus(), ResourceStatus.DELETE.getNum())
             || !auth.hasResourceInstallTargetManagePermission(employee)) throw failure("permission");
+        if (request.getTargetResourceId() != null) return inspectInstalled(request, lock);
         String owner = employee.getOwnerType();
         if ("personal_default".equals(owner)) owner = OwnerType.PERSONAL;
         if (!OwnerType.PERSONAL.equals(owner) && !OwnerType.ENTERPRISE.equals(owner)) throw failure("invalid");
@@ -127,7 +135,7 @@ public class WorkspaceSkillCenterApplicationService {
         }
         byte[] targetPackage = existing == null ? null : packages.readCenterSkillPackage(existing);
         byte[] targetDocument = targetPackage == null ? null : packages.readCenterSkillDocument(targetPackage);
-        String action = existing == null ? "INSTALL" : Arrays.equals(document, targetDocument) ? "NONE" : "UPDATE";
+        String action = existing == null ? "INSTALL" : sameDocument(document, targetDocument) ? "NONE" : "UPDATE";
         if (existing != null && !"NONE".equals(action)) packages.assertSkillManagePermission(existing);
         String revision = DigestUtils.sha256Hex(owner + ":" + request.getResourceId() + ":" + path + ":"
             + DigestUtils.sha256Hex(document) + ":" + (existing == null ? "new" : existing.getResourceId()) + ":"
@@ -135,6 +143,34 @@ public class WorkspaceSkillCenterApplicationService {
         String code = existing == null ? (matches.isEmpty() ? name : scopedCode) : existing.getResourceCode();
         return new Inspection(new Status(action, owner, existing == null ? null : existing.getResourceId(), revision),
             path, name, code, document, existing, targetPackage);
+    }
+
+    /** 已绑定技能也比较员工目录与中心包，且始终更新实际绑定 ID，避免同名资源串写。 */
+    private Inspection inspectInstalled(WorkspaceSkillCenterQo request, boolean lock) {
+        Long targetId = request.getTargetResourceId();
+        var bindings = relations.findByResourceId(request.getResourceId());
+        if (bindings == null || bindings.stream().noneMatch(row -> targetId.equals(row.getRelResourceId()))) {
+            throw failure("permission");
+        }
+        SsResource target = lock ? resources.findByIdForUpdate(targetId) : resources.findById(targetId);
+        if (target == null || !"SKILL".equals(target.getResourceBizType())
+            || Objects.equals(target.getResourceStatus(), ResourceStatus.DELETE.getNum())) throw failure("invalid");
+        byte[] targetPackage = packages.readCenterSkillPackage(target);
+        String name = packages.readCenterSkillDirectoryName(targetPackage, target.getResourceCode());
+        String root = paths.resolveSkillRootPrefix(CurrentUserHolder.getCurrentUserCode(), request.getResourceId());
+        String path = normalizePath(root + name, request.getResourceId());
+        byte[] document = read(path + "/SKILL.md");
+        String action = sameDocument(document, packages.readCenterSkillDocument(targetPackage)) ? "NONE" : "UPDATE";
+        if ("UPDATE".equals(action)) packages.assertSkillManagePermission(target);
+        String revision = DigestUtils.sha256Hex(request.getResourceId() + ":" + targetId + ":" + path + ":"
+            + DigestUtils.sha256Hex(document) + ":" + DigestUtils.sha256Hex(targetPackage));
+        return new Inspection(new Status(action, target.getOwnerType(), targetId, revision), path, name,
+            target.getResourceCode(), document, target, targetPackage);
+    }
+
+    /** MD5 仅用于文档内容差异判断；提交并发校验仍使用完整内容的 SHA-256。 */
+    private boolean sameDocument(byte[] source, byte[] target) {
+        return target != null && DigestUtils.md5Hex(source).equals(DigestUtils.md5Hex(target));
     }
 
     private String scopedCode(String owner, String name) {

@@ -14,6 +14,8 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo;
 import java.io.ByteArrayInputStream;
@@ -33,6 +35,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 class WorkspaceSkillCenterApplicationServiceTest {
     private static final String ROOT = "/.openclaw/workspace-baiying-agent-10/skills/";
     private static final String PATH = ROOT + "demo";
+    private final SsResourceRelDetailService relations = mock(SsResourceRelDetailService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
     private final AuthApplicationService auth = mock(AuthApplicationService.class);
     private final UserFS files = mock(UserFS.class);
@@ -73,7 +76,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         when(files.delete(PATH + "/")).thenAnswer(call -> { source.clear(); return true; });
         when(packages.saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any()))
             .thenReturn(new ByClawSkillResourceApplicationService.SkillImportResult(resource(20L, "personal", 1L), null, false));
-        service = new WorkspaceSkillCenterApplicationService(resources, auth, files, paths, packages, transactions);
+        service = new WorkspaceSkillCenterApplicationService(resources, auth, files, paths, packages, transactions, relations);
         request = new WorkspaceSkillCenterQo();
         request.setResourceId(10L);
         request.setSkillPath(PATH);
@@ -237,6 +240,58 @@ class WorkspaceSkillCenterApplicationServiceTest {
         }
         verify(files, never()).read(anyString());
         verify(files, never()).delete(anyString());
+    }
+
+    @Test
+    void installedSkillComparesMd5AndUpdatesBoundResourceWithoutDeletingDirectory() {
+        SsResource target = installed("old body");
+        // 即使员工与技能归属不同，也更新真实安装的资源，而不是创建同名副本。
+        employee.setOwnerType("enterprise");
+        var preview = service.preview(request);
+        assertThat(preview.action()).isEqualTo("UPDATE");
+        assertThat(preview.ownerType()).isEqualTo("personal");
+        assertThat(preview.targetResourceId()).isEqualTo(21L);
+        request.setRevision(preview.revision());
+        when(packages.replaceCenterSkillDocument(any(), any())).thenReturn(new byte[] {9});
+        assertThat(service.sync(request).sourceDeleted()).isFalse();
+        verify(packages).saveWorkspaceSkillCenterPackage(eq(new byte[] {9}), eq("personal"), eq("demo"), eq("demo"), eq(target));
+        verify(files, never()).delete(anyString());
+        verify(resources, never()).getResourceListByCode(any());
+        assertThat(source).containsKey("SKILL.md");
+    }
+
+    @Test
+    void installedIdenticalMarkdownHasNoUpdate() {
+        installed(new String(source.get("SKILL.md"), StandardCharsets.UTF_8));
+        assertThat(service.preview(request).action()).isEqualTo("NONE");
+        verify(packages, never()).assertSkillManagePermission(any());
+    }
+
+    @Test
+    void installedSkillRejectsUnboundIdsMissingFilesAndStaleContent() {
+        installed("old body");
+        request.setRevision(service.preview(request).revision());
+        source.put("SKILL.md", "newer body".getBytes(StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> service.sync(request)).hasMessageContaining("changed");
+        source.remove("SKILL.md");
+        assertThatThrownBy(() -> service.preview(request)).hasMessageContaining("missing");
+        when(relations.findByResourceId(10L)).thenReturn(List.of());
+        assertThatThrownBy(() -> service.preview(request)).hasMessageContaining("permission");
+        verify(files, never()).delete(anyString());
+        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any());
+    }
+
+    private SsResource installed(String document) {
+        SsResource target = resource(21L, "personal", 1L);
+        existing(target, document);
+        when(resources.findById(21L)).thenReturn(target);
+        when(packages.readCenterSkillDirectoryName(any(), eq("demo"))).thenReturn("demo");
+        SsResourceRelDetail binding = new SsResourceRelDetail();
+        binding.setRelResourceId(21L);
+        when(relations.findByResourceId(10L)).thenReturn(List.of(binding));
+        request.setTargetResourceId(21L);
+        request.setSkillPath(null);
+        return target;
     }
 
     private void existing(SsResource resource, String document) {

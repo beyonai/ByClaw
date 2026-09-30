@@ -512,6 +512,12 @@ public class ByClawSkillResourceApplicationService {
         }
     }
 
+    /** 使用技能包目录名定位员工工作空间，避免把资源展示名或隔离编码当作目录名。 */
+    String readCenterSkillDirectoryName(byte[] packageBytes, String fallback) {
+        return StringUtils.defaultIfBlank(lastPathSegment(parentDirOf(findSkillDoc(readZipEntries(packageBytes)).name())),
+            fallback);
+    }
+
     byte[] readCenterSkillDocument(byte[] packageBytes) {
         return findSkillDoc(readZipEntries(packageBytes)).content();
     }

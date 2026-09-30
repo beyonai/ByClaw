@@ -781,7 +781,13 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   const renderDetailDropdown = (item: ResourceItem) => {
     const menuItems: { key: string; label: React.ReactNode; disabled?: boolean }[] = [];
     const workspaceCenterItem = workspaceCenterSync.menuItem(item);
-    if (workspaceCenterItem) menuItems.push(workspaceCenterItem);
+    if (workspaceCenterItem) {
+      // 下拉菜单已清除默认 padding，安装、更新和状态提示需复用其余菜单项的容器。
+      menuItems.push({
+        ...workspaceCenterItem,
+        label: <div className={employeeStyles.dropdownMenuItem}>{workspaceCenterItem.label}</div>,
+      });
+    }
     if (!item.quoteDisabled) {
       menuItems.push({
         key: 'quote',
@@ -809,6 +815,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       resourceType === 'SKILL' &&
       item.resourceBizType === ResourceTypeMap.SKILL &&
       canManageActiveAgent &&
+      // 安装/更新（含检查中、失败重试）与卸载互斥，目录存在本身不代表已安装。
+      !workspaceCenterItem &&
       !isWorkspaceSkill(item)
     ) {
       menuItems.push({

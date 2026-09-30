@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { queryDigitalEmployeeSkillResources } from '@/components/Resources/workspaceSkill/queryDigitalEmployeeSkillResources';
 import ResourceSiderPanel from '../index';
+import employeeStyles from '../../EmployeeList/index.module.less';
 import { queryWorkspaceSkillCenterStatus } from '@/pages/manager/service/resources';
 
 const mockEventEmitter = { on: jest.fn(), off: jest.fn() };
@@ -228,6 +229,7 @@ it.each(['INSTALL', 'UPDATE', 'NONE'])(
     render(<ResourceSiderPanel resourceType="SKILL" embedded showRouter />);
     await screen.findByText('weather-query');
     expect(screen.queryByText('resource.uninstallSkill')).not.toBeInTheDocument();
+    expect(screen.getByText('resource.workspaceCenter.checking')).toHaveClass(employeeStyles.dropdownMenuItem);
     fireEvent.click(screen.getByText('open skill menu'));
     await waitFor(() => expect(screen.queryByText('resource.workspaceCenter.checking')).not.toBeInTheDocument());
     expect(queryWorkspaceSkillCenterStatus).toHaveBeenCalledWith({
@@ -235,7 +237,11 @@ it.each(['INSTALL', 'UPDATE', 'NONE'])(
       skillPath: '/skills/weather-query',
     });
     if (action !== 'NONE') {
-      expect(screen.getByText(`resource.workspaceCenter.${action.toLowerCase()}`)).toBeInTheDocument();
+      expect(screen.getByText(`resource.workspaceCenter.${action.toLowerCase()}`)).toHaveClass(
+        employeeStyles.dropdownMenuItem
+      );
+      const otherAction = action === 'INSTALL' ? 'update' : 'install';
+      expect(screen.queryByText(`resource.workspaceCenter.${otherAction}`)).not.toBeInTheDocument();
     } else {
       expect(screen.queryByText('resource.workspaceCenter.install')).not.toBeInTheDocument();
       expect(screen.queryByText('resource.workspaceCenter.update')).not.toBeInTheDocument();
@@ -244,7 +250,7 @@ it.each(['INSTALL', 'UPDATE', 'NONE'])(
   }
 );
 
-it('keeps uninstall for installed resource library skills', async () => {
+it.each(['NONE', 'UPDATE'])('checks installed resource library skills before showing %s actions', async (action) => {
   mockCanManage = true;
   const row = { resourceId: 'skill-1', resourceName: 'installed', resourceBizType: 'SKILL', resourceBacked: true };
   jest.mocked(queryDigitalEmployeeSkillResources).mockResolvedValue({
@@ -254,7 +260,18 @@ it('keeps uninstall for installed resource library skills', async () => {
     total: 1,
   });
   render(<ResourceSiderPanel resourceType="SKILL" embedded showRouter />);
-  expect(await screen.findByText('resource.uninstallSkill')).toBeInTheDocument();
+  jest.mocked(queryWorkspaceSkillCenterStatus).mockResolvedValue({ action, revision: 'r1', ownerType: 'personal' });
+  await screen.findByText('installed');
+  expect(screen.queryByText('resource.uninstallSkill')).not.toBeInTheDocument();
   fireEvent.click(screen.getByText('open skill menu'));
-  expect(queryWorkspaceSkillCenterStatus).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByText('resource.workspaceCenter.checking')).not.toBeInTheDocument());
+  expect(queryWorkspaceSkillCenterStatus).toHaveBeenCalledWith({ resourceId: 'employee-1', targetResourceId: 'skill-1' });
+  expect(screen.queryByText('resource.workspaceCenter.install')).not.toBeInTheDocument();
+  if (action === 'NONE') {
+    expect(screen.getByText('resource.uninstallSkill')).toBeInTheDocument();
+    expect(screen.queryByText('resource.workspaceCenter.update')).not.toBeInTheDocument();
+  } else {
+    expect(screen.getByText('resource.workspaceCenter.update')).toBeInTheDocument();
+    expect(screen.queryByText('resource.uninstallSkill')).not.toBeInTheDocument();
+  }
 });

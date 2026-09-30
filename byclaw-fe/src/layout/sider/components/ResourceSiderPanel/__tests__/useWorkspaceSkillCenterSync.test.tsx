@@ -64,16 +64,12 @@ it('hides both actions for identical markdown', async () => {
   expect(sync).not.toHaveBeenCalled();
 });
 
-it('does not offer directory sync for resource-backed skills or users without employee management permission', async () => {
+it('does not check skills without employee management permission', async () => {
   const { result } = setup(false);
   await act(async () => result.current.onOpen(skill));
   expect(result.current.menuItem(skill)).toBeUndefined();
   expect(query).not.toHaveBeenCalled();
-  const { result: enabled } = setup();
-  const bound = { ...skill, resourceId: '123', resourceBacked: true };
-  await act(async () => enabled.current.onOpen(bound));
-  expect(enabled.current.menuItem(bound)).toBeUndefined();
-  expect(query).not.toHaveBeenCalled();
+
 });
 
 it('confirms once and submits the comparison revision for the current employee', async () => {
@@ -171,4 +167,26 @@ it('discards comparison responses and confirmations from a previous employee', a
   rerender({ employeeId: 'employee-3' });
   await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
   expect(sync).not.toHaveBeenCalled();
+});
+
+// 已安装资源没有 skillPath 也要检查，目标路径由后端根据绑定资源解析。
+it('checks and updates an installed skill by resource ID while retaining its directory', async () => {
+  const bound = { ...skill, resourceId: '123', resourceBacked: true, skillPath: undefined };
+  const onChanged = jest.fn();
+  query.mockResolvedValue(status('UPDATE'));
+  sync.mockResolvedValue({ resourceId: '123', action: 'UPDATE', sourceDeleted: false });
+  const boundRows = [bound];
+  const { result } = renderHook(() =>
+    useWorkspaceSkillCenterSync({ employeeId: 'employee-1', enabled: true, rows: boundRows, onChanged })
+  );
+  await act(async () => result.current.onOpen(bound));
+  expect(query).toHaveBeenCalledWith({ resourceId: 'employee-1', targetResourceId: '123' });
+  expect(result.current.menuItem(bound)?.label).toBe('resource.workspaceCenter.update');
+  act(() => result.current.onClick(bound));
+  expect((Modal.confirm as jest.Mock).mock.calls[0][0].content).toBe('resource.workspaceCenter.updateInstalledConfirm');
+  await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
+  expect(sync).toHaveBeenCalledWith({ resourceId: 'employee-1', targetResourceId: '123', revision: 'revision-1' });
+  expect(onChanged).toHaveBeenCalledWith(bound, false);
+  expect(message.success).toHaveBeenCalledWith('resource.workspaceCenter.updatedInstalled');
+  expect(message.warning).not.toHaveBeenCalled();
 });
