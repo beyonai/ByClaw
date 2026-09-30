@@ -19,11 +19,15 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipInputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -76,6 +80,8 @@ class WorkspaceSkillCenterApplicationServiceTest {
         when(files.delete(PATH + "/")).thenAnswer(call -> { source.clear(); return true; });
         when(packages.saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L)))
             .thenReturn(new ByClawSkillResourceApplicationService.SkillImportResult(resource(20L, "personal", 1L), null, false));
+        when(packages.readCenterSkillFiles(any())).thenCallRealMethod();
+        when(packages.replaceCenterSkillFiles(any(), any())).thenCallRealMethod();
         service = new WorkspaceSkillCenterApplicationService(resources, auth, files, paths, packages, transactions, relations);
         request = new WorkspaceSkillCenterQo();
         request.setResourceId(10L);
@@ -135,14 +141,13 @@ class WorkspaceSkillCenterApplicationServiceTest {
         assertThat(preview.action()).isEqualTo("UPDATE");
         assertThat(preview.targetResourceId()).isEqualTo(21L);
         request.setRevision(preview.revision());
-        when(packages.replaceCenterSkillDocument(any(), any())).thenReturn(new byte[] {9});
         service.sync(request);
         verify(packages, times(2)).assertSkillManagePermission(target);
-        verify(packages).saveWorkspaceSkillCenterPackage(eq(new byte[] {9}), eq("enterprise"), eq("demo"), eq("demo"), eq(target), eq(10L));
+        verify(packages).saveWorkspaceSkillCenterPackage(any(), eq("enterprise"), eq("demo"), eq("demo"), eq(target), eq(10L));
     }
 
     @Test
-    void identicalMarkdownHasNoActionAndCannotDeleteSource() {
+    void identicalPackageHasNoActionAndCannotDeleteSource() {
         SsResource target = resource(21L, "personal", 1L);
         existing(target, new String(source.get("SKILL.md"), StandardCharsets.UTF_8));
         var preview = service.preview(request);
@@ -173,7 +178,7 @@ class WorkspaceSkillCenterApplicationServiceTest {
         SsResource target = resource(21L, "personal", 1L);
         existing(target, "old body");
         request.setRevision(service.preview(request).revision());
-        when(packages.readCenterSkillPackage(target)).thenReturn(new byte[] {3, 4});
+        when(packages.readCenterSkillPackage(target)).thenReturn(archive(Map.of("SKILL.md", new byte[] {3, 4}), "demo/", 0L));
         assertThatThrownBy(() -> service.sync(request)).hasMessageContaining("changed");
         doThrow(new IllegalArgumentException("permission")).when(packages).assertSkillManagePermission(target);
         assertThatThrownBy(() -> service.preview(request)).hasMessageContaining("permission");
@@ -264,16 +269,15 @@ class WorkspaceSkillCenterApplicationServiceTest {
         assertThat(preview.ownerType()).isEqualTo("personal");
         assertThat(preview.targetResourceId()).isEqualTo(21L);
         request.setRevision(preview.revision());
-        when(packages.replaceCenterSkillDocument(any(), any())).thenReturn(new byte[] {9});
         assertThat(service.sync(request).sourceDeleted()).isFalse();
-        verify(packages).saveWorkspaceSkillCenterPackage(eq(new byte[] {9}), eq("personal"), eq("demo"), eq("demo"), eq(target), eq(10L));
+        verify(packages).saveWorkspaceSkillCenterPackage(any(), eq("personal"), eq("demo"), eq("demo"), eq(target), eq(10L));
         verify(files, never()).delete(anyString());
         verify(resources, never()).getResourceListByCode(any());
         assertThat(source).containsKey("SKILL.md");
     }
 
     @Test
-    void installedIdenticalMarkdownHasNoUpdate() {
+    void installedIdenticalPackageHasNoUpdate() {
         installed(new String(source.get("SKILL.md"), StandardCharsets.UTF_8));
         assertThat(service.preview(request).action()).isEqualTo("NONE");
         verify(packages, never()).assertSkillManagePermission(any());
@@ -293,6 +297,117 @@ class WorkspaceSkillCenterApplicationServiceTest {
         verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L));
     }
 
+    @Test
+    void attachmentChangesTriggerUpdateAndSaveTheEntireDirectory() throws Exception {
+        SsResource target = resource(21L, "personal", 1L);
+        existing(target, new String(source.get("SKILL.md"), StandardCharsets.UTF_8));
+        source.put("scripts/run.sh", "echo changed".getBytes(StandardCharsets.UTF_8));
+        source.put("references/resourceMate.json", "{}".getBytes(StandardCharsets.UTF_8));
+        var preview = service.preview(request);
+        assertThat(preview.action()).isEqualTo("UPDATE");
+        request.setRevision(preview.revision());
+        Map<String, byte[]> expected = new LinkedHashMap<>(source);
+        service.sync(request);
+        var archive = ArgumentCaptor.forClass(byte[].class);
+        verify(packages).saveWorkspaceSkillCenterPackage(archive.capture(), eq("personal"), eq("demo"),
+            eq("demo"), eq(target), eq(10L));
+        Map<String, byte[]> actual = packages.readCenterSkillFiles(archive.getValue());
+        assertThat(actual.keySet()).containsExactlyInAnyOrderElementsOf(expected.keySet());
+        expected.forEach((name, bytes) -> assertThat(actual.get(name)).isEqualTo(bytes));
+        verify(packages, never()).replaceCenterSkillDocument(any(), any());
+    }
+
+    @Test
+    void removingAnAttachmentTriggersUpdate() {
+        existing(resource(21L, "personal", 1L), new String(source.get("SKILL.md"), StandardCharsets.UTF_8));
+        source.remove("scripts/run.sh");
+        assertThat(service.preview(request).action()).isEqualTo("UPDATE");
+    }
+
+    @Test
+    void completeUpdateRemovesDeletedFilesAndConvergesToNoAction() {
+        SsResource target = installed(new String(source.get("SKILL.md"), StandardCharsets.UTF_8));
+        source.remove("scripts/run.sh");
+        var preview = service.preview(request);
+        assertThat(preview.action()).isEqualTo("UPDATE");
+        request.setRevision(preview.revision());
+        service.sync(request);
+        var archive = ArgumentCaptor.forClass(byte[].class);
+        verify(packages).saveWorkspaceSkillCenterPackage(archive.capture(), eq("personal"), eq("demo"),
+            eq("demo"), eq(target), eq(10L));
+        assertThat(packages.readCenterSkillFiles(archive.getValue())).doesNotContainKey("scripts/run.sh");
+        when(packages.readCenterSkillPackage(target)).thenReturn(archive.getValue());
+        assertThat(service.preview(request).action()).isEqualTo("NONE");
+    }
+
+    @Test
+    void fullPackageUpdatePreservesExistingExecutableMode() throws Exception {
+        byte[] original;
+        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            var zip = new org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream(bytes)) {
+            for (var file : source.entrySet()) {
+                var entry = new org.apache.commons.compress.archivers.zip.ZipArchiveEntry("demo/" + file.getKey());
+                entry.setUnixMode(file.getKey().endsWith(".sh") ? 0100755 : 0100644);
+                zip.putArchiveEntry(entry);
+                zip.write(file.getValue());
+                zip.closeArchiveEntry();
+            }
+            zip.finish();
+            original = bytes.toByteArray();
+        }
+        source.put("scripts/run.sh", "echo updated".getBytes(StandardCharsets.UTF_8));
+        byte[] updated = packages.replaceCenterSkillFiles(original, source);
+        try (var channel = new org.apache.commons.compress.utils.SeekableInMemoryByteChannel(updated);
+            var zip = new org.apache.commons.compress.archivers.zip.ZipFile(channel)) {
+            assertThat(zip.getEntry("demo/scripts/run.sh").getUnixMode()).isEqualTo(0100755);
+        }
+    }
+
+    @Test
+    void addingAnAttachmentTriggersUpdate() {
+        existing(resource(21L, "personal", 1L), new String(source.get("SKILL.md"), StandardCharsets.UTF_8));
+        source.put("references/data.json", "{}".getBytes(StandardCharsets.UTF_8));
+        assertThat(service.preview(request).action()).isEqualTo("UPDATE");
+    }
+
+    @Test
+    void packageOrderTimestampAndWrapperDirectoryDoNotTriggerUpdate() {
+        SsResource target = resource(21L, "personal", 1L);
+        existing(target, new String(source.get("SKILL.md"), StandardCharsets.UTF_8));
+        Map<String, byte[]> reversed = new LinkedHashMap<>();
+        reversed.put("scripts/run.sh", source.get("scripts/run.sh"));
+        reversed.put("SKILL.md", source.get("SKILL.md"));
+        for (String prefix : List.of("", "another-wrapper/")) {
+            when(packages.readCenterSkillPackage(target)).thenReturn(archive(reversed, prefix, 1700000000000L));
+            assertThat(service.preview(request).action()).isEqualTo("NONE");
+        }
+    }
+
+    @Test
+    void attachmentChangesAfterPreviewRejectStaleSubmission() {
+        request.setRevision(service.preview(request).revision());
+        source.put("scripts/run.sh", "changed after preview".getBytes(StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> service.sync(request)).hasMessageContaining("changed");
+        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L));
+        verify(files, never()).delete(anyString());
+    }
+
+    private byte[] archive(Map<String, byte[]> contents, String prefix, long timestamp) {
+        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream(); ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            for (var file : contents.entrySet()) {
+                ZipEntry entry = new ZipEntry(prefix + file.getKey());
+                entry.setTime(timestamp);
+                zip.putNextEntry(entry);
+                zip.write(file.getValue());
+                zip.closeEntry();
+            }
+            zip.finish();
+            return bytes.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private SsResource installed(String document) {
         SsResource target = resource(21L, "personal", 1L);
         existing(target, document);
@@ -309,8 +424,9 @@ class WorkspaceSkillCenterApplicationServiceTest {
     private void existing(SsResource resource, String document) {
         when(resources.getResourceListByCode(any())).thenReturn(List.of(resource));
         when(resources.findByIdForUpdate(resource.getResourceId())).thenReturn(resource);
-        when(packages.readCenterSkillPackage(resource)).thenReturn(new byte[] {1, 2});
-        when(packages.readCenterSkillDocument(any())).thenReturn(document.getBytes(StandardCharsets.UTF_8));
+        Map<String, byte[]> center = new LinkedHashMap<>(source);
+        center.put("SKILL.md", document.getBytes(StandardCharsets.UTF_8));
+        when(packages.readCenterSkillPackage(resource)).thenReturn(archive(center, "demo/", 0L));
     }
 
     private SsResource resource(Long id, String owner, Long creator) {

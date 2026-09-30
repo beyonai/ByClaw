@@ -496,7 +496,7 @@ public class ByClawSkillResourceApplicationService {
     /** 供目录同步及发布校验复用资源包读取；始终读取资源中心包，不读取工作空间引用。 */
     byte[] readCenterSkillPackage(SsResource resource) {
         SsResExtSkill ext = ssResExtSkillService.findById(resource.getResourceId());
-        // 内置技能没有上传包，复用资源中心下载时的镜像导出，仍以真实 SKILL.md 比较。
+        // 内置技能没有上传包，复用资源中心下载时的镜像导出，参与完整技能包比较。
         if (ext != null && StringUtils.equalsIgnoreCase(ext.getSkillType(), SsResExtSkillService.INNER_SKILL_TYPE)) {
             return builtinSkillExportService.exportPackage(CurrentUserHolder.getCurrentUserCode(), resource.getResourceCode());
         }
@@ -518,8 +518,52 @@ public class ByClawSkillResourceApplicationService {
             fallback);
     }
 
+    /** 读取技能根目录内所有文件，以相对路径比较包内容，兼容有、无顶层目录的 ZIP。 */
+    Map<String, byte[]> readCenterSkillFiles(byte[] packageBytes) {
+        List<ZipEntryInfo> entries = readZipEntries(packageBytes);
+        String root = parentDirOf(findSkillDoc(entries).name());
+        String prefix = root.isEmpty() ? "" : root + "/";
+        Map<String, byte[]> files = new java.util.TreeMap<>();
+        for (ZipEntryInfo entry : entries) {
+            if (entry.name().startsWith(prefix)) {
+                String relative = entry.name().substring(prefix.length());
+                if (files.putIfAbsent(relative, entry.content()) != null) {
+                    throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"));
+                }
+            }
+        }
+        return files;
+    }
+
     byte[] readCenterSkillDocument(byte[] packageBytes) {
         return findSkillDoc(readZipEntries(packageBytes)).content();
+    }
+
+    /** 完整替换技能目录，并保留中心包中同路径文件的执行权限。已删除的文件不再写入。 */
+    byte[] replaceCenterSkillFiles(byte[] packageBytes, Map<String, byte[]> source) {
+        List<ZipEntryInfo> entries = readZipEntries(packageBytes);
+        String root = parentDirOf(findSkillDoc(entries).name());
+        String prefix = root.isEmpty() ? "" : root + "/";
+        Map<String, Integer> modes = new java.util.HashMap<>();
+        for (ZipEntryInfo entry : entries) modes.put(entry.name(), entry.unixMode());
+        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream zip =
+                new org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream(bytes)) {
+            zip.setEncoding(StandardCharsets.UTF_8.name());
+            for (var file : new java.util.TreeMap<>(source).entrySet()) {
+                String name = prefix + file.getKey();
+                ZipArchiveEntry entry = new ZipArchiveEntry(name);
+                entry.setTime(0L);
+                entry.setUnixMode(modes.getOrDefault(name, 0100644));
+                zip.putArchiveEntry(entry);
+                zip.write(file.getValue());
+                zip.closeArchiveEntry();
+            }
+            zip.finish();
+            return bytes.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
+        }
     }
 
     /** 更新只替换根 SKILL.md，保留资源中心包中其他文件及执行权限。 */
