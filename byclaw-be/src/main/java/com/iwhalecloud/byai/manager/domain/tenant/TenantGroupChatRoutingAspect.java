@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupCreate;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.EmptyPayload;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupMember;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageId;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -93,6 +94,16 @@ public class TenantGroupChatRoutingAspect {
             }
             case "settings": return read(context, requirePath(path) + "/settings");
             case "lifecycle": return read(context, requirePath(path) + "/lifecycle");
+            case "dissolve": {
+                node.command(context, "POST", requirePath(path) + "/dissolve", sessionId,
+                    "DISSOLVE_GROUP", new EmptyPayload());
+                return ResponseUtil.successResponse(null);
+            }
+            case "acknowledgeDissolution": {
+                node.command(context, "POST", requirePath(path) + "/dissolution-ack", sessionId,
+                    "ACK_DISSOLUTION", new EmptyPayload());
+                return ResponseUtil.successResponse(null);
+            }
             case "tasks": return read(context, requirePath(path) + "/tasks");
             case "context": {
                 GroupChatContextRequest request = (GroupChatContextRequest) args[1];

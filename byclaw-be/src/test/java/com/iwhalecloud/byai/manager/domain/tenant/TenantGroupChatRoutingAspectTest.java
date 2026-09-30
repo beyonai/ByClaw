@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupCreate;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupMember;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.RemoveMember;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.EmptyPayload;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandResult;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
@@ -194,6 +195,30 @@ class TenantGroupChatRoutingAspectTest {
         assertThat(response.getCode()).isZero();
         verify(node).command(context, "DELETE", "/internal/v1/group-chats/9000000000000000001/members",
             "9000000000000000001", "REMOVE_MEMBER", new RemoveMember("AGENT", "10000713"));
+    }
+
+    @Test
+    void tenantDissolveRoutesToNode() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("dissolve", 9000000000000000001L));
+
+        assertThat(response.getCode()).isZero();
+        verify(node).command(context, "POST", "/internal/v1/group-chats/9000000000000000001/dissolve",
+            "9000000000000000001", "DISSOLVE_GROUP", new EmptyPayload());
+    }
+
+    @Test
+    void tenantDissolutionAcknowledgmentRoutesToNode() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("acknowledgeDissolution", 9000000000000000001L));
+
+        assertThat(response.getCode()).isZero();
+        verify(node).command(context, "POST", "/internal/v1/group-chats/9000000000000000001/dissolution-ack",
+            "9000000000000000001", "ACK_DISSOLUTION", new EmptyPayload());
     }
 
     private ProceedingJoinPoint call(String method, Object... args) {
