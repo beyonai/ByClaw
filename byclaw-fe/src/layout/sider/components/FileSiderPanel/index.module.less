@@ -414,6 +414,14 @@
   }
 }
 
+// 行尾存在额外节点（如「项目空间」的 GitHub 图标）时为名称预留空间。
+// 图标定位 right: 32px（ProjectSpaceList/index.module.less）+ 宽 28px = 右边界距行尾 60px，
+// 预留 68px 即留出 8px 间距。写成复合类以取得与 .treeTitleContent:hover .treeTitleName
+// 相同的特异性 (0,3,0)，并靠源顺序（本规则在其后）压过 hover 态的 32px，避免 hover 时重新遮挡。
+.treeTitleContent.treeTitleContentWithExtra .treeTitleName {
+  padding-right: 68px;
+}
+
 .treeTitleContentActionVisible {
   .treeActionTrigger {
     opacity: 1;
