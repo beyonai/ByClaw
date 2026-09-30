@@ -158,8 +158,9 @@ public class WorkspaceSkillCenterApplicationService {
         String name = packages.readCenterSkillDirectoryName(targetPackage, target.getResourceCode());
         String root = paths.resolveSkillRootPrefix(CurrentUserHolder.getCurrentUserCode(), request.getResourceId());
         String path = normalizePath(root + name, request.getResourceId());
-        Map<String, byte[]> source = snapshot(path);
-        String action = samePackage(source, targetPackage) ? "NONE" : "UPDATE";
+        // 安装入库后源目录可能已清理；无目录副本属于正常状态，不再触发比较或错误重试。
+        Map<String, byte[]> source = snapshot(path, true);
+        String action = source.isEmpty() || samePackage(source, targetPackage) ? "NONE" : "UPDATE";
         if ("UPDATE".equals(action)) packages.assertSkillManagePermission(target);
         String revision = DigestUtils.sha256Hex(request.getResourceId() + ":" + targetId + ":" + path + ":"
             + DigestUtils.sha256Hex(zip("skill", source)) + ":" + DigestUtils.sha256Hex(targetPackage));
@@ -202,6 +203,10 @@ public class WorkspaceSkillCenterApplicationService {
     }
 
     private Map<String, byte[]> snapshot(String path) {
+        return snapshot(path, false);
+    }
+
+    private Map<String, byte[]> snapshot(String path, boolean allowAbsent) {
         String prefix = path + "/";
         List<String> keys = inUser(() -> files.list(prefix, Integer.MAX_VALUE));
         Map<String, byte[]> snapshot = new TreeMap<>();
@@ -216,6 +221,8 @@ public class WorkspaceSkillCenterApplicationService {
                 snapshot.put(relative, read(key));
             }
         }
+        // 仅无文件时跳过：有残留文件却缺少 SKILL.md，或任何文件读取失败，仍应报错。
+        if (allowAbsent && snapshot.isEmpty()) return snapshot;
         if (!snapshot.containsKey("SKILL.md")) throw failure("missing");
         return snapshot;
     }

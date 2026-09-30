@@ -284,6 +284,39 @@ class WorkspaceSkillCenterApplicationServiceTest {
     }
 
     @Test
+    void installedSkillWithCleanedSourceSkipsComparisonAndCannotSync() {
+        installed("old body");
+        source.clear();
+        var preview = service.preview(request);
+        assertThat(preview.action()).isEqualTo("NONE");
+        assertThat(preview.revision()).isNotBlank();
+        verify(packages, never()).readCenterSkillFiles(any());
+        verify(packages, never()).assertSkillManagePermission(any());
+        request.setRevision(preview.revision());
+        assertThatThrownBy(() -> service.sync(request)).hasMessageContaining("unchanged");
+        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L));
+        verify(files, never()).delete(anyString());
+    }
+
+    @Test
+    void installedSkillRejectsSubmissionIfSourceWasCleanedAfterPreview() {
+        installed("old body");
+        request.setRevision(service.preview(request).revision());
+        source.clear();
+        assertThatThrownBy(() -> service.sync(request)).hasMessageContaining("changed");
+        verify(packages, never()).saveWorkspaceSkillCenterPackage(any(), anyString(), anyString(), anyString(), any(), eq(10L));
+    }
+
+    @Test
+    void installedSkillStillReportsReadAndListingFailures() {
+        installed("old body");
+        when(files.read(PATH + "/scripts/run.sh")).thenReturn(null);
+        assertThatThrownBy(() -> service.preview(request)).hasMessageContaining("missing");
+        when(files.list(PATH + "/", Integer.MAX_VALUE)).thenThrow(new IllegalStateException("storage unavailable"));
+        assertThatThrownBy(() -> service.preview(request)).hasMessageContaining("storage unavailable");
+    }
+
+    @Test
     void installedSkillRejectsUnboundIdsMissingFilesAndStaleContent() {
         installed("old body");
         request.setRevision(service.preview(request).revision());
