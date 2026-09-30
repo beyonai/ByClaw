@@ -70,10 +70,10 @@ public class WorkspaceSkillCenterApplicationService {
             // 相同内容不执行写入，也不触发清理，避免过期按钮删除仍在使用的目录。
             if ("NONE".equals(inspection.status().action())) throw failure("unchanged");
             Map<String, byte[]> source = snapshot(inspection.path());
-            if (!Arrays.equals(inspection.document(), source.get("SKILL.md"))) throw failure("changed");
-            byte[] bytes = inspection.existing() == null
-                ? zip(inspection.name(), source)
-                : packages.replaceCenterSkillDocument(inspection.targetPackage(), inspection.document());
+            if (!sameSnapshot(inspection.source(), source)) throw failure("changed");
+            // 更新与安装都保存完整目录，避免附件差异一直存在、反复提示更新。
+            byte[] bytes = inspection.existing() == null ? zip(inspection.name(), source)
+                : packages.replaceCenterSkillFiles(inspection.targetPackage(), source);
             var result = packages.saveWorkspaceSkillCenterPackage(bytes, inspection.status().ownerType(),
                 inspection.resourceCode(), inspection.name(), inspection.existing(), request.getResourceId());
             return new Saved(result.resource().getResourceId(), inspection, source);
@@ -114,7 +114,7 @@ public class WorkspaceSkillCenterApplicationService {
         if (!OwnerType.PERSONAL.equals(owner) && !OwnerType.ENTERPRISE.equals(owner)) throw failure("invalid");
         String path = normalizePath(request.getSkillPath(), request.getResourceId());
         String name = path.substring(path.lastIndexOf('/') + 1);
-        byte[] document = read(path + "/SKILL.md");
+        Map<String, byte[]> source = snapshot(path);
         String scopedCode = scopedCode(owner, name);
         List<SsResource> matches = resources.getResourceListByCode(List.of(name, scopedCode));
         if (matches == null) matches = List.of();
@@ -134,15 +134,14 @@ public class WorkspaceSkillCenterApplicationService {
             if (existing == null) throw failure("changed");
         }
         byte[] targetPackage = existing == null ? null : packages.readCenterSkillPackage(existing);
-        byte[] targetDocument = targetPackage == null ? null : packages.readCenterSkillDocument(targetPackage);
-        String action = existing == null ? "INSTALL" : sameDocument(document, targetDocument) ? "NONE" : "UPDATE";
+        String action = existing == null ? "INSTALL" : samePackage(source, targetPackage) ? "NONE" : "UPDATE";
         if (existing != null && !"NONE".equals(action)) packages.assertSkillManagePermission(existing);
         String revision = DigestUtils.sha256Hex(owner + ":" + request.getResourceId() + ":" + path + ":"
-            + DigestUtils.sha256Hex(document) + ":" + (existing == null ? "new" : existing.getResourceId()) + ":"
+            + DigestUtils.sha256Hex(zip("skill", source)) + ":" + (existing == null ? "new" : existing.getResourceId()) + ":"
             + (targetPackage == null ? "" : DigestUtils.sha256Hex(targetPackage)));
         String code = existing == null ? (matches.isEmpty() ? name : scopedCode) : existing.getResourceCode();
         return new Inspection(new Status(action, owner, existing == null ? null : existing.getResourceId(), revision),
-            path, name, code, document, existing, targetPackage);
+            path, name, code, source, existing, targetPackage);
     }
 
     /** 已绑定技能也比较员工目录与中心包，且始终更新实际绑定 ID，避免同名资源串写。 */
@@ -159,18 +158,22 @@ public class WorkspaceSkillCenterApplicationService {
         String name = packages.readCenterSkillDirectoryName(targetPackage, target.getResourceCode());
         String root = paths.resolveSkillRootPrefix(CurrentUserHolder.getCurrentUserCode(), request.getResourceId());
         String path = normalizePath(root + name, request.getResourceId());
-        byte[] document = read(path + "/SKILL.md");
-        String action = sameDocument(document, packages.readCenterSkillDocument(targetPackage)) ? "NONE" : "UPDATE";
+        Map<String, byte[]> source = snapshot(path);
+        String action = samePackage(source, targetPackage) ? "NONE" : "UPDATE";
         if ("UPDATE".equals(action)) packages.assertSkillManagePermission(target);
         String revision = DigestUtils.sha256Hex(request.getResourceId() + ":" + targetId + ":" + path + ":"
-            + DigestUtils.sha256Hex(document) + ":" + DigestUtils.sha256Hex(targetPackage));
+            + DigestUtils.sha256Hex(zip("skill", source)) + ":" + DigestUtils.sha256Hex(targetPackage));
         return new Inspection(new Status(action, target.getOwnerType(), targetId, revision), path, name,
-            target.getResourceCode(), document, target, targetPackage);
+            target.getResourceCode(), source, target, targetPackage);
     }
 
-    /** MD5 仅用于文档内容差异判断；提交并发校验仍使用完整内容的 SHA-256。 */
-    private boolean sameDocument(byte[] source, byte[] target) {
-        return target != null && DigestUtils.md5Hex(source).equals(DigestUtils.md5Hex(target));
+    /**
+     * 比较完整技能包的 MD5：统一根目录、文件顺序及 ZIP 时间戳，避免仅打包元数据不同就提示更新。
+     * 文件相对路径及内容均参与比较，提交并发校验另用完整包的 SHA-256。
+     */
+    private boolean samePackage(Map<String, byte[]> source, byte[] target) {
+        return target != null && DigestUtils.md5Hex(zip("skill", source))
+            .equals(DigestUtils.md5Hex(zip("skill", packages.readCenterSkillFiles(target))));
     }
 
     private String scopedCode(String owner, String name) {
@@ -224,8 +227,10 @@ public class WorkspaceSkillCenterApplicationService {
 
     private byte[] zip(String name, Map<String, byte[]> source) {
         try (ByteArrayOutputStream bytes = new ByteArrayOutputStream(); ZipOutputStream zip = new ZipOutputStream(bytes)) {
-            for (Map.Entry<String, byte[]> file : source.entrySet()) {
-                zip.putNextEntry(new ZipEntry(name + "/" + file.getKey()));
+            for (Map.Entry<String, byte[]> file : new TreeMap<>(source).entrySet()) {
+                ZipEntry entry = new ZipEntry(name + "/" + file.getKey());
+                entry.setTime(0L);
+                zip.putNextEntry(entry);
                 zip.write(file.getValue());
                 zip.closeEntry();
             }
@@ -246,7 +251,7 @@ public class WorkspaceSkillCenterApplicationService {
 
     public record Status(String action, String ownerType, Long targetResourceId, String revision) { }
     public record Result(Long resourceId, String action, boolean sourceDeleted) { }
-    private record Inspection(Status status, String path, String name, String resourceCode, byte[] document,
+    private record Inspection(Status status, String path, String name, String resourceCode, Map<String, byte[]> source,
                               SsResource existing, byte[] targetPackage) { }
     private record Saved(Long resourceId, Inspection inspection, Map<String, byte[]> source) { }
 }
