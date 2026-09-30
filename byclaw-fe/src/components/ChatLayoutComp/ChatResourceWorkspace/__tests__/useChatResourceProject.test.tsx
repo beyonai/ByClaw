@@ -30,7 +30,8 @@ describe('useChatResourceProject', () => {
     const second = renderHook(() => useChatResourceProject(12));
 
     expect(second.result.current.loading).toBe(false);
-    expect(second.result.current.project).toMatchObject({ projectId: '12', projectType: 'normal' });
+    // normalizeProject 保留后端项目类型，运营项目不再被抹成 normal（issue #237 根因之一）。
+    expect(second.result.current.project).toMatchObject({ projectId: '12', projectType: 'operation' });
     expect(mockGetProject).toHaveBeenCalledTimes(1);
   });
 
@@ -66,7 +67,8 @@ describe('useChatResourceProject', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(mockGetProject).toHaveBeenCalledWith(12);
     expect(mockListProjects).not.toHaveBeenCalled();
-    expect(result.current.project).toMatchObject({ projectId: '12', projectType: 'normal' });
+    // 研发项目类型必须保留，任务模板入口据此选择对应模板。
+    expect(result.current.project).toMatchObject({ projectId: '12', projectType: 'develop' });
   });
 
   it('falls back to the default project for a conversation without a project', async () => {
@@ -82,6 +84,7 @@ describe('useChatResourceProject', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(mockGetProject).not.toHaveBeenCalled();
     expect(mockListProjects).toHaveBeenCalledWith({ pageNum: 1, pageSize: 200 });
-    expect(result.current.project).toMatchObject({ projectId: '2', projectType: 'normal' });
+    // 默认项目保留 default，调用方才能把它和普通项目区分开。
+    expect(result.current.project).toMatchObject({ projectId: '2', projectType: 'default' });
   });
 });

@@ -59,11 +59,8 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   const [createdProjectOption, setCreatedProjectOption] = useState<ProjectOption>();
   const [selectedProjectOverride, setSelectedProjectOverride] = useState<string>();
   const createdProjectNameRef = useRef('');
-  // 从会话详情切换到新任务时，父级项目上下文会在同一轮渲染后清空；保留初始显式项目，
-  // 避免项目列表请求完成前把侧边栏刚选中的项目作用域重置为列表第一项。
-  const initialProjectIdRef = useRef(projectId);
   const [selectedProjectId, updateProjectScopeId] = useProjectScopeId();
-  const { projects, loading: projectsLoading, fetchProjects } = useProjectList();
+  const { projects, loading: projectsLoading, fetchProjects, hasMore, loadMoreProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
   const projectRequestStartedRef = useRef(projectsLoading);
   const [projectListReady, setProjectListReady] = useState(() => projects.length > 0);
@@ -106,14 +103,11 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
 
   useEffect(() => {
     if (!projectOptions.length) {
-      // 项目列表首次请求尚未返回时，保留侧边栏新建任务传入的项目作用域。
-      // 此时直接清空共享项目会让请求完成后误选列表第一项（通常是默认项目）。
-      if (
-        !projectListReady &&
-        (projectsLoading || projectRequestStartedRef.current || initialProjectIdRef.current !== undefined)
-      ) {
-        return;
-      }
+      // 项目列表首次请求尚未返回时（含 useProjectList 的 300ms 防抖窗口），保留共享的项目作用域。
+      // 这里不能只看 projectId prop：新建会话路径上该 prop 恒为 undefined（见 pages/chat/index.tsx 的
+      // sessionProjectContext），一旦此时清空共享作用域，列表返回后就会回退成 projectOptions[0]（通常是默认项目）。
+      // 只有「首次请求确已结束且列表为空」才算真正的无项目可选项，此时才清理残留作用域。
+      if (!projectListReady) return;
       if (selectedProjectOverride) setSelectedProjectOverride(undefined);
       if (selectedProjectValue) updateProjectScopeId(undefined);
       return;
@@ -122,14 +116,26 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
     const storedProject = selectedProjectValue
       ? projectOptions.find((project) => `${project.projectId}` === `${selectedProjectValue}`)
       : undefined;
-    const nextProject = storedProject || projectOptions[0];
-    if (!storedProject && selectedProjectOverride) {
+    if (selectedProjectOverride && !storedProject) {
       setSelectedProjectOverride(undefined);
     }
+    // 列表只加载了第一页（每页 30 条）：已选项目不在这一页不等于它不存在，
+    // 此时保留共享值，绝不用列表第一项（通常是默认项目）覆盖用户选择。
+    // 注意 projectListReady 只表示「首次请求已结束」，列表就绪后仍可能只覆盖到第 1 页，
+    // 因此这里必须同时看 hasMore：还有下一页就先补齐，补齐不了才走下面的兜底。
+    if (selectedProjectValue && !storedProject) {
+      if (!projectListReady || hasMore) {
+        if (hasMore) void loadMoreProjects();
+        return;
+      }
+    }
+    const nextProject = storedProject || projectOptions[0];
     if (nextProject && `${nextProject.projectId}` !== `${selectedProjectValue || ''}`) {
       updateProjectScopeId(nextProject.projectId);
     }
   }, [
+    hasMore,
+    loadMoreProjects,
     projectListReady,
     projectOptions,
     projectsLoading,

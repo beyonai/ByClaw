@@ -156,7 +156,9 @@ describe('TaskTemplateEntry project selector', () => {
     expect(screen.getByRole('combobox', { name: '请选择项目' })).not.toHaveValue('2');
   });
 
-  it('does not display a persisted project id when no projects are available', async () => {
+  it('keeps the selected project while the project list has not returned yet', async () => {
+    // 新建会话路径上 projectId prop 恒为 undefined，且 useProjectList 有 300ms 防抖：
+    // 挂载瞬间「已选项目存在 + 列表为空」。此时清空共享作用域会让列表返回后回退成默认项目。
     mockUseProjectScopeId.mockReturnValue(['20059102', mockUpdateProjectScopeId]);
     mockUseProjectList.mockReturnValue({
       projects: [],
@@ -170,9 +172,108 @@ describe('TaskTemplateEntry project selector', () => {
 
     render(<TaskTemplateEntry onApply={jest.fn()} />);
 
+    expect(mockUpdateProjectScopeId).not.toHaveBeenCalled();
+  });
+
+  it('does not display a persisted project id when no projects are available', async () => {
+    mockUseProjectScopeId.mockReturnValue(['20059102', mockUpdateProjectScopeId]);
+    // 先进入「请求进行中」，再切到「请求已结束且列表为空」，模拟真实 useProjectList 的时序。
+    mockUseProjectList.mockReturnValue({
+      projects: [],
+      loading: true,
+      keyword: '',
+      setKeyword: jest.fn(),
+      fetchProjects: jest.fn(),
+      hasMore: false,
+      loadMoreProjects: jest.fn(),
+    });
+
+    const { rerender } = render(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    mockUseProjectList.mockReturnValue({
+      projects: [],
+      loading: false,
+      keyword: '',
+      setKeyword: jest.fn(),
+      fetchProjects: jest.fn(),
+      hasMore: false,
+      loadMoreProjects: jest.fn(),
+    });
+    rerender(<TaskTemplateEntry onApply={jest.fn()} />);
+
     await waitFor(() => {
       expect(mockUpdateProjectScopeId).toHaveBeenCalledWith(undefined);
     });
-    expect(screen.queryByRole('combobox', { name: '请选择项目' })).not.toBeInTheDocument();
+    // 断言的是「不回显这个已失效的项目 id」，而不是「选择器不存在」：
+    // 列表确实为空时选择器仍需保留，用户要靠它新建项目。
+    expect(screen.getByRole('combobox', { name: '请选择项目' })).not.toHaveValue('20059102');
+  });
+
+  // F6 回归防护：projectListReady 只表示「首次请求已结束」，列表就绪后仍可能只覆盖第 1 页。
+  // 已选项目在第 2 页时，旧实现会把它覆写成 projectOptions[0]（通常是默认项目）。
+  it('loads the next page instead of overwriting a selected project that is not on the first page', async () => {
+    const mockLoadMoreProjects = jest.fn();
+    mockUseProjectScopeId.mockReturnValue(['999', mockUpdateProjectScopeId]);
+    mockUseProjectList.mockReturnValue({
+      // 第 1 页只有项目一/项目二，已选的 999 在第 2 页。
+      projects: [
+        { projectId: '1', projectName: '项目一', projectType: 'normal' } as any,
+        { projectId: '2', projectName: '项目二', projectType: 'normal' } as any,
+      ],
+      loading: false,
+      keyword: '',
+      setKeyword: jest.fn(),
+      fetchProjects: jest.fn(),
+      hasMore: true,
+      loadMoreProjects: mockLoadMoreProjects,
+    });
+
+    render(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    await waitFor(() => {
+      expect(mockLoadMoreProjects).toHaveBeenCalled();
+    });
+    // 关键断言：不得把用户已选项目覆写成列表第一项。
+    expect(mockUpdateProjectScopeId).not.toHaveBeenCalledWith('1');
+  });
+
+  it('keeps the selected project once the appended page contains it', async () => {
+    mockUseProjectScopeId.mockReturnValue(['999', mockUpdateProjectScopeId]);
+    mockUseProjectList.mockReturnValue({
+      projects: [
+        { projectId: '1', projectName: '项目一', projectType: 'normal' } as any,
+        { projectId: '2', projectName: '项目二', projectType: 'normal' } as any,
+      ],
+      loading: false,
+      keyword: '',
+      setKeyword: jest.fn(),
+      fetchProjects: jest.fn(),
+      hasMore: true,
+      loadMoreProjects: jest.fn(),
+    });
+
+    const { rerender } = render(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    // 模拟 loadMoreProjects 追加第 2 页后列表增长（useProjectList 的真实时序）。
+    mockUseProjectList.mockReturnValue({
+      projects: [
+        { projectId: '1', projectName: '项目一', projectType: 'normal' } as any,
+        { projectId: '2', projectName: '项目二', projectType: 'normal' } as any,
+        { projectId: '999', projectName: '第二页项目', projectType: 'normal' } as any,
+      ],
+      loading: false,
+      keyword: '',
+      setKeyword: jest.fn(),
+      fetchProjects: jest.fn(),
+      hasMore: false,
+      loadMoreProjects: jest.fn(),
+    });
+    rerender(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    await waitFor(() => {
+      // 下拉未展开时，页面里出现「第二页项目」只可能来自 Select 的选中项。
+      expect(screen.getByText('第二页项目')).toBeInTheDocument();
+    });
+    expect(mockUpdateProjectScopeId).not.toHaveBeenCalledWith('1');
   });
 });

@@ -42,6 +42,7 @@ import { useProjectScopeId } from './hooks/useProjectScopeId';
 import { useProjectTypeConfig } from './hooks/useProjectTypeConfig';
 import type { ProjectSession, ProjectSpace } from './types';
 import { getProjectMutationErrorMessage, hasDuplicateProjectName } from './projectMutation';
+import { resolveProjectScopeId } from './utils';
 import styles from './index.module.less';
 
 const getProjectId = (value?: string | number) => `${value ?? ''}`.trim();
@@ -145,7 +146,12 @@ const ProjectSpacePage: React.FC = () => {
   const [renameValue, setRenameValue] = useState('');
   const [renameLoading, setRenameLoading] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [showProjectList, setShowProjectList] = useState(true);
+  // 选中的项目由 URL 承载：带 ?projectId= 的地址直接进入项目详情，刷新（深链）后不会退回项目列表。
+  const [showProjectList, setShowProjectList] = useState(() =>
+    typeof window === 'undefined'
+      ? true
+      : !getProjectId(new URLSearchParams(window.location.search).get('projectId') ?? undefined)
+  );
   const isDesktop = typeof window !== 'undefined' && Boolean(window.byclawDesktop);
   const projectIdFromSearch = useMemo(
     () => getProjectId(new URLSearchParams(location.search).get('projectId')),
@@ -156,18 +162,18 @@ const ProjectSpacePage: React.FC = () => {
     const navigationState = location.state as ProjectSpaceNavigationState | null;
     // 项目名称面包屑通过 URL 传入 projectId；即使历史路由状态残留 openProjectList，也应优先打开对应详情。
     const detailProjectId = getProjectId(navigationState?.openProjectDetail ? navigationState.projectId : undefined);
-    const projectId = detailProjectId || projectIdFromSearch;
+    const projectId = projectIdFromSearch || detailProjectId;
     if (projectId) {
       setSelectedProjectId(projectId);
       setShowProjectList(false);
       return;
     }
-    if (navigationState?.openProjectList) {
-      setShowProjectList(true);
-    }
-  }, [location.key, location.state, projectIdFromSearch, setSelectedProjectId]);
+    // URL 上没有项目时回到项目列表；当前项目作用域由下方兜底 effect 解析，不在这里改写。
+    setShowProjectList(true);
+  }, [location.key, location.search, location.state, projectIdFromSearch, setSelectedProjectId]);
 
-  const { activeProject, refreshProject } = useProjectDetail(projects, selectedProjectId);
+  // URL 上的 projectId 是深链/刷新时的权威值；共享作用域只作为「URL 未指定」时的选择。
+  const { activeProject, refreshProject } = useProjectDetail(projects, selectedProjectId, projectIdFromSearch);
   const canManageProject = useMemo(() => isProjectCreator(activeProject, userInfo), [activeProject, userInfo]);
 
   useEffect(() => {
@@ -187,20 +193,31 @@ const ProjectSpacePage: React.FC = () => {
     // 首次请求前列表也为空，不能因此清除会话模块已经保存的当前项目。
     if (!projects.length) return;
 
-    const storedProject =
-      selectedProjectId && projects.find((project) => getProjectId(project.projectId) === selectedProjectId);
-    if (selectedProjectId && !storedProject) {
-      if (hasMore) void loadMoreProjects();
-      // 另一模块可能刚创建或切换项目，列表刷新完成前保留共享值，不能回退覆盖。
+    // URL 指定的项目优先，其次是共享作用域；两者都没有时才算「未选择」，回退系统默认项目。
+    const requestedId = projectIdFromSearch || selectedProjectId;
+    if (!requestedId) {
+      const fallbackProjectId = resolveProjectScopeId({ projects });
+      if (fallbackProjectId && selectedProjectId !== fallbackProjectId) setSelectedProjectId(fallbackProjectId);
       return;
     }
-    const fallbackProject =
-      storedProject || projects.find((project) => project.projectType === 'default') || projects[0];
-    const nextProjectId = getProjectId(fallbackProject?.projectId);
-    if (!nextProjectId) return;
 
-    if (selectedProjectId !== nextProjectId) setSelectedProjectId(nextProjectId);
-  }, [hasMore, loadMoreProjects, projects, projectsLoading, selectedProjectId, setSelectedProjectId]);
+    const requestedProject = projects.find((project) => getProjectId(project.projectId) === requestedId);
+    if (!requestedProject) {
+      // 目标项目不在已加载的列表页里（每页 30 条）：继续加载补齐，绝不回退覆盖用户选择。
+      if (hasMore) void loadMoreProjects();
+      return;
+    }
+
+    if (selectedProjectId !== requestedId) setSelectedProjectId(requestedId);
+  }, [
+    hasMore,
+    loadMoreProjects,
+    projectIdFromSearch,
+    projects,
+    projectsLoading,
+    selectedProjectId,
+    setSelectedProjectId,
+  ]);
 
   useEffect(() => {
     if (!activeProject?.projectId) return;
@@ -463,17 +480,30 @@ const ProjectSpacePage: React.FC = () => {
         projectName: project.projectName,
       });
       setShowProjectList(false);
+      // 项目写进 URL：刷新/深链/返回时都能回到同一个项目，不再依赖 localStorage 里的共享作用域。
+      navigate(`/projectSpace?projectId=${encodeURIComponent(projectId)}`, {
+        state: { openProjectDetail: true, projectId },
+      });
     },
-    [EventEmitter, setSelectedProjectId]
+    [EventEmitter, navigate, setSelectedProjectId]
   );
+
+  const handleBackToProjectList = useCallback(() => {
+    setShowProjectList(true);
+    // 清掉 URL 上的项目，避免「返回列表」后刷新又落回上一个项目详情。
+    navigate('/projectSpace', { state: { openProjectList: true } });
+  }, [navigate]);
 
   const handleWizardFinish = useCallback(
     (projectId: string) => {
       setWizardOpen(false);
       setSelectedProjectId(projectId);
       setShowProjectList(false);
+      navigate(`/projectSpace?projectId=${encodeURIComponent(projectId)}`, {
+        state: { openProjectDetail: true, projectId },
+      });
     },
-    [setSelectedProjectId]
+    [navigate, setSelectedProjectId]
   );
 
   const handleCreateDesktopProject = useCallback(
@@ -619,14 +649,18 @@ const ProjectSpacePage: React.FC = () => {
         renderProjectCards()
       ) : !activeProject ? (
         <div className={styles.pageEmpty}>
-          <Empty description={intl.formatMessage({ id: 'projectSpace.selectProject' })} />
+          <div className={styles.pageEmptyContent}>
+            <Empty description={intl.formatMessage({ id: 'projectSpace.selectProject' })} />
+            {/* 无效/已删除的 ?projectId= 会让详情永远取不到：必须给一个出口，否则用户只能靠浏览器后退。 */}
+            <Button onClick={handleBackToProjectList}>{intl.formatMessage({ id: 'projectSpace.backToList' })}</Button>
+          </div>
         </div>
       ) : (
         <div className={styles.detailHost}>
           {/* 详情数据静默更新，由当前 Tab 独立展示 loading，避免打开项目时出现两层加载图标。 */}
           <ProjectDetail
             project={activeProject}
-            onBack={() => setShowProjectList(true)}
+            onBack={handleBackToProjectList}
             onRefresh={refreshProject}
             onOpenSession={handleOpenSession}
             onNewSession={(target?: ChatWithAgentTarget) => {
