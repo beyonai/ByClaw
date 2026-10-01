@@ -189,9 +189,11 @@ jest.mock('@/components/CommonTabs', () => ({
 jest.mock('@/components/AntdIcon', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/components/Resources/components/ResourceList', () => ({
   __esModule: true,
-  default: ({ catalogId, enablePublishToEnterprise, dropdownParam, onDetail }: any) => (
+  default: ({ catalogId, enablePublishToEnterprise, dropdownParam, onDetail, enableFavorites, activeTab }: any) => (
     <div
       data-testid="resource-list"
+      data-tab={activeTab}
+      data-favorites-enabled={String(enableFavorites)}
       data-catalog-id={catalogId}
       data-status={dropdownParam?.resourceStatus}
       data-enterprise-publication={String(enablePublishToEnterprise)}
@@ -322,6 +324,65 @@ describe('Resources enterprise skill mode', () => {
       Promise.resolve(paramCode === 'BYAI_BRAND_VERSION' ? { paramValue: version } : {})
     );
   };
+
+  it.each(['SKILL', 'KG_DOC', 'TOOL'])(
+    'loads official %s resources before the brand request finishes',
+    async (resourceType) => {
+      let resolveBrand!: (value: any) => void;
+      (getDcSystemConfig as jest.Mock).mockImplementation(({ paramCode }) =>
+        paramCode === 'BYAI_BRAND_VERSION'
+          ? new Promise((resolve) => {
+              resolveBrand = resolve;
+            })
+          : Promise.resolve({})
+      );
+      window.history.pushState({}, '', '/resourceCenter?tab=enterprise');
+      render(<Resources resourceType={resourceType} />);
+      expect(screen.getByTestId('resource-list')).toHaveAttribute('data-favorites-enabled', 'false');
+      await act(async () => {
+        resolveBrand({ paramValue: 'openSource' });
+      });
+      expect(screen.getByTestId('resource-list')).toHaveAttribute('data-favorites-enabled', 'false');
+    }
+  );
+
+  it('places commercial favorites after official recommendations and before the skill market', async () => {
+    setBrandVersion('commercial');
+    renderAt('?tab=enterprise');
+    const favorite = await screen.findByRole('button', { name: 'resource.myFavorites' });
+    const tabs = favorite.parentElement?.querySelectorAll(':scope > button[aria-selected]');
+    expect(Array.from(tabs || []).map((tab) => tab.textContent)).toEqual([
+      'resource.available',
+      'resource.official',
+      'resource.myFavorites',
+      'resource.skillMarketplace',
+    ]);
+    expect(screen.getByTestId('resource-list')).toHaveAttribute('data-favorites-enabled', 'true');
+    fireEvent.click(favorite);
+    expect(screen.getByTestId('resource-list')).toHaveAttribute('data-tab', 'favorites');
+    expect(screen.queryByTestId('skill-group-list')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'common.import' })).toBeNull();
+  });
+
+  it('keeps skill groups on their existing commercial list without favorites', async () => {
+    setBrandVersion('commercial');
+    renderAt('?tab=enterprise&kind=group');
+    await screen.findByTestId('skill-group-list');
+    expect(screen.queryByTestId('resource-list')).toBeNull();
+    expect(mockSkillGroupProps.mock.calls.at(-1)?.[0]).not.toHaveProperty('enableFavorites');
+  });
+
+  it('does not add favorites to open-source or resource management tabs', async () => {
+    setBrandVersion('openSource');
+    renderAt('?tab=enterprise');
+    await screen.findByTestId('resource-list');
+    expect(screen.queryByRole('button', { name: 'resource.myFavorites' })).toBeNull();
+    cleanup();
+    setBrandVersion('commercial');
+    render(<Resources resourceType="SKILL" myResourcesOnly />);
+    await waitFor(() => expect(screen.getByTestId('resource-list')).toHaveAttribute('data-favorites-enabled', 'false'));
+    expect(screen.queryByRole('button', { name: 'resource.myFavorites' })).toBeNull();
+  });
 
   it('opens skill details as temporary panels and closes only that detail', async () => {
     renderAt('?tab=enterprise');
@@ -608,14 +669,14 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.getByTestId('audit-badge')).toHaveAttribute('data-count', '0');
   });
 
-  it('defaults to single skills and preserves the enterprise tab', () => {
+  it('defaults to single skills and preserves the enterprise tab', async () => {
     renderAt('?tab=enterprise');
 
     expect(screen.getByTestId('enterprise-skill-tab-trigger').closest('button')).toHaveAttribute(
       'aria-selected',
       'true'
     );
-    expect(screen.getByTestId('resource-list')).toBeTruthy();
+    expect(await screen.findByTestId('resource-list')).toBeTruthy();
     expect(window.location.search).toBe('?tab=enterprise');
   });
 
@@ -707,7 +768,7 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.queryByTestId('skill-group-list')).toBeNull();
   });
 
-  it('hides no-op filters in enterprise group mode but preserves them for single skills', () => {
+  it('hides no-op filters in enterprise group mode but preserves them for single skills', async () => {
     renderAt('?tab=enterprise&kind=group');
 
     expect(screen.queryByTestId('resource-filter')).toBeNull();
@@ -724,7 +785,7 @@ describe('Resources enterprise skill mode', () => {
       })
     );
     fireEvent.click(screen.getByTestId('resource-filter'));
-    expect(screen.getByTestId('resource-list')).toHaveAttribute('data-catalog-id', 'catalog-1');
+    expect(await screen.findByTestId('resource-list')).toHaveAttribute('data-catalog-id', 'catalog-1');
   });
 
   it('uses the upload entry to open the skill group create dialog and refresh the group list', async () => {
@@ -753,7 +814,7 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.queryByRole('button', { name: 'common.import' })).toBeNull();
   });
 
-  it('clears enterprise skill kind when changing to another tab', () => {
+  it('clears enterprise skill kind when changing to another tab', async () => {
     renderAt('?tab=enterprise&kind=group');
 
     fireEvent.click(screen.getByRole('button', { name: 'resource.available' }));
@@ -761,7 +822,7 @@ describe('Resources enterprise skill mode', () => {
 
     fireEvent.click(screen.getByTestId('enterprise-skill-tab-trigger').closest('button')!);
     expect(window.location.search).toBe('?tab=enterprise');
-    expect(screen.getByTestId('resource-list')).toBeTruthy();
+    expect(await screen.findByTestId('resource-list')).toBeTruthy();
     expect(screen.queryByTestId('skill-group-list')).toBeNull();
   });
 

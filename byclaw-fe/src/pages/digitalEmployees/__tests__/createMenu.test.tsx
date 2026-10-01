@@ -1,7 +1,9 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DigitalEmployeesPage from '../index';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 
 let mockTab = 'available';
+let mockBrandVersion = 'openSource';
 let mockUserInfo: { userCode: string; usersOrganizations?: { userType: string }[] } | null;
 const mockNavigate = jest.fn();
 const mockDispatch = jest.fn();
@@ -39,7 +41,12 @@ jest.mock('@/hooks/useDigitalEmployeeAuditCount', () => ({
 }));
 jest.mock('../components/AllDigitalEmployees', () => ({
   __esModule: true,
-  default: require('react').forwardRef(() => null),
+  default: require('react').forwardRef(({ source, enableFavorites }: any) => (
+    <div data-testid={`employee-list-${source}`} data-favorites-enabled={String(enableFavorites)} />
+  )),
+}));
+jest.mock('@/pages/manager/service/session', () => ({
+  getDcSystemConfig: jest.fn(() => Promise.resolve({ paramValue: mockBrandVersion })),
 }));
 jest.mock('../components/EmployeeTypeTag', () => () => null);
 jest.mock('@/components/Resources/components/ResourceFilter', () => ({
@@ -68,7 +75,12 @@ jest.mock('antd', () => {
       {children}
     </div>
   );
-  Tabs.TabPane = Wrapper;
+  Tabs.TabPane = ({ children, tab }: any) => (
+    <div>
+      {tab}
+      {children}
+    </div>
+  );
   return {
     Badge: Wrapper,
     Button: ({ children, onClick }: any) => <button onClick={onClick}>{children}</button>,
@@ -102,6 +114,7 @@ describe('digital employee creation by tab', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockTab = 'available';
+    mockBrandVersion = 'openSource';
     mockUserInfo = null;
     sessionStorage.clear();
   });
@@ -165,4 +178,46 @@ describe('digital employee creation by tab', () => {
     });
     expect(screen.queryByText('digitalEmployees.create')).toBeNull();
   });
+
+  it.each(['commercial', 'openSource'])('enables employee favorites only for %s', async (brand) => {
+    mockBrandVersion = brand;
+    mockTab = 'official';
+    render(<DigitalEmployeesPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId('employee-list-official')).toHaveAttribute(
+        'data-favorites-enabled',
+        String(brand === 'commercial')
+      )
+    );
+    expect(screen.getByTestId('employee-list-available')).toHaveAttribute('data-favorites-enabled', 'undefined');
+    if (brand === 'commercial') {
+      expect(screen.getByText('resource.myFavorites')).toBeInTheDocument();
+      expect(screen.getByTestId('employee-list-favorites')).toHaveAttribute('data-favorites-enabled', 'true');
+    } else {
+      expect(screen.queryByText('resource.myFavorites')).toBeNull();
+    }
+  });
+
+  it.each(['commercial', 'openSource'])(
+    'loads official employees before the %s brand request finishes',
+    async (brand) => {
+      let resolveBrand!: (value: any) => void;
+      (getDcSystemConfig as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveBrand = resolve;
+          })
+      );
+      mockTab = 'official';
+      render(<DigitalEmployeesPage />);
+      expect(screen.getByTestId('employee-list-official')).toHaveAttribute('data-favorites-enabled', 'false');
+      await act(async () => {
+        resolveBrand({ paramValue: brand });
+      });
+      expect(screen.getByTestId('employee-list-official')).toHaveAttribute(
+        'data-favorites-enabled',
+        String(brand === 'commercial')
+      );
+    }
+  );
 });

@@ -17,6 +17,14 @@ import lombok.Setter;
 @Setter
 public class DiscoverQo extends AuthQo {
 
+    /** 仅商业版官方推荐/我的收藏列表请求收藏字段与排序。 */
+    private Boolean includeFavorites;
+
+    private Boolean favoritesOnly;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long favoriteTenantId;
+
     /**
      * 数字员工类型。017 表示数字员工组；未传时保持历史接口语义并排除 017。
      */

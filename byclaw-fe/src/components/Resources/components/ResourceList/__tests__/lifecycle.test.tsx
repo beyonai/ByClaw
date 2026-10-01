@@ -50,9 +50,12 @@ jest.mock('@/components/InfiniteScroll', () => ({
 }));
 jest.mock('../../ResourceCard', () => ({
   __esModule: true,
-  default: ({ actionConfig, resource }: any) => (
+  default: ({ actionConfig, resource, enableFavorites }: any) => (
     <div
       data-testid="resource-card"
+      data-resource-id={resource.resourceId}
+      data-favorited={String(resource.favorited)}
+      data-favorites-enabled={String(enableFavorites)}
       data-resource-status={resource.resourceStatus}
       data-can-off-shelf={String(resource.canOffShelf)}
       data-hidden-menu-keys={JSON.stringify(actionConfig.hiddenMenuItemKeys)}
@@ -486,6 +489,178 @@ it('shows an empty available skill list when only personal directory skills exis
 });
 
 // 模拟离开资源中心后员工目录新增技能，再返回中心；目录数据不能随员工上下文混入。
+it.each(['SKILL', 'KG_DOC', 'TOOL'])('queries favorites through the existing paged %s API', async (resourceType) => {
+  renderList({
+    resourceType,
+    activeTab: 'favorites',
+    myResourcesOnly: false,
+    enableFavorites: true,
+    searchValue: 'query',
+    catalogId: '20',
+  });
+  await screen.findByTestId('resource-card');
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(1);
+  expect(listResourceUseAuth).toHaveBeenCalledWith(
+    expect.objectContaining({
+      ownerType: 'enterprise',
+      includeFavorites: true,
+      favoritesOnly: true,
+      resourceStatus: '2',
+      keyword: 'query',
+      catalogId: '20',
+    })
+  );
+  expect(screen.getByTestId('resource-card')).toHaveAttribute('data-favorites-enabled', 'true');
+  expect(queryResourceDetail).not.toHaveBeenCalled();
+});
+
+it.each([
+  { activeTab: 'personal', myResourcesOnly: false },
+  { activeTab: 'enterprise', myResourcesOnly: true },
+])('keeps favorite queries out of other list scenes (%j)', async (scene) => {
+  renderList({ ...scene, enableFavorites: true });
+  await screen.findByTestId('resource-card');
+  expect((listResourceUseAuth as jest.Mock).mock.calls[0][0]).not.toHaveProperty('includeFavorites');
+  expect(screen.getByTestId('resource-card')).toHaveAttribute('data-favorites-enabled', 'false');
+});
+
+it('removes only the canceled favorite and fills the shifted page boundary without skipping', async () => {
+  const row = (id: number) => ({
+    resourceId: `${id}`,
+    resourceBizType: 'SKILL',
+    ownerType: 'enterprise',
+    favorited: true,
+    favoriteCount: 5,
+  });
+  (listResourceUseAuth as jest.Mock).mockResolvedValueOnce({
+    data: { list: Array.from({ length: 30 }, (_, i) => row(i + 1)), total: 31 },
+  });
+  renderList({ resourceType: 'SKILL', activeTab: 'favorites', myResourcesOnly: false, enableFavorites: true });
+  expect(await screen.findAllByTestId('resource-card')).toHaveLength(30);
+  act(() =>
+    window.dispatchEvent(
+      new CustomEvent('resourceFavoriteChanged', { detail: { resourceId: '1', favorited: false, favoriteCount: 4 } })
+    )
+  );
+  expect(screen.getAllByTestId('resource-card')).toHaveLength(29);
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(1);
+  (listResourceUseAuth as jest.Mock).mockResolvedValueOnce({
+    data: { list: Array.from({ length: 30 }, (_, i) => row(i + 2)), total: 30 },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
+  expect(listResourceUseAuth).toHaveBeenLastCalledWith(expect.objectContaining({ pageNum: 1, favoritesOnly: true }));
+  expect(screen.getAllByTestId('resource-card').map((card) => card.getAttribute('data-resource-id'))).toEqual(
+    Array.from({ length: 30 }, (_, i) => `${i + 2}`)
+  );
+});
+
+it.each(['enterprise', 'favorites'])(
+  'retries an in-flight %s request after a favorite cancellation',
+  async (activeTab) => {
+    const row = (id: string, favorited = true) => ({
+      resourceId: id,
+      ownerType: 'enterprise',
+      resourceBizType: 'SKILL',
+      favorited,
+      favoriteCount: favorited ? 1 : 0,
+    });
+    let finishOld!: (value: any) => void;
+    (listResourceUseAuth as jest.Mock)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOld = resolve;
+          })
+      )
+      .mockResolvedValueOnce({
+        data: {
+          list: activeTab === 'favorites' ? [row('2')] : [row('1', false), row('2')],
+          total: activeTab === 'favorites' ? 1 : 2,
+        },
+      });
+    renderList({
+      resourceType: 'SKILL',
+      activeTab,
+      myResourcesOnly: false,
+      enableFavorites: true,
+      searchValue: 'query',
+    });
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('resourceFavoriteChanged', {
+          detail: { resourceId: '1', favorited: false, favoriteCount: 0 },
+        })
+      );
+    });
+    await act(async () => {
+      finishOld({ data: { list: [row('1'), row('2')], total: 2 } });
+    });
+    await waitFor(() => expect(listResourceUseAuth).toHaveBeenCalledTimes(2));
+    expect(listResourceUseAuth).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyword: 'query', favoritesOnly: activeTab === 'favorites' })
+    );
+    const cards = screen.getAllByTestId('resource-card');
+    if (activeTab === 'favorites') {
+      expect(cards.map((card) => card.getAttribute('data-resource-id'))).toEqual(['2']);
+    } else {
+      expect(cards[0]).toHaveAttribute('data-favorited', 'false');
+    }
+  }
+);
+
+it('retries the current favorite boundary and stays loading until the fresh page completes', async () => {
+  const row = (id: number) => ({
+    resourceId: `${id}`,
+    resourceBizType: 'SKILL',
+    ownerType: 'enterprise',
+    favorited: true,
+  });
+  const first = Array.from({ length: 30 }, (_, index) => row(index + 1));
+  let finishOld!: (value: any) => void;
+  let finishFresh!: (value: any) => void;
+  (listResourceUseAuth as jest.Mock)
+    .mockResolvedValueOnce({ data: { list: first, total: 31 } })
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        })
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFresh = resolve;
+        })
+    );
+  renderList({ resourceType: 'SKILL', activeTab: 'favorites', myResourcesOnly: false, enableFavorites: true });
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
+  fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+  act(() => {
+    window.dispatchEvent(
+      new CustomEvent('resourceFavoriteChanged', {
+        detail: { resourceId: '1', favorited: false, favoriteCount: 0 },
+      })
+    );
+  });
+  await act(async () => {
+    finishOld({ data: { list: [row(31)], total: 31 } });
+  });
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(3);
+  expect(screen.getByText('common.loading')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(3);
+  await act(async () => {
+    finishFresh({ data: { list: [...first.slice(1), row(31)], total: 30 } });
+  });
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
+  expect((listResourceUseAuth as jest.Mock).mock.calls.map(([params]) => params.pageNum)).toEqual([1, 2, 1]);
+  expect(screen.getAllByTestId('resource-card').map((card) => card.getAttribute('data-resource-id'))).not.toContain(
+    '1'
+  );
+  expect(screen.queryByRole('button', { name: 'load more' })).toBeNull();
+});
+
 it('keeps available skills resource-backed after leaving and reopening the center', async () => {
   (listResourceUseAuth as jest.Mock).mockResolvedValue({
     data: { list: [{ resourceId: 'center-skill', resourceBizType: 'SKILL' }], total: 1 },

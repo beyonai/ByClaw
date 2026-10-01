@@ -16,6 +16,10 @@ import java.util.Date;
 @Setter
 public class DigitEmployMarketVo {
 
+    private Boolean favorited;
+
+    private Long favoriteCount;
+
     /**
      * 主键ID
      */

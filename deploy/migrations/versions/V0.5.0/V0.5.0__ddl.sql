@@ -463,3 +463,33 @@ CREATE INDEX IF NOT EXISTS idx_group_recall_stop_pending
 CREATE TABLE IF NOT EXISTS byai.byai_group_chat_send_gate (
     session_id BIGINT PRIMARY KEY
 );
+
+-- 商业版本官方推荐资源收藏：仅新增独立表，不修改资源、授权或安装数据。
+-- 收藏功能上线前执行本段；两个主键同时承担列表关联索引，避免逐资源统计收藏记录。
+SET search_path TO byai;
+
+CREATE TABLE IF NOT EXISTS byai.byai_resource_favorite (
+    com_acct_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    resource_id BIGINT NOT NULL,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_resource_favorite PRIMARY KEY (com_acct_id, user_id, resource_id)
+);
+
+CREATE TABLE IF NOT EXISTS byai.byai_resource_favorite_count (
+    com_acct_id BIGINT NOT NULL,
+    resource_id BIGINT NOT NULL,
+    favorite_count BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT pk_byai_resource_favorite_count PRIMARY KEY (com_acct_id, resource_id),
+    CONSTRAINT ck_resource_favorite_count_nonnegative CHECK (favorite_count >= 0)
+);
+
+COMMENT ON TABLE byai.byai_resource_favorite IS '商业版企业资源的用户收藏关系；不产生授权、申请或安装关系';
+COMMENT ON COLUMN byai.byai_resource_favorite.com_acct_id IS '当前用户所属企业（租户）ID';
+COMMENT ON COLUMN byai.byai_resource_favorite.user_id IS '收藏用户ID，来自服务端登录上下文';
+COMMENT ON COLUMN byai.byai_resource_favorite.resource_id IS '收藏资源ID；支持数字员工、技能、知识、工具，技能组除外';
+COMMENT ON COLUMN byai.byai_resource_favorite.create_time IS '收藏时间，重复收藏不改变原时间';
+COMMENT ON TABLE byai.byai_resource_favorite_count IS '企业资源收藏总数，与收藏关系在同一事务中维护';
+COMMENT ON COLUMN byai.byai_resource_favorite_count.com_acct_id IS '资源所属企业（租户）ID';
+COMMENT ON COLUMN byai.byai_resource_favorite_count.resource_id IS '资源ID';
+COMMENT ON COLUMN byai.byai_resource_favorite_count.favorite_count IS '收藏用户总数，关系实际新增或删除时才增减；不复用授权申请次数或技能使用次数';

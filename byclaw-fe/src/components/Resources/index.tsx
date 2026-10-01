@@ -156,7 +156,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     Array<{ catalogId: string | number; catalogName: string; pcatalogId?: string | number }>
   >([]);
 
-  type ResourceTab = 'personal' | 'enterprise' | 'marketplace' | 'audit';
+  type ResourceTab = 'personal' | 'enterprise' | 'favorites' | 'marketplace' | 'audit';
   type MyResourceScope = 'all' | 'created' | 'managed';
   const defaultTab = (): ResourceTab => {
     if (myResourcesOnly) {
@@ -165,6 +165,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     const tabFromUrl = searchParams.get('tab');
     if (
       tabFromUrl === 'enterprise' ||
+      tabFromUrl === 'favorites' ||
       tabFromUrl === 'personal' ||
       (resourceType === 'SKILL' && tabFromUrl === 'marketplace')
     ) {
@@ -194,6 +195,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     }
     if (
       (tabFromUrl === 'enterprise' ||
+        tabFromUrl === 'favorites' ||
         tabFromUrl === 'personal' ||
         (resourceType === 'SKILL' && tabFromUrl === 'marketplace')) &&
       tabFromUrl !== activeTab
@@ -237,6 +239,16 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const [fixedEntryCapability, setFixedEntryCapability] = useState<FixedEntryOperationCapability | null>(null);
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
   const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
+  const favoritesEnabled = brandVersionLoaded && brandVersion === 'commercial' && !myResourcesOnly;
+  const favoriteListLoading = !myResourcesOnly && !brandVersionLoaded && activeTab === 'favorites';
+  useEffect(() => {
+    if (brandVersionLoaded && activeTab === 'favorites' && !favoritesEnabled) {
+      setActiveTab('personal');
+      const next = new URLSearchParams(searchParams);
+      next.set('tab', 'personal');
+      setSearchParams(next, { state: location.state });
+    }
+  }, [activeTab, brandVersionLoaded, favoritesEnabled, searchParams, setSearchParams]);
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
   const [myResourceAuditPendingCount, setMyResourceAuditPendingCount] = useState(0);
@@ -463,9 +475,11 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
 
   // 我可用的技能在所有版本开放导入；官方推荐保留品牌和角色规则，其他资源仍限制为开源版。
   const showImportEntry =
-    resourceType === 'SKILL' && activeTab === 'enterprise'
-      ? canImportCurrentEnterpriseResource
-      : (resourceType === 'SKILL' && activeTab === 'personal') || brandVersion === 'openSource';
+    activeTab === 'favorites'
+      ? false
+      : resourceType === 'SKILL' && activeTab === 'enterprise'
+        ? canImportCurrentEnterpriseResource
+        : (resourceType === 'SKILL' && activeTab === 'personal') || brandVersion === 'openSource';
 
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
@@ -487,7 +501,10 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           if (openTemporaryDetailPanel) {
             openTemporaryDetailPanel(renderDetail, { width: 350 });
           } else {
-            setDetailPanel?.(renderDetail(() => clearDetailPanel?.()), { width: 350 });
+            setDetailPanel?.(
+              renderDetail(() => clearDetailPanel?.()),
+              { width: 350 }
+            );
           }
         }
         return;
@@ -637,10 +654,10 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const currentMyResourceStatusOptions =
     resourceType === 'SKILL'
       ? [
-          ...myResourceStatusOptions,
-          { label: 'resourceStatus.reviewing', value: '4' },
-          { label: 'resourceStatus.notPassed', value: '5' },
-        ]
+        ...myResourceStatusOptions,
+        { label: 'resourceStatus.reviewing', value: '4' },
+        { label: 'resourceStatus.notPassed', value: '5' },
+      ]
       : myResourceStatusOptions;
   const tabBarExtraContent =
     activeTab === 'audit' ? undefined : (
@@ -889,6 +906,9 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
         ),
     },
   ];
+  if (favoritesEnabled) {
+    items.push({ key: 'favorites', label: intl.formatMessage({ id: 'resource.myFavorites' }) });
+  }
   if (myResourcesOnly) {
     items.push({
       key: 'audit',
@@ -1039,7 +1059,9 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
               <img className={styles.marketBg} src={bannerUrl} alt="poster" />
             </div>
           )}
-          {isEnterpriseSkillGroupMode ? (
+          {favoriteListLoading ? (
+            <Spin tip={intl.formatMessage({ id: 'common.loading' })} />
+          ) : isEnterpriseSkillGroupMode ? (
             <SkillGroupList
               key={refreshKey}
               keyword={debouncedSearchValue}
@@ -1079,6 +1101,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
               onAuditUse={handleAuditUse}
               onRefresh={refreshList}
               enablePublishToEnterprise={brandVersionLoaded && brandVersion !== 'commercial'}
+              enableFavorites={favoritesEnabled}
               skillCardViewMode="new"
             />
           )}

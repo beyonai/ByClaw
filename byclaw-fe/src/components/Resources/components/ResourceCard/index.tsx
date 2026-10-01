@@ -31,6 +31,7 @@ import { useWorkspaceSkillActions } from '../../workspaceSkill/useWorkspaceSkill
 import WorkspaceSkillShareAuthModal from '../../workspaceSkill/WorkspaceSkillShareAuthModal';
 import type { WorkspaceSkillItem } from '../../workspaceSkill/utils';
 import ResourceInstallDialog from '../ResourceInstallDialog';
+import ResourceFavoriteActions from '../ResourceFavoriteActions';
 import type { ResourceInstallTargetContext } from '../../resourceInstallContext';
 import styles from './index.module.less';
 
@@ -58,6 +59,8 @@ export interface IResourceCardItem {
   resourceSourcePkId?: string;
   focusCount?: number | string;
   useCount?: number | string;
+  favorited?: boolean;
+  favoriteCount?: number | string;
   memberName?: string;
   manUserName?: string;
   creatorId?: string;
@@ -184,6 +187,7 @@ export type ResourceCardProps = {
   className?: string;
   variant?: 'default' | 'skillPoster';
   digitalEmployeeActionMode?: boolean;
+  enableFavorites?: boolean;
 };
 
 const ResourceInfo = (props: { resource: IResourceCardItem; className?: string }) => {
@@ -372,6 +376,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resourceType,
     variant = 'default',
     digitalEmployeeActionMode = false,
+    enableFavorites = false,
   } = props;
   const { ownerType } = resource || {};
   const isWorkspaceSkillResource = isWorkspaceSkill(resource);
@@ -399,6 +404,17 @@ const RenderContent = (props: ResourceCardProps) => {
   } = actionConfig || {};
   const intl = useIntl();
   const lifecycleLock = useRef(false);
+  const favoriteActions =
+    enableFavorites && resource.favoriteCount !== undefined && resource.favoriteCount !== null ? (
+      <ResourceFavoriteActions
+        resourceId={`${resource.resourceId ?? resource.id ?? ''}`}
+        favorited={resource.favorited}
+        favoriteCount={resource.favoriteCount}
+        hasUsePermission={resource.hasUsePermission}
+        useApplyPending={resource.useApplyPending}
+        operationPermissionsLoaded={resource.operationPermissionsLoaded}
+      />
+    ) : null;
   const [processingLifecycle, setProcessingLifecycle] = useState(false);
   // 提示只覆盖当前操作，异步期间锁定本卡片，其他卡片和列表仍可交互。
   const runLifecycle = useCallback(
@@ -1504,6 +1520,7 @@ const RenderContent = (props: ResourceCardProps) => {
               )}
             </span>
           </div>
+          {favoriteActions}
         </div>
         {!!effectiveMenuItems?.length && (
           <div
@@ -1744,6 +1761,7 @@ const RenderContent = (props: ResourceCardProps) => {
                 </div>
               ) : null}
             </div>
+            {favoriteActions}
           </div>
         </div>
       </div>
@@ -1777,6 +1795,16 @@ function ResourceCard(props: ResourceCardProps) {
         pointer:
           (!!props.onCardClick || isWorkspaceSkill(displayResource)) && !isCancelledResource && !isCardClickDisabled,
         [styles.skillPosterCard]: variant === 'skillPoster',
+        [styles.skillPosterFavoriteCard]:
+          variant === 'skillPoster' &&
+          props.enableFavorites &&
+          resource.favoriteCount !== undefined &&
+          resource.favoriteCount !== null,
+        [styles.favoriteCard]:
+          variant === 'default' &&
+          props.enableFavorites &&
+          resource.favoriteCount !== undefined &&
+          resource.favoriteCount !== null,
         [styles.disabledClickCard]: isCardClickDisabled,
       })}
       ref={resourceCardRef}

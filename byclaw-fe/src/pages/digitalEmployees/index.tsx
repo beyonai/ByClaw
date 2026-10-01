@@ -18,6 +18,7 @@ import { isAdminVip } from '@/utils/auth';
 import type { UserState } from '@/models/common/user';
 import useDigitalEmployeeAuditCount from '@/hooks/useDigitalEmployeeAuditCount';
 import { applyResourceUse } from '@/pages/manager/service/resources';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import EmployFormModal from '@/pages/manager/pages/digitalEmployeeMgr/components/EmployFormModal';
 import MdPreview from '@/components/Preview/Md';
 
@@ -68,8 +69,27 @@ const DigitalEmployeesPage: React.FC = () => {
   const [isLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(() => {
     const tabFromUrl = searchParams.get('tab');
-    return tabFromUrl === 'official' ? 'official' : 'available';
+    return tabFromUrl === 'official' || tabFromUrl === 'favorites' ? tabFromUrl : 'available';
   });
+  const [brandVersion, setBrandVersion] = useState<string | null>(null);
+  const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
+  const favoritesEnabled = brandVersion === 'commercial';
+  useEffect(() => {
+    let active = true;
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((response: any) => {
+        if (active) setBrandVersion(response?.paramValue || 'openSource');
+      })
+      .catch(() => {
+        if (active) setBrandVersion('openSource');
+      })
+      .finally(() => {
+        if (active) setBrandVersionLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const [keywords, setKeywords] = useState<Record<string, string>>({});
   const defaultFilterParam = getDefaultParams();
   const [filterParamsByTab, setFilterParamsByTab] = useState<Record<string, IOnOkParams>>({
@@ -79,6 +99,7 @@ const DigitalEmployeesPage: React.FC = () => {
   // 我可用的与官方推荐都使用合并列表组件，统一分页后再按类型分块展示。
   const AvailableRef = React.useRef<any>(null);
   const OfficialEmployeeRef = React.useRef<any>(null);
+  const FavoritesRef = React.useRef<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [enterpriseCreateOpen, setEnterpriseCreateOpen] = useState(false);
   const dropdownParam = filterParamsByTab[activeTab] || defaultFilterParam;
@@ -116,10 +137,19 @@ const DigitalEmployeesPage: React.FC = () => {
     const tabFromUrl = searchParams.get('tab');
     const legacyTabMap: Record<string, string> = { personal: 'available', enterprise: 'official', group: 'official' };
     const nextTab = legacyTabMap[tabFromUrl || ''] || tabFromUrl;
-    if ((nextTab === 'available' || nextTab === 'official') && nextTab !== activeTab) {
+    if ((nextTab === 'available' || nextTab === 'official' || nextTab === 'favorites') && nextTab !== activeTab) {
       setActiveTab(nextTab);
     }
   }, [activeTab, searchParams]);
+
+  useEffect(() => {
+    if (brandVersionLoaded && !favoritesEnabled && activeTab === 'favorites') {
+      const next = new URLSearchParams(searchParams);
+      next.set('tab', 'available');
+      setSearchParams(next);
+      setActiveTab('available');
+    }
+  }, [activeTab, brandVersionLoaded, favoritesEnabled, searchParams, setSearchParams]);
 
   useEffect(() => {
     const nextSearchParams = new URLSearchParams(searchParams);
@@ -131,7 +161,8 @@ const DigitalEmployeesPage: React.FC = () => {
 
   const getSearch = React.useCallback(
     debounce((otherParam?: any) => {
-      const refs = activeTab === 'available' ? [AvailableRef] : [OfficialEmployeeRef];
+      const refs =
+        activeTab === 'available' ? [AvailableRef] : activeTab === 'favorites' ? [FavoritesRef] : [OfficialEmployeeRef];
       refs.forEach((item) => item.current?.getSearch?.(keywords[activeTab] || '', otherParam || dropdownParam));
     }, 500),
     [activeTab, dropdownParam, keywords]
@@ -155,17 +186,19 @@ const DigitalEmployeesPage: React.FC = () => {
 
   // 创建入口随页签区分归属；实际创建操作仍由后端校验权限。
   const createMenuItems =
-    activeTab === 'available'
-      ? [
-        { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
-        { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
-      ]
-      : canCreateEnterprise
+    activeTab === 'favorites'
+      ? []
+      : activeTab === 'available'
         ? [
-          { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
-          { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) },
+          { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
+          { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
         ]
-        : [];
+        : canCreateEnterprise
+          ? [
+            { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
+            { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) },
+          ]
+          : [];
 
   const tabBarExtraContent = (
     <Space className={styles.toolbar}>
@@ -269,6 +302,10 @@ const DigitalEmployeesPage: React.FC = () => {
             nextSearchParams.set('tab', nextTab);
             setActiveTab(nextTab);
             setSearchParams(nextSearchParams);
+            if (favoritesEnabled && ['official', 'favorites'].includes(nextTab)) {
+              const target = nextTab === 'favorites' ? FavoritesRef : OfficialEmployeeRef;
+              target.current?.getSearch?.(keywords[nextTab] || '', nextFilterParam);
+            }
           }}
         >
           <Tabs.TabPane tab={intl.formatMessage({ id: 'digitalEmployees.available' })} key="available">
@@ -291,6 +328,7 @@ const DigitalEmployeesPage: React.FC = () => {
               <AllDigitalEmployees
                 mode="all"
                 source="official"
+                enableFavorites={favoritesEnabled}
                 ref={OfficialEmployeeRef}
                 onEmployeeClick={setPreview}
                 onChatEmployee={handleEmployeeChat}
@@ -301,6 +339,24 @@ const DigitalEmployeesPage: React.FC = () => {
               />
             </div>
           </Tabs.TabPane>
+          {favoritesEnabled && (
+            <Tabs.TabPane tab={intl.formatMessage({ id: 'resource.myFavorites' })} key="favorites">
+              <div id="favoriteDigitalEmployeesScroller" className={styles.tabContent}>
+                <AllDigitalEmployees
+                  mode="all"
+                  source="favorites"
+                  enableFavorites
+                  ref={FavoritesRef}
+                  onEmployeeClick={setPreview}
+                  onChatEmployee={handleEmployeeChat}
+                  hideCategories
+                  buildFilterParam={buildDigitalEmployeeFilterParam}
+                  compactLayout
+                  scrollableTarget="favoriteDigitalEmployeesScroller"
+                />
+              </div>
+            </Tabs.TabPane>
+          )}
         </Tabs>
       </Spin>
       {/* eslint-disable-next-line @typescript-eslint/no-use-before-define */}
