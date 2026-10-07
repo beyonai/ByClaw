@@ -310,8 +310,14 @@ RUN set -eux; \
     searxng-cli --list-engines >/dev/null 2>&1
 
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \
-    && /usr/local/bin/verify-runtime-toolchain
+    && if [ "${BUILDPLATFORM}" = "${TARGETPLATFORM}" ]; then \
+        /usr/local/bin/verify-runtime-toolchain; \
+    else \
+        SKIP_BROWSER_SMOKE=1 /usr/local/bin/verify-runtime-toolchain; \
+    fi
 
 COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
