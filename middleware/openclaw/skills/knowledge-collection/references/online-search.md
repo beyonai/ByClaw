@@ -1,8 +1,4 @@
-# Online Search 检索信源（可选 WSA/Search1API、SearXNG 降级）
-
-部署时必须在沙箱镜像中安装 SearXNG；仅同步技能文件不会安装 Python 运行时。
-实际使用的 DSH 镜像由 `byclaw-harness/Dockerfile` 构建；其 `scripts/install-search-runtime.sh` 安装固定版本及约束依赖，并在构建时检查普通用户能运行 `searxng-cli`。已有沙箱需更新该镜像以获得降级通道。
-安装后以 Agent 用户通过 `online-search` 验证实际查询；`--list-engines` 只验证运行时加载，不证明联网搜索成功。
+# Online Search 检索信源
 
 普通热度发现会向子进程传入总预算（外层超时的 75%，最多 90 秒）和单适配器最多 10 秒超时。
 runtime 的版本/catalog 查询、bridge-bootstrap 与适配器都受同一个剩余预算限制；启动 bridge 前也检查预算与早停条件。
@@ -31,12 +27,12 @@ Runner 自动在本会话 `.collection-inputs/` 中管理运行级 runtime 缓�
 逐来源快照只是发现证据，不是全文验证或完整覆盖证明。尚未运行联网提速基准。
 
 `online-search` 是知识采集技能的公共网页检索通道（由统一路由层 [agent-reach.md](agent-reach.md) 的公共工作流使用）。
-它并发调用当前已配置的腾讯联网搜索 API（WSA）和 Search1API；两者均未配置或均发生通道级故障时，
-降级到 OpenClaw 镜像内置的 `searxng-cli`。合法空结果不得改写为基础设施故障，后续仍由既有
-hot-discovery 逻辑补充候选。**本通道只负责发现 URL，不得直接抓取网页；取内容一律委派来源执行器（公共网页 `bycli`）。**
+它并发调用当前已配置的腾讯联网搜索 API（WSA）和 Search1API，并合并成功 provider 的 URL 命中证据。
+两者均未配置或均发生通道级故障时，online-search 通道失败，后续仍由既有 hot-discovery 逻辑补充候选。
+合法空结果不得改写为基础设施故障。**本通道只负责发现 URL，不得直接抓取网页；取内容一律委派来源执行器（公共网页 `bycli`）。**
 
 WSA 从运行环境读取 `TENCENTCLOUD_SECRET_ID` 和 `TENCENTCLOUD_SECRET_KEY`；两者齐全时自动启用，
-`TENCENT_WSA_ENABLED=false` 可强制使用 SearXNG。凭据不得出现在命令参数、快照、会话状态或日志中。
+`TENCENT_WSA_ENABLED=false` 可显式关闭。凭据不得出现在命令参数、快照、会话状态或日志中。
 
 Search1API 从运行环境读取 `SEARCH1API_API_KEY`，可用 `SEARCH1API_ENABLED=false` 显式关闭，
 `SEARCH1API_BASE_URL` 仅用于受控端点覆盖。TypeSafe Jev 从 `TYPESAFE_API_KEY` 读取凭据，并支持
@@ -44,7 +40,7 @@ Search1API 从运行环境读取 `SEARCH1API_API_KEY`，可用 `SEARCH1API_ENABL
 诊断只记录能力状态，不记录凭据。Jev 只提供规划与排序证据，不能授权 URL，也不能充当正文或 full-text evidence。
 
 Tencent WSA SDK 是可选运行依赖。部署未提供 `tencentcloud-sdk-nodejs` 时，WSA 返回
-`WSA_SDK_UNAVAILABLE`，随后继续使用 Search1API 或 SearXNG；Agent 不在采集过程中安装依赖。
+`WSA_SDK_UNAVAILABLE`，随后继续使用 Search1API；Agent 不在采集过程中安装依赖。
 
 显式指定的分类和时间范围不会被规划覆盖；改写后的检索词不改变原始发现预约标识，保证结果回写、重试和恢复使用同一工作流身份。排序输入会限制字段长度和来源数量。
 
@@ -66,7 +62,7 @@ Tencent WSA SDK 是可选运行依赖。部署未提供 `tencentcloud-sdk-nodejs
 - 共享 Jev 包装层在复用或应用建议前校验每个请求字段：`choice` 必须是题目 `criteria` 中的字符串键，且 `confidence` 是 0 到 1 的有限数值；`noul` 必须是 0 到 1 的有限数值，无需 `confidence`。成功响应缺项、类型错误或越界时统一返回 `TYPESAFE_INVALID_RESPONSE`，并打开本次运行的熔断；部分批量答案不可应用或缓存。合法的低置信度答案以及题目中明确定义的 `unsure` 选项仍按调用者原有降级规则处理，不视为响应损坏。
 - **第二轮查询（P1）**：只有已有获取反馈且备用查询保留主题时，选择原 fallbackQuery 或只追加“全文/案例实践”等的固定模板；不自由生成、不改变主题、不增加第三轮。选择失败、缺项或低置信度时使用精确的原 fallbackQuery。已预约的查询在恢复时保持不变。
 - **增量证据（P2）**：有已采集文章或显式证据上下文时，在同一排序批次中加入增量价值评分（未覆盖子题、独立来源、反例），不额外发请求；已有研究分支的覆盖/缺失子题也可作为上下文，混合或企业资料需显式启用 `TYPESAFE_ENTERPRISE_ENABLED=true`。最多 40 个已采集标题/来源和各 12 个有界子题。仅以 `0.8 + 0.2 × incrementalValue` 软调分，不剔除候选；任一新增评分无效则整体恢复原顺序。
-- **提供商组合实验（P2，默认关闭）**：仅 `JEV_PROVIDER_SELECTION_ENABLED=true` 且两个商业提供商都配置时，才允许选择 WSA、Search1API 或 both；`all` 不启用。选择失败恢复原双路并行。选中提供商通道失败后仍尝试未执行的商业备选，最后保留 SearXNG 降级；合法空结果不触发故障降级。该实验尚无实网 A/B 性能结论。
+- **提供商组合实验（P2，默认关闭）**：仅 `JEV_PROVIDER_SELECTION_ENABLED=true` 且两个商业提供商都配置时，才允许选择 WSA、Search1API 或 both；`all` 不启用。选择失败恢复原双路并行。选中提供商通道失败后仍尝试未执行的商业备选；合法空结果不触发故障切换。该实验尚无实网 A/B 性能结论。
 
 效率验收应固定任务和来源环境，比较首篇交付耗时、完成 N 篇耗时、抓取次数/交付篇数及最终完成率。离线夹具验证排序和回退，不代表真实公网耗时已改善。
 
@@ -97,23 +93,8 @@ node scripts/knowledge-collection.mjs public-discover --session-dir <会话目�
 `article`、`weak` 或 `reject`。中文文章 profile 会并发启动 online-search 与限定来源的 `hot_discovery`，共享 60 秒软预算和 90 秒硬上限；
 停止阈值为 `max(N*3, 5)`，且至少尝试前三个运行时可用来源。这是未启用有效来源计划时的兼容路径；有效计划按上述来源波次执行。其他 requested-count 请求保持先 online-search、候选不足再运行 hot-discovery 的行为。任一逻辑通道失败时保留另一通道的快照与候选，
 只有 online-search 与 hot-discovery 均失败才判定本次发现失败。命令输出的 `candidateQuality`、`pageTypeReasons` 和 `timing` 是候选选择与阶段耗时的权威诊断。
-直接运行 `searxng-cli` 仅适用于独立调试，不会自动启动热度发现。
-
-- 默认按 `--category` 使用内置直连白名单（`searxng_pack_settings.yml` 的 `cli.default_engines`，120 个直连可用引擎），避免超时拖累；
-- 白名单外的海外头部引擎（google/duckduckgo/wikipedia/brave 等）在无代理直连环境下不可用（2026-08-15 复测：50 个跳过引擎 47 个不可用，
-  3 个可用者已在白名单），属预期行为，无需逐个重试；
-- 输出 stdout 单个 JSON：`results[]`（url/title/content/engine/score）+ `engine_stats`（逐引擎耗时与错误）+ `elapsed_sec`；
-- 错误时 stdout 输出 `{"error": "...", "exit_code": 1}`，退出码非 0；单引擎失败不影响主结果。
-
-## 关键参数
-
-| 参数 | 说明 |
-|---|---|
-| `--category` | general / news / science / it / images / videos / files / social media 等；science 含 arxiv/crossref/pubmed/openalex |
-| `--time-range` | day / week / month / year；**仅 baidu/bing/sogou 等支持**；science 引擎不支持（传了会过滤为空） |
-| `--engines` | 逗号分隔引擎白名单覆盖；海外引擎在无代理时不可用，勿依赖 |
-| `--language` | zh-CN / en / all |
-| `--pageno` / `--max-results` | 翻页 / 条数 |
+合并输出中的 `searxngTop`、`--searxng-file` 等名称属于历史兼容契约，现在承载统一
+online-search 结果，不表示镜像中仍包含 SearXNG CLI。
 
 ## 检索源分工（与内置路由层）
 
@@ -122,10 +103,3 @@ node scripts/knowledge-collection.mjs public-discover --session-dir <会话目�
 - **英文技术/代码**：优先内置路由层的 Exa（擅长英文技术文档与代码上下文）与 `gh`（搜 GitHub）；
 - **通用发现**：使用 `public-discover`，它会并行运行 online-search 与 hot-discovery 并生成合并快照；
 - **取内容**：一律委派来源执行器，通用公共网页按 [agent-reach.md](agent-reach.md) → `acquire-web` → `materialize-web`；不得手工重定向 stdout 或构造 payload。
-
-## 实测引擎可用性（2026-08-15 直连探测）
-
-- 白名单内 121 实例：可用且有结果 30 / 可用但 0 结果 71 / 失败 20（timeout×13、KeyError×4、captcha×1、403×1、ConnectError×1）；
-- science 全 7 引擎零失败（arxiv/crossref/openalex/pubmed 均命中）——学术检索首选；
-- baidu 触发 captcha、pexels 403（上游风控，换词或稍后再试即可）；
-- 4 个 KeyError（discuss.python/hackernews/radio browser/pkg.go.dev）为 SearXNG 解析层异常，非网络问题。

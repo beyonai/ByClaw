@@ -34,14 +34,12 @@ import { planSourceWaves, sourcePlanIdentity } from './jev/source-plan.mjs';
 import { researchEvidenceContext } from './jev/research-evidence.mjs';
 import { resolveTypeSafeCapability } from './jev/typesafe.mjs';
 
-export { resolveSearxngRuntime } from './online-search/searxng.mjs';
-
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const onlineSearchRoot = resolve(scriptDir, '../references/online-search');
 const hotDiscoveryScript = join(onlineSearchRoot, 'references/hot_discovery/scripts/hot_discovery.mjs');
 const adaptersPath = join(onlineSearchRoot, 'references/hot_discovery/adapters.md');
 const MAX_DIAGNOSTIC_STDERR_CHARS = 2_000;
-const DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS = 60;
+const DEFAULT_ONLINE_SEARCH_TIMEOUT_SECONDS = 60;
 export const SOFT_DISCOVERY_BUDGET_MS = 60_000;
 export const HARD_DISCOVERY_BUDGET_MS = 90_000;
 const CHINESE_ARTICLE_SOURCES = Object.freeze(['36kr', 'weixin', 'sogou', 'baidu', 'bing']);
@@ -267,7 +265,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const reservationIdentity = { query, category };
   const budgetNow = options.budgetNow || (() => performance.now());
   const budgetStartedAt = budgetNow();
-  const discoveryBudgetMs = Math.max(1, Number(args?.timeout || DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS) * 1_000);
+  const discoveryBudgetMs = Math.max(1, Number(args?.timeout || DEFAULT_ONLINE_SEARCH_TIMEOUT_SECONDS) * 1_000);
   const remainingBudgetMs = () => Math.max(0, Math.min(
     discoveryBudgetMs - (budgetNow() - budgetStartedAt),
     options.remainingBudgetMs ? options.remainingBudgetMs() : Infinity,
@@ -313,7 +311,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     : Math.max(Number(requestedCount) * 3, 5);
   const effectiveMaxResults = profileEnabled ? String(profileStopAfter)
     : (options.orchestrationRunId !== undefined ? maxResults : (requestedCount || maxResults));
-  const processTimeout = String(args?.timeout || DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS);
+  const processTimeout = String(args?.timeout || DEFAULT_ONLINE_SEARCH_TIMEOUT_SECONDS);
   let timeRange = typeof args?.['time-range'] === 'string' && args['time-range'].trim()
     ? args['time-range'].trim() : null;
   const planner = options.planDiscovery || defaultPlanDiscovery;
@@ -541,7 +539,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
       : {
         code: 1,
         stdout: '',
-        stderr: result?.providerDiagnostics?.searxng?.message
+        stderr: result?.error?.message
           || JSON.stringify(result?.error || { code: 'ONLINE_SEARCH_FAILED' }),
         provider: result?.provider,
         fallbackUsed: result?.fallbackUsed,
@@ -718,8 +716,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
     && ['in_progress', 'process_interrupted'].includes(hotDoc?.stopReason);
   if (!sxDoc && !hotDoc) {
     const failure = hotOutcome?.skipped
-      ? 'SearXNG 未返回有效结果'
-      : 'SearXNG 与 hot-discovery 均未返回有效结果';
+      ? 'online-search 未返回有效结果'
+      : 'online-search 与 hot-discovery 均未返回有效结果';
     if (options.orchestrationRunId === undefined) {
       withSessionLock(paths, 'public-discover-failed', () => {
         const current = loadSession(paths, { persistMigration: false }).session;
@@ -742,7 +740,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     hotDiscovery: summarize(hotOutcome, hotDoc, hotDiscoveryMs),
   };
   const warnings = [];
-  if (!sxDoc) warnings.push(`SearXNG 发现失败（exit ${channelDiagnostics.searxng.exitCode}）`);
+  if (!sxDoc) warnings.push(`online-search 发现失败（exit ${channelDiagnostics.searxng.exitCode}）`);
   if (!hotDoc && !hotOutcome?.skipped) {
     warnings.push(`hot-discovery 发现失败（exit ${channelDiagnostics.hotDiscovery.exitCode}）`);
   }
