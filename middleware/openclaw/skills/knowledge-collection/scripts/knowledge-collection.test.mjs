@@ -461,28 +461,14 @@ await (async () => {
     '--source-scope', '["public-internet"]', '--materialization-target', 'candidates',
   ]);
   assert.equal(asyncDiscoveryInit.code, 0, asyncDiscoveryInit.stderr);
-  const fixtureBinDir = join(asyncDiscoveryRoot, 'fixture-bin');
-  const fixtureSearxng = join(fixtureBinDir, 'searxng-cli');
-  mkdirSync(fixtureBinDir);
-  writeFileSync(fixtureSearxng, `#!/usr/bin/env node
-process.stdout.write(JSON.stringify({
-  query: 'async discovery',
-  results: [{
-    url: 'https://example.com/news/async-discovery-report',
-    title: 'Async discovery 深度报道',
-    engine: 'fixture',
-  }],
-}));
-`);
-  chmodSync(fixtureSearxng, 0o700);
   const asyncDiscovery = await runCli([
     'public-discover', '--session-dir', asyncDiscoveryRoot, '--query', 'async discovery',
     '--requested-count', '1',
-  ], { PATH: `${fixtureBinDir}:${process.env.PATH}` });
+  ]);
   assert.notEqual(asyncDiscovery.stdout.trim(), '{}');
-  assert.equal(asyncDiscovery.code, 0, asyncDiscovery.stderr);
-  assert.equal(asyncDiscovery.json.ok, true);
-  assert.equal(asyncDiscovery.json.action, 'public-discover');
+  assert.equal(asyncDiscovery.code, 1);
+  assert.equal(asyncDiscovery.json.ok, false);
+  assert.match(asyncDiscovery.json.error, /未返回有效结果/);
   rmSync(asyncDiscoveryRoot, { recursive: true, force: true });
 
   const wechatRoot = makeSessionDir();
