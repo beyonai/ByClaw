@@ -177,3 +177,41 @@ describe('available resource ownership filter', () => {
     expect(onOk.mock.calls[0][0]).not.toHaveProperty('ownerType');
   });
 });
+
+describe('external quick filter parameters', () => {
+  it('does not confirm or reset hidden ownership and permission conditions', () => {
+    const onOk = jest.fn();
+    render(
+      <ResourceFilter
+        resourceType="SKILL"
+        activeTab="personal"
+        hideStatusFilter
+        hidePermissionFilter
+        catalogOptions={[
+          { value: '', label: 'All categories' },
+          { value: 'sales', label: 'Sales' },
+        ]}
+        defaultParam={getDefaultParams({
+          catalogId: 'sales',
+          ownerType: 'enterprise',
+          permission: 'AUTHORIZED_TO_ME',
+        })}
+        onOk={onOk}
+      />
+    );
+
+    expect(screen.queryByText('resource.permission')).toBeNull();
+    expect(screen.queryByText('resource.ownership')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.tag.enterpriseSkill' })).toBeNull();
+    fireEvent.click(screen.getByText('common.confirm'));
+    expect(onOk.mock.calls[0][0]).toEqual(expect.objectContaining({ catalogId: 'sales' }));
+    expect(onOk.mock.calls[0][0]).not.toHaveProperty('ownerType');
+    expect(onOk.mock.calls[0][0]).not.toHaveProperty('permission');
+
+    fireEvent.click(screen.getByText('common.reset'));
+    fireEvent.click(screen.getByText('common.confirm'));
+    expect(onOk.mock.calls[1][0]).toEqual(expect.objectContaining({ catalogId: '' }));
+    expect(onOk.mock.calls[1][0]).not.toHaveProperty('ownerType');
+    expect(onOk.mock.calls[1][0]).not.toHaveProperty('permission');
+  });
+});

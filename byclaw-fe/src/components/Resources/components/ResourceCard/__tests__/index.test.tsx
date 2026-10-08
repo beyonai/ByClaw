@@ -66,6 +66,22 @@ jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({
   installDigitalEmployeeRelResources: jest.fn(),
 }));
 
+// 安装弹窗自身的目标查询和安装流程由其独立用例覆盖，这里验证卡片入口及事件边界。
+jest.mock('@/components/Resources/components/ResourceInstallDialog', () => ({
+  __esModule: true,
+  default: ({ resourceId, targetContext, onClose, onInstallingChange }: any) => (
+    <div
+      role="dialog"
+      aria-label="install-dialog"
+      data-resource-id={resourceId}
+      data-target-context={JSON.stringify(targetContext)}
+    >
+      <button type="button" onClick={onClose}>close-install</button>
+      <button type="button" onClick={() => onInstallingChange(true)}>start-install</button>
+    </div>
+  ),
+}));
+
 jest.mock('@/components/AntdIcon', () => ({
   __esModule: true,
   default: ({ type, className }: { type: string; className?: string }) => (
@@ -778,42 +794,245 @@ describe('ResourceCard', () => {
     expect(screen.getByText('common.editInfo')).toBeTruthy();
   });
 
-  it('hides install skill action when skill has no use permission', () => {
+  it.each(['default', 'skillPoster'] as const)('hides the %s skill install icon without use permission', (variant) => {
     renderWithQueryClient(
       <ResourceCard
         resourceType="SKILL"
+        variant={variant}
         resource={{
           resourceId: 'skill-1',
           resourceName: 'Skill',
           resourceBizType: 'SKILL',
           hasUsePermission: false,
+          canApplyUse: true,
+          resourceStatus: '2',
         }}
+        actionConfig={{ enableResourceLifecycle: true }}
       />
     );
 
-    expect(screen.queryByText('resource.installSkill')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.installSkill' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'resource.applyUse' })).toBeInTheDocument();
+    expect(screen.queryByTestId('resource-menu-applyUse')).toBeNull();
   });
 
-  it('shows install skill action when skill has use permission', () => {
+  it.each([
+    ['SKILL', 'default'],
+    ['SKILL', 'skillPoster'],
+    ['KG_DOC', 'default'],
+    ['TOOL', 'default'],
+  ] as const)('confirms use applications from the %s %s card icon', async (resourceType, variant) => {
+    const onApplyUse = jest.fn();
+    const onCardClick = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType={resourceType}
+        variant={variant}
+        onCardClick={onCardClick}
+        resource={{
+          resourceId: 'resource-apply',
+          resourceBizType: resourceType,
+          resourceStatus: '2',
+          canApplyUse: true,
+          hasUsePermission: false,
+          canEdit: true,
+        }}
+        actionConfig={{ enableResourceLifecycle: true, onApplyUse }}
+      />
+    );
+
+    const applyButton = screen.getByRole('button', { name: 'resource.applyUse' });
+    expect(applyButton).toHaveClass('ant-btn-circle');
+    expect(screen.queryByTestId('resource-menu-applyUse')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.installSkill' })).toBeNull();
+    expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
+    fireEvent.click(applyButton);
+    expect(onApplyUse).not.toHaveBeenCalled();
+    expect(onCardClick).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    await waitFor(() => expect(onApplyUse).toHaveBeenCalledTimes(1));
+    expect(onCardClick).not.toHaveBeenCalled();
+  });
+
+  it('does not submit a use application when confirmation is cancelled', async () => {
+    const onApplyUse = jest.fn();
+    const onCardClick = jest.fn();
     renderWithQueryClient(
       <ResourceCard
         resourceType="SKILL"
+        variant="skillPoster"
+        onCardClick={onCardClick}
+        resource={{
+          resourceId: 'skill-apply',
+          resourceStatus: '2',
+          canApplyUse: true,
+          hasUsePermission: false,
+        }}
+        actionConfig={{ enableResourceLifecycle: true, onApplyUse }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'resource.applyUse' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.cancel' }));
+    expect(onApplyUse).not.toHaveBeenCalled();
+    expect(onCardClick).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['SKILL', 'default'],
+    ['SKILL', 'skillPoster'],
+    ['KG_DOC', 'default'],
+    ['TOOL', 'default'],
+  ] as const)('shows a disabled pending use action for %s %s cards', async (resourceType, variant) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType={resourceType}
+        variant={variant}
+        resource={{
+          resourceId: 'resource-pending',
+          resourceBizType: resourceType,
+          resourceStatus: '2',
+          hasUsePermission: false,
+          canApplyUse: true,
+          useApplyPending: true,
+          canEdit: true,
+        }}
+        actionConfig={{ enableResourceLifecycle: true }}
+      />
+    );
+
+    const pendingButton = screen.getByRole('button', { name: 'resource.pendingAuthorization' });
+    expect(pendingButton).toBeDisabled();
+    expect(screen.queryByText('resource.pendingAuthorization')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.applyUse' })).toBeNull();
+    expect(screen.queryByTestId('resource-menu-applyUse')).toBeNull();
+    expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
+    fireEvent.mouseEnter(pendingButton.parentElement!);
+    expect(await screen.findByText('resource.pendingAuthorization')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['default', true],
+    ['default', false],
+    ['skillPoster', true],
+    ['skillPoster', false],
+  ] as const)('keeps the %s card action slots stable after confirmation, menu=%s', async (variant, canEdit) => {
+    const onApplyUse = jest.fn();
+    const ApplyCard = () => {
+      const [pending, setPending] = React.useState(false);
+      return (
+        <ResourceCard
+          resourceType="SKILL"
+          variant={variant}
+          resource={{
+            resourceId: 'skill-apply',
+            resourceStatus: '2',
+            hasUsePermission: false,
+            canApplyUse: !pending,
+            useApplyPending: pending,
+            canEdit,
+          }}
+          actionConfig={{
+            enableResourceLifecycle: true,
+            onApplyUse: () => {
+              onApplyUse();
+              setPending(true);
+            },
+          }}
+        />
+      );
+    };
+    renderWithQueryClient(<ApplyCard />);
+    const applyButton = screen.getByRole('button', { name: 'resource.applyUse' });
+    const actions = applyButton.parentElement!;
+    const actionCount = within(actions).getAllByRole('button').length;
+    const editMenu = screen.queryByTestId('resource-menu-edit');
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+
+    const pendingButton = await screen.findByRole('button', { name: 'resource.pendingAuthorization' });
+    expect(onApplyUse).toHaveBeenCalledTimes(1);
+    expect(pendingButton).toBeDisabled();
+    expect(pendingButton).toHaveClass('ant-btn-circle');
+    expect(pendingButton.parentElement?.parentElement).toBe(actions);
+    expect(within(actions).getAllByRole('button')).toHaveLength(actionCount);
+    // 文字只在悬浮提示中展示，不会扩展按钮所在操作区的尺寸。
+    expect(within(actions).queryByText('resource.pendingAuthorization')).toBeNull();
+    expect(screen.queryByTestId('resource-menu-edit')).toBe(editMenu);
+  });
+
+  it.each([
+    { resourceStatus: '0' },
+    { resourceStatus: '3' },
+    { resourceStatus: '-1' },
+    { resourceStatus: '2', hasUsePermission: true },
+    { resourceStatus: '2', canApplyUse: false },
+    { resourceStatus: '2', hiddenMenuItemKeys: ['applyUse'] },
+    { resourceStatus: '2', resourceBacked: false, skillPath: '/skills/example' },
+  ])('hides the resource center use application icon when unavailable: %j', (state) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        variant="skillPoster"
+        resource={{
+          resourceId: 'skill-unavailable',
+          resourceBizType: 'SKILL',
+          hasUsePermission: false,
+          canApplyUse: true,
+          ...state,
+        }}
+        actionConfig={{ enableResourceLifecycle: true, hiddenMenuItemKeys: state.hiddenMenuItemKeys }}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: 'resource.applyUse' })).toBeNull();
+    expect(screen.queryByTestId('resource-menu-applyUse')).toBeNull();
+  });
+
+  it.each(['default', 'skillPoster'] as const)('opens installation from the %s skill icon only', (variant) => {
+    const onCardClick = jest.fn();
+    const targetContext = {
+      mode: 'fixed' as const,
+      digitalEmployeeId: 'employee-1',
+      digitalEmployeeName: 'Employee',
+    };
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        variant={variant}
+        onCardClick={onCardClick}
         resource={{
           resourceId: 'skill-1',
           resourceName: 'Skill',
           resourceBizType: 'SKILL',
           hasUsePermission: true,
+          canEdit: true,
+          resourceStatus: '2',
         }}
+        actionConfig={{ enableResourceLifecycle: true, installTargetContext: targetContext }}
       />
     );
 
-    expect(screen.getByText('resource.installSkill')).toBeTruthy();
+    const installButton = screen.getByRole('button', { name: 'resource.installSkill' });
+    expect(installButton).toHaveClass('ant-btn-circle');
+    expect(installButton.parentElement).toHaveClass('digitalEmployeeActions');
+    expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+    expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
+    fireEvent.click(installButton);
+    const dialog = screen.getByRole('dialog', { name: 'install-dialog' });
+    expect(dialog).toHaveAttribute('data-resource-id', 'skill-1');
+    expect(dialog).toHaveAttribute('data-target-context', JSON.stringify(targetContext));
+    expect(onCardClick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'close-install' }));
+    expect(screen.queryByRole('dialog', { name: 'install-dialog' })).toBeNull();
+    expect(onCardClick).not.toHaveBeenCalled();
   });
 
-  it('hides install skill action when current digital employee already installed it', () => {
+  it.each(['default', 'skillPoster'] as const)('hides the %s skill install icon when already installed', (variant) => {
     renderWithQueryClient(
       <ResourceCard
         resourceType="SKILL"
+        variant={variant}
         resource={{
           resourceId: 'skill-1',
           resourceName: 'Skill',
@@ -826,7 +1045,67 @@ describe('ResourceCard', () => {
       />
     );
 
-    expect(screen.queryByText('resource.installSkill')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.installSkill' })).toBeNull();
+    expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+  });
+
+  it.each([
+    { resourceStatus: '0' },
+    { resourceStatus: '3' },
+    { resourceStatus: '-1' },
+    { resourceStatus: '2', canInstallToTarget: false },
+    { resourceStatus: '2', hiddenMenuItemKeys: ['install'] },
+    { resourceStatus: '2', resourceBacked: false, skillPath: '/skills/example' },
+  ])('hides the skill install icon when installation is unavailable: %j', (state) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        variant="skillPoster"
+        resource={{
+          resourceId: 'skill-1',
+          resourceBizType: 'SKILL',
+          hasUsePermission: true,
+          ...state,
+        }}
+        actionConfig={{
+          enableResourceLifecycle: true,
+          canInstallToTarget: state.canInstallToTarget,
+          hiddenMenuItemKeys: state.hiddenMenuItemKeys,
+        }}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: 'resource.installSkill' })).toBeNull();
+    expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+  });
+
+  it('opens target selection and prevents repeated installation while installing', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        resource={{ resourceId: 'skill-1', resourceBizType: 'SKILL', hasUsePermission: true }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'resource.installSkill' }));
+    expect(screen.getByRole('dialog', { name: 'install-dialog' })).toHaveAttribute(
+      'data-target-context',
+      JSON.stringify({ mode: 'select' })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'start-install' }));
+    expect(screen.getByRole('button', { name: 'resource.installSkill' })).toBeDisabled();
+  });
+
+  it.each(['KG_DOC', 'TOOL'])('keeps installation in the menu for %s resources', (resourceType) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType={resourceType}
+        resource={{ resourceId: 'resource-1', resourceBizType: resourceType }}
+      />
+    );
+
+    expect(screen.getByTestId('resource-menu-install')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'resource.installSkill' })).toBeNull();
   });
 
   it('hides install knowledge action when current digital employee already installed it', () => {
@@ -930,8 +1209,8 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resource.applyUse')).toBeNull();
   });
 
-  // 共用卡片组件的其他资源仍通过菜单申请使用权限。
-  it('keeps the apply use menu for non-employee resources', () => {
+  // 资源中心之外的旧复用场景保持菜单申请，避免影响独立页面。
+  it('keeps the apply use menu outside the resource center action mode', () => {
     renderWithQueryClient(
       <ResourceCard
         resourceType="TOOL"

@@ -134,7 +134,6 @@ type ResourceCardActionConfig = {
   extraMenuItems?: ExtraResourceMenuItem[];
   hiddenMenuItemKeys?: string[];
   onApplyUse?: () => void;
-  onAuditUse?: () => void;
   onDelete?: (feedback: ResourceActionFeedback) => void | Promise<void>;
   onDeleteData?: (feedback: ResourceActionFeedback) => void | Promise<void>;
   onShelf?: (feedback: ResourceActionFeedback) => void | Promise<void>;
@@ -538,6 +537,9 @@ const RenderContent = (props: ResourceCardProps) => {
 
   const isDigitalEmployeeResource =
     resource.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE || resourceType === resourceBizTypeMap.DIG_EMPLOYEE;
+  // 资源中心的技能、知识和工具沿用员工卡片主操作区；其他复用场景保留原菜单。
+  const resourceActionMode =
+    !isDigitalEmployeeResource && (isSkillResource(resource, resourceType) || enableResourceLifecycle);
   const isPublishedDigitalEmployee =
     !isDigitalEmployeeResource || `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` === '2';
   const isPendingUseApproval =
@@ -686,6 +688,15 @@ const RenderContent = (props: ResourceCardProps) => {
   const isInstalledResource = Boolean(
     resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`)
   );
+  // 安装入口移到技能卡片主操作区，继续沿用原菜单的权限、状态及目标员工限制。
+  const canShowInstallAction =
+    !isCancelledResource &&
+    !isWorkspaceSkillResource &&
+    canInstallResource(resource, resourceType) &&
+    (!enableResourceLifecycle || `${resource.resourceStatus}` === '2') &&
+    actionConfig?.canInstallToTarget !== false &&
+    !isInstalledResource &&
+    !actionConfig?.hiddenMenuItemKeys?.includes('install');
   const isCardClickDisabled =
     typeof cardClickDisabled === 'function' ? cardClickDisabled(resource) : !!cardClickDisabled;
 
@@ -1043,8 +1054,8 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 数字员工和员工组统一使用卡片上的加号申请；其他资源保留菜单申请入口。
-    if (!isDigitalEmployeeResource && canApplyUse && canApplyUseForStatus) {
+    // 资源中心与数字员工使用卡片上的加号申请，不重复展示菜单入口。
+    if (!isDigitalEmployeeResource && !resourceActionMode && canApplyUse && canApplyUseForStatus) {
       items.push({
         key: 'applyUse',
         label: (
@@ -1061,12 +1072,7 @@ const RenderContent = (props: ResourceCardProps) => {
     // 使用审核统一由审核中心承载，卡片不再返回或消费审核按钮权限。
 
     // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
-    if (
-      canInstallResource(resource, resourceType) &&
-      (!enableResourceLifecycle || `${resource.resourceStatus}` === '2') &&
-      actionConfig?.canInstallToTarget !== false &&
-      !isInstalledResource
-    ) {
+    if (canShowInstallAction && !isSkillResource(resource, resourceType)) {
       items.push({
         key: 'install',
         label: (
@@ -1252,6 +1258,7 @@ const RenderContent = (props: ResourceCardProps) => {
     intl,
     isDefaultDigitalEmployee,
     isDigitalEmployeeResource,
+    resourceActionMode,
     isDeletedDigitalEmployee,
     isPublishedDigitalEmployee,
     onApplyUse,
@@ -1299,6 +1306,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resourceType,
     isInnerSkill,
     isInstalledResource,
+    canShowInstallAction,
     installing,
     restoring,
     settingDefault,
@@ -1433,6 +1441,93 @@ const RenderContent = (props: ResourceCardProps) => {
       />
     ) : null;
 
+  // 申请确认及待审核展示与数字员工共用，阻止操作事件打开卡片详情。
+  const applyUseAction = (
+    <Tooltip title={intl.formatMessage({ id: 'resource.applyUse' })}>
+      <Popconfirm
+        title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        onConfirm={(event) => {
+          event?.stopPropagation();
+          onApplyUse?.();
+        }}
+        onCancel={(event) => event?.stopPropagation()}
+      >
+        <Button
+          shape="circle"
+          aria-label={intl.formatMessage({ id: 'resource.applyUse' })}
+          icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
+          onClick={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+          }}
+        />
+      </Popconfirm>
+    </Tooltip>
+  );
+  const pendingUseButton = (
+    <Button
+      disabled
+      shape="circle"
+      aria-label={intl.formatMessage({ id: 'resource.pendingAuthorization' })}
+      icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
+    />
+  );
+  const pendingUseAction = (
+    <div className={styles.applyActionWrap}>
+      {pendingUseButton}
+      <span className={styles.pendingApplyText}>{intl.formatMessage({ id: 'resource.pendingAuthorization' })}</span>
+    </div>
+  );
+  // 状态文字不参与资源中心操作区布局，避免居中容器变高、变宽后带动按钮移位。
+  // 禁用按钮用容器接收悬浮事件，待审核状态仍可通过提示和无障碍名称读取。
+  const pendingResourceUseAction = (
+    <Tooltip title={intl.formatMessage({ id: 'resource.pendingAuthorization' })}>
+      <span className={styles.applyActionWrap}>{pendingUseButton}</span>
+    </Tooltip>
+  );
+  const showResourceUseAction =
+    resourceActionMode &&
+    !isCancelledResource &&
+    !isWorkspaceSkillResource &&
+    !isTruthyFlag(resource.hasUsePermission) &&
+    !actionConfig?.hiddenMenuItemKeys?.includes('applyUse');
+  const showPendingResourceUse = showResourceUseAction && isPendingUseApproval;
+  const showResourceApplyUse = showResourceUseAction && !showPendingResourceUse && canApplyForUse;
+  const showSkillInstallAction = isSkillResource(resource, resourceType) && canShowInstallAction;
+  const resourceCardActions =
+    resourceActionMode &&
+    (showPendingResourceUse || showResourceApplyUse || showSkillInstallAction || !!effectiveMenuItems?.length) ? (
+      <div
+        className={styles.digitalEmployeeActions}
+        onClick={(event) => {
+          event.stopPropagation();
+          event.preventDefault();
+        }}
+      >
+        {showPendingResourceUse ? pendingResourceUseAction : showResourceApplyUse ? applyUseAction : null}
+        {showSkillInstallAction && (
+          <Tooltip title={intl.formatMessage({ id: 'resource.installSkill' })}>
+            <Button
+              shape="circle"
+              aria-label={intl.formatMessage({ id: 'resource.installSkill' })}
+              icon={<AntdIcon type="icon-a-Addtianjia" className={styles.cardActionBtnIcon} />}
+              loading={installing}
+              disabled={installing}
+              onClick={() => setInstallDialogOpen(true)}
+            />
+          </Tooltip>
+        )}
+        {!!effectiveMenuItems?.length && (
+          <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight" trigger={['click']}>
+            <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
+          </Dropdown>
+        )}
+        {workspaceShareModal}
+      </div>
+    ) : null;
+
   const getDefaultIcon = () => {
     switch (resourceType) {
       case 'KG_DOC':
@@ -1476,7 +1571,11 @@ const RenderContent = (props: ResourceCardProps) => {
           )}
         </div>
         {installing && <InstallingOverlay />}
-        <div className={styles.skillPosterBody}>
+        <div
+          className={classnames(styles.skillPosterBody, {
+            [styles.resourceInfoWithActions]: !!resourceCardActions,
+          })}
+        >
           <div className={styles.skillPosterHeader}>
             <Paragraph className={styles.skillPosterTitle} ellipsis={{ tooltip: `${displayTitle}` }}>
               {displayTitle}
@@ -1522,23 +1621,7 @@ const RenderContent = (props: ResourceCardProps) => {
           </div>
           {favoriteActions}
         </div>
-        {!!effectiveMenuItems?.length && (
-          <div
-            className={styles.skillPosterAction}
-            onClick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-            }}
-          >
-            <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight">
-              <Button
-                className={styles.skillPosterActionBtn}
-                icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
-              />
-            </Dropdown>
-            {workspaceShareModal}
-          </div>
-        )}
+        {resourceCardActions}
         {installDialog}
       </div>
     );
@@ -1592,7 +1675,7 @@ const RenderContent = (props: ResourceCardProps) => {
           </div>
           <div
             className={classnames(styles.resourceInfo, 'ub ub-ver ub-f1', {
-              [styles.resourceInfoWithActions]: digitalEmployeeActionMode,
+              [styles.resourceInfoWithActions]: digitalEmployeeActionMode || !!resourceCardActions,
             })}
           >
             <div
@@ -1632,7 +1715,7 @@ const RenderContent = (props: ResourceCardProps) => {
                 </span>
               ) : null}
               {headerExtra}
-              {!!effectiveMenuItems?.length && !digitalEmployeeActionMode && (
+              {!!effectiveMenuItems?.length && !digitalEmployeeActionMode && !resourceActionMode && (
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1650,38 +1733,12 @@ const RenderContent = (props: ResourceCardProps) => {
               )}
             </div>
 
+            {resourceCardActions}
             {digitalEmployeeActionMode && (
               <div className={styles.digitalEmployeeActions} onClick={(event) => event.stopPropagation()}>
-                {isPendingUseApproval ? (
-                  <div className={styles.applyActionWrap}>
-                    <Button disabled shape="circle" icon={<PlusOutlined className={styles.cardActionBtnIcon} />} />
-                    <span className={styles.pendingApplyText}>
-                      {intl.formatMessage({ id: 'resource.pendingAuthorization' })}
-                    </span>
-                  </div>
-                ) : canApplyForUse ? (
+                {isPendingUseApproval ? pendingUseAction : canApplyForUse ? (
                   <>
-                    <Tooltip title={intl.formatMessage({ id: 'resource.applyUse' })}>
-                      <Popconfirm
-                        title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
-                        okText={intl.formatMessage({ id: 'common.confirm' })}
-                        cancelText={intl.formatMessage({ id: 'common.cancel' })}
-                        onConfirm={(event) => {
-                          event?.stopPropagation();
-                          onApplyUse?.();
-                        }}
-                        onCancel={(event) => event?.stopPropagation()}
-                      >
-                        <Button
-                          shape="circle"
-                          icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            event.preventDefault();
-                          }}
-                        />
-                      </Popconfirm>
-                    </Tooltip>
+                    {applyUseAction}
                     {!!effectiveMenuItems?.length ? (
                       <Dropdown
                         menu={{ items: effectiveMenuItems }}

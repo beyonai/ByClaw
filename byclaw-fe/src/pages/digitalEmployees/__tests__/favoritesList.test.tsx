@@ -92,21 +92,27 @@ describe('commercial employee favorite lists', () => {
     }
   );
 
-  it('preserves personal type filtering and the original query in official recommendations', async () => {
+  it.each(['official', 'favorites'] as const)('only keeps personal type filtering in favorites: %s', async (source) => {
     render(
       <AllDigitalEmployees
-        source="official"
+        source={source}
         mode="all"
         enableFavorites
         hideCategories
-        dropdownParam={{ digitalEmployeeType: 'PERSONAL_EMPLOYEE' }}
+        dropdownParam={{ resourceStatus: '2', digitalEmployeeType: 'PERSONAL_EMPLOYEE' }}
         buildFilterParam={buildDigitalEmployeeFilterParam}
       />
     );
     await screen.findByTestId('card');
     const params = (getAllDigitalEmployeesV2 as jest.Mock).mock.calls[0][0];
-    expect(params).toMatchObject({ ownerType: 'personal', resourceStatus: '2', includeEmployeeGroup: false });
-    expect(params).not.toHaveProperty('includeFavorites');
+    expect(params).toMatchObject({
+      ownerType: source === 'official' ? 'enterprise' : 'personal',
+      resourceStatus: '2',
+      includeEmployeeGroup: source === 'official',
+      includeFavorites: true,
+      favoritesOnly: source === 'favorites',
+    });
+    expect(params).not.toHaveProperty('agentType');
   });
 
   it('leaves available employees and noncommercial recommendations on their original requests', async () => {
@@ -181,15 +187,17 @@ describe('commercial employee favorite lists', () => {
     await waitFor(() => expect(getAllDigitalEmployeesV2).toHaveBeenCalledTimes(3));
     expect((getAllDigitalEmployeesV2 as jest.Mock).mock.calls[2][0]).toMatchObject({
       keyword: 'weather',
-      agentType: '017',
+      ownerType: 'enterprise',
+      includeEmployeeGroup: true,
       permission: '2',
       resourceStatus: '2',
       includeFavorites: true,
     });
+    expect((getAllDigitalEmployeesV2 as jest.Mock).mock.calls[2][0]).not.toHaveProperty('agentType');
   });
 
   it.each(['official', 'favorites'] as const)(
-    'keeps the imperative search keyword when paginating %s',
+    'keeps the keyword and permission with source-specific type filtering when paginating %s',
     async (source) => {
       const ref = React.createRef<any>();
       const first = Array.from({ length: 20 }, (_, index) => row(index + 1));
@@ -197,17 +205,38 @@ describe('commercial employee favorite lists', () => {
         .mockResolvedValueOnce({ list: [row(1)], total: 1, pageNum: 1 })
         .mockResolvedValueOnce({ list: first, total: 21, pageNum: 1 })
         .mockResolvedValueOnce({ list: [row(21)], total: 21, pageNum: 2 });
-      render(<AllDigitalEmployees ref={ref} source={source} mode="all" enableFavorites hideCategories />);
+      render(
+        <AllDigitalEmployees
+          ref={ref}
+          source={source}
+          mode="all"
+          enableFavorites
+          hideCategories
+          buildFilterParam={buildDigitalEmployeeFilterParam}
+        />
+      );
       await screen.findByTestId('card');
       await act(async () => {
-        await ref.current.getSearch('weather');
+        await ref.current.getSearch('weather', {
+          digitalEmployeeType: 'ENTERPRISE_GROUP',
+          permission: 'AUTHORIZED_TO_ME',
+        });
       });
       fireEvent.click(screen.getByRole('button', { name: 'load more' }));
       await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(21));
-      expect((getAllDigitalEmployeesV2 as jest.Mock).mock.calls[2][0]).toMatchObject({
+      const params = (getAllDigitalEmployeesV2 as jest.Mock).mock.calls[2][0];
+      expect(params).toMatchObject({
         keyword: 'weather',
         pageNum: 2,
+        ownerType: 'enterprise',
+        permission: 'AUTHORIZED_TO_ME',
       });
+      if (source === 'official') {
+        expect(params).not.toHaveProperty('agentType');
+        expect(params).toMatchObject({ includeEmployeeGroup: true });
+      } else {
+        expect(params).toMatchObject({ agentType: '017' });
+      }
     }
   );
 

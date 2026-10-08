@@ -54,6 +54,39 @@ describe('publication approval in the audit list', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
+  it('keeps the approval kind switch alongside publication filters', async () => {
+    render(<PublicationAuditList initialReview toolbarExtra={<button>approval kind switch</button>} />);
+    await screen.findByText('待发布员工');
+    const kinds = screen.getByRole('button', { name: 'approval kind switch' });
+    const filters = screen.getByText('发布审核及记录').closest('.ant-segmented')!;
+    expect(kinds.nextElementSibling).toBe(filters);
+    expect(kinds.parentElement).toBe(filters.parentElement);
+  });
+
+  it('opens publication details with the approval center as the return route', async () => {
+    window.history.replaceState({}, '', '/approvalCenter?tab=employee');
+    (getPublication as jest.Mock).mockResolvedValue({ publication: pending, employee: { resourceId: '10' } });
+    (publicationUrl as jest.Mock).mockReturnValue('/digitalEmployeesCreate?publicationId=100');
+    render(<PublicationAuditList initialReview />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看 / 编辑' }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/digitalEmployeesCreate?publicationId=100'));
+    expect(listPublications).toHaveBeenCalledWith(true, 1);
+    expect(sessionStorage.getItem('EmployeeDetail_prevRoute')).toBe('/approvalCenter?tab=employee');
+    window.history.replaceState({}, '', '/');
+  });
+
+  it('refreshes the unified badge after a successful publication approval', async () => {
+    const onAuditComplete = jest.fn();
+    (publicationAction as jest.Mock).mockResolvedValue({
+      publication: { ...pending, status: 'PUBLISHED' },
+      dependencies: [],
+    });
+    render(<PublicationAuditList initialReview onAuditComplete={onAuditComplete} />);
+    fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
+    await waitFor(() => expect(onAuditComplete).toHaveBeenCalledTimes(1));
+  });
+
   it('identifies adminvip-only applications without offering platform approval', async () => {
     (listPublications as jest.Mock).mockResolvedValue({
       list: [{ ...pending, requiresAdminVipReview: true, canReview: false }],

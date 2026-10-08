@@ -20,7 +20,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from '@umijs/max';
 import { Alert, Button, Empty, Segmented, Space, Table, Tag, Typography, message } from 'antd';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import dayjs from 'dayjs';
 import styles from './AuditList.module.less';
 import { publicationErrorMessage } from '@/utils/publicationError';
@@ -69,9 +69,20 @@ function PublicationNote({ text, error = false }: { text: string; error?: boolea
   );
 }
 
-function EnabledPublicationAuditList({ capabilities }: { capabilities: { administrator: boolean } }) {
+interface PublicationAuditListProps {
+  onAuditComplete?: () => void;
+  initialReview?: boolean;
+  toolbarExtra?: ReactNode;
+}
+
+function EnabledPublicationAuditList({
+  capabilities,
+  onAuditComplete,
+  initialReview = false,
+  toolbarExtra,
+}: PublicationAuditListProps & { capabilities: { administrator: boolean } }) {
   const navigate = useNavigate();
-  const [review, setReview] = useState(false);
+  const [review, setReview] = useState(initialReview && capabilities.administrator);
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<Publication[]>([]);
   const [total, setTotal] = useState(0);
@@ -108,7 +119,7 @@ function EnabledPublicationAuditList({ capabilities }: { capabilities: { adminis
   const open = async (row: Publication) => {
     try {
       const detail = await getPublication(row.requestId);
-      sessionStorage.setItem('EmployeeDetail_prevRoute', '/myEmployees');
+      sessionStorage.setItem('EmployeeDetail_prevRoute', `${window.location.pathname}${window.location.search}`);
       navigate(publicationUrl(detail));
     } catch (error: any) {
       message.error(publicationErrorMessage(error, '无法查看此申请'));
@@ -123,7 +134,7 @@ function EnabledPublicationAuditList({ capabilities }: { capabilities: { adminis
       const current = await previewPublication(row);
       const decision = await confirmPublication(current);
       if (decision === 'edit') {
-        sessionStorage.setItem('EmployeeDetail_prevRoute', '/myEmployees');
+        sessionStorage.setItem('EmployeeDetail_prevRoute', `${window.location.pathname}${window.location.search}`);
         navigate(publicationUrl(current));
       }
       if (decision !== 'publish') return;
@@ -138,6 +149,8 @@ function EnabledPublicationAuditList({ capabilities }: { capabilities: { adminis
       message.error(publicationErrorMessage(error, '审批失败，请刷新后重试'));
     } finally {
       await load();
+      // 员工发布审批完成后同步工作区和申请页签的待审角标。
+      onAuditComplete?.();
       approvalInFlight.current = false;
       setApprovingId(undefined);
     }
@@ -146,18 +159,21 @@ function EnabledPublicationAuditList({ capabilities }: { capabilities: { adminis
     <div className={styles.container}>
       {confirmationDialog}
       <div className={styles.toolbar}>
-        <Segmented
-          disabled={!!approvingId}
-          value={review ? 'review' : 'mine'}
-          onChange={(value) => {
-            setReview(value === 'review');
-            setPage(1);
-          }}
-          options={[
-            { label: '我的发布申请', value: 'mine' },
-            ...(capabilities?.administrator ? [{ label: '发布审核及记录', value: 'review' }] : []),
-          ]}
-        />
+        <div className={styles.toolbarControls}>
+          {toolbarExtra}
+          <Segmented
+            disabled={!!approvingId}
+            value={review ? 'review' : 'mine'}
+            onChange={(value) => {
+              setReview(value === 'review');
+              setPage(1);
+            }}
+            options={[
+              { label: '我的发布申请', value: 'mine' },
+              ...(capabilities?.administrator ? [{ label: '发布审核及记录', value: 'review' }] : []),
+            ]}
+          />
+        </div>
         <Space size="middle">
           {!loading && !loadError && <span className={styles.secondary}>共 {total} 条申请</span>}
           <Button icon={<ReloadOutlined />} loading={loading} disabled={!!approvingId} onClick={load}>
@@ -300,8 +316,8 @@ function EnabledPublicationAuditList({ capabilities }: { capabilities: { adminis
   );
 }
 
-export default function PublicationAuditList() {
+export default function PublicationAuditList(props: PublicationAuditListProps) {
   const capabilities = useEmployeePublicationCapabilities();
   if (capabilities?.enabled !== true) return null;
-  return <EnabledPublicationAuditList capabilities={capabilities} />;
+  return <EnabledPublicationAuditList capabilities={capabilities} {...props} />;
 }

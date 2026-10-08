@@ -188,6 +188,11 @@ export default [
             component: './resourceCenter',
           },
           {
+            path: '/approvalCenter',
+            name: 'approvalCenter',
+            component: './approvalCenter',
+          },
+          {
             path: '/files',
             name: 'files',
             component: './files',
