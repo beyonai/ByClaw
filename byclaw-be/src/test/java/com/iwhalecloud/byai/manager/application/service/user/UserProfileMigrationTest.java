@@ -4,6 +4,8 @@ import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 import org.h2.tools.RunScript;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,14 +21,18 @@ class UserProfileMigrationTest {
         assertThat(migration).contains(marker);
         String sql = migration.substring(migration.indexOf(marker));
         assertThat(sql.toUpperCase()).contains("ALTER TABLE").doesNotContain("CREATE FUNCTION", "CREATE OR REPLACE FUNCTION", "ADD COLUMN IF NOT EXISTS", "SET SEARCH_PATH");
+        // 同一版本后续还会追加其他表的迁移，本测试仅执行客户线索的个人资料语句。
+        String profileSql = Arrays.stream(sql.replaceAll("(?m)^\\s*--.*$", "").split(";"))
+            .filter(statement -> statement.matches("(?is).*\\bbyai\\.byai_customer_leads\\b.*"))
+            .collect(Collectors.joining(";\n", "", ";"));
         try (var connection = DriverManager.getConnection(
             "jdbc:h2:mem:user_profile_migration;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE")) {
             try (var statement = connection.createStatement()) {
                 statement.execute("CREATE SCHEMA byai");
                 statement.execute("CREATE TABLE byai.po_users(user_id BIGINT, user_name VARCHAR(255))");
-                statement.execute("CREATE TABLE byai.byai_customer_leads(id BIGINT, company_name VARCHAR(100), contact_name VARCHAR(100), industry VARCHAR(100), phone VARCHAR(20), wechat VARCHAR(50), demand TEXT, create_time TIMESTAMP)");
+                statement.execute("CREATE TABLE byai.byai_customer_leads(id BIGINT NOT NULL, company_name VARCHAR(100), contact_name VARCHAR(100), industry VARCHAR(100), phone VARCHAR(20), wechat VARCHAR(50), demand TEXT, create_time TIMESTAMP)");
                 statement.execute("INSERT INTO byai.byai_customer_leads(id, contact_name, company_name, industry, demand) VALUES(42, '吴杰', '鲸智科技', '教育', '历史咨询')");
-                RunScript.execute(connection, new StringReader(sql));
+                RunScript.execute(connection, new StringReader(profileSql));
                 try (var result = statement.executeQuery("SELECT * FROM byai.byai_customer_leads WHERE id=42")) {
                     assertThat(result.next()).isTrue();
                     assertThat(result.getString("contact_name")).isEqualTo("吴杰");

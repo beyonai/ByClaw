@@ -266,15 +266,15 @@ describe('skill configuration ownership tabs', () => {
     render(<Editor employee={{ ownerType: 'enterprise', resourceCode: 'helper' }} />);
     openSkills();
     const dialog = within(await screen.findByRole('dialog'));
-    const addButton = await dialog.findByRole('button', { name: '添加' });
-    expect(dialog.queryByRole('button', { name: '新增' })).not.toBeInTheDocument();
+    const addButton = await dialog.findByRole('button', { name: /^添\s*加$/ });
+    expect(dialog.queryByRole('button', { name: /^新\s*增$/ })).not.toBeInTheDocument();
     fireEvent.click(addButton);
     expect(editorForm.getFieldValue('bundledSkills')).toEqual(
       expect.arrayContaining([expect.objectContaining({ resourceId: '103' })])
     );
     fireEvent.click(await dialog.findByRole('button', { name: 'itemCard.remove' }));
     expect(editorForm.getFieldValue('bundledSkills')).toEqual([]);
-    expect(dialog.getByRole('button', { name: '添加' })).toBeVisible();
+    expect(dialog.getByRole('button', { name: /^添\s*加$/ })).toBeVisible();
   });
 
   it.each(['personal', 'enterprise'])('shows the allowed tabs and queries the initial %s scope', async (ownerType) => {

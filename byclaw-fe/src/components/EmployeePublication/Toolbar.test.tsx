@@ -53,6 +53,7 @@ describe('employee publication controls', () => {
       .mockImplementation(async (publication) => ({ ...candidate, publication }));
     jest.spyOn(message, 'success').mockImplementation(jest.fn());
     jest.spyOn(message, 'error').mockImplementation(jest.fn());
+    jest.spyOn(message, 'warning').mockImplementation(jest.fn());
   });
   afterEach(() => jest.restoreAllMocks());
 
@@ -101,6 +102,62 @@ describe('employee publication controls', () => {
     await waitFor(() => expect(message.error).toHaveBeenCalledWith('申请已被修改，请刷新后再操作'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(publicationAction).not.toHaveBeenCalled();
+  });
+
+  it('shows synchronized source resources in the confirmation before submitting its new revision', async () => {
+    const fresh = {
+      ...candidate,
+      publication: { ...candidate.publication, revision: 4 },
+      sourceResourcesChanged: true,
+      employee: { relIds: ['21'] },
+      dependencies: [{ resourceId: '21', name: '最新关联知识库', action: 'REFERENCE_RESOURCE' }],
+    };
+    (previewPublication as jest.Mock).mockResolvedValue(fresh);
+    (publicationAction as jest.Mock).mockResolvedValue({
+      ...fresh,
+      publication: { ...fresh.publication, status: 'PENDING' },
+    });
+    const onChange = jest.fn();
+    render(<PublicationToolbar detail={candidate} dirty={false} onChange={onChange} onSave={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByText('个人员工的关联资源已变化，本次确认使用更新后的清单。')).toBeInTheDocument();
+    expect(onChange).toHaveBeenCalledWith(fresh);
+    expect(publicationAction).not.toHaveBeenCalled();
+    await continuePublication();
+    await waitFor(() => expect(publicationAction).toHaveBeenCalledWith('submit', fresh.publication, { comment: '' }));
+  });
+
+  it('returns to the updated draft and asks for another confirmation if resources change during the dialog', async () => {
+    const refreshed = {
+      ...candidate,
+      publication: { ...candidate.publication, revision: 4 },
+      sourceResourcesChanged: true,
+      employee: { relIds: [] },
+    };
+    (publicationAction as jest.Mock).mockResolvedValue(refreshed);
+    const onChange = jest.fn();
+    render(<PublicationToolbar detail={candidate} dirty={false} onChange={onChange} onSave={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    await continuePublication();
+    await waitFor(() =>
+      expect(message.warning).toHaveBeenCalledWith('个人员工的关联资源已变化，已更新待发布配置，请核对后再次提交。')
+    );
+    expect(onChange).toHaveBeenLastCalledWith(refreshed);
+    expect(publicationAction).toHaveBeenCalledTimes(1);
+    expect(message.success).not.toHaveBeenCalled();
+  });
+
+  it('explains automatic resource synchronization only on the publication draft page', () => {
+    render(
+      <PublicationToolbar
+        detail={{ ...candidate, sourceResourcesChanged: true }}
+        dirty={false}
+        onChange={jest.fn()}
+        onSave={jest.fn()}
+      />
+    );
+    expect(screen.getByText('已同步个人员工最新关联资源，请核对发布清单。')).toBeInTheDocument();
   });
 
   it('groups the publication explanation with the actions and expands detailed rules on demand', async () => {

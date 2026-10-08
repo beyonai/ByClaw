@@ -43,6 +43,13 @@ public class EmployeePublicationController {
     @GetMapping("/detail")
     public ResponseUtil<Detail> detail(@RequestParam Long requestId) { return ResponseUtil.successResponse(publication.detail(requestId)); }
 
+    public record OpenRequest(@jakarta.validation.constraints.NotNull Long requestId) { }
+
+    @PostMapping("/open")
+    public ResponseUtil<Detail> open(@Valid @RequestBody OpenRequest request) {
+        return ResponseUtil.successResponse(publication.open(request.requestId()));
+    }
+
     @GetMapping("/current")
     public ResponseUtil<Detail> current(@RequestParam Long resourceId) { return ResponseUtil.successResponse(publication.current(resourceId)); }
 

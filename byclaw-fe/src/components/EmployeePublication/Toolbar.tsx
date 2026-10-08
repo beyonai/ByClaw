@@ -72,6 +72,10 @@ export default function PublicationToolbar({
       }
       const next = await publicationAction(action, current.publication, { comment });
       onChange(next);
+      if (action === 'submit' && next.publication.status === 'DRAFT' && next.sourceResourcesChanged) {
+        message.warning('个人员工的关联资源已变化，已更新待发布配置，请核对后再次提交。');
+        return;
+      }
       if (action === 'refreshTarget') {
         message.success('已重新对照官方配置，请确认覆盖范围后再提交或审核');
         return;
@@ -207,6 +211,9 @@ export default function PublicationToolbar({
           </Popover>
         </div>
       </section>
+      {detail.sourceResourcesChanged && detail.canSubmit && (
+        <Alert showIcon type="info" style={{ marginTop: 8 }} message="已同步个人员工最新关联资源，请核对发布清单。" />
+      )}
       <UpdateTargetNotice
         detail={detail}
         busy={busy || dirty}

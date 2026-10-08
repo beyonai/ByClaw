@@ -15,7 +15,8 @@ export default function useOfficialUpdate() {
         const saved = await saveOfficialUpdateDraft(resourceId, employee);
         const preview = await previewPublication(saved.publication);
         if ((await confirmPublication(preview)) !== 'publish') return 'draft';
-        await publicationAction('submit', preview.publication);
+        const submitted = await publicationAction('submit', preview.publication);
+        if (submitted.publication.status === 'DRAFT') return 'draft';
         return 'submitted';
       } finally {
         lock.current = false;
