@@ -158,9 +158,12 @@ public class SsResourceService {
         ssResourceMapper.deleteById(resourceId);
     }
 
+    @Autowired
+    private SkillImportLockService skillImportLockService;
+
     /** 同编码导入与审核串行化，覆盖尚未存在资源的并发创建场景。必须在写事务中调用。 */
     public void lockSkillImport(String resourceCode) {
-        ssResourceMapper.lockSkillImport("BYAI:SKILL:IMPORT:" + resourceCode);
+        skillImportLockService.acquire(resourceCode);
     }
 
     /** 生命周期事务先锁定资源，防止并发上架覆盖已经提交的注销状态。 */

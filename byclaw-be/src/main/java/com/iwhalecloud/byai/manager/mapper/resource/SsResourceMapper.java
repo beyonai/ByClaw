@@ -34,10 +34,6 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface SsResourceMapper extends BaseMapper<SsResource> {
 
-    @org.apache.ibatis.annotations.Select("select 1 from pg_advisory_xact_lock(hashtextextended(#{lockKey}, 0))")
-    @org.apache.ibatis.annotations.Options(useCache = false)
-    Integer lockSkillImport(@Param("lockKey") String lockKey);
-
     List<ResourcePageDto> getResourceListByPage(Page<ResourcePageDto> page, @Param("query") ResourceQueryRequest query);
 
     List<SsResource> selectRelResourceList(@Param("resourceIdList") List<Long> resourceIdList);

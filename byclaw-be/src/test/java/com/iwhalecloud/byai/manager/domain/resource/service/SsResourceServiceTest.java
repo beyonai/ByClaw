@@ -27,11 +27,13 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SsResourceServiceTest {
@@ -49,6 +51,7 @@ class SsResourceServiceTest {
         ssResourceMapper = mock(SsResourceMapper.class);
 
         service = new SsResourceService();
+        ReflectionTestUtils.setField(service, "skillImportLockService", mock(SkillImportLockService.class));
         ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
         ReflectionTestUtils.setField(service, "ssResExtDigEmployeeMapper", mock(SsResExtDigEmployeeMapper.class));
@@ -62,6 +65,13 @@ class SsResourceServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.setLoginInfo(null);
+    }
+
+    @Test
+    void skillImportLockDoesNotRequireDatabaseSpecificFunctions() {
+        assertThatCode(() -> service.lockSkillImport("demo-skill"))
+            .doesNotThrowAnyException();
+        verifyNoInteractions(ssResourceMapper);
     }
 
     @Test

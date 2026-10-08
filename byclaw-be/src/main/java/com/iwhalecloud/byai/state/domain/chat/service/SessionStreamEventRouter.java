@@ -33,6 +33,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class SessionStreamEventRouter {
+    // 留出父会话事务提交窗口；只按 Redis Stream 的实际入队时间判定，不信任外部 timestamp。
+    private static final long MISSING_PARENT_GRACE_MILLIS = java.time.Duration.ofMinutes(5).toMillis();
+
     @Autowired
     private OutputStreamManager outputStreamManager;
 
@@ -80,6 +83,9 @@ public class SessionStreamEventRouter {
             scopedSessionEventService.handleChildBatch(sessionId, events);
             return StreamDispatchResult.HANDLED;
         }
+        catch (ExternalChildSessionService.MissingParentSessionException e) {
+            return handleMissingParent(sessionId, events);
+        }
         catch (Exception e) {
             log.warn("处理外部子会话批次失败, sessionId: {}, size: {}", sessionId, events.size(), e);
             return StreamDispatchResult.ERROR;
@@ -103,6 +109,9 @@ public class SessionStreamEventRouter {
                 && scopedSessionEventService.handleIfNecessary(parseLong(sessionId), dataJson)) {
                 return StreamDispatchResult.HANDLED;
             }
+        }
+        catch (ExternalChildSessionService.MissingParentSessionException e) {
+            return handleMissingParent(parseLong(sessionId), List.of(dataJson));
         }
         catch (Exception e) {
             log.warn("处理外部子会话事件失败, sessionId: {}, dataJson: {}", sessionId, dataJson, e);
@@ -152,6 +161,21 @@ public class SessionStreamEventRouter {
             broadcastToOtherDevices(ctx, dataJson);
         }
         return routeResult.dispatchResult;
+    }
+
+    private StreamDispatchResult handleMissingParent(Long sessionId, List<JSONObject> events) {
+        String cutoff = (System.currentTimeMillis() - MISSING_PARENT_GRACE_MILLIS) + "-0";
+        boolean expired = !events.isEmpty() && events.stream().allMatch(event -> {
+            String streamId = event.getString("stream_id");
+            return StreamIdUtil.compare(streamId, "0-0") > 0
+                && StreamIdUtil.isProcessedByWatermark(streamId, cutoff);
+        });
+        if (!expired) {
+            // 新事件或入队时间未知时保留 pending，不能把尚未提交的父会话当作已删除。
+            return StreamDispatchResult.ERROR;
+        }
+        log.warn("父会话不存在，忽略已超过提交等待窗口的外部子会话事件, sessionId: {}, size: {}", sessionId, events.size());
+        return StreamDispatchResult.INTENTIONALLY_IGNORED;
     }
 
     private WebSocketRouteResult routeWebSocketEvent(ChatProcessContext ctx, JSONObject dataJson) {
