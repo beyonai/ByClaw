@@ -3645,7 +3645,7 @@ const ConfigForm = (props) => {
                         >
                           {isSelected
                             ? intl.formatMessage({ id: 'itemCard.remove' })
-                            : intl.formatMessage({ id: 'common.add' })}
+                            : intl.formatMessage({ id: 'employeeDetail.addBundledSkill' })}
                         </Button>
                       </div>
                     );
