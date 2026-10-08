@@ -306,7 +306,10 @@ RUN set -eux; \
         'raise SystemExit(main())' \
         > /opt/searxng-cli/searxng_cli.py; \
     chmod 755 /opt/searxng-cli/searxng_cli.py; \
-    searxng-cli --list-engines >/dev/null 2>&1
+    command -v searxng-cli; \
+    ls -l /usr/local/bin/searxng-cli /opt/searxng-cli-venv/bin/searxng-cli; \
+    head -n 1 /opt/searxng-cli-venv/bin/searxng-cli; \
+    searxng-cli --list-engines >/dev/null
 
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \
