@@ -6702,8 +6702,7 @@ SET param_value = '[
       }
     ]
   }
-]',
-    update_time = CURRENT_TIMESTAMP
+]'
 WHERE param_code = 'TEMPLATE_DIGITAL_EMPLOYEE';
 
 -- 设置默认值为 personal
