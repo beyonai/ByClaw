@@ -41,6 +41,7 @@ import org.springframework.beans.factory.ObjectProvider;
 @lombok.extern.slf4j.Slf4j
 public class EmployeePublicationResources {
     private static final int MAX_SKILL_BYTES = 100 * 1024 * 1024;
+    private static final String TENANT_MISMATCH_REASON = "资源所属企业与原数字员工所属企业不一致";
     private final SsResourceService resources;
     private final SsResExtSkillService skills;
     private final ResourceArtifactStorageService storage;
@@ -264,8 +265,8 @@ public class EmployeePublicationResources {
             context(dependency, tenantId, authorId));
         if (checked == null || !checked.copyAllowed()) {
             String reasons = checked == null || checked.issues() == null ? "技能依赖校验未通过"
-                : checked.issues().stream().map(issue -> StringUtils.defaultIfBlank(issue.name(), issue.resourceId())
-                    + "：" + issue.reason()).collect(java.util.stream.Collectors.joining("；"));
+                : checked.issues().stream().map(EmployeePublicationSkillBridge.Issue::displayReason)
+                    .collect(java.util.stream.Collectors.joining("；"));
             omit(dependency, StringUtils.defaultIfBlank(reasons, "技能依赖校验未通过"));
         }
     }
@@ -411,8 +412,8 @@ public class EmployeePublicationResources {
             if (current == null) { omit(dependency, "资源不存在或已失效"); return; }
             if (!Objects.equals(current.getComAcctId(), tenantId)) {
                 dependency.setResource(null); dependency.setTargetId(id);
-                dependency.setLabel("其他企业资源");
-                omit(dependency, "资源不属于当前企业"); return;
+                setUnavailableDisplayMetadata(dependency, current);
+                omit(dependency, TENANT_MISMATCH_REASON); return;
             }
             dependency.setResource(current);
             dependency.setTargetId(id);
@@ -439,6 +440,35 @@ public class EmployeePublicationResources {
             log.warn("检查发布资源失败，resourceId={}", id, error);
             omit(dependency, "暂时无法确认此资源的归属或可用性");
         }
+    }
+
+    /** 仅补充查看页面的名称和类型，不恢复被排除资源的执行对象或改变冻结的发布结果。 */
+    public void refreshDisplayMetadata(List<Dependency> dependencies) {
+        for (Dependency dependency : dependencies) {
+            if (dependency.getResource() != null || dependency.getTargetId() == null || !isOmitted(dependency)) continue;
+            try {
+                setUnavailableDisplayMetadata(dependency, resources.findById(dependency.getTargetId()));
+            } catch (RuntimeException error) {
+                log.warn("读取发布资源展示信息失败，resourceId={}", dependency.getTargetId(), error);
+                redactUnavailableDisplayMetadata(dependency);
+            }
+            if ("资源不属于当前企业".equals(dependency.getWarning())) dependency.setWarning(TENANT_MISMATCH_REASON);
+        }
+    }
+
+    private void setUnavailableDisplayMetadata(Dependency dependency, SsResource resource) {
+        // 申请查看权限不等于关联资源详情权限；每次查看都按当前用户复核，避免沿用作者的权限。
+        if (resource != null && CurrentUserHolder.getCurrentUserId() != null && auth.hasResourceAccessPermission(resource)) {
+            dependency.setLabel(resource.getResourceName());
+            dependency.setResourceType(resource.getResourceBizType());
+        } else {
+            redactUnavailableDisplayMetadata(dependency);
+        }
+    }
+
+    private void redactUnavailableDisplayMetadata(Dependency dependency) {
+        dependency.setLabel("关联资源 " + dependency.getTargetId());
+        dependency.setResourceType(null);
     }
 
     private void omit(Dependency dependency, String reason) {
@@ -515,8 +545,10 @@ public class EmployeePublicationResources {
     }
 
     private String normalizePath(String path) {
-        String value = path.replace('\\', '/').replaceFirst("^/?resource/", "");
-        if (value.startsWith("/") || value.contains(":") || List.of(value.split("/")).contains("..")) {
+        // 资源中心保存 /byclaw/resource/...，存储门面接收相对 /resource 的路径。
+        String value = StringUtils.trimToEmpty(path).replace('\\', '/').replaceFirst("^/?(?:byclaw/)?resource/", "");
+        if (StringUtils.isBlank(value) || value.startsWith("/") || value.contains(":")
+            || List.of(value.split("/")).contains("..")) {
             throw new BaseException("技能文件不是平台资源目录中的有效文件");
         }
         return value;

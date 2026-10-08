@@ -1,0 +1,60 @@
+.container {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px 32px;
+  margin-bottom: 12px;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 100%;
+  font-size: 13px;
+}
+
+.title {
+  flex-shrink: 0;
+  color: #707680;
+  white-space: nowrap;
+}
+
+.options {
+  // 窄屏按完整选项换行，避免长文案被挤压或筛选条横向溢出。
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.option {
+  flex-shrink: 0;
+  padding: 3px 14px;
+  border: 1px solid #ced3d9;
+  border-radius: 30px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &.active {
+    border-color: transparent;
+    background: rgba(22, 93, 255, 0.1);
+    color: var(--beyond-color-primary);
+  }
+
+  &:hover:not(.active) {
+    border-color: rgba(22, 93, 255, 0.5);
+    color: var(--beyond-color-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--beyond-color-primary);
+    outline-offset: 2px;
+  }
+}

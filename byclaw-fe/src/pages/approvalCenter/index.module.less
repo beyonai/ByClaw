@@ -1,0 +1,76 @@
+@antPrefix: ant;
+
+.container {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.tabs {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin: 0;
+      font-weight: 400;
+
+      .@{antPrefix}-tabs-nav-list {
+        // 给浮在标签上方、右侧的角标留出空间，同时保留窄屏页签的横向裁剪和滚动。
+        padding-top: 6px;
+        padding-right: 24px;
+      }
+
+      .@{antPrefix}-tabs-tab {
+        font-size: 16px;
+        padding: 6px 0;
+        line-height: 24px;
+
+        + .@{antPrefix}-tabs-tab {
+          margin-left: 24px;
+        }
+      }
+
+      .@{antPrefix}-tabs-tab-btn {
+        color: var(--beyond-color-text) !important;
+        text-shadow: none !important;
+        font-weight: 500;
+        font-size: 16px;
+        line-height: 24px;
+
+        // 标签继承数字员工页签的字体，待审数量角标保留 Badge 自身的样式。
+        > .@{antPrefix}-badge {
+          font-size: inherit;
+          font-weight: inherit;
+          line-height: inherit;
+        }
+      }
+
+      .@{antPrefix}-tabs-ink-bar {
+        height: 3px;
+        background-color: var(--beyond-color-text);
+      }
+    }
+  }
+}
+
+.tabLabel {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+.employeeKinds {
+  flex-shrink: 0;
+  margin-left: 16px;
+}
+
+.content {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}

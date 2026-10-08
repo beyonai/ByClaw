@@ -1,14 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Popconfirm, Segmented, Space, Spin, Table, Tag, message } from 'antd';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Empty, Input, Popconfirm, Segmented, Space, Spin, Table, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useIntl } from '@umijs/max';
+import { SearchOutlined } from '@ant-design/icons';
 import {
   approveUseApply,
   queryResourceUseApplyAudit,
   rejectUseApply,
   type ResourceUseApplyAuditItem,
 } from '@/pages/manager/service/resources';
-import { filterResourceAuditRowsByType } from '../../utils';
+import { getResourceAuditItems } from '@/utils/approvalCenter';
+import useAuditSearch from '@/hooks/useAuditSearch';
 import styles from './index.module.less';
 
 type AuditFilter = 'pending' | 'history';
@@ -18,6 +20,8 @@ interface ResourceAuditCenterProps {
   resourceBizTypeList: string[];
   refreshKey?: number;
   onPendingCountChange?: (count: number) => void;
+  onAuditComplete?: () => void;
+  toolbarExtra?: React.ReactNode;
 }
 
 type AuditRow = ResourceUseApplyAuditItem & {
@@ -52,16 +56,13 @@ const isProcessedAuditStatus = (status: unknown) => {
 };
 
 const getAuditRows = (response: any, history: boolean, resourceBizTypeList: string[]): AuditRow[] => {
-  const data = response?.data?.data ?? response?.data ?? response;
-  const rows = Array.isArray(data) ? data : data?.list || data?.rows || [];
-  return filterResourceAuditRowsByType(rows, resourceBizTypeList)
-    .filter((item: any) => item?.resourceId !== undefined && item?.resourceId !== null)
+  return getResourceAuditItems(response, resourceBizTypeList)
     .filter((item: any) => !history || isProcessedAuditStatus(item?.applyStatus))
     .map((item: any) => ({
       ...item,
       resourceId: `${item.resourceId}`,
       resourceName: item.resourceName || '-',
-      resourceBizType: item.resourceBizType || '-',
+      resourceBizType: `${item.resourceBizType || '-'}`.trim().toUpperCase(),
       userId: `${item.userId ?? ''}`,
       userName: item.userName || `${item.userId ?? '-'}`,
       applyStatus: formatAuditStatus(item.applyStatus, history),
@@ -90,6 +91,8 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
   resourceBizTypeList,
   refreshKey = 0,
   onPendingCountChange,
+  onAuditComplete,
+  toolbarExtra,
 }) => {
   const intl = useIntl();
   const [auditFilter, setAuditFilter] = useState<AuditFilter>('pending');
@@ -99,14 +102,19 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [actionKey, setActionKey] = useState('');
+  const requestSequence = useRef({ pending: 0, history: 0 });
+  const employeeMode = resourceBizTypeList.includes('DIG_EMPLOYEE');
 
   const bizTypeKey = resourceBizTypeList.join(',');
   const loadAuditRows = useCallback(
     async (history: boolean) => {
+      const scope = history ? 'history' : 'pending';
+      const sequence = ++requestSequence.current[scope];
       const setLoadingState = history ? setHistoryLoading : setLoading;
       setLoadingState(true);
       try {
         const response = await queryResourceUseApplyAudit({ history, resourceBizTypeList });
+        if (sequence !== requestSequence.current[scope]) return;
         const rows = getAuditRows(response, history, resourceBizTypeList);
         if (history) {
           setHistoryRows(rows);
@@ -115,18 +123,26 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
           setPendingRows(rows);
         }
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+        if (sequence === requestSequence.current[scope]) {
+          message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+        }
       } finally {
-        setLoadingState(false);
+        if (sequence === requestSequence.current[scope]) setLoadingState(false);
       }
     },
     [intl, resourceBizTypeList]
   );
 
   useEffect(() => {
+    setPendingRows([]);
     setHistoryLoaded(false);
     setHistoryRows([]);
     void loadAuditRows(false);
+    return () => {
+      // 类型切换或卸载后，迟到的响应不能覆盖当前审批列表。
+      requestSequence.current.pending += 1;
+      requestSequence.current.history += 1;
+    };
   }, [bizTypeKey, loadAuditRows, refreshKey]);
 
   useEffect(() => {
@@ -139,7 +155,11 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
     onPendingCountChange?.(pendingRows.length);
   }, [onPendingCountChange, pendingRows.length]);
 
-  const auditRows = auditFilter === 'pending' ? pendingRows : historyRows;
+  const {
+    auditKeyword,
+    setAuditKeyword,
+    filteredRows: auditRows,
+  } = useAuditSearch(auditFilter === 'pending' ? pendingRows : historyRows);
   const auditLoading = auditFilter === 'pending' ? loading : historyLoading;
 
   const handleAudit = useCallback(
@@ -167,13 +187,14 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
             ...rows.filter((item) => getAuditRowKey(item) !== getAuditRowKey(row)),
           ]);
         }
+        onAuditComplete?.();
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
       } finally {
         setActionKey('');
       }
     },
-    [historyLoaded, intl]
+    [historyLoaded, intl, onAuditComplete]
   );
 
   const auditColumns = useMemo<ColumnsType<AuditRow>>(() => {
@@ -194,18 +215,14 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
         key: 'resourceBizType',
         width: 140,
         render: (_, row) => {
+          if (row.resourceBizType === 'DIG_EMPLOYEE') {
+            return intl.formatMessage({
+              id: `${row.agentType}` === '017' ? 'common.digitalEmployeeGroup' : 'common.digitalEmployee',
+            });
+          }
           const messageId = getResourceTypeMessageId(row.resourceBizType);
           return messageId ? intl.formatMessage({ id: messageId }) : row.resourceBizType;
         },
-      },
-      {
-        title: intl.formatMessage({ id: 'resource.auditApplicationType' }),
-        key: 'auditType',
-        width: 150,
-        render: (_, row) =>
-          intl.formatMessage({
-            id: row.auditType === 'SKILL_PUBLICATION' ? 'resource.skillPublicationAudit' : 'resource.resourceUseAudit',
-          }),
       },
       {
         title: intl.formatMessage({ id: 'resourceCenter.applicant' }),
@@ -220,6 +237,19 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
         width: 190,
       },
     ];
+
+    // 员工申请均为使用权限，发布审核已有独立视图；其他资源保留申请类型以区分技能上架审核。
+    if (!employeeMode) {
+      columns.splice(2, 0, {
+        title: intl.formatMessage({ id: 'resource.auditApplicationType' }),
+        key: 'auditType',
+        width: 150,
+        render: (_, row) =>
+          intl.formatMessage({
+            id: row.auditType === 'SKILL_PUBLICATION' ? 'resource.skillPublicationAudit' : 'resource.resourceUseAudit',
+          }),
+      });
+    }
 
     if (auditFilter === 'history') {
       columns.push(
@@ -291,11 +321,23 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
       );
     }
     return columns;
-  }, [actionKey, auditFilter, handleAudit, intl]);
+  }, [actionKey, auditFilter, employeeMode, handleAudit, intl]);
 
   return (
     <div className={styles.panel}>
       <div className={styles.filter}>
+        {employeeMode && (
+          <Input
+            className={styles.search}
+            suffix={<SearchOutlined />}
+            allowClear
+            placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+            value={auditKeyword}
+            onChange={(event) => setAuditKeyword(event.target.value)}
+          />
+        )}
+        {/* 员工审批类型切换跟随搜索框，复用同一行筛选工具栏。 */}
+        {toolbarExtra}
         <Segmented
           value={auditFilter}
           options={[

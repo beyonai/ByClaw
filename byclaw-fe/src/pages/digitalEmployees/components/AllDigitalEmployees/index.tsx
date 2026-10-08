@@ -36,7 +36,6 @@ import useGlobal from '@/hooks/useGlobal';
 import { getAgentChatAvatar } from '@/utils/agent';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
-import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import type { IOnOkParams } from '@/components/Resources/components/ResourceFilter';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
@@ -83,7 +82,7 @@ function AllDigitalEmployees(
     buildFilterParam?: (
       activeTab: string,
       filterParam?: IOnOkParams,
-      source?: 'official' | 'available'
+      source?: 'official' | 'available' | 'favorites'
     ) => Record<string, any>;
     mode?: 'employee' | 'group' | 'all';
     source?: 'official' | 'available' | 'favorites';
@@ -141,7 +140,6 @@ function AllDigitalEmployees(
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
   const [selectRecord, setSelectRecord] = useState<IAgentCache | null>(null);
   const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
-  const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
   const [paginationInfo, paginationDispatch] = useReducer(paginationReducer, getDefaultPagination({ pageSize: 20 }));
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
@@ -220,9 +218,8 @@ function AllDigitalEmployees(
         setList([]);
       }
 
-      const selectedFilter =
-        buildFilterParam?.(listTabKey, effectiveFilterParam, source === 'available' ? 'available' : 'official') || {};
-      // 官方推荐已有的个人类型筛选继续使用原查询，个人资源不进入企业资源收藏链路。
+      const selectedFilter = buildFilterParam?.(listTabKey, effectiveFilterParam, source) || {};
+      // 传递真实来源，企业推荐忽略旧类型条件，收藏页保留独立筛选。
       const includeRequestFavorites =
         favoriteMode && (source === 'favorites' || selectedFilter.ownerType !== 'personal');
       const params: Record<string, any> = {
@@ -235,7 +232,7 @@ function AllDigitalEmployees(
           ? { includeEmployeeGroup: true, employeeGroupFirst: !includeRequestFavorites }
           : {}),
         ...(includeRequestFavorites ? { includeFavorites: true, favoritesOnly: source === 'favorites' } : {}),
-        // 显式类型筛选覆盖官方推荐的默认归属及员工组范围，分页同样生效。
+        // 可用和收藏页的显式类型筛选覆盖默认范围，分页同样生效。
         ...selectedFilter,
         orderField: 'updateTime',
         orderBy: 'desc',
@@ -676,11 +673,6 @@ function AllDigitalEmployees(
     setAuthDrawerOpen(true);
   }, []);
 
-  const onAuditEmployee = React.useCallback((employee: IAgentCache) => {
-    setSelectRecord(employee);
-    setUseApplyAuditOpen(true);
-  }, []);
-
   const onApplyEmployee = React.useCallback(
     async (employee: IAgentCache) => {
       // 与 EmployeeRelatedToMe.onApplyEmployee 取值口径对齐：优先 resourceId，回退 id
@@ -717,7 +709,6 @@ function AllDigitalEmployees(
         onEdit: () => onEditEmployee(employee),
         onAuth: (type: any) => onAuthEmployee(employee, type),
         onApplyUse: () => onApplyEmployee(employee),
-        onAuditUse: () => onAuditEmployee(employee),
         onDelete: (feedback) => onDeleteEmployee(employee, feedback),
         onDeleteData: (feedback) => onDeleteEmployee(employee, feedback),
         onShelf: (feedback) => onChangeShelfStatus(employee, 'shelf', feedback),
@@ -867,17 +858,6 @@ function AllDigitalEmployees(
           }}
         />
       )}
-      <UseApplyAuditDrawer
-        open={useApplyAuditOpen}
-        record={selectRecord}
-        onCancel={() => {
-          setUseApplyAuditOpen(false);
-          setSelectRecord(null);
-        }}
-        onSuccess={() => {
-          void refreshEmployee(selectRecord).catch(console.error);
-        }}
-      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { GET, POST } from '@/service/common/request';
-import { history } from '@umijs/max';
+import { getIntl, history } from '@umijs/max';
 
 export interface Publication {
   requestId: string;
@@ -99,7 +99,7 @@ export const saveOfficialUpdateDraft = async (resourceId: string, employee: any)
   }
   if (detail.canRevise) detail = await publicationAction('revise', detail.publication);
   if (detail.publication.status !== 'DRAFT' || !detail.canEdit) {
-    throw new Error('该员工已有未完成的更新申请，请先在审核中心处理或撤回申请后再保存');
+    throw new Error(getIntl().formatMessage({ id: 'approvalCenter.employeeUpdateUnfinished' }));
   }
   return publicationAction('save', detail.publication, { employee });
 };

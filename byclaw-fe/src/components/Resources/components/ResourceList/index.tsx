@@ -89,8 +89,7 @@ interface ResourceListProps {
   onDetail: (item: IResourceItem) => void;
   onEdit: (item: IResourceItem) => void;
   onAuth: (item: IResourceItem, authType: 'useAuth' | 'mgrAuth') => void;
-  onApplyUse: (item: IResourceItem) => void;
-  onAuditUse: (item: IResourceItem) => void;
+  onApplyUse: (item: IResourceItem) => Promise<boolean>;
   onRefresh: () => void;
   skillCardViewMode?: 'current' | 'new';
   enablePublishToEnterprise?: boolean;
@@ -128,7 +127,6 @@ const ResourceList: React.FC<ResourceListProps> = ({
   onEdit,
   onAuth,
   onApplyUse,
-  onAuditUse,
   onRefresh,
   skillCardViewMode = 'current',
 }) => {
@@ -145,6 +143,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const listRef = useRef(list);
   listRef.current = list;
   const favoriteRevision = useRef(0);
+  const applyingResourceIds = useRef(new Set<string>());
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
   const [canManageInstallTarget, setCanManageInstallTarget] = useState(false);
   const [pageInfo, setPageInfo] = useState({
@@ -545,6 +544,54 @@ const ResourceList: React.FC<ResourceListProps> = ({
     return `${resourceType}ListScroller`;
   }, [resourceType]);
 
+  const handleApplyUse = async (item: IResourceItem) => {
+    const resourceId = `${item.resourceId}`;
+    if (applyingResourceIds.current.has(resourceId)) return;
+    applyingResourceIds.current.add(resourceId);
+    const generation = listGeneration.current;
+    try {
+      if (!(await onApplyUse(item)) || generation !== listGeneration.current) return;
+      // 与员工卡片一样先回填已提交结果，详情请求期间也不能再次申请。
+      setList((current) =>
+        current.map((row) =>
+          `${row.resourceId}` === resourceId ? { ...row, canApplyUse: false, useApplyPending: true } : row
+        )
+      );
+      try {
+        const response = await queryResourceDetail({ resourceId });
+        const detail = response?.data || response;
+        if (`${detail?.resourceId}` !== resourceId || !detail.operationPermissions) {
+          throw new Error('Missing resource operation permissions');
+        }
+        // 筛选、翻页或卸载后丢弃旧响应，不重载列表，也不覆盖其他卡片。
+        if (generation !== listGeneration.current) return;
+        setList((current) =>
+          current.map((row) =>
+            `${row.resourceId}` === resourceId
+              ? {
+                  ...row,
+                  ...detail,
+                  ...detail.operationPermissions,
+                  operationPermissionsLoaded: true,
+                  approveStatus: detail.operationPermissions.useApplyPending ? 'S' : '',
+                  // 详情查询不包含收藏上下文，保留期间用户对当前卡片的收藏操作。
+                  favorited: row.favorited,
+                  favoriteCount: row.favoriteCount,
+                }
+              : row
+          )
+        );
+      } catch {
+        // 申请已成功，详情失败时保留待审核状态，不能提示用户重复申请。
+        if (generation === listGeneration.current) {
+          message.warning(intl.formatMessage({ id: 'resource.rowRefreshFailed' }));
+        }
+      }
+    } finally {
+      applyingResourceIds.current.delete(resourceId);
+    }
+  };
+
   const renderResourceCard = (item: IResourceItem) => (
     <ResourceCard
       key={item.resourceId}
@@ -555,11 +602,14 @@ const ResourceList: React.FC<ResourceListProps> = ({
       onCardClick={() => onDetail(item)}
       actionConfig={{
         scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
-        // 浏览页隐藏生命周期操作；我的资源仍沿用原有权限和状态判断。
+        // 我可用的技能保留发布入口，由卡片判断版本和发布权限；浏览页仍隐藏其他生命周期操作。
         hiddenMenuItemKeys: [
           ...(activeTab === 'personal' ? ['authorize', 'use'] : []),
           ...(resourceType === 'SKILL' && activeTab === 'personal' ? ['share'] : []),
-          ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete', 'publishToEnterprise'] : []),
+          ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete'] : []),
+          ...(!myResourcesOnly && !(resourceType === 'SKILL' && activeTab === 'personal')
+            ? ['publishToEnterprise']
+            : []),
         ],
         installedResourceIds,
         canInstallToTarget: installTargetContext.mode !== 'fixed' || canManageInstallTarget,
@@ -569,8 +619,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
         enablePublishToEnterprise,
         onEnterpriseSkillDetail: (enterpriseSkill) => onDetail(enterpriseSkill),
         onAuth: (authType) => onAuth(item, authType),
-        onApplyUse: () => onApplyUse(item),
-        onAuditUse: () => onAuditUse(item),
+        onApplyUse: () => handleApplyUse(item),
         enableResourceLifecycle: true,
         enableSkillExport: resourceType === 'SKILL',
         showResourceTypeTag: !myResourcesOnly,

@@ -21,7 +21,6 @@ import { getAgentChatAvatar } from '@/utils/agent';
 import { sortDefaultDigitalEmployeeFirst } from '@/pages/digitalEmployees/utils';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
-import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import ApplyForModal from '@/pages/digitalEmployees/components/ApplyForModal';
 import type { IOnOkParams } from '@/components/Resources/components/ResourceFilter';
 import styles from './index.module.less';
@@ -64,7 +63,6 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
   const [list, setList] = useState<IAgentCache[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
-  const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
   const [selectRecord, setSelectRecord] = useState<IAgentCache | null>(null);
   const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
   const [showApply, setShowApply] = useState(false);
@@ -403,11 +401,6 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
     setShowApply(true);
   }, []);
 
-  const onAuditEmployee = React.useCallback((employee: IAgentCache) => {
-    setSelectRecord(employee);
-    setUseApplyAuditOpen(true);
-  }, []);
-
   return (
     <div className="full-width full-height ub ub-ver">
       <div className={classnames('ub ub-ac gap8', styles.body)} style={{ marginBottom: '16px', minHeight: '35px' }}>
@@ -496,7 +489,6 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
                           onEdit: () => onEditEmployee(employee),
                           onAuth: (type: any) => onAuthEmployee(employee, type),
                           onApplyUse: () => onApplyEmployee(employee),
-                          onAuditUse: () => onAuditEmployee(employee),
                           onDelete: (feedback) => onDeleteEmployee(employee, feedback),
                         }}
                       />
@@ -529,17 +521,6 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
           }}
         />
       )}
-      <UseApplyAuditDrawer
-        open={useApplyAuditOpen}
-        record={selectRecord}
-        onCancel={() => {
-          setUseApplyAuditOpen(false);
-          setSelectRecord(null);
-        }}
-        onSuccess={() => {
-          void refreshEmployee(selectRecord).catch(console.error);
-        }}
-      />
       <ApplyForModal
         id={curApplyId}
         visible={showApply}

@@ -2,12 +2,13 @@ import { hasAnyUserRole } from '@/utils/userRole';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { PlusOutlined, SearchOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { useDispatch, useIntl, useNavigate, useSearchParams, useSelector } from '@umijs/max';
-import { Badge, Button, Dropdown, Input, Menu, Modal, Popconfirm, Space, Spin, Tabs, Typography, message } from 'antd';
+import { Button, Dropdown, Input, Menu, Modal, Popconfirm, Space, Spin, Tabs, Typography, message } from 'antd';
 import { trim, debounce } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import AllDigitalEmployees from './components/AllDigitalEmployees';
 import EmployeeTypeTag from './components/EmployeeTypeTag';
-import ResourceFilter, { IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
+import { type IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
+import ResourceQuickFilters from '@/components/Resources/components/ResourceQuickFilters';
 import { buildDigitalEmployeeFilterParam } from './filterParams';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getAgentChatAvatar } from '@/utils/agent';
@@ -16,7 +17,6 @@ import AntdIcon from '@/components/AntdIcon';
 import { getFileUrl } from '@/utils/file';
 import { isAdminVip } from '@/utils/auth';
 import type { UserState } from '@/models/common/user';
-import useDigitalEmployeeAuditCount from '@/hooks/useDigitalEmployeeAuditCount';
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 import EmployFormModal from '@/pages/manager/pages/digitalEmployeeMgr/components/EmployFormModal';
@@ -64,7 +64,6 @@ const DigitalEmployeesPage: React.FC = () => {
   const dispatch = useDispatch();
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { count: auditCount, rows: auditRows } = useDigitalEmployeeAuditCount();
 
   const [isLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -168,6 +167,19 @@ const DigitalEmployeesPage: React.FC = () => {
     [activeTab, dropdownParam, keywords]
   );
 
+  // 页签或条件更新后取消旧的延迟搜索，避免它覆盖快捷筛选刚提交的新条件。
+  useEffect(() => () => getSearch.cancel(), [getSearch]);
+
+  const handleQuickFilterChange = (param: Partial<IOnOkParams>) => {
+    const nextFilterParam = { ...dropdownParam, ...param };
+    setFilterParamsByTab((current) => ({ ...current, [activeTab]: nextFilterParam }));
+    getSearch.cancel();
+    const target =
+      activeTab === 'available' ? AvailableRef : activeTab === 'favorites' ? FavoritesRef : OfficialEmployeeRef;
+    // 快捷筛选无需确认，复用列表搜索入口并从第一页刷新，同时保留当前关键字。
+    target.current?.getSearch?.(keywords[activeTab] || '', nextFilterParam);
+  };
+
   useEffect(() => {
     const handleRefreshList = () => {
       getSearch();
@@ -202,21 +214,6 @@ const DigitalEmployeesPage: React.FC = () => {
 
   const tabBarExtraContent = (
     <Space className={styles.toolbar}>
-      <ResourceFilter
-        className={styles.toolbarFilter}
-        resourceType="DIG_EMPLOYEE"
-        // 按一级 tab 重建筛选组件，加载该 tab 上次保存的筛选条件。
-        key={activeTab}
-        onOk={(param: any) => {
-          setFilterParamsByTab((current) => ({ ...current, [activeTab]: param }));
-          getSearch(param);
-        }}
-        defaultParam={dropdownParam}
-        activeTab={activeTab}
-        // 两个页签都只展示已上架员工，不再提供状态筛选。
-        hideStatusFilter
-        digitalEmployeeTypeFilter
-      />
       <Input
         suffix={
           <SearchOutlined
@@ -264,19 +261,9 @@ const DigitalEmployeesPage: React.FC = () => {
           </Button>
         </Dropdown>
       )}
-      <Badge count={auditCount} size="small" offset={[-2, 2]}>
-        <Button
-          icon={<UnorderedListOutlined />}
-          onClick={() => {
-            // 复用首页已加载的审核数据，进入“我的员工”后不再重复请求待审核接口。
-            navigate('/myEmployees', {
-              state: { pendingAuditRows: auditRows },
-            });
-          }}
-        >
-          {intl.formatMessage({ id: 'digitalEmployees.myEmployees' })}
-        </Button>
-      </Badge>
+      <Button icon={<UnorderedListOutlined />} onClick={() => navigate('/myEmployees')}>
+        {intl.formatMessage({ id: 'digitalEmployees.myEmployees' })}
+      </Button>
     </Space>
   );
 
@@ -291,6 +278,18 @@ const DigitalEmployeesPage: React.FC = () => {
           className={classnames(styles.tabs, 'full-height')}
           activeKey={activeTab}
           tabBarExtraContent={tabBarExtraContent}
+          renderTabBar={(props, DefaultTabBar) => (
+            <>
+              <DefaultTabBar {...props} />
+              <ResourceQuickFilters
+                className={styles.quickFilters}
+                resourceType="DIG_EMPLOYEE"
+                activeTab={activeTab}
+                value={dropdownParam}
+                onChange={handleQuickFilterChange}
+              />
+            </>
+          )}
           onChange={(key) => {
             const nextTab = key;
             const nextSearchParams = new URLSearchParams(searchParams);
@@ -313,6 +312,7 @@ const DigitalEmployeesPage: React.FC = () => {
               <AllDigitalEmployees
                 mode="all"
                 source="available"
+                dropdownParam={filterParamsByTab.available}
                 ref={AvailableRef}
                 onEmployeeClick={setPreview}
                 onChatEmployee={handleEmployeeChat}
@@ -328,6 +328,7 @@ const DigitalEmployeesPage: React.FC = () => {
               <AllDigitalEmployees
                 mode="all"
                 source="official"
+                dropdownParam={filterParamsByTab.official}
                 enableFavorites={favoritesEnabled}
                 ref={OfficialEmployeeRef}
                 onEmployeeClick={setPreview}
@@ -345,6 +346,7 @@ const DigitalEmployeesPage: React.FC = () => {
                 <AllDigitalEmployees
                   mode="all"
                   source="favorites"
+                  dropdownParam={filterParamsByTab.favorites}
                   enableFavorites
                   ref={FavoritesRef}
                   onEmployeeClick={setPreview}

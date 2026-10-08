@@ -44,6 +44,7 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('antd', () => ({
+  message: { success: jest.fn(), error: jest.fn() },
   Button: ({ children, icon, ...props }: any) => (
     <button type="button" {...props}>
       <span aria-hidden="true">{icon}</span>
@@ -189,16 +190,27 @@ jest.mock('@/components/CommonTabs', () => ({
 jest.mock('@/components/AntdIcon', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/components/Resources/components/ResourceList', () => ({
   __esModule: true,
-  default: ({ catalogId, enablePublishToEnterprise, dropdownParam, onDetail, enableFavorites, activeTab }: any) => (
+  default: ({
+    catalogId,
+    enablePublishToEnterprise,
+    dropdownParam,
+    onDetail,
+    onApplyUse,
+    enableFavorites,
+    activeTab,
+  }: any) => (
     <div
       data-testid="resource-list"
       data-tab={activeTab}
       data-favorites-enabled={String(enableFavorites)}
       data-catalog-id={catalogId}
       data-status={dropdownParam?.resourceStatus}
+      data-owner-type={dropdownParam?.ownerType || ''}
+      data-permission={dropdownParam?.permission || ''}
       data-enterprise-publication={String(enablePublishToEnterprise)}
     >
       <button onClick={() => onDetail({ resourceBizType: 'SKILL', resourceId: 'skill-1' })}>open skill</button>
+      <button onClick={() => onApplyUse({ resourceBizType: 'SKILL', resourceId: 'skill-1' })}>apply use</button>
     </div>
   ),
 }));
@@ -293,7 +305,11 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Resources from '..';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
-import { queryFixedEntryOperationCapability, queryResourceUseApplyAudit } from '@/pages/manager/service/resources';
+import {
+  applyResourceUse,
+  queryFixedEntryOperationCapability,
+  queryResourceUseApplyAudit,
+} from '@/pages/manager/service/resources';
 
 describe('Resources enterprise skill mode', () => {
   beforeEach(() => {
@@ -325,6 +341,19 @@ describe('Resources enterprise skill mode', () => {
     );
   };
 
+  it('does not remount the resource list after submitting a use application', async () => {
+    (applyResourceUse as jest.Mock).mockReset().mockResolvedValue({ code: 0 });
+    renderAt('?tab=enterprise');
+    const list = await screen.findByTestId('resource-list');
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('apply use'));
+    });
+
+    expect(applyResourceUse).toHaveBeenCalledWith({ resourceId: 'skill-1' });
+    expect(screen.getByTestId('resource-list')).toBe(list);
+  });
+
   it.each(['SKILL', 'KG_DOC', 'TOOL'])(
     'loads official %s resources before the brand request finishes',
     async (resourceType) => {
@@ -346,13 +375,26 @@ describe('Resources enterprise skill mode', () => {
     }
   );
 
+  // 三类资源分别使用浏览页签与管理入口的语言键，避免两处显示相同名称。
+  it.each([
+    ['KG_DOC', 'resource.myKnowledge', 'resourceCenter.myKnowledge'],
+    ['SKILL', 'resource.mySkills', 'resourceCenter.mySkills'],
+    ['TOOL', 'resource.myTools', 'resourceCenter.myTools'],
+  ])('uses distinct browsing and management labels for %s', async (resourceType, browseLabel, manageLabel) => {
+    render(<Resources resourceType={resourceType} onMyResourcesOnlyChange={jest.fn()} />);
+    expect(await screen.findByRole('button', { name: browseLabel })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: manageLabel })).toBeInTheDocument();
+    expect(screen.getByText('resource.official')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'resource.available' })).toBeNull();
+  });
+
   it('places commercial favorites after official recommendations and before the skill market', async () => {
     setBrandVersion('commercial');
     renderAt('?tab=enterprise');
     const favorite = await screen.findByRole('button', { name: 'resource.myFavorites' });
     const tabs = favorite.parentElement?.querySelectorAll(':scope > button[aria-selected]');
     expect(Array.from(tabs || []).map((tab) => tab.textContent)).toEqual([
-      'resource.available',
+      'resource.mySkills',
       'resource.official',
       'resource.myFavorites',
       'resource.skillMarketplace',
@@ -570,7 +612,12 @@ describe('Resources enterprise skill mode', () => {
     render(<Resources resourceType={resourceType} />);
 
     expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ activeTab: 'personal', hideStatusFilter: true, resourceOwnerFilter: true })
+      expect.objectContaining({
+        activeTab: 'personal',
+        hideStatusFilter: true,
+        resourceOwnerFilter: false,
+        hidePermissionFilter: true,
+      })
     );
     fireEvent.click(
       resourceType === 'SKILL'
@@ -578,96 +625,142 @@ describe('Resources enterprise skill mode', () => {
         : screen.getByRole('button', { name: 'resource.official' })
     );
     expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ activeTab: 'enterprise', hideStatusFilter: true, resourceOwnerFilter: false })
+      expect.objectContaining({
+        activeTab: 'enterprise',
+        hideStatusFilter: true,
+        resourceOwnerFilter: false,
+        hidePermissionFilter: true,
+      })
     );
   });
 
-  it.each(['SKILL', 'KG_DOC', 'TOOL'])(
-    'only shows supported status filters in my enterprise %s resources',
-    (resourceType) => {
+  it.each([
+    ['SKILL', 'Skill'],
+    ['KG_DOC', 'Knowledge'],
+    ['TOOL', 'Tool'],
+  ])(
+    'preserves quick filters when confirming categories and resets them on tab changes for %s',
+    (resourceType, suffix) => {
       window.history.pushState({}, '', '/resourceCenter?tab=personal');
-      render(<Resources resourceType={resourceType} myResourcesOnly />);
+      render(<Resources resourceType={resourceType} />);
 
-      if (resourceType === 'SKILL') {
-        expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
-      } else {
-        expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
-          expect.objectContaining({
-            activeTab: 'personal',
-            hideStatusFilter: true,
-            catalogOptions: undefined,
-          })
-        );
-      }
-      fireEvent.click(screen.getByRole('button', { name: 'resourceCenter.enterprise' }));
-      if (resourceType === 'SKILL') {
-        expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
-      } else {
-        expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
-          expect.objectContaining({
-            activeTab: 'enterprise',
-            hideStatusFilter: true,
-            catalogOptions: undefined,
-          })
-        );
-      }
-      expect(screen.queryByRole('button', { name: 'resourceStatus.pendingShelf' })).toBeNull();
-      expect(screen.queryByRole('button', { name: 'resource.statusCancelled' })).toBeNull();
-      for (const [label, value] of [
-        ['common.all', ''],
-        ['resourceStatus.draft', '0'],
-        ['resourceStatus.published', '2'],
-        ['resourceStatus.unpublished', '3'],
-      ]) {
-        const button = screen.getByRole('button', { name: label });
-        fireEvent.click(button);
-        expect(button).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByTestId('resource-list')).toHaveAttribute('data-status', value);
-      }
+      fireEvent.click(screen.getByRole('button', { name: `resource.tag.enterprise${suffix}` }));
+      fireEvent.click(screen.getByRole('button', { name: 'resource.authorizedToMe' }));
+      const list = screen.getByTestId('resource-list');
+      expect(list).toHaveAttribute('data-owner-type', 'enterprise');
+      expect(list).toHaveAttribute('data-permission', 'AUTHORIZED_TO_ME');
+      expect(list).toHaveAttribute('data-status', '2');
+      fireEvent.click(screen.getByTestId('resource-filter'));
+      expect(list).toHaveAttribute('data-catalog-id', 'catalog-1');
+      expect(list).toHaveAttribute('data-owner-type', 'enterprise');
+      expect(list).toHaveAttribute('data-permission', 'AUTHORIZED_TO_ME');
+
+      fireEvent.click(
+        resourceType === 'SKILL'
+          ? screen.getByTestId('enterprise-skill-tab-trigger').closest('button')!
+          : screen.getByRole('button', { name: 'resource.official' })
+      );
+      expect(screen.queryByRole('group', { name: 'resource.type' })).toBeNull();
+      expect(list).toHaveAttribute('data-owner-type', '');
+      expect(list).toHaveAttribute('data-permission', '');
+      expect(list).toHaveAttribute('data-catalog-id', '');
+      fireEvent.click(screen.getByRole('button', { name: 'resource.appliedByMe' }));
+      expect(list).toHaveAttribute('data-permission', 'APPLIED_BY_ME');
+
+      const personalLabel = resourceType === 'KG_DOC' ? 'resource.myKnowledge' : `resource.my${suffix}s`;
+      fireEvent.click(screen.getByRole('button', { name: personalLabel }));
+      expect(screen.getByRole('group', { name: 'resource.type' })).toBeInTheDocument();
+      expect(list).toHaveAttribute('data-permission', '');
+      expect(screen.queryByRole('button', { name: 'resource.appliedByMe' })).toBeNull();
     }
   );
 
   it.each([
-    ['KG_DOC', 'KG_DOC', 'resourceCenter.myKnowledge'],
-    ['SKILL', 'SKILL', 'resourceCenter.mySkills'],
-    ['TOOL', 'MCP', 'resourceCenter.myTools'],
-  ])('shares the pending count between the %s entry and audit tab', async (resourceType, resourceBizType, label) => {
-    (queryResourceUseApplyAudit as jest.Mock).mockResolvedValue({
-      data: [
-        { resourceId: 'pending-1', resourceBizType },
-        { resourceId: 'pending-2', resourceBizType },
-        { resourceId: 'unrelated', resourceBizType: 'DIG_EMPLOYEE' },
-        { resourceBizType },
-      ],
-    });
-    const Wrapper = () => {
-      const [myResourcesOnly, setMyResourcesOnly] = React.useState(false);
-      return (
-        <Resources
-          resourceType={resourceType}
-          myResourcesOnly={myResourcesOnly}
-          onMyResourcesOnlyChange={setMyResourcesOnly}
-        />
-      );
-    };
-    render(<Wrapper />);
-    await waitFor(() => expect(screen.getByTestId('audit-badge')).toHaveAttribute('data-count', '2'));
-    fireEvent.click(screen.getByRole('button', { name: label }));
-    await waitFor(() => expect(screen.getByTestId('audit-badge')).toHaveAttribute('data-count', '2'));
-    expect(screen.getByRole('button', { name: 'resourceCenter.auditCenter' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'resourceCenter.backToAll' }));
-    await waitFor(() => expect(screen.getByTestId('audit-badge')).toHaveAttribute('data-count', '2'));
-    (queryResourceUseApplyAudit as jest.Mock).mockResolvedValue({ data: [] });
+    { search: '?tab=personal', myResourcesOnly: true },
+    { search: '?tab=enterprise&kind=group', myResourcesOnly: false },
+    { search: '?tab=marketplace', myResourcesOnly: false },
+  ])('hides quick filters outside resource browsing: $search / $myResourcesOnly', ({ search, myResourcesOnly }) => {
+    window.history.pushState({}, '', `/resourceCenter${search}`);
+    render(<Resources resourceType="SKILL" myResourcesOnly={myResourcesOnly} />);
+
+    expect(screen.queryByRole('group', { name: 'resource.type' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'common.belong' })).toBeNull();
   });
 
-  it('clears the badge when the pending query fails', async () => {
-    (queryResourceUseApplyAudit as jest.Mock).mockRejectedValueOnce(new Error('unavailable'));
-    render(<Resources resourceType="KG_DOC" onMyResourcesOnlyChange={jest.fn()} />);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(screen.getByTestId('audit-badge')).toHaveAttribute('data-count', '0');
+  it.each([
+    ['SKILL', 'resourceCenter.enterpriseSkills'],
+    ['KG_DOC', 'resourceCenter.enterpriseKnowledge'],
+    ['TOOL', 'resourceCenter.enterpriseTools'],
+  ])('only shows supported status filters in my enterprise %s resources', (resourceType, enterpriseLabel) => {
+    window.history.pushState({}, '', '/resourceCenter?tab=personal');
+    render(<Resources resourceType={resourceType} myResourcesOnly />);
+
+    if (resourceType === 'SKILL') {
+      expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
+    } else {
+      expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          activeTab: 'personal',
+          hideStatusFilter: true,
+          catalogOptions: undefined,
+        })
+      );
+    }
+    fireEvent.click(screen.getByRole('button', { name: enterpriseLabel }));
+    if (resourceType === 'SKILL') {
+      expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
+    } else {
+      expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          activeTab: 'enterprise',
+          hideStatusFilter: true,
+          catalogOptions: undefined,
+        })
+      );
+    }
+    expect(screen.queryByRole('button', { name: 'resourceStatus.pendingShelf' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.statusCancelled' })).toBeNull();
+    for (const [label, value] of [
+      ['common.all', ''],
+      ['resourceStatus.draft', '0'],
+      ['resourceStatus.published', '2'],
+      ['resourceStatus.unpublished', '3'],
+    ]) {
+      const button = screen.getByRole('button', { name: label });
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByTestId('resource-list')).toHaveAttribute('data-status', value);
+    }
   });
+
+  it.each([
+    ['KG_DOC', 'resourceCenter.myKnowledge', 'resourceCenter.personalKnowledge', 'resourceCenter.enterpriseKnowledge'],
+    ['SKILL', 'resourceCenter.mySkills', 'resourceCenter.personalSkills', 'resourceCenter.enterpriseSkills'],
+    ['TOOL', 'resourceCenter.myTools', 'resourceCenter.personalTools', 'resourceCenter.enterpriseTools'],
+  ])(
+    'keeps %s management separate from the approval center',
+    async (resourceType, label, personalLabel, enterpriseLabel) => {
+      const Wrapper = () => {
+        const [myResourcesOnly, setMyResourcesOnly] = React.useState(false);
+        return (
+          <Resources
+            resourceType={resourceType}
+            myResourcesOnly={myResourcesOnly}
+            onMyResourcesOnlyChange={setMyResourcesOnly}
+          />
+        );
+      };
+      render(<Wrapper />);
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      expect(screen.getByRole('button', { name: personalLabel })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: enterpriseLabel })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'resourceCenter.auditCenter' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('audit-badge')).not.toBeInTheDocument();
+      expect(queryResourceUseApplyAudit).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'resourceCenter.backToAll' }));
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+    }
+  );
 
   it('defaults to single skills and preserves the enterprise tab', async () => {
     renderAt('?tab=enterprise');
@@ -817,7 +910,7 @@ describe('Resources enterprise skill mode', () => {
   it('clears enterprise skill kind when changing to another tab', async () => {
     renderAt('?tab=enterprise&kind=group');
 
-    fireEvent.click(screen.getByRole('button', { name: 'resource.available' }));
+    fireEvent.click(screen.getByRole('button', { name: 'resource.mySkills' }));
     expect(window.location.search).toBe('?tab=personal');
 
     fireEvent.click(screen.getByTestId('enterprise-skill-tab-trigger').closest('button')!);
@@ -868,7 +961,7 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.getByTestId('skill-group-list')).toHaveTextContent('2');
   });
 
-  it('enters the three-tab my resources view from the new entry', () => {
+  it('enters the personal and enterprise management view from the new entry', () => {
     const Wrapper = () => {
       const [myResourcesOnly, setMyResourcesOnly] = React.useState(false);
       return (
@@ -886,21 +979,19 @@ describe('Resources enterprise skill mode', () => {
     expect(mySkillsButton.querySelector('[aria-label="unordered-list"]')).toBeInTheDocument();
     fireEvent.click(mySkillsButton);
 
-    expect(screen.getByRole('button', { name: 'resourceCenter.personal' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'resourceCenter.enterprise' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'resourceCenter.auditCenter' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'resourceCenter.personalSkills' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'resourceCenter.enterpriseSkills' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'resourceCenter.auditCenter' })).not.toBeInTheDocument();
     expect(screen.getByTestId('resource-list')).toBeInTheDocument();
 
     // 返回入口和搜索均独立于页签，避免再次挤进同一行。
-    const personalTab = screen.getByRole('button', { name: 'resourceCenter.personal' });
+    const personalTab = screen.getByRole('button', { name: 'resourceCenter.personalSkills' });
     const backButton = screen.getByRole('button', { name: 'resourceCenter.backToAll' });
     const searchInput = screen.getByPlaceholderText('common.inputKeyword');
     expect(personalTab.parentElement).not.toContainElement(backButton);
     expect(personalTab.parentElement).not.toContainElement(searchInput);
     expect(screen.getAllByPlaceholderText('common.inputKeyword')).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'resourceCenter.auditCenter' }));
-    expect(screen.queryByPlaceholderText('common.inputKeyword')).not.toBeInTheDocument();
     fireEvent.click(backButton);
     expect(screen.getByRole('button', { name: 'resourceCenter.mySkills' })).toBeInTheDocument();
   });

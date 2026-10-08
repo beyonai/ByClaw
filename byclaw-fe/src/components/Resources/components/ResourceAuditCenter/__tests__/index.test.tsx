@@ -54,6 +54,8 @@ describe('ResourceAuditCenter', () => {
     render(<ResourceAuditCenter resourceBizTypeList={['SKILL']} />);
 
     await waitFor(() => expect(screen.getByText('待审核技能')).toBeInTheDocument());
+    expect(screen.getByRole('columnheader', { name: 'resource.auditApplicationType' })).toBeInTheDocument();
+    expect(screen.getByText('resource.resourceUseAudit')).toBeInTheDocument();
     expect(mockQueryResourceUseApplyAudit).toHaveBeenCalledWith({
       history: false,
       resourceBizTypeList: ['SKILL'],
@@ -61,6 +63,8 @@ describe('ResourceAuditCenter', () => {
 
     fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
     await waitFor(() => expect(screen.getByText('历史技能')).toBeInTheDocument());
+    expect(screen.getByRole('columnheader', { name: 'resource.auditApplicationType' })).toBeInTheDocument();
+    expect(screen.getByText('resource.resourceUseAudit')).toBeInTheDocument();
     expect(mockQueryResourceUseApplyAudit).toHaveBeenCalledWith({
       history: true,
       resourceBizTypeList: ['SKILL'],
@@ -99,6 +103,7 @@ describe('ResourceAuditCenter', () => {
       });
       render(<ResourceAuditCenter resourceBizTypeList={['SKILL']} />);
       await screen.findByText('上架申请');
+      expect(screen.getByRole('columnheader', { name: 'resource.auditApplicationType' })).toBeInTheDocument();
       expect(screen.getByText('resource.skillPublicationAudit')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: `resourceCenter.${action}` }));
       fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
@@ -114,42 +119,92 @@ describe('ResourceAuditCenter', () => {
     }
   );
 
-  it.each(['SKILL', 'KG_DOC', 'TOOL'])('isolates pending, history and counts for %s', async (resourceType) => {
-    const resourceBizTypeList = getBaseResourceBizTypeList(resourceType);
-    const types = ['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'MCP', 'TOOLKIT', 'AGENT'];
+  it.each(['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'TOOL'])(
+    'isolates pending, history and counts for %s',
+    async (resourceType) => {
+      const resourceBizTypeList = getBaseResourceBizTypeList(resourceType);
+      const types = ['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'MCP', 'TOOLKIT', 'AGENT'];
+      mockQueryResourceUseApplyAudit.mockImplementation(({ history }: { history: boolean }) =>
+        Promise.resolve({
+          data: types.map((type) => ({
+            privilegeGrantId: `grant-${type}`,
+            resourceId: type,
+            resourceName: `${history ? 'history' : 'pending'}-${type}`,
+            resourceBizType: type,
+            userId: 'applicant',
+            applyStatus: history ? 'X' : 'P',
+          })),
+        })
+      );
+      const onPendingCountChange = jest.fn();
+      render(
+        <ResourceAuditCenter resourceBizTypeList={resourceBizTypeList} onPendingCountChange={onPendingCountChange} />
+      );
+
+      for (const history of [false, true]) {
+        if (history) fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
+        const prefix = history ? 'history' : 'pending';
+        await screen.findByText(`${prefix}-${resourceBizTypeList[0]}`);
+        expect(mockQueryResourceUseApplyAudit).toHaveBeenCalledWith({ history, resourceBizTypeList });
+        for (const type of types) {
+          if (resourceBizTypeList.includes(type)) {
+            expect(screen.getByText(`${prefix}-${type}`)).toBeInTheDocument();
+          } else {
+            expect(screen.queryByText(`${prefix}-${type}`)).not.toBeInTheDocument();
+          }
+        }
+        // 筛选条只保留待审核和历史切换，不重复显示模块名称。
+        const filter = screen.getByText('resourceCenter.reviewHistory').closest('.ant-segmented')!.parentElement!;
+        expect(filter).not.toHaveTextContent(/resource\.knowledge|common\.skill|common\.tool/);
+      }
+      expect(onPendingCountChange).toHaveBeenLastCalledWith(resourceBizTypeList.length);
+    }
+  );
+
+  it('keeps rejected requests visible when the approval endpoint fails and does not refresh counts', async () => {
+    (rejectUseApply as jest.Mock).mockRejectedValueOnce(new Error('permission denied'));
+    const onAuditComplete = jest.fn();
+    render(<ResourceAuditCenter resourceBizTypeList={['SKILL']} onAuditComplete={onAuditComplete} />);
+    await screen.findByText('待审核技能');
+    fireEvent.click(screen.getByRole('button', { name: 'resourceCenter.reject' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+    await screen.findByText('permission denied');
+    expect(screen.getByText('待审核技能')).toBeInTheDocument();
+    expect(onAuditComplete).not.toHaveBeenCalled();
+  });
+
+  it.each(['001', '017'])('hides application type in both lists for employee type %s', async (agentType) => {
     mockQueryResourceUseApplyAudit.mockImplementation(({ history }: { history: boolean }) =>
       Promise.resolve({
-        data: types.map((type) => ({
-          privilegeGrantId: `grant-${type}`,
-          resourceId: type,
-          resourceName: `${history ? 'history' : 'pending'}-${type}`,
-          resourceBizType: type,
-          userId: 'applicant',
-          applyStatus: history ? 'X' : 'P',
-        })),
+        data: [
+          {
+            resourceId: 'group-1',
+            resourceName: '待审核员工组',
+            resourceBizType: 'DIG_EMPLOYEE',
+            agentType,
+            privilegeGrantId: 'grant-group',
+            userId: 'applicant',
+            userName: '申请人',
+            applyStatus: history ? 'X' : 'P',
+            auditUserName: '审核人员',
+            auditTime: '2026-10-08 10:00:00',
+          },
+        ],
       })
     );
-    const onPendingCountChange = jest.fn();
-    render(
-      <ResourceAuditCenter resourceBizTypeList={resourceBizTypeList} onPendingCountChange={onPendingCountChange} />
-    );
-
-    for (const history of [false, true]) {
-      if (history) fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
-      const prefix = history ? 'history' : 'pending';
-      await screen.findByText(`${prefix}-${resourceBizTypeList[0]}`);
-      expect(mockQueryResourceUseApplyAudit).toHaveBeenCalledWith({ history, resourceBizTypeList });
-      for (const type of types) {
-        if (resourceBizTypeList.includes(type)) {
-          expect(screen.getByText(`${prefix}-${type}`)).toBeInTheDocument();
-        } else {
-          expect(screen.queryByText(`${prefix}-${type}`)).not.toBeInTheDocument();
-        }
-      }
-      // 筛选条只保留待审核和历史切换，不重复显示模块名称。
-      const filter = screen.getByText('resourceCenter.reviewHistory').closest('.ant-segmented')!.parentElement!;
-      expect(filter).not.toHaveTextContent(/resource\.knowledge|common\.skill|common\.tool/);
-    }
-    expect(onPendingCountChange).toHaveBeenLastCalledWith(resourceBizTypeList.length);
+    render(<ResourceAuditCenter resourceBizTypeList={['DIG_EMPLOYEE']} />);
+    await screen.findByText('待审核员工组');
+    expect(
+      screen.getByText(agentType === '017' ? 'common.digitalEmployeeGroup' : 'common.digitalEmployee')
+    ).toBeInTheDocument();
+    // 员工和员工组的待审核、历史列表均不再重复显示固定的使用权限类型。
+    expect(screen.queryByRole('columnheader', { name: 'resource.auditApplicationType' })).not.toBeInTheDocument();
+    expect(screen.queryByText('resource.resourceUseAudit')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
+    await screen.findByText('审核人员');
+    expect(screen.queryByRole('columnheader', { name: 'resource.auditApplicationType' })).not.toBeInTheDocument();
+    expect(screen.queryByText('resource.resourceUseAudit')).not.toBeInTheDocument();
+    expect(screen.getByText('2026-10-08 10:00:00')).toBeInTheDocument();
+    expect(screen.getByText('resource.useApplyApproveSuccess')).toBeInTheDocument();
   });
 });

@@ -173,7 +173,8 @@ const ResourceFilterForm = ({
     const baseParams = {
       resourceStatus: filterStatus,
       ...(catalogOptions ? { catalogId: filterParam.catalogId || '' } : {}),
-      permission: filterPermission,
+      // 已移到外部的条件不参与弹层确认或重置，避免覆盖快捷筛选的即时选择。
+      ...(!hidePermissionFilter ? { permission: filterPermission } : {}),
       ...(resourceOwnerFilter ? { ownerType: filterParam.ownerType || '' } : {}),
       ...(digitalEmployeeTypeFilter ? { digitalEmployeeType: filterDigitalEmployeeType } : {}),
     };

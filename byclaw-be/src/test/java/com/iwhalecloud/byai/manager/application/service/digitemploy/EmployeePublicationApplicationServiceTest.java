@@ -358,6 +358,62 @@ class EmployeePublicationApplicationServiceTest {
         verifyNoInteractions(dependencies);
     }
 
+    @ParameterizedTest @ValueSource(strings = {"DRAFT", "PENDING", "REJECTED", "PUBLISHED"})
+    void legacyOmittedSkillIsNamedInBothAvailabilityAndCandidateEditorWithoutChangingStoredSnapshot(String state) {
+        publication.setStatus(state);
+        var dependency = new EmployeePublicationResources.Dependency();
+        dependency.setTargetId(20L); dependency.setAction("OMIT_RESOURCE");
+        dependency.setLabel("其他企业资源"); dependency.setWarning("资源不属于当前企业");
+        publication.setDependenciesJson(JSON.toJSONString(List.of(dependency)));
+        var snapshot = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDetailsDTO.class);
+        snapshot.setRelIds(List.of(20L)); snapshot.setResourceDesc("审核时的配置");
+        publication.setSnapshotJson(JSON.toJSONString(snapshot));
+        String storedSnapshot = publication.getSnapshotJson();
+        String storedDependencies = publication.getDependenciesJson();
+        var skill = employee(20L, 7L); skill.setComAcctId(2L);
+        skill.setResourceBizType("SKILL"); skill.setResourceName("weather-query");
+        SsResourceService dependencyResources = mock(SsResourceService.class);
+        when(dependencyResources.findById(20L)).thenReturn(skill);
+        when(auth.hasResourceAccessPermission(skill)).thenReturn(true);
+        var displayService = new EmployeePublicationResources(dependencyResources, null, null, auth, null, null,
+            null, null, null);
+        doAnswer(invocation -> {
+            displayService.refreshDisplayMetadata(invocation.getArgument(0));
+            return null;
+        }).when(dependencies).refreshDisplayMetadata(anyList());
+
+        for (var detail : List.of(service.detail(100L), service.current(10L), service.prepare(10L))) {
+            assertThat(detail.dependencies()).hasSize(1);
+            assertThat(detail.dependencies().getFirst().resourceId()).isEqualTo("20");
+            assertThat(detail.dependencies().getFirst().name()).isEqualTo("weather-query");
+            assertThat(detail.dependencies().getFirst().resourceType()).isEqualTo("SKILL");
+            assertThat(detail.dependencies().getFirst().action()).isEqualTo("OMIT_RESOURCE");
+            assertThat(detail.dependencies().getFirst().reason()).contains("原数字员工所属企业不一致");
+            assertThat(detail.employee().getRelResourceList()).singleElement().satisfies(resource -> {
+                assertThat(resource.getResourceId()).isEqualTo(20L);
+                assertThat(resource.getResourceName()).isEqualTo("weather-query");
+                assertThat(resource.getResourceBizType()).isEqualTo("SKILL");
+            });
+            assertThat(detail.employee().getRelIds()).containsExactly(20L);
+            assertThat(detail.employee().getResourceDesc()).isEqualTo("审核时的配置");
+        }
+        when(auth.hasResourceAccessPermission(skill)).thenReturn(false);
+        var inaccessible = service.detail(100L);
+        assertThat(inaccessible.dependencies().getFirst().name()).isEqualTo("关联资源 20");
+        assertThat(inaccessible.dependencies().getFirst().resourceType()).isEqualTo("UNKNOWN");
+        assertThat(inaccessible.employee().getRelResourceList()).isEmpty();
+        assertThat(publication.getSnapshotJson()).isEqualTo(storedSnapshot);
+        assertThat(publication.getDependenciesJson()).isEqualTo(storedDependencies);
+        assertThat(publication.getRevision()).isEqualTo(1L);
+        assertThat(publication.getStatus()).isEqualTo(state);
+        verify(publications, never()).update(isNull(), any());
+        verify(publications, never()).insert(any(DigitalEmployeePublication.class));
+        verify(employees, never()).findDetailsById(any());
+        verify(dependencies, never()).capture(any(), anyLong(), anyLong(), anyLong());
+        verify(dependencies, never()).validate(anyList(), anyLong(), anyLong());
+        verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
+    }
+
     @ParameterizedTest @ValueSource(strings = {"REJECTED", "WITHDRAWN", "PUBLISHED"})
     void preparingPersonalEmployeeReusesItsLatestResult(String state) {
         publication.setStatus(state);
