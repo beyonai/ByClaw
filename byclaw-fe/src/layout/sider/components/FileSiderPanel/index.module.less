@@ -414,6 +414,12 @@
   }
 }
 
+// 行内存在附加操作（如项目空间 Git 图标）时，附加操作已在行末占固定槽位并为三点按钮预留空间，
+// hover 不再给标题名叠加 32px 内边距，避免目录名被重复压缩、省略号提前出现。
+.treeTitleContent.treeTitleContentHasExtra:hover .treeTitleName {
+  padding-right: 0;
+}
+
 .treeTitleContentActionVisible {
   .treeActionTrigger {
     opacity: 1;

@@ -218,11 +218,13 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                   isDirectory(treeItem) &&
                   ensureDirectoryPath(normalizeFileBrowserPath(treeItem.path)) ===
                     ensureDirectoryPath(normalizeFileBrowserPath(currentPath));
+                const nodeExtra = getNodeExtra?.(treeItem);
 
                 return (
                   <span
                     className={[
                       styles.treeTitleContent,
+                      nodeExtra ? styles.treeTitleContentHasExtra : '',
                       directoryExpanded ? styles.treeTitleContentExpanded : '',
                       directoryCurrent ? styles.treeTitleContentCurrent : '',
                     ]
@@ -273,7 +275,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                         </span>
                       </Dropdown>
                     ) : null}
-                    {getNodeExtra?.(treeItem)}
+                    {nodeExtra}
                   </span>
                 );
               }}
