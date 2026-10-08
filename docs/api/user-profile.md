@@ -33,6 +33,6 @@
 
 ## 迁移与发布
 
-增量 SQL 位于 `deploy/migrations/versions/V0.5.0/V0.5.0__ddl.sql` 的“完善个人资料”段。复用已有姓名、公司字段；使用幂等 ALTER TABLE ADD COLUMN IF NOT EXISTS 添加线索表的 user_id/profile_role/profile_interests，并添加 user_id 唯一索引和列注释，不使用 SQL function，不回填或覆盖历史数据，不修改初始化 SQL 或 .applied。
+增量 SQL 位于 `deploy/migrations/versions/V0.5.0/V0.5.0__ddl.sql` 的“完善个人资料”段。复用已有姓名、公司字段；为兼容 openGauss，使用普通 ALTER TABLE ADD COLUMN 添加线索表的 user_id/profile_role/profile_interests，并添加 user_id 唯一索引和列注释，不使用 SQL function，不回填或覆盖历史数据，不修改初始化 SQL 或 .applied。
 
-发布顺序：执行新增 ALTER 与索引段，再部署后端与 Hacu 前端。如果环境已应用 V0.5.0，本次追加段仍需单独执行，不能仅依赖整版已应用标记。开发验证只运行迁移合并器 --dry-run，不执行数据库迁移。H2 迁移测试用于验证幂等与数据保留，正式目标数据库仍需发布验证。
+发布顺序：执行新增 ALTER 与索引段，再部署后端与 Hacu 前端。如果环境已应用 V0.5.0，本次追加段仍需单独执行，不能仅依赖整版已应用标记。开发验证只运行迁移合并器 --dry-run，不执行数据库迁移。新增列和创建索引使用普通语法，不支持重复执行；执行前查询 information_schema.columns 与 pg_indexes，仅执行缺失字段的 ADD COLUMN 和缺失索引的 CREATE INDEX。H2 迁移测试用于验证字段新增与数据保留，正式目标数据库仍需发布验证。

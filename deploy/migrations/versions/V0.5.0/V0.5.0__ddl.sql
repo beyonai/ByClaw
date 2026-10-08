@@ -466,7 +466,6 @@ CREATE TABLE IF NOT EXISTS byai.byai_group_chat_send_gate (
 
 -- 商业版本官方推荐资源收藏：仅新增独立表，不修改资源、授权或安装数据。
 -- 收藏功能上线前执行本段；两个主键同时承担列表关联索引，避免逐资源统计收藏记录。
-SET search_path TO byai;
 
 CREATE TABLE IF NOT EXISTS byai.byai_resource_favorite (
     com_acct_id BIGINT NOT NULL,
@@ -495,11 +494,11 @@ COMMENT ON COLUMN byai.byai_resource_favorite_count.resource_id IS '资源ID';
 COMMENT ON COLUMN byai.byai_resource_favorite_count.favorite_count IS '收藏用户总数，关系实际新增或删除时才增减；不复用授权申请次数或技能使用次数';
 
 -- 完善个人资料：复用客户线索，不扩展 po_users，不使用 SQL function 或数据回填。
-SET search_path TO byai;
-ALTER TABLE byai.byai_customer_leads ADD COLUMN IF NOT EXISTS user_id BIGINT;
-ALTER TABLE byai.byai_customer_leads ADD COLUMN IF NOT EXISTS profile_role VARCHAR(50);
-ALTER TABLE byai.byai_customer_leads ADD COLUMN IF NOT EXISTS profile_interests TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS uk_customer_leads_profile_user ON byai.byai_customer_leads(user_id);
+-- openGauss 兼容：新增字段使用普通 ALTER；执行前检查字段与索引，仅执行尚未存在的 ADD COLUMN / CREATE INDEX。
+ALTER TABLE byai.byai_customer_leads ADD COLUMN user_id BIGINT;
+ALTER TABLE byai.byai_customer_leads ADD COLUMN profile_role VARCHAR(50);
+ALTER TABLE byai.byai_customer_leads ADD COLUMN profile_interests TEXT;
+CREATE UNIQUE INDEX uk_customer_leads_profile_user ON byai.byai_customer_leads(user_id);
 COMMENT ON COLUMN byai.byai_customer_leads.user_id IS '个人资料所属登录用户；历史留资记录保持NULL';
 COMMENT ON COLUMN byai.byai_customer_leads.profile_role IS '用户自填岗位分类，不修改岗位权限';
 COMMENT ON COLUMN byai.byai_customer_leads.profile_interests IS '用户感兴趣的工作领域，JSON字符串数组';

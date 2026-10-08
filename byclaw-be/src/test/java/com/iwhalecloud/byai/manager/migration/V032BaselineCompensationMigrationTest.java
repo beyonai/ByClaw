@@ -106,14 +106,12 @@ class V032BaselineCompensationMigrationTest {
     }
 
     @Test
-    void makesV030StructuralAndDefaultSeedOperationsReplaySafe() throws IOException {
+    void usesPortableV030StructuralOperationsAndReplaySafeDefaultSeeds() throws IOException {
         String ddl = read("deploy/migrations/versions/V0.3.0/V0.3.0__ddl.sql");
         String dml = read("deploy/migrations/versions/V0.3.0/V0.3.0__dml.sql");
 
         assertThat(ddl).contains(
-            "from information_schema.columns",
-            "table_name = 'byai_session'",
-            "column_name = 'project_id'"
+            "alter table byai.byai_session add column project_id bigint not null default -1"
         );
         assertThat(dml).contains(
             "where not exists ( select 1 from byai.byai_project where project_id = -1 )"
