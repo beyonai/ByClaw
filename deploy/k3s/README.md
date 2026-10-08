@@ -215,7 +215,7 @@ SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED=false
 
 Alertmanager 默认挂载 `alertmanager-data` PVC 到 `/alertmanager`，容量由 `MONITORING_ALERTMANAGER_PVC_SIZE` 控制，默认 `2Gi`。`repeat_interval` 默认 `1h`，用于覆盖 BE 发布或重启窗口内漏消费的持续 firing 告警；如果 BE 处理后指标恢复，Prometheus 会自动 resolve，Alertmanager 不会继续按 1 小时重复发送。
 
-沙箱已达到最高或最低规格后，BE 会暴露 `byclaw_sandbox_autoscale_boundary_blacklist` 指标，Prometheus 告警规则通过 `unless on(sandboxId)` 过滤同方向极值告警，避免 Alertmanager 和钉钉机器人重复发送无意义消息。BE 同时暴露 `byclaw_sandbox_autoscale_runtime_info` 指标，Prometheus 告警会按 `sandboxId` 关联 `userCode` 和 `profileKey`，钉钉详情中可以直接看到用户编码和当前规格。黑名单按当前活跃沙箱和规格链动态计算；新增更高或更低规格后，原极值沙箱会自动恢复监控。
+沙箱已达到最高或最低规格后，BE 会暴露 `byclaw_sandbox_autoscale_boundary_blacklist` 指标，Prometheus 告警规则通过 `unless on(sandboxId)` 过滤同方向极值告警，避免 Alertmanager 和钉钉机器人重复发送无意义消息。BE 同时暴露 `byclaw_sandbox_autoscale_runtime_info` 指标，Prometheus 告警会按 `sandboxId` 关联 `userCode`、`profileKey` 和真实 `serviceType`；BE 使用该类型定位沙箱记录，钉钉详情中可以直接看到用户编码和当前规格。黑名单按当前活跃沙箱和规格链动态计算；新增更高或更低规格后，原极值沙箱会自动恢复监控。
 
 高水位或 OOM 告警会覆盖 `STARTING` 和 `RUNNING` 状态的活跃沙箱。`RUNNING` 沙箱继续走 OpenSandbox 原地调整；非 `RUNNING` 沙箱会先保存目标规格偏好，再触发沙箱重启重拉，避免容器已经 OOM/异常退出时原地调整被 OpenSandbox 拒绝。降配告警只处理可原地调整的运行态沙箱，且默认会在最近一次升配或 OOM 处理后的 15 分钟内跳过降配，防止重负载刚缓解就立刻回落到过低规格。
 

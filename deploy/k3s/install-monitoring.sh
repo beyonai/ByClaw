@@ -290,7 +290,7 @@ data:
                 } == 1,
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                * on (sandboxId) group_left(userCode, profileKey)
+                * on (sandboxId) group_left(userCode, profileKey, serviceType)
                 byclaw_sandbox_autoscale_runtime_info
               )
               unless on (sandboxId)
@@ -298,7 +298,6 @@ data:
             for: ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-30s}
             labels:
               severity: warning
-              serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.cpu.high
               alertActionType: AUTOSCALE
@@ -337,7 +336,7 @@ data:
                 } == 1,
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                * on (sandboxId) group_left(userCode, profileKey)
+                * on (sandboxId) group_left(userCode, profileKey, serviceType)
                 byclaw_sandbox_autoscale_runtime_info
               )
               unless on (sandboxId)
@@ -345,7 +344,6 @@ data:
             for: ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-15s}
             labels:
               severity: warning
-              serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.memory.high
               alertActionType: AUTOSCALE
@@ -384,7 +382,7 @@ data:
                 } == 1,
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                * on (sandboxId) group_left(userCode, profileKey)
+                * on (sandboxId) group_left(userCode, profileKey, serviceType)
                 byclaw_sandbox_autoscale_runtime_info
               )
               unless on (sandboxId)
@@ -392,7 +390,6 @@ data:
             for: ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-30s}
             labels:
               severity: critical
-              serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.memory.critical
               alertActionType: AUTOSCALE
@@ -433,12 +430,11 @@ data:
                   ),
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                * on (sandboxId) group_left(userCode, profileKey)
+                * on (sandboxId) group_left(userCode, profileKey, serviceType)
                 byclaw_sandbox_autoscale_runtime_info
               )
             labels:
               severity: critical
-              serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.memory.oom_killed
               alertActionType: ABNORMAL_RECOVERY
@@ -464,13 +460,12 @@ data:
                   ),
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                * on (sandboxId) group_left(userCode, profileKey)
+                * on (sandboxId) group_left(userCode, profileKey, serviceType)
                 byclaw_sandbox_autoscale_runtime_info
               )
             for: ${SANDBOX_AUTOSCALE_IMAGE_PULL_FAILED_FOR:-1m}
             labels:
               severity: critical
-              serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: ops.image_pull_failed
               alertActionType: OPS_INCIDENT
@@ -495,13 +490,12 @@ data:
                   ),
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                * on (sandboxId) group_left(userCode, profileKey)
+                * on (sandboxId) group_left(userCode, profileKey, serviceType)
                 byclaw_sandbox_autoscale_runtime_info
               )
             for: ${SANDBOX_AUTOSCALE_STARTUP_FAILED_FOR:-1m}
             labels:
               severity: critical
-              serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: recovery.startup_failed
               alertActionType: ABNORMAL_RECOVERY
@@ -524,13 +518,12 @@ data:
                   }[${SANDBOX_AUTOSCALE_RESTART_LOOP_WINDOW:-5m}]) >= ${SANDBOX_AUTOSCALE_RESTART_LOOP_THRESHOLD:-2},
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                * on (sandboxId) group_left(userCode, profileKey)
+                * on (sandboxId) group_left(userCode, profileKey, serviceType)
                 byclaw_sandbox_autoscale_runtime_info
               )
             for: ${SANDBOX_AUTOSCALE_RESTART_LOOP_FOR:-30s}
             labels:
               severity: critical
-              serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: recovery.restart_loop
               alertActionType: ABNORMAL_RECOVERY
@@ -563,13 +556,12 @@ data:
                   ),
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                * on (sandboxId) group_left(userCode, profileKey)
+                * on (sandboxId) group_left(userCode, profileKey, serviceType)
                 byclaw_sandbox_autoscale_runtime_info
               )
             for: ${SANDBOX_AUTOSCALE_SERVICE_UNAVAILABLE_FOR:-60s}
             labels:
               severity: critical
-              serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: ops.service_unavailable
               alertActionType: OPS_INCIDENT
@@ -627,7 +619,7 @@ data:
                   } == 1,
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                * on (sandboxId) group_left(userCode, profileKey)
+                * on (sandboxId) group_left(userCode, profileKey, serviceType)
                 byclaw_sandbox_autoscale_runtime_info
               )
               unless on (sandboxId)
@@ -635,7 +627,6 @@ data:
             for: ${SANDBOX_AUTOSCALE_LOW_USAGE_FOR:-5m}
             labels:
               severity: info
-              serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.low_usage
               alertActionType: AUTOSCALE
