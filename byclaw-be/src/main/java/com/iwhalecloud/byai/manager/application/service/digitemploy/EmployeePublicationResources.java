@@ -265,8 +265,8 @@ public class EmployeePublicationResources {
             context(dependency, tenantId, authorId));
         if (checked == null || !checked.copyAllowed()) {
             String reasons = checked == null || checked.issues() == null ? "技能依赖校验未通过"
-                : checked.issues().stream().map(issue -> StringUtils.defaultIfBlank(issue.name(), issue.resourceId())
-                    + "：" + issue.reason()).collect(java.util.stream.Collectors.joining("；"));
+                : checked.issues().stream().map(EmployeePublicationSkillBridge.Issue::displayReason)
+                    .collect(java.util.stream.Collectors.joining("；"));
             omit(dependency, StringUtils.defaultIfBlank(reasons, "技能依赖校验未通过"));
         }
     }

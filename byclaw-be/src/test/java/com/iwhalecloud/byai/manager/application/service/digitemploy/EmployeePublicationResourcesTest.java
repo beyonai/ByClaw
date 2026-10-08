@@ -146,6 +146,32 @@ class EmployeePublicationResourcesTest {
         assertThat(service.materialize(captured, 1L, 90L)).containsEntry(20L, null);
         verify(bridge, never()).publish(any(), any(), any(), any(), any());
     }
+    @ParameterizedTest @ValueSource(strings = {"personal", "personal_default"})
+    void manifestPersonalDependenciesExplainWhyTheSkillIsOmittedWithoutBlockingEmployeePublication(String owner) throws Exception {
+        readableSkill(); resource.setResourceName("tax-policy-knowledge-20261008");
+        var knowledge = EmployeePublicationApplicationServiceTest.employee(30L, 7L);
+        knowledge.setResourceBizType("KG_DOC"); knowledge.setResourceName("覃小迪的个人知识库"); knowledge.setOwnerType(owner);
+        var tool = EmployeePublicationApplicationServiceTest.employee(40L, 7L);
+        tool.setResourceBizType("MCP"); tool.setResourceName("个人税务查询工具"); tool.setOwnerType(owner);
+        when(resources.findById(30L)).thenReturn(knowledge); when(resources.findById(40L)).thenReturn(tool);
+        byte[] bytes = EmployeePublicationSkillServiceTest.zip(Map.of("tax-policy/SKILL.md", "# tax-policy",
+            "tax-policy/references/resourceMate.json", "{\"resources\":[{\"resourceId\":\"30\",\"resourceType\":\"KNOWLEDGE_BASE\"},{\"resourceId\":\"40\",\"resourceType\":\"TOOL\"}]}"));
+        when(storage.readWithinResourceRoot(anyString())).thenAnswer(invocation -> new ByteArrayInputStream(bytes));
+        var checker = new EmployeePublicationSkillService(resources, null, null, null, null, null, null, null);
+        when(bridge.check(any(), any(), any(), any())).thenAnswer(invocation -> checker.check(
+            invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2), invocation.getArgument(3)));
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        assertThat(captured).hasSize(1);
+        assertThat(captured.getFirst().getWarning()).isEqualTo(
+            "技能依赖了个人知识库「覃小迪的个人知识库」，因此本次不会随员工发布；技能依赖了个人工具「个人税务查询工具」，因此本次不会随员工发布");
+        assertThat(captured.getFirst().getAction()).isEqualTo("OMIT_RESOURCE");
+        assertThat(captured.getFirst().getError()).isNull();
+        var mapping = service.materialize(captured, 1L, 90L);
+        assertThat(mapping).containsEntry(20L, null);
+        service.applyPublishedResources(dto, captured, mapping);
+        assertThat(dto.getRelIds()).isEmpty();
+        verify(bridge, never()).publish(any(), any(), any(), any(), any());
+    }
     @Test void enterprisePermissionRestrictionIsWarningAndExistingGrantIsNotExpanded() {
         resource.setOwnerType("enterprise"); resource.setResourceBizType("KG_DOC");
         var captured = service.capture(dto, 7L, 1L, 100L);
