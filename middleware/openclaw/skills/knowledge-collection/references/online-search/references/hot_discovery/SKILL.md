@@ -1,6 +1,6 @@
 ---
 name: hot_discovery
-description: 通过 bycli 适配器按关键词检索并按平台原生热度排序，产出高热候选 URL。与统一 online-search 相关性检索并行使用，只负责发现 URL 与热度字段，不取正文。热度覆盖集中在 packages/science/it 维度，images/videos/music/translate/map/lyrics/radio/files/dictionaries/weather/icons 等维度无免登录热度源。
+description: 通过 bycli 适配器按关键词检索并按平台原生热度排序，产出高热候选 URL。与 online-search 的 searxng 相关性检索并行使用，只负责发现 URL 与热度字段，不取正文。热度覆盖集中在 packages/science/it 维度，images/videos/music/translate/map/lyrics/radio/files/dictionaries/weather/icons 等维度无免登录热度源。
 allowed-tools: read, exec
 ---
 
@@ -9,7 +9,7 @@ allowed-tools: read, exec
 > **入口前提**：本会话若未读过本文，先完整通读再执行。本子技能**只发现 URL 与热度字段，
 > 不取正文** —— 取内容一律回到 agent-reach 主路由表。
 
-与统一 online-search 相关性检索**并行**跑，产出「相关 + 高热」候选。两个通道汇入后由 `merge` 归并。
+与 searxng 的相关性检索**并行**跑，产出「相关 + 高热」候选。两个通道汇入后由 `merge` 归并。
 
 ## 一句话边界
 
@@ -17,7 +17,7 @@ allowed-tools: read, exec
 | --- | --- |
 | 调 `bycli <site> search`，取 URL / 标题 / 热度字段 | **取正文**（回 agent-reach） |
 | 本地按热度重排，输出分组视图 | 写 `session.json`（只经 `knowledge-collection.mjs`） |
-| URL 规范化 + 跨通道去重 | 调 online-search provider（`merge` 只**读**它的输出文件） |
+| URL 规范化 + 跨通道去重 | 调 searxng（`merge` 只**读**它的输出文件） |
 | 读 `adapters.md` + `bycli list` 运行时校验 | 硬编码适配器清单 |
 | 鉴权/限流时保留已完成候选并返回 `requiresUserAction` | **触发登录流程**、清理浏览器 session、启动未执行适配器 |
 | — | 任何直接 HTTP（禁 `web_fetch` / `curl` / `requests`） |
@@ -33,7 +33,7 @@ allowed-tools: read, exec
 `init` 会因目录非空直接失败，整条链断在第一步。
 
 固定顺序：**`init` → 三通道并行发现并分别写输入快照 → `merge` → 可选写 merged 快照**。
-由 `knowledge-collection` 发起公共发现时，使用 `public-discover` 完成 online-search 与本通道的并行和归并，
+由 `knowledge-collection` 发起公共发现时，使用 `public-discover` 完成 SearXNG 与本通道的并行和归并，
 不要手工单独运行本命令。
 
 ## 用法
@@ -41,14 +41,22 @@ allowed-tools: read, exec
 ```bash
 SKILL=<...>/knowledge-collection/references/online-search/references/hot_discovery/scripts
 
-# 独立调试本通道
+# ① 发现（与 searxng 并行跑）
 node $SKILL/hot_discovery.mjs search \
     --query "AI agent framework" \
     --dimensions "science,it,packages,repos" \
     --tiers 1 --limit 20 \
     --out <会话目录>/.collection-inputs/hot-discovery-$(date +%s).json
 
-# 完整的双通道发现与归并由 public-discover 执行，不手工调用 provider。
+# ② searxng 通道（另一个进程，同时跑）
+searxng-cli "AI agent framework" \
+    --category it --max-results 20 > /tmp/sx.json
+
+# ③ 归并（两边都完成后）
+node $SKILL/hot_discovery.mjs merge \
+    --hot-file <快照路径> --searxng-file /tmp/sx.json \
+    [--agent-reach-file <f>] [--group-limit 5] \
+    [--agent-reach-limit 20] [--unverified-limit 20] [--unranked-hot-limit 20]
 ```
 
 **快照命名须避开 `items.json` / `run.json` / `m.json`** —— 这些是 `collect --item-json-file`
@@ -63,7 +71,7 @@ node $SKILL/hot_discovery.mjs search \
 | | `--tiers` | 默认 `1,2,3`。只接受 1/2/3 的不重复逗号列表；只跑免登录纯 HTTP 就传 `1` |
 | | `--limit` | 每个适配器取几条（1–100，默认 20），同时是 `searchWindowSize` |
 | `merge` | `--hot-file` | `search` 的输出 |
-| | `--searxng-file` | 统一 online-search 输出；参数名为历史兼容契约（缺失时会在 `warnings` 标注「相关性通道缺失」） |
+| | `--searxng-file` | searxng 的输出（缺失时会在 `warnings` 标注「相关性通道缺失」） |
 | | `--group-limit` | 每个热度来源展示几条（1–100，默认 5），避免高产来源淹没其他来源 |
 | | `--searxng-limit` | `searxngTop` 最多展示几条（1–1000，默认 20） |
 | | `--agent-reach-limit` | `agentReachTop` 最多展示几条（1–1000，默认 20） |
@@ -73,7 +81,7 @@ node $SKILL/hot_discovery.mjs search \
 
 ## 维度判定（通道入口条件）
 
-**判定者**：编排层的 Agent —— 与选择 online-search category 是**同一次判断**，不新增步骤。
+**判定者**：编排层的 Agent —— 与选 searxng `--category` 是**同一次判断**，不新增步骤。
 
 **多维度取并集，不择一。** 每次搜索都强制补充 `general` 维度；例如输入 `science,it` 时实际执行
 `science,it,general`。因此「AI 发展」会同时命中 general + science + it，三套适配器都跑。

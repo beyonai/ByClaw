@@ -1,12 +1,8 @@
-# 腾讯 WSA 主用、SearXNG 故障降级设计（已废弃）
-
-> 2026-10-07：本设计中的 SearXNG CLI 降级实现已移除。当前 online-search 并发调用腾讯 WSA
-> 与 Search1API，合并所有成功 provider 的结果；两者均失败时由 hot-discovery 决定是否仍有
-> 可用候选。下文保留为历史决策记录，不再描述当前运行时。
+# 腾讯 WSA 主用、SearXNG 故障降级设计
 
 ## 1. 文档状态
 
-- 状态：已废弃，由 WSA + Search1API 并发 provider 方案取代
+- 状态：已按设计实现，待验收
 - 日期：2026-09-01
 - 范围：`middleware/openclaw/skills/knowledge-collection` 公共互联网发现链路中的 `online-search`
   实现替换

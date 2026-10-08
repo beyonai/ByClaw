@@ -98,6 +98,7 @@ ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG ZREAD_CLI_VERSION=0.2.13
 ARG CHATLAB_CLI_VERSION=0.37.0
 ARG INSTALL_BROWSER_STACK=true
+ARG SEARXNG_CLI_VERSION=0.1.0
 
 RUN chown root:root /app
 
@@ -281,6 +282,31 @@ RUN set -eux; \
     kbcli --help >/dev/null; \
     groksearchcli --help >/dev/null; \
     rm -rf /tmp/byclaw-python-clis
+
+# searxng-cli is installed from the published PyPI wheel into an isolated
+# venv.  The settings file is still mounted as an override so ByClaw can
+# customize engine whitelists/proxies without repackaging the wheel.
+COPY middleware/openclaw/searxng-cli/searxng_pack_settings.yml /opt/searxng-cli/searxng_pack_settings.yml
+COPY middleware/openclaw/searxng-cli-constraints.txt /tmp/searxng-cli-constraints.txt
+ENV SEARXNG_CLI_SETTINGS=/opt/searxng-cli/searxng_pack_settings.yml
+
+RUN set -eux; \
+    python3 -m venv /opt/searxng-cli-venv; \
+    /opt/searxng-cli-venv/bin/python -m pip install --no-cache-dir \
+        --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+        --extra-index-url https://pypi.org/simple \
+        --constraint /tmp/searxng-cli-constraints.txt \
+        "searxng-cli==${SEARXNG_CLI_VERSION}"; \
+    /opt/searxng-cli-venv/bin/python -c 'import searxng_cli, flask, httpx, lxml, msgspec, yaml'; \
+    ln -sf /opt/searxng-cli-venv/bin/searxng-cli /usr/local/bin/searxng-cli; \
+    mkdir -p /opt/searxng-cli; \
+    printf '%s\n' \
+        '#!/usr/bin/env python3' \
+        'from searxng_cli.cli import main' \
+        'raise SystemExit(main())' \
+        > /opt/searxng-cli/searxng_cli.py; \
+    chmod 755 /opt/searxng-cli/searxng_cli.py; \
+    searxng-cli --list-engines >/dev/null 2>&1
 
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \

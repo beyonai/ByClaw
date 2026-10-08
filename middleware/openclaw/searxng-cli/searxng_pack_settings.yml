@@ -1,0 +1,151 @@
+# SearXNG CLI 覆盖配置 —— 通过 SEARXNG_SETTINGS_PATH 注入
+# 仅覆盖需要变更的键，其余继承仓库内默认 searx/settings.yml（use_default_settings 合并）
+use_default_settings: true
+
+outgoing:
+  # 引擎默认请求超时（默认 3s 过紧，放宽到 10s）
+  request_timeout: 10.0
+  # 单次搜索的全局超时上限
+  max_request_timeout: 20.0
+  # 不内置代理：默认直连上游引擎；如需代理，在 SKILL.md 说明如何配置
+
+valkey:
+  # 禁用外部 valkey/redis（CLI 单次进程无需共享缓存，内存模式即可）
+  url: false
+# ===== CLI 专属配置段（SearXNG 核心忽略，仅 searxng-cli 读取） =====
+cli:
+  default_engines:
+    dictionaries:
+    - duden
+    - etymonline
+    - jisho
+    - wordnik
+    files:
+    - findfiles
+    - openrepos
+    - piratebay
+    general:
+    - 360search
+    - abcnyheter
+    - ayo
+    - baidu
+    - bing
+    - bpb
+    - crowdview
+    - dogpile
+    - fynd
+    - gabanza
+    - mojeek
+    - mwmbl
+    - naver
+    - reloado
+    - resulthunter
+    - searchch
+    - searchmysite
+    - sogou
+    - vuhuv
+    - wikimini
+    - wolframalpha
+    - yacy
+    - yandex
+    images:
+    - 1x
+    - artic
+    - baidu images
+    - bing images
+    - devicons
+    - dogpile images
+    - findthatmeme
+    - frinkiac
+    - lucide
+    - magnific
+    - material icons
+    - naver images
+    - pexels
+    - public domain image archive
+    - quark images
+    - resulthunter images
+    - selfhst icons
+    - shopify stock
+    - sogou images
+    - vuhuv images
+    - yacy images
+    it:
+    - anaconda
+    - arch linux wiki
+    - askubuntu
+    - baidu kaifa
+    - bitbucket
+    - caddy.community
+    - codeberg
+    - crates.io
+    - discuss.python
+    - free software directory
+    - gentoo
+    - gitea.com
+    - github
+    - gitlab
+    - habrahabr
+    - hackernews
+    - hex
+    - hoogle
+    - lobste.rs
+    - mankier
+    - mdn
+    - microsoft learn
+    - national vulnerability database
+    - nixos wiki
+    - npm
+    - ollama
+    - packagist
+    - pi-hole.community
+    - pypi
+    - rubygems
+    - sourcehut
+    - stackoverflow
+    - superuser
+    map:
+    - photon
+    movies:
+    - senscritique
+    music:
+    - bandcamp
+    - findfiles music
+    - radio browser
+    news:
+    - ansa
+    - bing news
+    - dogpile news
+    - google news
+    - il post
+    - mojeek news
+    - naver news
+    - sogou wechat
+    other:
+    - destatis
+    - fyyd
+    packages:
+    - alpine linux packages
+    - cachy os packages
+    - pkg.go.dev
+    - pub.dev
+    - voidlinux
+    science:
+    - arxiv
+    - crossref
+    - openairedatasets
+    - openairepublications
+    - openalex
+    - pdbe
+    - pubmed
+    software wikis:
+    - minecraft wiki
+    videos:
+    - bing videos
+    - dogpile videos
+    - findfiles videos
+    - mediathekviewweb
+    - naver videos
+    - peertube
+    - sepiasearch
+    - vuhuv videos

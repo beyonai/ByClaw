@@ -11,45 +11,7 @@ import {
 } from './probe-state.mjs';
 import * as publicDiscovery from './public-discovery.mjs';
 
-async function runPublicDiscover(paths, args, options = {}) {
-  let runOnlineSearch = options.runOnlineSearch;
-  if (!runOnlineSearch && options.runProcess) {
-    runOnlineSearch = async (searchArgs, providerOptions = {}) => {
-      const spec = {
-        channel: 'online-search',
-        args: [
-          searchArgs.query,
-          '--category', searchArgs.category || 'general',
-          '--language', searchArgs.language || 'all',
-          '--pageno', String(searchArgs.pageno || '1'),
-          '--max-results', String(searchArgs['max-results'] || '20'),
-          '--timeout', '10',
-          ...(searchArgs['time-range'] ? ['--time-range', searchArgs['time-range']] : []),
-        ],
-      };
-      const outcome = await options.runProcess(spec, { timeoutMs: providerOptions.timeoutMs });
-      if (outcome?.code === 0 && typeof outcome.stdout === 'string') {
-        try {
-          return { ok: true, document: JSON.parse(outcome.stdout) };
-        } catch {
-          // Fall through to the normalized provider error below.
-        }
-      }
-      return {
-        ok: false,
-        provider: null,
-        fallbackUsed: false,
-        error: {
-          category: 'provider',
-          code: 'ONLINE_SEARCH_FAILED',
-          retryable: true,
-          ...(outcome?.stderr ? { message: outcome.stderr } : {}),
-        },
-      };
-    };
-  }
-  return publicDiscovery.runPublicDiscover(paths, args, { ...options, runOnlineSearch });
-}
+const { runPublicDiscover } = publicDiscovery;
 
 test('global Jev order reaches authorization across display groups with bounded inference budgets', async () => {
   const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
@@ -116,6 +78,47 @@ test('selects the bounded Chinese article profile from deterministic task state'
   }), false);
 });
 
+test('uses the image-wide SearXNG CLI by default', () => {
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime({}, {}),
+    { executable: 'searxng-cli', argsPrefix: [] },
+  );
+});
+
+test('prefers explicit SearXNG interpreter overrides over the image-wide command', () => {
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
+      { pythonExecutable: '/custom/python' },
+      { ONLINE_SEARCH_PYTHON: '/environment/python' },
+    ),
+    { executable: '/custom/python', argsPrefix: ['/opt/searxng-cli/searxng_cli.py'] },
+  );
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
+      {},
+      { ONLINE_SEARCH_PYTHON: '/environment/python' },
+    ),
+    { executable: '/environment/python', argsPrefix: ['/opt/searxng-cli/searxng_cli.py'] },
+  );
+});
+
+test('supports an explicit SearXNG script path for local development', () => {
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
+      { pythonExecutable: '/custom/python', searxngScript: '/workspace/searxng_cli.py' },
+      { ONLINE_SEARCH_PYTHON: '/environment/python', ONLINE_SEARCH_SCRIPT: '/environment/searxng_cli.py' },
+    ),
+    { executable: '/custom/python', argsPrefix: ['/workspace/searxng_cli.py'] },
+  );
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
+      {},
+      { ONLINE_SEARCH_PYTHON: '/environment/python', ONLINE_SEARCH_SCRIPT: '/environment/searxng_cli.py' },
+    ),
+    { executable: '/environment/python', argsPrefix: ['/environment/searxng_cli.py'] },
+  );
+});
+
 test('uses the unified online-search runner and exposes compatible provider aliases', async () => {
   const { paths } = makeInitializedSession(['public-internet'], '人工智能');
   let onlineSearchCalls = 0;
@@ -176,7 +179,7 @@ test('uses the unified online-search runner and exposes compatible provider alia
       };
     },
     runProcess: async (spec) => {
-      if (spec.channel === 'online-search') {
+      if (spec.channel === 'searxng') {
         return {
           code: 0,
           stdout: JSON.stringify({ query: '人工智能 报道', results: [] }),
@@ -241,7 +244,7 @@ test('keeps hot-discovery fallback when WSA returns a valid empty result', async
         fallbackUsed: false,
         providerDiagnostics: {
           tencentWsa: { status: 'success', durationMs: 5, resultCount: 0 },
-          search1api: { status: 'unavailable', durationMs: 0, code: 'SEARCH1API_KEY_MISSING' },
+          searxng: { status: 'skipped', durationMs: 0, skipReason: 'primary_provider_succeeded' },
         },
         results: [],
       },
@@ -272,11 +275,11 @@ test('preserves provider diagnostics when online-search fails and hot-discovery 
     runOnlineSearch: async () => ({
       ok: false,
       error: { category: 'provider', code: 'ONLINE_SEARCH_FAILED', message: 'both failed' },
-      provider: null,
-      fallbackUsed: false,
+      provider: 'searxng',
+      fallbackUsed: true,
       providerDiagnostics: {
         tencentWsa: { status: 'failed', code: 'WSA_DISABLED', category: 'unavailable' },
-        search1api: { status: 'failed', code: 'SEARCH1API_KEY_MISSING', category: 'unavailable' },
+        searxng: { status: 'failed', code: 'SEARXNG_FAILED', category: 'provider' },
       },
     }),
     runProcess: async () => ({
@@ -286,10 +289,10 @@ test('preserves provider diagnostics when online-search fails and hot-discovery 
     }),
   });
 
-  assert.equal(result.channels.onlineSearch.provider, undefined);
-  assert.equal(result.channels.onlineSearch.fallbackUsed, false);
+  assert.equal(result.channels.onlineSearch.provider, 'searxng');
+  assert.equal(result.channels.onlineSearch.fallbackUsed, true);
   assert.equal(result.channels.onlineSearch.providerDiagnostics.tencentWsa.code, 'WSA_DISABLED');
-  assert.equal(result.channels.onlineSearch.providerDiagnostics.search1api.code, 'SEARCH1API_KEY_MISSING');
+  assert.equal(result.channels.onlineSearch.providerDiagnostics.searxng.code, 'SEARXNG_FAILED');
 });
 
 function makeInitializedSession(sourceScope = ['public-internet'], query = '采集一篇文章') {
@@ -419,7 +422,7 @@ test('runs online search and hot discovery for every online-search category', as
   }, {
     runProcess: async (spec, options) => {
       calls.push({ spec, options });
-      return spec.channel === 'online-search'
+      return spec.channel === 'searxng'
         ? { code: 0, stdout: JSON.stringify({ query: 'DeepSeek Harness', results: [] }), stderr: '' }
         : {
           code: 0,
@@ -435,17 +438,17 @@ test('runs online search and hot discovery for every online-search category', as
     merge: ({ hotDoc, sxDoc }) => ({ query: sxDoc.query, effectiveDimensions: hotDoc.effectiveDimensions }),
   });
 
-  assert.deepEqual(calls.map(({ spec }) => spec.channel).sort(), ['hot-discovery', 'online-search']);
+  assert.deepEqual(calls.map(({ spec }) => spec.channel).sort(), ['hot-discovery', 'searxng']);
   assert.deepEqual(calls.find(({ spec }) => spec.channel === 'hot-discovery').spec.args.slice(-2), ['--dimensions', 'images']);
   assert.deepEqual(
     calls.find(({ spec }) => spec.channel === 'hot-discovery').options,
     { timeoutMs: 60_000 },
   );
-  const onlineSearchCall = calls.find(({ spec }) => spec.channel === 'online-search');
-  assert.ok(onlineSearchCall.spec.args.includes('--time-range'));
-  assert.ok(onlineSearchCall.spec.args.includes('week'));
-  assert.equal(onlineSearchCall.spec.args[onlineSearchCall.spec.args.indexOf('--timeout') + 1], '10');
-  assert.ok(onlineSearchCall.options.timeoutMs > 0 && onlineSearchCall.options.timeoutMs <= 60_000);
+  const searxngCall = calls.find(({ spec }) => spec.channel === 'searxng');
+  assert.ok(searxngCall.spec.args.includes('--time-range'));
+  assert.ok(searxngCall.spec.args.includes('week'));
+  assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--timeout') + 1], '10');
+  assert.ok(searxngCall.options.timeoutMs > 0 && searxngCall.options.timeoutMs <= 60_000);
   assert.equal(result.ok, true);
   assert.deepEqual(result.hotDiscovery.effectiveDimensions, ['images', 'general']);
   assert.equal(existsSync(result.snapshots.searxng), true);
@@ -469,7 +472,7 @@ test('runs online search and hot discovery for every online-search category', as
 test('default merge preserves the source hostname used for acquisition', async () => {
   const { paths } = makeInitializedSession();
   const result = await runPublicDiscover(paths, { query: '浩鲸科技' }, {
-    runProcess: async (spec) => spec.channel === 'online-search'
+    runProcess: async (spec) => spec.channel === 'searxng'
       ? {
         code: 0,
         stdout: JSON.stringify({
@@ -496,10 +499,10 @@ test('default merge preserves the source hostname used for acquisition', async (
   ]);
 });
 
-test('returns merged user action without discarding successful online-search discovery', async () => {
+test('returns merged user action without discarding successful SearXNG discovery', async () => {
   const { paths } = makeInitializedSession();
   const result = await runPublicDiscover(paths, { query: 'agent' }, {
-    runProcess: async (spec) => spec.channel === 'online-search'
+    runProcess: async (spec) => spec.channel === 'searxng'
       ? {
         code: 0,
         stdout: JSON.stringify({
@@ -544,7 +547,7 @@ test('returns merged user action without discarding successful online-search dis
   assert.match(mergedSnapshot.warnings.join('\n'), /禁止使用.*HTTP.*通用浏览器.*降级/);
 });
 
-test('uses only online search when a requested article count is satisfied', async () => {
+test('uses only SearXNG when a requested article count is satisfied', async () => {
   const { paths } = makeInitializedSession();
   const calls = [];
   const result = await runPublicDiscover(paths, {
@@ -581,11 +584,11 @@ test('uses only online search when a requested article count is satisfied', asyn
     }),
   });
 
-  assert.deepEqual(calls.map(({ spec }) => spec.channel), ['online-search']);
-  const onlineSearchCall = calls[0];
-  assert.equal(onlineSearchCall.spec.args[onlineSearchCall.spec.args.indexOf('--max-results') + 1], '1');
-  assert.equal(onlineSearchCall.spec.args[onlineSearchCall.spec.args.indexOf('--timeout') + 1], '10');
-  assert.ok(onlineSearchCall.options.timeoutMs > 0 && onlineSearchCall.options.timeoutMs <= 60_000);
+  assert.deepEqual(calls.map(({ spec }) => spec.channel), ['searxng']);
+  const searxngCall = calls[0];
+  assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--max-results') + 1], '1');
+  assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--timeout') + 1], '10');
+  assert.ok(searxngCall.options.timeoutMs > 0 && searxngCall.options.timeoutMs <= 60_000);
   assert.equal(result.hotDiscovery, null);
   assert.equal(result.snapshots.hotDiscovery, null);
   assert.equal(result.channels.hotDiscovery.status, 'skipped');
@@ -609,7 +612,7 @@ test('uses only online search when a requested article count is satisfied', asyn
   );
 });
 
-test('Chinese article profile starts online search and bounded hot discovery concurrently', async () => {
+test('Chinese article profile starts SearXNG and bounded hot discovery concurrently', async () => {
   const { paths } = makeInitializedSession(
     ['public-internet'],
     '采集一篇关于米哈游的文章',
@@ -617,7 +620,7 @@ test('Chinese article profile starts online search and bounded hot discovery con
   const calls = [];
   const releases = [];
   let initialWaveReleased = false;
-  const outcome = (spec) => spec.channel === 'online-search'
+  const outcome = (spec) => spec.channel === 'searxng'
     ? { code: 0, stdout: JSON.stringify({ query: '米哈游 报道', results: [] }), stderr: '' }
     : { code: 0, stdout: JSON.stringify({
       query: '米哈游 报道', candidates: [], adapterStats: {},
@@ -640,7 +643,7 @@ test('Chinese article profile starts online search and bounded hot discovery con
     }),
   });
   for (let index = 0; index < 10 && calls.length < 2; index += 1) await Promise.resolve();
-  assert.deepEqual(calls.map(({ spec }) => spec.channel).sort(), ['hot-discovery', 'online-search']);
+  assert.deepEqual(calls.map(({ spec }) => spec.channel).sort(), ['hot-discovery', 'searxng']);
   const hot = calls.find(({ spec }) => spec.channel === 'hot-discovery');
   const arg = (name) => hot.spec.args[hot.spec.args.indexOf(name) + 1];
   assert.equal(arg('--sources'), '36kr,weixin,sogou');
@@ -668,7 +671,7 @@ test('an unrelated trusted publication does not satisfy requested count or recei
   }, {
     runProcess: async (spec) => {
       calls.push(spec.channel);
-      return spec.channel === 'online-search'
+      return spec.channel === 'searxng'
         ? {
           code: 0,
           stdout: JSON.stringify({
@@ -695,7 +698,7 @@ test('an unrelated trusted publication does not satisfy requested count or recei
     }),
   });
 
-  assert.equal(calls.filter((channel) => channel === 'online-search').length, 1);
+  assert.equal(calls.filter((channel) => channel === 'searxng').length, 1);
   assert.ok(calls.filter((channel) => channel === 'hot-discovery').length >= 1);
   assert.equal(result.candidateQuality.searxng.article, 1);
   assert.equal(result.candidateQuality.searxng.eligibleArticle, 0);
@@ -740,7 +743,7 @@ test('a public legacy session with a missing gate is not silently upgraded', asy
   assert.equal(JSON.parse(readFileSync(paths.session, 'utf8')).task.discoveryGate, undefined);
 });
 
-test('requested count merges duplicate online-search evidence before deciding hot fallback', async () => {
+test('requested count merges duplicate SearXNG evidence before deciding hot fallback', async () => {
   const { paths } = makeInitializedSession(['public-internet'], 'neural scaling');
   const calls = [];
   const result = await runPublicDiscover(paths, {
@@ -774,11 +777,11 @@ test('requested count merges duplicate online-search evidence before deciding ho
     }),
   });
 
-  assert.deepEqual(calls, ['online-search']);
+  assert.deepEqual(calls, ['searxng']);
   assert.equal(result.channels.hotDiscovery.skipReason, 'sufficient_article_candidates');
 });
 
-test('falls back when non-empty online-search results are login and home pages', async () => {
+test('falls back when non-empty SearXNG results are login and home pages', async () => {
   const { paths } = makeInitializedSession();
   const calls = [];
   const result = await runPublicDiscover(paths, {
@@ -787,7 +790,7 @@ test('falls back when non-empty online-search results are login and home pages',
   }, {
     runProcess: async (spec) => {
       calls.push(spec.channel);
-      return spec.channel === 'online-search'
+      return spec.channel === 'searxng'
         ? {
           code: 0,
           stdout: JSON.stringify({
@@ -818,7 +821,7 @@ test('falls back when non-empty online-search results are login and home pages',
     }),
   });
 
-  assert.deepEqual(calls, ['online-search', 'hot-discovery']);
+  assert.deepEqual(calls, ['searxng', 'hot-discovery']);
   assert.equal(result.candidateQuality.searxng.article, 0);
   assert.equal(result.candidateQuality.searxng.weak, 1);
   assert.equal(result.candidateQuality.searxng.reject, 1);
@@ -833,7 +836,7 @@ test('falls back when unique article count is below requested count', async () =
   }, {
     runProcess: async (spec) => {
       calls.push(spec.channel);
-      return spec.channel === 'online-search'
+      return spec.channel === 'searxng'
         ? {
           code: 0,
           stdout: JSON.stringify({
@@ -850,7 +853,7 @@ test('falls back when unique article count is below requested count', async () =
     merge: ({ sxDoc }) => ({ query: sxDoc.query, groups: {} }),
   });
 
-  assert.deepEqual(calls, ['online-search', 'hot-discovery']);
+  assert.deepEqual(calls, ['searxng', 'hot-discovery']);
 });
 
 test('records deterministic discovery phase timings', async () => {
@@ -883,7 +886,7 @@ test('records deterministic discovery phase timings', async () => {
   assert.equal(result.channels.hotDiscovery.durationMs, 0);
 });
 
-test('falls back to hot discovery when requested online-search result set is empty', async () => {
+test('falls back to hot discovery when requested SearXNG result set is empty', async () => {
   const { paths } = makeInitializedSession();
   const calls = [];
   const result = await runPublicDiscover(paths, {
@@ -894,7 +897,7 @@ test('falls back to hot discovery when requested online-search result set is emp
   }, {
     runProcess: async (spec, options) => {
       calls.push({ spec, options });
-      return spec.channel === 'online-search'
+      return spec.channel === 'searxng'
         ? { code: 0, stdout: JSON.stringify({ query: '浩鲸科技', results: [] }), stderr: '' }
         : {
           code: 0,
@@ -910,7 +913,7 @@ test('falls back to hot discovery when requested online-search result set is emp
     merge: ({ hotDoc, sxDoc }) => ({ query: sxDoc.query, usedHotDiscovery: Boolean(hotDoc) }),
   });
 
-  assert.deepEqual(calls.map(({ spec }) => spec.channel), ['online-search', 'hot-discovery']);
+  assert.deepEqual(calls.map(({ spec }) => spec.channel), ['searxng', 'hot-discovery']);
   const hotDiscoveryCall = calls[1];
   assert.equal(
     hotDiscoveryCall.spec.args[hotDiscoveryCall.spec.args.indexOf('--limit') + 1],
@@ -933,7 +936,7 @@ test('persists two empty discovery attempts and rejects a third attempt before e
   const options = {
     runProcess: async (spec) => {
       executorCalls += 1;
-      return spec.channel === 'online-search'
+      return spec.channel === 'searxng'
         ? { code: 0, stdout: JSON.stringify({ query: 'DeepSeek', results: [] }), stderr: '' }
         : { code: 0, stdout: JSON.stringify({ query: 'DeepSeek', candidates: [] }), stderr: '' };
     },
@@ -967,7 +970,7 @@ test('applies a custom outer timeout to both public discovery channels', async (
   }, {
     runProcess: async (spec, options) => {
       calls.push({ spec, options });
-      return spec.channel === 'online-search'
+      return spec.channel === 'searxng'
         ? { code: 0, stdout: JSON.stringify({ query: 'timeout bounds', results: [] }), stderr: '' }
         : {
           code: 0,
@@ -984,7 +987,7 @@ test('applies a custom outer timeout to both public discovery channels', async (
   ]);
 });
 
-test('falls back to hot discovery when requested online-search output is invalid', async () => {
+test('falls back to hot discovery when requested SearXNG output is invalid', async () => {
   const { paths } = makeInitializedSession();
   const calls = [];
   const result = await runPublicDiscover(paths, {
@@ -993,7 +996,7 @@ test('falls back to hot discovery when requested online-search output is invalid
   }, {
     runProcess: async (spec) => {
       calls.push(spec);
-      return spec.channel === 'online-search'
+      return spec.channel === 'searxng'
         ? { code: 1, stdout: '', stderr: 'invalid response' }
         : {
           code: 0,
@@ -1013,7 +1016,7 @@ test('falls back to hot discovery when requested online-search output is invalid
     }),
   });
 
-  assert.deepEqual(calls.map((spec) => spec.channel), ['online-search', 'hot-discovery']);
+  assert.deepEqual(calls.map((spec) => spec.channel), ['searxng', 'hot-discovery']);
   assert.equal(result.merged.hasSearxng, false);
   assert.equal(result.channels.searxng.status, 'failed');
   assert.equal(result.channels.searxng.exitCode, 1);
@@ -1023,13 +1026,13 @@ test('falls back to hot discovery when requested online-search output is invalid
   assert.equal(result.channels.hotDiscovery.status, 'success');
   assert.equal(result.channels.hotDiscovery.exitCode, 0);
   assert.ok(Number.isInteger(result.channels.hotDiscovery.durationMs));
-  assert.match(result.warnings.join('\n'), /online-search 发现失败/);
+  assert.match(result.warnings.join('\n'), /SearXNG 发现失败/);
 });
 
-test('keeps online-search output when hot discovery fails', async () => {
+test('keeps SearXNG output when hot discovery fails', async () => {
   const { paths } = makeInitializedSession();
   const result = await runPublicDiscover(paths, { query: 'q' }, {
-    runProcess: async (spec) => spec.channel === 'online-search'
+    runProcess: async (spec) => spec.channel === 'searxng'
       ? { code: 0, stdout: JSON.stringify({ query: 'q', results: [] }), stderr: '' }
       : { code: 75, stdout: '', stderr: 'RATE_LIMITED' },
     merge: ({ sxDoc }) => ({ query: sxDoc.query, groups: {} }),
@@ -1058,7 +1061,7 @@ test('keeps online-search output when hot discovery fails', async () => {
 test('records outer timeout diagnostics with bounded and redacted stderr', async () => {
   const { paths } = makeInitializedSession();
   const result = await runPublicDiscover(paths, { query: 'q' }, {
-    runProcess: async (spec) => spec.channel === 'online-search'
+    runProcess: async (spec) => spec.channel === 'searxng'
       ? { code: 0, stdout: JSON.stringify({ query: 'q', results: [] }), stderr: '' }
       : {
         code: 1,
@@ -1083,6 +1086,6 @@ test('fails public discovery only when both channels fail', async () => {
     runPublicDiscover(paths, { query: 'q' }, {
       runProcess: async () => ({ code: 1, stdout: '', stderr: 'failed' }),
     }),
-    /online-search 与 hot-discovery 均未返回有效结果/,
+    /SearXNG 与 hot-discovery 均未返回有效结果/,
   );
 });
