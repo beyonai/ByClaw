@@ -448,9 +448,9 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 }', '用户登陆初始数字员工助手模板');
 
 
-delete from ss_res_ext_skill where  resource_id  in(select resource_id from ss_resource where resource_code in('unstructured-ontology-manager','structured-ontology-manager'));
-delete from au_privilege_grant apg  where grant_obj_type in('SKILL') and grant_obj_id in(select resource_id from ss_resource where resource_code in('unstructured-ontology-manager','structured-ontology-manager'));
-delete from ss_resource where resource_code in('unstructured-ontology-manager','structured-ontology-manager');
+delete from byai.ss_res_ext_skill where  resource_id  in(select resource_id from byai.ss_resource where resource_code in('unstructured-ontology-manager','structured-ontology-manager'));
+delete from byai.au_privilege_grant apg  where grant_obj_type in('SKILL') and grant_obj_id in(select resource_id from byai.ss_resource where resource_code in('unstructured-ontology-manager','structured-ontology-manager'));
+delete from byai.ss_resource where resource_code in('unstructured-ontology-manager','structured-ontology-manager');
 
 
 
