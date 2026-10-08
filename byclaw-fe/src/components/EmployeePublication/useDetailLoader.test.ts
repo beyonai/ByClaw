@@ -1,13 +1,13 @@
 import { act, renderHook } from '@testing-library/react';
-import { getPublication } from '@/service/employeePublication';
+import { openPublication, type PublicationDetail } from '@/service/employeePublication';
 import usePublicationDetailLoader from './useDetailLoader';
 
-jest.mock('@/service/employeePublication', () => ({ getPublication: jest.fn() }));
+jest.mock('@/service/employeePublication', () => ({ openPublication: jest.fn() }));
 beforeEach(() => jest.resetAllMocks());
 
 it('shows loading immediately, prevents duplicate requests, and finishes after hydration', async () => {
   let finish!: (value: any) => void;
-  (getPublication as jest.Mock).mockReturnValue(
+  (openPublication as jest.Mock).mockReturnValue(
     new Promise((resolve) => {
       finish = resolve;
     })
@@ -19,7 +19,8 @@ it('shows loading immediately, prevents duplicate requests, and finishes after h
     void result.current.load(hydrate);
     void result.current.load(hydrate);
   });
-  expect(getPublication).toHaveBeenCalledTimes(1);
+  expect(openPublication).toHaveBeenCalledTimes(1);
+  expect(openPublication).toHaveBeenCalledWith('100');
   await act(async () => {
     finish({ employee: { resourceName: '员工' } });
   });
@@ -28,7 +29,7 @@ it('shows loading immediately, prevents duplicate requests, and finishes after h
 });
 
 it('retains a visible error and retries with the original hydration callback', async () => {
-  (getPublication as jest.Mock).mockRejectedValueOnce('网络暂时不可用').mockResolvedValue({ employee: {} });
+  (openPublication as jest.Mock).mockRejectedValueOnce('网络暂时不可用').mockResolvedValue({ employee: {} });
   const { result } = renderHook(() => usePublicationDetailLoader('100'));
   const hydrate = jest.fn();
   await act(async () => {
@@ -41,12 +42,12 @@ it('retains a visible error and retries with the original hydration callback', a
   });
   expect(hydrate).toHaveBeenCalledTimes(1);
   expect(result.current.error).toBe('');
-  expect(getPublication).toHaveBeenCalledTimes(2);
+  expect(openPublication).toHaveBeenCalledTimes(2);
 });
 
 it('ignores a late response after leaving the publication page', async () => {
   let finish!: (value: any) => void;
-  (getPublication as jest.Mock).mockReturnValue(
+  (openPublication as jest.Mock).mockReturnValue(
     new Promise((resolve) => {
       finish = resolve;
     })
@@ -61,4 +62,25 @@ it('ignores a late response after leaving the publication page', async () => {
     finish({ employee: {} });
   });
   expect(hydrate).not.toHaveBeenCalled();
+});
+
+it('hydrates a synchronized or cleared resource configuration after saving or confirming without reloading the page', async () => {
+  const initial = { employee: { relIds: ['21'] } } as PublicationDetail;
+  const cleared = {
+    ...initial,
+    employee: { relIds: [], relTools: [], relResourceList: [] },
+    sourceResourcesChanged: true,
+  };
+  (openPublication as jest.Mock).mockResolvedValue(initial);
+  const { result, unmount } = renderHook(() => usePublicationDetailLoader('100'));
+  const hydrate = jest.fn();
+  await act(async () => {
+    await result.current.load(hydrate);
+  });
+  act(() => result.current.hydrate(cleared));
+  expect(hydrate).toHaveBeenLastCalledWith(cleared);
+  expect(openPublication).toHaveBeenCalledTimes(1);
+  unmount();
+  act(() => result.current.hydrate(initial));
+  expect(hydrate).toHaveBeenCalledTimes(2);
 });

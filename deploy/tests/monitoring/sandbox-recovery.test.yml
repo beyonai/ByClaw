@@ -1,0 +1,70 @@
+rule_files:
+- sandbox-rules.yml
+evaluation_interval: 15s
+tests:
+- name: persistent OOM beyond lookback
+  interval: 15s
+  input_series:
+  - series: kube_pod_container_status_terminated_reason{namespace="by-service",pod="11111111-1111-1111-1111-111111111111-0",container="sandbox",reason="OOMKilled"}
+    values: 1+0x40
+  - &id003
+    series: byclaw_sandbox_autoscale_runtime_info{sandboxId="11111111-1111-1111-1111-111111111111",pod="11111111-1111-1111-1111-111111111111-0",userCode="test-user",profileKey="s",serviceType="byclaw-dsh"}
+    values: 1+0x40
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="OpenClawSandboxOOMKilled",alertstate="firing"})
+    eval_time: 10m
+    exp_samples: &id001
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="OpenClawSandboxOOMKilled",alertstate="firing"})
+    eval_time: 30s
+    exp_samples: *id001
+- name: terminated Error with restartPolicy Never
+  interval: 15s
+  input_series:
+  - series: kube_pod_container_status_terminated_reason{namespace="by-service",pod="11111111-1111-1111-1111-111111111111-0",container="sandbox",reason="Error"}
+    values: 1+0x40
+  - series: byclaw_sandbox_autoscale_runtime_info{sandboxId="11111111-1111-1111-1111-111111111111",pod="11111111-1111-1111-1111-111111111111-0",userCode="test-user",profileKey="s",serviceType="byclaw-dsh"}
+    values: 1+0x40
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="OpenClawSandboxStartupFailed",alertstate="firing"})
+    eval_time: 10m
+    exp_samples: &id002
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="OpenClawSandboxStartupFailed",alertstate="firing"})
+    eval_time: 1m
+    exp_samples: *id002
+  - expr: count(ALERTS{alertname="OpenClawSandboxStartupFailed",alertstate="firing"})
+    eval_time: 30s
+    exp_samples: []
+- name: recovered OOM stops firing
+  interval: 15s
+  input_series:
+  - series: kube_pod_container_status_terminated_reason{namespace="by-service",pod="11111111-1111-1111-1111-111111111111-0",container="sandbox",reason="OOMKilled"}
+    values: 0+0x40
+  - series: byclaw_sandbox_autoscale_runtime_info{sandboxId="11111111-1111-1111-1111-111111111111",pod="11111111-1111-1111-1111-111111111111-0",userCode="test-user",profileKey="s",serviceType="byclaw-dsh"}
+    values: 1+0x40
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="OpenClawSandboxOOMKilled",alertstate="firing"})
+    eval_time: 10m
+    exp_samples: []
+- name: released sandbox without runtime metadata
+  interval: 15s
+  input_series:
+  - series: kube_pod_container_status_terminated_reason{namespace="by-service",pod="11111111-1111-1111-1111-111111111111-0",container="sandbox",reason="OOMKilled"}
+    values: 1+0x40
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="OpenClawSandboxOOMKilled",alertstate="firing"})
+    eval_time: 10m
+    exp_samples: []
+- name: cleared last-termination gauge must not trigger recovery
+  interval: 15s
+  input_series:
+  - series: kube_pod_container_status_last_terminated_reason{namespace="by-service",pod="11111111-1111-1111-1111-111111111111-0",container="sandbox",reason="OOMKilled"}
+    values: 1+0x36 0+0x4
+  - *id003
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="OpenClawSandboxOOMKilled",alertstate="firing"})
+    eval_time: 10m
+    exp_samples: []

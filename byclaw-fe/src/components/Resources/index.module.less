@@ -8,6 +8,11 @@
   flex-direction: column;
   // 列表自身已有底部外边距，外层仅保留少量留白以扩大可视区域。
   padding: 16px 30px 8px;
+
+  > .quickFilters {
+    // 列表顶部已留出 20px，取消筛选行额外的底部间距，避免留白叠加。
+    margin-bottom: 0;
+  }
 }
 
 .myResourcesContainer {

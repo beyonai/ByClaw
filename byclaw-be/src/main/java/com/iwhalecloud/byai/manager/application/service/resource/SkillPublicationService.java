@@ -3,6 +3,8 @@ package com.iwhalecloud.byai.manager.application.service.resource;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
@@ -23,9 +25,28 @@ public class SkillPublicationService {
     private final PrivilegeGrantMapper mapper;
     private final SsResourceService resources;
     private final SequenceService sequence;
+    private final SsResExtSkillService skills;
+    private final DigitalEmployeeGovernanceService governance;
 
     public boolean canReview() {
         return CurrentUserHolder.isAdminVip() || CurrentUserHolder.isPlatformManager();
+    }
+
+    /** 独立发布副本的创建人可能是代发布人，审核归属必须读取冻结的来源创建人。 */
+    public boolean canReview(SsResource target) {
+        if (!canReview() || target == null || !"SKILL".equals(target.getResourceBizType())
+            || !"enterprise".equals(target.getOwnerType()) || CurrentUserHolder.getEnterpriseId() == null
+            || !Objects.equals(target.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
+        if (CurrentUserHolder.isAdminVip()) return true;
+        var ext = skills.findById(target.getResourceId());
+        Long creatorId = target.getCreateBy();
+        if (ext != null && org.apache.commons.lang3.StringUtils.isNotBlank(ext.getTargetContent())) {
+            try {
+                var provenance = com.alibaba.fastjson.JSON.parseObject(ext.getTargetContent());
+                if (provenance.containsKey("sourceCreatorId")) creatorId = provenance.getLong("sourceCreatorId");
+            } catch (RuntimeException invalidProvenance) { return false; }
+        }
+        return creatorId != null && !governance.isAdminVipCreator(creatorId);
     }
 
     /** 调用方已经锁定个人源技能；创建快照与申请处于同一个事务。 */
@@ -39,11 +60,17 @@ public class SkillPublicationService {
         request.setGrantToObjType("USER");
         request.setGrantToType("RED");
         request.setOperType("READ");
-        request.setStatusCd("P");
+        boolean automatic = canReview() && (CurrentUserHolder.isAdminVip()
+            || source.getCreateBy() != null && !governance.isAdminVipCreator(source.getCreateBy()));
+        request.setStatusCd(automatic ? "X" : "P");
         request.setCreateStaff(CurrentUserHolder.getCurrentUserId());
         request.setCreateDate(new Date());
+        if (automatic) {
+            request.setUpdateStaff(CurrentUserHolder.getCurrentUserId());
+            request.setUpdateDate(new Date());
+        }
         mapper.insert(request);
-        target.setResourceStatus(ResourceStatus.AUDIT.getNum());
+        target.setResourceStatus(automatic ? ResourceStatus.ON_SHELF.getNum() : ResourceStatus.AUDIT.getNum());
         resources.updateResourceEntity(target);
     }
 
@@ -59,6 +86,7 @@ public class SkillPublicationService {
             || !Objects.equals(target.getResourceStatus(), ResourceStatus.AUDIT.getNum())) {
             throw new IllegalArgumentException(I18nUtil.get("skill.publication.review.processed"));
         }
+        if (!canReview(target)) throw new IllegalArgumentException(I18nUtil.get("skill.publication.review.adminvip.only"));
         PrivilegeGrant request = mapper.selectOne(new LambdaQueryWrapper<PrivilegeGrant>()
             .eq(PrivilegeGrant::getGrantObjId, resourceId)
             .eq(PrivilegeGrant::getGrantObjType, "SKILL")

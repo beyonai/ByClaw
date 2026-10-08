@@ -39,22 +39,39 @@ describe('available employee filter params', () => {
     });
   });
 
+  it.each(['PERSONAL_GROUP', 'ENTERPRISE_GROUP', 'PERSONAL_EMPLOYEE', 'ENTERPRISE_EMPLOYEE'])(
+    'ignores stale %s type filtering in enterprise recommendations while retaining permission',
+    (digitalEmployeeType) => {
+      expect(
+        buildDigitalEmployeeFilterParam(
+          'official',
+          { resourceStatus: '', digitalEmployeeType, permission: 'APPLIED_BY_ME' },
+          'official'
+        )
+      ).toEqual({ resourceStatus: '2', excludeDeleted: true, permission: 'APPLIED_BY_ME' });
+    }
+  );
+
   it.each<[string, Record<string, string | boolean>]>([
     ['PERSONAL_GROUP', { ownerType: 'personal', agentType: '017' }],
     ['ENTERPRISE_GROUP', { ownerType: 'enterprise', agentType: '017' }],
     ['PERSONAL_EMPLOYEE', { ownerType: 'personal', includeEmployeeGroup: false }],
     ['ENTERPRISE_EMPLOYEE', { ownerType: 'enterprise', includeEmployeeGroup: false }],
-  ])('filters official recommendations by %s with permission', (digitalEmployeeType, expected) => {
+  ])('retains %s filtering in favorites', (digitalEmployeeType, expected) => {
     expect(
       buildDigitalEmployeeFilterParam(
-        'official',
-        { resourceStatus: '', digitalEmployeeType, permission: 'APPLIED_BY_ME' },
-        'official'
+        'favorites',
+        {
+          resourceStatus: '2',
+          digitalEmployeeType,
+          permission: 'AUTHORIZED_TO_ME',
+        },
+        'favorites'
       )
-    ).toEqual({ resourceStatus: '2', excludeDeleted: true, permission: 'APPLIED_BY_ME', ...expected });
+    ).toEqual({ resourceStatus: '2', excludeDeleted: true, permission: 'AUTHORIZED_TO_ME', ...expected });
   });
 
-  it('clears official type restrictions when selecting all', () => {
+  it('leaves enterprise recommendations unrestricted without a type value', () => {
     expect(
       buildDigitalEmployeeFilterParam('official', { resourceStatus: '2', digitalEmployeeType: '' }, 'official')
     ).toEqual({ resourceStatus: '2', excludeDeleted: true });

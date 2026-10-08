@@ -33,6 +33,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -69,7 +70,13 @@ public class UserController {
         return ResponseUtil.successRes(userAvatarApplicationService.uploadAvatar(file));
     }
 
-    /** 修改当前登录用户的用户名和可选头像文件或地址。 */
+    /** 获取当前登录用户的完整个人资料。 */
+    @GetMapping("/profile")
+    public ResponseUtil<UserProfileResponse> profile() {
+        return ResponseUtil.successResponse(userProfileApplicationService.getProfile());
+    }
+
+    /** 修改当前登录用户的用户名、头像及自填资料，不修改组织或权限。 */
     @PostMapping(value = "/updateProfile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<UserProfileResponse> updateProfile(
         @Validated @ModelAttribute UserProfileUpdateRequest request) throws IOException {

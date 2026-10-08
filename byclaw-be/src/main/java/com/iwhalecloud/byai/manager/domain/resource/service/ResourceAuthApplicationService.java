@@ -83,6 +83,9 @@ public class ResourceAuthApplicationService {
     @Autowired
     private SuasSuperassistApplicationService suasSuperassistApplicationService;
 
+    @Autowired
+    private ResourceFavoriteService resourceFavoriteService;
+
     /**
      * 组织-资源授权明细列表查询
      *
@@ -93,6 +96,14 @@ public class ResourceAuthApplicationService {
 
         // 添加用户权限上下文信息
         resourceAuthContextService.setCurrentUserAuthQo(resourceUseAuthQo);
+        resourceUseAuthQo.setFavoriteTenantId(null);
+        if (Boolean.TRUE.equals(resourceUseAuthQo.getIncludeFavorites())
+            || Boolean.TRUE.equals(resourceUseAuthQo.getFavoritesOnly())) {
+            Long tenantId = resourceFavoriteService.resolveQueryTenant(
+                resourceUseAuthQo.getIncludeFavorites(), resourceUseAuthQo.getFavoritesOnly());
+            resourceUseAuthQo.setFavoriteTenantId(tenantId);
+            resourceUseAuthQo.setIncludeFavorites(tenantId != null);
+        }
         fillPublishOrgIds(resourceUseAuthQo);
         fillCatalogIds(resourceUseAuthQo);
 

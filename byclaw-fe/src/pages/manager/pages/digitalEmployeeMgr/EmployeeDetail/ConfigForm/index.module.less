@@ -1,3 +1,23 @@
+.pageScroll {
+  .formSection {
+    .basicSettings,
+    .configurationDetails {
+      overflow: visible;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .formColumns {
+      flex-direction: column;
+    }
+
+    .formSection .basicSettings {
+      border-right: 0;
+      border-bottom: 1px solid #e8e8e8;
+    }
+  }
+}
+
 .formSection {
   width: 100%;
   min-width: 0;

@@ -8,6 +8,9 @@ public class WorkspaceSkillCenterQo {
     private Long resourceId;
     private String skillPath;
 
+    /** 已安装技能的资源 ID；服务端验证员工绑定并解析目录，不信任客户端路径。 */
+    private Long targetResourceId;
+
     /** 预检查版本，避免确认期间目录或资源中心技能变化后覆盖新内容。 */
     private String revision;
 }

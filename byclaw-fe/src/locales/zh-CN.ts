@@ -266,7 +266,8 @@ export default {
   'resource.installTool': '安装工具',
   'resource.rowRefreshFailed': '操作已成功，当前资源详情刷新失败，请稍后重试',
   'resource.publishToEnterprise': '发布到官方推荐',
-  'resource.publishToEnterpriseConfirm': '提交发布到官方推荐申请？审核通过后生效。',
+  'resource.publishToEnterpriseConfirm':
+    '确认发布企业技能副本？管理员符合免审条件时直接发布并留存审核记录；平台管理员发布 adminvip 创建的技能，需由 adminvip 审核。',
   'resource.enterpriseSkillPending': '已提交发布申请，等待审核',
   'resource.enterprisePersonalDependenciesTitle': '关联个人资源提醒',
   'resource.enterprisePersonalDependenciesWarning':

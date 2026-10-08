@@ -1,5 +1,6 @@
 import { openEmployeePublication, publicationEntryLabel } from '@/service/employeePublication';
 import { publicationErrorMessage } from '@/utils/publicationError';
+import { showSkillPublication, skillPublicationEntryLabel } from '../../skillPublication';
 import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
@@ -10,8 +11,12 @@ import { getLocale, useDispatch, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
-import { publishSkillToEnterprise, restoreResource } from '@/pages/manager/service/resources';
-import type { EnterpriseSkillPublishResult } from '@/pages/manager/service/resources';
+import {
+  getSkillPublicationPermissions,
+  publishSkillToEnterprise,
+  restoreResource,
+} from '@/pages/manager/service/resources';
+import type { EnterpriseSkillPublishResult, SkillPublicationSummary } from '@/pages/manager/service/resources';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
 import { useSkillExport } from '../SkillExportButton';
@@ -26,6 +31,7 @@ import { useWorkspaceSkillActions } from '../../workspaceSkill/useWorkspaceSkill
 import WorkspaceSkillShareAuthModal from '../../workspaceSkill/WorkspaceSkillShareAuthModal';
 import type { WorkspaceSkillItem } from '../../workspaceSkill/utils';
 import ResourceInstallDialog from '../ResourceInstallDialog';
+import ResourceFavoriteActions from '../ResourceFavoriteActions';
 import type { ResourceInstallTargetContext } from '../../resourceInstallContext';
 import styles from './index.module.less';
 
@@ -53,6 +59,8 @@ export interface IResourceCardItem {
   resourceSourcePkId?: string;
   focusCount?: number | string;
   useCount?: number | string;
+  favorited?: boolean;
+  favoriteCount?: number | string;
   memberName?: string;
   manUserName?: string;
   creatorId?: string;
@@ -65,6 +73,7 @@ export interface IResourceCardItem {
   officialPublication?: boolean;
   canPublishEmployee?: boolean;
   employeePublicationStatus?: string;
+  employeePublicationUpdate?: boolean;
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canApplyUse?: boolean;
@@ -72,6 +81,7 @@ export interface IResourceCardItem {
   canOnShelf?: boolean;
   canOffShelf?: boolean;
   canPublishToEnterprise?: boolean;
+  skillPublication?: SkillPublicationSummary;
   canUnShelf?: boolean;
   canDeleteData?: boolean;
   canSetDefault?: boolean;
@@ -124,7 +134,6 @@ type ResourceCardActionConfig = {
   extraMenuItems?: ExtraResourceMenuItem[];
   hiddenMenuItemKeys?: string[];
   onApplyUse?: () => void;
-  onAuditUse?: () => void;
   onDelete?: (feedback: ResourceActionFeedback) => void | Promise<void>;
   onDeleteData?: (feedback: ResourceActionFeedback) => void | Promise<void>;
   onShelf?: (feedback: ResourceActionFeedback) => void | Promise<void>;
@@ -177,6 +186,7 @@ export type ResourceCardProps = {
   className?: string;
   variant?: 'default' | 'skillPoster';
   digitalEmployeeActionMode?: boolean;
+  enableFavorites?: boolean;
 };
 
 const ResourceInfo = (props: { resource: IResourceCardItem; className?: string }) => {
@@ -365,6 +375,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resourceType,
     variant = 'default',
     digitalEmployeeActionMode = false,
+    enableFavorites = false,
   } = props;
   const { ownerType } = resource || {};
   const isWorkspaceSkillResource = isWorkspaceSkill(resource);
@@ -392,6 +403,17 @@ const RenderContent = (props: ResourceCardProps) => {
   } = actionConfig || {};
   const intl = useIntl();
   const lifecycleLock = useRef(false);
+  const favoriteActions =
+    enableFavorites && resource.favoriteCount !== undefined && resource.favoriteCount !== null ? (
+      <ResourceFavoriteActions
+        resourceId={`${resource.resourceId ?? resource.id ?? ''}`}
+        favorited={resource.favorited}
+        favoriteCount={resource.favoriteCount}
+        hasUsePermission={resource.hasUsePermission}
+        useApplyPending={resource.useApplyPending}
+        operationPermissionsLoaded={resource.operationPermissionsLoaded}
+      />
+    ) : null;
   const [processingLifecycle, setProcessingLifecycle] = useState(false);
   // 提示只覆盖当前操作，异步期间锁定本卡片，其他卡片和列表仍可交互。
   const runLifecycle = useCallback(
@@ -431,11 +453,15 @@ const RenderContent = (props: ResourceCardProps) => {
   const [openingPublication, setOpeningPublication] = useState(false);
   const publicationFeedbackCleanup = useRef<() => void>();
   useEffect(() => () => publicationFeedbackCleanup.current?.(), []);
-  const [enterpriseCopyCreated, setEnterpriseCopyCreated] = useState(false);
+  const [skillPublication, setSkillPublication] = useState(resource.skillPublication);
+  const [skillPublicationFailed, setSkillPublicationFailed] = useState(false);
+  const [publicationSourceId, setPublicationSourceId] = useState(resource.resourceId);
   const publishToEnterpriseLock = useRef(false);
   useEffect(() => {
-    setEnterpriseCopyCreated(false);
-  }, [resource]);
+    setSkillPublication(resource.skillPublication);
+    setSkillPublicationFailed(false);
+    setPublicationSourceId(resource.resourceId);
+  }, [resource.resourceId, resource.skillPublication]);
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -511,6 +537,9 @@ const RenderContent = (props: ResourceCardProps) => {
 
   const isDigitalEmployeeResource =
     resource.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE || resourceType === resourceBizTypeMap.DIG_EMPLOYEE;
+  // 资源中心的技能、知识和工具沿用员工卡片主操作区；其他复用场景保留原菜单。
+  const resourceActionMode =
+    !isDigitalEmployeeResource && (isSkillResource(resource, resourceType) || enableResourceLifecycle);
   const isPublishedDigitalEmployee =
     !isDigitalEmployeeResource || `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` === '2';
   const isPendingUseApproval =
@@ -563,6 +592,8 @@ const RenderContent = (props: ResourceCardProps) => {
         '1': 'resourceStatus.pendingShelf',
         '2': 'resourceStatus.published',
         '3': 'resourceStatus.unpublished',
+        '4': 'resourceStatus.reviewing',
+        '5': 'resourceStatus.notPassed',
       };
       // 员工组与数字员工接口的状态字段可能不同，统一按同一组回退字段取值。
       const statusMessageId =
@@ -657,6 +688,15 @@ const RenderContent = (props: ResourceCardProps) => {
   const isInstalledResource = Boolean(
     resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`)
   );
+  // 安装入口移到技能卡片主操作区，继续沿用原菜单的权限、状态及目标员工限制。
+  const canShowInstallAction =
+    !isCancelledResource &&
+    !isWorkspaceSkillResource &&
+    canInstallResource(resource, resourceType) &&
+    (!enableResourceLifecycle || `${resource.resourceStatus}` === '2') &&
+    actionConfig?.canInstallToTarget !== false &&
+    !isInstalledResource &&
+    !actionConfig?.hiddenMenuItemKeys?.includes('install');
   const isCardClickDisabled =
     typeof cardClickDisabled === 'function' ? cardClickDisabled(resource) : !!cardClickDisabled;
 
@@ -728,6 +768,7 @@ const RenderContent = (props: ResourceCardProps) => {
     setPublishingToEnterprise(true);
     const messageKey = `publish-enterprise-${resource.resourceId}`;
     message.loading({ key: messageKey, content: intl.formatMessage({ id: 'common.processing' }), duration: 0 });
+    let sourceId = publicationSourceId;
     try {
       // 工作空间技能没有真实资源 ID，复用现有资源化及同名覆盖确认后再复制到企业。
       const sourceSkill = isWorkspaceSkillResource
@@ -737,7 +778,9 @@ const RenderContent = (props: ResourceCardProps) => {
         message.destroy(messageKey);
         return;
       }
-      const result = await publishSkillToEnterprise(String(sourceSkill.resourceId));
+      sourceId = String(sourceSkill.resourceId);
+      setPublicationSourceId(sourceId);
+      const result = await publishSkillToEnterprise(sourceId);
       // 关联个人资源只做提醒，提交已经成功，不要求用户再次确认。
       if (result.personalDependencies?.length) {
         Modal.warning({
@@ -756,7 +799,8 @@ const RenderContent = (props: ResourceCardProps) => {
         });
       }
       // 仅更新当前卡片，不刷新或重新挂载列表，避免 loading 结束时列表短暂空白。
-      setEnterpriseCopyCreated(true);
+      setSkillPublication(result.resource);
+      setSkillPublicationFailed(false);
       message.success({
         key: messageKey,
         content: (
@@ -769,7 +813,7 @@ const RenderContent = (props: ResourceCardProps) => {
                     ? 'resource.enterpriseSkillExists'
                     : 'resource.publishToEnterpriseSuccess',
             })}
-            {onEnterpriseSkillDetail && result.resource.resourceStatus !== 4 && (
+            {onEnterpriseSkillDetail && result.resource.resourceStatus === 2 && (
               <Button type="link" onClick={() => onEnterpriseSkillDetail(result.resource)}>
                 {intl.formatMessage({ id: 'resource.viewEnterpriseSkill' })}
               </Button>
@@ -779,15 +823,51 @@ const RenderContent = (props: ResourceCardProps) => {
         duration: 6,
       });
     } catch (error) {
-      let errorText = intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' });
-      if (typeof error === 'string') errorText = error;
-      else if (error instanceof Error) errorText = error.message;
-      message.error({ key: messageKey, content: errorText });
+      setSkillPublicationFailed(true);
+      message.error({
+        key: messageKey,
+        content: publicationErrorMessage(error, intl.formatMessage({ id: 'resource.publishToEnterpriseFailed' })),
+      });
+      // 响应丢失不代表事务失败；只读核对已提交申请，避免误导用户反复创建。
+      if (sourceId && (!isWorkspaceSkillResource || sourceId !== resource.resourceId)) {
+        try {
+          const permissions = await getSkillPublicationPermissions(sourceId);
+          setSkillPublication(permissions.skillPublication);
+        } catch {
+          // 状态核对失败保留重试入口，写接口仍负责幂等。
+        }
+      }
     } finally {
       publishToEnterpriseLock.current = false;
       setPublishingToEnterprise(false);
     }
-  }, [resource, isWorkspaceSkillResource, workspaceActions.resourceizeSkill, onEnterpriseSkillDetail, intl]);
+  }, [
+    resource,
+    publicationSourceId,
+    isWorkspaceSkillResource,
+    workspaceActions.resourceizeSkill,
+    onEnterpriseSkillDetail,
+    intl,
+  ]);
+
+  const viewSkillPublication = useCallback(async () => {
+    if (!publicationSourceId || publishToEnterpriseLock.current) return;
+    publishToEnterpriseLock.current = true;
+    setPublishingToEnterprise(true);
+    try {
+      await showSkillPublication({
+        sourceId: publicationSourceId,
+        onChange: setSkillPublication,
+        onPublish: handlePublishToEnterprise,
+        onDetail: onEnterpriseSkillDetail,
+      });
+    } catch (error) {
+      message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'resource.skillPublicationLoadFailed' })));
+    } finally {
+      publishToEnterpriseLock.current = false;
+      setPublishingToEnterprise(false);
+    }
+  }, [publicationSourceId, handlePublishToEnterprise, onEnterpriseSkillDetail, intl]);
 
   const openPublication = useCallback(async () => {
     if (publishToEnterpriseLock.current) return;
@@ -809,7 +889,11 @@ const RenderContent = (props: ResourceCardProps) => {
     publicationFeedbackCleanup.current = clearFeedback;
     try {
       const resourceId = String(resource.resourceId || resource.id || resource.agentId);
-      await openEmployeePublication(resourceId);
+      if (resource.employeePublicationStatus === 'PUBLISHED') {
+        await openEmployeePublication(resourceId, 'publishUpdate');
+      } else {
+        await openEmployeePublication(resourceId);
+      }
     } catch (error: any) {
       message.error(publicationErrorMessage(error, '无法发起发布申请'));
     } finally {
@@ -818,7 +902,7 @@ const RenderContent = (props: ResourceCardProps) => {
       publishToEnterpriseLock.current = false;
       setOpeningPublication(false);
     }
-  }, [resource.resourceId, resource.id, resource.agentId]);
+  }, [resource.resourceId, resource.id, resource.agentId, resource.employeePublicationStatus]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const {
@@ -873,12 +957,22 @@ const RenderContent = (props: ResourceCardProps) => {
         label: (
           <BuildMenuLabel
             icon="icon-a-Uploadshangchuan"
-            text={publicationEntryLabel(resource.employeePublicationStatus)}
+            text={publicationEntryLabel(resource.employeePublicationStatus, resource.employeePublicationUpdate)}
             loading={openingPublication}
           />
         ),
         onClick: () => openPublication(),
       });
+      if (resource.employeePublicationStatus === 'PUBLISHED') {
+        items.push({
+          key: 'viewEmployeePublication',
+          label: <BuildMenuLabel icon="icon-a-Uploadshangchuan" text="查看发布记录" />,
+          onClick: () =>
+            openEmployeePublication(String(resource.resourceId || resource.id || resource.agentId)).catch((error) =>
+              message.error(publicationErrorMessage(error, '无法查看发布记录'))
+            ),
+        });
+      }
     }
 
     // 编辑信息
@@ -897,13 +991,19 @@ const RenderContent = (props: ResourceCardProps) => {
       !isWorkspaceSkillResource &&
       currentResourceStatus !== '-1' &&
       resource.resourceId &&
-      !enterpriseCopyCreated &&
       actionConfig?.enablePublishToEnterprise === true &&
       resource.canPublishToEnterprise === true
     ) {
       items.push({
         key: 'publishToEnterprise',
-        label: (
+        disabled: publishingToEnterprise,
+        label: skillPublication ? (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={intl.formatMessage({ id: skillPublicationEntryLabel(skillPublication) })}
+            loading={publishingToEnterprise}
+          />
+        ) : (
           <ConfirmMenuLabel
             title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
             loading={publishingToEnterprise}
@@ -911,11 +1011,12 @@ const RenderContent = (props: ResourceCardProps) => {
           >
             <BuildMenuLabel
               icon="icon-a-Uploadshangchuan"
-              text={intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+              text={intl.formatMessage({ id: skillPublicationEntryLabel(undefined, skillPublicationFailed) })}
               loading={publishingToEnterprise}
             />
           </ConfirmMenuLabel>
         ),
+        onClick: skillPublication ? () => void viewSkillPublication() : undefined,
       });
     }
 
@@ -953,8 +1054,8 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 数字员工和员工组统一使用卡片上的加号申请；其他资源保留菜单申请入口。
-    if (!isDigitalEmployeeResource && canApplyUse && canApplyUseForStatus) {
+    // 资源中心与数字员工使用卡片上的加号申请，不重复展示菜单入口。
+    if (!isDigitalEmployeeResource && !resourceActionMode && canApplyUse && canApplyUseForStatus) {
       items.push({
         key: 'applyUse',
         label: (
@@ -971,12 +1072,7 @@ const RenderContent = (props: ResourceCardProps) => {
     // 使用审核统一由审核中心承载，卡片不再返回或消费审核按钮权限。
 
     // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
-    if (
-      canInstallResource(resource, resourceType) &&
-      (!enableResourceLifecycle || `${resource.resourceStatus}` === '2') &&
-      actionConfig?.canInstallToTarget !== false &&
-      !isInstalledResource
-    ) {
+    if (canShowInstallAction && !isSkillResource(resource, resourceType)) {
       items.push({
         key: 'install',
         label: (
@@ -1153,13 +1249,16 @@ const RenderContent = (props: ResourceCardProps) => {
     publishingToEnterprise,
     openingPublication,
     processingLifecycle,
-    enterpriseCopyCreated,
+    skillPublication,
+    skillPublicationFailed,
+    viewSkillPublication,
     isPersonalResource,
     isWorkspaceSkillResource,
     currentResourceStatus,
     intl,
     isDefaultDigitalEmployee,
     isDigitalEmployeeResource,
+    resourceActionMode,
     isDeletedDigitalEmployee,
     isPublishedDigitalEmployee,
     onApplyUse,
@@ -1184,6 +1283,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.officialPublication,
     resource?.canPublishEmployee,
     resource?.employeePublicationStatus,
+    resource?.employeePublicationUpdate,
     openPublication,
     resource?.canManageAuth,
     resource?.canUseAuth,
@@ -1206,6 +1306,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resourceType,
     isInnerSkill,
     isInstalledResource,
+    canShowInstallAction,
     installing,
     restoring,
     settingDefault,
@@ -1228,10 +1329,17 @@ const RenderContent = (props: ResourceCardProps) => {
         onClick: () => workspaceActions.shareSkill(resource as WorkspaceSkillItem),
       },
     ];
-    if (actionConfig?.enablePublishToEnterprise && actionConfig?.canManageWorkspaceSkill && !enterpriseCopyCreated) {
+    if (actionConfig?.enablePublishToEnterprise && actionConfig?.canManageWorkspaceSkill) {
       items.push({
         key: 'publishToEnterprise',
-        label: (
+        disabled: publishingToEnterprise,
+        label: skillPublication ? (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={intl.formatMessage({ id: skillPublicationEntryLabel(skillPublication) })}
+            loading={publishingToEnterprise}
+          />
+        ) : (
           <ConfirmMenuLabel
             title={intl.formatMessage({ id: 'resource.publishToEnterpriseConfirm' })}
             loading={publishingToEnterprise}
@@ -1239,11 +1347,12 @@ const RenderContent = (props: ResourceCardProps) => {
           >
             <BuildMenuLabel
               icon="icon-a-Uploadshangchuan"
-              text={intl.formatMessage({ id: 'resource.publishToEnterprise' })}
+              text={intl.formatMessage({ id: skillPublicationEntryLabel(undefined, skillPublicationFailed) })}
               loading={publishingToEnterprise}
             />
           </ConfirmMenuLabel>
         ),
+        onClick: skillPublication ? () => void viewSkillPublication() : undefined,
       });
     }
     // 工作空间技能同样遵循浏览页隐藏规则，管理入口仍需员工管理权限（后端同样校验）。
@@ -1258,7 +1367,9 @@ const RenderContent = (props: ResourceCardProps) => {
     return items.filter((item) => item && !hiddenKeys.has(String(item.key)));
   }, [
     actionConfig?.enablePublishToEnterprise,
-    enterpriseCopyCreated,
+    skillPublication,
+    skillPublicationFailed,
+    viewSkillPublication,
     publishingToEnterprise,
     handlePublishToEnterprise,
     isWorkspaceSkillResource,
@@ -1330,6 +1441,93 @@ const RenderContent = (props: ResourceCardProps) => {
       />
     ) : null;
 
+  // 申请确认及待审核展示与数字员工共用，阻止操作事件打开卡片详情。
+  const applyUseAction = (
+    <Tooltip title={intl.formatMessage({ id: 'resource.applyUse' })}>
+      <Popconfirm
+        title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        onConfirm={(event) => {
+          event?.stopPropagation();
+          onApplyUse?.();
+        }}
+        onCancel={(event) => event?.stopPropagation()}
+      >
+        <Button
+          shape="circle"
+          aria-label={intl.formatMessage({ id: 'resource.applyUse' })}
+          icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
+          onClick={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+          }}
+        />
+      </Popconfirm>
+    </Tooltip>
+  );
+  const pendingUseButton = (
+    <Button
+      disabled
+      shape="circle"
+      aria-label={intl.formatMessage({ id: 'resource.pendingAuthorization' })}
+      icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
+    />
+  );
+  const pendingUseAction = (
+    <div className={styles.applyActionWrap}>
+      {pendingUseButton}
+      <span className={styles.pendingApplyText}>{intl.formatMessage({ id: 'resource.pendingAuthorization' })}</span>
+    </div>
+  );
+  // 状态文字不参与资源中心操作区布局，避免居中容器变高、变宽后带动按钮移位。
+  // 禁用按钮用容器接收悬浮事件，待审核状态仍可通过提示和无障碍名称读取。
+  const pendingResourceUseAction = (
+    <Tooltip title={intl.formatMessage({ id: 'resource.pendingAuthorization' })}>
+      <span className={styles.applyActionWrap}>{pendingUseButton}</span>
+    </Tooltip>
+  );
+  const showResourceUseAction =
+    resourceActionMode &&
+    !isCancelledResource &&
+    !isWorkspaceSkillResource &&
+    !isTruthyFlag(resource.hasUsePermission) &&
+    !actionConfig?.hiddenMenuItemKeys?.includes('applyUse');
+  const showPendingResourceUse = showResourceUseAction && isPendingUseApproval;
+  const showResourceApplyUse = showResourceUseAction && !showPendingResourceUse && canApplyForUse;
+  const showSkillInstallAction = isSkillResource(resource, resourceType) && canShowInstallAction;
+  const resourceCardActions =
+    resourceActionMode &&
+    (showPendingResourceUse || showResourceApplyUse || showSkillInstallAction || !!effectiveMenuItems?.length) ? (
+      <div
+        className={styles.digitalEmployeeActions}
+        onClick={(event) => {
+          event.stopPropagation();
+          event.preventDefault();
+        }}
+      >
+        {showPendingResourceUse ? pendingResourceUseAction : showResourceApplyUse ? applyUseAction : null}
+        {showSkillInstallAction && (
+          <Tooltip title={intl.formatMessage({ id: 'resource.installSkill' })}>
+            <Button
+              shape="circle"
+              aria-label={intl.formatMessage({ id: 'resource.installSkill' })}
+              icon={<AntdIcon type="icon-a-Addtianjia" className={styles.cardActionBtnIcon} />}
+              loading={installing}
+              disabled={installing}
+              onClick={() => setInstallDialogOpen(true)}
+            />
+          </Tooltip>
+        )}
+        {!!effectiveMenuItems?.length && (
+          <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight" trigger={['click']}>
+            <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
+          </Dropdown>
+        )}
+        {workspaceShareModal}
+      </div>
+    ) : null;
+
   const getDefaultIcon = () => {
     switch (resourceType) {
       case 'KG_DOC':
@@ -1373,7 +1571,11 @@ const RenderContent = (props: ResourceCardProps) => {
           )}
         </div>
         {installing && <InstallingOverlay />}
-        <div className={styles.skillPosterBody}>
+        <div
+          className={classnames(styles.skillPosterBody, {
+            [styles.resourceInfoWithActions]: !!resourceCardActions,
+          })}
+        >
           <div className={styles.skillPosterHeader}>
             <Paragraph className={styles.skillPosterTitle} ellipsis={{ tooltip: `${displayTitle}` }}>
               {displayTitle}
@@ -1417,24 +1619,9 @@ const RenderContent = (props: ResourceCardProps) => {
               )}
             </span>
           </div>
+          {favoriteActions}
         </div>
-        {!!effectiveMenuItems?.length && (
-          <div
-            className={styles.skillPosterAction}
-            onClick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-            }}
-          >
-            <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight">
-              <Button
-                className={styles.skillPosterActionBtn}
-                icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
-              />
-            </Dropdown>
-            {workspaceShareModal}
-          </div>
-        )}
+        {resourceCardActions}
         {installDialog}
       </div>
     );
@@ -1488,7 +1675,7 @@ const RenderContent = (props: ResourceCardProps) => {
           </div>
           <div
             className={classnames(styles.resourceInfo, 'ub ub-ver ub-f1', {
-              [styles.resourceInfoWithActions]: digitalEmployeeActionMode,
+              [styles.resourceInfoWithActions]: digitalEmployeeActionMode || !!resourceCardActions,
             })}
           >
             <div
@@ -1528,7 +1715,7 @@ const RenderContent = (props: ResourceCardProps) => {
                 </span>
               ) : null}
               {headerExtra}
-              {!!effectiveMenuItems?.length && !digitalEmployeeActionMode && (
+              {!!effectiveMenuItems?.length && !digitalEmployeeActionMode && !resourceActionMode && (
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1546,38 +1733,12 @@ const RenderContent = (props: ResourceCardProps) => {
               )}
             </div>
 
+            {resourceCardActions}
             {digitalEmployeeActionMode && (
               <div className={styles.digitalEmployeeActions} onClick={(event) => event.stopPropagation()}>
-                {isPendingUseApproval ? (
-                  <div className={styles.applyActionWrap}>
-                    <Button disabled shape="circle" icon={<PlusOutlined className={styles.cardActionBtnIcon} />} />
-                    <span className={styles.pendingApplyText}>
-                      {intl.formatMessage({ id: 'resource.pendingAuthorization' })}
-                    </span>
-                  </div>
-                ) : canApplyForUse ? (
+                {isPendingUseApproval ? pendingUseAction : canApplyForUse ? (
                   <>
-                    <Tooltip title={intl.formatMessage({ id: 'resource.applyUse' })}>
-                      <Popconfirm
-                        title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
-                        okText={intl.formatMessage({ id: 'common.confirm' })}
-                        cancelText={intl.formatMessage({ id: 'common.cancel' })}
-                        onConfirm={(event) => {
-                          event?.stopPropagation();
-                          onApplyUse?.();
-                        }}
-                        onCancel={(event) => event?.stopPropagation()}
-                      >
-                        <Button
-                          shape="circle"
-                          icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            event.preventDefault();
-                          }}
-                        />
-                      </Popconfirm>
-                    </Tooltip>
+                    {applyUseAction}
                     {!!effectiveMenuItems?.length ? (
                       <Dropdown
                         menu={{ items: effectiveMenuItems }}
@@ -1657,6 +1818,7 @@ const RenderContent = (props: ResourceCardProps) => {
                 </div>
               ) : null}
             </div>
+            {favoriteActions}
           </div>
         </div>
       </div>
@@ -1690,6 +1852,16 @@ function ResourceCard(props: ResourceCardProps) {
         pointer:
           (!!props.onCardClick || isWorkspaceSkill(displayResource)) && !isCancelledResource && !isCardClickDisabled,
         [styles.skillPosterCard]: variant === 'skillPoster',
+        [styles.skillPosterFavoriteCard]:
+          variant === 'skillPoster' &&
+          props.enableFavorites &&
+          resource.favoriteCount !== undefined &&
+          resource.favoriteCount !== null,
+        [styles.favoriteCard]:
+          variant === 'default' &&
+          props.enableFavorites &&
+          resource.favoriteCount !== undefined &&
+          resource.favoriteCount !== null,
         [styles.disabledClickCard]: isCardClickDisabled,
       })}
       ref={resourceCardRef}

@@ -6,7 +6,6 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
-import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -42,20 +41,20 @@ import org.springframework.beans.factory.ObjectProvider;
 @lombok.extern.slf4j.Slf4j
 public class EmployeePublicationResources {
     private static final int MAX_SKILL_BYTES = 100 * 1024 * 1024;
+    private static final String TENANT_MISMATCH_REASON = "资源所属企业与原数字员工所属企业不一致";
     private final SsResourceService resources;
     private final SsResExtSkillService skills;
     private final ResourceArtifactStorageService storage;
     private final AuthApplicationService auth;
     private final PrivilegeGrantMapper grants;
     private final OrganizationService organizations;
-    private final EnterpriseInfoService enterprise;
     private final DigitalEmployeePublicationMapper publications;
     private final ObjectProvider<EmployeePublicationSkillBridge> skillBridge;
     private final com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService config;
 
     public EmployeePublicationResources(SsResourceService resources,
         SsResExtSkillService skills, ResourceArtifactStorageService storage, AuthApplicationService auth,
-        PrivilegeGrantMapper grants, OrganizationService organizations, EnterpriseInfoService enterprise,
+        PrivilegeGrantMapper grants, OrganizationService organizations,
         DigitalEmployeePublicationMapper publications,
         com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService config,
         ObjectProvider<EmployeePublicationSkillBridge> skillBridge) {
@@ -65,7 +64,6 @@ public class EmployeePublicationResources {
         this.auth = auth;
         this.grants = grants;
         this.organizations = organizations;
-        this.enterprise = enterprise;
         this.publications = publications;
         this.config = config;
         this.skillBridge = skillBridge;
@@ -87,13 +85,15 @@ public class EmployeePublicationResources {
         private String availabilityScope;
         private String impact;
         private Long requestId;
+        private String copyName;
         private List<String> toolCodes = new ArrayList<>();
     }
 
     public List<Long> audienceRoots(Long tenantId) {
-        // 版本开放不改变本部署的组织授权边界；不能将另一企业授权到当前部署的根组织。
-        if (tenantId == null || !Objects.equals(tenantId, enterprise.getEnterpriseId())) {
-            throw new BaseException("发布范围与当前部署企业不一致");
+        // 发布归属沿用源员工，并与当前登录企业一致，不以企业信息表的最大 ID 推断归属。
+        // 当前组织模型是部署级组织树；这里继续沿用既有根组织授权。
+        if (tenantId == null || !Objects.equals(tenantId, CurrentUserHolder.getEnterpriseId())) {
+            throw new BaseException("发布企业与当前登录企业不一致");
         }
         List<Long> roots = organizations.getTopOrgList();
         if (roots == null || roots.isEmpty()) throw new BaseException("企业尚未配置根组织，无法建立全员使用授权");
@@ -169,7 +169,7 @@ public class EmployeePublicationResources {
             dependency.setAction("REFERENCE_RESOURCE");
             if (resource == null || !"SKILL".equals(resource.getResourceBizType())
                 || !Objects.equals(tenantId, resource.getComAcctId())
-                || !isPersonal(resource) || !Objects.equals(authorId, resource.getCreateBy())) {
+                || !isPersonal(resource)) {
                 inspectReference(dependency, authorId, tenantId, roots);
                 result.add(dependency);
                 continue;
@@ -200,6 +200,7 @@ public class EmployeePublicationResources {
                 dependency.setSkill(snapshot);
                 dependency.setTargetId(id);
                 dependency.setAction("COPY_SKILL");
+                dependency.setCopyName(EmployeePublicationNames.enterpriseName(resource.getResourceName(), null));
                 checkSkill(dependency, bytes, authorId, tenantId);
             } catch (Exception error) {
                 omit(dependency, error instanceof BaseException ? error.getMessage() : "技能文件读取或校验失败");
@@ -222,7 +223,7 @@ public class EmployeePublicationResources {
                     SsResource current = resources.findById(dependency.getResource().getResourceId());
                     requireAvailable(current, tenantId);
                     if (!auth.hasResourceUsePermission(current, authorId)) throw new BaseException("创建者已无关联资源使用权限");
-                    if (!Objects.equals(current.getCreateBy(), authorId)) throw new BaseException("个人技能所有权已变更");
+                    if (!Objects.equals(current.getCreateBy(), dependency.getResource().getCreateBy())) throw new BaseException("个人技能所有权已变更");
                     byte[] bytes = snapshotBytes(dependency);
                     checkSkill(dependency, bytes, authorId, tenantId);
                 } catch (Exception error) {
@@ -264,8 +265,8 @@ public class EmployeePublicationResources {
             context(dependency, tenantId, authorId));
         if (checked == null || !checked.copyAllowed()) {
             String reasons = checked == null || checked.issues() == null ? "技能依赖校验未通过"
-                : checked.issues().stream().map(issue -> StringUtils.defaultIfBlank(issue.name(), issue.resourceId())
-                    + "：" + issue.reason()).collect(java.util.stream.Collectors.joining("；"));
+                : checked.issues().stream().map(EmployeePublicationSkillBridge.Issue::displayReason)
+                    .collect(java.util.stream.Collectors.joining("；"));
             omit(dependency, StringUtils.defaultIfBlank(reasons, "技能依赖校验未通过"));
         }
     }
@@ -276,7 +277,7 @@ public class EmployeePublicationResources {
             String[] parts = normalizePath(dependency.getSkill().getSkillUrl()).split("/");
             if (parts.length > 2 && "official-publications".equals(parts[1])) requestId = Long.valueOf(parts[2]);
         }
-        return new EmployeePublicationSkillBridge.Context(tenantId, authorId, requestId);
+        return new EmployeePublicationSkillBridge.Context(tenantId, authorId, requestId, dependency.getCopyName());
     }
 
     public InputStream openSnapshot(List<Dependency> dependencies, Long resourceId) {
@@ -355,6 +356,9 @@ public class EmployeePublicationResources {
     }
 
     public void grantAudience(SsResource resource, Long tenantId) {
+        if (resource == null || tenantId == null || !Objects.equals(resource.getComAcctId(), tenantId)) {
+            throw new BaseException("发布资源与原员工的企业归属不一致");
+        }
         List<AuthDTO> subjects = audienceRoots(tenantId).stream().map(id -> {
             AuthDTO dto = new AuthDTO();
             dto.setGrantToObjType("ORG");
@@ -408,8 +412,8 @@ public class EmployeePublicationResources {
             if (current == null) { omit(dependency, "资源不存在或已失效"); return; }
             if (!Objects.equals(current.getComAcctId(), tenantId)) {
                 dependency.setResource(null); dependency.setTargetId(id);
-                dependency.setLabel("其他企业资源");
-                omit(dependency, "资源不属于当前企业"); return;
+                setUnavailableDisplayMetadata(dependency, current);
+                omit(dependency, TENANT_MISMATCH_REASON); return;
             }
             dependency.setResource(current);
             dependency.setTargetId(id);
@@ -438,6 +442,35 @@ public class EmployeePublicationResources {
         }
     }
 
+    /** 仅补充查看页面的名称和类型，不恢复被排除资源的执行对象或改变冻结的发布结果。 */
+    public void refreshDisplayMetadata(List<Dependency> dependencies) {
+        for (Dependency dependency : dependencies) {
+            if (dependency.getResource() != null || dependency.getTargetId() == null || !isOmitted(dependency)) continue;
+            try {
+                setUnavailableDisplayMetadata(dependency, resources.findById(dependency.getTargetId()));
+            } catch (RuntimeException error) {
+                log.warn("读取发布资源展示信息失败，resourceId={}", dependency.getTargetId(), error);
+                redactUnavailableDisplayMetadata(dependency);
+            }
+            if ("资源不属于当前企业".equals(dependency.getWarning())) dependency.setWarning(TENANT_MISMATCH_REASON);
+        }
+    }
+
+    private void setUnavailableDisplayMetadata(Dependency dependency, SsResource resource) {
+        // 申请查看权限不等于关联资源详情权限；每次查看都按当前用户复核，避免沿用作者的权限。
+        if (resource != null && CurrentUserHolder.getCurrentUserId() != null && auth.hasResourceAccessPermission(resource)) {
+            dependency.setLabel(resource.getResourceName());
+            dependency.setResourceType(resource.getResourceBizType());
+        } else {
+            redactUnavailableDisplayMetadata(dependency);
+        }
+    }
+
+    private void redactUnavailableDisplayMetadata(Dependency dependency) {
+        dependency.setLabel("关联资源 " + dependency.getTargetId());
+        dependency.setResourceType(null);
+    }
+
     private void omit(Dependency dependency, String reason) {
         dependency.setAction("OMIT_RESOURCE");
         dependency.setError(null);
@@ -458,7 +491,10 @@ public class EmployeePublicationResources {
                 "新企业员工中不会出现此资源，依赖它的能力不可用；原个人员工保持不变");
         }
         if ("COPY_SKILL".equals(dependency.getAction())) {
-            return new Availability("SKILL", "当前企业全员（发布成功后）", "个人技能将生成独立副本", "使用独立技能副本，不依赖原技能的私有权限");
+            String name = StringUtils.defaultIfBlank(dependency.getCopyName(),
+                EmployeePublicationNames.enterpriseName(dependency.getResource().getResourceName(), null));
+            return new Availability("SKILL", "当前企业全员（发布成功后）", "个人技能将生成独立副本",
+                "生成企业技能副本「" + name + "」，不依赖原技能的私有权限");
         }
         if ("BUILTIN_TOOL".equals(dependency.getAction())) {
             return new Availability("TOOL", "当前企业全员", "平台内置工具", "发布后全员可使用，仍需运行环境正常");
@@ -509,8 +545,10 @@ public class EmployeePublicationResources {
     }
 
     private String normalizePath(String path) {
-        String value = path.replace('\\', '/').replaceFirst("^/?resource/", "");
-        if (value.startsWith("/") || value.contains(":") || List.of(value.split("/")).contains("..")) {
+        // 资源中心保存 /byclaw/resource/...，存储门面接收相对 /resource 的路径。
+        String value = StringUtils.trimToEmpty(path).replace('\\', '/').replaceFirst("^/?(?:byclaw/)?resource/", "");
+        if (StringUtils.isBlank(value) || value.startsWith("/") || value.contains(":")
+            || List.of(value.split("/")).contains("..")) {
             throw new BaseException("技能文件不是平台资源目录中的有效文件");
         }
         return value;

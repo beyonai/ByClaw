@@ -1699,7 +1699,7 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
-    void uninstallDigitalEmployeeRelResources_deletesLegacyChatUploadWorkspaceCopy() {
+    void uninstallDigitalEmployeeRelResources_preservesLegacyChatUploadWorkspaceCopy() {
         DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
         dto.setDigitalEmployeeId(100L);
         dto.setRelIds(List.of(300L));
@@ -1740,8 +1740,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         service.uninstallDigitalEmployeeRelResources(dto);
 
-        verify(byClawSkillDeleteApplicationService).deleteSkillIfExists("zhangsan", 100L,
-            "/.openclaw/workspace-baiying-agent-100/skills/dws");
+        verify(byClawSkillDeleteApplicationService, never()).deleteSkillIfExists(any(), any(), any());
         verify(ssResourceRelDetailService).removeById(900L);
     }
 
@@ -1975,6 +1974,28 @@ class DigitalEmployeeApplicationServiceTest {
         verify(ssResourceRelDetailService).removeById(901L);
         verify(ssResourceRelDetailService, never()).updateById(relation);
         verify(skillGroupMapper).selectDigitalEmployeeForUpdate(100L, 201L);
+    }
+
+    @Test
+    void publishedPersonalEmployeeStillSavesThroughTheNormalUpdateAndRefreshesOnlyItself() {
+        DigitalEmployeeApplicationService updateService = updateServiceSpy();
+        DigitalEmployeeDTO dto = updateDto(); dto.setResourceName("个人修改已保存");
+        SsResource personal = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        personal.setComAcctId(201L);
+        // 兼容历史错误标记：个人归属仍决定普通保存行为。
+        personal.setPublicationSourceId(90L); personal.setPublicationRequestId(1000L);
+        var publications = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
+        var governance = new DigitalEmployeeGovernanceService(userService,
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class), publications);
+        ReflectionTestUtils.setField(updateService, "employeeGovernance", governance);
+        prepareFullUpdate(personal, List.of(), List.of());
+        updateService.updateDigitalEmployee(dto);
+        assertThat(personal.getResourceName()).isEqualTo("个人修改已保存");
+        assertThat(personal.getOwnerType()).isEqualTo(OwnerType.PERSONAL);
+        verify(ssResourceService).updateResourceEntity(personal);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, dto);
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleDigitalEmployeeUpdateRefreshAfterCommit(eq(90L), any());
+        verifyNoInteractions(publications);
     }
 
     @Test

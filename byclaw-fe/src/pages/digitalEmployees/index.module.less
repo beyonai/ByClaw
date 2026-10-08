@@ -21,18 +21,17 @@
 }
 
 .toolbar {
-  // 筛选、搜索和操作按钮使用同一高度，避免各自的内边距造成错位。
+  // 搜索和操作按钮使用同一高度，避免各自的内边距造成错位。
   .searchInput,
-  .toolbarFilter,
   :global(.@{antPrefix}-btn) {
     box-sizing: border-box;
     height: 32px;
   }
+}
 
-  .toolbarFilter {
-    padding-top: 3px;
-    padding-bottom: 3px;
-  }
+.quickFilters {
+  // 位于页签与滚动内容之间，右边缘与搜索、创建按钮保持对齐。
+  margin-right: 30px;
 }
 
 .sectionTitle {

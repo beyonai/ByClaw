@@ -22,7 +22,7 @@ jest.mock('@umijs/max', () => ({
     replace: jest.fn(),
   },
   getIntl: jest.fn(() => ({
-    formatMessage: jest.fn(() => 'login expired'),
+    formatMessage: jest.fn(({ id }) => (id === 'common.loginExpired' ? 'login expired' : 'Operation failed')),
   })),
 }));
 
@@ -89,6 +89,7 @@ import { showRequestErrorModal } from '@/utils/antdAppModal';
 import { logout } from '../user';
 
 import { GET, globalLogout, POST } from '../common/request';
+import { setResourceFavorite } from '../resourceFavorites';
 
 const rejectResponse = (error: unknown) => {
   if (typeof mockResponseRejected !== 'function') {
@@ -446,6 +447,40 @@ describe('Service Common Request', () => {
     ).rejects.toBe('请求拒绝,无权限访问!');
 
     expect(message.error).not.toHaveBeenCalled();
+    expect(clearToken).not.toHaveBeenCalled();
+  });
+
+  it.each([400, 409, 503])('rejects favorite business error %s without clearing the session', async (status) => {
+    mockRequest.mockImplementation((config) =>
+      rejectWithResponseInterceptor({
+        status,
+        config,
+        response: { status, data: { code: -1, msg: 'Favorite unavailable' } },
+      })
+    );
+    await expect(setResourceFavorite('10', true)).rejects.toBe('Favorite unavailable');
+    expect(message.error).not.toHaveBeenCalled();
+    expect(clearToken).not.toHaveBeenCalled();
+    expect(loginRedirect).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {},
+    { favorited: true, favoriteCount: null },
+    { favorited: true, favoriteCount: -1 },
+    { favorited: 'true', favoriteCount: 1 },
+  ])('rejects malformed favorite success data %j', async (data) => {
+    mockRequest.mockImplementation((config) => Promise.resolve({ config, data: { code: 0, data } }));
+    await expect(setResourceFavorite('10', true)).rejects.toThrow('Operation failed');
+  });
+
+  it.each([
+    { favorited: true, favoriteCount: 5 },
+    { favorited: false, favoriteCount: 0 },
+  ])('returns successful favorite state %j through the real request wrapper', async (data) => {
+    mockRequest.mockImplementation((config) => Promise.resolve({ config, data: { code: 0, data } }));
+    await expect(setResourceFavorite('10', data.favorited)).resolves.toEqual(data);
     expect(clearToken).not.toHaveBeenCalled();
   });
 });

@@ -31,6 +31,9 @@ public class ObjectZipImportItem {
 
     private boolean success;
 
+    /** 导入成功但尚未上架，等待官方技能审核。 */
+    private boolean reviewRequired;
+
     private String message;
 
     private String diffSummary;

@@ -30,6 +30,7 @@ import com.iwhalecloud.byai.manager.vo.index.DigitEmployMarketVo;
 import com.iwhalecloud.byai.manager.vo.index.ManPrivVo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceFavoriteService;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.state.common.constant.GrantToObjTypeConstants;
 import com.iwhalecloud.byai.state.common.share.bean.Organization;
@@ -89,6 +90,9 @@ public class IndexApplicationServiceV2 {
 
     @Autowired
     private SuasSuperassistService suasSuperassistService;
+
+    @Autowired
+    private ResourceFavoriteService resourceFavoriteService;
 
     private static final String SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
@@ -386,6 +390,13 @@ public class IndexApplicationServiceV2 {
      * @param discoverQo 发现页查询条件
      */
     private void prepareDiscoverQo(DiscoverQo discoverQo) {
+        discoverQo.setFavoriteTenantId(null);
+        if (Boolean.TRUE.equals(discoverQo.getIncludeFavorites()) || Boolean.TRUE.equals(discoverQo.getFavoritesOnly())) {
+            Long tenantId = resourceFavoriteService.resolveQueryTenant(
+                discoverQo.getIncludeFavorites(), discoverQo.getFavoritesOnly());
+            discoverQo.setFavoriteTenantId(tenantId);
+            discoverQo.setIncludeFavorites(tenantId != null);
+        }
         // 设置过滤的组织发布范围
         discoverQo.setPublishOrgIds(this.getPublishOrgIds(discoverQo.getOrgFilters()));
         fillCatalogIds(discoverQo);
@@ -498,6 +509,7 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setOfficialPublication(permissions.isOfficialPublication());
         digitalEmployee.setCanPublishEmployee(permissions.isCanPublishEmployee());
         digitalEmployee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
+        digitalEmployee.setEmployeePublicationUpdate(permissions.isEmployeePublicationUpdate());
         digitalEmployee.setCanManageAuth(permissions.isCanManageAuth());
         digitalEmployee.setCanUseAuth(permissions.isCanUseAuth());
         digitalEmployee.setCanDelete(permissions.isCanDelete());
@@ -525,6 +537,7 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setOfficialPublication(permissions.isOfficialPublication());
         digitalEmployee.setCanPublishEmployee(permissions.isCanPublishEmployee());
         digitalEmployee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
+        digitalEmployee.setEmployeePublicationUpdate(permissions.isEmployeePublicationUpdate());
         digitalEmployee.setCanManageAuth(permissions.isCanManageAuth());
         digitalEmployee.setCanUseAuth(permissions.isCanUseAuth());
         digitalEmployee.setCanDelete(permissions.isCanDelete());

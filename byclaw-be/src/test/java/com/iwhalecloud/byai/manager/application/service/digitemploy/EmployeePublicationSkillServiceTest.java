@@ -48,7 +48,28 @@ class EmployeePublicationSkillServiceTest {
         snapshot = new SsResExtSkill(); snapshot.setSkillUrl("skill/official-publications/100/20/frozen.zip");
         snapshot.setVersion("v0.1"); snapshot.setSkillType("hub");
     }
-    @AfterEach void cleanup() { CurrentUserHolder.clearLoginInfo(); }
+    @AfterEach void cleanup() {
+        CurrentUserHolder.clearLoginInfo();
+        org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"zh", "en"})
+    void newSkillNameUsesLocalizedSuffixAndNeverMutatesSource(String language) throws Exception {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        byte[] bytes = skill("{\"resources\":[]}"); snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
+        service.publish(source, snapshot, bytes, 90L, context);
+        var target = ArgumentCaptor.forClass(SsResource.class); verify(mapper).insert(target.capture());
+        assertThat(target.getValue().getResourceName()).isEqualTo("zh".equals(language) ? "客户分析(企业)" : "客户分析 (Enterprise)");
+        assertThat(source.getResourceName()).isEqualTo("客户分析");
+    }
+
+    @Test void approvalLanguageDoesNotRenameTheFrozenSkillCopy() throws Exception {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        byte[] bytes = skill("{\"resources\":[]}"); snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
+        service.publish(source, snapshot, bytes, 90L,
+            new EmployeePublicationSkillBridge.Context(1L, 7L, 100L, "客户分析(企业)"));
+        verify(mapper).insert(argThat((SsResource target) -> "客户分析(企业)".equals(target.getResourceName())));
+    }
     static byte[] zip(Map<String,String> files) throws Exception {
         var bytes = new ByteArrayOutputStream();
         try (var output = new ZipOutputStream(bytes)) {
@@ -98,6 +119,9 @@ class EmployeePublicationSkillServiceTest {
         assertThat(checked.copyAllowed()).isFalse();
         assertThat(checked.issues()).extracting(EmployeePublicationSkillBridge.Issue::name).containsExactly("个人查询工具","个人客户库");
         assertThat(checked.issues()).allSatisfy(i -> assertThat(i.reason()).contains("个人资源"));
+        assertThat(checked.issues()).extracting(EmployeePublicationSkillBridge.Issue::displayReason).containsExactly(
+            "技能依赖了个人工具「个人查询工具」，因此本次不会随员工发布",
+            "技能依赖了个人知识库「个人客户库」，因此本次不会随员工发布");
         verifyNoInteractions(storage, mapper);
     }
     @Test void enterpriseDependenciesPassButMissingCrossTenantMismatchAndDeletedDoNot() throws Exception {

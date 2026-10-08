@@ -215,7 +215,7 @@ SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED=false
 
 Alertmanager 默认挂载 `alertmanager-data` PVC 到 `/alertmanager`，容量由 `MONITORING_ALERTMANAGER_PVC_SIZE` 控制，默认 `2Gi`。`repeat_interval` 默认 `1h`，用于覆盖 BE 发布或重启窗口内漏消费的持续 firing 告警；如果 BE 处理后指标恢复，Prometheus 会自动 resolve，Alertmanager 不会继续按 1 小时重复发送。
 
-沙箱已达到最高或最低规格后，BE 会暴露 `byclaw_sandbox_autoscale_boundary_blacklist` 指标，Prometheus 告警规则通过 `unless on(sandboxId)` 过滤同方向极值告警，避免 Alertmanager 和钉钉机器人重复发送无意义消息。BE 同时暴露 `byclaw_sandbox_autoscale_runtime_info` 指标，Prometheus 告警会按 `sandboxId` 关联 `userCode` 和 `profileKey`，钉钉详情中可以直接看到用户编码和当前规格。黑名单按当前活跃沙箱和规格链动态计算；新增更高或更低规格后，原极值沙箱会自动恢复监控。
+沙箱已达到最高或最低规格后，BE 会暴露 `byclaw_sandbox_autoscale_boundary_blacklist` 指标，Prometheus 告警规则通过 `unless on(sandboxId)` 过滤同方向极值告警，避免 Alertmanager 和钉钉机器人重复发送无意义消息。BE 同时暴露 `byclaw_sandbox_autoscale_runtime_info` 指标，Prometheus 告警会按 `sandboxId` 关联 `userCode`、`profileKey` 和真实 `serviceType`；BE 使用该类型定位沙箱记录，钉钉详情中可以直接看到用户编码和当前规格。黑名单按当前活跃沙箱和规格链动态计算；新增更高或更低规格后，原极值沙箱会自动恢复监控。
 
 高水位或 OOM 告警会覆盖 `STARTING` 和 `RUNNING` 状态的活跃沙箱。`RUNNING` 沙箱继续走 OpenSandbox 原地调整；非 `RUNNING` 沙箱会先保存目标规格偏好，再触发沙箱重启重拉，避免容器已经 OOM/异常退出时原地调整被 OpenSandbox 拒绝。降配告警只处理可原地调整的运行态沙箱，且默认会在最近一次升配或 OOM 处理后的 15 分钟内跳过降配，防止重负载刚缓解就立刻回落到过低规格。
 
@@ -253,3 +253,21 @@ BYCLAW_K3S_DEMO_SQL_GLOB=*.auto.sql
 ```text
 docs/reports/opensandbox-k3s-longhorn-oneclick-deploy-manual.html
 ```
+
+### 沙箱异常恢复与旧实例清理
+
+OOM 回看窗口默认 `30s`；当前 OOM 终止状态立即触发，启动异常和镜像拉取失败的持续等待仍为 `1m`，服务未就绪仍为 `60s`。规则每 `15s` 评估一次，Alertmanager 另有默认 `5s` 分组等待，实际通知延迟还包含这些调度时间。OOM 告警同时覆盖当前 `terminated/OOMKilled` 状态和近期 OOM 状态变化，避免异常持续超过回看窗口后消失；启动异常告警也覆盖 `terminated/Error`、`ContainerCannotRun` 和 `StartError`，适用于 `restartPolicy=Never` 的沙箱。告警仍通过 BE 的活跃实例指标关联，已释放实例不进入自愈。
+
+BE 自动恢复携带告警对应的原始记录和 sandboxId，在启动锁内校验身份，清理该旧实例并释放原始记录，再按目标规格创建新实例。目标规格已有另一活跃实例时拒绝旧告警恢复，防止清理正常的新实例。告警中的 serviceType 与带规格后缀的 sandboxType 分别校验，不能用 serviceType 直接代替后者定位记录。恢复失败或处理异常返回 HTTP 503，允许 Alertmanager 重试；已释放实例的迟到告警返回跳过。
+
+规则回归验证（需要 `promtool`）：
+
+```bash
+mkdir -p /tmp/byclaw-monitoring-test
+python3 deploy/tests/monitoring/render-rules.py deploy/k3s/install-monitoring.sh /tmp/byclaw-monitoring-test/sandbox-rules.yml
+cp deploy/tests/monitoring/sandbox-recovery.test.yml /tmp/byclaw-monitoring-test/
+promtool test rules /tmp/byclaw-monitoring-test/sandbox-recovery.test.yml
+# 再以 deploy/k3s/render-manifests.sh 生成同一路径，重复 promtool 验证。
+```
+
+BE 与新告警规则应一起发布；不要在 BE 尚未正确释放旧记录时单独启用持续 OOM 自愈，否则旧活跃记录可能重新拉起已结束的实例。钉钉机器人停用会使通知返回 400102，需要管理员重新启用机器人，不代表 BE webhook 没有接收告警。

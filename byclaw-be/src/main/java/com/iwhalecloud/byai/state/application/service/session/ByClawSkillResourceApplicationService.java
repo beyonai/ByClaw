@@ -490,6 +490,52 @@ public class ByClawSkillResourceApplicationService {
         }
     }
 
+    String readCenterSkillDirectoryName(byte[] packageBytes, String fallback) {
+        return StringUtils.defaultIfBlank(lastPathSegment(parentDirOf(findSkillDoc(readZipEntries(packageBytes)).name())), fallback);
+    }
+
+    Map<String, byte[]> readCenterSkillFiles(byte[] packageBytes) {
+        List<ZipEntryInfo> entries = readZipEntries(packageBytes);
+        String root = parentDirOf(findSkillDoc(entries).name());
+        String prefix = root.isEmpty() ? "" : root + "/";
+        Map<String, byte[]> files = new java.util.TreeMap<>();
+        for (ZipEntryInfo entry : entries) {
+            if (entry.name().startsWith(prefix)) {
+                String relative = entry.name().substring(prefix.length());
+                if (files.putIfAbsent(relative, entry.content()) != null) {
+                    throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"));
+                }
+            }
+        }
+        return files;
+    }
+
+    byte[] replaceCenterSkillFiles(byte[] packageBytes, Map<String, byte[]> source) {
+        List<ZipEntryInfo> entries = readZipEntries(packageBytes);
+        String root = parentDirOf(findSkillDoc(entries).name());
+        String prefix = root.isEmpty() ? "" : root + "/";
+        Map<String, Integer> modes = new java.util.HashMap<>();
+        for (ZipEntryInfo entry : entries) modes.put(entry.name(), entry.unixMode());
+        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream zip =
+                new org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream(bytes)) {
+            zip.setEncoding(StandardCharsets.UTF_8.name());
+            for (var file : new java.util.TreeMap<>(source).entrySet()) {
+                String name = prefix + file.getKey();
+                ZipArchiveEntry entry = new ZipArchiveEntry(name);
+                entry.setTime(0L);
+                entry.setUnixMode(modes.getOrDefault(name, 0100644));
+                zip.putArchiveEntry(entry);
+                zip.write(file.getValue());
+                zip.closeArchiveEntry();
+            }
+            zip.finish();
+            return bytes.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
+        }
+    }
+
     byte[] readCenterSkillDocument(byte[] packageBytes) {
         return findSkillDoc(readZipEntries(packageBytes)).content();
     }
@@ -519,6 +565,11 @@ public class ByClawSkillResourceApplicationService {
     /** 调用方提供事务；目录同步不绑定员工，更新保留资源 ID、归属、目录及上下架状态。 */
     SkillImportResult saveWorkspaceSkillCenterPackage(byte[] bytes, String ownerType, String resourceCode,
         String skillName, SsResource existing) {
+        return saveWorkspaceSkillCenterPackage(bytes, ownerType, resourceCode, skillName, existing, null);
+    }
+
+    SkillImportResult saveWorkspaceSkillCenterPackage(byte[] bytes, String ownerType, String resourceCode,
+        String skillName, SsResource existing, Long employeeId) {
         SkillPackageMetadata inspected = inspectSkillPackage(
             new ByteArrayMultipartFile(skillName + ".zip", bytes, PACKAGE_CONTENT_TYPE));
         SkillPackageMetadata metadata = new SkillPackageMetadata(skillName, resourceCode, inspected.skillDesc(),
@@ -600,12 +651,15 @@ public class ByClawSkillResourceApplicationService {
 
         SsResExtSkill sourceExt = ssResExtSkillService.findById(sourceId);
         // 校验读取原包；副本仍只复制数据库记录及文件引用，不重打包或上传文件。
-        String targetName = source.getResourceName();
+        String targetName = com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames
+            .enterpriseName(source.getResourceName(), null);
         if (ssResourceService.existsEnterpriseSkillByName(targetName)) {
             // 重名时标明本次上架人；仅调整企业副本名称，不改变个人技能或已有副本。
             String publisherName = StringUtils.defaultIfBlank(CurrentUserHolder.getCurrentUserName(),
                 CurrentUserHolder.getCurrentUserCode());
-            targetName += "（" + publisherName + "）";
+            String baseName = targetName.replaceFirst("\\s*\\((企业|Enterprise)\\)$", "");
+            targetName = com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames
+                .enterpriseName(baseName + "（" + publisherName + "）", targetName);
         }
         SkillPackageMetadata metadata = new SkillPackageMetadata(targetName, targetCode,
             source.getResourceDesc(), sourceExt == null ? null : sourceExt.getSkillOriginalFilename(),

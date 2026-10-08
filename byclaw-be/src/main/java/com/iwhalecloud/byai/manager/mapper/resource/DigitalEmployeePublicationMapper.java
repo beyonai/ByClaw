@@ -24,7 +24,8 @@ public interface DigitalEmployeePublicationMapper extends BaseMapper<DigitalEmpl
     @Select("select * from byai.digital_employee_publication where request_id = #{id} and tenant_id = #{tenantId} for update")
     DigitalEmployeePublication lock(@Param("id") Long id, @Param("tenantId") Long tenantId);
 
-    @Select("select * from byai.ss_resource where publication_source_id = #{sourceId} and com_acct_id = #{tenantId}")
+    @Select("select * from byai.ss_resource where publication_source_id = #{sourceId} and com_acct_id = #{tenantId} "
+        + "and owner_type = 'enterprise' and resource_biz_type = 'DIG_EMPLOYEE' and resource_id <> publication_source_id")
     SsResource official(@Param("sourceId") Long sourceId, @Param("tenantId") Long tenantId);
 
     @Select("select * from byai.digital_employee_publication where source_id = #{sourceId} and tenant_id = #{tenantId} "
@@ -41,7 +42,7 @@ public interface DigitalEmployeePublicationMapper extends BaseMapper<DigitalEmpl
     DigitalEmployeePublication previousRejection(@Param("sourceId") Long sourceId, @Param("tenantId") Long tenantId,
         @Param("createdAt") java.util.Date createdAt, @Param("requestId") Long requestId);
 
-    @Select({"<script>", "select source_id, status from (select source_id, status, row_number() over (partition by source_id "
+    @Select({"<script>", "select source_id, status, official_id from (select source_id, status, official_id, row_number() over (partition by source_id "
         + "order by case when status in ('DRAFT','PENDING','APPLYING','FAILED') then 0 else 1 end, created_at desc, request_id desc) as rn "
         + "from byai.digital_employee_publication where tenant_id = #{tenantId} and source_id in",
         "<foreach collection='sourceIds' item='id' open='(' separator=',' close=')'>#{id}</foreach>",
