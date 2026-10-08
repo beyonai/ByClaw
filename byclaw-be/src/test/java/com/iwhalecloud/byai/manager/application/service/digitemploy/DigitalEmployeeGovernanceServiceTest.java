@@ -56,6 +56,15 @@ class DigitalEmployeeGovernanceServiceTest {
         ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", resource, permissions);
         assertThat(permissions.isCanEdit()).isTrue();
         assertThat(permissions.isCanManageAuth()).isTrue();
+        // 有效黑名单仍优先于白名单，不能因停用创建者保护而放宽授权冲突。
+        var deny = new com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant();
+        deny.setGrantObjId(10L);
+        deny.setGrantToType("BLACK");
+        deny.setStatusCd("A");
+        doReturn(List.of(grant, deny)).when(auth).listAuthPrivilegeGrant(anyString(), any(), anyString(), anyLong(), isNull());
+        assertThat(auth.hasResourceManagePermission(resource)).isFalse();
+        assertThat(auth.hasResourceUseSettingPermission(resource)).isFalse();
+        assertThat(auth.hasResourceInstallTargetManagePermission(resource)).isFalse();
     }
     @Test void adminvipRetainsMaintenanceRights() {
         EmployeePublicationApplicationServiceTest.login("adminvip", 1L, List.of());

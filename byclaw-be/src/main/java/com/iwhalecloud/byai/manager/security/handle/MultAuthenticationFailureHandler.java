@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -65,9 +66,16 @@ public class MultAuthenticationFailureHandler implements AuthenticationFailureHa
             responseData = bindResponse;
         }
         else {
-            // 登陆失败响应信息
-            responseData = LoginResponse
-                    .fail(I18nUtil.get("login.login.auth.fail") + exception.getMessage());
+            // 手机号登录直接展示业务原因；服务异常不向客户端泄露底层信息。
+            String failureMessage;
+            if ("/system/session/loginByPhone".equals(request.getServletPath())) {
+                failureMessage = exception instanceof InternalAuthenticationServiceException
+                    ? I18nUtil.get("login.phone.service.unavailable") : exception.getMessage();
+            }
+            else {
+                failureMessage = I18nUtil.get("login.login.auth.fail") + exception.getMessage();
+            }
+            responseData = LoginResponse.fail(failureMessage);
         }
 
         response.setHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);

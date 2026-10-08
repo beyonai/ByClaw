@@ -104,7 +104,9 @@ class SmsLoginFlowTest extends LoginMessageSourceTestSupport {
             ReflectionTestUtils.setField(captcha, "SequenceService", sequence);
             ReflectionTestUtils.setField(captcha, "smsRateLimitConfig", new SmsRateLimitConfig());
             UserService users = mock(UserService.class);
-            when(users.findByUserPhone("13800000000")).thenReturn(new Users());
+            Users activeUser = new Users();
+            activeUser.setState("A");
+            when(users.findAllByUserPhone("13800000000")).thenReturn(List.of(activeUser));
             ReflectionTestUtils.setField(provider, "userService", users);
             ReflectionTestUtils.setField(provider, "safeAccountMsgService", records);
             ReflectionTestUtils.setField(provider, "loginApplicationService", mock(LoginApplicationService.class));
