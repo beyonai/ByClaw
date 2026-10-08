@@ -68,6 +68,17 @@ describe('employee publication navigation', () => {
     expect(POST).toHaveBeenCalledWith('/byaiService/digitalEmployeePublication/prepare', { resourceId: '90' });
   });
 
+  it('explicit personal publication update asks the server for a new candidate based on the saved personal employee', async () => {
+    (POST as jest.Mock).mockResolvedValue({ ...detail, employee: { resourceId: '90', ownerType: 'enterprise' } });
+    await openEmployeePublication('10', 'publishUpdate');
+    expect(GET).not.toHaveBeenCalled();
+    expect(POST).toHaveBeenCalledTimes(1);
+    expect(POST).toHaveBeenCalledWith('/byaiService/digitalEmployeePublication/prepareUpdate', { resourceId: '10' });
+    expect(history.push).toHaveBeenCalledWith(
+      '/digitalEmployeesCreate?publicationId=100&appId=90&log=false&manage=false'
+    );
+  });
+
   it('opens the published official copy in read-only mode without creating an update', () => {
     openOfficialEmployee('90');
     expect(history.push).toHaveBeenCalledWith('/digitalEmployeesCreate?appId=90&readOnly=true&log=false&manage=false');

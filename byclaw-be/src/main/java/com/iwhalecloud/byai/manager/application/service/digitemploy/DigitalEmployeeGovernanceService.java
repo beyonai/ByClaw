@@ -40,7 +40,9 @@ public class DigitalEmployeeGovernanceService {
     }
 
     public static boolean isOfficialCopy(SsResource resource) {
-        return isEmployee(resource) && resource.getPublicationSourceId() != null;
+        return isEmployee(resource) && "enterprise".equals(resource.getOwnerType())
+            && resource.getPublicationSourceId() != null
+            && !Objects.equals(resource.getResourceId(), resource.getPublicationSourceId());
     }
 
     public static boolean isPublicationSkill(SsResource resource) {
@@ -49,7 +51,7 @@ public class DigitalEmployeeGovernanceService {
 
     public boolean canPublish(SsResource resource) {
         return isEmployee(resource) && "personal".equals(resource.getOwnerType())
-            && Objects.equals(resource.getCreateBy(), CurrentUserHolder.getCurrentUserId())
+            && (Objects.equals(resource.getCreateBy(), CurrentUserHolder.getCurrentUserId()) || isAdministrator())
             && Objects.equals(resource.getResourceStatus(), 2) && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
             && !org.apache.commons.lang3.StringUtils.endsWithIgnoreCase(resource.getResourceCode(), "_main") && publicationEnabled();
     }
@@ -58,7 +60,13 @@ public class DigitalEmployeeGovernanceService {
         if (!isEmployee(resource) || resource.getCreateBy() == null || CurrentUserHolder.isAdminVip()) {
             return false;
         }
-        Users creator = users.findById(resource.getCreateBy());
+        return isAdminVipCreator(resource.getCreateBy());
+    }
+
+    public boolean isAdminVipCreator(Long creatorId) {
+        if (creatorId == null) return false;
+        if (Objects.equals(creatorId, CurrentUserHolder.getCurrentUserId()) && CurrentUserHolder.isAdminVip()) return true;
+        Users creator = users.findById(creatorId);
         return creator != null && "adminvip".equalsIgnoreCase(creator.getUserCode());
     }
 

@@ -7,10 +7,10 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.i18n.LocaleContextHolder;
 
 /** 名称是持久化业务数据：按首次申请语言加后缀，审核语言不改变已确定的名称。 */
-final class EmployeePublicationNames {
+public final class EmployeePublicationNames {
     private EmployeePublicationNames() { }
 
-    static String enterpriseName(String name, String previousName) {
+    public static String enterpriseName(String name, String previousName) {
         if (StringUtils.isBlank(name)) return name;
         String value = name.strip();
         String zh = suffix(Locale.SIMPLIFIED_CHINESE);

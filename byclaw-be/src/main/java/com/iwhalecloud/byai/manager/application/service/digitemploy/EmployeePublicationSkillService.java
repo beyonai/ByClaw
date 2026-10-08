@@ -60,7 +60,7 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
                 if (resource == null) reason = "依赖资源不存在";
                 else if (!Objects.equals(context.tenantId(), resource.getComAcctId())) reason = "依赖资源不属于当前企业";
                 else if (!matchesType(declared.type(), resource.getResourceBizType())) reason = "声明类型与实际资源类型不一致";
-                else if (EmployeePublicationResources.isPersonal(resource)) reason = "依赖个人资源，不随员工发布";
+                else if (EmployeePublicationResources.isPersonal(resource)) reason = Issue.PERSONAL_RESOURCE_REASON;
                 else if (!"enterprise".equals(resource.getOwnerType())) reason = "无法确认依赖资源的企业归属";
                 else if (!Objects.equals(resource.getResourceStatus(), 2)) reason = "依赖资源已下架或失效";
                 if (reason != null) issues.add(new Issue(String.valueOf(declared.id()), declared.type(), name, reason));
@@ -154,7 +154,9 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
         }
         target = new SsResource();
         target.setResourceId(sequence.nextVal()); target.setResourceCode(code);
-        target.setResourceName(source.getResourceName()); target.setResourceDesc(source.getResourceDesc());
+        target.setResourceName(StringUtils.defaultIfBlank(context.copyName(),
+            EmployeePublicationNames.enterpriseName(source.getResourceName(), null)));
+        target.setResourceDesc(source.getResourceDesc());
         target.setResourceBizType("SKILL"); target.setResourceType("ATOM"); target.setSystemCode("BYAI");
         target.setOwnerType("enterprise"); target.setComAcctId(context.tenantId());
         target.setResourceStatus(2); target.setCreateBy(context.authorId()); target.setUpdateBy(CurrentUserHolder.getCurrentUserId());

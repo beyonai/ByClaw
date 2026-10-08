@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationServ
 import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
@@ -118,11 +119,11 @@ class AuthApplicationServiceTest {
         target.setComAcctId(1L);
         when(grants.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).thenReturn(List.of(row));
         when(resources.selectBatchIds(any())).thenReturn(List.of(target));
-        when(publications.canReview()).thenReturn(true);
+        when(publications.canReview(target)).thenReturn(true);
         assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).containsExactly(row);
-        when(publications.canReview()).thenReturn(false);
+        when(publications.canReview(target)).thenReturn(false);
         assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
-        when(publications.canReview()).thenReturn(true);
+        when(publications.canReview(target)).thenReturn(true);
         target.setComAcctId(2L);
         assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
     }
@@ -193,10 +194,13 @@ class AuthApplicationServiceTest {
         when(governance.canPublish(own)).thenReturn(true);
         var rejected = new com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication();
         rejected.setSourceId(601L); rejected.setStatus("REJECTED");
+        rejected.setOfficialId(901L);
         when(publicationMapper.currentStatuses(List.of(601L), 1L)).thenReturn(List.of(rejected));
         var result = service.queryResourceOperationPermissionsBatch(List.of(601L, 602L));
         assertThat(result.get(601L).getEmployeePublicationStatus()).isEqualTo("REJECTED");
+        assertThat(result.get(601L).isEmployeePublicationUpdate()).isTrue();
         assertThat(result.get(602L).getEmployeePublicationStatus()).isNull();
+        assertThat(result.get(602L).isEmployeePublicationUpdate()).isFalse();
         verify(publicationMapper).currentStatuses(List.of(601L), 1L);
     }
 
@@ -235,6 +239,9 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
         if (ReflectionTestUtils.getField(service, "privilegeGrantMapper") == null) {
             ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
+        }
+        if (ReflectionTestUtils.getField(service, "ssResExtSkillService") == null) {
+            ReflectionTestUtils.setField(service, "ssResExtSkillService", mock(SsResExtSkillService.class));
         }
         when(privilegeGrantService.findPrivilegeByQo(any())).thenReturn(new ArrayList<>());
         when(organizationService.findEffectiveOrganizationIdsByUserId(any())).thenReturn(Set.of());
@@ -327,6 +334,21 @@ class AuthApplicationServiceTest {
         assertThat(service.queryResourceOperationPermissions(601L).isCanPublishToEnterprise()).isTrue();
         assertThat(service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L)
             .isCanPublishToEnterprise()).isTrue();
+    }
+
+    @Test
+    void platformCanSubmitAnotherCreatorsPersonalSkillInSameTenantWithoutGettingManagePermission() {
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        LoginInfo login = loginInfo(2L); login.setEnterpriseId(1L); login.setUserCode("platform");
+        UsersOrganization role = new UsersOrganization(); role.setUserType(UserType.PLAT_MAN);
+        login.setUsersOrganizations(List.of(role)); CurrentUserHolder.setLoginInfo(login);
+        SsResource source = enterpriseResource(601L, 1L);
+        source.setComAcctId(1L); source.setResourceBizType("SKILL"); source.setOwnerType("personal");
+        assertThat(service.canPublishSkillToEnterprise(source)).isTrue();
+        assertThat(service.hasResourceInstallTargetManagePermission(source)).isFalse();
+        source.setComAcctId(2L);
+        assertThat(service.canPublishSkillToEnterprise(source)).isFalse();
     }
 
     @ParameterizedTest

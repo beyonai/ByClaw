@@ -286,8 +286,8 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(target.getOwnerType()).isEqualTo("enterprise");
         assertThat(target.getResourceStatus()).isEqualTo(4);
         verify(publications).submit(source, target);
-        assertThat(target.getResourceName()).isEqualTo(source.getResourceName());
-        verify(ssResourceService).existsEnterpriseSkillByName(source.getResourceName());
+        assertThat(target.getResourceName()).isEqualTo(enterpriseName(source.getResourceName()));
+        verify(ssResourceService).existsEnterpriseSkillByName(enterpriseName(source.getResourceName()));
         assertThat(target.getAvatar()).isEqualTo("skill-logo");
         assertThat(target.getCatalogId()).isEqualTo(10L);
         assertThat(source.getOwnerType()).isEqualTo("personal");
@@ -376,22 +376,22 @@ class ByClawSkillResourceApplicationServiceTest {
         SsResource source = prepareEnterpriseCopy();
         source.setResourceName("技能1");
         CurrentUserHolder.getLoginInfo().setUserName("张三");
-        when(ssResourceService.existsEnterpriseSkillByName("技能1")).thenReturn(true);
+        when(ssResourceService.existsEnterpriseSkillByName(enterpriseName("技能1"))).thenReturn(true);
         var result = service.publishSkillToEnterprise(7001L);
-        assertThat(result.resource().getResourceName()).isEqualTo("技能1（张三）");
+        assertThat(result.resource().getResourceName()).isEqualTo(enterpriseName("技能1（张三）"));
         assertThat(source.getResourceName()).isEqualTo("技能1");
-        verify(ssResourceService).existsEnterpriseSkillByName("技能1");
+        verify(ssResourceService).existsEnterpriseSkillByName(enterpriseName("技能1"));
         ArgumentCaptor<SsResExtSkill> extension = ArgumentCaptor.forClass(SsResExtSkill.class);
         verify(ssResExtSkillService).saveOrUpdate(extension.capture());
-        assertThat(extension.getValue().getTargetContent()).contains("技能1（张三）");
+        assertThat(extension.getValue().getTargetContent()).contains(enterpriseName("技能1（张三）"));
     }
 
     @Test
     void publishEnterpriseFallsBackToPublisherAccountWhenDisplayNameIsMissing() throws Exception {
         SsResource source = prepareEnterpriseCopy();
-        when(ssResourceService.existsEnterpriseSkillByName(source.getResourceName())).thenReturn(true);
+        when(ssResourceService.existsEnterpriseSkillByName(enterpriseName(source.getResourceName()))).thenReturn(true);
         var result = service.publishSkillToEnterprise(7001L);
-        assertThat(result.resource().getResourceName()).isEqualTo(source.getResourceName() + "（user001）");
+        assertThat(result.resource().getResourceName()).isEqualTo(enterpriseName(source.getResourceName() + "（user001）"));
     }
 
     @Test
@@ -696,6 +696,10 @@ class ByClawSkillResourceApplicationServiceTest {
             eq("skill/org-hub/7101"), eq("updated.zip"), eq("application/zip"));
         verify(ssResourceService, never()).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
             resource -> resource != null && Long.valueOf(7001L).equals(resource.getResourceId())));
+    }
+
+    private String enterpriseName(String name) {
+        return com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames.enterpriseName(name, null);
     }
 
     private SsResource enterpriseCopy(Long id, int status) {

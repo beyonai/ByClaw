@@ -1,4 +1,4 @@
-import { getPublication, type PublicationDetail } from '@/service/employeePublication';
+import { openPublication, type PublicationDetail } from '@/service/employeePublication';
 import { publicationErrorMessage } from '@/utils/publicationError';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -7,11 +7,14 @@ export default function usePublicationDetailLoader(publicationId?: string) {
   const sequence = useRef(0);
   const retryRef = useRef<() => void>();
   const inFlight = useRef(false);
+  const hydrateRef = useRef<(detail: PublicationDetail) => void>();
   useEffect(() => {
     inFlight.current = false;
     retryRef.current = undefined;
+    hydrateRef.current = undefined;
     return () => {
       sequence.current += 1;
+      hydrateRef.current = undefined;
     };
   }, [publicationId]);
 
@@ -19,13 +22,14 @@ export default function usePublicationDetailLoader(publicationId?: string) {
     async (onLoaded: (detail: PublicationDetail) => void) => {
       if (!publicationId || inFlight.current) return;
       inFlight.current = true;
+      hydrateRef.current = onLoaded;
       const current = ++sequence.current;
       retryRef.current = () => {
         void load(onLoaded);
       };
       setState({ id: publicationId, loading: true, error: '' });
       try {
-        const detail = await getPublication(publicationId);
+        const detail = await openPublication(publicationId);
         if (current !== sequence.current) return;
         onLoaded(detail);
         setState({ id: publicationId, loading: false, error: '' });
@@ -47,6 +51,7 @@ export default function usePublicationDetailLoader(publicationId?: string) {
     loading: !!publicationId && (state.id !== publicationId || state.loading),
     error: state.id === publicationId ? state.error : '',
     load,
+    hydrate: (detail: PublicationDetail) => hydrateRef.current?.(detail),
     retry: () => retryRef.current?.(),
   };
 }

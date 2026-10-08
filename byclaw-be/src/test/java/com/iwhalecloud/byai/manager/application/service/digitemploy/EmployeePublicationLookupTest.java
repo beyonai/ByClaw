@@ -27,7 +27,7 @@ class EmployeePublicationLookupTest {
         try (var statement = connection.createStatement()) {
             statement.execute("ATTACH DATABASE ':memory:' AS byai");
             statement.execute("CREATE TABLE byai.digital_employee_publication "
-                + "(request_id BIGINT, source_id BIGINT, tenant_id BIGINT, status TEXT, created_at BIGINT)");
+                + "(request_id BIGINT, source_id BIGINT, tenant_id BIGINT, status TEXT, created_at BIGINT, official_id BIGINT)");
         }
         Configuration configuration = new Configuration();
         configuration.setMapUnderscoreToCamelCase(true);
@@ -43,11 +43,29 @@ class EmployeePublicationLookupTest {
     }
 
     void insert(long id, long source, long tenant, String state, long created) throws Exception {
-        try (var statement = connection.prepareStatement("INSERT INTO byai.digital_employee_publication VALUES (?,?,?,?,?)")) {
+        try (var statement = connection.prepareStatement("INSERT INTO byai.digital_employee_publication VALUES (?,?,?,?,?,NULL)")) {
             statement.setLong(1, id); statement.setLong(2, source); statement.setLong(3, tenant);
             statement.setString(4, state); statement.setLong(5, created); statement.executeUpdate();
         }
         session.clearCache();
+    }
+
+    @Test void batchSummaryIdentifiesAnUpdateWithoutReadingEachRequest() throws Exception {
+        insert(10, 100, 1, "DRAFT", 1000);
+        connection.createStatement().executeUpdate("UPDATE byai.digital_employee_publication SET official_id=900 WHERE request_id=10");
+        assertThat(mapper.currentStatuses(List.of(100L), 1L).getFirst().getOfficialId()).isEqualTo(900L);
+    }
+
+    @Test void personalLegacyMarkersAreNeverReturnedAsTheOfficialCopy() throws Exception {
+        try (var statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE byai.ss_resource "
+                + "(resource_id BIGINT, publication_source_id BIGINT, com_acct_id BIGINT, owner_type TEXT, resource_biz_type TEXT)");
+            statement.execute("INSERT INTO byai.ss_resource VALUES (100,100,1,'personal','DIG_EMPLOYEE'), "
+                + "(200,100,1,'personal','DIG_EMPLOYEE'), (300,100,2,'enterprise','DIG_EMPLOYEE'), "
+                + "(400,100,1,'enterprise','SKILL'), (900,100,1,'enterprise','DIG_EMPLOYEE')");
+        }
+        assertThat(mapper.official(100L, 1L).getResourceId()).isEqualTo(900L);
+        assertThat(mapper.official(100L, 3L)).isNull();
     }
 
     @Test void currentAndBatchPreferActiveRequestsAndNeverCrossTenant() throws Exception {

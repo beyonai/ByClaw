@@ -2,6 +2,7 @@ import type { PublicationDetail } from '@/service/employeePublication';
 import { Alert, Button, Collapse, Modal, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ResourceAvailabilityList, { resourceIsOmitted } from './ResourceAvailabilityList';
+import UpdateTargetNotice from './UpdateTargetNotice';
 
 type Decision = 'publish' | 'edit' | 'cancel';
 
@@ -61,7 +62,12 @@ export default function usePublicationConfirmation(mode: 'publish' | 'update' = 
         <Button key="edit" onClick={() => settle('edit')}>
           返回修改
         </Button>,
-        <Button key="publish" type="primary" onClick={() => settle('publish')}>
+        <Button
+          key="publish"
+          type="primary"
+          disabled={candidate?.updateTarget?.changed}
+          onClick={() => settle('publish')}
+        >
           {updating ? '提交更新审核' : '确认并继续发布'}
         </Button>,
       ]}
@@ -77,6 +83,15 @@ export default function usePublicationConfirmation(mode: 'publish' | 'update' = 
                 : '发布后，当前企业的所有成员都能使用这位数字员工。'}
             </Typography.Text>
           </Typography.Paragraph>
+          <UpdateTargetNotice detail={candidate} />
+          {candidate.sourceResourcesChanged && (
+            <Alert
+              showIcon
+              type="info"
+              style={{ marginBottom: 16 }}
+              message="个人员工的关联资源已变化，本次确认使用更新后的清单。"
+            />
+          )}
           <Alert
             showIcon
             type={omitted.length || warnings.length ? 'warning' : 'success'}

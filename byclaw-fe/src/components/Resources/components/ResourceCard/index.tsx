@@ -65,6 +65,7 @@ export interface IResourceCardItem {
   officialPublication?: boolean;
   canPublishEmployee?: boolean;
   employeePublicationStatus?: string;
+  employeePublicationUpdate?: boolean;
   canManageAuth?: boolean;
   canUseAuth?: boolean;
   canApplyUse?: boolean;
@@ -809,7 +810,11 @@ const RenderContent = (props: ResourceCardProps) => {
     publicationFeedbackCleanup.current = clearFeedback;
     try {
       const resourceId = String(resource.resourceId || resource.id || resource.agentId);
-      await openEmployeePublication(resourceId);
+      if (resource.employeePublicationStatus === 'PUBLISHED') {
+        await openEmployeePublication(resourceId, 'publishUpdate');
+      } else {
+        await openEmployeePublication(resourceId);
+      }
     } catch (error: any) {
       message.error(publicationErrorMessage(error, '无法发起发布申请'));
     } finally {
@@ -818,7 +823,7 @@ const RenderContent = (props: ResourceCardProps) => {
       publishToEnterpriseLock.current = false;
       setOpeningPublication(false);
     }
-  }, [resource.resourceId, resource.id, resource.agentId]);
+  }, [resource.resourceId, resource.id, resource.agentId, resource.employeePublicationStatus]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const {
@@ -873,12 +878,22 @@ const RenderContent = (props: ResourceCardProps) => {
         label: (
           <BuildMenuLabel
             icon="icon-a-Uploadshangchuan"
-            text={publicationEntryLabel(resource.employeePublicationStatus)}
+            text={publicationEntryLabel(resource.employeePublicationStatus, resource.employeePublicationUpdate)}
             loading={openingPublication}
           />
         ),
         onClick: () => openPublication(),
       });
+      if (resource.employeePublicationStatus === 'PUBLISHED') {
+        items.push({
+          key: 'viewEmployeePublication',
+          label: <BuildMenuLabel icon="icon-a-Uploadshangchuan" text="查看发布记录" />,
+          onClick: () =>
+            openEmployeePublication(String(resource.resourceId || resource.id || resource.agentId)).catch((error) =>
+              message.error(publicationErrorMessage(error, '无法查看发布记录'))
+            ),
+        });
+      }
     }
 
     // 编辑信息
@@ -1184,6 +1199,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.officialPublication,
     resource?.canPublishEmployee,
     resource?.employeePublicationStatus,
+    resource?.employeePublicationUpdate,
     openPublication,
     resource?.canManageAuth,
     resource?.canUseAuth,

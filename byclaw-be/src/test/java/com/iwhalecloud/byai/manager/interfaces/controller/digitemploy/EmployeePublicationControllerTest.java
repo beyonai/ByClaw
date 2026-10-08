@@ -12,6 +12,18 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class EmployeePublicationControllerTest {
+    @Test void pageOpeningUsesExplicitPostEndpointAndValidatesRequestId() throws Exception {
+        var service = mock(EmployeePublicationApplicationService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new EmployeePublicationController(service))
+            .setControllerAdvice(new GlobalExceptionHandler()).build();
+        mvc.perform(post("/digitalEmployeePublication/open").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"requestId\":100}"))
+            .andExpect(status().isOk());
+        verify(service).open(100L);
+        mvc.perform(post("/digitalEmployeePublication/open").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isBadRequest());
+        verify(service, times(1)).open(any());
+    }
     @Test void businessValidationReturns400WithSpecificReasonAndUnexpectedFailuresRemain500() throws Exception {
         var service = mock(EmployeePublicationApplicationService.class);
         var mvc = MockMvcBuilders.standaloneSetup(new EmployeePublicationController(service))

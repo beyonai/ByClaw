@@ -247,7 +247,11 @@ function EnabledPublicationAuditList({ capabilities }: { capabilities: { adminis
                         <span className={styles.secondary}>审核于 {formatTime(row.reviewedAt)}</span>
                       </>
                     ) : (
-                      <span className={styles.secondary}>{reviewPlaceholder[row.status] || '暂无审核记录'}</span>
+                      <span className={styles.secondary}>
+                        {row.requiresAdminVipReview && ['PENDING', 'FAILED'].includes(row.status)
+                          ? '等待超管 adminvip 审核'
+                          : reviewPlaceholder[row.status] || '暂无审核记录'}
+                      </span>
                     )}
                   </div>
                 ),

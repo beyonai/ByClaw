@@ -600,12 +600,15 @@ public class ByClawSkillResourceApplicationService {
 
         SsResExtSkill sourceExt = ssResExtSkillService.findById(sourceId);
         // 校验读取原包；副本仍只复制数据库记录及文件引用，不重打包或上传文件。
-        String targetName = source.getResourceName();
+        String targetName = com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames
+            .enterpriseName(source.getResourceName(), null);
         if (ssResourceService.existsEnterpriseSkillByName(targetName)) {
             // 重名时标明本次上架人；仅调整企业副本名称，不改变个人技能或已有副本。
             String publisherName = StringUtils.defaultIfBlank(CurrentUserHolder.getCurrentUserName(),
                 CurrentUserHolder.getCurrentUserCode());
-            targetName += "（" + publisherName + "）";
+            String baseName = targetName.replaceFirst("\\s*\\((企业|Enterprise)\\)$", "");
+            targetName = com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames
+                .enterpriseName(baseName + "（" + publisherName + "）", targetName);
         }
         SkillPackageMetadata metadata = new SkillPackageMetadata(targetName, targetCode,
             source.getResourceDesc(), sourceExt == null ? null : sourceExt.getSkillOriginalFilename(),

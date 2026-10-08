@@ -3,16 +3,37 @@ package com.iwhalecloud.byai.manager.application.service.digitemploy;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import java.util.List;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * 员工发布专用 A/B 接口，由 EmployeePublicationSkillService 实现；不调用原有独立技能上架方法。
  * 未提供实现时，个人技能在确认清单中标为不带入，员工本身仍可发布。
  */
 public interface EmployeePublicationSkillBridge {
-    record Context(Long tenantId, Long authorId, Long requestId) { }
+    record Context(Long tenantId, Long authorId, Long requestId, String copyName) {
+        public Context(Long tenantId, Long authorId, Long requestId) {
+            this(tenantId, authorId, requestId, null);
+        }
+    }
 
     /** 与用户约定的技能根目录/references/resourceMate.json 中的一项依赖。 */
-    record Issue(String resourceId, String resourceType, String name, String reason) { }
+    record Issue(String resourceId, String resourceType, String name, String reason) {
+        static final String PERSONAL_RESOURCE_REASON = "依赖个人资源，不随员工发布";
+
+        /** 明确提示被排除的是技能，并指出它声明依赖的个人资源类型与名称。 */
+        String displayReason() {
+            String resourceName = StringUtils.defaultIfBlank(name, StringUtils.defaultIfBlank(resourceId, "未命名资源"));
+            if (PERSONAL_RESOURCE_REASON.equals(reason)) {
+                String type = switch (StringUtils.defaultString(resourceType)) {
+                    case "KNOWLEDGE_BASE" -> "知识库";
+                    case "TOOL" -> "工具";
+                    default -> "资源";
+                };
+                return "技能依赖了个人" + type + "「" + resourceName + "」，因此本次不会随员工发布";
+            }
+            return resourceName + "：" + reason;
+        }
+    }
 
     record CheckResult(boolean copyAllowed, List<Issue> issues) { }
 
