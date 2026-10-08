@@ -50,6 +50,7 @@ class EmployeePublicationResourcesTest {
         resource.setResourceBizType("SKILL"); resource.setResourceName("技能");
         when(resources.findById(20L)).thenReturn(resource);
         when(auth.hasResourceUsePermission(any(), eq(7L))).thenReturn(true);
+        when(auth.hasResourceAccessPermission(resource)).thenReturn(true);
     }
     @AfterEach void cleanup() {
         CurrentUserHolder.clearLoginInfo();
@@ -198,6 +199,58 @@ class EmployeePublicationResourcesTest {
         service.validate(captured, 7L, 1L);
         assertThat(service.materialize(captured, 1L, 90L)).containsEntry(20L, null);
     }
+    @Test void visibleCrossTenantSkillKeepsItsIdentityButNeverEntersPublishedConfiguration() {
+        resource.setComAcctId(2L); resource.setResourceName("weather-query");
+        dto.setRelSkills(List.of(Map.of("resourceId", "20", "resourceName", "weather-query")));
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        var dependency = captured.getFirst();
+        assertThat(captured).hasSize(1);
+        assertThat(dependency.getLabel()).isEqualTo("weather-query");
+        assertThat(EmployeePublicationResources.describe(dependency).resourceType()).isEqualTo("SKILL");
+        assertThat(dependency.getWarning()).contains("原数字员工所属企业不一致");
+        assertThat(dependency.getResource()).isNull();
+        service.validate(captured, 7L, 1L);
+        var mapping = service.materialize(captured, 1L, 90L);
+        assertThat(mapping).containsEntry(20L, null);
+        assertThat(dto.getRelIds()).containsExactly(20L);
+        service.applyPublishedResources(dto, captured, mapping);
+        assertThat(dto.getRelIds()).isEmpty();
+        assertThat(dto.getRelSkills()).isEmpty();
+        verifyNoInteractions(storage, bridge);
+    }
+    @Test void unreadableCrossTenantResourceDoesNotExposeItsNameOrType() {
+        resource.setComAcctId(2L); resource.setResourceName("weather-query");
+        when(auth.hasResourceAccessPermission(resource)).thenReturn(false);
+        var dependency = service.capture(dto, 7L, 1L, 100L).getFirst();
+        assertThat(dependency.getLabel()).isEqualTo("关联资源 20");
+        assertThat(dependency.getResource()).isNull();
+        assertThat(EmployeePublicationResources.describe(dependency).resourceType()).isEqualTo("UNKNOWN");
+        assertThat(service.materialize(List.of(dependency), 1L, 90L)).containsEntry(20L, null);
+    }
+    @Test void legacyDisplayRecoveryIsReadOnlyAndRechecksEachViewersResourcePermission() {
+        resource.setComAcctId(2L); resource.setResourceName("weather-query");
+        var dependency = new EmployeePublicationResources.Dependency();
+        dependency.setTargetId(20L); dependency.setAction("OMIT_RESOURCE");
+        dependency.setLabel("其他企业资源"); dependency.setWarning("资源不属于当前企业");
+        service.refreshDisplayMetadata(List.of(dependency));
+        assertThat(dependency.getLabel()).isEqualTo("weather-query");
+        assertThat(dependency.getResourceType()).isEqualTo("SKILL");
+        assertThat(dependency.getWarning()).contains("原数字员工所属企业不一致");
+        assertThat(dependency.getAction()).isEqualTo("OMIT_RESOURCE");
+        assertThat(dependency.getResource()).isNull();
+        assertThat(dependency.getTargetId()).isEqualTo(20L);
+        when(auth.hasResourceAccessPermission(resource)).thenReturn(false);
+        service.refreshDisplayMetadata(List.of(dependency));
+        assertThat(dependency.getLabel()).isEqualTo("关联资源 20");
+        assertThat(dependency.getResourceType()).isNull();
+        assertThat(service.materialize(List.of(dependency), 1L, 90L)).containsEntry(20L, null);
+        when(resources.findById(20L)).thenThrow(new IllegalStateException("storage offline"));
+        service.refreshDisplayMetadata(List.of(dependency));
+        assertThat(dependency.getLabel()).isEqualTo("关联资源 20");
+        assertThat(dependency.getResourceType()).isNull();
+        assertThat(dependency.getWarning()).contains("原数字员工所属企业不一致");
+        verifyNoInteractions(storage, bridge);
+    }
     @Test void lostSnapshotNeverFallsBackToPrivateSkill() {
         readableSkill(); var captured = service.capture(dto, 7L, 1L, 100L);
         when(storage.readWithinResourceRoot(anyString())).thenReturn(null);
@@ -211,10 +264,38 @@ class EmployeePublicationResourcesTest {
         assertThat(captured.getFirst().getWarning()).contains("尚未接入");
         assertThat(service.materialize(captured, 1L, 90L)).containsEntry(20L, null);
     }
-    @Test void invalidStoragePathDoesNotReadOutsideResourceRoot() {
-        readableSkill(); skills.findById(20L).setSkillUrl("../../secrets.zip");
+    @ParameterizedTest @ValueSource(strings = {
+        "skill/original.zip", "/resource/skill/original.zip", "resource/skill/original.zip",
+        "/byclaw/resource/skill/original.zip", "byclaw/resource/skill/original.zip",
+        "  /byclaw/resource/skill/original.zip  ", "\\byclaw\\resource\\skill\\original.zip"
+    })
+    void registeredSkillPathsUseTheSameResourceRelativeFileAndStillRequireA(String path) {
+        readableSkill(); skills.findById(20L).setSkillUrl(path);
+        var dependency = service.capture(dto, 7L, 1L, 100L).getFirst();
+        assertThat(dependency.getAction()).isEqualTo("COPY_SKILL");
+        verify(storage).readWithinResourceRoot("skill/original.zip");
+        verify(bridge).check(eq(resource), any(), eq(new byte[]{1,2,3}), any());
+        verify(bridge, never()).publish(any(), any(), any(), any(), any());
+    }
+    @ParameterizedTest @ValueSource(strings = {
+        "../../secrets.zip", "/byclaw/resource/skill/../secrets.zip", "/tmp/secrets.zip",
+        "https://example.com/skill.zip", "file:/tmp/skill.zip", "C:\\skill.zip",
+        "//resource/skill/original.zip", "/resource/", "/byclaw/resource/"
+    })
+    void invalidStoragePathDoesNotReadOutsideResourceRoot(String path) {
+        readableSkill(); skills.findById(20L).setSkillUrl(path);
         assertThat(service.capture(dto, 7L, 1L, 100L).getFirst().getAction()).isEqualTo("OMIT_RESOURCE");
         verifyNoInteractions(storage);
+        verifyNoInteractions(bridge);
+    }
+    @Test void recognizedSkillPathStillOmitsAMissingFileWithoutBlockingEmployeePublication() {
+        readableSkill(); skills.findById(20L).setSkillUrl("/byclaw/resource/skill/original.zip");
+        when(storage.readWithinResourceRoot("skill/original.zip")).thenReturn(null);
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        assertThat(captured.getFirst().getWarning()).isEqualTo("技能文件不存在");
+        assertThat(captured.getFirst().getError()).isNull();
+        assertThat(service.materialize(captured, 1L, 90L)).containsEntry(20L, null);
+        verifyNoInteractions(bridge);
     }
     @Test void failedBIsNotReportedAsSuccessfulPublication() {
         readableSkill(); var captured = service.capture(dto, 7L, 1L, 100L);

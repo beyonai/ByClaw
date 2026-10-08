@@ -569,9 +569,23 @@ public class EmployeePublicationApplicationService {
     private Detail view(DigitalEmployeePublication publication) {
         DigitalEmployeeDetailsDTO employee = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDetailsDTO.class);
         List<Dependency> deps = dependencyList(publication);
-        employee.setRelResourceList(deps.stream().map(Dependency::getResource).filter(Objects::nonNull).map(resource -> {
-            SsResourceDTO dto = new SsResourceDTO(); BeanUtils.copyProperties(resource, dto); return dto;
-        }).toList());
+        if (deps.stream().anyMatch(d -> d.getResource() == null && d.getTargetId() != null
+            && EmployeePublicationResources.isOmitted(d))) {
+            dependencies.refreshDisplayMetadata(deps);
+        }
+        employee.setRelResourceList(deps.stream().map(dependency -> {
+            SsResourceDTO dto = new SsResourceDTO();
+            if (dependency.getResource() != null) BeanUtils.copyProperties(dependency.getResource(), dto);
+            else {
+                if (!EmployeePublicationResources.isOmitted(dependency) || dependency.getTargetId() == null
+                    || StringUtils.isBlank(dependency.getResourceType())) return null;
+                // 仅供待发布配置回显/移除关联；执行发布仍按 action 过滤，不将展示信息恢复为可发布资源。
+                dto.setResourceId(dependency.getTargetId());
+                dto.setResourceName(dependency.getLabel());
+                dto.setResourceBizType(dependency.getResourceType());
+            }
+            return dto;
+        }).filter(Objects::nonNull).toList());
         boolean active = List.of("DRAFT", "PENDING", "FAILED").contains(publication.getStatus());
         boolean editable = "DRAFT".equals(publication.getStatus()) || canReview(publication) && "PENDING".equals(publication.getStatus());
         publication.setRequiresAdminVipReview(requiresAdminVipReview(publication));
