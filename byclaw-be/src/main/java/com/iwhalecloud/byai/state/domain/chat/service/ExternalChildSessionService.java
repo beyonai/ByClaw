@@ -140,7 +140,7 @@ public class ExternalChildSessionService {
     ) {
         ByaiSession parent = sessionService.findById(parentSessionId);
         if (parent == null) {
-            throw new IllegalArgumentException("parent session does not exist: " + parentSessionId);
+            throw new MissingParentSessionException(parentSessionId);
         }
 
         Long childSessionId = sequenceService.nextVal();
@@ -175,6 +175,13 @@ public class ExternalChildSessionService {
         saveExt(childSessionId, EXT_EVENT_SOURCE, "事件来源", metadata.getString("event_source"));
 
         return new ExternalChildSessionBinding(child, externalSessionId, messageId);
+    }
+
+    /** 与元数据无效、数据库故障等可重试错误区分，供 Stream 路由处理历史孤儿事件。 */
+    public static class MissingParentSessionException extends IllegalArgumentException {
+        public MissingParentSessionException(Long parentSessionId) {
+            super("parent session does not exist: " + parentSessionId);
+        }
     }
 
     private void saveExt(Long sessionId, String code, String name, String value) {

@@ -1547,8 +1547,8 @@ COMMENT ON COLUMN byai.byai_project.update_time IS '更新时间';
 COMMENT ON COLUMN byai.byai_project.delete_flag IS '删除标记 0正常 1删除';
 
 -- 项目关联会话
-ALTER TABLE byai_session ADD COLUMN project_id BIGINT NOT NULL DEFAULT -1;
-COMMENT ON COLUMN byai_session.project_id IS '项目ID,-1代表无归属项目,即默认项目';
+ALTER TABLE byai.byai_session ADD COLUMN project_id BIGINT NOT NULL DEFAULT -1;
+COMMENT ON COLUMN byai.byai_session.project_id IS '项目ID,-1代表无归属项目,即默认项目';
 
 -- 项目关联成员
 CREATE TABLE IF NOT EXISTS byai.byai_project_member
