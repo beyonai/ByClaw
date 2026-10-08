@@ -195,7 +195,9 @@ public class ProjectApplicationService {
         return createProject(dto, ProjectType.NORMAL);
     }
 
-    /** 创建群聊关联项目，沿用普通项目的成员、云盘和工作目录初始化流程。 */
+    /**
+     * 创建群聊关联项目，沿用普通项目的成员、云盘和工作目录初始化流程。
+     */
     @Transactional
     public Project createGroupChatProject(ProjectDTO dto) {
         return createProject(dto, ProjectType.HACU);
@@ -264,7 +266,7 @@ public class ProjectApplicationService {
 
         String projectName = project.getProjectName();
         DatasetDto datasetDto = new DatasetDto();
-        datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName) + DateUtils.getFormatedDate(new Date()));
+        datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName) + DateUtils.formatDate(new Date(), DateUtils.COMPACT_DATE_TIME_FORMAT));
         datasetDto.setResourceDesc(I18nUtil.get("project.cloud.resource.desc", projectName));
         datasetDto.setSystemCode("BYAI");
         datasetDto.setResourceBizType("KG_CLOUD");
@@ -351,7 +353,7 @@ public class ProjectApplicationService {
         //如果没有初始化云盘，创建云盘知识库
         Long cloudResourceId = project.getCloudResourceId();
         if (cloudResourceId == null) {
-             cloudResourceId = this.createCloudResource(project);
+            cloudResourceId = this.createCloudResource(project);
             project.setCloudResourceId(cloudResourceId);
         }
 
@@ -1010,7 +1012,9 @@ public class ProjectApplicationService {
         return null;
     }
 
-    /** 删除项目仓库；扫描源关联不再阻断删除。 */
+    /**
+     * 删除项目仓库；扫描源关联不再阻断删除。
+     */
     @Transactional
     public void deleteProjectRepo(Long repoId) {
         if (repoId == null) {
