@@ -2233,22 +2233,22 @@ data:
                       reason="OOMKilled",
                       pod=~"[0-9a-f-]{36}-[0-9]+"
                     } == 1
-                    unless
-                    kube_pod_container_status_terminated_reason{
-                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                      container="sandbox",
-                      reason="OOMKilled",
-                      pod=~"[0-9a-f-]{36}-[0-9]+"
-                    } offset ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m} == 1
                   )
                   or
                   (
-                    increase(kube_pod_container_status_last_terminated_reason{
+                    changes(kube_pod_container_status_last_terminated_reason{
                       namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
                       container="sandbox",
                       reason="OOMKilled",
                       pod=~"[0-9a-f-]{36}-[0-9]+"
-                    }[${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m}]) > 0
+                    }[${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-30s}]) > 0
+                    and
+                    kube_pod_container_status_last_terminated_reason{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      reason="OOMKilled",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    } == 1
                   ),
                   "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
@@ -2266,7 +2266,7 @@ data:
               resizeDirection: recovery
             annotations:
               summary: "OpenClaw 沙箱 OOMKilled"
-              reason_detail: "沙箱容器最近 ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m} 发生 OOMKilled，建议保存目标规格偏好并自动重启恢复。pod={{ \$labels.pod }} value={{ \$value }}"
+              reason_detail: "沙箱容器最近 ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-30s} 发生 OOMKilled 或仍处于 OOM 终止状态，建议保存目标规格偏好并自动重启恢复。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxImagePullFailed
             expr: |
@@ -2307,6 +2307,13 @@ data:
                       namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
                       container="sandbox",
                       reason=~"CrashLoopBackOff|RunContainerError|CreateContainerConfigError|CreateContainerError",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    } == 1
+                    or
+                    kube_pod_container_status_terminated_reason{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      reason=~"Error|ContainerCannotRun|StartError",
                       pod=~"[0-9a-f-]{36}-[0-9]+"
                     } == 1
                   ),
