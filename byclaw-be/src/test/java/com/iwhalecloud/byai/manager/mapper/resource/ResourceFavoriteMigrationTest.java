@@ -61,37 +61,35 @@ class ResourceFavoriteMigrationTest {
         String migration = Files.readString(root.resolve("deploy/migrations/versions/V0.5.0/V0.5.0__ddl.sql"));
         String marker = "-- 商业版本官方推荐资源收藏：";
         assertThat(migration).contains(marker);
-        String sql = migration.substring(migration.indexOf(marker));
+        String sql = migration.substring(migration.indexOf(marker), migration.indexOf("-- 完善个人资料："));
 
         try (var connection = DriverManager.getConnection(
             "jdbc:h2:mem:favorite_migration;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE")) {
             try (var statement = connection.createStatement()) {
                 statement.execute("CREATE SCHEMA byai");
-                // V0.5.0 尾部同时包含已有客户线索表的增量个人资料字段。
-                statement.execute("CREATE TABLE byai.byai_customer_leads(id BIGINT, company_name VARCHAR(100), contact_name VARCHAR(100))");
                 RunScript.execute(connection, new StringReader(sql));
-                statement.executeUpdate("INSERT INTO byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (22, 11, 33)");
-                statement.executeUpdate("INSERT INTO byai_resource_favorite_count(com_acct_id, resource_id, favorite_count) VALUES (22, 33, 5)");
+                statement.executeUpdate("INSERT INTO byai.byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (22, 11, 33)");
+                statement.executeUpdate("INSERT INTO byai.byai_resource_favorite_count(com_acct_id, resource_id, favorite_count) VALUES (22, 33, 5)");
 
                 RunScript.execute(connection, new StringReader(sql));
-                try (var result = statement.executeQuery("SELECT favorite_count FROM byai_resource_favorite_count")) {
+                try (var result = statement.executeQuery("SELECT favorite_count FROM byai.byai_resource_favorite_count")) {
                     assertThat(result.next()).isTrue();
                     assertThat(result.getLong(1)).isEqualTo(5L);
                     assertThat(result.next()).isFalse();
                 }
                 assertThatThrownBy(() -> statement.executeUpdate(
-                    "INSERT INTO byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (22, 11, 33)"))
+                    "INSERT INTO byai.byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (22, 11, 33)"))
                     .isInstanceOf(SQLException.class);
-                statement.executeUpdate("INSERT INTO byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (22, 12, 33)");
-                statement.executeUpdate("INSERT INTO byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (23, 11, 33)");
+                statement.executeUpdate("INSERT INTO byai.byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (22, 12, 33)");
+                statement.executeUpdate("INSERT INTO byai.byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (23, 11, 33)");
                 assertThatThrownBy(() -> statement.executeUpdate(
-                    "INSERT INTO byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (22, NULL, 34)"))
-                    .isInstanceOf(SQLException.class);
-                assertThatThrownBy(() -> statement.executeUpdate(
-                    "INSERT INTO byai_resource_favorite_count(com_acct_id, resource_id) VALUES (22, 33)"))
+                    "INSERT INTO byai.byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (22, NULL, 34)"))
                     .isInstanceOf(SQLException.class);
                 assertThatThrownBy(() -> statement.executeUpdate(
-                    "UPDATE byai_resource_favorite_count SET favorite_count = -1 WHERE resource_id = 33"))
+                    "INSERT INTO byai.byai_resource_favorite_count(com_acct_id, resource_id) VALUES (22, 33)"))
+                    .isInstanceOf(SQLException.class);
+                assertThatThrownBy(() -> statement.executeUpdate(
+                    "UPDATE byai.byai_resource_favorite_count SET favorite_count = -1 WHERE resource_id = 33"))
                     .isInstanceOf(SQLException.class);
             }
         }
