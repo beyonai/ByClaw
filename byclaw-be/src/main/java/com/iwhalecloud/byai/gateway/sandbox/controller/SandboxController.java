@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.controller;
 
+import jakarta.servlet.http.HttpServletResponse;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -512,12 +514,17 @@ public class SandboxController {
 
     @PostMapping("/autoscale/alerts")
     @Operation(summary = "Prometheus 沙箱扩缩容告警入口", description = "接收 Alertmanager webhook，生成动态扩缩容审计记录并按目标规格调用 OpenSandbox")
-    public ResponseUtil handleAutoscaleAlert(@RequestBody Map<String, Object> payload) {
+    public ResponseUtil handleAutoscaleAlert(@RequestBody Map<String, Object> payload, HttpServletResponse response) {
         try {
             SsSandboxResizeRecord record = sandboxResizeService.handlePrometheusAlert(payload);
+            if (record != null && "FAILED".equals(record.getStatus())) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return ResponseUtil.fail("沙箱扩缩容告警处理失败: " + record.getErrorMessage());
+            }
             return ResponseUtil.successResponse(record);
         }
         catch (Exception e) {
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
             return ResponseUtil.fail("沙箱扩缩容告警处理失败: " + e.getMessage());
         }
     }
