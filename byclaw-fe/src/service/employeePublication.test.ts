@@ -2,7 +2,10 @@ import { POST } from '@/service/common/request';
 import { openPublication, saveOfficialUpdateDraft } from './employeePublication';
 
 jest.mock('@/service/common/request', () => ({ POST: jest.fn(), GET: jest.fn() }));
-jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+jest.mock('@umijs/max', () => ({
+  history: { push: jest.fn() },
+  getIntl: () => ({ formatMessage: ({ id }: { id: string }) => require('@/locales/zh-CN').default[id] }),
+}));
 const base = '/byaiService/digitalEmployeePublication';
 const candidate = (status = 'DRAFT', revision = 1) => ({
   publication: { requestId: '100', officialId: '20', status, revision },
@@ -26,7 +29,9 @@ it('saves B configuration as a candidate without mutating the live employee', as
 });
 it.each(['PENDING', 'APPLYING', 'FAILED'])('does not overwrite an outstanding %s application', async (status) => {
   (POST as jest.Mock).mockResolvedValue(candidate(status));
-  await expect(saveOfficialUpdateDraft('20', {})).rejects.toThrow('未完成的更新申请');
+  await expect(saveOfficialUpdateDraft('20', {})).rejects.toThrow(
+    '该员工已有未完成的更新申请，请先在审批中心处理或撤回申请后再保存'
+  );
   expect(POST).toHaveBeenCalledTimes(1);
 });
 it.each(['REJECTED', 'WITHDRAWN'])('creates a successor for %s and saves using its revision', async (status) => {

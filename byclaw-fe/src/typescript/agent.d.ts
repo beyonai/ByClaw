@@ -56,6 +56,8 @@ export type IAgent = {
   // 关注相关
   focus: boolean | null;
   focusCount: string; // 使用次数
+  favorited?: boolean;
+  favoriteCount?: number;
   useCount: string; // 订阅次数
   myCreate?: boolean;
   mySubscribe?: boolean;

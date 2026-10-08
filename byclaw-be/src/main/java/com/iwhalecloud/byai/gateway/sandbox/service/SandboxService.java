@@ -344,6 +344,11 @@ public class SandboxService {
         return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, serviceType, false);
     }
 
+    public SandboxLaunchData restartSandboxAfterRemoteExitWithoutWait(String userCode, Long resourceId,
+        String targetAgentType, String serviceType, SsSandboxRecord recoveryTarget) {
+        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, serviceType, false, recoveryTarget);
+    }
+
     private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
         boolean waitForWorkerReady) {
         return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, null, waitForWorkerReady);
@@ -351,6 +356,11 @@ public class SandboxService {
 
     private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
         String serviceType, boolean waitForWorkerReady) {
+        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, serviceType, waitForWorkerReady, null);
+    }
+
+    private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
+        String serviceType, boolean waitForWorkerReady, SsSandboxRecord recoveryTarget) {
         SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
@@ -367,14 +377,18 @@ public class SandboxService {
                 throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
             }
 
-            SsSandboxRecord existingRecord = sandboxRecordMapper.selectActiveByUserAndResource(userCode,
-                routing.getSandboxType(), routing.getEffectiveResourceId());
+            SsSandboxRecord existingRecord = resolveRecoveryRecord(userCode, routing, recoveryTarget);
             if (existingRecord != null) {
                 LOGGER.info("重拉前命中旧活跃记录：{}", sandboxRef(existingRecord));
                 String cleanupServiceType = StringUtils.defaultIfBlank(serviceType,
                     StringUtils.defaultIfBlank(existingRecord.getServiceType(), routing.getSandboxType()));
-                removeRemoteSandboxesForServiceTypeOrThrow(userCode, routing.getSandboxType(), cleanupServiceType,
-                    existingRecord.getSandboxId(), "remote-exit-restart");
+                if (recoveryTarget != null) {
+                    // Retire the alert's original instance, even after the preferred profile changed.
+                    removeRemoteSandboxOrThrow(existingRecord, "remote-exit-restart");
+                } else {
+                    removeRemoteSandboxesForServiceTypeOrThrow(userCode, routing.getSandboxType(), cleanupServiceType,
+                        existingRecord.getSandboxId(), "remote-exit-restart");
+                }
                 int marked = sandboxRecordMapper.markReleased(existingRecord.getId(),
                     RELEASE_REASON_REMOTE_EXIT, new Date(), existingRecord.getLockVersion());
                 if (marked == 0) {
@@ -402,6 +416,26 @@ public class SandboxService {
                 RedisUtil.releaseLock(lockKey, lockValue);
             }
         }
+    }
+
+    private SsSandboxRecord resolveRecoveryRecord(String userCode, SandboxLaunchRouting routing,
+        SsSandboxRecord recoveryTarget) {
+        SsSandboxRecord current = sandboxRecordMapper.selectActiveByUserAndResource(userCode,
+            routing.getSandboxType(), routing.getEffectiveResourceId());
+        if (recoveryTarget == null) {
+            return current;
+        }
+        if (current != null && !Objects.equals(current.getId(), recoveryTarget.getId())) {
+            throw new IllegalStateException("recovery target was superseded by another active sandbox");
+        }
+        SsSandboxRecord original = sandboxRecordMapper.selectById(recoveryTarget.getId());
+        if (original == null || !StringUtils.equals(original.getSandboxId(), recoveryTarget.getSandboxId())
+            || !StringUtils.equals(original.getUserCode(), userCode)
+            || !Objects.equals(original.getResourceId(), routing.getEffectiveResourceId())
+            || (!STATUS_STARTING.equals(original.getStatus()) && !STATUS_RUNNING.equals(original.getStatus()))) {
+            throw new IllegalStateException("recovery target is no longer the expected active sandbox");
+        }
+        return original;
     }
 
     /**

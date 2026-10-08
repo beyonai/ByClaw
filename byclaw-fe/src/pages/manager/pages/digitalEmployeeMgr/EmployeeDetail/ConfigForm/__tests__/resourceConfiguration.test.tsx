@@ -23,7 +23,11 @@ jest.mock('antd', () => {
 });
 
 jest.mock('@umijs/max', () => {
-  const intl = { formatMessage: ({ id }: { id: string }) => id };
+  const messages = jest.requireActual('../../../locales/zh-CN').default;
+  const intl = {
+    // 该操作使用真实中文文案，其他消息仍返回 ID，保持既有用例的定位方式。
+    formatMessage: ({ id }: { id: string }) => (id === 'employeeDetail.addBundledSkill' ? messages[id] : id),
+  };
   return { useIntl: () => intl, getIntl: () => intl, getLocale: () => 'en-US' };
 });
 jest.mock('@/pages/manager/service/System', () => ({ getByParamGroupCode: jest.fn().mockResolvedValue([]) }));
@@ -252,6 +256,25 @@ describe('skill configuration ownership tabs', () => {
 
   beforeEach(() => {
     listSkills.mockReset().mockResolvedValue({ list: [], total: 0 });
+  });
+
+  it('labels an existing skill action as 添加 and allows adding and removing it', async () => {
+    listSkills.mockResolvedValue({
+      list: [{ resourceId: '103', resourceCode: 'search', resourceName: 'Search skill' }],
+      total: 1,
+    });
+    render(<Editor employee={{ ownerType: 'enterprise', resourceCode: 'helper' }} />);
+    openSkills();
+    const dialog = within(await screen.findByRole('dialog'));
+    const addButton = await dialog.findByRole('button', { name: /^添\s*加$/ });
+    expect(dialog.queryByRole('button', { name: /^新\s*增$/ })).not.toBeInTheDocument();
+    fireEvent.click(addButton);
+    expect(editorForm.getFieldValue('bundledSkills')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ resourceId: '103' })])
+    );
+    fireEvent.click(await dialog.findByRole('button', { name: 'itemCard.remove' }));
+    expect(editorForm.getFieldValue('bundledSkills')).toEqual([]);
+    expect(dialog.getByRole('button', { name: /^添\s*加$/ })).toBeVisible();
   });
 
   it.each(['personal', 'enterprise'])('shows the allowed tabs and queries the initial %s scope', async (ownerType) => {

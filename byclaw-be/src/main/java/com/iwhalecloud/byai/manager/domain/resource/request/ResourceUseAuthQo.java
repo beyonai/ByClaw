@@ -12,6 +12,15 @@ import java.util.List;
 @ApiModel(description = "我能使用的资源列表查询请求")
 public class ResourceUseAuthQo extends AuthQo implements Serializable {
 
+    /** 仅商业版官方推荐/我的收藏列表请求收藏字段与排序。 */
+    private Boolean includeFavorites;
+
+    private Boolean favoritesOnly;
+
+    /** 仅由服务端登录上下文填充，客户端不能指定租户。 */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long favoriteTenantId;
+
     /**
      * 资源类型
      */

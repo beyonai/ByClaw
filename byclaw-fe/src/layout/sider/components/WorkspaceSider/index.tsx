@@ -6,12 +6,14 @@ import {
   ReloadOutlined,
   RightOutlined,
   ShareAltOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useIntl, useLocation, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
-import { Tag } from 'antd';
+import { Badge, Tag } from 'antd';
+import useApprovalPendingCounts from '@/hooks/useApprovalPendingCounts';
 import AntdIcon from '@/components/AntdIcon';
 import { hydrateRunningSessions } from '@/hooks/useChat/chatRuntime';
 import useGlobal from '@/hooks/useGlobal';
@@ -538,6 +540,8 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     [projectScopeId, projects]
   );
   const resourceCenterActive = RESOURCE_PATHS.some((path) => isSameOrChildPath(location.pathname, path));
+  const approvalCenterActive = isSameOrChildPath(location.pathname, '/approvalCenter');
+  const { total: approvalPendingCount } = useApprovalPendingCounts();
   const newSessionActive = location.pathname === '/chat' && !sessionId;
   const projectActive = isSameOrChildPath(location.pathname, '/projectSpace');
   const employeeActive =
@@ -874,6 +878,15 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         >
           <AntdIcon type="icon-ziyuan" className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
+        </button>
+        <button
+          type="button"
+          className={classNames(styles.primaryItem, approvalCenterActive && styles.primaryItemActive)}
+          onClick={() => navigate('/approvalCenter')}
+        >
+          <AuditOutlined className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.approvalCenter' })}</span>
+          <Badge className={styles.approvalBadge} count={approvalPendingCount} size="small" />
         </button>
         <button
           type="button"

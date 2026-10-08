@@ -560,9 +560,10 @@ class SkillGroupContractTest {
         Configuration configuration = buildMapperConfiguration();
         String lockSql = normalizedBoundSql(configuration, "selectDigitalEmployeeForUpdate", Map.of(
                 "digitalEmployeeId", 30001L, "comAcctId", 60001L)).getSql();
+        // 企业过滤暂时停用，仍须按员工 ID、资源类型查询并保留行锁。
         assertThat(lockSql)
                 .contains("resource_id = ?")
-                .contains("com_acct_id = ?")
+                .doesNotContain("com_acct_id = ?")
                 .contains("resource_biz_type = 'dig_employee'")
                 .endsWith("for update");
 

@@ -1,16 +1,22 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { Modal, message } from 'antd';
-import { publishSkillToEnterprise } from '@/pages/manager/service/resources';
+import { getSkillPublicationPermissions, publishSkillToEnterprise } from '@/pages/manager/service/resources';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { useEnterpriseSkillPublication } from '../useEnterpriseSkillPublication';
 
-jest.mock('@umijs/max', () => ({ useIntl: () => ({ formatMessage: ({ id }: any) => id }) }));
+jest.mock('@umijs/max', () => ({
+  useIntl: () => ({ formatMessage: ({ id }: any) => id }),
+  getIntl: () => ({ formatMessage: ({ id }: any) => id }),
+}));
 jest.mock('antd', () => ({
   Button: () => null,
   Modal: { confirm: jest.fn(), warning: jest.fn() },
   message: { loading: jest.fn(), success: jest.fn(), error: jest.fn() },
 }));
-jest.mock('@/pages/manager/service/resources', () => ({ publishSkillToEnterprise: jest.fn() }));
+jest.mock('@/pages/manager/service/resources', () => ({
+  publishSkillToEnterprise: jest.fn(),
+  getSkillPublicationPermissions: jest.fn(),
+}));
 jest.mock('@/pages/manager/service/session', () => ({ getDcSystemConfig: jest.fn() }));
 
 const skill = {
@@ -34,6 +40,8 @@ const setup = () => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  (publishSkillToEnterprise as jest.Mock).mockReset();
+  (getSkillPublicationPermissions as jest.Mock).mockReset().mockResolvedValue({ canPublishToEnterprise: true });
   (getDcSystemConfig as jest.Mock).mockResolvedValue({ paramValue: 'openSource' });
 });
 
@@ -73,7 +81,7 @@ it.each([false, true])('confirms once and updates only the source item (existing
   expect(publishSkillToEnterprise).not.toHaveBeenCalled();
   await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
   expect(publishSkillToEnterprise).toHaveBeenCalledWith('personal-skill');
-  expect(onPublished).toHaveBeenCalledWith('personal-skill');
+  expect(onPublished).toHaveBeenCalledWith('personal-skill', expect.objectContaining({ resourceId: 'copy' }));
   expect(message.success).toHaveBeenCalled();
   expect(result.current.publishingId).toBeNull();
 });
@@ -105,6 +113,7 @@ it.each(['string', 'error'])('shows manifest rejection without marking the skill
   expect(Modal.warning).not.toHaveBeenCalled();
   expect(onPublished).not.toHaveBeenCalled();
   expect(result.current.publishingId).toBeNull();
+  expect(result.current.entryLabel(skill)).toBe('resource.retrySkillPublication');
   act(() => result.current.publish(skill));
   expect(Modal.confirm).toHaveBeenCalledTimes(2);
 });
@@ -118,7 +127,42 @@ it('submits successfully before showing personal dependency warning', async () =
   });
   act(() => result.current.publish(skill));
   await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
-  expect(onPublished).toHaveBeenCalledWith('personal-skill');
+  expect(onPublished).toHaveBeenCalledWith('personal-skill', expect.objectContaining({ resourceId: 'copy' }));
   expect(Modal.warning).toHaveBeenCalledTimes(1);
   expect(message.success).toHaveBeenCalled();
+});
+
+it('opens current progress without submitting another publication request', async () => {
+  const { result } = setup();
+  await waitFor(() => expect(result.current.canPublish(skill)).toBe(true));
+  const publication = { resourceId: 'copy', resourceName: 'Copy', resourceStatus: 4 };
+  (getSkillPublicationPermissions as jest.Mock).mockResolvedValue({
+    canPublishToEnterprise: true,
+    skillPublication: publication,
+  });
+  expect(result.current.entryLabel({ ...skill, skillPublication: publication })).toBe(
+    'resource.skillPublicationProgress'
+  );
+  await act(async () => result.current.publish({ ...skill, skillPublication: publication }));
+  expect(publishSkillToEnterprise).not.toHaveBeenCalled();
+  expect(getSkillPublicationPermissions).toHaveBeenCalledWith('personal-skill');
+  expect((Modal.confirm as jest.Mock).mock.calls[0][0].onOk).toBeUndefined();
+});
+
+it('uses structured API errors and recovers a committed request after a lost response', async () => {
+  const { result, onPublished } = setup();
+  await waitFor(() => expect(result.current.canPublish(skill)).toBe(true));
+  const publication = { resourceId: 'copy', resourceName: 'Copy', resourceStatus: 4 };
+  (publishSkillToEnterprise as jest.Mock).mockRejectedValue({ response: { data: { msg: 'Disconnected' } } });
+  (getSkillPublicationPermissions as jest.Mock).mockResolvedValue({
+    canPublishToEnterprise: true,
+    skillPublication: publication,
+  });
+  act(() => result.current.publish(skill));
+  await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
+  expect(message.error).toHaveBeenCalledWith(expect.objectContaining({ content: 'Disconnected' }));
+  expect(onPublished).toHaveBeenCalledWith('personal-skill', publication);
+  expect(result.current.entryLabel({ ...skill, skillPublication: publication })).toBe(
+    'resource.skillPublicationProgress'
+  );
 });

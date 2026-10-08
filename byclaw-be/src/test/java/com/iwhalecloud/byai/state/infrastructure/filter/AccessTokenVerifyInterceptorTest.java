@@ -25,6 +25,73 @@ import org.springframework.test.util.ReflectionTestUtils;
 class AccessTokenVerifyInterceptorTest {
 
     @Test
+    void conversationSearchRequiresTokenEvenWithCookieAnonymousPatternOrSpoofedUserHeader() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        ReflectionTestUtils.setField(interceptor, "urlPattenrs", ".*");
+        interceptor.init();
+        SessionFilter session = mock(SessionFilter.class);
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", session);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        for (String suffix : List.of("", "/")) {
+            MockHttpServletRequest request = request("POST",
+                "/byaiService/skills/conversation-search/query" + suffix, "/byaiService");
+            MockHttpSession cookie = new MockHttpSession();
+            cookie.setAttribute("USER_CODE", "allowed-admin");
+            request.setSession(cookie);
+            request.addHeader("X-User-Id", "allowed-admin");
+            var response = new MockHttpServletResponse();
+            assertFalse(interceptor.preHandle(request, response, new Object()));
+            assertThat(response.getStatus()).isEqualTo(401);
+            assertThat(CurrentUserHolder.getLoginInfo()).isNull();
+        }
+        verifyNoInteractions(session, jwt);
+    }
+
+    @Test
+    void conversationSearchUsesTokenIdentityInsteadOfCookieOrTargetUser() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+        SessionFilter session = mock(SessionFilter.class);
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        LoginApplicationService loginService = mock(LoginApplicationService.class);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", session);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        ReflectionTestUtils.setField(interceptor, "loginApplicationService", loginService);
+        LoginInfo caller = new LoginInfo();
+        caller.setUserId(99L);
+        caller.setUserCode("actual-caller");
+        when(jwt.doFilter(null, "caller-token")).thenAnswer(invocation -> {
+            CurrentUserHolder.setLoginInfo(caller);
+            return true;
+        });
+        when(loginService.getLoginInfo("actual-caller")).thenReturn(caller);
+        MockHttpServletRequest request = request("POST", "/byaiService/skills/conversation-search/query", "/byaiService");
+        MockHttpSession cookie = new MockHttpSession();
+        cookie.setAttribute("USER_CODE", "allowed-admin");
+        request.setSession(cookie);
+        request.addHeader("Beyond-Token", "caller-token");
+        request.addHeader("X-User-Id", "allowed-admin");
+        request.setContent("{\"userCode\":\"allowed-admin\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("actual-caller");
+        verifyNoInteractions(session);
+    }
+
+    @Test
+    void conversationSearchInvalidTokenReturnsUnauthorized() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        MockHttpServletRequest request = request("POST", "/byaiService/skills/conversation-search/query", "/byaiService");
+        request.addHeader("Beyond-Token", "invalid");
+        var response = new MockHttpServletResponse();
+        assertFalse(interceptor.preHandle(request, response, new Object()));
+        assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    @Test
     void allowsInvitationValidationThroughUrlMatcher() {
         AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
         interceptor.init();

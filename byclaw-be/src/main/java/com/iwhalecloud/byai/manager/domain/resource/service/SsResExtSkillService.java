@@ -5,10 +5,13 @@ import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSkillMapper;
+import com.iwhalecloud.byai.manager.vo.auth.SkillPublicationVo;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONException;
 import com.alibaba.fastjson.JSONObject;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.Collection;
 import java.util.Collections;
@@ -126,6 +129,30 @@ public class SsResExtSkillService {
             }
             catch (JSONException | IllegalArgumentException ignored) {
                 // 历史非 JSON 内容或无效来源 ID 不构成可识别的企业副本。
+            }
+        }
+        return result;
+    }
+
+    /** 来源 JSON 再校验，避免同编码的手工导入记录被当成发布申请。 */
+    public Map<Long, SkillPublicationVo> findCurrentPublications(
+        Collection<Long> sourceIds) {
+        var result = new LinkedHashMap<Long, SkillPublicationVo>();
+        if (sourceIds == null || sourceIds.isEmpty()) return result;
+        for (SsResExtSkillDto copy : ssResExtSkillMapper.findPublicationCopies(sourceIds)) {
+            SsResExtSkill ext = copy.getSsResExtSkill();
+            if (ext == null || !StringUtils.hasText(ext.getTargetContent())) continue;
+            try {
+                JSONObject content = JSON.parseObject(ext.getTargetContent());
+                Long sourceId = content == null ? null : content.getLong("sourceResourceId");
+                if (sourceId == null || !sourceIds.contains(sourceId)) continue;
+                var summary = new SkillPublicationVo();
+                summary.setResourceId(copy.getResourceId());
+                summary.setResourceName(copy.getResourceName());
+                summary.setResourceStatus(copy.getResourceStatus());
+                result.putIfAbsent(sourceId, summary);
+            } catch (JSONException | IllegalArgumentException ignored) {
+                // 无法识别来源的历史数据不提供发布入口摘要。
             }
         }
         return result;

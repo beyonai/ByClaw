@@ -19,6 +19,48 @@ class SsResExtSkillEnterpriseCopyIntegrationTest {
     Path tempDir;
 
     @Test
+    void publicationLookupRanksActiveCopiesAndMapsRejectedHistoryWithinSourceTenant() throws Exception {
+        String url = "jdbc:sqlite:" + tempDir.resolve("publication-status.sqlite");
+        try (var connection = DriverManager.getConnection(url); var sql = connection.createStatement()) {
+            sql.execute("CREATE TABLE ss_resource (resource_id INTEGER PRIMARY KEY, resource_code TEXT, "
+                + "resource_biz_type TEXT, owner_type TEXT, resource_status INTEGER, "
+                + "resource_name TEXT, com_acct_id INTEGER, create_time INTEGER)");
+            sql.execute("CREATE TABLE ss_res_ext_skill (resource_id INTEGER PRIMARY KEY, target_content TEXT)");
+            sql.execute("INSERT INTO ss_resource VALUES "
+                + "(601, 'source', 'SKILL', 'personal', 2, 'Source', 1, 0),"
+                + "(602, 'source-two', 'SKILL', 'personal', 2, 'Source two', 1, 0),"
+                + "(701, 'enterprise-skill-601', 'SKILL', 'enterprise', 4, 'Pending', 1, 1),"
+                + "(702, 'enterprise-skill-601-2', 'SKILL', 'enterprise', 5, 'Rejected', 1, 3),"
+                + "(703, 'enterprise-skill-602', 'SKILL', 'enterprise', -1, 'Removed', 1, 2),"
+                + "(704, 'enterprise-skill-601-3', 'SKILL', 'enterprise', 2, 'Other tenant', 2, 4),"
+                + "(705, 'enterprise-skill-6010', 'SKILL', 'enterprise', 2, 'Other source', 1, 4)");
+            sql.execute("INSERT INTO ss_res_ext_skill VALUES "
+                + "(701, '{\"sourceResourceId\":601}'),(702, '{\"sourceResourceId\":601}'),"
+                + "(703, '{\"sourceResourceId\":602}'),(704, '{\"sourceResourceId\":601}'),"
+                + "(705, '{\"sourceResourceId\":6010}')");
+        }
+        var configuration = new MybatisConfiguration(new Environment("sqlite-test", new JdbcTransactionFactory(),
+            new UnpooledDataSource("org.sqlite.JDBC", url, null, null)));
+        configuration.addMapper(SsResourceMapper.class);
+        configuration.addMapper(SsResExtSkillMapper.class);
+        try (var session = new SqlSessionFactoryBuilder().build(configuration).openSession()) {
+            var mapper = session.getMapper(SsResExtSkillMapper.class);
+            var copies = mapper.findPublicationCopies(List.of(601L, 602L));
+            assertThat(copies).extracting("resourceId").containsExactly(701L, 702L, 703L);
+            assertThat(copies.getFirst().getResourceStatus()).isEqualTo(4);
+            assertThat(copies.getFirst().getResourceName()).isEqualTo("Pending");
+            assertThat(copies.getFirst().getSsResExtSkill().getTargetContent()).contains("601");
+            // 活动副本物理删除后仍能展示驳回记录，供用户重新申请。
+            try (var sql = session.getConnection().createStatement()) {
+                sql.execute("DELETE FROM ss_resource WHERE resource_id = 701");
+            }
+            session.clearCache();
+            assertThat(mapper.findPublicationCopies(List.of(601L)))
+                .extracting("resourceId").containsExactly(702L);
+        }
+    }
+
+    @Test
     void copyLookupIncludesOffShelfAndReplacementButExcludesRemovedAndUnrelatedCopies() throws Exception {
         String url = "jdbc:sqlite:" + tempDir.resolve("enterprise-copies.sqlite");
         try (var connection = DriverManager.getConnection(url); var sql = connection.createStatement()) {

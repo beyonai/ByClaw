@@ -76,6 +76,8 @@ class DigitalEmployeeGroupApplicationServiceTest {
     @Test
     void resolveRuntime_returnsSanitizedPublishedSnapshot() {
         SsResource group = groupResource();
+        // The login may currently select another enterprise while an explicit group grant remains valid.
+        group.setComAcctId(2L);
         SsResExtDigEmployee groupExt = new SsResExtDigEmployee();
         groupExt.setAgentType("017");
         SsResourceVersion version = new SsResourceVersion();
@@ -85,6 +87,7 @@ class DigitalEmployeeGroupApplicationServiceTest {
             + "\"prompt\":\"你是营销组团长\",\"modelId\":\"10023\","
             + "\"members\":[{\"resourceId\":20001,\"teamRole\":\"调研分析\",\"sortOrder\":1}]}");
         ResourceExtDigEmployeeDto member = memberResource();
+        member.setComAcctId(2L);
         ModelDto model = new ModelDto();
         model.setInstanceId("10023");
 
@@ -124,7 +127,7 @@ class DigitalEmployeeGroupApplicationServiceTest {
     }
 
     @Test
-    void resolveRuntime_hidesGroupFromAnotherEnterprise() {
+    void resolveRuntime_rejectsCrossEnterpriseGroupWithoutUsePermission() {
         SsResource group = groupResource();
         group.setComAcctId(2L);
         SsResExtDigEmployee groupExt = new SsResExtDigEmployee();
@@ -135,7 +138,7 @@ class DigitalEmployeeGroupApplicationServiceTest {
         assertThatThrownBy(() -> service.resolveRuntime(request()))
             .isInstanceOf(ResponseStatusException.class)
             .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND));
+                .isEqualTo(HttpStatus.FORBIDDEN));
     }
 
     @Test

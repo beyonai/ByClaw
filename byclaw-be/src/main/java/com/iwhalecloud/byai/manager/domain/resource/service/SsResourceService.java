@@ -158,6 +158,14 @@ public class SsResourceService {
         ssResourceMapper.deleteById(resourceId);
     }
 
+    @Autowired
+    private SkillImportLockService skillImportLockService;
+
+    /** 同编码导入与审核串行化，覆盖尚未存在资源的并发创建场景。必须在写事务中调用。 */
+    public void lockSkillImport(String resourceCode) {
+        skillImportLockService.acquire(resourceCode);
+    }
+
     /** 生命周期事务先锁定资源，防止并发上架覆盖已经提交的注销状态。 */
     public SsResource findByIdForUpdate(Long resourceId) {
         return ssResourceMapper.selectOne(new LambdaQueryWrapper<SsResource>()
@@ -234,7 +242,7 @@ public class SsResourceService {
     }
 
     /**
-     * 按 systemCode + resourceBizType + resourceCode 查询唯一资源。
+     * 按 systemCode + resourceBizType + resourceCode 查询唯一资源；BYAI 技能的注销历史不占用编码。
      */
     public SsResource findUniqueBySystemCodeAndBizTypeAndResourceCode(String systemCode, String resourceBizType,
                                                                       String resourceCode) {
@@ -246,6 +254,13 @@ public class SsResourceService {
         queryWrapper.eq(SsResource::getResourceBizType, resourceBizType);
         queryWrapper.eq(SsResource::getResourceCode, resourceCode);
         List<SsResource> resources = ssResourceMapper.selectList(queryWrapper);
+        if (SystemCode.BYAI.getCode().equals(systemCode) && ResourceBizTypeEnum.SKILL.name().equals(resourceBizType)
+            && !ListUtil.isEmpty(resources)) {
+            // 与技能导入预检保持一致：重新导入生成新 ID，不复活旧资源，也不继承旧授权和绑定。
+            resources = resources.stream()
+                .filter(resource -> !ResourceStatus.DELETE.getNum().equals(resource.getResourceStatus()))
+                .collect(Collectors.toList());
+        }
         if (ListUtil.isEmpty(resources)) {
             return null;
         }

@@ -37,6 +37,35 @@ class SsResExtSkillServiceTest {
     }
 
     @Test
+    void publicationSummaryValidatesProvenanceAndKeepsFirstRankedSnapshot() {
+        SsResExtSkillMapper mapper = mock(SsResExtSkillMapper.class);
+        ReflectionTestUtils.setField(service, "ssResExtSkillMapper", mapper);
+        assertThat(service.findCurrentPublications(null)).isEmpty();
+        assertThat(service.findCurrentPublications(List.of())).isEmpty();
+        verifyNoInteractions(mapper);
+        var active = publicationCopy(701L, 4, "{\"sourceResourceId\":601}");
+        var rejected = publicationCopy(702L, 5, "{\"sourceResourceId\":601}");
+        var deleted = publicationCopy(703L, -1, "{\"sourceResourceId\":602}");
+        when(mapper.findPublicationCopies(List.of(601L, 602L))).thenReturn(List.of(
+            publicationCopy(700L, 2, "invalid"), publicationCopy(704L, 2, "{\"sourceResourceId\":999}"),
+            active, rejected, deleted));
+        var result = service.findCurrentPublications(List.of(601L, 602L));
+        assertThat(result).containsOnlyKeys(601L, 602L);
+        assertThat(result.get(601L).getResourceId()).isEqualTo(701L);
+        assertThat(result.get(601L).getResourceStatus()).isEqualTo(4);
+        assertThat(result.get(602L).getResourceStatus()).isEqualTo(-1);
+        verify(mapper).findPublicationCopies(List.of(601L, 602L));
+    }
+
+    private com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto publicationCopy(
+        Long id, int status, String provenance) {
+        var copy = new com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto();
+        copy.setResourceId(id); copy.setResourceName("企业技能"); copy.setResourceStatus(status);
+        var ext = new SsResExtSkill(); ext.setTargetContent(provenance); copy.setSsResExtSkill(ext);
+        return copy;
+    }
+
+    @Test
     void nextVersion_incrementsMinorVersion() {
         assertThat(service.nextVersion("v0.1")).isEqualTo("v0.2");
         assertThat(service.nextVersion("v1.9")).isEqualTo("v1.10");

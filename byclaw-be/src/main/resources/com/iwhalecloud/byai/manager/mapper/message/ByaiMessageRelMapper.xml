@@ -397,7 +397,12 @@
                     AND task_due_time <![CDATA[ <= ]]> #{req.taskDueTimeRange[1]}
                 </if>
                 <if test="req.askTimeRange != null and req.askTimeRange.size() >= 2">
-                    AND ask_time BETWEEN #{req.askTimeRange[0]} AND #{req.askTimeRange[1]}
+                    <if test="req.askTimeRange[0] != null">
+                        AND ask_time <![CDATA[ >= ]]> #{req.askTimeRange[0]}
+                    </if>
+                    <if test="req.askTimeRange[1] != null">
+                        AND ask_time <![CDATA[ <= ]]> #{req.askTimeRange[1]}
+                    </if>
                 </if>
                 <if test="req.resTimeRange != null and req.resTimeRange.size() >= 2">
                     AND res_time BETWEEN #{req.resTimeRange[0]} AND #{req.resTimeRange[1]}
@@ -467,6 +472,7 @@
             <when test="req.sortDirection != null and (req.sortDirection == 'ASC' or req.sortDirection == 'asc')">ASC</when>
             <otherwise>DESC</otherwise>
         </choose>
+        , rel_id DESC
     </select>
 
 </mapper>

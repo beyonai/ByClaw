@@ -27,6 +27,15 @@ public class ByaiCustomerLeads implements Serializable {
     @TableId(value = "id", type = IdType.INPUT)
     private Long id;
 
+    /** 个人资料关联的登录用户；历史留资记录保持空值。 */
+    private Long userId;
+
+    /** 自填岗位分类，与组织权限岗位无关。 */
+    private String profileRole;
+
+    /** 兴趣领域 JSON 字符串数组。 */
+    private String profileInterests;
+
     /**
      * 企业名称
      */

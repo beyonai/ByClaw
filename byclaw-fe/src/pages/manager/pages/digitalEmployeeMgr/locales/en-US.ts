@@ -109,6 +109,7 @@ export default {
   'employeeDetail.catalogManagePlaceholder': 'Please select a directory',
   'employeeDetail.configureSkills': 'Configure Tools',
   'employeeDetail.configureBundledSkills': 'Configure Skills',
+  'employeeDetail.addBundledSkill': 'Add',
   'employeeDetail.personalSkills': 'Personal Skills',
   'employeeDetail.enterpriseSkills': 'Enterprise Skills',
   'employeeDetail.bundledSkillsPlaceholder': 'Please select skills',

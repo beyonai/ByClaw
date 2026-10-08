@@ -1624,7 +1624,7 @@ const EmployeeDetail = ({ loading }) => {
           try {
             const outcome = await officialUpdate.save(String(currentResourceId), savePayload);
             if (outcome === 'submitted') {
-              setOfficialUpdateNotice('更新申请已提交，审核通过后生效。可在审核中心查看进度；当前展示的仍是在用版本。');
+              setOfficialUpdateNotice(intl.formatMessage({ id: 'approvalCenter.employeeUpdatePending' }));
               setIsConfigChanged(false);
               getCompositeAppInfo('reload');
               EventEmitter?.emit('digitalEmployees-refresh-list', { refresh: true });
