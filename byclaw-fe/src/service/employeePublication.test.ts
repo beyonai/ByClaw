@@ -1,5 +1,5 @@
 import { POST } from '@/service/common/request';
-import { saveOfficialUpdateDraft } from './employeePublication';
+import { openPublication, saveOfficialUpdateDraft } from './employeePublication';
 
 jest.mock('@/service/common/request', () => ({ POST: jest.fn(), GET: jest.fn() }));
 jest.mock('@umijs/max', () => ({
@@ -13,6 +13,12 @@ const candidate = (status = 'DRAFT', revision = 1) => ({
   canRevise: ['REJECTED', 'WITHDRAWN'].includes(status),
 });
 beforeEach(() => jest.resetAllMocks());
+it('opens a publication page through the draft synchronization endpoint and returns the latest resource configuration', async () => {
+  const fresh = { ...candidate(), employee: { relIds: ['21'] }, sourceResourcesChanged: true };
+  (POST as jest.Mock).mockResolvedValue(fresh);
+  await expect(openPublication('100')).resolves.toBe(fresh);
+  expect(POST).toHaveBeenCalledWith(`${base}/open`, { requestId: '100' });
+});
 it('saves B configuration as a candidate without mutating the live employee', async () => {
   (POST as jest.Mock).mockResolvedValue(candidate());
   const employee = { resourceName: 'B updated', resourceId: '20' };

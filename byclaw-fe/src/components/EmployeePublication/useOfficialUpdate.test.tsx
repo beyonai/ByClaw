@@ -61,6 +61,24 @@ it('retains a draft when returning to edit and prevents duplicate saves during c
   expect(saveOfficialUpdateDraft).toHaveBeenCalledTimes(1);
   expect(publicationAction).not.toHaveBeenCalled();
 });
+it('does not report a submission when the server returns a refreshed draft requiring another confirmation', async () => {
+  (publicationAction as jest.Mock).mockResolvedValue({
+    ...draft,
+    publication: { ...draft.publication, status: 'DRAFT' },
+    sourceResourcesChanged: true,
+  });
+  render(<Editor />);
+  let saving: ReturnType<typeof save>;
+  act(() => {
+    saving = save('20', {});
+  });
+  await screen.findByText('确认提交员工更新');
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '提交更新审核' }));
+    expect(await saving).toBe('draft');
+  });
+  expect(publicationAction).toHaveBeenCalledTimes(1);
+});
 it('unlocks after failure and allows a retry', async () => {
   (saveOfficialUpdateDraft as jest.Mock).mockRejectedValueOnce(new Error('待审核，不可覆盖'));
   render(<Editor />);

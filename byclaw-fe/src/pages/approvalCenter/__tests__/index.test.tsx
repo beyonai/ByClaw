@@ -15,11 +15,11 @@ jest.mock('@umijs/max', () => {
   return {
     useIntl: () => intl,
     useSearchParams: () => {
-      const [query, setQuery] = useState(window.location.search);
+      const [query, setQuery] = useState(globalThis.window.location.search);
       return [
         new URLSearchParams(query),
         (next: URLSearchParams) => {
-          window.history.replaceState({}, '', `?${next}`);
+          globalThis.window.history.replaceState({}, '', `?${next}`);
           setQuery(`?${next}`);
         },
       ];
@@ -36,7 +36,7 @@ jest.mock('@/components/EmployeePublication/AuditList', () => ({
   default: ({ onAuditComplete, initialReview, toolbarExtra }: any) => (
     <div>
       <div data-testid="publication-toolbar">{toolbarExtra}</div>
-      <button data-review={String(initialReview)} onClick={onAuditComplete}>
+      <button type="button" data-review={String(initialReview)} onClick={onAuditComplete}>
         publication approval
       </button>
     </div>

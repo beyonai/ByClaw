@@ -84,6 +84,14 @@ export default function usePublicationConfirmation(mode: 'publish' | 'update' = 
             </Typography.Text>
           </Typography.Paragraph>
           <UpdateTargetNotice detail={candidate} />
+          {candidate.sourceResourcesChanged && (
+            <Alert
+              showIcon
+              type="info"
+              style={{ marginBottom: 16 }}
+              message="个人员工的关联资源已变化，本次确认使用更新后的清单。"
+            />
+          )}
           <Alert
             showIcon
             type={omitted.length || warnings.length ? 'warning' : 'success'}

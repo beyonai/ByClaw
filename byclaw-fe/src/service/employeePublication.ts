@@ -39,6 +39,7 @@ export interface PublicationDetail {
   canRevise?: boolean;
   previousReview?: { requestId: string; reviewerName?: string; reviewedAt?: string; comment?: string };
   updateTarget?: { resourceId: string; name: string; fromPersonal: boolean; changed: boolean };
+  sourceResourcesChanged?: boolean;
 }
 export const publicationStatus: Record<string, string> = {
   DRAFT: '草稿',
@@ -71,6 +72,9 @@ export const getPublicationPendingCount = () => GET<number>(`${base}/pendingCoun
 export const getPublicationCapabilities = () =>
   GET<{ enabled: boolean; administrator: boolean; canCreateEnterprise: boolean }>(`${base}/capabilities`);
 export const getPublication = (requestId: string) => GET<PublicationDetail>(`${base}/detail`, { requestId });
+
+/** 统一页面加载入口：只同步个人来源的未提交草稿，历史申请保持原快照。 */
+export const openPublication = (requestId: string) => POST<PublicationDetail>(`${base}/open`, { requestId });
 export const previewPublication = (publication: Pick<Publication, 'requestId' | 'revision'>) =>
   POST<PublicationDetail>(`${base}/preview`, { requestId: publication.requestId, revision: publication.revision });
 export const getCurrentPublication = (resourceId: string) =>

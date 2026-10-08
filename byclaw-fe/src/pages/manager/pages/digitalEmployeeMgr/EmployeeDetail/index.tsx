@@ -496,6 +496,7 @@ const EmployeeDetail = ({ loading }) => {
     error: publicationLoadError,
     load: loadPublication,
     retry: retryPublication,
+    hydrate: hydratePublication,
   } = usePublicationDetailLoader(publicationId);
   const showLog = !publicationId && _log === 'true';
   const readOnly =
@@ -1205,14 +1206,14 @@ const EmployeeDetail = ({ loading }) => {
               }))
               .filter((tool) => !relResourceSkills.some((skill) => `${skill.resourceId}` === `${tool.resourceId}`));
 
-            if (relResourceSkills.length > 0 || relToolSkills.length > 0) {
+            if (publicationId || relResourceSkills.length > 0 || relToolSkills.length > 0) {
               setSelectedTools([...relResourceSkills, ...relToolSkills]);
             }
-            if (relResourceList?.length > 0) {
+            if (publicationId || relResourceList?.length > 0) {
               setKnowledgeBases(
                 knowledgeBases.map((it) => ({
                   ...it,
-                  items: relResourceList
+                  items: (relResourceList || [])
                     .filter((i) => (i.grantResourceType || i.resourceBizType) === it.id)
                     .map((rel) => ({
                       ...rel,
@@ -2075,7 +2076,14 @@ const EmployeeDetail = ({ loading }) => {
         <PublicationToolbar
           detail={publicationDetail}
           dirty={isConfigChanged}
-          onChange={setPublicationDetail}
+          onChange={(detail) => {
+            setPublicationDetail(detail);
+            if (detail.sourceResourcesChanged) {
+              // 同步资源清单后同步编辑区，包含清空关联；避免下一次保存又回传旧资源。
+              hydratePublication(detail);
+              setIsConfigChanged(false);
+            }
+          }}
           onSave={() => saveResource()}
           onBusyChange={setPublicationBusy}
         />
