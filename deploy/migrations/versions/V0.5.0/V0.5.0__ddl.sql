@@ -493,3 +493,13 @@ COMMENT ON TABLE byai.byai_resource_favorite_count IS '企业资源收藏总数�
 COMMENT ON COLUMN byai.byai_resource_favorite_count.com_acct_id IS '资源所属企业（租户）ID';
 COMMENT ON COLUMN byai.byai_resource_favorite_count.resource_id IS '资源ID';
 COMMENT ON COLUMN byai.byai_resource_favorite_count.favorite_count IS '收藏用户总数，关系实际新增或删除时才增减；不复用授权申请次数或技能使用次数';
+
+-- 完善个人资料：复用客户线索，不扩展 po_users，不使用 SQL function 或数据回填。
+SET search_path TO byai;
+ALTER TABLE byai.byai_customer_leads ADD COLUMN IF NOT EXISTS user_id BIGINT;
+ALTER TABLE byai.byai_customer_leads ADD COLUMN IF NOT EXISTS profile_role VARCHAR(50);
+ALTER TABLE byai.byai_customer_leads ADD COLUMN IF NOT EXISTS profile_interests TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_customer_leads_profile_user ON byai.byai_customer_leads(user_id);
+COMMENT ON COLUMN byai.byai_customer_leads.user_id IS '个人资料所属登录用户；历史留资记录保持NULL';
+COMMENT ON COLUMN byai.byai_customer_leads.profile_role IS '用户自填岗位分类，不修改岗位权限';
+COMMENT ON COLUMN byai.byai_customer_leads.profile_interests IS '用户感兴趣的工作领域，JSON字符串数组';

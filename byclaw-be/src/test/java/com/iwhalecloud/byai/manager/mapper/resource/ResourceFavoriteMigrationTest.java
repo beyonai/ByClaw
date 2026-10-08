@@ -67,6 +67,8 @@ class ResourceFavoriteMigrationTest {
             "jdbc:h2:mem:favorite_migration;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE")) {
             try (var statement = connection.createStatement()) {
                 statement.execute("CREATE SCHEMA byai");
+                // V0.5.0 尾部同时包含已有客户线索表的增量个人资料字段。
+                statement.execute("CREATE TABLE byai.byai_customer_leads(id BIGINT, company_name VARCHAR(100), contact_name VARCHAR(100))");
                 RunScript.execute(connection, new StringReader(sql));
                 statement.executeUpdate("INSERT INTO byai_resource_favorite(com_acct_id, user_id, resource_id) VALUES (22, 11, 33)");
                 statement.executeUpdate("INSERT INTO byai_resource_favorite_count(com_acct_id, resource_id, favorite_count) VALUES (22, 33, 5)");

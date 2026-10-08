@@ -19,6 +19,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.List;
+import com.iwhalecloud.byai.manager.mapper.customer.ByaiCustomerLeadsMapper;
+import static org.mockito.ArgumentMatchers.any;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -59,12 +61,16 @@ class LoginApplicationServiceTest {
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
 
+        ByaiCustomerLeadsMapper leads = mock(ByaiCustomerLeadsMapper.class);
+        when(leads.selectCount(any())).thenReturn(1L);
+        ReflectionTestUtils.setField(service, "byaiCustomerLeadsMapper", leads);
         Users users = new Users();
         users.setUserId(1L);
         users.setUserCode("zhangsan");
         users.setUserName("张三");
         users.setAssistantId(7L);
         users.setAvatar("/commonFile/preview?filePath=avatar.png");
+
 
         SuasSuperassist superassist = new SuasSuperassist();
         superassist.setDefaultDigEmployeeId(200L);
@@ -81,6 +87,7 @@ class LoginApplicationServiceTest {
         assertThat(result.getDefaultDigEmployeeId()).isEqualTo(200L);
         assertThat(result.getEnterpriseId()).isEqualTo(99L);
         assertThat(result.getComAcctId()).isEqualTo(99L);
+        assertThat(result.getIsRetented()).isTrue();
         assertThat(result.getAvatar()).isEqualTo(users.getAvatar());
         assertThat(service.buildShareCurrentUserObjectMap(result)).containsEntry("avatar", users.getAvatar());
     }
@@ -95,10 +102,14 @@ class LoginApplicationServiceTest {
         ReflectionTestUtils.setField(service, "suasSuperassistService", superassistService);
         ReflectionTestUtils.setField(service, "sandboxLoginAutoStartService", mock(SandboxLoginAutoStartService.class));
         ReflectionTestUtils.setField(service, "authRedisSyncService", mock(AuthRedisSyncService.class));
+        ByaiCustomerLeadsMapper leads = mock(ByaiCustomerLeadsMapper.class);
+        when(leads.selectCount(any())).thenReturn(1L);
+        ReflectionTestUtils.setField(service, "byaiCustomerLeadsMapper", leads);
         Users user = new Users();
         user.setUserId(1L);
         user.setUserName("新名字");
         user.setAvatar("saved-avatar");
+
         when(userService.findById(1L)).thenReturn(user);
         SuasSuperassist superassist = new SuasSuperassist();
         superassist.setSessionDatasetId(10L);
@@ -113,6 +124,7 @@ class LoginApplicationServiceTest {
 
         assertThat(result.getUserName()).isEqualTo("新名字");
         assertThat(result.getAvatar()).isEqualTo("saved-avatar");
+        assertThat(result.getIsRetented()).isTrue();
     }
 
     @Test
