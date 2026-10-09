@@ -17,24 +17,30 @@ jest.mock('@/service/knowledgeCenter', () => ({}));
 jest.mock('@/components/ProjectCloudDrive', () => ({ queryProjectCloudDrive: jest.fn() }));
 
 // 保留真实菜单生成逻辑，隔离目录树与文件预览，检查传给公共文件树的菜单内容。
-jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', () => (props: any) => (
-  <div>
-    {props.items.map((item: any) => (
-      <div key={item.path} data-testid={item.name}>
-        {props.getActionItems(item).map((action: any) => (
-          <button
-            key={action.key}
-            role="menuitem"
-            data-danger={action.danger ? 'true' : undefined}
-            onClick={() => props.onAction(action.key, item)}
-          >
-            {action.label}
-          </button>
-        ))}
-      </div>
-    ))}
-  </div>
-));
+// 同时把 FileSpaceBlock 收到的 getNodeExtra 捕获到测试作用域，用于断言 GitHub 图标的渲染守卫。
+let mockGetNodeExtra: ((item: any) => any) | undefined;
+
+jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', () => (props: any) => {
+  mockGetNodeExtra = props.getNodeExtra;
+  return (
+    <div>
+      {props.items.map((item: any) => (
+        <div key={item.path} data-testid={item.name}>
+          {props.getActionItems(item).map((action: any) => (
+            <button
+              key={action.key}
+              role="menuitem"
+              data-danger={action.danger ? 'true' : undefined}
+              onClick={() => props.onAction(action.key, item)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+});
 
 it('uses the shared file menu spacing for every project-space action and keeps delete dangerous', async () => {
   jest.mocked(listProjectSpaceTree).mockResolvedValue([
@@ -60,6 +66,63 @@ it('uses the shared file menu spacing for every project-space action and keeps d
   const folder = within(screen.getByTestId('reports'));
   expect(folder.queryByText('fileBrowser.action.preview')).not.toBeInTheDocument();
   expect(folder.queryByText('projectSpace.projectDrive.save')).not.toBeInTheDocument();
+});
+
+it('renders the GitHub icon only for git repository directories', async () => {
+  jest
+    .mocked(listProjectSpaceTree)
+    .mockResolvedValue([
+      { name: 'reports', path: 'reports', type: 'directory', gitRepository: true },
+      { name: 'docs', path: 'docs', type: 'directory' },
+    ] as any);
+
+  render(<ProjectSpaceTab projectId={42} resourceId="100" projectCloudResourceId="200" />);
+  await screen.findByTestId('reports');
+
+  expect(mockGetNodeExtra).toBeDefined();
+
+  const gitNode = mockGetNodeExtra!({
+    name: 'reports',
+    path: 'reports',
+    type: 'directory',
+    gitRepository: true,
+  } as any);
+  expect(gitNode).toBeTruthy();
+  const gitView = render(<>{gitNode}</>);
+  expect(gitView.getByLabelText('GitHub')).toBeInTheDocument();
+  gitView.unmount();
+
+  expect(mockGetNodeExtra!({ name: 'docs', path: 'docs', type: 'directory' } as any)).toBeNull();
+  expect(mockGetNodeExtra!({ name: 'create.png', path: 'create.png', type: 'file' } as any)).toBeNull();
+});
+
+it('opens the GitHub drawer when the repository icon is clicked', async () => {
+  jest
+    .mocked(listProjectSpaceTree)
+    .mockResolvedValue([
+      { name: 'reports', path: 'reports', type: 'directory', gitRepository: true, repoId: 'repo-1' },
+    ] as any);
+
+  render(<ProjectSpaceTab projectId={42} resourceId="100" projectCloudResourceId="200" />);
+  await screen.findByTestId('reports');
+
+  const node = mockGetNodeExtra!({
+    name: 'reports',
+    path: 'reports',
+    type: 'directory',
+    gitRepository: true,
+    repoId: 'repo-1',
+  } as any);
+  const view = render(<>{node}</>);
+
+  // 抽屉未打开时不应出现以目录名为标题的面板。
+  expect(screen.queryByText('reports')).not.toBeInTheDocument();
+
+  fireEvent.click(view.getByLabelText('GitHub'));
+  view.unmount();
+
+  // 抽屉标题取 gitDrawerItem.name，出现即证明点击链路把节点交给了 setGitDrawerItem。
+  expect(await screen.findByText('reports')).toBeInTheDocument();
 });
 
 it('enables rename only for a changed nonempty name and guards Enter submission', async () => {
