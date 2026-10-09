@@ -1,4 +1,7 @@
-FROM minio/minio:RELEASE.2025-09-07T16-13-09Z AS minio-bin
+ARG MINIO_IMAGE=quay.io/minio/minio
+ARG MINIO_VERSION=RELEASE.2025-09-07T16-13-09Z
+
+FROM ${MINIO_IMAGE}:${MINIO_VERSION} AS minio-bin
 
 FROM debian:bookworm-slim
 
