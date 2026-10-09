@@ -36,6 +36,29 @@ class TenantContextInterceptorTest {
         assertThat(TenantRequestContextHolder.get()).isSameAs(context);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/group-chat/tasks/50", "/group-chat/tasks/50/delivery-status",
+        "/group-chat/tasks/50/pending-publication", "/group-chat/tasks/50/complete", "/group-chat/tasks/50/cancel"})
+    void groupTaskRoutesReceiveValidatedTenantContext(String path) {
+        TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
+        when(service.validate("123", "context-token")).thenReturn(context);
+        MockHttpServletRequest request = request("/byaiService" + path, "123");
+        request.addHeader("X-Tenant-Context", "context-token");
+
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        assertThat(TenantRequestContextHolder.get()).isSameAs(context);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/group-chat/other", "/group-chat/tasks-other/50"})
+    void groupTaskAllowanceDoesNotPermitUnmappedSiblingRoutes(String path) {
+        MockHttpServletRequest request = request("/byaiService" + path, "123");
+        request.addHeader("X-Tenant-Context", "context-token");
+        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant route is not ready");
+        assertThat(TenantRequestContextHolder.get()).isNull();
+    }
+
     @Test
     void tenantHeaderCannotReachUnmappedBusinessRoute() {
         MockHttpServletRequest request = request("/byaiService/chat/sessions", "123");

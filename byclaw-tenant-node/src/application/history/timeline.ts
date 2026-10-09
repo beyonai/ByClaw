@@ -49,6 +49,17 @@ export class TimelineHistory extends HistoryAccess {
       const length = (safeMessage(row).messageContent ?? "").length;
       if (used + length > maxCharacters) {
         characterTruncated = true;
+        // Retain an identity when the newest message alone exceeds the budget, so paging can advance.
+        if (!selected.length) {
+          const notice = "…（消息过长，已截断预览）";
+          const content = safeMessage(row).messageContent ?? "";
+          selected.push({
+            ...row,
+            messageContent:
+              content.slice(0, Math.max(0, maxCharacters - notice.length)) +
+              notice.slice(0, maxCharacters),
+          });
+        }
         break;
       }
       used += length;
@@ -59,6 +70,9 @@ export class TimelineHistory extends HistoryAccess {
       schemaVersion: "byclaw.group-chat-context/v1",
       conversationKey: sessionId,
       messages: (await this.display(selected, actor)).map((message) => {
+        // The withdrawal projection may restore its safe label after row-level clipping.
+        if (message.content.length > maxCharacters)
+          message.content = message.content.slice(0, maxCharacters);
         if (agentContext && message.replyTo?.usage === 5) delete message.replyTo;
         return message;
       }),

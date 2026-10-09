@@ -38,7 +38,15 @@ class TenantGroupTaskRoutingAspectTest {
 
     @Test
     void tenantPendingReadsNodeInsteadOfPlatformTaskTable() throws Throwable {
-        TenantRequestContextHolder.set(tenant);
+        TenantContextService contexts = mock(TenantContextService.class);
+        when(contexts.validate("11222473", "context-token")).thenReturn(tenant);
+        org.springframework.mock.web.MockHttpServletRequest request =
+            new org.springframework.mock.web.MockHttpServletRequest("GET", "/byaiService/group-chat/tasks/33/pending-publication");
+        request.setContextPath("/byaiService");
+        request.addHeader("X-Enterprise-Id", "11222473");
+        request.addHeader("X-Tenant-Context", "context-token");
+        assertThat(new TenantContextInterceptor(contexts).preHandle(request,
+            new org.springframework.mock.web.MockHttpServletResponse(), new Object())).isTrue();
         when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/33/pending-publication"),
             eq(null), any())).thenReturn(Map.of("taskId", "33"));
 

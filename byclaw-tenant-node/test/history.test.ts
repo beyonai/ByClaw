@@ -148,6 +148,34 @@ describe("tenant history use cases", () => {
     expect(result.messages[0]?.role).toBe("event");
     expect(result.truncation.truncated).toBe(false);
   });
+  it("keeps a bounded newest message and a usable older paging boundary when it exceeds the character budget", async () => {
+    const { service, repo } = setup();
+    const large = message({ messageContent: "x".repeat(25000) });
+    const older = message({ messageId: "99", messageContent: "older" });
+    vi.mocked(repo.messages).mockImplementation(async (query) =>
+      query.before === "100" ? [older] : [large, older],
+    );
+    vi.mocked(repo.countMessages).mockResolvedValue(2);
+    const latest = await service.context("20", "30", undefined, 50, 20000);
+    expect(latest.messages).toHaveLength(1);
+    expect(latest.messages[0]?.messageId).toBe("100");
+    expect(latest.messages[0]?.content.length).toBeLessThanOrEqual(20000);
+    expect(latest.messages[0]?.content).toContain("截断预览");
+    expect(latest.truncation.reason).toBe("character_limit");
+    expect(large.messageContent).toHaveLength(25000);
+    const previous = await service.context("20", "30", latest.messages[0]?.messageId, 50, 20000);
+    expect(previous.messages[0]?.messageId).toBe("99");
+  });
+  it("keeps recalled message previews within very small character budgets without exposing original content", async () => {
+    const { service, repo } = setup();
+    vi.mocked(repo.messages).mockResolvedValue([
+      message({ recalledAt: new Date(), messageContent: "secret" }),
+    ]);
+    vi.mocked(repo.countMessages).mockResolvedValue(1);
+    const result = await service.context("20", "30", undefined, 50, 3);
+    expect(result.messages[0]?.content.length).toBeLessThanOrEqual(3);
+    expect(result.messages[0]?.content).not.toContain("secret");
+  });
   it("filters system events before budgeting agent context while preserving the user timeline", async () => {
     const { service, repo } = setup();
     vi.mocked(repo.messages).mockResolvedValue([message(), message({ messageId: "99", usage: 5 })]);

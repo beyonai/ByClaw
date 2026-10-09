@@ -44,6 +44,7 @@ public class TenantContextInterceptor implements HandlerInterceptor {
             && !"/project/session/listByQo".equals(path)
             && !"/api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents".equals(path)
             && !path.equals("/group-chats") && !path.startsWith("/group-chats/")
+            && !path.startsWith("/group-chat/tasks/")
             && !CHAT_ROUTES.contains(path)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant route is not ready");
         }
