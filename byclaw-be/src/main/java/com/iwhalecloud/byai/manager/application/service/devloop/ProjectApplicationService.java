@@ -301,12 +301,12 @@ public class ProjectApplicationService {
             MultipartFile multipartFile = new MultipartFileUtil("files", KNOWLEDGE_DIR_TEMPLATE_FILENAME,
                 "application/zip", inputStream);
 
-            datasetApplicationService.uploadFiles(new MultipartFile[]{
+            datasetApplicationService.uploadFilesDirect(new MultipartFile[]{
                 multipartFile
 
             }, resourceId, "/", "init", false, false, true, headers);
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             log.error("上传项目云盘知识库目录模板失败, resourceId={}", resourceId, e);
         }
     }
