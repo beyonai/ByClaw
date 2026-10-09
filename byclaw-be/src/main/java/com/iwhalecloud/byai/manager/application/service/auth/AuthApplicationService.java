@@ -1219,7 +1219,9 @@ public class AuthApplicationService {
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(ssResource)) return false;
         if (employeeGovernance != null && employeeGovernance.isProtected(ssResource)) return false;
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
-            return employeeGovernance.canMaintainOfficial(ssResource);
+            // 官方副本的授权维护沿用创建者和有效管理授权；官方管理员仍可在同企业内直接管理。
+            if (!Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
+            if (employeeGovernance.canAdministerOfficial(ssResource)) return true;
         }
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
 
@@ -1440,9 +1442,6 @@ public class AuthApplicationService {
     public boolean hasResourceUseSettingPermission(SsResource ssResource) {
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(ssResource)) return false;
         if (employeeGovernance != null && employeeGovernance.isProtected(ssResource)) return false;
-        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
-            return employeeGovernance.canAdministerOfficial(ssResource);
-        }
         if (ssResource == null) {
             return false;
         }
@@ -3532,7 +3531,9 @@ public class AuthApplicationService {
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(ssResource)) return false;
         if (employeeGovernance != null && employeeGovernance.isProtected(ssResource)) return false;
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
-            return employeeGovernance.canMaintainOfficial(ssResource);
+            // 列表批量权限与单条授权接口一致，显式授权的管理人也可维护官方副本的授权及上下架。
+            if (!Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
+            if (employeeGovernance.canAdministerOfficial(ssResource)) return true;
         }
         if (ssResource == null) {
             return false;
@@ -3758,8 +3759,8 @@ public class AuthApplicationService {
         employeeGovernance.requireNotProtected(resource);
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) throw new BaseException("发布技能为固定快照，请通过员工发布流程更新");
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(resource)
-            && !employeeGovernance.canAdministerOfficial(resource)) {
-            throw new BaseException("仅官方管理员可以调整官方副本授权");
+            && !hasResourceManagePermission(resource)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
         }
     }
 
@@ -3771,10 +3772,13 @@ public class AuthApplicationService {
         if (official) {
             boolean admin = employeeGovernance.canAdministerOfficial(resource);
             vo.setOfficialUpdateRequiresReview(!admin && employeeGovernance.canMaintainOfficial(resource));
-            vo.setCanManageAuth(admin);
-            vo.setCanUseAuth(admin);
-            vo.setCanOffShelf(admin && Objects.equals(resource.getResourceStatus(), 2));
-            vo.setCanOnShelf(admin && Objects.equals(resource.getResourceStatus(), 3));
+            // 配置更新审核与日常授权、上下架分开判定，避免作者只有编辑入口却无法维护授权。
+            vo.setCanEdit(employeeGovernance.canMaintainOfficial(resource));
+            boolean canManage = vo.isHasManagePermission();
+            vo.setCanManageAuth(canManage);
+            vo.setCanUseAuth(canManage);
+            vo.setCanOffShelf(canManage && Objects.equals(resource.getResourceStatus(), 2));
+            vo.setCanOnShelf(canManage && Objects.equals(resource.getResourceStatus(), 3));
             vo.setCanDelete(admin && Objects.equals(resource.getResourceStatus(), 3));
         }
         // 停用按 adminvip 创建者身份隐藏“管理授权”的规则，保留原代码供追溯。

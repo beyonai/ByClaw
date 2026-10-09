@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 
 class SsResExtDigEmployeeMapperSqlTest {
 
-    /** 我的员工的全部范围必须是创建与授权管理的并集，即使当前用户有管理员角色。 */
+    /** 非 adminvip 的全部范围仍是创建与授权管理的并集，其他管理员角色不隐式扩大范围。 */
     @Test
     void enterpriseOwnerOrManagerQuery_doesNotExpandForAdminRoles() throws IOException {
         String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
@@ -24,6 +24,7 @@ class SsResExtDigEmployeeMapperSqlTest {
             var source = new XMLLanguageDriver().createSqlSource(new Configuration(), script, DigitalEmployeeQo.class);
             DigitalEmployeeQo qo = new DigitalEmployeeQo();
             qo.setUserId(2L);
+            qo.setEnterpriseListAdminVip(false);
             qo.setType("ownerOrManager");
             qo.setManagerOrgPathCodes(List.of("-1.100"));
             for (boolean platformManager : List.of(false, true)) {
@@ -37,6 +38,47 @@ class SsResExtDigEmployeeMapperSqlTest {
             // 保留其他调用方的全局管理权限语义，避免收窄后台管理功能。
             qo.setType("manageable");
             assertThat(source.getBoundSql(qo).getSql()).contains("or 1 = 1");
+        }
+    }
+
+    /** 超管不依赖单资源授权，搜索、状态和“我创建的”筛选仍需保留。 */
+    @Test
+    void enterpriseAdminVipQueries_includeEmployeesCreatedByOtherUsers() throws IOException {
+        String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
+        try (var input = getClass().getResourceAsStream(resourcePath)) {
+            assertThat(input).isNotNull();
+            String query = selectBody(new String(input.readAllBytes(), StandardCharsets.UTF_8),
+                "selectDigitalEmployeeByQo");
+            String script = "<script>" + query.substring(query.indexOf('>') + 1) + "</script>";
+            var source = new XMLLanguageDriver().createSqlSource(new Configuration(), script, DigitalEmployeeQo.class);
+            DigitalEmployeeQo qo = new DigitalEmployeeQo();
+            qo.setUserId(10001L);
+            qo.setEnterpriseListAdminVip(true);
+            qo.setIncludeEmployeeGroup(true);
+            qo.setKeyword("1091");
+            qo.setResourceStatus(2L);
+            for (String type : List.of("ownerOrManager", "managerExcludingOwner")) {
+                qo.setType(type);
+                String sql = source.getBoundSql(qo).getSql().replaceAll("\\s+", " ");
+                assertThat(sql).contains("a.owner_type = 'enterprise'")
+                    .contains("a.resource_status != -1")
+                    .contains("a.resource_status = ?")
+                    .contains("a.resource_name like concat('%', ?, '%')")
+                    .doesNotContain("k.allow_manage_count > 0")
+                    .doesNotContain("k.black_count = 0")
+                    .doesNotContain("and a.create_by = ?")
+                    .doesNotContain("and (a.create_by = ? or k.allow_manage_count > 0)");
+                if ("managerExcludingOwner".equals(type)) {
+                    assertThat(sql).contains("and (a.create_by is null or a.create_by != ?)");
+                }
+            }
+            qo.setType("owner");
+            assertThat(source.getBoundSql(qo).getSql()).contains("and a.create_by = ?");
+            qo.setType("managerExcludingOwner");
+            qo.setEnterpriseListAdminVip(false);
+            assertThat(source.getBoundSql(qo).getSql()).contains("and k.allow_manage_count > 0")
+                .contains("and (a.create_by is null or a.create_by != ?)")
+                .contains("k.black_count = 0");
         }
     }
 

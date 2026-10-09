@@ -8,6 +8,11 @@ export default {
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
   ...systemFeedbackMgrLocale,
+  'workgroupTemplate.saveSuccess': 'Template saved successfully',
+  'workgroupTemplate.saveFailed': 'Failed to save template',
+  'workgroupTemplate.deleteSuccess': 'Template deleted',
+  'workgroupTemplate.deleteFailed': 'Failed to delete template',
+  'workgroupTemplate.loadFailed': 'Failed to load templates',
   // Menu
   'menu.business': 'Management',
   'menu.business.field': 'Asset Directory',

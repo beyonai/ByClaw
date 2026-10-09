@@ -1,5 +1,5 @@
 import { act, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, message } from 'antd';
 import ApprovalCenter from '..';
 import useEmployeePublicationCapabilities from '@/hooks/useEmployeePublicationCapabilities';
 import { approveUseApply, queryResourceUseApplyAudit } from '@/pages/manager/service/resources';
@@ -56,6 +56,9 @@ describe('approval center', () => {
   // 类型隔离用例包含多次真实表格渲染，只增加用例总预算，保留断言默认超时。
   jest.setTimeout(15000);
 
+  // 三类知识/工具同时检查待审和历史，日志中已超过 15 秒；只扩大此参数化用例的总预算。
+  const typeIsolationTestTimeout = 30000;
+
   beforeEach(() => {
     jest.clearAllMocks();
     window.history.replaceState({}, '', '/approvalCenter');
@@ -78,34 +81,50 @@ describe('approval center', () => {
     );
   });
 
+  afterEach(async () => {
+    // 审核提示挂在 render 容器之外，清理提示和计时器，避免状态更新跨越用例边界。
+    await act(async () => {
+      message.destroy();
+    });
+  });
+
   it.each([
     ['employee', ['DIG_EMPLOYEE']],
     ['skill', ['SKILL']],
     ['knowledge', ['KG_DOC', 'KG_QA', 'KG_TERM']],
     ['tool', ['MCP', 'TOOLKIT', 'AGENT']],
-  ])('opens %s directly and isolates pending and history rows', async (tab, allowedTypes) => {
-    window.history.replaceState({}, '', `/approvalCenter?tab=${tab}`);
-    render(<ApprovalCenter />);
-    // 页签断言限定在页签栏，避免反复遍历无关的审核表格和计算其可见性。
-    const tabs = within(screen.getByRole('tablist'));
-    for (const name of ['employee', 'skill', 'knowledge', 'tool']) {
-      expect(tabs.getByRole('tab', { name: new RegExp(`approvalCenter.${name}`) })).toBeInTheDocument();
-    }
-    for (const history of [false, true]) {
-      if (history) {
-        await act(async () => {
-          fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
-        });
+  ])(
+    'opens %s directly and isolates pending and history rows',
+    async (tab, allowedTypes) => {
+      window.history.replaceState({}, '', `/approvalCenter?tab=${tab}`);
+      await act(async () => {
+        render(<ApprovalCenter />);
+      });
+      // 页签断言限定在页签栏，避免反复遍历无关的审核表格和计算其可见性。
+      const tabs = within(screen.getByRole('tablist'));
+      for (const name of ['employee', 'skill', 'knowledge', 'tool']) {
+        expect(tabs.getByRole('tab', { name: new RegExp(`approvalCenter.${name}`) })).toBeInTheDocument();
       }
-      const prefix = history ? 'history' : 'pending';
-      await screen.findByText(`${prefix}-${allowedTypes[0]}`);
-      for (const type of types) {
-        if (allowedTypes.includes(type)) expect(screen.getByText(`${prefix}-${type}`)).toBeInTheDocument();
-        else expect(screen.queryByText(`${prefix}-${type}`)).not.toBeInTheDocument();
+      for (const history of [false, true]) {
+        if (history) {
+          await act(async () => {
+            fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
+          });
+        }
+        const prefix = history ? 'history' : 'pending';
+        await screen.findByText(`${prefix}-${allowedTypes[0]}`);
+        // 一次收集全部资源名，完整比较允许类型，并检查其他类型和上一视图均未残留。
+        expect(
+          screen
+            .getAllByText(/^(pending|history)-/)
+            .map((element) => element.textContent)
+            .sort()
+        ).toEqual(allowedTypes.map((type) => `${prefix}-${type}`).sort());
+        expect(queryResourceUseApplyAudit).toHaveBeenCalledWith({ history, resourceBizTypeList: allowedTypes });
       }
-      expect(queryResourceUseApplyAudit).toHaveBeenCalledWith({ history, resourceBizTypeList: allowedTypes });
-    }
-  });
+    },
+    typeIsolationTestTimeout
+  );
 
   it('removes an approved row and refreshes the shared pending counts', async () => {
     window.history.replaceState({}, '', '/approvalCenter?tab=skill');

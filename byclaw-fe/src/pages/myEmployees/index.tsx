@@ -86,7 +86,7 @@ const MyEmployeesPage: React.FC = () => {
       }
       try {
         const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
-        // 企业“全部”仅合并本人创建和授权管理的数据，不因管理员角色扩大为全库列表。
+        // 普通用户“全部”合并本人创建和授权管理，adminvip 的企业员工范围由后端按会话放行。
         const scopedEnterpriseType = enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner';
         const enterpriseQueryType = enterpriseScope === 'all' ? 'ownerOrManager' : scopedEnterpriseType;
         const type = activeTab === 'enterprise' ? enterpriseQueryType : 'owner';

@@ -35,6 +35,9 @@ public class DigitalEmployeeQo extends AuthQo {
      */
     private String type;
 
+    /** 企业员工管理列表的 adminvip 放行标志，由服务端按当前会话覆盖。 */
+    private Boolean enterpriseListAdminVip;
+
     private List<Long> catalogIds;
 
     private Long catalogId;
