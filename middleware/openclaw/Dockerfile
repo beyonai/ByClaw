@@ -309,7 +309,26 @@ RUN set -eux; \
     command -v searxng-cli; \
     ls -l /usr/local/bin/searxng-cli /opt/searxng-cli-venv/bin/searxng-cli; \
     head -n 1 /opt/searxng-cli-venv/bin/searxng-cli; \
-    searxng-cli --list-engines >/dev/null
+    printf '>>> Python loader diagnostics: TARGETARCH=%s\n' "${TARGETARCH}"; \
+    uname -m; \
+    ls -l /opt/searxng-cli-venv/bin/python* /usr/local/bin/python* /usr/local/lib/libpython3.12.so*; \
+    readlink -f /opt/searxng-cli-venv/bin/python; \
+    /opt/searxng-cli-venv/bin/python -c 'import os, sys; print("executable:", sys.executable); print("proc/self/exe:", os.readlink("/proc/self/exe")); print("prefix:", sys.prefix); print("base_prefix:", sys.base_prefix)'; \
+    printf 'LD_LIBRARY_PATH=%s\nLD_PRELOAD=%s\n' "${LD_LIBRARY_PATH-}" "${LD_PRELOAD-}"; \
+    cat /etc/ld.so.conf /etc/ld.so.conf.d/*.conf; \
+    (ldconfig -p | grep -E 'libpython|libc\.so') || true; \
+    ldd /opt/searxng-cli-venv/bin/python || true; \
+    if command -v readelf >/dev/null; then \
+        readelf -d /usr/local/bin/python3.12 | grep -E 'NEEDED|RPATH|RUNPATH' || true; \
+    fi; \
+    if searxng-cli --list-engines >/dev/null; then \
+        :; \
+    else \
+        cli_status=$?; \
+        printf '>>> CLI failed with status %s; tracing loader without changing library paths\n' "${cli_status}"; \
+        LD_DEBUG=libs searxng-cli --list-engines >/dev/null || true; \
+        exit "${cli_status}"; \
+    fi
 
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \
