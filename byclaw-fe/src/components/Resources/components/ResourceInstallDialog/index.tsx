@@ -1,7 +1,6 @@
 // 用户可见提示在使用时读取当前语言，接口值与用户内容保持原样。
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Avatar, Checkbox, Empty, Input, List, Modal, Pagination, Tag, message } from 'antd';
-import { UserOutlined } from '@ant-design/icons';
+import { Checkbox, Empty, Input, List, Modal, Pagination, Tag, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import {
   batchInstallDigitalEmployeeRelResources,
@@ -9,7 +8,7 @@ import {
   queryInstallTargetEmployees,
   queryInstalledResourceIds,
 } from '@/pages/manager/service/DigitalEmployeeMgr';
-import { getFileUrl } from '@/utils/file';
+import { getAgentChatAvatar } from '@/utils/agent';
 import type { ResourceInstallTargetContext } from '../../resourceInstallContext';
 import styles from './index.module.less';
 
@@ -297,7 +296,8 @@ const ResourceInstallDialog: React.FC<ResourceInstallDialogProps> = ({
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
         renderItem={(employee) => {
           const selected = selectedEmployees.has(employee.resourceId);
-          const avatarUrl = employee.avatar ? getFileUrl(employee.avatar) : undefined;
+
+          // 复用数字员工头像渲染，兼容上传图片、内置头像及加载失败时的默认图。
           return (
             <List.Item
               className={`${styles.employeeItem} ${selected ? styles.employeeItemSelected : ''} ${
@@ -306,7 +306,7 @@ const ResourceInstallDialog: React.FC<ResourceInstallDialogProps> = ({
               onClick={() => toggleEmployee(employee)}
             >
               <Checkbox checked={selected} disabled={employee.installed} />
-              <Avatar src={avatarUrl} icon={<UserOutlined />} />
+              <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.avatar)}</div>
               <div className={styles.employeeInfo}>
                 <div className={styles.employeeTitle}>
                   <span title={employee.resourceName}>{employee.resourceName}</span>

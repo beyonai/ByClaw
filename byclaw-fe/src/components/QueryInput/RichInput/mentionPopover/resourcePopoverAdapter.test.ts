@@ -1,4 +1,8 @@
-import { getResourcePopoverAdapter, getResourcePopoverPanelHeight } from './resourcePopoverAdapter';
+import {
+  getResourcePopoverAdapter,
+  getResourcePopoverContentHeight,
+  getResourcePopoverPanelHeight,
+} from './resourcePopoverAdapter';
 
 describe('resource popover placement', () => {
   it.each([false, true])('opens above the employee detail input when isBottom is %s', (isInputAtBottom) => {
@@ -52,5 +56,24 @@ describe('resource popover overflow strategy', () => {
 
   it('clamps unavailable space to zero instead of imposing an overflowing minimum', () => {
     expect(getResourcePopoverPanelHeight({ top: 599, bottom: 600 }, 'bottomLeft', 500, 100)).toBe(0);
+  });
+});
+
+describe('resource popover minimum content height', () => {
+  it('keeps a readable list height after the employee group menu shrinks to three categories', () => {
+    const availableHeight = getResourcePopoverPanelHeight({ top: 680, bottom: 681 }, 'topLeft', 800);
+    expect(getResourcePopoverContentHeight(availableHeight, 3 * 42 + 16)).toBe(320);
+  });
+
+  it('still fits all categories when their natural height exceeds the minimum', () => {
+    expect(getResourcePopoverContentHeight(652, 9 * 42 + 16)).toBe(394);
+  });
+
+  it.each([0, 72, 272])('fits a viewport with only %s pixels available', (availableHeight) => {
+    expect(getResourcePopoverContentHeight(availableHeight, 3 * 42 + 16)).toBe(availableHeight);
+  });
+
+  it('limits a long category list to the available space and allows internal scrolling', () => {
+    expect(getResourcePopoverContentHeight(272, 9 * 42 + 16)).toBe(272);
   });
 });

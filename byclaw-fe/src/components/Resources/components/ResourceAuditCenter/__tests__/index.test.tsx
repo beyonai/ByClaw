@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider, message } from 'antd';
 import ResourceAuditCenter from '..';
 import { getBaseResourceBizTypeList } from '../../../utils';
 import { approveUseApply, queryResourceUseApplyAudit, rejectUseApply } from '@/pages/manager/service/resources';
@@ -15,6 +16,15 @@ jest.mock('@/pages/manager/service/resources', () => ({
 }));
 
 const mockQueryResourceUseApplyAudit = queryResourceUseApplyAudit as jest.Mock;
+
+// 保留真实审核表格和确认弹层，禁用动画以稳定 JSDOM 中的可见性判断。
+const render = (ui: Parameters<typeof renderComponent>[0]) =>
+  renderComponent(ui, {
+    wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+  });
+
+// 全量钩子中为发布审核预留渲染和确认的总预算，查找及断言仍使用默认超时。
+const publicationAuditTestTimeout = 15000;
 
 describe('ResourceAuditCenter', () => {
   beforeEach(() => {
@@ -48,6 +58,13 @@ describe('ResourceAuditCenter', () => {
             ],
       })
     );
+  });
+
+  afterEach(async () => {
+    // 全局 message 不属于 render 容器，清理提示及计时器，避免残留到后续用例。
+    await act(async () => {
+      message.destroy();
+    });
   });
 
   it('loads pending resource applications and lazily loads history', async () => {
@@ -102,11 +119,17 @@ describe('ResourceAuditCenter', () => {
         ],
       });
       render(<ResourceAuditCenter resourceBizTypeList={['SKILL']} />);
-      await screen.findByText('上架申请');
+      const row = within((await screen.findByText('上架申请')).closest('tr')!);
       expect(screen.getByRole('columnheader', { name: 'resource.auditApplicationType' })).toBeInTheDocument();
-      expect(screen.getByText('resource.skillPublicationAudit')).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: `resourceCenter.${action}` }));
-      fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+      expect(row.getByText('resource.skillPublicationAudit')).toBeInTheDocument();
+      // 限定在当前申请行查找操作，并等待确认后的异步状态更新，减少重复 DOM 遍历。
+      await act(async () => {
+        fireEvent.click(row.getByRole('button', { name: `resourceCenter.${action}` }));
+      });
+      const confirm = await screen.findByRole('button', { name: 'common.confirm' });
+      await act(async () => {
+        fireEvent.click(confirm);
+      });
       await waitFor(() =>
         expect(action === 'approve' ? approveUseApply : rejectUseApply).toHaveBeenCalledWith({
           resourceId: 'enterprise-snapshot',
@@ -116,7 +139,8 @@ describe('ResourceAuditCenter', () => {
       );
       expect(action === 'approve' ? rejectUseApply : approveUseApply).not.toHaveBeenCalled();
       await waitFor(() => expect(screen.queryByText('上架申请')).not.toBeInTheDocument());
-    }
+    },
+    publicationAuditTestTimeout
   );
 
   it.each(['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'TOOL'])(

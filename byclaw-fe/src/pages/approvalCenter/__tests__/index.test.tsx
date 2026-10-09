@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider } from 'antd';
 import ApprovalCenter from '..';
 import useEmployeePublicationCapabilities from '@/hooks/useEmployeePublicationCapabilities';
 import { approveUseApply, queryResourceUseApplyAudit } from '@/pages/manager/service/resources';
@@ -45,7 +46,16 @@ jest.mock('@/components/EmployeePublication/AuditList', () => ({
 
 const types = ['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'MCP', 'TOOLKIT', 'AGENT'];
 
+// 使用真实页签和审核表格，但禁用动画，避免切换时的动画更新跨越用例边界。
+const render = (ui: Parameters<typeof renderComponent>[0]) =>
+  renderComponent(ui, {
+    wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+  });
+
 describe('approval center', () => {
+  // 类型隔离用例包含多次真实表格渲染，只增加用例总预算，保留断言默认超时。
+  jest.setTimeout(15000);
+
   beforeEach(() => {
     jest.clearAllMocks();
     window.history.replaceState({}, '', '/approvalCenter');
@@ -76,11 +86,17 @@ describe('approval center', () => {
   ])('opens %s directly and isolates pending and history rows', async (tab, allowedTypes) => {
     window.history.replaceState({}, '', `/approvalCenter?tab=${tab}`);
     render(<ApprovalCenter />);
+    // 页签断言限定在页签栏，避免反复遍历无关的审核表格和计算其可见性。
+    const tabs = within(screen.getByRole('tablist'));
     for (const name of ['employee', 'skill', 'knowledge', 'tool']) {
-      expect(screen.getByRole('tab', { name: new RegExp(`approvalCenter.${name}`) })).toBeInTheDocument();
+      expect(tabs.getByRole('tab', { name: new RegExp(`approvalCenter.${name}`) })).toBeInTheDocument();
     }
     for (const history of [false, true]) {
-      if (history) fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
+      if (history) {
+        await act(async () => {
+          fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
+        });
+      }
       const prefix = history ? 'history' : 'pending';
       await screen.findByText(`${prefix}-${allowedTypes[0]}`);
       for (const type of types) {
@@ -125,11 +141,12 @@ describe('approval center', () => {
   it('places employee approval kinds at the right of the tab bar and keeps switching available in publication mode', async () => {
     render(<ApprovalCenter />);
     await screen.findByText('pending-DIG_EMPLOYEE');
+    const tabs = within(screen.getByRole('tablist'));
     const search = screen.getByPlaceholderText('myEmployees.searchPlaceholder');
     const searchControl = search.closest('.ant-input-affix-wrapper')!;
     const kinds = screen.getByText('approvalCenter.employeeUse').closest('.ant-segmented')!;
     const status = screen.getByText('resourceCenter.unreviewed').closest('.ant-segmented')!;
-    const tabBar = screen.getByRole('tab', { name: /approvalCenter.employee/ }).closest('.ant-tabs-nav')!;
+    const tabBar = tabs.getByRole('tab', { name: /approvalCenter.employee/ }).closest('.ant-tabs-nav')!;
     const extra = kinds.closest('.ant-tabs-extra-content')!;
     // 使用 Tabs 的右侧扩展区域，将类型切换与页签放在同一行，并移出搜索工具栏。
     expect(tabBar).toContainElement(kinds);
@@ -137,17 +154,23 @@ describe('approval center', () => {
     expect(searchControl.parentElement).not.toContainElement(kinds);
     expect(searchControl.nextElementSibling).toBe(status);
 
-    fireEvent.click(screen.getByText('approvalCenter.employeePublication'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('approvalCenter.employeePublication'));
+    });
     expect(tabBar).toContainElement(screen.getByText('approvalCenter.employeeUse'));
     expect(screen.getByTestId('publication-toolbar')).not.toContainElement(
       screen.getByText('approvalCenter.employeeUse')
     );
-    fireEvent.click(screen.getByText('approvalCenter.employeeUse'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('approvalCenter.employeeUse'));
+    });
     await screen.findByText('pending-DIG_EMPLOYEE');
     expect(screen.getByPlaceholderText('myEmployees.searchPlaceholder')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'publication approval' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: /approvalCenter.skill/ }));
+    await act(async () => {
+      fireEvent.click(tabs.getByRole('tab', { name: /approvalCenter.skill/ }));
+    });
     await screen.findByText('pending-SKILL');
     expect(screen.queryByText('approvalCenter.employeeUse')).not.toBeInTheDocument();
     expect(screen.queryByText('approvalCenter.employeePublication')).not.toBeInTheDocument();

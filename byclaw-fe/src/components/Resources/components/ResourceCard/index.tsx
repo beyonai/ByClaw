@@ -1496,37 +1496,41 @@ const RenderContent = (props: ResourceCardProps) => {
   const showPendingResourceUse = showResourceUseAction && isPendingUseApproval;
   const showResourceApplyUse = showResourceUseAction && !showPendingResourceUse && canApplyForUse;
   const showSkillInstallAction = isSkillResource(resource, resourceType) && canShowInstallAction;
-  const resourceCardActions =
+  // 单独计算操作区显示条件，避免多行条件与 JSX 的缩进规则互相冲突。
+  const showResourceCardActions =
     resourceActionMode &&
-    (showPendingResourceUse || showResourceApplyUse || showSkillInstallAction || !!effectiveMenuItems?.length) ? (
-      <div
-        className={styles.digitalEmployeeActions}
-        onClick={(event) => {
-          event.stopPropagation();
-          event.preventDefault();
-        }}
-      >
-        {showPendingResourceUse ? pendingResourceUseAction : showResourceApplyUse ? applyUseAction : null}
-        {showSkillInstallAction && (
-          <Tooltip title={intl.formatMessage({ id: 'resource.installSkill' })}>
-            <Button
-              shape="circle"
-              aria-label={intl.formatMessage({ id: 'resource.installSkill' })}
-              icon={<AntdIcon type="icon-a-Addtianjia" className={styles.cardActionBtnIcon} />}
-              loading={installing}
-              disabled={installing}
-              onClick={() => setInstallDialogOpen(true)}
-            />
-          </Tooltip>
-        )}
-        {!!effectiveMenuItems?.length && (
-          <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight" trigger={['click']}>
-            <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
-          </Dropdown>
-        )}
-        {workspaceShareModal}
-      </div>
-    ) : null;
+    (showPendingResourceUse || showResourceApplyUse || showSkillInstallAction || !!effectiveMenuItems?.length);
+  const resourceCardActions = showResourceCardActions ? (
+    <div
+      className={classnames(styles.digitalEmployeeActions, {
+        [styles.skillPosterActions]: variant === 'skillPoster',
+      })}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.preventDefault();
+      }}
+    >
+      {showPendingResourceUse ? pendingResourceUseAction : showResourceApplyUse ? applyUseAction : null}
+      {showSkillInstallAction && (
+        <Tooltip title={intl.formatMessage({ id: 'resource.installSkill' })}>
+          <Button
+            shape="circle"
+            aria-label={intl.formatMessage({ id: 'resource.installSkill' })}
+            icon={<AntdIcon type="icon-a-Addtianjia" className={styles.cardActionBtnIcon} />}
+            loading={installing}
+            disabled={installing}
+            onClick={() => setInstallDialogOpen(true)}
+          />
+        </Tooltip>
+      )}
+      {!!effectiveMenuItems?.length && (
+        <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight" trigger={['click']}>
+          <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
+        </Dropdown>
+      )}
+      {workspaceShareModal}
+    </div>
+  ) : null;
 
   const getDefaultIcon = () => {
     switch (resourceType) {
@@ -1555,6 +1559,19 @@ const RenderContent = (props: ResourceCardProps) => {
           effectiveCardClick?.(resource);
         }}
       >
+        {/* 标签固定到卡片右上角，避免占用标题行并挤压技能名称。 */}
+        {effectiveTopRightTag ? (
+          <span
+            className={classnames(styles.skillPosterTag, {
+              [styles.digitalEmployeePersonalTag]: showResourceTypeTag && isPersonalResource,
+              [styles.digitalEmployeeEnterpriseTag]: showResourceTypeTag && !isPersonalResource,
+              [styles[statusTagClass]]: Boolean(statusTagClass),
+              [styles.cancelledTag]: isCancelledResource,
+            })}
+          >
+            <span className={styles.tagText}>{effectiveTopRightTag}</span>
+          </span>
+        ) : null}
         <div className={styles.skillPosterImageWrap}>
           {displayImageUrl && !displayImageLoadFailed ? (
             <img
@@ -1576,22 +1593,14 @@ const RenderContent = (props: ResourceCardProps) => {
             [styles.resourceInfoWithActions]: !!resourceCardActions,
           })}
         >
-          <div className={styles.skillPosterHeader}>
+          <div
+            className={classnames(styles.skillPosterHeader, {
+              [styles.skillPosterHeaderWithTag]: !!effectiveTopRightTag,
+            })}
+          >
             <Paragraph className={styles.skillPosterTitle} ellipsis={{ tooltip: `${displayTitle}` }}>
               {displayTitle}
             </Paragraph>
-            {effectiveTopRightTag ? (
-              <span
-                className={classnames(styles.skillPosterTag, {
-                  [styles.digitalEmployeePersonalTag]: showResourceTypeTag && isPersonalResource,
-                  [styles.digitalEmployeeEnterpriseTag]: showResourceTypeTag && !isPersonalResource,
-                  [styles[statusTagClass]]: Boolean(statusTagClass),
-                  [styles.cancelledTag]: isCancelledResource,
-                })}
-              >
-                <span className={styles.tagText}>{effectiveTopRightTag}</span>
-              </span>
-            ) : null}
             {headerExtra}
           </div>
           <Paragraph
@@ -1736,7 +1745,9 @@ const RenderContent = (props: ResourceCardProps) => {
             {resourceCardActions}
             {digitalEmployeeActionMode && (
               <div className={styles.digitalEmployeeActions} onClick={(event) => event.stopPropagation()}>
-                {isPendingUseApproval ? pendingUseAction : canApplyForUse ? (
+                {isPendingUseApproval ? (
+                  pendingUseAction
+                ) : canApplyForUse ? (
                   <>
                     {applyUseAction}
                     {!!effectiveMenuItems?.length ? (
