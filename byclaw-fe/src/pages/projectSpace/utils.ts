@@ -79,8 +79,9 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   resourceId: item?.resourceId,
   cloudResourceId: item?.cloudResourceId,
   // 后端项目类型统一使用 normal/operation/develop，这里继续兼容旧前端 development 值，保证历史项目仍能进入对应详情页。
-  // 项目类型已统一按普通项目处理，兼容历史数据但不再向界面暴露类型差异。
-  projectType: 'normal',
+  // 系统内置项目的 projectType 为 default，必须原样保留：一旦被抹成 normal，默认项目就无法与普通项目区分，
+  // 「无选择时回退默认项目」只能退化成「回退列表第一项」，进而覆盖用户已选项目。
+  projectType: item?.projectType === 'development' ? 'develop' : item?.projectType || 'normal',
   isShare: item?.isShare === 'Y' || item?.sharedFlag === true ? 'Y' : 'N',
   sharedFlag: item?.isShare === 'Y' || item?.sharedFlag === true,
   // 存量/普通项目无该字段时按 ready 处理,避免误拦截历史项目建需求/启动任务。
@@ -101,6 +102,34 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   // boundResources 保留别名，兼容早期详情组件对该字段的读取。
   boundResources: Array.isArray(item?.resources) ? item.resources : [],
 });
+
+/**
+ * 解析当前项目作用域，供侧栏、项目空间、任务模板等入口共用，避免各处各写一套兜底。
+ *
+ * 三条分支刻意区分「没有选择」和「选择的项目不在当前列表页」：
+ * - requestedId 命中列表：返回它，不改变用户选择；
+ * - requestedId 有值但未命中（例如目标项目不在分页第一页）：返回 undefined，调用方补齐而不是回退，
+ *   否则一次列表分页就会把用户刚选的项目覆盖成列表第一项（系统默认项目）；
+ * - 没有 requestedId：这是真正的「未选择」，回退系统默认项目；默认项目缺失时（桌面端本地项目没有
+ *   projectType）才退化为列表第一项。
+ */
+export const resolveProjectScopeId = ({
+  projects,
+  requestedId,
+}: {
+  projects: ProjectSpace[];
+  requestedId?: string | number;
+}): string | undefined => {
+  const normalizedRequestedId = `${requestedId ?? ''}`.trim();
+  if (normalizedRequestedId) {
+    const matchedProject = projects.find((project) => `${project?.projectId ?? ''}`.trim() === normalizedRequestedId);
+    return matchedProject ? normalizedRequestedId : undefined;
+  }
+
+  const fallbackProject = projects.find((project) => project?.projectType === 'default') || projects[0];
+  const fallbackProjectId = `${fallbackProject?.projectId ?? ''}`.trim();
+  return fallbackProjectId || undefined;
+};
 
 export const normalizeProjectDetail = (response: any, fallback?: ProjectSpace): ProjectSpace | undefined => {
   const detail = getObjectData(response);
