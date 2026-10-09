@@ -46,6 +46,7 @@ import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manag
 import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } from '@/pages/manager/service/TenantMgr';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { getMultiTenancyRevision, useMultiTenancy } from '@/utils/multiTenancy';
+import { hasAnyUserRole } from '@/utils/userRole';
 import { buildServiceSpecPayload, isServiceSpecAutoStartEnabled, type ServiceSpecConfig } from './serviceSpecUtils';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 
@@ -235,11 +236,19 @@ const SandboxMgr = () => {
   const dispatch = useDispatch();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const showLaunchButton = isAdminVip(userInfo);
+  const canViewTenantResources =
+    multiTenancyEnabled &&
+    hasAnyUserRole(
+      userInfo?.usersOrganizations?.map((organization: { userType?: string }) => organization?.userType),
+      ['PLAT_MAN']
+    );
+  const tenantPermissionRef = useRef(canViewTenantResources);
+  tenantPermissionRef.current = canViewTenantResources;
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState('RUNNING');
-  const [resourceScope, setOwnerScope] = useState<'USER' | 'TENANT'>(multiTenancyEnabled ? 'TENANT' : 'USER');
-  const ownerScope = multiTenancyEnabled ? resourceScope : 'USER';
+  const [resourceScope, setOwnerScope] = useState<'USER' | 'TENANT'>(canViewTenantResources ? 'TENANT' : 'USER');
+  const ownerScope = canViewTenantResources ? resourceScope : 'USER';
   const [enterpriseId, setEnterpriseId] = useState<string | undefined>();
   const [tenantOptions, setTenantOptions] = useState<TenantItem[]>([]);
   const [list, setList] = useState<SsSandboxRecord[]>([]);
@@ -480,8 +489,8 @@ const SandboxMgr = () => {
         pageSize: myPageInfo.pageSize,
         keyword: kw,
         status: st,
-        ownerScope: multiTenancyEnabled ? scope : 'USER',
-        enterpriseId: multiTenancyEnabled && scope === 'TENANT' ? tenantId : undefined,
+        ownerScope: canViewTenantResources ? scope : 'USER',
+        enterpriseId: canViewTenantResources && scope === 'TENANT' ? tenantId : undefined,
       };
 
       const requestRevision = getMultiTenancyRevision();
@@ -492,7 +501,8 @@ const SandboxMgr = () => {
         type: 'sandboxMgr/listSandboxRecords',
         payload: p,
         success: (data: any) => {
-          if (requestRevision !== getMultiTenancyRevision()) return;
+          if (requestRevision !== getMultiTenancyRevision() || canViewTenantResources !== tenantPermissionRef.current)
+            return;
           setList(data?.list || []);
           setPageInfo((prev) => ({
             ...prev,
@@ -504,16 +514,17 @@ const SandboxMgr = () => {
           if (!silent) setManualLoading(false);
         },
         fail: () => {
-          if (requestRevision !== getMultiTenancyRevision()) return;
+          if (requestRevision !== getMultiTenancyRevision() || canViewTenantResources !== tenantPermissionRef.current)
+            return;
           if (!silent) setManualLoading(false);
         },
       });
     },
-    [dispatch, ownerScope, enterpriseId, multiTenancyEnabled]
+    [dispatch, ownerScope, enterpriseId, canViewTenantResources]
   );
 
   useEffect(() => {
-    if (!multiTenancyEnabled) {
+    if (!canViewTenantResources) {
       setTenantOptions([]);
       return;
     }
@@ -528,7 +539,7 @@ const SandboxMgr = () => {
     return () => {
       active = false;
     };
-  }, [multiTenancyEnabled]);
+  }, [canViewTenantResources]);
 
   // Auto refresh (silent)
   useEffect(() => {
@@ -558,16 +569,16 @@ const SandboxMgr = () => {
     };
   }, [autoRefresh, loadData, pageInfo, keyword, status, ownerScope, enterpriseId]);
 
-  // Reload the visible resource scope when the system switch changes.
+  // Reload the visible resource scope when the system switch or role changes.
   useEffect(() => {
-    if (!multiTenancyEnabled) {
+    if (!canViewTenantResources) {
       setOwnerScope('USER');
       setEnterpriseId(undefined);
       setTenantLaunchOpen(false);
     }
     setList([]);
     loadData({ pageIndex: 1, pageSize: pageInfo.pageSize }, keyword, status);
-  }, [multiTenancyEnabled]);
+  }, [canViewTenantResources]);
 
   // Load preferred serviceKey for each unique userCode in the list
   useEffect(() => {
@@ -2001,7 +2012,7 @@ const SandboxMgr = () => {
       <Tabs
         activeKey={ownerScope}
         items={[
-          ...(multiTenancyEnabled ? [{ key: 'TENANT', label: '租户资源' }] : []),
+          ...(canViewTenantResources ? [{ key: 'TENANT', label: '租户资源' }] : []),
           { key: 'USER', label: '用户资源' },
         ]}
         onChange={(key) => {

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -102,7 +103,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ResponseUtil<Object>> handleResponseStatusException(ResponseStatusException e) {
         logger.warn("ResponseStatusException occurred: status={}, reason={}", e.getStatusCode(), e.getReason());
         String msg = dealMessage(StringUtils.defaultIfBlank(e.getReason(), e.getMessage()));
-        return ResponseEntity.status(e.getStatusCode()).body(ResponseUtil.fail(msg));
+        ResponseUtil<Object> body = ResponseUtil.fail(msg);
+        if (e.getStatusCode().value() == HttpStatus.FORBIDDEN.value()) {
+            body.setData(Map.of("errorType", "PERMISSION_DENIED"));
+        }
+        return ResponseEntity.status(e.getStatusCode()).body(body);
     }
 
     @ExceptionHandler(value = NoHandlerFoundException.class)

@@ -243,6 +243,8 @@ public interface SsSandboxRecordMapper {
                          @Param("ownerScope") String ownerScope,
                          @Param("enterpriseId") Long enterpriseId);
 
+    int countEnterpriseUserSandbox(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
+
     /**
      * 根据ID查询沙箱记录
      *

@@ -266,8 +266,12 @@ const getRequestAuthSnapshot = (config: any): AuthSnapshot => ({
 const isLoginExpiredResponse = (status: number, responseData: unknown) => {
   if (!(status in TOKEN_ERROR_CODE)) return false;
 
-  // 后端将“已登录但无权限访问”也返回为 401，不能因此清除整个登录态。
-  if (status === 401 && isPlainObject(responseData) && `${get(responseData, 'code')}` === '-1') {
+  // 保留旧 401 领域响应兼容；403 须有权限拒绝标记，避免混淆安全过滤器的鉴权失效。
+  if (
+    isPlainObject(responseData) &&
+    `${get(responseData, 'code')}` === '-1' &&
+    (status === 401 || get(responseData, 'data.errorType') === 'PERMISSION_DENIED')
+  ) {
     return false;
   }
 

@@ -474,10 +474,10 @@ describe('Service Common Request', () => {
     expect(loginRedirect).not.toHaveBeenCalled();
   });
 
-  it('does not treat a permission-denied 401 response as an expired login', async () => {
+  it.each([401, 403])('does not treat a permission-denied %s response as an expired login', async (status) => {
     await expect(
       rejectResponse({
-        status: 401,
+        status,
         config: {
           url: '/api/protected',
           headers: {
@@ -487,10 +487,11 @@ describe('Service Common Request', () => {
           },
         },
         response: {
-          status: 401,
+          status,
           data: {
             code: -1,
             msg: '请求拒绝,无权限访问!',
+            data: status === 403 ? { errorType: 'PERMISSION_DENIED' } : undefined,
           },
         },
       })
@@ -498,6 +499,23 @@ describe('Service Common Request', () => {
 
     expect(message.error).not.toHaveBeenCalled();
     expect(clearToken).not.toHaveBeenCalled();
+  });
+
+  it('still treats an unmarked security-filter 403 failure as an expired login', async () => {
+    await expect(
+      rejectResponse({
+        status: 403,
+        config: {
+          url: '/api/protected',
+          headers: {
+            'x-token': 'access-token',
+            'x-sso-token': 'sso-token',
+            'x-session-id': 'session-key',
+          },
+        },
+        response: { status: 403, data: { code: -1, msg: 'Authentication failed' } },
+      })
+    ).resolves.toBe('登录失效');
   });
 
   it.each([400, 409, 503])('rejects favorite business error %s without clearing the session', async (status) => {

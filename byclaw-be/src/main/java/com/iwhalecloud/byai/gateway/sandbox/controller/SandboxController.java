@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -395,9 +397,6 @@ public class SandboxController {
     @PostMapping("/listRecords")
     @Operation(summary = "分页查询沙箱记录", description = "管理端分页查询沙箱记录，支持关键字搜索和状态过滤")
     public ResponseUtil listRecords(@RequestBody Map<String, Object> params) {
-        if (!CurrentUserHolder.isPlatformManager()) {
-            return ResponseUtil.fail("platform administrator required");
-        }
         int pageIndex = 1;
         int pageSize = 20;
         String keyword = null;
@@ -436,6 +435,11 @@ public class SandboxController {
         }
         if (pageIndex < 1 || pageSize < 1 || pageSize > 100) {
             return ResponseUtil.fail("invalid sandbox page");
+        }
+
+        enterpriseId = userResourceEnterpriseScope(enterpriseId);
+        if (!CurrentUserHolder.isPlatformManager() && !"USER".equals(ownerScope)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "user sandbox scope required");
         }
 
         int offset = (pageIndex - 1) * pageSize;
@@ -498,6 +502,7 @@ public class SandboxController {
             return ResponseUtil.fail("id must be a valid number");
         }
 
+        requireUserSandboxRecordAccess(id);
         sandboxService.removeSandboxById(id);
         return ResponseUtil.successResponse();
     }
@@ -529,8 +534,26 @@ public class SandboxController {
             return ResponseUtil.fail("autoRelease must be a valid number");
         }
 
+        requireUserSandboxRecordAccess(id);
         sandboxService.updateSandboxById(id, autoRelease);
         return ResponseUtil.successResponse();
+    }
+
+    private Long userResourceEnterpriseScope(Long requestedEnterpriseId) {
+        if (CurrentUserHolder.isPlatformManager()) return requestedEnterpriseId;
+        Long enterpriseId = CurrentUserHolder.getEnterpriseId();
+        if (!CurrentUserHolder.isBusinessAdmin() || enterpriseId == null || enterpriseId <= 0
+            || (requestedEnterpriseId != null && !enterpriseId.equals(requestedEnterpriseId))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "enterprise access denied");
+        }
+        return enterpriseId;
+    }
+
+    private void requireUserSandboxRecordAccess(Long id) {
+        Long enterpriseId = userResourceEnterpriseScope(null);
+        if (enterpriseId != null && sandboxRecordMapper.countEnterpriseUserSandbox(id, enterpriseId) != 1) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "enterprise access denied");
+        }
     }
 
     @PostMapping("/resize")

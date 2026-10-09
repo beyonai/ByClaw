@@ -685,6 +685,8 @@ check the task's `turnStatus` and BE task execution logs to determine whether th
 
 沙箱管理页的“指定租户启动沙箱”调用 `POST /admin/tenants/provision`，对未完成开通的租户继续开通，对已就绪租户检查数据库和数据节点是否仍在运行，并恢复缺失的沙箱。租户沙箱行的“重启”调用 `POST /admin/tenants/sandboxes/restart`（`enterpriseId`、`sandboxType`、`recordId`），只接受该租户该类型最新的运行中或失败记录；后台先释放旧沙箱，再使用当前镜像重新创建。重启 `tenant-opengauss` 会先释放依赖的数据节点，保留租户数据库卷，重建数据库后重新创建数据节点。重启 `tenant-data-node` 保留数据库沙箱。操作由平台管理员发起，开通锁阻止并发重建；状态和失败原因可在租户管理页查看。
 
+业务管理员进入沙箱管理页时只显示“用户资源”，不调用租户列表接口。`POST /sandbox/listRecords` 从已认证登录信息取得当前企业，业务管理员只能查询该企业的用户沙箱；历史上未保存 `enterprise_id` 的用户沙箱通过有效用户和企业的 `ACTIVE` 成员关系限定范围。按记录 ID 更新自动释放设置或释放沙箱时执行同样的企业归属校验。平台管理员保留全局用户资源和租户资源管理能力。领域 `ResponseStatusException` 的 HTTP 403 响应在 `data.errorType` 标记 `PERMISSION_DENIED`，前端只提示权限错误并保留登录态；未带此标记的安全过滤器鉴权失效响应仍触发重新登录，原有 HTTP 401 领域响应处理保持兼容。
+
 租户资源列表每次刷新会向 OpenSandbox 查询当前页运行中或失败记录的容器状态。表格的“记录运行中”筛选依照数据库生命周期状态；状态列则显示实时查询结果。查询得到沙箱不存在或已停止时显示“沙箱异常”，OpenSandbox 暂时不可达时显示“状态未核实”，不会把网络故障误判为沙箱停止。状态列表示容器运行情况；租户业务就绪状态仍以租户管理页的开通状态和数据节点就绪检查为准。
 
 本地 OpenSandbox v0.1.9 在删除已停止容器时会错误地再次 `kill` 并返回 500。`deploy/middleware/opensandbox-server.Dockerfile` 在镜像构建时应用 `patch-local-opensandbox-tcp.py`，只对实际运行中的容器执行 `kill`，然后释放容器。修改补丁后从 `deploy/middleware` 运行 `podman compose --env-file ../../.env -f docker-compose.yml up -d --no-deps --build opensandbox-server`（本机使用额外的 rootful override 时保留对应 `-f` 参数），让正在运行的服务使用新镜像；不要仅替换容器内脚本。

@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.util.Date;
 import java.util.List;
@@ -191,6 +192,87 @@ class SandboxControllerTest {
         loginInfo.setUserCode("adminvip");
         loginInfo.setUsersOrganizations(List.of(organization));
         CurrentUserHolder.setLoginInfo(loginInfo);
+    }
+
+    @Test
+    void businessManagerListDefaultsToItsOwnEnterpriseAndCannotOverrideIt() {
+        setBusinessManager();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        when(mapper.selectByPage(null, null, "USER", 123L, 0, 20)).thenReturn(List.of());
+
+        assertThat(controller.listRecords(Map.of("ownerScope", "USER")).getCode())
+            .isEqualTo(ResponseUtil.SUCCESS);
+        verify(mapper).selectByPage(null, null, "USER", 123L, 0, 20);
+        verify(mapper).countByCondition(null, null, "USER", 123L);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.listRecords(
+            Map.of("ownerScope", "USER", "enterpriseId", "456")))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+            .hasMessageContaining("enterprise access denied");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.listRecords(
+            Map.of("ownerScope", "TENANT")))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    }
+
+    @Test
+    void businessManagerCannotModifyAnotherEnterpriseSandboxByRecordId() {
+        setBusinessManager();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(7L);
+        record.setEnterpriseId(456L);
+        when(mapper.selectById(7L)).thenReturn(record);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.updateSandbox(
+            Map.of("id", 7L, "autoRelease", 1)))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+            .hasMessageContaining("enterprise access denied");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.removeSandboxById(Map.of("id", 7L)))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verifyNoInteractions(service);
+    }
+
+    private void setBusinessManager() {
+        UsersOrganization organization = new UsersOrganization();
+        organization.setUserType(UserType.BUSINESS_MAN);
+        LoginInfo login = new LoginInfo();
+        login.setUserCode("business-manager");
+        login.setEnterpriseId(123L);
+        login.setUsersOrganizations(List.of(organization));
+        CurrentUserHolder.setLoginInfo(login);
+    }
+
+    @Test
+    void businessManagerCanModifyAnAccessibleUserSandbox() {
+        setBusinessManager();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        when(mapper.countEnterpriseUserSandbox(7L, 123L)).thenReturn(1);
+
+        assertThat(controller.updateSandbox(Map.of("id", 7L, "autoRelease", 1)).getCode())
+            .isEqualTo(ResponseUtil.SUCCESS);
+        assertThat(controller.removeSandboxById(Map.of("id", 7L)).getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        verify(service).updateSandboxById(7L, 1);
+        verify(service).removeSandboxById(7L);
+    }
+
+    @Test
+    void userResourcesStillRequireAnAdministrativeRole() {
+        CurrentUserHolder.clearLoginInfo();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.listRecords(Map.of()))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verifyNoInteractions(mapper);
     }
 
     @Test

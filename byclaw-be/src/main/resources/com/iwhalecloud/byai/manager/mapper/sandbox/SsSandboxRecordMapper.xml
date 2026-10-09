@@ -571,6 +571,16 @@
           AND status = 'RUNNING'
     </select>
 
+    <!-- Legacy personal sandboxes have no enterprise_id; scope them through active enterprise membership. -->
+    <sql id="UserEnterpriseScope">
+        (enterprise_id = #{enterpriseId} OR (enterprise_id IS NULL AND EXISTS (
+            SELECT 1 FROM byai.tenant_user_membership m
+            JOIN byai.po_users u ON u.user_id = m.user_id
+            WHERE u.user_code = ss_sandbox_record.user_code AND u.state = 'A'
+              AND m.enterprise_id = #{enterpriseId} AND m.status = 'ACTIVE'
+        )))
+    </sql>
+
     <!-- 分页查询沙箱记录 -->
     <select id="selectByPage" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
@@ -580,7 +590,10 @@
                 AND owner_scope = #{ownerScope}
             </if>
             <if test="enterpriseId != null">
-                AND enterprise_id = #{enterpriseId}
+                <choose>
+                    <when test="ownerScope == 'USER'">AND <include refid="UserEnterpriseScope" /></when>
+                    <otherwise>AND enterprise_id = #{enterpriseId}</otherwise>
+                </choose>
             </if>
             <if test="status != null and status != ''">
                 AND status = #{status,jdbcType=VARCHAR}
@@ -612,7 +625,10 @@
                 AND owner_scope = #{ownerScope}
             </if>
             <if test="enterpriseId != null">
-                AND enterprise_id = #{enterpriseId}
+                <choose>
+                    <when test="ownerScope == 'USER'">AND <include refid="UserEnterpriseScope" /></when>
+                    <otherwise>AND enterprise_id = #{enterpriseId}</otherwise>
+                </choose>
             </if>
             <if test="status != null and status != ''">
                 AND status = #{status,jdbcType=VARCHAR}
@@ -631,6 +647,13 @@
                 )
             </if>
         </where>
+    </select>
+
+    <!-- 管理端按记录 ID 校验用户沙箱的企业归属 -->
+    <select id="countEnterpriseUserSandbox" resultType="int">
+        SELECT COUNT(*) FROM ss_sandbox_record
+        WHERE id = #{id} AND owner_scope = 'USER'
+          AND <include refid="UserEnterpriseScope" />
     </select>
 
     <!-- 根据ID查询沙箱记录 -->
