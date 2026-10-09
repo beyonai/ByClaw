@@ -169,6 +169,42 @@ describe('Service Common Request', () => {
     }
   );
 
+  it.each(['delivery-status', 'pending-publication', 'cancel', 'prepare-publication', 'complete-publication'])(
+    'routes group task %s with the selected tenant context',
+    async (action) => {
+      window.localStorage.setItem('SESSION', 'session-key');
+      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+      const url = `/byaiService/group-chat/tasks/50/${action}`;
+      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
+      try {
+        await POST(url, {});
+        expect(mockRequest.mock.calls[0][0].headers).toEqual(
+          expect.objectContaining({ 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' })
+        );
+      } finally {
+        clearSelectedEnterprise();
+        window.localStorage.removeItem('SESSION');
+      }
+    }
+  );
+
+  it('blocks group task requests when the selected tenant context has expired', async () => {
+    window.localStorage.setItem('SESSION', 'session-key');
+    const expiresAt = Date.now() + 60000;
+    selectEnterprise('123', 'expired-context', new Date(expiresAt).toISOString());
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(expiresAt + 1);
+    try {
+      await expect(GET('/byaiService/group-chat/tasks/50/pending-publication')).rejects.toThrow(
+        'Tenant context expired; select a space again'
+      );
+      expect(mockRequest).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+      clearSelectedEnterprise();
+      window.localStorage.removeItem('SESSION');
+    }
+  });
+
   it('globalLogout clears local auth state and redirects when a user exists', async () => {
     (getModelState as jest.Mock).mockReturnValue({
       userInfo: {

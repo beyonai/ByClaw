@@ -103,10 +103,22 @@ class TenantGroupAgentDispatcherTest {
         dispatcher.dispatch(tenant, 30L, "40", "hello", List.of(new GroupDispatch("50", "90")));
         awaitDispatch();
 
-        verify(node).request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/50"), isNull(), any());
+        verify(node, never()).request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/50"), isNull(), any());
         verify(node, never()).command(eq(tenant), eq("PATCH"), any(), any(), any(), any(), any());
         assertThat(response.get()).isInstanceOf(ByteArrayOutputStream.class);
         assertThat(((ByteArrayOutputStream) response.get()).size()).isZero();
+    }
+
+    @Test
+    void asynchronousDispatchKeepsTaskRunningUntilTerminalCallback() throws Exception {
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/50"), isNull(), any()))
+            .thenReturn(Map.of("status", "ACTIVE", "turnStatus", "RUNNING"));
+
+        dispatcher.dispatch(tenant, 30L, "40", "hello", List.of(new GroupDispatch("50", "90")));
+        awaitDispatch();
+
+        verify(chat).chat(any(), any(), isNull());
+        verify(node, never()).command(eq(tenant), eq("PATCH"), any(), any(), any(), any(), any());
     }
 
     @Test

@@ -14,7 +14,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
@@ -31,8 +30,6 @@ import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 /** Runs tenant group mentions in private tenant task sessions. Node owns all message writes. */
 @Service
 public class TenantGroupAgentDispatcher {
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher events;
     private static final Logger log = LoggerFactory.getLogger(TenantGroupAgentDispatcher.class);
     private final ExecutorService workers = new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<>(128));
@@ -95,27 +92,8 @@ public class TenantGroupAgentDispatcher {
                     throw new IllegalStateException("Unable to execute tenant group agent", error);
                 }
             });
-            // The terminal mirror projects the reply into the group in the same tenant transaction.
-            Map<String, Object> state = node.request(tenant, "GET",
-                "/internal/v1/group-chat/tasks/" + dispatch.taskSessionId(), null,
-                new TypeReference<Map<String, Object>>() { });
-            if (!"WAITING_USER".equals(state.get("turnStatus"))
-                && !"FAILED".equals(state.get("turnStatus"))) {
-                throw new IllegalStateException("Group agent returned without a terminal tenant mirror");
-            }
-            if (dispatch.groupCoordination() != null && "COORDINATED".equals(dispatch.groupCoordination().get("mode"))) {
-                com.alibaba.fastjson.JSONObject status = new com.alibaba.fastjson.JSONObject();
-                status.put("type", "GROUP_CHAT_EVENT");
-                status.put("event", "TASK_STATUS_CHANGED");
-                status.put("sessionId", groupId.toString());
-                status.put("taskId", dispatch.taskSessionId());
-                status.put("sourceMessageId", sourceMessageId);
-                status.put("targetAgentId", dispatch.targetAgentId());
-                status.put("status", state.get("status"));
-                status.put("turnStatus", state.get("turnStatus"));
-                status.put("groupCoordination", dispatch.groupCoordination());
-                events.publishTenant(tenant, groupId, status);
-            }
+            // Gateway dispatch may return before the Redis Stream delivers the final answer.
+            // The terminal mirror owns task completion and group publication, including async turns.
         }
         catch (Exception error) {
             log.error("租户群任务执行失败, groupId={}, taskId={}", groupId, dispatch.taskSessionId(), error);

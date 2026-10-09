@@ -24,6 +24,39 @@ import java.util.List;
 import com.alibaba.fastjson.JSONObject;
 
 class TenantChatMirrorServiceTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void coordinatedTaskStatusIsBroadcastAfterTerminalMirror(boolean failed) {
+        TenantNodeClient node = mock(TenantNodeClient.class);
+        GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
+        TenantChatMirrorService service = new TenantChatMirrorService(node, new ObjectMapper(), events);
+        AssistantChatDto dto = new AssistantChatDto();
+        dto.getExtParams().put("tenantGroupTask", "12");
+        dto.getExtParams().put("groupCoordination", Map.of("mode", "COORDINATED"));
+        ChatProcessContext context = new ChatProcessContext(null, dto);
+        context.tenantContext = new TenantRequestContext(7L, 11L, "MEMBER");
+        context.sessionId = 12L;
+        context.taskId = 13L;
+        context.userMessageId = 14L;
+        context.modelAnswerMessageId = 15L;
+        context.messageContext = new MessageContext();
+        context.gatewayError = failed;
+        doReturn(Map.of("groupSessionId", "30", "sourceMessageId", "14", "targetAgentId", "42",
+            "status", "ACTIVE", "turnStatus", failed ? "FAILED" : "WAITING_USER"))
+            .when(node).request(any(), eq("GET"), eq("/internal/v1/group-chat/tasks/12"), isNull(), any());
+
+        service.terminal(context);
+
+        ArgumentCaptor<JSONObject> event = ArgumentCaptor.forClass(JSONObject.class);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(node, events);
+        order.verify(node).mirror(eq(context.tenantContext), any());
+        order.verify(node).request(any(), eq("GET"), eq("/internal/v1/group-chat/tasks/12"), isNull(), any());
+        order.verify(events).publishTenant(eq(context.tenantContext), eq(30L), event.capture());
+        assertThat(event.getValue().getString("event")).isEqualTo("TASK_STATUS_CHANGED");
+        assertThat(event.getValue().getString("turnStatus")).isEqualTo(failed ? "FAILED" : "WAITING_USER");
+        assertThat(event.getValue().getString("taskId")).isEqualTo("12");
+    }
+
     @Test
     void terminalCarriesRenderedHistoryAndResponder() {
         TenantNodeClient node = mock(TenantNodeClient.class);

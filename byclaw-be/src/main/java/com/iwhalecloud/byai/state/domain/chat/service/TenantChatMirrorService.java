@@ -51,7 +51,7 @@ public class TenantChatMirrorService {
                 metadata == null ? null : metadata.resourceName(), metadata,
                 context.messageContext.getAnswerMessageList(),
                 context.messageContext.getReasonMessageList())));
-        if (!context.gatewayError) notifyGroupReply(context, content);
+        notifyGroupReply(context, content);
     }
 
     private void notifyGroupReply(ChatProcessContext context, String content) {
@@ -64,7 +64,23 @@ public class TenantChatMirrorService {
                 new TypeReference<Map<String, Object>>() { });
             Object messageId = task.get("publishMessageId");
             Object groupId = task.get("groupSessionId");
-            if (messageId == null || groupId == null) return;
+            if (groupId == null) return;
+            Object coordination = params.get("groupCoordination");
+            if (coordination instanceof Map<?, ?> scope && "COORDINATED".equals(scope.get("mode"))) {
+                JSONObject status = new JSONObject();
+                status.put("type", "GROUP_CHAT_EVENT");
+                status.put("event", "TASK_STATUS_CHANGED");
+                status.put("sessionId", groupId.toString());
+                status.put("taskId", taskId.toString());
+                status.put("sourceMessageId", task.get("sourceMessageId"));
+                status.put("targetAgentId", task.get("targetAgentId"));
+                status.put("status", task.get("status"));
+                status.put("turnStatus", task.get("turnStatus"));
+                status.put("groupCoordination", coordination);
+                groupEvents.publishTenant(context.tenantContext, Long.valueOf(groupId.toString()), status);
+                return;
+            }
+            if (context.gatewayError || messageId == null) return;
             List<MessageView> committed = node.request(context.tenantContext, "POST",
                 "/internal/v1/assiman/getMessageByIds", Map.of("messageIds", List.of(messageId.toString())),
                 new TypeReference<List<MessageView>>() { });

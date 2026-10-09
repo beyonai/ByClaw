@@ -359,7 +359,8 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
     tenantChatPaths.has(requestPath) ||
     requestPath.startsWith('/byaiService/assiman/getForwardMessage/') ||
     requestPath === '/byaiService/group-chats' ||
-    requestPath.startsWith('/byaiService/group-chats/');
+    requestPath.startsWith('/byaiService/group-chats/') ||
+    requestPath.startsWith('/byaiService/group-chat/tasks/');
   if (isTenantChatRequest && hasStoredTenantSelection() && !tenantContext) {
     return Promise.reject(new Error('Tenant context expired; select a space again'));
   }
