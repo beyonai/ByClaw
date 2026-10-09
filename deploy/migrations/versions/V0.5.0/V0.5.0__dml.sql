@@ -462,7 +462,8 @@ delete from byai.ss_res_ext_skill where  resource_id  in(select resource_id from
 delete from byai.au_privilege_grant apg  where grant_obj_type in('SKILL') and grant_obj_id in(select resource_id from byai.ss_resource where resource_code in('unstructured-ontology-manager','structured-ontology-manager'));
 delete from byai.ss_resource where resource_code in('unstructured-ontology-manager','structured-ontology-manager');
 
-
+delete byai.byai_system_config_list where param_group_code in('MODEL_TAGS') and param_value ='7';
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES(nextval('byai.seq_any_table'), 'MODEL_TAGS', '模型打标', '多模态模型', 'MULTIMODAL_MODEL', '7', '多模态模型', 7);
 
 
 

@@ -604,6 +604,4 @@ ALTER TABLE byai.suas_superassist_sub_agent ADD PRIMARY KEY (superassist_sub_age
 ALTER TABLE byai.sys_app_version ADD PRIMARY KEY (version_id);
 ALTER TABLE byai.template_rule_info ADD PRIMARY KEY (template_id);
 
-delete byai.byai_system_config_list where param_group_code in('MODEL_TAGS') and param_value ='7';
-INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES(nextval('byai.seq_any_table'), 'MODEL_TAGS', '模型打标', '多模态模型', 'MULTIMODAL_MODEL', '7', '多模态模型', 7);
 
