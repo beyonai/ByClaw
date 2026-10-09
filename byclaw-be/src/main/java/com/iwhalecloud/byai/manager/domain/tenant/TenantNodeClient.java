@@ -18,6 +18,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.ser.std.NumberSerializers;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandHashBody;
@@ -162,7 +163,10 @@ public class TenantNodeClient {
     }
 
     static String commandHash(ObjectMapper mapper, CommandHashBody body) throws Exception {
-        ObjectMapper canonical = protocolMapper(mapper).configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
+        // Node sorts every JSON object, including maps flattened by @JsonAnyGetter and nested member maps.
+        ObjectMapper canonical = protocolMapper(mapper)
+            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
             .digest(canonical.writeValueAsString(body).getBytes(StandardCharsets.UTF_8)));
     }
