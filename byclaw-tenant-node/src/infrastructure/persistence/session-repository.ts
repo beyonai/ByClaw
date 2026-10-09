@@ -13,15 +13,21 @@ export class SqlSessionRepository implements SessionRepository {
     keyword: string,
     types: string[],
     projectId?: string,
+    agentId?: string,
   ) {
     const params = projectId
       ? [this.enterpriseId, actor, `%${keyword}%`, types, projectId]
       : [this.enterpriseId, actor, `%${keyword}%`, types];
-    const where =
+    let where =
       "enterprise_id=$1 AND session_type=ANY($4::text[]) AND (creator_id=$2 OR EXISTS(SELECT 1 FROM byai.byai_session_member m WHERE m.session_id=byai_session.session_id AND m.mem_obj_type='USER' AND m.mem_obj_id=$2 AND m.com_acct_id=$1)) AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING') AND COALESCE(session_name,'') LIKE $3 ESCAPE '\\' AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_task t WHERE t.task_session_id=byai_session.session_id)" +
       (projectId ? " AND project_id::text=$5" : "");
-    const limitParam = projectId ? 6 : 5;
-    const offsetParam = projectId ? 7 : 6;
+    if (agentId) {
+      params.push(agentId);
+      const agentParam = `$${params.length}`;
+      where += ` AND creator_id=$2 AND (object_id::text=${agentParam} OR EXISTS(SELECT 1 FROM byai.byai_session_member a WHERE a.session_id=byai_session.session_id AND a.mem_obj_type='AGENT' AND a.mem_obj_id::text=${agentParam} AND a.com_acct_id=$1))`;
+    }
+    const limitParam = params.length + 1;
+    const offsetParam = params.length + 2;
     const [total] = await this.db.query(
       `SELECT COUNT(*) AS count FROM byai.byai_session WHERE ${where}`,
       params,

@@ -126,6 +126,25 @@ describe("group write permission", () => {
     expect(sql).toContain("project_id");
     expect(parameters).toContain("-1");
   });
+  it("retains the selected agent and project when creating a tenant chat", async () => {
+    const query = vi.fn(async () => []);
+    const ctx = new CommandContext(
+      { query },
+      command({
+        payload: {
+          sessionName: "project chat",
+          sessionType: "h_as",
+          agentId: "42",
+          projectId: "50",
+        },
+      }),
+    );
+    await createSession(ctx);
+    const [sql, parameters] = query.mock.calls.at(-1)!;
+    expect(sql).toContain("object_id");
+    expect(parameters).toContain("42");
+    expect(parameters).toContain("50");
+  });
   it("rejects a group with two owners", async () => {
     const s = context(
       "CREATE_GROUP",

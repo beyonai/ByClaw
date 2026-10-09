@@ -219,3 +219,11 @@ pnpm start
 正式 baseline/增量 SQL 尚未生成：仓库要求先由用户给出准确迁移版本；本次未修改 deploy/migrations/versions、initdb 或 .applied。制品需包含既有表及方案新增 last_seq、created_seq、storage_version、mirror 序号/ID、clientRequestId/run/answer/command/hash 字段，以及 `readiness.ts` 要求的唯一索引和 seq_any_table。缺结构、索引、catalog 或审计不一致时只进入管理态。
 
 目标 openGauss 的 PostgreSQL 驱动兼容性、advisory lock/ON CONFLICT/catalog 查询、完整 baseline/版本链、COMMIT 故障恢复，以及 BE/KMS/证书/Redis ACL 的实际联调，由实库验收完成。部署约定每租户每代际一个 Node 写入实例；多副本的任务状态共享与协调需另行设计。
+
+## D0.5.0 消息命令兼容
+
+`UPDATE_FEEDBACK` 对应 `POST /internal/v1/sessions/:sessionId/messages/:messageId/feedback`，payload 为 `messageId`、`type`（praise/tread/none）、`mode`（reaction/feedback）和可选的 `feedback` JSON 字符串。服务保留与反馈无关的消息 metadata，更新消息与问答关系的反馈字段，并返回 metadata 字符串。
+
+`UPDATE_MESSAGE_STRUCTURE` 对应 `PATCH /internal/v1/sessions/:sessionId/messages/:messageId/structure`，payload 为 `messageId`、`updateField`（messageStruct/inferLog）、`id` 与 `content`，按段落 ID 替换结构内容。两种命令均复用企业/用户/会话授权、会话锁、requestHash 校验及命令事务；已撤回或不属于该会话的消息拒绝更新。运行快照中的待落库回答由 BE 精确会话授权后编辑。
+
+会话创建可保留 `agentId`、`projectId`，会话查询支持 `agentId`。`GET /internal/v1/messages/:messageId/trace` 复用消息访问权限，返回当前镜像协议保存的 runId（BE 生产端与 traceId 相同）。

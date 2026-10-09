@@ -113,6 +113,42 @@ class AssistantChatApplicationServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.clear();
+    }
+
+    @Test
+    void tenantSnapshotEditOnlyUpdatesTheAuthorizedSession() {
+        var request = new com.iwhalecloud.byai.state.common.dto.MessageStructDto();
+        request.setSessionId(456L);
+        request.setMessageId(789L);
+        request.setUpdateField("messageStruct");
+        request.setId("segment");
+        request.setContent("edited");
+        var snapshot = new com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse();
+        snapshot.setSessionId(456L);
+        snapshot.setMessageId(789L);
+        snapshot.setMessageStruct("[{\"id\":\"segment\",\"choices\":[{\"delta\":{\"content\":\"before\"}}]}]");
+        when(runningChatSnapshotService.get(456L, null, 789L)).thenReturn(snapshot);
+        assertThat(assistantChatApplicationService.updateRunningSnapshotMessageStructInSession(request)
+            .getMessageStruct()).contains("edited").doesNotContain("before");
+        verify(runningChatSnapshotService).updateSnapshot(snapshot);
+        verify(runningChatSnapshotService, never()).findByMessageId(any());
+        org.mockito.Mockito.verifyNoInteractions(scriptService, sessionService);
+        snapshot.setSessionId(999L);
+        assertThat(assistantChatApplicationService.updateRunningSnapshotMessageStructInSession(request)).isNull();
+    }
+
+    @Test
+    void tenantStopOnAnotherInstanceNeverFlushesIntoPersonalDatabase() {
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.set(
+            new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(1L, 123L, "MEMBER"));
+        StopChatDto request = new StopChatDto();
+        request.setSessionId(10L);
+        request.setMessageId(20L);
+        assistantChatApplicationService.stopChat(request);
+        verify(gatewayClient).cancelSession("10", "user cancel task");
+        verify(scriptService, never()).flushFromSnapshot(any(), any());
+        verify(runningChatSnapshotService, never()).delete(any(), any());
     }
 
     private SessionRuntimeStateService sessionRuntimeStateService;

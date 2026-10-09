@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.server.ResponseStatusException;
@@ -19,6 +21,19 @@ class TenantContextInterceptorTest {
     @AfterEach
     void clearContext() {
         TenantRequestContextHolder.clear();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/chat/superAgentChat", "/chat/runningStatus", "/chat/runningSnapshot",
+        "/chat/stopChat", "/chat/getMessageById", "/chat/updateMessageStructById", "/chat/sessionStatus"})
+    void supportedChatRoutesReceiveValidatedTenantContext(String path) {
+        TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
+        when(service.validate("123", "context-token")).thenReturn(context);
+        MockHttpServletRequest request = request("/byaiService" + path, "123");
+        request.addHeader("X-Tenant-Context", "context-token");
+
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        assertThat(TenantRequestContextHolder.get()).isSameAs(context);
     }
 
     @Test

@@ -1,3 +1,5 @@
+import { isMultiTenancyEnabled } from './multiTenancy';
+
 /**
  * WebSocket 管理工具类 - 全局单例模式
  */
@@ -404,6 +406,7 @@ class WebSocketManager {
     tenantContextToken?: string,
     expiresAt?: string
   ): Promise<void> {
+    if (enterpriseId && !isMultiTenancyEnabled()) throw new Error('Multi-tenancy is disabled');
     if (this.pendingTenantSwitchId) throw new Error('Tenant switch already in progress');
     if (enterpriseId && (!tenantContextToken || !expiresAt)) throw new Error('Tenant context is required');
     await this.waitUntilConnected();

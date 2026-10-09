@@ -18,6 +18,11 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.manager.qo.session.ByaiSessionQo;
+import com.iwhalecloud.byai.manager.qo.session.SessionByAgentQo;
+import com.iwhalecloud.byai.state.domain.message.model.MessageFeedbackDto;
+import com.iwhalecloud.byai.state.domain.message.enums.PraiseAndTreadEnum;
+import com.iwhalecloud.byai.state.domain.message.enums.FeedbackTypeEnum;
+import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.state.common.dto.MessageQo;
 import com.iwhalecloud.byai.state.domain.message.model.SessionOpeartorDto;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -60,6 +65,31 @@ public class TenantChatRoutingAspect {
         if (mentionMapper != null && args.length > 0 && args[0] instanceof MessageQo messageQuery
             && isLegacyGroup(context, messageQuery.getSessionId())) return call.proceed();
         switch (method) {
+            case "querySessionByAgent": {
+                SessionByAgentQo query = (SessionByAgentQo) args[0];
+                if (query.getObjectId() == null || query.getObjectId() <= 0) throw badRequest();
+                SessionQuery body = new SessionQuery(query.getPageNum() == null ? 1 : query.getPageNum(),
+                    query.getPageSize() == null ? 10 : query.getPageSize(),
+                    query.getKeyword() == null ? "" : query.getKeyword(), List.of("h_as", "h_h", "hs_as"),
+                    null, query.getObjectId().toString());
+                Page<SessionView> page = node.request(context, "POST", "/internal/v1/sessions/query", body,
+                    new TypeReference<Page<SessionView>>() { });
+                return ResponseUtil.successResponse(new Page<>(page.list(), page.total(), page.pageNum(),
+                    page.pageSize(), page.pageSize() <= 0 ? 0 : (int) Math.ceil((double) page.total() / page.pageSize())));
+            }
+            case "updateMessage": {
+                SessionOpeartorDto request = (SessionOpeartorDto) args[0];
+                return feedback(context, request.getMessageId(), request.getType(), "reaction",
+                    request.getFeedback() == null ? null : JSON.toJSONString(request.getFeedback()));
+            }
+            case "updateMesFeedback": {
+                MessageFeedbackDto request = (MessageFeedbackDto) args[0];
+                if (request.getMessageId() == null
+                    || PraiseAndTreadEnum.getName(request.getType()) == PraiseAndTreadEnum.TREAD
+                        && FeedbackTypeEnum.getName(request.getFeedbackLabel()) == null) throw badRequest();
+                return feedback(context, request.getMessageId().toString(), request.getType(), "feedback",
+                    JSON.toJSONString(request));
+            }
             case "qryConversations": {
                 ByaiSessionQo query = (ByaiSessionQo) args[0];
                 if (query.getSessionId() != null) {
@@ -181,6 +211,26 @@ public class TenantChatRoutingAspect {
     private boolean isLegacyGroup(TenantRequestContext context, Long sessionId) {
         return sessionId != null && sessionId > 0 && mentionMapper.isLegacyGroupMember(sessionId,
             context.userId(), context.enterpriseId());
+    }
+
+    private Object feedback(TenantRequestContext context, String messageId, String type, String mode, String details) {
+        if (messageId == null || !messageId.matches("[1-9][0-9]*") || PraiseAndTreadEnum.getName(type) == null) {
+            throw badRequest();
+        }
+        List<MessageView> messages = node.request(context, "POST", "/internal/v1/assiman/getMessageByIds",
+            new MessageIds(List.of(Long.valueOf(messageId))), new TypeReference<List<MessageView>>() { });
+        if (messages == null || messages.size() != 1 || !messageId.equals(messages.get(0).messageId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant message not found");
+        }
+        String sessionId = messages.get(0).sessionId();
+        var result = node.command(context, "POST",
+            "/internal/v1/sessions/" + sessionId + "/messages/" + messageId + "/feedback", sessionId,
+            "UPDATE_FEEDBACK", new TenantNodeModels.MessageFeedback(messageId, type.toLowerCase(java.util.Locale.ROOT), mode, details));
+        return ResponseUtil.successResponse("update message success", result.metadata());
+    }
+
+    private ResponseStatusException badRequest() {
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant chat request");
     }
 
     private ResponseStatusException unsupported() {

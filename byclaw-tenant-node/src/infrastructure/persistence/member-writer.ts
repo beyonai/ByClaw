@@ -124,6 +124,15 @@ export async function groupSettings(context: CommandContext): Promise<void> {
     allowMemberInviteUser: "group_member_invite_user_enabled",
   };
   for (const [key, value] of Object.entries(command.payload)) {
+    if (key === "sessionName") {
+      const name = text(value, 100, true);
+      if (!name.trim()) throw new DomainError("INVALID_SESSION_NAME");
+      await db.query(
+        "UPDATE byai.byai_session SET session_name=$1,update_time=CURRENT_TIMESTAMP WHERE session_id=$2 AND enterprise_id=$3",
+        [name, command.sessionId, command.enterpriseId],
+      );
+      continue;
+    }
     if (!codes[key] || typeof value !== "boolean") throw new DomainError("INVALID_GROUP_SETTINGS");
     await context.setExtension(codes[key], String(value));
   }

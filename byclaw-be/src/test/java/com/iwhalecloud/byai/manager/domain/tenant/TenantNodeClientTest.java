@@ -20,6 +20,26 @@ import org.springframework.web.server.ResponseStatusException;
 class TenantNodeClientTest {
 
     @Test
+    void nodeWireKeepsSnowflakeIdsExactInsideMirrorStructuresWhilePagingIsNumeric() throws Exception {
+        var delta = new com.iwhalecloud.byai.state.common.dto.AnswerDelta();
+        delta.setMessageId(8000000123000000001L);
+        delta.setTaskId(8000000123000000002L);
+        for (ObjectMapper mapper : List.of(new ObjectMapper(),
+            new com.iwhalecloud.byai.state.infrastructure.filter.WebMvcConfiguration()
+                .jacksonObjectMapper(new org.springframework.http.converter.json.Jackson2ObjectMapperBuilder()))) {
+            ObjectMapper wire = TenantNodeClient.protocolMapper(mapper);
+            var structure = wire.readTree(wire.writeValueAsBytes(Map.of("messageStruct", List.of(delta))));
+            assertThat(structure.get("messageStruct").get(0).get("messageId").textValue())
+                .isEqualTo("8000000123000000001");
+            assertThat(structure.get("messageStruct").get(0).get("taskId").textValue())
+                .isEqualTo("8000000123000000002");
+            var query = wire.readTree(wire.writeValueAsBytes(new TenantNodeModels.MessageQuery("456", 1L, 20L)));
+            assertThat(query.get("pageNum").isInt()).isTrue();
+            assertThat(query.get("pageSize").intValue()).isEqualTo(20);
+        }
+    }
+
+    @Test
     void mirrorEventKeepsExplicitNullStreamIdForNodeContract() throws Exception {
         ObjectMapper mapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         MirrorEvent event = new MirrorEvent("10", "req-1", "run-1", "trace-1", "20", "21",
@@ -34,6 +54,21 @@ class TenantNodeClientTest {
             "UPDATE_SESSION", new SessionUpdate("renamed", null));
         assertThat(TenantNodeClient.commandHash(new ObjectMapper(), body))
             .isEqualTo("75ab7e02c951cdd400c61b241ca1744be140c9dd21490dd4c8c2fdbc809e69b1");
+    }
+
+    @Test
+    void publicApiNumberSerializationCannotChangeNodeCommandProtocol() throws Exception {
+        ObjectMapper publicMapper = new com.iwhalecloud.byai.state.infrastructure.filter.WebMvcConfiguration()
+            .jacksonObjectMapper(new org.springframework.http.converter.json.Jackson2ObjectMapperBuilder());
+        CommandHashBody body = new CommandHashBody(1, "123", "8", "req-1", "456",
+            "UPDATE_SESSION", new SessionUpdate("renamed", null));
+        assertThat(TenantNodeClient.commandHash(publicMapper, body))
+            .isEqualTo("75ab7e02c951cdd400c61b241ca1744be140c9dd21490dd4c8c2fdbc809e69b1");
+        ObjectMapper wire = TenantNodeClient.protocolMapper(publicMapper);
+        assertThat(wire.readTree(wire.writeValueAsBytes(body)).get("protocolVersion").isInt()).isTrue();
+        var ids = new TenantNodeModels.MessageIds(List.of(8000000123000000001L));
+        assertThat(wire.readTree(wire.writeValueAsBytes(ids)).get("messageIds").get(0).textValue())
+            .isEqualTo("8000000123000000001");
     }
 
     @Test

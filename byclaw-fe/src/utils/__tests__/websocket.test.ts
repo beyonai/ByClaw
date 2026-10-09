@@ -29,6 +29,7 @@ describe('utils/websocket', () => {
 
   beforeEach(() => {
     jest.resetModules();
+    require('../multiTenancy').setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
     jest.clearAllMocks();
     jest.useFakeTimers();
     window.localStorage.clear();

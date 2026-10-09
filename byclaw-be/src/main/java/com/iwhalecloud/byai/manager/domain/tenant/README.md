@@ -16,3 +16,18 @@ WebSocket 在原连接上发送 `SWITCH_TENANT` 消息，payload 带 `enterprise
 平台管理员通过 `POST /byaiService/admin/tenants/create` 提交 `enterpriseName`、`packageId`、`requestId`，通过 `POST /byaiService/admin/tenants/list` 查看租户。创建事务写入企业、所有者成员关系、套餐快照和 `RESERVED` 开通状态；同一个 `requestId` 重试返回原租户。`RESERVED` 不能切换进入业务空间，必须由沙箱与 schema 开通流程推进到 `READY`。
 
 列表接口支持 `name` 模糊查询、`createdFrom`/`createdTo` 半开时间段过滤，以及 `createdAt`、`openedAt`、`enterpriseName` 白名单排序。创建时间取开通请求记录，开通时间仅在状态达到 `READY` 时显示；失败原因存于 `PROVISION_FAILURE_REASON`，成功重试后清空。租户 OpenGauss 依赖启用 `BYCLAW_SANDBOX_PROFILE_ENABLED=true` 以加载套餐资源规格。
+
+## D0.5.0 聊天兼容范围
+
+无租户上下文时继续使用个人聊天与原有工作组处理路径。带租户上下文时，业务读写先经过 Node 的企业、当前用户和目标会话授权，不能回退到个人消息表。
+
+- `/chat/superAgentChat`、运行状态、运行快照、停止、消息查询、trace 查询和结构编辑接入租户路由。未落库的回答可在授权会话的精确快照中编辑；不会跨会话扫描。跨实例停止不得将租户快照写入个人消息库。
+- 会话创建保留 `agentId` 和 `projectId`；数字员工维度的会话查询在租户库中执行。消息反馈及结构编辑通过幂等 Node 命令执行。
+- 新工作组可在创建时加入已验证的 ACTIVE 租户用户和数字员工，支持设置、成员角色、群主交接及退出。既有工作组按企业与成员关系识别后仍使用原有服务。
+- 新租户工作组的撤回、邀请链接等未移植操作继续返回 409。撤回不能仅设置数据库标记：还需可靠取消关联执行、补偿重试及租户事件广播。这些场景尚不能视为已通过验收。
+
+Java 到 Node 的独立协议 mapper 保持版本号和分页为 JSON 数字；业务 ID 仍以字符串传输。它不改变公共 MVC mapper。前端仅向已接入的业务接口发送租户头，共享模型目录不附带租户头；同一登录会话中的上下文续期不触发空间切换或中断流式请求。
+
+离线回归覆盖个人路径、拒绝跨租户访问、协议 hash、反馈、会话与工作组操作。真实 openGauss、Redis、Gateway、SSE 和多实例故障恢复仍需部署环境联调；本次兼容修复不包含数据库迁移或发布生成操作。
+
+前端能力受 `ENABLE_MULTI_TENACY` 控制：公共布局通过 `/byaiService/system/session/getDcSystemConfigValueByCodes` 批量查询，仅非空字符串 `"1"` 开启。缺失、空响应、其他值或请求失败均关闭；关闭时隐藏空间切换入口、清理旧租户选择，HTTP/WebSocket 不附带旧租户上下文。系统开关查询完成前不挂载业务路由。此开关控制前端业务入口，不替代服务端逐请求的成员与资源授权。

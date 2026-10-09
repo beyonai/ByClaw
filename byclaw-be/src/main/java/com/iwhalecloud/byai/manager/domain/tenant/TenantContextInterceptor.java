@@ -11,6 +11,11 @@ import org.springframework.web.servlet.HandlerInterceptor;
 @Component
 public class TenantContextInterceptor implements HandlerInterceptor {
 
+    private static final java.util.Set<String> CHAT_ROUTES = java.util.Set.of(
+        "/chat/superAgentChat", "/chat/runningStatus", "/chat/runningSnapshot", "/chat/stopChat",
+        "/chat/getMessageById", "/chat/updateMessageStructById", "/chat/sessionStatus",
+        "/chat/getTraceIdByMessageId");
+
     private final TenantContextService tenantContextService;
 
     public TenantContextInterceptor(TenantContextService tenantContextService) {
@@ -38,7 +43,8 @@ public class TenantContextInterceptor implements HandlerInterceptor {
         if (!path.startsWith("/tenantContext/") && !path.startsWith("/assiman/")
             && !"/project/session/listByQo".equals(path)
             && !"/api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents".equals(path)
-            && !path.startsWith("/group-chats")) {
+            && !path.equals("/group-chats") && !path.startsWith("/group-chats/")
+            && !CHAT_ROUTES.contains(path)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant route is not ready");
         }
         TenantRequestContextHolder.set(tenantContextService.validate(enterpriseId, contextToken));

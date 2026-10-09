@@ -127,16 +127,45 @@ class TenantChatRoutingAspectTest {
         return call(AssistantManController.class, method, arg);
     }
 
+    @Test
+    void tenantAgentHistoryUsesNodeInsteadOfPersonalSessionStorage() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(8L, 123L, "OWNER");
+        TenantRequestContextHolder.set(context);
+        var query = new com.iwhalecloud.byai.manager.qo.session.SessionByAgentQo();
+        query.setObjectId(42L);
+        query.setUserId(999L);
+        when(node.request(eq(context), eq("POST"), eq("/internal/v1/sessions/query"), any(), any()))
+            .thenReturn(new Page<>(java.util.List.of(), 21L, 1, 10, 0));
+        ProceedingJoinPoint call = call("querySessionByAgent", query);
+        ResponseUtil<?> result = (ResponseUtil<?>) aspect.route(call);
+        assertThat(((Page<?>) result.getData()).totalPages()).isEqualTo(3);
+        verify(call, org.mockito.Mockito.never()).proceed();
+    }
+
+    @Test
+    void tenantFeedbackReturnsMetadataCommittedByTheOwningNode() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(8L, 123L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        var request = new com.iwhalecloud.byai.state.domain.message.model.MessageFeedbackDto();
+        request.setMessageId(789L);
+        request.setType("praise");
+        MessageView message = new MessageView();
+        message.setMessageId("789");
+        message.setSessionId("456");
+        when(node.request(eq(context), eq("POST"), eq("/internal/v1/assiman/getMessageByIds"), any(), any()))
+            .thenReturn(java.util.List.of(message));
+        when(node.command(eq(context), eq("POST"), eq("/internal/v1/sessions/456/messages/789/feedback"),
+            eq("456"), eq("UPDATE_FEEDBACK"), any())).thenReturn(new TenantNodeModels.CommandResult(
+                "456", "request", "UPDATE_FEEDBACK", null, null, null, "{\"feedback_type\":\"praise\"}"));
+        ResponseUtil<?> result = (ResponseUtil<?>) aspect.route(call("updateMesFeedback", request));
+        assertThat(result.getData()).isEqualTo("{\"feedback_type\":\"praise\"}");
+    }
+
     private ProceedingJoinPoint call(Class<?> controller, String method, Object arg) throws NoSuchMethodException {
         ProceedingJoinPoint call = mock(ProceedingJoinPoint.class);
         MethodSignature signature = mock(MethodSignature.class);
         when(call.getSignature()).thenReturn(signature);
-        when(signature.getMethod()).thenReturn(controller.getMethod(method,
-            method.equals("listSessionsByProject") ? ProjectSessionQo.class :
-            method.equals("qryConversations") ? ByaiSessionQo.class :
-                method.equals("updateConversation") ? SessionOpeartorDto.class :
-                method.equals("deleteMessage") ? com.iwhalecloud.byai.state.domain.message.model.SessionOpeartorDto.class
-                    : Object.class));
+        when(signature.getMethod()).thenReturn(controller.getMethod(method, arg.getClass()));
         when(call.getArgs()).thenReturn(new Object[] {arg});
         return call;
     }

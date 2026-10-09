@@ -31,8 +31,12 @@ public final class TenantNodeModels {
                             boolean ready) {
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record SessionQuery(int pageNum, int pageSize, String keyword, List<String> sessionTypes,
-                               String projectId) {
+                               String projectId, String agentId) {
+        public SessionQuery(int pageNum, int pageSize, String keyword, List<String> sessionTypes, String projectId) {
+            this(pageNum, pageSize, keyword, sessionTypes, projectId, null);
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -45,13 +49,18 @@ public final class TenantNodeModels {
                               String creatorId, String enterpriseId, String projectId) {
     }
 
-    public record MessageQuery(String sessionId, long pageNum, long pageSize) {
+    public record MessageQuery(String sessionId, int pageNum, int pageSize) {
+        public MessageQuery(String sessionId, long pageNum, long pageSize) {
+            this(sessionId, Math.toIntExact(pageNum), Math.toIntExact(pageSize));
+        }
     }
 
     public record SessionRef(String sessionId) {
     }
 
-    public record MessageIds(List<Long> messageIds) {
+    public record MessageIds(
+        @com.fasterxml.jackson.databind.annotation.JsonSerialize(contentUsing = com.fasterxml.jackson.databind.ser.std.ToStringSerializer.class)
+        List<Long> messageIds) {
     }
 
     @Data
@@ -98,10 +107,35 @@ public final class TenantNodeModels {
     }
 
     public sealed interface CommandPayload permits SessionCreate, GroupCreate, SessionUpdate, MessageId, EmptyPayload,
-        GroupMessagePayload, GroupTaskUpdate, GroupTaskClaim, AddMembers, RemoveMember {
+        GroupMessagePayload, GroupTaskUpdate, GroupTaskClaim, AddMembers, RemoveMember, MessageFeedback, MessageStructure,
+        GroupSettings, MemberRole, GroupUser {
     }
 
-    public record SessionCreate(String sessionName, String sessionType) implements CommandPayload {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record SessionCreate(String sessionName, String sessionType, String agentId, String projectId)
+        implements CommandPayload {
+        public SessionCreate(String sessionName, String sessionType) {
+            this(sessionName, sessionType, null, null);
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record MessageFeedback(String messageId, String type, String mode, String feedback) implements CommandPayload {
+    }
+
+    public record MessageStructure(String messageId, String updateField, String id, String content)
+        implements CommandPayload {
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record GroupSettings(String sessionName, Boolean allowJoinByLink, Boolean allowMemberAddAgent,
+                                Boolean allowMemberInviteUser) implements CommandPayload {
+    }
+
+    public record MemberRole(String userId, String role) implements CommandPayload {
+    }
+
+    public record GroupUser(String userId) implements CommandPayload {
     }
 
     public record GroupMember(String memObjType, String memObjId, String userRole, String memName,
@@ -211,9 +245,13 @@ public final class TenantNodeModels {
     }
 
     public record CommandResult(String sessionId, String requestId, String operation, String messageId,
-                                List<GroupDispatch> dispatches, Boolean claimed) {
+                                List<GroupDispatch> dispatches, Boolean claimed, String metadata) {
+        public CommandResult(String sessionId, String requestId, String operation, String messageId,
+                             List<GroupDispatch> dispatches, Boolean claimed) {
+            this(sessionId, requestId, operation, messageId, dispatches, claimed, null);
+        }
         public CommandResult(String sessionId, String requestId, String operation, String messageId) {
-            this(sessionId, requestId, operation, messageId, null, null);
+            this(sessionId, requestId, operation, messageId, null, null, null);
         }
     }
 }

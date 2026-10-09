@@ -4,6 +4,17 @@ import { SqlSessionRepository } from "../src/infrastructure/persistence/session-
 import type { SqlSession } from "../src/application/database-ports.js";
 
 describe("tenant session query", () => {
+  it("filters agent history inside the tenant and actor boundary", async () => {
+    const sql = vi.fn(async () => []);
+    const query = new SessionQueries(new SqlSessionRepository({ query: sql }, "123"));
+    await query.list("8", { pageNum: 1, pageSize: 5, agentId: "42" });
+    for (const [statement, params] of sql.mock.calls) {
+      expect(statement).toContain("object_id");
+      expect(statement).toContain("mem_obj_type='AGENT'");
+      expect(params).toContain("42");
+      expect(params.slice(0, 2)).toEqual(["123", "8"]);
+    }
+  });
   it("passes requested chat types to the repository", async () => {
     const list = vi.fn(async () => ({ list: [], total: 0, pageNum: 1, pageSize: 20 }));
     const query = new SessionQueries({ list });

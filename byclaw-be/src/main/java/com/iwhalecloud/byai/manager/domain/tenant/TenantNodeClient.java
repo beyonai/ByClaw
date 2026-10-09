@@ -18,6 +18,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.ser.std.NumberSerializers;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandHashBody;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandPayload;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandRequest;
@@ -57,7 +59,7 @@ public class TenantNodeClient {
                             String internalToken) {
         this.tenantMapper = tenantMapper;
         this.sandboxMapper = sandboxMapper;
-        this.mapper = mapper;
+        this.mapper = protocolMapper(mapper);
         this.discovery = new DiscoveryClient(redisClient, 5);
         this.internalToken = internalToken;
     }
@@ -160,9 +162,19 @@ public class TenantNodeClient {
     }
 
     static String commandHash(ObjectMapper mapper, CommandHashBody body) throws Exception {
-        ObjectMapper canonical = mapper.copy().configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
+        ObjectMapper canonical = protocolMapper(mapper).configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
             .digest(canonical.writeValueAsString(body).getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /** The public API stringifies IDs; the Node protocol requires numeric versions and pagination. */
+    static ObjectMapper protocolMapper(ObjectMapper mapper) {
+        SimpleModule numbers = new SimpleModule("tenant-node-numbers");
+        numbers.addSerializer(Integer.class, new NumberSerializers.IntegerSerializer(Integer.class));
+        numbers.addSerializer(Integer.TYPE, new NumberSerializers.IntegerSerializer(Integer.TYPE));
+        numbers.addSerializer(Long.class, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
+        numbers.addSerializer(Long.TYPE, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
+        return mapper.copy().registerModule(numbers);
     }
 
     private String dbRecordId(long enterpriseId) {

@@ -1,3 +1,4 @@
+import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 jest.mock('@/utils/auth', () => ({
   clearToken: jest.fn(),
   getssoToken: jest.fn(() => 'sso-token'),
@@ -116,10 +117,22 @@ describe('Service Common Request', () => {
   });
 
   beforeEach(() => {
+    setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
     jest.clearAllMocks();
     clearSelectedEnterprise();
     window.localStorage.removeItem('SESSION');
     (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(true);
+  });
+
+  it('does not attach tenant headers when the system switch is off despite a stored selection', async () => {
+    window.localStorage.setItem('SESSION', 'session-key');
+    selectEnterprise('123', 'context-token', '2099-01-01');
+    setMultiTenancyConfig(null);
+    const url = '/byaiService/group-chats';
+    mockRequest.mockResolvedValue({ data: { code: 0, data: [] }, config: { url } });
+    await POST(url, {});
+    expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
+    expect(mockRequest.mock.calls[0][0].headers['X-Tenant-Context']).toBeUndefined();
   });
 
   it('keeps the existing chat URL and attaches tenant headers only in tenant space', async () => {
@@ -144,6 +157,17 @@ describe('Service Common Request', () => {
       headers: { 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' },
     });
   });
+
+  it.each(['/byaiService/chat/getAiModeList', '/byaiService/chat/getAssistant', '/byaiService/chat/getTermsOptions'])(
+    'keeps shared catalog requests outside tenant routing: %s',
+    async (url) => {
+      window.localStorage.setItem('SESSION', 'session-key');
+      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
+      await POST(url, {});
+      expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
+    }
+  );
 
   it('globalLogout clears local auth state and redirects when a user exists', async () => {
     (getModelState as jest.Mock).mockReturnValue({
