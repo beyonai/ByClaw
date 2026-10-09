@@ -495,6 +495,8 @@ COMMENT ON COLUMN byai.byai_resource_favorite_count.favorite_count IS '收藏用
 
 -- 完善个人资料：复用客户线索，不扩展 po_users，不使用 SQL function 或数据回填。
 -- openGauss 兼容：新增字段使用普通 ALTER；执行前检查字段与索引，仅执行尚未存在的 ADD COLUMN / CREATE INDEX。
+-- 手机号直接复用 po_users.phone 的加密值，长度与来源字段保持一致，兼容历史明文数据。
+ALTER TABLE byai.byai_customer_leads ALTER COLUMN phone TYPE VARCHAR(255);
 ALTER TABLE byai.byai_customer_leads ADD COLUMN user_id BIGINT;
 ALTER TABLE byai.byai_customer_leads ADD COLUMN profile_role VARCHAR(50);
 ALTER TABLE byai.byai_customer_leads ADD COLUMN profile_interests TEXT;
