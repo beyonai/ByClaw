@@ -78,6 +78,24 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
+    void tenantListTreatsDefaultEnterpriseIdAsAnAbsentFilter() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        Map<String, Object> page = Map.of("list", List.of(Map.of("sessionId", "9000000000000000001")),
+            "total", 1, "pageNum", 1, "pageSize", 20, "totalPages", 1);
+        when(node.request(eq(context), eq("GET"), eq("/internal/v1/group-chats?pageNum=1&pageSize=20"),
+            eq(null), any())).thenReturn(page);
+
+        ResponseUtil<?> defaultResponse = (ResponseUtil<?>) aspect.route(call("list", 1, 20, 1L));
+        ResponseUtil<?> absentResponse = (ResponseUtil<?>) aspect.route(call("list", 1, 20, null));
+
+        assertThat(defaultResponse.getCode()).isZero();
+        assertThat(defaultResponse.getData()).isEqualTo(page);
+        assertThat(absentResponse.getData()).isEqualTo(page);
+        verifyNoInteractions(legacy, memberships);
+    }
+
+    @Test
     void tenantListRejectsAnotherEnterpriseId() {
         TenantRequestContextHolder.set(new TenantRequestContext(27L, 11221076L, "MEMBER"));
 
