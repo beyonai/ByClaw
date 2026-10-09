@@ -1,14 +1,18 @@
+import { createGroupTasks } from "./group-task-create.js";
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
 import { first, insert, nextId } from "./sql-utils.js";
 import { nextSequence } from "./message-fields.js";
 import { indexGroupMessage } from "./group-message-index.js";
+import { GROUP_COORDINATOR_AGENT_ID } from "../../domain/group-coordination.js";
+import { readGroupCoordination } from "./group-coordination.js";
+import type { GroupDispatch } from "./group-task-create.js";
 
 /** Commits a human group message in the owning tenant database, keyed by client request ID. */
 export interface GroupMessageResult {
   messageId: string;
-  dispatches: { taskSessionId: string; targetAgentId: string }[];
+  dispatches: GroupDispatch[];
 }
 
 export async function sendGroupMessage(context: CommandContext): Promise<GroupMessageResult> {
@@ -19,7 +23,16 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
   if (
     Object.keys(payload).some(
       (key) =>
-        !["chatContent", "resourceList", "files", "replyToMessageId", "creatorName"].includes(key),
+        ![
+          "chatContent",
+          "resourceList",
+          "files",
+          "replyToMessageId",
+          "creatorName",
+          "coordinatorAgentId",
+          "coordinatorName",
+          "coordinatorAuthorized",
+        ].includes(key),
     ) ||
     !Array.isArray(payload.resourceList) ||
     payload.resourceList.length > 100 ||
@@ -62,11 +75,51 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
     );
     return {
       messageId: String(existing.messageId),
-      dispatches: tasks.map((task) => ({
-        taskSessionId: String(task.task_session_id ?? task.taskSessionId),
-        targetAgentId: String(task.target_agent_id ?? task.targetAgentId),
-      })),
+      dispatches: await Promise.all(
+        tasks.map(async (task) => {
+          const taskSessionId = String(task.task_session_id ?? task.taskSessionId);
+          const scope = await readGroupCoordination(db, taskSessionId);
+          return {
+            taskSessionId,
+            targetAgentId: String(task.target_agent_id ?? task.targetAgentId),
+            ...(scope ? { groupCoordination: scope } : {}),
+          };
+        }),
+      ),
     };
+  }
+  if (mentionedAgents.length && payload.coordinatorAgentId !== undefined) {
+    const coordinatorAgentId = requireId(payload.coordinatorAgentId);
+    const bound = await first(
+      db,
+      "SELECT ext_param_value FROM byai.byai_session_ext WHERE session_id=$1 AND ext_param_code=$2",
+      [command.sessionId, GROUP_COORDINATOR_AGENT_ID],
+    );
+    if (bound && bound.extParamValue !== coordinatorAgentId)
+      throw new DomainError("GROUP_COORDINATOR_MISMATCH");
+    if (!bound) {
+      const member = await first(
+        db,
+        "SELECT 1 FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='AGENT' AND mem_obj_id=$2 AND com_acct_id=$3",
+        [command.sessionId, coordinatorAgentId, command.enterpriseId],
+      );
+      if (!member) {
+        if (payload.coordinatorAuthorized !== true)
+          throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+        await insert(db, "byai_session_member", {
+          byai_session_member_id: await nextId(db, command.enterpriseId),
+          session_id: command.sessionId,
+          mem_obj_type: "AGENT",
+          mem_obj_id: coordinatorAgentId,
+          user_role: "MEMBER",
+          mem_name: text(payload.coordinatorName ?? "", 255),
+          creator_id: command.userId,
+          com_acct_id: command.enterpriseId,
+          create_time: new Date(),
+        });
+      }
+      await context.setExtension(GROUP_COORDINATOR_AGENT_ID, coordinatorAgentId);
+    }
   }
   const id = await nextId(db, command.enterpriseId);
   const reference = payload.replyToMessageId == null ? null : requireId(payload.replyToMessageId);
@@ -102,42 +155,24 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       [id, command.sessionId, user, command.userId],
     );
   }
-  const dispatches: GroupMessageResult["dispatches"] = [];
-  for (const agentId of new Set(mentionedAgents)) {
-    const taskSessionId = await nextId(db, command.enterpriseId);
-    await insert(db, "byai_session", {
-      session_id: taskSessionId,
-      parent_session_id: command.sessionId,
-      creator_id: command.userId,
-      enterprise_id: command.enterpriseId,
-      session_name: content.slice(0, 255) || "群聊任务",
-      session_type: "h_as",
-      state: "ACTIVE",
-      last_seq: "0",
-      create_time: new Date(),
-      update_time: new Date(),
-    });
-    await insert(db, "byai_group_chat_task", {
-      task_session_id: taskSessionId,
-      group_session_id: command.sessionId,
-      source_message_id: id,
-      dispatch_id: await nextId(db, command.enterpriseId),
-      initiator_user_id: command.userId,
-      target_agent_id: agentId,
-      task_name: content.slice(0, 255) || "群聊任务",
-      status: "ACTIVE",
-      turn_status: "QUEUED",
-      create_time: new Date(),
-      update_time: new Date(),
-    });
-    await insert(db, "byai_session_ext", {
-      ext_id: await nextId(db, command.enterpriseId),
-      session_id: taskSessionId,
-      ext_param_name: "group_auto_dispatch",
-      ext_param_code: "group_auto_dispatch",
-      ext_param_value: id,
-    });
-    dispatches.push({ taskSessionId, targetAgentId: agentId });
-  }
+  const dispatches = await createGroupTasks(context, id, content, mentionedAgents);
+  const scope = dispatches.find(
+    (dispatch) => dispatch.groupCoordination?.mode === "COORDINATED",
+  )?.groupCoordination;
+  if (scope)
+    await db.query(
+      "UPDATE byai.byai_message SET metadata=$1 WHERE message_id=$2 AND enterprise_id=$3",
+      [
+        JSON.stringify({
+          scene: "GROUP_CHAT",
+          clientRequestId: command.requestId,
+          resourceList: payload.resourceList,
+          groupCoordination: scope,
+          taskId: scope.taskSessionId,
+        }),
+        id,
+        command.enterpriseId,
+      ],
+    );
   return { messageId: id, dispatches };
 }

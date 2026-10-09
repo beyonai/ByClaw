@@ -569,15 +569,15 @@ const ResourceList: React.FC<ResourceListProps> = ({
           current.map((row) =>
             `${row.resourceId}` === resourceId
               ? {
-                  ...row,
-                  ...detail,
-                  ...detail.operationPermissions,
-                  operationPermissionsLoaded: true,
-                  approveStatus: detail.operationPermissions.useApplyPending ? 'S' : '',
-                  // 详情查询不包含收藏上下文，保留期间用户对当前卡片的收藏操作。
-                  favorited: row.favorited,
-                  favoriteCount: row.favoriteCount,
-                }
+                ...row,
+                ...detail,
+                ...detail.operationPermissions,
+                operationPermissionsLoaded: true,
+                approveStatus: detail.operationPermissions.useApplyPending ? 'S' : '',
+                // 详情查询不包含收藏上下文，保留期间用户对当前卡片的收藏操作。
+                favorited: row.favorited,
+                favoriteCount: row.favoriteCount,
+              }
               : row
           )
         );

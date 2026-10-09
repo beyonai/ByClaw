@@ -8,8 +8,8 @@ import { displayMessages } from "./timeline-format.js";
 
 /** 话题列表及话题消息查询；游标绑定会话和话题，防止跨上下文复用。 */
 export class TopicHistory extends HistoryAccess {
-  private display(rows: Row[]) {
-    return displayMessages(this.repository, rows);
+  private display(rows: Row[], actor: string) {
+    return displayMessages(this.repository, rows, actor);
   }
   async topics(actor: string, sessionId: string, limit: number, cursor?: string) {
     await this.access(actor, sessionId, true);
@@ -27,7 +27,7 @@ export class TopicHistory extends HistoryAccess {
           ids: [r.rootMessageId, r.lastMessageId],
           visible: true,
         });
-        const display = new Map((await this.display(messages)).map((m) => [m.messageId, m]));
+        const display = new Map((await this.display(messages, actor)).map((m) => [m.messageId, m]));
         return {
           topicId: r.topicId,
           rootMessageId: r.rootMessageId,
@@ -93,7 +93,9 @@ export class TopicHistory extends HistoryAccess {
         ids: [topic.rootMessageId],
         visible: true,
       });
-    const display = new Map((await this.display([...page, ...roots])).map((m) => [m.messageId, m]));
+    const display = new Map(
+      (await this.display([...page, ...roots], actor)).map((m) => [m.messageId, m]),
+    );
     const last = page.at(-1);
     return {
       topicId,

@@ -1,4 +1,5 @@
 import type { PublicationDetail } from '@/service/employeePublication';
+import { getRuntimeActualUrl } from '@/utils';
 import { Alert, Button } from 'antd';
 
 export default function UpdateTargetNotice({
@@ -28,9 +29,11 @@ export default function UpdateTargetNotice({
             员工 ID 和授权保留，个人员工的后续修改不会自动同步到本次申请。
           </div>
           <a
-            href={`/digitalEmployeesCreate?appId=${encodeURIComponent(
-              target.resourceId
-            )}&readOnly=true&log=false&manage=false`}
+            href={getRuntimeActualUrl(
+              `/digitalEmployeesCreate?appId=${encodeURIComponent(
+                target.resourceId
+              )}&readOnly=true&log=false&manage=false`
+            )}
             target="_blank"
             rel="noopener noreferrer"
           >

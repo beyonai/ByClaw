@@ -180,6 +180,21 @@ class GroupChatCreationAndInvitationTest {
     }
 
     @Test
+    void creationAddsAndBindsTheDefaultCoordinatorWithoutFrontendSelection() {
+        var assistants = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupWorkAssistantService.class);
+        when(assistants.resolveDefaultCoordinatorId()).thenReturn(40L);
+        ReflectionTestUtils.setField(service, "workAssistantService", assistants);
+        GroupChatCreateRequest request = request();
+        request.setAgentIds(List.of(30L));
+        GroupChatDetailResponse result = service.create(request);
+        assertThat(result.getCoordinatorAgentId()).isEqualTo("40");
+        assertThat(result.getMembers()).filteredOn(member -> "AGENT".equals(member.getMemObjType()))
+            .extracting(ByaiSessionMember::getMemObjId).containsExactly(30L, 40L);
+        verify(assistants).bindCoordinator(result.getSession().getSessionId(), 40L);
+        verify(authService).grantDigitalEmployeesToUser(Set.of(30L, 40L), 10L);
+    }
+
+    @Test
     void detailRefreshesUserAvatarEvenWhenMemberHasNickname() {
         UserService users = mock(UserService.class);
         ReflectionTestUtils.setField(service, "userService", users);

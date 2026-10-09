@@ -41,10 +41,15 @@ public class GroupChatAgentMentionParser {
     }
 
     public GroupChatAgentMention parse(Long groupSessionId, Long currentAgentId, String content) {
+        return parseMembers(memberService.findSessionMembers(groupSessionId, null, null), currentAgentId, content);
+    }
+
+    /** 租户群使用 Node 已鉴权的成员快照，解析规则保持一致。 */
+    public GroupChatAgentMention parseMembers(List<ByaiSessionMember> groupMembers, Long currentAgentId, String content) {
         if (content == null || content.isEmpty()) {
             return new GroupChatAgentMention(content, List.of());
         }
-        Map<String, ByaiSessionMember> members = memberIndex(groupSessionId);
+        Map<String, ByaiSessionMember> members = memberIndex(groupMembers);
         Map<String, ResourceVo> resources = new LinkedHashMap<>();
         Matcher matcher = MENTION_PATTERN.matcher(content);
         StringBuffer normalized = new StringBuffer();
@@ -68,9 +73,8 @@ public class GroupChatAgentMentionParser {
         return new GroupChatAgentMention(normalized.toString(), new ArrayList<>(resources.values()));
     }
 
-    private Map<String, ByaiSessionMember> memberIndex(Long groupSessionId) {
+    private Map<String, ByaiSessionMember> memberIndex(List<ByaiSessionMember> members) {
         Map<String, ByaiSessionMember> index = new LinkedHashMap<>();
-        List<ByaiSessionMember> members = memberService.findSessionMembers(groupSessionId, null, null);
         if (members == null) {
             return index;
         }

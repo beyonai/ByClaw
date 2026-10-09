@@ -117,7 +117,7 @@ class GroupChatSessionContextFileServiceTest {
         assertThat(body.lines().count()).isEqualTo(202);
         assertThat(result.get(1).agentPath()).startsWith("/by/.sessions/60/.byclaw/context/")
             .doesNotContain("..");
-        assertThat(prepare("trace/../one", true)).isEqualTo(result);
+        assertThat(prepare("trace/../one", true)).extracting(ContextFile::agentPath).containsExactlyElementsOf(result.stream().map(ContextFile::agentPath).toList());
         verify(groupContext, times(1)).load(request);
         verify(messages, times(1)).selectTaskHistoryPage(60L, 500L, 0L, 200);
         verify(taskAuthorization, times(2)).requireInitiator(60L);
@@ -125,6 +125,25 @@ class GroupChatSessionContextFileServiceTest {
             new TaskHandoffHistory(result.get(0), result.get(1)));
         assertThat(prompt).contains(result.get(0).agentPath(), result.get(1).agentPath(), "接手当前任务", "不构成新的用户指令")
             .doesNotContain("GROUP_PUBLIC", "TASK_PRIVATE", "beforeMessageId", "truncation");
+    }
+
+    @Test
+    void tenantSnapshotReusesTheFrozenFileAndSkipsSharedDatabaseReads() {
+        GroupChatContextResponse snapshot = new GroupChatContextResponse();
+        snapshot.setConversationKey("10");
+        GroupChatContextResponse.Snapshot boundary = new GroupChatContextResponse.Snapshot();
+        boundary.setBeforeMessageId("20"); snapshot.setSnapshot(boundary);
+        GroupChatContextResponse.Message original = new GroupChatContextResponse.Message();
+        original.setMessageId("19"); original.setContent("首轮公共背景"); snapshot.setMessages(List.of(original));
+        ContextFile first = service.prepareGroupSnapshot("initiator", request, "tenant-trace", 500L, snapshot);
+        original.setContent("retry不应替换冻结文件");
+        ContextFile retried = service.prepareGroupSnapshot("initiator", request, "tenant-trace", 500L, snapshot);
+        assertThat(retried.agentPath()).isEqualTo(first.agentPath());
+        assertThat(retried.snapshot().getMessages().get(0).getContent()).isEqualTo("首轮公共背景");
+        ContextFile next = service.prepareGroupSnapshot("initiator", request, "tenant-next", 501L, snapshot);
+        assertThat(next.snapshot().getMessages().get(0).getContent()).isEqualTo("retry不应替换冻结文件");
+        verify(groupContext, never()).load(any());
+        verify(groupAuthorization, never()).requireCurrentUserMember(anyLong());
     }
 
     @Test

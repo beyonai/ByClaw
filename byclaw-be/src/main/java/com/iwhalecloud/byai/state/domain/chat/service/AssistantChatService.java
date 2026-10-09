@@ -152,6 +152,10 @@ public class AssistantChatService {
 
     @Autowired
     private ObjectProvider<GroupChatTaskChatGuard> groupChatTaskGuardProvider;
+    @Autowired
+    private ObjectProvider<com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService> groupCoordinationProvider;
+    @Autowired
+    private ObjectProvider<com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService> tenantGroupCoordinationProvider;
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
@@ -220,6 +224,14 @@ public class AssistantChatService {
             if (assistantChatDto != null) {
                 assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
                 applyCallAcpAgentDelegation(assistantChatDto);
+                if (TenantRequestContextHolder.get() == null) {
+                    var coordination = groupCoordinationProvider == null ? null : groupCoordinationProvider.getIfAvailable();
+                    if (coordination != null) coordination.validateRequest(assistantChatDto);
+                }
+                else {
+                    var coordination = tenantGroupCoordinationProvider == null ? null : tenantGroupCoordinationProvider.getIfAvailable();
+                    if (coordination != null) coordination.validateRequest(assistantChatDto);
+                }
                 // 会话标识与最终 agentId 已确定：解析本轮实际模型并维护会话级覆盖键（写/删）。
                 if (TenantRequestContextHolder.get() == null) {
                     sessionModelSelectionService.resolveSelection(assistantChatDto);

@@ -21,14 +21,14 @@ export const buildDigitalEmployeeFilterParam = (
 
   const employeeTypeParams = employeeType
     ? {
-        ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
-        // 收藏使用 discover 的类型参数，可用列表使用 excludeEmployeeGroup 排除员工组。
-        ...(employeeType.includes('GROUP')
-          ? { agentType: '017' }
-          : discoverSource
+      ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
+      // 收藏使用 discover 的类型参数，可用列表使用 excludeEmployeeGroup 排除员工组。
+      ...(employeeType.includes('GROUP')
+        ? { agentType: '017' }
+        : discoverSource
           ? { includeEmployeeGroup: false }
           : { excludeEmployeeGroup: true }),
-      }
+    }
     : {};
 
   return {
@@ -36,8 +36,8 @@ export const buildDigitalEmployeeFilterParam = (
     ...(discoverSource
       ? { resourceStatus: '2', excludeDeleted: true }
       : filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
-      ? { resourceStatus: filterParam.resourceStatus }
-      : {}),
+        ? { resourceStatus: filterParam.resourceStatus }
+        : {}),
     // 我可用接口使用 type=owner/authorize；企业推荐和收藏使用通用 permission 枚举。
     ...(discoverSource && permission ? { permission } : {}),
     ...(type ? { type } : {}),

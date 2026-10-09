@@ -2,6 +2,20 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import usePublicationConfirmation from './usePublicationConfirmation';
 import type { PublicationDetail } from '@/service/employeePublication';
 
+jest.mock('@umijs/max', () => ({ getDvaApp: jest.fn() }));
+
+const originalPublicPath = window.publicPath;
+beforeEach(() => {
+  delete (window as Window & { publicPath?: string }).publicPath;
+});
+afterEach(() => {
+  if (originalPublicPath === undefined) {
+    delete (window as Window & { publicPath?: string }).publicPath;
+  } else {
+    window.publicPath = originalPublicPath;
+  }
+});
+
 let confirm: ReturnType<typeof usePublicationConfirmation>['confirmPublication'];
 function Confirmation() {
   const result = usePublicationConfirmation();
@@ -87,25 +101,38 @@ it('returns to editing without consenting to publication', async () => {
   });
 });
 
-it('explains which official employee and settings are replaced and requires renewed confirmation after an official change', async () => {
-  render(<Confirmation />);
-  let pending: ReturnType<typeof confirm>;
-  act(() => {
-    pending = confirm({
-      ...detail,
-      updateTarget: { resourceId: '90', name: '官方客服(企业)', fromPersonal: true, changed: true },
+it.each([
+  [undefined, '/'],
+  ['/', '/'],
+  ['/beyond/', '/beyond/'],
+  ['/beyond', '/beyond/'],
+  ['/tenant/portal/', '/tenant/portal/'],
+])(
+  'opens the read-only official target under runtime publicPath %s and requires renewed confirmation after a change',
+  async (publicPath, prefix) => {
+    if (publicPath !== undefined) window.publicPath = publicPath;
+    render(<Confirmation />);
+    let pending: ReturnType<typeof confirm>;
+    act(() => {
+      pending = confirm({
+        ...detail,
+        updateTarget: { resourceId: '90', name: '官方客服(企业)', fromPersonal: true, changed: true },
+      });
     });
-  });
-  const dialog = within(await screen.findByRole('dialog'));
-  expect(dialog.getByText(/企业副本单独调整过的这些内容也可能被替换/)).toBeInTheDocument();
-  expect(dialog.getByText('官方员工配置已变化，需要重新确认')).toBeInTheDocument();
-  expect(dialog.getByRole('link', { name: '查看当前官方配置' })).toHaveAttribute(
-    'href',
-    '/digitalEmployeesCreate?appId=90&readOnly=true&log=false&manage=false'
-  );
-  expect(dialog.getByRole('button', { name: '确认并继续发布' })).toBeDisabled();
-  await act(async () => {
-    fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
-    expect(await pending).toBe('edit');
-  });
-});
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByText(/企业副本单独调整过的这些内容也可能被替换/)).toBeInTheDocument();
+    expect(dialog.getByText('官方员工配置已变化，需要重新确认')).toBeInTheDocument();
+    const officialLink = dialog.getByRole('link', { name: '查看当前官方配置' });
+    expect(officialLink).toHaveAttribute(
+      'href',
+      `${prefix}digitalEmployeesCreate?appId=90&readOnly=true&log=false&manage=false`
+    );
+    expect(officialLink).toHaveAttribute('target', '_blank');
+    expect(officialLink).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(dialog.getByRole('button', { name: '确认并继续发布' })).toBeDisabled();
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
+      expect(await pending).toBe('edit');
+    });
+  }
+);

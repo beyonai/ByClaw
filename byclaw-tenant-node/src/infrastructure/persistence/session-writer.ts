@@ -1,7 +1,8 @@
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
-import { first, insert, nextId } from "./sql-utils.js";
+import { first, insert, nextId, camel } from "./sql-utils.js";
+import { GROUP_COORDINATOR_AGENT_ID } from "../../domain/group-coordination.js";
 
 /** 创建个人或群会话；群成员与默认设置在外层命令事务内一并写入，项目编排由 BE 负责。 */
 export async function createSession(context: CommandContext): Promise<void> {
@@ -18,7 +19,7 @@ export async function createSession(context: CommandContext): Promise<void> {
     creator_id: command.userId,
     enterprise_id: command.enterpriseId,
     session_name: name,
-    ...(group ? { session_content: text(p.sessionContent ?? "", 4000, true) } : {}),
+    session_content: text(p.sessionContent ?? "", 4000, true),
     session_type: group ? "hs_as" : "h_as",
     project_id: group
       ? requireId(p.projectId)
@@ -35,6 +36,16 @@ export async function createSession(context: CommandContext): Promise<void> {
   });
   if (group) {
     await createMembers(context);
+    if (p.coordinatorAgentId !== undefined) {
+      const coordinatorAgentId = requireId(p.coordinatorAgentId);
+      if (
+        !p.members.some(
+          (member: any) => member.memObjType === "AGENT" && member.memObjId === coordinatorAgentId,
+        )
+      )
+        throw new DomainError("INVALID_GROUP_COORDINATOR");
+      await context.setExtension(GROUP_COORDINATOR_AGENT_ID, coordinatorAgentId);
+    }
     for (const [code, value] of [
       ["group_join_link_enabled", "true"],
       ["group_member_add_agent_enabled", "false"],
@@ -137,18 +148,44 @@ export async function readState(context: CommandContext): Promise<void> {
   );
 }
 /** 消息作者或群管理员可撤回；保留原行并记录撤回身份，读取侧负责内容脱敏。 */
-export async function recallMessage(context: CommandContext): Promise<void> {
+export async function recallMessage(context: CommandContext): Promise<Record<string, any>> {
   const { command, db } = context,
     messageId = requireId(command.payload.messageId);
   const message = await first(
     db,
-    "SELECT creator_id FROM byai.byai_message WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3",
+    "SELECT creator_id,usage FROM byai.byai_message WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3 AND archived_at IS NULL",
     [command.sessionId, messageId, command.enterpriseId],
   );
   if (!message) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
-  if (message.creatorId !== command.userId) await context.requireRole(["OWNER", "ADMIN"]);
+  if (![1, 2].includes(message.usage)) throw new DomainError("SYSTEM_MESSAGE_CANNOT_BE_RECALLED");
+  if (message.usage !== 1 || message.creatorId !== command.userId)
+    await context.requireRole(["OWNER", "ADMIN"]);
   await db.query(
     "UPDATE byai.byai_message SET recalled_at=COALESCE(recalled_at,CURRENT_TIMESTAMP),recalled_by=COALESCE(recalled_by,$1) WHERE message_id=$2 AND session_id=$3 AND enterprise_id=$4",
     [command.userId, messageId, command.sessionId, command.enterpriseId],
   );
+  // 按源消息取消任务；重复撤回仍返回取消任务，供 BE 重试未完成的外部停止。
+  const tasks = (
+    await db.query(
+      "WITH RECURSIVE affected(message_id) AS (SELECT $2::bigint UNION SELECT m.message_id FROM byai.byai_message m JOIN affected a ON m.message_ref=a.message_id WHERE m.session_id=$1) UPDATE byai.byai_group_chat_task SET status='CANCELLED',update_time=CURRENT_TIMESTAMP WHERE group_session_id=$1 AND source_message_id IN (SELECT message_id FROM affected) AND status IN ('ACTIVE','CANCELLED') RETURNING *",
+      [command.sessionId, messageId],
+    )
+  ).map(camel);
+  await db.query(
+    "DELETE FROM byai.byai_group_chat_pending_publication WHERE task_session_id=ANY($1::bigint[])",
+    [tasks.map((task) => task.taskSessionId)],
+  );
+  const saved = await first(
+    db,
+    "SELECT recalled_at,recalled_by FROM byai.byai_message WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3",
+    [command.sessionId, messageId, command.enterpriseId],
+  );
+  return {
+    data: {
+      messageId,
+      tasks,
+      recalled: true,
+      recall: { operatorId: saved!.recalledBy, recalledAt: new Date(saved!.recalledAt).getTime() },
+    },
+  };
 }

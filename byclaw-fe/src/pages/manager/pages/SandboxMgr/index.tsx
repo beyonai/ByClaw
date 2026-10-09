@@ -45,6 +45,7 @@ import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } from '@/pages/manager/service/TenantMgr';
 import { isAdminVip } from '@/pages/manager/utils/auth';
+import { getMultiTenancyRevision, useMultiTenancy } from '@/utils/multiTenancy';
 import { buildServiceSpecPayload, isServiceSpecAutoStartEnabled, type ServiceSpecConfig } from './serviceSpecUtils';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 
@@ -229,6 +230,7 @@ interface SandboxHealthWatermarkModel {
 }
 
 const SandboxMgr = () => {
+  const { enabled: multiTenancyEnabled } = useMultiTenancy();
   const intl = useIntl();
   const dispatch = useDispatch();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
@@ -236,7 +238,8 @@ const SandboxMgr = () => {
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState('RUNNING');
-  const [ownerScope, setOwnerScope] = useState<'USER' | 'TENANT'>('TENANT');
+  const [resourceScope, setOwnerScope] = useState<'USER' | 'TENANT'>(multiTenancyEnabled ? 'TENANT' : 'USER');
+  const ownerScope = multiTenancyEnabled ? resourceScope : 'USER';
   const [enterpriseId, setEnterpriseId] = useState<string | undefined>();
   const [tenantOptions, setTenantOptions] = useState<TenantItem[]>([]);
   const [list, setList] = useState<SsSandboxRecord[]>([]);
@@ -477,10 +480,11 @@ const SandboxMgr = () => {
         pageSize: myPageInfo.pageSize,
         keyword: kw,
         status: st,
-        ownerScope: scope,
-        enterpriseId: tenantId,
+        ownerScope: multiTenancyEnabled ? scope : 'USER',
+        enterpriseId: multiTenancyEnabled && scope === 'TENANT' ? tenantId : undefined,
       };
 
+      const requestRevision = getMultiTenancyRevision();
       curParam.current = p;
       if (!silent) setManualLoading(true);
 
@@ -488,6 +492,7 @@ const SandboxMgr = () => {
         type: 'sandboxMgr/listSandboxRecords',
         payload: p,
         success: (data: any) => {
+          if (requestRevision !== getMultiTenancyRevision()) return;
           setList(data?.list || []);
           setPageInfo((prev) => ({
             ...prev,
@@ -499,18 +504,31 @@ const SandboxMgr = () => {
           if (!silent) setManualLoading(false);
         },
         fail: () => {
+          if (requestRevision !== getMultiTenancyRevision()) return;
           if (!silent) setManualLoading(false);
         },
       });
     },
-    [dispatch, ownerScope, enterpriseId]
+    [dispatch, ownerScope, enterpriseId, multiTenancyEnabled]
   );
 
   useEffect(() => {
+    if (!multiTenancyEnabled) {
+      setTenantOptions([]);
+      return;
+    }
+    let active = true;
     listTenants()
-      .then((tenants) => setTenantOptions(Array.isArray(tenants) ? tenants : []))
-      .catch(() => setTenantOptions([]));
-  }, []);
+      .then((tenants) => {
+        if (active) setTenantOptions(Array.isArray(tenants) ? tenants : []);
+      })
+      .catch(() => {
+        if (active) setTenantOptions([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [multiTenancyEnabled]);
 
   // Auto refresh (silent)
   useEffect(() => {
@@ -540,10 +558,16 @@ const SandboxMgr = () => {
     };
   }, [autoRefresh, loadData, pageInfo, keyword, status, ownerScope, enterpriseId]);
 
-  // Initial load
+  // Reload the visible resource scope when the system switch changes.
   useEffect(() => {
-    loadData(pageInfo, keyword, status);
-  }, []);
+    if (!multiTenancyEnabled) {
+      setOwnerScope('USER');
+      setEnterpriseId(undefined);
+      setTenantLaunchOpen(false);
+    }
+    setList([]);
+    loadData({ pageIndex: 1, pageSize: pageInfo.pageSize }, keyword, status);
+  }, [multiTenancyEnabled]);
 
   // Load preferred serviceKey for each unique userCode in the list
   useEffect(() => {
@@ -1977,7 +2001,7 @@ const SandboxMgr = () => {
       <Tabs
         activeKey={ownerScope}
         items={[
-          { key: 'TENANT', label: '租户资源' },
+          ...(multiTenancyEnabled ? [{ key: 'TENANT', label: '租户资源' }] : []),
           { key: 'USER', label: '用户资源' },
         ]}
         onChange={(key) => {

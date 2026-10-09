@@ -136,7 +136,8 @@ export const useWorkspaceSkillCenterSync = ({
             if (requestGeneration === generation.current) {
               setStates((current) => ({ ...current, [path]: { status: { ...status, action: 'NONE' } } }));
             }
-          } else if (result.sourceDeleted) message.success(intl.formatMessage({ id: 'resource.workspaceCenter.success' }));
+          } else if (result.sourceDeleted)
+            message.success(intl.formatMessage({ id: 'resource.workspaceCenter.success' }));
           else message.warning(intl.formatMessage({ id: 'resource.workspaceCenter.cleanupFailed' }));
           // 中心保存已成功，即使目录清理失败也刷新状态，避免再次覆盖已同步的内容。
           if (requestGeneration === generation.current) onChanged(item, result.sourceDeleted);

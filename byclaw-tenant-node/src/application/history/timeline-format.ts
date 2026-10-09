@@ -2,7 +2,11 @@ import type { HistoryRepository, Row } from "./contracts.js";
 import { safeMessage, objectJson, arrayJson, recalled, time } from "./message-format.js";
 
 /** 组合历史展示字段和引用摘要，所有被展示的消息都使用撤回安全投影。 */
-export async function displayMessages(repository: HistoryRepository, rows: Row[]): Promise<Row[]> {
+export async function displayMessages(
+  repository: HistoryRepository,
+  rows: Row[],
+  actor?: string,
+): Promise<Row[]> {
   const references = [...new Set(rows.map((r) => r.messageRef).filter(Boolean))];
   const byId = new Map(
     (references.length
@@ -20,6 +24,11 @@ export async function displayMessages(repository: HistoryRepository, rows: Row[]
       r,
     ]),
   );
+  const acknowledgements = rows.length
+    ? await repository.acknowledgements(rows[0]!.sessionId, [
+        ...new Set([...rows, ...byId.values()].map((r) => r.messageId)),
+      ])
+    : [];
   const projection = (source: Row, withReply = true): Row => {
     const row = safeMessage(source),
       meta = objectJson(row.metadata),
@@ -59,12 +68,16 @@ export async function displayMessages(repository: HistoryRepository, rows: Row[]
             : []),
         ];
     const task = tasks.get(String(meta.taskId ?? ""));
+    const messageAcks = recalled(source)
+      ? []
+      : acknowledgements.filter((ack) => ack.messageId === source.messageId);
     const reply = withReply ? byId.get(source.messageRef) : undefined;
     return {
       messageId: row.messageId,
       clientRequestId: meta.clientRequestId,
       topicId: row.topicId,
       taskId: meta.taskId,
+      groupCoordination: meta.groupCoordination,
       initiatorUserId: task?.initiatorUserId,
       kind: row.usage === 5 ? "SYSTEM_EVENT" : meta.kind,
       usage: row.usage,
@@ -86,6 +99,15 @@ export async function displayMessages(repository: HistoryRepository, rows: Row[]
         ? { type: "agent", agentId: String(meta.targetAgentId) }
         : undefined,
       resourceList: recalled(source) ? [] : arrayJson(meta.resourceList),
+      acknowledgements: messageAcks,
+      canAcknowledge:
+        !recalled(source) &&
+        actor !== undefined &&
+        actor !== String(source.creatorId) &&
+        arrayJson(meta.resourceList).some(
+          (r) => r?.resourceType === "HUMAN" && String(r.resourceId) === actor,
+        ) &&
+        !messageAcks.some((ack) => ack.userId === actor),
       attachments,
       recalled: recalled(source),
       recall: recalled(source)

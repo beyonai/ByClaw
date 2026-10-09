@@ -271,7 +271,8 @@ export default {
   'resource.skillPublicationResult': '查看发布结果',
   'resource.retrySkillPublication': '重试发布',
   'resource.skillPublicationResubmit': '重新提交发布申请',
-  'resource.skillPublicationPendingDescription': '发布申请已提交，等待管理员审核。可在审批中心的技能申请中查看申请记录。',
+  'resource.skillPublicationPendingDescription':
+    '发布申请已提交，等待管理员审核。可在审批中心的技能申请中查看申请记录。',
   'resource.skillPublicationRejectedDescription':
     '发布申请已被驳回。可修改个人技能后重新提交，系统将创建新的企业快照并保留原审核记录。',
   'resource.skillPublicationPublishedDescription': '该技能已发布到官方推荐。',

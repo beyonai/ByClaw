@@ -443,8 +443,8 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     activeTab === 'favorites'
       ? false
       : resourceType === 'SKILL' && activeTab === 'enterprise'
-      ? canImportCurrentEnterpriseResource
-      : (resourceType === 'SKILL' && activeTab === 'personal') || brandVersion === 'openSource';
+        ? canImportCurrentEnterpriseResource
+        : (resourceType === 'SKILL' && activeTab === 'personal') || brandVersion === 'openSource';
 
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
@@ -618,10 +618,10 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const currentMyResourceStatusOptions =
     resourceType === 'SKILL'
       ? [
-          ...myResourceStatusOptions,
-          { label: 'resourceStatus.reviewing', value: '4' },
-          { label: 'resourceStatus.notPassed', value: '5' },
-        ]
+        ...myResourceStatusOptions,
+        { label: 'resourceStatus.reviewing', value: '4' },
+        { label: 'resourceStatus.notPassed', value: '5' },
+      ]
       : myResourceStatusOptions;
   const tabBarExtraContent = (
     <Space>
@@ -683,12 +683,12 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             myResourcesOnly
               ? undefined
               : [
-                  { value: '', label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }) },
-                  ...topLevelCatalogList.map((item) => ({
-                    value: `${item.catalogId}`,
-                    label: getLocalizedCatalogName(item, intl.locale),
-                  })),
-                ]
+                { value: '', label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }) },
+                ...topLevelCatalogList.map((item) => ({
+                  value: `${item.catalogId}`,
+                  label: getLocalizedCatalogName(item, intl.locale),
+                })),
+              ]
           }
           activeTab={activeTab}
           resourceOwnerFilter={false}
@@ -705,25 +705,25 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
         brandVersion === 'openSource' &&
         resourceType === 'KG_DOC' &&
         (activeTab === 'personal' || isAdmin) && (
-          <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
-            <span>
-              <Button
-                icon={<PlusOutlined />}
-                type="primary"
-                disabled={!knowledgeCapability?.allowKnowledgeBaseCreate}
-                onClick={() => {
-                  if (!knowledgeCapability?.allowKnowledgeBaseCreate) {
-                    return;
-                  }
-                  setCurrentItem(null);
-                  setDetailPanelOpen(true);
-                }}
-              >
-                {intl.formatMessage({ id: 'common.create' })}
-              </Button>
-            </span>
-          </Tooltip>
-        )}
+        <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
+          <span>
+            <Button
+              icon={<PlusOutlined />}
+              type="primary"
+              disabled={!knowledgeCapability?.allowKnowledgeBaseCreate}
+              onClick={() => {
+                if (!knowledgeCapability?.allowKnowledgeBaseCreate) {
+                  return;
+                }
+                setCurrentItem(null);
+                setDetailPanelOpen(true);
+              }}
+            >
+              {intl.formatMessage({ id: 'common.create' })}
+            </Button>
+          </span>
+        </Tooltip>
+      )}
 
       {!myResourcesOnly && showImportEntry && (
         <Tooltip
@@ -771,10 +771,10 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
               resourceType === 'KG_DOC'
                 ? 'resourceCenter.myKnowledge'
                 : resourceType === 'SKILL'
-                ? 'resourceCenter.mySkills'
-                : resourceType === 'TOOL'
-                ? 'resourceCenter.myTools'
-                : 'resourceCenter.myResources',
+                  ? 'resourceCenter.mySkills'
+                  : resourceType === 'TOOL'
+                    ? 'resourceCenter.myTools'
+                    : 'resourceCenter.myResources',
           })}
         </Button>
       )}
@@ -790,12 +790,12 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
         id: myResourcesOnly
           ? managementTabMessageIds?.personal ?? 'resourceCenter.personal'
           : resourceType === 'KG_DOC'
-          ? 'resource.myKnowledge'
-          : resourceType === 'SKILL'
-          ? 'resource.mySkills'
-          : resourceType === 'TOOL'
-          ? 'resource.myTools'
-          : 'resource.available',
+            ? 'resource.myKnowledge'
+            : resourceType === 'SKILL'
+              ? 'resource.mySkills'
+              : resourceType === 'TOOL'
+                ? 'resource.myTools'
+                : 'resource.available',
       }),
     },
     {

@@ -70,17 +70,23 @@ class GroupChatWebSocketMergeTest {
     }
 
     @Test
-    void legacyMembershipStillUsesLegacyServiceUnderTenantContext() {
+    void legacyMembershipCannotBypassTenantNodeUnderTenantContext() {
         TenantRequestContextHolder.set(tenant);
         when(memberships.isLegacyGroupMember(30L, tenant.userId(), tenant.enterpriseId())).thenReturn(true);
         ChatMessage message = message();
-        when(legacy.acceptUserMessage(message)).thenReturn(9002L);
+        when(node.command(eq(tenant), eq("POST"), eq("/internal/v1/group-chats/30/messages"),
+            eq("30"), eq("SEND_GROUP_MESSAGE"), any(), eq("request-1")))
+            .thenReturn(new CommandResult("30", "request-1", "SEND_GROUP_MESSAGE", "9002", List.of(), null));
 
         service.send(channel, message);
 
-        assertThat(response().getString("messageId")).isEqualTo("9002");
-        verify(legacy).acceptUserMessage(message);
-        verifyNoInteractions(node, events, dispatcher);
+        JSONObject ack = response();
+        assertThat(ack.getString("messageId")).isEqualTo("9002");
+        assertThat(ack.getString("enterpriseId")).isEqualTo(String.valueOf(tenant.enterpriseId()));
+        verify(node).command(eq(tenant), eq("POST"), eq("/internal/v1/group-chats/30/messages"),
+            eq("30"), eq("SEND_GROUP_MESSAGE"), any(), eq("request-1"));
+        verify(events).publishTenant(eq(tenant), eq(30L), any());
+        verifyNoInteractions(legacy);
     }
 
     @Test

@@ -15,6 +15,7 @@ import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;

@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -41,6 +42,7 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
 import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMemberUidCodec;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatContextTokenService;
@@ -64,6 +66,7 @@ class GroupChatQueuedGatewayTest {
     private final GroupChatContextTokenService tokens = mock(GroupChatContextTokenService.class);
     private final GroupChatSessionContextFileService historyFiles = mock(GroupChatSessionContextFileService.class);
     private final GroupChatTaskAuthorizationService taskAuthorization = mock(GroupChatTaskAuthorizationService.class);
+    private final SandboxUserContextRunner runner = mock(SandboxUserContextRunner.class);
     private GroupChatGatewayExecutor executor;
     private ByaiGroupChatTurn turn;
     private ByaiSession session;
@@ -79,7 +82,6 @@ class GroupChatQueuedGatewayTest {
         when(resources.findById(40L)).thenReturn(new SsResource());
         SequenceService sequences = mock(SequenceService.class);
         when(sequences.nextVal()).thenReturn(72L);
-        SandboxUserContextRunner runner = mock(SandboxUserContextRunner.class);
         doAnswer(call -> { call.getArgument(1, Runnable.class).run(); return null; })
             .when(runner).runAsUser(eq("user30"), any());
         SessionMemberService members = mock(SessionMemberService.class);
@@ -301,6 +303,35 @@ class GroupChatQueuedGatewayTest {
         assertThatThrownBy(() -> executor.executeTurn(turn)).isInstanceOf(IllegalArgumentException.class);
         verify(messages, never()).insert(any(ByaiMessage.class));
         verify(script, never()).startExistingMessageTurn(any(), any());
+    }
+
+    @Test
+    void loginContextFailureBeforeEnteringScriptRetainsProofThatNoSendWasAttempted() throws Exception {
+        IllegalStateException failure = new IllegalStateException("Login database unavailable");
+        doThrow(failure).when(runner).runAsUser(eq("user30"), any());
+
+        assertThatThrownBy(() -> executor.executeTurn(turn))
+            .isInstanceOf(ChatTurnPreparationException.class)
+            .hasMessageContaining("身份上下文准备失败")
+            .hasCause(failure);
+
+        assertThat(turn.getTraceId()).isEqualTo(ScriptService.getTraceId(71L, 72L));
+        verify(turns).bindRuntime(52L, turn.getTraceId());
+        verify(script, never()).startExistingMessageTurn(any(), any());
+    }
+
+    @Test
+    void failureAfterEnteringScriptIsNotMisclassifiedAsProofOfAnUnsentTurn() throws Exception {
+        IllegalStateException uncertainDelivery = new IllegalStateException("Gateway acknowledgement unavailable");
+        doThrow(uncertainDelivery).when(script).startExistingMessageTurn(any(), any());
+
+        assertThatThrownBy(() -> executor.executeTurn(turn))
+            .isInstanceOf(IllegalStateException.class)
+            .isNotInstanceOf(ChatTurnPreparationException.class)
+            .hasCause(uncertainDelivery);
+
+        verify(script).startExistingMessageTurn(any(), any());
+        assertThat(turn.getTraceId()).isEqualTo(ScriptService.getTraceId(71L, 72L));
     }
 
     private ChatProcessContext context(Long sessionId) {

@@ -81,6 +81,12 @@ public class GroupChatExecutionCoordinator {
     }
 
     @Transactional
+    public ByaiGroupChatExecution enqueueCoordinated(Long groupId, Long sourceId, Long replyId,
+        Long userId, Long coordinatorId, List<Long> selectedIds) {
+        return turnCoordinator.enqueueCoordinatedUser(groupId, sourceId, replyId, userId, coordinatorId, selectedIds);
+    }
+
+    @Transactional
     public ByaiGroupChatExecution enqueueChild(ByaiGroupChatExecution parent, Long targetAgentId) {
         if (parent == null || targetAgentId == null) {
             return null;

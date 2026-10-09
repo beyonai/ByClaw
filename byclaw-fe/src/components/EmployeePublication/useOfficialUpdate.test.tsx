@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { previewPublication, publicationAction, saveOfficialUpdateDraft } from '@/service/employeePublication';
 import useOfficialUpdate from './useOfficialUpdate';
 
+jest.mock('@umijs/max', () => ({ getDvaApp: jest.fn() }));
+
 jest.mock('@/service/employeePublication', () => ({
   previewPublication: jest.fn(),
   publicationAction: jest.fn(),
