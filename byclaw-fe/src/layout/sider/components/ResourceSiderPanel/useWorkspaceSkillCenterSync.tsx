@@ -17,7 +17,7 @@ const responseData = (response: any) => {
   return response?.data ?? response;
 };
 
-/** 仅在展开目录技能菜单时查询中心状态，避免列表加载时逐条下载中心技能包。 */
+/** 仅在展开技能菜单时查询中心状态，避免列表加载时逐条下载中心技能包。 */
 export const useWorkspaceSkillCenterSync = ({
   employeeId,
   enabled,
@@ -51,18 +51,30 @@ export const useWorkspaceSkillCenterSync = ({
     setStates({});
   }, [rows]);
 
-  const eligible = (item: WorkspaceSkillItem) => enabled && employeeId && isWorkspaceSkill(item) && item.skillPath;
+  const skillKey = (item: WorkspaceSkillItem) =>
+    isWorkspaceSkill(item) ? item.skillPath! : `resource:${item.resourceId}`;
+  // 已绑定资源由服务端验证关联并定位目录，前端不拼接工作空间路径。
+  const targetParams = (item: WorkspaceSkillItem) =>
+    isWorkspaceSkill(item) ? { skillPath: item.skillPath! } : { targetResourceId: item.resourceId! };
+  const eligible = (item: WorkspaceSkillItem) =>
+    // 更新不按来源标签过滤；目录技能传路径，已绑定技能传真实资源 ID，由后端定位并比较完整技能包。
+    enabled &&
+    employeeId &&
+    item.resourceBizType === 'SKILL' &&
+    (isWorkspaceSkill(item) ? !!item.skillPath : !!item.resourceId && String(item.resourceId) !== '-1');
 
   const load = async (item: WorkspaceSkillItem) => {
     if (!eligible(item)) return;
-    const path = item.skillPath!;
+    const path = skillKey(item);
     const requestGeneration = generation.current;
     const requestKey = `${requestGeneration}:${path}`;
     if (inFlight.current.has(requestKey)) return;
     inFlight.current.add(requestKey);
     setStates((current) => ({ ...current, [path]: { loading: true } }));
     try {
-      const status = responseData(await queryWorkspaceSkillCenterStatus({ resourceId: employeeId!, skillPath: path }));
+      const status = responseData(
+        await queryWorkspaceSkillCenterStatus({ resourceId: employeeId!, ...targetParams(item) })
+      );
       if (!status?.revision || !['INSTALL', 'UPDATE', 'NONE'].includes(status.action)) throw new Error();
       if (requestGeneration === generation.current) {
         setStates((current) => ({ ...current, [path]: { status } }));
@@ -78,7 +90,7 @@ export const useWorkspaceSkillCenterSync = ({
 
   const sync = (item: WorkspaceSkillItem, status: WorkspaceSkillCenterStatus) => {
     if (!eligible(item)) return;
-    const path = item.skillPath!;
+    const path = skillKey(item);
     const sourceEmployeeId = employeeId!;
     const key = `${sourceEmployeeId}:${path}`;
     if (pending.current.has(key)) return;
@@ -90,7 +102,11 @@ export const useWorkspaceSkillCenterSync = ({
     Modal.confirm({
       title: action,
       content: intl.formatMessage(
-        { id: 'resource.workspaceCenter.confirm' },
+        {
+          id: isWorkspaceSkill(item)
+            ? 'resource.workspaceCenter.confirm'
+            : 'resource.workspaceCenter.updateInstalledConfirm',
+        },
         {
           action,
           name: item.resourceName,
@@ -110,12 +126,18 @@ export const useWorkspaceSkillCenterSync = ({
           const result = responseData(
             await syncWorkspaceSkillToCenter({
               resourceId: sourceEmployeeId,
-              skillPath: path,
+              ...targetParams(item),
               revision: status.revision,
             })
           );
           if (!result?.resourceId || typeof result.sourceDeleted !== 'boolean') throw new Error();
-          if (result.sourceDeleted) message.success(intl.formatMessage({ id: 'resource.workspaceCenter.success' }));
+          if (!isWorkspaceSkill(item)) {
+            message.success(intl.formatMessage({ id: 'resource.workspaceCenter.updatedInstalled' }));
+            if (requestGeneration === generation.current) {
+              setStates((current) => ({ ...current, [path]: { status: { ...status, action: 'NONE' } } }));
+            }
+          } else if (result.sourceDeleted)
+            message.success(intl.formatMessage({ id: 'resource.workspaceCenter.success' }));
           else message.warning(intl.formatMessage({ id: 'resource.workspaceCenter.cleanupFailed' }));
           // 中心保存已成功，即使目录清理失败也刷新状态，避免再次覆盖已同步的内容。
           if (requestGeneration === generation.current) onChanged(item, result.sourceDeleted);
@@ -134,7 +156,7 @@ export const useWorkspaceSkillCenterSync = ({
 
   const menuItem = (item: WorkspaceSkillItem) => {
     if (!eligible(item)) return undefined;
-    const state = states[item.skillPath!];
+    const state = states[skillKey(item)];
     if (!state || state.loading) {
       return {
         key: 'workspaceCenter',
@@ -151,7 +173,7 @@ export const useWorkspaceSkillCenterSync = ({
       label: intl.formatMessage({
         id: `resource.workspaceCenter.${state.status?.action === 'INSTALL' ? 'install' : 'update'}`,
       }),
-      disabled: busyPath === item.skillPath,
+      disabled: busyPath === skillKey(item),
     };
   };
 
@@ -161,7 +183,7 @@ export const useWorkspaceSkillCenterSync = ({
       if (!busyPath) void load(item);
     },
     onClick: (item: WorkspaceSkillItem) => {
-      const state = item.skillPath ? states[item.skillPath] : undefined;
+      const state = states[skillKey(item)];
       if (state?.error) void load(item);
       else if (state?.status && state.status.action !== 'NONE') sync(item, state.status);
     },

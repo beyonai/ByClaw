@@ -6,6 +6,7 @@ import FileResourcePanel from '@/components/ChatLayoutComp/ChatResourceWorkspace
 import ProjectDataSources from '@/components/ProjectDataSources';
 import { useSessionDataSourcesVisible } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useSessionDataSourcesVisible';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import ResourceTabs from '../../../RichInput/mentionPopover/resourceTabsCompact';
 import { ResourceType } from '../../../RichInput/utils/constants';
 
 jest.mock('@umijs/max', () => ({
@@ -27,7 +28,9 @@ jest.mock('@/components/ChatLayoutComp/ChatResourceWorkspace/useSessionDataSourc
   useSessionDataSourcesVisible: jest.fn(() => false),
 }));
 jest.mock('../../ConnectorControl', () => () => null);
-jest.mock('../../../RichInput/mentionPopover/resourceTabsCompact', () => () => null);
+jest.mock('../../../RichInput/mentionPopover/resourceTabsCompact', () =>
+  jest.fn(({ onlyTab }: any) => <div>{`resource content ${onlyTab}`}</div>)
+);
 jest.mock('../FilePicker', () => ({ onSelect }: any) => (
   <button onClick={() => onSelect({ id: '/notes.md' }, 'COMMON_FILE')}>quote file</button>
 ));
@@ -302,5 +305,64 @@ describe('resource menu categories', () => {
     expect(screen.queryByRole('button', { name: 'chatResource.projectSpace' })).toBeNull();
     expect(screen.getByRole('button', { name: 'common.digitalEmployee' }).className).toContain('Active');
     expect(ProjectSpaceTab).not.toHaveBeenCalled();
+  });
+});
+
+describe('employee group resource menu', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (useActiveSiderAgent as jest.Mock).mockReturnValue({ resourceId: 'sidebar-agent' });
+    (useChatResourceProject as jest.Mock).mockReturnValue({ project: undefined, loading: false });
+    (useSessionDataSourcesVisible as jest.Mock).mockReturnValue(true);
+  });
+
+  it('hides only skill, tool and knowledge for an employee group', () => {
+    render(<ResourceToolMenu projectId={42} sessionId="session-1" hideEmployeeResources onSelect={jest.fn()} />);
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'common.digitalEmployee',
+      'queryInput.tools.connector',
+      'queryInput.tools.processFile',
+      'chatResource.localSharedFile',
+      'queryInput.tools.projectCloud',
+      'dataSource.title',
+      'chatResource.projectSpace',
+    ]);
+    expect(ResourceTabs).not.toHaveBeenCalled();
+  });
+
+  it.each(['skill', 'tool', 'knowledge'])('ignores hidden initial category %s', (activeKey) => {
+    render(<ResourceToolMenu projectId={42} activeKey={activeKey} hideEmployeeResources onSelect={jest.fn()} />);
+    expect(screen.getByRole('button', { name: 'common.digitalEmployee' }).className).toContain('Active');
+    expect(ResourceTabs).not.toHaveBeenCalled();
+  });
+
+  it.each(['skill', 'tool', 'knowledge'])(
+    'unmounts visited %s resources on group selection and restores the entry on employee selection',
+    (key) => {
+      const { rerender } = render(<ResourceToolMenu projectId={42} onSelect={jest.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: `queryInput.tools.${key}` }));
+      expect(screen.getByText(`resource content ${key}`)).toBeTruthy();
+
+      jest.clearAllMocks();
+      rerender(<ResourceToolMenu projectId={42} hideEmployeeResources onSelect={jest.fn()} />);
+      expect(screen.queryByRole('button', { name: `queryInput.tools.${key}` })).toBeNull();
+      expect(screen.queryByText(`resource content ${key}`)).toBeNull();
+      expect(screen.getByRole('button', { name: 'common.digitalEmployee' }).className).toContain('Active');
+      expect(ResourceTabs).not.toHaveBeenCalled();
+
+      rerender(<ResourceToolMenu projectId={42} hideEmployeeResources={false} onSelect={jest.fn()} />);
+      expect(screen.getByRole('button', { name: `queryInput.tools.${key}` })).toBeTruthy();
+      expect(screen.queryByText(`resource content ${key}`)).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: `queryInput.tools.${key}` }));
+      expect(screen.getByText(`resource content ${key}`)).toBeTruthy();
+    }
+  );
+
+  it('preserves the selected file panel when switching to an employee group', () => {
+    const { rerender } = render(<ResourceToolMenu projectId={42} onSelect={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'chatResource.localSharedFile' }));
+    rerender(<ResourceToolMenu projectId={42} hideEmployeeResources onSelect={jest.fn()} />);
+    expect(screen.getByRole('button', { name: 'chatResource.localSharedFile' }).className).toContain('Active');
+    expect(screen.getByRole('button', { name: 'quote file' })).toBeTruthy();
   });
 });

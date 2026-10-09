@@ -65,7 +65,7 @@ public class LoginApplicationService {
     /**
      * 默认开放查询的key值,多个用逗号隔开
      */
-    @Value("${open.dc.query.keys:ENV,beyondLogo,beyondTitle,beyondFavicon,beyondAssistant}")
+    @Value("${open.dc.query.keys:ENV,beyondLogo,beyondTitle,beyondFavicon,beyondAssistant,ENABLE_MULTI_TENACY}")
     private String openKeys;
 
     @Autowired
@@ -164,22 +164,23 @@ public class LoginApplicationService {
                 loginInfo.setUserStation(userStation);
             }
         }
-        loginInfo.setIsRetented(getRetented(users.getPhone()));
+        loginInfo.setIsRetented(getRetented(users.getUserId(), users.getPhone()));
         return loginInfo;
     }
 
     /**
-     * 实时查询用户手机是否注册过
+     * 实时查询用户关联资料，兼容手机号对应的未关联历史留资
      *
+     * @param userId 当前登录用户
      * @param phone 手机号码
      * @return boolean
      */
-    private boolean getRetented(String phone) {
-        if (phone == null) {
-            return false;
-        }
+    private boolean getRetented(Long userId, String phone) {
         LambdaQueryWrapper<ByaiCustomerLeads> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(ByaiCustomerLeads::getPhone, phone);
+        queryWrapper.eq(ByaiCustomerLeads::getUserId, userId);
+        if (StringUtil.isNotEmpty(phone)) {
+            queryWrapper.or(legacy -> legacy.isNull(ByaiCustomerLeads::getUserId).eq(ByaiCustomerLeads::getPhone, phone));
+        }
         Long count = byaiCustomerLeadsMapper.selectCount(queryWrapper);
         return count > 0;
     }
@@ -256,11 +257,11 @@ public class LoginApplicationService {
             loginInfo.setLoginType(this.getSessionString(httpSession, "loginType"));
             loginInfo.setEnterpriseId(this.getSessionLong(httpSession, "enterpriseId"));
             loginInfo.setSessionId(httpSession.getId());
-            loginInfo.setIsRetented(getRetented(loginInfo.getPhone()));
             loginInfo.setRegisterType(this.getSessionInteger(httpSession, "registerType"));
 
             // 检查用户密码是否是默认密码
             Users users = userService.findById(loginInfo.getUserId());
+            loginInfo.setIsRetented(getRetented(loginInfo.getUserId(), loginInfo.getPhone()));
             // 个人资料可在登录后修改，使用数据库中的最新用户名。
             loginInfo.setUserName(users != null ? users.getUserName() : null);
             // 头像可能在当前 session 建立后更新，使用数据库值覆盖会话快照。

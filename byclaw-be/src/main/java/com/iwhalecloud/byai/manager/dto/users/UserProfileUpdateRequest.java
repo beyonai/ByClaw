@@ -20,6 +20,19 @@ public class UserProfileUpdateRequest {
     @Size(max = 400, message = "头像地址不能超过 400 个字符")
     private String avatar;
 
+    /** 省略则保留原值；提供时必须为非空组织名称。 */
+    @Size(max = 100, message = "公司 / 组织名称不能超过 100 个字符")
+    @Pattern(regexp = "(?s).*\\S.*", message = "公司 / 组织名称不能为空")
+    private String companyName;
+
+    /** 省略则保留原值，空字符串清空自填岗位。 */
+    @Size(max = 50, message = "岗位不能超过 50 个字符")
+    private String profileRole;
+
+    /** JSON 字符串数组；省略保留原值，[] 清空。 */
+    @Size(max = 300, message = "兴趣领域内容过长")
+    private String profileInterests;
+
     private MultipartFile avatarFile;
 
     public UserProfileUpdateRequest() {

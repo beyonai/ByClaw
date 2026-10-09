@@ -1,4 +1,5 @@
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
+import { RESOURCE_FAVORITE_CHANGED_EVENT } from '@/service/resourceFavorites';
 import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { Spin, message } from 'antd';
 import { useIntl } from '@umijs/max';
@@ -66,6 +67,9 @@ interface IResourceItem {
   syncError?: string;
   lastSyncTime?: string;
   useCount?: number | string;
+  favorited?: boolean;
+  favoriteCount?: number;
+  operationPermissionsLoaded?: boolean;
   ownerType?: string;
   personalWorkspace?: boolean;
 }
@@ -85,11 +89,11 @@ interface ResourceListProps {
   onDetail: (item: IResourceItem) => void;
   onEdit: (item: IResourceItem) => void;
   onAuth: (item: IResourceItem, authType: 'useAuth' | 'mgrAuth') => void;
-  onApplyUse: (item: IResourceItem) => void;
-  onAuditUse: (item: IResourceItem) => void;
+  onApplyUse: (item: IResourceItem) => Promise<boolean>;
   onRefresh: () => void;
   skillCardViewMode?: 'current' | 'new';
   enablePublishToEnterprise?: boolean;
+  enableFavorites?: boolean;
 }
 
 const PAGE_SIZE_DEFAULT = 30;
@@ -114,6 +118,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
   activeTab,
   myResourcesOnly = false,
   enablePublishToEnterprise = false,
+  enableFavorites = false,
   myResourceScope = 'all',
   searchValue,
   catalogId,
@@ -122,7 +127,6 @@ const ResourceList: React.FC<ResourceListProps> = ({
   onEdit,
   onAuth,
   onApplyUse,
-  onAuditUse,
   onRefresh,
   skillCardViewMode = 'current',
 }) => {
@@ -136,6 +140,10 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const [loading, setLoading] = useState(true);
   const listGeneration = useRef(0);
   const [list, setList] = useState<IResourceItem[]>([]);
+  const listRef = useRef(list);
+  listRef.current = list;
+  const favoriteRevision = useRef(0);
+  const applyingResourceIds = useRef(new Set<string>());
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
   const [canManageInstallTarget, setCanManageInstallTarget] = useState(false);
   const [pageInfo, setPageInfo] = useState({
@@ -151,6 +159,27 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const isSkillPosterMode = resourceType === 'SKILL' && skillCardViewMode === 'new';
   // 知识和工具卡片信息较多，尤其右侧资源面板打开时，需要减少列数以保证名称和描述可读。
   const useWideCardLayout = WIDE_CARD_RESOURCE_TYPES.has(resourceType);
+  const favoriteMode = enableFavorites && !myResourcesOnly && ['enterprise', 'favorites'].includes(activeTab);
+
+  useEffect(() => {
+    if (!favoriteMode) return;
+    const onFavoriteChanged = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (!detail?.resourceId || typeof detail.favorited !== 'boolean') return;
+      favoriteRevision.current += 1;
+      const removed = activeTab === 'favorites' && !detail.favorited;
+      const exists = listRef.current.some((row) => `${row.resourceId}` === detail.resourceId);
+      const updateRows = (rows: IResourceItem[]) =>
+        rows.flatMap((row) =>
+          `${row.resourceId}` !== detail.resourceId ? [row] : removed ? [] : [{ ...row, ...detail }]
+        );
+      listRef.current = updateRows(listRef.current);
+      setList(updateRows);
+      if (removed && exists) setPageInfo((page) => ({ ...page, total: Math.max(0, page.total - 1) }));
+    };
+    window.addEventListener(RESOURCE_FAVORITE_CHANGED_EVENT, onFavoriteChanged);
+    return () => window.removeEventListener(RESOURCE_FAVORITE_CHANGED_EVENT, onFavoriteChanged);
+  }, [activeTab, favoriteMode]);
 
   const getList = useCallback(
     async function fetchPage(
@@ -166,7 +195,12 @@ const ResourceList: React.FC<ResourceListProps> = ({
       const rawFilterParam = params?.dropdownParam ?? dropdownParam;
       const filterParam = {
         ...rawFilterParam,
-        resourceStatus: getResourceQueryStatus(activeTab, myResourcesOnly, rawFilterParam?.resourceStatus),
+        resourceStatus: getResourceQueryStatus(
+          activeTab,
+          myResourcesOnly,
+          rawFilterParam?.resourceStatus,
+          resourceType
+        ),
       };
       const availableOnly = !myResourcesOnly && activeTab === 'personal';
       const selectedOwnerType =
@@ -177,6 +211,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
         if (!append) listGeneration.current += 1;
         setLoading(true);
       }
+      const generation = listGeneration.current;
+      const revision = favoriteRevision.current;
       try {
         // 普通资源中心保留原有“我可用的/官方推荐”查询口径；“我的资源”改为后端权限筛选，
         // 个人只查创建人资源，企业按“全部/我创建的/我管理的”映射到统一管理权限。
@@ -184,7 +220,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
           ? [activeTab]
           : activeTab === 'installed'
             ? ['personal', 'enterprise']
-            : [activeTab];
+            : [activeTab === 'favorites' ? 'enterprise' : activeTab];
         const responses = await Promise.all(
           ownerTypes.map(async (ownerType) => {
             const ownerFilterParam = buildResourceListFilterParam(ownerType, filterParam);
@@ -205,6 +241,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
               keyword,
               pageNum,
               pageSize,
+              ...(favoriteMode ? { includeFavorites: true, favoritesOnly: activeTab === 'favorites' } : {}),
               ...(availableOnly ? { ownerType: selectedOwnerType, availableOnly: true } : { ownerType }),
               catalogId: selectedCatalogId || undefined,
               ...ownerFilterParam,
@@ -220,6 +257,21 @@ const ResourceList: React.FC<ResourceListProps> = ({
           })
         );
 
+        if (!exportOnly && generation !== listGeneration.current) return [];
+        // 收藏提交后，旧响应的状态、总数及分页边界都可能过期；只重试当前页。
+        if (!exportOnly && favoriteMode && revision !== favoriteRevision.current) {
+          const loadedCount = listRef.current.filter((item) => !isWorkspaceSkill(item)).length;
+          return await fetchPage(
+            {
+              ...params,
+              pageIndex: undefined,
+              pageNum: activeTab === 'favorites' && append ? Math.floor(loadedCount / pageSize) + 1 : pageNum,
+              pageSize,
+            },
+            append
+          );
+        }
+
         const rows = responses.flatMap(({ ownerType, pageData }) =>
           ((pageData?.list || pageData?.rows || []) as IResourceItem[]).map((item) => ({
             ...item,
@@ -229,18 +281,18 @@ const ResourceList: React.FC<ResourceListProps> = ({
         );
         const total = responses.reduce((sum, { pageData }) => sum + Number(pageData?.total || 0), 0);
 
-        // 个人技能 tab 首页追加“用户开发(工作空间)技能”。仅在第一页、无目录筛选时拉取，
+        // 仅“我的资源”的个人技能首页补充目录技能；资源中心“我可用的”只展示资源库技能。
         // 翻页只走 listResourceUseAuth；后端已按个人已资源化技能去重，前端无需再去重。
         let workspaceRows: IResourceItem[] = [];
         const shouldLoadWorkspaceSkills =
+          myResourcesOnly &&
           resourceType === 'SKILL' &&
           activeTab === 'personal' &&
           selectedOwnerType !== 'enterprise' &&
           !append &&
           pageNum === 1 &&
           !selectedCatalogId &&
-          (!myResourcesOnly ||
-            filterParam?.resourceStatus === null ||
+          (filterParam?.resourceStatus === null ||
             filterParam?.resourceStatus === undefined ||
             filterParam.resourceStatus === '' ||
             `${filterParam.resourceStatus}` === '2');
@@ -267,6 +319,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
           }
           return nextRows;
         }
+        if (generation !== listGeneration.current) return [];
         setList((prev) => {
           const mergedRows = append ? [...prev, ...rows] : nextRows;
           return Array.from(
@@ -280,7 +333,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
         });
         return nextRows;
       } finally {
-        if (!exportOnly) setLoading(false);
+        if (!exportOnly && generation === listGeneration.current) setLoading(false);
       }
     },
     [
@@ -288,6 +341,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
       baseResourceBizTypeList,
       catalogId,
       dropdownParam,
+      favoriteMode,
       myResourceScope,
       myResourcesOnly,
       resourceType,
@@ -341,7 +395,12 @@ const ResourceList: React.FC<ResourceListProps> = ({
     }
     // 等待期间如果用户切换筛选或分页，不把旧请求写回新列表。
     if (generation !== listGeneration.current) return;
-    const statusFilter = getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam?.resourceStatus);
+    const statusFilter = getResourceQueryStatus(
+      activeTab,
+      myResourcesOnly,
+      dropdownParam?.resourceStatus,
+      resourceType
+    );
     // 注销后立即移除当前行，与后端排除注销的分页查询口径一致。
     const keepRow = resourceStatus !== '-1' && (!statusFilter || `${statusFilter}` === resourceStatus);
     setList((current) =>
@@ -354,6 +413,9 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   useEffect(() => {
     getList({ pageIndex: 1 });
+    return () => {
+      listGeneration.current += 1;
+    };
   }, [baseResourceBizTypeList, activeTab, catalogId, dropdownParam, getList, myResourceScope, myResourcesOnly]);
 
   const fixedInstallTargetId =
@@ -456,19 +518,79 @@ const ResourceList: React.FC<ResourceListProps> = ({
     // 直接使用当前的pageInfo状态，避免将其作为依赖项
     getList(
       {
-        pageNum: pageInfo.pageNum + 1,
+        // 收藏页取消收藏后，按剩余行数补齐边界页，避免 offset 前移漏掉下一条。
+        pageNum:
+          activeTab === 'favorites' ? Math.floor(loadedResourcedCount / pageInfo.pageSize) + 1 : pageInfo.pageNum + 1,
         pageSize: pageInfo.pageSize,
         searchValue,
         catalogId,
       },
       true
     );
-  }, [catalogId, getList, hasMore, loading, pageInfo.pageNum, pageInfo.pageSize, searchValue]);
+  }, [
+    activeTab,
+    catalogId,
+    getList,
+    hasMore,
+    loadedResourcedCount,
+    loading,
+    pageInfo.pageNum,
+    pageInfo.pageSize,
+    searchValue,
+  ]);
 
   // 获取滚动区域的ID
   const getScrollableTarget = useMemo(() => {
     return `${resourceType}ListScroller`;
   }, [resourceType]);
+
+  const handleApplyUse = async (item: IResourceItem) => {
+    const resourceId = `${item.resourceId}`;
+    if (applyingResourceIds.current.has(resourceId)) return;
+    applyingResourceIds.current.add(resourceId);
+    const generation = listGeneration.current;
+    try {
+      if (!(await onApplyUse(item)) || generation !== listGeneration.current) return;
+      // 与员工卡片一样先回填已提交结果，详情请求期间也不能再次申请。
+      setList((current) =>
+        current.map((row) =>
+          `${row.resourceId}` === resourceId ? { ...row, canApplyUse: false, useApplyPending: true } : row
+        )
+      );
+      try {
+        const response = await queryResourceDetail({ resourceId });
+        const detail = response?.data || response;
+        if (`${detail?.resourceId}` !== resourceId || !detail.operationPermissions) {
+          throw new Error('Missing resource operation permissions');
+        }
+        // 筛选、翻页或卸载后丢弃旧响应，不重载列表，也不覆盖其他卡片。
+        if (generation !== listGeneration.current) return;
+        setList((current) =>
+          current.map((row) =>
+            `${row.resourceId}` === resourceId
+              ? {
+                ...row,
+                ...detail,
+                ...detail.operationPermissions,
+                operationPermissionsLoaded: true,
+                approveStatus: detail.operationPermissions.useApplyPending ? 'S' : '',
+                // 详情查询不包含收藏上下文，保留期间用户对当前卡片的收藏操作。
+                favorited: row.favorited,
+                favoriteCount: row.favoriteCount,
+              }
+              : row
+          )
+        );
+      } catch {
+        // 申请已成功，详情失败时保留待审核状态，不能提示用户重复申请。
+        if (generation === listGeneration.current) {
+          message.warning(intl.formatMessage({ id: 'resource.rowRefreshFailed' }));
+        }
+      }
+    } finally {
+      applyingResourceIds.current.delete(resourceId);
+    }
+  };
 
   const renderResourceCard = (item: IResourceItem) => (
     <ResourceCard
@@ -476,14 +598,18 @@ const ResourceList: React.FC<ResourceListProps> = ({
       resource={item}
       resourceType={resourceType}
       variant={isSkillPosterMode ? 'skillPoster' : 'default'}
+      enableFavorites={favoriteMode}
       onCardClick={() => onDetail(item)}
       actionConfig={{
         scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
-        // 浏览页隐藏生命周期操作；我的资源仍沿用原有权限和状态判断。
+        // 我可用的技能保留发布入口，由卡片判断版本和发布权限；浏览页仍隐藏其他生命周期操作。
         hiddenMenuItemKeys: [
           ...(activeTab === 'personal' ? ['authorize', 'use'] : []),
           ...(resourceType === 'SKILL' && activeTab === 'personal' ? ['share'] : []),
-          ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete', 'publishToEnterprise'] : []),
+          ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete'] : []),
+          ...(!myResourcesOnly && !(resourceType === 'SKILL' && activeTab === 'personal')
+            ? ['publishToEnterprise']
+            : []),
         ],
         installedResourceIds,
         canInstallToTarget: installTargetContext.mode !== 'fixed' || canManageInstallTarget,
@@ -493,8 +619,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
         enablePublishToEnterprise,
         onEnterpriseSkillDetail: (enterpriseSkill) => onDetail(enterpriseSkill),
         onAuth: (authType) => onAuth(item, authType),
-        onApplyUse: () => onApplyUse(item),
-        onAuditUse: () => onAuditUse(item),
+        onApplyUse: () => handleApplyUse(item),
         enableResourceLifecycle: true,
         enableSkillExport: resourceType === 'SKILL',
         showResourceTypeTag: !myResourcesOnly,

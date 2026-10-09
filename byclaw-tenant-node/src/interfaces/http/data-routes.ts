@@ -20,6 +20,14 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
   };
   const queryLimit = (req: any) =>
     bounded(req.query.limit === undefined ? undefined : Number(req.query.limit), 20, 50);
+  app.get<{ Params: { messageId: string } }>(
+    "/internal/v1/messages/:messageId/trace",
+    async (req) => {
+      const [message] = await service.byIds(actor(req), [requireId(req.params.messageId)]);
+      if (!message) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+      return { traceId: typeof message.runId === "string" ? message.runId : null };
+    },
+  );
   app.get<{ Params: { commandId: string } }>(
     "/internal/v1/messages/by-command/:commandId",
     async (req) => service.byCommand(actor(req), req.params.commandId),

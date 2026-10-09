@@ -11,6 +11,7 @@ import BeyondBroadcastChannel from '@/utils/broadcastChannel';
 import { getDcSystemConfigValueByCodes as getDcSystemConfigValueByCodesService } from '@/service/layout';
 import { SYSTEM_CONFIG_STORAGE_KEY } from '@/constants/system';
 import useGlobalChatRuntime from '@/hooks/useGlobalChatRuntime';
+import { MULTI_TENANCY_CONFIG_CODE, setMultiTenancyConfig, useMultiTenancy } from '@/utils/multiTenancy';
 
 function formatImgUrl(url?: string) {
   if (!url) return '';
@@ -28,6 +29,7 @@ function formatImgUrl(url?: string) {
 }
 
 const CommonLayout = () => {
+  const { loaded: multiTenancyLoaded } = useMultiTenancy();
   const userInfo = useSelector(({ user }) => user.userInfo);
   const { getFeedbackType, getSandboxesInfoUrl, setENV, cleanCloudSettings, setCloudSettings, setDevConfig } =
     useAppStore();
@@ -60,6 +62,8 @@ const CommonLayout = () => {
       return;
     }
 
+    if (!multiTenancyLoaded) return;
+
     dispatch({
       type: 'employees/getAllDigitalEmployees',
     });
@@ -87,7 +91,7 @@ const CommonLayout = () => {
     initAdminVipList().catch(() => {});
 
     BeyondBroadcastChannel.init();
-  }, [userInfo]);
+  }, [userInfo, multiTenancyLoaded]);
 
   useLayoutEffect(() => {
     setUserToken({
@@ -104,9 +108,10 @@ const CommonLayout = () => {
     setSearchParams(searchParams);
 
     getDcSystemConfigValueByCodes({
-      paramCodes: ['beyondLogo', 'beyondTitle', 'beyondFavicon', 'beyondAssistant', 'ENV'],
+      paramCodes: ['beyondLogo', 'beyondTitle', 'beyondFavicon', 'beyondAssistant', 'ENV', MULTI_TENANCY_CONFIG_CODE],
     })
       .then((data) => {
+        setMultiTenancyConfig(data);
         try {
           const { beyondLogo, beyondTitle, beyondFavicon, beyondAssistant, ENV } = data || {};
 
@@ -135,7 +140,7 @@ const CommonLayout = () => {
           console.error(error);
         }
       })
-      .catch(() => {});
+      .catch(() => setMultiTenancyConfig(null));
   }, []);
 
   return (
@@ -144,9 +149,7 @@ const CommonLayout = () => {
         {pageTitle && <title>{pageTitle}</title>}
         <link rel="shortcut icon" href={favicon} />
       </Helmet>
-      <QueryClientProvider client={queryClient}>
-        <Outlet />
-      </QueryClientProvider>
+      <QueryClientProvider client={queryClient}>{multiTenancyLoaded && <Outlet />}</QueryClientProvider>
     </div>
   );
 };

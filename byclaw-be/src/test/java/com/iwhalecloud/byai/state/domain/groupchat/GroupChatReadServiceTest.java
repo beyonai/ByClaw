@@ -163,7 +163,7 @@ class GroupChatReadServiceTest {
         item.setLatestMessageRelatedResources("""
             {"files":[{"fileId":"123","fileName":"report.pdf","fileUrl":"/report.pdf","fileType":"application/pdf"}]}
             """);
-        when(mentionMapper.selectMyGroups(30L)).thenAnswer(invocation -> {
+        when(mentionMapper.selectMyGroups(30L, null)).thenAnswer(invocation -> {
             Page<GroupChatListItemResponse> page = PageHelper.getLocalPage();
             page.add(item);
             return page;
@@ -193,7 +193,7 @@ class GroupChatReadServiceTest {
               {"fileName":"result.txt","filePath":"/results/result.txt","cloudResourceId":"cloud-1"}
             ]}
             """);
-        when(mentionMapper.selectMyGroups(30L)).thenAnswer(invocation -> {
+        when(mentionMapper.selectMyGroups(30L, null)).thenAnswer(invocation -> {
             Page<GroupChatListItemResponse> page = PageHelper.getLocalPage();
             page.add(item);
             return page;

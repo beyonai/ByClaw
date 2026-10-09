@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { message } from 'antd';
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider, message } from 'antd';
 import { history } from '@umijs/max';
 import PublicationToolbar from './Toolbar';
 import {
@@ -40,11 +40,26 @@ const candidate: PublicationDetail = {
   canWithdraw: true,
 };
 
+// 验证发布流程时禁用弹窗动画，避免在入场或退场准备阶段读取可见性。
+const render = (ui: Parameters<typeof renderComponent>[0]) =>
+  renderComponent(ui, {
+    wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+  });
+
 async function continuePublication() {
-  fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
+  const dialog = within(await screen.findByRole('dialog', { name: '确认发布到官方推荐' }));
+  const confirm = dialog.getByRole('button', { name: '确认并继续发布' });
+  expect(confirm).toBeEnabled();
+  // 确认后会继续执行异步发布，需要等待 Promise 后续的状态更新。
+  await act(async () => {
+    fireEvent.click(confirm);
+  });
 }
 
 describe('employee publication controls', () => {
+  // 真实弹窗和资源清单在全量钩子中开销较大，只增加用例总预算，保留断言默认超时。
+  jest.setTimeout(15000);
+
   beforeEach(() => {
     jest.clearAllMocks();
     (publicationAction as jest.Mock).mockReset();
@@ -53,6 +68,7 @@ describe('employee publication controls', () => {
       .mockImplementation(async (publication) => ({ ...candidate, publication }));
     jest.spyOn(message, 'success').mockImplementation(jest.fn());
     jest.spyOn(message, 'error').mockImplementation(jest.fn());
+    jest.spyOn(message, 'warning').mockImplementation(jest.fn());
   });
   afterEach(() => jest.restoreAllMocks());
 
@@ -77,7 +93,10 @@ describe('employee publication controls', () => {
     const onChange = jest.fn();
     (previewPublication as jest.Mock).mockResolvedValue(fresh);
     render(<PublicationToolbar detail={candidate} dirty onChange={onChange} onSave={onSave} />);
-    fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    const submit = screen.getByRole('button', { name: '提交发布' });
+    await act(async () => {
+      fireEvent.click(submit);
+    });
     const dialog = within(await screen.findByRole('dialog'));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(previewPublication).toHaveBeenCalledWith(saved.publication);
@@ -87,9 +106,12 @@ describe('employee publication controls', () => {
     expect(dialog.getByText('该资源为私有资源')).toBeInTheDocument();
     expect(dialog.getByText('未获授权的使用者无法使用该知识库')).toBeInTheDocument();
     expect(dialog.getByRole('button', { name: '确认并继续发布' })).toBeEnabled();
+    expect(submit).toBeDisabled();
     expect(publicationAction).not.toHaveBeenCalled();
-    fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '提交发布' })).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
+    });
+    await waitFor(() => expect(submit).toBeEnabled());
     expect(publicationAction).not.toHaveBeenCalled();
     expect(onChange).toHaveBeenLastCalledWith(fresh);
   });
@@ -101,6 +123,62 @@ describe('employee publication controls', () => {
     await waitFor(() => expect(message.error).toHaveBeenCalledWith('申请已被修改，请刷新后再操作'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(publicationAction).not.toHaveBeenCalled();
+  });
+
+  it('shows synchronized source resources in the confirmation before submitting its new revision', async () => {
+    const fresh = {
+      ...candidate,
+      publication: { ...candidate.publication, revision: 4 },
+      sourceResourcesChanged: true,
+      employee: { relIds: ['21'] },
+      dependencies: [{ resourceId: '21', name: '最新关联知识库', action: 'REFERENCE_RESOURCE' }],
+    };
+    (previewPublication as jest.Mock).mockResolvedValue(fresh);
+    (publicationAction as jest.Mock).mockResolvedValue({
+      ...fresh,
+      publication: { ...fresh.publication, status: 'PENDING' },
+    });
+    const onChange = jest.fn();
+    render(<PublicationToolbar detail={candidate} dirty={false} onChange={onChange} onSave={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByText('个人员工的关联资源已变化，本次确认使用更新后的清单。')).toBeInTheDocument();
+    expect(onChange).toHaveBeenCalledWith(fresh);
+    expect(publicationAction).not.toHaveBeenCalled();
+    await continuePublication();
+    await waitFor(() => expect(publicationAction).toHaveBeenCalledWith('submit', fresh.publication, { comment: '' }));
+  });
+
+  it('returns to the updated draft and asks for another confirmation if resources change during the dialog', async () => {
+    const refreshed = {
+      ...candidate,
+      publication: { ...candidate.publication, revision: 4 },
+      sourceResourcesChanged: true,
+      employee: { relIds: [] },
+    };
+    (publicationAction as jest.Mock).mockResolvedValue(refreshed);
+    const onChange = jest.fn();
+    render(<PublicationToolbar detail={candidate} dirty={false} onChange={onChange} onSave={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '提交发布' }));
+    await continuePublication();
+    await waitFor(() =>
+      expect(message.warning).toHaveBeenCalledWith('个人员工的关联资源已变化，已更新待发布配置，请核对后再次提交。')
+    );
+    expect(onChange).toHaveBeenLastCalledWith(refreshed);
+    expect(publicationAction).toHaveBeenCalledTimes(1);
+    expect(message.success).not.toHaveBeenCalled();
+  });
+
+  it('explains automatic resource synchronization only on the publication draft page', () => {
+    render(
+      <PublicationToolbar
+        detail={{ ...candidate, sourceResourcesChanged: true }}
+        dirty={false}
+        onChange={jest.fn()}
+        onSave={jest.fn()}
+      />
+    );
+    expect(screen.getByText('已同步个人员工最新关联资源，请核对发布清单。')).toBeInTheDocument();
   });
 
   it('groups the publication explanation with the actions and expands detailed rules on demand', async () => {
@@ -151,7 +229,7 @@ describe('employee publication controls', () => {
     });
     render(<PublicationToolbar detail={detail} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
     expect(screen.getByText('3 项使用范围受限')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '保留关联（4）' }));
+    fireEvent.click(screen.getByRole('tab', { name: '将发布到新数字员工的（4）' }));
     expect(screen.getByText('全部工具')).toBeInTheDocument();
     expect(screen.getByText('部分使用者无权使用')).toBeInTheDocument();
     expect(screen.getByText('技能文件不存在')).toBeInTheDocument();
@@ -280,6 +358,22 @@ describe('employee publication controls', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: '查看官方副本' }));
     expect(openOfficialEmployee).toHaveBeenCalledWith('90');
+  });
+
+  it('refreshes the official comparison without submitting or replacing the candidate', async () => {
+    const detail = {
+      ...candidate,
+      updateTarget: { resourceId: '90', name: '官方 B', fromPersonal: true, changed: true },
+    };
+    const refreshed = { ...detail, updateTarget: { ...detail.updateTarget, changed: false } };
+    (publicationAction as jest.Mock).mockResolvedValue(refreshed);
+    const onChange = jest.fn();
+    render(<PublicationToolbar detail={detail} dirty={false} onChange={onChange} onSave={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '重新对照官方配置' }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(refreshed));
+    expect(publicationAction).toHaveBeenCalledTimes(1);
+    expect(publicationAction).toHaveBeenCalledWith('refreshTarget', candidate.publication, { comment: '' });
+    expect(previewPublication).not.toHaveBeenCalled();
   });
 
   it('offers saving in the publication toolbar and allows automatic saving on submission', () => {

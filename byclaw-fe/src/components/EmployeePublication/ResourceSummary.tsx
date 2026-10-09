@@ -6,8 +6,8 @@ import ResourceAvailabilityList, { resourceIsOmitted } from './ResourceAvailabil
 import styles from './ResourceSummary.module.less';
 
 const categories = [
-  { key: 'omitted', label: '不会带入关联', emptyText: '没有需要排除的关联资源' },
-  { key: 'retained', label: '保留关联', emptyText: '暂无保留关联的资源' },
+  { key: 'retained', label: '将发布到新数字员工的', emptyText: '暂无可发布到新数字员工的资源' },
+  { key: 'omitted', label: '不会发布到新数字员工的', emptyText: '没有需要排除的关联资源' },
 ];
 
 const needsAttention = (row: PublicationDependency) => resourceIsOmitted(row) || !!row.warning || !!row.error;

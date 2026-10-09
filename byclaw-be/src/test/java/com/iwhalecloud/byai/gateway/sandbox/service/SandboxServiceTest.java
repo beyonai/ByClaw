@@ -100,6 +100,62 @@ class SandboxServiceTest {
     }
 
     @Test
+    void recoverySelectsOriginalRecordAfterPreferredProfileChanged() {
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", mapper);
+        SsSandboxRecord original = recoveryRecord(1L, "byclaw-dsh", "old-sandbox");
+        when(mapper.selectById(1L)).thenReturn(original);
+        SandboxLaunchRouting preferred = new SandboxLaunchRouting("byclaw-dsh-m", -1L);
+
+        SsSandboxRecord selected = ReflectionTestUtils.invokeMethod(service, "resolveRecoveryRecord",
+            "user001", preferred, original);
+
+        assertThat(selected).isSameAs(original);
+        verify(mapper).selectById(1L);
+    }
+
+    @Test
+    void recoveryPreservesNewerActiveInstanceAndRejectsOldAlert() {
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", mapper);
+        SsSandboxRecord old = recoveryRecord(1L, "byclaw-dsh", "old-sandbox");
+        SsSandboxRecord current = recoveryRecord(2L, "byclaw-dsh-m", "new-sandbox");
+        SandboxLaunchRouting preferred = new SandboxLaunchRouting("byclaw-dsh-m", -1L);
+        when(mapper.selectActiveByUserAndResource("user001", "byclaw-dsh-m", -1L)).thenReturn(current);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service,
+            "resolveRecoveryRecord", "user001", preferred, old))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("superseded");
+        verify(mapper, never()).markReleased(any(), any(), any(), any());
+    }
+
+    @Test
+    void recoveryRejectsChangedSandboxIdentity() {
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", mapper);
+        SsSandboxRecord old = recoveryRecord(1L, "byclaw-dsh", "old-sandbox");
+        when(mapper.selectById(1L)).thenReturn(recoveryRecord(1L, "byclaw-dsh", "replacement-sandbox"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service,
+            "resolveRecoveryRecord", "user001", new SandboxLaunchRouting("byclaw-dsh-m", -1L), old))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("expected active sandbox");
+    }
+
+    private SsSandboxRecord recoveryRecord(Long id, String type, String sandboxId) {
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(id);
+        record.setUserCode("user001");
+        record.setResourceId(-1L);
+        record.setSandboxType(type);
+        record.setSandboxId(sandboxId);
+        record.setStatus("STARTING");
+        return record;
+    }
+
+    @Test
     void sandboxInfo_hydratesGatewayTokenFromCachedEndpoint() {
         SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
         SandboxService sandboxService = new SandboxService();

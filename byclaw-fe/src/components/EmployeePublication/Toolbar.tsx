@@ -17,9 +17,10 @@ import dayjs from 'dayjs';
 import { publicationErrorMessage } from '@/utils/publicationError';
 import PublicationResourceSummary from './ResourceSummary';
 import usePublicationConfirmation from './usePublicationConfirmation';
+import UpdateTargetNotice from './UpdateTargetNotice';
 import styles from './Toolbar.module.less';
 
-type PublicationAction = 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'revise';
+type PublicationAction = 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'revise' | 'refreshTarget';
 
 export default function PublicationToolbar({
   detail,
@@ -71,6 +72,14 @@ export default function PublicationToolbar({
       }
       const next = await publicationAction(action, current.publication, { comment });
       onChange(next);
+      if (action === 'submit' && next.publication.status === 'DRAFT' && next.sourceResourcesChanged) {
+        message.warning('个人员工的关联资源已变化，已更新待发布配置，请核对后再次提交。');
+        return;
+      }
+      if (action === 'refreshTarget') {
+        message.success('已重新对照官方配置，请确认覆盖范围后再提交或审核');
+        return;
+      }
       if (action === 'revise') history.replace(publicationUrl(next));
       setRejecting(false);
       if (next.publication.status === 'FAILED') message.error(next.publication.publishError || '发布失败');
@@ -156,7 +165,19 @@ export default function PublicationToolbar({
             </Button>
           )}
           {detail.publication.status === 'PUBLISHED' && detail.publication.officialId && (
-            <Button onClick={() => openOfficialEmployee(detail.publication.officialId!)}>查看官方副本</Button>
+            <>
+              <Button onClick={() => openOfficialEmployee(detail.publication.officialId!)}>查看官方副本</Button>
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  openEmployeePublication(detail.publication.sourceId, 'publishUpdate').catch((error) =>
+                    message.error(publicationErrorMessage(error, '无法发起发布更新'))
+                  )
+                }
+              >
+                发布更新
+              </Button>
+            </>
           )}
           {detail.canWithdraw && (
             <Button disabled={busy} onClick={() => run('withdraw')}>
@@ -190,6 +211,14 @@ export default function PublicationToolbar({
           </Popover>
         </div>
       </section>
+      {detail.sourceResourcesChanged && detail.canSubmit && (
+        <Alert showIcon type="info" style={{ marginTop: 8 }} message="已同步个人员工最新关联资源，请核对发布清单。" />
+      )}
+      <UpdateTargetNotice
+        detail={detail}
+        busy={busy || dirty}
+        onRefresh={detail.canEdit || detail.canReview ? () => run('refreshTarget') : undefined}
+      />
       {reviewed && (
         <Alert
           style={{ marginTop: 8 }}

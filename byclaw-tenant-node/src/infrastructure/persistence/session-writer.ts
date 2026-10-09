@@ -18,8 +18,16 @@ export async function createSession(context: CommandContext): Promise<void> {
     creator_id: command.userId,
     enterprise_id: command.enterpriseId,
     session_name: name,
+    ...(group ? { session_content: text(p.sessionContent ?? "", 4000, true) } : {}),
     session_type: group ? "hs_as" : "h_as",
-    project_id: group ? requireId(p.projectId) : "-1",
+    project_id: group
+      ? requireId(p.projectId)
+      : p.projectId == null || p.projectId === "-1"
+        ? "-1"
+        : requireId(p.projectId),
+    ...(!group && p.agentId != null
+      ? { object_id: requireId(p.agentId), object_type: "AGENT" }
+      : {}),
     state: "ACTIVE",
     last_seq: "0",
     create_time: new Date(),

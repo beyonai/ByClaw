@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useMultiTenancy } from '@/utils/multiTenancy';
 import { isEqual } from 'lodash';
 import { useDispatch, useSelector } from '@umijs/max';
 
@@ -28,13 +29,14 @@ type INotificationMessage = { session?: ISession; data?: { session?: ISession } 
 
 let lastNotificationInfo: INotificationMessage | null = null;
 export default function useGlobalChatRuntime() {
+  const { loaded, enabled } = useMultiTenancy();
   const dispatch = useDispatch();
   const userInfo = useSelector((state: State) => state.user.userInfo);
 
   const userId = userInfo?.userId;
 
   useEffect(() => {
-    if (!userId) {
+    if (!loaded || !userId) {
       webSocketManager.disconnect();
       clearChatRuntime();
       return;
@@ -45,10 +47,10 @@ export default function useGlobalChatRuntime() {
     return () => {
       webSocketManager.disconnect();
     };
-  }, [userId]);
+  }, [userId, loaded, enabled]);
 
   useEffect(() => {
-    if (!userId) {
+    if (!loaded || !userId) {
       return;
     }
 
@@ -127,5 +129,5 @@ export default function useGlobalChatRuntime() {
       webSocketManager.offMessage('TASK_PLAN_SNAPSHOT', handleTaskPlan);
       webSocketManager.offMessage('SESSION_RUNTIME_STATUS', handleSessionRuntime);
     };
-  }, [dispatch, userId]);
+  }, [dispatch, userId, loaded, enabled]);
 }

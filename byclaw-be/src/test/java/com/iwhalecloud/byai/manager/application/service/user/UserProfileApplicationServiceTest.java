@@ -11,6 +11,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import com.iwhalecloud.byai.manager.entity.customer.ByaiCustomerLeads;
+import com.iwhalecloud.byai.manager.mapper.customer.ByaiCustomerLeadsMapper;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -33,7 +36,9 @@ class UserProfileApplicationServiceTest {
 
     private final UsersMapper mapper = mock(UsersMapper.class);
     private final UserAvatarApplicationService avatarService = mock(UserAvatarApplicationService.class);
-    private final UserProfileApplicationService service = new UserProfileApplicationService(mapper, avatarService);
+    private final ByaiCustomerLeadsMapper leads = mock(ByaiCustomerLeadsMapper.class);
+    private final SequenceService sequence = mock(SequenceService.class);
+    private final UserProfileApplicationService service = new UserProfileApplicationService(mapper, avatarService, leads, sequence);
     private LoginInfo loginInfo;
 
     @BeforeEach
@@ -70,6 +75,119 @@ class UserProfileApplicationServiceTest {
         assertThat(update.getSqlSet()).contains("user_name=", "thumbnail_uri=", "update_date=")
             .doesNotContain("user_code", "pwd", "email", "phone", "org_id");
         assertThat(update.getParamNameValuePairs().values()).contains(1001L, "A", "新名字", "/avatars/new.png");
+    }
+
+    @Test
+    void readsSavedFieldsAndPreservesThemForLegacyNameOnlyUpdates() throws Exception {
+        Users user = activeUserWithProfile();
+        assertThat(service.getProfile().companyName()).isEqualTo("鲸智科技");
+        assertThat(service.getProfile().profileRole()).isEqualTo("产品 / 设计");
+        assertThat(service.getProfile().profileInterests()).containsExactly("内容创作", "数据分析");
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        UserProfileResponse result = service.updateProfile(new UserProfileUpdateRequest("新名字", null));
+        assertThat(result.companyName()).isEqualTo("鲸智科技");
+        assertThat(result.profileInterests()).containsExactly("内容创作", "数据分析");
+        assertThat(capturedUpdate().getSqlSet()).doesNotContain("company_name=", "profile_role=", "profile_interests=");
+    }
+
+    @Test
+    void explicitEmptyOptionalFieldsClearSavedSelections() throws Exception {
+        activeUserWithProfile();
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", null);
+        request.setProfileRole("");
+        request.setProfileInterests("[]");
+        UserProfileResponse result = service.updateProfile(request);
+        assertThat(result.profileRole()).isEmpty();
+        assertThat(result.profileInterests()).isEmpty();
+        assertThat(capturedUpdate().getSqlSet()).doesNotContain("profile_role=", "profile_interests=", "company_name=");
+        ArgumentCaptor<ByaiCustomerLeads> lead = ArgumentCaptor.forClass(ByaiCustomerLeads.class);
+        verify(leads).updateProfileLead(lead.capture());
+        assertThat(lead.getValue().getProfileRole()).isEmpty();
+        assertThat(lead.getValue().getProfileInterests()).isEqualTo("[]");
+    }
+
+    @Test
+    void invalidSelectionsFailBeforeWritingOrUploading() {
+        activeUser();
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", null);
+        for (String value : java.util.List.of("not-json", "null", "[null]", "[\"未知领域\"]")) {
+            request.setProfileInterests(value);
+            assertThatThrownBy(() -> service.updateProfile(request)).isInstanceOf(BaseException.class);
+        }
+        request.setProfileInterests("[]");
+        request.setProfileRole("管理员");
+        assertThatThrownBy(() -> service.updateProfile(request)).isInstanceOf(BaseException.class);
+        verify(mapper, never()).update(isNull(), any());
+        verifyNoInteractions(avatarService);
+    }
+
+    @Test
+    void profileReadRequiresLoggedInActiveUser() {
+        CurrentUserHolder.clearLoginInfo();
+        assertThatThrownBy(service::getProfile).isInstanceOf(BaseException.class);
+        verifyNoInteractions(mapper);
+    }
+
+    private Users activeUserWithProfile() {
+        Users user = new Users();
+        user.setUserId(1001L);
+        user.setUserName("旧名字");
+        user.setState("A");
+        when(mapper.selectById(1001L)).thenReturn(user);
+        ByaiCustomerLeads lead = new ByaiCustomerLeads();
+        lead.setId(9001L);
+        lead.setUserId(1001L);
+        lead.setCompanyName("鲸智科技");
+        lead.setProfileRole("产品 / 设计");
+        lead.setProfileInterests("[\"内容创作\",\"数据分析\"]");
+        when(leads.selectProfileByUserId(1001L)).thenReturn(lead);
+        when(leads.updateProfileLead(any())).thenReturn(1);
+        return user;
+    }
+
+    @Test
+    void savesLinkedProfileWithoutOverwritingTheLegacyConsultation() throws Exception {
+        activeUser();
+        Users user = mapper.selectById(1001L);
+        user.setPhone("13900000000");
+        ByaiCustomerLeads historical = new ByaiCustomerLeads();
+        historical.setId(12L);
+        historical.setContactName("旧名字");
+        historical.setCompanyName("旧公司");
+        historical.setIndustry("教育");
+        historical.setDemand("历史咨询");
+        historical.setWechat("wechat");
+        when(leads.selectLegacyProfileByPhone(user.getPhone())).thenReturn(historical);
+        when(sequence.nextVal()).thenReturn(9001L);
+        when(leads.insertProfile(any())).thenReturn(1);
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", null);
+        request.setCompanyName("新公司");
+        request.setProfileRole("其他");
+        request.setProfileInterests("[\"教育学习\"]");
+
+        assertThat(service.updateProfile(request).companyName()).isEqualTo("新公司");
+        ArgumentCaptor<ByaiCustomerLeads> saved = ArgumentCaptor.forClass(ByaiCustomerLeads.class);
+        verify(leads).insertProfile(saved.capture());
+        assertThat(saved.getValue().getId()).isEqualTo(9001L);
+        assertThat(saved.getValue().getUserId()).isEqualTo(1001L);
+        assertThat(saved.getValue().getIndustry()).isEqualTo("教育");
+        assertThat(saved.getValue().getDemand()).isEqualTo("历史咨询");
+        assertThat(historical.getUserId()).isNull();
+        assertThat(historical.getCompanyName()).isEqualTo("旧公司");
+        verify(leads, never()).updateProfileLead(any());
+    }
+
+    @Test
+    void failedLeadWriteDoesNotChangeTheLoginSnapshot() {
+        activeUser();
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", null);
+        request.setCompanyName("个人");
+        assertThatThrownBy(() -> service.updateProfile(request)).isInstanceOf(BaseException.class);
+        assertThat(loginInfo.getUserName()).isEqualTo("旧名字");
+        assertThat(loginInfo.getIsRetented()).isNull();
     }
 
     @Test
@@ -173,6 +291,7 @@ class UserProfileApplicationServiceTest {
         Users user = new Users();
         user.setUserId(1001L);
         user.setState("A");
+        user.setUserId(1001L);
         user.setAvatar("/avatars/old.png");
         when(mapper.selectById(1001L)).thenReturn(user);
     }

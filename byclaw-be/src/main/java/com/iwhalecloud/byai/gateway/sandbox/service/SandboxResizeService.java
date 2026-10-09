@@ -396,6 +396,12 @@ public class SandboxResizeService {
             throw new IllegalArgumentException("sandbox record not found for abnormal recovery alert");
         }
 
+        if (!"STARTING".equalsIgnoreCase(record.getStatus()) && !STATUS_RUNNING.equalsIgnoreCase(record.getStatus())) {
+            SsSandboxResizeRecord skipped = buildPayloadSkippedAudit("abnormal recovery target is no longer active");
+            skipped.setStatus(STATUS_SKIPPED_STALE);
+            return skipped;
+        }
+
         String triggerSource = StringUtils.defaultIfBlank(firstNonBlank(params, "triggerSource", "trigger_source",
                 "source"),
             "PROMETHEUS_ALERT");
@@ -501,7 +507,16 @@ public class SandboxResizeService {
         if (StringUtils.isBlank(userCode)) {
             return sandboxRecordMapper.selectLatestBySandboxIdAnyUser(sandboxId);
         }
-        return sandboxRecordMapper.selectLatestBySandboxId(userCode, sandboxType, sandboxId);
+        SsSandboxRecord record = sandboxRecordMapper.selectLatestBySandboxId(userCode, sandboxType, sandboxId);
+        if (record != null) {
+            return record;
+        }
+        // serviceType in runtime metrics is independent of the profile-specific sandboxType.
+        SsSandboxRecord candidate = sandboxRecordMapper.selectLatestBySandboxIdAnyUser(sandboxId);
+        String serviceType = firstNonBlank(params, "serviceType", "service_type");
+        return candidate != null && StringUtils.equals(userCode, candidate.getUserCode())
+            && StringUtils.isNotBlank(serviceType)
+            && StringUtils.equals(serviceType, candidate.getServiceType()) ? candidate : null;
     }
 
     private boolean isScaleUpAlert(String reasonCode) {
@@ -727,7 +742,7 @@ public class SandboxResizeService {
         try {
             sandboxService.savePreferredServiceKey(record.getUserCode(), preferredServiceKey);
             SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
-                record.getUserCode(), record.getResourceId(), null, serviceType);
+                record.getUserCode(), record.getResourceId(), null, serviceType, record);
             if (launchData == null || StringUtils.isBlank(launchData.getSandboxId())) {
                 throw new IllegalStateException("recovery restart did not return a sandbox id");
             }
@@ -789,7 +804,7 @@ public class SandboxResizeService {
         try {
             sandboxService.savePreferredServiceKey(record.getUserCode(), preferredServiceKey);
             SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
-                record.getUserCode(), record.getResourceId(), null, serviceType);
+                record.getUserCode(), record.getResourceId(), null, serviceType, record);
             Date finishedAt = new Date();
             long durationMs = System.currentTimeMillis() - startMillis;
             String responseJson = toJsonOrNull(launchData);

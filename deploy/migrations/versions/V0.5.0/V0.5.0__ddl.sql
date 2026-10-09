@@ -463,3 +463,144 @@ CREATE INDEX IF NOT EXISTS idx_group_recall_stop_pending
 CREATE TABLE IF NOT EXISTS byai.byai_group_chat_send_gate (
     session_id BIGINT PRIMARY KEY
 );
+
+-- 商业版本官方推荐资源收藏：仅新增独立表，不修改资源、授权或安装数据。
+-- 收藏功能上线前执行本段；两个主键同时承担列表关联索引，避免逐资源统计收藏记录。
+
+CREATE TABLE IF NOT EXISTS byai.byai_resource_favorite (
+    com_acct_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    resource_id BIGINT NOT NULL,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_resource_favorite PRIMARY KEY (com_acct_id, user_id, resource_id)
+);
+
+CREATE TABLE IF NOT EXISTS byai.byai_resource_favorite_count (
+    com_acct_id BIGINT NOT NULL,
+    resource_id BIGINT NOT NULL,
+    favorite_count BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT pk_byai_resource_favorite_count PRIMARY KEY (com_acct_id, resource_id),
+    CONSTRAINT ck_resource_favorite_count_nonnegative CHECK (favorite_count >= 0)
+);
+
+COMMENT ON TABLE byai.byai_resource_favorite IS '商业版企业资源的用户收藏关系；不产生授权、申请或安装关系';
+COMMENT ON COLUMN byai.byai_resource_favorite.com_acct_id IS '当前用户所属企业（租户）ID';
+COMMENT ON COLUMN byai.byai_resource_favorite.user_id IS '收藏用户ID，来自服务端登录上下文';
+COMMENT ON COLUMN byai.byai_resource_favorite.resource_id IS '收藏资源ID；支持数字员工、技能、知识、工具，技能组除外';
+COMMENT ON COLUMN byai.byai_resource_favorite.create_time IS '收藏时间，重复收藏不改变原时间';
+COMMENT ON TABLE byai.byai_resource_favorite_count IS '企业资源收藏总数，与收藏关系在同一事务中维护';
+COMMENT ON COLUMN byai.byai_resource_favorite_count.com_acct_id IS '资源所属企业（租户）ID';
+COMMENT ON COLUMN byai.byai_resource_favorite_count.resource_id IS '资源ID';
+COMMENT ON COLUMN byai.byai_resource_favorite_count.favorite_count IS '收藏用户总数，关系实际新增或删除时才增减；不复用授权申请次数或技能使用次数';
+
+-- 完善个人资料：复用客户线索，不扩展 po_users，不使用 SQL function 或数据回填。
+-- openGauss 兼容：新增字段使用普通 ALTER；执行前检查字段与索引，仅执行尚未存在的 ADD COLUMN / CREATE INDEX。
+-- 手机号直接复用 po_users.phone 的加密值，长度与来源字段保持一致，兼容历史明文数据。
+ALTER TABLE byai.byai_customer_leads ALTER COLUMN phone TYPE VARCHAR(255);
+ALTER TABLE byai.byai_customer_leads ADD COLUMN user_id BIGINT;
+ALTER TABLE byai.byai_customer_leads ADD COLUMN profile_role VARCHAR(50);
+ALTER TABLE byai.byai_customer_leads ADD COLUMN profile_interests TEXT;
+CREATE UNIQUE INDEX uk_customer_leads_profile_user ON byai.byai_customer_leads(user_id);
+COMMENT ON COLUMN byai.byai_customer_leads.user_id IS '个人资料所属登录用户；历史留资记录保持NULL';
+COMMENT ON COLUMN byai.byai_customer_leads.profile_role IS '用户自填岗位分类，不修改岗位权限';
+COMMENT ON COLUMN byai.byai_customer_leads.profile_interests IS '用户感兴趣的工作领域，JSON字符串数组';
+
+ALTER TABLE byai.au_privilege_grant ADD PRIMARY KEY (privilege_grant_id);
+ALTER TABLE byai.authorized_object_data_permissions ADD PRIMARY KEY (id);
+ALTER TABLE byai.authorized_objects ADD PRIMARY KEY (id);
+ALTER TABLE byai.byai_aimodel ADD PRIMARY KEY (model_id);
+ALTER TABLE byai.byai_ai_prompt ADD PRIMARY KEY (prompt_id);
+ALTER TABLE byai.byai_attach_file ADD PRIMARY KEY (attach_file_id);
+ALTER TABLE byai.byai_customer_leads ADD PRIMARY KEY (id);
+ALTER TABLE byai.byai_files ADD PRIMARY KEY (file_id);
+ALTER TABLE byai.byai_mode_dig_rel ADD PRIMARY KEY (rel_id);
+ALTER TABLE byai.byai_monitor_target ADD PRIMARY KEY (target_id);
+ALTER TABLE byai.byai_notification ADD PRIMARY KEY (id);
+ALTER TABLE byai.byai_sequence ADD PRIMARY KEY (sequence_id);
+ALTER TABLE byai.byai_session ADD PRIMARY KEY (session_id);
+ALTER TABLE byai.byai_session_ext ADD PRIMARY KEY (ext_id);
+ALTER TABLE byai.byai_session_member ADD PRIMARY KEY (byai_session_member_id);
+ALTER TABLE byai.byai_session_workspace ADD PRIMARY KEY (id);
+ALTER TABLE byai.byai_showcase ADD PRIMARY KEY (id);
+ALTER TABLE byai.byai_space_dir ADD PRIMARY KEY (dir_id);
+ALTER TABLE byai.byai_space_dir_rel ADD PRIMARY KEY (dir_rel_id);
+ALTER TABLE byai.byai_system_config ADD PRIMARY KEY (param_id);
+ALTER TABLE byai.byai_system_config_list ADD PRIMARY KEY (param_id);
+ALTER TABLE byai.byai_system_feedback ADD PRIMARY KEY (id);
+ALTER TABLE byai.byai_tag_relation ADD PRIMARY KEY (relation_id);
+ALTER TABLE byai.byai_track_log ADD PRIMARY KEY (trace_id);
+ALTER TABLE byai.byai_web_crawl_archive_doc ADD PRIMARY KEY (doc_archive_id);
+ALTER TABLE byai.byai_web_crawl_request ADD PRIMARY KEY (request_id);
+ALTER TABLE byai.datacloud_login_type ADD PRIMARY KEY (login_type_id);
+ALTER TABLE byai.datacloud_script ADD PRIMARY KEY (script_id);
+ALTER TABLE byai.datacloud_script_category ADD PRIMARY KEY (category_id);
+ALTER TABLE byai.datacloud_script_execution ADD PRIMARY KEY (execution_id);
+ALTER TABLE byai.datacloud_script_history ADD PRIMARY KEY (history_id);
+ALTER TABLE byai.datacloud_script_scenario ADD PRIMARY KEY (scenario_id);
+ALTER TABLE byai.datacloud_script_step ADD PRIMARY KEY (step_id);
+ALTER TABLE byai.datacloud_script_step_history ADD PRIMARY KEY (step_history_id);
+ALTER TABLE byai.datacloud_script_template ADD PRIMARY KEY (template_id);
+ALTER TABLE byai.datacloud_script_view ADD PRIMARY KEY (view_id);
+ALTER TABLE byai.datacloud_target_script ADD PRIMARY KEY (target_script_id);
+ALTER TABLE byai.default_data_permissions ADD PRIMARY KEY (id);
+ALTER TABLE byai.digital_position_user_relation ADD PRIMARY KEY (dig_position_rel_id);
+ALTER TABLE byai.feedback_msg_info ADD PRIMARY KEY (feedback_msg_id);
+ALTER TABLE byai.function_menu_permission ADD PRIMARY KEY (id);
+ALTER TABLE byai.log_exception_info ADD PRIMARY KEY (request_id);
+ALTER TABLE byai.memory_library ADD PRIMARY KEY (library_id);
+ALTER TABLE byai.men_res_com ADD PRIMARY KEY (res_com_id);
+ALTER TABLE byai.men_task ADD PRIMARY KEY (task_id);
+ALTER TABLE byai.men_task_catalog ADD PRIMARY KEY (task_catalog_id);
+ALTER TABLE byai.men_task_rec_obj ADD PRIMARY KEY (task_rec_obj_id);
+ALTER TABLE byai.men_task_status_log ADD PRIMARY KEY (task_status_log_id);
+ALTER TABLE byai.permission_group_authorized_objects ADD PRIMARY KEY (id);
+ALTER TABLE byai.permission_group_categories ADD PRIMARY KEY (id);
+ALTER TABLE byai.permission_group_excluded_objects ADD PRIMARY KEY (id);
+ALTER TABLE byai.permission_group_resources ADD PRIMARY KEY (id);
+ALTER TABLE byai.permission_groups ADD PRIMARY KEY (id);
+ALTER TABLE byai.po_login_log ADD PRIMARY KEY (log_id);
+ALTER TABLE byai.po_manage_log ADD PRIMARY KEY (log_id);
+ALTER TABLE byai.po_organization ADD PRIMARY KEY (org_id);
+ALTER TABLE byai.po_org_external_system ADD PRIMARY KEY (po_org_external_system_id);
+ALTER TABLE byai.po_position ADD PRIMARY KEY (position_id);
+ALTER TABLE byai.po_position_external ADD PRIMARY KEY (position_external_id);
+ALTER TABLE byai.po_safe_account_msg ADD PRIMARY KEY (msg_id);
+ALTER TABLE byai.po_source_system ADD PRIMARY KEY (po_external_system_id);
+ALTER TABLE byai.po_station ADD PRIMARY KEY (station_id);
+ALTER TABLE byai.po_user_access_token ADD PRIMARY KEY (user_access_token_id);
+ALTER TABLE byai.po_user_external_system ADD PRIMARY KEY (id);
+ALTER TABLE byai.po_users ADD PRIMARY KEY (user_id);
+ALTER TABLE byai.po_users_organization ADD PRIMARY KEY (id);
+ALTER TABLE byai.po_users_organization_external_system ADD PRIMARY KEY (po_users_organization_external_id);
+ALTER TABLE byai.query_config ADD PRIMARY KEY (query_id);
+ALTER TABLE byai.resource_attribute_permissions ADD PRIMARY KEY (id);
+ALTER TABLE byai.resource_rule_enabled ADD PRIMARY KEY (resource_template_id);
+ALTER TABLE byai.resource_template_relation ADD PRIMARY KEY (resource_template_id);
+ALTER TABLE byai.ss_res_ext_agent ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_attribute ADD PRIMARY KEY (ext_attribute_id);
+ALTER TABLE byai.ss_res_ext_db ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_dbdataset ADD PRIMARY KEY (dataset_id);
+ALTER TABLE byai.ss_res_ext_dig_employee ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_doc ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_evaluate ADD PRIMARY KEY (evaluate_id);
+ALTER TABLE byai.ss_res_ext_mcp ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_mcpserver ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_mcptool ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_object ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_test_set ADD PRIMARY KEY (test_set_id);
+ALTER TABLE byai.ss_res_ext_tool ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_toolkit ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_res_ext_view ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_resource ADD PRIMARY KEY (resource_id);
+ALTER TABLE byai.ss_resource_catalog ADD PRIMARY KEY (catalog_id);
+ALTER TABLE byai.ss_resource_oper_log ADD PRIMARY KEY (resource_oper_log_id);
+ALTER TABLE byai.ss_resource_rel_detail ADD PRIMARY KEY (resource_rel_detail_id);
+ALTER TABLE byai.ss_resource_version ADD PRIMARY KEY (resource_version_id);
+ALTER TABLE byai.ss_res_position_relation ADD PRIMARY KEY (resource_position_rel_id);
+ALTER TABLE byai.ss_superassist_kw_catalog ADD PRIMARY KEY (kw_catalog_id);
+ALTER TABLE byai.suas_superassist ADD PRIMARY KEY (superassist_id);
+ALTER TABLE byai.suas_superassist_resource_privilege ADD PRIMARY KEY (id);
+ALTER TABLE byai.suas_superassist_sub_agent ADD PRIMARY KEY (superassist_sub_agent_id);
+ALTER TABLE byai.sys_app_version ADD PRIMARY KEY (version_id);
+ALTER TABLE byai.template_rule_info ADD PRIMARY KEY (template_id);
+

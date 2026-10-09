@@ -10,7 +10,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 
-/** Rules specific to employee publication; platform roles never override adminvip ownership.
+/** Rules specific to employee publication; maintenance follows the resource permission checks.
  * @author qin.guoquan
  * @date 2026-09-27 22:38:38
  * */
@@ -40,7 +40,9 @@ public class DigitalEmployeeGovernanceService {
     }
 
     public static boolean isOfficialCopy(SsResource resource) {
-        return isEmployee(resource) && resource.getPublicationSourceId() != null;
+        return isEmployee(resource) && "enterprise".equals(resource.getOwnerType())
+            && resource.getPublicationSourceId() != null
+            && !Objects.equals(resource.getResourceId(), resource.getPublicationSourceId());
     }
 
     public static boolean isPublicationSkill(SsResource resource) {
@@ -55,10 +57,12 @@ public class DigitalEmployeeGovernanceService {
     }
 
     public boolean isProtected(SsResource resource) {
-        if (!isEmployee(resource) || resource.getCreateBy() == null || CurrentUserHolder.isAdminVip()) {
-            return false;
-        }
-        return isAdminVipCreator(resource.getCreateBy());
+        // 停用“adminvip 创建的员工仅允许 adminvip 维护”；保留原判断，权限回归创建人及有效授权。
+        // if (!isEmployee(resource) || resource.getCreateBy() == null || CurrentUserHolder.isAdminVip()) {
+        //     return false;
+        // }
+        // return isAdminVipCreator(resource.getCreateBy());
+        return false;
     }
 
     public boolean isAdminVipCreator(Long creatorId) {

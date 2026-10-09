@@ -1,3 +1,4 @@
+import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 jest.mock('@/utils/auth', () => ({
   clearToken: jest.fn(),
   getssoToken: jest.fn(() => 'sso-token'),
@@ -22,7 +23,7 @@ jest.mock('@umijs/max', () => ({
     replace: jest.fn(),
   },
   getIntl: jest.fn(() => ({
-    formatMessage: jest.fn(() => 'login expired'),
+    formatMessage: jest.fn(({ id }) => (id === 'common.loginExpired' ? 'login expired' : 'Operation failed')),
   })),
 }));
 
@@ -90,6 +91,7 @@ import { logout } from '../user';
 import { clearSelectedEnterprise, selectEnterprise } from '@/utils/tenantContext';
 
 import { GET, globalLogout, POST } from '../common/request';
+import { setResourceFavorite } from '../resourceFavorites';
 
 const rejectResponse = (error: unknown) => {
   if (typeof mockResponseRejected !== 'function') {
@@ -115,10 +117,22 @@ describe('Service Common Request', () => {
   });
 
   beforeEach(() => {
+    setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
     jest.clearAllMocks();
     clearSelectedEnterprise();
     window.localStorage.removeItem('SESSION');
     (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(true);
+  });
+
+  it('does not attach tenant headers when the system switch is off despite a stored selection', async () => {
+    window.localStorage.setItem('SESSION', 'session-key');
+    selectEnterprise('123', 'context-token', '2099-01-01');
+    setMultiTenancyConfig(null);
+    const url = '/byaiService/group-chats';
+    mockRequest.mockResolvedValue({ data: { code: 0, data: [] }, config: { url } });
+    await POST(url, {});
+    expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
+    expect(mockRequest.mock.calls[0][0].headers['X-Tenant-Context']).toBeUndefined();
   });
 
   it('keeps the existing chat URL and attaches tenant headers only in tenant space', async () => {
@@ -143,6 +157,17 @@ describe('Service Common Request', () => {
       headers: { 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' },
     });
   });
+
+  it.each(['/byaiService/chat/getAiModeList', '/byaiService/chat/getAssistant', '/byaiService/chat/getTermsOptions'])(
+    'keeps shared catalog requests outside tenant routing: %s',
+    async (url) => {
+      window.localStorage.setItem('SESSION', 'session-key');
+      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
+      await POST(url, {});
+      expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
+    }
+  );
 
   it('globalLogout clears local auth state and redirects when a user exists', async () => {
     (getModelState as jest.Mock).mockReturnValue({
@@ -472,6 +497,40 @@ describe('Service Common Request', () => {
     ).rejects.toBe('请求拒绝,无权限访问!');
 
     expect(message.error).not.toHaveBeenCalled();
+    expect(clearToken).not.toHaveBeenCalled();
+  });
+
+  it.each([400, 409, 503])('rejects favorite business error %s without clearing the session', async (status) => {
+    mockRequest.mockImplementation((config) =>
+      rejectWithResponseInterceptor({
+        status,
+        config,
+        response: { status, data: { code: -1, msg: 'Favorite unavailable' } },
+      })
+    );
+    await expect(setResourceFavorite('10', true)).rejects.toBe('Favorite unavailable');
+    expect(message.error).not.toHaveBeenCalled();
+    expect(clearToken).not.toHaveBeenCalled();
+    expect(loginRedirect).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {},
+    { favorited: true, favoriteCount: null },
+    { favorited: true, favoriteCount: -1 },
+    { favorited: 'true', favoriteCount: 1 },
+  ])('rejects malformed favorite success data %j', async (data) => {
+    mockRequest.mockImplementation((config) => Promise.resolve({ config, data: { code: 0, data } }));
+    await expect(setResourceFavorite('10', true)).rejects.toThrow('Operation failed');
+  });
+
+  it.each([
+    { favorited: true, favoriteCount: 5 },
+    { favorited: false, favoriteCount: 0 },
+  ])('returns successful favorite state %j through the real request wrapper', async (data) => {
+    mockRequest.mockImplementation((config) => Promise.resolve({ config, data: { code: 0, data } }));
+    await expect(setResourceFavorite('10', data.favorited)).resolves.toEqual(data);
     expect(clearToken).not.toHaveBeenCalled();
   });
 });

@@ -958,6 +958,12 @@
             </exclusions>
         </dependency>
 
+        <!-- 数据库无关的分布式锁，版本由 Spring Boot BOM 管理。 -->
+        <dependency>
+            <groupId>org.springframework.integration</groupId>
+            <artifactId>spring-integration-redis</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.session</groupId>
             <artifactId>spring-session-core</artifactId>

@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService.TenantSandboxView;
+import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantConfigRow;
@@ -342,6 +343,14 @@ public class TenantDbProvisioningService {
 
     static HostPort parseEndpoint(String value, String sandboxId) {
         if (value == null || value.isBlank()) throw new IllegalArgumentException("tenant DB endpoint is missing");
+        if (value.stripLeading().startsWith("{")) {
+            var parsed = SandboxEndpointRecordSupport.parseEndpointRecord(value);
+            if (parsed.malformedJson()
+                || !parsed.instanceEndpoints().containsKey(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)) {
+                throw new IllegalArgumentException("tenant DB endpoint record is invalid");
+            }
+            value = parsed.instanceEndpoints().get(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
+        }
         URI uri = URI.create(value.contains("://") ? value : "tcp://" + value);
         if (uri.getHost() == null || uri.getPort() <= 0) {
             throw new IllegalArgumentException("tenant DB endpoint is not a TCP host and port");

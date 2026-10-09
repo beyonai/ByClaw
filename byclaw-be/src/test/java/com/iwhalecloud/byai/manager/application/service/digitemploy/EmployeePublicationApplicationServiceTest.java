@@ -42,6 +42,7 @@ class EmployeePublicationApplicationServiceTest {
     EmployeePublicationApplicationService service;
     SsResource source;
     DigitalEmployeePublication publication;
+    DigitalEmployeeDetailsDTO personalDetails;
 
     @BeforeEach void setup() {
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
@@ -64,11 +65,15 @@ class EmployeePublicationApplicationServiceTest {
         DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
         details.setAgentType("001"); details.setResourceName("员工"); details.setOwnerType("personal");
         details.setResourceId(10L); details.setRelIds(List.of());
+        personalDetails = details;
         when(employees.findDetailsById(any())).thenReturn(details);
         publication = new DigitalEmployeePublication();
         publication.setRequestId(100L); publication.setRevision(1L); publication.setTenantId(1L);
         publication.setAuthorId(7L); publication.setAuthorName("作者"); publication.setSourceId(10L);
         publication.setStatus("DRAFT"); publication.setSnapshotJson(JSON.toJSONString(details)); publication.setDependenciesJson("[]");
+        var snapshot = JSON.parseObject(publication.getSnapshotJson());
+        snapshot.put("_publicationSourceResources", Map.of("fingerprint", EmployeePublicationApplicationService.resourceFingerprint(details)));
+        publication.setSnapshotJson(snapshot.toJSONString());
         when(publications.selectById(100L)).thenReturn(publication);
         when(publications.lock(100L, 1L)).thenReturn(publication);
         when(publications.current(10L, 1L)).thenReturn(publication);
@@ -132,15 +137,50 @@ class EmployeePublicationApplicationServiceTest {
         publication.setStatus("PUBLISHED");
         assertThatThrownBy(() -> service.preview(request())).hasMessageContaining("当前申请状态");
     }
-    @Test void adminSubmissionPublishesNewCopyAndDoesNotMutateSource() {
+    @ParameterizedTest @ValueSource(longs = {1L, 37L})
+    void adminSubmissionPublishesNewCopyInTheSourceTenantAndDoesNotMutateSource(long tenantId) {
         login("admin", 7L, List.of("PLAT_MAN"));
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(tenantId);
+        source.setComAcctId(tenantId);
+        publication.setTenantId(tenantId);
+        when(publications.lock(100L, tenantId)).thenReturn(publication);
+        when(publications.lockResource(10L, tenantId)).thenReturn(source);
+        when(dependencies.audienceRoots(tenantId)).thenReturn(List.of(1L));
+        when(dependencies.materialize(anyList(), eq(tenantId), anyLong())).thenReturn(Map.of());
         when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
         var result = service.submit(request());
         assertThat(result.publication().getStatus()).isEqualTo("PUBLISHED");
         verify(resources).insert(argThat((SsResource copy) -> copy.getResourceId() != 10L && copy.getCreateBy() == 7L
-            && copy.getPublicationSourceId() == 10L && "enterprise".equals(copy.getOwnerType())));
+            && copy.getPublicationSourceId() == 10L && "enterprise".equals(copy.getOwnerType())
+            && copy.getComAcctId().equals(source.getComAcctId())));
         assertThat(source.getOwnerType()).isEqualTo("personal");
-        verify(dependencies).grantAudience(any(), eq(1L));
+        verify(dependencies).grantAudience(any(), eq(tenantId));
+    }
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void changedOrMissingSourceTenantCannotCreateOfficialCopyOrGrantAccess(boolean missing) {
+        login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
+        SsResource moved = employee(10L, 7L); moved.setComAcctId(2L);
+        when(publications.lockResource(10L, 1L)).thenReturn(missing ? null : moved);
+        var result = service.approve(request());
+        assertThat(result.publication().getStatus()).isEqualTo("FAILED");
+        assertThat(result.publication().getPublishError()).contains(missing ? "数字员工不存在" : "企业归属不一致");
+        verify(resources, never()).insert(any(SsResource.class));
+        verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
+        verify(dependencies, never()).grantAudience(any(), anyLong());
+    }
+    @Test void officialCopyCannotBeUpdatedAfterItsTenantChanges() {
+        login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
+        SsResource official = employee(90L, 7L);
+        official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
+        when(publications.official(10L, 1L)).thenReturn(official);
+        SsResource moved = employee(90L, 7L); moved.setComAcctId(2L);
+        when(publications.lockResource(90L, 1L)).thenReturn(moved);
+        var result = service.approve(request());
+        assertThat(result.publication().getStatus()).isEqualTo("FAILED");
+        assertThat(result.publication().getPublishError()).contains("官方副本与原员工的企业归属不一致");
+        verify(resources, never()).updateById(any(SsResource.class));
+        verify(resources, never()).insert(any(SsResource.class));
+        verify(dependencies, never()).grantAudience(any(), anyLong());
     }
     @ParameterizedTest @ValueSource(strings = {"ORG_MAN", "BUSINESS_MAN", "PLAT_DEVOPS"})
     void otherAdminRolesCannotApprove(String role) {
@@ -167,6 +207,7 @@ class EmployeePublicationApplicationServiceTest {
         when(publications.lockResource(90L, 1L)).thenReturn(official);
         when(publications.official(10L, 1L)).thenReturn(official);
         when(employees.syncPublicationOpenClawWorkSpace(eq(90L), any())).thenReturn(true);
+        service.refreshTarget(request());
         var result = service.approve(request());
         assertThat(result.publication().getOfficialId()).isEqualTo(90L);
         verify(resources, never()).insert(any(SsResource.class));
@@ -209,6 +250,205 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(service.prepare(10L).publication().getRequestId()).isEqualTo(100L);
         verify(publications, never()).insert(any(DigitalEmployeePublication.class));
     }
+
+    @Test void openingDraftSynchronizesLatestRelationsAndAvailabilityButPreservesOtherCandidateChanges() {
+        var candidate = JSON.parseObject(publication.getSnapshotJson());
+        candidate.put("resourceName", "准备发布的名称(企业)"); candidate.put("resourceDesc", "发布页单独调整的描述");
+        publication.setSnapshotJson(candidate.toJSONString());
+        personalDetails.setResourceDesc("普通编辑的新描述"); personalDetails.setRelIds(List.of(21L));
+        personalDetails.setRelTools(List.of("*"));
+        personalDetails.setRelSkills(List.of(Map.of("resourceId", "21", "skillCode", "new-skill")));
+        var info = new RelResourceInfo(); info.setRelId("21"); info.setActiveResourceIds(List.of("22"));
+        personalDetails.setRelResourceList(List.of()); personalDetails.setRelResourceInfoList(List.of(info));
+        var dependency = new EmployeePublicationResources.Dependency();
+        var skill = employee(21L, 7L); skill.setResourceBizType("SKILL"); skill.setResourceName("最新技能");
+        dependency.setResource(skill); dependency.setAction("OMIT_RESOURCE"); dependency.setWarning("技能依赖了个人知识库");
+        when(dependencies.capture(any(), anyLong(), anyLong(), anyLong())).thenReturn(List.of(dependency));
+
+        var opened = service.open(100L);
+        assertThat(opened.sourceResourcesChanged()).isTrue();
+        assertThat(opened.employee().getRelIds()).containsExactly(21L);
+        assertThat(opened.employee().getRelTools()).containsExactly("*");
+        assertThat(opened.employee().getRelSkills()).singleElement().satisfies(skillConfig ->
+            assertThat(((Map<?, ?>) skillConfig).get("skillCode")).isEqualTo("new-skill"));
+        assertThat(opened.employee().getResourceDesc()).isEqualTo("发布页单独调整的描述");
+        assertThat(opened.employee().getResourceName()).isEqualTo("准备发布的名称(企业)");
+        assertThat(opened.employee().getRelResourceList()).extracting(SsResource::getResourceId).containsExactly(21L);
+        assertThat(opened.dependencies()).singleElement().satisfies(d -> {
+            assertThat(d.name()).isEqualTo("最新技能"); assertThat(d.action()).isEqualTo("OMIT_RESOURCE"); assertThat(d.error()).isNull();
+        });
+        assertThat(opened.publication().getRevision()).isEqualTo(2L);
+        assertThat(opened.canSubmit()).isTrue();
+        verify(resources, never()).updateById(any(SsResource.class));
+        verifyNoInteractions(auth, relations, extensions);
+    }
+
+    @Test void reopeningDraftKeepsPublicationResourceAdjustmentsWhenSourceHasNotChanged() {
+        var edit = request();
+        DigitalEmployeeDTO candidate = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
+        candidate.setRelIds(List.of(99L)); candidate.setResourceDesc("仅发布页修改"); edit.setEmployee(candidate);
+        service.save(edit);
+        personalDetails.setResourceDesc("个人员工修改了描述，但资源没变");
+        long revision = publication.getRevision();
+        clearInvocations(dependencies, publications);
+        var opened = service.open(100L);
+        assertThat(opened.sourceResourcesChanged()).isFalse();
+        assertThat(opened.employee().getRelIds()).containsExactly(99L);
+        assertThat(opened.employee().getResourceDesc()).isEqualTo("仅发布页修改");
+        assertThat(opened.publication().getRevision()).isEqualTo(revision);
+        verify(dependencies, never()).capture(any(), anyLong(), anyLong(), anyLong());
+        verify(publications, never()).update(isNull(), any());
+    }
+
+    @Test void removingAllSourceResourcesClearsDraftRelationsAndOldWarnings() {
+        personalDetails.setRelIds(List.of(21L)); personalDetails.setRelTools(List.of("*"));
+        personalDetails.setRelSkills(List.of(Map.of("resourceId", "21")));
+        service.open(100L);
+        personalDetails.setRelIds(List.of()); personalDetails.setRelTools(List.of()); personalDetails.setRelSkills(List.of());
+        var opened = service.open(100L);
+        assertThat(opened.sourceResourcesChanged()).isTrue();
+        assertThat(opened.employee().getRelIds()).isEmpty(); assertThat(opened.employee().getRelTools()).isEmpty();
+        assertThat(opened.employee().getRelSkills()).isEmpty(); assertThat(opened.employee().getRelResourceList()).isEmpty();
+        assertThat(opened.dependencies()).isEmpty();
+    }
+
+    @Test void queriedRelationOrderDoesNotResetCandidateResourceAdjustments() {
+        personalDetails.setRelIds(List.of(21L, 22L)); personalDetails.setRelTools(List.of("a", "b"));
+        personalDetails.setRelSkills(List.of(Map.of("resourceId", "21"), Map.of("resourceId", "22")));
+        service.open(100L);
+        var edit = request(); var candidate = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
+        candidate.setRelIds(List.of(21L)); candidate.setRelTools(List.of("a")); candidate.setRelSkills(List.of());
+        edit.setEmployee(candidate); service.save(edit);
+        personalDetails.setRelIds(List.of(22L, 21L)); personalDetails.setRelTools(List.of("b", "a"));
+        personalDetails.setRelSkills(List.of(Map.of("resourceId", "22"), Map.of("resourceId", "21")));
+        var opened = service.open(100L);
+        assertThat(opened.sourceResourcesChanged()).isFalse(); assertThat(opened.employee().getRelIds()).containsExactly(21L);
+        assertThat(opened.employee().getRelTools()).containsExactly("a"); assertThat(opened.employee().getRelSkills()).isEmpty();
+    }
+
+    @Test void emptyAndNullResourceListsDoNotAppearChangedAfterNormalizationOrSharedListSerialization() {
+        assertThat(EmployeePublicationApplicationService.resourceFingerprint(EmployeePublicationApplicationService.sanitize(personalDetails, source)))
+            .isEqualTo(EmployeePublicationApplicationService.resourceFingerprint(personalDetails));
+        String original = EmployeePublicationApplicationService.resourceFingerprint(personalDetails);
+        personalDetails.setRelIds(new java.util.ArrayList<>()); personalDetails.setRelSkills(List.of());
+        personalDetails.setRelTools(new java.util.ArrayList<>()); personalDetails.setRelResourceInfoList(List.of());
+        assertThat(EmployeePublicationApplicationService.resourceFingerprint(personalDetails)).isEqualTo(original);
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"PENDING", "APPLYING", "FAILED", "REJECTED", "WITHDRAWN", "PUBLISHED"})
+    void openingSubmittedAndHistoricalApplicationsNeverReadsOrSynchronizesNewSourceResources(String state) {
+        publication.setStatus(state); publication.setComment("原审核记录"); personalDetails.setRelIds(List.of(21L));
+        String stored = publication.getSnapshotJson();
+        var opened = service.open(100L);
+        assertThat(opened.sourceResourcesChanged()).isFalse(); assertThat(opened.employee().getRelIds()).isEmpty();
+        assertThat(publication.getSnapshotJson()).isEqualTo(stored); assertThat(publication.getRevision()).isEqualTo(1L);
+        assertThat(publication.getComment()).isEqualTo("原审核记录");
+        verify(employees, never()).findDetailsById(any()); verify(publications, never()).update(isNull(), any());
+        verify(dependencies, never()).capture(any(), anyLong(), anyLong(), anyLong());
+    }
+
+    @Test void confirmationPreviewSynchronizesDraftAndReturnsItsNewRevisionWithoutSubmitting() {
+        personalDetails.setRelIds(List.of(21L));
+        var preview = service.preview(request());
+        assertThat(preview.sourceResourcesChanged()).isTrue(); assertThat(preview.employee().getRelIds()).containsExactly(21L);
+        assertThat(preview.publication().getRevision()).isEqualTo(2L); assertThat(publication.getStatus()).isEqualTo("DRAFT");
+        assertThat(JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class).getRelIds()).containsExactly(21L);
+        verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
+        var unchanged = service.preview(request());
+        assertThat(unchanged.sourceResourcesChanged()).isFalse(); assertThat(unchanged.publication().getRevision()).isEqualTo(2L);
+    }
+
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void sourceChangesDuringConfirmationReturnUpdatedDraftAndRequireAnotherExplicitSubmission(boolean administrator) {
+        var preview = service.preview(request());
+        if (administrator) login("admin", 7L, List.of("PLAT_MAN"));
+        personalDetails.setRelIds(List.of(21L));
+        var confirmation = request(); confirmation.setRevision(preview.publication().getRevision());
+        var submitted = service.submit(confirmation);
+        assertThat(submitted.sourceResourcesChanged()).isTrue(); assertThat(submitted.employee().getRelIds()).containsExactly(21L);
+        assertThat(submitted.publication().getStatus()).isEqualTo("DRAFT"); assertThat(submitted.publication().getRevision()).isEqualTo(2L);
+        verify(resources, never()).insert(any(SsResource.class)); verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
+        login("user", 7L, List.of());
+        assertThat(service.submit(request()).publication().getStatus()).isEqualTo("PENDING");
+    }
+
+    @Test void saveRetainsOtherFormEditsButReplacesStaleResourcePayloadWithLatestSource() {
+        var edit = request(); var candidate = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
+        candidate.setResourceDesc("还未保存的发布描述"); candidate.setRelIds(List.of(99L)); edit.setEmployee(candidate);
+        personalDetails.setRelIds(List.of(21L));
+        var saved = service.save(edit);
+        assertThat(saved.sourceResourcesChanged()).isTrue(); assertThat(saved.employee().getRelIds()).containsExactly(21L);
+        assertThat(saved.employee().getResourceDesc()).isEqualTo("还未保存的发布描述");
+        assertThat(service.open(100L).sourceResourcesChanged()).isFalse();
+        assertThat(service.open(100L).employee().getRelIds()).containsExactly(21L);
+    }
+
+    @Test void submittedResourcesStayFrozenThroughReviewerPreviewAndApprovalAfterPersonalEditing() {
+        service.submit(request()); personalDetails.setRelIds(List.of(21L)); personalDetails.setRelTools(List.of("new-tool"));
+        login("reviewer", 8L, List.of("PLAT_MAN"));
+        var preview = service.preview(request());
+        assertThat(preview.sourceResourcesChanged()).isFalse(); assertThat(preview.employee().getRelIds()).isEmpty();
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        var approved = service.approve(request());
+        assertThat(approved.publication().getStatus()).isEqualTo("PUBLISHED");
+        verify(employees).syncPublicationOpenClawWorkSpace(anyLong(), argThat(dto ->
+            dto.getRelIds().isEmpty() && dto.getRelTools().isEmpty()));
+    }
+
+    @Test void anotherOpenSyncInvalidatesAnOlderEditorRevisionInsteadOfAcceptingItsStaleResourcePayload() {
+        var oldEditor = request(); oldEditor.setEmployee(JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class));
+        personalDetails.setRelIds(List.of(21L)); service.open(100L);
+        assertThatThrownBy(() -> service.save(oldEditor)).hasMessageContaining("申请已被修改");
+        assertThat(service.detail(100L).employee().getRelIds()).containsExactly(21L);
+    }
+
+    @Test void sourceRelationConfigurationChangesAreDetectedAndCopied() {
+        var sourceInfo = new RelResourceInfo(); sourceInfo.setRelId("21"); sourceInfo.setActiveResourceIds(List.of("22"));
+        var sourceResource = new SsResourceDTO(); sourceResource.setResourceId(21L); sourceResource.setResourceBizType("KG_DOC");
+        sourceResource.setRelResourceInfo(JSON.toJSONString(sourceInfo));
+        personalDetails.setRelIds(List.of(21L)); personalDetails.setRelResourceList(List.of(sourceResource));
+        service.open(100L);
+        sourceInfo.setActiveResourceIds(List.of("23")); sourceResource.setRelResourceInfo(JSON.toJSONString(sourceInfo));
+        var opened = service.open(100L);
+        assertThat(opened.sourceResourcesChanged()).isTrue();
+        assertThat(opened.employee().getRelResourceInfoList()).singleElement().satisfies(info ->
+            assertThat(info.getActiveResourceIds()).containsExactly("23"));
+    }
+
+    @Test void legacyDraftIsSynchronizedOnceAndThenPreservesPublicationOnlyResourceChanges() {
+        var legacy = JSON.parseObject(publication.getSnapshotJson()); legacy.remove("_publicationSourceResources");
+        publication.setSnapshotJson(legacy.toJSONString()); personalDetails.setRelIds(List.of(21L));
+        assertThat(service.open(100L).sourceResourcesChanged()).isTrue();
+        var edit = request(); var candidate = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
+        candidate.setRelIds(List.of()); edit.setEmployee(candidate); service.save(edit);
+        assertThat(service.open(100L).employee().getRelIds()).isEmpty();
+    }
+
+    @Test void unauthorizedOpeningCannotRefreshAnotherAuthorsDraft() {
+        login("other", 8L, List.of()); personalDetails.setRelIds(List.of(21L));
+        assertThatThrownBy(() -> service.open(100L)).hasMessageContaining("无权访问");
+        verify(employees, never()).findDetailsById(any()); verify(publications, never()).update(isNull(), any());
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"REJECTED", "WITHDRAWN"})
+    void explicitlyRevisingHistoryUsesLatestPersonalResourcesAndKeepsReviewAndOtherCandidateChanges(String state) {
+        publication.setStatus(state); publication.setComment("原来的处理意见");
+        var previous = JSON.parseObject(publication.getSnapshotJson()); previous.put("resourceDesc", "之前为发布调整的描述");
+        publication.setSnapshotJson(previous.toJSONString()); String stored = publication.getSnapshotJson();
+        personalDetails.setRelIds(List.of(21L));
+        var next = service.revise(request());
+        assertThat(next.employee().getRelIds()).containsExactly(21L);
+        assertThat(next.employee().getResourceDesc()).isEqualTo("之前为发布调整的描述");
+        assertThat(next.publication().getSnapshotJson()).contains("_publicationSourceResources");
+        assertThat(publication.getSnapshotJson()).isEqualTo(stored); assertThat(publication.getComment()).isEqualTo("原来的处理意见");
+        assertThat(publication.getStatus()).isEqualTo(state);
+    }
+
+    @Test void changedSourceTenantCannotRefreshCandidateResources() {
+        source.setComAcctId(2L);
+        assertThatThrownBy(() -> service.open(100L)).hasMessageContaining("归属已变更");
+        verify(employees, never()).findDetailsById(any()); verify(publications, never()).update(isNull(), any());
+    }
     @Test void publicationIsAvailableInBothEditionsWithoutChangingRoleRules() {
         for (String edition : new String[]{"commercial", "openSource", null, "", "unknown"}) {
             when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn(edition);
@@ -228,43 +468,42 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(service.prepare(10L).canSubmit()).isTrue();
         verify(resources, never()).updateById(any(SsResource.class));
     }
-    @Test void adminvipOwnershipOverridesPlatformRole() {
+    @Test void adminvipEmployeeOwnershipDoesNotOverridePlatformReviewerPermission() {
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
         login("platform", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
-        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("仅允许 adminvip");
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PUBLISHED");
     }
 
-    @Test void platformSubmissionOfAdminvipEmployeeWaitsForAdminvipAndCannotBypassReview() {
+    @Test void platformSubmissionOfAdminvipEmployeeUsesNormalImmediatePublication() {
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
         login("platform", 8L, List.of("PLAT_MAN"));
         assertThat(service.prepare(10L).canSubmit()).isTrue();
-        var pending = service.submit(request());
-        assertThat(pending.publication().getStatus()).isEqualTo("PENDING");
-        assertThat(pending.publication().isRequiresAdminVipReview()).isTrue();
-        assertThat(pending.canReview()).isFalse();
-        assertThat(pending.canEdit()).isFalse();
-        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("仅允许 adminvip");
-        assertThatThrownBy(() -> service.reject(request())).hasMessageContaining("仅允许 adminvip");
-        assertThatThrownBy(() -> service.save(request())).hasMessageContaining("审核期间不可编辑");
-        verify(resources, never()).insert(any(SsResource.class));
-        assertThat(publication.getStatus()).isEqualTo("PENDING");
-        login("adminvip", 7L, List.of());
         when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
-        assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PUBLISHED");
-        assertThat(publication.getReviewerId()).isEqualTo(7L);
+        var result = service.submit(request());
+        assertThat(result.publication().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(result.publication().isRequiresAdminVipReview()).isFalse();
+        assertThat(publication.getReviewerId()).isEqualTo(8L);
         assertThat(publication.getReviewedAt()).isNotNull();
     }
 
-    @Test void copiedAdminvipSkillRequiresAdminvipEvenWhenEmployeeBelongsToPlatformManager() {
-        Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(9L)).thenReturn(creator);
-        var skill = employee(20L, 9L); skill.setResourceBizType("SKILL");
+    @ParameterizedTest @ValueSource(longs = {7L, 9L})
+    void copiedAdminvipSkillStillRequiresAdminvipRegardlessOfEmployeeCreator(Long skillCreator) {
+        Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(skillCreator)).thenReturn(creator);
+        var skill = employee(20L, skillCreator); skill.setResourceBizType("SKILL");
         var dependency = new EmployeePublicationResources.Dependency();
         dependency.setResource(skill); dependency.setAction("COPY_SKILL"); dependency.setCopyName("技能(企业)");
         publication.setDependenciesJson(JSON.toJSONString(List.of(dependency)));
         login("platform", 7L, List.of("PLAT_MAN"));
         assertThat(service.submit(request()).canReview()).isFalse();
         assertThat(publication.getStatus()).isEqualTo("PENDING");
-        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("仅允许 adminvip");
+        try (var messages = mockStatic(com.iwhalecloud.byai.common.i18n.I18nUtil.class)) {
+            messages.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get("employee.publication.adminvip.skill.review"))
+                .thenReturn("adminvip skill review required");
+            messages.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get("adminvip skill review required"))
+                .thenReturn("adminvip skill review required");
+            assertThatThrownBy(() -> service.approve(request())).hasMessage("adminvip skill review required");
+        }
         when(publications.selectList(any())).thenReturn(List.of(publication));
         assertThat(service.pendingCount()).isZero();
         assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isFalse();
@@ -323,6 +562,62 @@ class EmployeePublicationApplicationServiceTest {
         verifyNoInteractions(dependencies);
     }
 
+    @ParameterizedTest @ValueSource(strings = {"DRAFT", "PENDING", "REJECTED", "PUBLISHED"})
+    void legacyOmittedSkillIsNamedInBothAvailabilityAndCandidateEditorWithoutChangingStoredSnapshot(String state) {
+        publication.setStatus(state);
+        var dependency = new EmployeePublicationResources.Dependency();
+        dependency.setTargetId(20L); dependency.setAction("OMIT_RESOURCE");
+        dependency.setLabel("其他企业资源"); dependency.setWarning("资源不属于当前企业");
+        publication.setDependenciesJson(JSON.toJSONString(List.of(dependency)));
+        var snapshot = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDetailsDTO.class);
+        snapshot.setRelIds(List.of(20L)); snapshot.setResourceDesc("审核时的配置");
+        publication.setSnapshotJson(JSON.toJSONString(snapshot));
+        String storedSnapshot = publication.getSnapshotJson();
+        String storedDependencies = publication.getDependenciesJson();
+        var skill = employee(20L, 7L); skill.setComAcctId(2L);
+        skill.setResourceBizType("SKILL"); skill.setResourceName("weather-query");
+        SsResourceService dependencyResources = mock(SsResourceService.class);
+        when(dependencyResources.findById(20L)).thenReturn(skill);
+        when(auth.hasResourceAccessPermission(skill)).thenReturn(true);
+        var displayService = new EmployeePublicationResources(dependencyResources, null, null, auth, null, null,
+            null, null, null);
+        doAnswer(invocation -> {
+            displayService.refreshDisplayMetadata(invocation.getArgument(0));
+            return null;
+        }).when(dependencies).refreshDisplayMetadata(anyList());
+
+        for (var detail : List.of(service.detail(100L), service.current(10L), service.prepare(10L))) {
+            assertThat(detail.dependencies()).hasSize(1);
+            assertThat(detail.dependencies().getFirst().resourceId()).isEqualTo("20");
+            assertThat(detail.dependencies().getFirst().name()).isEqualTo("weather-query");
+            assertThat(detail.dependencies().getFirst().resourceType()).isEqualTo("SKILL");
+            assertThat(detail.dependencies().getFirst().action()).isEqualTo("OMIT_RESOURCE");
+            assertThat(detail.dependencies().getFirst().reason()).contains("原数字员工所属企业不一致");
+            assertThat(detail.employee().getRelResourceList()).singleElement().satisfies(resource -> {
+                assertThat(resource.getResourceId()).isEqualTo(20L);
+                assertThat(resource.getResourceName()).isEqualTo("weather-query");
+                assertThat(resource.getResourceBizType()).isEqualTo("SKILL");
+            });
+            assertThat(detail.employee().getRelIds()).containsExactly(20L);
+            assertThat(detail.employee().getResourceDesc()).isEqualTo("审核时的配置");
+        }
+        when(auth.hasResourceAccessPermission(skill)).thenReturn(false);
+        var inaccessible = service.detail(100L);
+        assertThat(inaccessible.dependencies().getFirst().name()).isEqualTo("关联资源 20");
+        assertThat(inaccessible.dependencies().getFirst().resourceType()).isEqualTo("UNKNOWN");
+        assertThat(inaccessible.employee().getRelResourceList()).isEmpty();
+        assertThat(publication.getSnapshotJson()).isEqualTo(storedSnapshot);
+        assertThat(publication.getDependenciesJson()).isEqualTo(storedDependencies);
+        assertThat(publication.getRevision()).isEqualTo(1L);
+        assertThat(publication.getStatus()).isEqualTo(state);
+        verify(publications, never()).update(isNull(), any());
+        verify(publications, never()).insert(any(DigitalEmployeePublication.class));
+        verify(employees, never()).findDetailsById(any());
+        verify(dependencies, never()).capture(any(), anyLong(), anyLong(), anyLong());
+        verify(dependencies, never()).validate(anyList(), anyLong(), anyLong());
+        verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
+    }
+
     @ParameterizedTest @ValueSource(strings = {"REJECTED", "WITHDRAWN", "PUBLISHED"})
     void preparingPersonalEmployeeReusesItsLatestResult(String state) {
         publication.setStatus(state);
@@ -354,6 +649,27 @@ class EmployeePublicationApplicationServiceTest {
         verify(dependencies, never()).validate(anyList(), anyLong(), anyLong());
     }
 
+    @Test void newDraftUsesTheOriginalEmployeesTenantAndRejectsAnotherLoginTenant() {
+        source.setComAcctId(37L);
+        assertThatThrownBy(() -> service.prepare(10L)).hasMessageContaining("不存在");
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(37L);
+        when(publications.lockResource(10L, 37L)).thenReturn(source);
+        var draft = service.prepare(10L);
+        assertThat(draft.publication().getTenantId()).isEqualTo(source.getComAcctId());
+        verify(dependencies).capture(any(), eq(7L), eq(37L), anyLong());
+    }
+
+    @Test void savingDraftReplacesTheObsoleteDeploymentScopeError() {
+        publication.setDependenciesJson(JSON.toJSONString(List.of(
+            EmployeePublicationResources.blocker("发布范围", "发布范围与当前部署企业不一致"))));
+        EmployeePublicationRequest update = request();
+        update.setEmployee(JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class));
+        var saved = service.save(update);
+        assertThat(saved.dependencies()).isEmpty();
+        assertThat(publication.getDependenciesJson()).isEqualTo("[]");
+        assertThat(service.submit(request()).publication().getStatus()).isEqualTo("PENDING");
+    }
+
     @ParameterizedTest @ValueSource(strings = {"MCP", "KG_DOC", "SKILL"})
     void legacyPrivateResourceBlockerBecomesOmissionAndPublishedRuntimeExcludesIt(String type) {
         SsResource tool = employee(20L, 7L); tool.setResourceBizType(type); tool.setResourceName("个人资源");
@@ -363,7 +679,9 @@ class EmployeePublicationApplicationServiceTest {
         publication.setDependenciesJson(JSON.toJSONString(List.of(dependency)));
         var dto = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
         dto.setRelTools(List.of("*", "unknown")); dto.setRelIds(List.of(20L));
-        publication.setSnapshotJson(JSON.toJSONString(dto));
+        var stored = JSON.parseObject(publication.getSnapshotJson());
+        stored.put("relTools", dto.getRelTools()); stored.put("relIds", dto.getRelIds());
+        publication.setSnapshotJson(stored.toJSONString());
         var draft = service.detail(100L);
         assertThat(draft.dependencies().getFirst().error()).isNull();
         assertThat(draft.dependencies().getFirst().warning()).contains("当前发布规则");
@@ -397,7 +715,7 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(next.previousReview().comment()).isEqualTo("请修改岗位描述");
         assertThat(publication.getStatus()).isEqualTo("REJECTED");
         assertThat(publication.getComment()).isEqualTo("请修改岗位描述");
-        verify(employees, never()).findDetailsById(any());
+        verify(employees).findDetailsById(argThat(id -> id.getResourceId().equals(10L)));
     }
 
     @Test void historicalRejectionCannotReplaceANewerFinishedApplication() {
@@ -423,6 +741,179 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(draft.getRequestId()).isNotEqualTo(publication.getRequestId());
     }
 
+    SsResource publishedCopyForPersonalUpdate() {
+        publication.setStatus("PUBLISHED"); publication.setOfficialId(90L);
+        SsResource official = employee(90L, 7L);
+        official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
+        official.setResourceName("官方维护名称(企业)");
+        when(resources.selectById(90L)).thenReturn(official);
+        when(publications.lockResource(90L, 1L)).thenReturn(official);
+        when(publications.official(10L, 1L)).thenReturn(official);
+        DigitalEmployeeDetailsDTO personal = new DigitalEmployeeDetailsDTO();
+        personal.setResourceId(10L); personal.setAgentType("001"); personal.setOwnerType("personal");
+        personal.setResourceName("最新个人名称"); personal.setResourceDesc("最新个人配置"); personal.setRelIds(List.of(20L));
+        DigitalEmployeeDetailsDTO enterprise = new DigitalEmployeeDetailsDTO();
+        enterprise.setResourceId(90L); enterprise.setAgentType("001"); enterprise.setOwnerType("enterprise");
+        enterprise.setResourceName(official.getResourceName()); enterprise.setResourceDesc("官方独立配置"); enterprise.setRelIds(List.of());
+        when(employees.findDetailsById(any())).thenAnswer(call -> {
+            EmployeeIdDTO id = call.getArgument(0);
+            return id.getResourceId().equals(10L) ? personal : enterprise;
+        });
+        return official;
+    }
+
+    EmployeePublicationRequest requestFor(DigitalEmployeePublication draft) {
+        when(publications.lock(draft.getRequestId(), 1L)).thenReturn(draft);
+        when(publications.selectById(draft.getRequestId())).thenReturn(draft);
+        EmployeePublicationRequest request = new EmployeePublicationRequest();
+        request.setRequestId(draft.getRequestId()); request.setRevision(draft.getRevision());
+        return request;
+    }
+
+    @Test void explicitPersonalUpdateCapturesLatestAAndKeepsBIdentityNameAndPermissions() {
+        SsResource official = publishedCopyForPersonalUpdate();
+        assertThat(service.current(10L).publication()).isSameAs(publication);
+        verify(publications, never()).insert(any(DigitalEmployeePublication.class));
+        var candidate = service.prepareUpdate(10L);
+        assertThat(candidate.publication().getSourceId()).isEqualTo(10L);
+        assertThat(candidate.publication().getOfficialId()).isEqualTo(90L);
+        assertThat(candidate.employee().getResourceId()).isEqualTo(90L);
+        assertThat(candidate.employee().getOwnerType()).isEqualTo("enterprise");
+        assertThat(candidate.employee().getResourceName()).isEqualTo(official.getResourceName());
+        assertThat(candidate.employee().getResourceDesc()).isEqualTo("最新个人配置");
+        assertThat(candidate.employee().getRelIds()).containsExactly(20L);
+        assertThat(candidate.updateTarget().fromPersonal()).isTrue();
+        assertThat(candidate.updateTarget().changed()).isFalse();
+        assertThat(publication.getStatus()).isEqualTo("PUBLISHED");
+        verify(resources, never()).updateById(any(SsResource.class));
+        verifyNoInteractions(auth, relations, extensions);
+        var request = requestFor(candidate.publication());
+        assertThat(service.submit(request).publication().getStatus()).isEqualTo("PENDING");
+        // 后续 A 改动不改变待审快照，审核只将已提交候选更新到原 B。
+        source.setResourceDesc("个人又修改了");
+        login("reviewer", 8L, List.of("PLAT_MAN"));
+        request.setRevision(candidate.publication().getRevision());
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        var approved = service.approve(request);
+        assertThat(approved.publication().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(approved.publication().getOfficialId()).isEqualTo(90L);
+        assertThat(official.getResourceDesc()).isEqualTo("最新个人配置");
+        assertThat(source.getResourceDesc()).isEqualTo("个人又修改了");
+        verify(resources, never()).insert(any(SsResource.class));
+        verify(dependencies, never()).grantAudience(any(), anyLong());
+        verify(auth, never()).ensureCreatorDefaultPrivileges(any());
+    }
+
+    @Test void personalPublicationUpdateRefreshesAResourcesWithoutReplacingBNameOrOfficialComparison() {
+        var official = publishedCopyForPersonalUpdate();
+        var draft = service.prepareUpdate(10L).publication(); requestFor(draft);
+        var id = new EmployeeIdDTO(); id.setResourceId(10L);
+        var latest = employees.findDetailsById(id); latest.setRelIds(List.of(21L)); latest.setResourceDesc("A 又修改了描述");
+        var opened = service.open(draft.getRequestId());
+        assertThat(opened.sourceResourcesChanged()).isTrue(); assertThat(opened.employee().getRelIds()).containsExactly(21L);
+        assertThat(opened.employee().getResourceId()).isEqualTo(90L);
+        assertThat(opened.employee().getResourceName()).isEqualTo(official.getResourceName());
+        assertThat(opened.employee().getResourceDesc()).isEqualTo("最新个人配置");
+        assertThat(opened.updateTarget().fromPersonal()).isTrue(); assertThat(opened.updateTarget().changed()).isFalse();
+        verify(resources, never()).updateById(any(SsResource.class)); verifyNoInteractions(auth, relations, extensions);
+    }
+
+    @Test void officialEditingDraftDoesNotSynchronizeResourcesFromOriginalPersonalEmployee() {
+        publishedCopyForPersonalUpdate();
+        var draft = service.prepare(90L).publication(); requestFor(draft);
+        var id = new EmployeeIdDTO(); id.setResourceId(10L); employees.findDetailsById(id).setRelIds(List.of(21L));
+        clearInvocations(employees, publications, dependencies);
+        var opened = service.open(draft.getRequestId());
+        assertThat(opened.sourceResourcesChanged()).isFalse(); assertThat(opened.employee().getRelIds()).isEmpty();
+        assertThat(opened.updateTarget().fromPersonal()).isFalse();
+        verify(employees, never()).findDetailsById(argThat(request -> request.getResourceId().equals(10L)));
+        verify(dependencies, never()).capture(any(), anyLong(), anyLong(), anyLong());
+        verify(publications, never()).update(isNull(), any());
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"DRAFT", "PENDING", "FAILED", "REJECTED", "WITHDRAWN"})
+    void personalUpdateRestoresExistingCandidateOrResultWithoutReplacingIt(String state) {
+        publishedCopyForPersonalUpdate(); publication.setStatus(state);
+        if (List.of("DRAFT", "PENDING", "FAILED").contains(state)) when(publications.active(10L, 1L)).thenReturn(publication);
+        clearInvocations(employees);
+        assertThat(service.prepareUpdate(10L).publication()).isSameAs(publication);
+        verify(employees, never()).findDetailsById(any());
+        verify(publications, never()).insert(any(DigitalEmployeePublication.class));
+    }
+
+    @Test void personalUpdateRequiresExistingAvailableCopyAndTheOriginalAuthorOrAdministrator() {
+        publication.setStatus("PUBLISHED");
+        assertThatThrownBy(() -> service.prepareUpdate(10L)).hasMessageContaining("尚无官方副本");
+        SsResource official = publishedCopyForPersonalUpdate();
+        login("other", 8L, List.of());
+        assertThatThrownBy(() -> service.prepareUpdate(10L)).hasMessageContaining("只能发布自己");
+        login("user", 7L, List.of()); official.setResourceStatus(3);
+        assertThatThrownBy(() -> service.prepareUpdate(10L)).hasMessageContaining("已下架");
+        official.setResourceStatus(2);
+        assertThatThrownBy(() -> service.prepareUpdate(90L)).hasMessageContaining("原个人员工");
+    }
+
+    @Test void changedOfficialConfigurationNeedsExplicitRefreshBeforeSubmission() {
+        SsResource official = publishedCopyForPersonalUpdate();
+        var draft = service.prepareUpdate(10L).publication();
+        var request = requestFor(draft);
+        official.setResourceDesc("管理员另行维护");
+        assertThat(service.preview(request).updateTarget().changed()).isTrue();
+        assertThatThrownBy(() -> service.submit(request)).hasMessageContaining("官方员工配置已变化");
+        assertThat(draft.getStatus()).isEqualTo("DRAFT");
+        request.setEmployee(JSON.parseObject(draft.getSnapshotJson(), DigitalEmployeeDTO.class));
+        service.save(request); request.setRevision(draft.getRevision());
+        // 保存候选不能暗中重置对照信息。
+        assertThat(service.detail(draft.getRequestId()).updateTarget().changed()).isTrue();
+        String configuration = JSON.parseObject(draft.getSnapshotJson()).getString("resourceDesc");
+        var refreshed = service.refreshTarget(request);
+        assertThat(refreshed.updateTarget().changed()).isFalse();
+        assertThat(refreshed.updateTarget().fromPersonal()).isTrue();
+        assertThat(refreshed.employee().getResourceDesc()).isEqualTo(configuration);
+        request.setRevision(draft.getRevision());
+        assertThat(service.submit(request).publication().getStatus()).isEqualTo("PENDING");
+        verify(resources, never()).updateById(any(SsResource.class));
+    }
+
+    @Test void changingOnlyTheOrderOfQueriedRelationsDoesNotRequireRenewedComparison() {
+        publishedCopyForPersonalUpdate();
+        EmployeeIdDTO id = new EmployeeIdDTO(); id.setResourceId(90L);
+        DigitalEmployeeDetailsDTO details = employees.findDetailsById(id);
+        details.setRelIds(List.of(20L, 30L));
+        var draft = service.prepareUpdate(10L).publication();
+        details.setRelIds(List.of(30L, 20L));
+        assertThat(service.preview(requestFor(draft)).updateTarget().changed()).isFalse();
+    }
+
+    @Test void approvalNeverSilentlyOverwritesOfficialChangesAfterSubmission() {
+        SsResource official = publishedCopyForPersonalUpdate();
+        var draft = service.prepareUpdate(10L).publication();
+        var request = requestFor(draft);
+        service.submit(request); request.setRevision(draft.getRevision());
+        official.setResourceDesc("提交后的官方变更");
+        login("reviewer", 8L, List.of("PLAT_MAN"));
+        var failed = service.approve(request);
+        assertThat(failed.publication().getStatus()).isEqualTo("FAILED");
+        assertThat(failed.publication().getPublishError()).contains("官方员工配置已变化");
+        assertThat(official.getResourceDesc()).isEqualTo("提交后的官方变更");
+        verify(resources, never()).updateById(any(SsResource.class));
+        verify(dependencies, never()).materialize(anyList(), anyLong(), anyLong());
+        // 失败后审核员也能显式重新对照并重试，不会卡死在失败状态。
+        request.setRevision(draft.getRevision());
+        assertThat(service.refreshTarget(request).updateTarget().changed()).isFalse();
+        assertThat(draft.getStatus()).isEqualTo("FAILED");
+    }
+
+    @Test void legacyUpdateCannotOverwriteAnOfficialCopyWithoutRenewedComparison() {
+        publishedCopyForPersonalUpdate(); publication.setStatus("PENDING");
+        login("reviewer", 8L, List.of("PLAT_MAN"));
+        assertThat(service.preview(request()).updateTarget().changed()).isTrue();
+        var failed = service.approve(request());
+        assertThat(failed.publication().getPublishError()).contains("尚未对照官方配置");
+        verify(resources, never()).updateById(any(SsResource.class));
+        assertThat(service.refreshTarget(request()).updateTarget().changed()).isFalse();
+    }
+
     @Test void readonlyCurrentEntryEnforcesTenantAuthorEditionAndAdminvipProtection() {
         login("outsider", 9L, List.of());
         assertThatThrownBy(() -> service.current(10L)).isInstanceOf(BaseException.class);
@@ -430,7 +921,7 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(service.current(10L).publication()).isSameAs(publication);
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
         assertThat(service.current(10L).canSubmit()).isTrue();
-        assertThat(service.current(10L).publication().isRequiresAdminVipReview()).isTrue();
+        assertThat(service.current(10L).publication().isRequiresAdminVipReview()).isFalse();
         login("adminvip", 7L, List.of()); source.setComAcctId(2L);
         assertThatThrownBy(() -> service.current(10L)).hasMessageContaining("不存在");
         source.setComAcctId(1L); when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn("commercial");
@@ -479,7 +970,7 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isFalse();
         publication.setStatus("FAILED");
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
-        assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isFalse();
+        assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isTrue();
         login("adminvip", 7L, List.of());
         assertThat(service.list(true, 1, 20).list().getFirst().isCanReview()).isTrue();
     }
@@ -494,9 +985,9 @@ class EmployeePublicationApplicationServiceTest {
         // A distinct DataSource reads through a separate connection, outside the transaction under test.
         var committed = new org.springframework.jdbc.core.JdbcTemplate(
             new org.apache.ibatis.datasource.unpooled.UnpooledDataSource("org.sqlite.JDBC", url, null, null));
-        jdbc.execute("CREATE TABLE request (status TEXT, revision BIGINT, official_id BIGINT, error TEXT)");
+        jdbc.execute("CREATE TABLE request (status TEXT, revision BIGINT, official_id BIGINT, error TEXT, snapshot TEXT)");
         jdbc.execute("CREATE TABLE resource (id BIGINT PRIMARY KEY, body TEXT)");
-        jdbc.update("INSERT INTO request VALUES ('PENDING', 1, ?, NULL)", existing ? 90L : null);
+        jdbc.update("INSERT INTO request VALUES ('PENDING', 1, ?, NULL, ?)", existing ? 90L : null, publication.getSnapshotJson());
         jdbc.update("INSERT INTO resource VALUES (10, ?)", JSON.toJSONString(source));
         if (existing) {
             SsResource official = employee(90L, 7L); official.setOwnerType("enterprise");
@@ -509,14 +1000,15 @@ class EmployeePublicationApplicationServiceTest {
             org.springframework.beans.BeanUtils.copyProperties(publication, row);
             row.setStatus(rs.getString("status")); row.setRevision(rs.getLong("revision"));
             row.setOfficialId(rs.getObject("official_id") == null ? null : rs.getLong("official_id"));
+            row.setSnapshotJson(rs.getString("snapshot"));
             row.setPublishError(rs.getString("error")); return row;
         });
         when(publications.selectById(100L)).thenAnswer(call -> read.get());
         when(publications.lock(100L, 1L)).thenAnswer(call -> { locked.set(read.get()); return locked.get(); });
         when(publications.update(isNull(), any())).thenAnswer(call -> {
             var row = locked.get();
-            return jdbc.update("UPDATE request SET status=?, revision=?, official_id=?, error=?",
-                row.getStatus(), row.getRevision(), row.getOfficialId(), row.getPublishError());
+            return jdbc.update("UPDATE request SET status=?, revision=?, official_id=?, error=?, snapshot=?",
+                row.getStatus(), row.getRevision(), row.getOfficialId(), row.getPublishError(), row.getSnapshotJson());
         });
         when(resources.selectById(anyLong())).thenAnswer(call -> jdbc.query("SELECT body FROM resource WHERE id=?",
             (rs, n) -> JSON.parseObject(rs.getString(1), SsResource.class), (Long) call.getArgument(0)).stream().findFirst().orElse(null));
@@ -555,7 +1047,9 @@ class EmployeePublicationApplicationServiceTest {
             else assertThat(resources.selectById((Long) call.getArgument(0))).isNull();
             throw new IllegalStateException("模拟补偿服务不可用，失败记录仍须提交");
         }).when(employees).restorePublicationRuntimeAfterRollback(anyLong());
-        var failed = proxied.approve(request());
+        if (existing) proxied.refreshTarget(request());
+        EmployeePublicationRequest approval = request(); approval.setRevision(read.get().getRevision());
+        var failed = proxied.approve(approval);
         assertThat(failed.publication().getStatus()).isEqualTo("FAILED");
         assertThat(read.get().getStatus()).isEqualTo("FAILED");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM resource", Integer.class)).isEqualTo(existing ? 2 : 1);

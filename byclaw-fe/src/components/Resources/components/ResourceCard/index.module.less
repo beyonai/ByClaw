@@ -44,6 +44,14 @@
   }
 }
 
+.favoriteCard {
+  height: 186px;
+}
+
+.skillPosterFavoriteCard {
+  height: 148px;
+}
+
 .skillPosterContent {
   position: relative;
   width: 100%;
@@ -125,7 +133,20 @@
   gap: 6px;
 }
 
+.skillPosterHeaderWithTag {
+  // 为最长的角标预留空间；有操作区时复用正文已有的 48px 留白。
+  padding-right: 64px;
+}
+
+.resourceInfoWithActions .skillPosterHeaderWithTag {
+  padding-right: 16px;
+}
+
 .skillPosterTag {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 1;
   flex-shrink: 0;
   max-width: 72px;
   padding: 2px 6px;
@@ -141,6 +162,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+}
+
+.skillPosterContent > .skillPosterTag {
+  // 归属标签共用的样式会放宽最大宽度，这里限制角标，保护长名称和译文的间距。
+  max-width: 72px;
 }
 
 .skillPosterAction {
@@ -691,6 +717,21 @@
   align-items: center;
   gap: 6px;
   transform: translateY(-50%);
+}
+
+.skillPosterActions {
+  // 技能卡片的操作区下移，为右上角标签留出独立空间。
+  top: auto;
+  bottom: 12px;
+  gap: 4px;
+  transform: none;
+
+  :global {
+    .@{antPrefix}-btn-text {
+      height: 24px;
+      padding: 0;
+    }
+  }
 }
 
 .applyActionWrap {

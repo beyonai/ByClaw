@@ -1,3 +1,4 @@
+import { getMultiTenancyRevision, isMultiTenancyEnabled } from './multiTenancy';
 import { getRuntimeActualUrl } from './index';
 
 const STORAGE_KEY = 'BYCLAW_TAB_ENTERPRISE';
@@ -11,13 +12,13 @@ type StoredTenant = {
 
 let switchSeq = 0;
 
-export const getTenantSwitchSeq = () => switchSeq;
+export const getTenantSwitchSeq = () => switchSeq + getMultiTenancyRevision();
 
 export const hasStoredTenantSelection = (): boolean =>
-  typeof window !== 'undefined' && window.sessionStorage.getItem(STORAGE_KEY) !== null;
+  isMultiTenancyEnabled() && typeof window !== 'undefined' && window.sessionStorage.getItem(STORAGE_KEY) !== null;
 
 export const getTenantContext = (): StoredTenant | null => {
-  if (typeof window === 'undefined') return null;
+  if (!isMultiTenancyEnabled() || typeof window === 'undefined') return null;
   const raw = window.sessionStorage.getItem(STORAGE_KEY);
   if (!raw) return null;
   try {
@@ -42,6 +43,7 @@ export const getTenantContext = (): StoredTenant | null => {
 export const getSelectedEnterpriseId = (): string | null => getTenantContext()?.enterpriseId ?? null;
 
 export const selectEnterprise = (enterpriseId: string, tenantContextToken: string, expiresAt: string): void => {
+  if (!isMultiTenancyEnabled()) throw new Error('Multi-tenancy is disabled');
   if (typeof window === 'undefined' || !/^[1-9][0-9]*$/.test(enterpriseId)) {
     throw new Error('Invalid enterprise ID');
   }
@@ -50,11 +52,12 @@ export const selectEnterprise = (enterpriseId: string, tenantContextToken: strin
   }
   const sessionId = window.localStorage.getItem('SESSION');
   if (!sessionId) throw new Error('Login session is required');
+  const previous = getTenantContext();
   window.sessionStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({ enterpriseId, sessionId, tenantContextToken, expiresAt })
   );
-  switchSeq += 1;
+  if (previous?.enterpriseId !== enterpriseId || previous.sessionId !== sessionId) switchSeq += 1;
 };
 
 export const clearSelectedEnterprise = (): void => {

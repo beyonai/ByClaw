@@ -15,8 +15,9 @@ import {
 } from '@/utils/tenantContext';
 import webSocketManager from '@/utils/websocket';
 import styles from './index.module.less';
+import { useMultiTenancy } from '@/utils/multiTenancy';
 
-const TenantSwitcher: React.FC = () => {
+const EnabledTenantSwitcher: React.FC = () => {
   const intl = useIntl();
   const [tenants, setTenants] = useState<TenantAvailableItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(() => getSelectedEnterpriseId());
@@ -138,6 +139,11 @@ const TenantSwitcher: React.FC = () => {
       </button>
     </Dropdown>
   );
+};
+
+const TenantSwitcher: React.FC = () => {
+  const { enabled } = useMultiTenancy();
+  return enabled ? <EnabledTenantSwitcher /> : null;
 };
 
 export default TenantSwitcher;

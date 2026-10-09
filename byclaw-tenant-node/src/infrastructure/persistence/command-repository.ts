@@ -10,6 +10,7 @@ import { addMembers, removeMember, changeRole, groupSettings } from "./member-wr
 import { publishTask } from "./task-publication.js";
 import { createTask, changeTask, claimTask } from "./task-writer.js";
 import { sendGroupMessage } from "./group-message-writer.js";
+import { updateFeedback, updateMessageStructure } from "./message-update-writer.js";
 
 const handlers = {
   CREATE_SESSION: createSession,
@@ -34,6 +35,8 @@ const handlers = {
   DELETE_PENDING_PUBLICATION: changeTask,
   RECALL_MESSAGE: recallMessage,
   SEND_GROUP_MESSAGE: sendGroupMessage,
+  UPDATE_FEEDBACK: updateFeedback,
+  UPDATE_MESSAGE_STRUCTURE: updateMessageStructure,
 };
 /** 把业务命令映射到租户事务，接入统一的写入资格检查。 */
 export class SqlCommandTransactions implements CommandTransactions {

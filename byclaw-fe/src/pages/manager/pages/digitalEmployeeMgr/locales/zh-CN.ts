@@ -110,6 +110,8 @@ export default {
   'employeeDetail.catalogManagePlaceholder': '请选择所属领域',
   'employeeDetail.configureSkills': '配置工具',
   'employeeDetail.configureBundledSkills': '配置技能',
+  // 已有技能加入员工配置时使用“添加”，与创建新资源的“新增”区分。
+  'employeeDetail.addBundledSkill': '添加',
   'employeeDetail.personalSkills': '个人技能',
   'employeeDetail.enterpriseSkills': '企业技能',
   'employeeDetail.bundledSkillsPlaceholder': '请选择技能',

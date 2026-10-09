@@ -1,0 +1,29 @@
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.favorite {
+  padding-left: 0;
+  color: #8b93a1;
+
+  &[aria-pressed='true'] {
+    color: #d89614;
+  }
+}
+
+.authorized {
+  color: #389e0d;
+}
+
+.pending {
+  color: #d89614;
+}
+
+.unauthorized {
+  color: #8b93a1;
+}

@@ -28,6 +28,23 @@ function setup(ready = true) {
 }
 const headers = { "x-enterprise-id": "10", "x-tenant-generation": "7", "x-actor-user-id": "20" };
 describe("protected tenant HTTP", () => {
+  it("accepts a scoped feedback command at the existing message boundary", async () => {
+    const s = setup();
+    const response = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/sessions/30/messages/40/feedback",
+      headers,
+      payload: command({
+        operation: "UPDATE_FEEDBACK" as any,
+        payload: {
+          messageId: "40",
+          type: "praise",
+          mode: "reaction",
+        },
+      }),
+    });
+    expect(response.statusCode).toBe(200);
+  });
   it("exposes liveness before database availability", async () => {
     const s = setup(false);
     const response = await s.app.inject({ url: "/internal/v1/health/live" });

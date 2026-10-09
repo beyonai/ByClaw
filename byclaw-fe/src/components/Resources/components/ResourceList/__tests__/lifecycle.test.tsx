@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { message } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceList from '..';
@@ -11,6 +11,15 @@ import {
   deregisterResource,
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
+
+jest.mock('antd', () => {
+  const actual = jest.requireActual('antd');
+  return {
+    ...actual,
+    // 全局提示的渲染由卡片用例覆盖；列表只验证反馈调用，避免静态提示和计时器跨用例残留。
+    message: { ...actual.message, success: jest.fn(), error: jest.fn(), warning: jest.fn() },
+  };
+});
 
 jest.mock('../../../skillExport', () => ({
   buildSkillBundle: jest.fn().mockResolvedValue(new Blob(['zip'])),
@@ -44,17 +53,27 @@ jest.mock('@/components/InfiniteScroll', () => ({
   default: ({ children, next, hasMore }: any) => (
     <div>
       {children}
-      {hasMore && <button onClick={next}>load more</button>}
+      {hasMore && (
+        <button data-testid="resource-load-more" onClick={next}>
+          load more
+        </button>
+      )}
     </div>
   ),
 }));
 jest.mock('../../ResourceCard', () => ({
   __esModule: true,
-  default: ({ actionConfig, resource }: any) => (
+  default: ({ actionConfig, resource, enableFavorites }: any) => (
     <div
       data-testid="resource-card"
+      data-resource-id={resource.resourceId}
+      data-favorited={String(resource.favorited)}
+      data-favorites-enabled={String(enableFavorites)}
       data-resource-status={resource.resourceStatus}
       data-can-off-shelf={String(resource.canOffShelf)}
+      data-can-apply-use={String(resource.canApplyUse)}
+      data-use-apply-pending={String(resource.useApplyPending)}
+      data-resource-name={resource.resourceName}
       data-hidden-menu-keys={JSON.stringify(actionConfig.hiddenMenuItemKeys)}
       data-type-tag={String(actionConfig.showResourceTypeTag)}
       data-enterprise-publication={String(actionConfig.enablePublishToEnterprise)}
@@ -63,6 +82,7 @@ jest.mock('../../ResourceCard', () => ({
       <button onClick={() => actionConfig.onShelf()}>publish</button>
       <button onClick={() => actionConfig.onUnShelf()}>unpublish</button>
       <button onClick={() => actionConfig.onDeleteData()}>deregister</button>
+      <button onClick={() => actionConfig.onApplyUse()}>apply use</button>
     </div>
   ),
 }));
@@ -83,7 +103,6 @@ const renderList = (props: Record<string, any> = {}) => {
         onEdit={jest.fn()}
         onAuth={jest.fn()}
         onApplyUse={jest.fn()}
-        onAuditUse={jest.fn()}
         onRefresh={refresh}
         {...props}
       />
@@ -94,6 +113,15 @@ const renderList = (props: Record<string, any> = {}) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // 清空未消费的一次性响应，保证失败或提前结束的用例不会影响下一次请求。
+  [
+    listResourceUseAuth,
+    queryResourceDetail,
+    queryWorkspacePersonalSkillList,
+    shelfResource,
+    unShelfResource,
+    deregisterResource,
+  ].forEach((operation) => (operation as jest.Mock).mockReset());
   (listResourceUseAuth as jest.Mock).mockResolvedValue({
     data: { list: [{ resourceId: '10', resourceBizType: 'TOOLKIT', ownerType: 'enterprise' }], total: 1 },
   });
@@ -106,6 +134,8 @@ beforeEach(() => {
     (operation as jest.Mock).mockResolvedValue({ code: 0 })
   );
 });
+
+afterEach(() => jest.restoreAllMocks());
 
 it.each(['SKILL', 'KG_DOC', 'TOOL'])('shows loading while the initial %s request is pending', async (resourceType) => {
   let finish!: (value: any) => void;
@@ -128,7 +158,7 @@ it.each(['SKILL', 'KG_DOC', 'TOOL'])('shows loading while the initial %s request
   expect(screen.queryByText('common.loading')).toBeNull();
 });
 
-it('keeps loading visible until workspace skills finish loading', async () => {
+it('keeps my personal resources loading until workspace skills finish loading', async () => {
   let finish!: (value: any) => void;
   (queryWorkspacePersonalSkillList as jest.Mock).mockImplementation(
     () =>
@@ -136,7 +166,7 @@ it('keeps loading visible until workspace skills finish loading', async () => {
         finish = resolve;
       })
   );
-  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: true });
   await waitFor(() => expect(queryWorkspacePersonalSkillList).toHaveBeenCalled());
   expect(screen.getByText('common.loading')).toBeInTheDocument();
   expect(screen.queryByTestId('resource-card')).toBeNull();
@@ -170,6 +200,143 @@ it.each([
     expect(queryResourceDetail).toHaveBeenCalledWith({ resourceId: '10' });
     expect(screen.getByTestId('resource-card')).toHaveAttribute('data-can-off-shelf', 'true');
   }
+});
+
+it.each(['SKILL', 'KG_DOC', 'TOOL'])('refreshes only the applied %s row', async (resourceType) => {
+  const rows = [
+    { resourceId: '10', resourceName: 'First', resourceStatus: '2', canApplyUse: true, useApplyPending: false },
+    { resourceId: '11', resourceName: 'Second', resourceStatus: '2', canApplyUse: true, useApplyPending: false },
+  ];
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({ data: { list: rows, total: 2 } });
+  let finishDetail!: (value: any) => void;
+  (queryResourceDetail as jest.Mock).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishDetail = resolve;
+      })
+  );
+  const onApplyUse = jest.fn().mockResolvedValue(true);
+  const refresh = renderList({ resourceType, myResourcesOnly: false, enableFavorites: true, onApplyUse });
+  const cards = await screen.findAllByTestId('resource-card');
+  fireEvent.click(screen.getAllByText('apply use')[0]);
+  fireEvent.click(screen.getAllByText('apply use')[0]);
+
+  await waitFor(() => expect(cards[0]).toHaveAttribute('data-use-apply-pending', 'true'));
+  expect(cards[0]).toHaveAttribute('data-can-apply-use', 'false');
+  expect(cards[1]).toHaveAttribute('data-use-apply-pending', 'false');
+  expect(cards[1]).toHaveAttribute('data-can-apply-use', 'true');
+  expect(queryResourceDetail).toHaveBeenCalledTimes(1);
+  expect(queryResourceDetail).toHaveBeenCalledWith({ resourceId: '10' });
+  expect(onApplyUse).toHaveBeenCalledWith(expect.objectContaining({ resourceId: '10' }));
+  expect(onApplyUse).toHaveBeenCalledTimes(1);
+  act(() =>
+    window.dispatchEvent(
+      new CustomEvent('resourceFavoriteChanged', {
+        detail: { resourceId: '10', favorited: true, favoriteCount: 8 },
+      })
+    )
+  );
+
+  await act(async () => {
+    finishDetail({
+      resourceId: '10',
+      resourceName: 'Updated first',
+      favorited: false,
+      operationPermissions: { useApplyPending: true, canApplyUse: false },
+    });
+  });
+
+  const updatedCards = screen.getAllByTestId('resource-card');
+  expect(updatedCards[0]).toBe(cards[0]);
+  expect(updatedCards[1]).toBe(cards[1]);
+  expect(updatedCards[0]).toHaveAttribute('data-resource-name', 'Updated first');
+  expect(updatedCards[0]).toHaveAttribute('data-favorited', 'true');
+  expect(updatedCards[1]).toHaveAttribute('data-resource-name', 'Second');
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(1);
+  expect(refresh).not.toHaveBeenCalled();
+});
+
+it('does not refresh or mark a row pending after a failed use application', async () => {
+  const onApplyUse = jest.fn().mockResolvedValue(false);
+  const refresh = renderList({ onApplyUse });
+  const card = await screen.findByTestId('resource-card');
+  await act(async () => {
+    fireEvent.click(screen.getByText('apply use'));
+  });
+
+  expect(onApplyUse).toHaveBeenCalledTimes(1);
+  expect(queryResourceDetail).not.toHaveBeenCalled();
+  expect(card).toHaveAttribute('data-use-apply-pending', 'undefined');
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(1);
+  expect(refresh).not.toHaveBeenCalled();
+});
+
+it('keeps a submitted application pending when its row detail refresh fails', async () => {
+  (queryResourceDetail as jest.Mock).mockRejectedValue(new Error('Detail unavailable'));
+  const warning = jest.spyOn(message, 'warning').mockImplementation(() => (() => undefined) as any);
+  const onApplyUse = jest.fn().mockResolvedValue(true);
+  const refresh = renderList({ onApplyUse });
+  const card = await screen.findByTestId('resource-card');
+  fireEvent.click(screen.getByText('apply use'));
+
+  await waitFor(() => expect(warning).toHaveBeenCalledWith('resource.rowRefreshFailed'));
+  expect(card).toHaveAttribute('data-use-apply-pending', 'true');
+  expect(card).toHaveAttribute('data-can-apply-use', 'false');
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(1);
+  expect(refresh).not.toHaveBeenCalled();
+  warning.mockRestore();
+});
+
+it('ignores an applied row detail response after the search changes', async () => {
+  const onApplyUse = jest.fn().mockResolvedValue(true);
+  let finishDetail!: (value: any) => void;
+  (queryResourceDetail as jest.Mock).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishDetail = resolve;
+      })
+  );
+  const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  const listForSearch = (searchValue: string) => (
+    <QueryClientProvider client={queryClient}>
+      <ResourceList
+        resourceType="SKILL"
+        activeTab="enterprise"
+        searchValue={searchValue}
+        catalogId=""
+        dropdownParam={{}}
+        resourceName="Skill"
+        onDetail={jest.fn()}
+        onEdit={jest.fn()}
+        onAuth={jest.fn()}
+        onApplyUse={onApplyUse}
+        onRefresh={jest.fn()}
+      />
+    </QueryClientProvider>
+  );
+  const view = render(listForSearch('first'));
+  await screen.findByTestId('resource-card');
+  fireEvent.click(screen.getByText('apply use'));
+  await waitFor(() => expect(queryResourceDetail).toHaveBeenCalledWith({ resourceId: '10' }));
+
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({
+    data: { list: [{ resourceId: '10', resourceName: 'New search row', useApplyPending: false }], total: 1 },
+  });
+  view.rerender(listForSearch('second'));
+  await waitFor(() =>
+    expect(screen.getByTestId('resource-card')).toHaveAttribute('data-resource-name', 'New search row')
+  );
+  await act(async () => {
+    finishDetail({
+      resourceId: '10',
+      resourceName: 'Old request row',
+      operationPermissions: { canApplyUse: false, useApplyPending: true },
+    });
+  });
+
+  expect(screen.getByTestId('resource-card')).toHaveAttribute('data-resource-name', 'New search row');
+  expect(screen.getByTestId('resource-card')).toHaveAttribute('data-use-apply-pending', 'false');
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(2);
 });
 
 it.each(['3', '-1'])('ignores stale personal status %s and loads published skills', async (resourceStatus) => {
@@ -258,9 +425,13 @@ it.each(
   const cards = await screen.findAllByTestId('resource-card');
   for (const card of cards) {
     const hiddenKeys = JSON.parse(card.getAttribute('data-hidden-menu-keys') || '[]');
-    for (const key of ['shelfData', 'unShelfData', 'deleteData', 'delete', 'publishToEnterprise']) {
+    for (const key of ['shelfData', 'unShelfData', 'deleteData', 'delete']) {
       expect(hiddenKeys.includes(key)).toBe(!props.myResourcesOnly);
     }
+    // 仅我可用的技能允许展示发布入口，其他浏览场景继续隐藏。
+    expect(hiddenKeys.includes('publishToEnterprise')).toBe(
+      !props.myResourcesOnly && !(props.resourceType === 'SKILL' && props.activeTab === 'personal')
+    );
   }
 });
 
@@ -282,9 +453,12 @@ it('keeps the successful state when the detail refresh fails', async () => {
   const warning = jest.spyOn(message, 'warning').mockImplementation(() => undefined as any);
   (queryResourceDetail as jest.Mock).mockRejectedValue(new Error('Detail unavailable'));
   const refresh = renderList({ dropdownParam: { resourceStatus: '' } });
-  const card = await screen.findByTestId('resource-card');
-  fireEvent.click(screen.getByText('publish'));
-  await waitFor(() => expect(card).toHaveAttribute('data-resource-status', '2'));
+  await screen.findByTestId('resource-card');
+  // 等待写操作和详情失败都结束，再检查当前列表中的成功状态。
+  await act(async () => {
+    fireEvent.click(screen.getByText('publish'));
+  });
+  await waitFor(() => expect(screen.getByTestId('resource-card')).toHaveAttribute('data-resource-status', '2'));
   expect(warning).toHaveBeenCalledWith('resource.rowRefreshFailed');
   expect(refresh).not.toHaveBeenCalled();
   expect(listResourceUseAuth).toHaveBeenCalledTimes(1);
@@ -323,10 +497,7 @@ it.each(
       resourceStatus: '2',
     })
   );
-  if (resourceType === 'SKILL') {
-    if (ownerType === 'enterprise') expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
-    else expect(queryWorkspacePersonalSkillList).toHaveBeenCalled();
-  }
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
 });
 
 it.each([true, false])(
@@ -410,7 +581,7 @@ it.each(
   }
 );
 
-it('exports all filtered pages and workspace skills without changing the displayed list', async () => {
+it('exports only resource library skills across filtered pages without changing the displayed list', async () => {
   const { buildSkillBundle, saveSkillFile } = jest.requireMock('../../../skillExport');
   (listResourceUseAuth as jest.Mock).mockImplementation(({ pageNum }) =>
     Promise.resolve({
@@ -429,7 +600,7 @@ it('exports all filtered pages and workspace skills without changing the display
     searchValue: 'demo',
     exportContainer,
   });
-  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(2));
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(1));
   const exportButton = screen.getByRole('button', { name: /resource\.skillExport\.all/ });
   expect(exportContainer).toContainElement(exportButton);
   expect(document.getElementById('SKILLListScroller')).not.toContainElement(exportButton);
@@ -444,25 +615,22 @@ it('exports all filtered pages and workspace skills without changing the display
     })
   );
   expect(buildSkillBundle).toHaveBeenCalledWith(
-    [
-      expect.objectContaining({ resourceBacked: false }),
-      expect.objectContaining({ resourceId: '1' }),
-      expect.objectContaining({ resourceId: '2' }),
-    ],
+    [expect.objectContaining({ resourceId: '1' }), expect.objectContaining({ resourceId: '2' })],
     undefined
   );
-  expect(screen.getAllByTestId('resource-card')).toHaveLength(2);
+  expect(screen.getAllByTestId('resource-card')).toHaveLength(1);
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
   exportContainer.remove();
 });
 
 it.each([false, true])(
-  'hides skill sharing and allows publication only in my personal skills: %s',
+  'hides skill sharing and preserves publication in available and my personal skills: %s',
   async (myResourcesOnly) => {
     renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly, enablePublishToEnterprise: true });
     const card = await screen.findByTestId('resource-card');
     const hiddenKeys = JSON.parse(card.getAttribute('data-hidden-menu-keys') || '[]');
     expect(hiddenKeys).toContain('share');
-    expect(hiddenKeys.includes('publishToEnterprise')).toBe(!myResourcesOnly);
+    expect(hiddenKeys).not.toContain('publishToEnterprise');
     expect(card).toHaveAttribute('data-enterprise-publication', 'true');
   }
 );
@@ -477,4 +645,211 @@ it('loads personal directories without a default employee and trusts their perso
   expect(queryWorkspacePersonalSkillList).toHaveBeenCalledWith({ keyword: '', personalWorkspace: true });
   const { queryInstalledResourceIds } = jest.requireMock('@/pages/manager/service/DigitalEmployeeMgr');
   expect(queryInstalledResourceIds).not.toHaveBeenCalled();
+});
+
+// 目录中有技能也不能补入“我可用的”，空状态应完全由资源库结果决定。
+it('shows an empty available skill list when only personal directory skills exist', async () => {
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({ data: { list: [], total: 0 } });
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'local', skillPath: '/workspace/skills/local', personalWorkspace: true }],
+  });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false });
+  expect(await screen.findByText('common.noData')).toBeInTheDocument();
+  expect(screen.queryByTestId('resource-card')).toBeNull();
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
+});
+
+// 模拟离开资源中心后员工目录新增技能，再返回中心；目录数据不能随员工上下文混入。
+it.each(['SKILL', 'KG_DOC', 'TOOL'])('queries favorites through the existing paged %s API', async (resourceType) => {
+  renderList({
+    resourceType,
+    activeTab: 'favorites',
+    myResourcesOnly: false,
+    enableFavorites: true,
+    searchValue: 'query',
+    catalogId: '20',
+  });
+  await screen.findByTestId('resource-card');
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(1);
+  expect(listResourceUseAuth).toHaveBeenCalledWith(
+    expect.objectContaining({
+      ownerType: 'enterprise',
+      includeFavorites: true,
+      favoritesOnly: true,
+      resourceStatus: '2',
+      keyword: 'query',
+      catalogId: '20',
+    })
+  );
+  expect(screen.getByTestId('resource-card')).toHaveAttribute('data-favorites-enabled', 'true');
+  expect(queryResourceDetail).not.toHaveBeenCalled();
+});
+
+it.each([
+  { activeTab: 'personal', myResourcesOnly: false },
+  { activeTab: 'enterprise', myResourcesOnly: true },
+])('keeps favorite queries out of other list scenes (%j)', async (scene) => {
+  renderList({ ...scene, enableFavorites: true });
+  await screen.findByTestId('resource-card');
+  expect((listResourceUseAuth as jest.Mock).mock.calls[0][0]).not.toHaveProperty('includeFavorites');
+  expect(screen.getByTestId('resource-card')).toHaveAttribute('data-favorites-enabled', 'false');
+});
+
+it('removes only the canceled favorite and fills the shifted page boundary without skipping', async () => {
+  const row = (id: number) => ({
+    resourceId: `${id}`,
+    resourceBizType: 'SKILL',
+    ownerType: 'enterprise',
+    favorited: true,
+    favoriteCount: 5,
+  });
+  (listResourceUseAuth as jest.Mock).mockResolvedValueOnce({
+    data: { list: Array.from({ length: 30 }, (_, i) => row(i + 1)), total: 31 },
+  });
+  renderList({ resourceType: 'SKILL', activeTab: 'favorites', myResourcesOnly: false, enableFavorites: true });
+  expect(await screen.findAllByTestId('resource-card')).toHaveLength(30);
+  act(() =>
+    window.dispatchEvent(
+      new CustomEvent('resourceFavoriteChanged', { detail: { resourceId: '1', favorited: false, favoriteCount: 4 } })
+    )
+  );
+  expect(screen.getAllByTestId('resource-card')).toHaveLength(29);
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(1);
+  (listResourceUseAuth as jest.Mock).mockResolvedValueOnce({
+    data: { list: Array.from({ length: 30 }, (_, i) => row(i + 2)), total: 30 },
+  });
+  // 30 张卡片各有多个操作按钮，直接定位分页入口，避免整表角色查询阻塞请求完成。
+  fireEvent.click(screen.getByTestId('resource-load-more'));
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
+  expect(listResourceUseAuth).toHaveBeenLastCalledWith(expect.objectContaining({ pageNum: 1, favoritesOnly: true }));
+  expect(screen.getAllByTestId('resource-card').map((card) => card.getAttribute('data-resource-id'))).toEqual(
+    Array.from({ length: 30 }, (_, i) => `${i + 2}`)
+  );
+});
+
+it.each(['enterprise', 'favorites'])(
+  'retries an in-flight %s request after a favorite cancellation',
+  async (activeTab) => {
+    const row = (id: string, favorited = true) => ({
+      resourceId: id,
+      ownerType: 'enterprise',
+      resourceBizType: 'SKILL',
+      favorited,
+      favoriteCount: favorited ? 1 : 0,
+    });
+    let finishOld!: (value: any) => void;
+    (listResourceUseAuth as jest.Mock)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOld = resolve;
+          })
+      )
+      .mockResolvedValueOnce({
+        data: {
+          list: activeTab === 'favorites' ? [row('2')] : [row('1', false), row('2')],
+          total: activeTab === 'favorites' ? 1 : 2,
+        },
+      });
+    renderList({
+      resourceType: 'SKILL',
+      activeTab,
+      myResourcesOnly: false,
+      enableFavorites: true,
+      searchValue: 'query',
+    });
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('resourceFavoriteChanged', {
+          detail: { resourceId: '1', favorited: false, favoriteCount: 0 },
+        })
+      );
+    });
+    await act(async () => {
+      finishOld({ data: { list: [row('1'), row('2')], total: 2 } });
+    });
+    await waitFor(() => expect(listResourceUseAuth).toHaveBeenCalledTimes(2));
+    expect(listResourceUseAuth).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyword: 'query', favoritesOnly: activeTab === 'favorites' })
+    );
+    const cards = screen.getAllByTestId('resource-card');
+    if (activeTab === 'favorites') {
+      expect(cards.map((card) => card.getAttribute('data-resource-id'))).toEqual(['2']);
+    } else {
+      expect(cards[0]).toHaveAttribute('data-favorited', 'false');
+    }
+  }
+);
+
+it('retries the current favorite boundary and stays loading until the fresh page completes', async () => {
+  const row = (id: number) => ({
+    resourceId: `${id}`,
+    resourceBizType: 'SKILL',
+    ownerType: 'enterprise',
+    favorited: true,
+  });
+  const first = Array.from({ length: 30 }, (_, index) => row(index + 1));
+  let finishOld!: (value: any) => void;
+  let finishFresh!: (value: any) => void;
+  (listResourceUseAuth as jest.Mock)
+    .mockResolvedValueOnce({ data: { list: first, total: 31 } })
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        })
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFresh = resolve;
+        })
+    );
+  renderList({ resourceType: 'SKILL', activeTab: 'favorites', myResourcesOnly: false, enableFavorites: true });
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
+  fireEvent.click(screen.getByTestId('resource-load-more'));
+  act(() => {
+    window.dispatchEvent(
+      new CustomEvent('resourceFavoriteChanged', {
+        detail: { resourceId: '1', favorited: false, favoriteCount: 0 },
+      })
+    );
+  });
+  await act(async () => {
+    finishOld({ data: { list: [row(31)], total: 31 } });
+  });
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(3);
+  expect(screen.getByText('common.loading')).toBeInTheDocument();
+  fireEvent.click(screen.getByTestId('resource-load-more'));
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(3);
+  await act(async () => {
+    finishFresh({ data: { list: [...first.slice(1), row(31)], total: 30 } });
+  });
+  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
+  expect((listResourceUseAuth as jest.Mock).mock.calls.map(([params]) => params.pageNum)).toEqual([1, 2, 1]);
+  expect(screen.getAllByTestId('resource-card').map((card) => card.getAttribute('data-resource-id'))).not.toContain(
+    '1'
+  );
+  expect(screen.queryByTestId('resource-load-more')).toBeNull();
+});
+
+it('keeps available skills resource-backed after leaving and reopening the center', async () => {
+  (listResourceUseAuth as jest.Mock).mockResolvedValue({
+    data: { list: [{ resourceId: 'center-skill', resourceBizType: 'SKILL' }], total: 1 },
+  });
+  const props = { resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: false };
+  renderList(props);
+  expect(await screen.findAllByTestId('resource-card')).toHaveLength(1);
+  cleanup();
+
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [{ skillName: 'weather-query', skillPath: '/skills/weather-query', personalWorkspace: true }],
+  });
+  renderList(props);
+  expect(await screen.findAllByTestId('resource-card')).toHaveLength(1);
+  expect(listResourceUseAuth).toHaveBeenCalledTimes(2);
+  expect(listResourceUseAuth).toHaveBeenLastCalledWith(
+    expect.objectContaining({ availableOnly: true, resourceBizTypeList: ['SKILL'], resourceStatus: '2' })
+  );
+  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
 });

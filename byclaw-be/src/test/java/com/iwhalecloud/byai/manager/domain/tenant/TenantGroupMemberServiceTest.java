@@ -77,6 +77,62 @@ class TenantGroupMemberServiceTest {
     }
 
     @Test
+    void initialAgentValidationMarksAccessibleResourcesForNodeCreate() {
+        SsResource resource = new SsResource();
+        resource.setResourceId(10000713L);
+        resource.setResourceBizType("DIG_EMPLOYEE");
+        resource.setResourceStatus(2);
+        resource.setResourceName("文章创作助手");
+        resource.setOwnerType("enterprise");
+        resource.setComAcctId(context.enterpriseId());
+        when(resources.findById(10000713L)).thenReturn(resource);
+
+        assertThat(service.initialAgents(context, List.of(10000713L))).containsExactly(
+            new TenantNodeModels.GroupMember("AGENT", "10000713", "MEMBER", "文章创作助手", true));
+    }
+
+    @Test
+    void initialUsersMustBeActiveMembersOfTheSelectedTenant() {
+        Users user = new Users();
+        user.setUserId(91L);
+        user.setUserName("member");
+        when(users.selectById(91L)).thenReturn(user);
+        when(tenantMemberships.selectActiveMembership(91L, context.enterpriseId()))
+            .thenReturn(new com.iwhalecloud.byai.manager.mapper.tenant.TenantMembershipRow());
+        assertThat(service.initialUsers(context, List.of(57L, 91L, 91L)))
+            .containsExactly(new TenantNodeModels.GroupMember("USER", "91", "MEMBER", "member"));
+        assertThatThrownBy(() -> service.initialUsers(context, List.of(92L)))
+            .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void anotherEnterpriseAgentIsNotAutomaticallyAuthorizedByEnterpriseOwnership() {
+        when(node.request(eq(context), eq("GET"), eq(path()), eq(null), any())).thenReturn(detail());
+        SsResource resource = new SsResource();
+        resource.setResourceBizType("DIG_EMPLOYEE");
+        resource.setResourceStatus(2);
+        resource.setOwnerType("enterprise");
+        resource.setComAcctId(context.enterpriseId() + 1);
+        when(resources.findById(10000713L)).thenReturn(resource);
+        GroupChatMemberRequest request = new GroupChatMemberRequest();
+        request.setType("AGENT");
+        request.setId(List.of(10000713L));
+        assertThatThrownBy(() -> service.invite(context, groupId, request)).isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void initialAgentValidationRejectsInaccessibleResources() {
+        SsResource resource = new SsResource();
+        resource.setResourceBizType("DIG_EMPLOYEE");
+        resource.setResourceStatus(2);
+        resource.setOwnerType("personal");
+        when(resources.findById(10000713L)).thenReturn(resource);
+
+        assertThatThrownBy(() -> service.initialAgents(context, List.of(10000713L)))
+            .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
     void privateAgentWithoutAccessCannotBeAdded() {
         when(node.request(eq(context), eq("GET"), eq(path()), eq(null), any())).thenReturn(detail());
         SsResource resource = new SsResource();

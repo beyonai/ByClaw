@@ -28,7 +28,7 @@ describe('available employee lifecycle configuration', () => {
 
   it('hides status filtering on both employee tabs', () => {
     const pageSource = fs.readFileSync(path.resolve(__dirname, '../index.tsx'), 'utf8');
-    expect(pageSource).toMatch(/\bhideStatusFilter\s+digitalEmployeeTypeFilter/);
+    expect(pageSource).not.toContain('<ResourceFilter');
     expect(pageSource).not.toContain('statusOptionsOverride=');
   });
 });

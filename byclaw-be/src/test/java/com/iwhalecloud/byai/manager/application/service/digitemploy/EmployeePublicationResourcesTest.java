@@ -2,7 +2,6 @@ package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
-import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.*;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
@@ -30,7 +29,6 @@ class EmployeePublicationResourcesTest {
     ResourceArtifactStorageService storage = mock(ResourceArtifactStorageService.class);
     AuthApplicationService auth = mock(AuthApplicationService.class);
     PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
-    EnterpriseInfoService enterprise = mock(EnterpriseInfoService.class);
     OrganizationService organizations = mock(OrganizationService.class);
     DigitalEmployeePublicationMapper publications = mock(DigitalEmployeePublicationMapper.class);
     ByaiSystemConfigService config = mock(ByaiSystemConfigService.class);
@@ -42,21 +40,36 @@ class EmployeePublicationResourcesTest {
 
     @BeforeEach void setup() {
         EmployeePublicationApplicationServiceTest.login("author", 7L, List.of());
-        when(enterprise.getEnterpriseId()).thenReturn(1L);
         when(organizations.getTopOrgList()).thenReturn(List.of(1L));
         when(provider.getIfAvailable()).thenReturn(bridge);
         when(bridge.check(any(), any(), any(), any())).thenReturn(new EmployeePublicationSkillBridge.CheckResult(true, List.of()));
         service = new EmployeePublicationResources(resources, skills, storage, auth, grants,
-            organizations, enterprise, publications, config, provider);
+            organizations, publications, config, provider);
         dto = new DigitalEmployeeDTO(); dto.setRelIds(List.of(20L)); dto.setRelTools(List.of()); dto.setRelResourceInfoList(List.of());
         resource = EmployeePublicationApplicationServiceTest.employee(20L, 7L);
         resource.setResourceBizType("SKILL"); resource.setResourceName("技能");
         when(resources.findById(20L)).thenReturn(resource);
         when(auth.hasResourceUsePermission(any(), eq(7L))).thenReturn(true);
+        when(auth.hasResourceAccessPermission(resource)).thenReturn(true);
     }
     @AfterEach void cleanup() {
         CurrentUserHolder.clearLoginInfo();
         org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
+    }
+    @Test void audienceUsesTheSourceAndLoginTenantWithoutInferringADefaultEnterprise() {
+        assertThat(service.audienceRoots(1L)).containsExactly(1L);
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(37L);
+        assertThat(service.audienceRoots(37L)).containsExactly(1L);
+        assertThatThrownBy(() -> service.audienceRoots(1L)).hasMessageContaining("当前登录企业");
+        assertThatThrownBy(() -> service.audienceRoots(null)).hasMessageContaining("当前登录企业");
+        CurrentUserHolder.clearLoginInfo();
+        assertThatThrownBy(() -> service.audienceRoots(37L)).hasMessageContaining("当前登录企业");
+    }
+    @Test void audienceGrantRejectsResourcesFromAnotherEnterprise() {
+        resource.setComAcctId(2L);
+        assertThatThrownBy(() -> service.grantAudience(resource, 1L)).hasMessageContaining("企业归属不一致");
+        verify(auth, never()).handleAuth(any());
+        verifyNoInteractions(organizations);
     }
     @Test void sharedPersonalSkillPreservesItsCreatorAndFreezesLocalizedCopyName() {
         resource.setCreateBy(9L);
@@ -133,6 +146,32 @@ class EmployeePublicationResourcesTest {
         assertThat(service.materialize(captured, 1L, 90L)).containsEntry(20L, null);
         verify(bridge, never()).publish(any(), any(), any(), any(), any());
     }
+    @ParameterizedTest @ValueSource(strings = {"personal", "personal_default"})
+    void manifestPersonalDependenciesExplainWhyTheSkillIsOmittedWithoutBlockingEmployeePublication(String owner) throws Exception {
+        readableSkill(); resource.setResourceName("tax-policy-knowledge-20261008");
+        var knowledge = EmployeePublicationApplicationServiceTest.employee(30L, 7L);
+        knowledge.setResourceBizType("KG_DOC"); knowledge.setResourceName("覃小迪的个人知识库"); knowledge.setOwnerType(owner);
+        var tool = EmployeePublicationApplicationServiceTest.employee(40L, 7L);
+        tool.setResourceBizType("MCP"); tool.setResourceName("个人税务查询工具"); tool.setOwnerType(owner);
+        when(resources.findById(30L)).thenReturn(knowledge); when(resources.findById(40L)).thenReturn(tool);
+        byte[] bytes = EmployeePublicationSkillServiceTest.zip(Map.of("tax-policy/SKILL.md", "# tax-policy",
+            "tax-policy/references/resourceMate.json", "{\"resources\":[{\"resourceId\":\"30\",\"resourceType\":\"KNOWLEDGE_BASE\"},{\"resourceId\":\"40\",\"resourceType\":\"TOOL\"}]}"));
+        when(storage.readWithinResourceRoot(anyString())).thenAnswer(invocation -> new ByteArrayInputStream(bytes));
+        var checker = new EmployeePublicationSkillService(resources, null, null, null, null, null, null, null);
+        when(bridge.check(any(), any(), any(), any())).thenAnswer(invocation -> checker.check(
+            invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2), invocation.getArgument(3)));
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        assertThat(captured).hasSize(1);
+        assertThat(captured.getFirst().getWarning()).isEqualTo(
+            "技能依赖了个人知识库「覃小迪的个人知识库」，因此本次不会随员工发布；技能依赖了个人工具「个人税务查询工具」，因此本次不会随员工发布");
+        assertThat(captured.getFirst().getAction()).isEqualTo("OMIT_RESOURCE");
+        assertThat(captured.getFirst().getError()).isNull();
+        var mapping = service.materialize(captured, 1L, 90L);
+        assertThat(mapping).containsEntry(20L, null);
+        service.applyPublishedResources(dto, captured, mapping);
+        assertThat(dto.getRelIds()).isEmpty();
+        verify(bridge, never()).publish(any(), any(), any(), any(), any());
+    }
     @Test void enterprisePermissionRestrictionIsWarningAndExistingGrantIsNotExpanded() {
         resource.setOwnerType("enterprise"); resource.setResourceBizType("KG_DOC");
         var captured = service.capture(dto, 7L, 1L, 100L);
@@ -186,6 +225,58 @@ class EmployeePublicationResourcesTest {
         service.validate(captured, 7L, 1L);
         assertThat(service.materialize(captured, 1L, 90L)).containsEntry(20L, null);
     }
+    @Test void visibleCrossTenantSkillKeepsItsIdentityButNeverEntersPublishedConfiguration() {
+        resource.setComAcctId(2L); resource.setResourceName("weather-query");
+        dto.setRelSkills(List.of(Map.of("resourceId", "20", "resourceName", "weather-query")));
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        var dependency = captured.getFirst();
+        assertThat(captured).hasSize(1);
+        assertThat(dependency.getLabel()).isEqualTo("weather-query");
+        assertThat(EmployeePublicationResources.describe(dependency).resourceType()).isEqualTo("SKILL");
+        assertThat(dependency.getWarning()).contains("原数字员工所属企业不一致");
+        assertThat(dependency.getResource()).isNull();
+        service.validate(captured, 7L, 1L);
+        var mapping = service.materialize(captured, 1L, 90L);
+        assertThat(mapping).containsEntry(20L, null);
+        assertThat(dto.getRelIds()).containsExactly(20L);
+        service.applyPublishedResources(dto, captured, mapping);
+        assertThat(dto.getRelIds()).isEmpty();
+        assertThat(dto.getRelSkills()).isEmpty();
+        verifyNoInteractions(storage, bridge);
+    }
+    @Test void unreadableCrossTenantResourceDoesNotExposeItsNameOrType() {
+        resource.setComAcctId(2L); resource.setResourceName("weather-query");
+        when(auth.hasResourceAccessPermission(resource)).thenReturn(false);
+        var dependency = service.capture(dto, 7L, 1L, 100L).getFirst();
+        assertThat(dependency.getLabel()).isEqualTo("关联资源 20");
+        assertThat(dependency.getResource()).isNull();
+        assertThat(EmployeePublicationResources.describe(dependency).resourceType()).isEqualTo("UNKNOWN");
+        assertThat(service.materialize(List.of(dependency), 1L, 90L)).containsEntry(20L, null);
+    }
+    @Test void legacyDisplayRecoveryIsReadOnlyAndRechecksEachViewersResourcePermission() {
+        resource.setComAcctId(2L); resource.setResourceName("weather-query");
+        var dependency = new EmployeePublicationResources.Dependency();
+        dependency.setTargetId(20L); dependency.setAction("OMIT_RESOURCE");
+        dependency.setLabel("其他企业资源"); dependency.setWarning("资源不属于当前企业");
+        service.refreshDisplayMetadata(List.of(dependency));
+        assertThat(dependency.getLabel()).isEqualTo("weather-query");
+        assertThat(dependency.getResourceType()).isEqualTo("SKILL");
+        assertThat(dependency.getWarning()).contains("原数字员工所属企业不一致");
+        assertThat(dependency.getAction()).isEqualTo("OMIT_RESOURCE");
+        assertThat(dependency.getResource()).isNull();
+        assertThat(dependency.getTargetId()).isEqualTo(20L);
+        when(auth.hasResourceAccessPermission(resource)).thenReturn(false);
+        service.refreshDisplayMetadata(List.of(dependency));
+        assertThat(dependency.getLabel()).isEqualTo("关联资源 20");
+        assertThat(dependency.getResourceType()).isNull();
+        assertThat(service.materialize(List.of(dependency), 1L, 90L)).containsEntry(20L, null);
+        when(resources.findById(20L)).thenThrow(new IllegalStateException("storage offline"));
+        service.refreshDisplayMetadata(List.of(dependency));
+        assertThat(dependency.getLabel()).isEqualTo("关联资源 20");
+        assertThat(dependency.getResourceType()).isNull();
+        assertThat(dependency.getWarning()).contains("原数字员工所属企业不一致");
+        verifyNoInteractions(storage, bridge);
+    }
     @Test void lostSnapshotNeverFallsBackToPrivateSkill() {
         readableSkill(); var captured = service.capture(dto, 7L, 1L, 100L);
         when(storage.readWithinResourceRoot(anyString())).thenReturn(null);
@@ -199,10 +290,38 @@ class EmployeePublicationResourcesTest {
         assertThat(captured.getFirst().getWarning()).contains("尚未接入");
         assertThat(service.materialize(captured, 1L, 90L)).containsEntry(20L, null);
     }
-    @Test void invalidStoragePathDoesNotReadOutsideResourceRoot() {
-        readableSkill(); skills.findById(20L).setSkillUrl("../../secrets.zip");
+    @ParameterizedTest @ValueSource(strings = {
+        "skill/original.zip", "/resource/skill/original.zip", "resource/skill/original.zip",
+        "/byclaw/resource/skill/original.zip", "byclaw/resource/skill/original.zip",
+        "  /byclaw/resource/skill/original.zip  ", "\\byclaw\\resource\\skill\\original.zip"
+    })
+    void registeredSkillPathsUseTheSameResourceRelativeFileAndStillRequireA(String path) {
+        readableSkill(); skills.findById(20L).setSkillUrl(path);
+        var dependency = service.capture(dto, 7L, 1L, 100L).getFirst();
+        assertThat(dependency.getAction()).isEqualTo("COPY_SKILL");
+        verify(storage).readWithinResourceRoot("skill/original.zip");
+        verify(bridge).check(eq(resource), any(), eq(new byte[]{1,2,3}), any());
+        verify(bridge, never()).publish(any(), any(), any(), any(), any());
+    }
+    @ParameterizedTest @ValueSource(strings = {
+        "../../secrets.zip", "/byclaw/resource/skill/../secrets.zip", "/tmp/secrets.zip",
+        "https://example.com/skill.zip", "file:/tmp/skill.zip", "C:\\skill.zip",
+        "//resource/skill/original.zip", "/resource/", "/byclaw/resource/"
+    })
+    void invalidStoragePathDoesNotReadOutsideResourceRoot(String path) {
+        readableSkill(); skills.findById(20L).setSkillUrl(path);
         assertThat(service.capture(dto, 7L, 1L, 100L).getFirst().getAction()).isEqualTo("OMIT_RESOURCE");
         verifyNoInteractions(storage);
+        verifyNoInteractions(bridge);
+    }
+    @Test void recognizedSkillPathStillOmitsAMissingFileWithoutBlockingEmployeePublication() {
+        readableSkill(); skills.findById(20L).setSkillUrl("/byclaw/resource/skill/original.zip");
+        when(storage.readWithinResourceRoot("skill/original.zip")).thenReturn(null);
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        assertThat(captured.getFirst().getWarning()).isEqualTo("技能文件不存在");
+        assertThat(captured.getFirst().getError()).isNull();
+        assertThat(service.materialize(captured, 1L, 90L)).containsEntry(20L, null);
+        verifyNoInteractions(bridge);
     }
     @Test void failedBIsNotReportedAsSuccessfulPublication() {
         readableSkill(); var captured = service.capture(dto, 7L, 1L, 100L);

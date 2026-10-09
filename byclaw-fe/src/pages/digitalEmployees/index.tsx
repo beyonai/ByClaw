@@ -2,12 +2,13 @@ import { hasAnyUserRole } from '@/utils/userRole';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { PlusOutlined, SearchOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { useDispatch, useIntl, useNavigate, useSearchParams, useSelector } from '@umijs/max';
-import { Badge, Button, Dropdown, Input, Menu, Modal, Popconfirm, Space, Spin, Tabs, Typography, message } from 'antd';
+import { Button, Dropdown, Input, Menu, Modal, Popconfirm, Space, Spin, Tabs, Typography, message } from 'antd';
 import { trim, debounce } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import AllDigitalEmployees from './components/AllDigitalEmployees';
 import EmployeeTypeTag from './components/EmployeeTypeTag';
-import ResourceFilter, { IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
+import { type IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
+import ResourceQuickFilters from '@/components/Resources/components/ResourceQuickFilters';
 import { buildDigitalEmployeeFilterParam } from './filterParams';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getAgentChatAvatar } from '@/utils/agent';
@@ -16,8 +17,8 @@ import AntdIcon from '@/components/AntdIcon';
 import { getFileUrl } from '@/utils/file';
 import { isAdminVip } from '@/utils/auth';
 import type { UserState } from '@/models/common/user';
-import useDigitalEmployeeAuditCount from '@/hooks/useDigitalEmployeeAuditCount';
 import { applyResourceUse } from '@/pages/manager/service/resources';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import EmployFormModal from '@/pages/manager/pages/digitalEmployeeMgr/components/EmployFormModal';
 import MdPreview from '@/components/Preview/Md';
 
@@ -63,13 +64,31 @@ const DigitalEmployeesPage: React.FC = () => {
   const dispatch = useDispatch();
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { count: auditCount, rows: auditRows } = useDigitalEmployeeAuditCount();
 
   const [isLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(() => {
     const tabFromUrl = searchParams.get('tab');
-    return tabFromUrl === 'official' ? 'official' : 'available';
+    return tabFromUrl === 'official' || tabFromUrl === 'favorites' ? tabFromUrl : 'available';
   });
+  const [brandVersion, setBrandVersion] = useState<string | null>(null);
+  const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
+  const favoritesEnabled = brandVersion === 'commercial';
+  useEffect(() => {
+    let active = true;
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((response: any) => {
+        if (active) setBrandVersion(response?.paramValue || 'openSource');
+      })
+      .catch(() => {
+        if (active) setBrandVersion('openSource');
+      })
+      .finally(() => {
+        if (active) setBrandVersionLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const [keywords, setKeywords] = useState<Record<string, string>>({});
   const defaultFilterParam = getDefaultParams();
   const [filterParamsByTab, setFilterParamsByTab] = useState<Record<string, IOnOkParams>>({
@@ -79,6 +98,7 @@ const DigitalEmployeesPage: React.FC = () => {
   // 我可用的与官方推荐都使用合并列表组件，统一分页后再按类型分块展示。
   const AvailableRef = React.useRef<any>(null);
   const OfficialEmployeeRef = React.useRef<any>(null);
+  const FavoritesRef = React.useRef<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [enterpriseCreateOpen, setEnterpriseCreateOpen] = useState(false);
   const dropdownParam = filterParamsByTab[activeTab] || defaultFilterParam;
@@ -116,10 +136,19 @@ const DigitalEmployeesPage: React.FC = () => {
     const tabFromUrl = searchParams.get('tab');
     const legacyTabMap: Record<string, string> = { personal: 'available', enterprise: 'official', group: 'official' };
     const nextTab = legacyTabMap[tabFromUrl || ''] || tabFromUrl;
-    if ((nextTab === 'available' || nextTab === 'official') && nextTab !== activeTab) {
+    if ((nextTab === 'available' || nextTab === 'official' || nextTab === 'favorites') && nextTab !== activeTab) {
       setActiveTab(nextTab);
     }
   }, [activeTab, searchParams]);
+
+  useEffect(() => {
+    if (brandVersionLoaded && !favoritesEnabled && activeTab === 'favorites') {
+      const next = new URLSearchParams(searchParams);
+      next.set('tab', 'available');
+      setSearchParams(next);
+      setActiveTab('available');
+    }
+  }, [activeTab, brandVersionLoaded, favoritesEnabled, searchParams, setSearchParams]);
 
   useEffect(() => {
     const nextSearchParams = new URLSearchParams(searchParams);
@@ -131,11 +160,25 @@ const DigitalEmployeesPage: React.FC = () => {
 
   const getSearch = React.useCallback(
     debounce((otherParam?: any) => {
-      const refs = activeTab === 'available' ? [AvailableRef] : [OfficialEmployeeRef];
+      const refs =
+        activeTab === 'available' ? [AvailableRef] : activeTab === 'favorites' ? [FavoritesRef] : [OfficialEmployeeRef];
       refs.forEach((item) => item.current?.getSearch?.(keywords[activeTab] || '', otherParam || dropdownParam));
     }, 500),
     [activeTab, dropdownParam, keywords]
   );
+
+  // 页签或条件更新后取消旧的延迟搜索，避免它覆盖快捷筛选刚提交的新条件。
+  useEffect(() => () => getSearch.cancel(), [getSearch]);
+
+  const handleQuickFilterChange = (param: Partial<IOnOkParams>) => {
+    const nextFilterParam = { ...dropdownParam, ...param };
+    setFilterParamsByTab((current) => ({ ...current, [activeTab]: nextFilterParam }));
+    getSearch.cancel();
+    const target =
+      activeTab === 'available' ? AvailableRef : activeTab === 'favorites' ? FavoritesRef : OfficialEmployeeRef;
+    // 快捷筛选无需确认，复用列表搜索入口并从第一页刷新，同时保留当前关键字。
+    target.current?.getSearch?.(keywords[activeTab] || '', nextFilterParam);
+  };
 
   useEffect(() => {
     const handleRefreshList = () => {
@@ -155,35 +198,22 @@ const DigitalEmployeesPage: React.FC = () => {
 
   // 创建入口随页签区分归属；实际创建操作仍由后端校验权限。
   const createMenuItems =
-    activeTab === 'available'
-      ? [
-        { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
-        { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
-      ]
-      : canCreateEnterprise
+    activeTab === 'favorites'
+      ? []
+      : activeTab === 'available'
         ? [
-          { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
-          { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) },
+          { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
+          { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
         ]
-        : [];
+        : canCreateEnterprise
+          ? [
+            { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
+            { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) },
+          ]
+          : [];
 
   const tabBarExtraContent = (
     <Space className={styles.toolbar}>
-      <ResourceFilter
-        className={styles.toolbarFilter}
-        resourceType="DIG_EMPLOYEE"
-        // 按一级 tab 重建筛选组件，加载该 tab 上次保存的筛选条件。
-        key={activeTab}
-        onOk={(param: any) => {
-          setFilterParamsByTab((current) => ({ ...current, [activeTab]: param }));
-          getSearch(param);
-        }}
-        defaultParam={dropdownParam}
-        activeTab={activeTab}
-        // 两个页签都只展示已上架员工，不再提供状态筛选。
-        hideStatusFilter
-        digitalEmployeeTypeFilter
-      />
       <Input
         suffix={
           <SearchOutlined
@@ -231,19 +261,9 @@ const DigitalEmployeesPage: React.FC = () => {
           </Button>
         </Dropdown>
       )}
-      <Badge count={auditCount} size="small" offset={[-2, 2]}>
-        <Button
-          icon={<UnorderedListOutlined />}
-          onClick={() => {
-            // 复用首页已加载的审核数据，进入“我的员工”后不再重复请求待审核接口。
-            navigate('/myEmployees', {
-              state: { pendingAuditRows: auditRows },
-            });
-          }}
-        >
-          {intl.formatMessage({ id: 'digitalEmployees.myEmployees' })}
-        </Button>
-      </Badge>
+      <Button icon={<UnorderedListOutlined />} onClick={() => navigate('/myEmployees')}>
+        {intl.formatMessage({ id: 'digitalEmployees.myEmployees' })}
+      </Button>
     </Space>
   );
 
@@ -258,6 +278,18 @@ const DigitalEmployeesPage: React.FC = () => {
           className={classnames(styles.tabs, 'full-height')}
           activeKey={activeTab}
           tabBarExtraContent={tabBarExtraContent}
+          renderTabBar={(props, DefaultTabBar) => (
+            <>
+              <DefaultTabBar {...props} />
+              <ResourceQuickFilters
+                className={styles.quickFilters}
+                resourceType="DIG_EMPLOYEE"
+                activeTab={activeTab}
+                value={dropdownParam}
+                onChange={handleQuickFilterChange}
+              />
+            </>
+          )}
           onChange={(key) => {
             const nextTab = key;
             const nextSearchParams = new URLSearchParams(searchParams);
@@ -269,6 +301,10 @@ const DigitalEmployeesPage: React.FC = () => {
             nextSearchParams.set('tab', nextTab);
             setActiveTab(nextTab);
             setSearchParams(nextSearchParams);
+            if (favoritesEnabled && ['official', 'favorites'].includes(nextTab)) {
+              const target = nextTab === 'favorites' ? FavoritesRef : OfficialEmployeeRef;
+              target.current?.getSearch?.(keywords[nextTab] || '', nextFilterParam);
+            }
           }}
         >
           <Tabs.TabPane tab={intl.formatMessage({ id: 'digitalEmployees.available' })} key="available">
@@ -276,6 +312,7 @@ const DigitalEmployeesPage: React.FC = () => {
               <AllDigitalEmployees
                 mode="all"
                 source="available"
+                dropdownParam={filterParamsByTab.available}
                 ref={AvailableRef}
                 onEmployeeClick={setPreview}
                 onChatEmployee={handleEmployeeChat}
@@ -291,6 +328,8 @@ const DigitalEmployeesPage: React.FC = () => {
               <AllDigitalEmployees
                 mode="all"
                 source="official"
+                dropdownParam={filterParamsByTab.official}
+                enableFavorites={favoritesEnabled}
                 ref={OfficialEmployeeRef}
                 onEmployeeClick={setPreview}
                 onChatEmployee={handleEmployeeChat}
@@ -301,6 +340,25 @@ const DigitalEmployeesPage: React.FC = () => {
               />
             </div>
           </Tabs.TabPane>
+          {favoritesEnabled && (
+            <Tabs.TabPane tab={intl.formatMessage({ id: 'resource.myFavorites' })} key="favorites">
+              <div id="favoriteDigitalEmployeesScroller" className={styles.tabContent}>
+                <AllDigitalEmployees
+                  mode="all"
+                  source="favorites"
+                  dropdownParam={filterParamsByTab.favorites}
+                  enableFavorites
+                  ref={FavoritesRef}
+                  onEmployeeClick={setPreview}
+                  onChatEmployee={handleEmployeeChat}
+                  hideCategories
+                  buildFilterParam={buildDigitalEmployeeFilterParam}
+                  compactLayout
+                  scrollableTarget="favoriteDigitalEmployeesScroller"
+                />
+              </div>
+            </Tabs.TabPane>
+          )}
         </Tabs>
       </Spin>
       {/* eslint-disable-next-line @typescript-eslint/no-use-before-define */}

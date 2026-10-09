@@ -249,6 +249,7 @@ export interface ResourceImportItem {
   resourceId?: string; // 资源ID
   updated: boolean; // 是否为更新操作
   success: boolean; // 是否导入成功
+  reviewRequired?: boolean; // 导入已接收，审核通过后才上架
   message?: string; // 导入消息/错误信息
   diffSummary?: string; // 差异摘要
   diffDetails?: ResourceImportDiffItem[]; // 差异详情列表
@@ -644,6 +645,7 @@ export interface ResourceOperationPermissions {
   canOnShelf?: boolean; // 是否可上架
   canOffShelf?: boolean; // 是否可下架
   canPublishToEnterprise?: boolean; // 是否可将个人技能复制上架到企业
+  skillPublication?: SkillPublicationSummary; // 当前发布快照，包含待审核及驳回结果
   useApplyPending?: boolean; // 使用申请是否待审核
 }
 
@@ -658,6 +660,20 @@ export interface EnterpriseSkillPublishResult {
   };
   alreadyExists: boolean;
 }
+
+export interface SkillPublicationSummary {
+  resourceId: string;
+  resourceName: string;
+  resourceStatus: number;
+}
+
+/** 只读查询发布状态，不能通过重复调用发布接口来查看结果。 */
+export const getSkillPublicationPermissions = (resourceId: string) =>
+  POST<ResourceOperationPermissions>(
+    '/byaiService/auth/privilegeGrant/queryResourceOperationPermissions',
+    { resourceId },
+    { responseCfg: { hideErrorTips: true } }
+  );
 
 /** 独立复制接口，不使用会按技能编码覆盖原资源的导入接口。 */
 export const publishSkillToEnterprise = (resourceId: string) =>
@@ -775,10 +791,16 @@ export interface WorkspaceSkillCenterStatus {
 }
 
 /** 员工目录同步使用当前登录身份；目标归属与匹配范围由后端解析。 */
-export const queryWorkspaceSkillCenterStatus = (params: { resourceId: string; skillPath: string }) =>
+export interface WorkspaceSkillCenterParams {
+  resourceId: string;
+  skillPath?: string;
+  targetResourceId?: string | number;
+}
+
+export const queryWorkspaceSkillCenterStatus = (params: WorkspaceSkillCenterParams) =>
   POST<WorkspaceSkillCenterStatus>('/byaiService/tool/queryWorkspaceSkillCenterStatus', params);
 
-export const syncWorkspaceSkillToCenter = (params: { resourceId: string; skillPath: string; revision: string }) =>
+export const syncWorkspaceSkillToCenter = (params: WorkspaceSkillCenterParams & { revision: string }) =>
   POST<{ resourceId: string | number; action: 'INSTALL' | 'UPDATE'; sourceDeleted: boolean }>(
     '/byaiService/tool/syncWorkspaceSkillToCenter',
     params

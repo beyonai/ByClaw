@@ -23,7 +23,7 @@ import type { UploadFileRef } from './components/UploadFile';
 import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig';
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
-import { getLastMentionedDigitalEmployeeId } from './utils/mention';
+import { getLastMentionedDigitalEmployeeId, isEmployeeGroupChat } from './utils/mention';
 import { getInputResourceProject } from './utils/resourceProject';
 import MentionPopover from './RichInput/mentionPopover';
 import { getResourcePopoverAdapter } from './RichInput/mentionPopover/resourcePopoverAdapter';
@@ -855,6 +855,14 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           agentId={this.getQuoteAgentId()}
           resourceAgentIds={this.getResourceAgentIds()}
           excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
+          hideEmployeeResources={isEmployeeGroupChat({
+            resourceList: this.getCurrentResourceList(),
+            agentId: this.props.globalContext.agentId,
+            agentType: this.props.myAgentType,
+            agentInfo: this.props.globalContext.agentInfo,
+            employeesList: this.props.employeesList,
+            defaultDigEmployeeId: this.props.defaultDigEmployeeId || (this.props.userInfo as any)?.defaultDigEmployeeId,
+          })}
           inputText={this.state.toolsPopoverKeyword}
           activeTabKey={this.state.activeToolMenuKey}
           {...getResourcePopoverAdapter({

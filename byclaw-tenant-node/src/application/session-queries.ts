@@ -10,6 +10,7 @@ export interface SessionRepository {
     keyword: string,
     types: string[],
     projectId?: string,
+    agentId?: string,
   ): Promise<unknown>;
 }
 /** 个人会话查询入口；校验分页及类型，按当前用户查询；私有任务过滤由仓储完成。 */
@@ -18,7 +19,8 @@ export class SessionQueries {
   async list(actor: string, input: Record<string, any>) {
     if (
       Object.keys(input).some(
-        (key) => !["pageNum", "pageSize", "keyword", "sessionTypes", "projectId"].includes(key),
+        (key) =>
+          !["pageNum", "pageSize", "keyword", "sessionTypes", "projectId", "agentId"].includes(key),
       )
     )
       throw new DomainError("INVALID_QUERY");
@@ -38,6 +40,8 @@ export class SessionQueries {
         : input.projectId === "-1" || input.projectId === -1
           ? "-1"
           : requireId(input.projectId);
+    const agentId = input.agentId == null ? undefined : requireId(input.agentId);
+    if (agentId) return this.repository.list(actor, page, size, keyword, types, projectId, agentId);
     return projectId
       ? this.repository.list(actor, page, size, keyword, types, projectId)
       : this.repository.list(actor, page, size, keyword, types);

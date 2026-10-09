@@ -3,6 +3,7 @@ import {
   buildResourceListFilterParam,
   filterResourceAuditRowsByType,
   getBaseResourceBizTypeList,
+  getResourceQueryStatus,
   isAllResourceBizTypeSelected,
   isSkillMarketplaceInstalledMessage,
   normalizeResourceBizTypeList,
@@ -12,6 +13,13 @@ const ALL_RESOURCE_BIZ_TYPE_VALUES = ['MCP', 'TOOLKIT', 'AGENT'];
 const ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES = ['KG_DOC', 'KG_TERM', 'KG_QA'];
 
 describe('components/Resources utils', () => {
+  it.each(['4', '5'])('allows review status %s only in my enterprise skills', (status) => {
+    expect(getResourceQueryStatus('enterprise', true, status, 'SKILL')).toBe(status);
+    expect(getResourceQueryStatus('enterprise', false, status, 'SKILL')).toBe('2');
+    expect(getResourceQueryStatus('personal', true, status, 'SKILL')).toBe('2');
+    expect(getResourceQueryStatus('enterprise', true, status, 'TOOL')).toBe('2');
+  });
+
   it('adds the current Beyond-Token and parent origin to the skill marketplace URL', () => {
     const url = new URL(
       buildSkillMarketplaceUrl(

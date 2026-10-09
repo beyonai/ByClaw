@@ -18,6 +18,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.ser.std.NumberSerializers;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandHashBody;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandPayload;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandRequest;
@@ -32,7 +34,6 @@ import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import jakarta.annotation.PreDestroy;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -50,10 +51,6 @@ public class TenantNodeClient {
     private final ObjectMapper mapper;
     private final DiscoveryClient discovery;
     private final String internalToken;
-    @Value("${BYCLAW_TENANT_NODE_HOST_OVERRIDE:}")
-    private String localHostOverride;
-    @Value("${byclaw.sandbox.opensandbox.base-url}")
-    private String sandboxBaseUrl;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
     public TenantNodeClient(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
@@ -62,7 +59,7 @@ public class TenantNodeClient {
                             String internalToken) {
         this.tenantMapper = tenantMapper;
         this.sandboxMapper = sandboxMapper;
-        this.mapper = mapper;
+        this.mapper = protocolMapper(mapper);
         this.discovery = new DiscoveryClient(redisClient, 5);
         this.internalToken = internalToken;
     }
@@ -165,9 +162,19 @@ public class TenantNodeClient {
     }
 
     static String commandHash(ObjectMapper mapper, CommandHashBody body) throws Exception {
-        ObjectMapper canonical = mapper.copy().configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
+        ObjectMapper canonical = protocolMapper(mapper).configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
             .digest(canonical.writeValueAsString(body).getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /** The public API stringifies IDs; the Node protocol requires numeric versions and pagination. */
+    static ObjectMapper protocolMapper(ObjectMapper mapper) {
+        SimpleModule numbers = new SimpleModule("tenant-node-numbers");
+        numbers.addSerializer(Integer.class, new NumberSerializers.IntegerSerializer(Integer.class));
+        numbers.addSerializer(Integer.TYPE, new NumberSerializers.IntegerSerializer(Integer.TYPE));
+        numbers.addSerializer(Long.class, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
+        numbers.addSerializer(Long.TYPE, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
+        return mapper.copy().registerModule(numbers);
     }
 
     private String dbRecordId(long enterpriseId) {
@@ -182,30 +189,21 @@ public class TenantNodeClient {
                          SsSandboxRecord record) {
         String name = "TENANT_DATA_" + context.enterpriseId();
         List<ServiceInstance> instances = discovery.getInstances(name);
-        URI endpoint = registeredEndpoint(name, context.enterpriseId(), generation, dbRecordId, instances);
-        URI proxy = proxyEndpoint(endpoint, record.getSandboxId(), record.getEndpoint(), sandboxBaseUrl);
-        if (!proxy.equals(endpoint)) return proxy;
-        if ("127.0.0.1".equals(localHostOverride)
-            && "host.containers.internal".equals(endpoint.getHost())) {
-            return URI.create("http://127.0.0.1:" + endpoint.getPort() + endpoint.getPath());
-        }
-        return endpoint;
+        URI registered = registeredEndpoint(name, context.enterpriseId(), generation, dbRecordId, instances);
+        return containerEndpoint(registered, record.getSandboxId());
     }
 
-    static URI proxyEndpoint(URI registered, String sandboxId, String sandboxEndpoint,
-                             String sandboxBaseUrl) {
-        if (sandboxEndpoint == null || !sandboxEndpoint.startsWith("/v1/sandboxes/")) return registered;
-        if (sandboxId == null || !sandboxId.matches("[A-Za-z0-9-]{1,128}")
-            || !sandboxEndpoint.equals("/v1/sandboxes/" + sandboxId + "/proxy/" + registered.getPort())) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant Node sandbox proxy mismatch");
+    static URI containerEndpoint(URI registered, String sandboxId) {
+        try {
+            if (sandboxId == null || !UUID.fromString(sandboxId).toString().equals(sandboxId)) {
+                throw new IllegalArgumentException("invalid sandbox ID");
+            }
         }
-        URI base = URI.create(sandboxBaseUrl);
-        if (!("http".equals(base.getScheme()) || "https".equals(base.getScheme()))
-            || base.getHost() == null || base.getUserInfo() != null
-            || base.getQuery() != null || base.getFragment() != null) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant Node proxy is unavailable");
+        catch (IllegalArgumentException error) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "tenant Node sandbox identity is invalid");
         }
-        return URI.create(sandboxBaseUrl.replaceAll("/+$", "") + sandboxEndpoint);
+        return URI.create("http://sandbox-" + sandboxId + ":" + registered.getPort());
     }
 
     static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,

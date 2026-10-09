@@ -126,6 +126,25 @@ describe("group write permission", () => {
     expect(sql).toContain("project_id");
     expect(parameters).toContain("-1");
   });
+  it("retains the selected agent and project when creating a tenant chat", async () => {
+    const query = vi.fn(async () => []);
+    const ctx = new CommandContext(
+      { query },
+      command({
+        payload: {
+          sessionName: "project chat",
+          sessionType: "h_as",
+          agentId: "42",
+          projectId: "50",
+        },
+      }),
+    );
+    await createSession(ctx);
+    const [sql, parameters] = query.mock.calls.at(-1)!;
+    expect(sql).toContain("object_id");
+    expect(parameters).toContain("42");
+    expect(parameters).toContain("50");
+  });
   it("rejects a group with two owners", async () => {
     const s = context(
       "CREATE_GROUP",
@@ -141,6 +160,20 @@ describe("group write permission", () => {
     );
     vi.mocked(s.ctx.session).mockResolvedValue(null);
     await expect(createSession(s.ctx)).rejects.toThrow("INVALID_GROUP_MEMBERS");
+  });
+  it("persists a new group's goal in the create transaction", async () => {
+    const s = context("CREATE_GROUP", {
+      sessionName: "group",
+      sessionContent: "shared goal",
+      projectId: "50",
+      members: [{ memObjType: "USER", memObjId: "20", userRole: "OWNER" }],
+    });
+    vi.mocked(s.ctx.session).mockResolvedValue(null);
+    s.query.mockImplementation(async (sql) => (sql.includes("nextval") ? [{ id: "1" }] : []));
+    await createSession(s.ctx);
+    const [sql, parameters] = s.query.mock.calls[0]!;
+    expect(sql).toContain("session_content");
+    expect(parameters).toContain("shared goal");
   });
   it("allows pending task writes only to the initiator", async () => {
     const s = context("SAVE_PENDING_PUBLICATION", { taskSessionId: "40" });

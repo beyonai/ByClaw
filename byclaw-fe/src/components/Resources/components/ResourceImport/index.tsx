@@ -203,7 +203,8 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
     items
       .map((item) => {
         const catalogSuffix = item.catalogName ? `（${item.catalogName}）` : '';
-        return `${item.resourceCode}：${item.resourceName}${catalogSuffix}`;
+        const reviewSuffix = item.reviewRequired ? `（${intl.formatMessage({ id: 'resourceStatus.reviewing' })}）` : '';
+        return `${item.resourceCode}：${item.resourceName}${catalogSuffix}${reviewSuffix}`;
       })
       .join('、');
 
@@ -228,7 +229,13 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
         title: intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmTitle' }),
         content: (
           <div>
-            <div>{intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmDesc' })}</div>
+            <div>
+              {intl.formatMessage({
+                id: updatedItems.some((item) => item.reviewRequired)
+                  ? 'resource.import.skillReviewOverwriteConfirmDesc'
+                  : 'resource.import.skillOverwriteConfirmDesc',
+              })}
+            </div>
             <div className={styles.confirmConflictList}>{buildRangeText(updatedItems)}</div>
           </div>
         ),
@@ -350,6 +357,12 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const secondaryButtonText = isImportSummaryMode ? cancelText : currentStep === 'curlConfig' ? backText : cancelText;
   const secondaryButtonAction = isImportSummaryMode ? onCancel : currentStep === 'curlConfig' ? handleBack : onCancel;
   const failedCount = importResult?.failed || failedItems.length;
+  // 预检查结果不代表导入完成；审核统计只使用正式导入接口返回的结果。
+  const importedItems = completedImportResult?.items || [];
+  const pendingReviewCount = importedItems.filter((item) => item.success && item.reviewRequired).length;
+  const publishedCount = importedItems.filter((item) => item.success && !item.reviewRequired).length;
+  const showSkillPublicationSummary =
+    resourceType === 'SKILL' && !!completedImportResult && (activeTab === 'enterprise' || pendingReviewCount > 0);
   const failedSummaryDescription = failedItems.length
     ? intl.formatMessage({ id: 'resource.import.failedSummary' }, { failedCount })
     : undefined;
@@ -392,13 +405,23 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
             type={failedItems.length ? 'warning' : 'success'}
             showIcon
             message={intl.formatMessage(
-              { id: 'resource.import.summary' },
+              {
+                id: showSkillPublicationSummary ? 'resource.import.skillPublicationSummary' : 'resource.import.summary',
+              },
               {
                 createdCount: importResult?.createdCount || 0,
                 updatedCount: importResult?.updatedCount || 0,
+                publishedCount,
+                pendingReviewCount,
+                failedCount,
               }
             )}
-            description={failedSummaryDescription}
+            description={[
+              pendingReviewCount > 0 ? intl.formatMessage({ id: 'resource.import.skillReviewHint' }) : '',
+              failedSummaryDescription,
+            ]
+              .filter(Boolean)
+              .join(' ')}
           />
           <div className={styles.rangeBlock}>
             <div className={styles.rangeTitle}>{intl.formatMessage({ id: 'resource.import.createdRange' })}</div>

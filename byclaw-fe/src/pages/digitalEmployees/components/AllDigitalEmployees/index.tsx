@@ -1,4 +1,5 @@
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
+import { RESOURCE_FAVORITE_CHANGED_EVENT } from '@/service/resourceFavorites';
 // tslint:disable:ordered-imports
 import React, { useEffect, useMemo, useReducer, useState } from 'react';
 // @ts-ignore
@@ -35,7 +36,6 @@ import useGlobal from '@/hooks/useGlobal';
 import { getAgentChatAvatar } from '@/utils/agent';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
-import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import type { IOnOkParams } from '@/components/Resources/components/ResourceFilter';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
@@ -82,10 +82,11 @@ function AllDigitalEmployees(
     buildFilterParam?: (
       activeTab: string,
       filterParam?: IOnOkParams,
-      source?: 'official' | 'available'
+      source?: 'official' | 'available' | 'favorites'
     ) => Record<string, any>;
     mode?: 'employee' | 'group' | 'all';
-    source?: 'official' | 'available';
+    source?: 'official' | 'available' | 'favorites';
+    enableFavorites?: boolean;
     onEmployeeClick?: (employee: IAgentCache) => void;
     onChatEmployee?: (employee: IAgentCache) => void;
     hideCategories?: boolean;
@@ -100,6 +101,7 @@ function AllDigitalEmployees(
     buildFilterParam,
     mode = 'employee',
     source = 'official',
+    enableFavorites = false,
     onEmployeeClick,
     onChatEmployee: onChatEmployeeProp,
     hideCategories = false,
@@ -108,6 +110,8 @@ function AllDigitalEmployees(
   } = props;
   const isEmployeeGroup = mode === 'group';
   const isAllEmployees = mode === 'all';
+  const favoriteMode = enableFavorites && source !== 'available';
+  const showSections = isAllEmployees && !favoriteMode;
   const listTabKey = isEmployeeGroup ? 'group' : 'enterprise';
   const catalogSearchParamKey = isEmployeeGroup ? 'groupCatalogId' : 'enterpriseCatalogId';
   const scrollerId = isEmployeeGroup ? 'allDigitalEmployeeGroupsScroller' : 'allDigitalEmployeesScroller';
@@ -129,15 +133,19 @@ function AllDigitalEmployees(
 
   const [curActiveLink, setCurActiveLink] = useState<string>(() => searchParams.get(catalogSearchParamKey) || '');
   const [list, setList] = useState<IAgentCache[]>([]);
+  const listRef = React.useRef(list);
+  listRef.current = list;
+  const favoriteRevision = React.useRef(0);
   const [isLoading, setIsLoading] = useState(false);
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
   const [selectRecord, setSelectRecord] = useState<IAgentCache | null>(null);
   const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
-  const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
   const [paginationInfo, paginationDispatch] = useReducer(paginationReducer, getDefaultPagination({ pageSize: 20 }));
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
   const hasInitializedRef = React.useRef(false);
+  const initializedFavoriteModeRef = React.useRef(favoriteMode);
+  const activeKeywordRef = React.useRef(searchName || '');
   // 分页请求复用当前筛选条件，避免滚动加载下一页时丢失 resourceStatus 等参数。
   const activeFilterParamRef = React.useRef<IOnOkParams | undefined>(dropdownParam || DEFAULT_DIGITAL_EMPLOYEE_FILTER);
 
@@ -188,7 +196,13 @@ function AllDigitalEmployees(
   }, [employeesTypeList, intl]);
 
   const myGetAllDigitalEmployeesV2 = React.useCallback(
-    (keyword: string = '', catalogId?: string | number, pageNum: number = 1, filterParam?: IOnOkParams) => {
+    function fetchEmployees(
+      keyword: string = '',
+      catalogId?: string | number,
+      pageNum: number = 1,
+      filterParam?: IOnOkParams,
+      append = false
+    ): Promise<void> {
       // 直接触发的分页请求也复用最近一次筛选，兼容“我可用的”两类列表。
       const effectiveFilterParam = filterParam ?? activeFilterParamRef.current ?? DEFAULT_DIGITAL_EMPLOYEE_FILTER;
       activeFilterParamRef.current = effectiveFilterParam;
@@ -198,20 +212,28 @@ function AllDigitalEmployees(
 
       abortControllerRef.current = new AbortController();
       const requestController = abortControllerRef.current;
+      const revision = favoriteRevision.current;
 
-      if (pageNum === 1) {
+      if (pageNum === 1 && !append) {
         setList([]);
       }
 
+      const selectedFilter = buildFilterParam?.(listTabKey, effectiveFilterParam, source) || {};
+      // 传递真实来源，企业推荐忽略旧类型条件，收藏页保留独立筛选。
+      const includeRequestFavorites =
+        favoriteMode && (source === 'favorites' || selectedFilter.ownerType !== 'personal');
       const params: Record<string, any> = {
         pageNum,
         pageSize: paginationInfo.pageSize,
         keyword,
-        ...(source === 'official' ? { ownerType: 'enterprise' } : {}),
+        ...(source !== 'available' ? { ownerType: 'enterprise' } : {}),
         ...(isEmployeeGroup ? { agentType: '017' } : {}),
-        ...(source === 'official' && isAllEmployees ? { includeEmployeeGroup: true, employeeGroupFirst: true } : {}),
-        // 显式类型筛选覆盖官方推荐的默认归属及员工组范围，分页同样生效。
-        ...(buildFilterParam?.(listTabKey, effectiveFilterParam, source) || {}),
+        ...(source !== 'available' && isAllEmployees
+          ? { includeEmployeeGroup: true, employeeGroupFirst: !includeRequestFavorites }
+          : {}),
+        ...(includeRequestFavorites ? { includeFavorites: true, favoritesOnly: source === 'favorites' } : {}),
+        // 可用和收藏页的显式类型筛选覆盖默认范围，分页同样生效。
+        ...selectedFilter,
         orderField: 'updateTime',
         orderBy: 'desc',
       };
@@ -238,13 +260,25 @@ function AllDigitalEmployees(
       return request
         .then((res) => {
           if (requestController.signal.aborted) return;
+          if (favoriteMode && revision !== favoriteRevision.current) {
+            // 不接受收藏提交前的列表快照，沿用筛选并补齐当前分页边界。
+            const nextPage =
+              source === 'favorites' && append
+                ? Math.floor(listRef.current.length / paginationInfo.pageSize) + 1
+                : pageNum;
+            return fetchEmployees(keyword, catalogId, nextPage, effectiveFilterParam, append);
+          }
           const { list: responseList, ...rest } = res || {};
           const mappedList = responseList?.map?.((item: IAgent) => agentHandler(item)) || [];
 
-          if (pageNum === 1) {
+          if (pageNum === 1 && !append) {
             setList(mappedList);
           } else {
-            setList((prevList) => [...prevList, ...mappedList]);
+            setList((prevList) =>
+              favoriteMode
+                ? Array.from(new Map([...prevList, ...mappedList].map((row) => [employeeRowId(row), row])).values())
+                : [...prevList, ...mappedList]
+            );
           }
 
           paginationDispatch({
@@ -260,7 +294,7 @@ function AllDigitalEmployees(
           console.error(e);
         });
     },
-    [buildFilterParam, isEmployeeGroup, listTabKey, paginationInfo.pageSize, source]
+    [buildFilterParam, favoriteMode, isAllEmployees, isEmployeeGroup, listTabKey, paginationInfo.pageSize, source]
   );
 
   const getSearch = React.useCallback(
@@ -273,6 +307,7 @@ function AllDigitalEmployees(
       const targetCatalogId = catalogId ?? (curActiveLink || myEmployeesTypeList?.[0]?.catalogId || ALL_CATEGORY_KEY);
       const effectiveFilterParam = filterParam ?? activeFilterParamRef.current ?? DEFAULT_DIGITAL_EMPLOYEE_FILTER;
       activeFilterParamRef.current = effectiveFilterParam;
+      activeKeywordRef.current = keyword;
 
       if (pageNum === 1) {
         setIsLoading(true);
@@ -300,13 +335,29 @@ function AllDigitalEmployees(
     const validCatalogIdFromUrl = catalogIdFromUrl && catalogIds.includes(catalogIdFromUrl) ? catalogIdFromUrl : '';
     const validCurActiveLink = curActiveLink && catalogIds.includes(curActiveLink) ? curActiveLink : '';
     const nextCatalogId = validCatalogIdFromUrl || validCurActiveLink || `${firstEmployeesType.catalogId}`;
+    const favoriteModeChanged = initializedFavoriteModeRef.current !== favoriteMode;
 
-    if (!hasInitializedRef.current || curActiveLink !== nextCatalogId) {
+    if (!hasInitializedRef.current || curActiveLink !== nextCatalogId || favoriteModeChanged) {
       setCurActiveLink(nextCatalogId);
-      getSearch(searchName || '', dropdownParam, 1, nextCatalogId);
+      getSearch(
+        favoriteModeChanged ? activeKeywordRef.current : searchName || '',
+        favoriteModeChanged ? activeFilterParamRef.current : dropdownParam,
+        1,
+        nextCatalogId
+      );
       hasInitializedRef.current = true;
+      initializedFavoriteModeRef.current = favoriteMode;
     }
-  }, [catalogSearchParamKey, curActiveLink, dropdownParam, getSearch, myEmployeesTypeList, searchName, searchParams]);
+  }, [
+    catalogSearchParamKey,
+    curActiveLink,
+    dropdownParam,
+    favoriteMode,
+    getSearch,
+    myEmployeesTypeList,
+    searchName,
+    searchParams,
+  ]);
 
   useEffect(() => {
     if (!curActiveLink) return;
@@ -423,14 +474,36 @@ function AllDigitalEmployees(
   const visibleList = useMemo(() => list.filter((item) => shouldKeepEmployee(item)), [list, shouldKeepEmployee]);
   const hasMore = paginationInfo.total > size(visibleList);
 
+  useEffect(() => {
+    if (!favoriteMode) return;
+    const onFavoriteChanged = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (!detail?.resourceId || typeof detail.favorited !== 'boolean') return;
+      favoriteRevision.current += 1;
+      const removed = source === 'favorites' && !detail.favorited;
+      const exists = listRef.current.some((row) => employeeRowId(row) === detail.resourceId);
+      const updateRows = (rows: IAgentCache[]) =>
+        rows.flatMap((row) =>
+          employeeRowId(row) !== detail.resourceId ? [row] : removed ? [] : [{ ...row, ...detail }]
+        );
+      listRef.current = updateRows(listRef.current);
+      setList(updateRows);
+      if (removed && exists) {
+        paginationDispatch({ type: 'change', item: { total: Math.max(0, paginationInfo.total - 1) } });
+      }
+    };
+    window.addEventListener(RESOURCE_FAVORITE_CHANGED_EVENT, onFavoriteChanged);
+    return () => window.removeEventListener(RESOURCE_FAVORITE_CHANGED_EVENT, onFavoriteChanged);
+  }, [favoriteMode, paginationInfo.total, source]);
+
   // 合并查询模式按资源类型分块展示，保证“我可用的”和“官方推荐”都先显示员工组、再显示数字员工。
   const employeeGroupList = useMemo(
     () => (isAllEmployees ? visibleList.filter((item) => `${item.agentType}` === '017') : []),
     [isAllEmployees, visibleList]
   );
   const employeeList = useMemo(
-    () => (isAllEmployees ? visibleList.filter((item) => `${item.agentType}` !== '017') : visibleList),
-    [isAllEmployees, visibleList]
+    () => (showSections ? visibleList.filter((item) => `${item.agentType}` !== '017') : visibleList),
+    [showSections, visibleList]
   );
 
   const showNoUsePermissionWarning = React.useCallback(() => {
@@ -600,11 +673,6 @@ function AllDigitalEmployees(
     setAuthDrawerOpen(true);
   }, []);
 
-  const onAuditEmployee = React.useCallback((employee: IAgentCache) => {
-    setSelectRecord(employee);
-    setUseApplyAuditOpen(true);
-  }, []);
-
   const onApplyEmployee = React.useCallback(
     async (employee: IAgentCache) => {
       // 与 EmployeeRelatedToMe.onApplyEmployee 取值口径对齐：优先 resourceId，回退 id
@@ -628,6 +696,7 @@ function AllDigitalEmployees(
       key={employee.agentId}
       resource={employee}
       resourceType="DIG_EMPLOYEE"
+      enableFavorites={favoriteMode}
       avatarNode={<div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>}
       onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
       digitalEmployeeActionMode
@@ -640,7 +709,6 @@ function AllDigitalEmployees(
         onEdit: () => onEditEmployee(employee),
         onAuth: (type: any) => onAuthEmployee(employee, type),
         onApplyUse: () => onApplyEmployee(employee),
-        onAuditUse: () => onAuditEmployee(employee),
         onDelete: (feedback) => onDeleteEmployee(employee, feedback),
         onDeleteData: (feedback) => onDeleteEmployee(employee, feedback),
         onShelf: (feedback) => onChangeShelfStatus(employee, 'shelf', feedback),
@@ -687,7 +755,7 @@ function AllDigitalEmployees(
               nextSearchParams.set(catalogSearchParamKey, nextActiveKey);
               setCurActiveLink(nextActiveKey);
               setSearchParams(nextSearchParams);
-              getSearch(searchName || '', dropdownParam, 1, activeKey);
+              getSearch(favoriteMode ? activeKeywordRef.current : searchName || '', dropdownParam, 1, activeKey);
             }}
           />
         </div>
@@ -712,10 +780,13 @@ function AllDigitalEmployees(
                 ref={infiniteScrollRef}
                 next={() => {
                   return myGetAllDigitalEmployeesV2(
-                    searchName || '',
+                    favoriteMode ? activeKeywordRef.current : searchName || '',
                     curActiveLink,
-                    paginationInfo.pageIndex + 1,
-                    activeFilterParamRef.current
+                    source === 'favorites'
+                      ? Math.floor(visibleList.length / paginationInfo.pageSize) + 1
+                      : paginationInfo.pageIndex + 1,
+                    activeFilterParamRef.current,
+                    true
                   );
                 }}
                 autoFill
@@ -736,7 +807,7 @@ function AllDigitalEmployees(
                   overflow: 'visible',
                 }}
               >
-                {isAllEmployees && employeeGroupList.length > 0 && (
+                {showSections && employeeGroupList.length > 0 && (
                   <section className={styles.allEmployeesSection}>
                     <div className={styles.allEmployeesSectionTitle}>
                       {intl.formatMessage({ id: 'digitalEmployees.employeeGroup' })}
@@ -746,7 +817,7 @@ function AllDigitalEmployees(
                     </div>
                   </section>
                 )}
-                {isAllEmployees && employeeList.length > 0 && (
+                {showSections && employeeList.length > 0 && (
                   <section className={styles.allEmployeesSection}>
                     <div className={styles.allEmployeesSectionTitle}>
                       {intl.formatMessage({ id: 'digitalEmployees.title' })}
@@ -756,7 +827,7 @@ function AllDigitalEmployees(
                     </div>
                   </section>
                 )}
-                {!isAllEmployees && (
+                {!showSections && (
                   <div className={styles.employeeList}>
                     {employeeList.map((employee) => renderEmployeeCard(employee))}
                   </div>
@@ -787,17 +858,6 @@ function AllDigitalEmployees(
           }}
         />
       )}
-      <UseApplyAuditDrawer
-        open={useApplyAuditOpen}
-        record={selectRecord}
-        onCancel={() => {
-          setUseApplyAuditOpen(false);
-          setSelectRecord(null);
-        }}
-        onSuccess={() => {
-          void refreshEmployee(selectRecord).catch(console.error);
-        }}
-      />
     </div>
   );
 }

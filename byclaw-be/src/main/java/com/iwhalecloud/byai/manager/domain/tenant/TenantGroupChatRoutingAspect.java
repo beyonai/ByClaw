@@ -5,11 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupCreate;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.EmptyPayload;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupMember;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageId;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.WorkgroupTemplateService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
@@ -20,6 +22,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -38,14 +41,17 @@ public class TenantGroupChatRoutingAspect {
     private final ByaiGroupChatMentionMapper mentionMapper;
     private final ObjectMapper mapper;
     private final TenantGroupMemberService memberService;
+    private final WorkgroupTemplateService templates;
 
     public TenantGroupChatRoutingAspect(TenantNodeClient node, GroupChatReadService legacy,
-        ByaiGroupChatMentionMapper mentionMapper, ObjectMapper mapper, TenantGroupMemberService memberService) {
+        ByaiGroupChatMentionMapper mentionMapper, ObjectMapper mapper, TenantGroupMemberService memberService,
+        WorkgroupTemplateService templates) {
         this.node = node;
         this.legacy = legacy;
         this.mentionMapper = mentionMapper;
         this.mapper = mapper;
         this.memberService = memberService;
+        this.templates = templates;
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController.*(..))"
@@ -87,7 +93,51 @@ public class TenantGroupChatRoutingAspect {
                 return ResponseUtil.successResponse(null);
             }
             case "settings": return read(context, requirePath(path) + "/settings");
+            case "updateSettings": {
+                var request = (com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest) args[1];
+                if (request == null) throw unsupported();
+                node.command(context, "PATCH", requirePath(path) + "/settings", sessionId, "UPDATE_SETTINGS",
+                    new TenantNodeModels.GroupSettings(request.getSessionName(), request.getAllowJoinByLink(),
+                        request.getAllowMemberAddAgent(), request.getAllowMemberInviteUser()));
+                Map<String, Object> detail = node.request(context, "GET", requirePath(path), null,
+                    new TypeReference<Map<String, Object>>() { });
+                return ResponseUtil.successResponse(detail == null ? null : detail.get("session"));
+            }
+            case "leave": {
+                node.command(context, "POST", requirePath(path) + "/leave", sessionId,
+                    "LEAVE_GROUP", new EmptyPayload());
+                return ResponseUtil.successResponse(null);
+            }
+            case "changeRole": {
+                if (args.length != 4 || !"USER".equals(args[1]) || !(args[2] instanceof Long userId)
+                    || !(args[3] instanceof Map<?, ?> roles) || !(roles.get("role") instanceof String role)
+                    || !List.of("ADMIN", "MEMBER").contains(role)) throw unsupported();
+                memberService.requireActiveUser(context, userId);
+                node.command(context, "PATCH", requirePath(path) + "/members/role", sessionId,
+                    "SET_ROLE", new TenantNodeModels.MemberRole(userId.toString(), role),
+                    java.util.UUID.randomUUID().toString(), List.of(Long.toString(context.userId()), userId.toString()));
+                return ResponseUtil.successResponse(null);
+            }
+            case "transferOwnership": {
+                var request = (com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTransferOwnershipRequest) args[1];
+                if (request == null || request.getUserId() == null) throw unsupported();
+                memberService.requireActiveUser(context, request.getUserId());
+                node.command(context, "POST", requirePath(path) + "/owner", sessionId, "TRANSFER_OWNER",
+                    new TenantNodeModels.GroupUser(request.getUserId().toString()), java.util.UUID.randomUUID().toString(),
+                    List.of(Long.toString(context.userId()), request.getUserId().toString()));
+                return ResponseUtil.successResponse(null);
+            }
             case "lifecycle": return read(context, requirePath(path) + "/lifecycle");
+            case "dissolve": {
+                node.command(context, "POST", requirePath(path) + "/dissolve", sessionId,
+                    "DISSOLVE_GROUP", new EmptyPayload());
+                return ResponseUtil.successResponse(null);
+            }
+            case "acknowledgeDissolution": {
+                node.command(context, "POST", requirePath(path) + "/dissolution-ack", sessionId,
+                    "ACK_DISSOLUTION", new EmptyPayload());
+                return ResponseUtil.successResponse(null);
+            }
             case "tasks": return read(context, requirePath(path) + "/tasks");
             case "context": {
                 GroupChatContextRequest request = (GroupChatContextRequest) args[1];
@@ -131,17 +181,29 @@ public class TenantGroupChatRoutingAspect {
     private Object create(TenantRequestContext context, GroupChatCreateRequest request) {
         if (request == null || request.getName() == null || request.getName().isBlank()
             || request.getGoal() == null || request.getGoal().isBlank()
-            || request.getUserIds() != null && !request.getUserIds().isEmpty()
-            || request.getAgentIds() != null && !request.getAgentIds().isEmpty()
-            || request.getTemplateId() != null) throw unsupported();
+            || request.getTemplateId() == null && request.getExpectedTemplateVersion() != null) throw unsupported();
+        LinkedHashSet<Long> agentIds = new LinkedHashSet<>();
+        if (request.getAgentIds() != null) agentIds.addAll(request.getAgentIds());
+        if (request.getTemplateId() != null) agentIds.addAll(templates.resolveResourceIds(
+            request.getTemplateId(), request.getExpectedTemplateVersion()));
+        List<GroupMember> members = new ArrayList<>();
         String sessionId = Long.toString(IdUtil.getSnowflakeNextId());
         String name = CurrentUserHolder.getLoginInfo() == null ? ""
             : CurrentUserHolder.getLoginInfo().getUserName();
-        node.command(context, "POST", "/internal/v1/group-chats", sessionId, "CREATE_GROUP",
-            new GroupCreate(request.getName(), sessionId,
-                List.of(new GroupMember("USER", Long.toString(context.userId()), "OWNER", name))));
-        node.command(context, "PATCH", "/internal/v1/group-chats/" + sessionId, sessionId,
-            "UPDATE_SESSION", new TenantNodeModels.SessionUpdate(null, request.getGoal()));
+        members.add(new GroupMember("USER", Long.toString(context.userId()), "OWNER", name));
+        if (request.getUserIds() != null && !request.getUserIds().isEmpty()) {
+            members.addAll(memberService.initialUsers(context, request.getUserIds()));
+        }
+        if (!agentIds.isEmpty()) members.addAll(memberService.initialAgents(context, new ArrayList<>(agentIds)));
+        GroupCreate payload = new GroupCreate(request.getName(), request.getGoal(), sessionId, members);
+        if (members.stream().filter(member -> "USER".equals(member.memObjType())).count() == 1) {
+            node.command(context, "POST", "/internal/v1/group-chats", sessionId, "CREATE_GROUP", payload);
+        } else {
+            node.command(context, "POST", "/internal/v1/group-chats", sessionId, "CREATE_GROUP", payload,
+                java.util.UUID.randomUUID().toString(), members.stream().filter(member -> "USER".equals(member.memObjType()))
+                    .map(GroupMember::memObjId).toList());
+        }
+        memberService.grantInitialAgents(new ArrayList<>(agentIds), members);
         return read(context, "/internal/v1/group-chats/" + sessionId);
     }
 

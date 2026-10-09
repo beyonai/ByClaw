@@ -229,7 +229,7 @@ public class AssistantChatService {
 
             // 在解析实际执行 Agent 后校验接续权限，再原子占用任务 turn。
             GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
-            groupTaskTurnId = taskGuard != null && assistantChatDto != null
+            groupTaskTurnId = TenantRequestContextHolder.get() == null && taskGuard != null && assistantChatDto != null
                 ? taskGuard.beforeTurn(assistantChatDto.getSessionId(), assistantChatDto.getAgentId(),
                     assistantChatDto.getTraceId()) : null;
             assistantChatDto.setGroupTaskTurnId(groupTaskTurnId);
@@ -654,13 +654,15 @@ public class AssistantChatService {
             String content = StringUtils.defaultString(assistantChatDto.getChatContent());
             String title = StringUtils.substring(content, 0, 10);
             tenantNodeClient.command(tenant, "POST", "/internal/v1/sessions", sessionId.toString(),
-                "CREATE_SESSION", new SessionCreate(title, "h_as"));
+                "CREATE_SESSION", new SessionCreate(title, "h_as",
+                    assistantChatDto.getAgentId() == null ? null : assistantChatDto.getAgentId().toString(),
+                    assistantChatDto.getProjectId() == null ? "-1" : assistantChatDto.getProjectId().toString()));
             SessionMembersDto session = new SessionMembersDto();
             session.setSessionId(sessionId);
             session.setSessionName(title);
             session.setSessionContent(content);
             session.setSessionType(SessionType.H_AS.getCode());
-            session.setProjectId(-1L);
+            session.setProjectId(assistantChatDto.getProjectId() == null ? -1L : assistantChatDto.getProjectId());
             session.setCreatorId(tenant.userId());
             session.setEnterpriseId(tenant.enterpriseId());
             session.setCreateTime(new Date());

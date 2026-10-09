@@ -16,6 +16,10 @@ import java.util.Date;
 @Setter
 public class ResourceAuthVo extends AuthVo {
 
+    private Boolean favorited;
+
+    private Long favoriteCount;
+
     /**
      * 资源标识
      */
@@ -323,5 +327,7 @@ public class ResourceAuthVo extends AuthVo {
     private Boolean canOffShelf;
 
     private Boolean canPublishToEnterprise;
+
+    private SkillPublicationVo skillPublication;
 
 }

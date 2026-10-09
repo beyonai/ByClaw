@@ -22,6 +22,8 @@ export const operations = [
   "DELETE_PENDING_PUBLICATION",
   "RECALL_MESSAGE",
   "SEND_GROUP_MESSAGE",
+  "UPDATE_FEEDBACK",
+  "UPDATE_MESSAGE_STRUCTURE",
 ] as const;
 export type Operation = (typeof operations)[number];
 /** BE 生成的内部写入命令；ACTIVE 成员断言与请求摘要由 BE 提供，Node 再核验资源权限。 */

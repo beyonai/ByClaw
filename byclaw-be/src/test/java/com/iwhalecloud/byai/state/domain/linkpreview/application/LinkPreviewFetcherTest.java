@@ -62,6 +62,23 @@ class LinkPreviewFetcherTest {
     }
 
     @Test
+    void extractsMetadataFromTheBoundedPrefixOfAnOversizedHtmlPage() {
+        String html = "<html><head><meta property='og:title' content='WeChat article'>"
+            + "<meta property='og:description' content='Article summary'>"
+            + "<meta property='og:image' content='/cover.jpg'></head><body>"
+            + "x".repeat(1024 * 1024 + 1);
+        OkHttpClient client = new OkHttpClient.Builder().addInterceptor(chain ->
+            response(chain.request(), 200, html)).build();
+
+        var result = new LinkPreviewFetcher(client).fetch("https://example.com/article");
+
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.title()).isEqualTo("WeChat article");
+        assertThat(result.description()).isEqualTo("Article summary");
+        assertThat(result.ogImage()).isEqualTo("https://example.com/cover.jpg");
+    }
+
+    @Test
     void cachesSuccessfulAndUnavailableResults() {
         AtomicInteger calls = new AtomicInteger();
         OkHttpClient client = new OkHttpClient.Builder().addInterceptor(chain -> {

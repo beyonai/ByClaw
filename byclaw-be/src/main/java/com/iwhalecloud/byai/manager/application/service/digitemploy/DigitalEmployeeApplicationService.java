@@ -350,6 +350,8 @@ public class DigitalEmployeeApplicationService {
 
         // 设置用户上下文信息
         resourceAuthContextService.setCurrentUserAuthQo(digitalEmployeeQo);
+        // 只信任当前登录身份，覆盖请求中传入的标志，避免普通用户伪造超管列表范围。
+        digitalEmployeeQo.setEnterpriseListAdminVip(CurrentUserHolder.isAdminVip());
         this.fillCatalogIds(digitalEmployeeQo);
 
         PageInfo<DigitalEmployeePageVo> pageInfo = ssResExtDigEmployeeService
@@ -554,6 +556,7 @@ public class DigitalEmployeeApplicationService {
         employee.setOfficialPublication(permissions.isOfficialPublication());
         employee.setCanPublishEmployee(permissions.isCanPublishEmployee());
         employee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
+        employee.setEmployeePublicationUpdate(permissions.isEmployeePublicationUpdate());
         employee.setCanManageAuth(permissions.isCanManageAuth());
         employee.setCanUseAuth(permissions.isCanUseAuth());
         employee.setCanDelete(permissions.isCanDelete());
@@ -581,6 +584,7 @@ public class DigitalEmployeeApplicationService {
         employee.setOfficialPublication(permissions.isOfficialPublication());
         employee.setCanPublishEmployee(permissions.isCanPublishEmployee());
         employee.setEmployeePublicationStatus(permissions.getEmployeePublicationStatus());
+        employee.setEmployeePublicationUpdate(permissions.isEmployeePublicationUpdate());
         employee.setCanManageAuth(permissions.isCanManageAuth());
         employee.setCanUseAuth(permissions.isCanUseAuth());
         employee.setCanDelete(permissions.isCanDelete());
@@ -1700,18 +1704,14 @@ public class DigitalEmployeeApplicationService {
 
         List<SsResourceRelDetail> skillRelations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
             digitalEmployee.getResourceId(), new ArrayList<>(orderedSkillIds));
-        LinkedHashSet<Long> deletedSkillIds = new LinkedHashSet<>();
-        LinkedHashSet<Long> preservedSkillIds = new LinkedHashSet<>();
         Date now = new Date();
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         for (SsResourceRelDetail relation : this.safeRelations(skillRelations)) {
-            Long skillId = relation.getRelResourceId();
             SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
             // 兼容来源字段为空的历史直接安装技能：旧版本没有写入来源元数据，应按手工来源卸载。
             // 带有内容但无法解析的元数据仍保守保留，避免把未知的技能组来源误删。
             if (!source.isManual()
                 || (source.isMalformed() && StringUtils.isNotBlank(relation.getRelResourceInfo()))) {
-                preservedSkillIds.add(skillId);
                 continue;
             }
             SkillRelationSource remainingSource = source.withoutManual();
@@ -1721,14 +1721,9 @@ public class DigitalEmployeeApplicationService {
                 if (!ssResourceRelDetailService.updateById(relation)) {
                     throw new BaseException("数字员工技能关系更新失败");
                 }
-                preservedSkillIds.add(skillId);
-                deletedSkillIds.remove(skillId);
             } else {
                 if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
                     throw new BaseException("数字员工技能关系删除失败");
-                }
-                if (!preservedSkillIds.contains(skillId)) {
-                    deletedSkillIds.add(skillId);
                 }
             }
         }
@@ -1744,14 +1739,7 @@ public class DigitalEmployeeApplicationService {
             }
         }
 
-        deletedSkillIds.removeAll(preservedSkillIds);
-        if (!deletedSkillIds.isEmpty()) {
-            List<SsResource> removedSkills = uninstallRelResources.stream()
-                .filter(resource -> resource != null && deletedSkillIds.contains(resource.getResourceId()))
-                .distinct()
-                .collect(Collectors.toList());
-            this.deleteLegacyWorkspaceSkills(this.findLegacyWorkspaceSkillsToDelete(digitalEmployee, removedSkills));
-        }
+        // 卸载只移除安装来源/关联，保留资源库技能及历史工作区文件。
     }
 
     /**
@@ -2176,8 +2164,11 @@ public class DigitalEmployeeApplicationService {
         Long resourceId = employeeIdDTO.getResourceId();
         SsResource ssResource = ssResourceService.findById(resourceId);
         this.validateDigitalEmployeeManagePermission(ssResource);
-
-
+        // 官方副本注销仍仅允许官方管理员，授权和上下架的管理权限不能代替注销资格。
+        if (employeeGovernance != null && DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)
+            && !employeeGovernance.canAdministerOfficial(ssResource)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+        }
         // 保留可辨认的删除记录并释放原名称;按状态判断,避免重复删除时叠加后缀.
         if (!Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
             String suffix = I18nUtil.get("digemployee.deleted.name.suffix");
@@ -2293,10 +2284,6 @@ public class DigitalEmployeeApplicationService {
     private void validateDigitalEmployeeManagePermission(SsResource ssResource) {
         if (employeeGovernance != null) {
             employeeGovernance.requireNotProtected(ssResource);
-            if (DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
-                if (employeeGovernance.canAdministerOfficial(ssResource)) return;
-                throw new BaseException("仅官方管理员可以上下架官方副本");
-            }
         }
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
@@ -2304,6 +2291,7 @@ public class DigitalEmployeeApplicationService {
         if (StringUtils.equals(ssResource.getOwnerType(), OwnerType.PERSONAL_DEFAULT)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
         }
+        // 官方副本也复用操作权限接口的管理判断，保证可见的上下架按钮能够实际执行。
         if (authApplicationService.hasResourceManagePermission(ssResource)) {
             return;
         }

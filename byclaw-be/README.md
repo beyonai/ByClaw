@@ -18,6 +18,35 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - 🛠️ **工具集成** - 灵活的插件和工具编排
 - 📊 **数据分析** - 对话分析和性能监控
 
+## 技能导入并发与外部子会话恢复
+
+技能导入、审核与审核后的运行文件刷新按技能编码共享 Spring Integration `RedisLockRegistry`。
+锁使用已有 Redis 连接，在数据库事务提交或回滚后释放；持锁期间自动续租，提交前再次验证锁所有权。
+若提交前已失去租约或 Redis 无法验证锁，事务回滚。
+同事务重复取得同编码锁不会重复持有，不同编码可以并发执行；等待超过 30 秒或 Redis 获取锁失败时终止操作，
+不会退化为无锁写入。此路径不再调用 PostgreSQL/openGauss 专属 advisory lock 或哈希函数，无需数据库迁移。
+
+外部子会话事件在父会话不存在时保留 5 分钟提交等待窗口，按 Redis Stream ID 的入队时间计算。
+超过窗口且父会话查询仍明确返回不存在的旧事件被 ACK，避免恢复线程无限重试。
+新事件、无法判断入队时间的事件、混有新事件的批次、数据库异常与无效元数据仍保留 pending；
+正常子会话的所有权继承与事件落库保持原逻辑，不会凭空创建父会话。
+
+可用独立本地 Redis 验证锁续租和跨实例互斥：测试时设置 `BYCLAW_TEST_REDIS_PORT` 为本地测试 Redis 端口。
+不设置时跳过该集成测试；事务提交/回滚、同编码并发和子会话重投递测试无需外部服务。
+
+## 手机号验证码登录失败提示
+
+`POST /system/session/loginByPhone` 保持失败响应 `code: -1` 和现有认证字段契约，`msg` 直接返回具体原因，不重复拼接认证失败前缀：
+
+- 未关联账号：该手机号尚未绑定账号，请使用账号密码登录。
+- 只有停用账号：账号已停用，请联系管理员。
+- 多个有效账号：手机号绑定异常，请联系管理员。
+- 数据库服务异常：登录服务暂时不可用，请稍后重试；不返回底层异常详情。
+
+手机号查询复用已有的全部关联账号查询（兼容历史明文手机号及 SM4 存储值）。仅唯一有效账号可以继续验证码校验；
+存在停用账号不影响唯一有效账号登录。绑定或状态异常时不消耗短信验证码。验证码过期、错误及账号有效性检查保持原有行为。
+其他登录方式仍使用原有失败处理。提示支持中文、英文，并补齐原有验证码过期、错误提示的中文翻译；无需修改数据库或前端。
+
 ## 邮箱连接器凭证存储
 
 `mail-form` 连接器（QQ、163、阿里邮箱、Fastmail、自定义 IMAP）按用户和连接器各保存一套账户配置。
@@ -62,6 +91,8 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 
 ## 群列表消息摘要
 
+租户请求带 `X-Enterprise-Id` 和 `X-Tenant-Context` 时，新建工作组由租户 Node 持久化。创建请求中的 `agentIds` 与模板资源先在 BE 校验访问权限并去重，再随 `CREATE_GROUP` 一次写入群成员；无效或无权限的资源不会留下半成品群。现阶段创建时的 `userIds` 仍不支持，需建群后邀请真人成员。存量旧库群仍按其原有成员关系路由。
+
 - `GET /group-chats?pageNum=1&pageSize=20` 仅在返回时将 `latestMessageContent` 中的 `{{DIG_EMPLOYEE_资源ID}}`、`{{HUMAN_资源ID}}` 转成 `@名称`，名称取最新消息 metadata 中 `resourceList.resourceName` 的快照。
 - Agent 的 `[@成员名称](uid=成员UID)` 同样转成 `@名称`；优先使用资源快照名称，没有快照时使用链接中的成员名称。无法找到名称的占位符和其他资源占位符保留原文。
 - 该转换适用于已有消息，不修改数据库正文、WebSocket 消息或 Agent 调度；查询所需的消息 metadata 不包含在接口响应中。
@@ -84,6 +115,14 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - 员工授权只追加 `DIG_EMPLOYEE / USER / FORCE_USE` 红名单，已有有效同维度授权不重复插入，其他红名单和全部黑名单保持不变，黑名单仍按既有规则优先生效。
 - 项目成员、群成员和员工授权共用数据库事务，任一写入失败整体回滚。权限集合与用户权限缓存在事务提交后同步，回滚不发布权限缓存。
 - 本次不处理退出或移除成员后的撤权，也不补建群初始授权、后续邀请数字员工时向已有真人授权或存量群数据。
+
+## 数字员工组授权与运行时
+
+通过资源成员设置接口授权数字员工组时，同一事务内将管理或使用授权同步到组内有效数字员工，以及组和成员关联的同企业、已上架资源（包括技能）。同步使用关联资源自身的业务类型写入授权；撤销组名单中的对象时，也从这些关联资源的对应名单中移除，并保留其独立授权对象。事务提交后重建受影响用户的 Redis 权限缓存。
+
+BE 启动后异步扫描存量数字员工组，将数据库中已有的组使用与管理授权补齐到当前组员及关联资源。已齐全的授权直接跳过，单个组失败会记录日志并继续处理其他组。补齐完成后才执行原有的用户权限 Redis 全量重建；即使关闭 `INIT_USER_AUTH_RESOURCES_REDIS_ENABLED`，数据库补齐仍会运行，变更的用户缓存沿用授权写入链路同步。无需重新保存组授权。
+
+`POST /internal/v1/orchestrators/resolve-runtime` 对已上架的数字员工组校验实际使用权限，不要求组的归属企业等于用户当前选择的企业。组内成员仍必须属于组的企业；未获授权的用户不能解析组运行时。
 
 ## 群聊成员系统消息
 
@@ -605,7 +644,7 @@ root message ID. Deploy this endpoint before enabling the topic modal frontend.
 
 数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。
 
-本地 Podman 联调时，OpenSandbox 的 TCP endpoint 可能返回容器网段地址。Docker 模式返回的 `/proxy/5432` 地址由 BE 的连接探测和租户数据源管理统一转换为数据库容器名与原生 5432 端口。`BYCLAW_TENANT_DB_PROBE_HOST=127.0.0.1` 可覆盖 BE 连接租户数据库时使用的主机；Node 仍使用同一 Podman 网络内的数据库容器名。Node 到 BE 的 `BYCLAW_TENANT_BE_INTERNAL_URL`、Redis 地址和 `BYCLAW_TENANT_INTERNAL_TOKEN` 由部署环境注入。HTTP 模式下 BE 经 OpenSandbox 代理访问 Node 时使用 `X-Byclaw-Internal-Token`；Node 直连 BE 的三个内部接口使用 Bearer 令牌。这些接口由控制器核验专用令牌。
+本地 Podman 联调时，OpenSandbox 的 TCP endpoint 可能返回容器网段地址。Docker 模式返回的 `/proxy/5432` 地址由 BE 的连接探测和租户数据源管理统一转换为数据库容器名与原生 5432 端口；两者也兼容沙箱记录中的 `openclaw` JSON endpoint。`BYCLAW_TENANT_DB_PROBE_HOST=127.0.0.1` 可覆盖 BE 连接租户数据库时使用的主机；Node 仍使用同一 Podman 网络内的数据库容器名。Node 到 BE 的 `BYCLAW_TENANT_BE_INTERNAL_URL`、Redis 地址和 `BYCLAW_TENANT_INTERNAL_TOKEN` 由部署环境注入。HTTP 模式下 BE 通过已核验沙箱 ID 对应的容器名和注册端口直连 Node，使用 `X-Byclaw-Internal-Token`；Node 直连 BE 的三个内部接口使用 Bearer 令牌。这些接口由控制器核验专用令牌。
 
 更新租户 Node 镜像后，平台管理员可调用 `POST /admin/tenants/recreate-node`（请求体 `{"enterpriseId":"…"}`）经 OpenSandbox 删除旧 Node 沙箱并从当前 `IMAGE_TENANT_NODE` 镜像重建，租户数据库沙箱和业务数据保留。接口更新 Node 沙箱记录及租户配置；替换失败时进入可重试的开通失败状态。仅重启已有容器不会应用新镜像。
 
@@ -615,12 +654,12 @@ root message ID. Deploy this endpoint before enabling the topic modal frontend.
 
 本地 OpenSandbox v0.1.9 在删除已停止容器时会错误地再次 `kill` 并返回 500。`deploy/middleware/opensandbox-server.Dockerfile` 在镜像构建时应用 `patch-local-opensandbox-tcp.py`，只对实际运行中的容器执行 `kill`，然后释放容器。修改补丁后从 `deploy/middleware` 运行 `podman compose --env-file ../../.env -f docker-compose.yml up -d --no-deps --build opensandbox-server`（本机使用额外的 rootful override 时保留对应 `-f` 参数），让正在运行的服务使用新镜像；不要仅替换容器内脚本。
 
-HACU 切换企业时，登录 Token 负责认证用户，当前企业保存在该用户的 HTTP 会话中。后续带同一用户 Token 的请求会沿用会话里的企业 ID，避免旧 Token 把切换结果覆盖；浏览器 Cookie 属于其他用户时仍以 Token 身份为准。BE 访问租户 Node 时会校验服务注册记录与沙箱 ID，并使用配置的 OpenSandbox 基址和该沙箱的代理路径，避免依赖宿主机无法解析的容器域名。
+HACU 切换企业时，登录 Token 负责认证用户，当前企业保存在该用户的 HTTP 会话中。后续带同一用户 Token 的请求会沿用会话里的企业 ID，避免旧 Token 把切换结果覆盖；浏览器 Cookie 属于其他用户时仍以 Token 身份为准。BE 访问租户 Node 时校验服务注册记录与沙箱 ID，再通过容器网络的 `sandbox-<沙箱 ID>` 和注册端口直连，不依赖沙箱记录 endpoint 的存储格式。
 
 租户聊天继续使用现有 `/assiman/qryConversations` 和 `/assiman/getMessages` 协议。BE 根据租户上下文将会话精确查询、列表和历史消息转发到对应 Node；对尚无 `messageStruct` 的 worker 纯文本历史回答，在响应中投影为原有前端可渲染的回答片段，并将成对的 `<think>` 内容投影为思考片段。投影不改写租户数据库中的原始消息。个人空间沿用原处理链路。
 
-HACU 工作组列表合并租户 Node 中的新工作组与平台旧库中属于同一企业、且当前用户为成员的存量工作组；打开存量工作组时继续访问旧库，按企业和成员双重校验，防止跨租户读取。新建空成员工作组使用租户 Node，当前不支持在创建请求中附加其他成员、数字员工或模板。
+HACU 工作组列表合并租户 Node 中的新工作组与平台旧库中属于同一企业、且当前用户为成员的存量工作组；打开存量工作组时继续访问旧库，按企业和成员双重校验，防止跨租户读取。新建工作组时，BE 校验所选数字员工和模板资源权限，连同群主、工作组名称和目标在租户 Node 的同一次创建事务中写入；当前不支持在创建请求中附加其他真人成员。
 
-租户工作组的 `POST /group-chats/{sessionId}/members` 支持添加数字员工和当前企业的有效成员：BE 检查当前成员邀请权限；数字员工须为已上架的企业资源或操作者有权访问的个人资源，真人须已有该企业的有效成员关系。BE 将已校验的真人 ID 作为成员断言随 `ADD_MEMBERS` 命令交给租户 Node，并为新真人或现有真人补齐群内数字员工使用授权。`DELETE /group-chats/{sessionId}/members/{type}/{id}` 将成员移除命令交给租户 Node，由 Node 校验群主或管理员权限，拒绝移除群主。`POST /api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents` 在携带租户上下文且指定工作组时，使用租户 Node 校验添加权限；旧工作组继续使用原权限校验。HACU 在该候选查询中发送当前租户上下文。租户任务详情和待发布内容从 Node 读取；读取交付信号前先通过 Node 校验发起人身份。角色变更、转让群主及租户任务写操作仍待后续实现。
+租户工作组的 `POST /group-chats/{sessionId}/members` 支持添加数字员工和当前企业的有效成员：BE 检查当前成员邀请权限；数字员工须为已上架的企业资源或操作者有权访问的个人资源，真人须已有该企业的有效成员关系。BE 将已校验的真人 ID 作为成员断言随 `ADD_MEMBERS` 命令交给租户 Node，并为新真人或现有真人补齐群内数字员工使用授权。`DELETE /group-chats/{sessionId}/members/{type}/{id}` 将成员移除命令交给租户 Node，由 Node 校验群主或管理员权限，拒绝移除群主。`DELETE /group-chats/{sessionId}` 将解散命令交给租户 Node，由 Node 校验群主身份并将工作组标记为已解散；`POST /group-chats/{sessionId}/dissolution-acknowledgment` 同样路由到 Node，记录成员的解散确认。`POST /api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents` 在携带租户上下文且指定工作组时，使用租户 Node 校验添加权限；旧工作组继续使用原权限校验。HACU 在该候选查询中发送当前租户上下文。租户任务详情和待发布内容从 Node 读取；读取交付信号前先通过 Node 校验发起人身份。角色变更、转让群主及租户任务写操作仍待后续实现。
 
 平台管理员可调用 `POST /admin/tenants/delete`，提交企业 ID 与完全一致的租户名称。删除请求先将状态设为 `DELETING` 并阻止新的开通和租户访问，再在同一开通锁下删除该租户历代 Node/数据库沙箱、`tenants/<企业ID>` 私有持久化目录、Redis 配置快照、租户成员及组织关联和连接配置。外部资源删除失败时保留删除标记并定时重试，状态显示 `DELETE_FAILED`；全部清理后标记 `DELETED` 并从租户列表隐藏。企业主记录、开通请求 ID、删除状态及沙箱/建表审计记录留作追踪，其他租户的目录与共享沙箱规格不会被清理。

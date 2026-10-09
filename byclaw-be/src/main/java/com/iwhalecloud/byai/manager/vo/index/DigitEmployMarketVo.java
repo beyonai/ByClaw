@@ -16,6 +16,10 @@ import java.util.Date;
 @Setter
 public class DigitEmployMarketVo {
 
+    private Boolean favorited;
+
+    private Long favoriteCount;
+
     /**
      * 主键ID
      */
@@ -192,6 +196,8 @@ public class DigitEmployMarketVo {
     private boolean canPublishEmployee;
     /** 当前活动申请或最近一次发布结果，用于列表入口展示。 */
     private String employeePublicationStatus;
+    /** 当前申请是否更新已有企业副本，用于区分首次发布与发布更新入口。 */
+    private boolean employeePublicationUpdate;
 
     /**
      * 是否可管理授权

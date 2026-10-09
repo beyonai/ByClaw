@@ -59,6 +59,8 @@
 
     <!-- listResourceAuth：ss_resource 列 → ResourceAuthVo；同列可写入父类字段便于复用 AuthVo 语义 -->
     <resultMap id="resourceAuthVoResultMap" type="com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo">
+        <result column="favorited" property="favorited"/>
+        <result column="favorite_count" property="favoriteCount"/>
         <result column="resource_id" property="resourceId"/>
         <result column="resource_id" property="grantResourceId"/>
         <result column="system_code" property="systemCode"/>
@@ -301,7 +303,12 @@
     </select>
 
     <select id="listResourceAuth" resultMap="resourceAuthVoResultMap">
-        select a.resource_id,
+        select
+        <if test="includeFavorites == true and favoriteTenantId != null">
+               coalesce(fc.favorite_count, 0) as favorite_count,
+               (uf.resource_id is not null) as favorited,
+        </if>
+               a.resource_id,
                a.system_code,
                a.resource_source_pk_id,
                a.resource_biz_type,
@@ -349,6 +356,13 @@
                b.user_name as createUserName,
                coalesce(uc.use_count, 0) as use_count
         from ss_resource a
+             <if test="includeFavorites == true and favoriteTenantId != null">
+                 left join byai_resource_favorite_count fc
+                     on fc.com_acct_id = #{favoriteTenantId} and fc.resource_id = a.resource_id
+                 left join byai_resource_favorite uf
+                     on uf.com_acct_id = #{favoriteTenantId}
+                     and uf.user_id = #{userId} and uf.resource_id = a.resource_id
+             </if>
              left join po_users b on a.create_by = b.user_id
              left join ss_res_ext_skill esk on a.resource_id = esk.resource_id
              left join (
@@ -409,6 +423,14 @@
              ) p
                 on a.resource_id = p.grant_obj_id
         <where>
+            <if test="includeFavorites == true and favoriteTenantId != null">
+                and a.owner_type = 'enterprise' and a.resource_status = 2
+                and a.resource_biz_type != 'SKILL_GROUP'
+                <if test="favoritesOnly == true">
+                    and a.com_acct_id = #{favoriteTenantId}
+                    and uf.resource_id is not null
+                </if>
+            </if>
             <!-- 在状态与默认个人资源的 OR 条件之外排除注销，避免全部状态或默认资源绕过。 -->
             <if test="excludeDeleted == true">
                 and a.resource_status != -1
@@ -546,9 +568,18 @@
                 </choose>
             </if>
         </where>
-        order by case when a.resource_status = 3 then 1 else 0 end asc,
-                 COALESCE(a.update_time, '1970-01-01 00:00:00') desc,
-                 a.create_time desc
+        <choose>
+            <when test="includeFavorites == true and favoriteTenantId != null">
+                order by coalesce(fc.favorite_count, 0) desc,
+                         coalesce(a.update_time, a.create_time) desc,
+                         a.resource_id desc
+            </when>
+            <otherwise>
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(a.update_time, '1970-01-01 00:00:00') desc,
+                         a.create_time desc
+            </otherwise>
+        </choose>
     </select>
 
     <select id="findPrivilegeGrant" resultMap="privilegeGrantResultMap">

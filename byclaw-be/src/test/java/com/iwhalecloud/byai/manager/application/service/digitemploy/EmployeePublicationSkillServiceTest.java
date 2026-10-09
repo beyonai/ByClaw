@@ -119,6 +119,9 @@ class EmployeePublicationSkillServiceTest {
         assertThat(checked.copyAllowed()).isFalse();
         assertThat(checked.issues()).extracting(EmployeePublicationSkillBridge.Issue::name).containsExactly("个人查询工具","个人客户库");
         assertThat(checked.issues()).allSatisfy(i -> assertThat(i.reason()).contains("个人资源"));
+        assertThat(checked.issues()).extracting(EmployeePublicationSkillBridge.Issue::displayReason).containsExactly(
+            "技能依赖了个人工具「个人查询工具」，因此本次不会随员工发布",
+            "技能依赖了个人知识库「个人客户库」，因此本次不会随员工发布");
         verifyNoInteractions(storage, mapper);
     }
     @Test void enterpriseDependenciesPassButMissingCrossTenantMismatchAndDeletedDoNot() throws Exception {

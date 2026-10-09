@@ -558,8 +558,7 @@ public class DigitalEmployeeGroupApplicationService {
     private boolean isVisibleGroup(SsResource group, SsResExtDigEmployee ext) {
         return group != null && ext != null && isGroup(ext.getAgentType())
             && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(group.getResourceBizType())
-            && Objects.equals(ResourceStatus.ON_SHELF.getNum(), group.getResourceStatus())
-            && Objects.equals(CurrentUserHolder.getEnterpriseId(), group.getComAcctId());
+            && Objects.equals(ResourceStatus.ON_SHELF.getNum(), group.getResourceStatus());
     }
 
     private void validateRuntimeRequest(OrchestratorRuntimeRequestDTO request) {

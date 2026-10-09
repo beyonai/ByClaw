@@ -28,6 +28,10 @@ public class SkillPublicationService {
     private final SsResExtSkillService skills;
     private final DigitalEmployeeGovernanceService governance;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService skillResources;
+
     public boolean canReview() {
         return CurrentUserHolder.isAdminVip() || CurrentUserHolder.isPlatformManager();
     }
@@ -49,7 +53,7 @@ public class SkillPublicationService {
         return creatorId != null && !governance.isAdminVipCreator(creatorId);
     }
 
-    /** 调用方已经锁定个人源技能；创建快照与申请处于同一个事务。 */
+    /** 发布副本或 ZIP 导入快照与申请处于同一个事务；导入可没有个人源技能。 */
     public void submit(SsResource source, SsResource target) {
         PrivilegeGrant request = new PrivilegeGrant();
         request.setPrivilegeGrantId(sequence.nextVal());
@@ -100,6 +104,8 @@ public class SkillPublicationService {
             throw new IllegalArgumentException(I18nUtil.get("skill.publication.review.processed"));
         }
         target.setResourceStatus(approve ? ResourceStatus.ON_SHELF.getNum() : ResourceStatus.AUDIT_REJECT.getNum());
+        // 导入审核在同一事务内应用快照；普通个人技能发布仍沿用原状态转换。
+        skillResources.applySkillImportReview(target, approve);
         resources.updateResourceEntity(target);
         // 使用现有申请终态，不写入有效授权 A，也不生成 FORCE_USE 授权。
         request.setStatusCd(approve ? "X" : "R");

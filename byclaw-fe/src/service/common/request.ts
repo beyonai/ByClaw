@@ -86,6 +86,9 @@ const tenantChatPaths = new Set([
   '/byaiService/chat/runningSnapshot',
   '/byaiService/chat/stopChat',
   '/byaiService/chat/updateMessageStructById',
+  '/byaiService/chat/sessionStatus',
+  '/byaiService/chat/getTraceIdByMessageId',
+  '/byaiService/api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents',
 ]);
 
 let globalLogoutPromise: Promise<void> | null = null;
@@ -347,12 +350,12 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
   // 在创建 Axios 请求时固定凭证，响应晚到时仍可判断它属于哪个登录会话。
   const tenantSwitchSeq = getTenantSwitchSeq();
   const tenantContext = getTenantContext();
+  const requestPath = url.split('?')[0];
   const isTenantChatRequest =
-    tenantChatPaths.has(url) ||
-    url.startsWith('/byaiService/assiman/getForwardMessage/') ||
-    url.startsWith('/byaiService/chat/') ||
-    url.startsWith('/byaiService/group/') ||
-    url.startsWith('/byaiService/group-chats');
+    tenantChatPaths.has(requestPath) ||
+    requestPath.startsWith('/byaiService/assiman/getForwardMessage/') ||
+    requestPath === '/byaiService/group-chats' ||
+    requestPath.startsWith('/byaiService/group-chats/');
   if (isTenantChatRequest && hasStoredTenantSelection() && !tenantContext) {
     return Promise.reject(new Error('Tenant context expired; select a space again'));
   }

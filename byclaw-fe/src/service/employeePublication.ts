@@ -1,5 +1,5 @@
 import { GET, POST } from '@/service/common/request';
-import { history } from '@umijs/max';
+import { getIntl, history } from '@umijs/max';
 
 export interface Publication {
   requestId: string;
@@ -38,6 +38,8 @@ export interface PublicationDetail {
   canWithdraw: boolean;
   canRevise?: boolean;
   previousReview?: { requestId: string; reviewerName?: string; reviewedAt?: string; comment?: string };
+  updateTarget?: { resourceId: string; name: string; fromPersonal: boolean; changed: boolean };
+  sourceResourcesChanged?: boolean;
 }
 export const publicationStatus: Record<string, string> = {
   DRAFT: '草稿',
@@ -48,8 +50,12 @@ export const publicationStatus: Record<string, string> = {
   WITHDRAWN: '已撤回',
   FAILED: '发布失败',
 };
-export const publicationEntryLabel = (status?: string) =>
-  ((
+export const publicationEntryLabel = (status?: string, updating = false) =>
+  (updating &&
+    ({ DRAFT: '继续发布更新', PENDING: '查看更新进度', APPLYING: '查看更新进度' } as Record<string, string>)[
+      status || ''
+    ]) ||
+  (
     {
       DRAFT: '继续发布',
       PENDING: '查看发布进度',
@@ -57,14 +63,18 @@ export const publicationEntryLabel = (status?: string) =>
       REJECTED: '查看审核结果',
       WITHDRAWN: '查看发布申请',
       FAILED: '查看发布结果',
-      PUBLISHED: '查看发布结果',
+      PUBLISHED: '发布更新',
     } as Record<string, string>
-  )[status || ''] || '发布到官方推荐');
+  )[status || ''] ||
+  '发布到官方推荐';
 const base = '/byaiService/digitalEmployeePublication';
 export const getPublicationPendingCount = () => GET<number>(`${base}/pendingCount`);
 export const getPublicationCapabilities = () =>
   GET<{ enabled: boolean; administrator: boolean; canCreateEnterprise: boolean }>(`${base}/capabilities`);
 export const getPublication = (requestId: string) => GET<PublicationDetail>(`${base}/detail`, { requestId });
+
+/** 统一页面加载入口：只同步个人来源的未提交草稿，历史申请保持原快照。 */
+export const openPublication = (requestId: string) => POST<PublicationDetail>(`${base}/open`, { requestId });
 export const previewPublication = (publication: Pick<Publication, 'requestId' | 'revision'>) =>
   POST<PublicationDetail>(`${base}/preview`, { requestId: publication.requestId, revision: publication.revision });
 export const getCurrentPublication = (resourceId: string) =>
@@ -72,7 +82,7 @@ export const getCurrentPublication = (resourceId: string) =>
 export const listPublications = (review: boolean, page = 1) =>
   GET<{ list: Publication[]; total: number }>(`${base}/list`, { review, page, size: 20 });
 export const publicationAction = (
-  action: 'revise' | 'save' | 'submit' | 'approve' | 'reject' | 'withdraw',
+  action: 'revise' | 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'refreshTarget',
   publication: Pick<Publication, 'requestId' | 'revision'>,
   extra: { employee?: any; comment?: string } = {}
 ) =>
@@ -93,13 +103,20 @@ export const saveOfficialUpdateDraft = async (resourceId: string, employee: any)
   }
   if (detail.canRevise) detail = await publicationAction('revise', detail.publication);
   if (detail.publication.status !== 'DRAFT' || !detail.canEdit) {
-    throw new Error('该员工已有未完成的更新申请，请先在审核中心处理或撤回申请后再保存');
+    throw new Error(getIntl().formatMessage({ id: 'approvalCenter.employeeUpdateUnfinished' }));
   }
   return publicationAction('save', detail.publication, { employee });
 };
-export const openEmployeePublication = async (resourceId: string, intent: 'view' | 'editOfficial' = 'view') => {
+export const openEmployeePublication = async (
+  resourceId: string,
+  intent: 'view' | 'editOfficial' | 'publishUpdate' = 'view'
+) => {
   const current = intent === 'view' ? await getCurrentPublication(resourceId) : null;
-  const detail = current || (await POST<PublicationDetail>(`${base}/prepare`, { resourceId }));
+  const detail =
+    current ||
+    (await POST<PublicationDetail>(`${base}/${intent === 'publishUpdate' ? 'prepareUpdate' : 'prepare'}`, {
+      resourceId,
+    }));
   sessionStorage.setItem('EmployeeDetail_prevRoute', `${window.location.pathname}${window.location.search}`);
   history.push(publicationUrl(detail));
 };

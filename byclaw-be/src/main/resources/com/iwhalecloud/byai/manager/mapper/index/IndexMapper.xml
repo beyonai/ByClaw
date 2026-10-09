@@ -32,6 +32,8 @@
 
     <resultMap id="DigitEmployMarketVoResultMap" type="com.iwhalecloud.byai.manager.vo.index.DigitEmployMarketVo">
         <id column="resource_id" property="id" />
+        <result column="favorited" property="favorited" />
+        <result column="favorite_count" property="favoriteCount" />
         <result column="resource_id" property="resourceId" />
         <result column="resource_biz_type" property="resourceBizType" />
         <result column="resource_name" property="name" />
@@ -580,7 +582,12 @@
     </select>
 
     <select id="discover" resultMap="DigitEmployMarketExtVoResultMap">
-        select a.resource_id,
+        select
+        <if test="includeFavorites == true and favoriteTenantId != null">
+               coalesce(fc.favorite_count, 0) as favorite_count,
+               (uf.resource_id is not null) as favorited,
+        </if>
+               a.resource_id,
                a.resource_biz_type,
                a.resource_name,
                a.resource_code,
@@ -611,6 +618,13 @@
                COALESCE(k.available_use_count, 0) as available_use_count,
                COALESCE(k.approve_status_count, 0) as approve_status_count
         from ss_resource a
+                 <if test="includeFavorites == true and favoriteTenantId != null">
+                     left join byai_resource_favorite_count fc
+                         on fc.com_acct_id = #{favoriteTenantId} and fc.resource_id = a.resource_id
+                     left join byai_resource_favorite uf
+                         on uf.com_acct_id = #{favoriteTenantId}
+                         and uf.user_id = #{userId} and uf.resource_id = a.resource_id
+                 </if>
                  left join ss_res_ext_dig_employee b
                      on a.resource_id = b.resource_id
                  left join po_users c
@@ -691,6 +705,13 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
+            <if test="includeFavorites == true and favoriteTenantId != null">
+                and a.owner_type = 'enterprise' and a.resource_status = 2
+                <if test="favoritesOnly == true">
+                    and a.com_acct_id = #{favoriteTenantId}
+                    and uf.resource_id is not null
+                </if>
+            </if>
             <choose>
                 <when test="agentType != null and agentType != ''">
                     and b.agent_type = #{agentType}
@@ -807,6 +828,11 @@
         </where>
         <!-- 排序规则 -->
         <choose>
+            <when test="includeFavorites == true and favoriteTenantId != null">
+                order by coalesce(fc.favorite_count, 0) desc,
+                         coalesce(a.update_time, a.create_time) desc,
+                         a.resource_id desc
+            </when>
             <when test="employeeGroupFirst == true">
                 order by case when b.agent_type = '017' then 0 else 1 end asc,
                          COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,

@@ -95,6 +95,8 @@ class GroupChatMemberSystemEventTest {
             mock(ProjectApplicationService.class), mock(ProjectMemberService.class), messages, coordinator, events,
             mock(SessionExtService.class));
         ReflectionTestUtils.setField(target, "invitationService", invitations);
+        ReflectionTestUtils.setField(target, "tenantUserMembershipService",
+            mock(com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService.class));
         ReflectionTestUtils.setField(target, "userService", users);
         ReflectionTestUtils.setField(target, "resourceService", resources);
         DataSource dataSource = mock(DataSource.class);

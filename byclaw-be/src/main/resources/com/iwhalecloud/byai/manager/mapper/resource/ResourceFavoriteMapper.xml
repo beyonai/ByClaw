@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.ResourceFavoriteMapper">
+    <select id="isSchemaReady" resultType="boolean">
+        select count(*) = 2
+        from information_schema.tables
+        where table_schema = current_schema()
+          and table_name in ('byai_resource_favorite', 'byai_resource_favorite_count')
+    </select>
+
+    <select id="selectResource" resultType="com.iwhalecloud.byai.manager.entity.resource.SsResource">
+        select resource_id, resource_biz_type, owner_type, resource_status, com_acct_id
+        from ss_resource
+        where resource_id = #{resourceId} and com_acct_id = #{tenantId}
+    </select>
+
+    <insert id="ensureCount">
+        insert into byai_resource_favorite_count (com_acct_id, resource_id, favorite_count)
+        values (#{tenantId}, #{resourceId}, 0)
+        on conflict (com_acct_id, resource_id) do nothing
+    </insert>
+
+    <select id="lockCount" resultType="long">
+        select favorite_count from byai_resource_favorite_count
+        where com_acct_id = #{tenantId} and resource_id = #{resourceId}
+        for update
+    </select>
+
+    <insert id="insertFavorite">
+        insert into byai_resource_favorite (com_acct_id, user_id, resource_id, create_time)
+        values (#{tenantId}, #{userId}, #{resourceId}, current_timestamp)
+        on conflict (com_acct_id, user_id, resource_id) do nothing
+    </insert>
+
+    <delete id="deleteFavorite">
+        delete from byai_resource_favorite
+        where com_acct_id = #{tenantId} and user_id = #{userId} and resource_id = #{resourceId}
+    </delete>
+
+    <update id="updateCount">
+        update byai_resource_favorite_count
+        set favorite_count = favorite_count + #{delta}
+        where com_acct_id = #{tenantId} and resource_id = #{resourceId}
+    </update>
+</mapper>

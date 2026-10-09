@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -59,6 +60,30 @@ class UserProfileControllerTest {
         assertThat(request.getValue().getAvatar()).isEqualTo("/avatars/old.png");
         assertThat(request.getValue().getAvatarFile()).isNotNull();
         assertThat(request.getValue().getAvatarFile().getBytes()).isEqualTo(file.getBytes());
+    }
+
+    @Test
+    void profileReadReturnsSavedFields() throws Exception {
+        UserController controller = new UserController();
+        UserProfileApplicationService service = mock(UserProfileApplicationService.class);
+        ReflectionTestUtils.setField(controller, "userProfileApplicationService", service);
+        when(service.getProfile()).thenReturn(new UserProfileResponse("吴杰", null, "个人", "学生",
+            java.util.List.of("教育学习")));
+        MockMvcBuilders.standaloneSetup(controller).build()
+            .perform(get("/system/user/profile"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.companyName").value("个人"))
+            .andExpect(jsonPath("$.data.profileInterests[0]").value("教育学习"));
+    }
+
+    @Test
+    void updateProfileRejectsBlankOrOversizedCompany() throws Exception {
+        for (String company : java.util.List.of("", "   ", "x".repeat(101))) {
+            MockMvcBuilders.standaloneSetup(new UserController()).build()
+                .perform(multipart("/system/user/updateProfile")
+                    .param("userName", "张三").param("companyName", company))
+                .andExpect(status().isBadRequest());
+        }
     }
 
     @Test

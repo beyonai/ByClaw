@@ -43,6 +43,13 @@ public class EmployeePublicationController {
     @GetMapping("/detail")
     public ResponseUtil<Detail> detail(@RequestParam Long requestId) { return ResponseUtil.successResponse(publication.detail(requestId)); }
 
+    public record OpenRequest(@jakarta.validation.constraints.NotNull Long requestId) { }
+
+    @PostMapping("/open")
+    public ResponseUtil<Detail> open(@Valid @RequestBody OpenRequest request) {
+        return ResponseUtil.successResponse(publication.open(request.requestId()));
+    }
+
     @GetMapping("/current")
     public ResponseUtil<Detail> current(@RequestParam Long resourceId) { return ResponseUtil.successResponse(publication.current(resourceId)); }
 
@@ -59,6 +66,12 @@ public class EmployeePublicationController {
 
     @PostMapping("/prepare")
     public ResponseUtil<Detail> prepare(@RequestBody EmployeeIdDTO request) { return ResponseUtil.successResponse(publication.prepare(request.getResourceId())); }
+
+    @PostMapping("/prepareUpdate")
+    public ResponseUtil<Detail> prepareUpdate(@RequestBody EmployeeIdDTO request) { return ResponseUtil.successResponse(publication.prepareUpdate(request.getResourceId())); }
+
+    @PostMapping("/refreshTarget")
+    public ResponseUtil<Detail> refreshTarget(@Valid @RequestBody EmployeePublicationRequest request) { return ResponseUtil.successResponse(publication.refreshTarget(request)); }
 
     @PostMapping("/preview")
     public ResponseUtil<Detail> preview(@Valid @RequestBody EmployeePublicationRequest request) { return ResponseUtil.successResponse(publication.preview(request)); }
