@@ -193,7 +193,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
 
         // 更新最后登陆的时间
         users.setLastLoginDate(new Date());
-        if (suasSuperassist.getSuperassistId() != null) {
+        if (suasSuperassist != null && suasSuperassist.getSuperassistId() != null) {
             users.setAssistantId(suasSuperassist.getSuperassistId());
         }
         userService.update(users);
@@ -205,33 +205,28 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
         String sandboxUserCode = loginInfo.getUserCode();
         try {
             sandboxLoginAutoStartService.trigger(sandboxUserCode);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("提交登录沙箱自启动任务失败，userId={}", loginInfo.getUserId(), e);
         }
         try {
             authRedisSyncService.asyncSyncUserAuthToRedis(loginInfo.getUserId());
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("提交登录用户权限同步任务失败，用户ID：{}", loginInfo.getUserId(), e);
         }
         try {
             authRedisSyncService.asyncSyncUserManageAuthToRedis(loginInfo.getUserId());
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("提交登录用户管理权限同步任务失败，用户ID：{}", loginInfo.getUserId(), e);
         }
         try {
             executor.execute(() -> {
                 try {
                     tokenSaverProvisionService.provisionIfNeeded(loginInfo.getUserId(), sandboxUserCode);
-                }
-                catch (Exception e) {
+                } catch (Exception e) {
                     logger.error("登录后初始化 Token Saver 失败，userId={}", loginInfo.getUserId(), e);
                 }
             });
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("提交 Token Saver 初始化任务失败，userId={}", loginInfo.getUserId(), e);
         }
 
