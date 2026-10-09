@@ -1,3 +1,5 @@
+import { messageAcknowledgements } from "./message-ack-reader.js";
+import { invitationPreview } from "./group-invitation.js";
 import { groupList } from "./group-list.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type { HistoryRepository, MessageFilter, Row } from "../../application/history.js";
@@ -19,6 +21,22 @@ export class SqlHistoryRepository implements HistoryRepository {
   ) {}
   private async read(sql: string, parameters: unknown[] = []): Promise<Row[]> {
     return (await this.db.query(sql, parameters)).map(camel);
+  }
+  invitation(actor: string, token: string) {
+    return invitationPreview(this.db, this.tenantId, actor, token);
+  }
+  async publication(taskId: string) {
+    return (
+      (
+        await this.read(
+          "SELECT * FROM byai.byai_group_chat_task_publication WHERE task_session_id=$1",
+          [taskId],
+        )
+      )[0] ?? null
+    );
+  }
+  acknowledgements(sessionId: string, messageIds: string[]) {
+    return messageAcknowledgements(this.db, this.tenantId, sessionId, messageIds);
   }
   async session(id: string) {
     return (

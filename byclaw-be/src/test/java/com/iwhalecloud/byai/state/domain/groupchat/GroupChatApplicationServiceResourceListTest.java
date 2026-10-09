@@ -111,6 +111,36 @@ class GroupChatApplicationServiceResourceListTest {
     }
 
     @Test
+    void multipleDistinctEmployeeMentionsCreateOnlyOneScopedCoordinatorTask() {
+        var assistants = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupWorkAssistantService.class);
+        var coordination = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "workAssistantService", assistants);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "coordinationService", coordination);
+        when(assistants.resolveDefaultCoordinatorId()).thenReturn(900L);
+        for (Long id : List.of(501L, 502L, 900L)) {
+            when(memberService.findSessionMember(GROUP_ID, "AGENT", id)).thenReturn(new ByaiSessionMember());
+        }
+        when(memberService.findSessionMember(GROUP_ID, "USER", 601L)).thenReturn(new ByaiSessionMember());
+        var execution = new com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution();
+        execution.setCandidateSessionId(700L);
+        when(executionCoordinator.enqueueCoordinated(GROUP_ID, MESSAGE_ID, null, USER_ID, 900L, List.of(501L, 502L)))
+            .thenReturn(execution);
+        java.util.Map<String, Object> scope = java.util.Map.of("mode", "COORDINATED", "coordinatorAgentId", "900",
+            "taskSessionId", "700", "allowedAgentIds", List.of("501", "502"));
+        when(coordination.findScope(700L)).thenReturn(scope);
+        service.acceptUserMessage(command(List.of(resource(AgentMetaEnum.DIG_EMPLOYEE, "501", "DIG_EMPLOYEE_501"),
+            resource(AgentMetaEnum.DIG_EMPLOYEE, "502", "DIG_EMPLOYEE_502"),
+            resource(AgentMetaEnum.DIG_EMPLOYEE, "501", "DIG_EMPLOYEE_501"),
+            resource(AgentMetaEnum.HUMAN, "601", "HUMAN_601"))));
+        verify(executionCoordinator).enqueueCoordinated(GROUP_ID, MESSAGE_ID, null, USER_ID, 900L, List.of(501L, 502L));
+        verify(executionCoordinator, never()).enqueue(any(), any(), any(), any(), any(), any(), any());
+        ArgumentCaptor<ByaiMessage> saved = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(messageMapper).updateById(saved.capture());
+        assertThat(JSON.parseObject(saved.getValue().getMetadata()).getJSONObject("groupCoordination").getJSONArray("allowedAgentIds"))
+            .containsExactly("501", "502");
+    }
+
+    @Test
     void rejectedContinuationNeverBroadcastsTheRolledBackUserMessage() {
         when(memberService.findSessionMember(GROUP_ID, MemObjType.AGENT.name(), 501L))
             .thenReturn(new ByaiSessionMember());

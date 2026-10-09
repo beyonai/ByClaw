@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.entity.groupchat;
 
 import java.util.Date;
+import java.util.Map;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -14,6 +15,8 @@ import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 @Data
 @TableName("byai_group_chat_task")
 public class ByaiGroupChatTask {
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private Map<String, Object> groupCoordination;
     @TableId(value = "task_session_id", type = IdType.INPUT)
     @JsonSerialize(using = ToStringSerializer.class)
     private Long taskSessionId;

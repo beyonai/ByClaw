@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
@@ -18,6 +17,10 @@ import org.springframework.web.server.ResponseStatusException;
 @Aspect
 @Component
 public class TenantGroupTaskRoutingAspect {
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupTaskService tenantTasks;
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupPublicationService publications;
     private final TenantNodeClient node;
     private final ByaiGroupChatTaskMapper legacyTasks;
     private final ByaiGroupChatMentionMapper legacyMembership;
@@ -39,13 +42,14 @@ public class TenantGroupTaskRoutingAspect {
         if (args.length == 0 || !(args[0] instanceof Long taskId) || taskId <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid group task");
         }
-        ByaiGroupChatTask old = legacyTasks.selectById(taskId);
-        if (old != null && legacyMembership.isLegacyGroupMember(old.getGroupSessionId(),
-            context.userId(), context.enterpriseId())) return call.proceed();
-
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         String path = "/internal/v1/group-chat/tasks/" + taskId;
         return switch (method) {
+            case "prepare" -> ResponseUtil.successResponse(tenantTasks.prepare(context, taskId,
+                (com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatPendingPublicationRequest) args[1]));
+            case "complete" -> ResponseUtil.successResponse(publications.complete(context, taskId,
+                (com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskCompleteRequest) args[1]));
+            case "cancel" -> { tenantTasks.cancel(context, taskId); yield ResponseUtil.successResponse(null); }
             case "detail" -> ResponseUtil.successResponse(node.request(context, "GET", path, null,
                 new TypeReference<Object>() { }));
             case "pending" -> ResponseUtil.successResponse(node.request(context, "GET",

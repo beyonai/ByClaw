@@ -32,6 +32,17 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
     "/internal/v1/messages/by-command/:commandId",
     async (req) => service.byCommand(actor(req), req.params.commandId),
   );
+  app.get<{ Params: { taskId: string } }>(
+    "/internal/v1/group-chat/tasks/:taskId/cancellation",
+    async (req) => service.cancellation(actor(req), req.params.taskId),
+  );
+  app.post("/internal/v1/group-chats/invitations/validate", async (req) =>
+    service.invitation(actor(req), body(req).token),
+  );
+  app.get<{ Params: { taskId: string } }>(
+    "/internal/v1/group-chat/tasks/:taskId/publication",
+    async (req) => service.publication(actor(req), req.params.taskId),
+  );
   app.post("/internal/v1/assiman/getMessages", async (req) => {
     const b = body(req);
     return service.traditional(
@@ -63,6 +74,9 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
       ),
   );
   app.get("/internal/v1/group-chats/:id", async (req) => service.detail(actor(req), session(req)));
+  app.get("/internal/v1/group-chats/:id/management", async (req) =>
+    service.management(actor(req), session(req)),
+  );
   app.get("/internal/v1/group-chats/:id/lifecycle", async (req) =>
     service.lifecycle(actor(req), session(req)),
   );
@@ -77,6 +91,7 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
       cursor(b.beforeMessageId),
       bounded(b.maxMessages, 60, 60),
       bounded(b.maxCharacters, 30000, 30000),
+      b.agentContext === true,
     );
   });
   app.post("/internal/v1/group-chats/:id/messages/search", async (req) =>

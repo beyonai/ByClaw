@@ -12,7 +12,19 @@ import { createTask, changeTask, claimTask } from "./task-writer.js";
 import { sendGroupMessage } from "./group-message-writer.js";
 import { updateFeedback, updateMessageStructure } from "./message-update-writer.js";
 
+import { acknowledgeMessage } from "./message-ack-writer.js";
+
+import { nickname, directSession } from "./group-management.js";
+import { createInvitation } from "./group-invitation.js";
+import { cancelTask, checkpointPublication } from "./task-control.js";
 const handlers = {
+  SET_NICKNAME: nickname,
+  CREATE_DIRECT_SESSION: directSession,
+  CREATE_INVITATION: createInvitation,
+  CANCEL_TASK: cancelTask,
+  CHECKPOINT_PUBLICATION: checkpointPublication,
+  ACK_MESSAGE: acknowledgeMessage,
+  UNACK_MESSAGE: acknowledgeMessage,
   CREATE_SESSION: createSession,
   CREATE_GROUP: createSession,
   UPDATE_SESSION: changeSession,

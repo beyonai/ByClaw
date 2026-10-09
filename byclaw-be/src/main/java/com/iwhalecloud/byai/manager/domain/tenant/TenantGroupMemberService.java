@@ -62,24 +62,7 @@ public class TenantGroupMemberService {
         }
         String type = request.getType();
         Map<String, Object> detail = requireInvite(context, sessionId, type);
-        List<TenantNodeModels.InvitedMember> members = request.getId().stream().distinct().map(id -> {
-            if ("USER".equals(type)) {
-                Users user = users.selectById(id);
-                if (user == null || tenantMemberships.selectActiveMembership(id, context.enterpriseId()) == null) {
-                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "user is not an active tenant member");
-                }
-                return new TenantNodeModels.InvitedMember("USER", id.toString(), user.getUserName(), false);
-            }
-            SsResource resource = resources.findById(id);
-            if (resource == null || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())
-                || !Objects.equals(resource.getResourceStatus(), 2)
-                || !("enterprise".equalsIgnoreCase(resource.getOwnerType())
-                    && Objects.equals(resource.getComAcctId(), context.enterpriseId())
-                    || resourceAuthorization.hasResourceAccessPermission(resource))) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "digital employee is not accessible");
-            }
-            return new TenantNodeModels.InvitedMember("AGENT", id.toString(), resource.getResourceName(), true);
-        }).toList();
+        List<TenantNodeModels.InvitedMember> members = prepareMembers(context, type, request.getId());
         String id = sessionId.toString();
         if ("USER".equals(type)) {
             List<String> tenantMemberIds = new java.util.ArrayList<>();
@@ -111,6 +94,39 @@ public class TenantGroupMemberService {
             .filter(member -> type.equals(member.get("memObjType"))
                 && request.getId().stream().anyMatch(idValue -> idValue.toString().equals(member.get("memObjId"))))
             .toList();
+    }
+
+    public List<TenantNodeModels.InvitedMember> prepareMembers(TenantRequestContext context, String type, List<Long> ids) {
+        if (ids == null || ids.size() > 100 || ids.stream().anyMatch(id -> id == null || id <= 0))
+            throw new IllegalArgumentException("Invalid group members");
+        return ids.stream().distinct().map(id -> {
+            if ("USER".equals(type)) {
+                Users user = users.selectById(id);
+                if (user == null || tenantMemberships.selectActiveMembership(id, context.enterpriseId()) == null) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "user is not an active tenant member");
+                }
+                return new TenantNodeModels.InvitedMember("USER", id.toString(), user.getUserName(), false);
+            }
+            SsResource resource = resources.findById(id);
+            if (resource == null || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())
+                || !Objects.equals(resource.getResourceStatus(), 2)
+                || !("enterprise".equalsIgnoreCase(resource.getOwnerType())
+                    && Objects.equals(resource.getComAcctId(), context.enterpriseId())
+                    || resourceAuthorization.hasResourceAccessPermission(resource))) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "digital employee is not accessible");
+            }
+            return new TenantNodeModels.InvitedMember("AGENT", id.toString(), resource.getResourceName(), true);
+        }).toList();
+    }
+
+    /** Only the server's default coordinator resolver supplies this identity. */
+    TenantNodeModels.InvitedMember prepareCoordinatorMember(Long coordinatorId) {
+        SsResource resource = resources.findById(coordinatorId);
+        if (resource == null || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())
+            || !Objects.equals(resource.getResourceStatus(), 2)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "default group coordinator is unavailable");
+        }
+        return new TenantNodeModels.InvitedMember("AGENT", coordinatorId.toString(), resource.getResourceName(), true);
     }
 
     /** Validate initial users before the Node's atomic CREATE_GROUP command. */

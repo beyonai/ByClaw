@@ -75,11 +75,18 @@ public class GroupChatEventPublisher {
             "/internal/v1/group-chats/" + sessionId, null, new TypeReference<Map<String, Object>>() { });
         Object rawMembers = detail.get("members");
         if (!(rawMembers instanceof List<?> members)) throw new IllegalStateException("tenant group members unavailable");
+        return publishTenantMembers(tenant, event, members);
+    }
+
+    /** 使用写入前已鉴权的成员快照，离群和解散提交后仍可通知原成员。 */
+    public int publishTenantMembers(TenantRequestContext tenant, JSONObject event, List<?> members) {
         event.put("enterpriseId", String.valueOf(tenant.enterpriseId()));
         int sent = 0;
         for (Object value : members) {
             if (!(value instanceof Map<?, ?> member) || !"USER".equals(member.get("memObjType"))) continue;
             Object rawId = member.get("memObjId");
+            if ("OWNERSHIP_TRANSFERRED".equals(event.getString("event"))
+                && !String.valueOf(rawId).equals(event.getString("recipientUserId"))) continue;
             if (rawId == null || !rawId.toString().matches("[1-9][0-9]*")) continue;
             for (Channel channel : channelManager.getChannels(Long.valueOf(rawId.toString()))) {
                 if (!channel.isActive() || !Objects.equals(String.valueOf(tenant.enterpriseId()),
@@ -89,7 +96,7 @@ public class GroupChatEventPublisher {
                     sent++;
                 }
                 catch (Exception error) {
-                    log.warn("租户工作组事件广播失败, sessionId={}, userId={}", sessionId, rawId, error);
+                    log.warn("租户工作组事件广播失败, sessionId={}, userId={}", event.getString("sessionId"), rawId, error);
                 }
             }
         }

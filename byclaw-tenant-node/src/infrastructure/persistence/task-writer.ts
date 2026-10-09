@@ -105,12 +105,19 @@ export async function changeTask(context: CommandContext): Promise<void> {
     throw new DomainError("INVALID_SOURCE_PATHS");
   const existing = await first(
     db,
-    "SELECT 1 FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1",
+    "SELECT pending_publication_id FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1",
     [taskId],
   );
+  if (
+    p.expectedPendingPublicationId !== undefined &&
+    existing?.pendingPublicationId !== requireId(p.expectedPendingPublicationId)
+  )
+    throw new DomainError("PENDING_PUBLICATION_CHANGED");
+  if (!String(p.text ?? "").trim() && !p.sourcePaths.length)
+    throw new DomainError("INVALID_PUBLICATION_CONTENT");
   const args = [
     requireId(p.pendingPublicationId),
-    text(p.text, 1048576, true),
+    text(p.text ?? "", 1048576, true),
     JSON.stringify(p.sourcePaths),
     taskId,
   ];

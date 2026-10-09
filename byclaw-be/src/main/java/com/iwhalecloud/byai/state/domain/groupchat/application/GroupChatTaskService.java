@@ -69,6 +69,8 @@ import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 /** 群聊任务提升、查询、取消以及一次性完成发布用例。 */
 @Service
 public class GroupChatTaskService {
+    @Autowired
+    private GroupChatCoordinationService coordinationService;
     // Chat preparation depends on the task guard; defer resolving the reverse stop dependency.
     @Autowired
     @Lazy
@@ -178,11 +180,15 @@ public class GroupChatTaskService {
 
     public List<ByaiGroupChatTask> list(Long groupSessionId) {
         groupAuthorizationService.requireCurrentUserMember(groupSessionId);
-        return taskMapper.selectByGroup(groupSessionId);
+        List<ByaiGroupChatTask> result = taskMapper.selectByGroup(groupSessionId);
+        if (coordinationService != null) result.forEach(coordinationService::attach);
+        return result;
     }
 
     public ByaiGroupChatTask detail(Long taskId) {
-        return taskAuthorizationService.requireInitiator(taskId);
+        ByaiGroupChatTask task = taskAuthorizationService.requireInitiator(taskId);
+        if (coordinationService != null) coordinationService.attach(task);
+        return task;
     }
 
     @Transactional
@@ -246,31 +252,9 @@ public class GroupChatTaskService {
         task.setStatus("PUBLISHED");
         task.setPublishMessageId(messageId);
         task.setPublishBy(publication.getPublisherUserId());
-        scheduleResultMentions(task, mentions, messageId);
         pendingStore.clear(task, messageId);
         publishTaskEvent(task, "TASK_PUBLISHED", messageId);
         return response(publication);
-    }
-
-    private void scheduleResultMentions(ByaiGroupChatTask task, GroupChatAgentMention mentions, Long messageId) {
-        List<ResourceVo> agents = mentions.resourceList().stream()
-            .filter(resource -> resource.getResourceType() == AgentMetaEnum.DIG_EMPLOYEE).toList();
-        if (agents.isEmpty()) {
-            return;
-        }
-        // 保留原始 turn 的委派链和 hop 预算；旧任务则沿用会话执行记录。
-        ByaiGroupChatExecution parent = turnMapper.selectById(task.getDispatchId());
-        if (parent == null || !Objects.equals(parent.getCandidateSessionId(), task.getTaskSessionId())) {
-            parent = executionMapper.selectByCandidateSessionId(task.getTaskSessionId());
-        }
-        if (parent == null) {
-            throw new IllegalStateException("Task publication cannot resolve its execution: " + task.getTaskSessionId());
-        }
-        // 与成果发布共用事务和公开消息边界；回滚不留委派，重复确认在入口直接返回已有成果。
-        for (ResourceVo agent : agents) {
-            executionCoordinator.enqueueChild(parent, Long.valueOf(agent.getResourceId()), messageId, messageId,
-                mentions.normalizedContent(), mentions.resourceList());
-        }
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -333,6 +317,11 @@ public class GroupChatTaskService {
             throw new IllegalArgumentException("Task is no longer active");
         }
         return task;
+    }
+
+    /** Node 已验证权限并提交取消状态；这里只停止既有运行态，不访问群任务表。 */
+    public void stopTenantTask(ByaiGroupChatTask task) {
+        if ("RUNNING".equals(task.getTurnStatus())) chatApplicationService.stopChatForRecall(cancellationRequest(task));
     }
 
     private StopChatDto cancellationRequest(ByaiGroupChatTask task) {
@@ -412,6 +401,12 @@ public class GroupChatTaskService {
         }
     }
 
+    public Long tenantProjectCloudResourceId(Long projectId) {
+        Project project = projectService.findById(projectId);
+        if (project == null || project.getCloudResourceId() == null) throw new IllegalArgumentException("Group project cloud drive is unavailable");
+        return project.getCloudResourceId();
+    }
+
     private Long projectCloudResourceId(ByaiGroupChatTask task) {
         ByaiSession group = sessionService.findById(task.getGroupSessionId());
         Project project = group == null ? null : projectService.findById(group.getProjectId());
@@ -426,6 +421,11 @@ public class GroupChatTaskService {
             return;
         }
         Long cloudResourceId = projectCloudResourceId(task);
+        validateTenantFiles(cloudResourceId, files);
+    }
+
+    /** 调用方已通过 Node 核验任务与群归属；这里仅复用平台云文件校验。 */
+    public void validateTenantFiles(Long cloudResourceId, List<GroupChatTaskFile> files) {
         for (GroupChatTaskFile file : files) {
             if (file == null || StringUtils.isBlank(file.getFileName()) || StringUtils.isBlank(file.getFilePath())
                 || file.getFilePath().contains("..") || file.getFilePath().contains("\\")) {
@@ -552,6 +552,10 @@ public class GroupChatTaskService {
         event.put("sessionId", String.valueOf(task.getGroupSessionId()));
         event.put("taskId", String.valueOf(task.getTaskSessionId()));
         event.put("taskName", task.getTaskName());
+        if (coordinationService != null) {
+            coordinationService.attach(task);
+            if (task.getGroupCoordination() != null) event.put("groupCoordination", task.getGroupCoordination());
+        }
         event.put("status", task.getStatus());
         event.put("turnStatus", task.getTurnStatus());
         event.put("targetAgentId", task.getTargetAgentId());

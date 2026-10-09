@@ -1,7 +1,7 @@
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
-import { first, insert, nextId } from "./sql-utils.js";
+import { first, insert, nextId, camel } from "./sql-utils.js";
 
 /** 邀请用户须有 BE 的 ACTIVE 成员断言；邀请 AGENT 须有资源授权，普通成员还受群设置限制。 */
 export async function addMembers(context: CommandContext): Promise<void> {
@@ -95,7 +95,7 @@ export async function changeRole(context: CommandContext): Promise<void> {
   );
 }
 /** 统一处理群设置、解散及成员确认；不同操作各自核验角色和生命周期。 */
-export async function groupSettings(context: CommandContext): Promise<void> {
+export async function groupSettings(context: CommandContext): Promise<Record<string, any> | void> {
   const { command, db } = context;
   if (command.operation === "ACK_DISSOLUTION") {
     const session = await context.session();
@@ -116,16 +116,27 @@ export async function groupSettings(context: CommandContext): Promise<void> {
       "UPDATE byai.byai_session SET state='GROUP_DISSOLVED',update_time=CURRENT_TIMESTAMP WHERE session_id=$1 AND enterprise_id=$2",
       [command.sessionId, command.enterpriseId],
     );
-    return;
+    const tasks = (
+      await db.query(
+        "UPDATE byai.byai_group_chat_task SET status='CANCELLED',update_time=CURRENT_TIMESTAMP WHERE group_session_id=$1 AND status IN ('ACTIVE','CANCELLED') RETURNING *",
+        [command.sessionId],
+      )
+    ).map(camel);
+    await db.query(
+      "DELETE FROM byai.byai_group_chat_pending_publication WHERE task_session_id IN (SELECT task_session_id FROM byai.byai_group_chat_task WHERE group_session_id=$1)",
+      [command.sessionId],
+    );
+    return { data: { tasks } };
   }
   const codes: Record<string, string> = {
     allowJoinByLink: "group_join_link_enabled",
     allowMemberAddAgent: "group_member_add_agent_enabled",
     allowMemberInviteUser: "group_member_invite_user_enabled",
   };
+  if (!Object.keys(command.payload).length) throw new DomainError("INVALID_GROUP_SETTINGS");
   for (const [key, value] of Object.entries(command.payload)) {
     if (key === "sessionName") {
-      const name = text(value, 100, true);
+      const name = text(value, 100, true).trim();
       if (!name.trim()) throw new DomainError("INVALID_SESSION_NAME");
       await db.query(
         "UPDATE byai.byai_session SET session_name=$1,update_time=CURRENT_TIMESTAMP WHERE session_id=$2 AND enterprise_id=$3",
@@ -136,6 +147,10 @@ export async function groupSettings(context: CommandContext): Promise<void> {
     if (!codes[key] || typeof value !== "boolean") throw new DomainError("INVALID_GROUP_SETTINGS");
     await context.setExtension(codes[key], String(value));
   }
+  await db.query(
+    "UPDATE byai.byai_session SET update_time=CURRENT_TIMESTAMP WHERE session_id=$1 AND enterprise_id=$2",
+    [command.sessionId, command.enterpriseId],
+  );
 }
 
 async function authorizeInvitation(

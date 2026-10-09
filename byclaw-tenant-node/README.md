@@ -67,12 +67,12 @@ DB_SANDBOX_RECORD_ID DB_CREDENTIAL_VERSION PROVISION_STATE
 
 只接受 BE 发布制品，不提供任意 SQL/创建数据库接口。
 
-| API                                                   | 含义                                                                              |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------- |
+| API                                                   | 含义                                                                                  |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | `POST /internal/v1/schema-tasks`                      | 内部认证 multipart：`task` 为 application/json 字段，`bundle` 为 application/zip 文件 |
-| `GET /internal/v1/schema-tasks/{auditId}`             | 返回原/目标/实测版本、阶段、脱敏错误和清理状态                                    |
-| `GET /internal/v1/schema`                             | 最近对账的本地版本、BE 审计版本和 verified 状态                                   |
-| `POST /internal/v1/schema-tasks/{auditId}/report-ack` | BE 轮询落库后的确认：`{attemptNo,status}`                                         |
+| `GET /internal/v1/schema-tasks/{auditId}`             | 返回原/目标/实测版本、阶段、脱敏错误和清理状态                                        |
+| `GET /internal/v1/schema`                             | 最近对账的本地版本、BE 审计版本和 verified 状态                                       |
+| `POST /internal/v1/schema-tasks/{auditId}/report-ack` | BE 轮询落库后的确认：`{attemptNo,status}`                                             |
 
 上传必须带 `Idempotency-Key: <auditId>:<attemptNo>`。task 完整字段见 OpenAPI；INIT 只能有一个 baseline、fromVersion=null；UPDATE 沿 parentVersion 严格连续，无重复或降级。脚本相对路径必须为 `baseline/<version>/__ddl.sql` 或 `versions/<version>/__ddl.sql`，ZIP 每个版本只含该 SQL 与同目录 manifest.json。
 
@@ -136,31 +136,45 @@ VERIFIED 立即删除 ZIP，只保留结果；报告失败仍持续重试。FAIL
 
 BE 每次核验 ACTIVE 租户成员，并生成 tenantMemberUserIds；邀请/转让目标也必须在此列表。AGENT 和文件的 resourceAuthorized、链接的 joinLinkAuthorized 均由 BE 校验后生成，不能透传 FE 的布尔值。Node 再校验 session.enterprise_id、群成员、OWNER/ADMIN、任务发起人和私有任务的群归属。
 
-| operation                                             | payload 主要字段                                                                                                                                             |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| CREATE_SESSION                                        | sessionName；仅个人 h_as                                                                                                                                     |
-| CREATE_GROUP                                          | projectId、sessionName、members[{memObjType,memObjId,memName,userRole,resourceAuthorized?}]；唯一 OWNER 为当前用户                                           |
-| UPDATE_SESSION / DELETE_SESSION                       | 名称/内容；个人删除为 CLOSED，群使用解散                                                                                                                     |
-| ADD_MEMBERS / REMOVE_MEMBER                           | members[] / memObjType+memObjId；普通成员邀请须启用对应设置                                                                                                  |
-| JOIN_GROUP / LEAVE_GROUP                              | BE 授权的 joinLinkAuthorized+memName / 空对象；OWNER 先转让                                                                                                  |
-| SET_ROLE / TRANSFER_OWNER                             | userId+role(ADMIN/MEMBER) / userId；仅 OWNER                                                                                                                 |
-| DISSOLVE_GROUP / ACK_DISSOLUTION                      | 空对象；解散仅 OWNER，确认须是已解散群成员                                                                                                                   |
-| UPDATE_SETTINGS                                       | allowJoinByLink、allowMemberAddAgent、allowMemberInviteUser 布尔字段                                                                                         |
-| READ_STATE / RECALL_MESSAGE                           | messageId；已读游标仅向前，撤回由作者或群管理员操作                                                                                                          |
-| CREATE_TASK                                           | taskSessionId、sourceMessageId、dispatchId、targetAgentId、taskName                                                                                          |
-| SEND_GROUP_MESSAGE                                    | chatContent、resourceList、files、replyToMessageId；消息与每个被提及数字员工的 QUEUED 私有任务在同一事务写入，返回 messageId 和 dispatches |
-| CLAIM_TASK                                            | taskSessionId；仅发起人可将 QUEUED 任务原子领取为 RUNNING，返回 claimed，重复领取不会启动第二次执行 |
-| UPDATE_TASK                                           | taskSessionId、status(ACTIVE/CANCELLED)、turnStatus(RUNNING/WAITING_USER/FAILED)                                                                             |
-| SAVE_PENDING_PUBLICATION / DELETE_PENDING_PUBLICATION | taskSessionId、pendingPublicationId、text、sourcePaths / taskSessionId                                                                                       |
-| PUBLISH_TASK                                          | taskSessionId、id、messageId、text、files[]、pendingPublicationId?、metadata?；仅发起人，非 RUNNING；发布消息、publication、PUBLISHED 状态与待发布清理同事务 |
+| operation                                             | payload 主要字段                                                                                                                                                       |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CREATE_SESSION                                        | sessionName；仅个人 h_as                                                                                                                                               |
+| CREATE_GROUP                                          | projectId、sessionName、members[{memObjType,memObjId,memName,userRole,resourceAuthorized?}]；唯一 OWNER 为当前用户                                                     |
+| UPDATE_SESSION / DELETE_SESSION                       | 名称/内容；个人删除为 CLOSED，群使用解散                                                                                                                               |
+| ADD_MEMBERS / REMOVE_MEMBER                           | members[] / memObjType+memObjId；普通成员邀请须启用对应设置                                                                                                            |
+| JOIN_GROUP / LEAVE_GROUP                              | BE 授权的 joinLinkAuthorized+memName / 空对象；OWNER 先转让                                                                                                            |
+| SET_ROLE / TRANSFER_OWNER                             | userId+role(ADMIN/MEMBER) / userId；仅 OWNER                                                                                                                           |
+| DISSOLVE_GROUP / ACK_DISSOLUTION                      | 空对象；解散仅 OWNER，确认须是已解散群成员                                                                                                                             |
+| UPDATE_SETTINGS                                       | sessionName（1–100 字符）、allowJoinByLink、allowMemberAddAgent、allowMemberInviteUser 布尔字段；由 BE 的群设置 PUT 路由转发，OWNER/ADMIN 可更新                       |
+| READ_STATE / RECALL_MESSAGE                           | messageId；已读游标仅向前，撤回由作者或群管理员操作                                                                                                                    |
+| CREATE_TASK                                           | taskSessionId、sourceMessageId、dispatchId、targetAgentId、taskName                                                                                                    |
+| SEND_GROUP_MESSAGE                                    | chatContent、resourceList、files、replyToMessageId；单个员工创建直接任务，两个及以上不同员工只创建团长 GROUP_TASK；返回 messageId 和带 groupCoordination 的 dispatches |
+| CLAIM_TASK                                            | taskSessionId；仅发起人可将 QUEUED 任务原子领取为 RUNNING，返回 claimed，重复领取不会启动第二次执行                                                                    |
+| UPDATE_TASK                                           | taskSessionId、status(ACTIVE/CANCELLED)、turnStatus(RUNNING/WAITING_USER/FAILED)                                                                                       |
+| SAVE_PENDING_PUBLICATION / DELETE_PENDING_PUBLICATION | taskSessionId、pendingPublicationId、text、sourcePaths / taskSessionId                                                                                                 |
+| PUBLISH_TASK                                          | taskSessionId、id、messageId、text、files[]、pendingPublicationId?、metadata?；仅发起人，非 RUNNING；发布消息、publication、PUBLISHED 状态与待发布清理同事务           |
 
 API 路径对应 `command-routes.ts` 和 OpenAPI。HTTP 正常结果是**事务已提交**的原始结果；同 requestId 同内容不重做，冲突拒绝。命令结果使用既有 byai_session_ext 的 `node_command:<requestId>` 保存，与业务变更同事务；不新增幂等/回执表。重投离群/删除命令也可返回原结果。
 
 `GET /internal/v1/messages/by-command/{commandId}` 按既有 `byai_message.persist_command_id` 查询当前消息。commandId 是镜像 eventId，允许 1–64 个 ASCII 字母、数字、冒号、下划线和连字符。接口要求 mTLS、固定租户/代际头与真实 `X-Actor-User-Id`，查询同时限定消息和会话的企业，返回前复核个人会话所有者、群成员或私有任务发起人权限；撤回消息仍做脱敏。200 返回沿用历史字段的单条消息及 complete；未匹配或无权访问均返回 404 RESOURCE_NOT_ACCESSIBLE。
 
+群消息“收到”确认：`POST /internal/v1/group-chats/:id/messages/:messageId/ack` 使用 `ACK_MESSAGE`，同路径 `DELETE` 使用 `UNACK_MESSAGE`。请求体沿用完整命令信封，payload 为 `{ "messageId": "...", "userName": "可选的显示名称" }`；实际确认用户取鉴权后的 actor，不接受 payload 指定其他用户。仅未撤回消息的被 @ 群成员可操作，发送者不能确认自己的消息。重复确认保留原时间，重复撤销无副作用。
+
+确认结果包含 `messageId` 和 `acknowledgements[{messageId,userId,userName,acknowledgedAt}]`，时间为毫秒时间戳。Node 只持久化；BE 提交成功后广播 `MESSAGE_ACK_UPDATED`。群上下文、搜索、消息定位和话题消息返回确认列表及当前用户的 `canAcknowledge`。该操作不推进已读游标，不新增聊天消息。
+
+部署前须在租户数据库中创建 `byai.byai_group_chat_message_ack`；表结构沿用 `deploy/migrations/versions/V0.5.0/V0.5.0__ddl.sql`。主库 SQL 与租户 baseline 是独立制品，仅合并主库建表语句不会更新租户数据库；新租户 baseline 和已有租户升级都需要包含此表。
+
 输入消息保留 INPUT 的 commandId；回答行只保留最近一次已提交的出站 commandId，后续事件会覆盖旧 ID。该接口查询当前行，不保存逐事件审计历史，404 不能作为“事件从未落库”的证明。旧出站事件应结合稳定 answerMessageId、后续消息状态和源流记录对账。
 
-历史保留既有 assiman、群列表/详情/上下文/搜索、话题、任务与待发布查询，撤回内容做脱敏投影。任务状态沿用 ACTIVE/PUBLISHED/CANCELLED 与 QUEUED/RUNNING/WAITING_USER/FAILED。群消息沿引用链写 topic_id，首次公开回复形成话题；真人提及投影至既有 mention 表。BE 领取私有任务并运行数字员工后，Node 在回答 TERMINAL 镜像事务内保存私有回答、问答关系和群公开回复，群回复 ID 记录在任务中；ERROR 则将任务标记 FAILED。BE 在 Node 提交成功后广播群事件。
+历史保留既有 assiman、群列表/详情/上下文/搜索、话题、任务与待发布查询，撤回内容做脱敏投影。任务状态沿用 ACTIVE/PUBLISHED/CANCELLED 与 QUEUED/RUNNING/WAITING_USER/FAILED。群消息沿引用链写 topic_id，首次公开回复形成话题；真人提及投影至既有 mention 表。BE 领取私有任务并运行数字员工后，Node 在回答 TERMINAL 镜像事务内保存私有回答、问答关系；直接任务同时投影群公开回复，团长协作任务只置 WAITING_USER，保留既有成果确认发布流程；ERROR 则将任务标记 FAILED。BE 在 Node 提交成功后广播群事件。
+
+群的团长关联保存于现有会话扩展 `group_coordinator_agent_id`；新建群由 BE 添加平台确定的唯一默认助手。存量群首次发送员工请求时，BE 确定默认助手并授权群用户，Node 在发送事务内核验、补齐成员和关联。`coordinatorAgentId/coordinatorName/coordinatorAuthorized` 仅由 BE 生成，禁止透传客户端数据。
+
+任务范围保存于 `group_coordination_scope`：`{schemaVersion:"byclaw.group-coordination/v1",mode:"COORDINATED"|"DIRECT",groupSessionId,taskSessionId,coordinatorAgentId,allowedAgentIds}`，ID 均为字符串。多人请求仅保留原 @ 的员工为可委派成员（团长身份单独记录）；单人请求保留直接执行，并通过团长申请协助。任务详情、私有会话和重试 dispatch 返回同一持久化范围；客户端不能覆盖范围或在团长根会话切换员工。内部成员协助由运行时结构化工具关联原任务，正文 @ 与成果署名仅用于展示，`PUBLISH_TASK` 不再根据资源引用创建新任务。
+
+群任务每次新入站在现有 INPUT 消息 `metadata.groupPublicContext` 中冻结服务端公共历史边界：首轮使用原群消息 ID，续聊使用 Node 当前群最大消息 ID 加一。Node 的公共消息 ID 与 BE 私有消息 ID 属于不同范围，不可互相比较。客户端同名字段被移除；重复输入复用已有边界。BE 读取并校验这条私有输入后，调用既有 context API 的 `agentContext:true` 视图，最多 60 条 / 30,000 字符，查询阶段排除系统事件和系统引用；普通用户时间线保持原展示。Worker `GET_CONTEXT` 同样使用 Agent 视图。
+
+BE 复用个人群聊的私有 UserFS 快照导出与完成校验机制，将 `group-history.json` 路径和冻结的 `groupContextSnapshot` 一并送入运行时；同 trace 重试复用完成文件，新输入生成新快照。旧执行缺少 INPUT 边界时保留原任务 sourceMessageId，不按重试时的最新历史扩大范围。快照中的历史和引用是只读背景，不能被当作新请求或调度授权。未新增 Redis key、表或数据库迁移。
 
 BE 仍负责平台项目 PENDING→READY 编排、过滤未 READY 项目、租户权限、资源/云文件授权、上传、AI 调度与实时广播。Node 的群创建结果提交后 BE 才能发布项目 READY；上传/文件元数据未租户化的入口不能靠本模块绕开。
 
@@ -227,3 +241,29 @@ pnpm start
 `UPDATE_MESSAGE_STRUCTURE` 对应 `PATCH /internal/v1/sessions/:sessionId/messages/:messageId/structure`，payload 为 `messageId`、`updateField`（messageStruct/inferLog）、`id` 与 `content`，按段落 ID 替换结构内容。两种命令均复用企业/用户/会话授权、会话锁、requestHash 校验及命令事务；已撤回或不属于该会话的消息拒绝更新。运行快照中的待落库回答由 BE 精确会话授权后编辑。
 
 会话创建可保留 `agentId`、`projectId`，会话查询支持 `agentId`。`GET /internal/v1/messages/:messageId/trace` 复用消息访问权限，返回当前镜像协议保存的 runId（BE 生产端与 traceId 相同）。
+
+## HACU 租户接口补齐
+
+BE 公共路径保持不变。带租户上下文的群消息、群管理与任务请求转发到对应 Node；个人模式继续使用原 BE 用例。Node 只存取数据，BE 负责平台项目/模板/资源授权、文件上传、停止运行以及提交后的 WS 广播。
+
+| 能力               | Node 内部接口（省略 `/internal/v1`）                      | 操作                                                                                         |
+| ------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 修改群昵称         | `PATCH /group-chats/:id/members/me/nickname`              | `SET_NICKNAME`，`nickname`                                                                   |
+| 从群创建私聊       | `POST /group-chats/:id/direct-sessions`                   | `CREATE_DIRECT_SESSION`，`agentId`；返回 `data` 会话                                         |
+| 创建/续期邀请      | `POST /group-chats/:id/invitations`                       | `CREATE_INVITATION`，BE 生成 8 位 `token`；返回 `data.token/expiresAt`                       |
+| 预览邀请码         | `POST /group-chats/invitations/validate`                  | body `{token}`；仅当前租户成员可访问                                                         |
+| 凭邀请码入群       | `POST /group-chats/:id/join`                              | `JOIN_GROUP`，`token/joinLinkAuthorized/memName`；事务内复查邀请及群状态                     |
+| 修改群名/设置      | `PATCH /group-chats/:id/settings`                         | `UPDATE_SETTINGS`，可选 `sessionName` 和三个既有布尔设置                                     |
+| 改角色、转让、退群 | `/group-chats/:id/members/role`、`/owner`、`/leave`       | 复用 `SET_ROLE/TRANSFER_OWNER/LEAVE_GROUP`                                                   |
+| 解散、确认解散     | `/group-chats/:id/dissolve`、`/dissolution-ack`           | 复用 `DISSOLVE_GROUP/ACK_DISSOLUTION`                                                        |
+| 撤回群消息         | `POST /group-chats/:id/messages/:messageId/recall`        | `RECALL_MESSAGE`；返回撤回事实和需停止的关联任务                                             |
+| 准备发布           | `POST /group-chats/:id/tasks/:taskId/pending-publication` | `SAVE_PENDING_PUBLICATION`；支持 `expectedPendingPublicationId` 防止覆盖旧卡片               |
+| 上传检查点         | 同上路径 `PATCH`                                          | `CHECKPOINT_PUBLICATION`，`taskSessionId/pendingPublicationId/cloudResourceId/uploadedFiles` |
+| 完成发布           | `POST /group-chats/:id/tasks/:taskId/publication`         | `PUBLISH_TASK`；Node 分配消息 ID、原子保存消息和成果，重复发布返回已有结果                   |
+| 取消任务           | `POST /group-chats/:id/tasks/:taskId/cancel`              | `CANCEL_TASK`，`taskSessionId`；发起人或管理员可操作                                         |
+
+以上写入均使用完整 `TenantCommand` 信封；路径、operation、actor 与 payload 必须一致。查询补充 `GET /group-chats/:id/management`（含解散后的成员快照）、`GET /group-chat/tasks/:taskId/cancellation`（取消权限校验）与 `GET /group-chat/tasks/:taskId/publication`（发起人查询已发布结果）。
+
+邀请记录复用群扩展表，不单独建表。私聊记录来源群、目标 Agent 和创建时的消息边界，仅创建者可读取。取消、解散和撤回先在 Node 关闭任务，再由 BE 停止发起人的运行；迟到终态不会重新发布到群。外部停止失败会返回错误，重复取消/撤回可重试停止。
+
+本次不修改或执行数据库脚本、不重新生成 baseline。部署者需要保证租户库已有原群聊/任务/待发布表、确认表及 Node 原有字段。BE 和 Node 应一起更新；数据库结构由部署者升级后再联调。

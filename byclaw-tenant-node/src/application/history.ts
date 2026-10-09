@@ -30,7 +30,13 @@ export class HistoryService {
     this.basic.byCommand(...args);
   forward = (...args: Parameters<TraditionalHistory["forward"]>) => this.basic.forward(...args);
   outline = (...args: Parameters<TraditionalHistory["outline"]>) => this.basic.outline(...args);
+  cancellation = (...args: Parameters<GroupHistory["cancellation"]>) =>
+    this.group.cancellation(...args);
+  invitation = (...args: Parameters<GroupHistory["invitation"]>) => this.group.invitation(...args);
+  publication = (...args: Parameters<GroupHistory["publication"]>) =>
+    this.group.publication(...args);
   groups = (...args: Parameters<GroupHistory["groups"]>) => this.group.groups(...args);
+  management = (...args: Parameters<GroupHistory["management"]>) => this.group.management(...args);
   detail = (...args: Parameters<GroupHistory["detail"]>) => this.group.detail(...args);
   settings = (...args: Parameters<GroupHistory["settings"]>) => this.group.settings(...args);
   lifecycle = (...args: Parameters<GroupHistory["lifecycle"]>) => this.group.lifecycle(...args);

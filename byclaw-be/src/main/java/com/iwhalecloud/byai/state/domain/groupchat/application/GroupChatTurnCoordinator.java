@@ -57,6 +57,11 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 /** Coordinates immutable per-turn requests under persistent session ownership. */
 @Service
 public class GroupChatTurnCoordinator {
+    @Autowired
+    private GroupChatCoordinationService coordination;
+    @Autowired
+    @org.springframework.context.annotation.Lazy
+    private GroupChatTaskService taskService;
     private static final Logger log = LoggerFactory.getLogger(GroupChatTurnCoordinator.class);
     @Autowired
     private ByaiGroupChatRecallMapper recalls;
@@ -161,13 +166,27 @@ public class GroupChatTurnCoordinator {
         });
     }
 
+    /** A multi-mention is one new task; quoted messages supply context without reopening an earlier task. */
+    public ByaiGroupChatTurn enqueueCoordinatedUser(Long group, Long source, Long reply, Long user,
+        Long coordinatorId, List<Long> selectedIds) {
+        return transaction.execute(status -> {
+            turns.lockGroup(group);
+            ByaiMessage message = messages.selectByMessageId(source);
+            ByaiGroupChatTurn turn = enqueue(group, source, source, source, user, coordinatorId, "USER", user,
+                message.getMessageContent(), metadata(message), null, 0, null,
+                reply == null ? null : quotedMessage(group, reply));
+            if (coordination.findScope(turn.getCandidateSessionId()) == null) {
+                coordination.resolveForExecution(group, turn.getCandidateSessionId(), selectedIds, coordinatorId,
+                    GroupChatCoordinationService.COORDINATED);
+            }
+            taskService.promote(turn, "协作任务", null);
+            return turn;
+        });
+    }
+
     public ByaiGroupChatTurn enqueueAgent(ByaiGroupChatExecution parent, Long agent, Long trigger,
         Long publicBoundary, String content, Object resourceList) {
         int hop = parent instanceof ByaiGroupChatTurn ? ((ByaiGroupChatTurn) parent).getHopCount() + 1 : 1;
-        if (hop > 6) {
-            log.info("Group automatic delegation suppressed: parentTurnId={}, targetAgentId={}, hop={}", parent.getExecutionId(), agent, hop);
-            return null;
-        }
         return transaction.execute(status -> {
             turns.lockGroup(parent.getGroupSessionId());
             // 父轮次即使已完成，也可能已被撤回；禁止发布回调继续自动委派。
@@ -382,6 +401,9 @@ public class GroupChatTurnCoordinator {
                             && (persisted.getTraceId() == null || (isPreparationFailure(error)
                                 && Objects.equals(persisted.getTraceId(), turn.getTraceId())))) {
                             turns.markFailed(turn.getExecutionId(), "START_FAILED", error.getMessage(), new Date());
+                            if (coordination != null && coordination.isCoordinated(persisted.getCandidateSessionId())) {
+                                taskService.failTurnStart(persisted.getCandidateSessionId(), persisted.getExecutionId());
+                            }
                             wakeAfterCommit(persisted.getCandidateSessionId());
                         }
                         return null;
@@ -451,11 +473,16 @@ public class GroupChatTurnCoordinator {
             return false;
         }
         ByaiGroupChatTask task = tasks.selectById(first.getCandidateSessionId());
-        if (task != null && "ACTIVE".equals(task.getStatus())) {
+        boolean coordinatedInitial = task != null && coordination != null
+            && coordination.isCoordinated(first.getCandidateSessionId())
+            && Objects.equals(task.getDispatchId(), first.getExecutionId())
+            && Objects.equals(task.getCurrentTurnId(), first.getExecutionId());
+        if (task != null && "ACTIVE".equals(task.getStatus())
+            && !coordinatedInitial) {
             block(first, "ACTIVE_TASK");
             return false;
         }
-        if ((task != null && "NORMAL".equals(first.getPhase())) || "ASSESSMENT".equals(first.getPhase())) {
+        if ((task != null && !coordinatedInitial && "NORMAL".equals(first.getPhase())) || "ASSESSMENT".equals(first.getPhase())) {
             // 排队期间任务可能已结束；旧版尚未发送的评估记录也直接转为原会话追问。
             first.setPhase("CHAT_CONTINUATION");
             first.setDisposition("CHAT");
@@ -471,10 +498,6 @@ public class GroupChatTurnCoordinator {
             }
             turns.updateById(first);
         }
-        if (first.getHopCount() > 6) {
-            block(first, "HOP_LIMIT");
-            return false;
-        }
         ChatRuntimeState state = runtime.get(first.getCandidateSessionId());
         if (state != null && (ChatRuntimeState.STATUS_RUNNING.equals(state.getStatus())
             || ChatRuntimeState.STATUS_HANDOFF_REQUESTED.equals(state.getStatus()))) {
@@ -488,6 +511,13 @@ public class GroupChatTurnCoordinator {
         turn.setErrorCode(reason);
         turn.setFinishTime(new Date());
         turns.updateById(turn);
+        if (coordination != null && coordination.isCoordinated(turn.getCandidateSessionId())) {
+            ByaiGroupChatTask task = tasks.selectById(turn.getCandidateSessionId());
+            if (task != null && Objects.equals(task.getDispatchId(), turn.getExecutionId())
+                && Objects.equals(task.getCurrentTurnId(), turn.getExecutionId())) {
+                taskService.failTurnStart(turn.getCandidateSessionId(), turn.getExecutionId());
+            }
+        }
         wakeAfterCommit(turn.getCandidateSessionId());
     }
 
