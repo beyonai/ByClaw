@@ -12,6 +12,7 @@ import UserDropdown from '@/pages/manager/layout/sider/components/userDropdown';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { getWorkgroupTemplateCapability } from '@/pages/manager/service/WorkgroupTemplate';
 import { getAppVersionCapability } from '@/pages/manager/service/AppVersion';
+import { useMultiTenancy } from '@/utils/multiTenancy';
 import {
   fallbackMenuConfig,
   filterAppVersionMenu,
@@ -55,6 +56,7 @@ const LocaleDropdown = () => {
 };
 
 const Sider: React.FC = () => {
+  const { enabled: multiTenancyEnabled } = useMultiTenancy();
   const intl = useIntl();
   const location = useLocation();
   const navigate = useNavigate();
@@ -122,11 +124,13 @@ const Sider: React.FC = () => {
   // Filter menu items by blockedPaths
   const filteredMenus = useMemo(() => {
     // 根据userInfo判断isAdminVip过滤menuConfig中的adminVipOnly
-    const filterMenus = filterMenusByMenuDisplay(filterMenusByAdminVip(menuConfig, isAdminVip(userInfo)), userInfo);
+    const platformAdmin = (userInfo?.usersOrganizations || []).some((org: any) => org.userType === 'PLAT_MAN');
+    const tenantMenus = withTenantAdminMenu(menuConfig, multiTenancyEnabled && platformAdmin);
+    const filterMenus = filterMenusByMenuDisplay(filterMenusByAdminVip(tenantMenus, isAdminVip(userInfo)), userInfo);
 
     // blockedPaths 为 null 表示接口还未返回，先展示全部菜单；为空数组表示无需屏蔽
     return filterRoutesByBlockedPaths(filterMenus, blockedPaths || []);
-  }, [blockedPaths, menuConfig, userInfo]);
+  }, [blockedPaths, menuConfig, userInfo, multiTenancyEnabled]);
 
   // Build antd Menu items from filtered config
   const menuItems = useMemo(() => {
