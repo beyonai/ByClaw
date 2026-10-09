@@ -111,7 +111,12 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 const openPanel = async () => {
-  render(<FileResourcePanel scope="project" sessionId="s1" projectId={42} resourceId="100" onOpenDetail={jest.fn()} />);
+  // 等待模拟目录请求及其派生 effect 完成，避免状态更新跨到后续交互或用例。
+  await act(async () => {
+    render(
+      <FileResourcePanel scope="project" sessionId="s1" projectId={42} resourceId="100" onOpenDetail={jest.fn()} />
+    );
+  });
   await screen.findByRole('button', { name: 'old.md:rename' });
 };
 
@@ -164,24 +169,31 @@ it('allows a readable member to rename a folder', async () => {
   await waitFor(() => expect(screen.queryByRole('button', { name: 'confirm rename' })).not.toBeInTheDocument());
 });
 
+// 全量钩子并发执行时，为真实 AntD 渲染保留余量；业务结果仍须完成全部断言。
 it('allows a readable member to create a folder', async () => {
+  jest.mocked(createFolder).mockResolvedValueOnce({});
   await openPanel();
   fireEvent.click(screen.getByRole('button', { name: 'fileBrowser.toolbar.newFolder' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'folder name' }), { target: { value: 'created' } });
-  fireEvent.click(screen.getByRole('button', { name: 'confirm folder' }));
-  await waitFor(() =>
-    expect(createFolder).toHaveBeenCalledWith(
-      {
-        resourceId: 100,
-        directoryPath: '/',
-        directoryName: 'created',
-        directoryDescription: '',
-      },
-      { responseCfg: { hideErrorTips: true } }
-    )
+  // 将创建请求、关闭弹窗和目录刷新一起纳入 act，避免轮询期间仍遗留异步状态更新。
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'confirm folder' }));
+  });
+  expect(createFolder).toHaveBeenCalledWith(
+    {
+      resourceId: 100,
+      directoryPath: '/',
+      directoryName: 'created',
+      directoryDescription: '',
+    },
+    { responseCfg: { hideErrorTips: true } }
   );
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'confirm folder' })).not.toBeInTheDocument());
-});
+  expect(screen.queryByRole('button', { name: 'confirm folder' })).not.toBeInTheDocument();
+  expect(queryProjectCloudDrive).toHaveBeenCalledTimes(2);
+  expect(queryProjectCloudDrive).toHaveBeenLastCalledWith('100', '/', 'zh-CN');
+  expect(message.success).toHaveBeenCalledWith('fileBrowser.createFolder.success');
+  expect(message.error).not.toHaveBeenCalled();
+}, 15000);
 
 it('allows a readable member to upload files to the project cloud drive', async () => {
   await openPanel();

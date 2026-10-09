@@ -9,6 +9,12 @@ export default {
   ...sandboxMgrLocale,
   ...systemFeedbackMgrLocale,
 
+  'workgroupTemplate.saveSuccess': '模板保存成功',
+  'workgroupTemplate.saveFailed': '模板保存失败',
+  'workgroupTemplate.deleteSuccess': '模板已删除',
+  'workgroupTemplate.deleteFailed': '模板删除失败',
+  'workgroupTemplate.loadFailed': '模板列表加载失败',
+
   // Menu
   'menu.business': '资产',
   'menu.business.field': '资产目录管理',

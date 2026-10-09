@@ -12,6 +12,15 @@ import {
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
 
+jest.mock('antd', () => {
+  const actual = jest.requireActual('antd');
+  return {
+    ...actual,
+    // 全局提示的渲染由卡片用例覆盖；列表只验证反馈调用，避免静态提示和计时器跨用例残留。
+    message: { ...actual.message, success: jest.fn(), error: jest.fn(), warning: jest.fn() },
+  };
+});
+
 jest.mock('../../../skillExport', () => ({
   buildSkillBundle: jest.fn().mockResolvedValue(new Blob(['zip'])),
   saveSkillFile: jest.fn(),
@@ -44,7 +53,11 @@ jest.mock('@/components/InfiniteScroll', () => ({
   default: ({ children, next, hasMore }: any) => (
     <div>
       {children}
-      {hasMore && <button onClick={next}>load more</button>}
+      {hasMore && (
+        <button data-testid="resource-load-more" onClick={next}>
+          load more
+        </button>
+      )}
     </div>
   ),
 }));
@@ -100,6 +113,15 @@ const renderList = (props: Record<string, any> = {}) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // 清空未消费的一次性响应，保证失败或提前结束的用例不会影响下一次请求。
+  [
+    listResourceUseAuth,
+    queryResourceDetail,
+    queryWorkspacePersonalSkillList,
+    shelfResource,
+    unShelfResource,
+    deregisterResource,
+  ].forEach((operation) => (operation as jest.Mock).mockReset());
   (listResourceUseAuth as jest.Mock).mockResolvedValue({
     data: { list: [{ resourceId: '10', resourceBizType: 'TOOLKIT', ownerType: 'enterprise' }], total: 1 },
   });
@@ -112,6 +134,8 @@ beforeEach(() => {
     (operation as jest.Mock).mockResolvedValue({ code: 0 })
   );
 });
+
+afterEach(() => jest.restoreAllMocks());
 
 it.each(['SKILL', 'KG_DOC', 'TOOL'])('shows loading while the initial %s request is pending', async (resourceType) => {
   let finish!: (value: any) => void;
@@ -429,9 +453,12 @@ it('keeps the successful state when the detail refresh fails', async () => {
   const warning = jest.spyOn(message, 'warning').mockImplementation(() => undefined as any);
   (queryResourceDetail as jest.Mock).mockRejectedValue(new Error('Detail unavailable'));
   const refresh = renderList({ dropdownParam: { resourceStatus: '' } });
-  const card = await screen.findByTestId('resource-card');
-  fireEvent.click(screen.getByText('publish'));
-  await waitFor(() => expect(card).toHaveAttribute('data-resource-status', '2'));
+  await screen.findByTestId('resource-card');
+  // 等待写操作和详情失败都结束，再检查当前列表中的成功状态。
+  await act(async () => {
+    fireEvent.click(screen.getByText('publish'));
+  });
+  await waitFor(() => expect(screen.getByTestId('resource-card')).toHaveAttribute('data-resource-status', '2'));
   expect(warning).toHaveBeenCalledWith('resource.rowRefreshFailed');
   expect(refresh).not.toHaveBeenCalled();
   expect(listResourceUseAuth).toHaveBeenCalledTimes(1);
@@ -691,7 +718,8 @@ it('removes only the canceled favorite and fills the shifted page boundary witho
   (listResourceUseAuth as jest.Mock).mockResolvedValueOnce({
     data: { list: Array.from({ length: 30 }, (_, i) => row(i + 2)), total: 30 },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+  // 30 张卡片各有多个操作按钮，直接定位分页入口，避免整表角色查询阻塞请求完成。
+  fireEvent.click(screen.getByTestId('resource-load-more'));
   await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
   expect(listResourceUseAuth).toHaveBeenLastCalledWith(expect.objectContaining({ pageNum: 1, favoritesOnly: true }));
   expect(screen.getAllByTestId('resource-card').map((card) => card.getAttribute('data-resource-id'))).toEqual(
@@ -779,7 +807,7 @@ it('retries the current favorite boundary and stays loading until the fresh page
     );
   renderList({ resourceType: 'SKILL', activeTab: 'favorites', myResourcesOnly: false, enableFavorites: true });
   await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
-  fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+  fireEvent.click(screen.getByTestId('resource-load-more'));
   act(() => {
     window.dispatchEvent(
       new CustomEvent('resourceFavoriteChanged', {
@@ -792,7 +820,7 @@ it('retries the current favorite boundary and stays loading until the fresh page
   });
   expect(listResourceUseAuth).toHaveBeenCalledTimes(3);
   expect(screen.getByText('common.loading')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+  fireEvent.click(screen.getByTestId('resource-load-more'));
   expect(listResourceUseAuth).toHaveBeenCalledTimes(3);
   await act(async () => {
     finishFresh({ data: { list: [...first.slice(1), row(31)], total: 30 } });
@@ -802,7 +830,7 @@ it('retries the current favorite boundary and stays loading until the fresh page
   expect(screen.getAllByTestId('resource-card').map((card) => card.getAttribute('data-resource-id'))).not.toContain(
     '1'
   );
-  expect(screen.queryByRole('button', { name: 'load more' })).toBeNull();
+  expect(screen.queryByTestId('resource-load-more')).toBeNull();
 });
 
 it('keeps available skills resource-backed after leaving and reopening the center', async () => {

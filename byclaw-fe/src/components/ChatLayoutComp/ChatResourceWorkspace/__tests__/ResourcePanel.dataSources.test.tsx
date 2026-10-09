@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { ConfigProvider } from 'antd';
 import { querySessionDataSources } from '@/service/projectDataSources';
 import ResourcePanel from '../ResourcePanel';
 import { DetailPanelContent, useDetailPanelState } from '@/layout/pcLayout/useDetailPanelState';
@@ -28,7 +29,9 @@ jest.mock('@/components/ProjectDataSources', () => () => <div>datasource content
 const query = jest.mocked(querySessionDataSources);
 const page = (total: number) => ({ items: [], total, pageNum: 1, pageSize: 50 });
 const panel = (sessionId = 'session-1') => (
-  <ResourcePanel sessionId={sessionId} projectId={1} onOpenDetail={jest.fn()} />
+  <ConfigProvider theme={{ token: { motion: false } }}>
+    <ResourcePanel sessionId={sessionId} projectId={1} onOpenDetail={jest.fn()} />
+  </ConfigProvider>
 );
 
 beforeEach(() => {
@@ -49,12 +52,24 @@ it('hides the project data tab when the session has no data', async () => {
 
 it('shows the tab with data and falls back to files when refresh returns no data', async () => {
   query.mockResolvedValueOnce(page(1)).mockResolvedValueOnce(page(0));
-  render(panel());
-  fireEvent.click(await screen.findByRole('tab', { name: 'dataSource.title' }));
+  await act(async () => {
+    render(panel());
+  });
+  // 顶层 tabpanel 和侧栏同名，按 aside 的语义角色定位会话资源导航。
+  const sessionNav = screen.getByRole('complementary', { name: 'chatResource.currentSession' });
+  fireEvent.click(within(sessionNav).getByRole('tab', { name: 'dataSource.title' }));
   expect(screen.getByText('datasource content')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'common.refresh' }));
-  await waitFor(() => expect(screen.queryByRole('tab', { name: 'dataSource.title' })).not.toBeInTheDocument());
+  // 在 act 内等待刷新响应及回退状态，避免反复扫描整棵 Tabs 树阻塞异步更新。
+  await act(async () => {
+    fireEvent.click(within(sessionNav).getByRole('button', { name: 'common.refresh' }));
+  });
+  expect(within(sessionNav).queryByRole('tab', { name: 'dataSource.title' })).not.toBeInTheDocument();
+  expect(within(sessionNav).getByRole('tab', { name: 'chatResource.localSharedFile' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  );
   expect(screen.getByText('files')).toBeInTheDocument();
+  expect(query).toHaveBeenCalledTimes(2);
 });
 
 it('ignores a late response from the previous session', async () => {

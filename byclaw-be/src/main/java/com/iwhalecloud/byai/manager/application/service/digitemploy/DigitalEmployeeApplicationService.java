@@ -350,6 +350,8 @@ public class DigitalEmployeeApplicationService {
 
         // 设置用户上下文信息
         resourceAuthContextService.setCurrentUserAuthQo(digitalEmployeeQo);
+        // 只信任当前登录身份，覆盖请求中传入的标志，避免普通用户伪造超管列表范围。
+        digitalEmployeeQo.setEnterpriseListAdminVip(CurrentUserHolder.isAdminVip());
         this.fillCatalogIds(digitalEmployeeQo);
 
         PageInfo<DigitalEmployeePageVo> pageInfo = ssResExtDigEmployeeService
@@ -2162,8 +2164,11 @@ public class DigitalEmployeeApplicationService {
         Long resourceId = employeeIdDTO.getResourceId();
         SsResource ssResource = ssResourceService.findById(resourceId);
         this.validateDigitalEmployeeManagePermission(ssResource);
-
-
+        // 官方副本注销仍仅允许官方管理员，授权和上下架的管理权限不能代替注销资格。
+        if (employeeGovernance != null && DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)
+            && !employeeGovernance.canAdministerOfficial(ssResource)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+        }
         // 保留可辨认的删除记录并释放原名称;按状态判断,避免重复删除时叠加后缀.
         if (!Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
             String suffix = I18nUtil.get("digemployee.deleted.name.suffix");
@@ -2279,10 +2284,6 @@ public class DigitalEmployeeApplicationService {
     private void validateDigitalEmployeeManagePermission(SsResource ssResource) {
         if (employeeGovernance != null) {
             employeeGovernance.requireNotProtected(ssResource);
-            if (DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
-                if (employeeGovernance.canAdministerOfficial(ssResource)) return;
-                throw new BaseException("仅官方管理员可以上下架官方副本");
-            }
         }
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
@@ -2290,6 +2291,7 @@ public class DigitalEmployeeApplicationService {
         if (StringUtils.equals(ssResource.getOwnerType(), OwnerType.PERSONAL_DEFAULT)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
         }
+        // 官方副本也复用操作权限接口的管理判断，保证可见的上下架按钮能够实际执行。
         if (authApplicationService.hasResourceManagePermission(ssResource)) {
             return;
         }

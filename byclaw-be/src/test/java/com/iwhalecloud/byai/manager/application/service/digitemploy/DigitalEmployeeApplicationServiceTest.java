@@ -386,6 +386,63 @@ class DigitalEmployeeApplicationServiceTest {
         verify(ssResourceService, never()).update(any(SsResource.class));
     }
 
+    /** 作者和有效管理授权用户均复用资源管理权限，不再被官方副本的额外角色判断拦截。 */
+    @ParameterizedTest
+    @ValueSource(longs = {1L, 2L})
+    void officialEmployeeShelfActions_allowCreatorOrExplicitManager(Long creatorId) {
+        DigitalEmployeeGovernanceService governance = mock(DigitalEmployeeGovernanceService.class);
+        ReflectionTestUtils.setField(service, "employeeGovernance", governance);
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, creatorId);
+        resource.setPublicationSourceId(199L);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        service.unShelfDigitalEmployee(dto);
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.OFF_SHELF.getNum());
+        service.shelfDigitalEmployee(dto);
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.ON_SHELF.getNum());
+        verify(authApplicationService, times(2)).hasResourceManagePermission(resource);
+        verify(ssResourceService, times(2)).update(resource);
+    }
+
+    @Test
+    void officialEmployeeShelfActions_rejectUserWithoutManagementPermission() {
+        ReflectionTestUtils.setField(service, "employeeGovernance", mock(DigitalEmployeeGovernanceService.class));
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 2L);
+        resource.setPublicationSourceId(199L);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.unShelfDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class).hasMessage("user.permission.nopermission");
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        assertThatThrownBy(() -> service.shelfDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class).hasMessage("user.permission.nopermission");
+        verify(ssResourceService, never()).update(any(SsResource.class));
+    }
+
+    @Test
+    void officialEmployeeDeletion_stillRequiresOfficialAdministrator() {
+        ReflectionTestUtils.setField(service, "employeeGovernance", mock(DigitalEmployeeGovernanceService.class));
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setPublicationSourceId(199L);
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.deleteDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class).hasMessage("user.permission.nopermission");
+        verify(ssResourceService, never()).update(any(SsResource.class));
+    }
+
     /**
      * 登录自动创建超级助手时，仍走 saveDigitalEmployee 主链路，但不再写 owner_type=personal_default 或 tag_name。
      *
@@ -671,6 +728,25 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(result.getList()).hasSize(1);
         assertThat(result.getList().get(0).getOwnerType()).isEqualTo(OwnerType.ENTERPRISE);
+    }
+
+    /** 请求参数不能伪造或取消超管身份，企业列表放行只由当前会话决定。 */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void selectDigitalEmployeeByQo_overwritesAdminVipFlagFromSession(boolean adminVip) {
+        CurrentUserHolder.getLoginInfo().setUserCode(adminVip ? "adminvip" : "zhangsan");
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        qo.setType("ownerOrManager");
+        qo.setEnterpriseListAdminVip(!adminVip);
+        when(ssResExtDigEmployeeService.selectDigitalEmployeeByQo(any(DigitalEmployeeQo.class)))
+            .thenReturn(new PageInfo<>());
+
+        service.selectDigitalEmployeeByQo(qo);
+
+        ArgumentCaptor<DigitalEmployeeQo> captor = ArgumentCaptor.forClass(DigitalEmployeeQo.class);
+        verify(ssResExtDigEmployeeService).selectDigitalEmployeeByQo(captor.capture());
+        assertThat(captor.getValue().getEnterpriseListAdminVip()).isEqualTo(adminVip);
+        assertThat(captor.getValue().getType()).isEqualTo("ownerOrManager");
     }
 
     @Test
