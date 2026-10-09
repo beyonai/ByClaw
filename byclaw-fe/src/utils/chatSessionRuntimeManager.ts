@@ -71,6 +71,10 @@ class ChatSessionRuntimeManager {
 
   private sessionRuntimeBySessionId = new Map<string, SessionRuntimeState>();
 
+  // 用户已确认交互（提交 ask_user_question 等）的会话及其确认时间。
+  // 该覆盖位不进入 sessionRuntimeBySessionId，因此不会触碰 applySessionRuntime 的严格递增守卫。
+  private confirmedWaitingAtBySessionId = new Map<string, number>();
+
   private listeners = new Set<Listener>();
 
   register(info: RuntimeInfo): void {
@@ -217,7 +221,12 @@ class ChatSessionRuntimeManager {
 
   cancel(clientRequestId: string, sessionId?: string | number): void {
     const info = this.getByClientRequest(clientRequestId);
-    const runtime = this.getSessionRuntime(sessionId || info?.sessionId);
+    const targetSessionId = sessionId || info?.sessionId;
+    // 会话已进入终态，用户确认的覆盖位不再需要保留。
+    if (targetSessionId) {
+      this.confirmedWaitingAtBySessionId.delete(`${targetSessionId}`);
+    }
+    const runtime = this.getSessionRuntime(targetSessionId);
     if (runtime && (!info?.traceId || info.traceId === runtime.traceId)) {
       this.applySessionRuntime({
         ...runtime,
@@ -274,12 +283,13 @@ class ChatSessionRuntimeManager {
   }
 
   isSessionWaitingForUserInput(sessionId?: string | number): boolean {
+    // 来源 A（本地请求级标志）始终优先：本端确有未处理的交互时，任何覆盖位都不得把它压掉，
+    // 否则一旦覆盖位残留，后续真正需要用户输入的轮次将永远不显示标识。
+    if (this.getAllBySession(sessionId).some((runtimeInfo) => runtimeInfo.waitingForUserInput)) return true;
+    // 用户已确认的会话：在外部运行时下发更新一轮的投影之前，不再采用服务端投影的等待态。
+    if (sessionId && this.confirmedWaitingAtBySessionId.has(`${sessionId}`)) return false;
     const projected = sessionId ? this.sessionRuntimeBySessionId.get(`${sessionId}`) : undefined;
-    return (
-      this.getAllBySession(sessionId).some((runtimeInfo) => runtimeInfo.waitingForUserInput) ||
-      projected?.status === 'waiting_user' ||
-      Number(projected?.waitingInteractionCount || 0) > 0
-    );
+    return projected?.status === 'waiting_user' || Number(projected?.waitingInteractionCount || 0) > 0;
   }
 
   applySessionRuntime(runtime: SessionRuntimeState): boolean {
@@ -310,6 +320,7 @@ class ChatSessionRuntimeManager {
     }
 
     this.sessionRuntimeBySessionId.set(normalized.sessionId, normalized);
+    this.releaseConfirmedWaitingIfSuperseded(normalized);
     this.emitChange();
     return true;
   }
@@ -324,6 +335,16 @@ class ChatSessionRuntimeManager {
     if (!info || Boolean(info.waitingForUserInput) === waitingForUserInput) return;
 
     info.waitingForUserInput = waitingForUserInput;
+    this.emitChange();
+  }
+
+  /**
+   * 标记该会话「用户已确认交互」，使 isSessionWaitingForUserInput 立即短路为 false。
+   * 覆盖位不写入 sessionRuntimeBySessionId，因此不会伪造服务端投影的 revision。
+   */
+  markWaitingForUserInputConfirmed(sessionId?: string | number): void {
+    if (!sessionId) return;
+    this.confirmedWaitingAtBySessionId.set(`${sessionId}`, Date.now());
     this.emitChange();
   }
 
@@ -387,6 +408,7 @@ class ChatSessionRuntimeManager {
     this.activeClientRequestIdByTraceKey.clear();
     this.activeClientRequestIdByLaneKey.clear();
     this.sessionRuntimeBySessionId.clear();
+    this.confirmedWaitingAtBySessionId.clear();
     this.emitChange();
   }
 
@@ -399,6 +421,17 @@ class ChatSessionRuntimeManager {
 
   private emitChange(): void {
     this.listeners.forEach((listener) => listener());
+  }
+
+  /**
+   * 外部运行时是权威：一旦它下发了更新一轮（changedAt 晚于确认时间）的投影，用户确认的覆盖位即失效。
+   * 被守卫拒绝的陈旧帧不会走到这里，因此不会误解除覆盖位。
+   */
+  private releaseConfirmedWaitingIfSuperseded(runtime: SessionRuntimeState): void {
+    const confirmedAt = this.confirmedWaitingAtBySessionId.get(runtime.sessionId);
+    if (confirmedAt !== undefined && runtime.changedAt > confirmedAt) {
+      this.confirmedWaitingAtBySessionId.delete(runtime.sessionId);
+    }
   }
 
   private getScopedKey(sessionId?: string | number, value?: string | number): string {

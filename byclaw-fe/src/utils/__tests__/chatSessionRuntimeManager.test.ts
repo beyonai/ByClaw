@@ -352,4 +352,144 @@ describe('utils/chatSessionRuntimeManager', () => {
     expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(false);
     expect(chatSessionRuntimeManager.canAcceptInput('s2')).toBe(true);
   });
+
+  describe('user-confirmed interaction override', () => {
+    const waitingRuntime = {
+      sessionId: 's1',
+      traceId: 'trace-1',
+      source: 'test-engine',
+      status: 'waiting_user',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 1,
+      revision: 3,
+      changedAt: 1000,
+    };
+
+    it('converges the projected waiting state without forging the server projection', () => {
+      chatSessionRuntimeManager.applySessionRuntime(waitingRuntime);
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(true);
+
+      chatSessionRuntimeManager.markWaitingForUserInputConfirmed('s1');
+
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+      // 覆盖位不得伪造/篡改来源 B：服务端投影原样保留（revision 未被抬高）。
+      expect(chatSessionRuntimeManager.getSessionRuntime('s1')).toEqual(waitingRuntime);
+    });
+
+    it('releases the override once the runtime reports a newer turn, then shows the badge again', () => {
+      chatSessionRuntimeManager.applySessionRuntime(waitingRuntime);
+      chatSessionRuntimeManager.markWaitingForUserInputConfirmed('s1');
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+
+      // 外部运行时下发更新一轮（changedAt 晚于确认时间）的收敛态 → 覆盖位解除。
+      expect(
+        chatSessionRuntimeManager.applySessionRuntime({
+          ...waitingRuntime,
+          status: 'idle',
+          waitingInteractionCount: 0,
+          revision: 4,
+          changedAt: Date.now() + 10,
+        })
+      ).toBe(true);
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+
+      // 覆盖位确已解除：再来的等待态必须重新显示标识（防「永不显示」）。
+      expect(
+        chatSessionRuntimeManager.applySessionRuntime({
+          ...waitingRuntime,
+          revision: 5,
+          changedAt: Date.now() + 20,
+        })
+      ).toBe(true);
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(true);
+    });
+
+    it('does not release the override for a stale frame rejected by the guard', () => {
+      chatSessionRuntimeManager.applySessionRuntime(waitingRuntime);
+      chatSessionRuntimeManager.markWaitingForUserInputConfirmed('s1');
+
+      // 同 source/trace 且 revision 不前进 → 守卫拒绝，覆盖位不得被解除。
+      expect(
+        chatSessionRuntimeManager.applySessionRuntime({
+          ...waitingRuntime,
+          status: 'idle',
+          waitingInteractionCount: 0,
+          revision: 3,
+          changedAt: Date.now() + 10,
+        })
+      ).toBe(false);
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+    });
+
+    it('keeps the local pending interaction authoritative over the override', () => {
+      chatSessionRuntimeManager.register({ clientRequestId: 'req', sessionId: 's1', traceId: 'trace-1' });
+      chatSessionRuntimeManager.applySessionRuntime(waitingRuntime);
+      chatSessionRuntimeManager.markWaitingForUserInputConfirmed('s1');
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+
+      // 本端出现新的未处理交互（来源 A）→ 覆盖位不得把它压掉。
+      chatSessionRuntimeManager.setWaitingForUserInput('req', true);
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(true);
+    });
+
+    it('drops the override when the turn is cancelled', () => {
+      chatSessionRuntimeManager.register({ clientRequestId: 'req', sessionId: 's1', traceId: 'trace-1' });
+      chatSessionRuntimeManager.applySessionRuntime(waitingRuntime);
+      chatSessionRuntimeManager.markWaitingForUserInputConfirmed('s1');
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+
+      chatSessionRuntimeManager.cancel('req', 's1');
+
+      // 覆盖位已清除：新 trace 的等待态必须重新显示标识。
+      expect(
+        chatSessionRuntimeManager.applySessionRuntime({
+          ...waitingRuntime,
+          traceId: 'trace-2',
+          revision: 1,
+          changedAt: Date.now() + 100,
+        })
+      ).toBe(true);
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(true);
+    });
+
+    it('keeps the badge hidden after a refresh once the authoritative state converged', () => {
+      chatSessionRuntimeManager.applySessionRuntime(waitingRuntime);
+      chatSessionRuntimeManager.markWaitingForUserInputConfirmed('s1');
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+
+      // 刷新：本地内存全清（覆盖位随之消失）。
+      chatSessionRuntimeManager.clear();
+      // 回读的是后端已收敛的投影。
+      chatSessionRuntimeManager.applySessionRuntime({
+        ...waitingRuntime,
+        status: 'idle',
+        waitingInteractionCount: 0,
+        revision: 4,
+        changedAt: Date.now() + 10,
+      });
+
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+    });
+
+    it('converges the badge for a multi-agent lane registration', () => {
+      chatSessionRuntimeManager.register({
+        clientRequestId: 'lane-req',
+        sessionId: 'pending_lane-req',
+        laneId: 'lane-1',
+        turnId: 'turn-1',
+        traceId: 'trace-lane',
+      });
+      chatSessionRuntimeManager.applySessionRuntime({
+        ...waitingRuntime,
+        sessionId: 'pending_lane-req',
+        traceId: 'trace-lane',
+      });
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('pending_lane-req')).toBe(true);
+
+      chatSessionRuntimeManager.markWaitingForUserInputConfirmed('pending_lane-req');
+
+      expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('pending_lane-req')).toBe(false);
+    });
+  });
 });

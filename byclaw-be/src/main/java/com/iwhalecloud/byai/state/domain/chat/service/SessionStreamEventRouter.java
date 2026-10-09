@@ -591,6 +591,11 @@ public class SessionStreamEventRouter {
         multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage, null);
     }
 
+    /** 供非流式入口（如用户确认交互后的收敛）广播已收敛的运行态，复用同一套跳过边界。 */
+    public void broadcastRuntimeState(SessionRuntimeState runtime) {
+        broadcastSessionRuntimeStatus(runtime);
+    }
+
     private void broadcastSessionRuntimeStatus(SessionRuntimeState runtime) {
         if (runtime == null || runtime.getSessionId() == null) {
             return;

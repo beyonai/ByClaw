@@ -21,12 +21,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.context.i18n.LocaleContextHolder;
 
+import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.manager.entity.aimodel.AiPrompt;
 
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
@@ -48,6 +50,12 @@ class AssistantChatServiceTest {
 
     @Mock
     private AIService aiService;
+
+    @Mock
+    private SessionRuntimeStateService sessionRuntimeStateService;
+
+    @Mock
+    private SessionStreamEventRouter sessionStreamEventRouter;
 
     @AfterEach
     void resetLocale() {
@@ -160,5 +168,44 @@ class AssistantChatServiceTest {
         String eventPayload = outputStream.toString(StandardCharsets.UTF_8);
         assertThat(eventPayload).contains("\"event\":\"sessionTitleUpdated\"");
         assertThat(eventPayload).contains("\"sessionName\":\"请分析这个文件\"");
+    }
+
+    @Test
+    void resumeTurnConvergesAndBroadcastsTheWaitingRuntimeState() {
+        AssistantChatDto assistantChatDto = new AssistantChatDto();
+        assistantChatDto.setSessionId(10L);
+        assistantChatDto.setActionType(ActionType.RESUME);
+        SessionRuntimeState converged = new SessionRuntimeState();
+        converged.setSessionId(10L);
+        converged.setStatus("idle");
+        when(sessionRuntimeStateService.confirmWaitingInteraction(10L)).thenReturn(converged);
+
+        ReflectionTestUtils.invokeMethod(assistantChatService, "confirmWaitingInteractionOnResume", assistantChatDto);
+
+        verify(sessionRuntimeStateService).confirmWaitingInteraction(10L);
+        verify(sessionStreamEventRouter).broadcastRuntimeState(converged);
+    }
+
+    @Test
+    void nonResumeTurnDoesNotTouchTheRuntimeState() {
+        AssistantChatDto assistantChatDto = new AssistantChatDto();
+        assistantChatDto.setSessionId(10L);
+        assistantChatDto.setActionType("CHAT");
+
+        ReflectionTestUtils.invokeMethod(assistantChatService, "confirmWaitingInteractionOnResume", assistantChatDto);
+
+        verifyNoInteractions(sessionRuntimeStateService);
+        verifyNoInteractions(sessionStreamEventRouter);
+    }
+
+    @Test
+    void resumeTurnWithoutASessionIdDoesNotTouchTheRuntimeState() {
+        AssistantChatDto assistantChatDto = new AssistantChatDto();
+        assistantChatDto.setActionType(ActionType.RESUME);
+
+        ReflectionTestUtils.invokeMethod(assistantChatService, "confirmWaitingInteractionOnResume", assistantChatDto);
+
+        verifyNoInteractions(sessionRuntimeStateService);
+        verifyNoInteractions(sessionStreamEventRouter);
     }
 }
