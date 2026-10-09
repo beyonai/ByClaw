@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.enterprise;
 
 import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole;
+import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipStatus;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -26,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -64,13 +66,29 @@ public class EnterpriseInfoApplicationService {
     }
 
     /**
-     * 查询当前登录用户关联的企业列表。
+     * 查询当前登录用户关联的企业列表。系统预置默认企业始终可进入，不依赖租户成员关系。
      *
      * @return 企业简要信息列表（企业标识、名称、编码、角色、成员状态）
      */
     public List<UserEnterpriseVo> listUserEnterprises() {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        return tenantUserMembershipService.listUserEnterprises(userId);
+        List<UserEnterpriseVo> enterprises = new ArrayList<>(tenantUserMembershipService.listUserEnterprises(userId));
+        boolean containsDefaultEnterprise = enterprises.stream()
+            .anyMatch(enterprise -> enterprise != null
+                && DEFAULT_ENTERPRISE_ID.equals(enterprise.getEnterpriseId()));
+        if (!containsDefaultEnterprise) {
+            EnterpriseInfo defaultEnterprise = enterpriseInfoService.findById(DEFAULT_ENTERPRISE_ID);
+            if (defaultEnterprise != null) {
+                UserEnterpriseVo defaultEnterpriseVo = new UserEnterpriseVo();
+                defaultEnterpriseVo.setEnterpriseId(defaultEnterprise.getEnterpriseId());
+                defaultEnterpriseVo.setComAcctName(defaultEnterprise.getComAcctName());
+                defaultEnterpriseVo.setComAcctCode(defaultEnterprise.getComAcctCode());
+                defaultEnterpriseVo.setRole(TenantUserMembershipRole.MEMBER);
+                defaultEnterpriseVo.setStatus(TenantUserMembershipStatus.ACTIVE);
+                enterprises.add(0, defaultEnterpriseVo);
+            }
+        }
+        return enterprises;
     }
 
     /**
@@ -138,7 +156,7 @@ public class EnterpriseInfoApplicationService {
     }
 
     /**
-     * 切换当前登录用户的企业（租户）；仅允许切换至本人 ACTIVE 成员身份的企业。
+     * 切换当前登录用户的企业（租户）；默认企业无需成员关系，其他企业仅允许 ACTIVE 成员进入。
      *
      * @param switchDTO 切换入参
      * @param session HTTP 会话
@@ -149,7 +167,8 @@ public class EnterpriseInfoApplicationService {
         requireEnterprise(enterpriseId);
 
         Long userId = CurrentUserHolder.getCurrentUserId();
-        if (tenantUserMembershipService.findActiveByUserIdAndEnterpriseId(userId, enterpriseId) == null) {
+        if (!DEFAULT_ENTERPRISE_ID.equals(enterpriseId)
+            && tenantUserMembershipService.findActiveByUserIdAndEnterpriseId(userId, enterpriseId) == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("enterprise.membership.required"));
         }
