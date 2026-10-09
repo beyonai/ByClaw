@@ -65,7 +65,7 @@ public class LoginApplicationService {
     /**
      * 默认开放查询的key值,多个用逗号隔开
      */
-    @Value("${open.dc.query.keys:ENV,beyondLogo,beyondTitle,beyondFavicon,beyondAssistant}")
+    @Value("${open.dc.query.keys:ENV,beyondLogo,beyondTitle,beyondFavicon,beyondAssistant,ENABLE_MULTI_TENACY}")
     private String openKeys;
 
     @Autowired
