@@ -2,7 +2,8 @@ import { bounded } from "./paging.js";
 import { DomainError } from "../../domain/errors.js";
 import { opaqueId, requireId } from "../../domain/values.js";
 import { HistoryAccess } from "./access.js";
-import { objectJson, recalled, safeMessage } from "./message-format.js";
+import type { Row } from "./contracts.js";
+import { arrayJson, objectJson, recalled, safeMessage } from "./message-format.js";
 
 /** 保留传统 assiman 消息、关联与大纲查询的分页和位置语义。 */
 export class TraditionalHistory extends HistoryAccess {
@@ -12,7 +13,7 @@ export class TraditionalHistory extends HistoryAccess {
     if (!message || message.enterpriseId !== this.tenantId)
       throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     await this.access(actor, message.sessionId);
-    return safeMessage(message);
+    return (await this.projectTaskMentions([message]))[0];
   }
   async traditional(actor: string, sessionId: string, pageNum: number, pageSize: number) {
     pageNum = bounded(pageNum, 1, 100000);
@@ -28,7 +29,7 @@ export class TraditionalHistory extends HistoryAccess {
       pageSize,
       total,
       totalPages: Math.ceil(total / pageSize),
-      list: rows.map(safeMessage),
+      list: await this.projectTaskMentions(rows),
     };
   }
   async byIds(actor: string, ids: string[]) {
@@ -36,7 +37,64 @@ export class TraditionalHistory extends HistoryAccess {
     if (!ids.length || ids.length > 100) throw new DomainError("INVALID_MESSAGE_IDS");
     const rows = await this.repository.messages({ ids });
     for (const id of new Set(rows.map((r) => r.sessionId))) await this.access(actor, id);
-    return rows.map(safeMessage);
+    return this.projectTaskMentions(rows);
+  }
+  /** 为旧任务的首条私聊输入补齐原群消息提及；仅修改返回投影。 */
+  private async projectTaskMentions(rows: Row[]): Promise<Row[]> {
+    const sources = new Map<string, Row | null>();
+    const result: Row[] = [];
+    for (const row of rows) {
+      const projected = safeMessage(row);
+      if (recalled(row) || row.usage !== 1 || !String(row.messageContent).includes("{{")) {
+        result.push(projected);
+        continue;
+      }
+      if (!sources.has(row.sessionId)) {
+        const task = await this.repository.task(row.sessionId);
+        let source: Row | null = null;
+        if (
+          task?.sourceMessageId &&
+          task.groupSessionId &&
+          task.initiatorUserId === row.creatorId
+        ) {
+          const [candidate] = await this.repository.messages({ ids: [task.sourceMessageId] });
+          if (
+            candidate &&
+            candidate.messageId === task.sourceMessageId &&
+            candidate.sessionId === task.groupSessionId &&
+            candidate.enterpriseId === this.tenantId &&
+            candidate.creatorId === task.initiatorUserId &&
+            !recalled(candidate)
+          )
+            source = candidate;
+        }
+        sources.set(row.sessionId, source);
+      }
+      const source = sources.get(row.sessionId);
+      if (
+        source &&
+        source.creatorId === row.creatorId &&
+        source.messageContent === row.messageContent
+      ) {
+        const metadata = objectJson(row.metadata);
+        const related = objectJson(row.relatedResources);
+        const existing = arrayJson(metadata.resourceList).length
+          ? arrayJson(metadata.resourceList)
+          : arrayJson(related.resourceList);
+        const original = arrayJson(objectJson(source.metadata).resourceList).length
+          ? arrayJson(objectJson(source.metadata).resourceList)
+          : arrayJson(objectJson(source.relatedResources).resourceList);
+        const resources = existing.length ? existing : original;
+        if (resources.length) {
+          if (!arrayJson(metadata.resourceList).length)
+            projected.metadata = JSON.stringify({ ...metadata, resourceList: resources });
+          if (!arrayJson(related.resourceList).length)
+            projected.relatedResources = JSON.stringify({ ...related, resourceList: resources });
+        }
+      }
+      result.push(projected);
+    }
+    return result;
   }
   async forward(actor: string, messageId: string) {
     const [message] = await this.byIds(actor, [requireId(messageId)]);

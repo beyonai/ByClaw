@@ -72,6 +72,85 @@ describe("tenant history use cases", () => {
     await service.traditional("20", "40", 1, 10);
     await expect(service.traditional("21", "40", 1, 10)).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
   });
+  it("restores original mentions in private task history without changing stored messages", async () => {
+    const { service, repo } = setup();
+    const resources = [
+      {
+        id: "DIG_EMPLOYEE_90",
+        resourceId: "90",
+        resourceType: "DIG_EMPLOYEE",
+        resourceName: "群组工作助手",
+      },
+    ];
+    const source: Row = message({
+      enterpriseId: "10",
+      creatorId: "20",
+      messageContent: "{{DIG_EMPLOYEE_90}} 你好",
+      metadata: JSON.stringify({ resourceList: resources }),
+    });
+    const input: Row = message({
+      enterpriseId: "10",
+      messageId: "200",
+      sessionId: "40",
+      creatorId: "20",
+      messageContent: source.messageContent,
+      metadata: "{}",
+    });
+    const followup = message({
+      messageId: "201",
+      sessionId: "40",
+      creatorId: "20",
+      messageContent: "{{DIG_EMPLOYEE_90}} 后续问题",
+      metadata: "{}",
+    });
+    vi.mocked(repo.session).mockImplementation(async (id) => ({
+      sessionId: id,
+      enterpriseId: "10",
+      creatorId: "20",
+      sessionType: id === "30" ? "hs_as" : "h_as",
+    }));
+    vi.mocked(repo.task).mockImplementation(async (id) =>
+      id === "40" ? { groupSessionId: "30", sourceMessageId: "100", initiatorUserId: "20" } : null,
+    );
+    vi.mocked(repo.messages).mockImplementation(async (query) =>
+      query.ids?.includes("100") ? [source] : [input, followup],
+    );
+    const result = await service.traditional("20", "40", 1, 20);
+    expect(JSON.parse(result.list[0].relatedResources).resourceList).toEqual(resources);
+    expect(JSON.parse(result.list[0].metadata).resourceList).toEqual(resources);
+    expect(result.list[1].relatedResources).toBeUndefined();
+    expect(input.metadata).toBe("{}");
+    expect(input.messageContent).toBe(source.messageContent);
+    expect((await service.byIds("20", ["200"]))[0].relatedResources).toBe(
+      result.list[0].relatedResources,
+    );
+    expect((await service.byCommand("20", "command")).relatedResources).toBe(
+      result.list[0].relatedResources,
+    );
+    input.metadata = JSON.stringify({
+      resourceList: [{ ...resources[0], resourceName: "已保存的名称" }],
+      custom: "kept",
+    });
+    const existing = (await service.traditional("20", "40", 1, 20)).list[0];
+    expect(JSON.parse(existing.metadata).custom).toBe("kept");
+    expect(JSON.parse(existing.relatedResources).resourceList[0].resourceName).toBe("已保存的名称");
+    input.relatedResources = JSON.stringify({
+      resourceList: [{ ...resources[0], resourceName: "关联资源名称" }],
+    });
+    const distinct = (await service.traditional("20", "40", 1, 20)).list[0];
+    expect(JSON.parse(distinct.metadata).resourceList[0].resourceName).toBe("已保存的名称");
+    expect(JSON.parse(distinct.relatedResources).resourceList[0].resourceName).toBe("关联资源名称");
+    delete input.relatedResources;
+    input.metadata = "{}";
+    input.recalledAt = new Date();
+    expect((await service.traditional("20", "40", 1, 20)).list[0].relatedResources).toBeUndefined();
+    delete input.recalledAt;
+    source.recalledAt = new Date();
+    expect((await service.traditional("20", "40", 1, 20)).list[0].relatedResources).toBeUndefined();
+    delete source.recalledAt;
+    source.enterpriseId = "11";
+    expect((await service.traditional("20", "40", 1, 20)).list[0].relatedResources).toBeUndefined();
+  });
   it("checks access for every session in an ID batch", async () => {
     const { service, repo } = setup();
     vi.mocked(repo.messages).mockResolvedValue([message({ sessionId: "99" })]);
