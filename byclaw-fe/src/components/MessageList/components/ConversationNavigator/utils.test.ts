@@ -117,4 +117,11 @@ describe('ConversationNavigator utils', () => {
       })
     ).toBe(0);
   });
+
+  it('keeps the full summary text for tooltips without truncation', () => {
+    const longText = '长'.repeat(300);
+    const summary = normalizeConversationSummary(longText);
+    expect(summary).toBe(longText);
+    expect(summary.endsWith('...')).toBe(false);
+  });
 });

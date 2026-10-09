@@ -32,6 +32,13 @@ public class MessageContext {
     private static final String TASK_PLAN_CONTENT_TYPE = "2008";
 
     /**
+     * 思考态内容类型：不计入落库正文 answerText / streamAnswerText（#291）。
+     * 与各渠道输出流的 reasoning 集合口径一致（3003 思考标题、3009 任务结束/思考状态）。
+     */
+    private static final Set<String> NON_ANSWER_TEXT_CONTENT_TYPES = Set.of(
+        MessageContentTypeEnum.THINK_TITLE.getCode(), MessageContentTypeEnum.TASK_FINISHED.getCode());
+
+    /**
      * 智能体类型
      */
     private AgentTypeEnum type;
@@ -231,6 +238,30 @@ public class MessageContext {
     }
 
     /**
+     * 抽取可计入正文的文本；思考态内容类型（3003/3009）返回 null，不进入正文。
+     */
+    private String extractAnswerText(String text) {
+        if (isNonAnswerTextContentType(text)) {
+            return null;
+        }
+        return CompletionsUtils.getSseContext(text);
+    }
+
+    private boolean isNonAnswerTextContentType(String text) {
+        if (StringUtils.isBlank(text)) {
+            return false;
+        }
+        try {
+            AnswerDelta answerDelta = JSONObject.parseObject(text, AnswerDelta.class);
+            return answerDelta != null && NON_ANSWER_TEXT_CONTENT_TYPES.contains(answerDelta.getContentType());
+        }
+        catch (Exception e) {
+            // 解析失败时保持原行为，由 getSseContext 自行处理
+            return false;
+        }
+    }
+
+    /**
      * 从增量消息中抽取正文内容并记录到answerText
      *
      * @param text 增量消息文本
@@ -239,7 +270,7 @@ public class MessageContext {
         // 综合问题才会有sseContext
         // chatbi这里sseContext会为null
         // 从增量消息中抽取相应的正文，可以是内容(md或者普通字符串)，或者卡片
-        String sseContext = CompletionsUtils.getSseContext(text);
+        String sseContext = extractAnswerText(text);
         if (sseContext != null) {
             answerText.append(sseContext);
             // 记录消息骨架,在最终保存的时候，会把骨架中的消息替换为完整的消息
@@ -258,7 +289,7 @@ public class MessageContext {
         // 综合问题才会有sseContext
         // chatbi这里sseContext会为null
         // 从增量消息中抽取相应的正文，可以是内容(md或者普通字符串)，或者卡片
-        String sseContext = CompletionsUtils.getSseContext(text);
+        String sseContext = extractAnswerText(text);
         if (sseContext != null) {
             streamAnswerText.append(sseContext);
             // 记录消息骨架,在最终保存的时候，会把骨架中的消息替换为完整的消息

@@ -4,13 +4,13 @@ import { SearchOutlined } from '@ant-design/icons';
 import { Divider, Dropdown, Input, Popconfirm, Space, Spin, Typography } from 'antd';
 import classnames from 'classnames';
 import dayjs from 'dayjs';
-import { get } from 'lodash';
 // @ts-ignore
 import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 
 import AntdIcon from '@/components/AntdIcon';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import useGlobal from '@/hooks/useGlobal';
+import { resolveSessionSummary } from './summary';
 import useSearch from './useSearch';
 
 import { UserState } from '@/models/common/user';
@@ -132,6 +132,8 @@ const DialogueRecord: React.FC = () => {
       title = intl.formatMessage({ id: 'dialogueRecord.earlier' });
     }
 
+    const summary = resolveSessionSummary(item, intl.formatMessage({ id: 'projectSpace.sessions.noSummary' }));
+
     return (
       <div
         key={item.sessionId}
@@ -189,8 +191,8 @@ const DialogueRecord: React.FC = () => {
             </span>
           </Dropdown>
         </div>
-        <Paragraph ellipsis={{ rows: 2 }}>
-          {get(item, 'messageStruct') || get(item, 'messageDtoList.0.messageContent') || item.sessionName}
+        <Paragraph ellipsis={{ rows: 2, tooltip: !summary.empty }} type={summary.empty ? 'secondary' : undefined}>
+          {summary.content}
         </Paragraph>
       </div>
     );

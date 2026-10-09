@@ -203,6 +203,34 @@ class MessageContextTest {
         assertThat(context.getFirstResponseTime()).isEqualTo(firstResponseTime);
     }
 
+    @Test
+    void recordAnswerText_excludesThinkTitleAndTaskFinishedFromPersistedBody() {
+        MessageContext context = new MessageContext();
+
+        context.recordAnswerText(answerDelta("任务规划", "title-order", "3003"));
+        context.recordAnswerText(answerDelta("正文第一段", "answer-order", "1002"));
+        context.recordAnswerText(answerDelta("已思考结束", "finish-order", "3009"));
+        context.recordAnswerText(answerDelta("正文第二段", "answer-order", "1001"));
+        context.recordStreamAnswerText(answerDelta("企业资料", "title-order", "3003"));
+        context.recordStreamAnswerText(answerDelta("流式正文", "answer-order", "1002"));
+        context.recordStreamAnswerText(answerDelta("任务结束", "finish-order", "3009"));
+
+        assertThat(context.returnAnswerText()).isEqualTo("正文第一段正文第二段");
+        assertThat(context.persistenceContent()).isEqualTo("正文第一段正文第二段");
+        assertThat(context.returnStreamAnswerText()).isEqualTo("流式正文");
+    }
+
+    @Test
+    void recordAnswerText_onlyThinkingContentLeavesPersistedBodyEmpty() {
+        MessageContext context = new MessageContext();
+
+        context.recordAnswerText(answerDelta("任务规划", "title-order", "3003"));
+        context.recordAnswerText(answerDelta("任务结束", "finish-order", "3009"));
+
+        assertThat(context.persistenceContent()).isEmpty();
+        assertThat(context.getMessageStructTemplate()).isNull();
+    }
+
     private static String answerDelta(String content, String orderId) {
         return answerDelta(content, orderId, "1002");
     }

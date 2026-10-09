@@ -95,4 +95,18 @@ describe('DialogueCard', () => {
     expect(screen.getByTestId('badge')).toHaveAttribute('data-status', '');
     expect(screen.getByTestId('badge')).toHaveAttribute('data-count', '5');
   });
+
+  it('exposes full title and filters thinking content from description', () => {
+    const longName = '很长的会话标题'.repeat(10);
+    render(
+      <DialogueCard
+        item={{ ...session, sessionName: longName, sessionContent: '任务规划\n企业资料\n真正的总结' } as any}
+        cannotActionList={['edit', 'delete']}
+      />
+    );
+
+    expect(screen.getByText(longName)).toHaveAttribute('title', longName);
+    expect(screen.getByText('真正的总结')).toHaveAttribute('title', '真正的总结');
+    expect(screen.queryByText(/任务规划/)).toBeNull();
+  });
 });

@@ -97,22 +97,21 @@
 
 .tooltipTitle,
 .tooltipAnswer {
-  overflow: hidden;
-  display: -webkit-box;
+  overflow-y: auto;
   line-height: 20px;
+  white-space: pre-wrap;
   word-break: break-word;
-  -webkit-box-orient: vertical;
 }
 
 .tooltipTitle {
+  max-height: 120px;
   color: rgb(255 255 255 / 95%);
   font-weight: 500;
-  -webkit-line-clamp: 2;
 }
 
 .tooltipAnswer {
+  max-height: 200px;
   margin-top: 6px;
   color: rgb(255 255 255 / 65%);
   font-size: 12px;
-  -webkit-line-clamp: 3;
 }

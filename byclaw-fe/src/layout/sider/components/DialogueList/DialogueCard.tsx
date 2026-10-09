@@ -269,7 +269,12 @@ const DialogueCard = ({
           <div className={classnames(styles.dialogueItemContent, 'full-width')}>
             <div className={styles.dialogueItemContentBox}>
               <div>
-                <div className={classnames(styles.dialogueTitle, 'ellipsis')}>{sessionName}</div>
+                <div
+                  className={classnames(styles.dialogueTitle, 'ellipsis')}
+                  title={typeof sessionName === 'string' ? sessionName : undefined}
+                >
+                  {sessionName}
+                </div>
                 <div
                   className={classnames(styles.dialogueDesc, 'ellipsis')}
                   title={typeof processedContent === 'string' ? processedContent : undefined}
