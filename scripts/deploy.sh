@@ -90,3 +90,13 @@ cat "$ENV_FILE" | eval "$SSH_CMD $REMOTE \"cat > $REMOTE_DIR_Q/.env\""
 
 echo "==> Running remote deploy.sh $ACTION"
 eval "$SSH_CMD $REMOTE \"cd $REMOTE_DIR_Q && sh deploy.sh $(shell_quote "$ACTION")\""
+
+# The runner stays on the release host and accesses the target as the test user.
+case "$ACTION" in
+    init|update)
+        if [ "${BYCLAW_SMOKE_ENABLED:-false}" = "true" ]; then
+            echo "==> Running post-release smoke tests for '$ENV_NAME'"
+            sh "$SCRIPT_DIR/run-release-smoke.sh" --env "$ENV_NAME" --require-version
+        fi
+        ;;
+esac

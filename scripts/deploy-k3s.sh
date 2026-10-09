@@ -165,3 +165,12 @@ echo 'Error: kubectl is not available and k3s is not installed yet.' >&2
 exit 127
 EOF
 chmod +x .bin/kubectl && PATH=\\\"\\\$PWD/.bin:\\\$PATH\\\" K3S_ENV_FILE=deploy/k3s/env.k3s sh deploy/k3s/deploy.sh $(shell_quote "$ACTION")\""
+
+case "$ACTION" in
+    init|update)
+        if [ "${BYCLAW_SMOKE_ENABLED:-false}" = "true" ]; then
+            echo "==> Running post-release smoke tests for '$ENV_NAME'"
+            sh "$SCRIPT_DIR/run-release-smoke.sh" --env "$ENV_NAME" --require-version
+        fi
+        ;;
+esac

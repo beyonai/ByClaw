@@ -7,6 +7,8 @@ Repository-level automation: bootstrapping, codegen, release helpers, local orch
 
 Document dependencies (bash, Python version, etc.) per script.
 
+- **Post-release smoke tests:** `run-release-smoke.sh` logs in as a configured user, tests five individual digital employees in separate chats, deletes successful test chats, retains failed chats, and sends a text report through the dedicated ByClaw automated testing DingTalk robot. Requires Node.js 20+, pnpm 9 and Playwright. See [configuration and deployment hooks](../tests/integration/release-smoke/README.md).
+
 ## One-click startup
 
 Use `start.sh` to run multiple modules locally.
