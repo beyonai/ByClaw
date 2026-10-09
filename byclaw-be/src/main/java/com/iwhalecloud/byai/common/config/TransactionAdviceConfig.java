@@ -81,6 +81,7 @@ public class TransactionAdviceConfig {
         txMap.put("search*", readOnlyTx);
         txMap.put("createDatasetIfNotExists", notSurpportedTx);
         txMap.put("createDefaultResourcesIfNotExists", notSurpportedTx);
+        txMap.put("initExpertTeams", notSurpportedTx);
         // 记忆引擎同步属于数字员工保存的可选旁路能力。若调用失败会被业务层捕获并继续，
         // 因此不能加入主事务，否则会把主事务标记为 rollback-only，最终导致 UnexpectedRollbackException。
         txMap.put("createOrGetMemoryLibraryForDigitalEmployee", notSurpportedTx);
