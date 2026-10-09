@@ -1,12 +1,11 @@
--- 多租户系统开关默认关闭；重复执行不覆盖管理员已配置的值。
+-- 多租户系统开关默认关闭；先删除旧配置，再初始化为关闭状态。
+DELETE FROM byai.byai_system_config WHERE param_code = 'ENABLE_MULTI_TENACY';
 INSERT INTO byai.byai_system_config (
     param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc
 )
-SELECT
+VALUES (
     nextval('byai.seq_any_table'), 'text', 'ENABLE_MULTI_TENACY', '是否开启多租户',
     'ENABLE_MULTI_TENACY', '0', '多租户业务开关：0 关闭，1 开启，默认关闭'
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.byai_system_config WHERE param_code = 'ENABLE_MULTI_TENACY'
 );
 
 -- 邮箱连接器相关 DML 统一归属 V0.5.0；保留原 advisory lock 键以兼容旧版本并发重放。
