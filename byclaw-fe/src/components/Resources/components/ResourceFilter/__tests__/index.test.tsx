@@ -141,36 +141,41 @@ describe('resource lifecycle filters', () => {
 });
 
 describe('available resource ownership filter', () => {
-  it.each([['SKILL', 'Skill'], ['KG_DOC', 'Knowledge'], ['TOOL', 'Tool']])(
-    'confirms and resets personal / enterprise ownership for %s',
-    (resourceType, suffix) => {
-      const onOk = jest.fn();
-      render(
-        <ResourceFilter
-          resourceType={resourceType}
-          activeTab="personal"
-          resourceOwnerFilter
-          hideStatusFilter
-          defaultParam={getDefaultParams()}
-          onOk={onOk}
-        />
-      );
-      for (const ownerType of ['personal', 'enterprise']) {
-        fireEvent.click(screen.getByRole('button', { name: `resource.tag.${ownerType}${suffix}` }));
-        fireEvent.click(screen.getByText('common.confirm'));
-        expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ ownerType }));
-      }
-      fireEvent.click(screen.getByText('common.reset'));
+  it.each([
+    ['SKILL', 'Skill'],
+    ['KG_DOC', 'Knowledge'],
+    ['TOOL', 'Tool'],
+  ])('confirms and resets personal / enterprise ownership for %s', (resourceType, suffix) => {
+    const onOk = jest.fn();
+    render(
+      <ResourceFilter
+        resourceType={resourceType}
+        activeTab="personal"
+        resourceOwnerFilter
+        hideStatusFilter
+        defaultParam={getDefaultParams()}
+        onOk={onOk}
+      />
+    );
+    for (const ownerType of ['personal', 'enterprise']) {
+      fireEvent.click(screen.getByRole('button', { name: `resource.tag.${ownerType}${suffix}` }));
       fireEvent.click(screen.getByText('common.confirm'));
-      expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ ownerType: '' }));
+      expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ ownerType }));
     }
-  );
+    fireEvent.click(screen.getByText('common.reset'));
+    fireEvent.click(screen.getByText('common.confirm'));
+    expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ ownerType: '' }));
+  });
 
   it('does not submit stale ownership when the filter is hidden', () => {
     const onOk = jest.fn();
     render(
-      <ResourceFilter resourceType="SKILL" activeTab="enterprise"
-        defaultParam={getDefaultParams({ ownerType: 'personal' })} onOk={onOk} />
+      <ResourceFilter
+        resourceType="SKILL"
+        activeTab="enterprise"
+        defaultParam={getDefaultParams({ ownerType: 'personal' })}
+        onOk={onOk}
+      />
     );
     expect(screen.queryByRole('button', { name: 'resource.tag.personalSkill' })).toBeNull();
     fireEvent.click(screen.getByText('common.confirm'));

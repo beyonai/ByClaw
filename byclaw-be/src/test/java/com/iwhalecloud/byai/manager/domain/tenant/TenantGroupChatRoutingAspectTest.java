@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
 
@@ -14,32 +16,35 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.page.PageInfo;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupCreate;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupMember;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.RemoveMember;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.EmptyPayload;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandResult;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
-import com.iwhalecloud.byai.state.domain.groupchat.application.WorkgroupTemplateService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class TenantGroupChatRoutingAspectTest {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final GroupChatReadService legacy = mock(GroupChatReadService.class);
     private final ByaiGroupChatMentionMapper memberships = mock(ByaiGroupChatMentionMapper.class);
     private final TenantGroupMemberService memberService = mock(TenantGroupMemberService.class);
-    private final WorkgroupTemplateService templates = mock(WorkgroupTemplateService.class);
+    private final TenantGroupCreationService creation = mock(TenantGroupCreationService.class);
     private final TenantGroupChatRoutingAspect aspect = new TenantGroupChatRoutingAspect(node, legacy, memberships,
-        new ObjectMapper(), memberService, templates);
+        new ObjectMapper(), memberService);
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(aspect, "creation", creation);
+    }
 
     @AfterEach
     void clear() {
@@ -47,17 +52,7 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
-    void tenantRecallIsRejectedUntilCancellationCompensationIsSupported() {
-        TenantRequestContextHolder.set(new TenantRequestContext(27L, 11221859L, "MEMBER"));
-        assertThatThrownBy(() -> aspect.route(call("recall", 456L, 789L)))
-            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-            .satisfies(error -> assertThat(((org.springframework.web.server.ResponseStatusException) error)
-                .getStatusCode().value()).isEqualTo(409));
-        org.mockito.Mockito.verifyNoInteractions(node);
-    }
-
-    @Test
-    void tenantListIncludesItsLegacyMembershipAndNodeGroups() throws Throwable {
+    void tenantListReadsOnlyItsNodeGroups() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
         TenantRequestContextHolder.set(context);
         GroupChatListItemResponse oldGroup = new GroupChatListItemResponse();
@@ -77,8 +72,9 @@ class TenantGroupChatRoutingAspectTest {
         assertThat(response.getCode()).isZero();
         @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) response.getData();
-        assertThat(data.get("total")).isEqualTo(2L);
-        assertThat((List<?>) data.get("list")).hasSize(2);
+        assertThat(data.get("total")).isEqualTo(1);
+        assertThat((List<?>) data.get("list")).hasSize(1);
+        verifyNoInteractions(legacy, memberships);
     }
 
     @Test
@@ -96,57 +92,32 @@ class TenantGroupChatRoutingAspectTest {
         GroupChatCreateRequest request = new GroupChatCreateRequest();
         request.setName("电信验证组");
         request.setGoal("验证租户隔离");
-        when(node.command(eq(context), eq("POST"), eq("/internal/v1/group-chats"), any(),
-            eq("CREATE_GROUP"), any(GroupCreate.class))).thenReturn(
-                new CommandResult("9000000000000000001", "request", "CREATE_GROUP", null));
-        when(node.request(eq(context), eq("GET"), any(), eq(null), any())).thenReturn(
+        var detail = new ObjectMapper().valueToTree(
             Map.of("session", Map.of("sessionId", "9000000000000000001", "sessionName", "电信验证组")));
+        when(creation.create(context, request)).thenReturn(detail);
 
         ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("create", request));
 
         assertThat(response.getCode()).isZero();
-        verify(node).command(eq(context), eq("POST"), eq("/internal/v1/group-chats"), any(),
-            eq("CREATE_GROUP"), any(GroupCreate.class));
-        ArgumentCaptor<GroupCreate> payload = ArgumentCaptor.forClass(GroupCreate.class);
-        verify(node).command(eq(context), eq("POST"), eq("/internal/v1/group-chats"), any(),
-            eq("CREATE_GROUP"), payload.capture());
-        assertThat(payload.getValue().sessionContent()).isEqualTo("验证租户隔离");
-        verify(node, org.mockito.Mockito.never()).command(eq(context), eq("PATCH"), any(), any(),
-            eq("UPDATE_SESSION"), any());
+        assertThat(response.getData()).isEqualTo(detail);
+        verify(creation).create(context, request);
+        verifyNoInteractions(node, legacy, memberships);
     }
 
     @Test
-    void tenantCreateIncludesValidatedDigitalEmployeesInTheAtomicGroupCommand() throws Throwable {
-        TenantRequestContext context = new TenantRequestContext(27L, 11221859L, "MEMBER");
+    void staleLegacyMembershipDoesNotBypassTheTenantNode() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
         TenantRequestContextHolder.set(context);
-        GroupChatCreateRequest request = new GroupChatCreateRequest();
-        request.setName("数字员工协作组");
-        request.setGoal("验证租户建组");
-        request.setAgentIds(List.of(10000713L));
-        when(memberService.initialAgents(context, List.of(10000713L))).thenReturn(
-            List.of(new GroupMember("AGENT", "10000713", "MEMBER", "文章创作助手", true)));
-        when(node.request(eq(context), eq("GET"), any(), eq(null), any())).thenReturn(
-            Map.of("session", Map.of("sessionId", "9000000000000000001")));
-
-        aspect.route(call("create", request));
-
-        ArgumentCaptor<GroupCreate> payload = ArgumentCaptor.forClass(GroupCreate.class);
-        verify(node).command(eq(context), eq("POST"), eq("/internal/v1/group-chats"), any(),
-            eq("CREATE_GROUP"), payload.capture());
-        assertThat(payload.getValue().members()).contains(
-            new GroupMember("AGENT", "10000713", "MEMBER", "文章创作助手", true));
-    }
-
-    @Test
-    void onlyAnExactEnterpriseMemberCanUseTheLegacyGroupHandler() throws Throwable {
-        TenantRequestContextHolder.set(new TenantRequestContext(27L, 11221076L, "MEMBER"));
         when(memberships.isLegacyGroupMember(11221825L, 27L, 11221076L)).thenReturn(true);
         ProceedingJoinPoint call = call("detail", 11221825L);
-        Object original = ResponseUtil.successResponse("legacy detail");
-        when(call.proceed()).thenReturn(original);
+        Map<String, Object> detail = Map.of("session", Map.of("sessionId", "11221825"));
+        when(node.request(eq(context), eq("GET"), eq("/internal/v1/group-chats/11221825"), eq(null), any()))
+            .thenReturn(detail);
 
-        assertThat(aspect.route(call)).isSameAs(original);
-        verify(call).proceed();
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call);
+        assertThat(response.getData()).isEqualTo(detail);
+        verify(call, never()).proceed();
+        verifyNoInteractions(memberships, legacy);
     }
 
     @Test
@@ -208,58 +179,22 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
-    void tenantDissolveRoutesToNode() throws Throwable {
+    void tenantSettingsUpdateRoutesToNodeAndReturnsSession() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
         TenantRequestContextHolder.set(context);
+        GroupChatSettingsRequest request = new GroupChatSettingsRequest();
+        request.setAllowMemberAddAgent(true);
+        Map<String, Object> session = Map.of("sessionId", "9000000000000000001");
+        when(node.request(eq(context), eq("GET"), eq("/internal/v1/group-chats/9000000000000000001"),
+            eq(null), any())).thenReturn(Map.of("session", session));
 
-        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("dissolve", 9000000000000000001L));
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("updateSettings", 9000000000000000001L,
+            request));
 
-        assertThat(response.getCode()).isZero();
-        verify(node).command(context, "POST", "/internal/v1/group-chats/9000000000000000001/dissolve",
-            "9000000000000000001", "DISSOLVE_GROUP", new EmptyPayload());
-    }
-
-    @Test
-    void tenantGroupCreationAcceptsInitialTenantUsers() throws Throwable {
-        TenantRequestContext context = new TenantRequestContext(27L, 123L, "MEMBER");
-        TenantRequestContextHolder.set(context);
-        GroupChatCreateRequest request = new GroupChatCreateRequest();
-        request.setName("tenant group");
-        request.setGoal("collaboration");
-        request.setUserIds(List.of(28L));
-        when(memberService.initialUsers(context, List.of(28L))).thenReturn(
-            List.of(new GroupMember("USER", "28", "MEMBER", "member")));
-        when(node.request(eq(context), eq("GET"), any(), eq(null), any())).thenReturn(Map.of("sessionId", "456"));
-        ResponseUtil<?> result = (ResponseUtil<?>) aspect.route(call("create", request));
-        assertThat(result.getCode()).isZero();
-        ArgumentCaptor<GroupCreate> payload = ArgumentCaptor.forClass(GroupCreate.class);
-        verify(node).command(eq(context), eq("POST"), eq("/internal/v1/group-chats"), any(),
-            eq("CREATE_GROUP"), payload.capture(), any(), eq(List.of("27", "28")));
-        assertThat(payload.getValue().members()).contains(new GroupMember("USER", "28", "MEMBER", "member"));
-    }
-
-    @Test
-    void tenantGroupSettingsCanUseTheExistingNodeSettingsCommand() throws Throwable {
-        TenantRequestContext context = new TenantRequestContext(27L, 123L, "MEMBER");
-        TenantRequestContextHolder.set(context);
-        var request = new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest();
-        request.setAllowMemberInviteUser(true);
-        ResponseUtil<?> result = (ResponseUtil<?>) aspect.route(call("updateSettings", 456L, request));
-        assertThat(result.getCode()).isZero();
-        verify(node).command(eq(context), eq("PATCH"), eq("/internal/v1/group-chats/456/settings"),
-            eq("456"), eq("UPDATE_SETTINGS"), any());
-    }
-
-    @Test
-    void tenantDissolutionAcknowledgmentRoutesToNode() throws Throwable {
-        TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
-        TenantRequestContextHolder.set(context);
-
-        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("acknowledgeDissolution", 9000000000000000001L));
-
-        assertThat(response.getCode()).isZero();
-        verify(node).command(context, "POST", "/internal/v1/group-chats/9000000000000000001/dissolution-ack",
-            "9000000000000000001", "ACK_DISSOLUTION", new EmptyPayload());
+        assertThat(response.getData()).isEqualTo(session);
+        verify(node).command(context, "PATCH", "/internal/v1/group-chats/9000000000000000001/settings",
+            "9000000000000000001", "UPDATE_SETTINGS",
+            new TenantNodeModels.GroupSettings(null, null, true, null));
     }
 
     private ProceedingJoinPoint call(String method, Object... args) {
@@ -270,10 +205,8 @@ class TenantGroupChatRoutingAspectTest {
                 case "list" -> new Class<?>[]{Integer.class, Integer.class, Long.class};
                 case "create" -> new Class<?>[]{GroupChatCreateRequest.class};
                 case "invite" -> new Class<?>[]{Long.class, GroupChatMemberRequest.class};
-                case "updateSettings" -> new Class<?>[]{Long.class,
-                    com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest.class};
+                case "updateSettings" -> new Class<?>[]{Long.class, GroupChatSettingsRequest.class};
                 case "remove" -> new Class<?>[]{Long.class, String.class, Long.class};
-                case "recall" -> new Class<?>[]{Long.class, Long.class};
                 case "context" -> new Class<?>[]{Long.class, GroupChatContextRequest.class};
                 case "searchMessages" -> new Class<?>[]{Long.class,
                     com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMessageSearchRequest.class};

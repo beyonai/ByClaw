@@ -56,6 +56,7 @@ export async function dispatchWorker(
         p.beforeMessageId,
         p.maxMessages ?? 60,
         p.maxCharacters ?? 30000,
+        true,
       );
     case "GET_TASK":
       return services.history.task(user, requireId(p.taskSessionId));

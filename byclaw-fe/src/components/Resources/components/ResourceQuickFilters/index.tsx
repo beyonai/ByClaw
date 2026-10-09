@@ -33,15 +33,15 @@ const ResourceQuickFilters = ({ className, resourceType, activeTab, value, onCha
     // 企业推荐固定展示企业员工和员工组，不再提供类型筛选；可用与收藏页保留原选项。
     ...(isDigitalEmployee && activeTab !== 'official'
       ? [
-          {
-            key: 'digitalEmployeeType' as const,
-            title: 'resource.type',
-            options: digitalEmployeeTypeOptions,
-            selectedValue: value.digitalEmployeeType || '',
-          },
-        ]
+        {
+          key: 'digitalEmployeeType' as const,
+          title: 'resource.type',
+          options: digitalEmployeeTypeOptions,
+          selectedValue: value.digitalEmployeeType || '',
+        },
+      ]
       : !isDigitalEmployee && availableOnly
-      ? [
+        ? [
           {
             key: 'ownerType' as const,
             title: 'resource.type',
@@ -49,7 +49,7 @@ const ResourceQuickFilters = ({ className, resourceType, activeTab, value, onCha
             selectedValue: value.ownerType || '',
           },
         ]
-      : []),
+        : []),
     {
       key: 'permission' as const,
       title: 'common.belong',

@@ -5,7 +5,7 @@ import { changeTask } from "../src/infrastructure/persistence/task-writer.js";
 import { command } from "./fixtures.js";
 function setup(overrides: Record<string, unknown> = {}) {
   const query = vi.fn(async (sql: string) => {
-    if (sql.includes("SELECT * FROM byai.byai_group_chat_task"))
+    if (sql.includes("SELECT * FROM byai.byai_group_chat_task WHERE"))
       return [
         {
           task_session_id: "40",
@@ -18,6 +18,7 @@ function setup(overrides: Record<string, unknown> = {}) {
         },
       ];
     if (sql.includes("RETURNING last_seq")) return [{ last_seq: "1" }];
+    if (sql.includes("nextval(")) return [{ id: "201" }];
     return [];
   });
   const ctx = new CommandContext(

@@ -109,6 +109,37 @@ class GroupChatTurnCoordinatorTest {
     }
 
     @Test
+    void coordinatedTaskIsCreatedBeforeFirstModelTurnAndCanOwnItsInitialDispatch() {
+        var coordination = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
+        var taskService = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService.class);
+        ReflectionTestUtils.setField(coordinator, "coordination", coordination);
+        ReflectionTestUtils.setField(coordinator, "taskService", taskService);
+        when(coordination.findScope(anyLong())).thenReturn(null);
+        ByaiGroupChatTurn turn = coordinator.enqueueCoordinatedUser(10L, 20L, null, 1L, 9L, List.of(2L, 3L));
+        verify(coordination).resolveForExecution(10L, turn.getCandidateSessionId(), List.of(2L, 3L), 9L, "COORDINATED");
+        verify(taskService).promote(turn, "协作任务", null);
+        assertEquals(1, turnRows.size());
+        assertEquals(9L, turn.getTargetAgentId());
+        var session = new com.iwhalecloud.byai.manager.entity.session.ByaiSession();
+        session.setCreatorId(1L); session.setObjectId(9L);
+        var sessions = (SessionService) ReflectionTestUtils.getField(coordinator, "sessions");
+        when(sessions.findById(turn.getCandidateSessionId())).thenReturn(session);
+        when(coordination.isCoordinated(turn.getCandidateSessionId())).thenReturn(true);
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus("ACTIVE"); task.setDispatchId(turn.getExecutionId()); task.setCurrentTurnId(turn.getExecutionId());
+        when(tasks.selectById(turn.getCandidateSessionId())).thenReturn(task);
+        assertTrue(Boolean.TRUE.equals(ReflectionTestUtils.invokeMethod(coordinator, "validateBeforeStart", turn)));
+        assertEquals("NORMAL", turn.getPhase());
+        var members = (SessionMemberService) ReflectionTestUtils.getField(coordinator, "members");
+        when(members.findSessionMember(10L, "AGENT", 9L)).thenReturn(null);
+        assertFalse(Boolean.TRUE.equals(ReflectionTestUtils.invokeMethod(coordinator, "validateBeforeStart", turn)));
+        verify(taskService).failTurnStart(turn.getCandidateSessionId(), turn.getExecutionId());
+        when(members.findSessionMember(10L, "AGENT", 9L)).thenReturn(new ByaiSessionMember());
+        task.setCurrentTurnId(99L);
+        assertFalse(Boolean.TRUE.equals(ReflectionTestUtils.invokeMethod(coordinator, "validateBeforeStart", turn)));
+    }
+
+    @Test
     void completedButRecalledParentCannotAutomaticallyDelegateAgain() {
         ByaiGroupChatRecallMapper recalls = mock(ByaiGroupChatRecallMapper.class);
         ReflectionTestUtils.setField(coordinator, "recalls", recalls);
@@ -172,14 +203,14 @@ class GroupChatTurnCoordinatorTest {
     }
 
     @Test
-    void duplicateTriggerDoesNotCreateAnotherTurnAndSixthHopIsAllowed() {
+    void duplicateTriggerDoesNotCreateAnotherTurnWithoutAFixedHopLimit() {
         ByaiGroupChatTurn a = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
         a.setHopCount(5);
         ByaiGroupChatTurn sixth = coordinator.enqueueAgent(a, 3L, 21L, 21L, "Proceed", null);
         assertEquals(6, sixth.getHopCount());
         assertSame(sixth, coordinator.enqueueAgent(a, 3L, 21L, 21L, "Proceed", null));
-        assertNull(coordinator.enqueueAgent(sixth, 2L, 22L, 22L, "Return", null));
-        assertEquals(2, turnRows.size());
+        assertNotNull(coordinator.enqueueAgent(sixth, 2L, 22L, 22L, "Return", null));
+        assertEquals(3, turnRows.size());
     }
 
     @Test

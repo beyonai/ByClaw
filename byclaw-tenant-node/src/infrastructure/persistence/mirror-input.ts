@@ -57,7 +57,7 @@ export class MirrorInputWriter {
         throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
       const task = await first(
         this.db,
-        "SELECT group_session_id,initiator_user_id FROM byai.byai_group_chat_task WHERE task_session_id=$1",
+        "SELECT group_session_id,initiator_user_id,status FROM byai.byai_group_chat_task WHERE task_session_id=$1",
         [event.sessionId],
       );
       if (task) {
@@ -66,12 +66,45 @@ export class MirrorInputWriter {
           "SELECT 1 FROM byai.byai_session s JOIN byai.byai_session_member m ON m.session_id=s.session_id WHERE s.session_id=$1 AND s.enterprise_id=$2 AND s.session_type='hs_as' AND COALESCE(s.state,'ACTIVE') NOT IN('GROUP_DISSOLVED','CLOSED') AND m.mem_obj_type='USER' AND m.mem_obj_id=$3 AND m.com_acct_id=$2",
           [task.groupSessionId, this.enterpriseId, event.payload.userId],
         );
-        if (!member || task.initiatorUserId !== event.payload.userId)
+        if (!member || task.status !== "ACTIVE" || task.initiatorUserId !== event.payload.userId)
           throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
       }
     }
   }
   async insertInput(event: MirrorEnvelope): Promise<void> {
+    const metadata: Record<string, unknown> = {
+      ...event.payload.metadata,
+      clientRequestId: event.clientRequestId,
+    };
+    delete metadata.groupPublicContext;
+    const task = await first(
+      this.db,
+      "SELECT group_session_id,source_message_id,initiator_user_id FROM byai.byai_group_chat_task WHERE task_session_id=$1",
+      [event.sessionId],
+    );
+    if (task) {
+      if (task.initiatorUserId !== event.payload.userId)
+        throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+      const previous = await first(
+        this.db,
+        "SELECT message_id FROM byai.byai_message WHERE session_id=$1 AND enterprise_id=$2 AND usage=1 LIMIT 1",
+        [event.sessionId, this.enterpriseId],
+      );
+      // Node public IDs and BE private input IDs belong to different ranges; freeze the public cutoff here.
+      const latest = previous
+        ? await first(
+            this.db,
+            "SELECT MAX(message_id)::text AS message_id FROM byai.byai_message WHERE session_id=$1 AND enterprise_id=$2",
+            [task.groupSessionId, this.enterpriseId],
+          )
+        : null;
+      metadata.groupPublicContext = {
+        groupSessionId: String(task.groupSessionId),
+        beforeMessageId: previous
+          ? (BigInt(latest?.messageId ?? "0") + 1n).toString()
+          : String(task.sourceMessageId),
+      };
+    }
     await insert(this.db, "byai_message", {
       id: event.payload.id,
       message_id: event.userMessageId,
@@ -83,10 +116,7 @@ export class MirrorInputWriter {
       role: "user",
       message_ref: event.payload.messageRef ?? null,
       message_content: text(event.payload.messageContent, 262144, true),
-      metadata: JSON.stringify({
-        ...event.payload.metadata,
-        clientRequestId: event.clientRequestId,
-      }),
+      metadata: JSON.stringify(metadata),
       message_struct:
         event.payload.messageStruct === undefined
           ? null

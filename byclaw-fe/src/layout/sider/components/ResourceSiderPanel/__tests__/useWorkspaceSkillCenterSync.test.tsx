@@ -70,7 +70,6 @@ it('does not check skills without employee management permission', async () => {
   await act(async () => result.current.onOpen(skill));
   expect(result.current.menuItem(skill)).toBeUndefined();
   expect(query).not.toHaveBeenCalled();
-
 });
 
 it('confirms once and submits the comparison revision for the current employee', async () => {
@@ -171,7 +170,13 @@ it('discards comparison responses and confirmations from a previous employee', a
 });
 
 it('compares and updates an installed skill without the user-developed label', async () => {
-  const bound = { ...skill, resourceId: '123', resourceBacked: true, displaySourceType: undefined, skillPath: undefined };
+  const bound = {
+    ...skill,
+    resourceId: '123',
+    resourceBacked: true,
+    displaySourceType: undefined,
+    skillPath: undefined,
+  };
   query.mockResolvedValue(status('UPDATE'));
   sync.mockResolvedValue({ resourceId: '123', action: 'UPDATE', sourceDeleted: false });
   const { result, onChanged } = setup();
@@ -194,7 +199,13 @@ it('compares and updates an installed skill without the user-developed label', a
 });
 
 it('hides update for an installed skill when the complete packages match', async () => {
-  const bound = { ...skill, resourceId: '123', resourceBacked: true, displaySourceType: undefined, skillPath: undefined };
+  const bound = {
+    ...skill,
+    resourceId: '123',
+    resourceBacked: true,
+    displaySourceType: undefined,
+    skillPath: undefined,
+  };
   query.mockResolvedValue(status('NONE'));
   const { result } = setup();
   await act(async () => result.current.onOpen(bound));

@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
@@ -58,17 +60,21 @@ class TenantGroupTaskRoutingAspectTest {
     }
 
     @Test
-    void legacyTaskStillUsesItsExistingHandler() throws Throwable {
+    void legacyTaskIdsStillAuthorizeAndReadThroughTheTenantNode() throws Throwable {
         TenantRequestContextHolder.set(tenant);
         ByaiGroupChatTask task = new ByaiGroupChatTask();
         task.setGroupSessionId(11222539L);
         when(legacyTasks.selectById(42L)).thenReturn(task);
         when(legacyMembership.isLegacyGroupMember(11222539L, 57L, 11222473L)).thenReturn(true);
         ProceedingJoinPoint call = call("pending", 42L);
-        ResponseUtil<?> existing = ResponseUtil.successResponse("legacy");
-        when(call.proceed()).thenReturn(existing);
+        Map<String, Object> pending = Map.of("taskId", "42");
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/42/pending-publication"),
+            eq(null), any())).thenReturn(pending);
 
-        assertThat(aspect.route(call)).isSameAs(existing);
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call);
+        assertThat(response.getData()).isEqualTo(pending);
+        verify(call, never()).proceed();
+        verifyNoInteractions(legacyTasks, legacyMembership);
     }
 
     private ProceedingJoinPoint call(String method, Long taskId) throws Exception {

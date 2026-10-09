@@ -2,27 +2,17 @@ package com.iwhalecloud.byai.manager.domain.tenant;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
-import com.iwhalecloud.byai.common.page.PageInfo;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupCreate;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.EmptyPayload;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupMember;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageId;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
-import com.iwhalecloud.byai.state.domain.groupchat.application.WorkgroupTemplateService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
-import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
-import cn.hutool.core.util.IdUtil;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -36,22 +26,27 @@ import org.springframework.web.server.ResponseStatusException;
 @Aspect
 @Component
 public class TenantGroupChatRoutingAspect {
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupMessageAckService messageAckService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupManagementService management;
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupInvitationService invitations;
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupCreationService creation;
     private final TenantNodeClient node;
     private final GroupChatReadService legacy;
     private final ByaiGroupChatMentionMapper mentionMapper;
     private final ObjectMapper mapper;
     private final TenantGroupMemberService memberService;
-    private final WorkgroupTemplateService templates;
 
     public TenantGroupChatRoutingAspect(TenantNodeClient node, GroupChatReadService legacy,
-        ByaiGroupChatMentionMapper mentionMapper, ObjectMapper mapper, TenantGroupMemberService memberService,
-        WorkgroupTemplateService templates) {
+        ByaiGroupChatMentionMapper mentionMapper, ObjectMapper mapper, TenantGroupMemberService memberService) {
         this.node = node;
         this.legacy = legacy;
         this.mentionMapper = mentionMapper;
         this.mapper = mapper;
         this.memberService = memberService;
-        this.templates = templates;
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController.*(..))"
@@ -61,13 +56,21 @@ public class TenantGroupChatRoutingAspect {
         if (context == null) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
-        if ("defaultAssistant".equals(method)) return ResponseUtil.successResponse(List.of());
+        if ("defaultAssistant".equals(method)) return call.proceed();
+        if (List.of("createInvitation", "validateInvitation", "joinInvitation").contains(method))
+            return ResponseUtil.successResponse(invitations.handle(context, method, args));
         if ("create".equals(method)) return create(context, (GroupChatCreateRequest) args[0]);
         if (args.length == 0 && !"list".equals(method)) throw unsupported();
         String sessionId = args.length > 0 && args[0] instanceof Long id && id > 0 ? id.toString() : null;
         String path = sessionId == null ? null : "/internal/v1/group-chats/" + sessionId;
-        if (sessionId != null && mentionMapper.isLegacyGroupMember(Long.valueOf(sessionId),
-            context.userId(), context.enterpriseId())) return call.proceed();
+        // 新增确认接口始终按租户上下文落 Node，不回退到共享消息表。
+        if ("acknowledge".equals(method) || "unacknowledge".equals(method)) {
+            return ResponseUtil.successResponse(messageAckService.change(context,
+                Long.valueOf(id(args[0])), Long.valueOf(id(args[1])), "acknowledge".equals(method)));
+        }
+        if (List.of("nickname", "changeRole", "transferOwnership", "leave", "dissolve",
+            "acknowledgeDissolution", "recall", "directSession").contains(method))
+            return ResponseUtil.successResponse(management.change(context, method, Long.valueOf(id(args[0])), args));
         switch (method) {
             case "list": {
                 if (args.length == 3 && args[0] instanceof Integer pageNum && args[1] instanceof Integer pageSize) {
@@ -94,50 +97,19 @@ public class TenantGroupChatRoutingAspect {
             }
             case "settings": return read(context, requirePath(path) + "/settings");
             case "updateSettings": {
-                var request = (com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest) args[1];
-                if (request == null) throw unsupported();
-                node.command(context, "PATCH", requirePath(path) + "/settings", sessionId, "UPDATE_SETTINGS",
-                    new TenantNodeModels.GroupSettings(request.getSessionName(), request.getAllowJoinByLink(),
-                        request.getAllowMemberAddAgent(), request.getAllowMemberInviteUser()));
-                Map<String, Object> detail = node.request(context, "GET", requirePath(path), null,
+                GroupChatSettingsRequest request = (GroupChatSettingsRequest) args[1];
+                if (request == null || request.getSessionName() == null
+                    && request.getAllowJoinByLink() == null && request.getAllowMemberAddAgent() == null
+                    && request.getAllowMemberInviteUser() == null) throw unsupported();
+                node.command(context, "PATCH", requirePath(path) + "/settings", sessionId,
+                    "UPDATE_SETTINGS", new TenantNodeModels.GroupSettings(request.getSessionName(),
+                        request.getAllowJoinByLink(), request.getAllowMemberAddAgent(),
+                        request.getAllowMemberInviteUser()));
+                Map<String, Object> detail = node.request(context, "GET", path, null,
                     new TypeReference<Map<String, Object>>() { });
-                return ResponseUtil.successResponse(detail == null ? null : detail.get("session"));
-            }
-            case "leave": {
-                node.command(context, "POST", requirePath(path) + "/leave", sessionId,
-                    "LEAVE_GROUP", new EmptyPayload());
-                return ResponseUtil.successResponse(null);
-            }
-            case "changeRole": {
-                if (args.length != 4 || !"USER".equals(args[1]) || !(args[2] instanceof Long userId)
-                    || !(args[3] instanceof Map<?, ?> roles) || !(roles.get("role") instanceof String role)
-                    || !List.of("ADMIN", "MEMBER").contains(role)) throw unsupported();
-                memberService.requireActiveUser(context, userId);
-                node.command(context, "PATCH", requirePath(path) + "/members/role", sessionId,
-                    "SET_ROLE", new TenantNodeModels.MemberRole(userId.toString(), role),
-                    java.util.UUID.randomUUID().toString(), List.of(Long.toString(context.userId()), userId.toString()));
-                return ResponseUtil.successResponse(null);
-            }
-            case "transferOwnership": {
-                var request = (com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTransferOwnershipRequest) args[1];
-                if (request == null || request.getUserId() == null) throw unsupported();
-                memberService.requireActiveUser(context, request.getUserId());
-                node.command(context, "POST", requirePath(path) + "/owner", sessionId, "TRANSFER_OWNER",
-                    new TenantNodeModels.GroupUser(request.getUserId().toString()), java.util.UUID.randomUUID().toString(),
-                    List.of(Long.toString(context.userId()), request.getUserId().toString()));
-                return ResponseUtil.successResponse(null);
+                return ResponseUtil.successResponse(detail.get("session"));
             }
             case "lifecycle": return read(context, requirePath(path) + "/lifecycle");
-            case "dissolve": {
-                node.command(context, "POST", requirePath(path) + "/dissolve", sessionId,
-                    "DISSOLVE_GROUP", new EmptyPayload());
-                return ResponseUtil.successResponse(null);
-            }
-            case "acknowledgeDissolution": {
-                node.command(context, "POST", requirePath(path) + "/dissolution-ack", sessionId,
-                    "ACK_DISSOLUTION", new EmptyPayload());
-                return ResponseUtil.successResponse(null);
-            }
             case "tasks": return read(context, requirePath(path) + "/tasks");
             case "context": {
                 GroupChatContextRequest request = (GroupChatContextRequest) args[1];
@@ -179,63 +151,12 @@ public class TenantGroupChatRoutingAspect {
     }
 
     private Object create(TenantRequestContext context, GroupChatCreateRequest request) {
-        if (request == null || request.getName() == null || request.getName().isBlank()
-            || request.getGoal() == null || request.getGoal().isBlank()
-            || request.getTemplateId() == null && request.getExpectedTemplateVersion() != null) throw unsupported();
-        LinkedHashSet<Long> agentIds = new LinkedHashSet<>();
-        if (request.getAgentIds() != null) agentIds.addAll(request.getAgentIds());
-        if (request.getTemplateId() != null) agentIds.addAll(templates.resolveResourceIds(
-            request.getTemplateId(), request.getExpectedTemplateVersion()));
-        List<GroupMember> members = new ArrayList<>();
-        String sessionId = Long.toString(IdUtil.getSnowflakeNextId());
-        String name = CurrentUserHolder.getLoginInfo() == null ? ""
-            : CurrentUserHolder.getLoginInfo().getUserName();
-        members.add(new GroupMember("USER", Long.toString(context.userId()), "OWNER", name));
-        if (request.getUserIds() != null && !request.getUserIds().isEmpty()) {
-            members.addAll(memberService.initialUsers(context, request.getUserIds()));
-        }
-        if (!agentIds.isEmpty()) members.addAll(memberService.initialAgents(context, new ArrayList<>(agentIds)));
-        GroupCreate payload = new GroupCreate(request.getName(), request.getGoal(), sessionId, members);
-        if (members.stream().filter(member -> "USER".equals(member.memObjType())).count() == 1) {
-            node.command(context, "POST", "/internal/v1/group-chats", sessionId, "CREATE_GROUP", payload);
-        } else {
-            node.command(context, "POST", "/internal/v1/group-chats", sessionId, "CREATE_GROUP", payload,
-                java.util.UUID.randomUUID().toString(), members.stream().filter(member -> "USER".equals(member.memObjType()))
-                    .map(GroupMember::memObjId).toList());
-        }
-        memberService.grantInitialAgents(new ArrayList<>(agentIds), members);
-        return read(context, "/internal/v1/group-chats/" + sessionId);
+        return ResponseUtil.successResponse(creation.create(context, request));
     }
 
     private Map<String, Object> list(TenantRequestContext context, int pageNum, int pageSize) {
-        long required = (long) pageNum * pageSize;
-        if (required > 1000) throw unsupported();
-        int count = (int) required;
-        PageInfo<GroupChatListItemResponse> old = legacy.listMyGroupsInEnterprise(1, count,
-            context.enterpriseId());
-        List<Map<String, Object>> joined = new ArrayList<>();
-        for (GroupChatListItemResponse item : old.getList()) {
-            joined.add(mapper.convertValue(item, new TypeReference<Map<String, Object>>() { }));
-        }
-        long nodeTotal = 0;
-        for (int offset = 0; offset < count; offset += 100) {
-            int size = Math.min(100, count);
-            int nodePage = offset / 100 + 1;
-            Map<String, Object> page = node.request(context, "GET", "/internal/v1/group-chats?pageNum="
-                + nodePage + "&pageSize=" + size, null, new TypeReference<Map<String, Object>>() { });
-            nodeTotal = ((Number) page.get("total")).longValue();
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> items = (List<Map<String, Object>>) page.get("list");
-            joined.addAll(items);
-            if (offset + size >= nodeTotal) break;
-        }
-        joined.sort(Comparator.comparingLong((Map<String, Object> item) ->
-            Long.parseLong(item.get("sessionId").toString())).reversed());
-        int from = Math.min((pageNum - 1) * pageSize, joined.size());
-        int to = Math.min(from + pageSize, joined.size());
-        long total = old.getTotal() + nodeTotal;
-        return Map.of("list", joined.subList(from, to), "total", total, "pageNum", pageNum,
-            "pageSize", pageSize, "totalPages", (int) Math.ceil((double) total / pageSize));
+        return node.request(context, "GET", "/internal/v1/group-chats?pageNum=" + pageNum + "&pageSize=" + pageSize,
+            null, new TypeReference<Map<String, Object>>() {});
     }
 
     private Object read(TenantRequestContext context, String path) {

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.route;
 
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
+import com.iwhalecloud.byai.common.feign.request.manager.AgentResourceChatInfoDto;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.JSONArray;
 import com.iwhaleai.byai.framework.client.GatewayClient;
@@ -57,6 +58,7 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -877,6 +879,40 @@ class RouteServiceTest {
 
         verify(chatStreamRuntimeCoordinator).stopIfStarted(ctx, true);
         verifyNoInteractions(gatewayClient);
+    }
+
+    @Test
+    void coordinatedCoordinatorRejectsIntegrationRoutesWithoutTeamAdapters() {
+        InterfaceRouteService interfaces = mock(InterfaceRouteService.class);
+        A2aRouteService a2a = mock(A2aRouteService.class);
+        ReflectionTestUtils.setField(routeService, "interfaceRouteService", interfaces);
+        ReflectionTestUtils.setField(routeService, "a2aRouteService", a2a);
+        var coordination = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(coordination);
+        ReflectionTestUtils.setField(routeService, "groupCoordinationProvider", provider);
+        doAnswer(call -> {
+            AssistantChatDto request = call.getArgument(0);
+            request.setExtParams(Map.of("groupCoordination", Map.of("mode", "COORDINATED", "coordinatorAgentId", "90")));
+            return null;
+        }).when(coordination).validateRequest(any());
+
+        for (String integrationType : List.of("INTERFACE", "A2A")) {
+            ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_EXE.getCode(), 90L);
+            AgentResourceChatInfoDto coordinator = new AgentResourceChatInfoDto();
+            coordinator.setId(90L);
+            coordinator.setCreateType("FROM_THIRD");
+            coordinator.setIntegrationType(integrationType);
+            ctx.getParams().put("agent_list", List.of(coordinator));
+
+            assertThatThrownBy(() -> routeService.route(ctx))
+                .isInstanceOf(ChatTurnPreparationException.class)
+                .hasMessageContaining("不支持团队调度");
+            verify(coordination).validateRequest(org.mockito.ArgumentMatchers.same(ctx.getAssistantChatDto()));
+        }
+
+        verifyNoInteractions(interfaces, a2a, gatewayClient, chatStreamRuntimeCoordinator, workerRouteReadinessService);
     }
 
     private ChatProcessContext buildContext() {

@@ -108,8 +108,16 @@ public final class TenantNodeModels {
 
     public sealed interface CommandPayload permits SessionCreate, GroupCreate, SessionUpdate, MessageId, EmptyPayload,
         GroupMessagePayload, GroupTaskUpdate, GroupTaskClaim, AddMembers, RemoveMember, MessageFeedback, MessageStructure,
-        GroupSettings, MemberRole, GroupUser {
+        GroupSettings, MemberRole, GroupUser, MessageAcknowledgementPayload, Fields {
     }
+
+    /** 内部命令可选字段保持扁平，按 Node operation 的契约校验。 */
+    public record Fields(@com.fasterxml.jackson.annotation.JsonAnyGetter java.util.Map<String, Object> values)
+        implements CommandPayload {}
+
+    public record MessageAcknowledgementPayload(String messageId, String userName) implements CommandPayload {}
+
+    public record MessageAcknowledgement(String messageId, String userId, String userName, Long acknowledgedAt) {}
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record SessionCreate(String sessionName, String sessionType, String agentId, String projectId)
@@ -173,7 +181,12 @@ public final class TenantNodeModels {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record GroupMessagePayload(String chatContent, List<ResourceVo> resourceList,
                                       List<MessageFileDto> files, String replyToMessageId,
-                                      String creatorName) implements CommandPayload {
+                                      String creatorName, String coordinatorAgentId,
+                                      String coordinatorName, Boolean coordinatorAuthorized) implements CommandPayload {
+        public GroupMessagePayload(String chatContent, List<ResourceVo> resourceList,
+                                   List<MessageFileDto> files, String replyToMessageId, String creatorName) {
+            this(chatContent, resourceList, files, replyToMessageId, creatorName, null, null, null);
+        }
     }
 
     public record GroupTaskUpdate(String taskSessionId, String status,
@@ -241,17 +254,37 @@ public final class TenantNodeModels {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record GroupDispatch(String taskSessionId, String targetAgentId) {
+    public record GroupDispatch(String taskSessionId, String targetAgentId,
+                                java.util.Map<String, Object> groupCoordination) {
+        public GroupDispatch(String taskSessionId, String targetAgentId) {
+            this(taskSessionId, targetAgentId, null);
+        }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record CommandResult(String sessionId, String requestId, String operation, String messageId,
-                                List<GroupDispatch> dispatches, Boolean claimed, String metadata) {
+                                List<GroupDispatch> dispatches, Boolean claimed,
+                                List<MessageAcknowledgement> acknowledgements, com.fasterxml.jackson.databind.JsonNode data,
+                                String metadata) {
+        public CommandResult(String sessionId, String requestId, String operation, String messageId,
+                             List<GroupDispatch> dispatches, Boolean claimed, String metadata) {
+            this(sessionId, requestId, operation, messageId, dispatches, claimed, null, null, metadata);
+        }
+        public CommandResult(String sessionId, String requestId, String operation, String messageId,
+                             List<GroupDispatch> dispatches, Boolean claimed, List<MessageAcknowledgement> acknowledgements,
+                             com.fasterxml.jackson.databind.JsonNode data) {
+            this(sessionId, requestId, operation, messageId, dispatches, claimed, acknowledgements, data, null);
+        }
+        public CommandResult(String sessionId, String requestId, String operation, String messageId,
+                             List<GroupDispatch> dispatches, Boolean claimed, List<MessageAcknowledgement> acknowledgements) {
+            this(sessionId, requestId, operation, messageId, dispatches, claimed, acknowledgements, null, null);
+        }
         public CommandResult(String sessionId, String requestId, String operation, String messageId,
                              List<GroupDispatch> dispatches, Boolean claimed) {
-            this(sessionId, requestId, operation, messageId, dispatches, claimed, null);
+            this(sessionId, requestId, operation, messageId, dispatches, claimed, null, null, null);
         }
         public CommandResult(String sessionId, String requestId, String operation, String messageId) {
-            this(sessionId, requestId, operation, messageId, null, null, null);
+            this(sessionId, requestId, operation, messageId, null, null, null, null, null);
         }
     }
 }

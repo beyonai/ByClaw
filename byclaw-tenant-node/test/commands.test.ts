@@ -114,6 +114,24 @@ describe("group write permission", () => {
     const s = context("DISSOLVE_GROUP", {}, "ADMIN");
     await expect(groupSettings(s.ctx)).rejects.toThrow("FORBIDDEN");
   });
+  it("updates group name and member permission for an admin", async () => {
+    const s = context(
+      "UPDATE_SETTINGS",
+      { sessionName: " New name ", allowMemberAddAgent: true },
+      "ADMIN",
+    );
+    const extension = vi.spyOn(s.ctx, "setExtension").mockResolvedValue();
+    await groupSettings(s.ctx);
+    expect(s.query.mock.calls).toContainEqual([
+      expect.stringContaining("SET session_name=$1"),
+      ["New name", "30", "10"],
+    ]);
+    expect(extension).toHaveBeenCalledWith("group_member_add_agent_enabled", "true");
+  });
+  it("rejects empty group settings", async () => {
+    const s = context("UPDATE_SETTINGS", {}, "OWNER");
+    await expect(groupSettings(s.ctx)).rejects.toThrow("INVALID_GROUP_SETTINGS");
+  });
   it("accepts acknowledgement only for a dissolved group", async () => {
     const s = context("ACK_DISSOLUTION");
     await expect(groupSettings(s.ctx)).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");

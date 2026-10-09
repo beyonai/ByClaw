@@ -8,8 +8,8 @@ import { displayMessages } from "./timeline-format.js";
 
 /** 群时间线、搜索和上下文快照；在用例层限制数量与字符量，覆盖 HTTP 和 Worker 两种入口。 */
 export class TimelineHistory extends HistoryAccess {
-  private display(rows: Row[]) {
-    return displayMessages(this.repository, rows);
+  private display(rows: Row[], actor: string) {
+    return displayMessages(this.repository, rows, actor);
   }
   async context(
     actor: string,
@@ -17,6 +17,7 @@ export class TimelineHistory extends HistoryAccess {
     before: string | undefined,
     maxMessages: number,
     maxCharacters: number,
+    agentContext = false,
   ) {
     maxMessages = bounded(maxMessages, 60, 60);
     maxCharacters = bounded(maxCharacters, 30000, 30000);
@@ -26,12 +27,21 @@ export class TimelineHistory extends HistoryAccess {
       ? []
       : await this.repository.messages({ sessionId, orderById: true, limit: 1 });
     const boundary = before ?? (latest ? (BigInt(latest.messageId) + 1n).toString() : "1");
-    const filter = { sessionId, before: boundary, timeline: true, limit: maxMessages + 1 };
+    const filter = {
+      sessionId,
+      before: boundary,
+      timeline: !agentContext,
+      visible: agentContext,
+      limit: maxMessages + 1,
+    };
     const [rows, total] = await Promise.all([
       this.repository.messages(filter),
       this.repository.countMessages(filter),
     ]);
-    const page = rows.slice(0, maxMessages);
+    const page = (agentContext ? rows.filter((row) => row.usage !== 5) : rows).slice(
+      0,
+      maxMessages,
+    );
     let used = 0;
     let characterTruncated = false;
     const selected: Row[] = [];
@@ -48,7 +58,10 @@ export class TimelineHistory extends HistoryAccess {
     return {
       schemaVersion: "byclaw.group-chat-context/v1",
       conversationKey: sessionId,
-      messages: await this.display(selected),
+      messages: (await this.display(selected, actor)).map((message) => {
+        if (agentContext && message.replyTo?.usage === 5) delete message.replyTo;
+        return message;
+      }),
       snapshot: {
         beforeMessageId: boundary,
         lastIncludedMessageId: selected.at(-1)?.messageId,
@@ -104,7 +117,7 @@ export class TimelineHistory extends HistoryAccess {
     });
     const page = rows.slice(0, limit);
     return {
-      messages: await this.display(page),
+      messages: await this.display(page, actor),
       hasMore: rows.length > limit,
       nextBeforeMessageId: rows.length > limit ? page.at(-1)?.messageId : undefined,
     };
@@ -130,7 +143,7 @@ export class TimelineHistory extends HistoryAccess {
     return {
       schemaVersion: "byclaw.group-chat-context/v1",
       conversationKey: sessionId,
-      messages: await this.display([...before.slice(0, 26).reverse(), ...after]),
+      messages: await this.display([...before.slice(0, 26).reverse(), ...after], actor),
       truncation: {
         truncated: before.length > 26,
         omittedMessageCount: before.length > 26 ? 1 : 0,

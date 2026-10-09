@@ -5,6 +5,7 @@ import { indexGroupMessage } from "./group-message-index.js";
 import { DomainError } from "../../domain/errors.js";
 import { first, insert } from "./sql-utils.js";
 import { nextSequence, answerFields } from "./message-fields.js";
+import { readGroupCoordination } from "./group-coordination.js";
 /** 稳定回答行的读取与版本条件更新；回答终态和问答关系由外层事务一起提交。 */
 export class MirrorAnswerWriter {
   constructor(
@@ -42,6 +43,13 @@ export class MirrorAnswerWriter {
     state: AnswerState,
     previous: AnswerState | null,
   ): Promise<void> {
+    const scope = await readGroupCoordination(this.db, event.sessionId);
+    if (
+      scope?.mode === "COORDINATED" &&
+      state.metadata.agentId != null &&
+      String(state.metadata.agentId) !== scope.coordinatorAgentId
+    )
+      throw new DomainError("GROUP_COORDINATION_AGENT_MISMATCH");
     const values = {
       id: state.id,
       message_id: state.messageId,

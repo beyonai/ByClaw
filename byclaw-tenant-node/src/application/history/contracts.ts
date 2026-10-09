@@ -23,6 +23,9 @@ export interface MessageFilter {
   endTime?: number;
 }
 export interface HistoryRepository {
+  invitation(actor: string, token: string): Promise<Row>;
+  publication(taskId: string): Promise<Row | null>;
+  acknowledgements(sessionId: string, messageIds: string[]): Promise<Row[]>;
   session(id: string): Promise<Row | null>;
   member(sessionId: string, userId: string): Promise<Row | null>;
   members(sessionId: string): Promise<Row[]>;

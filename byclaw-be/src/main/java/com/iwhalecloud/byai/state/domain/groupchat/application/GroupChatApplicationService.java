@@ -64,6 +64,10 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 @Service
 public class GroupChatApplicationService {
     @Autowired
+    private GroupWorkAssistantService workAssistantService;
+    @Autowired
+    private GroupChatCoordinationService coordinationService;
+    @Autowired
     private GroupChatTopicService topicService;
     @Autowired
     private UserService userService;
@@ -131,6 +135,8 @@ public class GroupChatApplicationService {
             agentIds.addAll(workgroupTemplateService.resolveResourceIds(request.getTemplateId(),
                 request.getExpectedTemplateVersion()));
         }
+        Long coordinatorId = workAssistantService == null ? null : workAssistantService.resolveDefaultCoordinatorId();
+        if (coordinatorId != null) agentIds.add(coordinatorId);
         if (!agentIds.isEmpty()) {
             if (agentIds.stream().anyMatch(id -> id == null || id <= 0)) {
                 throw new BaseException("error.resource.not.exist");
@@ -173,6 +179,7 @@ public class GroupChatApplicationService {
                 UserRole.MEMBER.name()));
         }
         memberService.batchSave(members);
+        if (coordinatorId != null) workAssistantService.bindCoordinator(session.getSessionId(), coordinatorId);
         // 建群批量写入不会经过 insertMember；复用入群授权，补齐默认助手及所选员工的使用权限。
         // 从最终成员列表取真人，包含创建人且避免重复授权；授权写入与建群共用当前事务。
         if (!agentIds.isEmpty()) {
@@ -184,6 +191,7 @@ public class GroupChatApplicationService {
         response.setSession(session);
         members.forEach(this::fillMemberPresentation);
         response.setMembers(members);
+        response.setCoordinatorAgentId(coordinatorId == null ? null : coordinatorId.toString());
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
     }
@@ -286,8 +294,34 @@ public class GroupChatApplicationService {
         event.put("topicId", String.valueOf(message.getTopicId()));
         event.put("messageRef", command.getReplyToMessageId());
         event.put("replyTo", buildReplySummary(session.getSessionId(), command.getReplyToMessageId()));
-        mentionedAgentIds.forEach(agentId -> executionCoordinator.enqueue(session.getSessionId(), messageId,
-            command.getReplyToMessageId(), CurrentUserHolder.getCurrentUserId(), agentId, null, messageId));
+        if (workAssistantService != null && !mentionedAgentIds.isEmpty()) {
+            Long coordinatorId = ensureCoordinator(session.getSessionId());
+            if (mentionedAgentIds.size() >= 2) {
+                var execution = executionCoordinator.enqueueCoordinated(session.getSessionId(), messageId,
+                    command.getReplyToMessageId(), CurrentUserHolder.getCurrentUserId(), coordinatorId,
+                    new ArrayList<>(mentionedAgentIds));
+                Map<String, Object> scope = coordinationService.findScope(execution.getCandidateSessionId());
+                metadata.put("groupCoordination", scope);
+                message.setMetadata(JSON.toJSONString(metadata));
+                messageMapper.updateById(message);
+                event.put("groupCoordination", scope);
+            }
+            else {
+                Long agentId = mentionedAgentIds.iterator().next();
+                var execution = executionCoordinator.enqueue(session.getSessionId(), messageId,
+                    command.getReplyToMessageId(), CurrentUserHolder.getCurrentUserId(), agentId, null, messageId);
+                if (coordinationService.findScope(execution.getCandidateSessionId()) == null) {
+                    List<Long> collaborators = memberService.findSessionMembers(session.getSessionId(), "AGENT", null)
+                        .stream().map(ByaiSessionMember::getMemObjId).toList();
+                    coordinationService.resolveForExecution(session.getSessionId(), execution.getCandidateSessionId(),
+                        collaborators, coordinatorId, "DIRECT");
+                }
+            }
+        }
+        else {
+            mentionedAgentIds.forEach(agentId -> executionCoordinator.enqueue(session.getSessionId(), messageId,
+                command.getReplyToMessageId(), CurrentUserHolder.getCurrentUserId(), agentId, null, messageId));
+        }
         // A rejected continuation must not leave a broadcast message whose database transaction rolled back.
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -312,8 +346,40 @@ public class GroupChatApplicationService {
         List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
         fillMemberPresentations(members);
         response.setMembers(members);
+        ByaiSessionExt binding = sessionExtService.findOneByExtParamCode(sessionId, GroupWorkAssistantService.COORDINATOR_EXT);
+        response.setCoordinatorAgentId(binding == null ? null : binding.getExtParamValue());
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
+    }
+
+    /** Upgrade existing groups inside the message transaction, using the same member authorization as creation. */
+    @Transactional
+    public Long ensureDefaultCoordinator(Long groupId) {
+        sessionService.lockById(groupId);
+        authorizationService.requireGroup(groupId);
+        authorizationService.requireCurrentUserMember(groupId);
+        return ensureCoordinator(groupId);
+    }
+
+    private Long ensureCoordinator(Long groupId) {
+        ByaiSessionExt binding = sessionExtService.findOneByExtParamCode(groupId, GroupWorkAssistantService.COORDINATOR_EXT);
+        Long coordinatorId = binding == null ? workAssistantService.resolveDefaultCoordinatorId()
+            : Long.valueOf(binding.getExtParamValue());
+        if (memberService.findSessionMember(groupId, "AGENT", coordinatorId) == null) {
+            ArrayList<ByaiSessionMember> added = new ArrayList<>();
+            addMember(added, groupId, "AGENT", coordinatorId, UserRole.MEMBER.name());
+            memberService.batchSave(added);
+            memberService.findSessionMembers(groupId, "USER", null).forEach(member ->
+                authApplicationService.grantDigitalEmployeesToUser(Set.of(coordinatorId), member.getMemObjId()));
+        }
+        if (binding == null) workAssistantService.bindCoordinator(groupId, coordinatorId);
+        return coordinatorId;
+    }
+
+    public Object coordinationForMessage(Long messageId) {
+        ByaiMessage message = messageMapper.selectByMessageId(messageId);
+        return message == null || message.getMetadata() == null ? null
+            : JSON.parseObject(message.getMetadata()).get("groupCoordination");
     }
 
     /**

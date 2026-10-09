@@ -31,6 +31,8 @@ import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 /** Runs tenant group mentions in private tenant task sessions. Node owns all message writes. */
 @Service
 public class TenantGroupAgentDispatcher {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher events;
     private static final Logger log = LoggerFactory.getLogger(TenantGroupAgentDispatcher.class);
     private final ExecutorService workers = new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<>(128));
@@ -82,7 +84,10 @@ public class TenantGroupAgentDispatcher {
                 request.setAgentType("001");
                 request.setChatContent(content);
                 request.setClientRequestId("group-" + sourceMessageId + "-" + dispatch.targetAgentId());
-                request.setExtParams(Map.of("tenantGroupTask", dispatch.taskSessionId()));
+                Map<String, Object> params = new java.util.HashMap<>();
+                params.put("tenantGroupTask", dispatch.taskSessionId());
+                if (dispatch.groupCoordination() != null) params.put("groupCoordination", dispatch.groupCoordination());
+                request.setExtParams(params);
                 try {
                     chat.chat(request, OutputStream.nullOutputStream(), null);
                 }
@@ -97,6 +102,19 @@ public class TenantGroupAgentDispatcher {
             if (!"WAITING_USER".equals(state.get("turnStatus"))
                 && !"FAILED".equals(state.get("turnStatus"))) {
                 throw new IllegalStateException("Group agent returned without a terminal tenant mirror");
+            }
+            if (dispatch.groupCoordination() != null && "COORDINATED".equals(dispatch.groupCoordination().get("mode"))) {
+                com.alibaba.fastjson.JSONObject status = new com.alibaba.fastjson.JSONObject();
+                status.put("type", "GROUP_CHAT_EVENT");
+                status.put("event", "TASK_STATUS_CHANGED");
+                status.put("sessionId", groupId.toString());
+                status.put("taskId", dispatch.taskSessionId());
+                status.put("sourceMessageId", sourceMessageId);
+                status.put("targetAgentId", dispatch.targetAgentId());
+                status.put("status", state.get("status"));
+                status.put("turnStatus", state.get("turnStatus"));
+                status.put("groupCoordination", dispatch.groupCoordination());
+                events.publishTenant(tenant, groupId, status);
             }
         }
         catch (Exception error) {

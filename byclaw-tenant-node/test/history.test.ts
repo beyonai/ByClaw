@@ -17,6 +17,7 @@ function setup() {
     })),
     member: vi.fn(async () => ({ memObjId: "20", userRole: "MEMBER" })),
     members: vi.fn(async () => []),
+    acknowledgements: vi.fn(async () => []),
     extensions: vi.fn(async () => []),
     messages: vi.fn(async () => []),
     countMessages: vi.fn(async () => 0),
@@ -77,6 +78,59 @@ describe("tenant history use cases", () => {
     vi.mocked(repo.member).mockResolvedValue(null);
     await expect(service.byIds("20", ["100"])).rejects.toThrow();
   });
+  it("inherits the frozen group scope through real child session parents", async () => {
+    const { service, repo } = setup();
+    const scope = {
+      schemaVersion: "byclaw.group-coordination/v1",
+      mode: "COORDINATED",
+      groupSessionId: "30",
+      taskSessionId: "40",
+      coordinatorAgentId: "90",
+      allowedAgentIds: ["42", "43"],
+    };
+    vi.mocked(repo.session).mockImplementation(async (id) => ({
+      sessionId: id,
+      enterpriseId: "10",
+      creatorId: "20",
+      sessionType: id === "30" ? "hs_as" : "h_as",
+      ...(id === "50" ? { parentSessionId: "40", objectId: "42" } : {}),
+    }));
+    vi.mocked(repo.task).mockImplementation(async (id) =>
+      id === "40"
+        ? {
+            taskSessionId: "40",
+            groupSessionId: "30",
+            initiatorUserId: "20",
+            targetAgentId: "90",
+          }
+        : null,
+    );
+    vi.mocked(repo.extensions).mockImplementation(async (id) =>
+      id === "40"
+        ? [
+            {
+              extParamCode: "group_coordination_scope",
+              extParamValue: JSON.stringify(scope),
+            },
+          ]
+        : [],
+    );
+
+    await expect(service.access("20", "50")).resolves.toMatchObject({
+      groupCoordination: scope,
+      groupCoordinationChild: true,
+      targetAgentId: "42",
+    });
+    await expect(service.access("21", "50")).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
+    vi.mocked(repo.session).mockImplementation(async (id) => ({
+      sessionId: id,
+      enterpriseId: "10",
+      creatorId: "20",
+      sessionType: id === "30" ? "hs_as" : "h_as",
+      ...(id === "50" ? { parentSessionId: "40", objectId: "999" } : {}),
+    }));
+    await expect(service.access("20", "50")).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
+  });
   it("preserves a terminal-safe timeline projection and clientRequestId", async () => {
     const { service, repo } = setup();
     vi.mocked(repo.messages).mockResolvedValue([
@@ -92,6 +146,17 @@ describe("tenant history use cases", () => {
     expect(result.messages.map((r) => r.messageId)).toEqual(["99", "100"]);
     expect(result.messages[1]?.clientRequestId).toBe("request");
     expect(result.messages[0]?.role).toBe("event");
+    expect(result.truncation.truncated).toBe(false);
+  });
+  it("filters system events before budgeting agent context while preserving the user timeline", async () => {
+    const { service, repo } = setup();
+    vi.mocked(repo.messages).mockResolvedValue([message(), message({ messageId: "99", usage: 5 })]);
+    vi.mocked(repo.countMessages).mockResolvedValue(1);
+    const result = await service.context("20", "30", "101", 60, 30000, true);
+    expect(result.messages.map((row) => row.messageId)).toEqual(["100"]);
+    expect(repo.messages).toHaveBeenCalledWith(
+      expect.objectContaining({ visible: true, timeline: false, before: "101" }),
+    );
     expect(result.truncation.truncated).toBe(false);
   });
   it("redacts every content-bearing field of a recalled message", () => {

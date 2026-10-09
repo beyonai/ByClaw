@@ -1,12 +1,12 @@
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
-import { first, insert } from "./sql-utils.js";
+import { first, insert, nextId } from "./sql-utils.js";
 import { nextSequence } from "./message-fields.js";
 import { indexGroupMessage } from "./group-message-index.js";
 
 /** BE 负责文件上传与授权；Node 原子写入群消息、publication、PUBLISHED 状态并清理待发布卡片。 */
-export async function publishTask(context: CommandContext): Promise<void> {
+export async function publishTask(context: CommandContext): Promise<Record<string, any>> {
   const { db, command } = context,
     p = command.payload,
     taskId = requireId(p.taskSessionId);
@@ -17,6 +17,28 @@ export async function publishTask(context: CommandContext): Promise<void> {
   );
   if (!task || task.initiatorUserId !== command.userId)
     throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+  const existing = await first(
+    db,
+    "SELECT * FROM byai.byai_group_chat_task_publication WHERE task_session_id=$1",
+    [taskId],
+  );
+  if (existing) {
+    if (
+      p.pendingPublicationId !== undefined &&
+      existing.pendingPublicationId !== p.pendingPublicationId
+    )
+      throw new DomainError("PENDING_PUBLICATION_CHANGED");
+    return {
+      messageId: existing.messageId,
+      data: {
+        taskId,
+        messageId: existing.messageId,
+        pendingPublicationId: existing.pendingPublicationId,
+        text: existing.textContent,
+        files: JSON.parse(existing.filesJson ?? "[]"),
+      },
+    };
+  }
   if (task.status !== "ACTIVE" || task.turnStatus === "RUNNING")
     throw new DomainError("TASK_NOT_READY_FOR_PUBLICATION");
   if (p.pendingPublicationId !== undefined) {
@@ -29,18 +51,22 @@ export async function publishTask(context: CommandContext): Promise<void> {
       throw new DomainError("PENDING_PUBLICATION_CHANGED");
   }
   const content = text(p.text ?? "", 1048576, true),
-    files = p.files ?? [];
+    rawFiles = p.files ?? [];
   if (
-    !Array.isArray(files) ||
-    files.length > 100 ||
-    files.some((file) => !file || file.resourceAuthorized !== true)
+    !Array.isArray(rawFiles) ||
+    rawFiles.length > 100 ||
+    rawFiles.some((file) => !file || file.resourceAuthorized !== true)
   )
     throw new DomainError("INVALID_PUBLICATION_FILES");
+  const files = rawFiles.map(
+    ({ resourceAuthorized: _authorized, ...file }: Record<string, any>) => file,
+  );
   if (!content.trim() && !files.length) throw new DomainError("INVALID_PUBLICATION_CONTENT");
-  const messageId = requireId(p.messageId),
+  const messageId = await nextId(db, command.enterpriseId),
     now = new Date();
   await insert(db, "byai_message", {
-    id: requireId(p.id),
+    id: messageId,
+    message_ref: task.sourceMessageId,
     message_id: messageId,
     session_id: command.sessionId,
     enterprise_id: command.enterpriseId,
@@ -82,4 +108,14 @@ export async function publishTask(context: CommandContext): Promise<void> {
   await db.query("DELETE FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1", [
     taskId,
   ]);
+  return {
+    messageId,
+    data: {
+      taskId,
+      messageId,
+      pendingPublicationId: p.pendingPublicationId ?? null,
+      text: content,
+      files,
+    },
+  };
 }

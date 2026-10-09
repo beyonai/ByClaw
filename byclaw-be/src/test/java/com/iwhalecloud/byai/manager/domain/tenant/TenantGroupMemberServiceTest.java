@@ -151,6 +151,21 @@ class TenantGroupMemberServiceTest {
     }
 
     @Test
+    void serverResolvedDefaultCoordinatorDoesNotDependOnTheCreatorsAccessCache() {
+        SsResource coordinator = new SsResource();
+        coordinator.setResourceBizType("DIG_EMPLOYEE");
+        coordinator.setResourceStatus(2);
+        coordinator.setResourceName("群组工作助手");
+        when(resources.findById(90L)).thenReturn(coordinator);
+
+        assertThat(service.prepareCoordinatorMember(90L))
+            .isEqualTo(new TenantNodeModels.InvitedMember("AGENT", "90", "群组工作助手", true));
+        verify(resourceAuthorization, never()).hasResourceAccessPermission(any(SsResource.class));
+        coordinator.setResourceStatus(1);
+        assertThatThrownBy(() -> service.prepareCoordinatorMember(90L)).isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
     void inviteActiveTenantUserWritesMembershipAssertionAndGrantsExistingAgents() {
         Map<String, Object> existingAgent = Map.of("memObjType", "AGENT", "memObjId", "10000713");
         Map<String, Object> owner = Map.of("memObjType", "USER", "memObjId", "57", "userRole", "OWNER");
