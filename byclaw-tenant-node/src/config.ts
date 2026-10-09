@@ -60,7 +60,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     instanceId: env.INSTANCE_ID ?? hostname(),
     host: env.HOST ?? "0.0.0.0",
     port,
-    advertiseHost: required("ADVERTISE_HOST"),
+    // The host-machine alias does not point to this sandbox's unexposed service port.
+    advertiseHost:
+      !env.ADVERTISE_HOST || env.ADVERTISE_HOST === "host.containers.internal"
+        ? hostname()
+        : env.ADVERTISE_HOST,
     stateDir: required("NODE_STATE_DIR"),
     beUrl: secureUrl("BE_INTERNAL_URL"),
     kmsUrl: secureUrl("KMS_DECRYPT_URL"),

@@ -5,6 +5,7 @@ import { event } from "./fixtures.js";
 describe("existing group projections", () => {
   it("creates a topic on the first reply and indexes mentions once", async () => {
     const query = vi.fn(async (sql: string) => {
+      if (sql.includes("ON CONFLICT")) throw new Error('syntax error at or near "CONFLICT"');
       if (sql.includes("SELECT m.*"))
         return [{ session_id: "30", session_type: "hs_as", create_time: new Date(1000) }];
       if (sql.includes("SELECT message_id"))
@@ -22,10 +23,10 @@ describe("existing group projections", () => {
       }),
     );
     expect(
-      query.mock.calls.filter(([sql]) => sql.includes("INSERT INTO byai.byai_group_chat_topic")),
+      query.mock.calls.filter(([sql]) => sql.includes("MERGE INTO byai.byai_group_chat_topic")),
     ).toHaveLength(1);
     expect(
-      query.mock.calls.filter(([sql]) => sql.includes("INSERT INTO byai.byai_group_chat_mention")),
+      query.mock.calls.filter(([sql]) => sql.includes("MERGE INTO byai.byai_group_chat_mention")),
     ).toHaveLength(1);
   });
   it("rejects a cyclic reply chain", async () => {

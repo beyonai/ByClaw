@@ -26,12 +26,53 @@ vi.mock("typeorm", () => ({
   },
 }));
 import { Database } from "../src/infrastructure/persistence/database.js";
-import { snapshot } from "./fixtures.js";
+import { CommandContext } from "../src/infrastructure/persistence/command-context.js";
+import { nextSequence } from "../src/infrastructure/persistence/message-fields.js";
+import { claimTask } from "../src/infrastructure/persistence/task-writer.js";
+import { command, snapshot } from "./fixtures.js";
 beforeEach(() => {
   vi.resetAllMocks();
+  fake.runner.query.mockResolvedValue([]);
   fake.runner.isTransactionActive = true;
 });
 describe("database transaction adapter without a database", () => {
+  it.each([
+    { raw: [[{ message_id: "40" }], 1], expected: [{ message_id: "40" }] },
+    { raw: [[], 0], expected: [] },
+    {
+      raw: [{ message_id: "40" }, { message_id: "41" }],
+      expected: [{ message_id: "40" }, { message_id: "41" }],
+    },
+  ])("exposes rows rather than TypeORM affected-row tuples: $raw", async ({ raw, expected }) => {
+    const db = await Database.open(snapshot(), "test");
+    fake.query.mockResolvedValue(raw);
+    expect(await db.query("query")).toEqual(expected);
+    fake.runner.query.mockResolvedValue(raw);
+    await db.exclusive(async (locked) => {
+      expect(await locked.query("query")).toEqual(expected);
+    });
+  });
+  it("claims a task once through the real transaction adapter", async () => {
+    const db = await Database.open(snapshot(), "test");
+    fake.runner.query.mockImplementation(async (sql: string) =>
+      sql.includes("RETURNING task_session_id") ? [[{ task_session_id: "60" }], 1] : [],
+    );
+    const request = command({ operation: "CLAIM_TASK", payload: { taskSessionId: "60" } });
+    expect(await db.transaction((sql) => claimTask(new CommandContext(sql, request)))).toEqual({
+      claimed: true,
+    });
+    fake.runner.query.mockResolvedValue([[], 0]);
+    expect(await db.transaction((sql) => claimTask(new CommandContext(sql, request)))).toEqual({
+      claimed: false,
+    });
+  });
+  it("retains the returned message sequence inside a transaction", async () => {
+    const db = await Database.open(snapshot(), "test");
+    fake.runner.query.mockImplementation(async (sql: string) =>
+      sql.includes("RETURNING last_seq") ? [[{ last_seq: "2" }], 1] : [],
+    );
+    expect(await db.transaction((sql) => nextSequence(sql, "10", "30"))).toBe("2");
+  });
   it("rolls back a failed authority check before COMMIT", async () => {
     const db = await Database.open(snapshot(), "test");
     await expect(

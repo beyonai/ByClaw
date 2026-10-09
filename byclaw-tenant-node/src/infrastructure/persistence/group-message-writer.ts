@@ -4,7 +4,7 @@ import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
 import { first, insert, nextId } from "./sql-utils.js";
 import { nextSequence } from "./message-fields.js";
-import { indexGroupMessage } from "./group-message-index.js";
+import { indexGroupMessage, indexGroupMention } from "./group-message-index.js";
 import { GROUP_COORDINATOR_AGENT_ID } from "../../domain/group-coordination.js";
 import { readGroupCoordination } from "./group-coordination.js";
 import type { GroupDispatch } from "./group-task-create.js";
@@ -150,10 +150,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
   await indexGroupMessage(db, command.enterpriseId, id, reference);
   for (const user of new Set(mentionedUsers)) {
     if (user === command.userId) continue;
-    await db.query(
-      "INSERT INTO byai.byai_group_chat_mention(message_id,group_session_id,mentioned_user_id,creator_id,create_time) VALUES($1,$2,$3,$4,CURRENT_TIMESTAMP) ON CONFLICT(message_id,mentioned_user_id) DO NOTHING",
-      [id, command.sessionId, user, command.userId],
-    );
+    await indexGroupMention(db, id, command.sessionId, user, command.userId);
   }
   const dispatches = await createGroupTasks(context, id, content, mentionedAgents);
   const scope = dispatches.find(

@@ -34,6 +34,34 @@ function setup(payload: Record<string, any>, coordinatorAgentId?: string) {
 }
 
 describe("tenant group message", () => {
+  it("saves distinct human mentions using openGauss-compatible idempotent writes", async () => {
+    const { context, query } = setup({
+      chatContent: "{{HUMAN_21}} {{HUMAN_22}} 你好",
+      resourceList: [
+        { resourceType: "HUMAN", resourceId: "21" },
+        { resourceType: "HUMAN", resourceId: "22" },
+        { resourceType: "HUMAN", resourceId: "21" },
+        { resourceType: "HUMAN", resourceId: "20" },
+      ],
+    });
+    const original = query.getMockImplementation()!;
+    query.mockImplementation(async (sql, parameters = []) => {
+      if (sql.includes("ON CONFLICT")) throw new Error('syntax error at or near "CONFLICT"');
+      return original(sql, parameters);
+    });
+    expect(await sendGroupMessage(context)).toEqual({
+      messageId: "8000000010000000101",
+      dispatches: [],
+    });
+    const mentions = query.mock.calls.filter(([sql]) =>
+      sql.startsWith("MERGE INTO byai.byai_group_chat_mention"),
+    );
+    expect(mentions.map(([, parameters]) => parameters)).toEqual([
+      ["8000000010000000101", "30", "21", "20"],
+      ["8000000010000000101", "30", "22", "20"],
+    ]);
+    expect(mentions.every(([sql]) => sql.includes("WHEN NOT MATCHED"))).toBe(true);
+  });
   it("commits a text message with the tenant and client request identity", async () => {
     const { context, query } = setup({
       chatContent: "你好",

@@ -28,7 +28,13 @@ export async function acknowledgeMessage(context: CommandContext) {
   if (command.operation === "ACK_MESSAGE") {
     const userName = text(command.payload.userName ?? member.memName ?? "群成员", 255);
     await db.query(
-      "INSERT INTO byai.byai_group_chat_message_ack(session_id,message_id,user_id,user_name,acknowledged_at) VALUES($1,$2,$3,$4,CURRENT_TIMESTAMP) ON CONFLICT(session_id,message_id,user_id) DO NOTHING",
+      `MERGE INTO byai.byai_group_chat_message_ack target
+       USING (SELECT CAST($1 AS BIGINT) AS session_id, CAST($2 AS BIGINT) AS message_id,
+         CAST($3 AS BIGINT) AS user_id, CAST($4 AS VARCHAR) AS user_name,
+         CURRENT_TIMESTAMP AS acknowledged_at) source
+       ON (target.session_id=source.session_id AND target.message_id=source.message_id AND target.user_id=source.user_id)
+       WHEN NOT MATCHED THEN INSERT (session_id,message_id,user_id,user_name,acknowledged_at)
+       VALUES (source.session_id,source.message_id,source.user_id,source.user_name,source.acknowledged_at)`,
       [...args, userName.trim() || "群成员"],
     );
   } else {

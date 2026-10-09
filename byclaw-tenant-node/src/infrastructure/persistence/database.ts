@@ -2,7 +2,14 @@ import "reflect-metadata";
 import { DataSource, type QueryRunner } from "typeorm";
 import { DomainError } from "../../domain/errors.js";
 import type { TenantSnapshot } from "../../domain/tenant.js";
-import type { SqlSession, TenantDatabase } from "../../application/database-ports.js";
+import type { SqlRow, SqlSession, TenantDatabase } from "../../application/database-ports.js";
+
+/** TypeORM wraps UPDATE/DELETE results as [rows, affected]; the port always exposes rows. */
+function queryRows(result: SqlRow[] | [SqlRow[], number]): SqlRow[] {
+  return result.length === 2 && Array.isArray(result[0]) && typeof result[1] === "number"
+    ? result[0]
+    : (result as SqlRow[]);
+}
 
 /** 固定租户连接池的 SQL 适配器；关闭自动建表和迁移，仅执行上层授权的参数化语句。 */
 export class Database implements TenantDatabase {
@@ -27,8 +34,10 @@ export class Database implements TenantDatabase {
     await source.initialize();
     return new Database(source, snapshot);
   }
-  query(sql: string, parameters: unknown[] = []) {
-    return this.locked ? this.locked.query(sql, parameters) : this.source.query(sql, parameters);
+  async query(sql: string, parameters: unknown[] = []): Promise<SqlRow[]> {
+    return queryRows(
+      await (this.locked ? this.locked.query(sql, parameters) : this.source.query(sql, parameters)),
+    );
   }
   async verifyIdentity(): Promise<void> {
     const [row] = await this.query(`SELECT current_database() AS database, current_user AS username,
@@ -64,7 +73,9 @@ export class Database implements TenantDatabase {
         await runner.query("SELECT pg_advisory_xact_lock_shared(hashtext($1))", [
           `tenant-schema:${this.snapshot.enterpriseId}`,
         ]);
-      const result = await work({ query: (sql, args = []) => runner.query(sql, args) });
+      const result = await work({
+        query: async (sql, args = []) => queryRows(await runner.query(sql, args)),
+      });
       await beforeCommit?.();
       committing = true;
       await runner.commitTransaction();

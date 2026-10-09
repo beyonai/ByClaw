@@ -184,6 +184,8 @@ public class GroupChatWebSocketService {
             response.put("sessionId", String.valueOf(message.getSessionId()));
         }
         response.put("clientRequestId", message.getClientRequestId());
+        TenantRequestContext tenant = TenantRequestContextHolder.get();
+        if (tenant != null) response.put("enterpriseId", Long.toString(tenant.enterpriseId()));
         return response;
     }
 

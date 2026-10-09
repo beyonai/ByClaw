@@ -63,6 +63,8 @@ DB_SANDBOX_RECORD_ID DB_CREDENTIAL_VERSION PROVISION_STATE
 
 成功连接后注册实际 `TENANT_DATA_<E>` Worker 和同名 ServiceRegistry 服务；metadata 含 enterpriseId、generation、实例 ID、HTTPS endpoint、Schema 版本与 READY/ADMIN_ONLY。失去连接权威后撤销注册，管理态拒绝业务命令。运行时每 5 秒串行对账。
 
+BE 以固定服务名 `TENANT_DATA_<E>` 从 Redis 发现并校验实例，直接使用注册的 host、port 和 pathPrefix，不再从数据库中的 sandbox ID 重建访问地址。Node 的 `ADVERTISE_HOST` 未设置、为空或沿用旧的 `host.containers.internal` 占位值时，默认发布自身容器 hostname；Docker 共享网络须能解析该 hostname，其他部署方式可显式设置可达的 `ADVERTISE_HOST`。容器重建后实例 hostname 可以变化，固定服务名和租户/代际校验保持不变。
+
 ## C2：Schema task
 
 只接受 BE 发布制品，不提供任意 SQL/创建数据库接口。
@@ -155,6 +157,8 @@ BE 每次核验 ACTIVE 租户成员，并生成 tenantMemberUserIds；邀请/转
 | PUBLISH_TASK                                          | taskSessionId、id、messageId、text、files[]、pendingPublicationId?、metadata?；仅发起人，非 RUNNING；发布消息、publication、PUBLISHED 状态与待发布清理同事务           |
 
 API 路径对应 `command-routes.ts` 和 OpenAPI。HTTP 正常结果是**事务已提交**的原始结果；同 requestId 同内容不重做，冲突拒绝。命令结果使用既有 byai_session_ext 的 `node_command:<requestId>` 保存，与业务变更同事务；不新增幂等/回执表。重投离群/删除命令也可返回原结果。
+
+群聊提及、话题及消息确认写入与 BE 的 Mapper 使用相同的 openGauss `MERGE` 语义：重复提及/确认不新增记录，话题活动时间和消息 ID 只向前推进。命令和镜像仍在群会话锁保护的事务内执行。数据库适配器统一将 TypeORM 的 `UPDATE`/`DELETE` 返回值 `[rows, affected]` 转为行数组，覆盖普通查询、业务事务和 Schema 专用连接；任务领取、消息序号及镜像版本检查不能直接判断驱动元组的长度。BE 的租户群聊成功、拒绝和错误回执均携带 `enterpriseId`，避免被前端租户过滤器丢弃。
 
 `GET /internal/v1/messages/by-command/{commandId}` 按既有 `byai_message.persist_command_id` 查询当前消息。commandId 是镜像 eventId，允许 1–64 个 ASCII 字母、数字、冒号、下划线和连字符。接口要求 mTLS、固定租户/代际头与真实 `X-Actor-User-Id`，查询同时限定消息和会话的企业，返回前复核个人会话所有者、群成员或私有任务发起人权限；撤回消息仍做脱敏。200 返回沿用历史字段的单条消息及 complete；未匹配或无权访问均返回 404 RESOURCE_NOT_ACCESSIBLE。
 

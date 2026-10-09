@@ -2,12 +2,24 @@ package com.iwhalecloud.byai.manager.domain.tenant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+
+import com.sun.net.httpserver.HttpServer;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.iwhaleai.byai.framework.core.discovery.DiscoveryClient;
+import com.iwhaleai.byai.framework.common.RedisClient;
+import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
+import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
+import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -24,6 +36,7 @@ import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.SessionUpdate
 import com.iwhaleai.byai.framework.core.discovery.ServiceInstance;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class TenantNodeClientTest {
 
@@ -125,18 +138,81 @@ class TenantNodeClientTest {
     }
 
     @Test
-    void routesAnIdentityCheckedTenantNodeThroughItsContainerNetwork() {
-        URI registered = URI.create("http://host.containers.internal:3100");
-        assertThat(TenantNodeClient.containerEndpoint(registered,
-            "a8bc9cb9-dd5f-48cc-8bdd-81ab69e20c47"))
-            .hasToString("http://sandbox-a8bc9cb9-dd5f-48cc-8bdd-81ab69e20c47:3100");
+    void rejectsPrefixesThatCanChangeTheRegisteredAuthorityOrRequestPath() {
+        for (String prefix : List.of("//other-node.example", "/%2fother-node.example",
+            "/%2e%2e/other-node", "/node?redirect=other", "/node#fragment")) {
+            ServiceInstance instance = instance("123", "1", "987", "READY");
+            instance.setPathPrefix(prefix);
+            assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
+                "987", List.of(instance))).as("pathPrefix %s", prefix)
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("registration path invalid");
+        }
     }
 
     @Test
-    void rejectsInvalidTenantNodeSandboxIdentity() {
-        URI registered = URI.create("http://host.containers.internal:3100");
-        assertThatThrownBy(() -> TenantNodeClient.containerEndpoint(registered, "sandbox-other"))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("sandbox identity is invalid");
+    void followsTheRedisEndpointAndPathPrefixAcrossSandboxReplacement() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        HttpServer replacementServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        List<String> paths = new CopyOnWriteArrayList<>();
+        List<String> replacementPaths = new CopyOnWriteArrayList<>();
+        for (HttpServer endpoint : List.of(server, replacementServer)) {
+            List<String> receivedPaths = endpoint == server ? paths : replacementPaths;
+            endpoint.createContext("/", exchange -> {
+                receivedPaths.add(exchange.getRequestURI().toString());
+                String response = exchange.getRequestURI().getPath().endsWith("/health/ready")
+                    ? "{\"ready\":true,\"enterpriseId\":\"123\",\"generation\":\"1\",\"dbSandboxRecordId\":\"987\"}"
+                    : "{\"groups\":[]}";
+                byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, bytes.length);
+                exchange.getResponseBody().write(bytes);
+                exchange.close();
+            });
+            endpoint.start();
+        }
+        TenantAdminTenantMapper tenants = mock(TenantAdminTenantMapper.class);
+        SsSandboxRecordMapper sandboxes = mock(SsSandboxRecordMapper.class);
+        DiscoveryClient discovery = mock(DiscoveryClient.class);
+        TenantNodeClient client = new TenantNodeClient(tenants, sandboxes, new ObjectMapper(),
+            mock(RedisClient.class), "test-token");
+        ReflectionTestUtils.setField(client, "discovery", discovery);
+        try {
+            when(tenants.selectConfig(123L, "NODE_SANDBOX_RECORD_ID")).thenReturn("31");
+            when(tenants.selectConfig(123L, "DB_SANDBOX_RECORD_ID")).thenReturn("987");
+            when(tenants.selectConfig(123L, "PROVISION_STATE"))
+                .thenReturn("{\"status\":\"READY\",\"generation\":1}");
+            SsSandboxRecord record = new SsSandboxRecord();
+            record.setId(31L);
+            record.setEnterpriseId(123L);
+            record.setOwnerScope("TENANT");
+            record.setStatus("RUNNING");
+            record.setSandboxId("a8bc9cb9-dd5f-48cc-8bdd-81ab69e20c47");
+            when(sandboxes.selectActiveTenantByResourceAndType(123L, "tenant-data-node")).thenReturn(record);
+            ServiceInstance first = instance("123", "1", "987", "READY");
+            first.setHost("localhost");
+            first.setPort(server.getAddress().getPort());
+            first.setPathPrefix("/node%20proxy");
+            ServiceInstance replacement = instance("123", "1", "987", "READY");
+            replacement.setHost("127.0.0.1");
+            replacement.setPort(replacementServer.getAddress().getPort());
+            replacement.setPathPrefix("/replacement-proxy");
+            when(discovery.getInstances("TENANT_DATA_123"))
+                .thenReturn(List.of(first), List.of(replacement));
+            TenantRequestContext context = new TenantRequestContext(8L, 123L, "MEMBER");
+            assertThat(client.request(context, "GET", "/internal/v1/group-chats?pageNum=1&pageSize=20", null,
+                new TypeReference<Map<String, Object>>() { })).containsEntry("groups", List.of());
+            record.setSandboxId("b8bc9cb9-dd5f-48cc-8bdd-81ab69e20c47");
+            assertThat(client.request(context, "GET", "/internal/v1/group-chats", null,
+                new TypeReference<Map<String, Object>>() { })).containsEntry("groups", List.of());
+            assertThat(paths).containsExactly("/node%20proxy/internal/v1/health/ready",
+                "/node%20proxy/internal/v1/group-chats?pageNum=1&pageSize=20");
+            assertThat(replacementPaths).containsExactly("/replacement-proxy/internal/v1/health/ready",
+                "/replacement-proxy/internal/v1/group-chats");
+        }
+        finally {
+            client.close();
+            server.stop(0);
+            replacementServer.stop(0);
+        }
     }
 
     @Test

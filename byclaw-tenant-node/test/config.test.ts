@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { hostname } from "node:os";
 import { readConfig } from "../src/config.js";
 import {
   readTenantSnapshot,
@@ -30,8 +31,15 @@ const env = {
   REDIS_TLS: "true",
 };
 describe("fixed tenant configuration", () => {
+  it.each([undefined, "", "host.containers.internal"])(
+    "advertises its own container hostname when the launch host is %s",
+    (advertiseHost) => {
+      expect(readConfig({ ...env, ADVERTISE_HOST: advertiseHost }).advertiseHost).toBe(hostname());
+    },
+  );
   it("uses separate Redis fields and requires matching IDs", () => {
     expect(readConfig(env).enterpriseId).toBe("10");
+    expect(readConfig(env).advertiseHost).toBe("node");
     expect(() => readConfig({ ...env, TENANT_ID: "11" })).toThrow();
   });
   it.each([

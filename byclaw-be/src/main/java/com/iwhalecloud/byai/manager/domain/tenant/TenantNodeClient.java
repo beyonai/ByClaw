@@ -96,7 +96,7 @@ public class TenantNodeClient {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant Node identity mismatch");
             }
             String dbRecordId = dbRecordId(enterpriseId);
-            URI base = discover(context, generation, dbRecordId, record);
+            URI base = discover(context, generation, dbRecordId);
             ReadyView ready = send(base, "/internal/v1/health/ready", "GET", null, context, generation,
                 new TypeReference<ReadyView>() { });
             if (!ready.ready() || !Long.toString(enterpriseId).equals(ready.enterpriseId())
@@ -189,25 +189,10 @@ public class TenantNodeClient {
         return value;
     }
 
-    private URI discover(TenantRequestContext context, long generation, String dbRecordId,
-                         SsSandboxRecord record) {
+    private URI discover(TenantRequestContext context, long generation, String dbRecordId) {
         String name = "TENANT_DATA_" + context.enterpriseId();
         List<ServiceInstance> instances = discovery.getInstances(name);
-        URI registered = registeredEndpoint(name, context.enterpriseId(), generation, dbRecordId, instances);
-        return containerEndpoint(registered, record.getSandboxId());
-    }
-
-    static URI containerEndpoint(URI registered, String sandboxId) {
-        try {
-            if (sandboxId == null || !UUID.fromString(sandboxId).toString().equals(sandboxId)) {
-                throw new IllegalArgumentException("invalid sandbox ID");
-            }
-        }
-        catch (IllegalArgumentException error) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                "tenant Node sandbox identity is invalid");
-        }
-        return URI.create("http://sandbox-" + sandboxId + ":" + registered.getPort());
+        return registeredEndpoint(name, context.enterpriseId(), generation, dbRecordId, instances);
     }
 
     static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,
@@ -229,7 +214,16 @@ public class TenantNodeClient {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant Node registration mismatch");
         }
         String pathPrefix = instance.getPathPrefix() == null ? "" : instance.getPathPrefix();
-        if (pathPrefix.contains("..") || (!pathPrefix.isEmpty() && !pathPrefix.startsWith("/"))) {
+        URI prefix;
+        try {
+            prefix = URI.create(pathPrefix);
+        }
+        catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant Node registration path invalid");
+        }
+        if (prefix.isAbsolute() || prefix.getRawAuthority() != null || prefix.getRawQuery() != null
+            || prefix.getRawFragment() != null || prefix.getPath().contains("..")
+            || prefix.getPath().startsWith("//") || (!pathPrefix.isEmpty() && !pathPrefix.startsWith("/"))) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant Node registration path invalid");
         }
         return URI.create("http://" + instance.getHost() + ":" + instance.getPort() + pathPrefix);
@@ -238,7 +232,10 @@ public class TenantNodeClient {
     private <I, O> O send(URI base, String path, String method, I body, TenantRequestContext context,
                           long generation, TypeReference<O> responseType) throws Exception {
         long enterpriseId = context.enterpriseId();
-        URI target = base.resolve(base.getPath().replaceAll("/+$", "") + path);
+        URI target = base.resolve(base.getRawPath().replaceAll("/+$", "") + path);
+        if (!base.getScheme().equals(target.getScheme()) || !base.getRawAuthority().equals(target.getRawAuthority())) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant Node request authority mismatch");
+        }
         byte[] content = body == null ? null : mapper.writeValueAsBytes(body);
         HttpRequest.Builder request = HttpRequest.newBuilder(target).timeout(Duration.ofSeconds(15))
             .header("X-Byclaw-Internal-Token", internalToken)

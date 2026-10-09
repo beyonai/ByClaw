@@ -101,6 +101,7 @@ class GroupChatWebSocketMergeTest {
         assertThat(error.getString("type")).isEqualTo("ERROR");
         assertThat(error.getString("code")).isEqualTo("GROUP_CHAT_STORAGE_ERROR");
         assertThat(error.getString("clientRequestId")).isEqualTo("request-1");
+        assertThat(error.getString("enterpriseId")).isEqualTo(String.valueOf(tenant.enterpriseId()));
         verifyNoInteractions(legacy, events, dispatcher);
     }
 
