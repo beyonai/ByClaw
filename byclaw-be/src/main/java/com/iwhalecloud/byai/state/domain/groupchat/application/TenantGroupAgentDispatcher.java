@@ -1,6 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
-import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -89,7 +89,7 @@ public class TenantGroupAgentDispatcher {
                 if (dispatch.groupCoordination() != null) params.put("groupCoordination", dispatch.groupCoordination());
                 request.setExtParams(params);
                 try {
-                    chat.chat(request, OutputStream.nullOutputStream(), null);
+                    chat.chat(request, new DiscardingResponseStream(), null);
                 }
                 catch (java.io.IOException error) {
                     throw new IllegalStateException("Unable to execute tenant group agent", error);
@@ -139,5 +139,20 @@ public class TenantGroupAgentDispatcher {
     @PreDestroy
     public void close() {
         workers.shutdown();
+    }
+
+    /** CompletionsUtils requires this stream type; tenant replies are persisted by Node, not buffered here. */
+    private static final class DiscardingResponseStream extends ByteArrayOutputStream {
+        private DiscardingResponseStream() {
+            super(0);
+        }
+
+        @Override
+        public void write(int value) {
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length) {
+        }
     }
 }
