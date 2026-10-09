@@ -6,6 +6,8 @@
         type="com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse">
         <id column="session_id" property="sessionId" />
         <result column="session_name" property="name" />
+        <result column="enterprise_id" property="enterpriseId" />
+        <result column="enterprise_name" property="enterpriseName" />
         <result column="project_id" property="projectId" />
         <result column="user_role" property="role" />
         <result column="latest_message_id" property="latestMessageId" />
@@ -81,6 +83,8 @@
     <select id="selectMyGroupsScoped" resultMap="GroupListItemMap">
         SELECT session.session_id,
                session.session_name,
+               session.enterprise_id,
+               enterprise.com_acct_name AS enterprise_name,
                session.project_id,
                member.user_role,
                member.last_read_message_id,
@@ -112,6 +116,7 @@
                <include refid="MentionStateColumns" />
         FROM byai_session_member member
         JOIN byai_session session ON session.session_id = member.session_id
+        LEFT JOIN po_enterprise_info enterprise ON enterprise.enterprise_id = session.enterprise_id
         LEFT JOIN (
             SELECT message.session_id,
                    message.message_id,

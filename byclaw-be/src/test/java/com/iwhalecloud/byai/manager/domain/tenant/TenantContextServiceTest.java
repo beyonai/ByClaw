@@ -80,10 +80,10 @@ class TenantContextServiceTest {
         assertThat(service.validate("123"))
             .isEqualTo(new TenantRequestContext(12L, 123L, "OWNER"));
         assertThatThrownBy(() -> service.validate("124"))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("403");
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("404");
         when(mapper.selectActiveMembership(12L, 123L)).thenReturn(null);
         assertThatThrownBy(() -> service.validate("123"))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("403");
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("404");
     }
 
     @Test
@@ -105,6 +105,41 @@ class TenantContextServiceTest {
         assertThat(view.path("tenantContextToken").asText()).isNotBlank();
         assertThat(view.path("expiresAt").asText()).isNotBlank();
         assertThat(view.path("contextVersion").asInt()).isPositive();
+    }
+
+    @Test
+    void developmentSwitchAllowsExistingMembershipBeforeTenantIsReady() {
+        String originalEnvironment = System.getProperty("BE_ENV");
+        try {
+            System.setProperty("BE_ENV", "development");
+            TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
+            TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis());
+            LoginInfo login = new LoginInfo();
+            login.setUserId(12L);
+            login.setSessionId("login-session-1");
+            CurrentUserHolder.setLoginInfo(login);
+            when(mapper.selectActiveMembership(12L, 123L))
+                .thenReturn(membership(123L, "MEMBER", "RESERVED"));
+
+            TenantSwitchView view = service.switchTo("123");
+
+            assertThat(view.enterpriseId()).isEqualTo("123");
+            assertThat(view.role()).isEqualTo("MEMBER");
+            assertThat(view.tenantContextToken()).isNotBlank();
+            assertThat(service.validate("123")).isEqualTo(new TenantRequestContext(12L, 123L, "MEMBER"));
+        }
+        finally {
+            if (originalEnvironment == null) System.clearProperty("BE_ENV");
+            else System.setProperty("BE_ENV", originalEnvironment);
+        }
+    }
+
+    private TenantMembershipRow membership(long enterpriseId, String role, String state) {
+        TenantMembershipRow membership = new TenantMembershipRow();
+        membership.setEnterpriseId(Long.toString(enterpriseId));
+        membership.setRole(role);
+        membership.setProvisionStateJson("{\"status\":\"" + state + "\"}");
+        return membership;
     }
 
     @SuppressWarnings("unchecked")

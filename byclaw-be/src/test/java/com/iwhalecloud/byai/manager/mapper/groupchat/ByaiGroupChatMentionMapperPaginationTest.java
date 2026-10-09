@@ -43,6 +43,8 @@ class ByaiGroupChatMentionMapperPaginationTest {
             assertThat(page.getTotal()).isEqualTo(2L);
             assertThat(groups).hasSize(1);
             assertThat(groups.get(0).getSessionId()).isEqualTo(10L);
+            assertThat(groups.get(0).getEnterpriseId()).isEqualTo(100L);
+            assertThat(groups.get(0).getEnterpriseName()).isEqualTo("enterprise 100");
             assertThat(groups.get(0).getLatestMessageId()).isEqualTo(99L);
             assertThat(groups.get(0).getLatestMessageContent()).isEqualTo("later timestamp but lower id");
             assertThat(groups.get(0).getLatestMessageMetadata()).isEqualTo("{\"resourceList\":[]}");
@@ -206,6 +208,18 @@ class ByaiGroupChatMentionMapperPaginationTest {
                     update_time TEXT,
                     create_time TEXT
                 )
+                """);
+            statement.execute("""
+                CREATE TABLE po_enterprise_info (
+                    enterprise_id INTEGER PRIMARY KEY,
+                    com_acct_name TEXT
+                )
+                """);
+            statement.execute("""
+                INSERT INTO po_enterprise_info VALUES
+                    (1, 'default enterprise'),
+                    (100, 'enterprise 100'),
+                    (200, 'enterprise 200')
                 """);
             statement.execute("""
                 CREATE TABLE byai_session_member (

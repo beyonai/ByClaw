@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageId;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
+import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
@@ -59,7 +60,7 @@ public class TenantGroupChatRoutingAspect {
         if ("defaultAssistant".equals(method)) return call.proceed();
         if (List.of("createInvitation", "validateInvitation", "joinInvitation").contains(method))
             return ResponseUtil.successResponse(invitations.handle(context, method, args));
-        if ("create".equals(method)) return create(context, (GroupChatCreateRequest) args[0]);
+        if ("create".equals(method)) return create(call, context, (GroupChatCreateRequest) args[0]);
         if (args.length == 0 && !"list".equals(method)) throw unsupported();
         String sessionId = args.length > 0 && args[0] instanceof Long id && id > 0 ? id.toString() : null;
         String path = sessionId == null ? null : "/internal/v1/group-chats/" + sessionId;
@@ -150,11 +151,16 @@ public class TenantGroupChatRoutingAspect {
         }
     }
 
-    private Object create(TenantRequestContext context, GroupChatCreateRequest request) {
+    private Object create(ProceedingJoinPoint call, TenantRequestContext context, GroupChatCreateRequest request)
+        throws Throwable {
+        if (RuntimeEnvironment.isDevelopment()) return call.proceed();
         return ResponseUtil.successResponse(creation.create(context, request));
     }
 
-    private Map<String, Object> list(TenantRequestContext context, int pageNum, int pageSize) {
+    private Object list(TenantRequestContext context, int pageNum, int pageSize) {
+        if (RuntimeEnvironment.isDevelopment()) {
+            return legacy.listMyGroups(pageNum, pageSize);
+        }
         return node.request(context, "GET", "/internal/v1/group-chats?pageNum=" + pageNum + "&pageSize=" + pageSize,
             null, new TypeReference<Map<String, Object>>() {});
     }

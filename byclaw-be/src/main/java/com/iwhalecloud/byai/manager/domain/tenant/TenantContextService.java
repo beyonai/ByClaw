@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.ProvisionState;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -113,7 +114,10 @@ public class TenantContextService {
     private TenantMembershipRow requireReadyMembership(long userId, long enterpriseId) {
         TenantMembershipRow membership = membershipMapper.selectActiveMembership(userId, enterpriseId);
         if (membership == null) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant membership required");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant membership required");
+        }
+        if (RuntimeEnvironment.isDevelopment()) {
+            return membership;
         }
         if (!"READY".equals(provisionState(membership))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant is not ready");

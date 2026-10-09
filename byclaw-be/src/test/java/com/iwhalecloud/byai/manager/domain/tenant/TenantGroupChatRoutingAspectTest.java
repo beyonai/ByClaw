@@ -40,15 +40,19 @@ class TenantGroupChatRoutingAspectTest {
     private final TenantGroupCreationService creation = mock(TenantGroupCreationService.class);
     private final TenantGroupChatRoutingAspect aspect = new TenantGroupChatRoutingAspect(node, legacy, memberships,
         new ObjectMapper(), memberService);
+    private String originalEnvironment;
 
     @BeforeEach
     void setUp() {
+        originalEnvironment = System.getProperty("BE_ENV");
         ReflectionTestUtils.setField(aspect, "creation", creation);
     }
 
     @AfterEach
     void clear() {
         TenantRequestContextHolder.clear();
+        if (originalEnvironment == null) System.clearProperty("BE_ENV");
+        else System.setProperty("BE_ENV", originalEnvironment);
     }
 
     @Test
@@ -75,6 +79,29 @@ class TenantGroupChatRoutingAspectTest {
         assertThat(data.get("total")).isEqualTo(1);
         assertThat((List<?>) data.get("list")).hasSize(1);
         verifyNoInteractions(legacy, memberships);
+    }
+
+    @Test
+    void developmentTenantListReadsFromLegacyDatabase() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        GroupChatListItemResponse group = new GroupChatListItemResponse();
+        group.setSessionId(11221825L);
+        group.setName("本地开发群");
+        PageInfo<GroupChatListItemResponse> legacyPage = new PageInfo<>();
+        legacyPage.setList(List.of(group));
+        legacyPage.setTotal(1);
+        when(legacy.listMyGroups(1, 20)).thenReturn(legacyPage);
+        System.setProperty("BE_ENV", "development");
+
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("list", 1, 20, 11221076L));
+
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData()).isSameAs(legacyPage);
+        assertThat(legacyPage.getTotal()).isEqualTo(1);
+        assertThat(legacyPage.getList()).containsExactly(group);
+        verify(legacy).listMyGroups(1, 20);
+        verifyNoInteractions(node, memberships);
     }
 
     @Test
@@ -120,6 +147,24 @@ class TenantGroupChatRoutingAspectTest {
         assertThat(response.getData()).isEqualTo(detail);
         verify(creation).create(context, request);
         verifyNoInteractions(node, legacy, memberships);
+    }
+
+    @Test
+    void developmentTenantCreateUsesLegacyDatabaseController() throws Throwable {
+        TenantRequestContextHolder.set(new TenantRequestContext(27L, 11221859L, "MEMBER"));
+        GroupChatCreateRequest request = new GroupChatCreateRequest();
+        request.setName("本地开发工作组");
+        ProceedingJoinPoint localCall = call("create", request);
+        ResponseUtil<Map<String, Object>> legacyResponse = ResponseUtil.successResponse(
+            Map.of("sessionId", "11221825"));
+        when(localCall.proceed()).thenReturn(legacyResponse);
+        System.setProperty("BE_ENV", "development");
+
+        Object response = aspect.route(localCall);
+
+        assertThat(response).isSameAs(legacyResponse);
+        verify(localCall).proceed();
+        verifyNoInteractions(creation, node, legacy, memberships);
     }
 
     @Test
