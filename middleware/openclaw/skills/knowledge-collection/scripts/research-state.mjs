@@ -450,7 +450,7 @@ function segmentWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-function wordCount(text) {
+export function wordCount(text) {
   if (Array.isArray(text)) {
     text = text.join(' ');
   }
@@ -1028,16 +1028,32 @@ function budgetSummary(session) {
 }
 
 /** aggregate: 去重并裁剪 context。 */
-export function cmdAggregate(args) {
+export function cmdAggregate(args, advisory = {}) {
   const paths = sessionPaths(args['session-dir']);
   return withSessionLock(paths, 'aggregate', () => {
     const { session } = loadSession(paths);
     if (!session.research.branches.length) {
       throw new Error('aggregate 前必须至少登记一个 branch');
     }
+    const expectedState = JSON.stringify({ task: session.task, research: session.research });
     session.research.learnings = appendUnique(session.research.learnings, []);
     session.research.visitedUrls = appendUnique(session.research.visitedUrls, []);
-    session.research.context = trimContext(session.research.context, Number(session.task.maxContextWords ?? DEFAULTS.maxContextWords));
+    const maxWords = Number(session.task.maxContextWords ?? DEFAULTS.maxContextWords);
+    const originalContext = session.research.context;
+    if (advisory.expectedState === expectedState && Array.isArray(advisory.indices)
+      && advisory.indices.length === originalContext.length && new Set(advisory.indices).size === originalContext.length
+      && advisory.indices.every((index) => Number.isInteger(index) && index >= 0 && index < originalContext.length)) {
+      let remaining = maxWords;
+      const chosen = new Set();
+      for (const index of advisory.indices) {
+        const count = wordCount(originalContext[index]);
+        if (count <= remaining) { chosen.add(index); remaining -= count; }
+      }
+      if (chosen.size) {
+        session.research.contextArchive = appendUnique(session.research.contextArchive || [], originalContext);
+        session.research.context = originalContext.filter((_item, index) => chosen.has(index));
+      } else session.research.context = trimContext(originalContext, maxWords);
+    } else session.research.context = trimContext(originalContext, maxWords);
     session.task.status = 'aggregated';
     persistSession(paths, session);
     return {

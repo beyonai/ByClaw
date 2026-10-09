@@ -47,6 +47,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { createBycliIntegration, deriveExecutionProfile } from './bycli_integration.mjs';
+import { bycliExecutableIdentity, createHotRuntimeState, hotRequestIdentity, stateIdentity } from './hot_runtime_state.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ADAPTERS_MD = resolve(HERE, '..', 'adapters.md');
@@ -427,9 +428,20 @@ export async function searchHotDiscovery(argv, options = {}) {
     : parseBoundedInteger(argv['minimum-attempts'], 'minimum-attempts', null, 1, 100);
   const totalBudgetMs = argv['total-budget-ms'] === undefined ? null
     : parseBoundedInteger(argv['total-budget-ms'], 'total-budget-ms', null, 1, 90_000);
+  let waveBudgetMs = totalBudgetMs;
+  const outputReserveMs = totalBudgetMs === null ? 0 : Math.min(250, totalBudgetMs * 0.05);
+  const remainingBudgetMs = () => totalBudgetMs === null ? Infinity
+    : Math.max(0, waveBudgetMs - outputReserveMs - (now() - schedulingStartedAt));
 
   const decl = options.declarations || parseDeclarations(await readFile(ADAPTERS_MD, 'utf8'));
-  const bycli = options.bycli || createBycliIntegration();
+  const bycli = options.bycli || createBycliIntegration({ remainingBudgetMs });
+  const stateRequested = ['state-dir', 'run-id', 'wave-id'].some((key) => argv[key] !== undefined);
+  const runtimeState = stateRequested ? await createHotRuntimeState({
+    directory: argv['state-dir'], runId: argv['run-id'], waveId: argv['wave-id'],
+    declarationIdentity: stateIdentity(decl),
+    executableIdentity: options.executableIdentity ?? await bycliExecutableIdentity(),
+    requestIdentity: hotRequestIdentity(argv),
+  }) : null;
 
   // 维度取并集：各维度适配器的召回集本就不重叠（openalex 出论文、SO 出技术问答、
   // 虎扑出讨论帖），择一等于人为砍掉召回。
@@ -458,22 +470,79 @@ export async function searchHotDiscovery(argv, options = {}) {
     }
   }
 
-  const candidates = [];
-  if (!selected.length) {
-    return {
-      channel: 'hot_discovery',
-      query,
-      dimensions: requestedDims,
-      effectiveDimensions: dims,
-      observedAt: new Date().toISOString(),
-      bycliVersion: null,
-      adaptersSelected: 0,
-      candidates,
-      adapterStats,
-      warnings,
-    };
+  const previous = ['resume', 'skip'].includes(argv.recovery) ? await runtimeState?.loadCheckpoint() : null;
+  const recovering = previous && (previous.requiresUserAction
+    || ['in_progress', 'process_interrupted'].includes(previous.stopReason));
+  if (recovering && waveBudgetMs !== null) {
+    waveBudgetMs = Math.max(0, Math.min(waveBudgetMs,
+      previous.remainingBudgetMs ?? (waveBudgetMs - (previous.timing?.totalMs || 0))));
   }
-  const runtime = await bycli.loadRuntime();
+  const unfinished = new Set();
+  if (recovering) {
+    Object.assign(adapterStats, previous.adapterStats);
+    for (const adapter of selected) {
+      if (!adapterStats[adapter.site] || adapterStats[adapter.site].status === 'skipped_user_action'
+        || adapter.site === previous.requiresUserAction?.source) unfinished.add(adapter.site);
+    }
+    const blockedSource = previous.requiresUserAction?.source
+      || previous.pendingSource
+      || selected.find((adapter) => unfinished.has(adapter.site))?.site;
+    for (const site of unfinished) delete adapterStats[site];
+    if (argv.recovery === 'skip' && blockedSource && unfinished.has(blockedSource)) {
+      adapterStats[blockedSource] = { status: 'user_skipped' };
+      unfinished.delete(blockedSource);
+    }
+  }
+  const candidates = recovering ? [...previous.candidates] : [];
+  const timing = { runtimeMs: 0, bridgeMs: 0, runtimeCacheHit: false };
+  let runtime = { catalog: new Map(), version: null };
+  let pendingSource = null;
+  let requiresUserAction = null;
+  let stopReason = 'sources_exhausted';
+  const resultDocument = () => ({
+    channel: 'hot_discovery', query, dimensions: requestedDims, effectiveDimensions: dims,
+    observedAt: new Date().toISOString(), bycliVersion: runtime.version || null,
+    adaptersSelected: selected.length, candidates, adapterStats, warnings,
+    status: stopReason === 'budget_exhausted' || requiresUserAction ? 'partial' : 'complete',
+    stopReason, timing: { ...timing, totalMs: Math.max(0, now() - schedulingStartedAt) },
+    ...(waveBudgetMs === null ? {} : { remainingBudgetMs: Math.max(0, waveBudgetMs - (now() - schedulingStartedAt)) }),
+    ...(requiresUserAction ? { requiresUserAction } : {}),
+    ...(pendingSource ? { pendingSource } : {}),
+  });
+  const checkpoint = async (complete = false) => {
+    const document = resultDocument();
+    if (!complete && !requiresUserAction) {
+      document.status = 'partial';
+      document.stopReason = stopReason === 'budget_exhausted' ? stopReason : 'in_progress';
+    }
+    if (runtimeState && !await runtimeState.saveCheckpoint(document)
+      && !warnings.includes('HOT_CHECKPOINT_WRITE_FAILED')) warnings.push('HOT_CHECKPOINT_WRITE_FAILED');
+    return document;
+  };
+  if (!selected.length) {
+    return checkpoint(true);
+  }
+  await checkpoint();
+  const runtimeStartedAt = now();
+  try {
+    if (remainingBudgetMs() < 1) throw Object.assign(new Error('budget exhausted'), { code: 'HOT_DISCOVERY_BUDGET_EXHAUSTED' });
+    const cached = await runtimeState?.loadRuntime();
+    timing.runtimeCacheHit = Boolean(cached);
+    runtime = cached || await bycli.loadRuntime();
+    if (!cached && runtimeState) await runtimeState.saveRuntime(runtime);
+  } catch (error) {
+    if (error.code !== 'HOT_DISCOVERY_BUDGET_EXHAUSTED') throw error;
+    stopReason = 'budget_exhausted';
+    for (const adapter of selected) {
+      if (!recovering || unfinished.has(adapter.site)) {
+        adapterStats[adapter.site] = { tier: adapter.tier, status: 'skipped_total_budget' };
+      }
+    }
+    timing.runtimeMs = Math.max(0, now() - runtimeStartedAt);
+    return checkpoint(true);
+  } finally {
+    timing.runtimeMs = Math.max(0, now() - runtimeStartedAt);
+  }
   const { catalog } = runtime;
 
   // ── 预校验：bycli list 能校验站点/命令存在，也能比对声明的列名是否出现在 columns 里。
@@ -481,6 +550,7 @@ export async function searchHotDiscovery(argv, options = {}) {
   // 这不能替代运行时告警：columns 有该列仍可能返回 null（github 的 watchers 即是实例）。
   const runnable = [];
   for (const a of selected) {
+    if (recovering && !unfinished.has(a.site)) continue;
     const meta = catalog.get(`${a.site}/${a.cmd}`);
     if (!meta) {
       adapterStats[a.site] = { tier: a.tier, status: 'not_in_catalog' };
@@ -521,25 +591,26 @@ export async function searchHotDiscovery(argv, options = {}) {
     return args;
   };
 
-  let requiresUserAction = null;
-  let attemptedAdapters = 0;
+  let attemptedAdapters = recovering ? Object.values(adapterStats)
+    .filter((stats) => Number.isInteger(stats.exitCode)).length : 0;
   const markSkippedForUserAction = (a) => {
     if (!adapterStats[a.site]) {
       adapterStats[a.site] = { tier: a.tier, transport: a.execution.transport, status: 'skipped_user_action' };
     }
   };
-  const invoke = async (a) => {
+  const shouldSkip = (a) => {
     if (requiresUserAction) {
       markSkippedForUserAction(a);
-      return;
+      return true;
     }
-    if (totalBudgetMs !== null && now() - schedulingStartedAt >= totalBudgetMs) {
+    if (remainingBudgetMs() < 1 || stopReason === 'budget_exhausted') {
+      stopReason = 'budget_exhausted';
       adapterStats[a.site] = {
         tier: a.tier,
         transport: a.execution.transport,
         status: 'skipped_total_budget',
       };
-      return;
+      return true;
     }
     if (stopAfter !== null && candidates.length >= stopAfter
       && attemptedAdapters >= minimumAttempts) {
@@ -548,11 +619,20 @@ export async function searchHotDiscovery(argv, options = {}) {
         transport: a.execution.transport,
         status: 'skipped_after_sufficient_candidates',
       };
-      return;
+      stopReason = 'sufficient_candidates';
+      return true;
     }
+    return false;
+  };
+  const invoke = async (a) => {
+    if (shouldSkip(a)) return;
     attemptedAdapters += 1;
-    const r = await bycli.invoke('bycli', buildArgs(a), adapterTimeoutMs);
-    const st = { tier: a.tier, transport: a.execution.transport, exitCode: r.code };
+    const remainingAdapterMs = Math.max(1, Math.floor(Math.min(adapterTimeoutMs, remainingBudgetMs())));
+    const executeStartedAt = now();
+    const r = await bycli.invoke('bycli', buildArgs(a), remainingAdapterMs);
+    const st = { tier: a.tier, transport: a.execution.transport, exitCode: r.code,
+      queueMs: Math.max(0, executeStartedAt - schedulingStartedAt),
+      executeMs: Math.max(0, now() - executeStartedAt) };
     if (a.driftedColumns.length) st.driftedColumns = a.driftedColumns;
 
     if (r.code !== 0) {
@@ -571,6 +651,7 @@ export async function searchHotDiscovery(argv, options = {}) {
           errorCode: errCode,
           message: `${a.site} 需要人工处理；已保留已完成候选并停止未启动的适配器。`,
         };
+        stopReason = 'requires_user_action';
       }
       return;
     }
@@ -648,55 +729,66 @@ export async function searchHotDiscovery(argv, options = {}) {
   // 直接传输档按声明顺序执行，确保认证/限流一旦出现就不会再启动后续 adapter。
   const direct = runnable.filter((a) => !a.execution.needsBrowser);
   const browser = runnable.filter((a) => a.execution.needsBrowser);
-  if (minimumAttempts > runnable.length) {
-    warnings.push(`insufficient-profile-coverage: 仅 ${runnable.length} 个运行时可用来源，少于 minimum-attempts=${minimumAttempts}`);
+  const invokeAndCheckpoint = async (adapter) => {
+    try {
+      pendingSource = adapter.site;
+      await checkpoint();
+      await invoke(adapter);
+      pendingSource = null;
+    }
+    catch (error) {
+      if (error.code !== 'HOT_DISCOVERY_BUDGET_EXHAUSTED') throw error;
+      stopReason = 'budget_exhausted';
+      adapterStats[adapter.site] = { tier: adapter.tier, transport: adapter.execution.transport,
+        status: 'skipped_total_budget' };
+    }
+    finally { await checkpoint(); }
+  };
+  const prepareBridge = async (adapter) => {
+    const startedAt = now();
+    try {
+      pendingSource = adapter.site;
+      await checkpoint();
+      const bridge = await bycli.ensureBridge();
+      pendingSource = null;
+      if (!bridge.ok) {
+        requiresUserAction = { ...bridge.requiresUserAction, source: adapter.site };
+        stopReason = 'requires_user_action';
+        warnings.push('byCLI 浏览器桥接不可用；已停止未启动的适配器并等待人工恢复。');
+      }
+      return bridge.ok;
+    } catch (error) {
+      if (error.code !== 'HOT_DISCOVERY_BUDGET_EXHAUSTED') throw error;
+      stopReason = 'budget_exhausted';
+      return false;
+    } finally {
+      timing.bridgeMs += Math.max(0, now() - startedAt);
+    }
+  };
+  if (minimumAttempts > runnable.length + attemptedAdapters) {
+    warnings.push(`insufficient-profile-coverage: 仅 ${runnable.length + attemptedAdapters} 个运行时可用来源，少于 minimum-attempts=${minimumAttempts}`);
   }
   if (requestedSources) {
     let bridgeReady = false;
     for (const adapter of runnable) {
+      if (shouldSkip(adapter)) continue;
       if (adapter.execution.needsBrowser && !bridgeReady && !requiresUserAction) {
-        const bridge = await bycli.ensureBridge();
-        if (!bridge.ok) {
-          requiresUserAction = bridge.requiresUserAction;
-          warnings.push('byCLI 浏览器桥接不可用；已停止未启动的适配器并等待人工恢复。');
-        } else bridgeReady = true;
+        bridgeReady = await prepareBridge(adapter);
       }
-      await invoke(adapter);
+      await invokeAndCheckpoint(adapter);
     }
   } else {
-    for (const a of direct) await invoke(a);
+    for (const a of direct) await invokeAndCheckpoint(a);
 
-    if (!requiresUserAction && browser.length) {
-      const bridge = await bycli.ensureBridge();
-      if (!bridge.ok) {
-        requiresUserAction = bridge.requiresUserAction;
-        for (const a of browser) markSkippedForUserAction(a);
-        warnings.push('byCLI 浏览器桥接不可用；已停止浏览器适配器并等待人工恢复。');
-      } else {
-        for (const a of browser) await invoke(a); // TAB 租约串行，认证失败后不再启动后续 adapter
-      }
-    } else if (requiresUserAction) {
-      for (const a of browser) markSkippedForUserAction(a);
-    }
+    if (browser.length && !shouldSkip(browser[0])) await prepareBridge(browser[0]);
+    for (const a of browser) await invokeAndCheckpoint(a); // TAB 租约串行，停止条件在准备 bridge 前复核
   }
   if (allSelectedAdaptersEmpty(selected, adapterStats)) {
     warnings.push('热度通道无覆盖 —— 所有已选适配器均返回 0 行');
   }
 
-  return {
-    channel: 'hot_discovery',
-    query,
-    dimensions: requestedDims,
-    effectiveDimensions: dims,
-    // 热度值是时点观测，跨时间比较无意义。报告引用热度时须一并给出观测时间。
-    observedAt: new Date().toISOString(),
-    bycliVersion: runtime.version || null,
-    adaptersSelected: selected.length,
-    candidates,
-    adapterStats,
-    warnings,
-    ...(requiresUserAction ? { requiresUserAction } : {}),
-  };
+  if (remainingBudgetMs() < 1 && !requiresUserAction) stopReason = 'budget_exhausted';
+  return checkpoint(true);
 }
 
 // ──────────────────────────── merge 子命令 ────────────────────────────

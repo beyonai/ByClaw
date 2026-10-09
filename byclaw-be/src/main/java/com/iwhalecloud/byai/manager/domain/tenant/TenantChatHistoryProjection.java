@@ -1,0 +1,60 @@
+package com.iwhalecloud.byai.manager.domain.tenant;
+
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageView;
+
+/** Adapts plain worker replies to the existing chat history rendering contract. */
+final class TenantChatHistoryProjection {
+
+    private static final Pattern THINK_BLOCK = Pattern.compile("(?s)^\\s*<think>(.*?)</think>\\s*");
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private TenantChatHistoryProjection() {
+    }
+
+    static MessageView project(MessageView message) {
+        if (message == null || !("assistant".equals(message.getRole())
+            || Integer.valueOf(2).equals(message.getUsage()))
+            || message.getMessageStruct() != null && !message.getMessageStruct().isBlank()) {
+            return message;
+        }
+        String content = message.getMessageContent();
+        if (content == null || content.isBlank()) return message;
+
+        Matcher thinking = THINK_BLOCK.matcher(content);
+        if (thinking.find()) {
+            message.setInferLog(textEvent(1001, thinking.group(1)));
+            content = content.substring(thinking.end()).trim();
+        }
+        if (!content.isBlank()) message.setMessageStruct(textEvent(1002, content));
+        return message;
+    }
+
+    static List<MessageView> project(List<MessageView> messages) {
+        if (messages != null) messages.forEach(TenantChatHistoryProjection::project);
+        return messages;
+    }
+
+    private static String textEvent(int contentType, String content) {
+        try {
+            return MAPPER.writeValueAsString(List.of(new TextEvent(contentType,
+                List.of(new Choice(new Delta(content))))));
+        } catch (JsonProcessingException error) {
+            throw new IllegalStateException("Could not encode tenant chat history", error);
+        }
+    }
+
+    private record TextEvent(int contentType, List<Choice> choices) {
+    }
+
+    private record Choice(Delta delta) {
+    }
+
+    private record Delta(String content) {
+    }
+}

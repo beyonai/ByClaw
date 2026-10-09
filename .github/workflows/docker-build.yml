@@ -38,6 +38,7 @@ jobs:
               - ".github/workflows/docker-build.yml"
             be:
               - "byclaw-be/**"
+              - "byclaw-tenant-node/baseline/**"
               - ".github/workflows/docker-build.yml"
             exe:
               - "byclaw-exe/**"

@@ -52,6 +52,7 @@ public class GenericSandboxSpecProcessor implements SandboxSpecProcessor {
         }
 
         String workspaceHost = resolveWorkspaceHost(spec, userCode, serviceKey, envVars);
+        String imageUri = renderEnvValue(spec.getImage(), userCode, serviceKey, userInfo, envVars);
 
         // volumes
         List<Volume> volumes = buildVolumes(spec, userCode, serviceKey, workspaceHost, envVars);
@@ -64,7 +65,7 @@ public class GenericSandboxSpecProcessor implements SandboxSpecProcessor {
         Map<String, String> mergedEnv = resolveSpecEnv(spec.getEnv(), envVars, userCode, serviceKey, userInfo);
 
         CreateSandboxRequest.CreateSandboxRequestBuilder builder = CreateSandboxRequest.builder()
-                .image(ImageSpec.builder().uri(spec.getImage()).build())
+                .image(ImageSpec.builder().uri(imageUri).build())
                 .timeout(spec.getTimeout())
                 .resourceLimits(spec.getResourceLimits())
                 .resourceRequests(spec.getResourceRequests())

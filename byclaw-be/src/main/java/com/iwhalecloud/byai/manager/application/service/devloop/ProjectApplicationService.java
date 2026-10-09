@@ -226,6 +226,7 @@ public class ProjectApplicationService {
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
         project.setDeleteFlag(DeleteFlag.NORMAL);
+        project.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         projectService.save(project);
 
         saveProjectRepos(project.getProjectId(), dto.getRepos());

@@ -1,0 +1,303 @@
+.page {
+  height: 100%;
+  min-height: 680px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  background: #f5f7fb;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 28px;
+  background: #fff;
+  border: 1px solid #e8edf5;
+  border-radius: 12px 12px 0 0;
+
+  h1 {
+    margin: 4px 0;
+    color: #14233c;
+    font-size: 22px;
+    font-weight: 650;
+  }
+
+  p {
+    margin: 0;
+    color: #8290a4;
+  }
+}
+
+.eyebrow {
+  color: #2467e8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #2467e8;
+}
+
+.workbench {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+  border: 1px solid #e8edf5;
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+}
+
+.sidebar {
+  display: flex;
+  flex: 0 0 265px;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px 16px;
+  border-right: 1px solid #e8edf5;
+}
+
+.sidebarTitle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #273b58;
+  font-weight: 600;
+
+  :global(.ant-tag) {
+    margin-left: auto;
+  }
+}
+
+.objectTree {
+  flex: 1;
+  overflow: auto;
+}
+
+.tableLoading {
+  display: block;
+  margin: 30px auto;
+}
+
+.treeFolder,
+.treeTable,
+.treeTableSelected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: #344665;
+  cursor: pointer;
+  text-align: left;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    margin-left: auto;
+    color: #9ba7b8;
+  }
+
+  &:hover {
+    background: #f1f5fc;
+  }
+}
+
+.treeFolder {
+  font-weight: 600;
+}
+
+.treeTable,
+.treeTableSelected {
+  padding-left: 56px;
+  font-weight: 400;
+}
+
+.treeTableSelected {
+  background: #eaf2ff;
+  color: #2467e8;
+}
+
+.treeHint {
+  color: #9ba7b8;
+  font-size: 12px;
+}
+
+.tabBar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 42px;
+  overflow-x: auto;
+  padding: 0 12px;
+  background: #f7f9fc;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.tab,
+.tabActive {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  max-width: 230px;
+  margin-top: 6px;
+  padding: 0 8px;
+  background: #edf1f7;
+  border: 1px solid #e1e7f0;
+  border-radius: 6px 6px 0 0;
+  color: #64748b;
+  white-space: nowrap;
+
+  > button {
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.tabActive {
+  background: #fff;
+  border-bottom-color: #fff;
+  color: #2467e8;
+}
+
+button.tab,
+button.tabActive {
+  cursor: pointer;
+}
+
+.closeTab,
+.newQuery {
+  border: 0;
+  background: transparent;
+  color: #8290a4;
+  cursor: pointer;
+
+  &:hover {
+    color: #2467e8;
+  }
+}
+
+.newQuery {
+  padding: 0 12px;
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.editorHeader,
+.resultHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 22px;
+  color: #273b58;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.editorHeader span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.editor {
+  border: 0 !important;
+  border-radius: 0;
+  padding: 18px 22px;
+  color: #26364f;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.resultHeader {
+  background: #fbfcfe;
+  border-top: 1px solid #e8edf5;
+
+  span {
+    color: #8290a4;
+    font-size: 12px;
+  }
+}
+
+.result {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 22px;
+}
+
+.resultLoading {
+  display: block;
+  margin: 32px auto;
+}
+
+.null {
+  color: #a6b0bf;
+}
+
+.success {
+  padding: 24px;
+  color: #178454;
+  background: #eefaf4;
+  border-radius: 8px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 14px;
+  color: #8290a4;
+}
+
+.confirmSql {
+  max-height: 180px;
+  overflow: auto;
+  padding: 12px;
+  background: #f6f8fb;
+  border: 1px solid #e8edf5;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sidebar {
+    flex-basis: 210px;
+  }
+}

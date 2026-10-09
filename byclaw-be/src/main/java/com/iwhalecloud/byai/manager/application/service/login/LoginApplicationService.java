@@ -148,7 +148,7 @@ public class LoginApplicationService {
         loginInfo.setAvatar(users.getAvatar());
         loginInfo.setEmail(users.getEmail());
         loginInfo.setRegisterType(users.getRegisterType());
-        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId());
+        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId(users.getUserId()));
         loginInfo.setComAcctId(loginInfo.getEnterpriseId());
         loginInfo.setUsersOrganizations(organizationService.findUsersOrganizationByUserId(users.getUserId()));
         // 管理组织

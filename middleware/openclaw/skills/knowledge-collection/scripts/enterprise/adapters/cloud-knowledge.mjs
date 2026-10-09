@@ -6,6 +6,9 @@ import { createArtifactWriter } from '../shared/artifact-writer.mjs';
 import { runCli, positiveEnv } from '../shared/cli-runner.mjs';
 import { deriveCollectionStatus, SOURCE_IDENTITY, handledOutcome, inventoryCounts } from '../shared/status-model.mjs';
 import { readCloudResumeCandidates, readResumeCandidates } from '../shared/resume.mjs';
+import { prioritizeItems } from '../../jev/selection.mjs';
+import { loadSession, persistSession, sessionPaths } from '../../session.mjs';
+import { validateSelectedRequest } from '../../selected-delivery.mjs';
 
 const identity = SOURCE_IDENTITY['cloud-knowledge'];
 const MAX_MATERIALIZED_BYTES = 50 * 1024 * 1024;
@@ -70,6 +73,27 @@ function isAuthorizedCloudPath(scope, resourceId, filePath) {
   return prefix === '/' || filePath === prefix || filePath.startsWith(`${prefix}/`);
 }
 
+export function assertCloudMaterializationScope(scope, candidates) {
+  if (scope?.schemaVersion !== '1.0' || !Array.isArray(scope.resources) || !scope.resources.length) {
+    throw new Error('cloudDiscoveryScope is required for cloud-knowledge collection');
+  }
+  for (const candidate of candidates) {
+    let authorized = false;
+    try {
+      authorized = Number.isSafeInteger(candidate?.resourceId)
+        && typeof candidate?.filePath === 'string'
+        && isAuthorizedCloudPath(scope, candidate.resourceId, candidate.filePath);
+    } catch {
+      authorized = false;
+    }
+    if (!authorized) throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${candidate?.itemId}`);
+    if (!SUPPORTED_EXTENSIONS.has(candidate.fileType)
+      || !Number.isSafeInteger(candidate.fileSize) || candidate.fileSize < 0) {
+      throw new Error(`cloud candidate preflight rejected ${candidate.itemId}: unsupported format or invalid fileSize`);
+    }
+  }
+}
+
 function safeItemId(resourceId, filePath) {
   return `cloud-${crypto.createHash('sha256').update(`${resourceId}\n${filePath}`).digest('hex').slice(0, 16)}`;
 }
@@ -132,6 +156,7 @@ function cloudCandidateFromRecord(record, scope) {
 function inventoryItem(candidate, rawArtifacts, materialization = {}) {
   return {
     ...candidate,
+    source: identity.source,
     sourceSkill: identity.sourceSkill,
     backend: identity.backend,
     collectionFilters: { resourceId: candidate.resourceId, directoryPath: candidate.filePath.slice(0, candidate.filePath.lastIndexOf('/')) || '/' },
@@ -324,7 +349,12 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
       }
     }
     const unique = [...new Map(allCandidates.map((item) => [`${item.resourceId}\n${item.filePath}`, item])).values()];
-    const found = sortCandidates(unique).slice(0, request.limit);
+    const legacyFound = sortCandidates(unique).slice(0, request.limit);
+    const recommendation = dependencies.deferJevRanking
+      ? { items: legacyFound, diagnostic: { status: 'skipped', code: 'RANKING_OWNED_BY_UNIFIED_SEARCH' } }
+      : await prioritizeItems(request.query, legacyFound, { ...dependencies.jevOptions, environment: env,
+        privateData: true, purpose: 'Recommend useful enterprise documents before download. Prefer relevance, complementary evidence, supported formats and lower conversion cost.' });
+    const found = recommendation.items;
     const inventory = found.map((candidate) => inventoryItem(candidate, candidate.rawArtifacts));
     const discoverySucceeded = groups.length === 0 || failures.length < groups.length;
     const status = deriveCollectionStatus({
@@ -340,6 +370,7 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
     } : null;
     const sourceMetadata = {
       ...identity, operation: 'search', metadataOnly: true,
+      candidateRanking: recommendation.diagnostic,
       discovery: { groupsRequested: groups.length, groupsSucceeded: groups.length - failures.length, groupsFailed: failures, rawMatches: allCandidates.length, uniqueMatches: unique.length, returnedMatches: found.length, limitReached: found.length === request.limit },
       ...(terminal ? { terminal } : {}),
     };
@@ -366,11 +397,28 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
   async function materialize(request = {}) {
     const scope = await readCloudScope(request.sessionDir);
     if (resolve(request.sessionDir) !== resolve(request.outputDir)) throw new Error('cloud-knowledge materialization must use the discovery session');
-    const candidates = Array.isArray(request.candidates)
-      ? request.candidates
-      : await readCloudResumeCandidates(request.sessionDir, request.itemIds || []);
+    const paths = sessionPaths(request.sessionDir);
+    const session = loadSession(paths, { persistMigration: false }).session;
     const currentMetadata = JSON.parse(await readFile(join(resolve(request.sessionDir), 'sanitized/metadata.json'), 'utf8'));
     const currentInventory = Array.isArray(currentMetadata?.collection?.items) ? currentMetadata.collection.items : [];
+    const selectedWorkflow = session.task?.materializationTarget === 'selected'
+      && session.task?.workflow !== 'public-collect'
+      && (currentMetadata?.sourceMetadata?.source === 'cloud-knowledge'
+        || currentMetadata?.sourceMetadata?.operation === 'unified-search'
+        || currentMetadata?.sourceMetadata?.selectionWorkflow === 'unified');
+    let selection = null;
+    if (selectedWorkflow) {
+      if (request.candidates !== undefined) throw new Error('selected cloud materialization requires itemIds from inventory');
+      selection = validateSelectedRequest(request.itemIds, currentInventory,
+        session.task.sourceScope || [], session.task.selectedDelivery || null);
+    }
+    const requestedIds = selection ? request.itemIds.map((id) => id.trim()) : request.itemIds || [];
+    const pendingIds = requestedIds.filter((id) => currentInventory.find((item) => item.itemId === id)
+      ?.materialization?.status !== 'materialized');
+    const candidates = Array.isArray(request.candidates)
+      ? request.candidates
+      : await readCloudResumeCandidates(request.sessionDir, pendingIds);
+    if (selection) assertCloudMaterializationScope(scope, candidates);
     const authorizationFailures = [];
     const validCandidates = [];
     for (const candidate of candidates) {
@@ -394,6 +442,13 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
       }
       validCandidates.push(candidate);
     }
+    if (selection && authorizationFailures.length) {
+      throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${authorizationFailures[0].itemId}`);
+    }
+    if (selection) {
+      session.task.selectedDelivery = selection;
+      persistSession(paths, session);
+    }
     const writer = await createArtifactWriter(request.outputDir, { allowExistingSession: true, allowFailed: true });
     try {
       const selectedInventory = [...authorizationFailures];
@@ -406,7 +461,7 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
           selectedInventory.push(inventoryItem(candidate, [...candidate.rawArtifacts, failedArtifact], { status: 'failed', reason: sanitizedReason(error, error.message?.includes('unsupported') ? 'UNSUPPORTED_FORMAT' : 'SOURCE_DOWNLOAD_FAILED') }));
         }
       }
-      const selectedIds = new Set(request.itemIds || []);
+      const selectedIds = new Set(selectedInventory.map((item) => item.itemId));
       const inventory = [
         ...currentInventory.filter((item) => !selectedIds.has(item?.itemId)),
         ...selectedInventory,
@@ -418,7 +473,11 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
       await writer.writeCollectionBundle({
         title: 'Cloud knowledge materialized collection', source: identity.source, backend: identity.backend,
         url: 'cloud-knowledge://materialize', filters: {}, inventory, canonicalItems,
-        sourceMetadata: { ...identity, operation: 'materialize', metadataOnly: false, selectedItemIds: request.itemIds },
+        sourceMetadata: { ...currentMetadata.sourceMetadata, ...identity, operation: 'materialize',
+          metadataOnly: false, selectedItemIds: request.itemIds,
+          ...(currentMetadata.sourceMetadata?.operation === 'unified-search'
+            || currentMetadata.sourceMetadata?.selectionWorkflow === 'unified'
+            ? { selectionWorkflow: 'unified' } : {}) },
         metadataOnly: false,
       });
       return handledOutcome(identity.connector, status, request.outputDir, inventoryCounts(inventory));

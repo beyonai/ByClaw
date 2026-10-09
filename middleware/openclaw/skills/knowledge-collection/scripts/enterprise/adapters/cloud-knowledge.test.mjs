@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createCloudKnowledgeAdapter, resolveCloudKnowledgeScript } from './cloud-knowledge.mjs';
 import { newSession, persistSession } from '../../session.mjs';
 import { dispatchEnterprise } from '../dispatcher.mjs';
+import { collectionStatus } from '../../collection-state.mjs';
+import { sessionPaths } from '../../session.mjs';
+import { cmdPublish } from '../../publish-delivery.mjs';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'cloud-knowledge-'));
@@ -60,6 +63,35 @@ test('cloud knowledge script resolution falls back from the container skill root
     resolved,
     '/opt/byclaw/dsh-managed/skills/project-cloud-knowledge/scripts/project_cloud_knowledge.py',
   );
+});
+
+test('cloud metadata recommendations opt in explicitly and revert to source order on failure', async () => {
+  for (const mode of ['disabled', 'success', 'failure']) {
+    const { root, script } = await fixture();
+    try {
+      const session = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+      session.task.cloudDiscoveryScope.resources[0].directoryPath = '/';
+      persistSession({ root, session: join(root, 'session.json') }, session);
+      let calls = 0;
+      const adapter = createCloudKnowledgeAdapter({ python: process.execPath, script,
+        env: { ...process.env, TYPESAFE_ENTERPRISE_ENABLED: mode === 'disabled' ? 'false' : 'true' },
+        jevOptions: { callJev: async () => {
+          calls += 1;
+          if (mode === 'failure') throw new Error('unavailable');
+          return { ok: true, document: { answers: {
+            i0: { type: 'choice', choice: 'low', confidence: 0.95 },
+            i1: { type: 'choice', choice: 'high', confidence: 0.95 },
+          } } };
+        } },
+      });
+      await adapter.search({ outputDir: root, query: '巡检流程', limit: 10 });
+      const metadata = JSON.parse(await readFile(join(root, 'sanitized/metadata.json'), 'utf8'));
+      assert.equal(metadata.collection.items[0].filePath, mode === 'success' ? '/docs/a.md' : '/outside/escape.md');
+      assert.equal(calls, mode === 'disabled' ? 0 : 1);
+      assert.equal(metadata.collection.items.length, 2);
+      assert.ok(metadata.collection.items.every((item) => item.materialization.status === 'pending'));
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }
 });
 
 test('default enterprise dispatcher honors the adapter resolver and legacy script override', async () => {
@@ -130,10 +162,12 @@ test('cloud knowledge materialization rejects a tampered unauthorized candidate 
     const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
     metadata.collection.items[0].filePath = '/outside/tampered.md';
     await writeFile(metadataPath, JSON.stringify(metadata));
-    const result = await adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [metadata.collection.items[0].itemId] });
-    assert.equal(result.status, 'failed');
-    const failed = JSON.parse(await readFile(join(root, 'sanitized/metadata.json'), 'utf8'));
-    assert.match(failed.collection.items[0].materialization.reason, /^SOURCE_NOT_AUTHORIZED_BY_DISCOVERY:/);
+    const beforeSession = await readFile(join(root, 'session.json'), 'utf8');
+    await assert.rejects(
+      adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [metadata.collection.items[0].itemId] }),
+      /SOURCE_NOT_AUTHORIZED_BY_DISCOVERY/,
+    );
+    assert.equal(await readFile(join(root, 'session.json'), 'utf8'), beforeSession);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -178,4 +212,76 @@ if (args[0] === 'download') { fs.mkdirSync(path.dirname(output), { recursive: tr
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('direct cloud selected subset retains pending inventory, accumulates failures and completes after retry', async () => {
+  const { root, script } = await fixture();
+  const deliveryRoot = await mkdtemp(join(tmpdir(), 'cloud-selected-publish-'));
+  try {
+    const scriptBody = `
+import fs from 'node:fs'; import path from 'node:path';
+const args = process.argv.slice(2);
+if (args[0] === 'search-file') process.stdout.write(JSON.stringify({ ok: true, data: ['/docs/a.md', '/docs/b.md'].map((filePath) => ({
+  resourceId: 1024, filePath, metadata: { fileType: { value: 'md' }, fileSize: { value: 12 } },
+})) }));
+else if (args[0] === 'download') { const output = args[args.indexOf('--output') + 1];
+  fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, '# downloaded\\n');
+  process.stdout.write(JSON.stringify({ ok: true, output, bytes: 12 })); }
+`;
+    await writeFile(script, scriptBody);
+    const adapter = createCloudKnowledgeAdapter({ python: process.execPath, script, env: process.env });
+    await adapter.search({ outputDir: root, query: '巡检流程', limit: 10 });
+    const metadata = JSON.parse(await readFile(join(root, 'sanitized/metadata.json'), 'utf8'));
+    const [chosen, other] = metadata.collection.items.map((item) => item.itemId);
+    const before = await readFile(join(root, 'session.json'), 'utf8');
+    await assert.rejects(adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [chosen, chosen] }), /duplicate/);
+    await assert.rejects(adapter.materialize({ sessionDir: root, outputDir: root, itemIds: ['unknown'] }), /candidates/);
+    assert.equal(await readFile(join(root, 'session.json'), 'utf8'), before);
+    await adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [chosen] });
+    let status = collectionStatus(sessionPaths(root));
+    assert.equal(status.deliveryComplete, true);
+    assert.equal(status.pending, 1);
+    assert.equal(status.downstreamInput.files.length, 1);
+    const published = cmdPublish(sessionPaths(root), { 'delivery-dir': await realpath(deliveryRoot) });
+    assert.equal(published.deliveryInput.files.length, 1);
+    assert.match(await readFile(published.deliveryInput.files[0], 'utf8'), /downloaded/);
+    const selected = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(selected.task.selectedDelivery.itemIds, [chosen]);
+    await writeFile(script, 'process.exit(2);');
+    await adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [other] });
+    status = collectionStatus(sessionPaths(root));
+    assert.equal(status.deliveryComplete, false);
+    assert.equal(status.failed, 1);
+    const failed = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(failed.task.selectedDelivery.itemIds, [chosen, other]);
+    await writeFile(script, scriptBody);
+    await adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [other] });
+    status = collectionStatus(sessionPaths(root));
+    assert.equal(status.downstreamInput.files.length, 2);
+    const cumulative = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(cumulative.task.selectedDelivery.itemIds, [chosen, other]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(deliveryRoot, { recursive: true, force: true });
+  }
+});
+
+test('unified cloud materialization preserves known public source failure metadata', async () => {
+  const { root, script } = await fixture();
+  try {
+    const adapter = createCloudKnowledgeAdapter({ python: process.execPath, script, env: process.env });
+    await adapter.search({ outputDir: root, query: '巡检流程', limit: 10 });
+    const metadataPath = join(root, 'sanitized/metadata.json');
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+    metadata.sourceMetadata = { operation: 'unified-search', metadataOnly: true,
+      sources: { publicInternet: { status: 'failed', error: 'PUBLIC_SEARCH_FAILED' },
+        cloudKnowledge: { status: 'complete' } } };
+    await writeFile(metadataPath, JSON.stringify(metadata));
+    const id = metadata.collection.items[0].itemId;
+    await adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [id] });
+    const finalMetadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+    assert.equal(finalMetadata.sourceMetadata.sources.publicInternet.status, 'failed');
+    assert.equal(finalMetadata.sourceMetadata.selectionWorkflow, 'unified');
+    assert.equal(collectionStatus(sessionPaths(root)).deliveryComplete, false);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

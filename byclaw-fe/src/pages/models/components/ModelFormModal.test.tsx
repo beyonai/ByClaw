@@ -63,6 +63,18 @@ describe('models/components/ModelFormModal', () => {
     expect(systems).toEqual([{ label: 'ByClaw', value: 'BY_CLAW' }]);
   });
 
+  it.each(['add', 'edit'] as const)('enables dictionary loading for %s forms', async (type) => {
+    mockGetDcSystemConfigListByStandType.mockResolvedValue({
+      data: [{ paramName: '图片理解', paramValue: '3' }],
+    });
+    const props = renderForm(type);
+
+    // 共享弹窗仅在 showTags 和加载回调同时存在时发起请求。
+    expect(props.showTags).toBe(true);
+    await expect(props.loadAbilityOptions()).resolves.toEqual([{ label: '图片理解', value: '3' }]);
+    expect(mockGetDcSystemConfigListByStandType).toHaveBeenCalledWith({ standType: 'MODEL_TAGS' });
+  });
+
   it('supports legacy dictionary fields and skips empty codes', async () => {
     mockGetDcSystemConfigListByStandType.mockResolvedValue({
       data: [

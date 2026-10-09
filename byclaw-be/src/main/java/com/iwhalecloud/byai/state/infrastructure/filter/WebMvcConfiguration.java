@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.ByteArrayHttpMessageConverter;
 import org.springframework.http.converter.FormHttpMessageConverter;
@@ -22,6 +23,8 @@ import org.springframework.web.multipart.support.StandardServletMultipartResolve
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import com.iwhalecloud.byai.manager.domain.tenant.TenantContextInterceptor;
 
 import com.alibaba.fastjson.parser.Feature;
 import com.alibaba.fastjson.serializer.SerializeConfig;
@@ -49,6 +52,9 @@ import com.fasterxml.jackson.databind.module.SimpleModule;
  */
 @Configuration
 public class WebMvcConfiguration implements WebMvcConfigurer {
+
+    @Autowired
+    private TenantContextInterceptor tenantContextInterceptor;
 
     /**
      * 配置字节数组消息转换器，用于处理二进制数据。
@@ -199,6 +205,7 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(tokenVerifyInterceptor()).addPathPatterns("/**");
+        registry.addInterceptor(tenantContextInterceptor).addPathPatterns("/**");
     }
 
     /**

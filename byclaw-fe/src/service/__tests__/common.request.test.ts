@@ -87,6 +87,7 @@ import { clearToken, isCurrentAuthSnapshot, loginRedirect } from '@/utils/auth';
 import { getModelState, getRootUnAuthPagePath } from '@/utils';
 import { showRequestErrorModal } from '@/utils/antdAppModal';
 import { logout } from '../user';
+import { clearSelectedEnterprise, selectEnterprise } from '@/utils/tenantContext';
 
 import { GET, globalLogout, POST } from '../common/request';
 import { setResourceFavorite } from '../resourceFavorites';
@@ -116,7 +117,32 @@ describe('Service Common Request', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    clearSelectedEnterprise();
+    window.localStorage.removeItem('SESSION');
     (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(true);
+  });
+
+  it('keeps the existing chat URL and attaches tenant headers only in tenant space', async () => {
+    mockRequest.mockResolvedValue({
+      data: { code: 0, data: { list: [] } },
+      config: { url: '/byaiService/assiman/qryConversations' },
+    });
+    await POST('/byaiService/assiman/qryConversations', {});
+    expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
+    await POST('/byaiService/project/session/listByQo', { projectId: 42 });
+    expect(mockRequest.mock.calls[1][0].headers['X-Enterprise-Id']).toBeUndefined();
+    window.localStorage.setItem('SESSION', 'session-key');
+    selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+    await POST('/byaiService/assiman/qryConversations', {});
+    expect(mockRequest.mock.calls[2][0]).toMatchObject({
+      url: '/byaiService/assiman/qryConversations',
+      headers: { 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' },
+    });
+    await POST('/byaiService/project/session/listByQo', { projectId: 42 });
+    expect(mockRequest.mock.calls[3][0]).toMatchObject({
+      url: '/byaiService/project/session/listByQo',
+      headers: { 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' },
+    });
   });
 
   it('globalLogout clears local auth state and redirects when a user exists', async () => {

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.ws.manager;
 
 import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
+import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -71,6 +72,10 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
         wrapper.put("type", wrapperType);
         wrapper.put("clientRequestId", clientRequestId);
         wrapper.put("requestId", requestId);
+        String enterpriseId = ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get();
+        if (StringUtils.isNotBlank(enterpriseId)) {
+            wrapper.put("enterpriseId", enterpriseId);
+        }
 
         try {
             JSONObject payload = JSON.parseObject(content);

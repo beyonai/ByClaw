@@ -36,6 +36,15 @@ public interface SsSandboxRecordMapper {
                                                   @Param("sandboxType") String sandboxType,
                                                   @Param("resourceId") Long resourceId);
 
+    /** Current tenant-owned DB or Node instance; enterpriseId is the resource ID. */
+    SsSandboxRecord selectActiveTenantByResourceAndType(@Param("enterpriseId") Long enterpriseId,
+                                                         @Param("sandboxType") String sandboxType);
+
+    SsSandboxRecord selectLatestTenantByResourceAndType(@Param("enterpriseId") Long enterpriseId,
+                                                         @Param("sandboxType") String sandboxType);
+
+    List<SsSandboxRecord> selectTenantRecords(@Param("enterpriseId") Long enterpriseId);
+
     /**
      * 根据用户编码和资源ID列表批量查询运行中的沙箱记录
      *
@@ -217,6 +226,8 @@ public interface SsSandboxRecordMapper {
      */
     List<SsSandboxRecord> selectByPage(@Param("keyword") String keyword,
                                        @Param("status") String status,
+                                       @Param("ownerScope") String ownerScope,
+                                       @Param("enterpriseId") Long enterpriseId,
                                        @Param("offset") int offset,
                                        @Param("pageSize") int pageSize);
 
@@ -228,7 +239,9 @@ public interface SsSandboxRecordMapper {
      * @return 总数
      */
     int countByCondition(@Param("keyword") String keyword,
-                         @Param("status") String status);
+                         @Param("status") String status,
+                         @Param("ownerScope") String ownerScope,
+                         @Param("enterpriseId") Long enterpriseId);
 
     /**
      * 根据ID查询沙箱记录

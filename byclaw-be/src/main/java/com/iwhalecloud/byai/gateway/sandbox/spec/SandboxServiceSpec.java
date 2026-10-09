@@ -83,5 +83,8 @@ public class SandboxServiceSpec {
      */
     private String serviceType;
 
+    /** Ownership boundary from sandbox_service_spec, not client-supplied spec JSON. */
+    private String ownerScope;
+
     private String profileKey;
 }

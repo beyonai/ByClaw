@@ -64,7 +64,7 @@ class WecomUserServiceTest {
         when(externalSystemService.findByUnionId(SourceType.WE_CHAT, fromUserId)).thenReturn(null);
         when(contactUserService.getUserDetail(BOT_ID, fromUserId)).thenReturn(detail);
         when(userService.findByUserCode(fromUserId)).thenReturn(user);
-        when(enterpriseInfoService.getEnterpriseId()).thenReturn(88L);
+        when(enterpriseInfoService.getEnterpriseId(1001L)).thenReturn(88L);
         when(sequenceService.nextVal()).thenReturn(9001L);
 
         LoginInfo loginInfo = service.resolveLoginInfo(fromUserId, BOT_ID);
@@ -115,7 +115,7 @@ class WecomUserServiceTest {
         when(externalSystemService.findByUnionId(SourceType.WE_CHAT, fromUserId)).thenReturn(null);
         when(contactUserService.getUserDetail(BOT_ID, fromUserId)).thenReturn(detail);
         when(userService.findByEmail("lisi@example.com")).thenReturn(user);
-        when(enterpriseInfoService.getEnterpriseId()).thenReturn(88L);
+        when(enterpriseInfoService.getEnterpriseId(1002L)).thenReturn(88L);
         when(sequenceService.nextVal()).thenReturn(9002L);
 
         LoginInfo loginInfo = service.resolveLoginInfo(fromUserId, BOT_ID);

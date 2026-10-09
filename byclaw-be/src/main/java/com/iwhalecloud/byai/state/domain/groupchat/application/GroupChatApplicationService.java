@@ -17,8 +17,10 @@ import java.util.Set;
 
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
+import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
@@ -67,6 +69,8 @@ public class GroupChatApplicationService {
     private UserService userService;
     @Autowired
     private AuthApplicationService authApplicationService;
+    @Autowired
+    private TenantUserMembershipService tenantUserMembershipService;
     @Autowired
     private GroupChatSettingsService settingsService;
     @Autowired
@@ -460,6 +464,10 @@ public class GroupChatApplicationService {
         // 邀请真人时补齐项目成员关系；已有成员的角色不变，数字员工不加入项目成员表。
         if (MemObjType.USER.name().equals(type) && session.getProjectId() != null && !projectMemberService.isMember(session.getProjectId(), memberId)) {
             projectMemberService.addMember(session.getProjectId(), memberId, MemberRole.MEMBER);
+        }
+        if (MemObjType.USER.name().equals(type) && session.getEnterpriseId() != null) {
+            tenantUserMembershipService.add(memberId, session.getEnterpriseId(), TenantUserMembershipRole.MEMBER,
+                CurrentUserHolder.getCurrentUserId());
         }
         if (MemObjType.USER.name().equals(type)) {
             // 群成员中的 AGENT 标识即数字员工 resourceId；授权与项目、群成员写入共用外层事务。

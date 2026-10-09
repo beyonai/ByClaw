@@ -28,7 +28,9 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
-/** 群邀请持久化到分享主表，一群一条记录；原始邀请码用于回显与续期。 */
+/**
+ * 群邀请持久化到分享主表，一群一条记录；原始邀请码用于回显与续期。
+ */
 @Service
 @RequiredArgsConstructor
 public class GroupChatInvitationService {
@@ -51,7 +53,6 @@ public class GroupChatInvitationService {
         ByaiSession group = authorization.requireGroup(sessionId);
         authorization.requireInvite(sessionId, "USER");
         requireLinkEnabled(sessionId);
-        requireEnterprise(group);
         requireInviter(sessionId, userId);
         MessageShareLink existing = links.selectInvitationBySessionId(sessionId);
         LocalDateTime now = LocalDateTime.now();
@@ -114,7 +115,9 @@ public class GroupChatInvitationService {
         return response;
     }
 
-    /** 只解析服务端绑定群；写入前由 applicationService 在群锁内重新校验。 */
+    /**
+     * 只解析服务端绑定群；写入前由 applicationService 在群锁内重新校验。
+     */
     public Long resolveSessionId(String token) {
         requireUser();
         return read(token).getSessionId();
@@ -130,7 +133,9 @@ public class GroupChatInvitationService {
         return group;
     }
 
-    /** 群锁内读取服务端保存的邀请者，不能把链接使用者当作邀请者。 */
+    /**
+     * 群锁内读取服务端保存的邀请者，不能把链接使用者当作邀请者。
+     */
     public Long validatedInviterId(Long sessionId, String token) {
         InvitationRecord record = read(token);
         if (!Objects.equals(sessionId, record.getSessionId())) throw invalid();
@@ -209,12 +214,6 @@ public class GroupChatInvitationService {
             throw new IllegalArgumentException("Group link joining is disabled");
     }
 
-    private void requireEnterprise(ByaiSession group) {
-        if (group.getEnterpriseId() != null
-            && !Objects.equals(group.getEnterpriseId(), CurrentUserHolder.getEnterpriseId())) {
-            throw new IllegalArgumentException("Only users in the group's enterprise can join");
-        }
-    }
 
     private Long requireUser() {
         Long userId = CurrentUserHolder.getCurrentUserId();

@@ -1,4 +1,6 @@
 import { verifyCandidate } from './candidate-verifier.mjs';
+import { withJevRun } from './jev/run-context.mjs';
+import { selectFeedbackQuery } from './jev/source-plan.mjs';
 import { finalizeVerifiedProbeRun, registerArxivAcquisitionVariant } from './collection-state.mjs';
 import { summarizePromotedDelivery } from './delivery-state.mjs';
 import {
@@ -16,8 +18,11 @@ import {
   updateProbeBudget,
 } from './probe-state.mjs';
 import { finalizePublicDiscoveryRound, runPublicDiscover } from './public-discovery.mjs';
-import { loadSession } from './session.mjs';
+import { loadSession, persistSession, withSessionLock } from './session.mjs';
 import { cleanupProbeSession } from './web-acquirer.mjs';
+import { rankCandidates } from './jev/candidate-ranker.mjs';
+import { collectionFeedback, schedulingEvidence, collectedPublicCandidates } from './jev/delivery-policy.mjs';
+import { researchEvidenceContext } from './jev/research-evidence.mjs';
 
 const MAX_DISCOVERY_ROUNDS = 2;
 
@@ -85,7 +90,11 @@ function prepareCandidate(paths, candidate) {
   });
 }
 
-export async function runPublicCollect(paths, rawInput, options = {}) {
+export function runPublicCollect(paths, rawInput, options = {}) {
+  return withJevRun(() => runPublicCollectInContext(paths, rawInput, options));
+}
+
+async function runPublicCollectInContext(paths, rawInput, options = {}) {
   const now = options.now || Date.now;
   const startedAt = now();
   const requestedRunId = rawInput?.runId || rawInput?.['run-id'];
@@ -108,15 +117,18 @@ export async function runPublicCollect(paths, rawInput, options = {}) {
     manualPolicy: rawInput?.manualPolicy || rawInput?.['manual-policy'],
   };
   let run;
+  let invocationBudgetMs;
+  const remainingBudgetMs = () => Math.max(0, invocationBudgetMs - Math.max(0, now() - startedAt));
   if (continuation) {
     run = readProbeRun(paths, requestedRunId);
+    invocationBudgetMs = Number(run.remainingBudgetMs);
     if (!['paused-user-action', 'infrastructure-blocked'].includes(run.status)
       && !(resumeRequested && run.status === 'running')) {
       throw new Error(`ORCHESTRATION_NOT_RESUMABLE: status=${run.status}`);
     }
-    if (skipRequested) {
+    if (skipRequested && run.pause?.attemptId !== null) {
       const pausedAttemptId = run.pause?.attemptId;
-      run = resumeProbeRun(paths, run.runId);
+      run = resumeProbeRun(paths, run.runId, { skip: true });
       const attempt = run.attempts.find((entry) => entry.attemptId === pausedAttemptId);
       if (!attempt) throw new Error('PROBE_ATTEMPT_NOT_ACTIVE: paused attempt missing');
       const owned = run.ownedSessionCleanupPending?.find(
@@ -132,6 +144,7 @@ export async function runPublicCollect(paths, rawInput, options = {}) {
             status: 'infrastructure-blocked',
             reasonCode: 'PROBE_BROWSER_CLEANUP_FAILED',
             ownedSession: owned,
+            remainingBudgetMs: remainingBudgetMs(),
           });
           return resultFor(paths);
         }
@@ -145,33 +158,64 @@ export async function runPublicCollect(paths, rawInput, options = {}) {
       });
       run = readProbeRun(paths, run.runId);
     } else if (run.status !== 'running') {
-      run = resumeProbeRun(paths, run.runId);
+      run = resumeProbeRun(paths, run.runId, { skip: skipRequested });
     } else {
       run = claimInterruptedProbeRun(paths, run.runId);
     }
   } else {
     run = createProbeRun(paths, normalizedInput);
+    invocationBudgetMs = Number(run.remainingBudgetMs);
   }
   if (['complete', 'partial', 'failed'].includes(run.status)) return resultFor(paths);
   if (!continuation && ['paused-user-action', 'infrastructure-blocked'].includes(run.status)) {
     run = resumeProbeRun(paths, run.runId);
   }
-  const persistedBudget = Number(run.remainingBudgetMs);
-  const invocationBudgetMs = Number.isFinite(persistedBudget) ? persistedBudget
-    : Math.min(180_000 + run.requestedCount * 90_000, 600_000);
-  const remainingBudgetMs = () => Math.max(0, invocationBudgetMs - (now() - startedAt));
+  if (!Number.isFinite(invocationBudgetMs)) invocationBudgetMs = Math.min(180_000 + run.requestedCount * 90_000, 600_000);
   const poolTarget = Math.min(Math.max(run.requestedCount * 3, 5), 50);
   const maxProbes = Math.min(poolTarget * 2, 100);
   const discover = options.discover || ((targetPaths, args, context) => runPublicDiscover(
     targetPaths,
     { ...args, timeout: String(Math.max(1, Math.ceil(context.remainingBudgetMs / 1_000))) },
-    { orchestrationRunId: context.runId, channelMode: context.channel, remainingBudgetMs },
+    { orchestrationRunId: context.runId, channelMode: context.channel, remainingBudgetMs,
+      environment: options.environment || process.env },
   ));
   const managedDiscoveryGate = !options.discover;
   const verify = options.verify || ((targetPaths, attempt, context) => verifyCandidate(
-    targetPaths, attempt, { remainingBudgetMs: context.remainingBudgetMs },
+    targetPaths, attempt, { remainingBudgetMs: context.remainingBudgetMs, environment: options.environment || process.env },
   ));
   let lastFailure = null;
+  let lastFeedbackCount = 0;
+  let scheduledIds = [];
+  const chooseCandidate = async (session, currentRun, available) => {
+    const feedback = collectionFeedback(session, currentRun);
+    const failedTail = feedback.slice(-2);
+    const finishedCount = currentRun.attempts.filter((attempt) => attempt.finishedAt).length;
+    if (available.length > 1 && finishedCount >= lastFeedbackCount + 2
+      && failedTail.length === 2 && failedTail.every((row) => !row.delivered)) {
+      lastFeedbackCount = finishedCount;
+      const deadline = now() + Math.min(2000, remainingBudgetMs() / 20);
+      const ranked = await (options.rankCandidates || rankCandidates)(session.task.query,
+        schedulingEvidence(session, available), {
+          optimizeDelivery: true, feedback, collectedCandidates: collectedPublicCandidates(session),
+          evidenceContext: researchEvidenceContext(session, options.environment || process.env),
+          environment: options.environment || process.env,
+          remainingBudgetMs: () => Math.max(0, Math.min(deadline - now(), remainingBudgetMs())),
+        });
+      scheduledIds = ranked.diagnostic.status === 'used' ? ranked.candidates.map((candidate) => candidate.candidateId) : [];
+      withSessionLock(paths, 'public-collect-scheduling', () => {
+        const current = loadSession(paths, { persistMigration: false }).session;
+        if (current.task.publicCollectRun?.runId !== currentRun.runId) return;
+        current.task.publicCollectRun.scheduling = { ...ranked.diagnostic, afterAttemptCount: finishedCount,
+          candidateIds: scheduledIds.slice(0, 100) };
+        persistSession(paths, current);
+      });
+    }
+    // Authorization/priority are owned by the existing state machine; only reorder peers.
+    return available.find((candidate) => candidate.origin === 'user-provided')
+      || scheduledIds.map((id) => available.find((candidate) => candidate.candidateId === id
+        && candidate.probePriority === available[0]?.probePriority)).find(Boolean)
+      || available[0];
+  };
   const executeVerification = async (attemptId) => {
     try {
       return await verify(paths, { runId: run.runId, attemptId }, {
@@ -238,21 +282,44 @@ export async function runPublicCollect(paths, rawInput, options = {}) {
       break;
     }
     const roundIndex = run.discoveryRounds.length;
-    const query = roundIndex === 0 ? run.input.query : run.input.fallbackQuery;
+    let query = run.discoveryReservation?.query || (roundIndex === 0 ? run.input.query : run.input.fallbackQuery);
+    if (roundIndex > 0 && !run.discoveryReservation) {
+      const current = loadSession(paths, { persistMigration: false }).session;
+      const selected = await selectFeedbackQuery({ query: run.input.query, fallbackQuery: run.input.fallbackQuery,
+        subject: current.task.discoveryGate.topicContract?.normalizedSubject,
+        feedback: collectionFeedback(current, run) }, { environment: options.environment || process.env,
+        callJev: options.callJev, remainingBudgetMs });
+      query = selected.query;
+    }
     let channel = run.discoveryReservation?.channel || 'online';
     let roundCandidateCount = 0;
     while (channel) {
+      let nextHotWave = Boolean(channel === 'hot' && readProbeRun(paths, run.runId).hotSourcePlan?.nextWave);
       const channelAlreadyComplete = readProbeRun(paths, run.runId).discoveryReservation?.channel === channel
         && readProbeRun(paths, run.runId).discoveryReservation?.phase === 'complete';
       if (!channelAlreadyComplete) {
         setProbeDiscoveryReservation(paths, run.runId, { query, channel, phase: 'reserved' });
         try {
-          await discover(paths, discoveryArgs(run, query, poolTarget), {
+          const discovery = await discover(paths, discoveryArgs(run, query, poolTarget), {
             runId: run.runId, round: roundIndex + 1, poolTarget, channel,
             remainingBudgetMs: remainingBudgetMs(),
           });
-          setProbeDiscoveryReservation(paths, run.runId, { query, channel, phase: 'complete' });
+          nextHotWave = discovery?.nextHotWave === true;
           updateProbeBudget(paths, run.runId, remainingBudgetMs());
+          if (discovery?.requiresUserAction) {
+            blockProbeRun(paths, run.runId, {
+              status: 'paused-user-action', reasonCode: 'DISCOVERY_REQUIRES_USER_ACTION',
+              remainingBudgetMs: remainingBudgetMs(),
+            });
+            return { ...resultFor(paths), requiresUserAction: discovery.requiresUserAction };
+          }
+          if (discovery?.infrastructureBlocked) {
+            blockProbeRun(paths, run.runId, {
+              reasonCode: 'DISCOVERY_INFRASTRUCTURE_FAILED', remainingBudgetMs: remainingBudgetMs(),
+            });
+            return resultFor(paths);
+          }
+          setProbeDiscoveryReservation(paths, run.runId, { query, channel, phase: 'complete' });
         } catch (error) {
           lastFailure = 'DISCOVERY_INFRASTRUCTURE_FAILED';
           blockProbeRun(paths, run.runId, {
@@ -274,7 +341,11 @@ export async function runPublicCollect(paths, rawInput, options = {}) {
         }
         const available = unattemptedCandidates(session, run);
         roundCandidateCount = Math.max(roundCandidateCount, available.length);
-        const discovered = available[0];
+        const discovered = await chooseCandidate(session, run, available);
+        if (remainingBudgetMs() <= 0) {
+          lastFailure = 'TOTAL_BUDGET_EXHAUSTED';
+          break;
+        }
         const next = discovered ? prepareCandidate(paths, discovered) : null;
         if (!next) break;
         const attempt = reserveProbeAttempt(paths, run.runId, next, {
@@ -292,6 +363,7 @@ export async function runPublicCollect(paths, rawInput, options = {}) {
       const afterChannel = summarizePromotedDelivery(loadSession(paths).session);
       if (afterChannel.remainingCount === 0 || lastFailure) channel = null;
       else if (channel === 'online') channel = 'hot';
+      else if (nextHotWave) channel = 'hot';
       else channel = null;
       if (channel) setProbeDiscoveryReservation(paths, run.runId, { query, channel, phase: 'reserved' });
     }

@@ -40,6 +40,7 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxBrowserNavigationServ
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxResizeService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -68,6 +69,9 @@ public class SandboxController {
 
     @Autowired
     private SandboxService sandboxService;
+
+    @Autowired
+    private TenantSandboxService tenantSandboxService;
 
     @Autowired
     private SandboxBrowserNavigationService sandboxBrowserNavigationService;
@@ -391,10 +395,15 @@ public class SandboxController {
     @PostMapping("/listRecords")
     @Operation(summary = "分页查询沙箱记录", description = "管理端分页查询沙箱记录，支持关键字搜索和状态过滤")
     public ResponseUtil listRecords(@RequestBody Map<String, Object> params) {
+        if (!CurrentUserHolder.isPlatformManager()) {
+            return ResponseUtil.fail("platform administrator required");
+        }
         int pageIndex = 1;
         int pageSize = 20;
         String keyword = null;
         String status = null;
+        String ownerScope = "USER";
+        Long enterpriseId = null;
 
         if (params.get("pageIndex") != null) {
             pageIndex = Integer.parseInt(params.get("pageIndex").toString());
@@ -414,15 +423,39 @@ public class SandboxController {
                 status = null;
             }
         }
+        if (params.get("ownerScope") != null) {
+            ownerScope = params.get("ownerScope").toString().trim();
+            if (!List.of("USER", "TENANT", "ALL").contains(ownerScope)) {
+                return ResponseUtil.fail("invalid sandbox owner scope");
+            }
+        }
+        if (params.get("enterpriseId") != null && !params.get("enterpriseId").toString().isBlank()) {
+            String text = params.get("enterpriseId").toString();
+            if (!text.matches("[1-9][0-9]*")) return ResponseUtil.fail("invalid enterprise ID");
+            enterpriseId = Long.parseLong(text);
+        }
+        if (pageIndex < 1 || pageSize < 1 || pageSize > 100) {
+            return ResponseUtil.fail("invalid sandbox page");
+        }
 
         int offset = (pageIndex - 1) * pageSize;
-        List<SandboxRecordView> list = sandboxRecordMapper.selectByPage(keyword, status, offset, pageSize).stream()
-            .map(sandboxService::buildRecordView)
+        List<SandboxRecordView> list = sandboxRecordMapper.selectByPage(keyword, status, ownerScope, enterpriseId,
+                offset, pageSize).stream()
+            .map(record -> {
+                SandboxRecordView view = sandboxService.buildRecordView(record);
+                if (view != null && "TENANT".equals(record.getOwnerScope())
+                    && ("RUNNING".equals(record.getStatus()) || "FAILED".equals(record.getStatus()))) {
+                    view.setProviderStatus(tenantSandboxService.providerStatus(record));
+                }
+                return view;
+            })
             .collect(Collectors.toList());
         // 动态端口的 openclaw 控制台外网不可达；配置了 WEB_BASE_URL 时改写为经网关整页代理的对外地址，
         // 未配置则保持原始 endpoint（原逻辑）。
-        String webBaseUrl = byaiSystemConfigService.getDcSystemConfigValueByCode(Constants.WEB_BASE_URL);
+        String webBaseUrl = list.stream().anyMatch(record -> "openclaw".equals(record.getSandboxType()))
+            ? byaiSystemConfigService.getDcSystemConfigValueByCode(Constants.WEB_BASE_URL) : null;
         list.forEach(record -> {
+            if (!"openclaw".equals(record.getSandboxType())) return;
             String rawEndpoint = SandboxEndpointRecordSupport.resolveInstanceEndpoint(record.getEndpoint(),
                 SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
             if (StringUtils.isNotBlank(webBaseUrl)) {
@@ -431,7 +464,7 @@ public class SandboxController {
                 record.setEndpoint(rawEndpoint);
             }
         });
-        int total = sandboxRecordMapper.countByCondition(keyword, status);
+        int total = sandboxRecordMapper.countByCondition(keyword, status, ownerScope, enterpriseId);
         int totalPage = (total + pageSize - 1) / pageSize;
 
         Map<String, Object> result = new HashMap<>();

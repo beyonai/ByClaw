@@ -6,7 +6,7 @@ import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;
 public interface EnterpriseInfoMapper extends BaseMapper<EnterpriseInfo> {
 
     /**
-     * 查询企业标识
+     * 查询最小企业标识
      *
      * @return Long
      */

@@ -7,6 +7,7 @@
 - `task.sourceScope`：本任务实际允许使用的来源，默认 `public-internet`；企业来源只能因用户点名或明确内部语境加入。
 - `task.workflow`：工作流对会话的永久归属标记。值为 `public-collect` 时只能通过该编排器推进公共文章采集；即使 run 已结束，外部 `public-discover`、抓取、物化、`collect` 与 crawl 编排命令也不得接管该会话。`status`、`inspect` 等纯查看命令不受影响。`crawl-next` 虽不写入状态，但会返回外部待执行批次，属于可驱动后续写入的编排能力，因此在 `public-collect` 持有的会话中也必须拒绝。
 - `task.materializationTarget`：`candidates`、`selected` 或 `all`。
+- `task.selectedDelivery`：仅统一搜索和直接云知识的显式 `selected` 物化流程使用，形如 `{"schemaVersion":"1.0","itemIds":["..."]}`。`--item-ids` 必须非空、无重复，且每个 ID 都属于当前 inventory 和授权来源；多次物化累积选择，不会因重试遗漏先前失败条目。此字段只定义交付子集，不删除未选 inventory 或来源失败诊断。缺少该字段的旧会话沿用原有完成规则。
 - `task.requiredContentGranularity`：`any` 或 `full-text`。用户明确要求全文、完整正文或 PDF 全文时必须在 `init` 传入 `--required-content-granularity full-text`；其他任务默认 `any`。
 - `task.discoveryGate`：公共来源授权状态。新会话使用 `schemaVersion: "2.0"`，保存从初始化任务派生且不可由第二轮 query 改写的 `topicContract`，并记录最多两轮发现、页面形态、主题证据、耗尽状态、兼容 `stopReason` 与诊断 `stopDetail`。用户明确提供的 URL 由 `init --direct-urls` 登记为 `origin=user-provided + topicRelevance.status=not-required`；Agent 自己发现或记忆的 URL 不得放入该参数。
 - `task.acquisitionEvidence`：受控来源执行器实际访问结果的独立、限量运行时凭据。每条凭据绑定同一 `candidateId`、请求 URL、最终 URL、执行器和 `raw/` 下的回执；它只授权该候选的这一最终 URL，不修改或扩大 `discoveryGate.candidates[].acquisitionUrls`。

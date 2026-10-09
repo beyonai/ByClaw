@@ -8,6 +8,9 @@ function text(value) {
 
 export function resolveTypeSafeCapability(environment = process.env) {
   const model = text(environment.TYPESAFE_MODEL) || DEFAULT_MODEL;
+  if (['false', '0', 'off'].includes(text(environment.TYPESAFE_ENABLED).toLowerCase())) {
+    return { status: 'disabled', code: 'JEV_DISABLED', model, timeoutMs: DEFAULT_TIMEOUT_MS };
+  }
   if (!text(environment.TYPESAFE_API_KEY)) {
     return { status: 'unavailable', code: 'TYPESAFE_API_KEY_MISSING', model, timeoutMs: DEFAULT_TIMEOUT_MS };
   }
@@ -91,6 +94,12 @@ export async function callTypeSafeJev(payload, options = {}) {
   try {
     body = await response.json();
   } catch {
+    if (options.signal?.aborted) {
+      return failure('failed', 'cancelled', 'TYPESAFE_CANCELLED', false, 'TypeSafe Jev request was cancelled');
+    }
+    if (timeout.aborted || signal.aborted) {
+      return failure('failed', 'timeout', 'TYPESAFE_TIMEOUT', true, 'TypeSafe Jev request timed out');
+    }
     return failure('failed', 'invalid-response', 'TYPESAFE_INVALID_JSON', false,
       'TypeSafe Jev returned invalid JSON');
   }

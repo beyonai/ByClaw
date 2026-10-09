@@ -35,6 +35,7 @@ import {
   registerAcceptedAcquisitionEvidence,
 } from './discovery-authorization.mjs';
 import { authorizationEquivalentHttpUrl } from './url-authorization.mjs';
+import { selectedInventoryItems, selectionAppliesToSession } from './selected-delivery.mjs';
 import { assessMaterializedTopic } from './topic-relevance.mjs';
 import {
   CONTENT_GRANULARITIES,
@@ -143,11 +144,12 @@ export function registerControlledAcquisitionEvidence(paths, evidence, options =
   });
 }
 
-function assertMaterializedTopic(session, authorization, canonicalItem, sanitizedAbsolute) {
+function assertMaterializedTopic(session, authorization, canonicalItem, sanitizedAbsolute, topicEvidence) {
   if (authorization?.authorizationKind !== 'public-discover') return null;
   const topicRelevance = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
     title: canonicalItem.title,
     markdown: fs.readFileSync(sanitizedAbsolute, 'utf8'),
+    topicEvidence,
   });
   if (!['matched', 'not-required'].includes(topicRelevance.status)) {
     throw new Error(`MATERIALIZED_CONTENT_NOT_RELEVANT: 实际正文与任务主题不匹配（${topicRelevance.status}）`);
@@ -843,8 +845,10 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
     throw new Error('canonicalItem.url 必须与 inventory.sourceUrl 一致');
   }
   const materializedTopicRelevance = assertMaterializedTopic(
-    session, discoveryCandidate, update.canonicalItem, sanitizedAbsolute,
+    session, discoveryCandidate, update.canonicalItem, sanitizedAbsolute, update.topicEvidence,
   );
+  if (materializedTopicRelevance?.topicEvidence) inventory.topicEvidence = clone(materializedTopicRelevance.topicEvidence);
+  else delete inventory.topicEvidence;
 
   const previous = inventory.materialization || {};
   const oldPaths = [previous.markdownPath, previous.sanitizedPath]
@@ -1245,7 +1249,7 @@ export function cmdExportViews(paths) {
   });
 }
 
-export function buildDownstreamInput(paths, collectionResult) {
+export function buildDownstreamInput(paths, collectionResult, session = null, promotionEvidence = null) {
   const rawDirectory = path.resolve(paths.root, 'sanitized', 'items');
   const directory = path.resolve(fs.realpathSync(paths.root), 'sanitized', 'items');
   if (!fs.existsSync(rawDirectory)
@@ -1255,11 +1259,34 @@ export function buildDownstreamInput(paths, collectionResult) {
     throw new Error('downstreamInput.directory 必须是会话内的普通 sanitized/items 目录');
   }
   const files = [];
+  const selected = selectionAppliesToSession(session)
+    ? selectedInventoryItems(session.collection?.collection?.items, session.task.selectedDelivery,
+      session.task.sourceScope || [])
+    : null;
+  const selectedPaths = selected && new Set(selected.map((item) => item.materialization?.sanitizedPath));
+  if (session?.task?.selectedDelivery !== undefined && !selectedPaths) {
+    return { schemaVersion: '1.0', directory, files };
+  }
+  const inventory = session?.collection?.collection?.items || [];
+  const validPromotedIds = new Set((promotionEvidence || (session
+    ? validatePromotionEvidence(paths, session) : null))?.validItemIds || []);
+  const inventoryByPath = new Map(inventory.map((item) => [item.materialization?.sanitizedPath, item]));
+  const probeRun = session?.task?.publicCollectRun;
+  const probeItemIds = new Set([
+    ...(probeRun?.deliverableItemIds || []),
+    ...(probeRun?.attempts || []).map((attempt) => attempt.itemId),
+  ]);
   for (const [index, item] of (collectionResult.items || []).entries()) {
     const relativePath = requireString(item.fileName, `collection-result.json items[${index}].fileName`);
     const absolutePath = validateMarkdownPath(
       paths.root, relativePath, `collection-result.json items[${index}].fileName`, path.join('sanitized', 'items'),
     );
+    if (selectedPaths && !selectedPaths.has(relativePath)) continue;
+    const inventoryItem = inventoryByPath.get(relativePath);
+    const probeOrigin = probeItemIds.has(inventoryItem?.itemId)
+      || inventoryItem?.probeRunId || inventoryItem?.probeAttemptId || inventoryItem?.probeCandidateId
+      || inventoryItem?.promotionId || inventoryItem?.verificationReceipt;
+    if (probeOrigin && !validPromotedIds.has(inventoryItem.itemId)) continue;
     files.push(absolutePath);
   }
   return { schemaVersion: '1.0', directory, files };
@@ -1324,6 +1351,7 @@ function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult
       const assessment = assessMaterializedTopic(gate.topicContract, {
         title: canonical?.title || item.title || '',
         markdown: fs.readFileSync(absolute, 'utf8'),
+        topicEvidence: item.topicEvidence,
       });
       if (!['matched', 'not-required'].includes(assessment.status)) {
         valid = false;
@@ -1439,6 +1467,7 @@ function validatePromotionEvidence(paths, session) {
       const topic = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
         title: receipt.analysis?.title || item.canonicalItem?.title || '',
         markdown: sanitizedMarkdown,
+        topicEvidence: receipt.topicEvidence,
       });
       if (!['matched', 'not-required'].includes(topic.status)
         || topic.status !== item.verifiedTopicStatus) {
@@ -1562,7 +1591,8 @@ export function collectionStatus(paths) {
     publicCollectRun: probeSummary,
     crawl: summarizeCrawlDelivery(session),
     canonicalItems: collectionResult.items.length,
-    ...(relevance.valid ? { downstreamInput: buildDownstreamInput(paths, collectionResult) } : {}),
+    ...(relevance.valid
+      ? { downstreamInput: buildDownstreamInput(paths, collectionResult, session, promotionEvidence) } : {}),
     warnings: [...new Set([
       ...loaded.warnings, ...relevance.warnings, ...promotionEvidence.warnings, ...mailAttachmentWarnings,
     ])],

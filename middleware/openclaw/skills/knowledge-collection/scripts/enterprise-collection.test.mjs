@@ -5,7 +5,10 @@ import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
 import * as enterpriseCollection from './enterprise-collection.mjs';
+import { dispatchEnterpriseBatch } from './enterprise/dispatcher.mjs';
 import { ensureSessionSkeleton, newSession } from './session.mjs';
+import { currentJevRun } from './jev/run-context.mjs';
+import { safeCallJev } from './jev/safe-call.mjs';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'enterprise-collection.mjs');
 const collectionScriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
@@ -69,6 +72,75 @@ async function createParentSession(
   }))}\n`);
   return parent;
 }
+
+await (async () => {
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-entry-dingtalk-contract-'));
+  try {
+    const parent = await createParentSession(root, ['dingtalk'], join(root, 'parent'), {
+      query: 'enterprise test', materializationTarget: 'all', requiredContentGranularity: 'full-text',
+    });
+    let received;
+    await enterpriseCollection.executeEnterpriseWorkflow('search', {
+      'parent-session-dir': parent, source: 'dingtalk', query: 'enterprise test',
+      'output-dir': join(root, 'output'), 'metadata-only': 'true', 'folder-id': 'folder-1',
+    }, { adapters: { dingtalk: { connector: 'dingtalk', search: async (request) => {
+      received = request;
+      return { status: 'complete' };
+    } } } });
+    assert.equal(received.metadataOnly, true);
+    assert.equal(received.folderId, 'folder-1');
+    assert.equal(received.taskContract.materializationTarget, 'all');
+    assert.equal(received.taskContract.requiredContentGranularity, 'full-text');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS DingTalk search entrypoint preserves exhaustive parent contract');
+})();
+
+await (async () => {
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-entry-batch-context-'));
+  try {
+    const parent = await createParentSession(root, ['dingtalk', 'feishu'], join(root, 'parent'), {
+      query: 'enterprise test', materializationTarget: 'all',
+    });
+    const contexts = [];
+    let inferenceCalls = 0;
+    const callJev = async () => {
+      inferenceCalls++;
+      return { ok: true, document: { answers: {
+        source: { type: 'choice', choice: 'dingtalk', confidence: 0.95 },
+      } } };
+    };
+    const adapter = (source) => ({ connector: source, search: async (request) => {
+      contexts.push(currentJevRun());
+      assert.equal(request.taskContract.materializationTarget, 'all');
+      const payload = { state: { query: 'enterprise test' }, questions: {
+        source: { type: 'choice', criteria: { dingtalk: 'dingtalk' } },
+      } };
+      assert.equal((await safeCallJev(payload, { environment: {}, callJev })).ok, true);
+      return { status: 'complete' };
+    } });
+    for (let index = 0; index < 2; index++) {
+      await assert.rejects(enterpriseCollection.executeEnterpriseSearchAll({
+        'parent-session-dir': parent, sources: 'dingtalk,feishu', query: 'enterprise test',
+        'output-root': join(root, `batch-${index}`), concurrency: '1',
+      }, { dispatchBatch: async (_command, _requests, options) => {
+        assert.equal(options.taskContract.materializationTarget, 'all');
+        await dispatchEnterpriseBatch(_command, _requests, { ...options,
+          adapters: { dingtalk: adapter('dingtalk'), feishu: adapter('feishu') } });
+        throw Error('batch probe complete');
+      } }), /batch probe complete/);
+    }
+    assert.ok(contexts.every(Boolean));
+    assert.equal(contexts[0], contexts[1]);
+    assert.equal(contexts[2], contexts[3]);
+    assert.notEqual(contexts[0], contexts[2]);
+    assert.equal(inferenceCalls, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS search-all entrypoint shares context within a batch and isolates invocations');
+})();
 
 await (async () => {
   assert.equal(typeof enterpriseCollection.assertEnterpriseScope, 'function');

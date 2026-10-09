@@ -2,6 +2,8 @@
 
 本文说明沙箱类型如何通过 `sandbox_service_spec.spec_json` 声明 Worker AgentType，以及沙箱启动路由常量的维护约定。
 
+租户资源规格以 `sandbox_service_spec.owner_scope=TENANT` 标记，个人启动入口会拒绝该规格；登录自动启动和个人实例查询仅处理 `owner_scope=USER`。租户 DB/Node 实例须经独立开通流程创建，不能保存为个人首选规格后启动。
+
 ## Worker Agent Type Configuration
 
 每种沙箱可以在 Spec JSON 的 `env` 中声明固定的基础 Worker AgentType：

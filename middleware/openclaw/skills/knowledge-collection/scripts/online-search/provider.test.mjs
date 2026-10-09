@@ -3,6 +3,55 @@ import test from 'node:test';
 
 import { runOnlineSearch } from './provider.mjs';
 
+test('provider experiment is opt-in, valid choice skips peer, invalid choice restores both', async () => {
+  for (const [enabled, choice, expected] of [[false, 'p1', ['wsa', 'search']], [true, 'p1', ['wsa']], [true, 'invalid', ['wsa', 'search']]]) {
+    const calls = [];
+    let inference = 0;
+    const result = await runOnlineSearch({ query: 'agents' }, {
+      environment: { JEV_PROVIDER_SELECTION_ENABLED: String(enabled), TENCENTCLOUD_SECRET_ID: 'fixture',
+        TENCENTCLOUD_SECRET_KEY: 'fixture', SEARCH1API_API_KEY: 'fixture' },
+      callJev: async () => { inference++; return { ok: true, document: { answers: { provider: { type: 'choice', choice, confidence: 0.95 } } } }; },
+      runWsa: async () => { calls.push('wsa'); return { ok: true, document: { results: [] } }; },
+      runSearch1Api: async () => { calls.push('search'); return { ok: true, document: { results: [] } }; },
+      runSearxng: async () => assert.fail('empty success must not trigger fallback'),
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, expected);
+    assert.equal(inference, enabled ? 1 : 0);
+  }
+});
+
+test('chosen provider failure still tries the unattempted commercial peer', async () => {
+  const calls = [];
+  const result = await runOnlineSearch({ query: 'agents' }, {
+    environment: { JEV_PROVIDER_SELECTION_ENABLED: 'true', TENCENTCLOUD_SECRET_ID: 'fixture',
+      TENCENTCLOUD_SECRET_KEY: 'fixture', SEARCH1API_API_KEY: 'fixture' },
+    callJev: async () => ({ ok: true, document: { answers: { provider: { type: 'choice', choice: 'p1', confidence: 0.95 } } } }),
+    runWsa: async () => { calls.push('wsa'); return { ok: false }; },
+    runSearch1Api: async () => { calls.push('search'); return { ok: true, document: { results: [] } }; },
+  });
+  assert.deepEqual(calls, ['wsa', 'search']);
+  assert.equal(result.document.provider, 'search1api');
+});
+
+test('provider experiment bypasses exhaustive tasks and restores parallel execution after inference failure', async () => {
+  for (const coverageRequired of [true, false]) {
+    const calls = [];
+    let inference = 0;
+    const result = await runOnlineSearch({ query: 'agents' }, {
+      coverageRequired,
+      environment: { JEV_PROVIDER_SELECTION_ENABLED: 'true', TENCENTCLOUD_SECRET_ID: 'fixture',
+        TENCENTCLOUD_SECRET_KEY: 'fixture', SEARCH1API_API_KEY: 'fixture' },
+      callJev: async () => { inference++; throw Error('unavailable'); },
+      runWsa: async () => { calls.push('wsa'); return { ok: true, document: { results: [] } }; },
+      runSearch1Api: async () => { calls.push('search'); return { ok: true, document: { results: [] } }; },
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, ['wsa', 'search']);
+    assert.equal(inference, coverageRequired ? 0 : 1);
+  }
+});
+
 test('returns WSA results without calling SearXNG', async () => {
   let searxngCalls = 0;
   const result = await runOnlineSearch({ query: '人工智能' }, {

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import { verifyCandidate } from './candidate-verifier.mjs';
 import { collectionStatus, finalizeVerifiedProbeRun } from './collection-state.mjs';
+import { cmdPublish } from './publish-delivery.mjs';
 import { createDiscoveryAuthorization } from './discovery-authorization.mjs';
 import { createProbeRun, finishProbeRun, reserveProbeAttempt } from './probe-state.mjs';
 import {
@@ -72,6 +73,20 @@ function articleMarkdown() {
   ].join('\n');
 }
 
+async function promoteArticle(paths, run, id, markdown = articleMarkdown()) {
+  const url = `https://example.com/article/${id}`;
+  const candidate = addCandidate(paths, id, url);
+  const attempt = reserveProbeAttempt(paths, run.runId, candidate);
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({
+      status: 'saved', requestedUrl: url, resolvedUrl: url,
+      title: 'DeepSeek Harness 工程实践', markdown, executor: 'fixture-web',
+    }),
+  });
+  assert.equal(result.promotionStatus, 'promoted');
+  return loadSession(paths).session.collection.collection.items.find((item) => item.itemId === result.itemId);
+}
+
 test('failed probe is terminal but never creates collection inventory', async () => {
   const { paths, run } = setup();
   const candidate = addCandidate(paths, 'candidate-failed', 'https://example.com/article/failed');
@@ -84,6 +99,56 @@ test('failed probe is terminal but never creates collection inventory', async ()
   assert.equal(result.attemptState, 'terminal');
   assert.equal(result.acquisitionOutcome, 'unavailable');
   assert.deepEqual(loadSession(paths).session.collection.collection.items, []);
+});
+
+test('ambiguous missing title is recovered from actual Markdown and recorded in the receipt', async () => {
+  const { paths, run } = setup();
+  const url = 'https://example.com/article/missing-title';
+  const candidate = addCandidate(paths, 'missing-title', url);
+  const attempt = reserveProbeAttempt(paths, run.runId, candidate, { expectedRevision: 1 });
+  let calls = 0;
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({ status: 'saved', requestedUrl: url, resolvedUrl: url,
+      title: '', markdown: articleMarkdown(), executor: 'fixture-web' }),
+    callJev: async (_payload, options) => {
+      calls += 1;
+      assert.ok(options.remainingBudgetMs() <= 1500);
+      return { ok: true, document: { model: 'fixture',
+        answers: { evidence: { type: 'choice', choice: 'e0', confidence: 0.95 } } } };
+    },
+  });
+  assert.equal(result.promotionStatus, 'promoted');
+  assert.equal(calls, 1);
+  const receipt = JSON.parse(readFileSync(join(paths.root,
+    `raw/probes/${run.runId}/${candidate.candidateId}/${attempt.attemptId}/verification.json`), 'utf8'));
+  assert.equal(receipt.semanticReview.kind, 'existing-heading');
+  assert.equal(receipt.analysis.title, 'DeepSeek Harness 工程实践');
+});
+
+test('topic evidence beyond the default text window survives promotion and is revalidated', async () => {
+  const { paths, run } = setup();
+  const url = 'https://example.com/article/long';
+  const candidate = addCandidate(paths, 'long', url);
+  const attempt = reserveProbeAttempt(paths, run.runId, candidate, { expectedRevision: 1 });
+  const markdown = ('This paragraph explains a general architecture with extensive technical details.\n\n').repeat(7500)
+    + articleMarkdown();
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({ status: 'saved', requestedUrl: url, resolvedUrl: url,
+      title: 'Architecture report', markdown, executor: 'fixture-web' }),
+    callJev: async (payload) => ({ ok: true, document: { model: 'fixture', answers: {
+      evidence: { type: 'choice', choice: Object.keys(payload.state.evidence).at(-1), confidence: 0.95 },
+    } } }),
+  });
+  assert.equal(result.promotionStatus, 'promoted');
+  const session = loadSession(paths).session;
+  assert.ok(session.collection.collection.items[0].topicEvidence.start > 512 * 1024);
+  const status = collectionStatus(paths);
+  assert.equal(status.publicCollectRun.deliverableArticleCount, 1);
+  const receiptPath = join(paths.root, `raw/probes/${run.runId}/${candidate.candidateId}/${attempt.attemptId}/verification.json`);
+  const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
+  receipt.topicEvidence.start = 0;
+  writeFileSync(receiptPath, JSON.stringify(receipt));
+  assert.equal(collectionStatus(paths).publicCollectRun.deliverableArticleCount, 0);
 });
 
 test('complete topic-matched body is promoted with a deterministic receipt', async () => {
@@ -346,6 +411,108 @@ test('damaged verification receipt invalidates requested-count delivery', async 
   assert.equal(status.deliveryComplete, false);
   assert.equal(status.publicCollectRun.effectiveStatus, 'invalidated');
   assert.equal(status.publicCollectRun.deliverableArticleCount, 0);
+});
+
+test('read-only status excludes a topic-matched body changed after promotion and publish rejects it', async () => {
+  const { paths, run } = setup();
+  const item = await promoteArticle(paths, run, 'candidate-topic-matched-change');
+  finishProbeRun(paths, run.runId, 'complete');
+  const bodyPath = join(paths.root, item.materialization.sanitizedPath);
+  writeFileSync(bodyPath, `${articleMarkdown()}\n\nDeepSeek Harness 的新增章节继续讨论工程实践。\n`);
+  const sessionPath = join(paths.root, 'session.json');
+  const sessionBytes = readFileSync(sessionPath);
+
+  const status = collectionStatus(paths);
+  assert.equal(status.deliveryComplete, false);
+  assert.equal(status.publicCollectRun.effectiveStatus, 'invalidated');
+  assert.equal(status.publicCollectRun.deliverableArticleCount, 0);
+  assert.deepEqual(status.downstreamInput.files, []);
+  assert.ok(status.warnings.some((warning) => /哈希|指纹/.test(warning)));
+  assert.deepEqual(readFileSync(sessionPath), sessionBytes);
+
+  const destination = join(realpathSync(paths.root), '..', 'candidate-topic-matched-delivery');
+  assert.throws(() => cmdPublish(paths, { 'delivery-dir': destination }), /deliveryComplete/);
+  assert.equal(existsSync(destination), false);
+});
+
+test('missing or corrupt receipt excludes only its promoted body from downstream handoff', async () => {
+  for (const damage of ['missing', 'corrupt']) {
+    const { paths, run } = setup(2);
+    const invalid = await promoteArticle(paths, run, `candidate-${damage}`);
+    const valid = await promoteArticle(paths, run, `candidate-valid-${damage}`,
+      `${articleMarkdown()}\n\n另一个候选提供不同的 DeepSeek Harness 工程部署实例。\n`);
+    finishProbeRun(paths, run.runId, 'complete');
+    const invalidPath = join(realpathSync(paths.root), invalid.materialization.sanitizedPath);
+    const validPath = join(realpathSync(paths.root), valid.materialization.sanitizedPath);
+    const receiptPath = join(paths.root, invalid.verificationReceipt);
+    if (damage === 'missing') unlinkSync(receiptPath);
+    else writeFileSync(receiptPath, '{corrupt receipt');
+    const sessionPath = join(paths.root, 'session.json');
+    const sessionBytes = readFileSync(sessionPath);
+
+    const status = collectionStatus(paths);
+    assert.equal(status.deliveryComplete, false);
+    assert.equal(status.publicCollectRun.effectiveStatus, 'invalidated');
+    assert.equal(status.publicCollectRun.deliverableArticleCount, 1);
+    assert.deepEqual(status.downstreamInput.files, [validPath]);
+    assert.equal(status.downstreamInput.files.includes(invalidPath), false);
+    assert.deepEqual(readFileSync(sessionPath), sessionBytes);
+  }
+});
+
+test('mixed inventory retains ordinary Markdown while excluding a damaged probe item', async () => {
+  const { paths, run } = setup(2);
+  const damaged = await promoteArticle(paths, run, 'candidate-mixed-damaged');
+  const valid = await promoteArticle(paths, run, 'candidate-mixed-valid',
+    `${articleMarkdown()}\n\n第二篇 DeepSeek Harness 文章描述不同的工程部署实例。\n`);
+  finishProbeRun(paths, run.runId, 'complete');
+
+  const ordinaryPath = 'sanitized/items/ordinary-cloud.md';
+  writeFileSync(join(paths.root, 'markdown/ordinary-cloud.md'), '# Ordinary cloud article\n\nContent.\n');
+  writeFileSync(join(paths.root, ordinaryPath), '# Ordinary cloud article\n\nContent.\n');
+  const session = loadSession(paths).session;
+  session.task.sourceScope.push('cloud-knowledge');
+  session.collection.collection.items.push({
+    itemId: 'ordinary-cloud',
+    title: 'Ordinary cloud article',
+    sourceUrl: 'cloud-knowledge://article/ordinary-cloud',
+    sourceItemId: 'ordinary-cloud',
+    sourceSkill: 'project-cloud-knowledge',
+    backend: 'cloud-knowledge',
+    collectionFilters: {},
+    rawArtifacts: [],
+    duplicateGroupKey: 'ordinary-cloud',
+    duplicateOf: null,
+    media: { coverStatus: 'not-present', coverCount: 0, materializedCoverCount: 0 },
+    materialization: {
+      status: 'materialized', markdownPath: 'markdown/ordinary-cloud.md',
+      sanitizedPath: ordinaryPath, pendingArtifactCleanup: [], reason: null,
+      contentGranularity: 'full-text',
+    },
+  });
+  persistSession(paths, session);
+  const canonical = JSON.parse(readFileSync(paths.collectionResult, 'utf8'));
+  canonical.items.push({
+    title: 'Ordinary cloud article', url: 'cloud-knowledge://article/ordinary-cloud',
+    author: '', publishTime: '', markdown: ordinaryPath, fileName: ordinaryPath,
+  });
+  writeFileSync(paths.collectionResult, JSON.stringify(canonical));
+  unlinkSync(join(paths.root, damaged.verificationReceipt));
+
+  const status = collectionStatus(paths);
+  assert.equal(status.deliveryComplete, false);
+  assert.equal(status.publicCollectRun.effectiveStatus, 'invalidated');
+  assert.deepEqual(status.downstreamInput.files, [
+    join(realpathSync(paths.root), valid.materialization.sanitizedPath),
+    join(realpathSync(paths.root), ordinaryPath),
+  ]);
+
+  const damagedSession = loadSession(paths).session;
+  const damagedItem = damagedSession.collection.collection.items.find((item) => item.itemId === damaged.itemId);
+  delete damagedItem.verificationReceipt;
+  delete damagedItem.promotionId;
+  persistSession(paths, damagedSession);
+  assert.deepEqual(collectionStatus(paths).downstreamInput.files, status.downstreamInput.files);
 });
 
 test('missing promoted Markdown invalidates a completed requested-count run', async () => {

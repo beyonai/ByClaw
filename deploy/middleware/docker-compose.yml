@@ -64,7 +64,12 @@ services:
 
   opensandbox-server:
     user: "1001:1001"
-    image: ${IMAGE_SANDBOX_SERVER:-sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9}
+    build:
+      context: .
+      dockerfile: opensandbox-server.Dockerfile
+      args:
+        BASE_IMAGE: ${IMAGE_SANDBOX_SERVER:-sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9}
+    image: ${IMAGE_BYCLAW_OPENSANDBOX_SERVER:-byclaw-opensandbox-server:v0.1.9}
     container_name: byclaw-opensandbox-${CONTAINER_SUFFIX:-middleware}
     ports:
       - "${BYCLAW_SANDBOX_PORT:-9005}:9005"

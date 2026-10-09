@@ -31,6 +31,8 @@ describe('utils/websocket', () => {
     jest.resetModules();
     jest.clearAllMocks();
     jest.useFakeTimers();
+    window.localStorage.clear();
+    window.sessionStorage.clear();
     mockGetLocale.mockReturnValue('zh-CN');
     const previousManager = (globalThis as any).__BYCLAW_WEBSOCKET_MANAGER__;
     previousManager?.dispose?.();
@@ -175,6 +177,73 @@ describe('utils/websocket', () => {
     expect(socketInstance.send).toHaveBeenLastCalledWith(
       JSON.stringify({ language: 'zh-CN', type: 'HEARTBEAT', scopedSessionId: '' })
     );
+  });
+
+  it('switches tenants over the existing socket after an acknowledgment', async () => {
+    mockGetToken.mockReturnValue('token-1');
+    window.localStorage.setItem('SESSION', 'session-1');
+    const ws = require('../websocket').default;
+    const { getSelectedEnterpriseId } = require('../tenantContext');
+
+    ws.disconnect();
+    ws.init();
+    socketInstance.onopen();
+    const originalSocket = socketInstance;
+    const switching = ws.switchTenant('123', 'context-token', '2099-01-01T00:00:00Z');
+    await Promise.resolve();
+    const outbound = JSON.parse(socketInstance.send.mock.calls[socketInstance.send.mock.calls.length - 1][0]);
+    expect(outbound).toMatchObject({ type: 'SWITCH_TENANT', enterpriseId: '123' });
+    expect(getSelectedEnterpriseId()).toBeNull();
+
+    socketInstance.onmessage({
+      data: JSON.stringify({
+        type: 'SWITCH_TENANT_ACK',
+        enterpriseId: '123',
+        clientRequestId: outbound.clientRequestId,
+      }),
+    });
+    await switching;
+    expect(getSelectedEnterpriseId()).toBe('123');
+    expect(socketInstance).toBe(originalSocket);
+    expect(WebSocketMock).toHaveBeenCalledTimes(1);
+
+    ws.sendMessage({ type: 'HEARTBEAT', scopedSessionId: '' });
+    expect(JSON.parse(socketInstance.send.mock.calls[socketInstance.send.mock.calls.length - 1][0])).toMatchObject({
+      type: 'HEARTBEAT',
+      enterpriseId: '123',
+    });
+
+    jest.advanceTimersByTime(6000);
+    expect(JSON.parse(socketInstance.send.mock.calls[socketInstance.send.mock.calls.length - 1][0])).toMatchObject({
+      type: 'HEARTBEAT',
+      enterpriseId: '123',
+      scopedSessionId: '',
+    });
+  });
+
+  it('restores the selected tenant with a payload control message after a network reconnect', () => {
+    mockGetToken.mockReturnValue('token-1');
+    window.localStorage.setItem('SESSION', 'session-1');
+    const { selectEnterprise } = require('../tenantContext');
+    selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+    const ws = require('../websocket').default;
+
+    ws.disconnect();
+    ws.init();
+    socketInstance.onopen();
+    expect(socketInstance.url).not.toContain('enterpriseId');
+    expect(JSON.parse(socketInstance.send.mock.calls[0][0])).toMatchObject({
+      type: 'SWITCH_TENANT',
+      enterpriseId: '123',
+    });
+
+    socketInstance.onclose({ code: 1006, reason: 'network failure' });
+    jest.advanceTimersByTime(2000);
+    socketInstances[1].onopen();
+    expect(JSON.parse(socketInstances[1].send.mock.calls[0][0])).toMatchObject({
+      type: 'SWITCH_TENANT',
+      enterpriseId: '123',
+    });
   });
 
   it('notifies reconnect subscribers only after a disconnected socket reconnects', () => {

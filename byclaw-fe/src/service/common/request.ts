@@ -21,6 +21,7 @@ import axios, { AxiosProgressEvent, AxiosResponse, InternalAxiosRequestConfig, M
 import { get, isPlainObject, throttle, isNil } from 'lodash';
 import { logout } from '../user';
 import { getDesktopLocalRequest } from './desktopLocal';
+import { getTenantContext, getTenantSwitchSeq, hasStoredTenantSelection } from '@/utils/tenantContext';
 
 declare module 'axios' {
   // 录制器需要在 409 时保留服务端原始响应，供调用方自行处理。
@@ -62,6 +63,30 @@ const maxQuantityMap: Record<
     sign: AbortController;
   }
 > = {};
+
+// Tenant context is sent only to chat APIs whose BE handlers enforce tenant routing.
+const tenantChatPaths = new Set([
+  '/byaiService/assiman/qryConversations',
+  '/byaiService/project/session/listByQo',
+  '/byaiService/assiman/getMessages',
+  '/byaiService/assiman/getMessageOutline',
+  '/byaiService/assiman/getMessageByIds',
+  '/byaiService/assiman/updateConversation',
+  '/byaiService/assiman/removeConversation',
+  '/byaiService/assiman/updateMessage',
+  '/byaiService/assiman/updateMesFeedback',
+  '/byaiService/assiman/deleteMessage',
+  '/byaiService/assiman/querySessionByAgent',
+  '/byaiService/group/batchReadMessages',
+  '/byaiService/group/addForwardMessage',
+  '/byaiService/group/createGroupChat',
+  '/byaiService/group/addMessage',
+  '/byaiService/chat/getMessageById',
+  '/byaiService/chat/runningStatus',
+  '/byaiService/chat/runningSnapshot',
+  '/byaiService/chat/stopChat',
+  '/byaiService/chat/updateMessageStructById',
+]);
 
 let globalLogoutPromise: Promise<void> | null = null;
 
@@ -320,22 +345,43 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
     }
   }
   // 在创建 Axios 请求时固定凭证，响应晚到时仍可判断它属于哪个登录会话。
+  const tenantSwitchSeq = getTenantSwitchSeq();
+  const tenantContext = getTenantContext();
+  const isTenantChatRequest =
+    tenantChatPaths.has(url) ||
+    url.startsWith('/byaiService/assiman/getForwardMessage/') ||
+    url.startsWith('/byaiService/chat/') ||
+    url.startsWith('/byaiService/group/') ||
+    url.startsWith('/byaiService/group-chats');
+  if (isTenantChatRequest && hasStoredTenantSelection() && !tenantContext) {
+    return Promise.reject(new Error('Tenant context expired; select a space again'));
+  }
   const headers: Record<string, string> = {
     ...(config.headers || {}),
     [tokenKey]: getToken(),
     [ssotokenKey]: getssoToken(),
     'x-session-id': getSessionKey(),
   };
+  if (tenantContext && isTenantChatRequest) {
+    headers['X-Enterprise-Id'] = tenantContext.enterpriseId;
+    headers['X-Tenant-Context'] = tenantContext.tenantContextToken;
+  }
   if (languageConf) {
     headers.language = getLocale();
   }
+
+  const desktopHeaders = (desktopToken: string) => ({
+    'content-type': config.headers?.['Content-Type'] || config.headers?.['content-type'] || 'application/json',
+    Authorization: `Bearer ${desktopToken}`,
+  });
 
   // 通过 Axios 标准 headers 传递认证信息，避免旧的自定义 myHeader 被单独覆盖或丢失。
   return getDesktopLocalRequest(url, method, myData).then((desktop) =>
     instance
       .request({
         ...config,
-        headers,
+        headers: desktop ? desktopHeaders(desktop.token) : headers,
+        desktopLocal: Boolean(desktop),
         baseURL: desktop?.baseURL || '/',
         url,
         method,
@@ -343,18 +389,11 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
         params: !['POST', 'PUT'].includes(method) ? myData : null,
         signal: cancelToken?.signal,
         preserveErrorResponse: responseCfg?.preserveErrorResponse,
-        ...(desktop
-          ? {
-            desktopLocal: true,
-            headers: {
-              'content-type':
-                  config.headers?.['Content-Type'] || config.headers?.['content-type'] || 'application/json',
-              Authorization: `Bearer ${desktop.token}`,
-            },
-          }
-          : {}),
       })
       .then((res) => {
+        if (tenantSwitchSeq !== getTenantSwitchSeq()) {
+          throw new Error('Tenant changed while request was pending');
+        }
         if (config && config.responseType === 'blob') {
           // @ts-ignore
           const disposition = res.headers.get('content-disposition') || '';

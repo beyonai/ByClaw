@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { assertNoActiveRoute } from './routing/plan-store.mjs';
+import { withJevRun } from './jev/run-context.mjs';
 import { registeredChannel } from './routing/channels.mjs';
 import { createFeishuAdapter } from './enterprise/adapters/feishu.mjs';
 import { createWecomAdapter } from './enterprise/adapters/wecom.mjs';
@@ -437,14 +438,19 @@ function commandSchema() {
   };
 }
 
-export async function executeEnterpriseWorkflow(command, values, dependencies = {}) {
+export function executeEnterpriseWorkflow(command, values, dependencies = {}) {
+  return withJevRun(() => executeEnterpriseWorkflowInContext(command, values, dependencies));
+}
+
+async function executeEnterpriseWorkflowInContext(command, values, dependencies = {}) {
   if (command === 'search' || command === 'metadata-search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
     const normalizedValues = normalizeEnterprisePaths(command, values);
     const scopeSessionDir = command === 'search' || command === 'metadata-search' || command === 'resource'
       ? normalizedValues['parent-session-dir'] : normalizedValues['session-dir'];
     const source = requireValue(values, 'source');
     const parentSession = assertEnterpriseScope(scopeSessionDir, [source]);
-    let dispatchOptions = {};
+    const dispatchOptions = command === 'search'
+      ? { taskContract: enterpriseChildTaskContract(parentSession) } : {};
     if (command === 'search' && ['ima', 'cloud-knowledge'].includes(source)) {
       const contractCheck = source === 'cloud-knowledge'
         ? assertCloudKnowledgeParentContract : assertImaParentContract;
@@ -454,12 +460,45 @@ export async function executeEnterpriseWorkflow(command, values, dependencies = 
         requireValue(values, 'query'),
         normalizedValues['output-dir'],
       );
-      dispatchOptions = source === 'ima' ? { taskContract: enterpriseChildTaskContract(parentSession) } : {};
     }
     const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...dispatchValues } = normalizedValues;
     return registeredChannel(source).executeLegacy(command, dispatchValues, (operation, options) => dispatchEnterprise(operation, options, { ...dependencies, ...dispatchOptions }));
   }
   throw new Error('unsupported enterprise workflow');
+}
+
+export function executeEnterpriseSearchAll(values, dependencies = {}) {
+  return withJevRun(() => executeEnterpriseSearchAllInContext(values, dependencies));
+}
+
+async function executeEnterpriseSearchAllInContext(values, dependencies = {}) {
+  const normalizedValues = normalizeEnterprisePaths('search-all', values);
+  const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...batchValues } = normalizedValues;
+  const requests = parseSearchBatchRequests(batchValues);
+  const sources = requests.map((request) => request.source);
+  const parentSession = assertEnterpriseScope(normalizedValues['parent-session-dir'], sources);
+  const outputRoot = normalizedValues['output-root'];
+  assertDistinctSessionTrees(normalizedValues['parent-session-dir'], outputRoot);
+  const query = requireValue(values, 'query');
+  if (sources.includes('ima')) {
+    assertImaParentContract(normalizedValues['parent-session-dir'], parentSession, query);
+  }
+  const taskContract = enterpriseChildTaskContract(parentSession);
+  return withSearchAllAggregateWriter(outputRoot, taskContract, async (aggregateWriter) => {
+    const outcomes = await (dependencies.dispatchBatch || dispatchEnterpriseBatch)('search', requests, {
+      concurrency: Number(values.concurrency) || 4,
+      taskContract,
+      ...(dependencies.adapters ? { adapters: dependencies.adapters } : {}),
+    });
+    const aggregate = await writeSearchAllAggregate({
+      aggregateWriter,
+      query,
+      sources,
+      metadataOnly: values['metadata-only'] !== false && values['metadata-only'] !== 'false' && values['metadata-only'] !== '0',
+      outcomes,
+    });
+    return { outputDir: outputRoot, ...aggregate, outcomes };
+  });
 }
 
 async function main() {
@@ -511,33 +550,7 @@ async function main() {
     return;
   }
   if (command === 'search-all') {
-    const normalizedValues = normalizeEnterprisePaths(command, values);
-    const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...batchValues } = normalizedValues;
-    const requests = parseSearchBatchRequests(batchValues);
-    const sources = requests.map((request) => request.source);
-    const parentSession = assertEnterpriseScope(normalizedValues['parent-session-dir'], sources);
-    const outputRoot = normalizedValues['output-root'];
-    assertDistinctSessionTrees(normalizedValues['parent-session-dir'], outputRoot);
-    const query = requireValue(values, 'query');
-    if (sources.includes('ima')) {
-      assertImaParentContract(normalizedValues['parent-session-dir'], parentSession, query);
-    }
-    const taskContract = enterpriseChildTaskContract(parentSession);
-    const result = await withSearchAllAggregateWriter(outputRoot, taskContract, async (aggregateWriter) => {
-      const outcomes = await dispatchEnterpriseBatch('search', requests, {
-        concurrency: Number(values.concurrency) || 4,
-        taskContract,
-      });
-      const aggregate = await writeSearchAllAggregate({
-        aggregateWriter,
-        query,
-        sources,
-        metadataOnly: values['metadata-only'] !== false && values['metadata-only'] !== 'false' && values['metadata-only'] !== '0',
-        outcomes,
-      });
-      return { outputDir: outputRoot, ...aggregate, outcomes };
-    });
-    render(result);
+    render(await executeEnterpriseSearchAll(values));
     return;
   }
   throw new Error(`unsupported command: ${command || '(missing)'}`);

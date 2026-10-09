@@ -76,7 +76,7 @@ public class BaseUserApplicationService {
     protected void saveUserAfter(Users users, List<UsersOrganization> usersOrganizations) {
 
         // 1.更新缓存
-        ShareCacheUtil.setShareShareBfmUser(users, enterpriseInfoService.getEnterpriseId());
+        ShareCacheUtil.setShareShareBfmUser(users, enterpriseInfoService.getEnterpriseId(users.getUserId()));
         ShareCacheUtil.setUsersOrganizationVos(users.getUserId(), this.completeUsersOrganizations(usersOrganizations));
 
         // 2.调用智能体初始化超级助手
@@ -95,7 +95,7 @@ public class BaseUserApplicationService {
     protected void updateUserAfter(Users users, List<UsersOrganization> usersOrganizations) {
 
         // 1.更新缓存
-        ShareCacheUtil.setShareShareBfmUser(users, enterpriseInfoService.getEnterpriseId());
+        ShareCacheUtil.setShareShareBfmUser(users, enterpriseInfoService.getEnterpriseId(users.getUserId()));
         ShareCacheUtil.setUsersOrganizationVos(users.getUserId(), this.completeUsersOrganizations(usersOrganizations));
 
         // 2.发布用户更新

@@ -52,6 +52,34 @@ class GenericSandboxSpecProcessorTest {
     }
 
     @Test
+    void buildCreateRequest_rendersImageAndTenantVolumeFromRequestContext() {
+        SandboxWorkspaceBootstrapInitializer bootstrapInitializer = mock(SandboxWorkspaceBootstrapInitializer.class);
+        GenericSandboxSpecProcessor processor = new GenericSandboxSpecProcessor(bootstrapInitializer);
+
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setImage("${envVars.IMAGE_OPENGAUSS}");
+        VolumeSpec volume = new VolumeSpec();
+        volume.setKey("database");
+        volume.setScope(VolumeScope.PRIVATE);
+        volume.setHostPath("${envVars.BYCLAW_SANDBOX_FILE_VOLUME_ROOT}");
+        volume.setSubPath("tenants/${envVars.TENANT_ID}/opengauss");
+        volume.setMountPath("/var/lib/opengauss");
+        spec.setVolumes(List.of(volume));
+
+        CreateSandboxRequest request = processor.buildCreateRequest(
+            "TENANT:123", "tenant-opengauss",
+            Map.of("IMAGE_OPENGAUSS", "local/opengauss:test", "TENANT_ID", "123",
+                "BYCLAW_SANDBOX_FILE_VOLUME_ROOT", "/shared/byclaw"), Map.of(), spec);
+
+        assertThat(request.getImage().getUri()).isEqualTo("local/opengauss:test");
+        assertThat(request.getVolumes()).singleElement().satisfies(item -> {
+            assertThat(item.getHost().getPath()).isEqualTo("/shared/byclaw");
+            assertThat(item.getSubPath()).isEqualTo("tenants/123/opengauss");
+            assertThat(item.getMountPath()).isEqualTo("/var/lib/opengauss");
+        });
+    }
+
+    @Test
     void buildCreateRequest_returnsNullEnvWhenSpecHasNoEnv() {
         SandboxWorkspaceBootstrapInitializer bootstrapInitializer = mock(SandboxWorkspaceBootstrapInitializer.class);
         GenericSandboxSpecProcessor processor = new GenericSandboxSpecProcessor(bootstrapInitializer);

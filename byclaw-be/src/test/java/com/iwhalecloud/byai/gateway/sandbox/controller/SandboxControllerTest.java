@@ -17,13 +17,16 @@ import org.springframework.context.MessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.login.bean.UsersOrganization;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.constants.users.UserType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxBrowserNavigationService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -102,6 +105,7 @@ class SandboxControllerTest {
 
     @Test
     void listRecords_returnsOpenclawEndpointForJsonStorage() {
+        setPlatformManager();
         SandboxController controller = new SandboxController();
         SandboxService sandboxService = mock(SandboxService.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
@@ -112,16 +116,18 @@ class SandboxControllerTest {
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);
+        record.setSandboxType("openclaw");
         record.setEndpoint(
             "{\"openclaw\":\"http://host/proxy/18789/chat?token=abc\",\"ui\":\"http://host/proxy/3000?token=abc\"}");
         record.setCreateTime(new Date());
-        when(sandboxRecordMapper.selectByPage(null, null, 0, 20)).thenReturn(List.of(record));
+        when(sandboxRecordMapper.selectByPage(null, null, "USER", null, 0, 20)).thenReturn(List.of(record));
         SandboxRecordView view = new SandboxRecordView();
         view.setId(1L);
+        view.setSandboxType("openclaw");
         view.setEndpoint(record.getEndpoint());
         view.setWorkerOnline(false);
         when(sandboxService.buildRecordView(record)).thenReturn(view);
-        when(sandboxRecordMapper.countByCondition(null, null)).thenReturn(1);
+        when(sandboxRecordMapper.countByCondition(null, null, "USER", null)).thenReturn(1);
         when(byaiSystemConfigService.getDcSystemConfigValueByCode("WEB_BASE_URL")).thenReturn("");
 
         ResponseUtil response = controller.listRecords(Map.of());
@@ -134,6 +140,57 @@ class SandboxControllerTest {
         assertThat(list).hasSize(1);
         assertThat(list.get(0).getEndpoint()).isEqualTo("http://host/proxy/18789/chat?token=abc");
         assertThat(list.get(0).getWorkerOnline()).isFalse();
+    }
+
+    @Test
+    void listRecords_filtersTenantSandboxRecordsByEnterprise() {
+        setPlatformManager();
+        SandboxController controller = new SandboxController();
+        SandboxService sandboxService = mock(SandboxService.class);
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        ByaiSystemConfigService configService = mock(ByaiSystemConfigService.class);
+        TenantSandboxService tenantSandboxService = mock(TenantSandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", configService);
+        ReflectionTestUtils.setField(controller, "tenantSandboxService", tenantSandboxService);
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(2L);
+        record.setSandboxType("tenant-opengauss");
+        record.setOwnerScope("TENANT");
+        record.setEnterpriseId(11220513L);
+        record.setStatus("RUNNING");
+        when(mapper.selectByPage(null, null, "TENANT", 11220513L, 0, 20)).thenReturn(List.of(record));
+        when(mapper.countByCondition(null, null, "TENANT", 11220513L)).thenReturn(1);
+        SandboxRecordView view = new SandboxRecordView();
+        view.setId(2L);
+        view.setSandboxType("tenant-opengauss");
+        view.setOwnerScope("TENANT");
+        view.setEnterpriseId(11220513L);
+        view.setEndpoint("tcp://db-host:5432");
+        when(sandboxService.buildRecordView(record)).thenReturn(view);
+        when(tenantSandboxService.providerStatus(record)).thenReturn("MISSING");
+
+        ResponseUtil response = controller.listRecords(Map.of("ownerScope", "TENANT", "enterpriseId", "11220513"));
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) response.getData();
+        @SuppressWarnings("unchecked")
+        List<SandboxRecordView> list = (List<SandboxRecordView>) data.get("list");
+        assertThat(list).hasSize(1);
+        assertThat(list.get(0).getEndpoint()).isEqualTo("tcp://db-host:5432");
+        assertThat(list.get(0).getProviderStatus()).isEqualTo("MISSING");
+        verify(mapper).countByCondition(null, null, "TENANT", 11220513L);
+    }
+
+    private void setPlatformManager() {
+        UsersOrganization organization = new UsersOrganization();
+        organization.setUserType(UserType.PLAT_MAN);
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserCode("adminvip");
+        loginInfo.setUsersOrganizations(List.of(organization));
+        CurrentUserHolder.setLoginInfo(loginInfo);
     }
 
     @Test

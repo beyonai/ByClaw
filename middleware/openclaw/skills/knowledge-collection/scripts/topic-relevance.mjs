@@ -282,7 +282,7 @@ function visibleMarkdownBlocks(markdown) {
   return visible.join('\n').split(/\n\s*\n+/u).map(normalizeText).filter(Boolean);
 }
 
-export function assessMaterializedTopic(contract, { title = '', markdown = '' } = {}) {
+export function assessMaterializedTopic(contract, { title = '', markdown = '', topicEvidence } = {}) {
   if (!contract?.required) return assessment('not-required');
   const bodyTruncated = typeof markdown === 'string' && markdown.length > MAX_VISIBLE_BODY_CHARS;
   const normalizedTitle = normalizeText(title);
@@ -318,6 +318,16 @@ export function assessMaterializedTopic(contract, { title = '', markdown = '' } 
   const status = repeatedStrong.length > 0 || (matched.supporting.length >= 2 && supportingBlockCount >= 2)
     ? 'matched' : 'unmatched';
   if (status === 'unmatched' && bodyTruncated) {
+    // An optional bounded locator can extend the visible window, never override a mismatch.
+    // Re-read the exact source bytes and apply the same local rules on every validation.
+    const start = topicEvidence?.start;
+    const length = topicEvidence?.length;
+    if (Number.isSafeInteger(start) && start >= 0 && Number.isSafeInteger(length)
+      && length > 0 && length <= 2000 && start + length <= markdown.length) {
+      const evidence = assessMaterializedTopic(contract, { markdown: markdown.slice(start, start + length) });
+      if (evidence.status === 'matched') return { ...evidence, inputDigest,
+        topicEvidence: { start, length } };
+    }
     return assessment('unknown', matched, [], { inputDigest, reason: 'visible-text-limit-exceeded' });
   }
   return assessment(status, matched, status === 'matched' ? ['body'] : [], { inputDigest });

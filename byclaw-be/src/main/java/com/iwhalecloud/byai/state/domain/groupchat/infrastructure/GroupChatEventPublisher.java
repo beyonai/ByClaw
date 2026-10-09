@@ -1,6 +1,13 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
+import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 
 import org.springframework.stereotype.Service;
 
@@ -22,6 +29,8 @@ public class GroupChatEventPublisher {
     private com.iwhalecloud.byai.state.domain.session.service.SessionService sessionService;
     private final SessionMemberService memberService;
     private final ChannelManager channelManager;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private TenantNodeClient tenantNodeClient;
 
     public GroupChatEventPublisher(SessionMemberService memberService, ChannelManager channelManager) {
         this.memberService = memberService;
@@ -53,6 +62,34 @@ public class GroupChatEventPublisher {
                 }
                 catch (Exception error) {
                     log.warn("群聊事件广播失败, sessionId={}, userId={}", sessionId, member.getMemObjId(), error);
+                }
+            }
+        }
+        return sent;
+    }
+
+    /** Tenant group membership is authoritative in the Node, not in the shared session tables. */
+    public int publishTenant(TenantRequestContext tenant, Long sessionId, JSONObject event) {
+        if (tenantNodeClient == null) throw new IllegalStateException("tenant Node client unavailable");
+        Map<String, Object> detail = tenantNodeClient.request(tenant, "GET",
+            "/internal/v1/group-chats/" + sessionId, null, new TypeReference<Map<String, Object>>() { });
+        Object rawMembers = detail.get("members");
+        if (!(rawMembers instanceof List<?> members)) throw new IllegalStateException("tenant group members unavailable");
+        event.put("enterpriseId", String.valueOf(tenant.enterpriseId()));
+        int sent = 0;
+        for (Object value : members) {
+            if (!(value instanceof Map<?, ?> member) || !"USER".equals(member.get("memObjType"))) continue;
+            Object rawId = member.get("memObjId");
+            if (rawId == null || !rawId.toString().matches("[1-9][0-9]*")) continue;
+            for (Channel channel : channelManager.getChannels(Long.valueOf(rawId.toString()))) {
+                if (!channel.isActive() || !Objects.equals(String.valueOf(tenant.enterpriseId()),
+                    channel.attr(Constant.ATT_ENTERPRISE_ID).get())) continue;
+                try {
+                    channel.writeAndFlush(new TextWebSocketFrame(event.toJSONString()));
+                    sent++;
+                }
+                catch (Exception error) {
+                    log.warn("租户工作组事件广播失败, sessionId={}, userId={}", sessionId, rawId, error);
                 }
             }
         }

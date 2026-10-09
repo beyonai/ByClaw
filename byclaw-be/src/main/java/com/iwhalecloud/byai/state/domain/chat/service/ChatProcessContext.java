@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
@@ -227,6 +228,9 @@ public class ChatProcessContext {
      * 当前请求的登录用户信息，用于在 handleGatewayMode() 中获取 userCode
      */
     public LoginInfo loginInfo;
+
+    /** Explicit tenant identity copied from the ingress thread for asynchronous stream completion. */
+    public TenantRequestContext tenantContext;
 
     /**
      * 当前用户ID，用于多端广播时查找用户的所有 WebSocket Channel

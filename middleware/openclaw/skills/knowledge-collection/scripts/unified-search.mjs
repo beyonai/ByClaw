@@ -9,14 +9,18 @@ import { dirname, join } from 'node:path';
 import { createDiscoveryAuthorization } from './discovery-authorization.mjs';
 import { mergedCandidates } from './candidate-quality.mjs';
 import { runPublicDiscover } from './public-discovery.mjs';
-import { createCloudKnowledgeAdapter } from './enterprise/adapters/cloud-knowledge.mjs';
+import { assertCloudMaterializationScope, createCloudKnowledgeAdapter } from './enterprise/adapters/cloud-knowledge.mjs';
 import { createArtifactWriter } from './enterprise/shared/artifact-writer.mjs';
 import { runWebAcquire } from './web-acquirer.mjs';
 import { runWebMaterialize } from './web-materializer.mjs';
+import { cmdCollect } from './collection-state.mjs';
+import { selectedItemSource, validateSelectedRequest } from './selected-delivery.mjs';
+import { deliveryCompleteForSession } from './delivery-state.mjs';
 import {
   ensureSessionSkeleton, loadSession, newSession, persistSession, sessionPaths,
 } from './session.mjs';
-import { mergeUnifiedCandidates } from './unified-candidates.mjs';
+import { mergeUnifiedCandidates, prioritizeUnifiedCandidates } from './unified-candidates.mjs';
+import { enterpriseInferenceAllowed } from './jev/safe-call.mjs';
 
 const execFileAsync = promisify(execFile);
 const TIME_RANGE_MILLISECONDS = Object.freeze({
@@ -132,10 +136,11 @@ function publicInventory(candidate) {
   const sourceUrl = candidate.url || candidate.sourceUrl;
   return {
     itemId: candidate.candidateId || `public-${Buffer.from(sourceUrl).toString('hex').slice(0, 16)}`,
+    source: 'public-internet',
     title: candidate.title || sourceUrl,
     sourceUrl,
     sourceItemId: null,
-    sourceSkill: 'public-internet',
+    sourceSkill: 'bycli',
     backend: candidate.provider || 'public-discovery',
     provider: candidate.provider || '',
     providerVersion: candidate.providerVersion || '',
@@ -178,6 +183,7 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
   let cloudOutcome = null;
   let cloudMetadata = null;
   const timeRange = inferredTimeRange(query, args['time-range']);
+  const jevOptions = { ...dependencies.jevOptions, environment: dependencies.jevOptions?.environment || process.env };
   try {
     const publicPaths = await childSession(parent, publicRoot, 'public-internet');
     let cloudResourceId = cloudAuthorized
@@ -195,17 +201,18 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
         ? { schemaVersion: '1.0', resources: [{ resourceId: cloudResourceId, directoryPath: '/', origin: 'user-input' }] }
         : null;
     const cloudAvailable = Boolean(cloudScope?.resources?.length);
+    const finalRankingAllowed = !cloudAvailable || enterpriseInferenceAllowed(jevOptions.environment);
     const cloudPaths = cloudAvailable
       ? await childSession(parent, cloudRoot, 'cloud-knowledge', cloudScope) : null;
     const cloudAdapter = cloudAvailable
-      ? (dependencies.createCloudKnowledgeAdapter || createCloudKnowledgeAdapter)(dependencies)
+      ? (dependencies.createCloudKnowledgeAdapter || createCloudKnowledgeAdapter)({ ...dependencies, deferJevRanking: true })
       : null;
     const [publicSettled, cloudSettled] = await Promise.all([
       (dependencies.runPublicDiscover || runPublicDiscover)(publicPaths, {
         query,
         category: args.category || 'general',
         ...(timeRange ? { 'time-range': timeRange } : {}),
-      }, dependencies.publicDiscoverOptions || {})
+      }, { ...dependencies.publicDiscoverOptions, deferCandidateRanking: finalRankingAllowed })
         .then((value) => ({ ok: true, value }))
         .catch((error) => ({ ok: false, error })),
       cloudAdapter && cloudPaths
@@ -214,15 +221,21 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
           .catch((error) => ({ ok: false, error }))
         : Promise.resolve({ ok: false, error: new Error('cloud context unavailable') }),
     ]);
+    const parentWithDiscovery = loadSession(paths, { persistMigration: false }).session;
+    let parentChanged = false;
     if (publicSettled.ok) {
       publicResult = publicSettled.value;
       const discovered = loadSession(publicPaths, { persistMigration: false }).session;
-      const parentWithDiscovery = loadSession(paths, { persistMigration: false }).session;
       if (discovered.task?.discoveryGate) {
         parentWithDiscovery.task.discoveryGate = discovered.task.discoveryGate;
-        persistSession(paths, parentWithDiscovery);
+        parentChanged = true;
       }
     }
+    if (cloudAvailable && !explicitScope?.resources?.length) {
+      parentWithDiscovery.task.cloudDiscoveryScope = cloudScope;
+      parentChanged = true;
+    }
+    if (parentChanged) persistSession(paths, parentWithDiscovery);
     if (cloudSettled.ok) cloudOutcome = cloudSettled.value;
     if (cloudPaths) {
       try {
@@ -247,10 +260,12 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
       dependencies.now || (() => new Date()),
     );
     const cloudItems = cloudFreshness.candidates;
-    const candidates = mergeUnifiedCandidates(query, {
+    const legacyCandidates = mergeUnifiedCandidates(query, {
       publicCandidates: publicItems,
       cloudCandidates: cloudItems,
     });
+    const ranked = await prioritizeUnifiedCandidates(query, legacyCandidates, jevOptions);
+    const candidates = ranked.items;
     const inventory = candidates.map((candidate) => candidate.source === 'cloud-knowledge'
       ? { ...candidate, itemId: candidate.candidateId, sourceSkill: 'project-cloud-knowledge', backend: 'project-cloud-knowledge', sourceUrl: candidate.sourceUrl, rawArtifacts: [], media: { coverStatus: 'not-present', coverCount: 0, materializedCoverCount: 0, reason: null }, materialization: { status: 'pending', markdownPath: null, sanitizedPath: null, pendingArtifactCleanup: [], reason: 'unified discovery; materialization is deferred', contentGranularity: 'unknown' } }
       : publicInventory(candidate));
@@ -275,7 +290,7 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
             ...(cloudOutcome?.reason ? { reason: cloudOutcome.reason } : {}),
           },
         },
-        ranking: { schemaVersion: '1.0', candidateCount: candidates.length },
+        ranking: { schemaVersion: '1.0', candidateCount: candidates.length, jev: ranked.diagnostic },
         freshness: {
           timeRange,
           excludedKnownOutOfRange: freshness.excludedKnownOutOfRange,
@@ -310,14 +325,28 @@ export async function runUnifiedMaterialize(paths, args = {}, dependencies = {})
   const current = loadSession(paths, { persistMigration: false }).session;
   const inventory = Array.isArray(current.collection?.collection?.items)
     ? current.collection.collection.items : [];
+  if (current.task?.materializationTarget !== 'selected'
+    || current.task?.requiredContentGranularity !== 'full-text'
+    || current.task?.workflow === 'public-collect'
+    || !['unified-search', 'materialize'].includes(current.collection?.sourceMetadata?.operation)
+    || (current.collection?.sourceMetadata?.operation === 'materialize'
+      && current.collection?.sourceMetadata?.selectionWorkflow !== 'unified')) {
+    throw new Error('UNIFIED_MATERIALIZE_REQUIRES_SELECTED_DISCOVERY');
+  }
+  const selection = validateSelectedRequest(args['item-ids'], inventory,
+    current.task.sourceScope || [], current.task.selectedDelivery || null);
   const requestedIds = Array.isArray(args['item-ids'])
-    ? args['item-ids'] : String(args['item-ids'] || '').split(',').map((item) => item.trim()).filter(Boolean);
-  if (!requestedIds.length) throw new Error('--item-ids is required for unified-materialize');
+    ? args['item-ids'].map((id) => id.trim()) : args['item-ids'].split(',').map((id) => id.trim());
   const selected = requestedIds.map((itemId) => inventory.find((item) => item?.itemId === itemId));
-  if (selected.some((item) => !item)) throw new Error('one or more --item-ids are not unified candidates');
   if (selected.some((item) => item.timeRange && item.freshnessStatus !== 'in-range')) {
     throw new Error('PUBLICATION_DATE_NOT_VERIFIED: time-bounded candidates require a verified in-range date');
   }
+  const selectedCloudItems = selected.filter((candidate) => selectedItemSource(candidate) === 'cloud-knowledge');
+  if (selectedCloudItems.length) {
+    assertCloudMaterializationScope(current.task.cloudDiscoveryScope, selectedCloudItems);
+  }
+  current.task.selectedDelivery = selection;
+  persistSession(paths, current);
   const results = [];
   const acquire = dependencies.runWebAcquire || runWebAcquire;
   const materialize = dependencies.runWebMaterialize || runWebMaterialize;
@@ -329,16 +358,26 @@ export async function runUnifiedMaterialize(paths, args = {}, dependencies = {})
         'item-id': item.itemId,
         'source-url': item.sourceUrl,
       }, publicAcquireOptions);
+      if (acquired.status !== 'saved') {
+        results.push({ ok: false, itemId: item.itemId, source: item.source,
+          error: acquired.errorCode || acquired.status || 'ACQUISITION_FAILED' });
+        continue;
+      }
       const executorResultFile = acquired.executorResult || `raw/bycli/web/${item.itemId}/executor-result.json`;
-      results.push(await materialize(paths, {
+      const materialized = await materialize(paths, {
         'item-id': item.itemId,
-        'executor-result-file': executorResultFile,
-      }, publicMaterializeOptions));
+        'executor-result-file': join(paths.root, executorResultFile),
+      }, publicMaterializeOptions);
+      if (materialized?.collectPayloadPath) {
+        cmdCollect(paths, { 'item-json-file': materialized.collectPayloadPath });
+      }
+      results.push(materialized?.materialization?.status === 'materialized'
+        ? materialized : { ...materialized, ok: false, itemId: item.itemId });
     } catch (error) {
       results.push({ ok: false, itemId: item.itemId, source: item.source, error: error.message });
     }
   }
-  const cloudIds = selected.filter((candidate) => candidate.source === 'cloud-knowledge').map((item) => item.itemId);
+  const cloudIds = selectedCloudItems.map((item) => item.itemId);
   if (cloudIds.length) {
     const cloudAdapter = (dependencies.createCloudKnowledgeAdapter || createCloudKnowledgeAdapter)(dependencies);
     try {
@@ -349,5 +388,7 @@ export async function runUnifiedMaterialize(paths, args = {}, dependencies = {})
       results.push({ ok: false, itemIds: cloudIds, source: 'cloud-knowledge', error: error.message });
     }
   }
-  return { ok: results.every((result) => result.ok !== false), action: 'unified-materialize', results };
+  const latest = loadSession(paths, { persistMigration: false }).session;
+  return { ok: results.every((result) => result.ok !== false && result.status !== 'failed')
+    && deliveryCompleteForSession(latest), action: 'unified-materialize', results };
 }

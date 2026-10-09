@@ -199,7 +199,8 @@
           and not exists (
               select 1
               from ss_sandbox_record r
-              where r.user_code = u.user_code
+              where r.owner_scope = 'USER'
+                and r.user_code = u.user_code
                 and r.sandbox_type = #{sandboxType}
                 and r.resource_id = #{resourceId}
                 and r.status = 'RUNNING'

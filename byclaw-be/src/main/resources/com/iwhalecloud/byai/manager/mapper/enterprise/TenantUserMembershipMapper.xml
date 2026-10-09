@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.enterprise.TenantUserMembershipMapper">
+
+    <resultMap id="UserEnterpriseVoResultMap" type="com.iwhalecloud.byai.manager.vo.enterprise.UserEnterpriseVo">
+        <result property="enterpriseId" column="enterprise_id"/>
+        <result property="comAcctName" column="com_acct_name"/>
+        <result property="comAcctCode" column="com_acct_code"/>
+        <result property="role" column="role"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <select id="listUserEnterprises" resultMap="UserEnterpriseVoResultMap">
+        SELECT
+            e.enterprise_id,
+            e.com_acct_name,
+            e.com_acct_code,
+            m.role,
+            m.status
+        FROM tenant_user_membership m
+        INNER JOIN po_enterprise_info e ON e.enterprise_id = m.enterprise_id
+        WHERE m.user_id = #{userId}
+        ORDER BY m.joined_at DESC
+    </select>
+
+</mapper>

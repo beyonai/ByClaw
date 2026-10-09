@@ -608,9 +608,23 @@ public class OpenSandboxClient {
                     error = objectMapper.readValue(responseBody, ErrorResponse.class);
                 } catch (Exception ignored) {
                 }
-                String msg = error != null
-                        ? error.getCode() + ": " + error.getMessage()
-                        : "HTTP " + response.code() + ": " + responseBody;
+                String msg;
+                if (error != null && error.getCode() != null && error.getMessage() != null) {
+                    msg = error.getCode() + ": " + error.getMessage();
+                } else if (response.code() == 422) {
+                    // Pydantic validation responses can echo request inputs, including sandbox credentials.
+                    // Report only the invalid field paths and messages.
+                    StringJoiner issues = new StringJoiner("; ");
+                    JsonNode detail = objectMapper.readTree(responseBody).path("detail");
+                    if (detail.isArray()) {
+                        for (JsonNode issue : detail) {
+                            issues.add(issue.path("loc").toString() + " " + issue.path("msg").asText());
+                        }
+                    }
+                    msg = "HTTP 422: " + issues;
+                } else {
+                    msg = "HTTP " + response.code() + ": " + responseBody;
+                }
                 throw new OpenSandboxException("OpenSandbox API error: " + msg);
             }
             return objectMapper.readValue(responseBody, responseType);

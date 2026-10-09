@@ -1,6 +1,7 @@
 import { runSearxng as defaultRunSearxng } from './searxng.mjs';
 import { runSearch1Api as defaultRunSearch1Api } from './search1api.mjs';
 import { runTencentWsa as defaultRunWsa } from './tencent-wsa.mjs';
+import { selectProviderCombination } from '../jev/source-plan.mjs';
 
 const MAX_COMMERCIAL_PROVIDER_TIMEOUT_MS = 15_000;
 
@@ -104,13 +105,35 @@ export async function runOnlineSearch(args, options = {}) {
     Math.floor(timeoutMs / 2),
   ));
   const environment = options.environment || process.env;
-  const [wsa, search1api] = await Promise.all([
-    timed(() => (options.runWsa || defaultRunWsa)(args, { environment, timeoutMs: commercialTimeoutMs,
-      client: options.wsaClient, capabilities: options.wsaCapabilities }), now, 'WSA_UNEXPECTED_ERROR'),
-    timed(() => (options.runSearch1Api || defaultRunSearch1Api)(args, { environment, timeoutMs: commercialTimeoutMs,
-      fetchImpl: options.search1ApiFetch, signal: options.signal }), now, 'SEARCH1API_UNEXPECTED_ERROR'),
-  ]);
+  const remaining = () => Math.max(0, timeoutMs - elapsed(startedAt, now()));
+  let selection = { provider: 'both', diagnostic: { status: 'skipped', code: 'PROVIDER_EXPERIMENT_DISABLED' } };
+  if (String(environment.JEV_PROVIDER_SELECTION_ENABLED).toLowerCase() === 'true' && !options.coverageRequired) {
+    const providers = [];
+    if (String(environment.TENCENT_WSA_ENABLED).toLowerCase() !== 'false'
+      && environment.TENCENTCLOUD_SECRET_ID?.trim() && environment.TENCENTCLOUD_SECRET_KEY?.trim()) providers.push('tencent-wsa');
+    if (!['false', '0', 'off'].includes(String(environment.SEARCH1API_ENABLED).toLowerCase())
+      && environment.SEARCH1API_API_KEY?.trim()) providers.push('search1api');
+    selection = await selectProviderCombination({ query: args.query, category: args.category, providers },
+      { ...options, environment, remainingBudgetMs: remaining });
+  }
+  const runWsa = () => timed(() => (options.runWsa || defaultRunWsa)(args, { environment,
+    timeoutMs: Math.max(1, Math.min(commercialTimeoutMs, remaining())),
+    client: options.wsaClient, capabilities: options.wsaCapabilities }), now, 'WSA_UNEXPECTED_ERROR');
+  const runSearch = () => timed(() => (options.runSearch1Api || defaultRunSearch1Api)(args, { environment,
+    timeoutMs: Math.max(1, Math.min(commercialTimeoutMs, remaining())),
+    fetchImpl: options.search1ApiFetch, signal: options.signal }), now, 'SEARCH1API_UNEXPECTED_ERROR');
+  const skipped = () => ({ result: { ok: false, error: { category: 'unavailable', code: 'JEV_PROVIDER_DEFERRED' } }, durationMs: 0 });
+  let wsa;
+  let search1api;
+  if (selection.provider === 'tencent-wsa') {
+    wsa = await runWsa();
+    search1api = wsa.result?.ok || remaining() <= 0 ? skipped() : await runSearch();
+  } else if (selection.provider === 'search1api') {
+    search1api = await runSearch();
+    wsa = search1api.result?.ok || remaining() <= 0 ? skipped() : await runWsa();
+  } else [wsa, search1api] = await Promise.all([runWsa(), runSearch()]);
   const providerDiagnostics = {
+    selection: selection.diagnostic,
     tencentWsa: wsa.result?.ok ? successDiagnostic(wsa.result, wsa.durationMs) : failedDiagnostic(wsa.result, wsa.durationMs),
     search1api: search1api.result?.ok ? successDiagnostic(search1api.result, search1api.durationMs)
       : failedDiagnostic(search1api.result, search1api.durationMs),
