@@ -76,8 +76,12 @@ jest.mock('@/components/Resources/components/ResourceInstallDialog', () => ({
       data-resource-id={resourceId}
       data-target-context={JSON.stringify(targetContext)}
     >
-      <button type="button" onClick={onClose}>close-install</button>
-      <button type="button" onClick={() => onInstallingChange(true)}>start-install</button>
+      <button type="button" onClick={onClose}>
+        close-install
+      </button>
+      <button type="button" onClick={() => onInstallingChange(true)}>
+        start-install
+      </button>
     </div>
   ),
 }));
@@ -438,16 +442,30 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resourceStatus.published')).not.toBeInTheDocument();
   });
 
-  it('shows ownership on official skill posters', () => {
+  it.each([
+    ['personal', 'personalSkill', 'digitalEmployeePersonalTag'],
+    ['enterprise', 'enterpriseSkill', 'digitalEmployeeEnterpriseTag'],
+  ])('places the %s skill ownership tag in the card corner outside the title row', (ownerType, tag, tagClass) => {
     renderWithQueryClient(
       <ResourceCard
         resourceType="SKILL"
         variant="skillPoster"
-        resource={{ resourceId: 'poster', resourceBizType: 'SKILL', ownerType: 'enterprise', resourceStatus: '2' }}
+        resource={{
+          resourceId: 'poster',
+          resourceName: 'A long skill name that should retain its title space',
+          resourceBizType: 'SKILL',
+          ownerType,
+          resourceStatus: '2',
+        }}
         actionConfig={{ enableResourceLifecycle: true, showResourceTypeTag: true }}
       />
     );
-    expect(screen.getByText('resource.tag.enterpriseSkill').parentElement).toHaveClass('digitalEmployeeEnterpriseTag');
+    const badge = screen.getByText(`resource.tag.${tag}`).parentElement!;
+    const title = screen.getByText('A long skill name that should retain its title space');
+    expect(badge).toHaveClass('skillPosterTag', tagClass);
+    expect(badge.parentElement).toHaveClass('skillPosterContent');
+    expect(title.parentElement).toHaveClass('skillPosterHeaderWithTag');
+    expect(title.parentElement).not.toContainElement(badge);
     expect(screen.queryByText('resourceStatus.published')).not.toBeInTheDocument();
   });
 
@@ -1016,6 +1034,12 @@ describe('ResourceCard', () => {
     const installButton = screen.getByRole('button', { name: 'resource.installSkill' });
     expect(installButton).toHaveClass('ant-btn-circle');
     expect(installButton.parentElement).toHaveClass('digitalEmployeeActions');
+    // 下移仅应用于技能海报卡片，普通资源卡片保持原操作区布局。
+    if (variant === 'skillPoster') {
+      expect(installButton.parentElement).toHaveClass('skillPosterActions');
+    } else {
+      expect(installButton.parentElement).not.toHaveClass('skillPosterActions');
+    }
     expect(screen.queryByTestId('resource-menu-install')).toBeNull();
     expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
     fireEvent.click(installButton);

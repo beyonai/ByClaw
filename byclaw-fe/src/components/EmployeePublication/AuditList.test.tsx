@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { message } from 'antd';
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider, message } from 'antd';
 import useEmployeePublicationCapabilities from '@/hooks/useEmployeePublicationCapabilities';
 import {
   getPublication,
@@ -41,7 +41,33 @@ const pending: Publication = {
   canReview: true,
 };
 
+// 保留真实审核表格和确认弹窗，禁用动画以稳定 JSDOM 中的可见性判断。
+const render = (ui: Parameters<typeof renderComponent>[0]) =>
+  renderComponent(ui, {
+    wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+  });
+
+async function openApprovalConfirmation() {
+  const approve = await screen.findByRole('button', { name: '通过并发布' });
+  // 预览返回后才打开确认弹窗，先等待异步状态更新，再在弹窗内查找操作。
+  await act(async () => {
+    fireEvent.click(approve);
+  });
+  return within(screen.getByRole('dialog', { name: '确认发布到官方推荐' }));
+}
+
+async function continuePublication(dialog: ReturnType<typeof within>) {
+  const confirm = dialog.getByRole('button', { name: '确认并继续发布' });
+  expect(confirm).toBeEnabled();
+  await act(async () => {
+    fireEvent.click(confirm);
+  });
+}
+
 describe('publication approval in the audit list', () => {
+  // 全量钩子同时渲染真实表格与弹窗，只增加用例总预算，不延长查找/断言超时。
+  jest.setTimeout(15000);
+
   beforeEach(() => {
     jest.clearAllMocks();
     (previewPublication as jest.Mock)
@@ -55,7 +81,7 @@ describe('publication approval in the audit list', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('keeps the approval kind switch alongside publication filters', async () => {
-    render(<PublicationAuditList initialReview toolbarExtra={<button>approval kind switch</button>} />);
+    render(<PublicationAuditList initialReview toolbarExtra={<button type="button">approval kind switch</button>} />);
     await screen.findByText('待发布员工');
     const kinds = screen.getByRole('button', { name: 'approval kind switch' });
     const filters = screen.getByText('发布审核及记录').closest('.ant-segmented')!;
@@ -82,8 +108,7 @@ describe('publication approval in the audit list', () => {
       dependencies: [],
     });
     render(<PublicationAuditList initialReview onAuditComplete={onAuditComplete} />);
-    fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
-    fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
+    await continuePublication(await openApprovalConfirmation());
     await waitFor(() => expect(onAuditComplete).toHaveBeenCalledTimes(1));
   });
 
@@ -128,15 +153,16 @@ describe('publication approval in the audit list', () => {
     (previewPublication as jest.Mock).mockResolvedValue(fresh);
     (publicationUrl as jest.Mock).mockReturnValue('/digitalEmployeesCreate?publicationId=100');
     render(<PublicationAuditList />);
-    fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
-    const dialog = within(await screen.findByRole('dialog'));
+    const dialog = await openApprovalConfirmation();
     expect(previewPublication).toHaveBeenCalledWith(pending);
     expect(dialog.getByText('原始个人技能')).toBeInTheDocument();
     expect(dialog.getByText('原有授权用户')).toBeInTheDocument();
     expect(dialog.getByText('无法生成技能副本')).toBeInTheDocument();
     expect(dialog.getByText('保留原技能，未获授权的用户无法使用')).toBeInTheDocument();
     expect(dialog.getByRole('button', { name: '确认并继续发布' })).toBeEnabled();
-    fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
+    });
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/digitalEmployeesCreate?publicationId=100'));
     expect(publicationAction).not.toHaveBeenCalled();
   });
@@ -158,8 +184,7 @@ describe('publication approval in the audit list', () => {
       dependencies: [{ resourceId: '20', name: '私有工具', action: 'REFERENCE_TOOL', warning: '部分工具可能不可用' }],
     });
     render(<PublicationAuditList />);
-    fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
-    fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
+    await continuePublication(await openApprovalConfirmation());
     await waitFor(() => expect(warning).toHaveBeenCalledWith('部分关联资源可能不可用，请进入申请详情查看可用性提醒'));
     expect(message.error).not.toHaveBeenCalled();
   });
@@ -168,10 +193,10 @@ describe('publication approval in the audit list', () => {
     const published = { ...pending, status: 'PUBLISHED', revision: 5, canReview: false };
     (publicationAction as jest.Mock).mockResolvedValue({ publication: published, dependencies: [] });
     render(<PublicationAuditList />);
-    fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
+    const dialog = await openApprovalConfirmation();
     expect(publicationAction).not.toHaveBeenCalled();
     (listPublications as jest.Mock).mockResolvedValue({ list: [published], total: 1 });
-    fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
+    await continuePublication(dialog);
     await waitFor(() => expect(publicationAction).toHaveBeenCalledWith('approve', pending));
     await screen.findByText('已发布');
     expect(screen.queryByRole('button', { name: '通过并发布' })).not.toBeInTheDocument();
@@ -204,12 +229,9 @@ describe('publication approval in the audit list', () => {
     const failed = { ...pending, status: 'FAILED', publishError: '运行配置同步失败', revision: 5 };
     (publicationAction as jest.Mock).mockResolvedValue({ publication: failed });
     render(<PublicationAuditList />);
-    fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
+    const dialog = await openApprovalConfirmation();
     (listPublications as jest.Mock).mockResolvedValue({ list: [failed], total: 1 });
-    const confirm = await screen.findByRole('button', { name: '确认并继续发布' });
-    await act(async () => {
-      fireEvent.click(confirm);
-    });
+    await continuePublication(dialog);
     await waitFor(() => expect(listPublications).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole('button', { name: '重试发布' }, { timeout: 5000 })).toBeInTheDocument();
     expect(message.error).toHaveBeenCalledWith('运行配置同步失败');
@@ -219,8 +241,7 @@ describe('publication approval in the audit list', () => {
   it('refreshes a stale request after the server rejects its revision', async () => {
     (publicationAction as jest.Mock).mockRejectedValue(new Error('申请已被修改，请刷新后再操作'));
     render(<PublicationAuditList />);
-    fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
-    fireEvent.click(await screen.findByRole('button', { name: '确认并继续发布' }));
+    await continuePublication(await openApprovalConfirmation());
     await waitFor(() => expect(listPublications).toHaveBeenCalledTimes(2));
     expect(message.error).toHaveBeenCalledWith('申请已被修改，请刷新后再操作');
     expect(message.success).not.toHaveBeenCalled();
