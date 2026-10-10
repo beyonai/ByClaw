@@ -4,6 +4,18 @@ import { SqlSessionRepository } from "../src/infrastructure/persistence/session-
 import type { SqlSession } from "../src/application/database-ports.js";
 
 describe("tenant session query", () => {
+  it("binds tenant, actor and parent when reading private task children", async () => {
+    const sql = vi.fn(async () => []);
+    const query = new SessionQueries(new SqlSessionRepository({ query: sql }, "123"));
+    await query.children("8", "8011237409000000345", 2, 50);
+    expect(sql).toHaveBeenCalledTimes(2);
+    for (const [statement, params] of sql.mock.calls) {
+      expect(statement).toContain("enterprise_id=$1 AND creator_id=$2 AND parent_session_id=$3");
+      expect(statement).toContain("NOT IN('CLOSED','GROUP_CHAT_ROUTING')");
+      expect(params.slice(0, 3)).toEqual(["123", "8", "8011237409000000345"]);
+    }
+    expect(sql.mock.calls[1][1]).toEqual(["123", "8", "8011237409000000345", 50, 50]);
+  });
   it("filters agent history inside the tenant and actor boundary", async () => {
     const sql = vi.fn(async () => []);
     const query = new SessionQueries(new SqlSessionRepository({ query: sql }, "123"));

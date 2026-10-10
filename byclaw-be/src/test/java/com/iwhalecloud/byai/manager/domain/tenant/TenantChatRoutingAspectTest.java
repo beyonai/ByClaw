@@ -59,6 +59,24 @@ class TenantChatRoutingAspectTest {
     }
 
     @Test
+    void tenantTaskChildrenUseAnAuthorizedNodeEndpoint() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(8L, 123L, "OWNER");
+        TenantRequestContextHolder.set(context);
+        ByaiSessionQo query = new ByaiSessionQo();
+        query.setParentSessionId(8011237409000000345L);
+        query.setPageNum(1);
+        query.setPageSize(100);
+        String path = "/internal/v1/sessions/8011237409000000345/children?pageNum=1&pageSize=100";
+        when(node.request(eq(context), eq("GET"), eq(path), eq(null), any()))
+            .thenReturn(new Page<>(java.util.List.of(), 0L, 1, 100, 0));
+        ProceedingJoinPoint call = call("qryConversations", query);
+        ResponseUtil<?> result = (ResponseUtil<?>) aspect.route(call);
+        assertThat(result.getCode()).isZero();
+        verify(node).request(eq(context), eq("GET"), eq(path), eq(null), any());
+        verify(call, org.mockito.Mockito.never()).proceed();
+    }
+
+    @Test
     void tenantChatCanLoadItsExactSessionAfterRefresh() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(8L, 123L, "OWNER");
         TenantRequestContextHolder.set(context);

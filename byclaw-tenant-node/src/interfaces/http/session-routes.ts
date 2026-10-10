@@ -15,6 +15,24 @@ export function sessionRoutes(
     const body = record(req.body);
     return queries.list(requireId(req.headers["x-actor-user-id"]), body);
   });
+  app.get<{ Params: { id: string }; Querystring: { pageNum?: string; pageSize?: string } }>(
+    "/internal/v1/sessions/:id/children",
+    async (req) => {
+      const actor = requireId(req.headers["x-actor-user-id"]);
+      const parentId = requireId(req.params.id);
+      await history.access(actor, parentId);
+      const page = await queries.children(
+        actor,
+        parentId,
+        req.query.pageNum === undefined ? undefined : Number(req.query.pageNum),
+        req.query.pageSize === undefined ? undefined : Number(req.query.pageSize),
+      );
+      const list = await Promise.all(
+        page.list.map((child) => history.access(actor, child.sessionId)),
+      );
+      return { ...page, list };
+    },
+  );
   app.get<{ Params: { id: string } }>("/internal/v1/sessions/:id", async (req) =>
     history.access(requireId(req.headers["x-actor-user-id"]), req.params.id),
   );

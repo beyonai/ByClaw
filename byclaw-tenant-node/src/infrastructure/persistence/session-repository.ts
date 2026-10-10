@@ -6,6 +6,20 @@ export class SqlSessionRepository implements SessionRepository {
     private readonly db: SqlSession,
     private readonly enterpriseId: string,
   ) {}
+  async children(actor: string, parentId: string, page: number, size: number) {
+    const params = [this.enterpriseId, actor, parentId];
+    const where =
+      "enterprise_id=$1 AND creator_id=$2 AND parent_session_id=$3 AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING')";
+    const [total] = await this.db.query(
+      `SELECT COUNT(*) AS count FROM byai.byai_session WHERE ${where}`,
+      params,
+    );
+    const list = await this.db.query(
+      `SELECT session_id::text AS "sessionId",parent_session_id::text AS "parentSessionId",object_id::text AS "objectId",object_type AS "objectType",state,session_name AS "sessionName",session_type AS "sessionType",session_content AS "sessionContent",creator_id::text AS "creatorId",enterprise_id::text AS "enterpriseId",project_id::text AS "projectId",create_time AS "createTime",update_time AS "updateTime" FROM byai.byai_session WHERE ${where} ORDER BY update_time DESC,session_id DESC LIMIT $4 OFFSET $5`,
+      [...params, size, (page - 1) * size],
+    );
+    return { list, total: Number(total?.count ?? 0), pageNum: page, pageSize: size };
+  }
   async list(
     actor: string,
     page: number,

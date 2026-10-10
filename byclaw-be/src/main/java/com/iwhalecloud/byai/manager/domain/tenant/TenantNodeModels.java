@@ -46,7 +46,14 @@ public final class TenantNodeModels {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record SessionView(String sessionId, String sessionName, String sessionType,
                               String createTime, String updateTime, String sessionContent,
-                              String creatorId, String enterpriseId, String projectId) {
+                              String creatorId, String enterpriseId, String projectId,
+                              String parentSessionId, String state, String objectId, String objectType) {
+        public SessionView(String sessionId, String sessionName, String sessionType,
+                           String createTime, String updateTime, String sessionContent,
+                           String creatorId, String enterpriseId, String projectId) {
+            this(sessionId, sessionName, sessionType, createTime, updateTime, sessionContent,
+                creatorId, enterpriseId, projectId, null, null, null, null);
+        }
     }
 
     public record MessageQuery(String sessionId, int pageNum, int pageSize) {

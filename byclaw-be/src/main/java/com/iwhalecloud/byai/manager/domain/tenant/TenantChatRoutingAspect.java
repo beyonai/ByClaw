@@ -102,8 +102,21 @@ public class TenantChatRoutingAspect {
                         new TypeReference<SessionView>() { });
                     return ResponseUtil.successResponse(new Page<>(List.of(session), 1, 1, 1, 1));
                 }
-                if (query.getParentSessionId() != null || query.getObjectId() != null
-                    || query.getObjectType() != null) {
+                if (query.getParentSessionId() != null) {
+                    if (query.getParentSessionId() <= 0 || query.getObjectId() != null
+                        || query.getObjectType() != null || query.getSessionType() != null
+                            && !query.getSessionType().isEmpty()) throw unsupported();
+                    int pageNum = query.getPageNum() == null ? 1 : query.getPageNum();
+                    int pageSize = query.getPageSize() == null ? 100 : query.getPageSize();
+                    if (pageNum < 1 || pageNum > 100000 || pageSize < 1 || pageSize > 100) throw badRequest();
+                    Page<SessionView> page = node.request(context, "GET",
+                        "/internal/v1/sessions/" + query.getParentSessionId() + "/children?pageNum="
+                            + pageNum + "&pageSize=" + pageSize, null,
+                        new TypeReference<Page<SessionView>>() { });
+                    return ResponseUtil.successResponse(new Page<>(page.list(), page.total(), page.pageNum(),
+                        page.pageSize(), page.pageSize() <= 0 ? 0 : (int) Math.ceil((double) page.total() / page.pageSize())));
+                }
+                if (query.getObjectId() != null || query.getObjectType() != null) {
                     throw unsupported();
                 }
                 List<String> types = query.getSessionType() == null || query.getSessionType().isEmpty()
