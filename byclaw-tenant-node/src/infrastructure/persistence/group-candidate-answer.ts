@@ -1,3 +1,4 @@
+import { truncateUtf8 } from "../../domain/values.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type { AnswerState, MirrorEnvelope } from "../../domain/mirror.js";
 import { DomainError } from "../../domain/errors.js";
@@ -70,7 +71,7 @@ export async function projectGroupCandidateAnswer(
     Boolean(value.taskName.trim()) &&
     (value.ackText == null ||
       (typeof value.ackText === "string" && value.ackText.length <= 1048576));
-  const taskName = declaredTask ? value.taskName.trim().slice(0, 255) : null;
+  const taskName = declaredTask ? truncateUtf8(value.taskName.trim(), 255) : null;
   if (candidate.disposition === "UNKNOWN" && sameDispatch && value.kind === "CHAT" && !terminal) {
     await db.query(
       "UPDATE byai.byai_group_chat_execution SET disposition='CHAT',disposition_time=CURRENT_TIMESTAMP WHERE candidate_session_id=$1 AND disposition='UNKNOWN' AND status='RUNNING'",

@@ -313,3 +313,7 @@ BE 到 Node 的镜像协议中，`AnswerDelta.seq` 是渲染顺序计数器，�
 租户子会话实时订阅通过 HEARTBEAT 的字符串 `scopedSessionId` 选择；BE 在更新频道前调用 Node 会话读取接口校验用户权限。空字符串取消订阅，拒绝访问时保留原订阅；HACU 心跳保留选中会话，重连的企业切换确认后恢复订阅。
 
 任务页 `/api/v1/sessionResources/query` 必须携带租户上下文并经过 BE 租户校验，随后从 Node 授权读取会话；未绑定项目（含 `projectId=-1`）的父子任务返回空资源页，不查询平台个人会话。
+
+租户话题列表路由到 Node 的 `/group-chats/{id}/topics` 集合，不能用群详情响应替代列表；话题消息继续使用对应 topicId 的消息接口。文件页共用 HACU 的任务文件、工作组云盘和对话上传组件及现有文件资源接口，不新增租户专属文件存储。
+
+租户候选任务标题和模型声明的任务名称按 UTF-8 字节限制截断到 255 字节，保留完整 Unicode 字符，兼容 openGauss VARCHAR 字节上限；群消息正文完整保留。回归覆盖长中文和 emoji 消息。

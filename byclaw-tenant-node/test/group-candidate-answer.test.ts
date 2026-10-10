@@ -141,7 +141,7 @@ describe("tenant single-mention classification", () => {
     const { project, tasks, disposition, candidate } = setup();
     await project("TERMINAL", { groupDisposition: { ...disposition, taskName: "中".repeat(300) } });
     expect(tasks()).toHaveLength(1);
-    expect(tasks()[0]![1]).toContain("中".repeat(255));
+    expect(tasks()[0]![1]).toContain("中".repeat(85));
     expect(candidate.disposition).toBe("TASK");
   });
   it("rejects a terminal answer from a different execution trace", async () => {

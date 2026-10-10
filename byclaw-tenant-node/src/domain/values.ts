@@ -23,3 +23,16 @@ export const text = (value: unknown, max: number, required = false): string => {
   return value;
 };
 export const next = (version: string) => (BigInt(version) + 1n).toString();
+
+/** openGauss VARCHAR limits use UTF-8 bytes; never split a Unicode code point. */
+export function truncateUtf8(value: string, maxBytes: number): string {
+  let bytes = 0;
+  let result = "";
+  for (const character of value) {
+    const size = Buffer.byteLength(character);
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    result += character;
+  }
+  return result;
+}

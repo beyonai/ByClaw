@@ -87,7 +87,7 @@ public class TenantGroupChatRoutingAspect {
                     return ResponseUtil.successResponse(list(context, pageNum, pageSize));
                 }
                 if (path != null && args.length == 3) {
-                    return read(context, topicPath(path, args[1], args[2]));
+                    return read(context, topicPath(path + "/topics", args[1], args[2]));
                 }
                 throw unsupported();
             }
