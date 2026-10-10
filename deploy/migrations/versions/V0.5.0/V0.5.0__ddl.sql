@@ -479,6 +479,7 @@ ALTER TABLE byai.permission_group_categories ADD PRIMARY KEY (id);
 ALTER TABLE byai.permission_group_excluded_objects ADD PRIMARY KEY (id);
 ALTER TABLE byai.permission_group_resources ADD PRIMARY KEY (id);
 ALTER TABLE byai.permission_groups ADD PRIMARY KEY (id);
+ALTER TABLE byai.po_enterprise_info ADD PRIMARY KEY (enterprise_id);
 ALTER TABLE byai.po_login_log ADD PRIMARY KEY (log_id);
 ALTER TABLE byai.po_manage_log ADD PRIMARY KEY (log_id);
 ALTER TABLE byai.po_organization ADD PRIMARY KEY (org_id);
