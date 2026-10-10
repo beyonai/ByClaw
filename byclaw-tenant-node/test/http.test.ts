@@ -10,10 +10,11 @@ function setup(ready = true) {
   const execute = vi.fn(async () => ({ committed: true }));
   const apply = vi.fn(async () => undefined);
   const groupNameCheck = vi.fn(async () => ({ exists: false }));
+  const groupProjectAccess = vi.fn(async () => ({ bound: true, canRead: true }));
   const services = {
     commands: { execute },
     mirror: { apply },
-    history: { detail: vi.fn(async () => ({ sessionId: "30" })), groupNameCheck },
+    history: { detail: vi.fn(async () => ({ sessionId: "30" })), groupNameCheck, groupProjectAccess },
     sessions: {},
     schema: { accept: vi.fn(async () => ({ status: "PENDING" })) },
     connected: () => true,
@@ -25,10 +26,34 @@ function setup(ready = true) {
   const verify = vi.fn();
   const app = createApp(config, services, {}, { verifyClient: verify, logger: false });
   apps.push(app);
-  return { app, execute, apply, verify, groupNameCheck };
+  return { app, execute, apply, verify, groupNameCheck, groupProjectAccess };
 }
 const headers = { "x-enterprise-id": "10", "x-tenant-generation": "7", "x-actor-user-id": "20" };
 describe("protected tenant HTTP", () => {
+  it("checks project cloud access using the authenticated actor and tenant", async () => {
+    const s = setup();
+    const response = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/project-access",
+      headers,
+      payload: { projectId: "50", actor: "21" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ bound: true, canRead: true });
+    expect(s.groupProjectAccess).toHaveBeenCalledWith("20", "50");
+    for (const invalid of [
+      { headers: { ...headers, "x-enterprise-id": "11" }, payload: { projectId: "50" } },
+      { headers, payload: { projectId: 50 } },
+    ]) {
+      const denied = await s.app.inject({
+        method: "POST",
+        url: "/internal/v1/group-chats/project-access",
+        ...invalid,
+      });
+      expect(denied.statusCode).toBeGreaterThanOrEqual(400);
+    }
+    expect(s.groupProjectAccess).toHaveBeenCalledOnce();
+  });
   it("checks group names using the trusted actor and rejects foreign tenants", async () => {
     const s = setup();
     const response = await s.app.inject({

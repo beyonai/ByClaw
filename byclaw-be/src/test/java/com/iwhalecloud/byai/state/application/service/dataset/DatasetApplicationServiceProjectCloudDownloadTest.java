@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +34,12 @@ import org.mockito.ArgumentCaptor;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantProjectCloudAccessService;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
 
 @ExtendWith(MockitoExtension.class)
 class DatasetApplicationServiceProjectCloudDownloadTest {
@@ -64,7 +71,60 @@ class DatasetApplicationServiceProjectCloudDownloadTest {
 
     @AfterEach
     void restoreMessages() {
+        CurrentUserHolder.clearLoginInfo();
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", originalMessageSource);
+    }
+
+    @Test
+    void invitedTenantMemberCanListAndDownloadWithoutPlatformMembership() throws Exception {
+        LoginInfo login = new LoginInfo();
+        login.setUserId(10000077L);
+        login.setUserCode("member");
+        CurrentUserHolder.setLoginInfo(login);
+        Project project = new Project();
+        project.setProjectId(11246210L);
+        project.setEnterpriseId(11237409L);
+        project.setCreateBy(10000118L);
+        project.setDeleteFlag("0");
+        project.setCloudResourceId(11246212L);
+        SsResource cloud = new SsResource();
+        cloud.setResourceId(11246212L);
+        cloud.setResourceCode("project-cloud");
+        cloud.setResourceBizType("KG_CLOUD");
+        ProjectService projects = mock(ProjectService.class);
+        ProjectMemberService members = mock(ProjectMemberService.class);
+        TenantProjectCloudAccessService tenantCloud = mock(TenantProjectCloudAccessService.class);
+        AuthApplicationService actualAuth = new AuthApplicationService();
+        ReflectionTestUtils.setField(actualAuth, "projectService", projects);
+        ReflectionTestUtils.setField(actualAuth, "projectMemberService", members);
+        ReflectionTestUtils.setField(actualAuth, "tenantProjectCloudAccessService", tenantCloud);
+        ReflectionTestUtils.setField(service, "authApplicationService", actualAuth);
+        when(projects.findByCloudResourceId(11246212L)).thenReturn(List.of(project));
+        when(tenantCloud.canRead(project)).thenReturn(true);
+        when(ssResourceService.findById(11246212L)).thenReturn(cloud);
+        PythonBuildResponse<Data> result = new PythonBuildResponse<>();
+        result.setResultCode("0");
+        result.setResultObject(new Data());
+        when(feignPythonBuildService.listDir(any(KbListDir.class), eq(11246212L))).thenReturn(result);
+        when(feignPythonBuildService.fileDownload(any(KbFileDownload.class), eq(11246212L)))
+            .thenReturn(new ByteArrayInputStream(new byte[] { 42 }));
+        DirAndFileQo request = new DirAndFileQo();
+        request.setResourceId(11246212L);
+        request.setDirectoryPath("/");
+
+        assertThat(service.queryDirAndFileByLevel(request)).isEmpty();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        service.download(11246212L, "/file.md", response);
+        assertThat(response.getContentAsByteArray()).containsExactly((byte) 42);
+
+        when(tenantCloud.canRead(project)).thenReturn(false);
+        assertThatThrownBy(() -> service.queryDirAndFileByLevel(request))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.cloud.access.denied");
+        assertThatThrownBy(() -> service.download(11246212L, "/file.md", new MockHttpServletResponse()))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.cloud.access.denied");
+        verify(feignPythonBuildService).listDir(any(KbListDir.class), eq(11246212L));
+        verify(feignPythonBuildService).fileDownload(any(KbFileDownload.class), eq(11246212L));
+        verifyNoInteractions(members);
     }
 
     @Test
@@ -124,7 +184,7 @@ class DatasetApplicationServiceProjectCloudDownloadTest {
         request.setDirectoryPath("/");
 
         assertThatThrownBy(() -> service.queryDirAndFileByLevel(request))
-            .isInstanceOf(IllegalArgumentException.class).hasMessage("user.permission.nopermission");
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.cloud.access.denied");
         verifyNoInteractions(feignPythonBuildService);
     }
 
@@ -140,9 +200,9 @@ class DatasetApplicationServiceProjectCloudDownloadTest {
         request.setDirectoryPath("/");
 
         assertThatThrownBy(() -> service.queryDirAndFileByLevel(request))
-            .isInstanceOf(IllegalArgumentException.class).hasMessage("user.permission.nopermission");
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.cloud.access.denied");
         assertThatThrownBy(() -> service.download(9001L, "/file.md", new MockHttpServletResponse()))
-            .isInstanceOf(IllegalArgumentException.class).hasMessage("user.permission.nopermission");
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.cloud.access.denied");
         verifyNoInteractions(feignPythonBuildService);
     }
 }

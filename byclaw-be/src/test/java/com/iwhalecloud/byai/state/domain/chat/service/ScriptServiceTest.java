@@ -113,6 +113,66 @@ class ScriptServiceTest {
     }
 
     @Test
+    void tenantBackgroundInputCreatesTheFrontendContextThroughTheTenantChannel() {
+        MultiDeviceBroadcastService broadcast = mock(MultiDeviceBroadcastService.class);
+        ReflectionTestUtils.setField(service, "multiDeviceBroadcastService", broadcast);
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.sessionId = 20L;
+        ctx.userId = 1001L;
+        ctx.tenantContext = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(1001L, 10L, "MEMBER");
+        ctx.assistantChatDto.setClientRequestId("group-source-agent");
+        ctx.assistantChatDto.setAgentId(90L);
+        ctx.askMsg = new ByaiMessageHotDtoDto();
+        ctx.askMsg.setSessionId(20L);
+        ctx.askMsg.setMessageId(22L);
+
+        ReflectionTestUtils.invokeMethod(service, "broadcastUserMessage", ctx);
+
+        var message = org.mockito.ArgumentCaptor.forClass(com.alibaba.fastjson.JSONObject.class);
+        verify(broadcast).broadcastTenantRawToUser(eq(ctx.tenantContext), message.capture(), isNull());
+        assertThat(message.getValue().getString("type")).isEqualTo("NEW_MESSAGE");
+        assertThat(message.getValue().getString("clientRequestId")).isEqualTo("group-source-agent");
+        assertThat(message.getValue().getLong("sessionId")).isEqualTo(20L);
+        verify(broadcast, never()).broadcastRawToUser(any(), any(), any());
+
+        ctx.suppressUserEvents = true;
+        org.mockito.Mockito.clearInvocations(broadcast);
+        ReflectionTestUtils.invokeMethod(service, "broadcastUserMessage", ctx);
+        org.mockito.Mockito.verifyNoInteractions(broadcast);
+    }
+
+    @Test
+    void tenantBackgroundInitializationUsesTheTenantChatStream() {
+        MultiDeviceBroadcastService broadcast = mock(MultiDeviceBroadcastService.class);
+        ReflectionTestUtils.setField(service, "multiDeviceBroadcastService", broadcast);
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.sessionId = 20L;
+        ctx.userId = 1001L;
+        ctx.modelAnswerMessageId = 21L;
+        ctx.userMessageId = 22L;
+        ctx.traceId = "task-trace";
+        ctx.clientRequestId = "group-source-agent";
+        ctx.tenantContext = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(1001L, 10L, "MEMBER");
+
+        ReflectionTestUtils.invokeMethod(service, "broadcastInitEvent", ctx);
+
+        var event = org.mockito.ArgumentCaptor.forClass(com.alibaba.fastjson.JSONObject.class);
+        verify(broadcast).broadcastTenantRawEvent(eq(ctx.tenantContext), eq(20L), event.capture(),
+            isNull(), eq("group-source-agent"));
+        assertThat(event.getValue().getString("event_type")).isEqualTo("initialization");
+        assertThat(event.getValue().getString("trace_id")).isEqualTo("task-trace");
+        var payload = com.alibaba.fastjson.JSONObject.parseObject(event.getValue().getString("data"));
+        assertThat(payload.getLong("messageId")).isEqualTo(21L);
+        assertThat(payload.getLong("queryMessageId")).isEqualTo(22L);
+        verify(broadcast, never()).broadcastToUserDevices(any(), any(), any(), any(), any());
+
+        ctx.suppressUserEvents = true;
+        org.mockito.Mockito.clearInvocations(broadcast);
+        ReflectionTestUtils.invokeMethod(service, "broadcastInitEvent", ctx);
+        org.mockito.Mockito.verifyNoInteractions(broadcast);
+    }
+
+    @Test
     void flushFromSnapshotPersistsBothCompletionSignals() {
         RunningChatSnapshotService snapshotService = mock(RunningChatSnapshotService.class);
         ByaiMessageHotService messageHotService = mock(ByaiMessageHotService.class);

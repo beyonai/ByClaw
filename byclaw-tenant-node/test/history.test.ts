@@ -9,6 +9,7 @@ import {
 
 function setup() {
   const repo: HistoryRepository = {
+    groupProjectAccess: vi.fn(async () => ({ bound: true, canRead: true })),
     groupNameExists: vi.fn(async () => false),
     session: vi.fn(async (id: string) => ({
       sessionId: id,
@@ -42,6 +43,17 @@ const message = (overrides: Row = {}) => ({
   ...overrides,
 });
 describe("tenant history use cases", () => {
+  it("validates project IDs before reading tenant group membership", async () => {
+    const { repo, service } = setup();
+    await expect(service.groupProjectAccess("21", "50")).resolves.toEqual({
+      bound: true,
+      canRead: true,
+    });
+    expect(repo.groupProjectAccess).toHaveBeenCalledWith("21", "50");
+    expect(() => service.groupProjectAccess("21", "50 OR 1=1")).toThrow("INVALID_ID");
+    expect(() => service.groupProjectAccess("invalid", "50")).toThrow("INVALID_ID");
+    expect(repo.groupProjectAccess).toHaveBeenCalledOnce();
+  });
   it("retains Unicode whitespace exactly as BE's String.trim does", async () => {
     const { repo, service } = setup();
     const name = "\u00a0Team\u00a0";

@@ -26,6 +26,23 @@ export class SqlHistoryRepository implements HistoryRepository {
   groupNameExists(actor: string, name: string) {
     return groupNameExists(this.db, this.tenantId, actor, name);
   }
+  async groupProjectAccess(actor: string, projectId: string) {
+    // 解散群仍算绑定，防止平台旧成员关系重新放行；成员和群都限定当前租户。
+    const [result] = await this.db.query(
+      `SELECT EXISTS (
+        SELECT 1 FROM byai.byai_session s
+        WHERE s.enterprise_id=$1 AND s.project_id=$2 AND s.session_type='hs_as'
+      ) AS "bound", EXISTS (
+        SELECT 1 FROM byai.byai_session s
+        JOIN byai.byai_session_member m ON m.session_id=s.session_id
+        WHERE s.enterprise_id=$1 AND s.project_id=$2 AND s.session_type='hs_as'
+          AND COALESCE(s.state,'ACTIVE') NOT IN ('GROUP_DISSOLVED','GROUP_CHAT_ROUTING','CLOSED')
+          AND m.com_acct_id=$1 AND m.mem_obj_type='USER' AND m.mem_obj_id=$3
+      ) AS "canRead"`,
+      [this.tenantId, projectId, actor],
+    );
+    return { bound: Boolean(result?.bound), canRead: Boolean(result?.canRead) };
+  }
   invitation(actor: string, token: string) {
     return invitationPreview(this.db, this.tenantId, actor, token);
   }

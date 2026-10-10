@@ -23,6 +23,7 @@ export interface MessageFilter {
   endTime?: number;
 }
 export interface HistoryRepository {
+  groupProjectAccess(actor: string, projectId: string): Promise<{ bound: boolean; canRead: boolean }>;
   groupNameExists(actor: string, name: string): Promise<boolean>;
   invitation(actor: string, token: string): Promise<Row>;
   publication(taskId: string): Promise<Row | null>;

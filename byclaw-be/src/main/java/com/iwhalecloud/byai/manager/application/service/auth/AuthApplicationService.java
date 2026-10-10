@@ -8,6 +8,7 @@ import java.util.Objects;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantProjectCloudAccessService;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -167,6 +168,9 @@ public class AuthApplicationService {
 
     @Autowired
     private ProjectMemberService projectMemberService;
+
+    @Autowired
+    private TenantProjectCloudAccessService tenantProjectCloudAccessService;
 
     @Autowired
     private DigitalEmployeeGroupAuthorizationService employeeGroupAuthorizationService;
@@ -1420,6 +1424,11 @@ public class AuthApplicationService {
     }
 
     private boolean isProjectCloudVisible(Project project, Long userId) {
+        // HACU 邀请和链接入群只写租户 Node；读取实时成员关系，也使退群后权限立即失效。
+        Boolean tenantAccess = tenantProjectCloudAccessService.canRead(project);
+        if (tenantAccess != null) {
+            return tenantAccess;
+        }
         // 只有负 ID 的内置默认项目是公共入口，用户自己的默认项目仍需校验归属。
         return ("default".equalsIgnoreCase(project.getProjectType()) && project.getProjectId() != null
             && project.getProjectId() < 0)

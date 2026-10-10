@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.chat.dto;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
 import lombok.Getter;
 import lombok.Setter;
 
@@ -7,6 +10,7 @@ import lombok.Setter;
 @Setter
 public class RunningChatInfo {
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long sessionId;
 
     private Boolean running = false;
@@ -17,10 +21,13 @@ public class RunningChatInfo {
 
     private String clientRequestId;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long userMessageId;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long modelAnswerMessageId;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long taskId;
 
     private String transport;
@@ -29,6 +36,7 @@ public class RunningChatInfo {
 
     private Long ttlSeconds;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long agentId;
 
     private String agentCode;

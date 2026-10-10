@@ -6556,6 +6556,67 @@
         }
       }
     },
+    "/internal/v1/group-chats/project-access": {
+      "post": {
+        "summary": "Check project cloud access against current tenant group membership",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "projectId"
+                ],
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project binding and current group membership; dissolved groups deny access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "bound",
+                    "canRead"
+                  ],
+                  "properties": {
+                    "bound": {
+                      "type": "boolean",
+                      "description": "True for a tenant group binding, including dissolved groups"
+                    },
+                    "canRead": {
+                      "type": "boolean",
+                      "description": "True only for a current human member of an accessible group"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/v1/group-chats/name-check": {
       "post": {
         "summary": "Check active workgroup name within the trusted tenant and creator",

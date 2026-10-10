@@ -58,11 +58,13 @@ public class TenantScopedSessionEventService {
     /** null means personal routing; false means tenant root/team routing may continue. */
     public Boolean handleIfNecessary(Long parentId, JSONObject event) {
         JSONObject metadata = event == null ? null : event.getJSONObject("metadata");
-        if (metadata == null || !List.of("child", "team").contains(metadata.getString("session_scope")))
+        String scope = metadata == null ? null : metadata.getString("session_scope");
+        // Terminal root events may carry metadata without a session scope.
+        if (!"child".equals(scope) && !"team".equals(scope))
             return owner(parentId) == null ? null : false;
         TenantRequestContext tenant = owner(parentId);
         if (tenant == null) return null;
-        if ("child".equals(metadata.getString("session_scope"))) {
+        if ("child".equals(scope)) {
             project(tenant, parentId, List.of(event));
             return true;
         }
