@@ -88,6 +88,7 @@ const tenantChatPaths = new Set([
   '/byaiService/chat/updateMessageStructById',
   '/byaiService/chat/sessionStatus',
   '/byaiService/chat/getTraceIdByMessageId',
+  '/byaiService/api/v1/sessionResources/query',
   '/byaiService/api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents',
 ]);
 

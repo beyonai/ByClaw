@@ -188,6 +188,24 @@ describe('Service Common Request', () => {
     }
   );
 
+  it.each(['/byaiService/api/v1/sessionResources/query'])(
+    'routes session resources %s with the selected tenant context',
+    async (url) => {
+      window.localStorage.setItem('SESSION', 'session-key');
+      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
+      try {
+        await POST(url, {});
+        expect(mockRequest.mock.calls[0][0].headers).toEqual(
+          expect.objectContaining({ 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' })
+        );
+      } finally {
+        clearSelectedEnterprise();
+        window.localStorage.removeItem('SESSION');
+      }
+    }
+  );
+
   it('blocks group task requests when the selected tenant context has expired', async () => {
     window.localStorage.setItem('SESSION', 'session-key');
     const expiresAt = Date.now() + 60000;

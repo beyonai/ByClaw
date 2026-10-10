@@ -41,6 +41,7 @@ public class TenantContextInterceptor implements HandlerInterceptor {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant context token required");
         }
         if (!path.startsWith("/tenantContext/") && !path.startsWith("/assiman/")
+            && !"/api/v1/sessionResources/query".equals(path)
             && !"/project/session/listByQo".equals(path)
             && !"/api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents".equals(path)
             && !path.equals("/group-chats") && !path.startsWith("/group-chats/")
