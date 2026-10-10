@@ -3,6 +3,17 @@ import { requireId, text } from "../domain/values.js";
 import { bounded } from "./history/paging.js";
 
 export interface SessionRepository {
+  children?(
+    actor: string,
+    parentId: string,
+    page: number,
+    size: number,
+  ): Promise<{
+    list: Record<string, any>[];
+    total: number;
+    pageNum: number;
+    pageSize: number;
+  }>;
   list(
     actor: string,
     page: number,
@@ -17,10 +28,21 @@ export interface SessionRepository {
 /** 个人会话查询入口；校验分页及类型，按当前用户查询；私有任务过滤由仓储完成。 */
 export class SessionQueries {
   constructor(private readonly repository: SessionRepository) {}
+  async children(actor: string, parentId: string, page?: number, size?: number) {
+    requireId(actor);
+    requireId(parentId);
+    if (!this.repository.children) throw new DomainError("INVALID_QUERY");
+    return this.repository.children(
+      actor,
+      parentId,
+      bounded(page, 1, 100000),
+      bounded(size, 100, 100),
+    );
+  }
   async list(actor: string, input: Record<string, any>) {
     return this.query(actor, input);
   }
-  async children(actor: string, parentSessionId: string, input: Record<string, any>) {
+  async childrenQuery(actor: string, parentSessionId: string, input: Record<string, any>) {
     return this.query(actor, input, requireId(parentSessionId));
   }
   private async query(actor: string, input: Record<string, any>, parentSessionId?: string) {

@@ -34,6 +34,9 @@ import org.springframework.web.server.ResponseStatusException;
 /** Tenant task scopes come from Node, never from client-supplied execution parameters. */
 @Service
 public class TenantGroupCoordinationService implements ChatGatewayRequestDecorator {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMemberRoutingService memberRouting;
+
     private final TenantNodeClient node;
     private final GroupWorkAssistantService assistants;
     private final SsResourceService resources;
@@ -144,7 +147,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         validateRequest(context.tenantContext, context.assistantChatDto);
         Object scope = context.assistantChatDto.getExtParams().get("groupCoordination");
         if (!(scope instanceof Map<?, ?> map)) return content;
-        gatewayParams.put("groupCoordination", scope);
+        gatewayParams.put("groupCoordination", memberRouting.withRoutes(map, users.findById(context.tenantContext.userId()).getUserCode()));
         GroupChatCoordinationService.attachDshTarget(context.assistantChatDto, map, gatewayParams);
         String coordinatorId = String.valueOf(map.get("coordinatorAgentId"));
         var coordinator = resources.findById(Long.valueOf(coordinatorId));
