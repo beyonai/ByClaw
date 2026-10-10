@@ -165,6 +165,21 @@ CREATE TABLE IF NOT EXISTS byai.byai_group_chat_topic (
 );
 
 
+-- 群消息“收到”确认：每个被@真人用户独立确认，确认不是新的群消息。
+CREATE TABLE IF NOT EXISTS byai.byai_group_chat_message_ack (
+    session_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    user_name VARCHAR(255) NOT NULL,
+    acknowledged_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_group_chat_message_ack PRIMARY KEY (session_id, message_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_chat_message_ack_message
+    ON byai.byai_group_chat_message_ack (session_id, message_id, acknowledged_at);
+
+COMMENT ON TABLE byai.byai_group_chat_message_ack IS '群消息被@真人用户的收到确认，不产生新消息';
+
 COMMENT ON COLUMN byai.byai_session.project_id IS '平台工作组ID；-1表示默认项目';
 
 COMMENT ON COLUMN byai.byai_session.last_seq IS '会话内最后提交的消息序号';

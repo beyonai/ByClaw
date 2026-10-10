@@ -166,7 +166,7 @@ API 路径对应 `command-routes.ts` 和 OpenAPI。HTTP 正常结果是**事务�
 
 确认结果包含 `messageId` 和 `acknowledgements[{messageId,userId,userName,acknowledgedAt}]`，时间为毫秒时间戳。Node 只持久化；BE 提交成功后广播 `MESSAGE_ACK_UPDATED`。群上下文、搜索、消息定位和话题消息返回确认列表及当前用户的 `canAcknowledge`。该操作不推进已读游标，不新增聊天消息。
 
-部署前须在租户数据库中创建 `byai.byai_group_chat_message_ack`；表结构沿用 `deploy/migrations/versions/V0.5.0/V0.5.0__ddl.sql`。主库 SQL 与租户 baseline 是独立制品，仅合并主库建表语句不会更新租户数据库；新租户 baseline 和已有租户升级都需要包含此表。
+`V0.5.0__baseline__ddl.sql` 与打包 ZIP 已包含 `byai.byai_group_chat_message_ack`、联合主键及消息确认查询索引；新租户初始化可直接创建。主库 SQL 与租户 baseline 是独立制品，仅合并主库建表语句不会更新已有租户数据库；已有租户升级仍需由部署执行器检查并补齐此表。2026-10-10 与 229《百应开源》租户库的同引擎 catalog 对照为 15 张表、272 列、43 个索引、21 个约束和 2 个序列，结构及指纹一致。
 
 输入消息保留 INPUT 的 commandId；回答行只保留最近一次已提交的出站 commandId，后续事件会覆盖旧 ID。该接口查询当前行，不保存逐事件审计历史，404 不能作为“事件从未落库”的证明。旧出站事件应结合稳定 answerMessageId、后续消息状态和源流记录对账。
 
