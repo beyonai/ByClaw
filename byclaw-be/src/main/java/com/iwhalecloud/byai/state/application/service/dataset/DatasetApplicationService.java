@@ -681,9 +681,6 @@ public class DatasetApplicationService {
             kbFileImport.setSkipIfDuplicate(skipIfDuplicate);
 
             boolean zipUpload = isZipUpload(multipartFile);
-            if (projectCloud && zipUpload) {
-                validateCloudArchive(ssResource, directoryPath, multipartFile);
-            }
             String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
                 : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
             if (projectCloud && !zipUpload && existingFilePaths.contains(filePath)) {
@@ -811,40 +808,6 @@ public class DatasetApplicationService {
         return response;
     }
 
-    /**
-     * ZIP 不允许隐式覆盖既有条目，避免解压绕过归属检查；需覆盖时使用显式单文件更新。
-     */
-    private void validateCloudArchive(SsResource resource, String directoryPath, MultipartFile file) throws IOException {
-        try (java.util.zip.ZipInputStream zip = new java.util.zip.ZipInputStream(file.getInputStream())) {
-            java.util.zip.ZipEntry entry;
-            int count = 0;
-            long bytes = 0;
-            byte[] buffer = new byte[8192];
-            while ((entry = zip.getNextEntry()) != null) {
-                if (++count > 1000 || entry.getName().startsWith("/") || entry.getName().contains("\\")) {
-                    throw new IllegalArgumentException(I18nUtil.get("dataset.archive.invalid"));
-                }
-                String path = normalizeKnowledgeFilePath(normalizeKnowledgeDirectoryPath(directoryPath) + "/" + entry.getName());
-                if (!entry.isDirectory()) {
-                    int offset = path.lastIndexOf('/');
-                    if (!findExistingKnowledgeFilePaths(resource, path.substring(0, offset + 1),
-                        Collections.singletonList(path.substring(offset + 1))).isEmpty()) {
-                        throw new IllegalArgumentException(I18nUtil.get("dataset.file.exists"));
-                    }
-                }
-                int read;
-                while ((read = zip.read(buffer)) != -1) {
-                    bytes += read;
-                    if (bytes > 100L * 1024 * 1024) {
-                        throw new IllegalArgumentException(I18nUtil.get("dataset.archive.invalid"));
-                    }
-                }
-            }
-            if (count == 0) {
-                throw new IllegalArgumentException(I18nUtil.get("dataset.archive.invalid"));
-            }
-        }
-    }
 
     private boolean isZipUpload(MultipartFile multipartFile) {
         return multipartFile != null && StringUtils.endsWithIgnoreCase(multipartFile.getOriginalFilename(), ".zip");
