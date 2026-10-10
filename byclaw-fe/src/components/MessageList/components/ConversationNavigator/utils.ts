@@ -13,8 +13,6 @@ export type ConversationTurn = {
   totalCount: number;
 };
 
-const SUMMARY_LENGTH = 160;
-
 export const MINIMUM_CONVERSATION_TURNS_FOR_NAVIGATOR = 3;
 
 export const CONVERSATION_NAVIGATOR_ACTIVATION_RATIO = 0.32;
@@ -69,8 +67,8 @@ export const normalizeConversationSummary = (content?: string) => {
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (text.length <= SUMMARY_LENGTH) return text;
-  return `${text.slice(0, SUMMARY_LENGTH)}...`;
+  // 不再截断：tooltip 需展示完整文本（#291），长度由样式中的 max-height + 滚动约束
+  return text;
 };
 
 const selectResolvedDisplayContent = (preferred?: string, fallback?: string) => {

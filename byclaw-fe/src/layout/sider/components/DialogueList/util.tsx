@@ -2,6 +2,8 @@ import dayjs from 'dayjs';
 import { PictureOutlined } from '@ant-design/icons';
 import { isNumber, isNil } from 'lodash';
 
+import { stripThinkingContent } from '@/utils/sessionSummary';
+
 export const formatTime = (updateTimeStr: string, createTime: string) => {
   const myUpdateTimeStr = Number(updateTimeStr) ? Number(updateTimeStr) : updateTimeStr;
   const myCreateTime = Number(createTime) ? Number(createTime) : createTime;
@@ -108,8 +110,14 @@ export const processSessionContent = (content: any): React.ReactNode => {
     return '';
   }
 
+  // 先按行过滤思考态内容（#291），再去 markdown（会折叠换行）
+  const visibleContent = stripThinkingContent(textContent);
+  if (!visibleContent) {
+    return '';
+  }
+
   // 将markdown的代码格式去掉，保留内容即可
-  const handledContent = stripMarkdownContent(textContent);
+  const handledContent = stripMarkdownContent(visibleContent);
   if (/<img\s+[^>]*src=/i.test(handledContent)) {
     // 将图片换成这个icon。暂时发现以这个开头的话，整个内容都是图片了。
     return <PictureOutlined />;
