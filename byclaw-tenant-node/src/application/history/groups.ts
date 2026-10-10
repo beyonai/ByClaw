@@ -12,6 +12,12 @@ import {
 
 /** 群列表、详情、设置及任务读取；私有任务和待发布卡片仅向发起人开放。 */
 export class GroupHistory extends HistoryAccess {
+  // 云盘资源留在平台，项目绑定与真人成员关系必须在当前租户内一起核验。
+  projectAccess(actor: string, projectId: string) {
+    requireId(actor);
+    requireId(projectId);
+    return this.repository.groupProjectAccess(actor, projectId);
+  }
   async nameCheck(actor: string, value: unknown) {
     requireId(actor);
     const name = workgroupName(value);
