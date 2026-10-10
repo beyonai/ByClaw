@@ -6,8 +6,8 @@
     "min": 1,
     "max": 1
   },
-  "sqlSha256": "086820e65a34ac89409f04aedba273214d7e371c5167658ebec5a459f0d3c19b",
-  "catalogDigest": "aa4bb6e4606b2f57e9f5c0d014247a1b709720b71a80e154f2c349dafc8a6973",
+  "sqlSha256": "485a849dfc67cbb32bd1040365bc172ca0a9f4e7510aed738c4971f14b8d82a8",
+  "catalogDigest": "524f5e5b52b83ac480facf98f2fc29411b459d4c535ce38aa30913044e4bda72",
   "objects": [
     {
       "kind": "sequence",
@@ -168,6 +168,10 @@
     {
       "kind": "index",
       "name": "idx_byai_message_session_topic_time"
+    },
+    {
+      "kind": "index",
+      "name": "idx_group_chat_task_running_turn"
     }
   ]
 }

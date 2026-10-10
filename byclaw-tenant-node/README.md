@@ -299,3 +299,9 @@ BE 公共路径保持不变。带租户上下文的群消息、群管理与任�
 `GET /internal/v1/sessions/{id}/children?pageNum=1&pageSize=100` 用于 GROUP_TASK 的成员导航。节点先沿用历史读取规则校验父任务，再按当前企业、当前用户及父会话分页查询，并逐一校验子会话。任务仍需由发起人访问，成员仍需位于原任务调度范围内；普通个人会话列表继续排除群任务。返回会话保留字符串 ID、`parentSessionId`、`state`、`objectId` 和 `objectType`。
 
 BE 的会话资源查询通过节点校验租户会话，不回退查询个人会话库。未关联项目（包括 `projectId=-1`）的已授权租户会话返回空资源页；关联平台项目时继续使用平台项目与数据源权限校验。
+
+### V0.5.0 租户任务轮次基线修复
+
+租户基线及配套 ZIP/manifest 必须包含 `byai_group_chat_task.current_turn_id`、`current_turn_trace_id` 和 `idx_group_chat_task_running_turn`。就绪检查会拒绝缺少轮次字段的库，避免任务续聊在业务阶段才失败。`tenant/V0.5.0__ddl.sql` 为已有租户的同版本补丁；openGauss 不支持 `ADD COLUMN IF NOT EXISTS`，执行器须在同一事务中检查字段存在性及类型，再执行缺失字段的 ALTER，并更新 schema 的 catalog 指纹。该补丁不回填历史任务状态。
+
+生成新基线 manifest 时，应在同引擎的临时空库执行完整基线后，使用 Node 的 `catalogDigest` 计算指纹；已有租户的修复指纹按实际 catalog 计算，不可直接覆盖为新建库指纹。修改 SQL 后须同步生成 `baseline/V0.5.0__baseline.zip` 和 manifest；`packaged-baseline.test.ts` 验证发布 ZIP 与迁移源及 manifest 一致。BE 的打包资源包含该 ZIP，部署时需同步更新。
