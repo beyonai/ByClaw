@@ -1,5 +1,5 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import {
   Alert,
   Button,
@@ -18,6 +18,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import EmployeeGroupMembers from '@/pages/manager/pages/digitalEmployeeMgr/EmployeeDetail/EmployeeGroupMembers';
 import { getAllDigitalEmployeesV2 } from '@/service/digitalEmployees';
+import { publicationErrorMessage } from '@/utils/publicationError';
 import {
   createManagedWorkgroupTemplate,
   deleteManagedWorkgroupTemplate,
@@ -56,6 +57,7 @@ const toCatalogTreeData = (catalogs: any[]) =>
   }));
 
 export default function WorkgroupTemplateMgr() {
+  const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const [allowed, setAllowed] = useState<boolean>();
   const [loading, setLoading] = useState(false);
@@ -73,6 +75,9 @@ export default function WorkgroupTemplateMgr() {
     setLoading(true);
     try {
       setItems((await listManagedWorkgroupTemplates()) || []);
+    } catch (error) {
+      // 列表刷新失败单独提示，避免已保存成功后又显示“模板保存失败”。
+      message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'workgroupTemplate.loadFailed' })));
     } finally {
       setLoading(false);
     }
@@ -175,10 +180,12 @@ export default function WorkgroupTemplateMgr() {
                     setDeletingId(item.template.templateId);
                     try {
                       await deleteManagedWorkgroupTemplate(item.template.templateId, item.template.version);
-                      message.success('模板已删除');
+                      message.success(intl.formatMessage({ id: 'workgroupTemplate.deleteSuccess' }));
                       await reload();
-                    } catch {
-                      message.error('模板删除失败');
+                    } catch (error) {
+                      message.error(
+                        publicationErrorMessage(error, intl.formatMessage({ id: 'workgroupTemplate.deleteFailed' }))
+                      );
                     } finally {
                       setDeletingId(undefined);
                     }
@@ -221,11 +228,12 @@ export default function WorkgroupTemplateMgr() {
             try {
               if (editing) await updateManagedWorkgroupTemplate(editing.template.templateId, payload);
               else await createManagedWorkgroupTemplate(payload);
-              message.success('模板保存成功');
+              message.success(intl.formatMessage({ id: 'workgroupTemplate.saveSuccess' }));
               close();
               await reload();
-            } catch {
-              message.error('模板保存失败');
+            } catch (error) {
+              // 请求层会将接口 msg 作为字符串拒绝；保留具体原因并保留表单供修正后重试。
+              message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'workgroupTemplate.saveFailed' })));
             } finally {
               savingRef.current = false;
               setSaving(false);

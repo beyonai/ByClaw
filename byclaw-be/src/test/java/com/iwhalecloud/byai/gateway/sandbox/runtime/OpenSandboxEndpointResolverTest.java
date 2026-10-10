@@ -86,6 +86,49 @@ class OpenSandboxEndpointResolverTest {
             .containsEntry("svc-2000", "/v1/sandboxes/sb-3/proxy/2000");
     }
 
+    @Test
+    void resolve_tcpPortUsesPublishedHostPortForJdbc() {
+        OpenSandboxClient client = mock(OpenSandboxClient.class);
+        when(client.getSandboxEndpoint("db-1", 5432, true))
+            .thenReturn(new SandboxEndpoint("127.0.0.1:57865", null));
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setServicePort(5432);
+        spec.setPorts(List.of(port(5432, "opengauss", "tcp")));
+        SandboxRuntimeInstance instance = SandboxRuntimeInstance.builder().sandboxId("db-1").build();
+
+        List<String> endpoints = new OpenSandboxEndpointResolver(client, new SandboxProperties()).resolve(instance, spec);
+
+        assertThat(endpoints).containsExactly("tcp://127.0.0.1:57865");
+        assertThat(instance.getInstanceEndpoints()).containsEntry("opengauss", "tcp://127.0.0.1:57865");
+    }
+
+    @Test
+    void tcpPortRequestsInternalEndpointInsteadOfKubernetesIngressPath() throws Exception {
+        var query = new java.util.concurrent.atomic.AtomicReference<String>();
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/sandboxes/db-k3s/endpoints/5432", exchange -> {
+            query.set(exchange.getRequestURI().getQuery());
+            String endpoint = "resolve_internal=true".equals(query.get())
+                ? "10.42.0.164:5432" : "gateway.example/v1/sandboxes/db-k3s/5432";
+            byte[] response = ("{\"endpoint\":\"" + endpoint + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            try (var body = exchange.getResponseBody()) { body.write(response); }
+        });
+        server.start();
+        try {
+            var properties = new SandboxProperties();
+            properties.getOpensandbox().setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+            var client = new OpenSandboxClient(properties);
+            var spec = new SandboxServiceSpec();
+            spec.setServicePort(5432);
+            spec.setPorts(List.of(port(5432, "opengauss", "tcp")));
+            var instance = SandboxRuntimeInstance.builder().sandboxId("db-k3s").build();
+            assertThat(new OpenSandboxEndpointResolver(client, properties).resolve(instance, spec))
+                .containsExactly("tcp://10.42.0.164:5432");
+            assertThat(query.get()).isEqualTo("resolve_internal=true");
+        } finally { server.stop(0); }
+    }
+
     private PortSpec port(int value, String instance, String protocol) {
         PortSpec portSpec = new PortSpec();
         portSpec.setPort(value);

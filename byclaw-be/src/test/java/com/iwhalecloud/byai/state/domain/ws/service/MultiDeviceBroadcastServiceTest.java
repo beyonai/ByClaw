@@ -17,12 +17,83 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MultiDeviceBroadcastServiceTest {
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void tenantChildProjectionReachesRemoteInstanceWithNoLocalChannel(boolean selected) {
+        var originChannels = mock(ChannelManager.class);
+        when(originChannels.getChannels(7L)).thenReturn(Collections.emptySet());
+        var redis = mock(StringRedisTemplate.class);
+        var source = service("instance-a", originChannels, redis);
+        var own = new EmbeddedChannel();
+        var foreign = new EmbeddedChannel();
+        var personal = new EmbeddedChannel();
+        var enterprise = com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID;
+        own.attr(enterprise).set("10"); foreign.attr(enterprise).set("11");
+        own.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_HEADER).set(java.util.Map.of("scoped-delta-version", "1"));
+        if (selected) own.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_SCOPED_SESSION_ID).set("51");
+        var remoteChannels = mock(ChannelManager.class);
+        when(remoteChannels.getChannels(7L)).thenReturn(Set.of(own, foreign, personal));
+        var remoteRedis = mock(StringRedisTemplate.class);
+        var remote = service("instance-b", remoteChannels, remoteRedis);
+        var projection = JSONObject.parseObject("{\"type\":\"NEW_MESSAGE\",\"sessionId\":\"51\",\"streamId\":\"1-0\","
+            + "\"data\":{\"sessionId\":\"51\",\"messageId\":\"61\",\"messageContent\":\"hello\",\"metadata\":\"{\\\"session_scope\\\":\\\"child\\\",\\\"external_session_id\\\":\\\"member\\\",\\\"external_parent_session_id\\\":\\\"50\\\"}\"}}");
+        try {
+            source.broadcastTenantScopedProjection(7L, 10L, "tenant:10:51", projection, false);
+            ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
+            verify(redis).convertAndSend(eq(MultiDeviceBroadcastService.DEFAULT_PUBSUB_TOPIC), envelope.capture());
+            remote.handleRemoteBroadcast(envelope.getValue());
+            own.runPendingTasks();
+            TextWebSocketFrame frame = own.readOutbound();
+            assertThat(frame).isNotNull();
+            try {
+                var event = JSONObject.parseObject(frame.text());
+                assertThat(event.getString("type")).isEqualTo(selected ? "NEW_MESSAGE" : "SCOPED_SESSION_STATUS");
+                assertThat(event.getString("enterpriseId")).isEqualTo("10");
+            } finally { frame.release(); }
+            assertThat((Object) foreign.readOutbound()).isNull();
+            assertThat((Object) personal.readOutbound()).isNull();
+            verify(remoteRedis, never()).convertAndSend(anyString(), anyString());
+        } finally { own.finishAndReleaseAll(); foreign.finishAndReleaseAll(); personal.finishAndReleaseAll(); }
+    }
+
+    @Test
+    void tenantBroadcastKeepsTheEnterpriseBoundaryAcrossInstances() {
+        EmbeddedChannel own = new EmbeddedChannel();
+        EmbeddedChannel foreign = new EmbeddedChannel();
+        EmbeddedChannel personal = new EmbeddedChannel();
+        var enterprise = com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID;
+        own.attr(enterprise).set("10"); foreign.attr(enterprise).set("11");
+        ChannelManager manager = mock(ChannelManager.class);
+        when(manager.getChannels(7L)).thenReturn(Set.of(own, foreign, personal));
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        var source = service("instance-a", manager, redis);
+        JSONObject event = new JSONObject();
+        event.put("type", "SESSION_RUNTIME_STATUS"); event.put("sessionId", "50");
+        try {
+            assertThat(source.broadcastTenantRawToUser(
+                new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(7L, 10L, "MEMBER"), event, null)).isEqualTo(1);
+            TextWebSocketFrame local = own.readOutbound();
+            assertThat(JSONObject.parseObject(local.text()).getString("enterpriseId")).isEqualTo("10");
+            local.release();
+            ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
+            verify(redis).convertAndSend(eq(MultiDeviceBroadcastService.DEFAULT_PUBSUB_TOPIC), envelope.capture());
+            var remote = service("instance-b", manager, mock(StringRedisTemplate.class));
+            assertThat(remote.handleRemoteBroadcast(envelope.getValue())).isEqualTo(1);
+            TextWebSocketFrame frame = own.readOutbound();
+            assertThat(JSONObject.parseObject(frame.text()).getString("enterpriseId")).isEqualTo("10");
+            frame.release();
+            assertThat((Object) foreign.readOutbound()).isNull();
+            assertThat((Object) personal.readOutbound()).isNull();
+        } finally { own.finishAndReleaseAll(); foreign.finishAndReleaseAll(); personal.finishAndReleaseAll(); }
+    }
 
     @Test
     void broadcastRawToUser_sendsLocallyThenPublishesForOtherInstances() {

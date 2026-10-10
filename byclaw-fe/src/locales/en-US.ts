@@ -1,9 +1,50 @@
+import employeePublication from './en-US/employeePublication';
 import dataSource from './en-US/dataSource';
 import secondEdition from './en-US/secondEdition';
 import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  ...employeePublication,
+  // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
+  'toolCall.defaultTitle': 'Tool call',
+  'chatBI.dragFileHere': 'Drop files here. Common spreadsheet and document formats are supported, up to 100 MB.',
+  'common.noPermissionOperation': 'Your current role does not have permission to perform this operation',
+  'resource.import.finish': 'Finish',
+  'common.back': 'Back',
+  'resource.import.failedSummary': '{failedCount} items failed. Resolve the failed items and try again.',
+  'resource.import.createdRange': 'Created items',
+  'resource.import.updatedRange': 'Updated items',
+  'resource.import.viewUpdateDetail': 'View update details',
+  'resource.import.failedRange': 'Failed items',
+  'resource.import.noPermissionUpdate': 'No permission to update',
+  'resource.import.updateDetailTitle': 'Update details for {name}',
+  'resource.import.diffSection': 'Change category',
+  'resource.import.diffField': 'Field',
+  'resource.import.diffBefore': 'Before update',
+  'resource.import.diffAfter': 'After update',
+  'resource.import.diffDescription': 'Change description',
+  'accessToken.newTokenSuccess': 'New token generated successfully. Copy it now; it will only be shown once.',
+  'accessToken.tokenHint':
+    'These tokens grant API management access to resources within your permissions. Keep them secure.',
+  'common.operateFailed': 'Operation failed',
+  'pagination.selectAll': 'Select all',
+  'pagination.selected': 'Selected ',
+  'pagination.items': ' items',
+  'common.applyTime': 'Application time',
+  'orgMgr.digital.ownerType.personal': 'Personal',
+  'orgMgr.digital.ownerType.enterprise': 'Enterprise',
+  'orgMgr.digital.ownerType.default': 'Default',
+  'common.fail': 'Failed',
+  'operation.testSetResult.previewFail': 'Preview failed',
+  'employeeDetail.debugTip': 'Save changes to the digital employee settings before testing the latest configuration.',
+  'employeeDetail.auditLoading':
+    'Checking your digital employee configuration to improve AI application quality. This takes about 3–10 seconds; please wait.',
+  'publishModal.managerTip':
+    'After publication, this administrator reviews and lists the employee under Managed by me → Pending listing. Once listed, it can serve enterprise members.',
+  'orgMgr.digital.ownerType': 'Ownership',
+  'workSpace.fileView.loadFail': 'Failed to load the file',
+
   'resource.skillExport.single': 'Export skill',
   'resource.skillExport.all': 'Export',
   'resource.skillExport.invalidBundle': 'Invalid skill ZIP or export bundle. Please check the file.',
@@ -275,7 +316,10 @@ export default {
   'resource.tool': 'Tool',
   'resource.installTool': 'Install Tool',
   'resource.rowRefreshFailed': 'Operation succeeded, but this resource could not be refreshed. Please try again later.',
-  'resource.publishToEnterprise': 'Publish to official recommendations',
+  'resource.publishToEnterprise': 'Publish to enterprise',
+  'employeePublication.publishToEnterpriseConfirm': 'Confirm publication to enterprise',
+  'employeePublication.publishedDescription': 'This application has been published to the enterprise.',
+  'employeePublication.approvedAndPublished': 'Approved and published to the enterprise',
   'resource.skillPublicationProgress': 'View publication progress',
   'resource.skillPublicationReviewResult': 'View review result',
   'resource.skillPublicationResult': 'View publication result',
@@ -285,7 +329,7 @@ export default {
     'Your publication request is awaiting administrator review. View it under Skill applications in the approval center.',
   'resource.skillPublicationRejectedDescription':
     'The request was rejected. Edit the personal skill and resubmit to create a new enterprise snapshot while keeping the previous review record.',
-  'resource.skillPublicationPublishedDescription': 'This skill has been published to official recommendations.',
+  'resource.skillPublicationPublishedDescription': 'This skill has been published to the enterprise.',
   'resource.skillPublicationOffShelfDescription':
     'The enterprise copy is off shelf. Manage it in enterprise skills to put it back on shelf; no duplicate copy will be created.',
   'resource.skillPublicationRemovedDescription':
@@ -304,10 +348,10 @@ export default {
   'resource.auditApplicationType': 'Application type',
   'resource.skillPublicationAudit': 'Skill publication',
   'resource.resourceUseAudit': 'Resource access',
-  'resource.publishToEnterpriseSuccess': 'Published to official recommendations',
+  'resource.publishToEnterpriseSuccess': 'Published to enterprise',
   'resource.enterpriseSkillExists': 'An enterprise copy already exists. View or manage it in enterprise skills.',
   'resource.viewEnterpriseSkill': 'View enterprise skill',
-  'resource.publishToEnterpriseFailed': 'Failed to publish to official recommendations. Please try again.',
+  'resource.publishToEnterpriseFailed': 'Failed to publish to enterprise. Please try again.',
   'resource.installSkill': 'Install Skill',
   'resource.skillGroup.fallbackCover': 'Skill group member cover',
   'resource.skillGroup.memberCount': '{count} members',
@@ -430,6 +474,7 @@ export default {
   'resource.marketplaceFullscreen': 'View official recommendations in fullscreen',
   'resource.skillMarketplaceUrlMissing': 'The official recommendations URL is missing or invalid',
   'resource.type': 'Type',
+  'resource.source': 'Source',
   'resource.permission': 'Permission',
   'resource.selectOrgScope': 'Select organization scope',
   'resource.statusActive': 'Active',
@@ -971,6 +1016,8 @@ export default {
   'citeRender.deleteConfirm': 'Are you sure to delete this reference?',
 
   'fileRender.previewUnavailable': 'File preview is temporarily unavailable',
+  'fileRender.mediaUnsupported': 'This browser cannot decode the media or the file is damaged. Download it to play.',
+  'fileRender.formatUnsupported': 'Online preview is unavailable for this format. Download it to view.',
   'fileRender.deleteConfirm': 'Are you sure to delete this file?',
   'fileRender.outlineImitate': 'Outline Imitation',
   'fileRender.contentExtract': 'Content Extraction',
@@ -1219,8 +1266,8 @@ export default {
   'digitalEmployees.noGroupMembers': 'No group members',
   'digitalEmployees.createGroup': 'Create',
   'digitalEmployees.employeeGroup': 'Groups',
-  'digitalEmployees.tag.personalEmployee': 'Personal Employee',
-  'digitalEmployees.tag.enterpriseEmployee': 'Enterprise Employee',
+  'digitalEmployees.tag.personalEmployee': 'Personal Digital Employee',
+  'digitalEmployees.tag.enterpriseEmployee': 'Enterprise Digital Employee',
   'digitalEmployees.tag.personalGroup': 'Personal Employee Group',
   'digitalEmployees.tag.enterpriseGroup': 'Enterprise Employee Group',
   'digitalEmployees.filter.personalGroup': 'Personal Employee Group',
@@ -1369,6 +1416,7 @@ export default {
   'approvalCenter.skill': 'Skill applications',
   'approvalCenter.knowledge': 'Knowledge applications',
   'approvalCenter.tool': 'Tool applications',
+  'approvalCenter.searchPlaceholder': 'Search resource name',
   'approvalCenter.employeeUse': 'Use authorization review',
   'approvalCenter.employeePublication': 'Employee publication review',
   'approvalCenter.employeeUpdatePending':

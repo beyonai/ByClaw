@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { assertNoActiveRoute } from './routing/plan-store.mjs';
-import { withJevRun } from './jev/run-context.mjs';
 import { registeredChannel } from './routing/channels.mjs';
 import { createFeishuAdapter } from './enterprise/adapters/feishu.mjs';
 import { createWecomAdapter } from './enterprise/adapters/wecom.mjs';
@@ -438,11 +437,7 @@ function commandSchema() {
   };
 }
 
-export function executeEnterpriseWorkflow(command, values, dependencies = {}) {
-  return withJevRun(() => executeEnterpriseWorkflowInContext(command, values, dependencies));
-}
-
-async function executeEnterpriseWorkflowInContext(command, values, dependencies = {}) {
+export async function executeEnterpriseWorkflow(command, values, dependencies = {}) {
   if (command === 'search' || command === 'metadata-search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
     const normalizedValues = normalizeEnterprisePaths(command, values);
     const scopeSessionDir = command === 'search' || command === 'metadata-search' || command === 'resource'
@@ -467,11 +462,7 @@ async function executeEnterpriseWorkflowInContext(command, values, dependencies 
   throw new Error('unsupported enterprise workflow');
 }
 
-export function executeEnterpriseSearchAll(values, dependencies = {}) {
-  return withJevRun(() => executeEnterpriseSearchAllInContext(values, dependencies));
-}
-
-async function executeEnterpriseSearchAllInContext(values, dependencies = {}) {
+export async function executeEnterpriseSearchAll(values, dependencies = {}) {
   const normalizedValues = normalizeEnterprisePaths('search-all', values);
   const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...batchValues } = normalizedValues;
   const requests = parseSearchBatchRequests(batchValues);

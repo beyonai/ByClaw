@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.tenant.TenantOrganizationMapper">
+
+    <resultMap id="organizationNode" type="com.iwhalecloud.byai.manager.mapper.tenant.TenantOrgNodeRow">
+        <id property="orgId" column="org_id"/>
+        <result property="parentOrgId" column="parent_org_id"/>
+        <result property="orgName" column="org_name"/>
+        <result property="orgIndex" column="org_index"/>
+        <result property="memberCount" column="member_count"/>
+        <result property="attached" column="attached"/>
+    </resultMap>
+
+    <select id="selectOrganizationTree" resultMap="organizationNode">
+        SELECT o.org_id, o.parent_org_id, o.org_name, o.org_index,
+               COUNT(DISTINCT CASE WHEN u.state = 'A' THEN rel.user_id END) AS member_count,
+               CASE WHEN t.org_id IS NULL THEN FALSE ELSE TRUE END AS attached
+        FROM byai.po_organization o
+        LEFT JOIN byai.po_users_organization rel ON rel.org_id = o.org_id
+        LEFT JOIN byai.po_users u ON u.user_id = rel.user_id
+        LEFT JOIN byai.tenant_organization t ON t.org_id = o.org_id AND t.enterprise_id = #{enterpriseId}
+        GROUP BY o.org_id, o.parent_org_id, o.org_name, o.org_level, o.org_index, t.org_id
+        ORDER BY o.org_level, o.org_index, o.org_id
+    </select>
+
+    <select id="selectBranchOrgIds" resultType="long">
+        WITH RECURSIVE branch(org_id) AS (
+            SELECT org_id FROM byai.po_organization WHERE org_id = #{orgId}
+            UNION ALL
+            SELECT child.org_id FROM byai.po_organization child
+            JOIN branch parent ON child.parent_org_id = parent.org_id
+        )
+        SELECT org_id FROM branch
+    </select>
+
+    <select id="selectActiveUsersByOrgIds" resultType="com.iwhalecloud.byai.manager.mapper.tenant.TenantMemberRow">
+        SELECT DISTINCT u.user_id AS "userId", u.user_code AS "userCode", u.user_name AS "userName"
+        FROM byai.po_users_organization rel
+        JOIN byai.po_users u ON u.user_id = rel.user_id
+        WHERE u.state = 'A' AND rel.org_id IN
+        <foreach collection="orgIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>
+        ORDER BY "userId"
+    </select>
+
+    <select id="selectAttachedOrgIds" resultType="long">
+        SELECT org_id FROM byai.tenant_organization WHERE enterprise_id = #{enterpriseId}
+    </select>
+
+    <insert id="insertAttachment">
+        INSERT INTO byai.tenant_organization (enterprise_id, org_id, added_by)
+        VALUES (#{enterpriseId}, #{orgId}, #{addedBy})
+    </insert>
+</mapper>

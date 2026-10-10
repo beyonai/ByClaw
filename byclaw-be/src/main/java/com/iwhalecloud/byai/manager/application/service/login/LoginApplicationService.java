@@ -65,7 +65,7 @@ public class LoginApplicationService {
     /**
      * 默认开放查询的key值,多个用逗号隔开
      */
-    @Value("${open.dc.query.keys:ENV,beyondLogo,beyondTitle,beyondFavicon,beyondAssistant}")
+    @Value("${open.dc.query.keys:ENV,beyondLogo,beyondTitle,beyondFavicon,beyondAssistant,ENABLE_MULTI_TENACY}")
     private String openKeys;
 
     @Autowired
@@ -148,7 +148,7 @@ public class LoginApplicationService {
         loginInfo.setAvatar(users.getAvatar());
         loginInfo.setEmail(users.getEmail());
         loginInfo.setRegisterType(users.getRegisterType());
-        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId());
+        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId(users.getUserId()));
         loginInfo.setComAcctId(loginInfo.getEnterpriseId());
         loginInfo.setUsersOrganizations(organizationService.findUsersOrganizationByUserId(users.getUserId()));
         // 管理组织

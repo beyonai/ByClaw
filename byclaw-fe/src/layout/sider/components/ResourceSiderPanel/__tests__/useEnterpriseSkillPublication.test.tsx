@@ -101,7 +101,7 @@ it('allows retry after cancellation or request failure without updating the item
 });
 
 it.each(['string', 'error'])('shows manifest rejection without marking the skill published (%s)', async (kind) => {
-  const reason = '无法发布到官方推荐：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。';
+  const reason = '无法发布到企业：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。';
   (publishSkillToEnterprise as jest.Mock).mockRejectedValue(kind === 'string' ? reason : new Error(reason));
   const { result, onPublished } = setup();
   await waitFor(() => expect(result.current.canPublish(skill)).toBe(true));

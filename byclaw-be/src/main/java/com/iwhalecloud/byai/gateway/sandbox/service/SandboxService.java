@@ -272,6 +272,7 @@ public class SandboxService {
         if (StringUtils.isBlank(userCode) || StringUtils.isBlank(serviceKey)) {
             return;
         }
+        rejectTenantSpecFromUserLaunch(serviceKey, resolveEffectiveSpec(serviceKey, null));
         String key = PREFERRED_SERVICE_KEY_PREFIX + userCode;
         RedisUtil.setString(key, serviceKey);
         LOGGER.info("保存用户首选 serviceKey: userCode={}, serviceKey={}", userCode, serviceKey);
@@ -661,6 +662,7 @@ public class SandboxService {
         request.setSandboxType(launchContext.getSandboxType());
         request.setProfileKey(routing.getProfileKey());
         SandboxServiceSpec effectiveSpec = resolveEffectiveSpec(launchContext.getSandboxType(), routing.getProfileKey());
+        rejectTenantSpecFromUserLaunch(launchContext.getSandboxType(), effectiveSpec);
         SandboxLeasePolicy leasePolicy = resolveDefaultLeasePolicy();
         Integer autoRelease = leasePolicy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE
             ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_MANUAL;
@@ -782,6 +784,13 @@ public class SandboxService {
         catch (Exception e) {
             LOGGER.warn("解析沙箱规格失败，sandboxType={}，profileKey={}，原因：{}", sandboxType, profileKey, e.getMessage());
             return null;
+        }
+    }
+
+    private void rejectTenantSpecFromUserLaunch(String sandboxType, SandboxServiceSpec spec) {
+        if ("tenant-opengauss".equals(sandboxType) || "tenant-data-node".equals(sandboxType)
+            || (spec != null && "TENANT".equals(spec.getOwnerScope()))) {
+            throw new BdpRuntimeException("租户沙箱只能由租户开通流程创建");
         }
     }
 
@@ -1017,6 +1026,11 @@ public class SandboxService {
         }
         SandboxRecordView view = new SandboxRecordView();
         BeanUtils.copyProperties(record, view);
+        // Historical records and tenant databases have no live user worker lease.
+        // Avoid remote Redis lookups for every row of the management table.
+        if (!STATUS_RUNNING.equals(record.getStatus()) || "TENANT".equals(record.getOwnerScope())) {
+            return view;
+        }
         String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
         view.setWorkerId(workerId);
         if (StringUtils.isBlank(workerId)) {
@@ -1214,6 +1228,9 @@ public class SandboxService {
         if (record == null) {
             throw new BdpRuntimeException("sandbox record not found");
         }
+        if ("TENANT".equals(record.getOwnerScope())) {
+            throw new BdpRuntimeException("租户沙箱只能由租户开通流程管理");
+        }
         String releaseReason = manualReleaseReason(record.getUserCode());
         if (STATUS_STARTING.equals(record.getStatus())) {
             markStartingSandboxReleased(record, releaseReason);
@@ -1241,6 +1258,9 @@ public class SandboxService {
         SsSandboxRecord record = sandboxRecordMapper.selectById(id);
         if (record == null) {
             throw new BdpRuntimeException("sandbox record not found");
+        }
+        if ("TENANT".equals(record.getOwnerScope())) {
+            throw new BdpRuntimeException("租户沙箱只能由租户开通流程管理");
         }
         int updated = sandboxRecordMapper.updateAutoRelease(id, autoRelease, record.getLockVersion());
         if (updated == 0) {

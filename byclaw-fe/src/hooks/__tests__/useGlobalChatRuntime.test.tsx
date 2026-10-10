@@ -1,3 +1,4 @@
+import { resetMultiTenancyConfig, setMultiTenancyConfig } from '@/utils/multiTenancy';
 jest.mock('@umijs/max', () => ({
   useDispatch: jest.fn(),
   useSelector: jest.fn(),
@@ -36,6 +37,7 @@ describe('hooks/useGlobalChatRuntime', () => {
   let state: any;
 
   beforeEach(() => {
+    setMultiTenancyConfig(null);
     jest.clearAllMocks();
     chatSessionRuntimeManager.clear();
     jest.useFakeTimers();
@@ -52,6 +54,29 @@ describe('hooks/useGlobalChatRuntime', () => {
     };
     mockUseDispatch.mockReturnValue(dispatch);
     mockUseSelector.mockImplementation((selector: any) => selector(state));
+  });
+
+  it('waits for system config before connecting and rebuilds the connection when the switch changes', () => {
+    resetMultiTenancyConfig();
+    window.sessionStorage.setItem(
+      'BYCLAW_TAB_ENTERPRISE',
+      JSON.stringify({
+        enterpriseId: '123',
+        sessionId: 'session-1',
+        tenantContextToken: 'token',
+        expiresAt: '2099-01-01',
+      })
+    );
+    renderHook(() => useGlobalChatRuntime());
+    expect(mockWebSocketManager.init).not.toHaveBeenCalled();
+    expect(mockSubscribeChatStream).not.toHaveBeenCalled();
+    act(() => setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' }));
+    expect(mockWebSocketManager.init).toHaveBeenCalledTimes(1);
+    expect(window.sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).not.toBeNull();
+    act(() => setMultiTenancyConfig(null));
+    expect(mockWebSocketManager.disconnect).toHaveBeenCalled();
+    expect(mockWebSocketManager.init).toHaveBeenCalledTimes(2);
+    expect(window.sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBeNull();
   });
 
   it('applies generic session runtime messages from websocket', () => {
@@ -84,6 +109,58 @@ describe('hooks/useGlobalChatRuntime', () => {
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
     expect(chatSessionRuntimeManager.getSessionRuntime('s1')?.activeAgentCount).toBe(2);
     expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
+  });
+
+  it('uses exact envelope IDs when legacy runtime payload IDs were rounded', () => {
+    renderHook(() => useGlobalChatRuntime());
+
+    const onSessionRuntime = mockWebSocketManager.onMessage.mock.calls.find(
+      ([type]) => type === 'SESSION_RUNTIME_STATUS'
+    )![1];
+    act(() => {
+      onSessionRuntime({
+        type: 'SESSION_RUNTIME_STATUS',
+        sessionId: '8011237409000004638',
+        traceId: 'trace-1',
+        data: {
+          sessionId: 8011237409000004638,
+          traceId: 'trace-1',
+          source: 'integration-a',
+          status: 'running',
+          activeAgentCount: 2,
+          activeChildCount: 1,
+          waitingInteractionCount: 0,
+          rootActive: false,
+          acceptingInput: true,
+          revision: 1,
+          changedAt: 1000,
+        },
+      });
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('8011237409000004638')).toBe(true);
+    expect(chatSessionRuntimeManager.getSessionRuntime('8011237409000004638')?.activeAgentCount).toBe(2);
+    expect(chatSessionRuntimeManager.canAcceptInput('8011237409000004638')).toBe(true);
+    act(() =>
+      onSessionRuntime({
+        sessionId: '8011237409000004638',
+        data: {
+          sessionId: 8011237409000004638,
+          traceId: 'trace-1',
+          source: 'integration-a',
+          status: 'idle',
+          active: false,
+          rootActive: false,
+          activeAgentCount: 0,
+          activeChildCount: 0,
+          waitingInteractionCount: 0,
+          acceptingInput: true,
+          revision: 2,
+          changedAt: 1001,
+        },
+      })
+    );
+    expect(chatSessionRuntimeManager.isSessionRunning('8011237409000004638')).toBe(false);
   });
 
   afterEach(() => {

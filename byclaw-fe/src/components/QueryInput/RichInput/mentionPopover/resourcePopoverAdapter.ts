@@ -12,7 +12,7 @@ export interface ResourcePopoverAdapterOptions {
 export const getResourcePopoverPlacement = (isInputAtBottom?: boolean): PopoverProps['placement'] =>
   isInputAtBottom ? 'topLeft' : 'bottomLeft';
 
-/** 按展开方向使用实际可用空间，预留浮层间距及屏幕边缘，不设置会导致溢出的最小高度。 */
+/** 按展开方向计算可用空间并预留浮层间距及屏幕边缘，内容最小高度也必须受此空间约束。 */
 export const getResourcePopoverPanelHeight = (
   anchor: { top: number; bottom: number },
   placement: PopoverProps['placement'],
@@ -24,6 +24,10 @@ export const getResourcePopoverPanelHeight = (
     : anchor.top - viewportTop;
   return Math.max(0, Math.floor(available - 12 - 16));
 };
+
+/** 分类减少时仍给右侧列表保留 320px 阅读空间；空间不足时压缩面板并沿用内部滚动。 */
+export const getResourcePopoverContentHeight = (availableHeight: number, navigationHeight: number): number =>
+  Math.min(availableHeight, Math.max(320, navigationHeight));
 
 /** 资源弹窗只依赖输入框宽度进行布局，不再使用光标坐标。 */
 export const getResourcePopoverPosition = (open: boolean, width?: number): CSSProperties | undefined =>

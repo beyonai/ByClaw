@@ -112,8 +112,6 @@ public class InitRedisSystemConfigRunner implements ApplicationRunner {
      */
     private void loadUsersToRedis() {
 
-        Long enterpriseId = enterpriseInfoService.getEnterpriseId();
-
         // 从第一页开始批量写入缓存中
         for (int pageIndex = 1; true; pageIndex++) {
 
@@ -132,7 +130,7 @@ public class InitRedisSystemConfigRunner implements ApplicationRunner {
 
             // 将用户数据加载到 Redis 中
             for (Users user : users) {
-                ShareCacheUtil.setShareShareBfmUser(user, enterpriseId);
+                ShareCacheUtil.setShareShareBfmUser(user, enterpriseInfoService.getEnterpriseId(user.getUserId()));
             }
         }
     }

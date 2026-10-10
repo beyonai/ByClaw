@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.aimodel.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -8,13 +10,43 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
-class AIServiceTest {
+class AIServiceTest extends I18nTestSupport {
+
+    @ParameterizedTest
+    @CsvSource({"zh_CN, 未配置默认模型", "en_US, model is not configured"})
+    void missingDefaultModelPreservesLocalizedError(String language, String expected) {
+        I18nUtil.setLocale(language);
+        AIService service = new AIService();
+        AiModelService models = org.mockito.Mockito.mock(AiModelService.class);
+        ReflectionTestUtils.setField(service, "aiModelService", models);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.generateText("prompt", (String) null))
+            .isExactlyInstanceOf(BdpRuntimeException.class)
+            .hasMessage(I18nUtil.get("ai.service.no.default.model.found"))
+            .hasMessageContaining(expected);
+    }
+
+    @Test
+    void placeholderCredentialsAreRejectedBeforeAnyHttpRequest() {
+        RequestFixture fixture = fixture("OpenAI", "model");
+        fixture.model().setAuthToken("请用户替换-secret");
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> fixture.service().generateText("system", "user", fixture.model(), 100))
+            .isInstanceOf(ModelConfigurationValidator.InvalidModelConfigurationException.class)
+            .hasMessageContaining("模型管理")
+            .hasMessageNotContaining("secret");
+        fixture.server().verify();
+    }
+
 
     @Test
     void selectedModelUsesItsOwnEndpointCredentialsAndParameters() {

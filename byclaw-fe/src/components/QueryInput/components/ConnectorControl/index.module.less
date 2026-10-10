@@ -59,7 +59,11 @@
 
 .connectorListInline {
   flex: 1;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
+  // 内嵌列表受资源面板约束，不沿用设置弹窗的负外边距，以免右侧描述和操作越界。
+  margin: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

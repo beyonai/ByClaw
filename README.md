@@ -77,7 +77,7 @@ byclaw-fe ── REST / WebSocket / SSE ── byclaw-be
               ┌───────────────────────────┼───────────────────────────┐
               ▼                           ▼                           ▼
         byclaw-qa                                             byclaw-exe
-   知识库 / QA Worker                                     Skills / Extensions
+   知识库管理 / 检索 API                                     Skills / Extensions
               │                                                   │
               └───────────────────────┬───────────────────────────┘
                               ▼                       ▼
@@ -126,7 +126,7 @@ flowchart TB
     nginx --> fe["byclaw-fe<br/>门户 / 控制台 / 对话界面"]
     fe --> be["byclaw-be<br/>核心 API / 认证授权 / 资源治理 / 网关路由"]
     be --> ws["WebSocket / SSE<br/>流式会话"]
-    be --> qa["byclaw-qa<br/>知识库管理 / QA Worker"]
+    be --> qa["byclaw-qa<br/>知识库管理 / 检索 API"]
     be --> super["byclaw-super<br/>多智能体主管 / 授权委派 / 持久运行"]
     be --> exe["byclaw-exe<br/>Skills / Extensions"]
     be --> sandbox["OpenSandbox<br/>隔离执行环境"]
@@ -141,7 +141,7 @@ flowchart TB
 |:---:|------|------|----------|
 | 1 | `byclaw-fe` | Web 门户与管理控制台 | 对话、知识中心、数字员工、工作中心、工具中心、沙箱页面、移动端适配 |
 | 2 | `byclaw-be` | 核心业务后端与统一网关 | 认证授权、会话管理、资源管理、数字员工管理、文件管理、Feign 调用、WebSocket |
-| 3 | `byclaw-qa` | 知识库与问答服务 | 知识导入、索引构建、检索问答、QA Worker、知识资源映射 |
+| 3 | `byclaw-qa` | 知识库与问答服务 | 知识导入、索引构建、检索问答、知识资源映射 |
 | 4 | `byclaw-super` | 多智能体主管与持久运行服务 | 任务规划、授权委派、用户交互、Run 状态、SSE、恢复与故障接管 |
 | 5 | `byclaw-exe` | 扩展插件与技能脚本 | Skills、Extensions、业务脚本、能力扩展 |
 | 6 | `middleware` | 基础运行组件 | Redis、MinIO、OpenGauss、OpenSandbox 等运行依赖 |
@@ -198,7 +198,6 @@ flowchart TB
     lb --> feC["byclaw-fe<br/>Nginx + 静态资源"]
     feC --> beC["byclaw-be<br/>HTTP 8086 / WS 8082"]
     beC --> qaApi["byclaw-qa-manager<br/>API 8000"]
-    beC --> qaWorker["byclaw-qa-worker<br/>后台消费"]
     beC --> sandboxC["OpenSandbox<br/>沙箱调度 / 租约管理"]
     sandboxC --> sandboxContainer["沙箱容器<br/>按需拉起 / 自动回收"]
     sandboxContainer --> openclawC["byclaw-openclaw<br/>Agent Runtime"]
@@ -213,18 +212,17 @@ flowchart TB
     qaApi --> redisC
     qaApi --> dbC
     qaApi --> minioC
-    qaWorker --> redisC
     sandboxContainer --> mount["文件挂载 / 个人数据空间"]
     minioC --> mount
 ```
 
 - **中间件层**：先启动 Redis、MinIO、OpenGauss、OpenSandbox 等基础组件；OpenSandbox 负责按需拉起沙箱容器。
-- **应用层**：启动 `byclaw-fe`、`byclaw-be`、`byclaw-qa-manager`、`byclaw-qa-worker`。
+- **应用层**：启动 `byclaw-fe`、`byclaw-be`、`byclaw-qa-manager`。
 - **接入层**：前端容器内置 Nginx，统一暴露 HTTP / HTTPS 入口，并转发后端 API、WebSocket、文件浏览和沙箱相关请求。
 - **配置层**：通过根目录 `.env` 和 `deploy/config` 注入数据库、Redis、MinIO、模型、沙箱、端口和域名配置。
 - **执行层**：`byclaw-openclaw` 运行在 OpenSandbox 拉起的沙箱容器中，Skills、Extensions 和外部业务 API 通过沙箱执行环境按需加载。
 
-在生产环境中，可以将数据库、缓存、对象存储、QA Worker 和 OpenSandbox 分别扩容；前端与后端保持无状态或弱状态部署，通过 Redis 和数据库共享状态。
+在生产环境中，可以将数据库、缓存、对象存储和 OpenSandbox 分别扩容；前端与后端保持无状态或弱状态部署，通过 Redis 和数据库共享状态。
 
 ### 安全架构
 
@@ -304,6 +302,21 @@ sh deploy.sh init
 ```
 
 访问 **http://localhost:8080** 开始使用。
+
+### 首次使用前配置模型
+
+数据库初始化脚本会创建一个预置 LLM（`glm-5-turbo`）和一个预置 Embedding 模型
+（`text-embedding-3-small`），但其中的 API 地址和 API Token 都只是“请用户替换”的占位值，
+**不能直接用于模型调用**。首次登录后，请先进入「管理后台 > 模型管理」完成以下配置：
+
+1. 编辑或新建一个实际可用的 LLM，填写供应商、协议、模型名称、供应商模型编码、API Endpoint、API Token 和上下文长度；使用 OpenAI 兼容协议时，API Endpoint 应填写对应供应商的基础地址。
+2. 编辑或新建一个实际可用的 Embedding 模型，填写相同的连接信息，并确认向量维度（初始化值为 `1536`）和批大小与供应商接口一致。
+3. 分别执行模型调试；调试成功后启用模型，并将可用的 LLM 和 Embedding 模型设为各自类型的默认模型。
+
+不要把真实 API Token 提交到仓库或写入初始化 SQL。数据库已经初始化后，修改
+`deploy/middleware/initdb/04_dml.sql` 不会更新现有数据，应通过「模型管理」修改配置。
+
+**QA 必须配置可用的 Embedding 模型后，才能正常提供知识库入库、检索等服务；容器启动或健康检查通过不代表这些服务已可用。**
 
 ### 本地开发
 

@@ -19,12 +19,14 @@ const BaseInfo = ({
   allowKnowledgeBaseDelete,
   canManage = false,
   backPath = '/knowledgeCenter',
+  backState,
 }: {
   data: any;
   resourceId: string;
   allowKnowledgeBaseDelete?: boolean;
   canManage?: boolean;
   backPath?: string;
+  backState?: unknown;
 }) => {
   const [showVisibleRange, setShowVisibleRange] = useState(false);
   const [showShareModal, setShareModal] = useState(false);
@@ -79,7 +81,7 @@ const BaseInfo = ({
         deleteKnowledge({ resourceId: resourceId })
           .then(() => {
             message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
-            navigate(backPath, { replace: true });
+            navigate(backPath, { replace: true, state: backState });
           })
           .catch((error) => {
             message.error(String(error || intl.formatMessage({ id: 'common.deleteFail' })));

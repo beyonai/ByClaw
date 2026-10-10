@@ -21,6 +21,12 @@ public class SsSandboxRecord {
     @TableId(value = "id", type = IdType.INPUT)
     private Long id;
 
+    /** USER personal sandbox or TENANT enterprise sandbox. */
+    private String ownerScope = "USER";
+
+    /** Owning enterprise for tenant-scoped sandbox records. */
+    private Long enterpriseId;
+
     /** 资源ID */
     private Long resourceId;
 

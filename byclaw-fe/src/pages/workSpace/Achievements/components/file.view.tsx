@@ -13,6 +13,7 @@ import { AchievementContext } from './AchievementContext';
 import { useUploadFileModal } from './UploadFileModal';
 import useGlobal from '@/hooks/useGlobal';
 import { LayoutMode } from '@/constants/system';
+import { IMAGE_PREVIEW_TYPES, PREVIEWABLE_TYPES, resolvePreviewType } from '@/components/Preview/formats';
 
 import styles from './file.view.module.less';
 
@@ -256,7 +257,7 @@ export default function FileView() {
       return <AntdIcon type="icon-PDF" />;
     }
 
-    if (node.data.type.match(/^img|image|jpg|jpeg|png|gif|bmp|webp$/i)) {
+    if (IMAGE_PREVIEW_TYPES.includes(resolvePreviewType(node.data.type, node.data.name))) {
       return <AntdIcon type="icon-Image" />;
     }
 
@@ -278,7 +279,7 @@ export default function FileView() {
   const titleRender: TreeProps['titleRender'] = (node: any) => {
     const isRoot = node.pCatalogId === '-1';
     const isParent = node.type === 'folder';
-    const canPreview = node.type.match(/^json|md|txt|html|pdf|jpg|jpeg|png|gif|bmp|webp|pptx|xlsx|docx$/i);
+    const canPreview = PREVIEWABLE_TYPES.includes(resolvePreviewType(node.type, node.name));
 
     return (
       <div className={cn(styles.treeNode, { [styles.treeNodeParent]: isParent })}>

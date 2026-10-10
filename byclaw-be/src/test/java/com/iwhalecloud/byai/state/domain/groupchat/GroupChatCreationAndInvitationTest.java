@@ -111,6 +111,7 @@ class GroupChatCreationAndInvitationTest {
             Project project = new Project();
             project.setProjectId(100L);
             project.setProjectName(request.getProjectName().trim());
+            project.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
             return project;
         });
         ByaiSession group = new ByaiSession();
@@ -177,6 +178,21 @@ class GroupChatCreationAndInvitationTest {
             assertThat(member.getMemName()).isEqualTo("群主");
             assertThat(member.getAvatar()).isEqualTo("/avatars/owner.png");
         });
+    }
+
+    @Test
+    void creationAddsAndBindsTheDefaultCoordinatorWithoutFrontendSelection() {
+        var assistants = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupWorkAssistantService.class);
+        when(assistants.resolveDefaultCoordinatorId()).thenReturn(40L);
+        ReflectionTestUtils.setField(service, "workAssistantService", assistants);
+        GroupChatCreateRequest request = request();
+        request.setAgentIds(List.of(30L));
+        GroupChatDetailResponse result = service.create(request);
+        assertThat(result.getCoordinatorAgentId()).isEqualTo("40");
+        assertThat(result.getMembers()).filteredOn(member -> "AGENT".equals(member.getMemObjType()))
+            .extracting(ByaiSessionMember::getMemObjId).containsExactly(30L, 40L);
+        verify(assistants).bindCoordinator(result.getSession().getSessionId(), 40L);
+        verify(authService).grantDigitalEmployeesToUser(Set.of(30L, 40L), 10L);
     }
 
     @Test

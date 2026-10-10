@@ -8,6 +8,7 @@ import { globalLogout } from '@/service/common/request';
 import { generateSignature } from '@/utils/signature';
 import { answerDeltaHandler, reasoningLogHandler } from './util';
 import { getMsgId } from '@/utils/messgae';
+import { getTenantContext, getTenantSwitchSeq, hasStoredTenantSelection } from '@/utils/tenantContext';
 
 export const ERROR_STATUS = {
   NOAUTH: '_NO_AUTH_',
@@ -60,6 +61,14 @@ export default class SendHelper {
     const abortController = new AbortController();
     const { signal } = abortController;
     const { callback } = params;
+    const tenantSwitchSeq = getTenantSwitchSeq();
+    const tenantContext = getTenantContext();
+    if (hasStoredTenantSelection() && !tenantContext) {
+      return {
+        promise: Promise.reject(new Error('Tenant context expired; select a space again')),
+        cancel: () => undefined,
+      };
+    }
     const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
       this.sendingMap.set(key, { abortController });
 
@@ -72,6 +81,12 @@ export default class SendHelper {
         [tokenKey]: authSnapshot.token,
         [ssotokenKey]: authSnapshot.ssoToken,
       };
+      if (tenantContext) {
+        Object.assign(headers, {
+          'X-Enterprise-Id': tenantContext.enterpriseId,
+          'X-Tenant-Context': tenantContext.tenantContextToken,
+        });
+      }
 
       const body = {
         ...data,
@@ -122,6 +137,10 @@ export default class SendHelper {
           console.log('onclose');
         },
         onmessage: (msg: { data: string; event: string; id: string }) => {
+          if (tenantSwitchSeq !== getTenantSwitchSeq()) {
+            abortController.abort();
+            return;
+          }
           console.log(' *** msg:', msg, '***');
           const eventName = msg.event;
 

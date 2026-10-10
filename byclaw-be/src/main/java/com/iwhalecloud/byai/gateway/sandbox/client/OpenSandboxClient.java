@@ -235,7 +235,13 @@ public class OpenSandboxClient {
     }
 
     public SandboxEndpoint getSandboxEndpoint(String sandboxId, int port) {
-        String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/endpoints/" + port;
+        return getSandboxEndpoint(sandboxId, port, false);
+    }
+
+    /** Internal TCP consumers need the private address, not an HTTP ingress path. */
+    public SandboxEndpoint getSandboxEndpoint(String sandboxId, int port, boolean resolveInternal) {
+        String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/endpoints/" + port
+            + (resolveInternal ? "?resolve_internal=true" : "");
         log.debug("OpenSandbox沙箱 GET {}", url);
         Request httpRequest = newRequestBuilder(url).get().build();
         return execute(httpRequest, SandboxEndpoint.class);
@@ -608,9 +614,23 @@ public class OpenSandboxClient {
                     error = objectMapper.readValue(responseBody, ErrorResponse.class);
                 } catch (Exception ignored) {
                 }
-                String msg = error != null
-                        ? error.getCode() + ": " + error.getMessage()
-                        : "HTTP " + response.code() + ": " + responseBody;
+                String msg;
+                if (error != null && error.getCode() != null && error.getMessage() != null) {
+                    msg = error.getCode() + ": " + error.getMessage();
+                } else if (response.code() == 422) {
+                    // Pydantic validation responses can echo request inputs, including sandbox credentials.
+                    // Report only the invalid field paths and messages.
+                    StringJoiner issues = new StringJoiner("; ");
+                    JsonNode detail = objectMapper.readTree(responseBody).path("detail");
+                    if (detail.isArray()) {
+                        for (JsonNode issue : detail) {
+                            issues.add(issue.path("loc").toString() + " " + issue.path("msg").asText());
+                        }
+                    }
+                    msg = "HTTP 422: " + issues;
+                } else {
+                    msg = "HTTP " + response.code() + ": " + responseBody;
+                }
                 throw new OpenSandboxException("OpenSandbox API error: " + msg);
             }
             return objectMapper.readValue(responseBody, responseType);

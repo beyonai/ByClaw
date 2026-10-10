@@ -37,7 +37,7 @@ public class DigitEmployManControllerV2 {
     private IndexApplicationServiceV2 digitEmployManServiceV2;
 
     @Autowired
-    private com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService groupAuthorizationService;
+    private com.iwhalecloud.byai.manager.domain.tenant.TenantGroupMemberService tenantGroupMemberService;
 
     /**
      * 我创建的和我订阅的数字员工
@@ -49,7 +49,7 @@ public class DigitEmployManControllerV2 {
     public ResponseUtil queryMyAuthEmploy(@RequestBody MyAuthEmployQo myAuthEmployQo) {
         if (myAuthEmployQo.getExcludeGroupSessionId() != null) {
             // 群内候选列表应与实际添加数字员工共用成员权限，支持已开启开关的普通成员。
-            groupAuthorizationService.requireInvite(myAuthEmployQo.getExcludeGroupSessionId(), "AGENT");
+            tenantGroupMemberService.requireInvite(myAuthEmployQo.getExcludeGroupSessionId(), "AGENT");
         }
         PageInfo<AuthDigitEmployVo> pageInfo = digitEmployManServiceV2.queryMyAuthEmploy(myAuthEmployQo);
         return ResponseUtil.successResponse(pageInfo);

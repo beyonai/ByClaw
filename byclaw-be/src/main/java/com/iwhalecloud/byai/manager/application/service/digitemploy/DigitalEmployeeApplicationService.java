@@ -350,6 +350,8 @@ public class DigitalEmployeeApplicationService {
 
         // 设置用户上下文信息
         resourceAuthContextService.setCurrentUserAuthQo(digitalEmployeeQo);
+        // 只信任当前登录身份，覆盖请求中传入的标志，避免普通用户伪造超管列表范围。
+        digitalEmployeeQo.setEnterpriseListAdminVip(CurrentUserHolder.isAdminVip());
         this.fillCatalogIds(digitalEmployeeQo);
 
         PageInfo<DigitalEmployeePageVo> pageInfo = ssResExtDigEmployeeService
@@ -1172,7 +1174,7 @@ public class DigitalEmployeeApplicationService {
         this.validateDigitalEmployeeUpdatePermission(ssResource);
         if (digitalEmployeeDTO.getOwnerType() == null) digitalEmployeeDTO.setOwnerType(ssResource.getOwnerType());
         if (!Objects.equals(ssResource.getOwnerType(), digitalEmployeeDTO.getOwnerType())) {
-            throw new BaseException("数字员工归属不可直接修改，请使用发布到官方推荐流程");
+            throw new BaseException(I18nUtil.get("employee.publication.owner.change.forbidden"));
         }
         SsResExtDigEmployee originalExt = ssResExtDigEmployeeService.findById(resourceId);
         boolean wasEmployeeGroup = originalExt != null
@@ -1347,11 +1349,10 @@ public class DigitalEmployeeApplicationService {
         SsResource ssResource;
         if (this.containsSkillResource(installRelResources)) {
             ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
-            this.validateSkillInstallPermission(ssResource, installRelResources);
         } else {
             ssResource = ssResourceService.findById(digitalEmployeeId);
-            validateDigitalEmployeeResourceInstallPermission(ssResource);
         }
+        this.validateResourceInstallPermission(ssResource, installRelResources);
 
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
         LinkedHashSet<Long> mergedRelIds = new LinkedHashSet<>();
@@ -2045,15 +2046,17 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 校验技能安装权限。
+     * 统一校验目标员工管理权限与每个待安装资源的使用权限。
      */
-    private void validateSkillInstallPermission(SsResource digitalEmployee, List<SsResource> installRelResources) {
+    private void validateResourceInstallPermission(SsResource digitalEmployee, List<SsResource> installRelResources) {
         validateDigitalEmployeeResourceInstallPermission(digitalEmployee);
         for (SsResource resource : installRelResources) {
-            if (resource != null && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType())
-                && !authApplicationService.hasResourceUsePermission(resource)) {
+            // 混装也逐个校验，管理目标员工不能替代对知识、工具或技能本身的使用授权。
+            if (resource != null && !authApplicationService.hasResourceUsePermission(resource)) {
+                String messageKey = StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType())
+                    ? "digemployee.skill.install.no.use.permission" : "digemployee.resource.install.no.use.permission";
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                    I18nUtil.get("digemployee.skill.install.no.use.permission", resource.getResourceName()));
+                    I18nUtil.get(messageKey, resource.getResourceName()));
             }
         }
     }
@@ -2162,8 +2165,11 @@ public class DigitalEmployeeApplicationService {
         Long resourceId = employeeIdDTO.getResourceId();
         SsResource ssResource = ssResourceService.findById(resourceId);
         this.validateDigitalEmployeeManagePermission(ssResource);
-
-
+        // 官方副本注销仍仅允许官方管理员，授权和上下架的管理权限不能代替注销资格。
+        if (employeeGovernance != null && DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)
+            && !employeeGovernance.canAdministerOfficial(ssResource)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+        }
         // 保留可辨认的删除记录并释放原名称;按状态判断,避免重复删除时叠加后缀.
         if (!Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
             String suffix = I18nUtil.get("digemployee.deleted.name.suffix");
@@ -2211,6 +2217,7 @@ public class DigitalEmployeeApplicationService {
         Long resourceId = employeeIdDTO.getResourceId();
         SsResource ssResource = ssResourceService.findById(resourceId);
         this.validateDigitalEmployeeManagePermission(ssResource);
+        this.validateDigitalEmployeeShelfOwner(ssResource);
         if (!Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.shelf.status.invalid"));
@@ -2244,6 +2251,7 @@ public class DigitalEmployeeApplicationService {
         Long resourceId = employeeIdDTO.getResourceId();
         SsResource ssResource = ssResourceService.findById(resourceId);
         this.validateDigitalEmployeeManagePermission(ssResource);
+        this.validateDigitalEmployeeShelfOwner(ssResource);
         if (!Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("digemployee.unshelf.status.invalid"));
         }
@@ -2273,16 +2281,18 @@ public class DigitalEmployeeApplicationService {
         robotChannelRegistryCoordinator.unregisterForResource(resourceId);
     }
 
-    /**
-     * 校验数字员工管理权限。
-     */
+    /** 校验员工上下架归属，与操作权限返回的企业范围一致。 */
+    private void validateDigitalEmployeeShelfOwner(SsResource ssResource) {
+        // 上下架只面向企业员工；与权限接口一致，个人员工通过发布流程生成企业副本。
+        if (!OwnerType.ENTERPRISE.equalsIgnoreCase(ssResource.getOwnerType())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+        }
+    }
+
+    /** 校验数字员工管理权限。 */
     private void validateDigitalEmployeeManagePermission(SsResource ssResource) {
         if (employeeGovernance != null) {
             employeeGovernance.requireNotProtected(ssResource);
-            if (DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
-                if (employeeGovernance.canAdministerOfficial(ssResource)) return;
-                throw new BaseException("仅官方管理员可以上下架官方副本");
-            }
         }
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
@@ -2290,6 +2300,7 @@ public class DigitalEmployeeApplicationService {
         if (StringUtils.equals(ssResource.getOwnerType(), OwnerType.PERSONAL_DEFAULT)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
         }
+        // 官方副本也复用操作权限接口的管理判断，保证可见的上下架按钮能够实际执行。
         if (authApplicationService.hasResourceManagePermission(ssResource)) {
             return;
         }

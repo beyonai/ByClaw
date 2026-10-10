@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper">
+
+    <resultMap id="packageRow" type="com.iwhalecloud.byai.manager.mapper.tenant.TenantPackageRow">
+        <id property="id" column="id"/>
+        <result property="packageName" column="package_name"/>
+        <result property="packageContent" column="package_content"/>
+    </resultMap>
+
+    <resultMap id="tenantRow" type="com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantRow">
+        <id property="enterpriseId" column="enterprise_id"/>
+        <result property="enterpriseName" column="enterprise_name"/>
+        <result property="packageName" column="package_name"/>
+        <result property="provisionStateJson" column="provision_state_json"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="openedAt" column="opened_at"/>
+        <result property="failureReason" column="failure_reason"/>
+        <result property="createdBy" column="created_by"/>
+    </resultMap>
+
+    <select id="selectEnabledPackage" resultMap="packageRow">
+        SELECT id, package_name, package_content
+        FROM byai.tenant_package_spec
+        WHERE id = #{packageId} AND enabled = TRUE
+    </select>
+
+    <select id="selectEnabledPackages" resultMap="packageRow">
+        SELECT id, package_name, package_content
+        FROM byai.tenant_package_spec WHERE enabled = TRUE
+        ORDER BY sort_order, id
+    </select>
+
+    <select id="selectByRequestId" resultMap="tenantRow">
+        SELECT e.enterprise_id, e.com_acct_name AS enterprise_name,
+               n.params_value AS package_name, s.params_value AS provision_state_json,
+               to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+               CASE WHEN s.params_value::jsonb -&gt;&gt; 'status' = 'READY'
+                    THEN to_char(s.updated_at, 'YYYY-MM-DD HH24:MI:SS') END AS opened_at,
+               f.params_value AS failure_reason,
+               m.user_id AS created_by
+        FROM byai.tenant_config r
+        JOIN byai.po_enterprise_info e ON e.enterprise_id = r.enterprise_id
+        LEFT JOIN byai.tenant_user_membership m ON m.enterprise_id = e.enterprise_id AND m.role = 'OWNER'
+        LEFT JOIN byai.tenant_config n ON n.enterprise_id = e.enterprise_id AND n.params_code = 'PACKAGE_NAME_SNAPSHOT'
+        LEFT JOIN byai.tenant_config s ON s.enterprise_id = e.enterprise_id AND s.params_code = 'PROVISION_STATE'
+        LEFT JOIN byai.tenant_config f ON f.enterprise_id = e.enterprise_id AND f.params_code = 'PROVISION_FAILURE_REASON'
+        WHERE r.params_code = 'PROVISION_REQUEST_ID' AND r.params_value = #{requestId}
+    </select>
+
+    <select id="selectTenants" resultMap="tenantRow">
+        SELECT e.enterprise_id, e.com_acct_name AS enterprise_name,
+               n.params_value AS package_name, s.params_value AS provision_state_json,
+               to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+               CASE WHEN s.params_value::jsonb -&gt;&gt; 'status' = 'READY'
+                    THEN to_char(s.updated_at, 'YYYY-MM-DD HH24:MI:SS') END AS opened_at,
+               f.params_value AS failure_reason,
+               m.user_id AS created_by
+        FROM byai.po_enterprise_info e
+        JOIN byai.tenant_config r ON r.enterprise_id = e.enterprise_id AND r.params_code = 'PROVISION_REQUEST_ID'
+        LEFT JOIN byai.tenant_config n ON n.enterprise_id = e.enterprise_id AND n.params_code = 'PACKAGE_NAME_SNAPSHOT'
+        LEFT JOIN byai.tenant_config s ON s.enterprise_id = e.enterprise_id AND s.params_code = 'PROVISION_STATE'
+        LEFT JOIN byai.tenant_config f ON f.enterprise_id = e.enterprise_id AND f.params_code = 'PROVISION_FAILURE_REASON'
+        LEFT JOIN byai.tenant_user_membership m ON m.enterprise_id = e.enterprise_id AND m.role = 'OWNER'
+        <where>
+            AND (s.params_value IS NULL OR s.params_value::jsonb -&gt;&gt; 'status' != 'DELETED')
+            <if test="name != null and name != ''">
+                AND LOWER(e.com_acct_name) LIKE '%' || LOWER(#{name}) || '%'
+            </if>
+            <if test="createdFrom != null">
+                AND r.created_at &gt;= #{createdFrom}
+            </if>
+            <if test="createdTo != null">
+                AND r.created_at &lt; #{createdTo}
+            </if>
+        </where>
+        ORDER BY
+        <choose>
+            <when test="sortField == 'enterpriseName'">e.com_acct_name</when>
+            <when test="sortField == 'openedAt'">CASE WHEN s.params_value::jsonb -&gt;&gt; 'status' = 'READY' THEN s.updated_at END</when>
+            <otherwise>r.created_at</otherwise>
+        </choose>
+        <choose>
+            <when test="sortOrder == 'asc'">ASC</when>
+            <otherwise>DESC</otherwise>
+        </choose>, e.enterprise_id DESC
+    </select>
+
+    <insert id="insertEnterprise">
+        INSERT INTO byai.po_enterprise_info (enterprise_id, com_acct_name, com_acct_code, system_name)
+        VALUES (#{enterpriseId}, #{name}, 'tenant-' || #{enterpriseId}, #{name})
+    </insert>
+
+    <insert id="insertConfig">
+        INSERT INTO byai.tenant_config (id, enterprise_id, params_code, params_value)
+        VALUES (#{id}, #{enterpriseId}, #{code}, #{value})
+    </insert>
+
+    <insert id="insertOwner">
+        INSERT INTO byai.tenant_user_membership (membership_id, enterprise_id, user_id, role, status, created_by)
+        VALUES (#{membershipId}, #{enterpriseId}, #{userId}, 'OWNER', 'ACTIVE', #{userId})
+    </insert>
+
+    <select id="selectConfig" resultType="string">
+        SELECT params_value FROM byai.tenant_config
+        WHERE enterprise_id = #{enterpriseId} AND params_code = #{code}
+    </select>
+
+    <update id="updateConfig">
+        UPDATE byai.tenant_config
+        SET params_value = #{value}, params_version = params_version + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE enterprise_id = #{enterpriseId} AND params_code = #{code}
+    </update>
+
+    <delete id="deleteConfig">
+        DELETE FROM byai.tenant_config
+        WHERE enterprise_id = #{enterpriseId} AND params_code = #{code}
+    </delete>
+
+    <select id="selectConfigs" resultType="com.iwhalecloud.byai.manager.mapper.tenant.TenantConfigRow">
+        SELECT params_code AS "paramsCode", params_value AS "paramsValue"
+        FROM byai.tenant_config WHERE enterprise_id = #{enterpriseId}
+    </select>
+
+    <select id="selectManagedEnterpriseName" resultType="string">
+        SELECT e.com_acct_name
+        FROM byai.po_enterprise_info e
+        JOIN byai.tenant_config r ON r.enterprise_id = e.enterprise_id
+          AND r.params_code = 'PROVISION_REQUEST_ID'
+        WHERE e.enterprise_id = #{enterpriseId}
+    </select>
+
+    <select id="selectPendingDeletions" resultType="long">
+        SELECT enterprise_id FROM byai.tenant_config
+        WHERE params_code = 'TENANT_DELETE_REQUESTED' AND params_value = 'true'
+        ORDER BY enterprise_id LIMIT 100
+    </select>
+
+    <delete id="deleteTenantMemberships">
+        DELETE FROM byai.tenant_user_membership WHERE enterprise_id = #{enterpriseId}
+    </delete>
+
+    <delete id="deleteTenantOrganizations">
+        DELETE FROM byai.tenant_organization WHERE enterprise_id = #{enterpriseId}
+    </delete>
+
+    <delete id="deleteTenantResourceConfigs">
+        DELETE FROM byai.tenant_config
+        WHERE enterprise_id = #{enterpriseId}
+          AND params_code NOT IN ('PROVISION_REQUEST_ID', 'PROVISION_STATE', 'TENANT_DELETE_REQUESTED')
+    </delete>
+
+</mapper>

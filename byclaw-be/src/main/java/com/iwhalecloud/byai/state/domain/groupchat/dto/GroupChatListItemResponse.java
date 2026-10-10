@@ -23,6 +23,11 @@ public class GroupChatListItemResponse {
     private String name;
 
     @JsonSerialize(using = ToStringSerializer.class)
+    private Long enterpriseId;
+
+    private String enterpriseName;
+
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long projectId;
 
     private String role;

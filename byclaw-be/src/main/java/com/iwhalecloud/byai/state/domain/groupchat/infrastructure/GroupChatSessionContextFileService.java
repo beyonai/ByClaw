@@ -71,6 +71,17 @@ public class GroupChatSessionContextFileService {
         return prepare(userCode, groupRequest, traceId, currentUserMessageId, false).get(0);
     }
 
+    /** Tenant callers supply a snapshot already authorized by the owning Node; storage remains shared. */
+    public ContextFile prepareGroupSnapshot(String userCode, GroupChatContextRequest groupRequest, String traceId,
+        Long currentUserMessageId, GroupChatContextResponse snapshot) {
+        if (groupRequest == null || snapshot == null || !Objects.equals(groupRequest.getConversationKey(), snapshot.getConversationKey())
+            || snapshot.getSnapshot() == null
+            || !Objects.equals(groupRequest.getBeforeMessageId(), snapshot.getSnapshot().getBeforeMessageId())) {
+            throw new ChatTurnPreparationException("历史上下文边界无效，请重试", null);
+        }
+        return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, snapshot).get(0);
+    }
+
     /** 任务切换执行员工时提供群背景和此前任务正文，两份文件全部就绪才返回。 */
     public TaskHandoffHistory prepareTaskHandoffHistory(String userCode, GroupChatContextRequest groupRequest,
         String traceId, Long currentUserMessageId) {
@@ -81,6 +92,11 @@ public class GroupChatSessionContextFileService {
     /** 仅复用私有存储流程；业务入口分别表达群聊派发和任务接手。 */
     private List<ContextFile> prepare(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, boolean includeTaskHistory) {
+        return prepare(userCode, groupRequest, traceId, currentUserMessageId, includeTaskHistory, null);
+    }
+
+    private List<ContextFile> prepare(String userCode, GroupChatContextRequest groupRequest, String traceId,
+        Long currentUserMessageId, boolean includeTaskHistory, GroupChatContextResponse authorizedSnapshot) {
         try {
             if (StringUtils.isBlank(userCode) || StringUtils.isBlank(traceId) || groupRequest == null
                 || groupRequest.getChildSessionId() == null || groupRequest.getChildSessionId() <= 0
@@ -95,8 +111,11 @@ public class GroupChatSessionContextFileService {
                 // 同轮的本机重入串行；跨实例派发仍由已有数据库 turn claim 约束。
                 synchronized (locks[Math.floorMod((userCode + turnKey).hashCode(), locks.length)]) {
                     try {
-                        authorize(groupRequest, includeTaskHistory);
-                        return prepareCurrent(groupRequest, currentUserMessageId, includeTaskHistory, turnKey);
+                        if (authorizedSnapshot == null) authorize(groupRequest, includeTaskHistory);
+                        else if (!Objects.equals(CurrentUserHolder.getCurrentUserId(), groupRequest.getInitiatorUserId())) {
+                            throw new IllegalArgumentException("Context owner does not match initiator");
+                        }
+                        return prepareCurrent(groupRequest, currentUserMessageId, includeTaskHistory, turnKey, authorizedSnapshot);
                     }
                     catch (Exception error) {
                         throw new ChatTurnPreparationException("历史上下文准备失败，请重试", error);
@@ -127,7 +146,7 @@ public class GroupChatSessionContextFileService {
     }
 
     private List<ContextFile> prepareCurrent(GroupChatContextRequest request, Long boundary, boolean taskHistory,
-        String turnKey) throws IOException {
+        String turnKey, GroupChatContextResponse authorizedSnapshot) throws IOException {
         String directory = "/.sessions/" + request.getChildSessionId() + "/.byclaw/context/" + turnKey;
         List<ContextFile> files = new ArrayList<>();
         files.add(new ContextFile("GROUP_PUBLIC", "/by" + directory + "/group-history.json",
@@ -140,7 +159,7 @@ public class GroupChatSessionContextFileService {
         List<String> existing = Objects.requireNonNull(userFS.list(directory, 1), "Missing storage listing");
         if (existing.contains(marker) || existing.contains("/by" + marker)) {
             verifyCompleted(marker, files);
-            return List.copyOf(files);
+            return frozenSnapshots(files);
         }
         List<FileProof> proofs = new ArrayList<>();
         for (ContextFile file : files) {
@@ -148,7 +167,7 @@ public class GroupChatSessionContextFileService {
             try {
                 try (BufferedWriter writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
                     if ("GROUP_PUBLIC".equals(file.kind())) {
-                        writer.write(objectMapper.writeValueAsString(groupHistoryForExport(request)));
+                        writer.write(objectMapper.writeValueAsString(groupHistoryForExport(request, authorizedSnapshot)));
                     }
                     else {
                         writeTaskHistory(writer, request.getChildSessionId(), boundary);
@@ -175,13 +194,14 @@ public class GroupChatSessionContextFileService {
             Objects.requireNonNull(userFS.write(input, manifest.length, "application/json", marker),
                 "Context completion marker returned no result");
         }
-        return List.copyOf(files);
+        return frozenSnapshots(files);
     }
 
     /** 只格式化文件副本，保留原群历史接口和数据库中的成员引用协议。 */
-    private GroupChatContextResponse groupHistoryForExport(GroupChatContextRequest request) {
+    private GroupChatContextResponse groupHistoryForExport(GroupChatContextRequest request, GroupChatContextResponse authorizedSnapshot) {
         GroupChatContextResponse snapshot = objectMapper.convertValue(Objects.requireNonNull(
-            groupContextService.load(request), "Missing group snapshot"), GroupChatContextResponse.class);
+            authorizedSnapshot == null ? groupContextService.load(request) : authorizedSnapshot,
+            "Missing group snapshot"), GroupChatContextResponse.class);
         // 查询层先过滤保证窗口完整；导出层防御性过滤，避免未来投影变化泄露事件。
         snapshot.getMessages().removeIf(message -> Integer.valueOf(5).equals(message.getUsage()));
         for (GroupChatContextResponse.Message message : snapshot.getMessages()) {
@@ -200,6 +220,20 @@ public class GroupChatSessionContextFileService {
                 : exported.get(exported.size() - 1).getMessageId());
         }
         return snapshot;
+    }
+
+    private List<ContextFile> frozenSnapshots(List<ContextFile> files) throws IOException {
+        List<ContextFile> result = new ArrayList<>();
+        for (ContextFile file : files) {
+            if ("GROUP_PUBLIC".equals(file.kind())) {
+                try (InputStream input = Objects.requireNonNull(userFS.read(storagePath(file)), "Missing group snapshot")) {
+                    result.add(new ContextFile(file.kind(), file.agentPath(), file.beforeMessageId(),
+                        objectMapper.readValue(input, GroupChatContextResponse.class)));
+                }
+            }
+            else result.add(file);
+        }
+        return List.copyOf(result);
     }
 
     private void verifyCompleted(String marker, List<ContextFile> files) throws IOException {
@@ -330,7 +364,11 @@ public class GroupChatSessionContextFileService {
         }
     }
 
-    public record ContextFile(String kind, String agentPath, String beforeMessageId) { }
+    public record ContextFile(String kind, String agentPath, String beforeMessageId, GroupChatContextResponse snapshot) {
+        public ContextFile(String kind, String agentPath, String beforeMessageId) {
+            this(kind, agentPath, beforeMessageId, null);
+        }
+    }
 
     public record TaskHandoffHistory(ContextFile groupHistory, ContextFile taskHistory) { }
 

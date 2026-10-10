@@ -35,6 +35,7 @@ public class SessionResourceQueryService {
             : providers.get(query.getResourceType().trim().toLowerCase(Locale.ROOT));
         if (provider == null) throw new BaseException(400, "datasource.resource.type.unsupported");
         Project project = access.requireSessionProject(query.getSessionId());
+        if (project == null) return new SessionResourcePage(List.of(), 0, query.getPageNum(), query.getPageSize());
         return provider.query(project, query, external && query.isIncludeCredentials());
     }
 }

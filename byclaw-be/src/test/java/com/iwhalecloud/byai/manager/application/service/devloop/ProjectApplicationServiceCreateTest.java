@@ -32,6 +32,9 @@ import com.iwhalecloud.byai.manager.application.service.project.ProjectWorkspace
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectResourceService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.WorkgroupNameService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -44,6 +47,9 @@ class ProjectApplicationServiceCreateTest {
 
     @Mock
     private ProjectService projectService;
+
+    @Mock
+    private WorkgroupNameService workgroupNames;
 
     @Mock
     private SequenceService sequenceService;
@@ -85,6 +91,7 @@ class ProjectApplicationServiceCreateTest {
     @AfterEach
     void clearCurrentUser() {
         CurrentUserHolder.clearLoginInfo();
+        TenantRequestContextHolder.clear();
         LocaleContextHolder.resetLocaleContext();
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", originalMessageSource);
     }
@@ -103,7 +110,7 @@ class ProjectApplicationServiceCreateTest {
         Project result = service.createProject(dto);
 
         assertThat(result.getProjectType()).isEqualTo("normal");
-        verify(projectService).existsProjectName("workspace", 88L, null);
+        verify(projectService).existsProjectName("workspace", 88L, 1L, null);
         verify(projectInitService).initProjectWorkspace(1001L);
         verify(projectWorkspaceManifestService).syncProjectGitmodules(1001L);
         verify(datasetApplicationService).createDataset(any());
@@ -111,7 +118,7 @@ class ProjectApplicationServiceCreateTest {
 
     @Test
     void rejectsDuplicateNamesWithinCurrentUsersProjectsBeforeSaving() {
-        when(projectService.existsProjectName("workspace", 88L, null)).thenReturn(true);
+        when(projectService.existsProjectName("workspace", 88L, 1L, null)).thenReturn(true);
         ProjectDTO dto = new ProjectDTO();
         dto.setProjectName(" workspace ");
 
@@ -125,6 +132,7 @@ class ProjectApplicationServiceCreateTest {
         Project project = new Project();
         project.setProjectId(1001L);
         project.setCreateBy(99L);
+        project.setEnterpriseId(10L);
         project.setCloudResourceId(9001L);
         when(projectService.findById(1001L)).thenReturn(project);
         ProjectDTO dto = new ProjectDTO();
@@ -133,9 +141,34 @@ class ProjectApplicationServiceCreateTest {
 
         service().updateProject(dto);
 
-        verify(projectService).existsProjectName("renamed workspace", 99L, 1001L);
+        verify(projectService).existsProjectName("renamed workspace", 99L, 10L, 1001L);
         verify(projectService).update(project);
         assertThat(project.getProjectName()).isEqualTo("renamed workspace");
+    }
+
+    @Test
+    void allowsEditingARecreatedProjectWhenItsUnchangedNameAlsoBelongsToHistory() {
+        Project project = new Project();
+        project.setProjectId(1002L);
+        project.setCreateBy(88L);
+        project.setEnterpriseId(10L);
+        project.setProjectName("Team");
+        project.setProjectType("hacu");
+        project.setCloudResourceId(9001L);
+        when(projectService.findById(1002L)).thenReturn(project);
+        org.mockito.Mockito.lenient().when(projectService.existsProjectName("Team", 88L, 10L, 1002L))
+            .thenReturn(true);
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectId(1002L);
+        dto.setProjectName(" Team ");
+        dto.setDescription("updated goal");
+
+        service().updateProject(dto);
+
+        assertThat(project.getProjectName()).isEqualTo("Team");
+        assertThat(project.getDescription()).isEqualTo("updated goal");
+        verify(projectService).update(project);
+        verify(projectService, never()).existsProjectName("Team", 88L, 10L, 1002L);
     }
 
     @Test
@@ -156,6 +189,70 @@ class ProjectApplicationServiceCreateTest {
         assertThat(savedProject.getValue().getProjectType()).isEqualTo("hacu");
         assertThat(result.getProjectType()).isEqualTo("hacu");
         verify(projectInitService).initProjectWorkspace(1001L);
+    }
+
+    @Test
+    void recreatesGroupProjectWithoutChangingTheHistoricalProject() {
+        // The old generic check sees the retained HACU project; workgroup availability must use group lifecycle.
+        org.mockito.Mockito.lenient().when(projectService.existsProjectName("group workspace", 88L, 1L, null))
+            .thenReturn(true);
+        when(sequenceService.nextVal()).thenReturn(1002L);
+        Project persisted = new Project();
+        persisted.setProjectId(1002L);
+        when(projectService.findById(1002L)).thenReturn(persisted);
+        stubCreateCloudResource();
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectName("group workspace");
+
+        Project result = service().createGroupChatProject(dto);
+
+        assertThat(result.getProjectId()).isEqualTo(1002L);
+        verify(projectService).save(result);
+        verify(projectService).existsNonWorkgroupProjectName("group workspace", 88L, 1L);
+        verify(workgroupNames).exists("group workspace", 88L, 1L);
+        verify(projectService, never()).update(org.mockito.ArgumentMatchers.argThat(p -> Long.valueOf(1001L).equals(p.getProjectId())));
+    }
+
+    @Test
+    void rejectsAnActiveSameNameWorkgroupBeforeCreatingAnyProject() {
+        when(workgroupNames.exists("group workspace", 88L, 1L)).thenReturn(true);
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectName(" group workspace ");
+
+        assertThatThrownBy(() -> service().createGroupChatProject(dto)).isInstanceOf(BaseException.class);
+
+        verify(projectService, never()).save(any());
+        verify(datasetApplicationService, never()).createDataset(any());
+    }
+
+    @Test
+    void keepsOrdinaryProjectNameConflictsWhenCreatingWorkgroups() {
+        when(projectService.existsNonWorkgroupProjectName("workspace", 88L, 1L)).thenReturn(true);
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectName("workspace");
+
+        assertThatThrownBy(() -> service().createGroupChatProject(dto)).isInstanceOf(BaseException.class);
+
+        verify(projectService, never()).save(any());
+        org.mockito.Mockito.verifyNoInteractions(workgroupNames);
+    }
+
+    @Test
+    void usesTheSelectedTenantForNameChecksAndProjectOwnership() {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 10L, "OWNER"));
+        when(sequenceService.nextVal()).thenReturn(1002L);
+        Project persisted = new Project();
+        persisted.setProjectId(1002L);
+        when(projectService.findById(1002L)).thenReturn(persisted);
+        stubCreateCloudResource();
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectName("group workspace");
+
+        Project result = service().createGroupChatProject(dto);
+
+        assertThat(result.getEnterpriseId()).isEqualTo(10L);
+        verify(workgroupNames).exists("group workspace", 88L, 10L);
+        verify(projectService).existsNonWorkgroupProjectName("group workspace", 88L, 10L);
     }
 
     @Test
@@ -222,6 +319,7 @@ class ProjectApplicationServiceCreateTest {
     private ProjectApplicationService service() {
         ProjectApplicationService service = new ProjectApplicationService();
         ReflectionTestUtils.setField(service, "projectService", projectService);
+        ReflectionTestUtils.setField(service, "workgroupNames", workgroupNames);
         ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(service, "projectRepoMapper", projectRepoMapper);
         ReflectionTestUtils.setField(service, "projectResourceService", projectResourceService);

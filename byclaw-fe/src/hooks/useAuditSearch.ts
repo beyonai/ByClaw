@@ -5,7 +5,7 @@ export default function useAuditSearch<T extends { resourceName?: string | null 
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
 
   useEffect(() => {
-    // 审核接口返回完整列表，输入停止后再过滤缓存，避免每次按键都更新表格。
+    // 输入停止后再更新关键词，供本地筛选或服务端查询共用，避免每次按键都更新列表。
     const timer = window.setTimeout(() => setDebouncedKeyword(auditKeyword.trim().toLowerCase()), 300);
     return () => window.clearTimeout(timer);
   }, [auditKeyword]);
@@ -16,5 +16,5 @@ export default function useAuditSearch<T extends { resourceName?: string | null 
     [rows, debouncedKeyword]
   );
 
-  return { auditKeyword, setAuditKeyword, filteredRows };
+  return { auditKeyword, setAuditKeyword, debouncedKeyword, filteredRows };
 }

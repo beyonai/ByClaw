@@ -1,5 +1,6 @@
 import {
   getMessages,
+  getMessageById,
   getMessageOutline,
   updateMesFeedback as likeOrDislike,
   delMessage,
@@ -27,6 +28,14 @@ const mockPOST = POST as jest.MockedFunction<typeof POST>;
 describe('Message Service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('loads one message with the GET query contract required by the chat controller', () => {
+    getMessageById({ messageId: '9007199254740993' });
+    expect(mockGET).toHaveBeenCalledWith('/byaiService/chat/getMessageById', {
+      messageId: '9007199254740993',
+    });
+    expect(mockPOST).not.toHaveBeenCalled();
   });
 
   describe('getMessages', () => {

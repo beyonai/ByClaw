@@ -752,7 +752,9 @@ public class ByClawSkillResourceApplicationService {
             } else if (OwnerType.PERSONAL.equals(resource.getOwnerType())
                 || "personal_default".equals(resource.getOwnerType())) {
                 failures.add(I18nUtil.get(knowledge ? "byclaw.skill.publication.personal.knowledge"
-                    : "byclaw.skill.publication.personal.tool", name, id.toString()));
+                    : "byclaw.skill.publication.personal.tool", name, id.toString(),
+                    StringUtils.defaultIfBlank(resource.getResourceCode(), "-"),
+                    StringUtils.defaultIfBlank(resource.getResourceBizType(), "-"), resource.getOwnerType()));
             } else if (!OwnerType.ENTERPRISE.equals(resource.getOwnerType())) {
                 failures.add(I18nUtil.get("byclaw.skill.publication.resource.owner.invalid", name, id.toString()));
             }

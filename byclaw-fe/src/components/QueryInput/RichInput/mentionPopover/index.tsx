@@ -18,7 +18,7 @@ import { useIntl, useSelector } from '@umijs/max';
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 import { getAgentChatAvatar } from '@/utils/agent';
 import { ResourceTypeMap } from '@/constants/resource';
-import { getResourcePopoverPanelHeight } from './resourcePopoverAdapter';
+import { getResourcePopoverContentHeight, getResourcePopoverPanelHeight } from './resourcePopoverAdapter';
 
 interface MentionPopoverProps {
   type?: '@' | '#';
@@ -42,6 +42,9 @@ interface MentionPopoverProps {
 
   /** 打开时默认展示的资源分类。 */
   activeTabKey?: string;
+
+  /** 员工组聊天隐藏技能、工具和知识分类，普通员工保留。 */
+  hideEmployeeResources?: boolean;
 }
 
 const MentionPopover: React.FC<MentionPopoverProps> = ({
@@ -60,6 +63,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   projectCloudResourceId,
   projectId,
   activeTabKey,
+  hideEmployeeResources,
 }) => {
   const { trackerEmployeeClick } = useTracker();
   const intl = useIntl();
@@ -84,9 +88,9 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   const isExpertResourceOverlayOpen = chatMode === chatModeMap.expert && !!currentAgent;
   const useInputWidth = isAtPopover && !isExpertResourceOverlayOpen && !!width;
   const isResourcePicker = isAtPopover && activeTabKey !== undefined;
-  // 分类完整显示即可；只有屏幕空间不足时才压缩并允许导航滚动。
+  // 分类较少时保留右侧列表的最小阅读高度，屏幕空间不足时再压缩并允许内部滚动。
   const panelHeight = isResourcePicker
-    ? Math.min(availableHeight, navigationHeight)
+    ? getResourcePopoverContentHeight(availableHeight, navigationHeight)
     : 'min(65vh, calc(100vh - 32px))';
   const panelWidth = useInputWidth && width ? width : 'min(calc(100vw - 24px), 485px)';
 
@@ -323,7 +327,11 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
               maxWidth: panelWidth,
             }}
           >
-            <div className={styles.contentInner}>
+            <div
+              className={classNames(styles.contentInner, {
+                [styles.contentInnerResourceMenu]: isAtPopover,
+              })}
+            >
               {(() => {
                 if (type === '#') {
                   return (
@@ -355,6 +363,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                       resourceAgentIds={resourceAgentIds}
                       excludedAgentIds={excludedAgentIds}
                       activeKey={activeTabKey}
+                      hideEmployeeResources={hideEmployeeResources}
                       onSelect={onSelect}
                     />
                   );

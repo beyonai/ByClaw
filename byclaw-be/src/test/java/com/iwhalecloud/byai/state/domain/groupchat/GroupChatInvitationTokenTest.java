@@ -15,6 +15,7 @@ import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.enterprise.EnterpriseInfo;
@@ -62,8 +63,12 @@ class GroupChatInvitationTokenTest {
     private ByaiSession group;
     private ByaiSessionMember owner;
 
+    private final com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService tenantMembers =
+        mock(com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService.class);
+
     @BeforeEach void setup() {
         ReflectionTestUtils.setField(application, "invitationService", service);
+        ReflectionTestUtils.setField(application, "tenantUserMembershipService", tenantMembers);
         LoginInfo login = new LoginInfo();
         login.setUserId(10L);
         login.setEnterpriseId(3L);
@@ -398,6 +403,8 @@ class GroupChatInvitationTokenTest {
 
         assertThat(joined.getSessionId()).isEqualTo(20L);
         assertThat(joined.getMemObjId()).isEqualTo(11L);
+        verify(tenantMembers).add(11L, group.getEnterpriseId(),
+            com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole.MEMBER, 11L);
         verify(members).save(joined);
     }
     @Test void successfulJoinUsesServerBoundGroupAndIsIdempotent() {

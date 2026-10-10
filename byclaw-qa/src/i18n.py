@@ -42,6 +42,8 @@ class Msg(str, Enum):
     PROMPT_GENERATE_FILENAME = "prompt.generate_filename"
     ERR_MINIO_ENDPOINT_MISSING = "err.minio_endpoint_missing"
     ERR_STORAGE_UNAVAILABLE = "err.storage_unavailable"
+    ERR_EMBEDDING_SETUP_REQUIRED = "err.embedding_setup_required"
+    ERR_LLM_SETUP_REQUIRED = "err.llm_setup_required"
     ERR_MODEL_CONFIG_INVALID = "err.model_config_invalid"
     ERR_MODEL_NOT_FOUND = "err.model_not_found"
     ERR_NO_USER_CODE = "err.no_user_code"
@@ -75,8 +77,10 @@ MESSAGES: dict[str, dict[Msg, str]] = {
         ),
         Msg.ERR_MINIO_ENDPOINT_MISSING: "存储服务配置缺失，无法执行检索。",
         Msg.ERR_STORAGE_UNAVAILABLE: "存储服务暂时不可用，请稍后重试。",
+        Msg.ERR_EMBEDDING_SETUP_REQUIRED: "请先到「管理后台 → 模型管理」配置可用的 Embedding 模型（API 地址、Token、模型编码及向量维度），调试成功后启用并设为默认模型，再使用知识库入库、检索服务。",
+        Msg.ERR_LLM_SETUP_REQUIRED: "请先到「管理后台 → 模型管理」配置可用的 LLM（API 地址、Token 和模型编码），调试成功后启用并设为默认模型。",
         Msg.ERR_MODEL_CONFIG_INVALID: "模型配置异常，无法执行检索。",
-        Msg.ERR_MODEL_NOT_FOUND: "未找到可用的AI模型，无法执行检索。",
+        Msg.ERR_MODEL_NOT_FOUND: "未找到可用的 AI 模型，请到「管理后台 → 模型管理」配置、启用默认 LLM 和 Embedding 模型后重试。",
         Msg.ERR_NO_USER_CODE: "未找到有效用户标识，无法执行检索。",
         Msg.ERR_AUTH_FAILED: "鉴权不通过，无法执行检索。",
     },
@@ -106,8 +110,10 @@ MESSAGES: dict[str, dict[Msg, str]] = {
         ),
         Msg.ERR_MINIO_ENDPOINT_MISSING: "Storage service configuration is missing; cannot perform search.",
         Msg.ERR_STORAGE_UNAVAILABLE: "Storage service is temporarily unavailable. Please try again later.",
+        Msg.ERR_EMBEDDING_SETUP_REQUIRED: "Configure a usable Embedding model in Admin > Model Management (endpoint, token, model code and dimensions), test it, enable it and set it as default before knowledge ingestion or search.",
+        Msg.ERR_LLM_SETUP_REQUIRED: "Configure a usable LLM in Admin > Model Management (endpoint, token and model code), test it, enable it and set it as default.",
         Msg.ERR_MODEL_CONFIG_INVALID: "Model configuration is invalid; cannot perform search.",
-        Msg.ERR_MODEL_NOT_FOUND: "No available AI model found; cannot perform search.",
+        Msg.ERR_MODEL_NOT_FOUND: "No available AI model found. Configure and enable default LLM and Embedding models in Admin > Model Management, then retry.",
         Msg.ERR_NO_USER_CODE: "No valid user identifier found; cannot perform search.",
         Msg.ERR_AUTH_FAILED: "Authentication failed; cannot perform search.",
     },

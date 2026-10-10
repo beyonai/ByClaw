@@ -43,7 +43,10 @@ import { useIntl, useDispatch, useSelector } from '@umijs/max';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
+import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } from '@/pages/manager/service/TenantMgr';
 import { isAdminVip } from '@/pages/manager/utils/auth';
+import { getMultiTenancyRevision, useMultiTenancy } from '@/utils/multiTenancy';
+import { hasAnyUserRole } from '@/utils/userRole';
 import { buildServiceSpecPayload, isServiceSpecAutoStartEnabled, type ServiceSpecConfig } from './serviceSpecUtils';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 
@@ -127,6 +130,8 @@ const resizeStatusColorMap: Record<string, string> = {
 
 interface SsSandboxRecord {
   id: number;
+  ownerScope?: 'USER' | 'TENANT';
+  enterpriseId?: string | number;
   resourceId: number;
   userCode: string;
   sandboxType: string;
@@ -134,6 +139,7 @@ interface SsSandboxRecord {
   sandboxId?: string;
   chatId: string;
   status: string;
+  providerStatus?: 'RUNNING' | 'STOPPED' | 'MISSING' | 'UNKNOWN';
   autoRelease: number;
   leasePolicy?: string;
   timeoutSeconds?: number;
@@ -225,18 +231,35 @@ interface SandboxHealthWatermarkModel {
 }
 
 const SandboxMgr = () => {
+  const { enabled: multiTenancyEnabled } = useMultiTenancy();
   const intl = useIntl();
   const dispatch = useDispatch();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const showLaunchButton = isAdminVip(userInfo);
+  const canViewTenantResources =
+    multiTenancyEnabled &&
+    hasAnyUserRole(
+      userInfo?.usersOrganizations?.map((organization: { userType?: string }) => organization?.userType),
+      ['PLAT_MAN']
+    );
+  const tenantPermissionRef = useRef(canViewTenantResources);
+  tenantPermissionRef.current = canViewTenantResources;
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState('RUNNING');
+  const [resourceScope, setOwnerScope] = useState<'USER' | 'TENANT'>(canViewTenantResources ? 'TENANT' : 'USER');
+  const ownerScope = canViewTenantResources ? resourceScope : 'USER';
+  const [enterpriseId, setEnterpriseId] = useState<string | undefined>();
+  const [tenantOptions, setTenantOptions] = useState<TenantItem[]>([]);
   const [list, setList] = useState<SsSandboxRecord[]>([]);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [manualLoading, setManualLoading] = useState(false);
+  const [tenantLaunchOpen, setTenantLaunchOpen] = useState(false);
+  const [tenantLaunching, setTenantLaunching] = useState(false);
+  const [tenantLaunchForm] = Form.useForm();
+  const [restartingId, setRestartingId] = useState<number | null>(null);
 
   // 沙箱配置抽屉相关状态
   const [specDrawerOpen, setSpecDrawerOpen] = useState(false);
@@ -285,7 +308,14 @@ const SandboxMgr = () => {
   const [preferredMap, setPreferredMap] = useState<Record<string, string>>({});
 
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
-  const curParam = useRef<{ pageIndex?: number; pageSize?: number; keyword?: string; status?: string }>({});
+  const curParam = useRef<{
+    pageIndex?: number;
+    pageSize?: number;
+    keyword?: string;
+    status?: string;
+    ownerScope?: 'USER' | 'TENANT';
+    enterpriseId?: string;
+  }>({});
   const watchedProfileKey = Form.useWatch('profileKey', resizeForm);
   const watchedResizeType = Form.useWatch('resizeType', resizeForm) || 'IN_PLACE';
   const targetProfile = profileList.find((item) => item.profileKey === watchedProfileKey);
@@ -446,14 +476,24 @@ const SandboxMgr = () => {
   };
 
   const loadData = useCallback(
-    (myPageInfo: { pageIndex: number; pageSize: number }, kw?: string, st?: string, silent?: boolean) => {
+    (
+      myPageInfo: { pageIndex: number; pageSize: number },
+      kw?: string,
+      st?: string,
+      silent?: boolean,
+      scope = ownerScope,
+      tenantId = enterpriseId
+    ) => {
       const p = {
         pageIndex: myPageInfo.pageIndex,
         pageSize: myPageInfo.pageSize,
         keyword: kw,
         status: st,
+        ownerScope: canViewTenantResources ? scope : 'USER',
+        enterpriseId: canViewTenantResources && scope === 'TENANT' ? tenantId : undefined,
       };
 
+      const requestRevision = getMultiTenancyRevision();
       curParam.current = p;
       if (!silent) setManualLoading(true);
 
@@ -461,6 +501,8 @@ const SandboxMgr = () => {
         type: 'sandboxMgr/listSandboxRecords',
         payload: p,
         success: (data: any) => {
+          if (requestRevision !== getMultiTenancyRevision() || canViewTenantResources !== tenantPermissionRef.current)
+            return;
           setList(data?.list || []);
           setPageInfo((prev) => ({
             ...prev,
@@ -472,12 +514,32 @@ const SandboxMgr = () => {
           if (!silent) setManualLoading(false);
         },
         fail: () => {
+          if (requestRevision !== getMultiTenancyRevision() || canViewTenantResources !== tenantPermissionRef.current)
+            return;
           if (!silent) setManualLoading(false);
         },
       });
     },
-    [dispatch]
+    [dispatch, ownerScope, enterpriseId, canViewTenantResources]
   );
+
+  useEffect(() => {
+    if (!canViewTenantResources) {
+      setTenantOptions([]);
+      return;
+    }
+    let active = true;
+    listTenants()
+      .then((tenants) => {
+        if (active) setTenantOptions(Array.isArray(tenants) ? tenants : []);
+      })
+      .catch(() => {
+        if (active) setTenantOptions([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canViewTenantResources]);
 
   // Auto refresh (silent)
   useEffect(() => {
@@ -488,9 +550,11 @@ const SandboxMgr = () => {
             pageIndex: curParam.current?.pageIndex || pageInfo.pageIndex,
             pageSize: curParam.current?.pageSize || pageInfo.pageSize,
           },
-          curParam.current?.keyword || keyword,
-          curParam.current?.status || status,
-          true
+          curParam.current?.keyword ?? keyword,
+          curParam.current?.status ?? status,
+          true,
+          curParam.current?.ownerScope ?? ownerScope,
+          curParam.current?.enterpriseId ?? enterpriseId
         );
       }, 10000);
     } else if (refreshTimer.current) {
@@ -503,16 +567,29 @@ const SandboxMgr = () => {
         clearInterval(refreshTimer.current);
       }
     };
-  }, [autoRefresh, loadData, pageInfo, keyword, status]);
+  }, [autoRefresh, loadData, pageInfo, keyword, status, ownerScope, enterpriseId]);
 
-  // Initial load
+  // Reload the visible resource scope when the system switch or role changes.
   useEffect(() => {
-    loadData(pageInfo, keyword, status);
-  }, []);
+    if (!canViewTenantResources) {
+      setOwnerScope('USER');
+      setEnterpriseId(undefined);
+      setTenantLaunchOpen(false);
+    }
+    setList([]);
+    loadData({ pageIndex: 1, pageSize: pageInfo.pageSize }, keyword, status);
+  }, [canViewTenantResources]);
 
   // Load preferred serviceKey for each unique userCode in the list
   useEffect(() => {
-    const userCodes = [...new Set(list.map((r) => r.userCode).filter(Boolean))];
+    const userCodes = [
+      ...new Set(
+        list
+          .filter((r) => r.ownerScope !== 'TENANT')
+          .map((r) => r.userCode)
+          .filter(Boolean)
+      ),
+    ];
     if (!userCodes.length) return;
     userCodes.forEach(async (code) => {
       try {
@@ -601,7 +678,10 @@ const SandboxMgr = () => {
     }
   }, []);
 
-  const canReleaseSandbox = useCallback((record: SsSandboxRecord) => RELEASABLE_STATUSES.includes(record.status), []);
+  const canReleaseSandbox = useCallback(
+    (record: SsSandboxRecord) => record.ownerScope !== 'TENANT' && RELEASABLE_STATUSES.includes(record.status),
+    []
+  );
 
   const handleAutoReleaseChange = useCallback(
     (record: SsSandboxRecord, checked: boolean) => {
@@ -1189,6 +1269,44 @@ const SandboxMgr = () => {
     });
   }, [dispatch, launchForm]);
 
+  const handleLaunchTenant = useCallback(async () => {
+    try {
+      const { tenantId } = await tenantLaunchForm.validateFields();
+      setTenantLaunching(true);
+      await provisionTenant(tenantId);
+      message.success(intl.formatMessage({ id: 'sandboxMgr.tenant.launchAccepted' }));
+      setTenantLaunchOpen(false);
+      loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, 'TENANT', tenantId);
+      setEnterpriseId(tenantId);
+    } catch (error) {
+      if ((error as { errorFields?: unknown[] })?.errorFields) return;
+      message.error(intl.formatMessage({ id: 'sandboxMgr.tenant.actionFailed' }));
+    } finally {
+      setTenantLaunching(false);
+    }
+  }, [intl, keyword, loadData, pageInfo, status, tenantLaunchForm]);
+
+  const handleRestartTenant = useCallback(
+    async (record: SsSandboxRecord) => {
+      if (record.enterpriseId === undefined || record.enterpriseId === null) return;
+      setRestartingId(record.id);
+      try {
+        await restartTenantSandbox({
+          enterpriseId: String(record.enterpriseId),
+          sandboxType: record.sandboxType,
+          recordId: record.id,
+        });
+        message.success(intl.formatMessage({ id: 'sandboxMgr.tenant.restartAccepted' }));
+        loadData({ ...pageInfo }, keyword, status);
+      } catch {
+        message.error(intl.formatMessage({ id: 'sandboxMgr.tenant.actionFailed' }));
+      } finally {
+        setRestartingId(null);
+      }
+    },
+    [intl, keyword, loadData, pageInfo, status]
+  );
+
   const handleLaunchSandbox = useCallback(() => {
     launchForm.validateFields().then((values) => {
       setLaunching(true);
@@ -1250,6 +1368,24 @@ const SandboxMgr = () => {
       width: 90,
     },
     {
+      title: '归属维度',
+      dataIndex: 'ownerScope',
+      align: 'center' as const,
+      width: 110,
+      render: (value: string) => (value === 'TENANT' ? <Tag color="blue">租户</Tag> : <Tag>用户</Tag>),
+    },
+    {
+      title: '租户',
+      dataIndex: 'enterpriseId',
+      align: 'center' as const,
+      width: 180,
+      render: (value: string | number | undefined, record: SsSandboxRecord) => {
+        if (record.ownerScope !== 'TENANT' || value === null || value === undefined) return '-';
+        const tenant = tenantOptions.find((item) => item.enterpriseId === String(value));
+        return renderEllipsisText(tenant ? `${tenant.enterpriseName} (${value})` : value);
+      },
+    },
+    {
       title: intl.formatMessage({ id: 'sandboxMgr.table.userCode' }),
       dataIndex: 'userCode',
       align: 'center' as const,
@@ -1303,6 +1439,7 @@ const SandboxMgr = () => {
       width: 260,
       ellipsis: true,
       render: (value: string, record: SsSandboxRecord) => {
+        if (record.ownerScope === 'TENANT') return renderEllipsisText(value);
         if (record.status === 'RUNNING' && value) {
           return <Typography.Link onClick={() => handleView(value)}>{value}</Typography.Link>;
         }
@@ -1314,7 +1451,15 @@ const SandboxMgr = () => {
       dataIndex: 'status',
       align: 'center' as const,
       width: 110,
-      render: (value: string) => {
+      render: (value: string, record: SsSandboxRecord) => {
+        if (record.ownerScope === 'TENANT' && value === 'RUNNING') {
+          if (record.providerStatus === 'MISSING' || record.providerStatus === 'STOPPED') {
+            return <Tag color="red">{intl.formatMessage({ id: 'sandboxMgr.tenant.providerAbnormal' })}</Tag>;
+          }
+          if (record.providerStatus !== 'RUNNING') {
+            return <Tag color="orange">{intl.formatMessage({ id: 'sandboxMgr.tenant.providerUnknown' })}</Tag>;
+          }
+        }
         if (value === 'RUNNING') {
           return <Tag color="green">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Tag>;
         }
@@ -1368,7 +1513,7 @@ const SandboxMgr = () => {
       render: (value: number, record: SsSandboxRecord) => (
         <Switch
           checked={value === 1}
-          disabled={record.status !== 'RUNNING' || updatingId === record.id}
+          disabled={record.ownerScope === 'TENANT' || record.status !== 'RUNNING' || updatingId === record.id}
           loading={updatingId === record.id}
           size="small"
           onChange={(checked) => handleAutoReleaseChange(record, checked)}
@@ -1446,6 +1591,31 @@ const SandboxMgr = () => {
       fixed: 'right' as const,
       width: 160,
       render: (_: any, record: SsSandboxRecord) => {
+        if (record.ownerScope === 'TENANT') {
+          if (!showLaunchButton || !['RUNNING', 'FAILED'].includes(record.status)) return null;
+          return (
+            <Popconfirm
+              title={intl.formatMessage({ id: 'sandboxMgr.tenant.restartConfirm' })}
+              description={intl.formatMessage({
+                id:
+                  record.sandboxType === 'tenant-opengauss'
+                    ? 'sandboxMgr.tenant.restartDbDescription'
+                    : 'sandboxMgr.tenant.restartNodeDescription',
+              })}
+              onConfirm={() => handleRestartTenant(record)}
+            >
+              <Button
+                size="small"
+                type="link"
+                icon={<ReloadOutlined />}
+                loading={restartingId === record.id}
+                disabled={restartingId !== null}
+              >
+                {intl.formatMessage({ id: 'sandboxMgr.tenant.restart' })}
+              </Button>
+            </Popconfirm>
+          );
+        }
         if (!canReleaseSandbox(record)) return null;
 
         return (
@@ -1820,14 +1990,47 @@ const SandboxMgr = () => {
         (PROFILE_ORDER[(b.profileKey || '').toLowerCase()] || b.sortOrder || 999)
     );
   const enabledProfileList = sortedProfileList.filter((item) => item.enabled !== 0 && item.resizeEnabled !== 0);
+  const tenantColumnKeys = new Set([
+    'id',
+    'enterpriseId',
+    'sandboxType',
+    'sandboxId',
+    'endpoint',
+    'status',
+    'createTime',
+    'releaseTime',
+    'releaseReason',
+    'action',
+  ]);
+  const visibleColumns =
+    ownerScope === 'TENANT'
+      ? columns.filter((column) => tenantColumnKeys.has(String(column.dataIndex)))
+      : columns.filter((column) => !['ownerScope', 'enterpriseId'].includes(String(column.dataIndex)));
 
   return (
     <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
+      <Tabs
+        activeKey={ownerScope}
+        items={[
+          ...(canViewTenantResources ? [{ key: 'TENANT', label: '租户资源' }] : []),
+          { key: 'USER', label: '用户资源' },
+        ]}
+        onChange={(key) => {
+          const scope = key as 'TENANT' | 'USER';
+          setOwnerScope(scope);
+          setEnterpriseId(undefined);
+          loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, scope, undefined);
+        }}
+      />
       <Row gutter={16} align="middle">
         <Col flex="auto">
           <Space size="middle">
             <Input.Search
-              placeholder={intl.formatMessage({ id: 'sandboxMgr.search.placeholder' })}
+              placeholder={
+                ownerScope === 'TENANT'
+                  ? '按租户名称 / 编码搜索'
+                  : intl.formatMessage({ id: 'sandboxMgr.search.placeholder' })
+              }
               value={keyword}
               onChange={(e) => setKeyword(trim(e.target.value))}
               onSearch={handleSearch}
@@ -1838,16 +2041,50 @@ const SandboxMgr = () => {
             <Select value={status} onChange={handleStatusChange} style={{ width: 150 }}>
               <Option value="">{intl.formatMessage({ id: 'sandboxMgr.status.all' })}</Option>
               <Option value="STARTING">{intl.formatMessage({ id: 'sandboxMgr.status.starting' })}</Option>
-              <Option value="RUNNING">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Option>
+              <Option value="RUNNING">
+                {ownerScope === 'TENANT'
+                  ? intl.formatMessage({ id: 'sandboxMgr.tenant.recordRunning' })
+                  : intl.formatMessage({ id: 'sandboxMgr.status.running' })}
+              </Option>
               <Option value="RELEASING">{intl.formatMessage({ id: 'sandboxMgr.status.releasing' })}</Option>
               <Option value="RELEASED">{intl.formatMessage({ id: 'sandboxMgr.status.released' })}</Option>
               <Option value="FAILED">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Option>
             </Select>
+            {ownerScope === 'TENANT' && (
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="筛选租户"
+                value={enterpriseId}
+                style={{ width: 220 }}
+                onChange={(value?: string) => {
+                  setEnterpriseId(value);
+                  loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, ownerScope, value);
+                }}
+                options={tenantOptions.map((item) => ({
+                  label: `${item.enterpriseName} (${item.enterpriseId})`,
+                  value: item.enterpriseId,
+                }))}
+              />
+            )}
           </Space>
         </Col>
         <Col>
           <Space size="middle">
-            {showLaunchButton && (
+            {showLaunchButton && ownerScope === 'TENANT' && (
+              <Button
+                type="primary"
+                icon={<RocketOutlined />}
+                onClick={() => {
+                  tenantLaunchForm.resetFields();
+                  setTenantLaunchOpen(true);
+                }}
+              >
+                {intl.formatMessage({ id: 'sandboxMgr.tenant.launch' })}
+              </Button>
+            )}
+            {showLaunchButton && ownerScope === 'USER' && (
               <Button type="primary" icon={<RocketOutlined />} onClick={handleOpenLaunchModal}>
                 {intl.formatMessage({ id: 'sandboxMgr.launch.button' })}
               </Button>
@@ -1879,7 +2116,7 @@ const SandboxMgr = () => {
       <div className={classNames('ub-f1', styles.tableScroll)}>
         <Table<SsSandboxRecord>
           rowKey="id"
-          columns={columns}
+          columns={visibleColumns}
           dataSource={list}
           pagination={{
             ...pageInfo,
@@ -1887,7 +2124,7 @@ const SandboxMgr = () => {
             showTotal: (total: number) => intl.formatMessage({ id: 'sandboxMgr.pagination.total' }, { total }),
             onChange: handlePaginationChange,
           }}
-          scroll={{ x: 2400, y: 'calc(100vh - 230px)' }}
+          scroll={{ x: ownerScope === 'TENANT' ? 1600 : 2690, y: 'calc(100vh - 280px)' }}
           loading={manualLoading}
           className={styles.table}
         />
@@ -2936,6 +3173,32 @@ const SandboxMgr = () => {
       </ModalDrawer>
 
       {/* 指定用户沙箱弹窗 */}
+      <Modal
+        title={intl.formatMessage({ id: 'sandboxMgr.tenant.launchTitle' })}
+        open={tenantLaunchOpen}
+        onCancel={() => setTenantLaunchOpen(false)}
+        onOk={handleLaunchTenant}
+        confirmLoading={tenantLaunching}
+        destroyOnClose
+      >
+        <Form form={tenantLaunchForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="tenantId"
+            label={intl.formatMessage({ id: 'sandboxMgr.tenant.select' })}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'sandboxMgr.tenant.selectRequired' }) }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder={intl.formatMessage({ id: 'sandboxMgr.tenant.select' })}
+              options={tenantOptions.map((item) => ({
+                label: `${item.enterpriseName} (${item.enterpriseId})`,
+                value: item.enterpriseId,
+              }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Modal
         title={intl.formatMessage({ id: 'sandboxMgr.launch.title' })}
         open={launchModalOpen}

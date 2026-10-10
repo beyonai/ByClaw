@@ -26,6 +26,15 @@ class SessionResourceQueryServiceTest {
     }
 
     @Test
+    void authorizedTenantTaskWithoutProjectHasNoResources() {
+        when(access.requireSessionProject(50L)).thenReturn(null);
+        SessionResourcePage page = service.query(query(), false);
+        assertThat(page.items()).isEmpty();
+        assertThat(page.total()).isZero();
+        verify(provider, never()).query(any(), any(), anyBoolean());
+    }
+
+    @Test
     void browserCredentialsAreRejectedBeforeAnyResourceLookup() {
         SessionResourceQueryDto query = query();
         query.setIncludeCredentials(true);

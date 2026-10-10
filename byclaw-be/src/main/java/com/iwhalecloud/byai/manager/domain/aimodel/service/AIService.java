@@ -131,6 +131,7 @@ public class AIService {
         int maxTokens,
         boolean jsonObject
     ) {
+        ModelConfigurationValidator.validate(defaultModel);
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
         String model = defaultModel.getModelCode();
@@ -199,6 +200,7 @@ public class AIService {
     public String generateTextStream(String systemPrompt, String userPrompt, String modelCode, int maxTokens,
                                      TextChunkHandler chunkHandler) {
         ModelDto defaultModel = resolveModel(modelCode);
+        ModelConfigurationValidator.validate(defaultModel);
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
         String model = defaultModel.getModelCode();

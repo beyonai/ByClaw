@@ -1,6 +1,6 @@
+import { runSearxng as defaultRunSearxng } from './searxng.mjs';
 import { runSearch1Api as defaultRunSearch1Api } from './search1api.mjs';
 import { runTencentWsa as defaultRunWsa } from './tencent-wsa.mjs';
-import { selectProviderCombination } from '../jev/source-plan.mjs';
 
 const MAX_COMMERCIAL_PROVIDER_TIMEOUT_MS = 15_000;
 
@@ -99,40 +99,21 @@ export async function runOnlineSearch(args, options = {}) {
   const now = options.now || (() => performance.now());
   const startedAt = now();
   const timeoutMs = Number.isSafeInteger(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 60_000;
-  const providerTimeoutMs = Math.max(1, Math.min(
+  const commercialTimeoutMs = Math.max(1, Math.min(
     MAX_COMMERCIAL_PROVIDER_TIMEOUT_MS,
-    timeoutMs,
+    Math.floor(timeoutMs / 2),
   ));
   const environment = options.environment || process.env;
   const remaining = () => Math.max(0, timeoutMs - elapsed(startedAt, now()));
-  let selection = { provider: 'both', diagnostic: { status: 'skipped', code: 'PROVIDER_EXPERIMENT_DISABLED' } };
-  if (String(environment.JEV_PROVIDER_SELECTION_ENABLED).toLowerCase() === 'true' && !options.coverageRequired) {
-    const providers = [];
-    if (String(environment.TENCENT_WSA_ENABLED).toLowerCase() !== 'false'
-      && environment.TENCENTCLOUD_SECRET_ID?.trim() && environment.TENCENTCLOUD_SECRET_KEY?.trim()) providers.push('tencent-wsa');
-    if (!['false', '0', 'off'].includes(String(environment.SEARCH1API_ENABLED).toLowerCase())
-      && environment.SEARCH1API_API_KEY?.trim()) providers.push('search1api');
-    selection = await selectProviderCombination({ query: args.query, category: args.category, providers },
-      { ...options, environment, remainingBudgetMs: remaining });
-  }
-  const runWsa = () => timed(() => (options.runWsa || defaultRunWsa)(args, { environment,
-    timeoutMs: Math.max(1, Math.min(providerTimeoutMs, remaining())),
-    client: options.wsaClient, capabilities: options.wsaCapabilities }), now, 'WSA_UNEXPECTED_ERROR');
-  const runSearch = () => timed(() => (options.runSearch1Api || defaultRunSearch1Api)(args, { environment,
-    timeoutMs: Math.max(1, Math.min(providerTimeoutMs, remaining())),
-    fetchImpl: options.search1ApiFetch, signal: options.signal }), now, 'SEARCH1API_UNEXPECTED_ERROR');
-  const skipped = () => ({ result: { ok: false, error: { category: 'unavailable', code: 'JEV_PROVIDER_DEFERRED' } }, durationMs: 0 });
-  let wsa;
-  let search1api;
-  if (selection.provider === 'tencent-wsa') {
-    wsa = await runWsa();
-    search1api = wsa.result?.ok || remaining() <= 0 ? skipped() : await runSearch();
-  } else if (selection.provider === 'search1api') {
-    search1api = await runSearch();
-    wsa = search1api.result?.ok || remaining() <= 0 ? skipped() : await runWsa();
-  } else [wsa, search1api] = await Promise.all([runWsa(), runSearch()]);
+  const [wsa, search1api] = await Promise.all([
+    timed(() => (options.runWsa || defaultRunWsa)(args, { environment,
+      timeoutMs: Math.max(1, Math.min(commercialTimeoutMs, remaining())),
+      client: options.wsaClient, capabilities: options.wsaCapabilities }), now, 'WSA_UNEXPECTED_ERROR'),
+    timed(() => (options.runSearch1Api || defaultRunSearch1Api)(args, { environment,
+      timeoutMs: Math.max(1, Math.min(commercialTimeoutMs, remaining())),
+      fetchImpl: options.search1ApiFetch, signal: options.signal }), now, 'SEARCH1API_UNEXPECTED_ERROR'),
+  ]);
   const providerDiagnostics = {
-    selection: selection.diagnostic,
     tencentWsa: wsa.result?.ok ? successDiagnostic(wsa.result, wsa.durationMs) : failedDiagnostic(wsa.result, wsa.durationMs),
     search1api: search1api.result?.ok ? successDiagnostic(search1api.result, search1api.durationMs)
       : failedDiagnostic(search1api.result, search1api.durationMs),
@@ -140,12 +121,39 @@ export async function runOnlineSearch(args, options = {}) {
   const successes = [];
   if (wsa.result?.ok && wsa.result.document) successes.push({ provider: 'tencent-wsa', document: wsa.result.document });
   if (search1api.result?.ok && search1api.result.document) successes.push({ provider: 'search1api', document: search1api.result.document });
-  if (successes.length > 0) {
+  if (successes.length > 0 && options.supplementWithSearxng !== true) {
+    providerDiagnostics.searxng = { status: 'skipped', durationMs: 0, skipReason: 'commercial_provider_succeeded' };
     const document = mergeDocuments(successes, args.query);
     return { ok: true, durationMs: elapsed(startedAt, now()), document: { ...document, providerDiagnostics } };
   }
 
-  return { ok: false, provider: null, fallbackUsed: false,
+  const remainingMs = timeoutMs - elapsed(startedAt, now());
+  if (remainingMs <= 0) {
+    providerDiagnostics.searxng = { status: 'skipped', durationMs: 0, skipReason: 'hard_budget_exhausted' };
+    if (successes.length > 0) {
+      const document = mergeDocuments(successes, args.query);
+      return { ok: true, durationMs: elapsed(startedAt, now()), document: { ...document, providerDiagnostics } };
+    }
+    return { ok: false, provider: null, fallbackUsed: false,
+      error: { category: 'timeout', code: 'ONLINE_SEARCH_FAILED', retryable: true,
+        message: 'Online search hard budget exhausted' }, providerDiagnostics,
+      durationMs: elapsed(startedAt, now()) };
+  }
+  const searxng = await timed(() => (options.runSearxng || defaultRunSearxng)(args, { environment,
+    timeoutMs: remainingMs, runProcess: options.runProcess, pythonExecutable: options.pythonExecutable,
+    searxngScript: options.searxngScript }), now, 'SEARXNG_UNEXPECTED_ERROR');
+  providerDiagnostics.searxng = searxng.result?.ok ? successDiagnostic(searxng.result, searxng.durationMs)
+    : failedDiagnostic(searxng.result, searxng.durationMs);
+  if (searxng.result?.ok && searxng.result.document) {
+    const document = mergeDocuments([...successes, { provider: 'searxng', document: searxng.result.document }], args.query);
+    document.fallbackUsed = successes.length === 0;
+    return { ok: true, durationMs: elapsed(startedAt, now()), document: { ...document, providerDiagnostics } };
+  }
+  if (successes.length > 0) {
+    const document = mergeDocuments(successes, args.query);
+    return { ok: true, durationMs: elapsed(startedAt, now()), document: { ...document, providerDiagnostics } };
+  }
+  return { ok: false, provider: 'searxng', fallbackUsed: true,
     error: { category: 'provider', code: 'ONLINE_SEARCH_FAILED', retryable: true,
       message: 'All online search providers failed' }, providerDiagnostics,
     durationMs: elapsed(startedAt, now()) };

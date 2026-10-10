@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -23,6 +25,7 @@ import com.iwhalecloud.byai.common.storage.KnowledgeResourceFS;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantProjectCloudAccessService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.application.service.fs.FsOperationApplicationService;
@@ -30,6 +33,7 @@ import com.iwhalecloud.byai.state.application.service.fs.FsOperationApplicationS
 class ProjectCloudReadPermissionTest {
     private final ProjectService projects = mock(ProjectService.class);
     private final ProjectMemberService members = mock(ProjectMemberService.class);
+    private final TenantProjectCloudAccessService tenantCloud = mock(TenantProjectCloudAccessService.class);
     private final AuthApplicationService auth = new AuthApplicationService();
     private final SsResource cloud = new SsResource();
 
@@ -41,6 +45,8 @@ class ProjectCloudReadPermissionTest {
         CurrentUserHolder.setLoginInfo(login);
         ReflectionTestUtils.setField(auth, "projectService", projects);
         ReflectionTestUtils.setField(auth, "projectMemberService", members);
+        ReflectionTestUtils.setField(auth, "tenantProjectCloudAccessService", tenantCloud);
+        when(tenantCloud.canRead(any(Project.class))).thenReturn(null);
         cloud.setResourceId(9001L);
         cloud.setResourceBizType("KG_CLOUD");
     }
@@ -62,6 +68,27 @@ class ProjectCloudReadPermissionTest {
     }
 
     @Test
+    void tenantMemberReadsWithoutPlatformProjectMembershipAndLosesAccessAfterRemoval() {
+        bindProject(7L, "normal", 99L, "0", false);
+        Project project = projects.findByCloudResourceId(9001L).get(0);
+        when(tenantCloud.canRead(project)).thenReturn(true);
+        assertThat(auth.hasResourceAccessPermission(cloud)).isTrue();
+        assertThat(auth.canManageAllProjectCloudItems(cloud)).isFalse();
+
+        // 租户侧移除后，即使平台残留成员记录也不能重新放行。
+        when(members.isMember(7L, 88L)).thenReturn(true);
+        when(tenantCloud.canRead(project)).thenReturn(false);
+        assertThat(auth.hasResourceAccessPermission(cloud)).isFalse();
+    }
+
+    @Test
+    void dissolvedTenantGroupCannotFallBackToProjectCreator() {
+        bindProject(7L, "normal", 88L, "0", true);
+        when(tenantCloud.canRead(projects.findByCloudResourceId(9001L).get(0))).thenReturn(false);
+        assertThat(auth.hasResourceAccessPermission(cloud)).isFalse();
+    }
+
+    @Test
     void rejectsUnboundAndAnonymousResources() {
         when(projects.findByCloudResourceId(9001L)).thenReturn(List.of());
         assertThat(auth.hasResourceAccessPermission(cloud)).isFalse();
@@ -70,9 +97,14 @@ class ProjectCloudReadPermissionTest {
         assertThat(auth.hasResourceAccessPermission(cloud)).isFalse();
     }
 
-    @Test
-    void qaStorageReadUsesSameProjectPermissionAndRevocation() throws Exception {
-        bindProject(7L, "normal", 99L, "0", true);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void qaStorageReadUsesSameProjectPermissionAndRevocation(boolean tenantGroup) throws Exception {
+        bindProject(7L, "normal", 99L, "0", !tenantGroup);
+        Project project = projects.findByCloudResourceId(9001L).get(0);
+        if (tenantGroup) {
+            when(tenantCloud.canRead(project)).thenReturn(true);
+        }
         SsResourceService resources = mock(SsResourceService.class);
         KnowledgeResourceFS storage = mock(KnowledgeResourceFS.class);
         FsOperationApplicationService fs = new FsOperationApplicationService();
@@ -85,7 +117,11 @@ class ProjectCloudReadPermissionTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         fs.downloadFile("RESOURCE", 9001L, path).getBody().writeTo(output);
         assertThat(output.toByteArray()).containsExactly((byte) 42);
-        when(members.isMember(7L, 88L)).thenReturn(false);
+        if (tenantGroup) {
+            when(tenantCloud.canRead(project)).thenReturn(false);
+        } else {
+            when(members.isMember(7L, 88L)).thenReturn(false);
+        }
         assertThatThrownBy(() -> fs.downloadFile("RESOURCE", 9001L, path))
             .isInstanceOf(BaseException.class);
     }

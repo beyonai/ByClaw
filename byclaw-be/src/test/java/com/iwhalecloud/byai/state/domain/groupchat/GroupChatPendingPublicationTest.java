@@ -442,15 +442,14 @@ class GroupChatPendingPublicationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    void resultMentionsUsePublishedMessageAndOriginalDelegationChain(boolean legacy) {
+    void resultMentionsRemainDisplayOnlyAfterPublication(boolean legacy) {
         ResourceVo agent = resultMention();
         ByaiGroupChatExecution parent = publicationParent(legacy);
         when(store.find(60L)).thenReturn(record(100L));
 
         GroupChatTaskPublicationResponse response = completion.complete(60L, confirm(100L));
 
-        verify(coordinator).enqueueChild(parent, 40L, response.getMessageId(), response.getMessageId(),
-            "{{DIG_EMPLOYEE_40}}", List.of(agent));
+        verifyNoInteractions(coordinator);
         ArgumentCaptor<ByaiMessage> saved = ArgumentCaptor.forClass(ByaiMessage.class);
         verify(messages).insert(saved.capture());
         assertThat(saved.getValue().getMessageContent()).isEqualTo("{{DIG_EMPLOYEE_40}}");
@@ -464,7 +463,7 @@ class GroupChatPendingPublicationTest {
         verify(publications).insert(publication.capture());
         when(publications.selectById(60L)).thenReturn(publication.getValue());
         completion.complete(60L, confirm(100L));
-        verify(coordinator, times(1)).enqueueChild(any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(coordinator);
         verify(parser, times(1)).parse(any(), any(), any());
     }
 
@@ -480,7 +479,7 @@ class GroupChatPendingPublicationTest {
     }
 
     @Test
-    void delegationFailureRollsBackPublicationAndDoesNotBroadcast() throws Exception {
+    void publicationDoesNotDependOnTheAutomaticDelegationQueue() throws Exception {
         resultMention();
         publicationParent(false);
         when(store.find(60L)).thenReturn(record(100L));
@@ -496,13 +495,12 @@ class GroupChatPendingPublicationTest {
             new AnnotationTransactionAttributeSource()));
         GroupChatTaskService transactional = (GroupChatTaskService) factory.getProxy();
 
-        assertThatThrownBy(() -> transactional.complete(60L, confirm(100L)))
-            .hasMessageContaining("queue unavailable");
+        assertThat(transactional.complete(60L, confirm(100L)).getMessageId()).isNotNull();
 
-        verify(connection).rollback();
-        verify(connection, never()).commit();
-        verifyNoInteractions(events);
-        verify(store, never()).clear(any(), any());
+        verify(connection).commit();
+        verify(connection, never()).rollback();
+        verifyNoInteractions(coordinator);
+        verify(store).clear(eq(task), any());
     }
 
     private ResourceVo resultMention() {

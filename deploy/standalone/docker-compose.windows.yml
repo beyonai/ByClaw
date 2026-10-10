@@ -17,11 +17,6 @@ services:
       - ../config:/app/config
       - ./logs/qa:/app/logs
 
-  qa-worker:
-    volumes:
-      - ../config:/app/config
-      - ./logs/qa:/app/logs
-
   data:
     volumes:
       - ../config:/app/config

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,10 +11,8 @@ import {
   createProbeRun, recordProbeDiscoveryRound, setProbeDiscoveryReservation,
 } from './probe-state.mjs';
 import * as publicDiscovery from './public-discovery.mjs';
-import { planSourceWaves } from './jev/source-plan.mjs';
-import { safeCallJev } from './jev/safe-call.mjs';
-import { currentJevRun, withJevRun } from './jev/run-context.mjs';
-import { runHotDiscoveryWave } from './hot-discovery-runtime.mjs';
+import { runHotDiscoveryWave, sourcePlanIdentity } from './hot-discovery-runtime.mjs';
+import { parseDeclarations } from '../references/online-search/references/hot_discovery/scripts/hot_discovery.mjs';
 import { createHotRuntimeState, hotRequestIdentity } from '../references/online-search/references/hot_discovery/scripts/hot_runtime_state.mjs';
 
 async function runPublicDiscover(paths, args, options = {}) {
@@ -56,36 +55,22 @@ async function runPublicDiscover(paths, args, options = {}) {
   return publicDiscovery.runPublicDiscover(paths, args, { ...options, runOnlineSearch });
 }
 
-test('invalid source plan uses the exact generic legacy command without a source subset', async () => {
-  for (const response of [{ waves: [['invented']], diagnostic: { status: 'used' } },
-    { waves: null, diagnostic: { status: 'fallback', code: 'JEV_SELECTION_INVALID_OR_UNCERTAIN' } }]) {
-    const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
-    let calls = 0;
-    const result = await runPublicDiscover(paths, { query: 'DeepSeek', category: 'it', 'requested-count': '1' }, {
-      environment: {}, channelMode: 'hot', planSourceWaves: async () => response,
-      runProcess: async (spec) => {
-        calls++;
-        assert.equal(spec.args.includes('--sources'), false);
-        assert.equal(spec.args[spec.args.indexOf('--query') + 1], 'DeepSeek');
-        return { code: 0, stdout: JSON.stringify({ candidates: [] }) };
-      },
-    });
-    assert.equal(calls, 1);
-    assert.equal(result.nextHotWave, false);
-  }
-});
-
-test('exhaustive public discovery bypasses optional source plans', async () => {
+test('discovery preserves supplied search parameters and candidate order', async () => {
   const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
-  const session = loadSession(paths).session;
-  session.task.materializationTarget = 'all';
-  writeFileSync(join(paths.root, 'session.json'), JSON.stringify(session));
-  let called = false;
-  await runPublicDiscover(paths, { query: 'DeepSeek', 'requested-count': '1' }, {
-    environment: {}, channelMode: 'hot', planSourceWaves: async () => { called = true; },
-    runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }) }),
+  const rows = [1, 2].map((id) => ({ url: `https://example.com/news/deepseek-${id}`,
+    title: `DeepSeek benchmarks ${id}`, engine: 'google' }));
+  const requests = [];
+  await runPublicDiscover(paths, { query: 'DeepSeek benchmarks', category: 'it', language: 'en',
+    'time-range': 'month', 'requested-count': '2' }, {
+    environment: {}, channelMode: 'online',
+    runOnlineSearch: async (args) => { requests.push(args); return { ok: true, document: { results: rows } }; },
   });
-  assert.equal(called, false);
+  assert.equal(requests[0].query, 'DeepSeek benchmarks');
+  assert.equal(requests[0].category, 'it');
+  assert.equal(requests[0].language, 'en');
+  assert.equal(requests[0]['time-range'], 'month');
+  assert.equal(requests[0].source, undefined);
+  assert.deepEqual(loadSession(paths).session.task.discoveryGate.observations.map((row) => row.url), rows.map((row) => row.url));
 });
 
 test('a persisted hot wave checkpoint is consumed before re-dispatching its completed sources', async () => {
@@ -102,290 +87,63 @@ test('a persisted hot wave checkpoint is consumed before re-dispatching its comp
   assert.equal(JSON.parse(result.stdout).adapterStats.github.status, 'ok_empty');
 });
 
-test('validated generic plan checkpoints disjoint source waves under one discovery round', async () => {
-  const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
+function persistAcceptedSourcePlan(paths, args, waves) {
   const session = loadSession(paths).session;
-  session.task.materializationTarget = 'selected';
-  session.task.requiredContentGranularity = 'full-text';
+  const sources = args.sources.split(',');
+  const declarations = parseDeclarations(readFileSync(new URL(
+    '../references/online-search/references/hot_discovery/adapters.md', import.meta.url), 'utf8'));
+  const planInput = { query: args.query, effectiveCategory: args.category, sources,
+    constraints: { category: args.category, tiers: '1,2,3', explicit: sources, language: args.language,
+      requestedCount: args['requested-count'], taskQuery: session.task.query,
+      sourceScope: session.task.sourceScope, topicContract: session.task.discoveryGate.topicContract,
+      declarationIdentity: sourcePlanIdentity(declarations) } };
+  const plan = { identity: sourcePlanIdentity(planInput), waves, cursor: 0, nextWave: true,
+    effective: { query: args.query, category: args.category, language: args.language, timeRange: null, source: 'automatic' },
+    waveIds: waves.map(() => randomUUID()), diagnostic: { status: 'used' } };
+  session.task.publicCollectRun.hotSourcePlan = plan;
   writeFileSync(join(paths.root, 'session.json'), JSON.stringify(session));
-  const run = createProbeRun(paths, { query: 'DeepSeek', fallbackQuery: 'DeepSeek architecture', requestedCount: 1,
-    category: 'it', language: 'en', manualPolicy: 'pause' });
-  const args = { query: 'DeepSeek', category: 'it', language: 'en', 'requested-count': '1' };
-  const seen = [];
-  let plans = 0;
-  const options = { environment: {}, orchestrationRunId: run.runId, channelMode: 'hot',
-    runProcess: async (spec) => {
-      const index = spec.args.indexOf('--sources');
-      assert.ok(index >= 0);
-      seen.push(spec.args[index + 1].split(','));
-      return { code: 0, stdout: JSON.stringify({ candidates: [], adapterStats: {}, status: 'complete' }) };
-    },
-  };
-  // Valid plans must use bounded complete permutations, so let the real planner split it.
-  options.planSourceWaves = async (input, opts) => {
-    plans++;
-    return planSourceWaves(input, { ...opts, environment: {}, callJev: async () => ({ ok: true,
-      document: { answers: { plan: { type: 'choice', choice: 'p1', confidence: 0.95 } } } }) });
-  };
-  let result;
-  do {
-    setProbeDiscoveryReservation(paths, run.runId, { query: args.query, channel: 'hot' });
-    result = await runPublicDiscover(paths, args, options);
-  } while (result.nextHotWave);
-  assert.equal(plans, 1);
-  assert.ok(seen.length > 1);
-  assert.ok(seen.every((wave) => wave.length <= 3));
-  assert.equal(new Set(seen.flat()).size, seen.flat().length);
-  assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 1);
-});
+  return plan;
+}
 
-test('resumed source waves retain their cursor and IDs without fresh query or source inference', async () => {
-  for (const resume of ['changed-answer', 'inference-failure', 'disabled', 'model-change']) {
-    const { paths } = makeInitializedSession(['public-internet'], '采集一篇关于米哈游的文章');
+for (const corrupt of [false, true]) {
+  test(`persisted source waves ${corrupt ? 'reject corrupt IDs' : 'retain their cursor and IDs'}`, async () => {
+    const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
     const session = loadSession(paths).session;
     session.task.materializationTarget = 'selected';
     session.task.requiredContentGranularity = 'full-text';
     writeFileSync(join(paths.root, 'session.json'), JSON.stringify(session));
-    const run = createProbeRun(paths, { query: '米哈游 报道', fallbackQuery: '米哈游 实践', requestedCount: 1,
-      category: 'general', language: 'zh-CN', manualPolicy: 'pause' });
-    const args = { query: '米哈游 报道', category: 'general', language: 'zh-CN', 'requested-count': '1' };
-    const waves = [];
-    let queryPlans = 0;
-    let sourcePlans = 0;
-    const base = { orchestrationRunId: run.runId, channelMode: 'hot', environment: {},
-      planDiscovery: async (input) => {
-        queryPlans++;
-        return { effective: { ...input, source: 'automatic', hotSource: queryPlans === 1 ? 'bing' : 'weixin' },
-          jev: { status: 'used' } };
-      },
-      planSourceWaves: async (input, options) => {
-        sourcePlans++;
-        return planSourceWaves(input, { ...options, environment: {}, callJev: async () => ({ ok: true,
-          document: { answers: { plan: { type: 'choice', choice: 'p0', confidence: 0.95 } } } }) });
-      },
-      runProcess: async (spec) => {
-        const value = (flag) => spec.args[spec.args.indexOf(flag) + 1];
-        waves.push({ sources: value('--sources'), waveId: value('--wave-id') });
-        return { code: 0, stdout: JSON.stringify({ candidates: [], status: 'complete' }) };
-      },
-    };
+    const run = createProbeRun(paths, { query: 'DeepSeek', fallbackQuery: 'DeepSeek architecture', requestedCount: 1,
+      category: 'it', language: 'en', manualPolicy: 'pause' });
+    const args = { query: 'DeepSeek', category: 'it', language: 'en', 'requested-count': '1',
+      sources: 'baidu,hackernews,stackoverflow,36kr' };
+    const accepted = persistAcceptedSourcePlan(paths, args, [['baidu', 'hackernews', 'stackoverflow'], ['36kr']]);
+    const seen = [];
+    const options = { orchestrationRunId: run.runId, channelMode: 'hot',
+      runProcess: async (spec) => { seen.push(spec.args); return { code: 0, stdout: JSON.stringify({ candidates: [], status: 'complete' }) }; } };
     setProbeDiscoveryReservation(paths, run.runId, { query: args.query, channel: 'hot' });
-    const first = await runPublicDiscover(paths, args, base);
+    const first = await runPublicDiscover(paths, args, options);
     assert.equal(first.nextHotWave, true);
-    const admitted = loadSession(paths).session.task.publicCollectRun.hotSourcePlan;
-    assert.equal(admitted.cursor, 1);
-    assert.equal(waves[0].waveId, admitted.waveIds[0]);
+    assert.equal(loadSession(paths).session.task.publicCollectRun.hotSourcePlan.cursor, 1);
+    if (corrupt) {
+      const current = loadSession(paths).session;
+      current.task.publicCollectRun.hotSourcePlan.waveIds[1] = 'forged';
+      writeFileSync(join(paths.root, 'session.json'), JSON.stringify(current));
+    }
     setProbeDiscoveryReservation(paths, run.runId, { query: args.query, channel: 'hot' });
-    const options = { ...base, environment: resume === 'disabled' ? { TYPESAFE_ENABLED: 'false' }
-      : resume === 'model-change' ? { TYPESAFE_MODEL: 'jev-other' } : {},
-      planDiscovery: resume === 'inference-failure'
-        ? async () => { throw Error('inference unavailable'); } : base.planDiscovery };
-    await runPublicDiscover(paths, args, options);
-    assert.equal(queryPlans, 1, resume);
-    assert.equal(sourcePlans, 1, resume);
-    assert.deepEqual(waves.map((wave) => wave.sources.split(',')), admitted.waves);
-    assert.equal(waves[1].waveId, admitted.waveIds[1]);
-  }
-});
-
-test('science query planning admits every science and general source and resumes its exact waves', async () => {
-  const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek paper');
-  const session = loadSession(paths).session;
-  session.task.materializationTarget = 'selected';
-  session.task.requiredContentGranularity = 'full-text';
-  writeFileSync(join(paths.root, 'session.json'), JSON.stringify(session));
-  const run = createProbeRun(paths, { query: 'DeepSeek paper', fallbackQuery: 'DeepSeek research',
-    requestedCount: 1, category: 'general', language: 'en', manualPolicy: 'pause' });
-  const args = { query: 'DeepSeek paper', language: 'en', 'requested-count': '1' };
-  const expectedSources = ['openalex', 'baidu', 'bing', 'brave', 'duckduckgo', 'google', 'yahoo',
-    'toutiao', 'weixin', 'yandex', 'so', 'sogou', '52pojie', 'hupu', 'google-scholar',
-    'baidu-scholar', 'wanfang', 'zhihu', 'tieba', 'weibo', 'xiaohongshu', 'rednote',
-    '1point3acres', 'cnki'];
-  let queryPlans = 0;
-  let sourcePlans = 0;
-  let offeredSources;
-  const dispatched = [];
-  const options = { environment: {}, orchestrationRunId: run.runId, channelMode: 'hot',
-    planDiscovery: async (input) => {
-      queryPlans++;
-      return { effective: { ...input, category: queryPlans === 1 ? 'science' : 'news',
-        source: 'automatic' }, jev: { status: 'used' } };
-    },
-    planSourceWaves: (input, plannerOptions) => {
-      sourcePlans++;
-      offeredSources = input.sources;
-      assert.deepEqual(plannerOptions.sourceMetadata.map((row) => row.site), input.sources);
-      return planSourceWaves(input, { ...plannerOptions, environment: {}, callJev: async () => ({
-        ok: true, document: { answers: { plan: { type: 'choice', choice: 'p0', confidence: 0.95 } } },
-      }) });
-    },
-    runProcess: async (spec) => {
-      const value = (flag) => spec.args[spec.args.indexOf(flag) + 1];
-      dispatched.push({ sources: value('--sources'), waveId: value('--wave-id') });
-      return { code: 0, stdout: JSON.stringify({ candidates: [], status: 'complete' }) };
-    },
-  };
-  setProbeDiscoveryReservation(paths, run.runId, { query: args.query, channel: 'hot' });
-  const first = await runPublicDiscover(paths, args, options);
-  assert.equal(first.nextHotWave, true);
-  assert.deepEqual(offeredSources, expectedSources);
-  const admitted = loadSession(paths).session.task.publicCollectRun.hotSourcePlan;
-  assert.deepEqual(admitted.waves.flat(), expectedSources);
-  assert.equal(admitted.cursor, 1);
-  setProbeDiscoveryReservation(paths, run.runId, { query: args.query, channel: 'hot' });
-  await runPublicDiscover(paths, args, { ...options,
-    planDiscovery: async () => { throw Error('resume cannot call fresh planner'); },
-    planSourceWaves: async () => { throw Error('resume cannot create a new source plan'); } });
-  assert.equal(queryPlans, 1);
-  assert.equal(sourcePlans, 1);
-  assert.deepEqual(dispatched.map((row) => row.sources.split(',')), admitted.waves.slice(0, 2));
-  assert.deepEqual(dispatched.map((row) => row.waveId), admitted.waveIds.slice(0, 2));
-});
-
-test('failed full plan restores hot-source preference without changing the selected query or category', async () => {
-  const { paths } = makeInitializedSession(['public-internet'], '采集一篇关于米哈游的文章');
-  const session = loadSession(paths).session;
-  session.task.materializationTarget = 'selected';
-  writeFileSync(join(paths.root, 'session.json'), JSON.stringify(session));
-  const args = { query: '米哈游 报道', category: 'general', language: 'zh-CN', 'requested-count': '1' };
-  const selectedQuery = '采集一篇关于米哈游的文章';
-  let plannerCalls = 0;
-  const sources = [];
-  const result = await runPublicDiscover(paths, args, {
-    environment: {}, channelMode: 'hot',
-    planDiscovery: async (input, options) => {
-      plannerCalls++;
-      if (plannerCalls === 1) {
-        assert.equal(options.deferHotSource, true);
-        return { effective: { query: selectedQuery, category: 'news', timeRange: null, source: 'automatic' },
-          jev: { status: 'used' } };
-      }
-      assert.equal(options.deferHotSource, undefined);
-      assert.deepEqual(input.queryCandidates, [selectedQuery]);
-      assert.deepEqual(input.categoryCandidates, ['news']);
-      return { effective: { query: 'wrong', category: 'science', timeRange: 'day', source: 'github', hotSource: 'bing' },
-        jev: { status: 'used' } };
-    },
-    planSourceWaves: async () => ({ waves: null, diagnostic: { status: 'fallback', code: 'TEST_INVALID_PLAN' } }),
-    runProcess: async (spec) => {
-      sources.push(spec.args.includes('--sources') ? spec.args[spec.args.indexOf('--sources') + 1] : null);
-      return { code: 0, stdout: JSON.stringify({ candidates: [] }) };
-    },
+    const second = await runPublicDiscover(paths, args, options);
+    const flag = (argv, key) => argv[argv.indexOf(key) + 1];
+    assert.equal(flag(seen[0], '--wave-id'), accepted.waveIds[0]);
+    if (corrupt) {
+      assert.equal(flag(seen[1], '--sources'), args.sources);
+      assert.notEqual(flag(seen[1], '--wave-id'), accepted.waveIds[1]);
+    } else {
+      assert.deepEqual(seen.map((argv) => flag(argv, '--sources')), ['baidu,hackernews,stackoverflow', '36kr']);
+      assert.deepEqual(seen.map((argv) => flag(argv, '--wave-id')), accepted.waveIds);
+    }
+    assert.equal(second.nextHotWave, false);
+    assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 1);
   });
-  assert.equal(result.query, selectedQuery);
-  assert.equal(result.category, 'news');
-  assert.equal(plannerCalls, 2);
-  assert.deepEqual(sources, ['bing,36kr,weixin', 'sogou', 'baidu']);
-});
-
-test('managed online and hot phases reuse planning without an unused hot-source question', async () => {
-  const { paths } = makeInitializedSession(['public-internet'], '采集一篇关于米哈游的文章');
-  const session = loadSession(paths).session;
-  session.task.materializationTarget = 'selected';
-  session.task.requiredContentGranularity = 'full-text';
-  writeFileSync(join(paths.root, 'session.json'), JSON.stringify(session));
-  const run = createProbeRun(paths, { query: '米哈游 报道', fallbackQuery: '米哈游 案例', requestedCount: 1,
-    category: 'general', language: 'zh-CN', manualPolicy: 'pause' });
-  const args = { query: run.input.query, category: 'general', language: 'zh-CN', 'requested-count': '1' };
-  const asked = [];
-  const callJev = async (payload) => {
-    const fields = Object.keys(payload.questions);
-    asked.push(fields);
-    assert.equal(fields.includes('hotSource'), false);
-    const answers = Object.fromEntries(fields.map((field) => [field, {
-      type: 'choice', choice: `${{ query: 'q', category: 'c', timeRange: 't', source: 's', plan: 'p' }[field]}0`,
-      confidence: 0.95,
-    }]));
-    return { ok: true, document: { answers } };
-  };
-  const common = { orchestrationRunId: run.runId, environment: {}, callJev,
-    runOnlineSearch: async () => ({ ok: true, document: { results: [] } }),
-    runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }) }),
-  };
-  await withJevRun(async () => {
-    setProbeDiscoveryReservation(paths, run.runId, { query: args.query, channel: 'online' });
-    await runPublicDiscover(paths, args, { ...common, channelMode: 'online' });
-    setProbeDiscoveryReservation(paths, run.runId, { query: args.query, channel: 'hot' });
-    await runPublicDiscover(paths, args, { ...common, channelMode: 'hot' });
-  });
-  assert.equal(asked.filter((fields) => fields.includes('plan')).length, 1);
-  assert.equal(asked.length, 2);
-  assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 1);
-});
-
-test('corrupt persisted wave IDs discard the plan and use the legacy hot command', async () => {
-  const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
-  const session = loadSession(paths).session;
-  session.task.materializationTarget = 'selected';
-  session.task.requiredContentGranularity = 'full-text';
-  writeFileSync(join(paths.root, 'session.json'), JSON.stringify(session));
-  const run = createProbeRun(paths, { query: 'DeepSeek', fallbackQuery: 'DeepSeek architecture',
-    requestedCount: 1, category: 'it', language: 'en', manualPolicy: 'pause' });
-  const args = { query: 'DeepSeek', category: 'it', language: 'en', 'requested-count': '1' };
-  const seen = [];
-  const options = { environment: {}, orchestrationRunId: run.runId, channelMode: 'hot',
-    planSourceWaves: (input, opts) => planSourceWaves(input, { ...opts, environment: {},
-      callJev: async () => ({ ok: true, document: { answers: {
-        plan: { type: 'choice', choice: 'p0', confidence: 0.95 },
-      } } }) }),
-    runProcess: async (spec) => {
-      seen.push(spec.args);
-      return { code: 0, stdout: JSON.stringify({ candidates: [], status: 'complete' }) };
-    },
-  };
-  setProbeDiscoveryReservation(paths, run.runId, { query: args.query, channel: 'hot' });
-  await runPublicDiscover(paths, args, options);
-  const current = loadSession(paths).session;
-  current.task.publicCollectRun.hotSourcePlan.waveIds[1] = 'forged-but-syntactically-plausible';
-  writeFileSync(join(paths.root, 'session.json'), JSON.stringify(current));
-  setProbeDiscoveryReservation(paths, run.runId, { query: args.query, channel: 'hot' });
-  const resumed = await runPublicDiscover(paths, args, { ...options,
-    planDiscovery: async () => { throw Error('corrupt plan cannot request fresh inference'); },
-    planSourceWaves: async () => { throw Error('corrupt plan cannot be re-planned'); } });
-  assert.equal(resumed.queryPlanning.code, 'SOURCE_PLAN_INVALID');
-  assert.equal(seen.at(-1).includes('--sources'), false);
-});
-
-test('planning reuse respects cancellation, budget and an open run circuit', async () => {
-  for (const gate of ['cancelled', 'budget', 'circuit']) {
-    const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
-    const planningCache = new Map();
-    let calls = 0;
-    let planningStatus;
-    const planDiscovery = async (input, options) => {
-      calls++;
-      const response = await safeCallJev({ state: { query: input.query }, questions: {
-        source: { type: 'choice', criteria: { github: 'github' } },
-      } }, { ...options, callJev: async () => ({ ok: true, document: {
-        answers: { source: { type: 'choice', choice: 'github', confidence: 0.95 } },
-      } }) });
-      planningStatus = response.ok ? 'used' : response.diagnostic.status;
-      return response.ok
-        ? { effective: { ...input, source: 'github' }, jev: { status: 'used' } }
-        : { effective: { ...input, source: 'automatic' }, jev: response.diagnostic };
-    };
-    await withJevRun(async () => {
-      await runPublicDiscover(paths, { query: 'DeepSeek' }, {
-        environment: {}, channelMode: 'online', planningCache, planDiscovery,
-        runOnlineSearch: async () => ({ ok: true, document: { results: [] } }),
-      });
-      if (gate === 'circuit') await safeCallJev({ state: { fail: true }, questions: {
-        fail: { type: 'choice', criteria: { yes: 'yes' } },
-      } }, { environment: {}, callJev: async () => { throw Error('transport failure'); } });
-      const controller = new AbortController();
-      if (gate === 'cancelled') controller.abort();
-      const discover = runPublicDiscover(paths, { query: 'DeepSeek' }, {
-        environment: {}, channelMode: 'hot', planningCache, planDiscovery,
-        signal: controller.signal, remainingBudgetMs: gate === 'budget' ? () => 0 : undefined,
-        runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }) }),
-      });
-      if (gate === 'budget') await assert.rejects(discover, /未返回有效结果/);
-      else await discover;
-      assert.notEqual(planningStatus, 'used', gate);
-    });
-    assert.equal(calls, 2, gate);
-  }
-});
+}
 
 test('standalone sequential discovery bounds hot by the remaining invocation budget', async () => {
   const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
@@ -460,48 +218,6 @@ test('a checkpoint from another request cannot authorize candidates after child 
   assert.equal(loadSession(paths).session.task.discoveryGate.candidates.length, 0);
 });
 
-test('hot-only collection reuses planning and prioritizes the chosen allowed source with fallback coverage', async () => {
-  const { paths } = makeInitializedSession(['public-internet'], '采集一篇关于米哈游的文章');
-  let plans = 0;
-  let inferences = 0;
-  const callJev = async () => {
-    inferences++;
-    return { ok: true, document: {
-      answers: { hotSource: { type: 'choice', choice: 'bing', confidence: 0.95 } },
-    } };
-  };
-  const hotSources = [];
-  const args = { query: '米哈游 报道', category: 'general', language: 'zh-CN', 'requested-count': '1' };
-  const options = {
-    environment: {},
-    planDiscovery: async (input, plannerOptions) => {
-      plans += 1;
-      assert.ok(input.hotSourceCandidates.includes('bing'));
-      const response = await safeCallJev({ state: { query: input.query }, questions: {
-        hotSource: { type: 'choice', criteria: { bing: 'bing' } },
-      } }, { ...plannerOptions, callJev });
-      return { effective: { ...input, source: 'automatic', hotSource: 'bing' },
-        jev: response.ok ? { status: 'used' } : response.diagnostic };
-    },
-    runOnlineSearch: async () => ({ ok: true, document: { results: [] } }),
-    runProcess: async (spec) => {
-      hotSources.push(spec.args[spec.args.indexOf('--sources') + 1]);
-      return { code: 0, stdout: JSON.stringify({ candidates: [], adapterStats: {} }), stderr: '' };
-    },
-    merge: () => ({ groups: { bothChannels: [], searxngTop: [] } }),
-  };
-  await withJevRun(async () => {
-    await runPublicDiscover(paths, args, { ...options, channelMode: 'online' });
-    const cachedAt = [...currentJevRun().cache.values()][0].at;
-    await runPublicDiscover(paths, args, { ...options, channelMode: 'hot',
-      runOnlineSearch: () => { throw new Error('hot-only must not invoke online search'); } });
-    assert.equal([...currentJevRun().cache.values()][0].at, cachedAt);
-  });
-  assert.equal(plans, 2);
-  assert.equal(inferences, 1);
-  assert.deepEqual(hotSources, ['bing,36kr,weixin', 'sogou', 'baidu']);
-});
-
 test('ordinary hot discovery receives an internal budget before the outer process deadline', async () => {
   const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
   let hotArgs;
@@ -519,59 +235,6 @@ test('ordinary hot discovery receives an internal budget before the outer proces
   const budget = Number(hotArgs[hotArgs.indexOf('--total-budget-ms') + 1]);
   assert.ok(budget > 0 && budget < outerTimeout);
   assert.ok(hotArgs.includes('--adapter-timeout-ms'));
-});
-
-test('global Jev order reaches authorization across display groups with bounded inference budgets', async () => {
-  const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek');
-  const researchSession = loadSession(paths).session;
-  researchSession.task.followups = ['benchmarks'];
-  researchSession.research.branches = [{ status: 'done', query: 'design', researchGoal: 'system design',
-    followups: ['tradeoffs'] }];
-  writeFileSync(join(paths.root, 'session.json'), JSON.stringify(researchSession));
-  const first = { url: 'https://example.com/news/deepseek-one', title: 'DeepSeek 深度报道', engine: 'google' };
-  const second = { url: 'https://example.com/news/deepseek-two', title: 'DeepSeek 最新报道', engine: 'bing' };
-  await runPublicDiscover(paths, { query: 'DeepSeek', category: 'general' }, {
-    environment: {}, remainingBudgetMs: () => 500, budgetNow: () => 0,
-    planDiscovery: async (input, options) => {
-      assert.deepEqual(input.categoryCandidates, ['general']);
-      assert.equal(options.remainingBudgetMs(), 50);
-      return { effective: { ...input, source: 'automatic' }, jev: { status: 'used' } };
-    },
-    rankCandidates: async (_request, candidates, options) => {
-      assert.equal(options.remainingBudgetMs(), 50);
-      assert.deepEqual(options.evidenceContext, {
-        coveredSubtopics: ['system design'], missingSubtopics: ['benchmarks', 'tradeoffs'],
-      });
-      return { candidates: [...candidates].reverse(), diagnostic: { status: 'used' } };
-    },
-    runOnlineSearch: async () => ({ ok: true, document: { results: [first, second] } }),
-    runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }), stderr: '' }),
-    merge: () => ({ groups: { bothChannels: [first], searxngTop: [second] } }),
-  });
-  const observations = loadSession(paths).session.task.discoveryGate.observations;
-  assert.equal(observations[0].url, second.url);
-  assert.equal(observations[0].rank, 1);
-});
-
-test('planned queries preserve the reservation identity and explicit time range', async () => {
-  const { paths } = makeInitializedSession(['public-internet'], '人工智能');
-  const result = await runPublicDiscover(paths, { query: '人工智能 报道', 'time-range': 'week' }, {
-    environment: {},
-    planDiscovery: async (input) => {
-      assert.deepEqual(input.timeRangeCandidates, ['week']);
-      return { effective: { ...input, query: '人工智能', category: 'it', source: 'automatic' }, jev: { status: 'used' } };
-    },
-    runOnlineSearch: async (args) => {
-      assert.equal(args.query, '人工智能');
-      return { ok: true, document: { results: [] } };
-    },
-    runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }), stderr: '' }),
-  });
-  assert.equal(result.ok, true);
-  const run = loadSession(paths).session.task.discoveryGate.runs.at(-1);
-  assert.equal(run.query, '人工智能 报道');
-  assert.equal(run.category, 'general');
-  assert.notEqual(run.status, 'running');
 });
 
 test('selects the bounded Chinese article profile from deterministic task state', () => {
@@ -597,35 +260,15 @@ test('selects the bounded Chinese article profile from deterministic task state'
 test('uses the unified online-search runner and exposes compatible provider aliases', async () => {
   const { paths } = makeInitializedSession(['public-internet'], '人工智能');
   let onlineSearchCalls = 0;
-  let plannerCalls = 0;
-  let rankerCalls = 0;
   const result = await runPublicDiscover(paths, {
     query: '人工智能 报道',
     category: 'general',
     language: 'zh-CN',
     'requested-count': '1',
   }, {
-    planDiscovery: async (input) => {
-      plannerCalls += 1;
-      assert.deepEqual(input.queryCandidates, ['人工智能 报道', '人工智能']);
-      return {
-        effective: {
-          query: input.query,
-          category: input.category,
-          language: input.language,
-          timeRange: input.timeRange,
-          source: 'github',
-        },
-        jev: { status: 'used', model: 'jev-test' },
-      };
-    },
-    rankCandidates: async (_request, candidates) => {
-      rankerCalls += 1;
-      return { candidates, diagnostic: { status: 'used', model: 'jev-test', candidateCount: candidates.length } };
-    },
     runOnlineSearch: async (args) => {
       onlineSearchCalls += 1;
-      assert.equal(args.source, 'github');
+      assert.equal(args.source, undefined);
       return {
         ok: true,
         durationMs: 12,
@@ -666,10 +309,6 @@ test('uses the unified online-search runner and exposes compatible provider alia
   });
 
   assert.equal(onlineSearchCalls, 1);
-  assert.equal(plannerCalls, 1);
-  assert.equal(rankerCalls, 1);
-  assert.deepEqual(result.queryPlanning, { status: 'used', model: 'jev-test' });
-  assert.equal(result.candidateRanking.status, 'used');
   assert.equal(result.channels.onlineSearch.provider, 'tencent-wsa');
   assert.equal(result.channels.onlineSearch.fallbackUsed, false);
   assert.deepEqual(result.channels.searxng, result.channels.onlineSearch);

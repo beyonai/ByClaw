@@ -23,4 +23,7 @@ public class SandboxRecordView extends SsSandboxRecord {
     private Long workerLeaseTtlSeconds;
 
     private List<String> workerAgentTypes;
+
+    /** Fresh OpenSandbox observation for tenant records; null for user records or historical tenant records. */
+    private String providerStatus;
 }

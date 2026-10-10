@@ -42,6 +42,13 @@ public class GroupChatPublicationUploader {
     }
 
     public List<GroupChatTaskFile> upload(ByaiGroupChatPendingPublication pending, Long cloudResourceId) {
+        return upload(pending, cloudResourceId,
+            (id, uploaded) -> store.checkpoint(pending.getPendingPublicationId(), id, uploaded));
+    }
+
+    /** 租户调用方将上传进度写入 Node，文件处理继续复用同一套校验。 */
+    public List<GroupChatTaskFile> upload(ByaiGroupChatPendingPublication pending, Long cloudResourceId,
+        java.util.function.BiConsumer<Long, String> checkpoint) {
         if (pending.getCloudResourceId() != null && !pending.getCloudResourceId().equals(cloudResourceId)) {
             throw new IllegalArgumentException("Project cloud drive changed; prepare publication again");
         }
@@ -62,7 +69,7 @@ public class GroupChatPublicationUploader {
                     + pending.getPendingPublicationId() + "/" + index;
                 files = uploadOne(source, cloudResourceId, directory);
                 uploaded.put(source, files);
-                store.checkpoint(pending.getPendingPublicationId(), cloudResourceId, uploaded.toJSONString());
+                checkpoint.accept(cloudResourceId, uploaded.toJSONString());
             }
             result.addAll(files);
         }

@@ -31,10 +31,10 @@ class EmployeePublicationApplicationServiceTest {
     SsResourceMapper resources = mock(SsResourceMapper.class);
     UserService users = mock(UserService.class);
     ByaiSystemConfigService config = mock(ByaiSystemConfigService.class);
-    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, config, publications);
+    SsResExtDigEmployeeService extensions = mock(SsResExtDigEmployeeService.class);
+    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, config, publications, extensions);
     DigitalEmployeeApplicationService employees = mock(DigitalEmployeeApplicationService.class);
     EmployeePublicationResources dependencies = mock(EmployeePublicationResources.class);
-    SsResExtDigEmployeeService extensions = mock(SsResExtDigEmployeeService.class);
     SsResourceRelDetailService relations = mock(SsResourceRelDetailService.class);
     AuthApplicationService auth = mock(AuthApplicationService.class);
     SequenceService sequence = mock(SequenceService.class);
@@ -843,7 +843,14 @@ class EmployeePublicationApplicationServiceTest {
 
     @Test void personalUpdateRequiresExistingAvailableCopyAndTheOriginalAuthorOrAdministrator() {
         publication.setStatus("PUBLISHED");
-        assertThatThrownBy(() -> service.prepareUpdate(10L)).hasMessageContaining("尚无官方副本");
+        try (var messages = mockStatic(com.iwhalecloud.byai.common.i18n.I18nUtil.class)) {
+            messages.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get("employee.publication.enterprise.copy.required"))
+                .thenReturn("尚无企业副本，请先发布到企业");
+            // BaseException#getMessage 会再次经过国际化，已翻译文案也要保留，避免静态 mock 返回 null。
+            messages.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get("尚无企业副本，请先发布到企业"))
+                .thenReturn("尚无企业副本，请先发布到企业");
+            assertThatThrownBy(() -> service.prepareUpdate(10L)).hasMessage("尚无企业副本，请先发布到企业");
+        }
         SsResource official = publishedCopyForPersonalUpdate();
         login("other", 8L, List.of());
         assertThatThrownBy(() -> service.prepareUpdate(10L)).hasMessageContaining("只能发布自己");

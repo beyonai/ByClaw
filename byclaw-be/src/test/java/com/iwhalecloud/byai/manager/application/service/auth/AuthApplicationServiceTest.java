@@ -49,6 +49,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.MessageSource;
 import org.springframework.data.redis.core.SetOperations;
@@ -71,6 +72,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -96,8 +98,10 @@ class AuthApplicationServiceTest {
         }
     }
 
-    @Test
-    void sharedAuditQueryFiltersPublicationByReviewerRoleAndTenant() {
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"  ", " 财务 Alpha "})
+    void sharedAuditQueryFiltersPublicationByReviewerRoleAndTenant(String keyword) {
         var service = new AuthApplicationService();
         var publications = mock(com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService.class);
         var grants = mock(PrivilegeGrantMapper.class);
@@ -117,15 +121,59 @@ class AuthApplicationServiceTest {
         target.setOwnerType("enterprise");
         target.setResourceStatus(4);
         target.setComAcctId(1L);
-        when(grants.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).thenReturn(List.of(row));
+        String normalizedKeyword = org.apache.commons.lang3.StringUtils.trimToNull(keyword);
+        when(grants.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), normalizedKeyword))
+            .thenReturn(List.of(row));
         when(resources.selectBatchIds(any())).thenReturn(List.of(target));
         when(publications.canReview(target)).thenReturn(true);
-        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).containsExactly(row);
+        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), keyword)).containsExactly(row);
         when(publications.canReview(target)).thenReturn(false);
-        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
+        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), keyword)).isEmpty();
         when(publications.canReview(target)).thenReturn(true);
         target.setComAcctId(2L);
-        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
+        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), keyword)).isEmpty();
+    }
+
+    @Test
+    void sharedAuditSearchNormalizesKeywordAndPreservesLegacyScope() {
+        var service = new AuthApplicationService();
+        var grants = mock(PrivilegeGrantMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
+        service.queryDigitalEmployeeUseApplyAudit(true, List.of(" KG_DOC ", "KG_QA", "KG_TERM"), " 财务 Alpha ");
+        verify(grants).queryDigitalEmployeeUseApplyAudit(true, List.of("KG_DOC", "KG_QA", "KG_TERM"), "财务 Alpha");
+        service.queryDigitalEmployeeUseApplyAudit(false);
+        service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"));
+        verify(grants).queryDigitalEmployeeUseApplyAudit(false, List.of("DIG_EMPLOYEE"), null);
+        verify(grants).queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), null);
+        // 不合法的资源类型不能借助搜索扩展为默认员工范围。
+        service.queryDigitalEmployeeUseApplyAudit(false, List.of("INVALID"), "Alpha");
+        verify(grants, never()).queryDigitalEmployeeUseApplyAudit(false, List.of("DIG_EMPLOYEE"), "Alpha");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    void sharedAuditSearchStillRequiresUseAuditPermission(String bizType) {
+        var service = spy(new AuthApplicationService());
+        var grants = mock(PrivilegeGrantMapper.class);
+        var resources = mock(SsResourceMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        SsResource target = enterpriseResource(601L, 1L);
+        target.setResourceBizType(bizType);
+        var row = new com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo();
+        row.setResourceId(601L);
+        row.setAuditType("USE");
+        when(resources.selectBatchIds(any())).thenReturn(List.of(target));
+        for (boolean history : List.of(false, true)) {
+            when(grants.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务"))
+                .thenReturn(List.of(row));
+            // 命中名称的记录也必须通过使用审核权限校验，待审核和历史使用相同口径。
+            doReturn(false).when(service).hasResourceUseSettingPermission(target);
+            assertThat(service.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务")).isEmpty();
+            doReturn(true).when(service).hasResourceUseSettingPermission(target);
+            assertThat(service.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务"))
+                .containsExactly(row);
+        }
     }
 
     @Test
@@ -191,7 +239,7 @@ class AuthApplicationServiceTest {
         SsResource own = enterpriseResource(601L, 1L); own.setResourceBizType("DIG_EMPLOYEE"); own.setOwnerType("personal");
         SsResource other = enterpriseResource(602L, 2L); other.setResourceBizType("DIG_EMPLOYEE"); other.setOwnerType("personal");
         when(resourceMapper.selectBatchIds(any())).thenReturn(List.of(own, other));
-        when(governance.canPublish(own)).thenReturn(true);
+        when(governance.canPublishBatch(List.of(own, other))).thenReturn(Map.of(601L, true));
         var rejected = new com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication();
         rejected.setSourceId(601L); rejected.setStatus("REJECTED");
         rejected.setOfficialId(901L);
@@ -512,6 +560,7 @@ class AuthApplicationServiceTest {
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(200L);
 
         assertThat(vo.isCanManageAuth()).isFalse();
+        assertThat(vo.isCanUseAuth()).isFalse();
         assertThat(vo.isCanApplyUse()).isFalse();
     }
 
@@ -543,6 +592,8 @@ class AuthApplicationServiceTest {
 
         assertThat(vo.isCanEdit()).isTrue();
         assertThat(vo.isCanDelete()).isFalse();
+        assertThat(vo.isCanManageAuth()).isFalse();
+        assertThat(vo.isCanUseAuth()).isFalse();
     }
 
     @Test
@@ -570,8 +621,25 @@ class AuthApplicationServiceTest {
         assertThat(offShelfVo.isCanOffShelf()).isFalse();
     }
 
+    @Test
+    void enterpriseEmployeeDraftCannotBeShelvedBySingleOrBatchPermissions() {
+        CurrentUserHolder.setLoginInfo(loginInfo(1L));
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        SsResource resource = enterpriseResource(220L, 1L);
+        resource.setResourceBizType("DIG_EMPLOYEE"); resource.setResourceStatus(0);
+        SsResourceService resources = mock(SsResourceService.class);
+        SsResourceMapper mapper = mock(SsResourceMapper.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", resources);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        when(resources.findById(220L)).thenReturn(resource);
+        when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
+        assertThat(service.queryResourceOperationPermissions(220L).isCanOnShelf()).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(220L)).get(220L).isCanOnShelf()).isFalse();
+    }
+
     /**
-     * 个人 tab 下知识/工具/对象/视图只允许有管理权限的人主动授权，不开放使用申请和申请审核。
+     * 个人知识不开放使用授权、管理授权和使用申请，即使当前登录账号是 adminvip。
      */
     @Test
     void queryResourceOperationPermissions_rejectsPersonalNonAssistantApplyAndAuditActions() {
@@ -596,9 +664,53 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(201L);
 
-        assertThat(vo.isCanManageAuth()).isTrue();
-        assertThat(vo.isCanUseAuth()).isTrue();
+        assertThat(vo.isCanManageAuth()).isFalse();
+        assertThat(vo.isCanUseAuth()).isFalse();
         assertThat(vo.isCanApplyUse()).isFalse();
+    }
+
+    /** 个人资源的列表与详情都不开放授权入口，企业资源继续沿用原有管理权限。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"creator", "adminvip"})
+    void operationPermissions_hidePersonalAuthorizationWithoutRemovingOwnAccess(String identity) {
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        SsResourceMapper mapper = mock(SsResourceMapper.class);
+        SsResourceService resources = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "ssResourceService", resources);
+        LoginInfo login = loginInfo(2L);
+        login.setUserCode(identity);
+        CurrentUserHolder.setLoginInfo(login);
+
+        // 员工组与普通员工共用 DIG_EMPLOYEE 资源类型；不同 agentType 不应绕过个人归属规则。
+        for (String bizType : List.of("DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM",
+            "AGENT", "MCP", "MCP_TOOL", "TOOLKIT", "TOOL")) {
+            for (String ownerType : List.of(OwnerType.PERSONAL, OwnerType.PERSONAL_DEFAULT, OwnerType.ENTERPRISE)) {
+                SsResource resource = enterpriseResource(601L, "creator".equals(identity) ? 2L : 1L);
+                resource.setResourceBizType(bizType);
+                resource.setOwnerType(ownerType);
+                when(mapper.selectBatchIds(List.of(601L))).thenReturn(List.of(resource));
+                when(resources.findById(601L)).thenReturn(resource);
+
+                ResourceOperationPermissionsVo detail = service.queryResourceOperationPermissions(601L);
+                ResourceOperationPermissionsVo row = service.queryResourceOperationPermissionsBatch(List.of(601L))
+                    .get(601L);
+                for (ResourceOperationPermissionsVo permissions : List.of(detail, row)) {
+                    assertThat(permissions.isCanManageAuth()).as("%s %s %s manage auth", identity, ownerType, bizType)
+                        .isEqualTo(OwnerType.ENTERPRISE.equals(ownerType));
+                    assertThat(permissions.isCanUseAuth()).as("%s %s %s use auth", identity, ownerType, bizType)
+                        .isEqualTo(OwnerType.ENTERPRISE.equals(ownerType));
+                    assertThat(permissions.isHasManagePermission()).isTrue();
+                    assertThat(permissions.isHasUsePermission()).isEqualTo("creator".equals(identity));
+                    assertThat(permissions.isCanViewDetail()).isTrue();
+                    // 默认个人资源的编辑仍遵循原有规则，普通个人资源和企业资源保持可编辑。
+                    if (!OwnerType.PERSONAL_DEFAULT.equals(ownerType)) {
+                        assertThat(permissions.isCanEdit()).isTrue();
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -654,8 +766,103 @@ class AuthApplicationServiceTest {
         assertThatThrownBy(() -> service.setResourceManagers(qo)).isInstanceOf(BaseException.class);
     }
 
+    /** 按资源归属拦截用户授权写入，同时覆盖旧授权入口调用的公共校验。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "SKILL_GROUP", "KG_DOC", "KG_QA", "KG_TERM", "TOOLKIT", "MCP", "AGENT"})
+    void personalResourcesRejectExternalUseAndManageGrantsEvenForCreatorOrAdmin(String bizType) {
+        mockI18n();
+        for (String owner : List.of(OwnerType.PERSONAL, OwnerType.PERSONAL_DEFAULT)) {
+            for (String identity : List.of("creator", "adminvip")) {
+                LoginInfo login = loginInfo("creator".equals(identity) ? 1L : 2L); login.setUserCode(identity);
+                CurrentUserHolder.setLoginInfo(login);
+                AuthApplicationService service = spy(new AuthApplicationService());
+                SsResourceMapper resources = mock(SsResourceMapper.class);
+                PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
+                ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+                ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
+                SsResource resource = enterpriseResource(203L, 1L);
+                resource.setOwnerType(owner); resource.setResourceBizType(bizType);
+                when(resources.selectById(203L)).thenReturn(resource);
+                ResourceMemberSettingQo request = new ResourceMemberSettingQo(); request.setResourceId(203L);
+                assertThatThrownBy(() -> service.setResourceUsers(request)).isInstanceOf(BaseException.class);
+                assertThatThrownBy(() -> service.setResourceManagers(request)).isInstanceOf(BaseException.class);
+                assertThatThrownBy(() -> service.validateEmployeeAuthorizationPermission(resource))
+                    .isInstanceOf(BaseException.class);
+                verify(service, never()).handleAuth(any());
+                verifyNoInteractions(grants);
+            }
+        }
+    }
+
+    /** 权限显示限制不影响创建流程对个人技能/知识/工具的内部授权初始化。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"SKILL", "KG_DOC", "TOOLKIT"})
+    void personalResourceCreatorInitializationStillCreatesInternalPrivileges(String bizType) {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
+        doNothing().when(service).handleAuth(any());
+        SsResource resource = enterpriseResource(203L, 1L);
+        resource.setOwnerType(OwnerType.PERSONAL); resource.setResourceBizType(bizType);
+        service.ensureCreatorDefaultPrivileges(resource);
+        verify(service).handleAuth(argThat(dto -> GrantType.ALLOW_MANAGE.equals(dto.getGrantType())));
+        verify(service).handleAuth(argThat(dto -> GrantType.FORCE_USE.equals(dto.getGrantType())));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {-1, 0, 2, 3, 4, 5})
+    void employeeUseApplicationStatusMatchesSingleBatchAndWriteEndpoints(int status) {
+        mockI18n();
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        SsResource resource = enterpriseResource(203L, 1L);
+        resource.setResourceBizType("DIG_EMPLOYEE"); resource.setResourceStatus(status);
+        SsResourceService resources = mock(SsResourceService.class);
+        SsResourceMapper mapper = mock(SsResourceMapper.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", resources);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        when(resources.findById(203L)).thenReturn(resource);
+        when(mapper.selectById(203L)).thenReturn(resource);
+        when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
+        assertThat(service.queryResourceOperationPermissions(203L).isCanApplyUse()).isEqualTo(status == 2);
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(203L)).get(203L).isCanApplyUse())
+            .isEqualTo(status == 2);
+        ResourceUseApplyQo request = new ResourceUseApplyQo(); request.setResourceId(203L);
+        PrivilegeGrantService grants = (PrivilegeGrantService) ReflectionTestUtils.getField(service, "privilegeGrantService");
+        if (status == 2) {
+            service.applyUse(request);
+            verify(grants).save(any(PrivilegeGrant.class));
+        } else {
+            assertThatThrownBy(() -> service.applyUse(request)).isInstanceOf(BaseException.class);
+            verify(grants, never()).save(any(PrivilegeGrant.class));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 2, 3})
+    void personalDefaultEmployeeNeverExposesShelfActionsInSingleOrBatch(int status) {
+        CurrentUserHolder.setLoginInfo(loginInfo(1L));
+        AuthApplicationService service = new AuthApplicationService();
+        mockEmptyUsePermissionDependencies(service);
+        SsResource resource = enterpriseResource(203L, 1L);
+        resource.setResourceBizType("DIG_EMPLOYEE"); resource.setOwnerType(OwnerType.PERSONAL_DEFAULT);
+        resource.setResourceStatus(status);
+        SsResourceService resources = mock(SsResourceService.class);
+        SsResourceMapper mapper = mock(SsResourceMapper.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", resources);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        when(resources.findById(203L)).thenReturn(resource);
+        when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
+        for (ResourceOperationPermissionsVo permission : List.of(service.queryResourceOperationPermissions(203L),
+            service.queryResourceOperationPermissionsBatch(List.of(203L)).get(203L))) {
+            assertThat(permission.isCanOnShelf()).isFalse();
+            assertThat(permission.isCanOffShelf()).isFalse();
+        }
+    }
+
     /**
-     * 个人 tab 下非助理资源不允许发起使用申请，只能由有管理权限的人主动授权。
+     * 个人 tab 下非助理资源不允许发起使用申请。
      */
     @Test
     void applyUse_rejectsPersonalNonAssistantResource() {
@@ -768,6 +975,33 @@ class AuthApplicationServiceTest {
         order.verify(service).handleAuth(memberAuth);
         verify(grants, times(GrantType.FORCE_USE.equals(grantType) ? 2 : 0))
             .update(any(PrivilegeGrant.class), any(LambdaUpdateWrapper.class));
+    }
+
+    /** 企业员工组的内部成员使用授权继续同步，个人成员仍不可从独立授权接口直接授权。 */
+    @Test
+    void enterpriseGroupUseGrantPreservesInternalPersonalMemberSynchronization() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        SsResourceMapper resources = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
+        DigitalEmployeeGroupAuthorizationService groups = mock(DigitalEmployeeGroupAuthorizationService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
+        ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", groups);
+        doNothing().when(service).handleAuth(any());
+        CurrentUserHolder.setLoginInfo(loginInfo(1L));
+        SsResource group = enterpriseResource(300L, 1L); group.setResourceBizType("DIG_EMPLOYEE");
+        SsResource member = enterpriseResource(301L, 1L);
+        member.setResourceBizType("DIG_EMPLOYEE"); member.setOwnerType(OwnerType.PERSONAL);
+        when(resources.selectById(300L)).thenReturn(group);
+        when(resources.selectById(301L)).thenReturn(member);
+        AuthRedBlackDTO memberGrant = new AuthRedBlackDTO();
+        memberGrant.setGrantObjId(301L); memberGrant.setGrantObjType("DIG_EMPLOYEE");
+        memberGrant.setGrantType(GrantType.FORCE_USE);
+        when(groups.buildMemberAuthorizations(any(), any())).thenReturn(List.of(memberGrant));
+        ResourceMemberSettingQo request = new ResourceMemberSettingQo(); request.setResourceId(300L);
+        service.setResourceUsers(request);
+        verify(service).handleAuth(memberGrant);
+        verify(service).handleAuth(argThat(dto -> Long.valueOf(300L).equals(dto.getGrantObjId())));
     }
 
     @Test

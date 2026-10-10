@@ -3,6 +3,7 @@ import { Spin } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
 import styles from './FilePreview.module.less';
 import { downloadFile } from '@/service/workSpace';
+import { PREVIEWABLE_TYPES, resolvePreviewType } from '@/components/Preview/formats';
 
 const Twins = React.lazy(() => import('@/components/Preview/Twins'));
 
@@ -56,12 +57,8 @@ export function FilePreview({ onBack, fileInfo }: FilePreviewProps) {
   }, [fileInfo]);
 
   const type = useMemo(() => {
-    if (!fileInfo.type) return '';
-    if (fileInfo.type.match(/^img|image|jpg|jpeg|png|gif|bmp|webp$/)) return 'image';
-    if (fileInfo.type.match(/^pdf$/)) return 'pdf';
-    if (fileInfo.type.match(/^h5|html$/)) return 'html';
-    return fileInfo.type;
-  }, [fileInfo]);
+    return resolvePreviewType(fileInfo.type, fileInfo.name, content instanceof Blob ? content.type : undefined);
+  }, [fileInfo, content]);
 
   console.log('contentdsaidjioasjdioas');
 
@@ -76,9 +73,9 @@ export function FilePreview({ onBack, fileInfo }: FilePreviewProps) {
           <Spin />
         </div>
       )}
-      {!loading && ['json', 'md', 'txt', 'h5', 'html', 'pdf', 'image', 'pptx', 'xlsx', 'docx'].includes(type) && (
+      {!loading && PREVIEWABLE_TYPES.includes(type) && (
         <React.Suspense fallback={<Spin />}>
-          <Twins data={content} type={fileInfo.type as 'json'} title={fileInfo.name} />
+          <Twins data={content} type={type} title={fileInfo.name} />
         </React.Suspense>
       )}
     </div>

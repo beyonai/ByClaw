@@ -6,7 +6,11 @@ import { useSelector } from '@umijs/max';
 export interface IAgentFileUploadConf {
   enabled: boolean;
   allowedFileTypes: string[];
+
+  /** 单个文件大小上限，按 1024 * 1024 字节换算；0 表示不限。 */
   maxFileSize: number;
+
+  /** 当前输入框附件数量上限；0 表示不限。 */
   maxFileCount: number;
 }
 
@@ -34,7 +38,8 @@ async function qrySuperAssistantDetail(): Promise<IAgentFileUploadConf | null> {
 }
 
 const default_globalConfig = {
-  enabled: false,
+  // 未配置全局参数时默认展示上传入口，仅显式的 enabled=false 关闭。
+  enabled: true,
   allowedFileTypes: [],
   maxFileSize: 0,
   maxFileCount: 0,

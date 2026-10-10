@@ -26,7 +26,7 @@ export type ConversationOutlineItem = {
 export const getMessageOutline = (sessionId: string) =>
   POST<ConversationOutlineItem[]>('/byaiService/assiman/getMessageOutline', { sessionId });
 export const getMessageById = (payload: { messageId: string }) =>
-  POST<any>('/byaiService/chat/getMessageById', {
+  GET<any>('/byaiService/chat/getMessageById', {
     ...payload,
   });
 

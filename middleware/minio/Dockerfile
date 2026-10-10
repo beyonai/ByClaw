@@ -1,15 +1,25 @@
 FROM debian:bookworm-slim
 
+ARG TARGETARCH
+ARG MINIO_VERSION=RELEASE.2025-09-07T16-13-09Z
+ARG MINIO_DOWNLOAD_BASE=https://github.com/minio/minio/releases/download
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget curl ca-certificates \
-    && ARCH=$(uname -m) \
-    && if [ "$ARCH" = "aarch64" ]; then MINIO_ARCH="linux-arm64"; else MINIO_ARCH="linux-amd64"; fi \
-    && wget -O /usr/local/bin/minio "https://dl.min.io/server/minio/release/${MINIO_ARCH}/minio" \
+    curl ca-certificates \
+    && case "${TARGETARCH}" in amd64|arm64) ;; *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; esac \
+    && MINIO_ASSET="minio.linux-${TARGETARCH}.${MINIO_VERSION}" \
+    && MINIO_URL="${MINIO_DOWNLOAD_BASE}/${MINIO_VERSION}/${MINIO_ASSET}" \
+    && curl --fail --location --retry 5 --connect-timeout 15 --output "/tmp/${MINIO_ASSET}" "${MINIO_URL}" \
+    && curl --fail --location --retry 5 --connect-timeout 15 --output "/tmp/${MINIO_ASSET}.sha256sum" \
+        "${MINIO_URL}.sha256sum" \
+    && MINIO_SHA256="$(cut -d ' ' -f 1 "/tmp/${MINIO_ASSET}.sha256sum")" \
+    && echo "${MINIO_SHA256}  /tmp/${MINIO_ASSET}" | sha256sum --check - \
+    && mv "/tmp/${MINIO_ASSET}" /usr/local/bin/minio \
     && chmod +x /usr/local/bin/minio \
-    && apt-get purge -y wget \
-    && apt-get autoremove -y \
+    && minio --version \
+    && rm -f "/tmp/${MINIO_ASSET}.sha256sum" \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /data && chmod 777 /data

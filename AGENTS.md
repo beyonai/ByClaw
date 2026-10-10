@@ -56,6 +56,12 @@ mvn -B -f byclaw-be/pom.xml verify
 cd byclaw-exe && pip install -e ".[dev]" && ruff check . && pytest
 ```
 
+## Deployment model configuration
+
+- Guide users to configure real LLM and Embedding endpoints, tokens, and model codes in model management; initialized values are placeholders. Setting `OPENAI_API_KEY` in `.env` does not configure the default models.
+- Debug both models, enable them, and set each as its type's default. Verify the Embedding dimensions match the model.
+- QA requires a usable Embedding model for knowledge ingestion and retrieval. Container startup or health checks alone do not establish readiness; report any unverified model calls.
+
 ## Database migration and release governance
 
 Treat any schema or data change as a database migration. This includes DDL and DML

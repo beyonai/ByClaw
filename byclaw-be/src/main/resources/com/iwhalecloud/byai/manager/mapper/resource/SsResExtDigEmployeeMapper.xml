@@ -265,7 +265,10 @@
                         </if>
                     </otherwise>
                 </choose>
-                and (k.black_count = 0 or k.black_count is null)
+                <!-- adminvip 按超管身份管理企业员工，不依赖本人授权名单。 -->
+                <if test="enterpriseListAdminVip != true">
+                    and (k.black_count = 0 or k.black_count is null)
+                </if>
                 <choose>
                     <when test="type != null and type == 'owner'">
                         and a.create_by = #{userId}
@@ -277,12 +280,16 @@
                         and k.allow_manage_count > 0
                     </when>
                     <when test="type != null and type == 'managerExcludingOwner'">
-                        and k.allow_manage_count > 0
+                        <if test="enterpriseListAdminVip != true">
+                            and k.allow_manage_count > 0
+                        </if>
                         and (a.create_by is null or a.create_by != #{userId})
                     </when>
-                    <!-- 我的员工“全部”是创建与授权管理的并集，不沿用管理员角色的全局管理范围。 -->
+                    <!-- 普通用户“全部”只合并创建与授权管理；adminvip 可查询全部企业员工。 -->
                     <when test="type != null and type == 'ownerOrManager'">
-                        and (a.create_by = #{userId} or k.allow_manage_count > 0)
+                        <if test="enterpriseListAdminVip != true">
+                            and (a.create_by = #{userId} or k.allow_manage_count > 0)
+                        </if>
                     </when>
                     <when test="type != null and type == 'manageable'">
                         and (

@@ -1,14 +1,10 @@
+import { useIntl } from '@umijs/max';
 import type { PublicationDependency } from '@/service/employeePublication';
 import { DownOutlined, UpOutlined } from '@ant-design/icons';
 import { Button, Empty, Space, Tabs, Tag, Typography, theme } from 'antd';
 import { useId, useState, type ReactNode } from 'react';
 import ResourceAvailabilityList, { resourceIsOmitted } from './ResourceAvailabilityList';
 import styles from './ResourceSummary.module.less';
-
-const categories = [
-  { key: 'retained', label: '将发布到新数字员工的', emptyText: '暂无可发布到新数字员工的资源' },
-  { key: 'omitted', label: '不会发布到新数字员工的', emptyText: '没有需要排除的关联资源' },
-];
 
 const needsAttention = (row: PublicationDependency) => resourceIsOmitted(row) || !!row.warning || !!row.error;
 
@@ -19,6 +15,20 @@ export default function PublicationResourceSummary({
   dependencies: PublicationDependency[];
   onDownloadSkill: (row: PublicationDependency) => void;
 }) {
+  const intl = useIntl();
+  const categories = [
+    {
+      key: 'retained',
+      label: intl.formatMessage({ id: 'employeePublication.resources.retainedTab' }),
+      emptyText: intl.formatMessage({ id: 'employeePublication.resources.emptyRetained' }),
+    },
+    {
+      key: 'omitted',
+      label: intl.formatMessage({ id: 'employeePublication.resources.omittedTab' }),
+      emptyText: intl.formatMessage({ id: 'employeePublication.resources.emptyOmitted' }),
+    },
+  ];
+
   const { token } = theme.useToken();
   const contentId = `publication-resources-${useId().replace(/:/g, '')}`;
   const [expanded, setExpanded] = useState(false);
@@ -31,7 +41,7 @@ export default function PublicationResourceSummary({
       renderAction={(row) =>
         row.action === 'COPY_SKILL' && (
           <Button type="link" size="small" style={{ marginTop: 6 }} onClick={() => onDownloadSkill(row)}>
-            下载待审技能
+            {intl.formatMessage({ id: 'employeePublication.resources.downloadSkill' })}
           </Button>
         )
       }
@@ -40,15 +50,25 @@ export default function PublicationResourceSummary({
   return (
     <section
       className={styles.panel}
-      aria-label="关联资源说明"
+      aria-label={intl.formatMessage({ id: 'employeePublication.resources.title' })}
       style={{ borderColor: token.colorBorderSecondary, background: token.colorBgContainer }}
     >
       <div className={styles.heading}>
         <Space wrap size={[8, 6]}>
-          <Typography.Text strong>关联资源说明</Typography.Text>
-          <Typography.Text type="secondary">共 {dependencies.length} 项</Typography.Text>
-          {omittedCount > 0 && <Tag color="orange">{omittedCount} 项不会带入</Tag>}
-          {restrictedCount > 0 && <Tag color="gold">{restrictedCount} 项使用范围受限</Tag>}
+          <Typography.Text strong>{intl.formatMessage({ id: 'employeePublication.resources.title' })}</Typography.Text>
+          <Typography.Text type="secondary">
+            {intl.formatMessage({ id: 'employeePublication.resources.total' }, { count: dependencies.length })}
+          </Typography.Text>
+          {omittedCount > 0 && (
+            <Tag color="orange">
+              {intl.formatMessage({ id: 'employeePublication.resources.omittedCount' }, { count: omittedCount })}
+            </Tag>
+          )}
+          {restrictedCount > 0 && (
+            <Tag color="gold">
+              {intl.formatMessage({ id: 'employeePublication.resources.restrictedCount' }, { count: restrictedCount })}
+            </Tag>
+          )}
         </Space>
         <Button
           type="link"
@@ -58,13 +78,15 @@ export default function PublicationResourceSummary({
           aria-controls={contentId}
           onClick={() => setExpanded((value) => !value)}
         >
-          {expanded ? '收起说明' : '展开说明'}
+          {expanded
+            ? intl.formatMessage({ id: 'employeePublication.resources.collapse' })
+            : intl.formatMessage({ id: 'employeePublication.resources.expand' })}
         </Button>
       </div>
       <Typography.Paragraph type="secondary" className={styles.hint}>
         {omittedCount || restrictedCount
-          ? '这些提醒不影响员工发布。“不会带入”的资源及依赖它们的能力在企业员工中不可用。'
-          : '按发布结果查看资源的可用范围，原个人员工的配置保持不变。'}
+          ? intl.formatMessage({ id: 'employeePublication.resources.warningHint' })
+          : intl.formatMessage({ id: 'employeePublication.resources.scopeHint' })}
       </Typography.Paragraph>
       <div id={contentId}>
         <Tabs
@@ -86,7 +108,10 @@ export default function PublicationResourceSummary({
             }
             return {
               key,
-              label: `${label}（${rows.length}）`,
+              label: intl.formatMessage(
+                { id: 'employeePublication.resources.tabCount' },
+                { label, count: rows.length }
+              ),
               children,
             };
           })}

@@ -5,12 +5,13 @@ import path from 'path';
 describe('my employees personal list scope', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../index.tsx'), 'utf8');
 
-  it('hides use authorization only in the personal tab', () => {
-    expect(source).toContain("hiddenMenuItemKeys: activeTab === 'personal' ? ['use'] : []");
+  it('uses backend authorization permissions without filtering the personal tab menu', () => {
+    expect(source).toContain('hiddenMenuItemKeys: []');
+    expect(source).not.toContain("hiddenMenuItemKeys: activeTab === 'personal' ? ['use'] : []");
   });
 
-  it('enables shelf actions only in the enterprise tab', () => {
-    expect(source).toContain("enableDigitalEmployeeLifecycle: activeTab === 'enterprise'");
+  it('leaves shelf visibility to backend permissions in both tabs', () => {
+    expect(source).toContain('enableDigitalEmployeeLifecycle: true');
   });
 
   // 两个页签复用同一卡片配置，开启入口的同时必须绑定实际删除回调。

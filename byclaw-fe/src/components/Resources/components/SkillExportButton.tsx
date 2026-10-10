@@ -11,7 +11,7 @@ interface Props {
   digitalEmployeeId?: string | number;
 }
 
-/** 导出属于浏览能力，不依赖管理、编辑或导入权限。 */
+/** 执行技能文件下载，单个导出入口由调用方校验技能使用权限。 */
 export function useSkillExport({ item, loadAll, digitalEmployeeId }: Props) {
   const intl = useIntl();
   const [loading, setLoading] = useState(false);

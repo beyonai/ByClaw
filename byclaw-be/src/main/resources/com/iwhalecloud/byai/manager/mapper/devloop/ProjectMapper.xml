@@ -20,6 +20,7 @@
         <result column="update_by" property="updateBy"/>
         <result column="update_time" property="updateTime"/>
         <result column="delete_flag" property="deleteFlag"/>
+        <result column="enterprise_id" property="enterpriseId"/>
     </resultMap>
 
     <resultMap id="ProjectListDtoResultMap"
@@ -43,6 +44,7 @@
                a.update_by,
                a.update_time,
                a.delete_flag,
+               a.enterprise_id,
                b.session_count
         FROM byai_project a
                  LEFT JOIN (SELECT project_id, COUNT(1) AS session_count

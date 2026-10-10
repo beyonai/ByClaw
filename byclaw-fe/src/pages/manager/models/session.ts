@@ -2,7 +2,7 @@
 import {
   getDcSystemConfigListByStandType,
   currentUser,
-  editEnterprise,
+  updateEnterprise,
   getEnterprise,
   bathQryPropertyKey,
 } from '@/pages/manager/service/session';
@@ -55,8 +55,8 @@ export default {
       }
       return response;
     },
-    *editEnterprise({ payload }, { call }) {
-      const response = yield call(editEnterprise, payload);
+    *updateEnterprise({ payload }, { call }) {
+      const response = yield call(updateEnterprise, payload);
       return response;
     },
     *getEnterprise({ payload }, { call }) {

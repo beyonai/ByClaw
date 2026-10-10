@@ -494,7 +494,9 @@ public class DatasetApplicationService {
         validateDatasetManagePermission(ssResource);
     }
 
-    /** 改名、删除按服务端原始创建账号鉴权，不能信任前端姓名或 createBy 参数。 */
+    /**
+     * 改名、删除按服务端原始创建账号鉴权，不能信任前端姓名或 createBy 参数。
+     */
     private void validateDatasetItemPermission(SsResource resource, String path) {
         if (!ResourceBizTypeEnum.KG_CLOUD.name().equals(resource.getResourceBizType())) {
             validateDatasetManagePermission(resource);
@@ -521,7 +523,9 @@ public class DatasetApplicationService {
         throw new IllegalArgumentException(I18nUtil.get("dataset.cloud.item.manage.denied"));
     }
 
-    /** 批量改写必须在发任务前检查全部文件，不能借目录级请求绕过文件归属。 */
+    /**
+     * 批量改写必须在发任务前检查全部文件，不能借目录级请求绕过文件归属。
+     */
     private void validateDatasetScopePermission(SsResource resource, String filePath, String directoryPath, int depth) {
         if (!"KG_CLOUD".equals(resource.getResourceBizType())) {
             validateDatasetManagePermission(resource);
@@ -575,7 +579,10 @@ public class DatasetApplicationService {
         if (authApplicationService.hasResourceAccessPermission(ssResource)) {
             return;
         }
-        throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+        // 云盘按项目成员授权，拒绝时不能误导用户去申请平台或组织管理员权限。
+        throw new IllegalArgumentException(I18nUtil.get(
+            ResourceBizTypeEnum.KG_CLOUD.name().equals(ssResource.getResourceBizType())
+                ? "dataset.cloud.access.denied" : "user.permission.nopermission"));
     }
 
     private SsResource loadDatasetResource(Long resourceId) {
@@ -674,9 +681,6 @@ public class DatasetApplicationService {
             kbFileImport.setSkipIfDuplicate(skipIfDuplicate);
 
             boolean zipUpload = isZipUpload(multipartFile);
-            if (projectCloud && zipUpload) {
-                validateCloudArchive(ssResource, directoryPath, multipartFile);
-            }
             String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
                 : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
             if (projectCloud && !zipUpload && existingFilePaths.contains(filePath)) {
@@ -720,6 +724,69 @@ public class DatasetApplicationService {
         return uploadResult;
     }
 
+    /***
+     * 直接上传上传文件到知识库，不做文件校验，重载方法
+     *
+     * @param files 文件信息
+     * @param resourceId 资源标识
+     * @param directoryPath 文件目录路径
+     * @param fileDescription 文件描述
+     * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
+     * @param overwrite 同路径同名文件存在时是否先删除旧文件再上传
+     * @param skipIfDuplicate 同路径同名文件存在时是否跳过
+     * @param headers 透传到 ByKC 的请求头
+     * @throws IOException 异常信息
+     */
+    public UploadResult uploadFilesDirect(MultipartFile[] files, Long resourceId, String directoryPath,
+                                          String fileDescription, Boolean processFrontMatter, Boolean overwrite,
+                                          boolean skipIfDuplicate, Map<String, String> headers) throws IOException {
+
+        SsResource ssResource = loadDatasetResource(resourceId);
+        validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
+
+        UploadResult uploadResult = new UploadResult();
+        uploadResult.setResourceId(resourceId);
+        uploadResult.setResourceCode(ssResource.getResourceCode());
+        uploadResult.setResourceName(ssResource.getResourceName());
+
+        List<String> uploadFileNames = Arrays.stream(files).filter(file -> !isZipUpload(file))
+            .map(MultipartFile::getOriginalFilename).toList();
+        Set<String> existingFilePaths = Boolean.TRUE.equals(overwrite)
+            ? new HashSet<>(findExistingKnowledgeFilePaths(ssResource, directoryPath, uploadFileNames))
+            : new HashSet<>();
+
+        for (MultipartFile multipartFile : files) {
+
+            // 上传文件到知识库
+            KbFileImport kbFileImport = new KbFileImport();
+            kbFileImport.setKnCode(ssResource.getResourceCode());
+            kbFileImport.setSkipIfDuplicate(skipIfDuplicate);
+
+            boolean zipUpload = isZipUpload(multipartFile);
+            String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
+                : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
+            if (!zipUpload && existingFilePaths.contains(filePath)) {
+                // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
+                deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件", forwardedHeaders);
+            }
+            kbFileImport.setFilePath(filePath);
+            kbFileImport
+                .setFileDescription(fileDescription != null ? fileDescription : multipartFile.getOriginalFilename());
+            // 为空时不发送该表单字段，由 QA 按最新接口默认值 true 处理。
+            kbFileImport.setProcessFrontMatter(processFrontMatter);
+            kbFileImport.setMultipartFile(multipartFile);
+            PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport,
+                forwardedHeaders);
+            logger.info("直接导入文件:{}", JSON.toJSONString(importRet));
+            assertPythonBuildSuccess(importRet, "上传知识库文件");
+
+            appendImportResult(uploadResult, importRet.getResultObject(), multipartFile, kbFileImport.getFilePath());
+        }
+
+        return uploadResult;
+    }
+
     /**
      * 知识库文件上传前检查同路径同名冲突，供前端展示覆盖确认。
      *
@@ -741,38 +808,6 @@ public class DatasetApplicationService {
         return response;
     }
 
-    /** ZIP 不允许隐式覆盖既有条目，避免解压绕过归属检查；需覆盖时使用显式单文件更新。 */
-    private void validateCloudArchive(SsResource resource, String directoryPath, MultipartFile file) throws IOException {
-        try (java.util.zip.ZipInputStream zip = new java.util.zip.ZipInputStream(file.getInputStream())) {
-            java.util.zip.ZipEntry entry;
-            int count = 0;
-            long bytes = 0;
-            byte[] buffer = new byte[8192];
-            while ((entry = zip.getNextEntry()) != null) {
-                if (++count > 1000 || entry.getName().startsWith("/") || entry.getName().contains("\\")) {
-                    throw new IllegalArgumentException(I18nUtil.get("dataset.archive.invalid"));
-                }
-                String path = normalizeKnowledgeFilePath(normalizeKnowledgeDirectoryPath(directoryPath) + "/" + entry.getName());
-                if (!entry.isDirectory()) {
-                    int offset = path.lastIndexOf('/');
-                    if (!findExistingKnowledgeFilePaths(resource, path.substring(0, offset + 1),
-                        Collections.singletonList(path.substring(offset + 1))).isEmpty()) {
-                        throw new IllegalArgumentException(I18nUtil.get("dataset.file.exists"));
-                    }
-                }
-                int read;
-                while ((read = zip.read(buffer)) != -1) {
-                    bytes += read;
-                    if (bytes > 100L * 1024 * 1024) {
-                        throw new IllegalArgumentException(I18nUtil.get("dataset.archive.invalid"));
-                    }
-                }
-            }
-            if (count == 0) {
-                throw new IllegalArgumentException(I18nUtil.get("dataset.archive.invalid"));
-            }
-        }
-    }
 
     private boolean isZipUpload(MultipartFile multipartFile) {
         return multipartFile != null && StringUtils.endsWithIgnoreCase(multipartFile.getOriginalFilename(), ".zip");
@@ -1115,7 +1150,9 @@ public class DatasetApplicationService {
         return executeKnowledgeItemsMove(ssResource, request, headers);
     }
 
-    /** 文件改名以路径定位，不依赖目录服务可能缺失的 fileId；只允许在原目录内改名。 */
+    /**
+     * 文件改名以路径定位，不依赖目录服务可能缺失的 fileId；只允许在原目录内改名。
+     */
     public KnowledgeItemsMoveResult renameKnowledgeFile(KnowledgeFileRenameRequest request,
                                                         Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
@@ -1137,8 +1174,8 @@ public class DatasetApplicationService {
     }
 
     private KnowledgeItemsMoveResult executeKnowledgeItemsMove(SsResource ssResource,
-                                                                KnowledgeItemsMoveRequest request,
-                                                                Map<String, String> headers) {
+                                                               KnowledgeItemsMoveRequest request,
+                                                               Map<String, String> headers) {
         Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
 
         boolean hasTargetDirectory = StringUtils.isNotBlank(request.getTargetDirectoryPath());

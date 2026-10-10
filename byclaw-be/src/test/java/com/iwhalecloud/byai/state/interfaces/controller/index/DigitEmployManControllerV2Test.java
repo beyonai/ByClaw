@@ -10,7 +10,7 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.index.MyAuthEmployQo;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
 import com.iwhalecloud.byai.state.application.service.index.IndexApplicationServiceV2;
-import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantGroupMemberService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -19,10 +19,10 @@ class DigitEmployManControllerV2Test {
     @Test
     void groupScopedEmployeeLookupUsesTheSameAgentInvitationPermission() {
         IndexApplicationServiceV2 service = mock(IndexApplicationServiceV2.class);
-        GroupChatAuthorizationService authorization = mock(GroupChatAuthorizationService.class);
+        TenantGroupMemberService authorization = mock(TenantGroupMemberService.class);
         DigitEmployManControllerV2 controller = new DigitEmployManControllerV2();
         ReflectionTestUtils.setField(controller, "digitEmployManServiceV2", service);
-        ReflectionTestUtils.setField(controller, "groupAuthorizationService", authorization);
+        ReflectionTestUtils.setField(controller, "tenantGroupMemberService", authorization);
 
         MyAuthEmployQo request = new MyAuthEmployQo();
         request.setExcludeGroupSessionId(123L);

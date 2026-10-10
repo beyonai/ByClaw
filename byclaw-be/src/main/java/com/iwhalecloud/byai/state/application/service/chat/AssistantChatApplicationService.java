@@ -527,6 +527,10 @@ public class AssistantChatApplicationService {
                 }
             }
             // 跨 pod：本 pod 无上下文，从 Redis 快照落库。
+            if (com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get() != null) {
+                // Tenant terminal events are persisted by the owning Node. Keep recovery state until committed.
+                return false;
+            }
             boolean flushed = scriptService.flushFromSnapshot(sessionId, cleanupMessageId);
             if (!flushed) {
                 log.info("stopChat 无可落库内容（本 pod 无上下文且无快照）, sessionId: {}, messageId: {}", sessionId,
@@ -698,22 +702,26 @@ public class AssistantChatApplicationService {
             fileUpload = JSON.parseObject(globalConf, FileUploadDto.class);
         }
 
+        // 未配置上传参数时不附加业务限制，与前端缺省配置保持一致。
+        if (fileUpload == null) {
+            return;
+        }
         boolean enabled = fileUpload.isEnabled();
         if (!enabled) {
             return;
         }
 
-        // 校验文件数量和文件大小
+        // 数量和单文件大小的 0 均表示不限，仅正数配置参与校验。
         long maxFileCount = fileUpload.getMaxFileCount();
         long maxFileSizeMB = fileUpload.getMaxFileSize();
-        if (files.length > maxFileCount) {
+        if (maxFileCount > 0 && files.length > maxFileCount) {
             throw new BaseException(I18nUtil.get("file.upload.count.exceeded", maxFileCount, files.length));
         }
 
         // 校验文件大小（文件类型不做限制）
         for (MultipartFile multipartFile : files) {
             long size = multipartFile.getSize();
-            if (size > (maxFileSizeMB * 1024 * 1024)) {
+            if (maxFileSizeMB > 0 && size > (maxFileSizeMB * 1024 * 1024)) {
                 // 将字节转换为MB，格式化在国际化文件中定义
                 double sizeMB = size / 1024.0 / 1024.0;
                 throw new BaseException(I18nUtil.get("file.upload.size.exceeded", maxFileSizeMB, sizeMB));
@@ -788,10 +796,21 @@ public class AssistantChatApplicationService {
      */
     private ByaiMessage updateRunningSnapshotMessageStruct(MessageStructDto messageStructDto) {
         RunningChatSnapshotResponse snapshot = locateSnapshot(messageStructDto);
-        if (snapshot == null) {
-            return null;
-        }
+        return updateRunningSnapshotMessageStruct(snapshot, messageStructDto);
+    }
 
+    /** Tenant callers must authorize the session before invoking this exact-session runtime update. */
+    public ByaiMessage updateRunningSnapshotMessageStructInSession(MessageStructDto request) {
+        RunningChatSnapshotResponse snapshot = runningChatSnapshotService.get(request.getSessionId(),
+            request.getTraceId(), request.getMessageId());
+        if (snapshot == null || !java.util.Objects.equals(request.getSessionId(), snapshot.getSessionId())
+            || !java.util.Objects.equals(request.getMessageId(), snapshot.getMessageId())) return null;
+        return updateRunningSnapshotMessageStruct(snapshot, request);
+    }
+
+    private ByaiMessage updateRunningSnapshotMessageStruct(RunningChatSnapshotResponse snapshot,
+        MessageStructDto messageStructDto) {
+        if (snapshot == null) return null;
         if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
             snapshot.setInferLog(this.replaceContent(snapshot.getInferLog(), messageStructDto));
         } else {
@@ -812,7 +831,7 @@ public class AssistantChatApplicationService {
      * 命中 DB 时，仍需同步更新运行中的快照与 messageContext：消息可能仍处于追加（APPEND）状态， 后续 storeMessage 会基于 messageContext
      * 重写 messageStruct / inferLog，否则刚刚的改动会被覆盖。
      */
-    private void syncRunningStateAfterUpdate(MessageStructDto messageStructDto) {
+    public void syncRunningStateAfterUpdate(MessageStructDto messageStructDto) {
         RunningChatSnapshotResponse snapshot = locateSnapshot(messageStructDto);
         if (snapshot == null) {
             return;

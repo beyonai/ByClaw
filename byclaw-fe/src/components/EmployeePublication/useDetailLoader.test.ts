@@ -1,3 +1,4 @@
+jest.mock('@umijs/max', () => ({ useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl('zh-CN') }));
 import { act, renderHook } from '@testing-library/react';
 import { openPublication, type PublicationDetail } from '@/service/employeePublication';
 import usePublicationDetailLoader from './useDetailLoader';
@@ -83,4 +84,13 @@ it('hydrates a synchronized or cleared resource configuration after saving or co
   unmount();
   act(() => result.current.hydrate(initial));
   expect(hydrate).toHaveBeenCalledTimes(2);
+});
+
+it('localizes the fallback when loading fails without a server-provided reason', async () => {
+  (openPublication as jest.Mock).mockRejectedValue({});
+  const { result } = renderHook(() => usePublicationDetailLoader('100'));
+  await act(async () => {
+    await result.current.load(jest.fn());
+  });
+  expect(result.current.error).toBe('发布配置加载失败，请稍后重试');
 });

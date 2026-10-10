@@ -7,7 +7,7 @@ export default {
   'dashboard.metric.activityRate': 'Digital Employee Activity Rate',
   'dashboard.metric.loginUser': 'Online Users',
   'dashboard.metric.serviceCount': 'Total Service Count',
-  'dashboard.unit.count': '',
+  'dashboard.unit.count': 'items',
   'dashboard.unit.percent': '%',
   'dashboard.unit.times': 'times',
   'dashboard.trend.compared': 'Compared to Last Period',

@@ -6,6 +6,7 @@ let mockSearch = '?publicationId=100&appId=10';
 const mockNavigate = jest.fn();
 const mockLoadEditor = jest.fn();
 jest.mock('@umijs/max', () => ({
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl('zh-CN'),
   useLocation: () => ({ search: mockSearch }),
   useNavigate: () => mockNavigate,
 }));
