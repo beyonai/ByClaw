@@ -294,6 +294,10 @@ class TenantChatMirrorServiceTest {
         verify(node, org.mockito.Mockito.times(3)).mirror(any(), mirrored.capture());
         assertThat(mirrored.getAllValues()).extracting(MirrorEvent::eventSeq).containsExactly("0", "1", "2");
         assertThat(mirrored.getAllValues()).extracting(MirrorEvent::eventType).containsExactly("INPUT", "DELTA", "TERMINAL");
+        var deltaPayload = new com.fasterxml.jackson.databind.ObjectMapper()
+            .valueToTree(mirrored.getAllValues().get(1).payload());
+        assertThat(deltaPayload.path("text").isTextual()).isTrue();
+        assertThat(deltaPayload.path("text").asText()).isEmpty();
         assertThat(((MirrorAnswerPayload) mirrored.getAllValues().get(2).payload()).metadata().groupDisposition().kind()).isEqualTo("TASK");
         ArgumentCaptor<JSONObject> published = ArgumentCaptor.forClass(JSONObject.class);
         verify(events, org.mockito.Mockito.times(4)).publishTenant(any(), eq(30L), published.capture());

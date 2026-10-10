@@ -205,7 +205,7 @@ public final class TenantNodeModels {
     public record GroupTaskClaim(String taskSessionId) implements CommandPayload {
     }
 
-    public sealed interface MirrorPayload permits MirrorInputPayload, MirrorAnswerPayload {
+    public sealed interface MirrorPayload permits MirrorInputPayload, MirrorAnswerPayload, MirrorAnswerDeltaPayload {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -229,6 +229,11 @@ public final class TenantNodeModels {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record MirrorUsedModel(String id, String code, String name, String provider,
                                   String thinkingLevel) {
+    }
+
+    /** Classification observation is an empty text delta, not a terminal answer snapshot. */
+    public record MirrorAnswerDeltaPayload(String id, String text, MirrorAnswerMetadata metadata)
+        implements MirrorPayload {
     }
 
     public record MirrorAnswerPayload(String id, String relationId, String messageContent,

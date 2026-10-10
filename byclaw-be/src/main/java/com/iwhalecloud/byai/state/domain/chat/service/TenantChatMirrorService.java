@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorAnswerPayload;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorAnswerDeltaPayload;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorAnswerMetadata;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorGroupDisposition;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorEvent;
@@ -123,8 +124,8 @@ public class TenantChatMirrorService {
             if (disposition == null) return;
             node.mirror(context.tenantContext, event(context, "DELTA", "1",
                 "disposition-" + context.modelAnswerMessageId,
-                new MirrorAnswerPayload(context.modelAnswerMessageId.toString(), context.taskId.toString(), "", null,
-                    null, metadata(context.assistantChatDto.getMetadata(), false, disposition), List.of(), List.of())));
+                new MirrorAnswerDeltaPayload(context.modelAnswerMessageId.toString(), "",
+                    metadata(context.assistantChatDto.getMetadata(), false, disposition))));
             observation.disposition = disposition;
             if ("TASK".equals(disposition.kind())) notifyGroupReply(context, true);
         }
