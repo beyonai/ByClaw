@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS byai.byai_group_chat_task (
     publish_by           BIGINT,
     create_time          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    current_turn_id      BIGINT,
+    current_turn_trace_id VARCHAR(255),
     CONSTRAINT pk_byai_group_chat_task PRIMARY KEY (task_session_id),
     CONSTRAINT uk_group_chat_task_dispatch UNIQUE (dispatch_id)
 );
@@ -233,3 +235,8 @@ CREATE INDEX IF NOT EXISTS idx_byai_message_session_message ON byai.byai_message
 CREATE INDEX IF NOT EXISTS idx_byai_message_session_ref ON byai.byai_message(session_id, message_ref);
 
 CREATE INDEX IF NOT EXISTS idx_byai_message_session_topic_time ON byai.byai_message(session_id, topic_id, create_time DESC, message_id DESC);
+
+COMMENT ON COLUMN byai.byai_group_chat_task.current_turn_id IS '当前轮次启动占位标识，用于隔离迟到的启动失败回调';
+COMMENT ON COLUMN byai.byai_group_chat_task.current_turn_trace_id IS '当前轮次实际trace，用于完成回调与落库结果补偿';
+CREATE INDEX IF NOT EXISTS idx_group_chat_task_running_turn
+    ON byai.byai_group_chat_task (status, turn_status, task_session_id);
