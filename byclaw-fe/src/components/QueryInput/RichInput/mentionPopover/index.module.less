@@ -35,6 +35,13 @@
   height: 100%;
 }
 
+.contentInnerResourceMenu {
+  // 加号/@资源菜单跟随弹窗宽度，避免 fit-content 被连接器长描述撑开，导致省略号失效。
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .resourceTabsWrap {
   height: 100%;
   width: min(calc(100vw - 24px), 485px);

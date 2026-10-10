@@ -48,6 +48,28 @@ class ScopedProjectionOutboundTest {
     }
 
     @Test
+    void tenantDeltaRetainsEnterpriseIdentityForTheBrowserFilter() {
+        healthy.attr(Constant.ATT_ENTERPRISE_ID).set("10");
+        healthy.attr(Constant.ATT_HEADER).set(Map.of("scoped-delta-version", "1"));
+        healthy.attr(Constant.ATT_SCOPED_SESSION_ID).set("200");
+        String log = "[\"" + "x".repeat(2000) + "\"]";
+        service.broadcastTenantScopedProjection(9L, 10L, "tenant:10:child", projection("100-0", "hello", log), false);
+        healthy.runPendingTasks();
+        TextWebSocketFrame initial = healthy.readOutbound();
+        assertThat(initial).isNotNull();
+        initial.release();
+        service.broadcastTenantScopedProjection(9L, 10L, "tenant:10:child", projection("101-0", "hello world", log), false);
+        healthy.runPendingTasks();
+        TextWebSocketFrame next = healthy.readOutbound();
+        assertThat(next).isNotNull();
+        try {
+            JSONObject delta = JSONObject.parseObject(next.text());
+            assertThat(delta.getString("type")).isEqualTo("SCOPED_MESSAGE_DELTA");
+            assertThat(delta.getString("enterpriseId")).isEqualTo("10");
+        } finally { next.release(); }
+    }
+
+    @Test
     void waitsForActualTransportCompletionAndKeepsLatestTerminalWithoutBlockingHealthyClient() {
         send("child", "first", false);
         for (int revision = 0; revision < 1000; revision++) {

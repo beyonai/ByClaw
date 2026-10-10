@@ -2,6 +2,25 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import usePublicationConfirmation from './usePublicationConfirmation';
 import type { PublicationDetail } from '@/service/employeePublication';
 
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  getDvaApp: jest.fn(),
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
+
+const originalPublicPath = window.publicPath;
+beforeEach(() => {
+  mockLocale = 'zh-CN';
+  delete (window as Window & { publicPath?: string }).publicPath;
+});
+afterEach(() => {
+  if (originalPublicPath === undefined) {
+    delete (window as Window & { publicPath?: string }).publicPath;
+  } else {
+    window.publicPath = originalPublicPath;
+  }
+});
+
 let confirm: ReturnType<typeof usePublicationConfirmation>['confirmPublication'];
 function Confirmation() {
   const result = usePublicationConfirmation();
@@ -43,7 +62,7 @@ it('explains exact omissions separately from retained restrictions and permits p
   act(() => {
     pending = confirm(detail);
   });
-  const dialog = within(await screen.findByRole('dialog'));
+  const dialog = within(await screen.findByRole('dialog', { name: '确认发布到企业' }));
   expect(dialog.getByText('发布后保留 3 项资源，2 项不会带入')).toBeInTheDocument();
   expect(dialog.getByText('个人客户库')).toBeInTheDocument();
   expect(dialog.getByText('客户查询工具：个人工具')).toBeInTheDocument();
@@ -87,25 +106,52 @@ it('returns to editing without consenting to publication', async () => {
   });
 });
 
-it('explains which official employee and settings are replaced and requires renewed confirmation after an official change', async () => {
-  render(<Confirmation />);
-  let pending: ReturnType<typeof confirm>;
-  act(() => {
-    pending = confirm({
-      ...detail,
-      updateTarget: { resourceId: '90', name: '官方客服(企业)', fromPersonal: true, changed: true },
+it.each([
+  [undefined, '/'],
+  ['/', '/'],
+  ['/beyond/', '/beyond/'],
+  ['/beyond', '/beyond/'],
+  ['/tenant/portal/', '/tenant/portal/'],
+])(
+  'opens the read-only official target under runtime publicPath %s and requires renewed confirmation after a change',
+  async (publicPath, prefix) => {
+    if (publicPath !== undefined) window.publicPath = publicPath;
+    render(<Confirmation />);
+    let pending: ReturnType<typeof confirm>;
+    act(() => {
+      pending = confirm({
+        ...detail,
+        updateTarget: { resourceId: '90', name: '官方客服(企业)', fromPersonal: true, changed: true },
+      });
     });
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByText(/企业副本单独调整过的这些内容也可能被替换/)).toBeInTheDocument();
+    expect(dialog.getByText('官方员工配置已变化，需要重新确认')).toBeInTheDocument();
+    const officialLink = dialog.getByRole('link', { name: '查看当前官方配置' });
+    expect(officialLink).toHaveAttribute(
+      'href',
+      `${prefix}digitalEmployeesCreate?appId=90&readOnly=true&log=false&manage=false`
+    );
+    expect(officialLink).toHaveAttribute('target', '_blank');
+    expect(officialLink).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(dialog.getByRole('button', { name: '确认并继续发布' })).toBeDisabled();
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
+      expect(await pending).toBe('edit');
+    });
+  }
+);
+
+it('localizes confirmation summaries, resource restrictions and publication actions in English', async () => {
+  mockLocale = 'en-US';
+  render(<Confirmation />);
+  let decision!: ReturnType<typeof confirm>;
+  act(() => {
+    decision = confirm(detail);
   });
-  const dialog = within(await screen.findByRole('dialog'));
-  expect(dialog.getByText(/企业副本单独调整过的这些内容也可能被替换/)).toBeInTheDocument();
-  expect(dialog.getByText('官方员工配置已变化，需要重新确认')).toBeInTheDocument();
-  expect(dialog.getByRole('link', { name: '查看当前官方配置' })).toHaveAttribute(
-    'href',
-    '/digitalEmployeesCreate?appId=90&readOnly=true&log=false&manage=false'
-  );
-  expect(dialog.getByRole('button', { name: '确认并继续发布' })).toBeDisabled();
-  await act(async () => {
-    fireEvent.click(dialog.getByRole('button', { name: '返回修改' }));
-    expect(await pending).toBe('edit');
-  });
+  const dialog = within(await screen.findByRole('dialog', { name: 'Confirm publication to enterprise' }));
+  expect(dialog.getByText('Resources retained after publication: 3; excluded: 2')).toBeInTheDocument();
+  expect(dialog.getByText('Retained links with restricted access (1)')).toBeInTheDocument();
+  fireEvent.click(dialog.getByRole('button', { name: 'Confirm and continue publishing' }));
+  await expect(decision).resolves.toBe('publish');
 });

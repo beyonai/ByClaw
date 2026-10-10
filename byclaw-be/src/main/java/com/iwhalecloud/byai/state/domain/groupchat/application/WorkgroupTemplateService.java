@@ -5,8 +5,8 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGroupApplicationService;
 import com.iwhalecloud.byai.manager.dto.orchestrator.OrchestratorRuntimeDTO;
@@ -211,9 +211,9 @@ public class WorkgroupTemplateService {
 
     private SsResourceCatalog requireCatalog(Long catalogId) {
         SsResourceCatalog catalog = catalogService.findById(catalogId);
-        if (catalog == null || !Integer.valueOf(6).equals(catalog.getCatalogType())
-            || !Objects.equals(CurrentUserHolder.getEnterpriseId(), catalog.getComAcctId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "资产目录不存在或不可用");
+        // 资产目录管理按类型提供全局分类；模板沿用相同规则，不能用当前企业归属过滤这些目录。
+        if (catalog == null || !Integer.valueOf(6).equals(catalog.getCatalogType())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("workgroup.template.catalog.unavailable"));
         }
         return catalog;
     }

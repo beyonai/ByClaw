@@ -73,6 +73,9 @@ public class SessionStreamEventRouter {
     private ScopedSessionEventService scopedSessionEventService;
 
     @Autowired
+    private TenantScopedSessionEventService tenantScopedSessionEventService;
+
+    @Autowired
     private SessionRuntimeStateService sessionRuntimeStateService;
 
     /**
@@ -80,6 +83,8 @@ public class SessionStreamEventRouter {
      */
     public StreamDispatchResult dispatchChildBatch(Long sessionId, List<JSONObject> events) {
         try {
+            if (tenantScopedSessionEventService != null && tenantScopedSessionEventService.handleChildBatch(sessionId, events))
+                return StreamDispatchResult.HANDLED;
             scopedSessionEventService.handleChildBatch(sessionId, events);
             return StreamDispatchResult.HANDLED;
         }
@@ -97,6 +102,15 @@ public class SessionStreamEventRouter {
         if (StringUtils.isBlank(sessionId)) {
             return StreamDispatchResult.INTENTIONALLY_IGNORED;
         }
+        Boolean tenantScoped = null;
+        try {
+            if (tenantScopedSessionEventService != null)
+                tenantScoped = tenantScopedSessionEventService.handleIfNecessary(parseLong(sessionId), dataJson);
+            if (Boolean.TRUE.equals(tenantScoped)) return StreamDispatchResult.HANDLED;
+        } catch (RuntimeException error) {
+            log.warn("租户子会话投影失败, sessionId: {}", sessionId, error);
+            return StreamDispatchResult.ERROR;
+        }
         if (sessionRuntimeStateService != null && sessionRuntimeStateService.isRuntimeEvent(dataJson)) {
             SessionRuntimeState runtime = sessionRuntimeStateService.applyEvent(parseLong(sessionId), dataJson);
             if (runtime != null) {
@@ -105,7 +119,7 @@ public class SessionStreamEventRouter {
             return StreamDispatchResult.HANDLED;
         }
         try {
-            if (scopedSessionEventService != null
+            if (tenantScoped == null && scopedSessionEventService != null
                 && scopedSessionEventService.handleIfNecessary(parseLong(sessionId), dataJson)) {
                 return StreamDispatchResult.HANDLED;
             }
@@ -342,6 +356,11 @@ public class SessionStreamEventRouter {
         }
         try {
             JSONObject broadcastEvent = buildBroadcastEvent(ctx, dataJson);
+            if (ctx.tenantContext != null) {
+                multiDeviceBroadcastService.broadcastTenantRawEvent(ctx.tenantContext, ctx.getSessionId(),
+                    broadcastEvent, ctx.getSenderChannel(), resolveBroadcastClientRequestId(ctx, broadcastEvent));
+                return;
+            }
             multiDeviceBroadcastService.broadcastRawEvent(ctx.getUserId(), ctx.getSessionId(),
                 broadcastEvent, ctx.getSenderChannel(), resolveBroadcastClientRequestId(ctx, broadcastEvent));
         }
@@ -595,6 +614,18 @@ public class SessionStreamEventRouter {
         if (runtime == null || runtime.getSessionId() == null) {
             return;
         }
+        JSONObject wsMessage = new JSONObject();
+        wsMessage.put("type", "SESSION_RUNTIME_STATUS");
+        wsMessage.put("sessionId", String.valueOf(runtime.getSessionId()));
+        wsMessage.put("traceId", runtime.getTraceId());
+        JSONObject runtimePayload = (JSONObject) JSON.toJSON(runtime);
+        runtimePayload.put("sessionId", runtime.getSessionId().toString());
+        wsMessage.put("data", runtimePayload);
+        var tenant = tenantScopedSessionEventService == null ? null : tenantScopedSessionEventService.owner(runtime.getSessionId());
+        if (tenant != null) {
+            multiDeviceBroadcastService.broadcastTenantRawToUser(tenant, wsMessage, null);
+            return;
+        }
         ByaiSession session = sessionService.findById(runtime.getSessionId());
         if (session != null && "GROUP_CHAT_ROUTING".equals(session.getState())) {
             return;
@@ -603,11 +634,6 @@ public class SessionStreamEventRouter {
         if (userId == null) {
             return;
         }
-        JSONObject wsMessage = new JSONObject();
-        wsMessage.put("type", "SESSION_RUNTIME_STATUS");
-        wsMessage.put("sessionId", String.valueOf(runtime.getSessionId()));
-        wsMessage.put("traceId", runtime.getTraceId());
-        wsMessage.put("data", JSON.toJSON(runtime));
         multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage, null);
     }
 

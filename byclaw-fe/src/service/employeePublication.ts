@@ -41,32 +41,51 @@ export interface PublicationDetail {
   updateTarget?: { resourceId: string; name: string; fromPersonal: boolean; changed: boolean };
   sourceResourcesChanged?: boolean;
 }
+// 保持既有状态表接口；每次取值时使用当前语言，避免切换语言后状态文案仍为中文。
 export const publicationStatus: Record<string, string> = {
-  DRAFT: '草稿',
-  PENDING: '待审核',
-  APPLYING: '发布中',
-  PUBLISHED: '已发布',
-  REJECTED: '已驳回',
-  WITHDRAWN: '已撤回',
-  FAILED: '发布失败',
+  get DRAFT() {
+    return getIntl().formatMessage({ id: 'employeePublication.status.DRAFT' });
+  },
+  get PENDING() {
+    return getIntl().formatMessage({ id: 'employeePublication.status.PENDING' });
+  },
+  get APPLYING() {
+    return getIntl().formatMessage({ id: 'employeePublication.status.APPLYING' });
+  },
+  get PUBLISHED() {
+    return getIntl().formatMessage({ id: 'employeePublication.status.PUBLISHED' });
+  },
+  get REJECTED() {
+    return getIntl().formatMessage({ id: 'employeePublication.status.REJECTED' });
+  },
+  get WITHDRAWN() {
+    return getIntl().formatMessage({ id: 'employeePublication.status.WITHDRAWN' });
+  },
+  get FAILED() {
+    return getIntl().formatMessage({ id: 'employeePublication.status.FAILED' });
+  },
 };
-export const publicationEntryLabel = (status?: string, updating = false) =>
-  (updating &&
-    ({ DRAFT: '继续发布更新', PENDING: '查看更新进度', APPLYING: '查看更新进度' } as Record<string, string>)[
-      status || ''
-    ]) ||
-  (
-    {
-      DRAFT: '继续发布',
-      PENDING: '查看发布进度',
-      APPLYING: '查看发布进度',
-      REJECTED: '查看审核结果',
-      WITHDRAWN: '查看发布申请',
-      FAILED: '查看发布结果',
-      PUBLISHED: '发布更新',
-    } as Record<string, string>
-  )[status || ''] ||
-  '发布到官方推荐';
+
+export const publicationEntryLabel = (status?: string, updating = false) => {
+  const updateMessageIds: Record<string, string> = {
+    DRAFT: 'employeePublication.entry.continueUpdate',
+    PENDING: 'employeePublication.entry.updateProgress',
+    APPLYING: 'employeePublication.entry.updateProgress',
+  };
+  const messageIds: Record<string, string> = {
+    DRAFT: 'employeePublication.entry.continuePublish',
+    PENDING: 'employeePublication.entry.progress',
+    APPLYING: 'employeePublication.entry.progress',
+    REJECTED: 'employeePublication.entry.reviewResult',
+    WITHDRAWN: 'employeePublication.entry.application',
+    FAILED: 'employeePublication.entry.result',
+    PUBLISHED: 'employeePublication.toolbar.publishUpdate',
+  };
+  // 数字员工与技能共用企业发布文案，避免不同入口的名称不一致。
+  return getIntl().formatMessage({
+    id: (updating && updateMessageIds[status || '']) || messageIds[status || ''] || 'resource.publishToEnterprise',
+  });
+};
 const base = '/byaiService/digitalEmployeePublication';
 export const getPublicationPendingCount = () => GET<number>(`${base}/pendingCount`);
 export const getPublicationCapabilities = () =>
@@ -99,7 +118,7 @@ export const preparePublication = (resourceId: string) => POST<PublicationDetail
 export const saveOfficialUpdateDraft = async (resourceId: string, employee: any) => {
   let detail = await preparePublication(resourceId);
   if (String(detail.publication.officialId) !== String(resourceId)) {
-    throw new Error('官方副本已变化，请刷新页面后重试');
+    throw new Error(getIntl().formatMessage({ id: 'employeePublication.officialChanged' }));
   }
   if (detail.canRevise) detail = await publicationAction('revise', detail.publication);
   if (detail.publication.status !== 'DRAFT' || !detail.canEdit) {

@@ -6,10 +6,14 @@ import useEmployeeRowRefresh, {
 } from '@/hooks/useEmployeeRowRefresh';
 import { LeftOutlined, SearchOutlined } from '@ant-design/icons';
 import { getIntl, useNavigate, useIntl } from '@umijs/max';
-import { Empty, Input, Segmented, Spin, Tabs, message } from 'antd';
+import { Empty, Input, Spin, Tabs, message } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
+import {
+  ResourceQuickFilterBar,
+  ResourceQuickFilterGroup,
+} from '@/components/Resources/components/ResourceQuickFilters';
 import { getAgentChatAvatar, agentHandler } from '@/utils/agent';
 import type { IAgentCache } from '@/typescript/agent';
 import {
@@ -86,7 +90,7 @@ const MyEmployeesPage: React.FC = () => {
       }
       try {
         const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
-        // 企业“全部”仅合并本人创建和授权管理的数据，不因管理员角色扩大为全库列表。
+        // 普通用户“全部”合并本人创建和授权管理，adminvip 的企业员工范围由后端按会话放行。
         const scopedEnterpriseType = enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner';
         const enterpriseQueryType = enterpriseScope === 'all' ? 'ownerOrManager' : scopedEnterpriseType;
         const type = activeTab === 'enterprise' ? enterpriseQueryType : 'owner';
@@ -261,6 +265,21 @@ const MyEmployeesPage: React.FC = () => {
     [intl]
   );
 
+  // 搜索挂载在页签行右侧，沿用已有的关键词防抖与回车搜索入口。
+  const employeeSearch = (
+    <Input
+      className={styles.employeeSearch}
+      suffix={<SearchOutlined onClick={() => void loadEmployees()} />}
+      allowClear
+      placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+      value={keyword}
+      onChange={(event) => {
+        setKeyword(event.target.value);
+      }}
+      onPressEnter={() => void loadEmployees()}
+    />
+  );
+
   return (
     <div id="myEmployeesScroller" className={styles.container}>
       <div className={styles.back} onClick={() => navigate('/digitalEmployees')}>
@@ -270,6 +289,7 @@ const MyEmployeesPage: React.FC = () => {
         className={styles.header}
         activeKey={activeTab}
         items={tabItems}
+        tabBarExtraContent={{ right: employeeSearch }}
         onChange={(key) => {
           setActiveTab(key as OwnerTab);
           setResourceFilter('all');
@@ -279,19 +299,9 @@ const MyEmployeesPage: React.FC = () => {
         }}
       />
       <div className={styles.toolbar}>
-        <Input
-          className={styles.employeeSearch}
-          suffix={<SearchOutlined onClick={() => void loadEmployees()} />}
-          allowClear
-          placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
-          value={keyword}
-          onChange={(event) => {
-            setKeyword(event.target.value);
-          }}
-          onPressEnter={() => void loadEmployees()}
-        />
-        <div className={styles.rightFilters}>
-          <Segmented
+        <ResourceQuickFilterBar className={styles.filters}>
+          <ResourceQuickFilterGroup
+            title={intl.formatMessage({ id: 'resource.type' })}
             value={resourceFilter}
             options={[
               { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
@@ -303,8 +313,9 @@ const MyEmployeesPage: React.FC = () => {
             }}
           />
           {activeTab === 'enterprise' && (
-            <div className={styles.enterpriseFilters}>
-              <Segmented
+            <>
+              <ResourceQuickFilterGroup
+                title={intl.formatMessage({ id: 'common.belong' })}
                 value={enterpriseScope}
                 options={[
                   { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
@@ -315,7 +326,8 @@ const MyEmployeesPage: React.FC = () => {
                   setEnterpriseScope(value as EnterpriseScope);
                 }}
               />
-              <Segmented
+              <ResourceQuickFilterGroup
+                title={intl.formatMessage({ id: 'common.status' })}
                 value={statusFilter}
                 options={[
                   { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
@@ -327,9 +339,9 @@ const MyEmployeesPage: React.FC = () => {
                   setStatusFilter(value as EmployeeStatusFilter);
                 }}
               />
-            </div>
+            </>
           )}
-        </div>
+        </ResourceQuickFilterBar>
       </div>
       <Spin spinning={loading}>
         <InfiniteScroll
@@ -356,8 +368,8 @@ const MyEmployeesPage: React.FC = () => {
                   digitalEmployeeActionMode
                   actionConfig={{
                     scene: activeTab,
-                    // 个人页签统一隐藏使用授权入口，企业页签仍按后端权限展示。
-                    hiddenMenuItemKeys: activeTab === 'personal' ? ['use'] : [],
+                    // 授权入口统一消费后端权限，个人资源由后端返回 false，不再按页签二次过滤。
+                    hiddenMenuItemKeys: [],
                     onChat: () => handleChat(employee),
                     onApplyUse: () => handleApplyUse(employee),
                     onEdit: () => handleEdit(employee),
@@ -369,8 +381,8 @@ const MyEmployeesPage: React.FC = () => {
                     onUnShelf: (feedback) => handleShelfStatusChange(employee, 'unShelf', feedback),
                     // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
                     showDigitalEmployeeTypeTag: false,
-                    // 个人页签不提供上下架操作，企业页签继续按权限展示。
-                    enableDigitalEmployeeLifecycle: activeTab === 'enterprise',
+                    // 个人归属的上下架限制由后端控制，不再按页签隐藏获准操作。
+                    enableDigitalEmployeeLifecycle: true,
                     // 个人、企业页签统一按后端 canDelete 展示删除数据入口。
                     enableDigitalEmployeeDelete: true,
                   }}

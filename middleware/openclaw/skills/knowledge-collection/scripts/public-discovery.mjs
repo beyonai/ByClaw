@@ -28,6 +28,8 @@ import { runCli } from './enterprise/shared/cli-runner.mjs';
 import { runOnlineSearch as defaultRunOnlineSearch } from './online-search/provider.mjs';
 import { runHotDiscoveryWave, sourcePlanIdentity } from './hot-discovery-runtime.mjs';
 
+export { resolveSearxngRuntime } from './online-search/searxng.mjs';
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const onlineSearchRoot = resolve(scriptDir, '../references/online-search');
 const hotDiscoveryScript = join(onlineSearchRoot, 'references/hot_discovery/scripts/hot_discovery.mjs');

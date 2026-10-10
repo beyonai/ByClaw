@@ -39,7 +39,7 @@ describe('available employee filter params', () => {
     });
   });
 
-  it.each(['PERSONAL_GROUP', 'ENTERPRISE_GROUP', 'PERSONAL_EMPLOYEE', 'ENTERPRISE_EMPLOYEE'])(
+  it.each(['PERSONAL_GROUP', 'PERSONAL_EMPLOYEE'])(
     'ignores stale %s type filtering in enterprise recommendations while retaining permission',
     (digitalEmployeeType) => {
       expect(
@@ -49,6 +49,22 @@ describe('available employee filter params', () => {
           'official'
         )
       ).toEqual({ resourceStatus: '2', excludeDeleted: true, permission: 'APPLIED_BY_ME' });
+    }
+  );
+
+  it.each<[string, Record<string, string | boolean>]>([
+    ['ENTERPRISE_GROUP', { ownerType: 'enterprise', agentType: '017' }],
+    ['ENTERPRISE_EMPLOYEE', { ownerType: 'enterprise', includeEmployeeGroup: false }],
+  ])(
+    'applies %s filtering in enterprise recommendations while retaining permission',
+    (digitalEmployeeType, expected) => {
+      expect(
+        buildDigitalEmployeeFilterParam(
+          'official',
+          { resourceStatus: '3', digitalEmployeeType, permission: 'APPLIED_BY_ME' },
+          'official'
+        )
+      ).toEqual({ resourceStatus: '2', excludeDeleted: true, permission: 'APPLIED_BY_ME', ...expected });
     }
   );
 

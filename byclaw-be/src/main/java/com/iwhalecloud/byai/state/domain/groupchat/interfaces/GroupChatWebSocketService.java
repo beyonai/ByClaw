@@ -1,6 +1,15 @@
 package com.iwhalecloud.byai.state.domain.groupchat.interfaces;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
+import com.iwhalecloud.byai.state.domain.groupchat.application.TenantGroupAgentDispatcher;
 import org.springframework.dao.DataAccessException;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandResult;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupMessagePayload;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
@@ -18,10 +27,31 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class GroupChatWebSocketService {
+    @Autowired
+    private com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService tenantCoordination;
     private final GroupChatApplicationService applicationService;
+    private final TenantNodeClient tenantNodeClient;
+    private final ByaiGroupChatMentionMapper mentionMapper;
+    private final GroupChatEventPublisher eventPublisher;
+    private final TenantGroupAgentDispatcher tenantDispatcher;
+
+    @Autowired
+    public GroupChatWebSocketService(GroupChatApplicationService applicationService, TenantNodeClient tenantNodeClient,
+        ByaiGroupChatMentionMapper mentionMapper, GroupChatEventPublisher eventPublisher,
+        TenantGroupAgentDispatcher tenantDispatcher) {
+        this.applicationService = applicationService;
+        this.tenantNodeClient = tenantNodeClient;
+        this.mentionMapper = mentionMapper;
+        this.eventPublisher = eventPublisher;
+        this.tenantDispatcher = tenantDispatcher;
+    }
 
     public GroupChatWebSocketService(GroupChatApplicationService applicationService) {
         this.applicationService = applicationService;
+        this.tenantNodeClient = null;
+        this.mentionMapper = null;
+        this.eventPublisher = null;
+        this.tenantDispatcher = null;
     }
 
     public void send(ChannelHandlerContext context, ChatMessage message) {
@@ -45,9 +75,13 @@ public class GroupChatWebSocketService {
 
     private JSONObject accept(ChatMessage message) {
         try {
+            TenantRequestContext tenant = TenantRequestContextHolder.get();
+            if (tenant != null) return acceptTenant(tenant, message);
             Long messageId = applicationService.acceptUserMessage(message);
             JSONObject ack = event(message, "GROUP_CHAT_ACCEPTED");
             ack.put("messageId", messageId);
+            Object scope = applicationService.coordinationForMessage(messageId);
+            if (scope != null) ack.put("groupCoordination", scope);
             return ack;
         }
         catch (GroupChatActiveTaskException rejection) {
@@ -72,6 +106,77 @@ public class GroupChatWebSocketService {
         }
     }
 
+    private JSONObject acceptTenant(TenantRequestContext tenant, ChatMessage message) {
+        if (tenantNodeClient == null) throw new IllegalStateException("tenant Node client unavailable");
+        java.util.Map<String, Object> coordinator = message.getResourceList() != null
+            && message.getResourceList().stream().anyMatch(resource ->
+                com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType()))
+            ? tenantCoordination.coordinator(tenant, message.getSessionId()) : java.util.Map.of();
+        CommandResult result = tenantNodeClient.command(tenant, "POST",
+            "/internal/v1/group-chats/" + message.getSessionId() + "/messages",
+            message.getSessionId().toString(), "SEND_GROUP_MESSAGE",
+            new GroupMessagePayload(message.getChatContent(), message.getResourceList() == null ? java.util.List.of() : message.getResourceList(), message.getFiles(),
+                message.getReplyToMessageId() == null ? null : message.getReplyToMessageId().toString(),
+                message.getSenderName(), (String) coordinator.get("coordinatorAgentId"),
+                (String) coordinator.get("coordinatorName"), (Boolean) coordinator.get("coordinatorAuthorized")), message.getClientRequestId());
+        if (result == null || result.messageId() == null) {
+            throw new IllegalStateException("tenant group message was not committed");
+        }
+        String messageId = result.messageId();
+        JSONObject event = new JSONObject();
+        event.put("type", "GROUP_CHAT_EVENT");
+        event.put("event", "MESSAGE_CREATED");
+        event.put("sessionId", String.valueOf(message.getSessionId()));
+        event.put("messageId", messageId);
+        event.put("clientRequestId", message.getClientRequestId());
+        event.put("content", message.getChatContent());
+        event.put("creatorId", tenant.userId());
+        event.put("creatorName", message.getSenderName());
+        event.put("resourceList", message.getResourceList());
+        event.put("files", message.getFiles());
+        event.put("replyToMessageId", message.getReplyToMessageId());
+        event.put("speaker", java.util.Map.of("type", "USER",
+            "displayName", message.getSenderName() == null ? "" : message.getSenderName()));
+        java.util.Map<String, Object> scope = result.dispatches() == null ? null : result.dispatches().stream()
+            .map(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.GroupDispatch::groupCoordination)
+            .filter(java.util.Objects::nonNull).filter(value -> "COORDINATED".equals(value.get("mode")))
+            .findFirst().orElse(null);
+        if (scope != null) event.put("groupCoordination", scope);
+        try {
+            eventPublisher.publishTenant(tenant, message.getSessionId(), event);
+            if (scope != null) {
+                JSONObject created = new JSONObject();
+                created.put("type", "GROUP_CHAT_EVENT");
+                created.put("event", "TASK_CREATED");
+                created.put("sessionId", message.getSessionId().toString());
+                created.put("taskId", scope.get("taskSessionId"));
+                created.put("taskName", message.getChatContent());
+                created.put("targetAgentId", scope.get("coordinatorAgentId"));
+                created.put("sourceMessageId", messageId);
+                created.put("initiatorUserId", tenant.userId());
+                created.put("status", "ACTIVE");
+                created.put("turnStatus", "QUEUED");
+                created.put("groupCoordination", scope);
+                eventPublisher.publishTenant(tenant, message.getSessionId(), created);
+            }
+        }
+        catch (RuntimeException error) {
+            log.warn("租户工作组消息已提交，但广播失败, sessionId={}, messageId={}",
+                message.getSessionId(), messageId, error);
+        }
+        if (tenantDispatcher != null) tenantDispatcher.dispatch(tenant, message.getSessionId(), messageId,
+            message.getChatContent(), result.dispatches());
+        JSONObject ack = event(message, "GROUP_CHAT_ACCEPTED");
+        ack.put("messageId", messageId);
+        ack.put("enterpriseId", Long.toString(tenant.enterpriseId()));
+        if (scope != null) {
+            ack.put("groupCoordination", scope);
+            ack.put("taskId", scope.get("taskSessionId"));
+            ack.put("targetAgentId", scope.get("coordinatorAgentId"));
+        }
+        return ack;
+    }
+
     private JSONObject event(ChatMessage message, String type) {
         JSONObject response = new JSONObject();
         response.put("type", type);
@@ -79,6 +184,8 @@ public class GroupChatWebSocketService {
             response.put("sessionId", String.valueOf(message.getSessionId()));
         }
         response.put("clientRequestId", message.getClientRequestId());
+        TenantRequestContext tenant = TenantRequestContextHolder.get();
+        if (tenant != null) response.put("enterpriseId", Long.toString(tenant.enterpriseId()));
         return response;
     }
 

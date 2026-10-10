@@ -71,6 +71,17 @@ class ChatRuntimeStateServiceTest {
     }
 
     @Test
+    void recoveryRetainsTenantIdentityThroughRedisSerialization() {
+        var serialized = com.alibaba.fastjson.JSON.parseObject(com.alibaba.fastjson.JSON.toJSONString(runtimeState(null)));
+        serialized.put("tenantContext", java.util.Map.of("userId", 200L, "enterpriseId", 123L, "role", "MEMBER"));
+        ChatRuntimeState state = serialized.toJavaObject(ChatRuntimeState.class);
+        ChatProcessContext recovered = service.buildRecoveryContext(state, snapshotService);
+        assertNotNull(recovered.tenantContext);
+        assertEquals(123L, recovered.tenantContext.enterpriseId());
+        assertEquals(200L, recovered.tenantContext.userId());
+    }
+
+    @Test
     void buildRecoveryContextCreatesFallbackAskMsgForLegacyRuntimeState() {
         long startedAt = 1_700_000_000_000L;
         ChatRuntimeState state = runtimeState(null);

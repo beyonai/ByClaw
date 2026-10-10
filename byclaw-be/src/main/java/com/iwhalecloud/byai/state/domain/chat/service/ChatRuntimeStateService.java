@@ -115,6 +115,7 @@ public class ChatRuntimeStateService {
         state.setModelAnswerMessageId(ctx.modelAnswerMessageId);
         state.setTaskId(ctx.taskId);
         state.setUserId(ctx.userId);
+        state.setTenantContext(ctx.tenantContext);
         state.setSessionMemberAgentId(ctx.sessionMemberAgentId);
         state.setSuppressUserEvents(ctx.suppressUserEvents);
         state.setAssistantChatDto(ctx.assistantChatDto);
@@ -382,6 +383,7 @@ public class ChatRuntimeStateService {
         ctx.modelAnswerMessageId = state.getModelAnswerMessageId();
         ctx.taskId = state.getTaskId();
         ctx.userId = state.getUserId();
+        ctx.tenantContext = state.getTenantContext();
         ctx.sessionMemberAgentId = state.getSessionMemberAgentId();
         ctx.suppressUserEvents = state.isSuppressUserEvents();
         ctx.askMsg = resolveAskMsg(state);

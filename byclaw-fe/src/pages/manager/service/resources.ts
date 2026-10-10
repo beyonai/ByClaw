@@ -442,6 +442,9 @@ export function queryUseApplyList(params: ResourceUseApplyParams) {
 export interface ResourceUseApplyAuditQueryParams {
   history?: boolean;
   resourceBizTypeList?: string[];
+
+  /** 按资源名称进行不区分大小写的包含匹配；空值不筛选。 */
+  keyword?: string;
 }
 
 export function queryResourceUseApplyAudit(params: ResourceUseApplyAuditQueryParams = {}) {

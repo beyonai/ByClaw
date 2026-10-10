@@ -229,7 +229,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         if ("TASK".equals(disposition)) {
             // 保留普通链路保存的过程结构，仅补充合法成员引用的展示信息。
             normalizeTaskMentions(execution, answer, answerMetadata);
-            // TASK 的 turn 结束不代表任务完成；过程中的 @ 只展示，发布成果时才允许委派。
+            // TASK 的 turn 结束不代表任务完成；回复与成果中的 @ 都只用于展示。
             taskService.completeTurn(execution.getCandidateSessionId(), execution.getTraceId(), failed);
             if (failed) {
                 markFailed(execution, "TURN_FAILED", "Task turn failed");
@@ -251,7 +251,6 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         }
         else {
             Long groupMessageId = projectChatAnswer(execution, answer, mentions);
-            scheduleAgentMentions(execution, mentions, groupMessageId, groupMessageId);
             markSucceeded(execution, groupMessageId);
         }
     }
@@ -452,18 +451,6 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
 
     private void wakeNext(ByaiGroupChatExecution execution) {
         if (turnCoordinator != null) turnCoordinator.wakeAfterCommit(execution.getCandidateSessionId());
-    }
-
-    private void scheduleAgentMentions(ByaiGroupChatExecution execution, GroupChatAgentMention mentions,
-        Long triggerId, Long publicBoundary) {
-        List<ResourceVo> resources = mentions.resourceList();
-        // 子委派先在当前投影事务中登记，协调器自身在提交后才发给 Gateway，便于失败重试。
-        for (ResourceVo resource : resources) {
-            if (resource.getResourceType() == AgentMetaEnum.DIG_EMPLOYEE) {
-                executionCoordinator.enqueueChild(execution, Long.valueOf(resource.getResourceId()),
-                    triggerId, publicBoundary, mentions.normalizedContent(), resources);
-            }
-        }
     }
 
     private void publishAfterCommit(Long sessionId, JSONObject payload) {

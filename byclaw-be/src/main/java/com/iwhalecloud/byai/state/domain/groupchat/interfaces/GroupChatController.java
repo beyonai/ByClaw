@@ -118,12 +118,13 @@ public class GroupChatController {
         return ResponseUtil.successResponse(ackService.unacknowledge(sessionId, messageId));
     }
 
-    /** 按当前 USER 成员关系返回群列表及未读 mention 状态。 */
+    /** 按当前 USER 成员关系返回群列表及未读 mention 状态；enterpriseId 不传或为 1 时不按企业筛选。 */
     @GetMapping
     public ResponseUtil<PageInfo<GroupChatListItemResponse>> list(
         @RequestParam(defaultValue = "1") Integer pageNum,
-        @RequestParam(defaultValue = "20") Integer pageSize) {
-        return ResponseUtil.successResponse(readService.listMyGroups(pageNum, pageSize));
+        @RequestParam(defaultValue = "20") Integer pageSize,
+        @RequestParam(required = false) Long enterpriseId) {
+        return ResponseUtil.successResponse(readService.listMyGroups(pageNum, pageSize, enterpriseId));
     }
 
     /** 只把前端已实际展示的群消息推进为已读位置。 */

@@ -507,6 +507,31 @@
   }
 }
 
+// 分隔行与会话名称使用相同的左侧缩进，避免虚线贴近列表边缘。
+.loadMoreSessionsAction {
+  padding-left: 31px;
+}
+
+// 仅为“查看更多”补充两侧浅色分隔线，文字与加载图标在缩进后的区域内居中。
+.loadMoreSessionsDivider {
+  gap: 8px;
+
+  &::before,
+  &::after {
+    content: '';
+    min-width: 0;
+    flex: 1;
+    border-top: 1px dashed #e5e5e4;
+  }
+}
+
+.loadMoreSessionsLabel {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
 .workspaceUserFooter {
   flex-shrink: 0;
   padding-top: 8px;

@@ -29,6 +29,7 @@ import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthRedisSyncService;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
@@ -70,6 +71,7 @@ class GroupChatMemberGrantTest {
     private final PrivilegeGrantMapper grantMapper = mock(PrivilegeGrantMapper.class);
     private final AuthRedisSyncService cacheSync = mock(AuthRedisSyncService.class);
     private final GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
+    private final TenantUserMembershipService tenantUserMembershipService = mock(TenantUserMembershipService.class);
     private final ByaiSession group = new ByaiSession();
     private final Connection connection = mock(Connection.class);
     private SetOperations<String, String> redis;
@@ -112,6 +114,7 @@ class GroupChatMemberGrantTest {
             mock(ByaiMessageMapper.class), mock(GroupChatExecutionCoordinator.class), events, mock(SessionExtService.class));
         ReflectionTestUtils.setField(target, "authApplicationService", authService);
         ReflectionTestUtils.setField(target, "invitationService", invitations);
+        ReflectionTestUtils.setField(target, "tenantUserMembershipService", tenantUserMembershipService);
         service = proxy(target, manager, GroupChatApplicationService.class);
     }
 
@@ -315,6 +318,16 @@ class GroupChatMemberGrantTest {
         verify(projectMembers).addMember(100L, 21L, "member");
         verify(grants, times(4)).save(any());
         verify(connection).commit();
+    }
+
+    @Test
+    void batchUserInvitationAddsUsersToTheGroupEnterprise() throws Exception {
+        group.setEnterpriseId(300L);
+
+        service.inviteBatch(200L, "USER", List.of(20L, 21L));
+
+        verify(tenantUserMembershipService).add(20L, 300L, "MEMBER", 10L);
+        verify(tenantUserMembershipService).add(21L, 300L, "MEMBER", 10L);
     }
 
     @Test

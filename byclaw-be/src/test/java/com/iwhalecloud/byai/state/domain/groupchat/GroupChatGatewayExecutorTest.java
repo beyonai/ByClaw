@@ -77,6 +77,9 @@ class GroupChatGatewayExecutorTest {
         SandboxUserContextRunner runner = mock(SandboxUserContextRunner.class);
         executor = new GroupChatGatewayExecutor(script, messages, users, resources, tokens,
             new GroupChatDispatchPromptBuilder(), members, new GroupChatMemberUidCodec(), executions, sequences, runner);
+        var memberRouting = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMemberRoutingService.class);
+        when(memberRouting.withRoutes(any(), any())).thenAnswer(call -> call.getArgument(0));
+        org.springframework.test.util.ReflectionTestUtils.setField(executor, "memberRouting", memberRouting);
         executor.configureTurnTransactions(mock(PlatformTransactionManager.class), tasks);
         executor.configureContextFiles(historyFiles, taskAuthorization);
         when(historyFiles.prepareGroupHistory(any(), any(), any(), any()))
@@ -176,6 +179,38 @@ class GroupChatGatewayExecutorTest {
     }
 
     @Test
+    void coordinationPromptSkipsClassificationAndDisclosesOnlyItsSelectedWorkers() {
+        var scopeService = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(executor, "coordinationService", scopeService);
+        var resources = (SsResourceService) org.springframework.test.util.ReflectionTestUtils.getField(executor, "resourceService");
+        var members = (SessionMemberService) org.springframework.test.util.ReflectionTestUtils.getField(executor, "memberService");
+        java.util.List<ByaiSessionMember> roster = new java.util.ArrayList<>();
+        for (long id : new long[] {40L, 50L, 70L, 90L}) {
+            ByaiSessionMember member = new ByaiSessionMember();
+            member.setMemObjId(id); member.setMemObjType("AGENT"); roster.add(member);
+            SsResource resource = new SsResource();
+            resource.setResourceName("Employee" + id); resource.setWorkerAgentType("BYCLAW_EXE");
+            when(resources.findById(id)).thenReturn(resource);
+        }
+        when(members.findSessionMembers(10L, null, null)).thenReturn(roster);
+        Map<String, Object> scope = new HashMap<>(Map.of("mode", "COORDINATED", "coordinatorAgentId", "40",
+            "taskSessionId", "60", "allowedAgentIds", List.of("50")));
+        when(scopeService.findScope(60L)).thenReturn(scope);
+        execution.setTraceId(ScriptService.getTraceId(61L, 70L));
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L; context.userId = 30L; context.traceId = execution.getTraceId();
+        context.assistantChatDto.setAgentId(40L);
+        Map<String, Object> params = new HashMap<>();
+        String outbound = (String) executor.decorate(context, "作业", params);
+        assertThat(outbound).contains("Employee50", "统一协调").doesNotContain("Employee70", "Employee90", "group-chat-disposition.json");
+        assertThat(params).containsEntry("groupCoordination", scope);
+        scope.put("mode", "DIRECT"); scope.put("coordinatorAgentId", "90");
+        outbound = (String) executor.decorate(context, "作业", params);
+        assertThat(outbound).contains("Employee90", "group_request_assistance")
+            .doesNotContain("Employee50", "Employee70");
+    }
+
+    @Test
     void onlyActivePrivateTaskFollowupsReceiveDeliveryReminderWithoutReclassification() {
         execution.setStatus("CONVERSATION");
         ByaiGroupChatTask task = new ByaiGroupChatTask();
@@ -264,19 +299,65 @@ class GroupChatGatewayExecutorTest {
     }
 
     @Test
-    void sameAgentTaskContinuationDoesNotPrepareEitherHistoryFile() {
+    void sameAgentTaskContinuationRefreshesPublicHistoryWithoutTaskHandoff() {
         ChatProcessContext context = taskContext(41L);
         when(messages.selectPreviousTaskAnswers(60L, 81L, 50)).thenReturn(List.of(answer(80L, 41L)));
-        String content = (String) executor.decorate(context, "继续", new HashMap<>());
-        assertThat(content).contains("[任务交付提醒]", "/by/.sessions/60/.byclaw/task-delivery.json").doesNotContain("任务接手上下文", "群聊历史", ".byclaw/context");
-        verifyNoInteractions(historyFiles);
+        Map<String, Object> params = new HashMap<>();
+        String content = (String) executor.decorate(context, "继续", params);
+        assertThat(content).contains("[任务交付提醒]", "/by/.sessions/60/.byclaw/task-delivery.json", "群聊历史")
+            .doesNotContain("任务接手上下文", "task-history.jsonl");
+        ArgumentCaptor<com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest> history =
+            ArgumentCaptor.forClass(com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest.class);
+        verify(historyFiles).prepareGroupHistory(eq("user30"), history.capture(), eq(context.traceId), eq(81L));
+        assertThat(history.getValue().getBeforeMessageId()).isEqualTo("81");
+        assertThat(((Map<?, ?>) params.get("groupChat")).get("beforeMessageId")).isEqualTo("81");
+        verify(historyFiles, never()).prepareTaskHandoffHistory(any(), any(), any(), any());
     }
 
     @Test
-    void originalAgentContinuationWithoutHistoricalIdentityDoesNotPrepareFiles() {
+    void originalAgentContinuationWithoutHistoricalIdentityStillReceivesPublicHistory() {
         ChatProcessContext context = taskContext(40L);
-        assertThat((String) executor.decorate(context, "继续", new HashMap<>())).doesNotContain("任务接手上下文");
-        verifyNoInteractions(historyFiles);
+        assertThat((String) executor.decorate(context, "继续", new HashMap<>()))
+            .contains("群聊历史").doesNotContain("任务接手上下文");
+        verify(historyFiles).prepareGroupHistory(eq("user30"), any(), eq(context.traceId), eq(81L));
+        verify(historyFiles, never()).prepareTaskHandoffHistory(any(), any(), any(), any());
+    }
+
+    @Test
+    void promotedCoordinatedInitialTurnLoadsAndForwardsItsFrozenPublicSnapshot() {
+        var scopeService = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(executor, "coordinationService", scopeService);
+        when(scopeService.findScope(60L)).thenReturn(Map.of("mode", "COORDINATED", "coordinatorAgentId", "40",
+            "taskSessionId", "60", "allowedAgentIds", List.of("50", "70")));
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus("ACTIVE");
+        when(tasks.selectById(60L)).thenReturn(task);
+        var snapshot = new com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse();
+        snapshot.setConversationKey("10");
+        when(historyFiles.prepareGroupHistory(any(), any(), any(), any())).thenReturn(
+            new GroupChatSessionContextFileService.ContextFile("GROUP_PUBLIC", "/by/group-history.json", "20", snapshot));
+        execution.setDisposition("TASK");
+        execution.setTraceId(ScriptService.getTraceId(61L, 70L));
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L; context.userId = 30L; context.userMessageId = 61L;
+        context.traceId = execution.getTraceId(); context.assistantChatDto.setAgentId(40L);
+        Map<String, Object> params = new HashMap<>();
+        String content = (String) executor.decorate(context, "协作", params);
+        assertThat(content).contains("group-history.json", "统一协调").doesNotContain("group-chat-disposition.json");
+        assertThat(params).containsEntry("groupContextSnapshot", snapshot);
+        verify(historyFiles).prepareGroupHistory(eq("user30"), any(), eq(context.traceId), eq(61L));
+        verify(tasks, never()).selectById(60L);
+    }
+
+    @Test
+    void continuationRetryKeepsSamePersistedInputBoundaryDespiteNewGroupMessages() {
+        ChatProcessContext context = taskContext(40L);
+        for (int retry = 0; retry < 2; retry++) {
+            Map<String, Object> params = new HashMap<>();
+            executor.decorate(context, "继续", params);
+            assertThat(((Map<?, ?>) params.get("groupChat")).get("beforeMessageId")).isEqualTo("81");
+        }
+        verify(messages, never()).selectLatestMessageId(any());
     }
 
     @Test

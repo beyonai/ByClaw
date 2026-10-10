@@ -147,13 +147,11 @@ sh start-be.sh              # 后端
 sh start-super.sh           # Super
 sh start-fe.sh              # 前端（会自动从模板生成 nginx 配置）
 sh start-qa-manager.sh      # QA Manager
-sh start-qa-worker.sh       # QA Worker（后台进程，无端口）
 
 sh stop-be.sh
 sh stop-super.sh
 sh stop-fe.sh
 sh stop-qa-manager.sh
-sh stop-qa-worker.sh
 ```
 
 ### 按需启动服务
@@ -174,7 +172,6 @@ STANDALONE_MODULES=fe,be,super
 | 后端 (be) | `be` | 8086 / 8082 | `BE_SERVER_PORT` / `BE_WS_PORT` |
 | Super | `super` | 3000 | `BYCLAW_SUPER_PORT` |
 | QA Manager | `qa-manager` | 8090 | `BYCLAW_QA_PORT` |
-| QA Worker | `qa-worker` | 无（后台进程） | - |
 
 ### Nginx 配置模板
 
@@ -184,3 +181,5 @@ STANDALONE_MODULES=fe,be,super
 - 输出文件：`config/nginx-standalone.conf`
 
 `start-fe.sh` 和 `start-all.sh` 会自动调用生成脚本，从 `.env` 读取 `BE_SERVER_PORT`、`BE_WS_PORT` 和 `BYCLAW_SANDBOX_PORT` 替换模板中的占位符，并初始化开发环境 `localhost` HTTPS 证书。修改 nginx 配置只需编辑 `.tpl` 模板文件。
+
+旧版本升级：需单独停止并删除旧 `qa-worker` 容器，或 K3s 中的旧 Worker Deployment 及专用 ConfigMap；更新部署清单不会自动删除旧实例。QA Manager 及数据卷保留。

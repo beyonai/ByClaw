@@ -1,3 +1,13 @@
+-- 多租户系统开关默认关闭；先删除旧配置，再初始化为关闭状态。
+DELETE FROM byai.byai_system_config WHERE param_code = 'ENABLE_MULTI_TENACY';
+INSERT INTO byai.byai_system_config (
+    param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc
+)
+VALUES (
+    nextval('byai.seq_any_table'), 'text', 'ENABLE_MULTI_TENACY', '是否开启多租户',
+    'ENABLE_MULTI_TENACY', '0', '多租户业务开关：0 关闭，1 开启，默认关闭'
+);
+
 -- 邮箱连接器相关 DML 统一归属 V0.5.0；保留原 advisory lock 键以兼容旧版本并发重放。
 -- Mail 内置 Skill 注册开始
 -- CLI、provider runtime 与托管 byCLI adapter 均随 OpenClaw 镜像提供；本段只注册可发现资源和授权。
@@ -455,8 +465,65 @@ delete from byai.ss_resource where resource_code in('unstructured-ontology-manag
 delete byai.byai_system_config_list where param_group_code in('MODEL_TAGS') and param_value ='7';
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES(nextval('byai.seq_any_table'), 'MODEL_TAGS', '模型打标', '多模态模型', 'MULTIMODAL_MODEL', '7', '多模态模型', 7);
 
+-- 删除已下线的 UI Agent 和 ByClaw Code Agent 沙箱基础配置。
+DELETE FROM byai.sandbox_service_spec
+WHERE service_key IN ('uiagent', 'byclaw-code-agent');
 
+-- 新环境开通未完成的鲸智百应脏记录：仅清理指定身份、删除失败且无运行资源的企业。
+-- 按顺序在同一事务内执行；不删除平台账号或共享组织，重复执行无副作用。
+DELETE FROM byai.tenant_organization
+WHERE enterprise_id = 10291378 AND EXISTS (
+    SELECT 1 FROM byai.po_enterprise_info e
+    JOIN byai.tenant_config state ON state.enterprise_id = e.enterprise_id
+        AND state.params_code = 'PROVISION_STATE'
+    WHERE e.enterprise_id = 10291378
+      AND e.com_acct_name = '鲸智百应' AND e.com_acct_code = 'tenant-10291378'
+      AND state.params_value::jsonb ->> 'status' = 'DELETE_FAILED'
+      AND NOT EXISTS (SELECT 1 FROM byai.ss_sandbox_record WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.tenant_schema_audit WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.byai_project WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.byai_session WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.byai_message WHERE enterprise_id = e.enterprise_id)
+);
 
+DELETE FROM byai.tenant_user_membership
+WHERE enterprise_id = 10291378 AND EXISTS (
+    SELECT 1 FROM byai.po_enterprise_info e
+    JOIN byai.tenant_config state ON state.enterprise_id = e.enterprise_id
+        AND state.params_code = 'PROVISION_STATE'
+    WHERE e.enterprise_id = 10291378
+      AND e.com_acct_name = '鲸智百应' AND e.com_acct_code = 'tenant-10291378'
+      AND state.params_value::jsonb ->> 'status' = 'DELETE_FAILED'
+      AND NOT EXISTS (SELECT 1 FROM byai.ss_sandbox_record WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.tenant_schema_audit WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.byai_project WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.byai_session WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.byai_message WHERE enterprise_id = e.enterprise_id)
+);
 
+DELETE FROM byai.tenant_config
+WHERE enterprise_id = 10291378 AND EXISTS (
+    SELECT 1 FROM byai.po_enterprise_info e
+    JOIN byai.tenant_config state ON state.enterprise_id = e.enterprise_id
+        AND state.params_code = 'PROVISION_STATE'
+    WHERE e.enterprise_id = 10291378
+      AND e.com_acct_name = '鲸智百应' AND e.com_acct_code = 'tenant-10291378'
+      AND state.params_value::jsonb ->> 'status' = 'DELETE_FAILED'
+      AND NOT EXISTS (SELECT 1 FROM byai.ss_sandbox_record WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.tenant_schema_audit WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.byai_project WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.byai_session WHERE enterprise_id = e.enterprise_id)
+      AND NOT EXISTS (SELECT 1 FROM byai.byai_message WHERE enterprise_id = e.enterprise_id)
+);
 
-
+DELETE FROM byai.po_enterprise_info
+WHERE enterprise_id = 10291378
+  AND com_acct_name = '鲸智百应' AND com_acct_code = 'tenant-10291378'
+  AND NOT EXISTS (SELECT 1 FROM byai.tenant_config WHERE enterprise_id = 10291378)
+  AND NOT EXISTS (SELECT 1 FROM byai.tenant_user_membership WHERE enterprise_id = 10291378)
+  AND NOT EXISTS (SELECT 1 FROM byai.tenant_organization WHERE enterprise_id = 10291378)
+  AND NOT EXISTS (SELECT 1 FROM byai.ss_sandbox_record WHERE enterprise_id = 10291378)
+  AND NOT EXISTS (SELECT 1 FROM byai.tenant_schema_audit WHERE enterprise_id = 10291378)
+  AND NOT EXISTS (SELECT 1 FROM byai.byai_project WHERE enterprise_id = 10291378)
+  AND NOT EXISTS (SELECT 1 FROM byai.byai_session WHERE enterprise_id = 10291378)
+  AND NOT EXISTS (SELECT 1 FROM byai.byai_message WHERE enterprise_id = 10291378);

@@ -101,6 +101,7 @@ const ResourceFilterForm = ({
   resourceType,
   showStatusFilter,
   hidePermissionFilter,
+  hideResourceBizTypeFilter = false,
   statusOptionsOverride,
   digitalEmployeeTypeFilter = false,
   resourceOwnerFilter = false,
@@ -112,6 +113,7 @@ const ResourceFilterForm = ({
   activeTab?: string;
   showStatusFilter?: boolean;
   hidePermissionFilter?: boolean;
+  hideResourceBizTypeFilter?: boolean;
   statusOptionsOverride?: typeof statusOptions;
   digitalEmployeeTypeFilter?: boolean;
   resourceOwnerFilter?: boolean;
@@ -132,7 +134,8 @@ const ResourceFilterForm = ({
   const typeOptions = resourceType === 'KG_DOC' ? knowledgeResourceBizTypeOptions : resourceBizTypeOptions;
   const currentStatusOptions =
     statusOptionsOverride || (resourceType === 'DIG_EMPLOYEE' ? digitalEmployeeStatusOptions : statusOptions);
-  const showTypeFilter = resourceType === 'TOOL' || resourceType === 'KG_DOC';
+  // 外部快捷类型由列表即时更新，弹层不再展示或提交该条件。
+  const showTypeFilter = !hideResourceBizTypeFilter && (resourceType === 'TOOL' || resourceType === 'KG_DOC');
   const normalizedResourceBizTypeList = normalizeResourceBizTypeList(filterResourceBizTypeList, resourceType);
 
   // 可用员工列表不包含待审批资源；其他资源页签保留原有申请筛选。
@@ -525,6 +528,7 @@ interface ResourceFilterWithDropdownProps {
   alwaysShowStatusFilter?: boolean;
   hideStatusFilter?: boolean;
   hidePermissionFilter?: boolean;
+  hideResourceBizTypeFilter?: boolean;
   statusOptionsOverride?: typeof statusOptions;
   digitalEmployeeTypeFilter?: boolean;
   resourceOwnerFilter?: boolean;
@@ -540,6 +544,7 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
   alwaysShowStatusFilter,
   hideStatusFilter = false,
   hidePermissionFilter = false,
+  hideResourceBizTypeFilter = false,
   statusOptionsOverride,
   digitalEmployeeTypeFilter = false,
   resourceOwnerFilter = false,
@@ -580,6 +585,7 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
           activeTab={activeTab}
           showStatusFilter={showStatusFilter}
           hidePermissionFilter={hidePermissionFilter}
+          hideResourceBizTypeFilter={hideResourceBizTypeFilter}
           statusOptionsOverride={statusOptionsOverride}
           digitalEmployeeTypeFilter={digitalEmployeeTypeFilter}
           resourceOwnerFilter={resourceOwnerFilter}
@@ -613,7 +619,7 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
             </div>
           )}
           {/* 筛选-类型 */}
-          {(resourceType === 'TOOL' || resourceType === 'KG_DOC') && (
+          {!hideResourceBizTypeFilter && (resourceType === 'TOOL' || resourceType === 'KG_DOC') && (
             <div className={styles.selectedItem}>
               {intl.formatMessage({ id: 'resource.type' })}：
               {(() => {

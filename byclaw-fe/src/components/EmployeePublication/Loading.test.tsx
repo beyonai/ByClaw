@@ -1,3 +1,4 @@
+jest.mock('@umijs/max', () => ({ useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl('zh-CN') }));
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import PublicationLoading from './Loading';
 

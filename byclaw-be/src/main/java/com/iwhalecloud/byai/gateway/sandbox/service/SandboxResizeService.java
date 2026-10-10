@@ -493,7 +493,8 @@ public class SandboxResizeService {
             recordId = parseLong(params != null ? params.get("recordId") : null);
         }
         if (recordId != null) {
-            return sandboxRecordMapper.selectById(recordId);
+            SsSandboxRecord record = sandboxRecordMapper.selectById(recordId);
+            return record != null && "TENANT".equals(record.getOwnerScope()) ? null : record;
         }
         String userCode = firstNonBlank(params, "userCode", "user_code");
         String sandboxId = normalizeSandboxId(firstNonBlank(params, "sandboxId", "sandbox_id", "pod"));

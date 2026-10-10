@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.UnaryOperator;
 
 import org.apache.commons.lang3.StringUtils;
@@ -56,6 +57,11 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 /** Adapts group dispatch to the ordinary private session runtime and decorates its Gateway request. */
 @Service
 public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMemberRoutingService memberRouting;
+
+    @Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService coordinationService;
     @Autowired
     private ApplicationEventPublisher schedulingEvents;
 
@@ -179,14 +185,22 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         }
         turn.setTraceId(ScriptService.getTraceId(prepared.message().getMessageId(), prepared.request().getLlmMessageId()));
         observeStarted(turn);
-        userContextRunner.runAsUser(prepared.userCode(), () -> {
-            try {
-                scriptService.startExistingMessageTurn(prepared.request(), prepared.message());
-            }
-            catch (Exception error) {
-                throw new IllegalStateException("Unable to start queued group turn", error);
-            }
-        });
+        AtomicBoolean enteredScript = new AtomicBoolean();
+        try {
+            userContextRunner.runAsUser(prepared.userCode(), () -> {
+                enteredScript.set(true);
+                try {
+                    scriptService.startExistingMessageTurn(prepared.request(), prepared.message());
+                }
+                catch (Exception error) {
+                    throw new IllegalStateException("Unable to start queued group turn", error);
+                }
+            });
+        }
+        catch (RuntimeException error) {
+            if (!enteredScript.get()) throw new ChatTurnPreparationException("身份上下文准备失败，请重试", error);
+            throw error;
+        }
     }
 
     private PreparedTurn prepareTurn(Long turnId) {
@@ -196,7 +210,11 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             return null;
         }
         ByaiGroupChatTask task = taskMapper.selectById(turn.getCandidateSessionId());
-        if ((task != null && "ACTIVE".equals(task.getStatus()))
+        boolean coordinatedInitial = task != null && coordinationService != null
+            && coordinationService.isCoordinated(turn.getCandidateSessionId())
+            && Objects.equals(task.getDispatchId(), turn.getExecutionId())
+            && Objects.equals(task.getCurrentTurnId(), turn.getExecutionId());
+        if ((task != null && "ACTIVE".equals(task.getStatus()) && !coordinatedInitial)
             || memberService.findSessionMember(turn.getGroupSessionId(), "USER", turn.getInitiatorUserId()) == null
             || memberService.findSessionMember(turn.getGroupSessionId(), "AGENT", turn.getTargetAgentId()) == null) {
             throw new IllegalArgumentException("Queued group turn is no longer authorized to continue");
@@ -266,6 +284,9 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         if (turnMapper.bindRuntime(turn.getExecutionId(), traceId) != 1) {
             throw new IllegalStateException("Queued turn no longer owns its runtime slot");
         }
+        if (coordinatedInitial && taskMapper.bindTurn(task.getTaskSessionId(), turn.getExecutionId(), traceId, new Date()) != 1) {
+            throw new IllegalStateException("Coordinated task no longer owns its initial turn");
+        }
         return new PreparedTurn(dto, existing, initiator.getUserCode());
     }
 
@@ -306,7 +327,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             throw new IllegalArgumentException("Group candidate runtime identity does not match its dispatch");
         }
         if (task != null) {
-            // 私有任务续聊可以更换群内执行者，但不能重写最初派发身份或群历史边界。
+            // 私有任务续聊校验实际执行者，最初派发身份保持不变。
             taskAuthorizationService.requireActiveAgent(context.sessionId, context.assistantChatDto.getAgentId());
         }
         else if (!Objects.equals(context.assistantChatDto.getAgentId(), execution.getTargetAgentId())) {
@@ -318,7 +339,15 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         Long boundary = turn != null ? turn.getPublicBoundaryMessageId()
             : "CONVERSATION".equals(execution.getStatus()) && execution.getReplyToMessageId() != null
                 ? execution.getReplyToMessageId() : execution.getSourceMessageId();
-        // New turns carry their own public boundary; legacy/private task turns keep the anchor boundary.
+        // 私有输入 ID 与群消息共享全局序列。以本轮已持久化输入为排他边界，
+        // 续聊可看到此轮之前的新群消息，同一输入重试不会纳入后续消息。
+        if (task != null) {
+            if (context.userMessageId == null || context.userMessageId <= 0) {
+                throw new ChatTurnPreparationException("历史上下文准备失败，请重试",
+                    new IllegalArgumentException("Missing task input boundary"));
+            }
+            boundary = context.userMessageId;
+        }
         Map<String, Object> groupChat = new HashMap<>();
         groupChat.put("schemaVersion", "byclaw.group-chat-ref/v1");
         groupChat.put("conversationKey", String.valueOf(execution.getGroupSessionId()));
@@ -329,6 +358,25 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         groupChat.put("initiatorUserId", execution.getInitiatorUserId());
         groupChat.put("targetAgentId", execution.getTargetAgentId());
         gatewayParams.put("groupChat", groupChat);
+        Map<String, Object> storedScope = coordinationService == null ? null : coordinationService.findScope(context.sessionId);
+        Map<String, Object> scope = storedScope == null ? null
+            : memberRouting.withRoutes(storedScope, userService.findById(execution.getInitiatorUserId()).getUserCode());
+        if (scope != null) gatewayParams.put("groupCoordination", scope);
+        if (scope != null) {
+            com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.attachDshTarget(
+                context.assistantChatDto, scope, gatewayParams);
+            String coordinatorId = scope.get("coordinatorAgentId").toString();
+            SsResource coordinator = resourceService.findById(Long.valueOf(coordinatorId));
+            if (coordinator == null) throw new IllegalArgumentException("Group work assistant is unavailable");
+            Map<String, Object> coordinatorMetadata = new HashMap<>();
+            coordinatorMetadata.put("id", coordinatorId);
+            coordinatorMetadata.put("name", coordinator.getResourceName());
+            if (StringUtils.isNotBlank(coordinator.getWorkerAgentType())) {
+                coordinatorMetadata.put("agentType", coordinator.getWorkerAgentType());
+                coordinatorMetadata.put("workerAgentType", coordinator.getWorkerAgentType());
+            }
+            gatewayParams.put("groupCoordinator", coordinatorMetadata);
+        }
         gatewayParams.put("cwd", "/by/.sessions/" + context.sessionId);
         GroupChatContextRequest historyRequest = new GroupChatContextRequest();
         historyRequest.setConversationKey(String.valueOf(execution.getGroupSessionId()));
@@ -338,27 +386,33 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         historyRequest.setInitiatorUserId(execution.getInitiatorUserId());
         historyRequest.setTargetAgentId(execution.getTargetAgentId());
         Object decorated = content;
-        if (task == null || hasAgentChanged(context, execution.getTargetAgentId())) {
-            Users initiator = userService.findById(execution.getInitiatorUserId());
-            if (initiator == null) {
-                throw new IllegalArgumentException("Group execution initiator is unavailable");
-            }
-            if (task == null) {
-                GroupChatSessionContextFileService.ContextFile groupHistory = contextFileService.prepareGroupHistory(
-                    initiator.getUserCode(), historyRequest, context.traceId, context.userMessageId);
-                decorated = decorateText(content, text -> promptBuilder.appendGroupHistory(text, groupHistory));
-            }
-            else {
-                GroupChatSessionContextFileService.TaskHandoffHistory handoff = contextFileService.prepareTaskHandoffHistory(
-                    initiator.getUserCode(), historyRequest, context.traceId, context.userMessageId);
-                decorated = decorateText(content, text -> promptBuilder.appendTaskHandoffHistory(text, handoff));
-            }
+        boolean agentChanged = task != null && hasAgentChanged(context, execution.getTargetAgentId());
+        Users initiator = userService.findById(execution.getInitiatorUserId());
+        if (initiator == null) {
+            throw new IllegalArgumentException("Group execution initiator is unavailable");
         }
+        GroupChatSessionContextFileService.ContextFile groupHistory;
+        if (agentChanged) {
+            GroupChatSessionContextFileService.TaskHandoffHistory handoff = contextFileService.prepareTaskHandoffHistory(
+                initiator.getUserCode(), historyRequest, context.traceId, context.userMessageId);
+            groupHistory = handoff.groupHistory();
+            decorated = decorateText(content, text -> promptBuilder.appendTaskHandoffHistory(text, handoff));
+        }
+        else {
+            groupHistory = contextFileService.prepareGroupHistory(
+                initiator.getUserCode(), historyRequest, context.traceId, context.userMessageId);
+            decorated = decorateText(content, text -> promptBuilder.appendGroupHistory(text, groupHistory));
+        }
+        if (groupHistory.snapshot() != null) gatewayParams.put("groupContextSnapshot", groupHistory.snapshot());
         if (Objects.equals(execution.getTraceId(), context.traceId) && "RUNNING".equals(execution.getStatus())) {
             return decorateText(decorated, text -> {
                 String dispatchContent = turn == null ? text : promptBuilder.appendTurnContext(text, turn.getInputContent());
                 if (turn != null && "CHAT_CONTINUATION".equals(turn.getPhase())) {
                     return promptBuilder.appendChatContinuation(dispatchContent, buildMemberRoster(execution));
+                }
+                if (scope != null && "COORDINATED".equals(scope.get("mode"))) {
+                    return promptBuilder.appendTaskDeliveryReminder(promptBuilder.appendCoordination(dispatchContent,
+                        scope, buildMemberRoster(execution)), context.sessionId);
                 }
                 return promptBuilder.appendTaskDeliveryReminder(promptBuilder.append(dispatchContent,
                     execution.getExecutionId(), context.sessionId, buildMemberRoster(execution)), context.sessionId);
@@ -369,7 +423,8 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             return decorated;
         }
         return decorateText(decorated, text -> {
-            String taskContent = promptBuilder.appendTaskDeliveryReminder(text, context.sessionId);
+            String taskContent = promptBuilder.appendTaskDeliveryReminder(scope == null ? text
+                : promptBuilder.appendCoordination(text, scope, buildMemberRoster(execution)), context.sessionId);
             return "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())
                 ? promptBuilder.appendPublicationPreparation(taskContent, context.sessionId) : taskContent;
         });
@@ -451,6 +506,10 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         if (members == null) {
             return roster;
         }
+        Map<String, Object> scope = coordinationService == null ? null
+            : coordinationService.findScope(execution.getCandidateSessionId());
+        String coordinatorId = scope == null ? null : scope.get("coordinatorAgentId").toString();
+        List<?> allowed = scope == null ? List.of() : (List<?>) scope.get("allowedAgentIds");
         for (ByaiSessionMember member : members) {
             if (member == null || member.getMemObjId() == null || member.getMemObjId() <= 0) {
                 continue;
@@ -467,6 +526,9 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                 }
             }
             else if (MemObjType.AGENT.name().equals(member.getMemObjType())) {
+                if (coordinatorId != null && !(coordinatorId.equals(execution.getTargetAgentId().toString())
+                    ? allowed.contains(member.getMemObjId().toString())
+                    : coordinatorId.equals(member.getMemObjId().toString()))) continue;
                 SsResource memberAgent = resourceService.findById(member.getMemObjId());
                 if (memberAgent != null && memberAgent.getResourceName() != null) {
                     roster.add(new GroupMemberPrompt(memberAgent.getResourceName(),

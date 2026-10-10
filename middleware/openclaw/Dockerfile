@@ -226,6 +226,7 @@ RUN set -eux; \
 COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/local/bin/
 COPY --from=python312 /usr/local/lib/libpython3.12.so* /usr/local/lib/
 COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
+RUN ldconfig
 
 ARG BY_REACH_VERSION=2.0.0b1
 ARG BY_REACH_COMMIT=9d4cc902195c180767d283787b980438f80871ad

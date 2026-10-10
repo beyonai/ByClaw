@@ -1,3 +1,5 @@
+import { isMultiTenancyEnabled } from './multiTenancy';
+
 /**
  * WebSocket 管理工具类 - 全局单例模式
  */
@@ -5,6 +7,7 @@
 import { isChatTerminal, recordChatChain, flushChatChainLogs, recordChatConnection } from '@/utils/chatChainLog';
 import { clearToken, getToken, loginRedirect } from './auth';
 import { getLocale } from '@umijs/max';
+import { clearSelectedEnterprise, getSelectedEnterpriseId, selectEnterprise } from './tenantContext';
 
 import { debugLog } from './debugLog';
 
@@ -51,6 +54,10 @@ class WebSocketManager {
   private connectionToken: string | null = null;
 
   private scopedSessionId = '';
+
+  private confirmedEnterpriseId: string | null = null;
+
+  private pendingTenantSwitchId: string | null = null;
 
   /**
    * 桌面外壳注入的本地聊天通道；只有聊天 WebSocket 走它，
@@ -145,6 +152,7 @@ class WebSocketManager {
   private withCurrentLanguage(message: WebSocketMessage): WebSocketMessage {
     return {
       language: getLocale(),
+      enterpriseId: getSelectedEnterpriseId() ?? undefined,
       ...message,
     };
   }
@@ -206,8 +214,14 @@ class WebSocketManager {
         const wasReconnect = this.reconnectCount > 0;
         this.isConnecting = false;
 
+        this.confirmedEnterpriseId = null;
+        const selectedEnterpriseId = getSelectedEnterpriseId();
+        if (selectedEnterpriseId) {
+          this.sendMessage({ type: 'SWITCH_TENANT', enterpriseId: selectedEnterpriseId });
+        }
+
         this.startHeartbeat();
-        if (this.scopedSessionId) {
+        if (this.scopedSessionId && !selectedEnterpriseId) {
           this.sendScopedSessionSelection();
         }
         this.reconnectCount = 0;
@@ -229,6 +243,10 @@ class WebSocketManager {
         }
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
+          if (message.type === 'SWITCH_TENANT_ACK') {
+            this.confirmedEnterpriseId = message.enterpriseId ?? null;
+            if (this.scopedSessionId) this.sendScopedSessionSelection();
+          }
           if (isChatTerminal(message)) recordChatChain('fe.final_received', message);
           this.handleMessage(message);
         } catch (error) {
@@ -273,6 +291,19 @@ class WebSocketManager {
    * 处理接收到的消息
    */
   private handleMessage(message: WebSocketMessage): void {
+    const selectedEnterpriseId = getSelectedEnterpriseId();
+    if (
+      selectedEnterpriseId &&
+      message.type !== 'SWITCH_TENANT_ACK' &&
+      !(
+        this.pendingTenantSwitchId &&
+        message.type === 'ERROR' &&
+        message.clientRequestId === this.pendingTenantSwitchId
+      ) &&
+      message.enterpriseId !== selectedEnterpriseId
+    ) {
+      return;
+    }
     // 调用注册的消息处理器
     const handlers = this.messageHandlers.get(message.type) || [];
     const wildcardHandlers = this.messageHandlers.get('*') || [];
@@ -293,8 +324,10 @@ class WebSocketManager {
 
     this.heartbeatTimer = setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        const enterpriseId = getSelectedEnterpriseId();
         this.sendMessage({
-          type: 'NOTIFICATION',
+          type: enterpriseId ? 'HEARTBEAT' : 'NOTIFICATION',
+          ...(enterpriseId ? { scopedSessionId: this.scopedSessionId } : {}),
         });
       }
     }, 6000); // 每6秒发送一次
@@ -316,6 +349,15 @@ class WebSocketManager {
   public sendMessage(message: WebSocketMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
+        const selectedEnterpriseId = getSelectedEnterpriseId();
+        if (
+          selectedEnterpriseId &&
+          message.type !== 'SWITCH_TENANT' &&
+          this.confirmedEnterpriseId !== selectedEnterpriseId
+        ) {
+          console.warn('Tenant WebSocket switch has not been confirmed');
+          return;
+        }
         const outbound =
           this.desktopChatWsUrl && message.type === 'LLM_MESSAGE' ? { ...message, beyondToken: getToken() } : message;
         this.ws.send(JSON.stringify(this.withCurrentLanguage(outbound)));
@@ -357,6 +399,54 @@ class WebSocketManager {
   public async sendMessageWhenReady(message: WebSocketMessage): Promise<void> {
     await this.waitUntilConnected();
     this.sendMessage(message);
+  }
+
+  /** Switch context on the current connection and store the selection only after server confirmation. */
+  public async switchTenant(
+    enterpriseId: string | null,
+    tenantContextToken?: string,
+    expiresAt?: string
+  ): Promise<void> {
+    if (enterpriseId && !isMultiTenancyEnabled()) throw new Error('Multi-tenancy is disabled');
+    if (this.pendingTenantSwitchId) throw new Error('Tenant switch already in progress');
+    if (enterpriseId && (!tenantContextToken || !expiresAt)) throw new Error('Tenant context is required');
+    await this.waitUntilConnected();
+    const requestId = `tenant-switch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this.pendingTenantSwitchId = requestId;
+    await new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const listeners: Array<[string, MessageHandler]> = [];
+      const cleanup = () => {
+        clearTimeout(timer);
+        listeners.forEach(([type, handler]) => this.offMessage(type, handler));
+        if (this.pendingTenantSwitchId === requestId) this.pendingTenantSwitchId = null;
+      };
+      const onAck = (message: WebSocketMessage) => {
+        if (message.clientRequestId !== requestId) return;
+        cleanup();
+        if ((message.enterpriseId ?? null) !== enterpriseId) {
+          reject(new Error('Tenant switch acknowledgment does not match the request'));
+          return;
+        }
+        this.scopedSessionId = '';
+        if (enterpriseId) selectEnterprise(enterpriseId, tenantContextToken!, expiresAt!);
+        else clearSelectedEnterprise();
+        resolve();
+      };
+      const onError = (message: WebSocketMessage) => {
+        if (message.clientRequestId !== requestId) return;
+        cleanup();
+        reject(new Error(message.chatContent || 'Tenant switch failed'));
+      };
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('Tenant switch timed out'));
+      }, 10000);
+      listeners.push(['SWITCH_TENANT_ACK', onAck], ['ERROR', onError]);
+      this.onMessage('SWITCH_TENANT_ACK', onAck);
+      this.onMessage('ERROR', onError);
+      this.sendMessage({ type: 'SWITCH_TENANT', enterpriseId: enterpriseId ?? '', clientRequestId: requestId });
+    });
   }
 
   /**
@@ -500,6 +590,7 @@ class WebSocketManager {
 
   private resetConnectionState(): void {
     this.activeConnectionId = 0;
+    this.confirmedEnterpriseId = null;
     this.connectionToken = null;
     this.stopHeartbeat();
     if (this.reconnectTimer) {

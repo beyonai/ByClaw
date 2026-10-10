@@ -234,18 +234,10 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
             const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
             if (defaultResourceId) {
               const isDefault = itemIdentity === `${defaultResourceId}`;
-              let canSetDefault = item.canSetDefault;
-              if (isDefault) {
-                canSetDefault = false;
-              } else if (item.operationPermissionsLoaded === true) {
-                canSetDefault =
-                  `${item.resourceStatus ?? item.metaStatus ?? ''}` !== '3' &&
-                  (item.hasManagePermission === true || item.hasUsePermission === true);
-              }
+              // 默认切换只更新展示身份，保留后端 canSetDefault，不在前端重算操作权限。
               return {
                 ...item,
                 isDefault,
-                canSetDefault,
                 ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
               };
             }

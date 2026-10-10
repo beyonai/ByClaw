@@ -15,8 +15,10 @@ describe('audit name search', () => {
     act(() => result.current.setAuditKeyword(' ALP '));
     act(() => jest.advanceTimersByTime(299));
     expect(result.current.filteredRows).toEqual(rows);
+    expect(result.current.debouncedKeyword).toBe('');
     act(() => jest.advanceTimersByTime(1));
     expect(result.current.filteredRows).toEqual([rows[0]]);
+    expect(result.current.debouncedKeyword).toBe('alp');
   });
 
   it('supports Chinese partial names, empty results, and clearing the search', () => {

@@ -34,14 +34,14 @@ export const showSkillPublication = async ({
     status === 4
       ? 'resource.skillPublicationPendingDescription'
       : status === 5
-      ? 'resource.skillPublicationRejectedDescription'
-      : status === 2
-      ? 'resource.skillPublicationPublishedDescription'
-      : status === 3
-      ? 'resource.skillPublicationOffShelfDescription'
-      : canResubmit
-      ? 'resource.skillPublicationRemovedDescription'
-      : 'resource.skillPublicationUnknownDescription';
+        ? 'resource.skillPublicationRejectedDescription'
+        : status === 2
+          ? 'resource.skillPublicationPublishedDescription'
+          : status === 3
+            ? 'resource.skillPublicationOffShelfDescription'
+            : canResubmit
+              ? 'resource.skillPublicationRemovedDescription'
+              : 'resource.skillPublicationUnknownDescription';
   Modal.confirm({
     title: t(skillPublicationEntryLabel(publication)),
     content: (

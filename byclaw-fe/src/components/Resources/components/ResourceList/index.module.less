@@ -40,6 +40,11 @@
   grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
 }
 
+.knowledgeList {
+  // 知识卡片收紧后同步缩小行间距，列间距仍沿用通用资源布局。
+  row-gap: 12px;
+}
+
 .skillPosterList {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

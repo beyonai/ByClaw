@@ -2,12 +2,19 @@ package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import java.util.Objects;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 
 /** Rules specific to employee publication; platform roles never override adminvip ownership.
@@ -19,12 +26,14 @@ public class DigitalEmployeeGovernanceService {
     private final UserService users;
     private final ByaiSystemConfigService config;
     private final DigitalEmployeePublicationMapper publications;
+    private final SsResExtDigEmployeeService employeeExtensions;
 
     public DigitalEmployeeGovernanceService(UserService users, ByaiSystemConfigService config,
-        DigitalEmployeePublicationMapper publications) {
+        DigitalEmployeePublicationMapper publications, SsResExtDigEmployeeService employeeExtensions) {
         this.users = users;
         this.config = config;
         this.publications = publications;
+        this.employeeExtensions = employeeExtensions;
     }
 
     public boolean publicationEnabled() {
@@ -50,10 +59,34 @@ public class DigitalEmployeeGovernanceService {
     }
 
     public boolean canPublish(SsResource resource) {
+        return isPublishSource(resource) && isPublishableEmployeeType(employeeExtensions.findById(resource.getResourceId()));
+    }
+
+    /** 本页一次查询扩展信息，避免权限列表按员工逐条查类型。缺少配置的资源不开放发布入口。 */
+    public Map<Long, Boolean> canPublishBatch(Collection<SsResource> resources) {
+        var sourceIds = resources.stream().filter(this::isPublishSource).map(SsResource::getResourceId).distinct().toList();
+        if (sourceIds.isEmpty()) return Collections.emptyMap();
+        Map<Long, Boolean> result = new LinkedHashMap<>();
+        employeeExtensions.findExtDigEmployeeByIds(sourceIds).forEach(employee ->
+            result.put(employee.getResourceId(), isPublishableEmployeeType(employee.getSsResExtDigEmployee())));
+        return result;
+    }
+
+    private boolean isPublishSource(SsResource resource) {
         return isEmployee(resource) && "personal".equals(resource.getOwnerType())
+            && resource.getResourceId() != null
             && (Objects.equals(resource.getCreateBy(), CurrentUserHolder.getCurrentUserId()) || isAdministrator())
             && Objects.equals(resource.getResourceStatus(), 2) && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
             && !org.apache.commons.lang3.StringUtils.endsWithIgnoreCase(resource.getResourceCode(), "_main") && publicationEnabled();
+    }
+
+    /** 与发布快照校验一致：员工组和第三方接入员工不能走个人员工发布流程。 */
+    private boolean isPublishableEmployeeType(SsResExtDigEmployee employee) {
+        return employee != null && DigitalEmployType.isValid(employee.getAgentType())
+            && !DigitalEmployeeGroupApplicationService.GROUP_AGENT_TYPE.equals(employee.getAgentType())
+            && !"FROM_THIRD".equals(employee.getCreateType())
+            && (org.apache.commons.lang3.StringUtils.isBlank(employee.getAgentDevType())
+                || "byai".equals(employee.getAgentDevType()));
     }
 
     public boolean isProtected(SsResource resource) {

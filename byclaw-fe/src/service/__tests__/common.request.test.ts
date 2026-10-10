@@ -1,3 +1,4 @@
+import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 jest.mock('@/utils/auth', () => ({
   clearToken: jest.fn(),
   getssoToken: jest.fn(() => 'sso-token'),
@@ -87,6 +88,7 @@ import { clearToken, isCurrentAuthSnapshot, loginRedirect } from '@/utils/auth';
 import { getModelState, getRootUnAuthPagePath } from '@/utils';
 import { showRequestErrorModal } from '@/utils/antdAppModal';
 import { logout } from '../user';
+import { clearSelectedEnterprise, selectEnterprise } from '@/utils/tenantContext';
 
 import { GET, globalLogout, POST } from '../common/request';
 import { setResourceFavorite } from '../resourceFavorites';
@@ -115,8 +117,110 @@ describe('Service Common Request', () => {
   });
 
   beforeEach(() => {
+    setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
     jest.clearAllMocks();
+    clearSelectedEnterprise();
+    window.localStorage.removeItem('SESSION');
     (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(true);
+  });
+
+  it('does not attach tenant headers when the system switch is off despite a stored selection', async () => {
+    window.localStorage.setItem('SESSION', 'session-key');
+    selectEnterprise('123', 'context-token', '2099-01-01');
+    setMultiTenancyConfig(null);
+    const url = '/byaiService/group-chats';
+    mockRequest.mockResolvedValue({ data: { code: 0, data: [] }, config: { url } });
+    await POST(url, {});
+    expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
+    expect(mockRequest.mock.calls[0][0].headers['X-Tenant-Context']).toBeUndefined();
+  });
+
+  it('keeps the existing chat URL and attaches tenant headers only in tenant space', async () => {
+    mockRequest.mockResolvedValue({
+      data: { code: 0, data: { list: [] } },
+      config: { url: '/byaiService/assiman/qryConversations' },
+    });
+    await POST('/byaiService/assiman/qryConversations', {});
+    expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
+    await POST('/byaiService/project/session/listByQo', { projectId: 42 });
+    expect(mockRequest.mock.calls[1][0].headers['X-Enterprise-Id']).toBeUndefined();
+    window.localStorage.setItem('SESSION', 'session-key');
+    selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+    await POST('/byaiService/assiman/qryConversations', {});
+    expect(mockRequest.mock.calls[2][0]).toMatchObject({
+      url: '/byaiService/assiman/qryConversations',
+      headers: { 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' },
+    });
+    await POST('/byaiService/project/session/listByQo', { projectId: 42 });
+    expect(mockRequest.mock.calls[3][0]).toMatchObject({
+      url: '/byaiService/project/session/listByQo',
+      headers: { 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' },
+    });
+  });
+
+  it.each(['/byaiService/chat/getAiModeList', '/byaiService/chat/getAssistant', '/byaiService/chat/getTermsOptions'])(
+    'keeps shared catalog requests outside tenant routing: %s',
+    async (url) => {
+      window.localStorage.setItem('SESSION', 'session-key');
+      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
+      await POST(url, {});
+      expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
+    }
+  );
+
+  it.each(['delivery-status', 'pending-publication', 'cancel', 'prepare-publication', 'complete-publication'])(
+    'routes group task %s with the selected tenant context',
+    async (action) => {
+      window.localStorage.setItem('SESSION', 'session-key');
+      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+      const url = `/byaiService/group-chat/tasks/50/${action}`;
+      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
+      try {
+        await POST(url, {});
+        expect(mockRequest.mock.calls[0][0].headers).toEqual(
+          expect.objectContaining({ 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' })
+        );
+      } finally {
+        clearSelectedEnterprise();
+        window.localStorage.removeItem('SESSION');
+      }
+    }
+  );
+
+  it.each(['/byaiService/api/v1/sessionResources/query'])(
+    'routes session resources %s with the selected tenant context',
+    async (url) => {
+      window.localStorage.setItem('SESSION', 'session-key');
+      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
+      try {
+        await POST(url, {});
+        expect(mockRequest.mock.calls[0][0].headers).toEqual(
+          expect.objectContaining({ 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' })
+        );
+      } finally {
+        clearSelectedEnterprise();
+        window.localStorage.removeItem('SESSION');
+      }
+    }
+  );
+
+  it('blocks group task requests when the selected tenant context has expired', async () => {
+    window.localStorage.setItem('SESSION', 'session-key');
+    const expiresAt = Date.now() + 60000;
+    selectEnterprise('123', 'expired-context', new Date(expiresAt).toISOString());
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(expiresAt + 1);
+    try {
+      await expect(GET('/byaiService/group-chat/tasks/50/pending-publication')).rejects.toThrow(
+        'Tenant context expired; select a space again'
+      );
+      expect(mockRequest).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+      clearSelectedEnterprise();
+      window.localStorage.removeItem('SESSION');
+    }
   });
 
   it('globalLogout clears local auth state and redirects when a user exists', async () => {
@@ -424,10 +528,10 @@ describe('Service Common Request', () => {
     expect(loginRedirect).not.toHaveBeenCalled();
   });
 
-  it('does not treat a permission-denied 401 response as an expired login', async () => {
+  it.each([401, 403])('does not treat a permission-denied %s response as an expired login', async (status) => {
     await expect(
       rejectResponse({
-        status: 401,
+        status,
         config: {
           url: '/api/protected',
           headers: {
@@ -437,10 +541,11 @@ describe('Service Common Request', () => {
           },
         },
         response: {
-          status: 401,
+          status,
           data: {
             code: -1,
             msg: '请求拒绝,无权限访问!',
+            data: status === 403 ? { errorType: 'PERMISSION_DENIED' } : undefined,
           },
         },
       })
@@ -448,6 +553,23 @@ describe('Service Common Request', () => {
 
     expect(message.error).not.toHaveBeenCalled();
     expect(clearToken).not.toHaveBeenCalled();
+  });
+
+  it('still treats an unmarked security-filter 403 failure as an expired login', async () => {
+    await expect(
+      rejectResponse({
+        status: 403,
+        config: {
+          url: '/api/protected',
+          headers: {
+            'x-token': 'access-token',
+            'x-sso-token': 'sso-token',
+            'x-session-id': 'session-key',
+          },
+        },
+        response: { status: 403, data: { code: -1, msg: 'Authentication failed' } },
+      })
+    ).resolves.toBe('登录失效');
   });
 
   it.each([400, 409, 503])('rejects favorite business error %s without clearing the session', async (status) => {

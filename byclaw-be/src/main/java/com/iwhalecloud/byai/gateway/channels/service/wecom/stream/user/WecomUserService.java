@@ -221,7 +221,7 @@ public class WecomUserService {
         loginInfo.setUserCode(user.getUserCode());
         loginInfo.setUserName(user.getUserName());
         loginInfo.setAssistantId(user.getAssistantId());
-        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId());
+        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId(user.getUserId()));
         SuasSuperassist superassist = suasSuperassistService.findByUserId(user.getUserId());
         if (superassist != null) {
             loginInfo.setSessionDatasetId(superassist.getSessionDatasetId());

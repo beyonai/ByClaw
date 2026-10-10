@@ -45,4 +45,21 @@ describe('FileSiderPanel project space paths', () => {
     ).toBe(false);
     expect(canPreviewFile({ name: 'archive.zip', path: '/archive.zip', isDir: false })).toBe(false);
   });
+
+  it.each(['svg', 'jpeg', 'ico', 'avif', 'csv', 'tsv', 'xls', 'webm', 'mp3', 'm4a', 'flac', 'htm'])(
+    'opens %s through the shared preview type',
+    (type) => {
+      expect(canPreviewFile({ name: `file.${type}`, path: `/file.${type}`, isDir: false })).toBe(true);
+      const aliases: Record<string, string> = { jpeg: 'jpg', htm: 'html' };
+      expect(getPreviewFileType(`file.${type}`)).toBe(aliases[type] || type);
+    }
+  );
+
+  it.each(['doc', 'ppt', 'tiff', 'tif', 'heic', 'heif'])(
+    'does not read unsupported %s binary files as source text',
+    (type) => {
+      expect(canPreviewFile({ name: `file.${type}`, path: `/file.${type}`, isDir: false })).toBe(false);
+      expect(getPreviewFileType(`file.${type}`)).toBe(type);
+    }
+  );
 });

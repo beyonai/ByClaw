@@ -181,7 +181,8 @@ public class ChatService {
             ack.put("type", "STOP_CHAT_ACK");
             ack.put("clientRequestId", message.getClientRequestId());
             ack.put("sessionId", message.getSessionId() == null ? null : String.valueOf(message.getSessionId()));
-            ack.put("messageId", message.getMessageId());
+            ack.put("messageId", message.getMessageId() == null ? null : String.valueOf(message.getMessageId()));
+            ack.put("enterpriseId", message.getEnterpriseId());
             ctx.writeAndFlush(new io.netty.handler.codec.http.websocketx.TextWebSocketFrame(ack.toJSONString()));
         }
         catch (Exception e) {

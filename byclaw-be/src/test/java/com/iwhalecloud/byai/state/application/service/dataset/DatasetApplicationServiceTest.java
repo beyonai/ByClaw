@@ -68,6 +68,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -1174,19 +1175,57 @@ class DatasetApplicationServiceTest {
         verify(feignPythonBuildService, never()).importKnowledgeItem(any(), any());
     }
 
-    @Test
-    void cloudArchiveCannotOverwriteAnExistingFile() throws Exception {
-        prepareCloudConflict();
+    @ParameterizedTest
+    @CsvSource({"UTF-8, false", "UTF-8, true", "GBK, false", "GBK, true"})
+    void cloudArchiveIsForwardedUnchangedAndPreservesQaResults(String charset, boolean skipIfDuplicate)
+        throws Exception {
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+
+        // QA owns ZIP decoding, including Windows archives with GBK entry names.
         java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
-        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(bytes)) {
-            zip.putNextEntry(new java.util.zip.ZipEntry("old.md"));
-            zip.write(new byte[]{1});
-            zip.closeEntry();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(bytes,
+            java.nio.charset.Charset.forName(charset))) {
+            for (String name : List.of("旧报告.md", "新报告.md")) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(name));
+                zip.write(new byte[]{1});
+                zip.closeEntry();
+            }
         }
         MockMultipartFile archive = new MockMultipartFile("files", "files.zip", "application/zip", bytes.toByteArray());
-        assertThatThrownBy(() -> service.uploadFiles(new MockMultipartFile[]{archive}, 100L, "/reports/", "", false,
-            true, false, Map.of())).isInstanceOf(IllegalArgumentException.class).hasMessage("dataset.file.exists");
-        verify(feignPythonBuildService, never()).importKnowledgeItem(any(), any());
+        KbImportResult.Item failed = new KbImportResult.Item();
+        failed.setFilePath("/reports/旧报告.md");
+        failed.setSuccess(false);
+        failed.setError("file already exists");
+        KbImportResult.Item succeeded = new KbImportResult.Item();
+        succeeded.setFilePath("/reports/新报告.md");
+        succeeded.setSuccess(true);
+        KbImportResult qaResult = new KbImportResult();
+        qaResult.setData(List.of(failed, succeeded));
+        PythonBuildResponse<KbImportResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.importKnowledgeItem(any(), any())).thenReturn(response);
+
+        UploadResult result = service.uploadFiles(new MockMultipartFile[]{archive}, 100L, "/reports/", "", false,
+            true, skipIfDuplicate, Map.of());
+
+        ArgumentCaptor<KbFileImport> captor = ArgumentCaptor.forClass(KbFileImport.class);
+        verify(feignPythonBuildService).importKnowledgeItem(captor.capture(), any());
+        assertThat(captor.getValue().getMultipartFile()).isSameAs(archive);
+        assertThat(captor.getValue().getMultipartFile().getBytes()).containsExactly(bytes.toByteArray());
+        assertThat(captor.getValue().getFilePath()).isEqualTo("/reports");
+        assertThat(captor.getValue().isSkipIfDuplicate()).isEqualTo(skipIfDuplicate);
+        assertThat(result.getUploadItems()).extracting("filePath").containsExactly("/reports/新报告.md");
+        assertThat(result.getFailedItems()).extracting("filePath").containsExactly("/reports/旧报告.md");
+        assertThat(result.getFailedItems()).extracting("error").containsExactly("file already exists");
+        assertThat(result.getSummary().getTotal()).isEqualTo(2);
+        assertThat(result.getSummary().getSucceeded()).isEqualTo(1);
+        assertThat(result.getSummary().getFailed()).isEqualTo(1);
+        verify(feignPythonBuildService, never()).deleteKnowledgeItem(any(), any());
+        verify(feignPythonBuildService, never()).updateKnowledgeItem(any(), any());
     }
 
     private SsResource prepareCloudConflict() {

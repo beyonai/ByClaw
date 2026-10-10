@@ -57,6 +57,15 @@ public class ScopedProjectionBroadcaster {
     }
 
     public void enqueue(String contextKey, Long userId, JSONObject message, boolean terminal) {
+        enqueue(contextKey, userId, null, message, terminal);
+    }
+
+    public void enqueueTenant(String contextKey, Long userId, Long enterpriseId, JSONObject message, boolean terminal) {
+        if (enterpriseId == null) throw new IllegalArgumentException("tenant projection enterprise required");
+        enqueue(contextKey, userId, enterpriseId, message, terminal);
+    }
+
+    private void enqueue(String contextKey, Long userId, Long enterpriseId, JSONObject message, boolean terminal) {
         if (contextKey == null || userId == null || message == null) {
             return;
         }
@@ -71,7 +80,7 @@ public class ScopedProjectionBroadcaster {
                 if (states.get(key) != state) {
                     continue;
                 }
-                state.latest = new PendingBroadcast(userId, message, terminal);
+                state.latest = new PendingBroadcast(userId, enterpriseId, message, terminal);
                 if (terminal && state.future != null) {
                     state.future.cancel(false);
                     state.future = null;
@@ -93,7 +102,7 @@ public class ScopedProjectionBroadcaster {
             state.latest = null;
         }
         if (pending != null) {
-            broadcastService.broadcastScopedProjection(pending.userId(), key.contextKey(), pending.message(), pending.terminal());
+            broadcast(key, pending);
         }
         synchronized (state) {
             if (state.latest == null) {
@@ -120,7 +129,7 @@ public class ScopedProjectionBroadcaster {
                 state.latest = null;
             }
             if (pending != null) {
-                broadcastService.broadcastScopedProjection(pending.userId(), key.contextKey(), pending.message(), pending.terminal());
+                broadcast(key, pending);
             }
             states.remove(key, state);
         });
@@ -135,7 +144,16 @@ public class ScopedProjectionBroadcaster {
         };
     }
 
-    private record PendingBroadcast(Long userId, JSONObject message, boolean terminal) {
+    private void broadcast(ProjectionKey key, PendingBroadcast pending) {
+        if (pending.enterpriseId() == null) {
+            broadcastService.broadcastScopedProjection(pending.userId(), key.contextKey(), pending.message(), pending.terminal());
+        } else {
+            broadcastService.broadcastTenantScopedProjection(pending.userId(), pending.enterpriseId(), key.contextKey(),
+                pending.message(), pending.terminal());
+        }
+    }
+
+    private record PendingBroadcast(Long userId, Long enterpriseId, JSONObject message, boolean terminal) {
     }
 
     private record ProjectionKey(String contextKey, String messageId) {

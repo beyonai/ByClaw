@@ -6,8 +6,6 @@ import { useIntl } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
-import SkillExportButton from '../SkillExportButton';
-import { createPortal } from 'react-dom';
 import {
   listResourceUseAuth,
   queryResourceDetail,
@@ -75,7 +73,6 @@ interface IResourceItem {
 }
 
 interface ResourceListProps {
-  exportContainer?: HTMLElement | null;
   resourceType: string;
   activeTab: string;
   myResourcesOnly?: boolean;
@@ -113,7 +110,6 @@ const collectInstalledResourceIds = (response: any) => {
 };
 
 const ResourceList: React.FC<ResourceListProps> = ({
-  exportContainer,
   resourceType,
   activeTab,
   myResourcesOnly = false,
@@ -182,11 +178,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
   }, [activeTab, favoriteMode]);
 
   const getList = useCallback(
-    async function fetchPage(
-      params?: Record<string, any>,
-      append = false,
-      exportOnly = false
-    ): Promise<IResourceItem[]> {
+    async function fetchPage(params?: Record<string, any>, append = false): Promise<IResourceItem[]> {
       const pageNum = params?.pageIndex ?? params?.pageNum ?? 1;
       const pageSize = params?.pageSize ?? 30; // 直接使用固定值，避免依赖pageInfo.pageSize
       const keyword = `${params?.searchValue ?? searchValue ?? ''}`.trim();
@@ -207,10 +199,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
         availableOnly && ['personal', 'enterprise'].includes(rawFilterParam?.ownerType)
           ? rawFilterParam.ownerType
           : undefined;
-      if (!exportOnly) {
-        if (!append) listGeneration.current += 1;
-        setLoading(true);
-      }
+      if (!append) listGeneration.current += 1;
+      setLoading(true);
       const generation = listGeneration.current;
       const revision = favoriteRevision.current;
       try {
@@ -257,9 +247,9 @@ const ResourceList: React.FC<ResourceListProps> = ({
           })
         );
 
-        if (!exportOnly && generation !== listGeneration.current) return [];
+        if (generation !== listGeneration.current) return [];
         // 收藏提交后，旧响应的状态、总数及分页边界都可能过期；只重试当前页。
-        if (!exportOnly && favoriteMode && revision !== favoriteRevision.current) {
+        if (favoriteMode && revision !== favoriteRevision.current) {
           const loadedCount = listRef.current.filter((item) => !isWorkspaceSkill(item)).length;
           return await fetchPage(
             {
@@ -307,18 +297,11 @@ const ResourceList: React.FC<ResourceListProps> = ({
               Array.isArray(workspaceData) ? workspaceData : workspaceData?.list || workspaceData?.rows || []
             ) as IResourceItem[];
           } catch (error) {
-            if (exportOnly) throw error;
             console.warn('query workspace personal skills failed', error);
           }
         }
 
         const nextRows = workspaceRows.length ? [...workspaceRows, ...rows] : rows;
-        if (exportOnly) {
-          if (pageNum * pageSize < total) {
-            return [...nextRows, ...(await fetchPage({ ...params, pageNum: pageNum + 1, pageSize }, true, true))];
-          }
-          return nextRows;
-        }
         if (generation !== listGeneration.current) return [];
         setList((prev) => {
           const mergedRows = append ? [...prev, ...rows] : nextRows;
@@ -333,7 +316,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
         });
         return nextRows;
       } finally {
-        if (!exportOnly && generation === listGeneration.current) setLoading(false);
+        if (generation === listGeneration.current) setLoading(false);
       }
     },
     [
@@ -569,15 +552,15 @@ const ResourceList: React.FC<ResourceListProps> = ({
           current.map((row) =>
             `${row.resourceId}` === resourceId
               ? {
-                  ...row,
-                  ...detail,
-                  ...detail.operationPermissions,
-                  operationPermissionsLoaded: true,
-                  approveStatus: detail.operationPermissions.useApplyPending ? 'S' : '',
-                  // 详情查询不包含收藏上下文，保留期间用户对当前卡片的收藏操作。
-                  favorited: row.favorited,
-                  favoriteCount: row.favoriteCount,
-                }
+                ...row,
+                ...detail,
+                ...detail.operationPermissions,
+                operationPermissionsLoaded: true,
+                approveStatus: detail.operationPermissions.useApplyPending ? 'S' : '',
+                // 详情查询不包含收藏上下文，保留期间用户对当前卡片的收藏操作。
+                favorited: row.favorited,
+                favoriteCount: row.favoriteCount,
+              }
               : row
           )
         );
@@ -632,18 +615,6 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   return (
     <div id={getScrollableTarget} className={styles.sectionsContainer}>
-      {resourceType === 'SKILL' &&
-        exportContainer &&
-        createPortal(
-          <SkillExportButton
-            loadAll={async () => {
-              // 导出入口在工具栏，分页查询仍复用列表的当前筛选。
-              const rows = await getList({ pageNum: 1, pageSize: PAGE_SIZE_DEFAULT }, false, true);
-              return Array.from(new Map(rows.map((row) => [String(row.resourceId), row])).values());
-            }}
-          />,
-          exportContainer
-        )}
       <Spin
         wrapperClassName={styles.spinningWrapper}
         tip={intl.formatMessage({ id: 'common.loading' })}
@@ -680,7 +651,13 @@ const ResourceList: React.FC<ResourceListProps> = ({
                 className={
                   isSkillPosterMode
                     ? styles.skillPosterList
-                    : [styles.employeeList, useWideCardLayout ? styles.wideResourceList : ''].filter(Boolean).join(' ')
+                    : [
+                      styles.employeeList,
+                      useWideCardLayout ? styles.wideResourceList : '',
+                      resourceType === 'KG_DOC' ? styles.knowledgeList : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
                 }
               >
                 {list.map((item) => renderResourceCard(item))}

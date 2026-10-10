@@ -1,10 +1,16 @@
 import { POST } from '@/service/common/request';
-import { openPublication, saveOfficialUpdateDraft } from './employeePublication';
+import {
+  openPublication,
+  publicationEntryLabel,
+  publicationStatus,
+  saveOfficialUpdateDraft,
+} from './employeePublication';
 
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
 jest.mock('@/service/common/request', () => ({ POST: jest.fn(), GET: jest.fn() }));
 jest.mock('@umijs/max', () => ({
   history: { push: jest.fn() },
-  getIntl: () => ({ formatMessage: ({ id }: { id: string }) => require('@/locales/zh-CN').default[id] }),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
 }));
 const base = '/byaiService/digitalEmployeePublication';
 const candidate = (status = 'DRAFT', revision = 1) => ({
@@ -12,7 +18,13 @@ const candidate = (status = 'DRAFT', revision = 1) => ({
   canEdit: true,
   canRevise: ['REJECTED', 'WITHDRAWN'].includes(status),
 });
-beforeEach(() => jest.resetAllMocks());
+beforeEach(() => {
+  mockLocale = 'zh-CN';
+  jest.resetAllMocks();
+});
+it('labels a new employee publication as publishing to enterprise', () => {
+  expect(publicationEntryLabel()).toBe('发布到企业');
+});
 it('opens a publication page through the draft synchronization endpoint and returns the latest resource configuration', async () => {
   const fresh = { ...candidate(), employee: { relIds: ['21'] }, sourceResourcesChanged: true };
   (POST as jest.Mock).mockResolvedValue(fresh);
@@ -50,4 +62,14 @@ it('refuses a candidate belonging to a different official employee', async () =>
   (POST as jest.Mock).mockResolvedValue(candidate());
   await expect(saveOfficialUpdateDraft('30', {})).rejects.toThrow('官方副本已变化');
   expect(POST).toHaveBeenCalledTimes(1);
+});
+
+it('resolves status and entry labels from the current language on every access', () => {
+  expect(publicationStatus.PENDING).toBe('待审核');
+  expect(publicationEntryLabel('DRAFT', true)).toBe('继续发布更新');
+  mockLocale = 'en-US';
+  expect(publicationStatus.PENDING).toBe('Pending review');
+  expect(publicationEntryLabel('DRAFT', true)).toBe('Continue publication update');
+  expect(publicationEntryLabel('PUBLISHED')).toBe('Publish update');
+  expect(publicationEntryLabel()).toBe('Publish to enterprise');
 });

@@ -34,9 +34,9 @@ export async function getEnterprise(params: any) {
   return POST('/byaiService/system/enterprise/getEnterprise', params);
 }
 
-// 企业信息编辑
-export async function editEnterprise(params: any) {
-  return POST('/byaiService/system/enterprise/editEnterprise', params);
+// 企业信息修改
+export async function updateEnterprise(params: any) {
+  return POST('/byaiService/system/enterprise/update', params);
 }
 
 // 单个查询系统配置文件参数

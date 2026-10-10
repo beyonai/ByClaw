@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import DigitalEmployeesPage from '../index';
+import DigitalEmployeesPage, { EmployeePreviewModal } from '../index';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
+import { getCompositeAppInfo } from '@/service/digitalEmployees';
+import { applyResourceUse } from '@/pages/manager/service/resources';
 
 let mockTab = 'available';
 let mockBrandVersion = 'openSource';
@@ -112,7 +114,11 @@ jest.mock('antd', () => {
   Tabs.TabPane = ({ children }: any) => <div>{children}</div>;
   return {
     Badge: Wrapper,
-    Button: ({ children, onClick }: any) => <button onClick={onClick}>{children}</button>,
+    Button: ({ children, onClick, disabled, loading }: any) => (
+      <button onClick={onClick} disabled={disabled || loading}>
+        {children}
+      </button>
+    ),
     Dropdown: ({ children, overlay }: any) => (
       <div>
         {children}
@@ -136,14 +142,73 @@ jest.mock('antd', () => {
         ))}
       </div>
     ),
-    Modal: () => null,
-    Popconfirm: Wrapper,
+    Modal: ({ open, children }: any) => (open ? <div>{children}</div> : null),
+    Popconfirm: ({ children, onConfirm, disabled, okText }: any) => (
+      <div>
+        {children}
+        <button disabled={disabled} onClick={onConfirm}>
+          {okText}
+        </button>
+      </div>
+    ),
     Space: Wrapper,
     Spin: Wrapper,
     Tabs,
     Typography: { Paragraph: Wrapper, Text: Wrapper, Title: Wrapper },
     message: { success: jest.fn(), error: jest.fn() },
   };
+});
+
+describe('employee preview operation permissions', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (applyResourceUse as jest.Mock).mockResolvedValue({});
+  });
+
+  const employee = { resourceId: 'preview-1', name: 'Employee', openingQuestion: ['问一个问题'] };
+  const loadPreview = async (permissions: any, onCreateTask = jest.fn()) => {
+    (getCompositeAppInfo as jest.Mock).mockResolvedValue({ operationPermissions: permissions });
+    render(<EmployeePreviewModal employee={employee} onClose={jest.fn()} onCreateTask={onCreateTask} />);
+    await waitFor(() => expect(getCompositeAppInfo).toHaveBeenCalled());
+    // 等待详情权限响应合入预览状态。
+    await act(async () => {});
+    return onCreateTask;
+  };
+
+  it('does not infer application permission or allow sample task creation without backend permission', async () => {
+    const createTask = await loadPreview({ hasUsePermission: false, canApplyUse: false, useApplyPending: false });
+    expect(screen.queryByText('digitalEmployees.newTask')).toBeNull();
+    expect(screen.queryByText('digitalEmployees.useRequest')).toBeNull();
+    fireEvent.click(screen.getByText('问一个问题'));
+    expect(createTask).not.toHaveBeenCalled();
+    expect(applyResourceUse).not.toHaveBeenCalled();
+  });
+
+  it('uses backend application permission and changes to pending after submitting once', async () => {
+    await loadPreview({ hasUsePermission: false, canApplyUse: true, useApplyPending: false });
+    expect(screen.getByText('digitalEmployees.useRequest')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('common.confirm'));
+    await screen.findByText('digitalEmployees.pendingApproval');
+    expect(applyResourceUse).toHaveBeenCalledWith({ resourceId: 'preview-1' });
+    expect(screen.getByText('digitalEmployees.pendingApproval')).toBeDisabled();
+    fireEvent.click(screen.getByText('common.confirm'));
+    expect(applyResourceUse).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a backend-reported pending application disabled', async () => {
+    await loadPreview({ hasUsePermission: false, canApplyUse: false, useApplyPending: true });
+    expect(screen.getByText('digitalEmployees.pendingApproval')).toBeDisabled();
+    fireEvent.click(screen.getByText('common.confirm'));
+    expect(applyResourceUse).not.toHaveBeenCalled();
+  });
+
+  it('allows the main task button and samples when backend use permission is true', async () => {
+    const createTask = await loadPreview({ hasUsePermission: true, canApplyUse: false });
+    fireEvent.click(screen.getByText('digitalEmployees.newTask'));
+    fireEvent.click(screen.getByText('问一个问题'));
+    expect(createTask.mock.calls).toEqual([[], ['问一个问题']]);
+    expect(screen.queryByText('digitalEmployees.useRequest')).toBeNull();
+  });
 });
 
 describe('digital employee creation by tab', () => {
@@ -277,7 +342,10 @@ describe('digital employee creation by tab', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: 'digitalEmployees.official' }));
-    expect(screen.queryByRole('group', { name: 'resource.type' })).toBeNull();
+    // 企业推荐只展示企业类型，并保留与其他页签独立的筛选状态。
+    const officialTypes = within(screen.getByRole('group', { name: 'resource.type' }));
+    expect(officialTypes.getByRole('button', { name: 'digitalEmployees.tag.enterpriseEmployee' })).toBeInTheDocument();
+    expect(officialTypes.queryByRole('button', { name: 'digitalEmployees.filter.personalGroup' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'resource.appliedByMe' }));
     expect(mockEmployeeSearch).toHaveBeenLastCalledWith(
       'official',
@@ -287,6 +355,12 @@ describe('digital employee creation by tab', () => {
         digitalEmployeeType: '',
         permission: 'APPLIED_BY_ME',
       })
+    );
+    fireEvent.click(officialTypes.getByRole('button', { name: 'digitalEmployees.filter.enterpriseGroup' }));
+    expect(mockEmployeeSearch).toHaveBeenLastCalledWith(
+      'official',
+      '',
+      expect.objectContaining({ digitalEmployeeType: 'ENTERPRISE_GROUP', permission: 'APPLIED_BY_ME' })
     );
 
     fireEvent.click(screen.getByRole('tab', { name: 'resource.myFavorites' }));
@@ -319,7 +393,10 @@ describe('digital employee creation by tab', () => {
     expect(screen.getByRole('button', { name: 'resource.authorizedToMe' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('button', { name: 'resource.appliedByMe' })).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: 'digitalEmployees.official' }));
-    expect(screen.queryByRole('group', { name: 'resource.type' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'digitalEmployees.filter.enterpriseGroup' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
     expect(screen.getByRole('button', { name: 'resource.appliedByMe' })).toHaveAttribute('aria-pressed', 'true');
   });
 

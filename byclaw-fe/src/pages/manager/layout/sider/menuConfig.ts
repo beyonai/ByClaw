@@ -4,6 +4,7 @@ import {
   CloudDownloadOutlined,
   CodeSandboxOutlined,
   ControlOutlined,
+  DatabaseOutlined,
   // DashboardOutlined,
   ExperimentOutlined,
   FolderOutlined,
@@ -31,6 +32,27 @@ export const WORKGROUP_TEMPLATE_MENU = {
   name: '工作组模板管理',
   nameEn: 'Workgroup templates',
   icon: TeamOutlined,
+};
+export const TENANT_ADMIN_MENU = {
+  path: '/manager/tenants',
+  routePath: '/manager/tenants',
+  name: '租户管理',
+  nameEn: 'Tenants',
+  icon: ApartmentOutlined,
+};
+export const TENANT_DATASOURCE_MENU = {
+  path: '/manager/tenant-datasource',
+  routePath: '/manager/tenant-datasource',
+  name: '租户数据源',
+  nameEn: 'Tenant datasource',
+  icon: DatabaseOutlined,
+};
+
+export const withTenantAdminMenu = (menus: any[], allowed: boolean): any[] => {
+  const filtered = menus.filter(
+    (item) => item.path !== TENANT_ADMIN_MENU.path && item.path !== TENANT_DATASOURCE_MENU.path
+  );
+  return allowed ? [...filtered, TENANT_ADMIN_MENU, TENANT_DATASOURCE_MENU] : filtered;
 };
 
 /**

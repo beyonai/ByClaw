@@ -151,6 +151,20 @@ public class TransactionAdviceConfig {
                 if (isStreamProjectionMethod(method, targetClass)) {
                     return notSurpportedTx;
                 }
+                if (targetClass != null
+                    && "com.iwhalecloud.byai.manager.domain.tenant.TenantNodeSchemaService"
+                        .equals(ClassUtils.getUserClass(targetClass).getName())
+                    && "initialize".equals(method.getName())) {
+                    // The Node callback must see the PENDING audit row while initialize waits for its result.
+                    return notSurpportedTx;
+                }
+                if (targetClass != null
+                    && "com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService"
+                        .equals(ClassUtils.getUserClass(targetClass).getName())
+                    && ("launchOpenGauss".equals(method.getName()) || "launchDataNode".equals(method.getName()))) {
+                    // Persist the retired record before inserting its replacement and calling OpenSandbox.
+                    return notSurpportedTx;
+                }
                 return super.getTransactionAttribute(method, targetClass);
             }
         };

@@ -189,6 +189,10 @@
            and pg.grant_to_obj_type = 'USER'
            and pg.grant_to_type = 'RED'
            and pg.oper_type = 'READ'
+           <!-- 参数化包含匹配，百分号和下划线按普通字符搜索，不扩展为 LIKE 通配符。 -->
+           <if test="keyword != null and keyword != ''">
+               and position(lower(#{keyword}) in lower(coalesce(r.resource_name, ''))) > 0
+           </if>
            <choose>
                <when test="history">
                    and pg.status_cd in ('X', 'R')

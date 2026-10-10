@@ -11,7 +11,6 @@
 | FE | 前端服务 | 8080 |
 | BE | 后端服务 | 8086 (HTTP) / 8082 (WebSocket) |
 | QA Manager | QA 管理服务 | 8090 |
-| QA Worker | QA 工作进程 | 无端口 |
 
 ## 部署步骤
 
@@ -115,7 +114,7 @@ STANDALONE_MODULES=fe,be
 # STANDALONE_MODULES=
 ```
 
-可用的服务名：`fe`、`be`、`qa-manager`、`qa-worker`、`data`
+可用的服务名：`fe`、`be`、`qa-manager`、`data`
 
 ## Nginx 配置模板
 
@@ -136,13 +135,11 @@ STANDALONE_MODULES=fe,be
 sh start-fe.sh
 sh start-be.sh
 sh start-qa-manager.sh
-sh start-qa-worker.sh
 
 # 停止单个服务
 sh stop-fe.sh
 sh stop-be.sh
 sh stop-qa-manager.sh
-sh stop-qa-worker.sh
 
 # 停止所有服务
 sh stop-all.sh
@@ -176,9 +173,6 @@ docker compose logs -f be
 # 查看 QA Manager 日志
 docker compose logs -f qa-manager
 
-# 查看 QA Worker 日志
-docker compose logs -f qa-worker
-
 # 查看 Data 日志
 docker compose logs -f data
 
@@ -198,17 +192,6 @@ sh stop-all.sh
 ```bash
 cd deploy
 sh stop-standalone.sh
-```
-
-## 扩缩容
-
-拆分模式支持独立扩缩容某个服务。例如，如果需要多个 QA Worker：
-
-```bash
-cd deploy/standalone
-docker compose up -d --scale qa-worker=3
-# 或
-docker-compose up -d --scale qa-worker=3
 ```
 
 ## 端口配置
@@ -237,12 +220,6 @@ BYCLAW_QA_PORT=8090
   │       ├──> Redis
   │       ├──> OpenGauss
   │       └──> MinIO
-  │
-QA Worker (后台处理，无端口)
-  │
-  ├──> Redis
-  ├──> OpenGauss
-  └──> MinIO
 ```
 
 ## 常见问题
@@ -257,10 +234,6 @@ docker compose logs <service-name>
 2. 确认中间件是否正常运行
 
 3. 检查 `.env` 配置是否正确
-
-### QA Worker 没有端口
-
-QA Worker 是后台工作进程，不需要对外暴露端口，它通过 Redis 与 QA Manager 通信。
 
 ### 更新单个服务
 

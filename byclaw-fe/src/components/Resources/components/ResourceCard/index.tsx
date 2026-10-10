@@ -3,7 +3,7 @@ import { publicationErrorMessage } from '@/utils/publicationError';
 import { showSkillPublication, skillPublicationEntryLabel } from '../../skillPublication';
 import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
-import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, useContext, useCallback } from 'react';
 import { EllipsisOutlined, MessageOutlined, PlusOutlined } from '@ant-design/icons';
 import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin, Modal } from 'antd';
 import type { MenuProps } from 'antd';
@@ -33,6 +33,7 @@ import type { WorkspaceSkillItem } from '../../workspaceSkill/utils';
 import ResourceInstallDialog from '../ResourceInstallDialog';
 import ResourceFavoriteActions from '../ResourceFavoriteActions';
 import type { ResourceInstallTargetContext } from '../../resourceInstallContext';
+import { ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES } from '../../constants';
 import styles from './index.module.less';
 
 const { Paragraph } = Typography;
@@ -148,6 +149,8 @@ type ResourceCardActionConfig = {
   lifecycleLoading?: boolean;
   enableDigitalEmployeeLifecycle?: boolean;
   enableDigitalEmployeeDelete?: boolean;
+
+  /** 数字员工模块显示个人/企业员工及员工组类型标签。 */
   showDigitalEmployeeTypeTag?: boolean;
 
   /** 资源中心技能导出不依赖管理权限。 */
@@ -160,8 +163,6 @@ type ResourceCardActionConfig = {
   onEdit?: () => void;
   onApply?: () => void;
 
-  /** 仅数字员工“我可用的”页签开启，其他使用卡片的场景默认隐藏。 */
-  enableSetDefault?: boolean;
   onSetDefault?: () => void;
   onChat?: () => void;
 };
@@ -306,7 +307,9 @@ const InstallingOverlay = () => {
 
 const getInstallLabelId = (resource: IResourceCardItem, resourceType?: string) => {
   const bizType = resource?.resourceBizType || resourceType;
-  if (['KG_DOC', 'KG_QA', 'KG_TERM'].includes(bizType || '')) return 'resource.installKnowledge';
+  if (resourceType === 'KG_DOC' || ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES.includes(bizType || '')) {
+    return 'resource.installKnowledge';
+  }
   if (bizType === 'SKILL' || resourceType === 'SKILL') return 'resource.installSkill';
   return 'resource.installTool';
 };
@@ -324,14 +327,14 @@ const getDeleteLabelId = (resource: IResourceCardItem, resourceType?: string) =>
 
 const canInstallResource = (resource: IResourceCardItem, resourceType?: string) => {
   const bizType = resource?.resourceBizType || resourceType;
-  if (bizType === 'SKILL' || resourceType === 'SKILL') {
-    return Boolean(resource?.resourceId && resource?.hasUsePermission);
-  }
   // 阻止历史已下线资源再次安装。
   if (bizType === 'ONTOLOGY_BASE' || resourceType === 'ONTOLOGY_BASE') {
     return false;
   }
-  return Boolean(resource?.resourceId && bizType && bizType !== 'DIG_EMPLOYEE');
+  // 安装必须持有资源使用权限，知识和工具与技能共用口径，申请中也不能提前安装。
+  return Boolean(
+    resource?.resourceId && bizType && bizType !== 'DIG_EMPLOYEE' && isTruthyFlag(resource.hasUsePermission)
+  );
 };
 
 const isSkillResource = (resource: IResourceCardItem, resourceType?: string) => {
@@ -537,20 +540,30 @@ const RenderContent = (props: ResourceCardProps) => {
 
   const isDigitalEmployeeResource =
     resource.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE || resourceType === resourceBizTypeMap.DIG_EMPLOYEE;
+  const isKnowledgeResource =
+    resourceType === 'KG_DOC' ||
+    ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES.includes(resource.resourceBizType || resourceType || '');
+  const isToolResource =
+    resourceType === 'TOOL' ||
+    ['TOOL', 'TOOLKIT', 'MCP', 'MCP_TOOL', 'AGENT'].includes(resource.resourceBizType || resourceType || '');
+  // 工具与知识、技能共用卡片上的圆形安装入口，不再重复放入更多菜单。
+  const useCardInstallAction = isSkillResource(resource, resourceType) || isKnowledgeResource || isToolResource;
   // 资源中心的技能、知识和工具沿用员工卡片主操作区；其他复用场景保留原菜单。
-  const resourceActionMode =
-    !isDigitalEmployeeResource && (isSkillResource(resource, resourceType) || enableResourceLifecycle);
+  const resourceActionMode = !isDigitalEmployeeResource && (useCardInstallAction || enableResourceLifecycle);
   const isPublishedDigitalEmployee =
     !isDigitalEmployeeResource || `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` === '2';
-  const isPendingUseApproval =
-    isPublishedDigitalEmployee &&
-    canApplyUseForStatus &&
-    (resource.approveStatus === 'S' || isTruthyFlag(resource.useApplyPending));
-  const canApplyForUse =
-    isPublishedDigitalEmployee &&
-    canApplyUseForStatus &&
-    !isTruthyFlag(resource.hasUsePermission) &&
-    isTruthyFlag(resource.canApplyUse);
+  const isPendingUseApproval = isDigitalEmployeeResource
+    ? isTruthyFlag(resource.useApplyPending)
+    : isPublishedDigitalEmployee &&
+      canApplyUseForStatus &&
+      (resource.approveStatus === 'S' || isTruthyFlag(resource.useApplyPending));
+  // 数字员工各页面消费同一套后端权限，资源中心其他类型仍保留原有展示逻辑。
+  const canApplyForUse = isDigitalEmployeeResource
+    ? isTruthyFlag(resource.canApplyUse)
+    : isPublishedDigitalEmployee &&
+      canApplyUseForStatus &&
+      !isTruthyFlag(resource.hasUsePermission) &&
+      isTruthyFlag(resource.canApplyUse);
   const resourceIdentity = `${resource.resourceId ?? resource.id ?? ''}`;
   const defaultEmployeeIdentity = `${defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`;
   const isDefaultDigitalEmployee =
@@ -688,7 +701,7 @@ const RenderContent = (props: ResourceCardProps) => {
   const isInstalledResource = Boolean(
     resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`)
   );
-  // 安装入口移到技能卡片主操作区，继续沿用原菜单的权限、状态及目标员工限制。
+  // 知识、技能和工具的安装入口共用原菜单的权限、状态及目标员工限制。
   const canShowInstallAction =
     !isCancelledResource &&
     !isWorkspaceSkillResource &&
@@ -919,19 +932,10 @@ const RenderContent = (props: ResourceCardProps) => {
     const items: NonNullable<MenuProps['items']> = [];
     // 注销为终态，即使列表中残留旧权限也不展示可操作入口。
     if (isCancelledResource) return items;
-    // 企业数字员工的操作权限接口以 canEdit 表示管理权限；兼容部分旧返回未带 canOffShelf 的情况。
-    const canManageEnterpriseDigitalEmployee =
-      isDigitalEmployeeResource && `${ownerType || ''}`.toLowerCase() === 'enterprise' && canEdit === true;
     const digitalEmployeeStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
 
-    // 仅我可用的页签提供设为默认，同时保留使用权限和后端设置权限校验。
-    if (
-      isDigitalEmployeeResource &&
-      actionConfig?.enableSetDefault === true &&
-      isTruthyFlag(resource.hasUsePermission) &&
-      canSetDefault === true &&
-      !isDefaultDigitalEmployee
-    ) {
+    // 所有员工卡片按后端权限展示设为默认，不再按页签或当前默认身份隐藏。
+    if (isDigitalEmployeeResource && canSetDefault === true) {
       items.push({
         key: 'setDefaultAssistant',
         label: (
@@ -948,31 +952,6 @@ const RenderContent = (props: ResourceCardProps) => {
           </ConfirmMenuLabel>
         ),
       });
-    }
-
-    if (resource.canPublishEmployee && resource.agentType !== '017') {
-      items.push({
-        key: 'publishEmployee',
-        disabled: openingPublication,
-        label: (
-          <BuildMenuLabel
-            icon="icon-a-Uploadshangchuan"
-            text={publicationEntryLabel(resource.employeePublicationStatus, resource.employeePublicationUpdate)}
-            loading={openingPublication}
-          />
-        ),
-        onClick: () => openPublication(),
-      });
-      if (resource.employeePublicationStatus === 'PUBLISHED') {
-        items.push({
-          key: 'viewEmployeePublication',
-          label: <BuildMenuLabel icon="icon-a-Uploadshangchuan" text="查看发布记录" />,
-          onClick: () =>
-            openEmployeePublication(String(resource.resourceId || resource.id || resource.agentId)).catch((error) =>
-              message.error(publicationErrorMessage(error, '无法查看发布记录'))
-            ),
-        });
-      }
     }
 
     // 编辑信息
@@ -1020,10 +999,10 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 下架记录不提供授权入口，兼容旧接口的状态文本；上架后仍按原权限展示。
+    // 员工的授权资格由后端决定；其他资源保留原有下架展示规则。
     const isOffShelf = rawStatusKey === '3' || normalizedStatus === '3';
     // 管理授权
-    if (canManageAuth && !isOffShelf) {
+    if (canManageAuth && (isDigitalEmployeeResource || !isOffShelf)) {
       items.push({
         key: 'authorize',
         label: (
@@ -1039,7 +1018,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 使用授权
-    if (canUseAuth && !isOffShelf) {
+    if (canUseAuth && (isDigitalEmployeeResource || !isOffShelf)) {
       items.push({
         key: 'use',
         label: (
@@ -1071,13 +1050,13 @@ const RenderContent = (props: ResourceCardProps) => {
 
     // 使用审核统一由审核中心承载，卡片不再返回或消费审核按钮权限。
 
-    // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
-    if (canShowInstallAction && !isSkillResource(resource, resourceType)) {
+    // 安装统一使用向下下载图标；选择目标员工，从“当前员工”进入时由路由指定唯一目标。
+    if (canShowInstallAction && !useCardInstallAction) {
       items.push({
         key: 'install',
         label: (
           <BuildMenuLabel
-            icon="icon-a-Addtianjia"
+            icon="icon-a-Downloadxiazai"
             text={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
             loading={installing}
           />
@@ -1136,11 +1115,8 @@ const RenderContent = (props: ResourceCardProps) => {
     const deleteConfirmId =
       deleteLabelId === 'common.deleteResource' ? 'common.deactivateConfirm' : `${deleteLabelId}Confirm`;
 
-    // 数字员工下架沿用操作权限判断；页面通过生命周期开关隐藏个人员工的上下架入口。
-    const canUnShelfDigitalEmployee =
-      isDigitalEmployeeResource &&
-      (canOffShelf === true ||
-        (canOffShelf === undefined && canManageEnterpriseDigitalEmployee && digitalEmployeeStatus === '2'));
+    // 员工上下架只接受明确的后端权限，不从编辑权限和状态推算旧接口权限。
+    const canUnShelfDigitalEmployee = isDigitalEmployeeResource && canOffShelf === true;
     if (
       enableDigitalEmployeeLifecycle &&
       ((!isDigitalEmployeeResource && !enableResourceLifecycle && canDelete) || canUnShelfDigitalEmployee)
@@ -1167,13 +1143,8 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 已下架数字员工始终提供“上架员工”，不再依赖恢复权限字段。
-    if (
-      enableDigitalEmployeeLifecycle &&
-      isDigitalEmployeeResource &&
-      (canOnShelf === true ||
-        (canOnShelf === undefined && canManageEnterpriseDigitalEmployee && ['0', '3'].includes(digitalEmployeeStatus)))
-    ) {
+    // 上架入口与下架入口一样，只消费后端操作权限。
+    if (enableDigitalEmployeeLifecycle && isDigitalEmployeeResource && canOnShelf === true) {
       items.push({
         key: 'shelfData',
         label: (
@@ -1182,6 +1153,32 @@ const RenderContent = (props: ResourceCardProps) => {
           </ConfirmMenuLabel>
         ),
       });
+    }
+
+    // 发布入口及发布记录统一放在注销员工之前，保留不同发布状态对应的原有操作。
+    if (resource.canPublishEmployee === true) {
+      items.push({
+        key: 'publishEmployee',
+        disabled: openingPublication,
+        label: (
+          <BuildMenuLabel
+            icon="icon-a-Uploadshangchuan"
+            text={publicationEntryLabel(resource.employeePublicationStatus, resource.employeePublicationUpdate)}
+            loading={openingPublication}
+          />
+        ),
+        onClick: () => openPublication(),
+      });
+      if (resource.employeePublicationStatus === 'PUBLISHED') {
+        items.push({
+          key: 'viewEmployeePublication',
+          label: <BuildMenuLabel icon="icon-a-Uploadshangchuan" text="查看发布记录" />,
+          onClick: () =>
+            openEmployeePublication(String(resource.resourceId || resource.id || resource.agentId)).catch((error) =>
+              message.error(publicationErrorMessage(error, '无法查看发布记录'))
+            ),
+        });
+      }
     }
 
     // 数字员工“注销员工”入口沿用删除权限和回调，与上下架生命周期菜单分开控制。
@@ -1307,6 +1304,7 @@ const RenderContent = (props: ResourceCardProps) => {
     isInnerSkill,
     isInstalledResource,
     canShowInstallAction,
+    useCardInstallAction,
     installing,
     restoring,
     settingDefault,
@@ -1384,10 +1382,14 @@ const RenderContent = (props: ResourceCardProps) => {
     item: resource,
     digitalEmployeeId: activeDigitalEmployeeId,
   });
-  // 工作空间和资源化技能都在更多菜单中导出，不受管理权限限制。
+  // 导出技能文件需要使用权限；管理、编辑及授权管理权限不能替代使用权限。
+  const canExportSkill =
+    actionConfig?.enableSkillExport &&
+    (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL') &&
+    isTruthyFlag(resource.hasUsePermission);
   const effectiveMenuItems: MenuProps['items'] = [
     ...((isWorkspaceSkillResource ? workspaceMenuItems : menuItems) || []),
-    ...(actionConfig?.enableSkillExport && (resourceType === 'SKILL' || resource.resourceBizType === 'SKILL')
+    ...(canExportSkill
       ? [
         {
           key: 'exportSkill',
@@ -1409,6 +1411,29 @@ const RenderContent = (props: ResourceCardProps) => {
     isWorkspaceSkillResource && !showResourceTypeTag
       ? intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })
       : topRightTag;
+  const isSkillPosterResource = variant === 'skillPoster' && isSkillResource(resource, resourceType);
+  const skillPosterTagRef = useRef<HTMLSpanElement>(null);
+  const [skillPosterTagWidth, setSkillPosterTagWidth] = useState<number>();
+  useLayoutEffect(() => {
+    const tag = skillPosterTagRef.current;
+    if (!tag) return;
+
+    // 角标仍固定在卡片右上角，但标题只按其实际宽度避让；译文、字体和容器变化时同步更新。
+    const measureTagWidth = () => {
+      const width = Math.ceil(tag.getBoundingClientRect().width);
+      // 隐藏 Tab 暂时没有尺寸，沿用已有宽度，显示后由 ResizeObserver 重新测量。
+      if (width > 0) setSkillPosterTagWidth(width);
+    };
+    measureTagWidth();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measureTagWidth);
+      observer.observe(tag);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', measureTagWidth);
+    return () => window.removeEventListener('resize', measureTagWidth);
+  }, [isSkillPosterResource, effectiveTopRightTag]);
   const effectiveCardClick: ((resource?: IResourceCardItem) => void) | undefined = isWorkspaceSkillResource
     ? () => workspaceActions.openDetail(resource as WorkspaceSkillItem)
     : onCardClick;
@@ -1456,6 +1481,7 @@ const RenderContent = (props: ResourceCardProps) => {
       >
         <Button
           shape="circle"
+          className={styles.cardPrimaryActionBtn}
           aria-label={intl.formatMessage({ id: 'resource.applyUse' })}
           icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
           onClick={(event) => {
@@ -1470,19 +1496,13 @@ const RenderContent = (props: ResourceCardProps) => {
     <Button
       disabled
       shape="circle"
+      className={styles.cardPrimaryActionBtn}
       aria-label={intl.formatMessage({ id: 'resource.pendingAuthorization' })}
       icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
     />
   );
+  // 禁用按钮通过外层容器接收悬浮事件，提示不占卡片空间；各类资源和员工共用同一入口。
   const pendingUseAction = (
-    <div className={styles.applyActionWrap}>
-      {pendingUseButton}
-      <span className={styles.pendingApplyText}>{intl.formatMessage({ id: 'resource.pendingAuthorization' })}</span>
-    </div>
-  );
-  // 状态文字不参与资源中心操作区布局，避免居中容器变高、变宽后带动按钮移位。
-  // 禁用按钮用容器接收悬浮事件，待审核状态仍可通过提示和无障碍名称读取。
-  const pendingResourceUseAction = (
     <Tooltip title={intl.formatMessage({ id: 'resource.pendingAuthorization' })}>
       <span className={styles.applyActionWrap}>{pendingUseButton}</span>
     </Tooltip>
@@ -1495,38 +1515,49 @@ const RenderContent = (props: ResourceCardProps) => {
     !actionConfig?.hiddenMenuItemKeys?.includes('applyUse');
   const showPendingResourceUse = showResourceUseAction && isPendingUseApproval;
   const showResourceApplyUse = showResourceUseAction && !showPendingResourceUse && canApplyForUse;
-  const showSkillInstallAction = isSkillResource(resource, resourceType) && canShowInstallAction;
-  const resourceCardActions =
+  const showCardInstallAction = useCardInstallAction && canShowInstallAction;
+  // 单独计算操作区显示条件，避免多行条件与 JSX 的缩进规则互相冲突。
+  const showResourceCardActions =
     resourceActionMode &&
-    (showPendingResourceUse || showResourceApplyUse || showSkillInstallAction || !!effectiveMenuItems?.length) ? (
-      <div
-        className={styles.digitalEmployeeActions}
-        onClick={(event) => {
-          event.stopPropagation();
-          event.preventDefault();
-        }}
-      >
-        {showPendingResourceUse ? pendingResourceUseAction : showResourceApplyUse ? applyUseAction : null}
-        {showSkillInstallAction && (
-          <Tooltip title={intl.formatMessage({ id: 'resource.installSkill' })}>
-            <Button
-              shape="circle"
-              aria-label={intl.formatMessage({ id: 'resource.installSkill' })}
-              icon={<AntdIcon type="icon-a-Addtianjia" className={styles.cardActionBtnIcon} />}
-              loading={installing}
-              disabled={installing}
-              onClick={() => setInstallDialogOpen(true)}
-            />
-          </Tooltip>
-        )}
-        {!!effectiveMenuItems?.length && (
-          <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight" trigger={['click']}>
-            <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
-          </Dropdown>
-        )}
-        {workspaceShareModal}
-      </div>
-    ) : null;
+    (showPendingResourceUse || showResourceApplyUse || showCardInstallAction || !!effectiveMenuItems?.length);
+  const resourceCardActions = showResourceCardActions ? (
+    <div
+      className={classnames(styles.digitalEmployeeActions, styles.resourceCardActions, {
+        [styles.skillPosterActions]: variant === 'skillPoster',
+        [styles.knowledgeActions]: isKnowledgeResource,
+      })}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.preventDefault();
+      }}
+    >
+      {showPendingResourceUse ? pendingUseAction : showResourceApplyUse ? applyUseAction : null}
+      {showCardInstallAction && (
+        <Tooltip title={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}>
+          <Button
+            shape="circle"
+            className={styles.cardPrimaryActionBtn}
+            aria-label={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
+            icon={
+              <AntdIcon
+                type="icon-a-Downloadxiazai"
+                className={classnames(styles.cardActionBtnIcon, styles.installActionIcon)}
+              />
+            }
+            loading={installing}
+            disabled={installing}
+            onClick={() => setInstallDialogOpen(true)}
+          />
+        </Tooltip>
+      )}
+      {!!effectiveMenuItems?.length && (
+        <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight" trigger={['click']}>
+          <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
+        </Dropdown>
+      )}
+      {workspaceShareModal}
+    </div>
+  ) : null;
 
   const getDefaultIcon = () => {
     switch (resourceType) {
@@ -1537,7 +1568,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
   };
 
-  if (variant === 'skillPoster' && isSkillResource(resource, resourceType)) {
+  if (isSkillPosterResource) {
     return (
       <div
         className={classnames(styles.skillPosterContent, {
@@ -1555,6 +1586,21 @@ const RenderContent = (props: ResourceCardProps) => {
           effectiveCardClick?.(resource);
         }}
       >
+        {/* 标签固定到卡片右上角，避免占用标题行并挤压技能名称。 */}
+        {effectiveTopRightTag ? (
+          <span
+            className={classnames(styles.skillPosterTag, {
+              [styles.digitalEmployeePersonalTag]: showResourceTypeTag && isPersonalResource,
+              [styles.digitalEmployeeEnterpriseTag]: showResourceTypeTag && !isPersonalResource,
+              [styles[statusTagClass]]: Boolean(statusTagClass),
+              [styles.cancelledTag]: isCancelledResource,
+            })}
+            title={effectiveTopRightTag}
+            ref={skillPosterTagRef}
+          >
+            <span className={styles.tagText}>{effectiveTopRightTag}</span>
+          </span>
+        ) : null}
         <div className={styles.skillPosterImageWrap}>
           {displayImageUrl && !displayImageLoadFailed ? (
             <img
@@ -1576,22 +1622,19 @@ const RenderContent = (props: ResourceCardProps) => {
             [styles.resourceInfoWithActions]: !!resourceCardActions,
           })}
         >
-          <div className={styles.skillPosterHeader}>
+          <div
+            className={classnames(styles.skillPosterHeader, {
+              [styles.skillPosterHeaderWithTag]: !!effectiveTopRightTag,
+            })}
+            style={
+              skillPosterTagWidth
+                ? ({ '--skill-poster-tag-width': `${skillPosterTagWidth}px` } as React.CSSProperties)
+                : undefined
+            }
+          >
             <Paragraph className={styles.skillPosterTitle} ellipsis={{ tooltip: `${displayTitle}` }}>
               {displayTitle}
             </Paragraph>
-            {effectiveTopRightTag ? (
-              <span
-                className={classnames(styles.skillPosterTag, {
-                  [styles.digitalEmployeePersonalTag]: showResourceTypeTag && isPersonalResource,
-                  [styles.digitalEmployeeEnterpriseTag]: showResourceTypeTag && !isPersonalResource,
-                  [styles[statusTagClass]]: Boolean(statusTagClass),
-                  [styles.cancelledTag]: isCancelledResource,
-                })}
-              >
-                <span className={styles.tagText}>{effectiveTopRightTag}</span>
-              </span>
-            ) : null}
             {headerExtra}
           </div>
           <Paragraph
@@ -1681,6 +1724,9 @@ const RenderContent = (props: ResourceCardProps) => {
             <div
               className={classnames('ub gap4 ub-ac', styles.resourceInfoHeader, {
                 [styles.resourceInfoHeaderWithTag]: isDigitalEmployeeResource && effectiveTopRightTag,
+                [styles.knowledgeHeaderWithTag]: isKnowledgeResource && !!effectiveTopRightTag,
+                [styles.toolHeaderWithTag]: isToolResource && !!effectiveTopRightTag,
+                [styles.skillHeaderWithTag]: isSkillResource(resource, resourceType) && !!effectiveTopRightTag,
               })}
             >
               <Paragraph
@@ -1707,9 +1753,13 @@ const RenderContent = (props: ResourceCardProps) => {
                     [styles.digitalEmployeeStatusTag]:
                       (isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) || showResourceStatusTag,
                     [styles.digitalEmployeeTopRightTag]: isDigitalEmployeeResource,
+                    [styles.knowledgeTopRightTag]: isKnowledgeResource,
+                    [styles.toolTopRightTag]: isToolResource,
+                    [styles.skillTopRightTag]: isSkillResource(resource, resourceType),
                     [styles[statusTagClass]]: Boolean(statusTagClass),
                     [styles.cancelledTag]: isCancelledResource,
                   })}
+                  title={useCardInstallAction ? effectiveTopRightTag : undefined}
                 >
                   <span className={styles.tagText}>{effectiveTopRightTag}</span>
                 </span>
@@ -1736,48 +1786,31 @@ const RenderContent = (props: ResourceCardProps) => {
             {resourceCardActions}
             {digitalEmployeeActionMode && (
               <div className={styles.digitalEmployeeActions} onClick={(event) => event.stopPropagation()}>
-                {isPendingUseApproval ? pendingUseAction : canApplyForUse ? (
-                  <>
-                    {applyUseAction}
-                    {!!effectiveMenuItems?.length ? (
-                      <Dropdown
-                        menu={{ items: effectiveMenuItems }}
-                        placement="bottomRight"
-                        trigger={['click']}
-                        open={digitalEmployeeMenuOpen}
-                        onOpenChange={setDigitalEmployeeMenuOpen}
-                      >
-                        <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
-                      </Dropdown>
-                    ) : null}
-                  </>
-                ) : (
-                  <>
-                    {!isDeletedDigitalEmployee && isPublishedDigitalEmployee && (
-                      <Tooltip title={intl.formatMessage({ id: 'resource.enterConversation' })}>
-                        <Button
-                          shape="circle"
-                          icon={<MessageOutlined className={styles.cardActionBtnIcon} />}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onChat?.();
-                          }}
-                        />
-                      </Tooltip>
-                    )}
-                    {!!effectiveMenuItems?.length ? (
-                      <Dropdown
-                        menu={{ items: effectiveMenuItems }}
-                        placement="bottomRight"
-                        trigger={['click']}
-                        open={digitalEmployeeMenuOpen}
-                        onOpenChange={setDigitalEmployeeMenuOpen}
-                      >
-                        <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
-                      </Dropdown>
-                    ) : null}
-                  </>
+                {isPendingUseApproval ? pendingUseAction : canApplyForUse ? applyUseAction : null}
+                {!isDeletedDigitalEmployee && isTruthyFlag(resource.hasUsePermission) && (
+                  <Tooltip title={intl.formatMessage({ id: 'resource.enterConversation' })}>
+                    <Button
+                      shape="circle"
+                      icon={<MessageOutlined className={styles.cardActionBtnIcon} />}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onChat?.();
+                      }}
+                    />
+                  </Tooltip>
                 )}
+                {/* 申请待审核只影响申请按钮，不遮住后端已允许的其他操作。 */}
+                {!!effectiveMenuItems?.length ? (
+                  <Dropdown
+                    menu={{ items: effectiveMenuItems }}
+                    placement="bottomRight"
+                    trigger={['click']}
+                    open={digitalEmployeeMenuOpen}
+                    onOpenChange={setDigitalEmployeeMenuOpen}
+                  >
+                    <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
+                  </Dropdown>
+                ) : null}
               </div>
             )}
 
@@ -1840,15 +1873,22 @@ function ResourceCard(props: ResourceCardProps) {
   // 资源中心和数字员工统一将 -1 视为注销终态；旧复用卡片继续按历史 3 状态处理。
   const isCancelledResource =
     isResourceLifecycleCard || isDigitalEmployeeResource ? displayStatus === '-1' : displayStatus === '3';
+  const isKnowledgeResource =
+    props.resourceType === 'KG_DOC' ||
+    ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES.includes(displayResource.resourceBizType || props.resourceType || '');
+  // 知识详情包含实际内容，必须取得使用权限；统一传递禁用状态，保持鼠标样式与点击拦截一致。
   const isCardClickDisabled =
-    typeof props.cardClickDisabled === 'function'
+    (isKnowledgeResource && !isTruthyFlag(displayResource.hasUsePermission)) ||
+    (typeof props.cardClickDisabled === 'function'
       ? props.cardClickDisabled(displayResource)
-      : !!props.cardClickDisabled;
+      : !!props.cardClickDisabled);
 
   return (
     <div
       key={resource.resourceId}
       className={classnames(styles.resourceCard, props.className, {
+        [styles.digitalEmployeeCard]: variant === 'default' && isDigitalEmployeeResource,
+        [styles.knowledgeCard]: variant === 'default' && isKnowledgeResource,
         pointer:
           (!!props.onCardClick || isWorkspaceSkill(displayResource)) && !isCancelledResource && !isCardClickDisabled,
         [styles.skillPosterCard]: variant === 'skillPoster',
@@ -1866,7 +1906,7 @@ function ResourceCard(props: ResourceCardProps) {
       })}
       ref={resourceCardRef}
     >
-      <RenderContent {...props} resource={displayResource} />
+      <RenderContent {...props} resource={displayResource} cardClickDisabled={isCardClickDisabled} />
     </div>
   );
 }

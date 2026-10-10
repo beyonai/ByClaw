@@ -407,16 +407,16 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
     };
   }, [employee]);
   const employeeResourceId = detail?.resourceId || detail?.id || detail?.agentId;
+  // 无使用权限不等于允许申请，预览与卡片都只消费后端明确返回的权限。
   const hasUsePermission = permissions?.hasUsePermission === true;
-  const isApplyPending = permissions?.useApplyPending === true || employee?.approveStatus === 'S';
-  const isOffShelfEmployee =
-    `${detail?.resourceStatus ?? employee?.resourceStatus ?? detail?.metaStatus ?? ''}` === '3';
+  const canApplyUse = permissions?.canApplyUse === true;
+  const isApplyPending = permissions?.useApplyPending === true;
   const handleApplyUse = async () => {
-    if (!employeeResourceId || applyLoading || isApplyPending) return;
+    if (!employeeResourceId || !canApplyUse || applyLoading || isApplyPending) return;
     setApplyLoading(true);
     try {
       await applyResourceUse({ resourceId: `${employeeResourceId}` });
-      setPermissions((current: any) => ({ ...(current || {}), useApplyPending: true }));
+      setPermissions((current: any) => ({ ...(current || {}), canApplyUse: false, useApplyPending: true }));
       message.success('申请已提交，等待授权通过');
     } catch (error: any) {
       message.error(error?.message || '使用申请失败');
@@ -585,11 +585,11 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   </Typography.Title>
                   <EmployeeTypeTag ownerType={detail.ownerType} agentType={detail.agentType} />
                 </div>
-                {isOffShelfEmployee ? null : hasUsePermission ? (
+                {hasUsePermission ? (
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateTask?.()}>
                     {intl.formatMessage({ id: 'digitalEmployees.newTask' })}
                   </Button>
-                ) : (
+                ) : canApplyUse || isApplyPending ? (
                   <Popconfirm
                     title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
                     okText={intl.formatMessage({ id: 'common.confirm' })}
@@ -603,7 +603,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                         : intl.formatMessage({ id: 'digitalEmployees.useRequest' })}
                     </Button>
                   </Popconfirm>
-                )}
+                ) : null}
               </div>
             </div>
             <div className={styles.employeePreviewCreator}>
@@ -620,11 +620,11 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   <div
                     className={styles.exampleItem}
                     key={`${item}-${index}`}
-                    onClick={() => onCreateTask?.(item)}
-                    role="button"
-                    tabIndex={0}
+                    onClick={() => hasUsePermission && onCreateTask?.(item)}
+                    role={hasUsePermission ? 'button' : undefined}
+                    tabIndex={hasUsePermission ? 0 : undefined}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
+                      if (hasUsePermission && (event.key === 'Enter' || event.key === ' ')) {
                         event.preventDefault();
                         onCreateTask?.(item);
                       }

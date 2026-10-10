@@ -181,15 +181,10 @@
   }
 
   :global {
-    .@{antPrefix}-space:has(> .@{antPrefix}-space-item:nth-child(4)) {
-      > .@{antPrefix}-space-item:nth-child(-n + 3) {
-        display: none;
-      }
-
-      // + 菜单收纳 @/# 等入口，但已启用连接器仍需保留在输入框底部。
-      > .@{antPrefix}-space-item:has(.byclaw-connector-outside-tool) {
-        display: flex;
-      }
+    // + 菜单收纳 @/# 入口，按控件身份隐藏，避免详情页省略 @ 后误隐藏前移的上传按钮。
+    .@{antPrefix}-space-item:has([data-query-input-tool='mention']),
+    .@{antPrefix}-space-item:has([data-query-input-tool='skill']) {
+      display: none;
     }
   }
 }

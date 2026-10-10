@@ -25,6 +25,7 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -95,8 +96,11 @@ class GroupChatMemberSystemEventTest {
             mock(ProjectApplicationService.class), mock(ProjectMemberService.class), messages, coordinator, events,
             mock(SessionExtService.class));
         ReflectionTestUtils.setField(target, "invitationService", invitations);
+        ReflectionTestUtils.setField(target, "tenantUserMembershipService",
+            mock(com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService.class));
         ReflectionTestUtils.setField(target, "userService", users);
         ReflectionTestUtils.setField(target, "resourceService", resources);
+        ReflectionTestUtils.setField(target, "tenantUserMembershipService", mock(TenantUserMembershipService.class));
         DataSource dataSource = mock(DataSource.class);
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.getAutoCommit()).thenReturn(true);

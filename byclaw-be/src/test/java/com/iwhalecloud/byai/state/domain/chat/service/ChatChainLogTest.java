@@ -7,6 +7,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.ws.manager.NettyArrayOutputStream;
+import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -17,6 +18,21 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ChatChainLogTest {
+    @Test
+    void tenantChatFramesCarryTheSelectedEnterpriseForClientRouting() throws Exception {
+        EmbeddedChannel channel = new EmbeddedChannel(new ChannelInboundHandlerAdapter());
+        channel.attr(Constant.ATT_ENTERPRISE_ID).set("11221076");
+        try (NettyArrayOutputStream output = new NettyArrayOutputStream(
+            channel.pipeline().firstContext(), "request-1", "CHAT_STREAM")) {
+            output.write("{\"event\":\"appStreamResponse\",\"sessionId\":\"11221552\"}"
+                .getBytes(StandardCharsets.UTF_8));
+            TextWebSocketFrame frame = channel.readOutbound();
+            assertThat(JSON.parseObject(frame.text()).getString("enterpriseId")).isEqualTo("11221076");
+            frame.release();
+        }
+        channel.finishAndReleaseAll();
+    }
+
     @Test
     void rootIdentitySurvivesSerializationWithoutChangingLaneIdentity() {
         AssistantChatDto dto = new AssistantChatDto();

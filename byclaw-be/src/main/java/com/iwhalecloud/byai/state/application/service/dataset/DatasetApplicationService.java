@@ -579,7 +579,10 @@ public class DatasetApplicationService {
         if (authApplicationService.hasResourceAccessPermission(ssResource)) {
             return;
         }
-        throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+        // 云盘按项目成员授权，拒绝时不能误导用户去申请平台或组织管理员权限。
+        throw new IllegalArgumentException(I18nUtil.get(
+            ResourceBizTypeEnum.KG_CLOUD.name().equals(ssResource.getResourceBizType())
+                ? "dataset.cloud.access.denied" : "user.permission.nopermission"));
     }
 
     private SsResource loadDatasetResource(Long resourceId) {

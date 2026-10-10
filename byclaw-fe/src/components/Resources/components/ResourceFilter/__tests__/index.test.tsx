@@ -141,36 +141,41 @@ describe('resource lifecycle filters', () => {
 });
 
 describe('available resource ownership filter', () => {
-  it.each([['SKILL', 'Skill'], ['KG_DOC', 'Knowledge'], ['TOOL', 'Tool']])(
-    'confirms and resets personal / enterprise ownership for %s',
-    (resourceType, suffix) => {
-      const onOk = jest.fn();
-      render(
-        <ResourceFilter
-          resourceType={resourceType}
-          activeTab="personal"
-          resourceOwnerFilter
-          hideStatusFilter
-          defaultParam={getDefaultParams()}
-          onOk={onOk}
-        />
-      );
-      for (const ownerType of ['personal', 'enterprise']) {
-        fireEvent.click(screen.getByRole('button', { name: `resource.tag.${ownerType}${suffix}` }));
-        fireEvent.click(screen.getByText('common.confirm'));
-        expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ ownerType }));
-      }
-      fireEvent.click(screen.getByText('common.reset'));
+  it.each([
+    ['SKILL', 'Skill'],
+    ['KG_DOC', 'Knowledge'],
+    ['TOOL', 'Tool'],
+  ])('confirms and resets personal / enterprise ownership for %s', (resourceType, suffix) => {
+    const onOk = jest.fn();
+    render(
+      <ResourceFilter
+        resourceType={resourceType}
+        activeTab="personal"
+        resourceOwnerFilter
+        hideStatusFilter
+        defaultParam={getDefaultParams()}
+        onOk={onOk}
+      />
+    );
+    for (const ownerType of ['personal', 'enterprise']) {
+      fireEvent.click(screen.getByRole('button', { name: `resource.tag.${ownerType}${suffix}` }));
       fireEvent.click(screen.getByText('common.confirm'));
-      expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ ownerType: '' }));
+      expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ ownerType }));
     }
-  );
+    fireEvent.click(screen.getByText('common.reset'));
+    fireEvent.click(screen.getByText('common.confirm'));
+    expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ ownerType: '' }));
+  });
 
   it('does not submit stale ownership when the filter is hidden', () => {
     const onOk = jest.fn();
     render(
-      <ResourceFilter resourceType="SKILL" activeTab="enterprise"
-        defaultParam={getDefaultParams({ ownerType: 'personal' })} onOk={onOk} />
+      <ResourceFilter
+        resourceType="SKILL"
+        activeTab="enterprise"
+        defaultParam={getDefaultParams({ ownerType: 'personal' })}
+        onOk={onOk}
+      />
     );
     expect(screen.queryByRole('button', { name: 'resource.tag.personalSkill' })).toBeNull();
     fireEvent.click(screen.getByText('common.confirm'));
@@ -179,6 +184,57 @@ describe('available resource ownership filter', () => {
 });
 
 describe('external quick filter parameters', () => {
+  it.each(
+    ['TOOL', 'KG_DOC'].flatMap((resourceType) =>
+      ['personal', 'enterprise', 'favorites'].map((activeTab) => ({ resourceType, activeTab }))
+    )
+  )(
+    'preserves external business types on confirm and reset in $resourceType / $activeTab',
+    ({ resourceType, activeTab }) => {
+      const onOk = jest.fn();
+      render(
+        <ResourceFilter
+          resourceType={resourceType}
+          activeTab={activeTab}
+          hideStatusFilter
+          hidePermissionFilter
+          hideResourceBizTypeFilter
+          catalogOptions={[
+            { value: '', label: 'All categories' },
+            { value: 'sales', label: 'Sales' },
+          ]}
+          defaultParam={getDefaultParams({
+            catalogId: 'sales',
+            resourceBizTypeList: [resourceType === 'KG_DOC' ? 'KG_QA' : 'MCP'],
+          })}
+          onOk={onOk}
+        />
+      );
+
+      expect(screen.queryByText('resource.type')).toBeNull();
+      expect(screen.queryByText('resource.mcp')).toBeNull();
+      expect(screen.queryByText('resource.kgQa')).toBeNull();
+      fireEvent.click(screen.getByText('common.confirm'));
+      expect(onOk.mock.calls[0][0]).toEqual(expect.objectContaining({ catalogId: 'sales' }));
+      expect(onOk.mock.calls[0][0]).not.toHaveProperty('resourceBizTypeList');
+      fireEvent.click(screen.getByText('common.reset'));
+      fireEvent.click(screen.getByText('common.confirm'));
+      expect(onOk.mock.calls[1][0]).toEqual(expect.objectContaining({ catalogId: '' }));
+      expect(onOk.mock.calls[1][0]).not.toHaveProperty('resourceBizTypeList');
+    }
+  );
+
+  it.each([
+    ['TOOL', 'resource.mcp', 'MCP'],
+    ['KG_DOC', 'resource.kgQa', 'KG_QA'],
+  ])('retains business types for %s consumers without external filters', (resourceType, label, value) => {
+    const onOk = jest.fn();
+    render(<ResourceFilter resourceType={resourceType} defaultParam={getDefaultParams()} onOk={onOk} />);
+    fireEvent.click(screen.getByText(label));
+    fireEvent.click(screen.getByText('common.confirm'));
+    expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ resourceBizTypeList: [value] }));
+  });
+
   it('does not confirm or reset hidden ownership and permission conditions', () => {
     const onOk = jest.fn();
     render(

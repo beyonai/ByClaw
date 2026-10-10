@@ -4,6 +4,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.iwhalecloud.byai.gateway.route.RouteService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatInitializationDto;
 import com.iwhalecloud.byai.state.domain.session.dto.SessionMembersDto;
@@ -83,6 +84,9 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskChat
 public class ScriptService extends AbstractChatProcess {
 
     @Autowired
+    private TenantChatMirrorService tenantChatMirrorService;
+
+    @Autowired
     private ObjectProvider<ChatTurnPersistenceObserver> turnPersistenceObservers;
 
     @Autowired
@@ -158,6 +162,7 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void prepareParams(ChatProcessContext ctx) {
+        ctx.tenantContext = TenantRequestContextHolder.get();
         // 前端有传就使用前端，没有则在马上生成一个session
         ctx.sessionId = ctx.assistantChatDto.getSessionId();
 
@@ -271,7 +276,7 @@ public class ScriptService extends AbstractChatProcess {
             initEvent(ctx);
         }
 
-        // 多端广播：将 initialization 事件推送到用户的其他设备
+        // 后台群任务没有请求端连接，租户初始化也需通过所属租户的广播通道发送。
         if (!ctx.continueRunningTrace) {
             broadcastInitEvent(ctx);
         }
@@ -388,6 +393,10 @@ public class ScriptService extends AbstractChatProcess {
      * @param ctx
      */
     private void saveUserContent(ChatProcessContext ctx) {
+        if (ctx.tenantContext != null) {
+            tenantChatMirrorService.input(ctx);
+            return;
+        }
         if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType())) {
@@ -427,6 +436,10 @@ public class ScriptService extends AbstractChatProcess {
             userMsg.put("data", JSON.toJSON(ctx.askMsg));
             userMsg.put("clientRequestId", ctx.assistantChatDto.getClientRequestId());
             userMsg.put("agentId", ctx.assistantChatDto.getAgentId());
+            if (ctx.tenantContext != null) {
+                multiDeviceBroadcastService.broadcastTenantRawToUser(ctx.tenantContext, userMsg, ctx.senderChannel);
+                return;
+            }
             multiDeviceBroadcastService.broadcastRawToUser(ctx.userId, userMsg, ctx.senderChannel);
         }
         catch (Exception e) {
@@ -459,6 +472,26 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void storeMessage(ChatProcessContext ctx) {
+        if (ctx.tenantContext != null) {
+            if (!ctx.tryBeginPersist()) return;
+            try {
+                tenantChatMirrorService.terminal(ctx);
+            }
+            catch (RuntimeException error) {
+                ctx.messagePersisted.set(false);
+                throw error;
+            }
+            ChatResponse response = new ChatResponse();
+            response.setSessionId(ctx.sessionId);
+            response.setMessageId(ctx.modelAnswerMessageId);
+            response.setQueryMessageId(ctx.userMessageId);
+            ctx.chatResponse = response;
+            if (!ctx.gatewayError && !ctx.recoveryOnly && ctx.res != null) {
+                CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.appStreamResponse,
+                    JSON.toJSONString(response), ctx.sessionId);
+            }
+            return;
+        }
         if ((ctx.gatewayError || ctx.exception != null) && ctx.messageContext != null) {
             ctx.messageContext.setComplete(true);
         }
@@ -704,6 +737,16 @@ public class ScriptService extends AbstractChatProcess {
             dto.setMessageId(ctx.modelAnswerMessageId);
             dto.setQueryMessageId(ctx.userMessageId);
             dto.setMetadata(ctx.assistantChatDto.getMetadata());
+            dto.setTraceId(ctx.traceId);
+            if (ctx.tenantContext != null) {
+                JSONObject event = new JSONObject();
+                event.put("event_type", SseResponseEventEnum.initialization);
+                event.put("data", JSON.toJSONString(dto));
+                event.put("trace_id", ctx.traceId);
+                multiDeviceBroadcastService.broadcastTenantRawEvent(ctx.tenantContext, ctx.sessionId,
+                    event, ctx.senderChannel, ctx.clientRequestId);
+                return;
+            }
             multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
                 SseResponseEventEnum.initialization, JSON.toJSONString(dto), ctx.senderChannel);
         }
@@ -864,6 +907,13 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void handleException(ChatProcessContext ctx) {
+        if (ctx != null && ctx.tenantContext != null) {
+            if (ctx.messageContext != null && ctx.userMessageId != null && ctx.modelAnswerMessageId != null) {
+                ctx.gatewayError = true;
+                storeMessage(ctx);
+            }
+            throw new BdpRuntimeException(ctx.exception.getMessage(), ctx.exception);
+        }
         try {
             saveExceptionRequiresNew(ctx);
             notifyTurnPersisted(ctx);
@@ -1224,6 +1274,7 @@ public class ScriptService extends AbstractChatProcess {
 
     @Override
     public void afterProcess(ChatProcessContext ctx) {
+        if (ctx.tenantContext != null) return;
         if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType())) {

@@ -23,8 +23,9 @@ import type { UploadFileRef } from './components/UploadFile';
 import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig';
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
-import { getLastMentionedDigitalEmployeeId } from './utils/mention';
+import { getLastMentionedDigitalEmployeeId, isEmployeeGroupChat } from './utils/mention';
 import { getInputResourceProject } from './utils/resourceProject';
+import { isUploadFileButtonVisible, isUploadFileCountExceeded, isUploadFileSizeExceeded } from './utils/fileUpload';
 import MentionPopover from './RichInput/mentionPopover';
 import { getResourcePopoverAdapter } from './RichInput/mentionPopover/resourcePopoverAdapter';
 
@@ -589,18 +590,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   checkCanUploadFile = () => {
-    const uploadFileConfig = this.getUploadFileConfig();
-
-    if (!uploadFileConfig) {
-      //  || !uploadFileConfig.allowedFileTypes.length
-      return true;
-    }
-
-    const { fileList } = this.state;
-    if (uploadFileConfig.maxFileCount > 0 && fileList && fileList.length >= uploadFileConfig.maxFileCount) {
-      return false;
-    }
-    return true;
+    // 显式关闭或当前附件已满时隐藏；删除附件后按实时数量恢复入口。
+    return isUploadFileButtonVisible(this.getUploadFileConfig(), this.state.fileList?.length || 0);
   };
 
   onCreateFile = (fileItem: IFile): boolean => {
@@ -612,12 +603,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       return false;
     }
     const uploadFileConfig = this.getUploadFileConfig();
-    if (uploadFileConfig?.maxFileSize) {
-      const maxFileSize = Number(uploadFileConfig.maxFileSize) * 1024 * 1024;
-      if (fileItem.file.size > maxFileSize) {
-        message.error(getIntl().formatMessage({ id: 'upload.fileSizeLimit' }, { size: uploadFileConfig.maxFileSize }));
-        return false;
-      }
+    if (isUploadFileSizeExceeded(uploadFileConfig, fileItem.file.size)) {
+      message.error(getIntl().formatMessage({ id: 'upload.fileSizeLimit' }, { size: uploadFileConfig?.maxFileSize }));
+      return false;
     }
 
     this.setState((prevState) => {
@@ -661,21 +649,13 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const uploadFileConfig = this.getUploadFileConfig();
     if (!uploadFileConfig) return true;
     const { fileList } = this.state;
-    if (
-      uploadFileConfig.maxFileCount > 0 &&
-      fileList &&
-      fileList.length + files.length > uploadFileConfig.maxFileCount
-    ) {
+    if (isUploadFileCountExceeded(uploadFileConfig, (fileList?.length || 0) + files.length)) {
       message.error(getIntl().formatMessage({ id: 'upload.maxFilesLimit' }, { count: uploadFileConfig.maxFileCount }));
       return false;
     }
-    if (uploadFileConfig.maxFileSize) {
-      const maxFileSize = Number(uploadFileConfig.maxFileSize) * 1024 * 1024;
-      const invalidFiles = files.filter((file) => file.size > maxFileSize);
-      if (invalidFiles.length > 0) {
-        message.error(getIntl().formatMessage({ id: 'upload.fileSizeLimit' }, { size: uploadFileConfig.maxFileSize }));
-        return false;
-      }
+    if (files.some((file) => isUploadFileSizeExceeded(uploadFileConfig, file.size))) {
+      message.error(getIntl().formatMessage({ id: 'upload.fileSizeLimit' }, { size: uploadFileConfig.maxFileSize }));
+      return false;
     }
     return true;
   };
@@ -855,6 +835,14 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           agentId={this.getQuoteAgentId()}
           resourceAgentIds={this.getResourceAgentIds()}
           excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
+          hideEmployeeResources={isEmployeeGroupChat({
+            resourceList: this.getCurrentResourceList(),
+            agentId: this.props.globalContext.agentId,
+            agentType: this.props.myAgentType,
+            agentInfo: this.props.globalContext.agentInfo,
+            employeesList: this.props.employeesList,
+            defaultDigEmployeeId: this.props.defaultDigEmployeeId || (this.props.userInfo as any)?.defaultDigEmployeeId,
+          })}
           inputText={this.state.toolsPopoverKeyword}
           activeTabKey={this.state.activeToolMenuKey}
           {...getResourcePopoverAdapter({

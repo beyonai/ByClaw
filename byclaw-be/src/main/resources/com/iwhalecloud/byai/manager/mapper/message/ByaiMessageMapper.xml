@@ -291,6 +291,37 @@
         LIMIT #{limit}
     </select>
 
+    <!-- 附件在应用层复用时间线投影，避免损坏的历史 JSON 阻断整页。
+         游标时间直接在数据库读取，保留时间戳精度；撤回游标消息仍可定位更早的消息。 -->
+    <select id="selectGroupFileMessagePage" resultMap="BaseResultMap">
+        SELECT message.message_id, message.session_id, message.create_time,
+               message.related_resources, message.metadata
+        FROM byai_message message
+        <if test="beforeMessageId != null">
+            JOIN byai_message boundary ON boundary.session_id = message.session_id
+              AND boundary.message_id = #{beforeMessageId}
+        </if>
+        WHERE message.session_id = #{sessionId}
+          AND message.archived_at IS NULL
+          AND message.recalled_at IS NULL
+          AND message."usage" IN (1, 2)
+          AND (NULLIF(TRIM(message.related_resources), '') IS NOT NULL
+               OR NULLIF(TRIM(message.metadata), '') IS NOT NULL)
+        <if test="beforeMessageId != null">
+          AND (
+            (message.create_time, message.message_id)
+            <choose><when test="includeCursor">&lt;=</when><otherwise>&lt;</otherwise></choose>
+            (boundary.create_time, boundary.message_id)
+            OR (message.create_time IS NULL AND (
+                boundary.create_time IS NOT NULL OR message.message_id
+                <choose><when test="includeCursor">&lt;=</when><otherwise>&lt;</otherwise></choose>
+                boundary.message_id))
+          )
+        </if>
+        ORDER BY message.create_time DESC NULLS LAST, message.message_id DESC
+        LIMIT #{limit}
+    </select>
+
     <select id="searchVisibleGroupMessages" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM byai_message message

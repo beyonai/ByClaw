@@ -3,7 +3,6 @@ import {
   previewPublication,
   listPublications,
   publicationAction,
-  publicationStatus,
   publicationUrl,
   type Publication,
 } from '@/service/employeePublication';
@@ -18,7 +17,7 @@ import {
   ReloadOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
-import { useNavigate } from '@umijs/max';
+import { useIntl, useNavigate } from '@umijs/max';
 import { Alert, Button, Empty, Segmented, Space, Table, Tag, Typography, message } from 'antd';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import dayjs from 'dayjs';
@@ -35,33 +34,29 @@ const statusAppearance = {
   WITHDRAWN: { color: 'default', icon: <MinusCircleOutlined /> },
   FAILED: { color: 'error', icon: <ExclamationCircleOutlined /> },
 };
-const statusDescription: Record<string, string> = {
-  DRAFT: '配置尚未提交，提交后进入发布流程。',
-  PENDING: '等待审核，可进入详情查看待发布配置。',
-  APPLYING: '正在发布官方副本，请稍后刷新查看结果。',
-  PUBLISHED: '本次申请已发布到官方推荐。',
-  REJECTED: '审核未通过，请查看详情了解审核结果。',
-  WITHDRAWN: '申请已撤回。',
-  FAILED: '发布未完成，请查看详情确认失败原因。',
-};
 const formatTime = (value?: string) =>
   value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—';
-const reviewPlaceholder: Record<string, string> = { DRAFT: '尚未提交审核', PENDING: '等待管理员审核' };
-const detailLabel = (row: Publication, review: boolean, administrator?: boolean) => {
-  if (row.status === 'DRAFT' && !review) return '继续编辑';
-  if (['REJECTED', 'WITHDRAWN', 'PUBLISHED'].includes(row.status)) return '查看结果';
-  if (row.status === 'PENDING' && administrator && row.canReview) return '查看 / 编辑';
-  return '查看详情';
-};
 
 function PublicationNote({ text, error = false }: { text: string; error?: boolean }) {
+  const intl = useIntl();
   return (
     <div className={styles.noteBlock}>
-      <span className={error ? styles.errorLabel : styles.secondary}>{error ? '失败原因' : '审核意见'}</span>
+      <span className={error ? styles.errorLabel : styles.secondary}>
+        {error
+          ? intl.formatMessage({ id: 'employeePublication.audit.failureReason' })
+          : intl.formatMessage({ id: 'employeePublication.audit.reviewComment' })}
+      </span>
       <Typography.Paragraph
         className={styles.note}
         type={error ? 'danger' : undefined}
-        ellipsis={{ rows: 2, expandable: 'collapsible', symbol: (expanded) => (expanded ? '收起' : '展开') }}
+        ellipsis={{
+          rows: 2,
+          expandable: 'collapsible',
+          symbol: (expanded) =>
+            expanded
+              ? intl.formatMessage({ id: 'employeePublication.collapse' })
+              : intl.formatMessage({ id: 'employeePublication.expand' }),
+        }}
       >
         {text}
       </Typography.Paragraph>
@@ -81,6 +76,30 @@ function EnabledPublicationAuditList({
   initialReview = false,
   toolbarExtra,
 }: PublicationAuditListProps & { capabilities: { administrator: boolean } }) {
+  const intl = useIntl();
+  // 状态说明按当前语言生成，切换语言时不沿用模块初始化时的文案。
+  const statusDescription: Record<string, string> = {
+    DRAFT: intl.formatMessage({ id: 'employeePublication.audit.draftDescription' }),
+    PENDING: intl.formatMessage({ id: 'employeePublication.audit.pendingDescription' }),
+    APPLYING: intl.formatMessage({ id: 'employeePublication.audit.applyingDescription' }),
+    REJECTED: intl.formatMessage({ id: 'employeePublication.audit.rejectedDescription' }),
+    WITHDRAWN: intl.formatMessage({ id: 'employeePublication.audit.withdrawnDescription' }),
+    FAILED: intl.formatMessage({ id: 'employeePublication.audit.failedDescription' }),
+  };
+  const reviewPlaceholder: Record<string, string> = {
+    DRAFT: intl.formatMessage({ id: 'employeePublication.audit.notSubmitted' }),
+    PENDING: intl.formatMessage({ id: 'employeePublication.audit.awaitingReview' }),
+  };
+  const detailLabel = (row: Publication, review: boolean, administrator?: boolean) => {
+    if (row.status === 'DRAFT' && !review)
+      return intl.formatMessage({ id: 'employeePublication.audit.continueEditing' });
+    if (['REJECTED', 'WITHDRAWN', 'PUBLISHED'].includes(row.status))
+      return intl.formatMessage({ id: 'employeePublication.audit.viewResult' });
+    if (row.status === 'PENDING' && administrator && row.canReview)
+      return intl.formatMessage({ id: 'employeePublication.audit.viewOrEdit' });
+    return intl.formatMessage({ id: 'employeePublication.audit.viewDetails' });
+  };
+
   const navigate = useNavigate();
   const [review, setReview] = useState(initialReview && capabilities.administrator);
   const [page, setPage] = useState(1);
@@ -105,11 +124,11 @@ function EnabledPublicationAuditList({
       if (sequence !== loadSequence.current) return;
       setRows([]);
       setTotal(0);
-      setLoadError(publicationErrorMessage(error, '请稍后重试'));
+      setLoadError(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.retryLater' })));
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [review, page]);
+  }, [intl, review, page]);
   useEffect(() => {
     load();
     return () => {
@@ -122,7 +141,7 @@ function EnabledPublicationAuditList({
       sessionStorage.setItem('EmployeeDetail_prevRoute', `${window.location.pathname}${window.location.search}`);
       navigate(publicationUrl(detail));
     } catch (error: any) {
-      message.error(publicationErrorMessage(error, '无法查看此申请'));
+      message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.cannotOpen' })));
     }
   };
   const approve = async (row: Publication) => {
@@ -140,13 +159,16 @@ function EnabledPublicationAuditList({
       if (decision !== 'publish') return;
       const result = await publicationAction('approve', current.publication);
       if (result.publication.status === 'PUBLISHED') {
-        message.success('审核通过，已发布到官方推荐');
+        message.success(intl.formatMessage({ id: 'employeePublication.approvedAndPublished' }));
         if (result.dependencies.some((dependency) => dependency.warning)) {
-          message.warning('部分关联资源可能不可用，请进入申请详情查看可用性提醒');
+          message.warning(intl.formatMessage({ id: 'employeePublication.resourceWarning' }));
         }
-      } else message.error(result.publication.publishError || '发布失败，请查看申请详情后重试');
+      } else
+        message.error(
+          result.publication.publishError || intl.formatMessage({ id: 'employeePublication.publishFailedRetry' })
+        );
     } catch (error: any) {
-      message.error(publicationErrorMessage(error, '审批失败，请刷新后重试'));
+      message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.approvalFailed' })));
     } finally {
       await load();
       // 员工发布审批完成后同步工作区和申请页签的待审角标。
@@ -169,30 +191,36 @@ function EnabledPublicationAuditList({
               setPage(1);
             }}
             options={[
-              { label: '我的发布申请', value: 'mine' },
-              ...(capabilities?.administrator ? [{ label: '发布审核及记录', value: 'review' }] : []),
+              { label: intl.formatMessage({ id: 'employeePublication.audit.mine' }), value: 'mine' },
+              ...(capabilities?.administrator
+                ? [{ label: intl.formatMessage({ id: 'employeePublication.audit.records' }), value: 'review' }]
+                : []),
             ]}
           />
         </div>
         <Space size="middle">
-          {!loading && !loadError && <span className={styles.secondary}>共 {total} 条申请</span>}
+          {!loading && !loadError && (
+            <span className={styles.secondary}>
+              {intl.formatMessage({ id: 'employeePublication.audit.total' }, { count: total })}
+            </span>
+          )}
           <Button icon={<ReloadOutlined />} loading={loading} disabled={!!approvingId} onClick={load}>
-            刷新
+            {intl.formatMessage({ id: 'employeePublication.refresh' })}
           </Button>
         </Space>
       </div>
       <div className={styles.description}>
         {review
-          ? '查看发布申请与处理记录。可直接通过并发布，也可进入详情查看或调整待审配置。'
-          : '跟踪我的申请进度与审核结果。被驳回后，可进入详情查看意见并修改后重新申请。'}
+          ? intl.formatMessage({ id: 'employeePublication.audit.reviewDescription' })
+          : intl.formatMessage({ id: 'employeePublication.audit.mineDescription' })}
       </div>
       {loadError ? (
         <Alert
           type="error"
           showIcon
-          message="发布申请加载失败"
+          message={intl.formatMessage({ id: 'employeePublication.audit.loadFailed' })}
           description={loadError}
-          action={<Button onClick={load}>重新加载</Button>}
+          action={<Button onClick={load}>{intl.formatMessage({ id: 'employeePublication.reload' })}</Button>}
         />
       ) : (
         <div className={styles.tableWrap}>
@@ -213,18 +241,22 @@ function EnabledPublicationAuditList({
             }}
             locale={{
               emptyText: loading ? (
-                '正在加载申请…'
+                intl.formatMessage({ id: 'employeePublication.audit.loading' })
               ) : (
                 <Empty
                   className={styles.empty}
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={review ? '暂无发布申请记录' : '你还没有发布申请，可从个人员工卡片发起发布'}
+                  description={
+                    review
+                      ? intl.formatMessage({ id: 'employeePublication.audit.emptyRecords' })
+                      : intl.formatMessage({ id: 'employeePublication.audit.emptyMine' })
+                  }
                 />
               ),
             }}
             columns={[
               {
-                title: '数字员工',
+                title: intl.formatMessage({ id: 'employeePublication.digitalEmployee' }),
                 dataIndex: 'employeeName',
                 width: 230,
                 render: (name, row) => (
@@ -236,57 +268,78 @@ function EnabledPublicationAuditList({
                       disabled={loading || !!approvingId}
                       onClick={() => open(row)}
                     >
-                      <span className={styles.employeeName}>{name || '未命名数字员工'}</span>
+                      <span className={styles.employeeName}>
+                        {name || intl.formatMessage({ id: 'employeePublication.audit.unnamed' })}
+                      </span>
                     </Button>
-                    <span className={styles.secondary}>创建者：{row.authorName || '—'}</span>
+                    <span className={styles.secondary}>
+                      {intl.formatMessage({ id: 'employeePublication.authorLabel' })}
+                      {row.authorName || '—'}
+                    </span>
                   </div>
                 ),
               },
               {
-                title: '发布状态',
+                title: intl.formatMessage({ id: 'employeePublication.audit.status' }),
                 dataIndex: 'status',
                 width: 110,
                 render: (status) => (
                   <Tag {...statusAppearance[status as keyof typeof statusAppearance]}>
-                    {publicationStatus[status] || status}
+                    {intl.formatMessage({ id: `employeePublication.status.${status}`, defaultMessage: status })}
                   </Tag>
                 ),
               },
               {
-                title: '审核信息',
+                title: intl.formatMessage({ id: 'employeePublication.audit.reviewInfo' }),
                 width: 185,
                 render: (_, row) => (
                   <div className={styles.reviewInfo}>
                     {row.reviewerName || row.reviewedAt ? (
                       <>
-                        <span>审核人：{row.reviewerName || '—'}</span>
-                        <span className={styles.secondary}>审核于 {formatTime(row.reviewedAt)}</span>
+                        <span>
+                          {intl.formatMessage({ id: 'employeePublication.reviewerLabel' })}
+                          {row.reviewerName || '—'}
+                        </span>
+                        <span className={styles.secondary}>
+                          {intl.formatMessage({ id: 'employeePublication.audit.reviewedAtLabel' })}
+                          {formatTime(row.reviewedAt)}
+                        </span>
                       </>
                     ) : (
                       <span className={styles.secondary}>
                         {row.requiresAdminVipReview && ['PENDING', 'FAILED'].includes(row.status)
-                          ? '等待超管 adminvip 审核'
-                          : reviewPlaceholder[row.status] || '暂无审核记录'}
+                          ? intl.formatMessage({ id: 'employeePublication.audit.awaitingAdminVip' })
+                          : reviewPlaceholder[row.status] ||
+                            intl.formatMessage({ id: 'employeePublication.audit.noReview' })}
                       </span>
                     )}
                   </div>
                 ),
               },
               {
-                title: '审核意见 / 发布说明',
+                title: intl.formatMessage({ id: 'employeePublication.audit.notes' }),
                 render: (_, row) => (
                   <div className={styles.notes}>
                     {row.publishError && <PublicationNote text={row.publishError} error />}
                     {row.comment && <PublicationNote text={row.comment} />}
                     {!row.publishError && !row.comment && (
-                      <span className={styles.secondary}>{statusDescription[row.status] || '—'}</span>
+                      <span className={styles.secondary}>
+                        {row.status === 'PUBLISHED'
+                          ? intl.formatMessage({ id: 'employeePublication.publishedDescription' })
+                          : statusDescription[row.status] || '—'}
+                      </span>
                     )}
                   </div>
                 ),
               },
-              { title: '最近更新', dataIndex: 'updatedAt', width: 165, render: (time) => formatTime(time) },
               {
-                title: '操作',
+                title: intl.formatMessage({ id: 'employeePublication.audit.updatedAt' }),
+                dataIndex: 'updatedAt',
+                width: 165,
+                render: (time) => formatTime(time),
+              },
+              {
+                title: intl.formatMessage({ id: 'employeePublication.actions' }),
                 width: 210,
                 fixed: 'right',
                 render: (_, row) => (
@@ -302,7 +355,9 @@ function EnabledPublicationAuditList({
                         disabled={loading || !!approvingId}
                         onClick={() => approve(row)}
                       >
-                        {['FAILED', 'APPLYING'].includes(row.status) ? '重试发布' : '通过并发布'}
+                        {['FAILED', 'APPLYING'].includes(row.status)
+                          ? intl.formatMessage({ id: 'employeePublication.retryPublish' })
+                          : intl.formatMessage({ id: 'employeePublication.approveAndPublish' })}
                       </Button>
                     )}
                   </Space>

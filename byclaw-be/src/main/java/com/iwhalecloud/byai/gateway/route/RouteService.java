@@ -76,6 +76,10 @@ import lombok.extern.slf4j.Slf4j;
 public class RouteService {
     @Autowired
     private ObjectProvider<ChatGatewayRequestDecorator> requestDecorators;
+    @Autowired
+    private ObjectProvider<com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService> groupCoordinationProvider;
+    @Autowired
+    private ObjectProvider<com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService> tenantGroupCoordinationProvider;
 
 
     private static final int SANDBOX_STARTUP_WAIT_ROUNDS = 5;
@@ -179,11 +183,29 @@ public class RouteService {
      * storeMessage / afterProcess，最终由 cleanupResources 关闭流。
      */
     public void route(ChatProcessContext ctx) throws Exception {
-        if (isIntegrationTypeInterface(ctx)) {
+        if (com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get() == null) {
+            var coordination = groupCoordinationProvider == null ? null : groupCoordinationProvider.getIfAvailable();
+            if (coordination != null) coordination.validateRequest(ctx.getAssistantChatDto());
+        }
+        else {
+            var coordination = tenantGroupCoordinationProvider == null ? null : tenantGroupCoordinationProvider.getIfAvailable();
+            if (coordination != null) coordination.validateRequest(ctx.getAssistantChatDto());
+        }
+        boolean interfaceIntegration = isIntegrationTypeInterface(ctx);
+        boolean a2aIntegration = isIntegrationTypeA2A(ctx);
+        Object groupScope = ctx.getAssistantChatDto() == null || ctx.getAssistantChatDto().getExtParams() == null
+            ? null : ctx.getAssistantChatDto().getExtParams().get("groupCoordination");
+        if ((interfaceIntegration || a2aIntegration) && groupScope instanceof Map<?, ?> scope
+            && "COORDINATED".equals(scope.get("mode"))
+            && String.valueOf(ctx.getAssistantChatDto().getAgentId()).equals(scope.get("coordinatorAgentId"))) {
+            throw new com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException(
+                "群组工作助手的当前执行渠道不支持团队调度，请配置支持团队协作的执行渠道", null);
+        }
+        if (interfaceIntegration) {
             interfaceRouteService.route(ctx);
             return;
         }
-        if (isIntegrationTypeA2A(ctx)) {
+        if (a2aIntegration) {
             a2aRouteService.route(ctx);
             return;
         }

@@ -38,17 +38,19 @@
   }
 }
 
-.myResourcesToolbar {
+.myResourcesTabActions {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
+  flex-shrink: 0;
+  gap: 12px;
+}
 
-  > :last-child {
-    margin-left: auto;
-  }
+.fileManagerContainer > .myResourcesFilters {
+  // 管理技能、知识、工具共用整行宽度，类型、归属和状态筛选沿整行分布。
+  width: 100%;
+  justify-content: space-between;
+  // 页签行已提供下方留白，筛选不再叠加间距；列表保留原有的 20px 顶部留白。
+  margin-bottom: 0;
 }
 
 .installedTabs {

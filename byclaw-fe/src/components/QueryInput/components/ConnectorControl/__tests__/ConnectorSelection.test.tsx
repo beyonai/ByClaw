@@ -3,6 +3,7 @@ import { useIntl } from '@umijs/max';
 import enUS from '@/locales/en-US';
 import zhCN from '@/locales/zh-CN';
 import { ConnectorSelection, type Connector } from '..';
+import { getConnectorIcon } from '../connectorIcons';
 
 jest.mock('@umijs/max', () => ({ useIntl: jest.fn() }));
 jest.mock('@/components/AntdIcon', () => () => null);
@@ -59,5 +60,27 @@ describe('ConnectorSelection localization', () => {
     expect(container).toBeEmptyDOMElement();
     rerender(<ConnectorSelection value={connectors} />);
     expect(screen.getByRole('button', { name: 'View connectors' })).toBeInTheDocument();
+  });
+
+  it('preserves distinct provider icons in the connected toolbar', () => {
+    setMessages(zhCN);
+    const mailConnectors: Connector[] = [
+      ['gmail-mail', 'Gmail'],
+      ['qq-mail', 'QQ 邮箱'],
+      ['netease-163-mail', '网易 163 邮箱'],
+    ].map<Connector>(([code, name]) => ({
+      id: code,
+      code,
+      name,
+      description: '',
+      authType: 'oauth',
+      icon: getConnectorIcon(code, name),
+      enableFlag: 'Y',
+    }));
+    render(<ConnectorSelection value={mailConnectors} />);
+
+    expect(screen.getByLabelText('Gmail').querySelector('svg[data-icon="gmail"]')).toBeInTheDocument();
+    expect(screen.getByLabelText('QQ 邮箱').querySelector('svg[data-icon="qq"]')).toBeInTheDocument();
+    expect(screen.getByLabelText('网易 163 邮箱').querySelector('svg[data-icon="netease-mail"]')).toBeInTheDocument();
   });
 });

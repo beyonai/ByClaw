@@ -33,6 +33,7 @@ import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistSe
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeBatchInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
@@ -48,6 +49,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetVo;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeBatchInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
@@ -66,6 +68,8 @@ import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.MessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -350,6 +354,22 @@ class DigitalEmployeeApplicationServiceTest {
         verify(ssResourceService, never()).update(any(SsResource.class));
     }
 
+    /** 个人员工只能发布企业副本，不能绕过后端按钮权限直接上下架。 */
+    @ParameterizedTest
+    @ValueSource(strings = {OwnerType.PERSONAL, OwnerType.PERSONAL_DEFAULT})
+    void personalEmployeeShelfWritesAreRejected(String ownerType) {
+        EmployeeIdDTO dto = new EmployeeIdDTO(); dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, ownerType, 1L);
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        assertThatThrownBy(() -> service.unShelfDigitalEmployee(dto)).isInstanceOf(BaseException.class);
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        assertThatThrownBy(() -> service.shelfDigitalEmployee(dto)).isInstanceOf(BaseException.class);
+        verify(ssResourceService, never()).update(any(SsResource.class));
+        verifyNoInteractions(robotChannelRegistryCoordinator, digitalEmployeeRuntimeRefreshService);
+    }
+
     @Test
     void unShelfDigitalEmployee_marksOnShelfResourceAsOffShelf() {
         EmployeeIdDTO dto = new EmployeeIdDTO();
@@ -383,6 +403,63 @@ class DigitalEmployeeApplicationServiceTest {
         assertThatThrownBy(() -> service.unShelfDigitalEmployee(dto))
             .isInstanceOf(BaseException.class)
             .hasMessage("digemployee.unshelf.status.invalid");
+        verify(ssResourceService, never()).update(any(SsResource.class));
+    }
+
+    /** 作者和有效管理授权用户均复用资源管理权限，不再被官方副本的额外角色判断拦截。 */
+    @ParameterizedTest
+    @ValueSource(longs = {1L, 2L})
+    void officialEmployeeShelfActions_allowCreatorOrExplicitManager(Long creatorId) {
+        DigitalEmployeeGovernanceService governance = mock(DigitalEmployeeGovernanceService.class);
+        ReflectionTestUtils.setField(service, "employeeGovernance", governance);
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, creatorId);
+        resource.setPublicationSourceId(199L);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        service.unShelfDigitalEmployee(dto);
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.OFF_SHELF.getNum());
+        service.shelfDigitalEmployee(dto);
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.ON_SHELF.getNum());
+        verify(authApplicationService, times(2)).hasResourceManagePermission(resource);
+        verify(ssResourceService, times(2)).update(resource);
+    }
+
+    @Test
+    void officialEmployeeShelfActions_rejectUserWithoutManagementPermission() {
+        ReflectionTestUtils.setField(service, "employeeGovernance", mock(DigitalEmployeeGovernanceService.class));
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 2L);
+        resource.setPublicationSourceId(199L);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.unShelfDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class).hasMessage("user.permission.nopermission");
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        assertThatThrownBy(() -> service.shelfDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class).hasMessage("user.permission.nopermission");
+        verify(ssResourceService, never()).update(any(SsResource.class));
+    }
+
+    @Test
+    void officialEmployeeDeletion_stillRequiresOfficialAdministrator() {
+        ReflectionTestUtils.setField(service, "employeeGovernance", mock(DigitalEmployeeGovernanceService.class));
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setPublicationSourceId(199L);
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.deleteDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class).hasMessage("user.permission.nopermission");
         verify(ssResourceService, never()).update(any(SsResource.class));
     }
 
@@ -673,6 +750,25 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(result.getList().get(0).getOwnerType()).isEqualTo(OwnerType.ENTERPRISE);
     }
 
+    /** 请求参数不能伪造或取消超管身份，企业列表放行只由当前会话决定。 */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void selectDigitalEmployeeByQo_overwritesAdminVipFlagFromSession(boolean adminVip) {
+        CurrentUserHolder.getLoginInfo().setUserCode(adminVip ? "adminvip" : "zhangsan");
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        qo.setType("ownerOrManager");
+        qo.setEnterpriseListAdminVip(!adminVip);
+        when(ssResExtDigEmployeeService.selectDigitalEmployeeByQo(any(DigitalEmployeeQo.class)))
+            .thenReturn(new PageInfo<>());
+
+        service.selectDigitalEmployeeByQo(qo);
+
+        ArgumentCaptor<DigitalEmployeeQo> captor = ArgumentCaptor.forClass(DigitalEmployeeQo.class);
+        verify(ssResExtDigEmployeeService).selectDigitalEmployeeByQo(captor.capture());
+        assertThat(captor.getValue().getEnterpriseListAdminVip()).isEqualTo(adminVip);
+        assertThat(captor.getValue().getType()).isEqualTo("ownerOrManager");
+    }
+
     @Test
     void queryEmployeeGroupMemberCandidates_usesDedicatedPagedQuery() {
         DigitalEmployeeQo qo = new DigitalEmployeeQo();
@@ -896,8 +992,131 @@ class DigitalEmployeeApplicationServiceTest {
         when(authApplicationService.hasResourceManagePermission(currentDefaultResource)).thenReturn(true);
         when(authApplicationService.hasResourceUsePermission(skillResource)).thenReturn(false);
 
-        assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto))
+            .isInstanceOf(BaseException.class).hasMessage("digemployee.skill.install.no.use.permission");
+        verify(authApplicationService).hasResourceUsePermission(skillResource);
         verify(ssResourceRelDetailService, never()).findByResourceId(100L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "TOOL", "TOOLKIT", "MCP", "MCP_TOOL",
+        "AGENT", "OBJECT", "VIEW" })
+    void installDigitalEmployeeRelResources_rejectsNonSkillWithoutUsePermissionBeforeRelationMutation(
+        String resourceBizType) {
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(400L));
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource resource = new SsResource();
+        resource.setResourceId(400L);
+        resource.setResourceBizType(resourceBizType);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(100L)).thenReturn(employee);
+        when(ssResourceService.findByIdList(List.of(400L))).thenReturn(List.of(resource));
+        when(authApplicationService.hasResourceUsePermission(resource)).thenReturn(false);
+
+        // 可管理目标员工仍不能安装未授权资源，必须在写关联关系前拒绝。
+        assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto))
+            .isInstanceOf(BaseException.class).hasMessage("digemployee.resource.install.no.use.permission");
+        verify(authApplicationService).hasResourceInstallTargetManagePermission(employee);
+        verify(authApplicationService).hasResourceUsePermission(resource);
+        verifyNoInteractions(ssResourceRelDetailService, digitalEmployeeRuntimeRefreshService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "TOOL", "TOOLKIT", "MCP", "MCP_TOOL",
+        "AGENT", "OBJECT", "VIEW" })
+    void installDigitalEmployeeRelResources_installsAuthorizedNonSkillAndPreservesExistingRelations(
+        String resourceBizType) {
+        DigitalEmployeeApplicationService installService = snapshotServiceSpy();
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(400L));
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource resource = new SsResource();
+        resource.setResourceId(400L);
+        resource.setResourceBizType(resourceBizType);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        SsResourceRelDetail existing = new SsResourceRelDetail();
+        existing.setResourceRelDetailId(900L);
+        existing.setResourceId(100L);
+        existing.setRelResourceId(399L);
+        when(ssResourceService.findById(100L)).thenReturn(employee);
+        when(ssResourceService.findByIdList(List.of(400L))).thenReturn(List.of(resource));
+        when(authApplicationService.hasResourceUsePermission(resource)).thenReturn(true);
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(existing));
+        when(sequenceService.nextVal()).thenReturn(901L);
+        doReturn(new DigitalEmployeeDetailsDTO()).when(installService).findDetailsById(any(EmployeeIdDTO.class));
+
+        installService.installDigitalEmployeeRelResources(dto);
+
+        ArgumentCaptor<SsResourceRelDetail> inserted = ArgumentCaptor.forClass(SsResourceRelDetail.class);
+        verify(ssResourceRelDetailService).save(inserted.capture());
+        assertThat(inserted.getValue().getResourceId()).isEqualTo(100L);
+        assertThat(inserted.getValue().getRelResourceId()).isEqualTo(400L);
+        verify(ssResourceRelDetailService).updateById(existing);
+        verify(ssResourceRelDetailService, never()).removeById(any());
+        verify(authApplicationService).hasResourceUsePermission(resource);
+        verifySnapshotRefresh(installService, employee, 1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "KG_DOC", "MCP" })
+    void installDigitalEmployeeRelResources_rejectsMixedInstallWhenNonSkillHasNoUsePermission(String resourceBizType) {
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(300L, 400L));
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skill = buildSkillResource(300L, 2L);
+        SsResource resource = new SsResource();
+        resource.setResourceId(400L);
+        resource.setResourceBizType(resourceBizType);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
+        when(ssResourceService.findByIdList(List.of(300L, 400L))).thenReturn(List.of(skill, resource));
+        when(authApplicationService.hasResourceUsePermission(skill)).thenReturn(true);
+        when(authApplicationService.hasResourceUsePermission(resource)).thenReturn(false);
+
+        // 技能已授权不能放行同一请求中的未授权知识或工具，也不能留下部分安装关系。
+        assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto))
+            .isInstanceOf(BaseException.class).hasMessage("digemployee.resource.install.no.use.permission");
+        verify(authApplicationService).hasResourceUsePermission(skill);
+        verify(authApplicationService).hasResourceUsePermission(resource);
+        verifyNoInteractions(ssResourceRelDetailService, digitalEmployeeRuntimeRefreshService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "KG_DOC", "MCP" })
+    void batchInstallDigitalEmployeeRelResources_rejectsUnauthorizedResourceForEveryEmployee(String resourceBizType) {
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        TransactionStatus transactionStatus = mock(TransactionStatus.class);
+        when(transactionManager.getTransaction(any())).thenReturn(transactionStatus);
+        ReflectionTestUtils.setField(service, "transactionManager", transactionManager);
+        DigitalEmployeeBatchInstallResourceDTO dto = new DigitalEmployeeBatchInstallResourceDTO();
+        dto.setDigitalEmployeeIds(List.of(100L, 200L));
+        dto.setRelIds(List.of(400L));
+        SsResource firstEmployee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource secondEmployee = buildDigitalEmployee(200L, OwnerType.PERSONAL, 1L);
+        SsResource resource = new SsResource();
+        resource.setResourceId(400L);
+        resource.setResourceBizType(resourceBizType);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(100L)).thenReturn(firstEmployee);
+        when(ssResourceService.findById(200L)).thenReturn(secondEmployee);
+        when(ssResourceService.findByIdList(List.of(400L))).thenReturn(List.of(resource));
+        when(authApplicationService.hasResourceUsePermission(resource)).thenReturn(false);
+
+        DigitalEmployeeBatchInstallResultVo result = service.batchInstallDigitalEmployeeRelResources(dto);
+
+        assertThat(result.getSuccessCount()).isZero();
+        assertThat(result.getFailureCount()).isEqualTo(2);
+        assertThat(result.getResults()).extracting(DigitalEmployeeBatchInstallResultVo.Item::getMessage)
+            .containsExactly("digemployee.resource.install.no.use.permission",
+                "digemployee.resource.install.no.use.permission");
+        verify(authApplicationService, times(2)).hasResourceUsePermission(resource);
+        verify(transactionManager, times(2)).rollback(transactionStatus);
+        verify(transactionManager, never()).commit(any());
+        verifyNoInteractions(ssResourceRelDetailService, digitalEmployeeRuntimeRefreshService);
     }
 
     @Test
@@ -939,6 +1158,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto)).isInstanceOf(BaseException.class);
         verify(authApplicationService).hasResourceInstallTargetManagePermission(boundDefaultEmployee);
+        verify(authApplicationService, never()).hasResourceUsePermission(resource);
         verify(ssResourceRelDetailService, never()).findByResourceId(100L);
     }
 
@@ -1296,6 +1516,7 @@ class DigitalEmployeeApplicationServiceTest {
         when(ssResourceService.findByIdList(List.of(301L, 401L))).thenReturn(List.of(skill, object));
         when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(authApplicationService.hasResourceUsePermission(skill)).thenReturn(true);
+        when(authApplicationService.hasResourceUsePermission(object)).thenReturn(true);
         when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(skillRelation, objectRelation));
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
             .thenReturn(List.of(skillRelation));
@@ -1364,6 +1585,7 @@ class DigitalEmployeeApplicationServiceTest {
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
         when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
         when(authApplicationService.hasResourceUsePermission(skill)).thenReturn(true);
+        when(authApplicationService.hasResourceUsePermission(object)).thenReturn(true);
         when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of());
         when(sequenceService.nextVal()).thenReturn(901L, 902L);
         when(ssResourceRelDetailService.save(any())).thenAnswer(invocation -> {
@@ -1986,7 +2208,7 @@ class DigitalEmployeeApplicationServiceTest {
         personal.setPublicationSourceId(90L); personal.setPublicationRequestId(1000L);
         var publications = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
         var governance = new DigitalEmployeeGovernanceService(userService,
-            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class), publications);
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class), publications, ssResExtDigEmployeeService);
         ReflectionTestUtils.setField(updateService, "employeeGovernance", governance);
         prepareFullUpdate(personal, List.of(), List.of());
         updateService.updateDigitalEmployee(dto);
@@ -1996,6 +2218,20 @@ class DigitalEmployeeApplicationServiceTest {
         verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, dto);
         verify(digitalEmployeeRuntimeRefreshService, never()).scheduleDigitalEmployeeUpdateRefreshAfterCommit(eq(90L), any());
         verifyNoInteractions(publications);
+    }
+
+    @Test
+    void changingPersonalEmployeeOwnershipRequiresTheEnterprisePublicationWorkflow() {
+        DigitalEmployeeApplicationService updateService = updateServiceSpy();
+        DigitalEmployeeDTO dto = updateDto();
+        dto.setOwnerType(OwnerType.ENTERPRISE);
+        SsResource personal = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        prepareFullUpdate(personal, List.of(), List.of());
+
+        // 普通保存不能转换归属，提示应复用企业发布的国际化消息。
+        assertThatThrownBy(() -> updateService.updateDigitalEmployee(dto))
+            .hasMessage("employee.publication.owner.change.forbidden");
+        verify(ssResourceService, never()).updateResourceEntity(any());
     }
 
     @Test

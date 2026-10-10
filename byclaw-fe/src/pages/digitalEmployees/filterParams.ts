@@ -7,8 +7,12 @@ export const buildDigitalEmployeeFilterParam = (
   source: 'official' | 'available' | 'favorites' = 'available'
 ) => {
   const permission = filterParam?.permission;
-  // 企业推荐移除类型筛选后忽略旧值，避免隐藏条件继续限制首屏、搜索和分页查询。
-  const employeeType = source === 'official' ? undefined : filterParam?.digitalEmployeeType;
+  // 企业推荐只接受可见的企业类型，避免个人类型旧值改变推荐列表的查询范围。
+  const selectedEmployeeType = filterParam?.digitalEmployeeType;
+  const employeeType =
+    source === 'official' && !['ENTERPRISE_EMPLOYEE', 'ENTERPRISE_GROUP'].includes(selectedEmployeeType || '')
+      ? undefined
+      : selectedEmployeeType;
   const discoverSource = source !== 'available';
   let type: string | undefined;
   if (source === 'available') {
@@ -21,14 +25,14 @@ export const buildDigitalEmployeeFilterParam = (
 
   const employeeTypeParams = employeeType
     ? {
-        ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
-        // 收藏使用 discover 的类型参数，可用列表使用 excludeEmployeeGroup 排除员工组。
-        ...(employeeType.includes('GROUP')
-          ? { agentType: '017' }
-          : discoverSource
+      ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
+      // 收藏使用 discover 的类型参数，可用列表使用 excludeEmployeeGroup 排除员工组。
+      ...(employeeType.includes('GROUP')
+        ? { agentType: '017' }
+        : discoverSource
           ? { includeEmployeeGroup: false }
           : { excludeEmployeeGroup: true }),
-      }
+    }
     : {};
 
   return {
@@ -36,8 +40,8 @@ export const buildDigitalEmployeeFilterParam = (
     ...(discoverSource
       ? { resourceStatus: '2', excludeDeleted: true }
       : filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
-      ? { resourceStatus: filterParam.resourceStatus }
-      : {}),
+        ? { resourceStatus: filterParam.resourceStatus }
+        : {}),
     // 我可用接口使用 type=owner/authorize；企业推荐和收藏使用通用 permission 枚举。
     ...(discoverSource && permission ? { permission } : {}),
     ...(type ? { type } : {}),

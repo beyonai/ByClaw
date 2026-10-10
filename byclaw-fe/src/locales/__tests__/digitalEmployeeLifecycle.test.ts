@@ -27,9 +27,10 @@ describe('digital employee lifecycle messages', () => {
   });
 });
 
-// 创建菜单沿用员工称谓，与员工组入口保持一致。
+// 创建按钮使用简短文案，菜单选项保留员工称谓以区分创建类型。
 describe('digital employee creation messages', () => {
   it.each([
+    ['digitalEmployees.create', '创建', 'Create'],
     ['digitalEmployees.createPersonal', '创建个人员工', 'Create personal employee'],
     ['digitalEmployees.createEnterprise', '创建企业员工', 'Create enterprise employee'],
   ])('uses concise employee wording for %s', (id, label, english) => {

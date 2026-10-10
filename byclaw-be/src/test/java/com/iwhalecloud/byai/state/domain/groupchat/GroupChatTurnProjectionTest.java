@@ -155,7 +155,7 @@ class GroupChatTurnProjectionTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"NORMAL", "CHAT_CONTINUATION"})
-    void chatAndCompletedTaskContinuationDispatchPublicAnswerMentions(String phase) {
+    void chatAndCompletedTaskContinuationMentionsRemainDisplayOnly(String phase) {
         turn.setPhase(phase);
         turn.setDisposition("CHAT");
         ResourceVo agent = new ResourceVo();
@@ -167,7 +167,8 @@ class GroupChatTurnProjectionTest {
 
         handler.afterPersisted(context);
 
-        verify(coordinator).enqueueChild(turn, 40L, 90L, 90L, "{{DIG_EMPLOYEE_40}}", List.of(agent));
+        verifyNoInteractions(coordinator);
+        verify(turns).markSucceeded(eq(10L), eq(90L), any());
         verifyNoInteractions(tasks);
     }
 

@@ -270,6 +270,7 @@ public class GroupChatContextService {
                     && String.valueOf(currentUserId).equals(String.valueOf(resource.getResourceId())))
                 && messageAcks.stream().noneMatch(ack -> currentUserId.equals(ack.getUserId())));
             message.setClientRequestId(toClientRequestId(source.getMetadata()));
+            message.setGroupCoordination(toCoordination(source.getMetadata()));
             message.setTaskId(toMetadataString(source.getMetadata(), "taskId"));
             message.setUsage(source.getUsage());
             message.setKind(Integer.valueOf(5).equals(source.getUsage()) ? "SYSTEM_EVENT"
@@ -398,6 +399,16 @@ public class GroupChatContextService {
 
     private String toClientRequestId(String metadata) {
         return toMetadataString(metadata, "clientRequestId");
+    }
+
+    private Map<String, Object> toCoordination(String metadata) {
+        try {
+            JSONObject object = JSON.parseObject(metadata);
+            return object == null ? null : object.getJSONObject("groupCoordination");
+        }
+        catch (RuntimeException ignored) {
+            return null;
+        }
     }
 
     private String toMetadataString(String metadata, String key) {
@@ -596,6 +607,7 @@ public class GroupChatContextService {
                 GroupChatContextResponse.Attachment attachment = new GroupChatContextResponse.Attachment();
                 attachment.setFileId(file.getFileId());
                 attachment.setFileName(file.getFileName());
+                attachment.setFilePath(file.getFilePath());
                 attachment.setFileUrl(file.getFileUrl());
                 if (StringUtils.isNotBlank(file.getFileType())) {
                     attachment.setMediaType(file.getFileType());

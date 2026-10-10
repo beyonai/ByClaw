@@ -13,6 +13,7 @@ public class SandboxServiceSpecEntity {
 
     @TableId("service_key")
     private String serviceKey;
+    private String ownerScope;
     private String specJson;
     private String templateJson;
     private String serviceType;

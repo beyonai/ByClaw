@@ -66,4 +66,7 @@ public class Project {
     private Date updateTime;
 
     private String deleteFlag;
+
+    /** 企业 ID */
+    private Long enterpriseId;
 }

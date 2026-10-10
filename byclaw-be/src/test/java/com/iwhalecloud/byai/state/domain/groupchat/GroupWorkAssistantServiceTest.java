@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupWorkAssistan
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupWorkAssistantResponse;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -55,6 +56,15 @@ class GroupWorkAssistantServiceTest {
         when(config.getDcSystemConfigValueByCode(GroupWorkAssistantService.NAME_CONFIG)).thenReturn("  ");
         when(mapper.findCandidates("群组工作助手")).thenReturn(List.of(30L));
         assertThat(service.getDefaultAssistants()).hasSize(1);
+    }
+
+    @Test
+    void coordinatorResolutionRequiresExactlyOnePublishedDefault() {
+        assertThatThrownBy(service::resolveDefaultCoordinatorId).hasMessageContaining("exactly one");
+        when(mapper.findCandidates("群组工作助手")).thenReturn(List.of(30L));
+        assertThat(service.resolveDefaultCoordinatorId()).isEqualTo(30L);
+        when(mapper.findCandidates("群组工作助手")).thenReturn(List.of(30L, 31L));
+        assertThatThrownBy(service::resolveDefaultCoordinatorId).hasMessageContaining("exactly one");
     }
 
     @Test

@@ -2,6 +2,13 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { previewPublication, publicationAction, saveOfficialUpdateDraft } from '@/service/employeePublication';
 import useOfficialUpdate from './useOfficialUpdate';
 
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  getDvaApp: jest.fn(),
+  // 更新确认复用发布确认组件，同步提供该组件新增的国际化依赖。
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
+
 jest.mock('@/service/employeePublication', () => ({
   previewPublication: jest.fn(),
   publicationAction: jest.fn(),
@@ -23,6 +30,7 @@ function Editor() {
   );
 }
 beforeEach(() => {
+  mockLocale = 'zh-CN';
   jest.resetAllMocks();
   (saveOfficialUpdateDraft as jest.Mock).mockResolvedValue(draft);
   (previewPublication as jest.Mock).mockResolvedValue(draft);

@@ -33,6 +33,9 @@ interface Props {
   /** 打开资源面板时需要激活的分类。 */
   activeKey?: string;
 
+  /** 生效对象为员工组时，不提供单员工的技能、工具和知识引用入口。 */
+  hideEmployeeResources?: boolean;
+
   /** 分类自然高度，用于限制外层弹窗高度。 */
   onNavigationHeightChange?: (height: number) => void;
   onSelect: (item: any, type: any) => void;
@@ -48,6 +51,7 @@ const ResourceToolMenu: React.FC<Props> = ({
   excludedAgentIds,
   userInfo,
   activeKey: activeKeyProp,
+  hideEmployeeResources = false,
   onNavigationHeightChange,
   onSelect,
 }) => {
@@ -95,9 +99,10 @@ const ResourceToolMenu: React.FC<Props> = ({
   const [visitedKeys, setVisitedKeys] = useState<string[]>(['expert']);
   useEffect(() => {
     if (!activeKeyProp || HIDDEN_RESOURCE_MENU_KEYS.has(activeKeyProp)) return;
+    if (hideEmployeeResources && ['skill', 'tool', 'knowledge'].includes(activeKeyProp)) return;
     setActiveKey(activeKeyProp);
     setVisitedKeys((current) => (current.includes(activeKeyProp) ? current : [...current, activeKeyProp]));
-  }, [activeKeyProp]);
+  }, [activeKeyProp, hideEmployeeResources]);
   const tabs = [
     {
       key: 'expert',
@@ -144,15 +149,23 @@ const ResourceToolMenu: React.FC<Props> = ({
   ];
   const visibleTabs = tabs.filter(
     (tab) =>
-      !['processFile', 'projectCloud', 'file', 'dataSources', 'projectCode'].includes(tab.key) ||
-      visibleFileKeys.includes(tab.key)
+      (!hideEmployeeResources || !['skill', 'tool', 'knowledge'].includes(tab.key)) &&
+      (!['processFile', 'projectCloud', 'file', 'dataSources', 'projectCode'].includes(tab.key) ||
+        visibleFileKeys.includes(tab.key))
   );
   useEffect(() => {
-    // 已访问面板也必须随入口隐藏，不能继续展示或加载上一项目的数据。
+    // 对象或项目切换后，隐藏分类及已访问面板一起清理，避免继续展示或请求不适用的资源。
     const fileKeys = ['processFile', 'projectCloud', 'file', 'dataSources', 'projectCode'];
-    if (fileKeys.includes(activeKey) && !visibleFileKeys.includes(activeKey)) setActiveKey('expert');
-    setVisitedKeys((current) => current.filter((key) => !fileKeys.includes(key) || visibleFileKeys.includes(key)));
-  }, [activeKey, visibleFileKeys]);
+    const isVisible = (key: string) =>
+      (!hideEmployeeResources || !['skill', 'tool', 'knowledge'].includes(key)) &&
+      (!fileKeys.includes(key) || visibleFileKeys.includes(key));
+    if (!isVisible(activeKey)) setActiveKey('expert');
+    setVisitedKeys((current) => {
+      const next = current.filter(isVisible);
+      return next.length === current.length ? current : next;
+    });
+  }, [activeKey, visibleFileKeys, hideEmployeeResources]);
+  const visibleActiveKey = visibleTabs.some((tab) => tab.key === activeKey) ? activeKey : 'expert';
   const visibleVisitedKeys = visitedKeys.filter((key) => visibleTabs.some((tab) => tab.key === key));
   const selectTab = (key: string) => {
     setActiveKey(key);
@@ -273,7 +286,10 @@ const ResourceToolMenu: React.FC<Props> = ({
             <button
               type="button"
               key={tab.key}
-              className={classNames(styles.toolsMenuNavItem, activeKey === tab.key && styles.toolsMenuNavItemActive)}
+              className={classNames(
+                styles.toolsMenuNavItem,
+                visibleActiveKey === tab.key && styles.toolsMenuNavItemActive
+              )}
               onMouseEnter={() => selectTab(tab.key)}
               onFocus={() => selectTab(tab.key)}
               onClick={() => selectTab(tab.key)}
@@ -291,7 +307,7 @@ const ResourceToolMenu: React.FC<Props> = ({
             key={key}
             className={classNames(
               styles.toolsMenuPanelContent,
-              activeKey === key && styles.toolsMenuPanelContentActive
+              visibleActiveKey === key && styles.toolsMenuPanelContentActive
             )}
           >
             {renderContent(key)}

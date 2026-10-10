@@ -85,6 +85,65 @@ class SessionStreamEventRouterLiveDedupTest {
         return dataJson;
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false, HTTP_SSE", "false, WEBSOCKET", "true, HTTP_SSE", "true, WEBSOCKET"})
+    void tenantRootEventsReachTheEnterpriseChannelDuringBackgroundExecution(boolean runtimeEvent, ChatTransport chatTransport) {
+        var own = new io.netty.channel.embedded.EmbeddedChannel();
+        var personal = new io.netty.channel.embedded.EmbeddedChannel();
+        var foreign = new io.netty.channel.embedded.EmbeddedChannel();
+        foreign.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("12");
+        own.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("11");
+        var channels = mock(com.iwhalecloud.byai.state.domain.ws.manager.ChannelManager.class);
+        when(channels.getChannels(7L)).thenReturn(java.util.Set.of(own, personal, foreign));
+        var transport = new MultiDeviceBroadcastService(channels,
+            mock(org.springframework.data.redis.core.StringRedisTemplate.class),
+            mock(org.springframework.data.redis.listener.RedisMessageListenerContainer.class),
+            mock(ChatRuntimeInstance.class), "test");
+        ReflectionTestUtils.setField(router, "multiDeviceBroadcastService", transport);
+        var context = liveCtx("0-0");
+        context.userId = 7L;
+        context.tenantContext = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(7L, 11L, "MEMBER");
+        context.transport = chatTransport;
+        context.clientRequestId = "group-source-agent";
+        context.gatewayEventQueue = new java.util.concurrent.LinkedBlockingQueue<>();
+        when(gatewayStreamEventProcessor.normalizeEventType(any(), any())).thenReturn("answerDelta");
+        {
+            var redis = mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+            org.springframework.data.redis.core.ValueOperations<String, String> values = mock(org.springframework.data.redis.core.ValueOperations.class);
+            when(redis.opsForValue()).thenReturn(values);
+            when(values.get(anyString())).thenReturn("{\"userId\":7,\"enterpriseId\":11,\"role\":\"MEMBER\"}");
+            ReflectionTestUtils.setField(router, "tenantScopedSessionEventService", new TenantScopedSessionEventService(
+                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class), redis,
+                pythonSseService, gatewayStreamEventProcessor, mock(ScopedProjectionBroadcaster.class)));
+        }
+        if (runtimeEvent) {
+            var runtimes = mockField("sessionRuntimeStateService", SessionRuntimeStateService.class);
+            when(runtimes.isRuntimeEvent(any())).thenReturn(true);
+            var runtime = new com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState();
+            runtime.setSessionId(8011237409000004638L); runtime.setTraceId("trace-1");
+            when(runtimes.applyEvent(any(), any())).thenReturn(runtime);
+            mockField("sessionService", com.iwhalecloud.byai.state.domain.session.service.SessionService.class);
+        }
+        try {
+            JSONObject incremental = event("100-0", "answerDelta");
+            incremental.put("metadata", new JSONObject(Map.of("scene", "GROUP_TASK")));
+            assertThat(context.suppressUserEvents).isFalse();
+            assertThat(router.dispatch(incremental).shouldAcknowledge()).isTrue();
+            io.netty.handler.codec.http.websocketx.TextWebSocketFrame frame = own.readOutbound();
+            assertThat(frame).isNotNull();
+            try {
+                var payload = JSONObject.parseObject(frame.text());
+                assertThat(payload.getString("enterpriseId")).isEqualTo("11");
+                assertThat(payload.getString("type")).isEqualTo(runtimeEvent ? "SESSION_RUNTIME_STATUS" : "CHAT_STREAM");
+                if (!runtimeEvent) assertThat(payload.getString("event")).isEqualTo("answerDelta");
+                else assertThat(payload.getJSONObject("data").get("sessionId"))
+                    .isEqualTo("8011237409000004638");
+            } finally { frame.release(); }
+            assertThat((Object) personal.readOutbound()).isNull();
+            assertThat((Object) foreign.readOutbound()).isNull();
+        } finally { own.finishAndReleaseAll(); personal.finishAndReleaseAll(); foreign.finishAndReleaseAll(); }
+    }
+
     @Test
     void liveIncrementalReplayIsNotPushedTwice() {
         when(gatewayStreamEventProcessor.normalizeEventType(any(), any()))
@@ -96,6 +155,61 @@ class SessionStreamEventRouterLiveDedupTest {
         verify(pythonSseService, never()).getContentFromPythonStreamV3(anyString(), any(), any(), any(), any());
         assertThat(result.shouldAcknowledge()).isTrue();
         assertThat(result.isTerminal()).isFalse();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void scopeFreeTerminalReachesBrowserAndPersistenceForPersonalAndTenantChats(boolean tenantChat) {
+        var channel = new io.netty.channel.embedded.EmbeddedChannel();
+        var channels = mock(com.iwhalecloud.byai.state.domain.ws.manager.ChannelManager.class);
+        when(channels.getChannels(7L)).thenReturn(java.util.Set.of(channel));
+        ReflectionTestUtils.setField(router, "multiDeviceBroadcastService", new MultiDeviceBroadcastService(channels,
+            mock(org.springframework.data.redis.core.StringRedisTemplate.class),
+            mock(org.springframework.data.redis.listener.RedisMessageListenerContainer.class),
+            mock(ChatRuntimeInstance.class), "test"));
+        var redis = mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+        org.springframework.data.redis.core.ValueOperations<String, String> values =
+            mock(org.springframework.data.redis.core.ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        if (tenantChat) {
+            when(values.get(anyString())).thenReturn("{\"userId\":7,\"enterpriseId\":11,\"role\":\"MEMBER\"}");
+            channel.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("11");
+        }
+        ReflectionTestUtils.setField(router, "tenantScopedSessionEventService", new TenantScopedSessionEventService(
+            mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class), redis,
+            pythonSseService, gatewayStreamEventProcessor, mock(ScopedProjectionBroadcaster.class)));
+        var context = liveCtx("0-0");
+        context.userId = 7L;
+        if (tenantChat) context.tenantContext =
+            new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(7L, 11L, "MEMBER");
+        when(gatewayStreamEventProcessor.normalizeEventType(any(), any()))
+            .thenReturn(SseResponseEventEnum.appStreamResponse);
+        var terminal = event("101-0", SseResponseEventEnum.appStreamResponse);
+        terminal.put("metadata", new JSONObject());
+        var processor = new StreamRecordProcessor();
+        var script = mock(ScriptService.class);
+        ReflectionTestUtils.setField(processor, "sessionStreamEventRouter", router);
+        ReflectionTestUtils.setField(processor, "scriptService", script);
+        ReflectionTestUtils.setField(processor, "terminalPersistMarkerService", terminalPersistMarkerService);
+        when(script.persistAsyncGatewayContext(context)).thenReturn(true);
+        var record = MapRecord.create("session-stream", Map.of("data", terminal.toJSONString()))
+            .withId(RecordId.of("101-0"));
+        try {
+            assertThat(processor.process(record).shouldAcknowledge()).isTrue();
+            assertThat(context.messageContext.getComplete()).isTrue();
+            verify(script).persistAsyncGatewayContext(context);
+            verify(terminalPersistMarkerService).markPersisted(10L, "101-0");
+            io.netty.handler.codec.http.websocketx.TextWebSocketFrame frame = channel.readOutbound();
+            assertThat(frame).isNotNull();
+            try {
+                var payload = JSONObject.parseObject(frame.text());
+                assertThat(payload.getString("type")).isEqualTo("CHAT_STREAM");
+                assertThat(payload.getString("event")).isEqualTo(SseResponseEventEnum.appStreamResponse);
+            } finally { frame.release(); }
+        } finally {
+            processor.shutdown();
+            channel.finishAndReleaseAll();
+        }
     }
 
     @Test

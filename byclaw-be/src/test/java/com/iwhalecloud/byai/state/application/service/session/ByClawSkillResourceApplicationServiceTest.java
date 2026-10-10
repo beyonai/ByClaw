@@ -555,8 +555,8 @@ class ByClawSkillResourceApplicationServiceTest {
                 publicationResource(3001L, "KG_DOC", owner, "产品资料")));
 
         assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
-            .hasMessageContaining("个人工具「订单查询」（ID：2001）")
-            .hasMessageContaining("个人知识「产品资料」（ID：3001）");
+            .hasMessageContaining("个人工具「订单查询」（code：resource-2001，ID：2001，类型：MCP，归属：")
+            .hasMessageContaining("个人知识库「产品资料」（code：resource-3001，ID：3001，类型：KG_DOC，归属：");
         verifyPublicationRejectedBeforeWrites();
     }
 
@@ -571,7 +571,7 @@ class ByClawSkillResourceApplicationServiceTest {
             .thenReturn(List.of(publicationResource(2001L, "TOOL", "enterprise", "企业工具"),
                 publicationResource(3001L, "KG_DB", "personal", "个人数据")));
         assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
-            .hasMessageContaining("个人知识「个人数据」（ID：3001）")
+            .hasMessageContaining("个人知识库「个人数据」（code：resource-3001，ID：3001，类型：KG_DB，归属：personal）")
             .hasMessageNotContaining("企业工具");
         verifyPublicationRejectedBeforeWrites();
     }
@@ -590,7 +590,7 @@ class ByClawSkillResourceApplicationServiceTest {
             .thenReturn("missing".equals(scenario) ? List.of() : List.of(resource));
 
         assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
-            .hasMessageContaining("无法发布到官方推荐").hasMessageContaining("2001")
+            .hasMessageContaining("无法发布到企业").hasMessageContaining("2001")
             .satisfies(error -> {
                 if ("other-enterprise".equals(scenario)) {
                     assertThat(error.getMessage()).doesNotContain("依赖资源");
@@ -634,6 +634,7 @@ class ByClawSkillResourceApplicationServiceTest {
     private SsResource publicationResource(Long id, String type, String owner, String name) {
         SsResource resource = new SsResource();
         resource.setResourceId(id);
+        resource.setResourceCode("resource-" + id);
         resource.setResourceBizType(type);
         resource.setOwnerType(owner);
         resource.setResourceName(name);

@@ -6,6 +6,12 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.SessionCreate;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.SessionView;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.aimodel.AiPrompt;
 import jakarta.servlet.ServletOutputStream;
@@ -97,6 +103,9 @@ public class AssistantChatService {
     private ScriptService scriptService;
 
     @Autowired
+    private TenantNodeClient tenantNodeClient;
+
+    @Autowired
     private SessionService sessionService;
 
     @Autowired
@@ -143,6 +152,10 @@ public class AssistantChatService {
 
     @Autowired
     private ObjectProvider<GroupChatTaskChatGuard> groupChatTaskGuardProvider;
+    @Autowired
+    private ObjectProvider<com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService> groupCoordinationProvider;
+    @Autowired
+    private ObjectProvider<com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService> tenantGroupCoordinationProvider;
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
@@ -201,7 +214,9 @@ public class AssistantChatService {
             handleSessionLogic(outputStream, assistantChatDto);
 
             // 研发派发的会话在等承接人接单:命中确认词才把完整任务提示词换上去下发,不命中原样放行。
-            applyPendingTaskConfirm(assistantChatDto);
+            if (TenantRequestContextHolder.get() == null) {
+                applyPendingTaskConfirm(assistantChatDto);
+            }
 
             long time02 = System.currentTimeMillis();
             logger.info("chat time01:{}", time02 - time01);
@@ -209,14 +224,24 @@ public class AssistantChatService {
             if (assistantChatDto != null) {
                 assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
                 applyCallAcpAgentDelegation(assistantChatDto);
+                if (TenantRequestContextHolder.get() == null) {
+                    var coordination = groupCoordinationProvider == null ? null : groupCoordinationProvider.getIfAvailable();
+                    if (coordination != null) coordination.validateRequest(assistantChatDto);
+                }
+                else {
+                    var coordination = tenantGroupCoordinationProvider == null ? null : tenantGroupCoordinationProvider.getIfAvailable();
+                    if (coordination != null) coordination.validateRequest(assistantChatDto);
+                }
                 // 会话标识与最终 agentId 已确定：解析本轮实际模型并维护会话级覆盖键（写/删）。
-                sessionModelSelectionService.resolveSelection(assistantChatDto);
-                sessionModelSelectionService.applySessionOverride(assistantChatDto);
+                if (TenantRequestContextHolder.get() == null) {
+                    sessionModelSelectionService.resolveSelection(assistantChatDto);
+                    sessionModelSelectionService.applySessionOverride(assistantChatDto);
+                }
             }
 
             // 在解析实际执行 Agent 后校验接续权限，再原子占用任务 turn。
             GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
-            groupTaskTurnId = taskGuard != null && assistantChatDto != null
+            groupTaskTurnId = TenantRequestContextHolder.get() == null && taskGuard != null && assistantChatDto != null
                 ? taskGuard.beforeTurn(assistantChatDto.getSessionId(), assistantChatDto.getAgentId(),
                     assistantChatDto.getTraceId()) : null;
             assistantChatDto.setGroupTaskTurnId(groupTaskTurnId);
@@ -580,6 +605,21 @@ public class AssistantChatService {
     private void handleSessionLogic(OutputStream outputStream, AssistantChatDto assistantChatDto) {
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
 
+        TenantRequestContext tenant = TenantRequestContextHolder.get();
+        if (tenant != null) {
+            if (assistantChatDto.getSessionId() == null) {
+                SessionMembersDto session = createGroupChatSession(assistantChatDto);
+                CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.createSession,
+                    JSON.toJSONString(session));
+            }
+            else {
+                tenantNodeClient.request(tenant, "GET",
+                    "/internal/v1/sessions/" + assistantChatDto.getSessionId(), null,
+                    new TypeReference<SessionView>() { });
+            }
+            return;
+        }
+
         if (assistantChatDto.getSessionId() == null) {
             // sessionId为空时，维护群成员关系
             SessionMembersDto membersDto = createGroupChatSession(assistantChatDto);
@@ -620,6 +660,29 @@ public class AssistantChatService {
      * @param assistantChatDto 对话请求参数
      */
     public SessionMembersDto createGroupChatSession(AssistantChatDto assistantChatDto) {
+        TenantRequestContext tenant = TenantRequestContextHolder.get();
+        if (tenant != null) {
+            Long sessionId = sequenceService.nextVal();
+            String content = StringUtils.defaultString(assistantChatDto.getChatContent());
+            String title = StringUtils.substring(content, 0, 10);
+            tenantNodeClient.command(tenant, "POST", "/internal/v1/sessions", sessionId.toString(),
+                "CREATE_SESSION", new SessionCreate(title, "h_as",
+                    assistantChatDto.getAgentId() == null ? null : assistantChatDto.getAgentId().toString(),
+                    assistantChatDto.getProjectId() == null ? "-1" : assistantChatDto.getProjectId().toString()));
+            SessionMembersDto session = new SessionMembersDto();
+            session.setSessionId(sessionId);
+            session.setSessionName(title);
+            session.setSessionContent(content);
+            session.setSessionType(SessionType.H_AS.getCode());
+            session.setProjectId(assistantChatDto.getProjectId() == null ? -1L : assistantChatDto.getProjectId());
+            session.setCreatorId(tenant.userId());
+            session.setEnterpriseId(tenant.enterpriseId());
+            session.setCreateTime(new Date());
+            session.setUpdateTime(new Date());
+            assistantChatDto.setSessionId(sessionId);
+            assistantChatDto.setSession(session);
+            return session;
+        }
         logger.info("开始创建群聊会话 - 当前用户ID: {}, agentId: {}", CurrentUserHolder.getCurrentUserId(),
             assistantChatDto.getAgentId());
 
