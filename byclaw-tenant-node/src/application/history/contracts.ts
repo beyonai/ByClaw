@@ -23,7 +23,10 @@ export interface MessageFilter {
   endTime?: number;
 }
 export interface HistoryRepository {
-  groupProjectAccess(actor: string, projectId: string): Promise<{ bound: boolean; canRead: boolean }>;
+  groupProjectAccess(
+    actor: string,
+    projectId: string,
+  ): Promise<{ bound: boolean; canRead: boolean }>;
   groupNameExists(actor: string, name: string): Promise<boolean>;
   invitation(actor: string, token: string): Promise<Row>;
   publication(taskId: string): Promise<Row | null>;
@@ -37,6 +40,7 @@ export interface HistoryRepository {
   groups(actor: string, page: number, size: number): Promise<{ list: Row[]; total: number }>;
   tasks(sessionId: string): Promise<Row[]>;
   task(taskId: string): Promise<Row | null>;
+  candidate?(sessionId: string): Promise<Row | null>;
   pending(taskId: string): Promise<Row | null>;
   topics(sessionId: string, limit: number, boundary?: string[]): Promise<Row[]>;
   topic(sessionId: string, topicId: string): Promise<Row | null>;

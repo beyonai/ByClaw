@@ -167,6 +167,69 @@ class TenantGroupCoordinationServiceTest {
         assertThat(gateway.get("groupCoordinator")).isEqualTo(Map.of("id", "90", "name", "群组工作助手"));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {42L, 90L})
+    void singleMentionClassifiesBeforeApplyingTheTaskContract(long target) {
+        stored(scope("DIRECT"), Long.toString(target));
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
+            .thenReturn(Map.of("state", "GROUP_TASK_CANDIDATE", "groupCoordination", scope("DIRECT"),
+                "targetAgentId", Long.toString(target), "groupDispatch", candidate(target)));
+        when(resources.findById(90L)).thenReturn(coordinator());
+        AssistantChatDto request = request(target);
+        request.setExtParams(Map.of("tenantGroupCandidate", false, "groupDispatch", Map.of("dispatchId", "999")));
+
+        String result = service.decorate(executionContext(request), "hello", new HashMap<>()).toString();
+
+        assertThat(result).contains("TASK 还是 CHAT", "\"dispatchId\":\"70\"", "只有判定为 TASK 时才适用")
+            .doesNotContain("平台确定为 GROUP_TASK", "处理自己的任务", "\"dispatchId\":\"999\"");
+        assertThat(request.getExtParams()).containsEntry("tenantGroupCandidate", true)
+            .containsEntry("groupDispatch", candidate(target));
+    }
+
+    @Test
+    void candidateCannotSwitchAwayFromTheMentionedEmployee() {
+        stored(scope("DIRECT"), "42");
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
+            .thenReturn(Map.of("state", "GROUP_TASK_CANDIDATE", "groupCoordination", scope("DIRECT"),
+                "targetAgentId", "42", "groupDispatch", candidate(42)));
+        assertThatThrownBy(() -> service.validateRequest(request(43L))).isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void promotedTaskDoesNotReclassifyAndStillAllowsManualGroupSwitching() {
+        stored(scope("DIRECT"), "42");
+        Map<String, Object> dispatch = new HashMap<>(candidate(42));
+        dispatch.put("disposition", "TASK");
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
+            .thenReturn(Map.of("state", "GROUP_TASK", "groupCoordination", scope("DIRECT"),
+                "targetAgentId", "42", "groupDispatch", dispatch));
+        when(resources.findById(90L)).thenReturn(coordinator());
+        AssistantChatDto request = request(43L);
+        request.setExtParams(Map.of("tenantGroupCandidate", true));
+
+        String result = service.decorate(executionContext(request), "继续", new HashMap<>()).toString();
+
+        assertThat(request.getExtParams()).doesNotContainKey("tenantGroupCandidate");
+        assertThat(result).contains("task-delivery.json").doesNotContain("群聊判定协议");
+    }
+
+    @Test
+    void clientCannotTurnAnEstablishedTaskIntoACandidate() {
+        stored(scope("COORDINATED"), "90");
+        when(resources.findById(90L)).thenReturn(coordinator());
+        AssistantChatDto request = request(90L);
+        request.setExtParams(Map.of("tenantGroupCandidate", true, "groupDispatch", candidate(90)));
+        String result = service.decorate(executionContext(request), "hello", new HashMap<>()).toString();
+        assertThat(request.getExtParams()).doesNotContainKeys("tenantGroupCandidate", "groupDispatch");
+        assertThat(result).contains("平台确定为 GROUP_TASK").doesNotContain("群聊判定协议");
+    }
+
+    private Map<String, Object> candidate(long target) {
+        return Map.of("schemaVersion", "1", "dispatchId", "70", "candidateSessionId", "50", "groupSessionId", "30",
+            "sourceMessageId", "8000000010000000201", "initiatorUserId", "20", "targetAgentId", Long.toString(target),
+            "status", "RUNNING", "disposition", "UNKNOWN");
+    }
+
     @Test
     void publicationIntentUsesExistingPreparationToolWithoutPublishingAutomatically() {
         stored(scope("DIRECT"), "42");

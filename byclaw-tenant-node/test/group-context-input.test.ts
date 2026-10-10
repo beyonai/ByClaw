@@ -18,6 +18,8 @@ function setup(previous = false, task = true) {
     if (sql.includes("usage=1 LIMIT 1")) return previous ? [{ message_id: "100" }] : [];
     if (sql.includes("MAX(message_id)")) return [{ message_id: "8000000010000000200" }];
     if (sql.includes("RETURNING last_seq")) return [{ last_seq: "1" }];
+    if (sql.startsWith("UPDATE byai.byai_group_chat_task SET turn_status='RUNNING'"))
+      return [{ task_session_id: "30" }];
     if (sql.startsWith("INSERT INTO byai.byai_message ")) {
       const columns = sql.slice(sql.indexOf("(") + 1, sql.indexOf(")")).split(",");
       saved = Object.fromEntries(columns.map((column, index) => [column, parameters[index]]));

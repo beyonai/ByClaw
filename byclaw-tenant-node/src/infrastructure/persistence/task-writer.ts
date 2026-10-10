@@ -60,7 +60,12 @@ export async function claimTask(context: CommandContext): Promise<{ claimed: boo
     "UPDATE byai.byai_group_chat_task SET turn_status='RUNNING',update_time=CURRENT_TIMESTAMP WHERE task_session_id=$1 AND group_session_id=$2 AND initiator_user_id=$3 AND status='ACTIVE' AND turn_status='QUEUED' RETURNING task_session_id",
     [taskId, command.sessionId, command.userId],
   );
-  return { claimed: rows.length === 1 };
+  if (rows.length === 1) return { claimed: true };
+  const candidates = await db.query(
+    "UPDATE byai.byai_group_chat_execution SET status='RUNNING',start_time=CURRENT_TIMESTAMP,attempt=attempt+1 WHERE candidate_session_id=$1 AND group_session_id=$2 AND initiator_user_id=$3 AND status='QUEUED' AND disposition='UNKNOWN' RETURNING execution_id",
+    [taskId, command.sessionId, command.userId],
+  );
+  return { claimed: candidates.length === 1 };
 }
 /** 仅发起人可修改任务或待发布卡片；已结束任务不复活，PUBLISHED 只能通过发布命令产生。 */
 export async function changeTask(context: CommandContext): Promise<void> {
@@ -72,6 +77,14 @@ export async function changeTask(context: CommandContext): Promise<void> {
     "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 FOR UPDATE",
     [taskId, command.sessionId],
   );
+  if (!task && command.operation === "UPDATE_TASK" && p.turnStatus === "FAILED") {
+    const candidate = await first(
+      db,
+      "UPDATE byai.byai_group_chat_execution SET status='FAILED',finish_time=CURRENT_TIMESTAMP WHERE candidate_session_id=$1 AND group_session_id=$2 AND initiator_user_id=$3 AND status='RUNNING' RETURNING candidate_session_id",
+      [taskId, command.sessionId, command.userId],
+    );
+    if (candidate) return;
+  }
   if (!task || task.initiatorUserId !== command.userId)
     throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
   if (command.operation === "UPDATE_TASK") {

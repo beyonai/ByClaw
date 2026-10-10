@@ -70,7 +70,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
   );
   if (existing) {
     const tasks = await db.query(
-      "SELECT task_session_id,target_agent_id FROM byai.byai_group_chat_task WHERE group_session_id=$1 AND source_message_id=$2",
+      "SELECT task_session_id,target_agent_id,dispatch_id FROM byai.byai_group_chat_task WHERE group_session_id=$1 AND source_message_id=$2 UNION ALL SELECT candidate_session_id AS task_session_id,target_agent_id,execution_id AS dispatch_id FROM byai.byai_group_chat_execution e WHERE group_session_id=$1 AND source_message_id=$2 AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_task t WHERE t.task_session_id=e.candidate_session_id)",
       [command.sessionId, existing.messageId],
     );
     return {
@@ -82,6 +82,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
           return {
             taskSessionId,
             targetAgentId: String(task.target_agent_id ?? task.targetAgentId),
+            dispatchId: String(task.dispatch_id ?? task.dispatchId),
             ...(scope ? { groupCoordination: scope } : {}),
           };
         }),

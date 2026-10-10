@@ -2,6 +2,7 @@ import type { TenantCommand } from "../../application/command.js";
 import type { SqlRow, SqlSession } from "../../application/database-ports.js";
 import { DomainError } from "../../domain/errors.js";
 import { first, insert, nextId } from "./sql-utils.js";
+import { readGroupCandidate } from "./group-candidate.js";
 
 /** 命令事务内的资源与权限上下文；BE 已验租户成员，Node 再验会话归属和群内角色。 */
 export class CommandContext {
@@ -31,7 +32,7 @@ export class CommandContext {
       throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     }
     if (
-      session.state === "GROUP_CHAT_ROUTING" ||
+      ["GROUP_CHAT_ROUTING", "GROUP_CHAT_DISPATCH"].includes(session.state) ||
       (session.state === "CLOSED" && this.command.operation !== "DELETE_SESSION")
     )
       throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
@@ -50,6 +51,23 @@ export class CommandContext {
     } else {
       if (session.creatorId !== this.command.userId)
         throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+      const candidate = ["GROUP_TASK_CANDIDATE", "GROUP_TASK"].includes(session.state)
+        ? await readGroupCandidate(this.db, this.command.sessionId)
+        : null;
+      if (
+        session.state === "GROUP_TASK_CANDIDATE" &&
+        (!candidate || candidate.status !== "RUNNING")
+      )
+        throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+      if (candidate) {
+        const group = await first(
+          this.db,
+          "SELECT 1 FROM byai.byai_session s JOIN byai.byai_session_member m ON m.session_id=s.session_id WHERE s.session_id=$1 AND s.enterprise_id=$2 AND s.session_type='hs_as' AND COALESCE(s.state,'ACTIVE') NOT IN('GROUP_DISSOLVED','CLOSED') AND m.mem_obj_type='USER' AND m.mem_obj_id=$3 AND m.com_acct_id=$2",
+          [candidate.groupSessionId, this.command.enterpriseId, this.command.userId],
+        );
+        if (!group || candidate.initiatorUserId !== this.command.userId)
+          throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+      }
       const task = await first(
         this.db,
         "SELECT group_session_id,initiator_user_id FROM byai.byai_group_chat_task WHERE task_session_id=$1",

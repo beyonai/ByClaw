@@ -116,6 +116,10 @@ export async function groupSettings(context: CommandContext): Promise<Record<str
       "UPDATE byai.byai_session SET state='GROUP_DISSOLVED',update_time=CURRENT_TIMESTAMP WHERE session_id=$1 AND enterprise_id=$2",
       [command.sessionId, command.enterpriseId],
     );
+    await db.query(
+      "UPDATE byai.byai_group_chat_execution SET status='CANCELLED',finish_time=CURRENT_TIMESTAMP WHERE group_session_id=$1 AND status IN ('QUEUED','RUNNING')",
+      [command.sessionId],
+    );
     const tasks = (
       await db.query(
         "UPDATE byai.byai_group_chat_task SET status='CANCELLED',update_time=CURRENT_TIMESTAMP WHERE group_session_id=$1 AND status IN ('ACTIVE','CANCELLED') RETURNING *",

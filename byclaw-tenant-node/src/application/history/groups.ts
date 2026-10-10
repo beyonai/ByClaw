@@ -12,6 +12,42 @@ import {
 
 /** 群列表、详情、设置及任务读取；私有任务和待发布卡片仅向发起人开放。 */
 export class GroupHistory extends HistoryAccess {
+  /** BE can observe a dispatch after CHAT hides its execution session; task APIs stay task-only. */
+  async dispatch(actor: string, sessionId: string) {
+    requireId(sessionId);
+    const candidate = await this.repository.candidate?.(sessionId);
+    if (!candidate) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+    const session = await this.repository.session(sessionId);
+    if (!session || session.enterpriseId !== this.tenantId || session.creatorId !== actor)
+      throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+    await this.access(actor, candidate.groupSessionId, true);
+    if (candidate.initiatorUserId !== actor) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+    const task = candidate.disposition === "TASK" ? await this.repository.task(sessionId) : null;
+    const answer = candidate.answerMessageId
+      ? (await this.repository.messages({ ids: [String(candidate.answerMessageId)], limit: 1 }))[0]
+      : null;
+    return {
+      schemaVersion: "1",
+      dispatchId: candidate.executionId,
+      candidateSessionId: candidate.candidateSessionId,
+      groupSessionId: candidate.groupSessionId,
+      sourceMessageId: candidate.sourceMessageId,
+      initiatorUserId: candidate.initiatorUserId,
+      targetAgentId: candidate.targetAgentId,
+      status: candidate.status,
+      disposition: candidate.disposition,
+      taskName: candidate.taskName ?? null,
+      ackMessageId: candidate.ackMessageId ?? null,
+      publishMessageId: candidate.ackMessageId ?? null,
+      answerMessageId: candidate.answerMessageId ?? null,
+      answerLastSeq: String(answer?.lastMirrorEventSeq ?? "0"),
+      answerTerminal: answer?.isComplete === true,
+      traceId: candidate.traceId ?? null,
+      ...(task
+        ? { taskStatus: task.status, turnStatus: task.turnStatus, taskName: task.taskName }
+        : {}),
+    };
+  }
   // 云盘资源留在平台，项目绑定与真人成员关系必须在当前租户内一起核验。
   projectAccess(actor: string, projectId: string) {
     requireId(actor);

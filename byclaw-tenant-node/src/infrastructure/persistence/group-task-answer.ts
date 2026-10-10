@@ -5,6 +5,7 @@ import { nextSequence } from "./message-fields.js";
 import { indexGroupMessage } from "./group-message-index.js";
 import { readGroupCoordination } from "./group-coordination.js";
 import { DomainError } from "../../domain/errors.js";
+import { projectGroupCandidateAnswer } from "./group-candidate-answer.js";
 
 /** Project a completed private agent turn into its group, in the same tenant transaction. */
 export async function projectGroupTaskAnswer(
@@ -13,6 +14,7 @@ export async function projectGroupTaskAnswer(
   event: MirrorEnvelope,
   answer: AnswerState,
 ): Promise<void> {
+  if (await projectGroupCandidateAnswer(db, enterpriseId, event, answer)) return;
   const task = await first(
     db,
     "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 FOR UPDATE",

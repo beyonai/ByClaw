@@ -80,21 +80,35 @@ describe("tenant group message", () => {
     expect(insert![1]).toContain("hacu-request");
   });
 
-  it("creates a tenant task and private session for an agent mention", async () => {
+  it("creates only a private candidate execution for a single agent greeting", async () => {
     const { context, query } = setup({
       chatContent: "@助手 你好",
       resourceList: [{ resourceType: "DIG_EMPLOYEE", resourceId: "42" }],
     });
     expect(await sendGroupMessage(context)).toEqual({
       messageId: "8000000010000000101",
-      dispatches: [{ taskSessionId: "8000000010000000102", targetAgentId: "42" }],
+      dispatches: [
+        {
+          taskSessionId: "8000000010000000102",
+          targetAgentId: "42",
+          dispatchId: "8000000010000000103",
+        },
+      ],
     });
     expect(
       query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_session (")),
     ).toBe(true);
     expect(
       query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_group_chat_task")),
+    ).toBe(false);
+    expect(
+      query.mock.calls.some(([sql]) =>
+        sql.startsWith("INSERT INTO byai.byai_group_chat_execution"),
+      ),
     ).toBe(true);
+    expect(
+      query.mock.calls.find(([sql]) => sql.startsWith("INSERT INTO byai.byai_session ("))![1],
+    ).toContain("GROUP_TASK_CANDIDATE");
     expect(
       query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_session_ext")),
     ).toBe(true);
@@ -163,6 +177,38 @@ describe("tenant group message", () => {
       },
     });
   });
+  it("keeps a single mention of the coordinator as a candidate DIRECT execution", async () => {
+    const { context, query } = setup(
+      { chatContent: "hello", resourceList: [{ resourceType: "DIG_EMPLOYEE", resourceId: "90" }] },
+      "90",
+    );
+    const result = await sendGroupMessage(context);
+    expect(result.dispatches[0]).toMatchObject({
+      targetAgentId: "90",
+      groupCoordination: { mode: "DIRECT" },
+    });
+    expect(
+      query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_group_chat_task")),
+    ).toBe(false);
+  });
+  it("replays the persisted single-mention candidate without creating a task or new execution", async () => {
+    const { context, query } = setup({
+      chatContent: "hello",
+      resourceList: [{ resourceType: "DIG_EMPLOYEE", resourceId: "42" }],
+    });
+    const original = query.getMockImplementation()!;
+    query.mockImplementation(async (sql, parameters = []) => {
+      if (sql.includes("SELECT message_id FROM byai.byai_message")) return [{ message_id: "40" }];
+      if (sql.includes("SELECT task_session_id,target_agent_id"))
+        return [{ task_session_id: "50", target_agent_id: "42", dispatch_id: "60" }];
+      return original(sql, parameters);
+    });
+    expect(await sendGroupMessage(context)).toEqual({
+      messageId: "40",
+      dispatches: [{ taskSessionId: "50", targetAgentId: "42", dispatchId: "60" }],
+    });
+    expect(query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
+  });
 
   it("rejects multi-agent dispatch without a configured coordinator", async () => {
     const { context } = setup({
@@ -198,14 +244,16 @@ describe("tenant group message", () => {
     query.mockImplementation(async (sql, parameters = []) => {
       if (sql.includes("SELECT message_id FROM byai.byai_message")) return [{ message_id: "40" }];
       if (sql.includes("SELECT task_session_id,target_agent_id"))
-        return [{ task_session_id: "50", target_agent_id: "90" }];
+        return [{ task_session_id: "50", target_agent_id: "90", dispatch_id: "60" }];
       if (sql.includes("ext_param_code=$2") && parameters[1] === "group_coordination_scope")
         return [{ ext_param_value: JSON.stringify(scope) }];
       return original(sql, parameters);
     });
     expect(await sendGroupMessage(context)).toEqual({
       messageId: "40",
-      dispatches: [{ taskSessionId: "50", targetAgentId: "90", groupCoordination: scope }],
+      dispatches: [
+        { taskSessionId: "50", targetAgentId: "90", dispatchId: "60", groupCoordination: scope },
+      ],
     });
     expect(query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
   });

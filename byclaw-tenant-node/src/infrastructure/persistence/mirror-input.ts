@@ -6,6 +6,7 @@ import { DomainError } from "../../domain/errors.js";
 import { text } from "../../domain/values.js";
 import { first, insert } from "./sql-utils.js";
 import { nextSequence } from "./message-fields.js";
+import { readGroupCandidate } from "./group-candidate.js";
 /** 复用用户消息行保存 INPUT 身份与摘要，校验会话访问后同步更新群话题和提及索引。 */
 export class MirrorInputWriter {
   constructor(
@@ -43,7 +44,12 @@ export class MirrorInputWriter {
       "SELECT * FROM byai.byai_session WHERE session_id=$1 AND enterprise_id=$2",
       [event.sessionId, this.enterpriseId],
     );
-    if (!session || ["CLOSED", "GROUP_DISSOLVED", "GROUP_CHAT_ROUTING"].includes(session.state))
+    if (
+      !session ||
+      ["CLOSED", "GROUP_DISSOLVED", "GROUP_CHAT_ROUTING", "GROUP_CHAT_DISPATCH"].includes(
+        session.state,
+      )
+    )
       throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     if (session.sessionType === "hs_as") {
       const member = await first(
@@ -55,6 +61,22 @@ export class MirrorInputWriter {
     } else {
       if (session.creatorId !== event.payload.userId)
         throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+      const candidate = await readGroupCandidate(this.db, event.sessionId);
+      if (session.state === "GROUP_TASK_CANDIDATE") {
+        if (!candidate || candidate.status !== "RUNNING" || candidate.disposition !== "UNKNOWN")
+          throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+      }
+      if (candidate) {
+        const member = await first(
+          this.db,
+          "SELECT 1 FROM byai.byai_session s JOIN byai.byai_session_member m ON m.session_id=s.session_id WHERE s.session_id=$1 AND s.enterprise_id=$2 AND s.session_type='hs_as' AND COALESCE(s.state,'ACTIVE') NOT IN('GROUP_DISSOLVED','CLOSED') AND m.mem_obj_type='USER' AND m.mem_obj_id=$3 AND m.com_acct_id=$2",
+          [candidate.groupSessionId, this.enterpriseId, event.payload.userId],
+        );
+        if (!member || candidate.initiatorUserId !== event.payload.userId)
+          throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+        if (session.state === "GROUP_TASK_CANDIDATE" && candidate.traceId != null)
+          throw new DomainError("MIRROR_CONTEXT_MISMATCH");
+      }
       const task = await first(
         this.db,
         "SELECT group_session_id,initiator_user_id,status FROM byai.byai_group_chat_task WHERE task_session_id=$1",
@@ -77,13 +99,15 @@ export class MirrorInputWriter {
       clientRequestId: event.clientRequestId,
     };
     delete metadata.groupPublicContext;
+    const candidate = await readGroupCandidate(this.db, event.sessionId);
     const task = await first(
       this.db,
       "SELECT group_session_id,source_message_id,initiator_user_id FROM byai.byai_group_chat_task WHERE task_session_id=$1",
       [event.sessionId],
     );
-    if (task) {
-      if (task.initiatorUserId !== event.payload.userId)
+    const source = task ?? candidate;
+    if (source) {
+      if (source.initiatorUserId !== event.payload.userId)
         throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
       const previous = await first(
         this.db,
@@ -95,15 +119,31 @@ export class MirrorInputWriter {
         ? await first(
             this.db,
             "SELECT MAX(message_id)::text AS message_id FROM byai.byai_message WHERE session_id=$1 AND enterprise_id=$2",
-            [task.groupSessionId, this.enterpriseId],
+            [source.groupSessionId, this.enterpriseId],
           )
         : null;
       metadata.groupPublicContext = {
-        groupSessionId: String(task.groupSessionId),
+        groupSessionId: String(source.groupSessionId),
         beforeMessageId: previous
           ? (BigInt(latest?.messageId ?? "0") + 1n).toString()
-          : String(task.sourceMessageId),
+          : String(source.sourceMessageId),
       };
+    }
+    if (candidate?.disposition === "UNKNOWN") {
+      const bound = await first(
+        this.db,
+        "UPDATE byai.byai_group_chat_execution SET trace_id=$1,answer_message_id=$2 WHERE candidate_session_id=$3 AND status='RUNNING' AND disposition='UNKNOWN' AND trace_id IS NULL RETURNING execution_id",
+        [event.traceId, event.answerMessageId, event.sessionId],
+      );
+      if (!bound) throw new DomainError("MIRROR_CONTEXT_MISMATCH");
+    }
+    if (task) {
+      const bound = await first(
+        this.db,
+        "UPDATE byai.byai_group_chat_task SET turn_status='RUNNING',current_turn_id=$1,current_turn_trace_id=$2,update_time=CURRENT_TIMESTAMP WHERE task_session_id=$3 AND status='ACTIVE' RETURNING task_session_id",
+        [event.userMessageId, event.traceId, event.sessionId],
+      );
+      if (!bound) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     }
     await insert(this.db, "byai_message", {
       id: event.payload.id,

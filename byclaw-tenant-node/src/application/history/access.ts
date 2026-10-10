@@ -28,7 +28,7 @@ export class HistoryAccess {
     if (
       !session ||
       session.enterpriseId !== this.tenantId ||
-      ["GROUP_CHAT_ROUTING", "CLOSED"].includes(session.state)
+      ["GROUP_CHAT_ROUTING", "GROUP_CHAT_DISPATCH", "CLOSED"].includes(session.state)
     )
       throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     if (group && session.sessionType !== "hs_as") throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
@@ -38,6 +38,30 @@ export class HistoryAccess {
       if (!(await this.repository.member(sessionId, actor)))
         throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     } else {
+      const candidate = ["GROUP_TASK_CANDIDATE", "GROUP_TASK"].includes(session.state)
+        ? await this.repository.candidate?.(sessionId)
+        : null;
+      if (session.state === "GROUP_TASK_CANDIDATE") {
+        if (!candidate || !["QUEUED", "RUNNING"].includes(candidate.status))
+          throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+      }
+      if (candidate) {
+        await this.access(actor, candidate.groupSessionId, true, false, visited);
+        if (candidate.initiatorUserId !== actor || session.creatorId !== actor)
+          throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+        session.groupDispatch = {
+          schemaVersion: "1",
+          dispatchId: candidate.executionId,
+          candidateSessionId: sessionId,
+          groupSessionId: candidate.groupSessionId,
+          sourceMessageId: candidate.sourceMessageId,
+          initiatorUserId: candidate.initiatorUserId,
+          targetAgentId: candidate.targetAgentId,
+          status: candidate.status,
+          disposition: candidate.disposition,
+        };
+        session.targetAgentId = candidate.targetAgentId;
+      }
       const task = await this.repository.task(sessionId);
       if (task) {
         await this.access(actor, task.groupSessionId, true);
@@ -47,6 +71,12 @@ export class HistoryAccess {
           extensions.find((row) => row.extParamCode === GROUP_COORDINATION_SCOPE)?.extParamValue,
         );
         session.targetAgentId = task.targetAgentId;
+        if (scope) session.groupCoordination = scope;
+      } else if (candidate) {
+        const extensions = await this.repository.extensions(sessionId);
+        const scope = parseGroupCoordination(
+          extensions.find((row) => row.extParamCode === GROUP_COORDINATION_SCOPE)?.extParamValue,
+        );
         if (scope) session.groupCoordination = scope;
       } else if (session.parentSessionId) {
         if (session.sessionType === "h_as" && session.creatorId !== actor)

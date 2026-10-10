@@ -10,6 +10,7 @@ import {
 export interface GroupDispatch {
   taskSessionId: string;
   targetAgentId: string;
+  dispatchId?: string;
   groupCoordination?: GroupCoordination;
 }
 
@@ -54,6 +55,7 @@ export async function createGroupTasks(
     )
       throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     const taskSessionId = await nextId(db, command.enterpriseId);
+    const dispatchId = await nextId(db, command.enterpriseId);
     await insert(db, "byai_session", {
       session_id: taskSessionId,
       parent_session_id: command.sessionId,
@@ -61,25 +63,39 @@ export async function createGroupTasks(
       enterprise_id: command.enterpriseId,
       session_name: content.slice(0, 255) || "群聊任务",
       session_type: "h_as",
-      state: coordinated ? "GROUP_TASK" : "ACTIVE",
+      state: coordinated ? "GROUP_TASK" : "GROUP_TASK_CANDIDATE",
       object_id: agentId,
       last_seq: "0",
       create_time: new Date(),
       update_time: new Date(),
     });
-    await insert(db, "byai_group_chat_task", {
-      task_session_id: taskSessionId,
-      group_session_id: command.sessionId,
-      source_message_id: id,
-      dispatch_id: await nextId(db, command.enterpriseId),
-      initiator_user_id: command.userId,
-      target_agent_id: agentId,
-      task_name: content.slice(0, 255) || "群聊任务",
-      status: "ACTIVE",
-      turn_status: "QUEUED",
-      create_time: new Date(),
-      update_time: new Date(),
-    });
+    if (coordinated)
+      await insert(db, "byai_group_chat_task", {
+        task_session_id: taskSessionId,
+        group_session_id: command.sessionId,
+        source_message_id: id,
+        dispatch_id: dispatchId,
+        initiator_user_id: command.userId,
+        target_agent_id: agentId,
+        task_name: content.slice(0, 255) || "群聊任务",
+        status: "ACTIVE",
+        turn_status: "QUEUED",
+        create_time: new Date(),
+        update_time: new Date(),
+      });
+    else
+      await insert(db, "byai_group_chat_execution", {
+        execution_id: dispatchId,
+        group_session_id: command.sessionId,
+        source_message_id: id,
+        root_message_id: id,
+        initiator_user_id: command.userId,
+        target_agent_id: agentId,
+        candidate_session_id: taskSessionId,
+        status: "QUEUED",
+        disposition: "UNKNOWN",
+        create_time: new Date(),
+      });
     await insert(db, "byai_session_ext", {
       ext_id: await nextId(db, command.enterpriseId),
       session_id: taskSessionId,
@@ -108,6 +124,7 @@ export async function createGroupTasks(
     dispatches.push({
       taskSessionId,
       targetAgentId: agentId,
+      dispatchId,
       ...(scope ? { groupCoordination: scope } : {}),
     });
   }

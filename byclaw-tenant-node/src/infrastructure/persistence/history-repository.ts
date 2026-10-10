@@ -4,6 +4,7 @@ import { groupList } from "./group-list.js";
 import { groupNameExists } from "./group-name.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type { HistoryRepository, MessageFilter, Row } from "../../application/history.js";
+import { readGroupCandidate } from "./group-candidate.js";
 
 const camel = (row: Row): Row =>
   Object.fromEntries(
@@ -181,6 +182,9 @@ export class SqlHistoryRepository implements HistoryRepository {
         ])
       )[0] ?? null
     );
+  }
+  candidate(sessionId: string) {
+    return readGroupCandidate(this.db, sessionId);
   }
   async pending(taskId: string) {
     return (

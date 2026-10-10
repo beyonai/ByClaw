@@ -65,6 +65,7 @@ export class HistoryService {
   lifecycle = (...args: Parameters<GroupHistory["lifecycle"]>) => this.group.lifecycle(...args);
   tasks = (...args: Parameters<GroupHistory["tasks"]>) => this.group.tasks(...args);
   task = (...args: Parameters<GroupHistory["task"]>) => this.group.task(...args);
+  dispatch = (...args: Parameters<GroupHistory["dispatch"]>) => this.group.dispatch(...args);
   pending = (...args: Parameters<GroupHistory["pending"]>) => this.group.pending(...args);
   context = (...args: Parameters<TimelineHistory["context"]>) => this.timeline.context(...args);
   search = (...args: Parameters<TimelineHistory["search"]>) => this.timeline.search(...args);

@@ -43,7 +43,9 @@ describe("tenant session query", () => {
     expect(sql).toHaveBeenCalledTimes(2);
     for (const [statement, params] of sql.mock.calls) {
       expect(statement).toContain("enterprise_id=$1 AND creator_id=$2 AND parent_session_id=$3");
-      expect(statement).toContain("NOT IN('CLOSED','GROUP_CHAT_ROUTING')");
+      expect(statement).toContain(
+        "NOT IN('CLOSED','GROUP_CHAT_ROUTING','GROUP_TASK_CANDIDATE','GROUP_CHAT_DISPATCH')",
+      );
       expect(params.slice(0, 3)).toEqual(["123", "8", "8011237409000000345"]);
     }
     expect(sql.mock.calls[1][1]).toEqual(["123", "8", "8011237409000000345", 50, 50]);

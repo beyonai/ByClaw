@@ -175,6 +175,10 @@ export async function recallMessage(context: CommandContext): Promise<Record<str
     [command.userId, messageId, command.sessionId, command.enterpriseId],
   );
   // 按源消息取消任务；重复撤回仍返回取消任务，供 BE 重试未完成的外部停止。
+  await db.query(
+    "WITH RECURSIVE affected(message_id) AS (SELECT $2::bigint UNION SELECT m.message_id FROM byai.byai_message m JOIN affected a ON m.message_ref=a.message_id WHERE m.session_id=$1) UPDATE byai.byai_group_chat_execution SET status='CANCELLED',finish_time=CURRENT_TIMESTAMP WHERE group_session_id=$1 AND source_message_id IN (SELECT message_id FROM affected) AND status IN ('QUEUED','RUNNING')",
+    [command.sessionId, messageId],
+  );
   const tasks = (
     await db.query(
       "WITH RECURSIVE affected(message_id) AS (SELECT $2::bigint UNION SELECT m.message_id FROM byai.byai_message m JOIN affected a ON m.message_ref=a.message_id WHERE m.session_id=$1) UPDATE byai.byai_group_chat_task SET status='CANCELLED',update_time=CURRENT_TIMESTAMP WHERE group_session_id=$1 AND source_message_id IN (SELECT message_id FROM affected) AND status IN ('ACTIVE','CANCELLED') RETURNING *",

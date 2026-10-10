@@ -9,7 +9,7 @@ export class SqlSessionRepository implements SessionRepository {
   async children(actor: string, parentId: string, page: number, size: number) {
     const params = [this.enterpriseId, actor, parentId];
     const where =
-      "enterprise_id=$1 AND creator_id=$2 AND parent_session_id=$3 AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING')";
+      "enterprise_id=$1 AND creator_id=$2 AND parent_session_id=$3 AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING','GROUP_TASK_CANDIDATE','GROUP_CHAT_DISPATCH')";
     const [total] = await this.db.query(
       `SELECT COUNT(*) AS count FROM byai.byai_session WHERE ${where}`,
       params,
@@ -34,7 +34,7 @@ export class SqlSessionRepository implements SessionRepository {
       ? [this.enterpriseId, actor, `%${keyword}%`, types, projectId]
       : [this.enterpriseId, actor, `%${keyword}%`, types];
     let where =
-      "enterprise_id=$1 AND session_type=ANY($4::text[]) AND (creator_id=$2 OR EXISTS(SELECT 1 FROM byai.byai_session_member m WHERE m.session_id=byai_session.session_id AND m.mem_obj_type='USER' AND m.mem_obj_id=$2 AND m.com_acct_id=$1)) AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING') AND COALESCE(session_name,'') LIKE $3 ESCAPE '\\' AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_task t WHERE t.task_session_id=byai_session.session_id)" +
+      "enterprise_id=$1 AND session_type=ANY($4::text[]) AND (creator_id=$2 OR EXISTS(SELECT 1 FROM byai.byai_session_member m WHERE m.session_id=byai_session.session_id AND m.mem_obj_type='USER' AND m.mem_obj_id=$2 AND m.com_acct_id=$1)) AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING','GROUP_TASK_CANDIDATE','GROUP_CHAT_DISPATCH') AND COALESCE(session_name,'') LIKE $3 ESCAPE '\\' AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_task t WHERE t.task_session_id=byai_session.session_id)" +
       (projectId ? " AND project_id::text=$5" : "");
     if (agentId) {
       params.push(agentId);

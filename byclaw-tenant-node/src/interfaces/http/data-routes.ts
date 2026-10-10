@@ -129,6 +129,10 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
   app.get<{ Params: { taskId: string } }>("/internal/v1/group-chat/tasks/:taskId", async (req) =>
     service.task(actor(req), req.params.taskId),
   );
+  app.get<{ Params: { sessionId: string } }>(
+    "/internal/v1/group-chat/dispatches/:sessionId",
+    async (req) => service.dispatch(actor(req), req.params.sessionId),
+  );
   app.get<{ Params: { taskId: string } }>(
     "/internal/v1/group-chat/tasks/:taskId/pending-publication",
     async (req) => service.pending(actor(req), req.params.taskId),

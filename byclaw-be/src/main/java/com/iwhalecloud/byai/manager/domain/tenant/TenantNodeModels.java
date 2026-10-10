@@ -217,7 +217,13 @@ public final class TenantNodeModels {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record MirrorAnswerMetadata(String role, String agentId, String mode,
                                        String resourceName, String resourceType, String resourceId,
-                                       String agentType, MirrorUsedModel usedModel, String messageRenderVersion) {
+                                       String agentType, MirrorUsedModel usedModel, String messageRenderVersion,
+                                       MirrorGroupDisposition groupDisposition) {
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record MirrorGroupDisposition(String schemaVersion, String dispatchId, String kind,
+                                         String taskName, String ackText) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
