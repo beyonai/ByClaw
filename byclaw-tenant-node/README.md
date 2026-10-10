@@ -226,6 +226,8 @@ HACU 租户任务会话的 WebSocket `STOP_CHAT` 与 HTTP 停止接口共用 Nod
 
 私有任务历史保留过程文字；仅收到明确最终答案而没有文本增量时，历史正文回退到最终答案，避免刷新后答复为空。群成果只使用明确最终答案或最后一个推理/工具事件之后的末段正文。没有最终正文时更新任务终态但不发布空成果。此修复需部署 BE 和租户 Node，单独更新 HACU 前端无法消除旧后端的停止拒绝及广播字段缺失；已保存的旧过程文字不自动清理。
 
+候选会话的状态写入和完成时间判断共用参数时，显式转换为 `varchar`，避免 openGauss 将同一参数分别推断为 `text` 与 `varchar`，造成群回复落库返回 503。设置 `TENANT_NODE_TEST_DATABASE_URL` 后，`pnpm test` 会额外执行真实 PostgreSQL/openGauss 的 CHAT/TASK SQL 回归；这些用例只执行 `EXPLAIN`，不会修改数据库数据或表结构。
+
 启动入口自动读取模块根目录的 `.env`，不依赖调试器工作目录，已有环境变量优先。
 
 本地填写 `.env` 后运行 `pnpm dev`，或调试 `src/dev.ts`。开发入口默认监听 `127.0.0.1`，把示例状态目录改为模块内 `.tenant-state/`；TLS 路径未填写或仍为 `/run/secrets/` 时，用 OpenSSL 自动生成本地 CA、Node 证书和 BE 客户端证书，保存至 `.tenant-state/dev-tls/`，有效证书重复启动会复用。自定义证书路径保持不变。私钥仅当前用户可读，目录已被 gitignore 排除；不会安装系统信任证书。

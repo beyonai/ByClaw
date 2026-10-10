@@ -185,7 +185,7 @@ export async function projectGroupCandidateAnswer(
   });
   await indexGroupMessage(db, enterpriseId, messageId, candidate.sourceMessageId);
   await db.query(
-    "UPDATE byai.byai_group_chat_execution SET disposition=$1,task_name=$2,ack_text=$3,ack_message_id=$4,disposition_time=CURRENT_TIMESTAMP,status=$5,finish_time=CASE WHEN $5='COMPLETED' THEN CURRENT_TIMESTAMP ELSE finish_time END WHERE candidate_session_id=$6",
+    "UPDATE byai.byai_group_chat_execution SET disposition=$1,task_name=$2,ack_text=$3,ack_message_id=$4,disposition_time=CURRENT_TIMESTAMP,status=$5::varchar,finish_time=CASE WHEN $5::varchar='COMPLETED' THEN CURRENT_TIMESTAMP ELSE finish_time END WHERE candidate_session_id=$6",
     [
       kind,
       taskName,
