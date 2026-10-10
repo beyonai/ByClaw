@@ -305,3 +305,7 @@ BE 的会话资源查询通过节点校验租户会话，不回退查询个人�
 租户基线及配套 ZIP/manifest 必须包含 `byai_group_chat_task.current_turn_id`、`current_turn_trace_id` 和 `idx_group_chat_task_running_turn`。就绪检查会拒绝缺少轮次字段的库，避免任务续聊在业务阶段才失败。`tenant/V0.5.0__ddl.sql` 为已有租户的同版本补丁；openGauss 不支持 `ADD COLUMN IF NOT EXISTS`，执行器须在同一事务中检查字段存在性及类型，再执行缺失字段的 ALTER，并更新 schema 的 catalog 指纹。该补丁不回填历史任务状态。
 
 生成新基线 manifest 时，应在同引擎的临时空库执行完整基线后，使用 Node 的 `catalogDigest` 计算指纹；已有租户的修复指纹按实际 catalog 计算，不可直接覆盖为新建库指纹。修改 SQL 后须同步生成 `baseline/V0.5.0__baseline.zip` 和 manifest；`packaged-baseline.test.ts` 验证发布 ZIP 与迁移源及 manifest 一致。BE 的打包资源包含该 ZIP，部署时需同步更新。
+
+### 专家团父子会话渲染序号
+
+BE 到 Node 的镜像协议中，`AnswerDelta.seq` 是渲染顺序计数器，必须输出 JSON 数字；消息、会话及任务业务 ID 仍为字符串。旧镜像中的字符串序号由 BE 历史投影转换为安全整数，仅调整响应，不修改库中历史及业务 ID。否则有序渲染器会退回纯文本，专家团活动卡和工具过程无法回显。回归同时验证大整数业务 ID 保真、渲染序号类型及旧父子任务历史。

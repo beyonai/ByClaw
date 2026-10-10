@@ -178,7 +178,22 @@ public class TenantNodeClient {
         numbers.addSerializer(Integer.TYPE, new NumberSerializers.IntegerSerializer(Integer.TYPE));
         numbers.addSerializer(Long.class, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
         numbers.addSerializer(Long.TYPE, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
-        return mapper.copy().registerModule(numbers);
+        return mapper.copy().registerModule(numbers)
+            .addMixIn(com.iwhalecloud.byai.state.common.dto.AnswerDelta.class, NumericRenderSequence.class);
+    }
+
+    /** Rendering order is a counter, unlike the opaque Long business IDs. */
+    private abstract static class NumericRenderSequence {
+        @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = RenderSequenceSerializer.class)
+        abstract Long getSeq();
+    }
+
+    public static final class RenderSequenceSerializer extends com.fasterxml.jackson.databind.JsonSerializer<Long> {
+        @Override
+        public void serialize(Long value, com.fasterxml.jackson.core.JsonGenerator generator,
+                              com.fasterxml.jackson.databind.SerializerProvider provider) throws java.io.IOException {
+            generator.writeNumber(value);
+        }
     }
 
     private String dbRecordId(long enterpriseId) {

@@ -18,6 +18,10 @@ final class TenantChatHistoryProjection {
     }
 
     static MessageView project(MessageView message) {
+        if (message != null) {
+            message.setMessageStruct(numericRenderSequences(message.getMessageStruct()));
+            message.setInferLog(numericRenderSequences(message.getInferLog()));
+        }
         if (message == null || !("assistant".equals(message.getRole())
             || Integer.valueOf(2).equals(message.getUsage()))
             || message.getMessageStruct() != null && !message.getMessageStruct().isBlank()) {
@@ -38,6 +42,29 @@ final class TenantChatHistoryProjection {
     static List<MessageView> project(List<MessageView> messages) {
         if (messages != null) messages.forEach(TenantChatHistoryProjection::project);
         return messages;
+    }
+
+    /** Read old Node mirrors without converting their opaque IDs or modifying stored history. */
+    private static String numericRenderSequences(String value) {
+        if (value == null || value.isBlank()) return value;
+        try {
+            var records = MAPPER.readTree(value);
+            if (!records.isArray()) return value;
+            boolean changed = false;
+            for (var record : records) {
+                var seq = record.get("seq");
+                if (record.isObject() && seq != null && seq.isTextual() && seq.textValue().matches("[0-9]{1,16}")) {
+                    long number = Long.parseLong(seq.textValue());
+                    if (number <= 9007199254740991L) {
+                        ((com.fasterxml.jackson.databind.node.ObjectNode) record).put("seq", number);
+                        changed = true;
+                    }
+                }
+            }
+            return changed ? MAPPER.writeValueAsString(records) : value;
+        } catch (JsonProcessingException error) {
+            return value;
+        }
     }
 
     private static String textEvent(int contentType, String content) {
