@@ -528,6 +528,10 @@ ALTER TABLE byai.template_rule_info ADD PRIMARY KEY (template_id);
 
 
 
+-- 项目列表与创建逻辑使用企业归属；历史项目允许为空，不推断或回填租户。
+ALTER TABLE byai.byai_project ADD COLUMN enterprise_id BIGINT;
+COMMENT ON COLUMN byai.byai_project.enterprise_id IS '项目所属企业ID；历史未关联项目为空';
+
 DROP TABLE IF EXISTS byai.tenant_schema_audit;
 DROP TABLE IF EXISTS byai.tenant_config;
 DROP TABLE IF EXISTS byai.tenant_user_membership;
