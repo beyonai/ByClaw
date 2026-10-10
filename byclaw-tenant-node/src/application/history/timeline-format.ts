@@ -79,7 +79,17 @@ export async function displayMessages(
       taskId: meta.taskId,
       groupCoordination: meta.groupCoordination,
       initiatorUserId: task?.initiatorUserId,
-      kind: row.usage === 5 ? "SYSTEM_EVENT" : meta.kind,
+      // Older automatic replies omitted kind but already recorded their published message ID.
+      // Repair the read projection, preserving task ACKs and stored history.
+      kind:
+        row.usage === 5
+          ? "SYSTEM_EVENT"
+          : (meta.kind ??
+            (meta.scene === "GROUP_CHAT" &&
+            row.usage === 2 &&
+            task?.publishMessageId === row.messageId
+              ? "TASK_RESULT"
+              : undefined)),
       usage: row.usage,
       systemEvent: row.usage === 5 ? meta.systemEvent : undefined,
       createdAt: time(row.createTime),

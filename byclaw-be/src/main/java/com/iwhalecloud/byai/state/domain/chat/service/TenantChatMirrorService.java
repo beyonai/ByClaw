@@ -10,7 +10,6 @@ import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorAnswerM
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorGroupDisposition;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorEvent;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorInputPayload;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageView;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispositionReader;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -84,15 +83,16 @@ public class TenantChatMirrorService {
             return;
         }
         String answerMessageId = context.modelAnswerMessageId.toString();
-        String content = context.messageContext.getExplicitFinalAnswer();
-        if (content == null) content = visibleText(context.messageContext);
+        String content = visibleText(context.messageContext);
+        String finalContent = finalText(context.messageContext);
+        if (content.isBlank()) content = finalContent;
         boolean ordered = java.util.stream.Stream.concat(context.messageContext.getAnswerMessageList().stream(),
             context.messageContext.getReasonMessageList().stream()).anyMatch(segment -> segment.getSeq() != null);
         MirrorAnswerMetadata metadata = metadata(context.assistantChatDto.getMetadata(), ordered, disposition(context, true));
         String sequence = terminalSequence(context, state);
         node.mirror(context.tenantContext, event(context, context.gatewayError ? "ERROR" : "TERMINAL",
             sequence, "terminal-" + answerMessageId,
-            new MirrorAnswerPayload(answerMessageId, context.taskId.toString(), content, content,
+            new MirrorAnswerPayload(answerMessageId, context.taskId.toString(), content, finalContent,
                 metadata == null ? null : metadata.resourceName(), metadata,
                 context.messageContext.getAnswerMessageList(),
                 context.messageContext.getReasonMessageList())));
@@ -217,34 +217,49 @@ public class TenantChatMirrorService {
             }
             if (coordination instanceof Map<?, ?> scope && "COORDINATED".equals(scope.get("mode"))) return;
             if (context.gatewayError || messageId == null) return;
-            List<MessageView> committed = node.request(context.tenantContext, "POST",
-                "/internal/v1/assiman/getMessageByIds", Map.of("messageIds", List.of(messageId.toString())),
-                new TypeReference<List<MessageView>>() { });
-            if (committed == null || committed.size() != 1) return;
-            MessageView stored = committed.get(0);
+            // Use the same recall-safe projection as history, including result kind and reply summary.
+            // A later private task turn must never overwrite this public message with its new answer.
+            Map<String, Object> committed = node.request(context.tenantContext, "GET",
+                "/internal/v1/group-chats/" + groupId + "/messages/" + messageId + "/context", null,
+                new TypeReference<Map<String, Object>>() { });
+            if (committed == null || !(committed.get("messages") instanceof List<?> messages)) return;
+            Map<?, ?> stored = messages.stream().filter(Map.class::isInstance).map(Map.class::cast)
+                .filter(message -> messageId.toString().equals(String.valueOf(message.get("messageId"))))
+                .findFirst().orElse(null);
+            if (stored == null) return;
             JSONObject event = new JSONObject();
+            stored.forEach((key, value) -> event.put(key.toString(), value));
+            // This permission is actor-specific; each recipient derives it from the public resourceList.
+            event.remove("canAcknowledge");
             event.put("type", "GROUP_CHAT_EVENT");
             event.put("event", "MESSAGE_CREATED");
             event.put("sessionId", groupId.toString());
-            event.put("messageId", messageId.toString());
-            event.put("messageRef", task.get("sourceMessageId"));
-            event.put("topicId", stored.getTopicId());
-            event.put("creatorId", task.get("targetAgentId"));
-            event.put("creatorName", stored.getCreatorName());
-            event.put("content", stored.getMessageContent());
-            event.put("metadata", stored.getMetadata());
-            if (stored.getMetadata() != null) {
-                JSONObject metadata = JSONObject.parseObject(stored.getMetadata());
-                event.put("kind", metadata.get("kind"));
-                event.put("taskId", metadata.get("taskId"));
-            }
-            event.put("speaker", Map.of("type", "AGENT", "agentId", task.get("targetAgentId"),
-                "displayName", stored.getCreatorName() == null ? "" : stored.getCreatorName()));
             groupEvents.publishTenant(context.tenantContext, Long.valueOf(groupId.toString()), event);
         }
         catch (RuntimeException error) {
             log.warn("租户群回复已提交但广播失败, taskId={}", taskId, error);
         }
+    }
+
+    /** Keep private progress in messageContent, but publish only the final text segment to the group. */
+    static String finalText(com.iwhalecloud.byai.state.domain.chat.model.MessageContext message) {
+        if (message.getExplicitFinalAnswer() != null) return message.getExplicitFinalAnswer();
+        var segments = message.getAnswerMessageList();
+        Long lastReasonSeq = message.getReasonMessageList().stream()
+            .map(com.iwhalecloud.byai.state.common.dto.AnswerDelta::getSeq)
+            .filter(java.util.Objects::nonNull).max(Long::compareTo).orElse(null);
+        for (int i = segments.size() - 1; i >= 0; i--) {
+            var segment = segments.get(i);
+            if (!"1002".equals(segment.getContentType()) || segment.getChoices() == null) continue;
+            if (segment.getSeq() != null && lastReasonSeq != null && segment.getSeq() <= lastReasonSeq) return "";
+            StringBuilder text = new StringBuilder();
+            for (var choice : segment.getChoices()) {
+                if (choice.getDelta() != null && choice.getDelta().getContent() != null)
+                    text.append(choice.getDelta().getContent());
+            }
+            if (!text.toString().isBlank()) return text.toString();
+        }
+        return segments.isEmpty() ? message.getAnswerText().toString() : "";
     }
 
     static String visibleText(com.iwhalecloud.byai.state.domain.chat.model.MessageContext message) {

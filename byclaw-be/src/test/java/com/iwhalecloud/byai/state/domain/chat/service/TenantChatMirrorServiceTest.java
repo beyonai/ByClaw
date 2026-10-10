@@ -12,7 +12,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorAnswerPayload;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorEvent;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageView;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -135,13 +134,14 @@ class TenantChatMirrorServiceTest {
         doReturn(Map.of("publishMessageId", "99", "groupSessionId", "30", "sourceMessageId", "14",
             "targetAgentId", "42")).when(node).request(any(), eq("GET"),
                 eq("/internal/v1/group-chat/tasks/12"), isNull(), any());
-        MessageView stored = new MessageView();
-        stored.setMessageId("99");
-        stored.setTopicId("14");
-        stored.setCreatorName("陈舵主的超级助手");
-        stored.setMessageContent("你好！");
-        doReturn(List.of(stored)).when(node).request(any(), eq("POST"),
-            eq("/internal/v1/assiman/getMessageByIds"), any(), any());
+        Map<String, Object> stored = Map.of(
+            "messageId", "99", "topicId", "14", "creatorName", "陈舵主的超级助手",
+            "kind", "TASK_RESULT", "taskId", "12", "content", "已保存的公开回复",
+            "replyTo", Map.of("messageId", "14", "content", "你好"),
+            "resourceList", List.of(Map.of("resourceType", "HUMAN", "resourceId", "7")),
+            "canAcknowledge", true, "createdAt", 1234L);
+        doReturn(Map.of("messages", List.of(stored))).when(node).request(any(), eq("GET"),
+            eq("/internal/v1/group-chats/30/messages/99/context"), isNull(), any());
         dto.setMetadata("{\"resourceName\":\"陈舵主的超级助手\",\"resourceType\":\"DIG_EMPLOYEE\","
             + "\"agentId\":\"42\",\"usedModel\":{\"id\":\"9\",\"name\":\"MiniMax-M3\"}}");
         ChatProcessContext context = new ChatProcessContext(null, dto);
@@ -169,8 +169,67 @@ class TenantChatMirrorServiceTest {
         ArgumentCaptor<JSONObject> groupEvent = ArgumentCaptor.forClass(JSONObject.class);
         verify(events).publishTenant(eq(context.tenantContext), eq(30L), groupEvent.capture());
         assertThat(groupEvent.getValue().getString("messageId")).isEqualTo("99");
-        assertThat(groupEvent.getValue().getString("content")).isEqualTo("你好！");
+        assertThat(groupEvent.getValue().getString("content")).isEqualTo("已保存的公开回复");
         assertThat(groupEvent.getValue().getString("topicId")).isEqualTo("14");
+        assertThat(groupEvent.getValue()).containsEntry("kind", "TASK_RESULT")
+            .containsEntry("taskId", "12").containsEntry("createdAt", 1234L)
+            .containsEntry("replyTo", stored.get("replyTo"))
+            .containsEntry("resourceList", stored.get("resourceList"))
+            .doesNotContainKey("canAcknowledge");
+    }
+
+    @Test
+    void groupFinalAnswerDoesNotIncludeEarlierProgressText() {
+        TenantNodeClient node = mock(TenantNodeClient.class);
+        var service = new TenantChatMirrorService(node, new ObjectMapper(), mock(GroupChatEventPublisher.class));
+        var context = new ChatProcessContext(null, new AssistantChatDto());
+        context.tenantContext = new TenantRequestContext(7L, 11L, "MEMBER");
+        context.sessionId = 12L; context.taskId = 13L; context.userMessageId = 14L;
+        context.modelAnswerMessageId = 15L; context.messageContext = new MessageContext();
+        context.messageContext.getAnswerMessageList().addAll(com.alibaba.fastjson.JSON.parseArray(
+            "[{\"contentType\":\"1002\",\"seq\":1,\"choices\":[{\"delta\":{\"content\":\"先读取历史。\"}}]},"
+                + "{\"contentType\":\"1002\",\"seq\":3,\"choices\":[{\"delta\":{\"content\":\"你好！\"}}]}]",
+            com.iwhalecloud.byai.state.common.dto.AnswerDelta.class));
+        service.terminal(context);
+        ArgumentCaptor<MirrorEvent> captured = ArgumentCaptor.forClass(MirrorEvent.class);
+        verify(node).mirror(any(), captured.capture());
+        var payload = (MirrorAnswerPayload) captured.getValue().payload();
+        assertThat(payload.messageContent()).isEqualTo("先读取历史。你好！");
+        assertThat(payload.finalContent()).isEqualTo("你好！");
+    }
+
+    @Test
+    void finalAnswerWithoutTextDeltasRemainsVisibleInTenantHistory() {
+        TenantNodeClient node = mock(TenantNodeClient.class);
+        var service = new TenantChatMirrorService(node, new ObjectMapper(), mock(GroupChatEventPublisher.class));
+        var context = new ChatProcessContext(null, new AssistantChatDto());
+        context.tenantContext = new TenantRequestContext(7L, 11L, "MEMBER");
+        context.sessionId = 12L; context.taskId = 13L; context.userMessageId = 14L;
+        context.modelAnswerMessageId = 15L; context.messageContext = new MessageContext();
+        new PythonSseService().accumulateEvent(
+            "{\"event\":\"finalAnswer\",\"data\":{\"content\":\"最终答复\"}}", context.messageContext);
+
+        service.terminal(context);
+
+        ArgumentCaptor<MirrorEvent> captured = ArgumentCaptor.forClass(MirrorEvent.class);
+        verify(node).mirror(any(), captured.capture());
+        var payload = (MirrorAnswerPayload) captured.getValue().payload();
+        assertThat(payload.messageContent()).isEqualTo("最终答复");
+        assertThat(payload.finalContent()).isEqualTo("最终答复");
+    }
+
+    @Test
+    void unfinishedToolTurnDoesNotPublishEarlierProgressAsFinalAnswer() {
+        MessageContext message = new MessageContext();
+        message.getAnswerMessageList().add(com.alibaba.fastjson.JSON.parseObject(
+            "{\"contentType\":\"1002\",\"seq\":1,\"choices\":[{\"delta\":{\"content\":\"先读取历史。\"}}]}",
+            com.iwhalecloud.byai.state.common.dto.AnswerDelta.class));
+        message.getReasonMessageList().add(com.alibaba.fastjson.JSON.parseObject(
+            "{\"contentType\":\"1003\",\"seq\":2}",
+            com.iwhalecloud.byai.state.common.dto.AnswerDelta.class));
+
+        assertThat(TenantChatMirrorService.finalText(message)).isEmpty();
+        assertThat(TenantChatMirrorService.visibleText(message)).isEqualTo("先读取历史。");
     }
 
     @Test
@@ -183,9 +242,9 @@ class TenantChatMirrorServiceTest {
         doReturn(Map.of("disposition", "CHAT", "publishMessageId", "99", "groupSessionId", "30",
             "sourceMessageId", "14", "targetAgentId", "42"))
             .when(node).request(any(), eq("GET"), eq("/internal/v1/group-chat/dispatches/12"), isNull(), any());
-        MessageView stored = new MessageView(); stored.setMessageContent("你好！");
-        stored.setMetadata("{\"kind\":\"CHAT_REPLY\"}");
-        doReturn(List.of(stored)).when(node).request(any(), eq("POST"), eq("/internal/v1/assiman/getMessageByIds"), any(), any());
+        var stored = Map.of("messageId", "99", "content", "你好！", "kind", "CHAT_REPLY");
+        doReturn(Map.of("messages", List.of(stored))).when(node).request(any(), eq("GET"),
+            eq("/internal/v1/group-chats/30/messages/99/context"), isNull(), any());
 
         service.terminal(context);
 
@@ -220,9 +279,9 @@ class TenantChatMirrorServiceTest {
         doReturn(Map.of("status", "ACTIVE", "turnStatus", "RUNNING", "taskName", "制作报告",
             "sourceMessageId", "14", "targetAgentId", "42"))
             .when(node).request(any(), eq("GET"), eq("/internal/v1/group-chat/tasks/12"), isNull(), any());
-        MessageView ack = new MessageView(); ack.setMessageContent("已接收任务");
-        ack.setMetadata("{\"kind\":\"TASK_ACK\",\"taskId\":\"12\"}");
-        doReturn(List.of(ack)).when(node).request(any(), eq("POST"), eq("/internal/v1/assiman/getMessageByIds"), any(), any());
+        var ack = Map.of("messageId", "99", "content", "已接收任务", "kind", "TASK_ACK", "taskId", "12");
+        doReturn(Map.of("messages", List.of(ack))).when(node).request(any(), eq("GET"),
+            eq("/internal/v1/group-chats/30/messages/99/context"), isNull(), any());
         ChatProcessContext context = candidateContext();
 
         service.input(context);

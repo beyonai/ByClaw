@@ -147,11 +147,15 @@ export async function projectGroupCandidateAnswer(
       enterpriseId,
     ],
   );
-  const messageId = await nextId(db, enterpriseId);
   const content =
     kind === "TASK"
       ? value.ackText?.trim() || "已接收任务"
       : (answer.finalContent ?? answer.content);
+  if (!content.trim()) {
+    await finish(db, event.sessionId, "FAILED");
+    return true;
+  }
+  const messageId = await nextId(db, enterpriseId);
   await insert(db, "byai_message", {
     id: messageId,
     message_id: messageId,

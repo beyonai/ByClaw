@@ -65,6 +65,19 @@ function setup() {
 }
 
 describe("tenant single-mention classification", () => {
+  it("does not publish an empty CHAT reply or fall back to private progress", async () => {
+    const { query, messages, tasks, candidate } = setup();
+    await projectGroupTaskAnswer(
+      { query },
+      "10",
+      event({ sessionId: "50", eventType: "TERMINAL" }),
+      answer({ content: "先读取历史。", finalContent: "" }),
+    );
+    expect(messages()).toHaveLength(0);
+    expect(tasks()).toHaveLength(0);
+    expect(candidate.status).toBe("FAILED");
+  });
+
   it.each([
     undefined,
     { schemaVersion: "1", dispatchId: "60", kind: "CHAT" },

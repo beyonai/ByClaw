@@ -69,8 +69,15 @@ export async function projectGroupTaskAnswer(
     );
     return;
   }
-  const messageId = await nextId(db, enterpriseId);
   const content = answer.finalContent ?? answer.content;
+  if (!content.trim()) {
+    await db.query(
+      "UPDATE byai.byai_group_chat_task SET turn_status='WAITING_USER',update_time=CURRENT_TIMESTAMP WHERE task_session_id=$1",
+      [event.sessionId],
+    );
+    return;
+  }
+  const messageId = await nextId(db, enterpriseId);
   await insert(db, "byai_message", {
     id: messageId,
     message_id: messageId,
@@ -89,6 +96,7 @@ export async function projectGroupTaskAnswer(
     storage_version: "1",
     metadata: JSON.stringify({
       scene: "GROUP_CHAT",
+      kind: "TASK_RESULT",
       targetAgentId: task.targetAgentId,
       sourceMessageId: task.sourceMessageId,
       replyToMessageId: task.sourceMessageId,
