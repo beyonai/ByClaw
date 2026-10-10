@@ -101,31 +101,21 @@ test('failed probe is terminal but never creates collection inventory', async ()
   assert.deepEqual(loadSession(paths).session.collection.collection.items, []);
 });
 
-test('ambiguous missing title is recovered from actual Markdown and recorded in the receipt', async () => {
+test('missing article title is rejected by the local content rules', async () => {
   const { paths, run } = setup();
   const url = 'https://example.com/article/missing-title';
   const candidate = addCandidate(paths, 'missing-title', url);
   const attempt = reserveProbeAttempt(paths, run.runId, candidate, { expectedRevision: 1 });
-  let calls = 0;
   const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
     acquire: async () => ({ status: 'saved', requestedUrl: url, resolvedUrl: url,
       title: '', markdown: articleMarkdown(), executor: 'fixture-web' }),
-    callJev: async (_payload, options) => {
-      calls += 1;
-      assert.ok(options.remainingBudgetMs() <= 1500);
-      return { ok: true, document: { model: 'fixture',
-        answers: { evidence: { type: 'choice', choice: 'e0', confidence: 0.95 } } } };
-    },
   });
-  assert.equal(result.promotionStatus, 'promoted');
-  assert.equal(calls, 1);
-  const receipt = JSON.parse(readFileSync(join(paths.root,
-    `raw/probes/${run.runId}/${candidate.candidateId}/${attempt.attemptId}/verification.json`), 'utf8'));
-  assert.equal(receipt.semanticReview.kind, 'existing-heading');
-  assert.equal(receipt.analysis.title, 'DeepSeek Harness 工程实践');
+  assert.equal(result.attemptState, 'terminal');
+  assert.equal(result.pageVerification, 'verified-non-article');
+  assert.equal(loadSession(paths).session.collection.collection.items.length, 0);
 });
 
-test('topic evidence beyond the default text window survives promotion and is revalidated', async () => {
+test('topic evidence outside the local text window does not bypass verification', async () => {
   const { paths, run } = setup();
   const url = 'https://example.com/article/long';
   const candidate = addCandidate(paths, 'long', url);
@@ -135,20 +125,10 @@ test('topic evidence beyond the default text window survives promotion and is re
   const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
     acquire: async () => ({ status: 'saved', requestedUrl: url, resolvedUrl: url,
       title: 'Architecture report', markdown, executor: 'fixture-web' }),
-    callJev: async (payload) => ({ ok: true, document: { model: 'fixture', answers: {
-      evidence: { type: 'choice', choice: Object.keys(payload.state.evidence).at(-1), confidence: 0.95 },
-    } } }),
   });
-  assert.equal(result.promotionStatus, 'promoted');
-  const session = loadSession(paths).session;
-  assert.ok(session.collection.collection.items[0].topicEvidence.start > 512 * 1024);
-  const status = collectionStatus(paths);
-  assert.equal(status.publicCollectRun.deliverableArticleCount, 1);
-  const receiptPath = join(paths.root, `raw/probes/${run.runId}/${candidate.candidateId}/${attempt.attemptId}/verification.json`);
-  const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
-  receipt.topicEvidence.start = 0;
-  writeFileSync(receiptPath, JSON.stringify(receipt));
-  assert.equal(collectionStatus(paths).publicCollectRun.deliverableArticleCount, 0);
+  assert.equal(result.attemptState, 'terminal');
+  assert.equal(result.reasonCode, 'TOPIC_UNKNOWN');
+  assert.equal(loadSession(paths).session.collection.collection.items.length, 0);
 });
 
 test('complete topic-matched body is promoted with a deterministic receipt', async () => {

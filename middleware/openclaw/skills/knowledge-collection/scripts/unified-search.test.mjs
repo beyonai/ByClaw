@@ -48,39 +48,24 @@ function unifiedTask(query, extra = {}) {
   };
 }
 
-test('unified search owns one final selection and provider failure preserves legacy order', async () => {
-  for (const succeeds of [true, false]) {
-    const root = await mkdtemp(join(tmpdir(), 'unified-jev-'));
-    try {
-      ensureSessionSkeleton(root);
-      const paths = { root, session: join(root, 'session.json'), collectionResult: join(root, 'collection-result.json'),
-        metadata: join(root, 'sanitized/metadata.json'), inputDir: join(root, '.collection-inputs'), lock: join(root, '.knowledge-collection.lock') };
-      persistSession(paths, newSession(unifiedTask('agents', { sourceScope: ['public-internet'] })));
-      let calls = 0;
-      const result = await runUnifiedSearch(paths, { query: 'agents' }, {
-        runPublicDiscover: async (_paths, _args, options) => {
-          assert.equal(options.deferCandidateRanking, true);
-          return { merged: { groups: { searxngTop: [
-            { url: 'https://example.test/a', title: 'Agents A' },
-            { url: 'https://example.test/b', title: 'Agents B' },
-          ] } } };
-        },
-        jevOptions: { environment: {}, callJev: async () => {
-          calls += 1;
-          if (!succeeds) throw new Error('provider unavailable');
-          return { ok: true, document: { answers: {
-            i0: { type: 'choice', choice: 'low', confidence: 0.95 },
-            i1: { type: 'choice', choice: 'high', confidence: 0.95 },
-          } } };
-        } },
-      });
-      assert.equal(calls, 1);
-      assert.deepEqual(result.candidates.map((candidate) => candidate.title), succeeds ? ['Agents B', 'Agents A'] : ['Agents A', 'Agents B']);
-      const metadata = JSON.parse(await readFile(paths.metadata, 'utf8'));
-      assert.equal(metadata.sourceMetadata.ranking.jev.status, succeeds ? 'used' : 'fallback');
-      assert.equal(metadata.collection.items.length, 2);
-    } finally { await rm(root, { recursive: true, force: true }); }
-  }
+test('unified search preserves deterministic candidate order and the full inventory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'unified-order-'));
+  try {
+    cmdInit({ 'session-dir': root, query: 'agents',
+      'source-scope': '["public-internet"]', 'materialization-target': 'selected',
+      'required-content-granularity': 'full-text' });
+    const paths = sessionPaths(root);
+    const result = await runUnifiedSearch(paths, { query: 'agents' }, {
+      runPublicDiscover: async () => ({ merged: { groups: { searxngTop: [
+        { url: 'https://example.test/a', title: 'Agents A' },
+        { url: 'https://example.test/b', title: 'Agents B' },
+      ] } } }),
+    });
+    assert.deepEqual(result.candidates.map((candidate) => candidate.title), ['Agents A', 'Agents B']);
+    const metadata = JSON.parse(await readFile(paths.metadata, 'utf8'));
+    assert.deepEqual(metadata.sourceMetadata.ranking, { schemaVersion: '1.0', candidateCount: 2 });
+    assert.equal(metadata.collection.items.length, 2);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('unified candidate ranking puts the best public/cloud match first and preserves source records', () => {
@@ -551,7 +536,6 @@ test('unified public materialization registers canonical full text and remains i
       'required-content-granularity': 'full-text' });
     const paths = sessionPaths(root);
     const discovered = await runUnifiedSearch(paths, { query: 'Example 公司发展' }, {
-      jevOptions: { environment: {} },
       runPublicDiscover: async (childPaths) => {
         const child = loadSession(childPaths, { persistMigration: false }).session;
         reserveDiscoveryAttempt(child.task.discoveryGate, { query: 'Example 公司发展', category: 'general' });
@@ -670,8 +654,7 @@ else if (args[0] === 'download') {
   process.stdout.write(JSON.stringify({ ok: true, output }));
 }
 `);
-      const dependencies = { python: process.execPath, script, env: { ...process.env, TYPESAFE_ENABLED: 'false' },
-        jevOptions: { environment: { TYPESAFE_ENABLED: 'false' } },
+      const dependencies = { python: process.execPath, script, env: { ...process.env },
         runPublicDiscover: async () => ({ merged: { results: [
           { url: 'https://example.com/deepseek', title: 'DeepSeek public' },
         ] } }),

@@ -6,7 +6,6 @@ import { positiveEnv, runCli } from '../shared/cli-runner.mjs';
 import { withRateLimitRetry } from '../shared/retry.mjs';
 import { copyResumeArtifacts, readResumeCandidates } from '../shared/resume.mjs';
 import { deriveCollectionStatus, SOURCE_IDENTITY, handledOutcome, inventoryCounts } from '../shared/status-model.mjs';
-import { prioritizeGroups } from '../../jev/group-selection.mjs';
 
 const identity = SOURCE_IDENTITY.dingtalk;
 const MAX_SEARCH_PAGE_SIZE = 30;
@@ -445,13 +444,12 @@ async function discoverSearch(writer, request, bin, env) {
   return { found, rawArtifacts, pagination, discovery: { pagesRequested, pagesCompleted, rawRecords, duplicateRecords, uniqueRecords: found.length, limitReached: found.length === request.limit, lastSafeCursor } };
 }
 
-async function discoverFolder(writer, request, bin, env, dependencies = {}) {
+async function discoverFolder(writer, request, bin, env) {
   const found = [];
   const seenFiles = new Set();
   const seenFolders = new Set([request.folderId]);
   const rawArtifacts = [];
-  let queue = [{ id: request.folderId, name: request.folderId, depth: 0 }];
-  let selectionAttempted = false;
+  const queue = [{ id: request.folderId, depth: 0 }];
   let pagesRequested = 0;
   let pagesCompleted = 0;
   let rawRecords = 0;
@@ -459,16 +457,6 @@ async function discoverFolder(writer, request, bin, env, dependencies = {}) {
   let lastSafeCursor = null;
   let pagination = null;
   while (queue.length && found.length < request.limit && !pagination) {
-    if (!selectionAttempted && queue.length > 1 && request.metadataOnly && request.taskContract?.materializationTarget !== 'all') {
-      selectionAttempted = true;
-      const selected = await prioritizeGroups(request.query, queue,
-        (folder) => ({ key: folder.id, title: folder.name }), {
-          privateData: true, environment: env, callJev: dependencies.callJev,
-          remainingBudgetMs: dependencies.remainingBudgetMs,
-          purpose: 'Choose which already authorized DingTalk folder to inspect first. Retain every folder.',
-        });
-      queue = selected.items;
-    }
     const folder = queue.shift();
     let token = null;
     const folderTokens = new Set();
@@ -503,7 +491,7 @@ async function discoverFolder(writer, request, bin, env, dependencies = {}) {
         if (item.isFolder) {
           if (folder.depth < MAX_FOLDER_DEPTH && !seenFolders.has(item.sourceItemId)) {
             seenFolders.add(item.sourceItemId);
-            queue.push({ id: item.sourceItemId, name: item.title, depth: folder.depth + 1 });
+            queue.push({ id: item.sourceItemId, depth: folder.depth + 1 });
           }
         } else if (matchesRequestedQuery(item, request.query)
           && matchesRequestedExtension(item, request.extensions)
@@ -530,7 +518,7 @@ async function search(request, dependencies) {
   try {
     env = commandEnvironment(dependencies);
     const discovery = normalized.folderId
-      ? await discoverFolder(writer, normalized, dependencies.bin || 'dws', env, dependencies)
+      ? await discoverFolder(writer, normalized, dependencies.bin || 'dws', env)
       : await discoverSearch(writer, normalized, dependencies.bin || 'dws', env);
     const materialized = normalized.metadataOnly
       ? { inventory: discovery.found.map((item) => inventoryItem(item, item.rawArtifacts, filtersFor(normalized))), canonicalItems: [], authError: null }

@@ -1,6 +1,6 @@
 # 公共互联网与云盘统一搜索
 
-V2 统一入口是 `unified-search`：默认并行执行公共互联网发现和云盘 metadata 检索。公共侧仍使用既有 WSA、SearXNG 和 `hot_discovery` 链路；云盘侧只使用已授权的 `cloudDiscoveryScope`。
+V2 统一入口是 `unified-search`：默认并行执行公共互联网发现和云盘 metadata 检索。公共侧仍使用既有 WSA、Search1API 和 `hot_discovery` 链路；云盘侧只使用已授权的 `cloudDiscoveryScope`。
 
 云盘授权范围来自 `init --cloud-discovery-scope`，或由 Agent 将可信 `project-context basic` 返回的 `cloudResourceId` 传给 `--cloud-resource-id`。统一搜索会把后者派生出的实际 `cloudDiscoveryScope` 保存回主会话，供随后同会话云盘物化使用。如果没有可信资源 ID，云盘状态为 `unavailable`，公共搜索仍继续。多个用户地址必须分别解析成资源 ID 与目录前缀，不得用另一个资源 ID 代替。
 

@@ -1,6 +1,6 @@
 ---
 name: online-search
-description: 公共网页 URL 发现通道；用于可选 TypeSafe Jev、腾讯 WSA、Search1API 与 hot-discovery 的受控检索场景。
+description: 公共网页 URL 发现通道；用于腾讯 WSA、Search1API 与 hot-discovery 的受控检索场景。
 ---
 
 # Online Search
@@ -11,9 +11,6 @@ description: 公共网页 URL 发现通道；用于可选 TypeSafe Jev、腾讯 
 
 本技能只负责发现 URL。正文获取一律委派来源执行器，公共网页使用 `bycli`。禁止把技能名当作
 平台工具名直接调用；公共互联网采集应使用 `knowledge-collection public-discover`。
-
-若配置 `TYPESAFE_API_KEY`，TypeSafe Jev 可在检索前做有界规划，并在硬过滤后进行候选重排。
-Jev 缺失、关闭或失败时必须保留原始输入和排序；Jev 不能授权 URL 或替代正文验证。
 
 ## Provider
 
@@ -54,7 +51,7 @@ node scripts/knowledge-collection.mjs public-discover \
 | `--requested-count` | 期望的合格文章数量；不足时触发 hot-discovery | 未设置 |
 | `--timeout` | public-discover 外层超时，秒 | `60` |
 
-显式指定的分类和时间范围不会被 Jev 覆盖。改写后的检索词不改变原始发现预约标识。
+检索使用请求中的查询、分类和时间范围；候选过滤与排序使用既有确定性规则。
 
 ## 结果契约
 

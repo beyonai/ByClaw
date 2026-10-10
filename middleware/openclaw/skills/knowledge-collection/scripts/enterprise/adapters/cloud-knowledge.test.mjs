@@ -65,33 +65,18 @@ test('cloud knowledge script resolution falls back from the container skill root
   );
 });
 
-test('cloud metadata recommendations opt in explicitly and revert to source order on failure', async () => {
-  for (const mode of ['disabled', 'success', 'failure']) {
-    const { root, script } = await fixture();
-    try {
-      const session = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
-      session.task.cloudDiscoveryScope.resources[0].directoryPath = '/';
-      persistSession({ root, session: join(root, 'session.json') }, session);
-      let calls = 0;
-      const adapter = createCloudKnowledgeAdapter({ python: process.execPath, script,
-        env: { ...process.env, TYPESAFE_ENTERPRISE_ENABLED: mode === 'disabled' ? 'false' : 'true' },
-        jevOptions: { callJev: async () => {
-          calls += 1;
-          if (mode === 'failure') throw new Error('unavailable');
-          return { ok: true, document: { answers: {
-            i0: { type: 'choice', choice: 'low', confidence: 0.95 },
-            i1: { type: 'choice', choice: 'high', confidence: 0.95 },
-          } } };
-        } },
-      });
-      await adapter.search({ outputDir: root, query: '巡检流程', limit: 10 });
-      const metadata = JSON.parse(await readFile(join(root, 'sanitized/metadata.json'), 'utf8'));
-      assert.equal(metadata.collection.items[0].filePath, mode === 'success' ? '/docs/a.md' : '/outside/escape.md');
-      assert.equal(calls, mode === 'disabled' ? 0 : 1);
-      assert.equal(metadata.collection.items.length, 2);
-      assert.ok(metadata.collection.items.every((item) => item.materialization.status === 'pending'));
-    } finally { await rm(root, { recursive: true, force: true }); }
-  }
+test('cloud metadata discovery preserves source score order before materialization', async () => {
+  const { root, script } = await fixture();
+  try {
+    const session = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    session.task.cloudDiscoveryScope.resources[0].directoryPath = '/';
+    persistSession({ root, session: join(root, 'session.json') }, session);
+    const adapter = createCloudKnowledgeAdapter({ python: process.execPath, script, env: process.env });
+    await adapter.search({ outputDir: root, query: '巡检流程', limit: 10 });
+    const metadata = JSON.parse(await readFile(join(root, 'sanitized/metadata.json'), 'utf8'));
+    assert.deepEqual(metadata.collection.items.map((item) => item.filePath), ['/outside/escape.md', '/docs/a.md']);
+    assert.ok(metadata.collection.items.every((item) => item.materialization.status === 'pending'));
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('default enterprise dispatcher honors the adapter resolver and legacy script override', async () => {
