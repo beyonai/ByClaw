@@ -465,8 +465,6 @@ delete from byai.ss_resource where resource_code in('unstructured-ontology-manag
 delete byai.byai_system_config_list where param_group_code in('MODEL_TAGS') and param_value ='7';
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES(nextval('byai.seq_any_table'), 'MODEL_TAGS', '模型打标', '多模态模型', 'MULTIMODAL_MODEL', '7', '多模态模型', 7);
 
-
-
-
-
-
+-- 删除已下线的 UI Agent 和 ByClaw Code Agent 沙箱基础配置。
+DELETE FROM byai.sandbox_service_spec
+WHERE service_key IN ('uiagent', 'byclaw-code-agent');
