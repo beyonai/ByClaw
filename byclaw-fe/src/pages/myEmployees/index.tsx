@@ -6,10 +6,14 @@ import useEmployeeRowRefresh, {
 } from '@/hooks/useEmployeeRowRefresh';
 import { LeftOutlined, SearchOutlined } from '@ant-design/icons';
 import { getIntl, useNavigate, useIntl } from '@umijs/max';
-import { Empty, Input, Segmented, Spin, Tabs, message } from 'antd';
+import { Empty, Input, Spin, Tabs, message } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
+import {
+  ResourceQuickFilterBar,
+  ResourceQuickFilterGroup,
+} from '@/components/Resources/components/ResourceQuickFilters';
 import { getAgentChatAvatar, agentHandler } from '@/utils/agent';
 import type { IAgentCache } from '@/typescript/agent';
 import {
@@ -261,6 +265,21 @@ const MyEmployeesPage: React.FC = () => {
     [intl]
   );
 
+  // 搜索挂载在页签行右侧，沿用已有的关键词防抖与回车搜索入口。
+  const employeeSearch = (
+    <Input
+      className={styles.employeeSearch}
+      suffix={<SearchOutlined onClick={() => void loadEmployees()} />}
+      allowClear
+      placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+      value={keyword}
+      onChange={(event) => {
+        setKeyword(event.target.value);
+      }}
+      onPressEnter={() => void loadEmployees()}
+    />
+  );
+
   return (
     <div id="myEmployeesScroller" className={styles.container}>
       <div className={styles.back} onClick={() => navigate('/digitalEmployees')}>
@@ -270,6 +289,7 @@ const MyEmployeesPage: React.FC = () => {
         className={styles.header}
         activeKey={activeTab}
         items={tabItems}
+        tabBarExtraContent={{ right: employeeSearch }}
         onChange={(key) => {
           setActiveTab(key as OwnerTab);
           setResourceFilter('all');
@@ -279,19 +299,9 @@ const MyEmployeesPage: React.FC = () => {
         }}
       />
       <div className={styles.toolbar}>
-        <Input
-          className={styles.employeeSearch}
-          suffix={<SearchOutlined onClick={() => void loadEmployees()} />}
-          allowClear
-          placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
-          value={keyword}
-          onChange={(event) => {
-            setKeyword(event.target.value);
-          }}
-          onPressEnter={() => void loadEmployees()}
-        />
-        <div className={styles.rightFilters}>
-          <Segmented
+        <ResourceQuickFilterBar className={styles.filters}>
+          <ResourceQuickFilterGroup
+            title={intl.formatMessage({ id: 'resource.type' })}
             value={resourceFilter}
             options={[
               { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
@@ -303,8 +313,9 @@ const MyEmployeesPage: React.FC = () => {
             }}
           />
           {activeTab === 'enterprise' && (
-            <div className={styles.enterpriseFilters}>
-              <Segmented
+            <>
+              <ResourceQuickFilterGroup
+                title={intl.formatMessage({ id: 'common.belong' })}
                 value={enterpriseScope}
                 options={[
                   { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
@@ -315,7 +326,8 @@ const MyEmployeesPage: React.FC = () => {
                   setEnterpriseScope(value as EnterpriseScope);
                 }}
               />
-              <Segmented
+              <ResourceQuickFilterGroup
+                title={intl.formatMessage({ id: 'common.status' })}
                 value={statusFilter}
                 options={[
                   { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
@@ -327,9 +339,9 @@ const MyEmployeesPage: React.FC = () => {
                   setStatusFilter(value as EmployeeStatusFilter);
                 }}
               />
-            </div>
+            </>
           )}
-        </div>
+        </ResourceQuickFilterBar>
       </div>
       <Spin spinning={loading}>
         <InfiniteScroll

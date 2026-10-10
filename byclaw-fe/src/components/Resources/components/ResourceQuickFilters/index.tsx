@@ -1,5 +1,6 @@
 import { useIntl } from '@umijs/max';
 import classnames from 'classnames';
+import type { PropsWithChildren } from 'react';
 import {
   digitalEmployeeTypeOptions,
   getResourceOwnerOptions,
@@ -22,6 +23,37 @@ interface Props {
   value: QuickFilterParams;
   onChange: (param: QuickFilterParams) => void;
 }
+
+interface FilterGroupProps {
+  title: string;
+  options: { value: string; label: string }[];
+  value?: string;
+  onChange: (value: string) => void;
+}
+
+// 浏览页和管理页复用同一行布局与按钮样式，筛选值及查询逻辑仍由调用方维护。
+export const ResourceQuickFilterBar = ({ className, children }: PropsWithChildren<{ className?: string }>) => (
+  <div className={classnames(styles.container, className)}>{children}</div>
+);
+
+export const ResourceQuickFilterGroup = ({ title, options, value, onChange }: FilterGroupProps) => (
+  <div className={styles.group} role="group" aria-label={title}>
+    <span className={styles.title}>{title}</span>
+    <div className={styles.options}>
+      {options.map((item) => (
+        <button
+          type="button"
+          key={item.value}
+          className={classnames(styles.option, { [styles.active]: value === item.value })}
+          aria-pressed={value === item.value}
+          onClick={() => onChange(item.value)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  </div>
+);
 
 // 常用类型、来源和归属条件直接生效，分类仍由筛选弹层确认。
 const ResourceQuickFilters = ({
@@ -56,15 +88,15 @@ const ResourceQuickFilters = ({
   const groups = [
     ...(isDigitalEmployee
       ? [
-        {
-          key: 'digitalEmployeeType' as const,
-          title: 'resource.type',
-          options: visibleEmployeeTypeOptions,
-          selectedValue: selectedEmployeeType,
-        },
-      ]
+          {
+            key: 'digitalEmployeeType' as const,
+            title: 'resource.type',
+            options: visibleEmployeeTypeOptions,
+            selectedValue: selectedEmployeeType,
+          },
+        ]
       : !isDigitalEmployee && availableOnly
-        ? [
+      ? [
           {
             key: 'ownerType' as const,
             // 与业务类型同时展示时，个人/企业用“来源”区分，避免同一行出现两个“类型”。
@@ -73,7 +105,7 @@ const ResourceQuickFilters = ({
             selectedValue: value.ownerType || '',
           },
         ]
-        : []),
+      : []),
     {
       key: 'permission' as const,
       title: 'common.belong',
@@ -83,44 +115,25 @@ const ResourceQuickFilters = ({
   ];
 
   return (
-    <div className={classnames(styles.container, className)}>
+    <ResourceQuickFilterBar className={className}>
       {showBizTypeFilter && (
-        <div className={styles.group} role="group" aria-label={intl.formatMessage({ id: 'resource.type' })}>
-          <span className={styles.title}>{intl.formatMessage({ id: 'resource.type' })}</span>
-          <div className={styles.options}>
-            {bizTypeOptions.map((item) => (
-              <button
-                type="button"
-                key={item.value}
-                className={classnames(styles.option, { [styles.active]: selectedBizType === item.value })}
-                aria-pressed={selectedBizType === item.value}
-                onClick={() => onChange({ resourceBizTypeList: item.value ? [item.value] : [] })}
-              >
-                {intl.formatMessage({ id: item.label })}
-              </button>
-            ))}
-          </div>
-        </div>
+        <ResourceQuickFilterGroup
+          title={intl.formatMessage({ id: 'resource.type' })}
+          options={bizTypeOptions.map((item) => ({ ...item, label: intl.formatMessage({ id: item.label }) }))}
+          value={selectedBizType}
+          onChange={(bizType) => onChange({ resourceBizTypeList: bizType ? [bizType] : [] })}
+        />
       )}
       {groups.map((group) => (
-        <div key={group.key} className={styles.group} role="group" aria-label={intl.formatMessage({ id: group.title })}>
-          <span className={styles.title}>{intl.formatMessage({ id: group.title })}</span>
-          <div className={styles.options}>
-            {group.options.map((item) => (
-              <button
-                type="button"
-                key={item.value}
-                className={classnames(styles.option, { [styles.active]: group.selectedValue === item.value })}
-                aria-pressed={group.selectedValue === item.value}
-                onClick={() => onChange({ [group.key]: item.value })}
-              >
-                {intl.formatMessage({ id: item.label })}
-              </button>
-            ))}
-          </div>
-        </div>
+        <ResourceQuickFilterGroup
+          key={group.key}
+          title={intl.formatMessage({ id: group.title })}
+          options={group.options.map((item) => ({ ...item, label: intl.formatMessage({ id: item.label }) }))}
+          value={group.selectedValue}
+          onChange={(selectedValue) => onChange({ [group.key]: selectedValue })}
+        />
       ))}
-    </div>
+    </ResourceQuickFilterBar>
   );
 };
 

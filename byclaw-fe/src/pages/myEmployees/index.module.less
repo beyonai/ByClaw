@@ -191,28 +191,15 @@
   cursor: pointer;
 }
 
-.employeeSearch {
-  margin-right: 16px;
-}
-
 .toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   margin-bottom: 20px;
 }
 
-.rightFilters {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-left: auto;
-}
-
-.enterpriseFilters {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.toolbar > .filters {
+  // 管理页筛选铺满内容区，类型、归属和状态按两端对齐排列。
+  width: 100%;
+  justify-content: space-between;
+  margin-bottom: 0;
 }
 
 .grid {

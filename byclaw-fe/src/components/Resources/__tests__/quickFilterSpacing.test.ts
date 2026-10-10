@@ -2,14 +2,15 @@ import fs from 'fs';
 import path from 'path';
 
 describe('resource center quick filter spacing', () => {
-  it('aligns all quick filter groups to the right without separating business types', () => {
+  it('justifies shared quick filter groups across the row and retains narrow-screen wrapping', () => {
     const styles = fs.readFileSync(
       path.resolve(__dirname, '../components/ResourceQuickFilters/index.module.less'),
       'utf8'
     );
 
-    // JSDOM 不计算布局；防止业务类型的自动外边距再次将整行拆成左右两组。
-    expect(styles).toMatch(/\.container\s*\{[^{}]*justify-content:\s*flex-end;/);
+    // JSDOM 不计算布局；保护浏览页和管理页共用的两端对齐与窄屏换行。
+    expect(styles).toMatch(/\.container\s*\{[^{}]*justify-content:\s*space-between;/);
+    expect(styles).toMatch(/\.container\s*\{[^{}]*flex-wrap:\s*wrap;/);
     expect(styles).not.toMatch(/margin-(?:right|left|inline-start|inline-end):\s*auto;/);
   });
 
@@ -24,16 +25,27 @@ describe('resource center quick filter spacing', () => {
     expect(listStyles).toMatch(/\.sectionsContainer\s*\{[^{}]*margin:\s*20px 0;/);
   });
 
-  it('uses only the list top margin below the shared resource management toolbar', () => {
+  it('places management search last in the right-side tab actions', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../index.tsx'), 'utf8');
     const styles = fs.readFileSync(path.resolve(__dirname, '../index.module.less'), 'utf8');
-    const listStyles = fs.readFileSync(path.resolve(__dirname, '../components/ResourceList/index.module.less'), 'utf8');
-    const toolbar = styles.slice(styles.indexOf('.myResourcesToolbar {'), styles.indexOf('.installedTabs {'));
 
-    // JSDOM 不计算间距，保护三个管理模块共用的工具栏与列表间距。
-    expect(source).toMatch(/myResourcesOnly\s*&&\s*\(\s*<div className=\{styles\.myResourcesToolbar\}/);
-    expect(toolbar).toMatch(/^[^{}]*\{[^{}]*margin-bottom:\s*0;/);
-    expect(toolbar).not.toContain('mySkillsToolbar');
+    // 保护共用页签行的右侧插槽，搜索位于其他管理操作之后。
+    expect(source).toMatch(/right:\s*\([\s\S]*?<div className=\{styles\.myResourcesTabActions\}/);
+    expect(source).toMatch(/myResourcesTabActions\}>\s*\{tabBarExtraContent\}\s*\{resourceSearch\}/);
+    expect(source).not.toContain('styles.myResourcesToolbar');
+    expect(styles).not.toContain('.myResourcesToolbar');
+  });
+
+  it('justifies management filters across the full row without adding list spacing', () => {
+    const styles = fs.readFileSync(path.resolve(__dirname, '../index.module.less'), 'utf8');
+    const listStyles = fs.readFileSync(path.resolve(__dirname, '../components/ResourceList/index.module.less'), 'utf8');
+    const filters = styles.match(/\.myResourcesFilters\s*\{([^}]+)\}/)?.[1] || '';
+
+    // JSDOM 不计算布局；管理筛选必须占满整行，并保留原有列表间距。
+    expect(filters).toContain('width: 100%;');
+    expect(filters).toContain('justify-content: space-between;');
+    expect(filters).not.toMatch(/margin-top:/);
+    expect(filters).toContain('margin-bottom: 0;');
     expect(listStyles).toMatch(/\.sectionsContainer\s*\{[^{}]*margin:\s*20px 0;/);
   });
 });

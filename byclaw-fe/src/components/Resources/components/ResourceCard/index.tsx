@@ -3,7 +3,7 @@ import { publicationErrorMessage } from '@/utils/publicationError';
 import { showSkillPublication, skillPublicationEntryLabel } from '../../skillPublication';
 import { runWithResourceFeedback } from '@/utils/resourceActionFeedback';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
-import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, useContext, useCallback } from 'react';
 import { EllipsisOutlined, MessageOutlined, PlusOutlined } from '@ant-design/icons';
 import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin, Modal } from 'antd';
 import type { MenuProps } from 'antd';
@@ -1050,13 +1050,13 @@ const RenderContent = (props: ResourceCardProps) => {
 
     // 使用审核统一由审核中心承载，卡片不再返回或消费审核按钮权限。
 
-    // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
+    // 安装统一使用向下下载图标；选择目标员工，从“当前员工”进入时由路由指定唯一目标。
     if (canShowInstallAction && !useCardInstallAction) {
       items.push({
         key: 'install',
         label: (
           <BuildMenuLabel
-            icon="icon-a-Addtianjia"
+            icon="icon-a-Downloadxiazai"
             text={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
             loading={installing}
           />
@@ -1411,6 +1411,29 @@ const RenderContent = (props: ResourceCardProps) => {
     isWorkspaceSkillResource && !showResourceTypeTag
       ? intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })
       : topRightTag;
+  const isSkillPosterResource = variant === 'skillPoster' && isSkillResource(resource, resourceType);
+  const skillPosterTagRef = useRef<HTMLSpanElement>(null);
+  const [skillPosterTagWidth, setSkillPosterTagWidth] = useState<number>();
+  useLayoutEffect(() => {
+    const tag = skillPosterTagRef.current;
+    if (!tag) return;
+
+    // 角标仍固定在卡片右上角，但标题只按其实际宽度避让；译文、字体和容器变化时同步更新。
+    const measureTagWidth = () => {
+      const width = Math.ceil(tag.getBoundingClientRect().width);
+      // 隐藏 Tab 暂时没有尺寸，沿用已有宽度，显示后由 ResizeObserver 重新测量。
+      if (width > 0) setSkillPosterTagWidth(width);
+    };
+    measureTagWidth();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measureTagWidth);
+      observer.observe(tag);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', measureTagWidth);
+    return () => window.removeEventListener('resize', measureTagWidth);
+  }, [isSkillPosterResource, effectiveTopRightTag]);
   const effectiveCardClick: ((resource?: IResourceCardItem) => void) | undefined = isWorkspaceSkillResource
     ? () => workspaceActions.openDetail(resource as WorkspaceSkillItem)
     : onCardClick;
@@ -1458,6 +1481,7 @@ const RenderContent = (props: ResourceCardProps) => {
       >
         <Button
           shape="circle"
+          className={styles.cardPrimaryActionBtn}
           aria-label={intl.formatMessage({ id: 'resource.applyUse' })}
           icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
           onClick={(event) => {
@@ -1472,6 +1496,7 @@ const RenderContent = (props: ResourceCardProps) => {
     <Button
       disabled
       shape="circle"
+      className={styles.cardPrimaryActionBtn}
       aria-label={intl.formatMessage({ id: 'resource.pendingAuthorization' })}
       icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
     />
@@ -1511,8 +1536,14 @@ const RenderContent = (props: ResourceCardProps) => {
         <Tooltip title={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}>
           <Button
             shape="circle"
+            className={styles.cardPrimaryActionBtn}
             aria-label={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
-            icon={<AntdIcon type="icon-a-Addtianjia" className={styles.cardActionBtnIcon} />}
+            icon={
+              <AntdIcon
+                type="icon-a-Downloadxiazai"
+                className={classnames(styles.cardActionBtnIcon, styles.installActionIcon)}
+              />
+            }
             loading={installing}
             disabled={installing}
             onClick={() => setInstallDialogOpen(true)}
@@ -1537,7 +1568,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
   };
 
-  if (variant === 'skillPoster' && isSkillResource(resource, resourceType)) {
+  if (isSkillPosterResource) {
     return (
       <div
         className={classnames(styles.skillPosterContent, {
@@ -1565,6 +1596,7 @@ const RenderContent = (props: ResourceCardProps) => {
               [styles.cancelledTag]: isCancelledResource,
             })}
             title={effectiveTopRightTag}
+            ref={skillPosterTagRef}
           >
             <span className={styles.tagText}>{effectiveTopRightTag}</span>
           </span>
@@ -1594,6 +1626,11 @@ const RenderContent = (props: ResourceCardProps) => {
             className={classnames(styles.skillPosterHeader, {
               [styles.skillPosterHeaderWithTag]: !!effectiveTopRightTag,
             })}
+            style={
+              skillPosterTagWidth
+                ? ({ '--skill-poster-tag-width': `${skillPosterTagWidth}px` } as React.CSSProperties)
+                : undefined
+            }
           >
             <Paragraph className={styles.skillPosterTitle} ellipsis={{ tooltip: `${displayTitle}` }}>
               {displayTitle}

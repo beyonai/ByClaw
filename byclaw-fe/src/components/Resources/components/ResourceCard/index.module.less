@@ -154,12 +154,13 @@
 }
 
 .skillPosterHeaderWithTag {
-  // 与知识、工具卡片一致，预留角标宽度和标题间距。
-  padding-right: 100px;
+  // 按角标实际宽度留 8px 间距，并扣除正文已留出的 22px 卡片边距。
+  padding-right: calc(var(--skill-poster-tag-width, 88px) + 12px + 8px - 22px);
 }
 
 .resourceInfoWithActions .skillPosterHeaderWithTag {
-  padding-right: 52px;
+  // 按钮在标题下方，标题可用回正文为按钮预留的 48px，描述和创建者仍保留避让。
+  margin-right: -48px;
 }
 
 .skillPosterTag {
@@ -777,6 +778,24 @@
 
 .cardActionBtnIcon {
   font-size: 16px;
+}
+
+.cardPrimaryActionBtn {
+  // 申请、待审核和安装共用固定外框，图标及加载状态不改变按钮尺寸。
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  flex-shrink: 0;
+
+  .cardActionBtnIcon {
+    font-size: 16px;
+  }
+
+  // 下载图形在 SVG 画布中的留白较大，补偿后与申请加号保持相近的视觉大小。
+  .installActionIcon {
+    font-size: 18px;
+  }
 }
 
 .renderRightBottom {

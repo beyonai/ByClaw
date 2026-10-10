@@ -327,7 +327,11 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
               maxWidth: panelWidth,
             }}
           >
-            <div className={styles.contentInner}>
+            <div
+              className={classNames(styles.contentInner, {
+                [styles.contentInnerResourceMenu]: isAtPopover,
+              })}
+            >
               {(() => {
                 if (type === '#') {
                   return (

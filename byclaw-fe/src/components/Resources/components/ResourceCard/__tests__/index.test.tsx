@@ -775,6 +775,110 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resourceStatus.published')).not.toBeInTheDocument();
   });
 
+  describe('skill poster title space', () => {
+    const originalResizeObserver = Object.getOwnPropertyDescriptor(global, 'ResizeObserver');
+    let tagWidth: number;
+    let notifyTagResize: () => void;
+    let disconnect: jest.Mock;
+    let observe: jest.Mock;
+
+    const skillCard = (showActions = false, variant: 'default' | 'skillPoster' = 'skillPoster') => (
+      <ResourceCard
+        resourceType="SKILL"
+        variant={variant}
+        resource={{
+          resourceId: 'poster-width',
+          resourceName: 'content-image-enrichment-with-a-long-name',
+          resourceBizType: 'SKILL',
+          ownerType: 'enterprise',
+          resourceStatus: '2',
+          hasUsePermission: true,
+          operationPermissionsLoaded: true,
+        }}
+        actionConfig={{
+          enableResourceLifecycle: true,
+          showResourceTypeTag: true,
+          canInstallToTarget: showActions,
+        }}
+      />
+    );
+
+    beforeEach(() => {
+      tagWidth = 56;
+      // JSDOM 不计算布局，用标签边界模拟真实中文/长译文宽度，其他节点保留默认边界。
+      const getBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+      jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const rect = getBoundingClientRect.call(this);
+        return this.classList.contains('skillPosterTag') ? { ...rect, width: tagWidth } : rect;
+      });
+      observe = jest.fn();
+      disconnect = jest.fn();
+      Object.defineProperty(global, 'ResizeObserver', {
+        configurable: true,
+        writable: true,
+        value: jest.fn((callback: ResizeObserverCallback) => {
+          const observer = { observe, disconnect, unobserve: jest.fn() };
+          notifyTagResize = () => callback([], observer as unknown as ResizeObserver);
+          return observer;
+        }),
+      });
+    });
+
+    afterEach(() => {
+      if (originalResizeObserver) {
+        Object.defineProperty(global, 'ResizeObserver', originalResizeObserver);
+      } else {
+        Reflect.deleteProperty(global, 'ResizeObserver');
+      }
+    });
+
+    it.each([false, true])('measures the actual tag width with actions: %s', (showActions) => {
+      renderWithQueryClient(skillCard(showActions));
+      const title = screen.getByText('content-image-enrichment-with-a-long-name');
+      const badge = screen.getByText('resource.tag.enterpriseSkill').parentElement!;
+      expect(title.parentElement!.style.getPropertyValue('--skill-poster-tag-width')).toBe('56px');
+      expect(title.closest('.skillPosterBody')!.classList.contains('resourceInfoWithActions')).toBe(showActions);
+      expect(observe).toHaveBeenCalledWith(badge);
+      expect(title.parentElement).not.toContainElement(badge);
+    });
+
+    it('updates the title space after tag resizing and ignores temporarily hidden tags', () => {
+      const { unmount } = renderWithQueryClient(skillCard());
+      const header = screen.getByText('content-image-enrichment-with-a-long-name').parentElement!;
+      tagWidth = 88;
+      act(() => notifyTagResize());
+      expect(header.style.getPropertyValue('--skill-poster-tag-width')).toBe('88px');
+      tagWidth = 0;
+      act(() => notifyTagResize());
+      expect(header.style.getPropertyValue('--skill-poster-tag-width')).toBe('88px');
+      tagWidth = 56;
+      act(() => notifyTagResize());
+      expect(header.style.getPropertyValue('--skill-poster-tag-width')).toBe('56px');
+      unmount();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it('remeasures on window resize when ResizeObserver is unavailable and cleans up the listener', () => {
+      Object.defineProperty(global, 'ResizeObserver', { value: undefined });
+      const removeEventListener = jest.spyOn(window, 'removeEventListener');
+      const { unmount } = renderWithQueryClient(skillCard());
+      const header = screen.getByText('content-image-enrichment-with-a-long-name').parentElement!;
+      expect(header.style.getPropertyValue('--skill-poster-tag-width')).toBe('56px');
+      tagWidth = 88;
+      fireEvent(window, new Event('resize'));
+      expect(header.style.getPropertyValue('--skill-poster-tag-width')).toBe('88px');
+      unmount();
+      expect(removeEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+    });
+
+    it('preserves the default skill card layout without measuring its tag', () => {
+      renderWithQueryClient(skillCard(false, 'default'));
+      const header = screen.getByText('content-image-enrichment-with-a-long-name').parentElement!;
+      expect(header.style.getPropertyValue('--skill-poster-tag-width')).toBe('');
+      expect(observe).not.toHaveBeenCalled();
+    });
+  });
+
   // 状态、权限和回调一并验证，不能只替换菜单文字却继续调用删除接口。
   it.each([
     ['TOOL', 'TOOLKIT', '2', 'unShelfData', 'onUnShelf'],
@@ -1182,7 +1286,7 @@ describe('ResourceCard', () => {
     );
 
     const applyButton = screen.getByRole('button', { name: 'resource.applyUse' });
-    expect(applyButton).toHaveClass('ant-btn-circle');
+    expect(applyButton).toHaveClass('ant-btn-circle', 'cardPrimaryActionBtn');
     if (resourceType === 'KG_DOC') {
       expect(applyButton.parentElement).toHaveClass('digitalEmployeeActions', 'knowledgeActions');
       expect(screen.queryByRole('button', { name: 'resource.installKnowledge' })).toBeNull();
@@ -1472,6 +1576,7 @@ describe('ResourceCard', () => {
 
     const installButton = screen.getByRole('button', { name: 'resource.installSkill' });
     expect(installButton).toHaveClass('ant-btn-circle');
+    expect(within(installButton).getByTestId('icon-icon-a-Downloadxiazai')).toBeInTheDocument();
     expect(installButton.parentElement).toHaveClass('digitalEmployeeActions');
     // 下移仅应用于技能海报卡片，普通资源卡片保持原操作区布局。
     if (variant === 'skillPoster') {
@@ -1554,7 +1659,15 @@ describe('ResourceCard', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: installLabel }));
+    const installButton = screen.getByRole('button', { name: installLabel });
+    expect(installButton).toHaveClass('cardPrimaryActionBtn');
+    // 技能、知识和工具共用安装图标，入口仍保留原来的目标选择与防重复提交行为。
+    expect(within(installButton).getByTestId('icon-icon-a-Downloadxiazai')).toHaveClass(
+      'cardActionBtnIcon',
+      'installActionIcon'
+    );
+    expect(within(installButton).queryByTestId('icon-icon-a-Addtianjia')).toBeNull();
+    fireEvent.click(installButton);
     expect(screen.getByRole('dialog', { name: 'install-dialog' })).toHaveAttribute(
       'data-target-context',
       JSON.stringify({ mode: 'select' })
@@ -1643,6 +1756,9 @@ describe('ResourceCard', () => {
     );
 
     expect(screen.getByTestId('resource-menu-install')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('resource-menu-install')).getByTestId('icon-icon-a-Downloadxiazai')
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'resource.installSkill' })).toBeNull();
     fireEvent.click(screen.getByTestId('resource-menu-install'));
     expect(screen.getByRole('dialog', { name: 'install-dialog' })).toHaveAttribute('data-resource-id', 'resource-1');
