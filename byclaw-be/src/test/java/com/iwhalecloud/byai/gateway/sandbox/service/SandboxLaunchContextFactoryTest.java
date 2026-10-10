@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
@@ -17,6 +20,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import com.iwhalecloud.byai.common.discovery.ApplicationServiceEndpoint;
+import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
+import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.ModelConfigurationValidator;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
@@ -28,7 +35,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 
 @ExtendWith(MockitoExtension.class)
-class SandboxLaunchContextFactoryTest {
+class SandboxLaunchContextFactoryTest extends I18nTestSupport {
 
     @InjectMocks
     private SandboxLaunchContextFactory factory;
@@ -59,6 +66,25 @@ class SandboxLaunchContextFactoryTest {
 
     @Mock
     private SsResourceService ssResourceService;
+
+    @Mock
+    private AiModelService aiModelService;
+
+    @Mock
+    private ModelManagementApplicationService modelManagementApplicationService;
+
+    @Test
+    void invalidModelStopsLaunchInsteadOfInjectingPlaceholderCredentials() {
+        when(modelManagementApplicationService.getDefaultModelId()).thenReturn("42");
+        ModelDto model = new ModelDto();
+        model.setModelCode("test-model");
+        model.setUrl("https://example.com/v1");
+        model.setAuthToken("请用户替换");
+        when(aiModelService.getModel("42")).thenReturn(model);
+        assertThatThrownBy(() -> factory.buildContext("user001", -1L, "openclaw"))
+            .isInstanceOf(ModelConfigurationValidator.InvalidModelConfigurationException.class)
+            .hasMessageContaining("模型管理");
+    }
 
     @BeforeEach
     void setUp() {
