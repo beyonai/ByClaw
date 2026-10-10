@@ -27,11 +27,11 @@ RUN printf '{"version":"%s","branch":"%s","commit":"%s","commitFull":"%s","build
 
 #RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /workspace
 #USER appuser
-RUN groupadd -g 1001 appuser \
-    && useradd -m -u 1001 -g 1001 appuser \
-    && chown -R 1001:1001 /workspace
-
-USER appuser
+#RUN groupadd -g 1001 appuser \
+#    && useradd -m -u 1001 -g 1001 appuser \
+#    && chown -R 1001:1001 /workspace
+#
+#USER appuser
 
 EXPOSE 8080
 
