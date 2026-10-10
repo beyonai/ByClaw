@@ -28,3 +28,20 @@
     }
   }
 }
+
+.autoHeight {
+  height: auto;
+
+  .spinWrapper {
+    height: auto;
+    max-height: none !important;
+
+    :global(.@{antPrefix}-spin-container) {
+      height: auto;
+    }
+  }
+
+  iframe {
+    display: block;
+  }
+}

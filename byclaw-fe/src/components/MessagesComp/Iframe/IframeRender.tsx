@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Spin } from 'antd';
 
 import styles from './index.module.less';
+import useIframeAutoHeight from './useIframeAutoHeight';
 
 type IProps = {
   url: string;
+  autoHeight?: boolean;
   iframePayload?: Record<string, any>;
   onMessage?: (data: { type: string; data: any }) => void;
   onLoad?: (iframeRef: React.RefObject<HTMLIFrameElement | null>) => void;
@@ -13,11 +15,13 @@ type IProps = {
 const emptyObj = {};
 
 function IframeRender(props: IProps) {
-  const { url, iframePayload = emptyObj, onMessage, onLoad } = props;
+  const { url, autoHeight = false, iframePayload = emptyObj, onMessage, onLoad } = props;
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const [iframeSrc, setIframeSrc] = useState(url);
   const [isLoading, setIsLoading] = useState(true);
+
+  const pauseAutoHeight = useIframeAutoHeight(iframeRef, autoHeight, iframeSrc);
 
   // 记录上次发送的payload，避免重复发送
   const lastPayloadRef = useRef<any>(emptyObj);
@@ -77,6 +81,7 @@ function IframeRender(props: IProps) {
       if (data.type === 'iframe-set-height' && iframeRef.current) {
         const heightValue = typeof data.data === 'number' ? `${data.data}px` : String(data.data ?? '');
 
+        pauseAutoHeight();
         iframeRef.current.style.height = heightValue;
       }
     };
@@ -84,7 +89,7 @@ function IframeRender(props: IProps) {
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [onMessage]);
+  }, [onMessage, pauseAutoHeight]);
 
   useEffect(() => {
     const onLoaded = () => {
@@ -97,7 +102,7 @@ function IframeRender(props: IProps) {
   }, []);
 
   return (
-    <div className="full-width full-height">
+    <div className={autoHeight ? `full-width ${styles.autoHeight}` : 'full-width full-height'}>
       <Spin spinning={isLoading} className={styles.spin} wrapperClassName={styles.spinWrapper}>
         <iframe
           ref={iframeRef}
