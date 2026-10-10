@@ -321,3 +321,5 @@ BE 到 Node 的镜像协议中，`AnswerDelta.seq` 是渲染顺序计数器，�
 BE 在任务开始前观察分类时发送空文本 DELTA（`text=""`）及可信 groupDisposition 元数据，不使用终态 messageContent 代替 delta 字段；Node 可以先落任务卡并继续镜像终态答案。
 
 会话运行态帧的 envelope 与 data.sessionId 都必须输出精确字符串；HACU 优先采用 envelope 会话 ID，兼容旧帧的数值 ID 精度丢失。否则 idle 更新到错误会话，任务完成后仍显示停止按钮并阻止续聊。
+
+无浏览器租户头的外部执行器发布接口仅可恢复已登记的大整数租户任务：使用 BE 派发注册的可信归属，匹配登录用户并重新检查租户成员资格，再由 Node 校验任务权限。普通个人任务保留原路由；不根据请求正文或可变用户默认空间猜测租户。

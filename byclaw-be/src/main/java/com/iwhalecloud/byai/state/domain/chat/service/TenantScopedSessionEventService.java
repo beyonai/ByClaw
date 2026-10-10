@@ -55,6 +55,11 @@ public class TenantScopedSessionEventService {
         return JSON.parseObject(stored, TenantRequestContext.class);
     }
 
+    /** Trusted dispatch registration; callers must revalidate actor membership before use. */
+    public TenantRequestContext registeredOwner(Long sessionId) {
+        return owner(sessionId);
+    }
+
     /** null means personal routing; false means tenant root/team routing may continue. */
     public Boolean handleIfNecessary(Long parentId, JSONObject event) {
         JSONObject metadata = event == null ? null : event.getJSONObject("metadata");
