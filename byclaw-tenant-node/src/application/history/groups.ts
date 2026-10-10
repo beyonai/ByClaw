@@ -1,6 +1,7 @@
 import { bounded } from "./paging.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId } from "../../domain/values.js";
+import { workgroupName } from "../../domain/workgroup-name.js";
 import { HistoryAccess } from "./access.js";
 import { arrayJson, objectJson } from "./message-format.js";
 import {
@@ -11,6 +12,11 @@ import {
 
 /** 群列表、详情、设置及任务读取；私有任务和待发布卡片仅向发起人开放。 */
 export class GroupHistory extends HistoryAccess {
+  async nameCheck(actor: string, value: unknown) {
+    requireId(actor);
+    const name = workgroupName(value);
+    return { exists: await this.repository.groupNameExists(actor, name) };
+  }
   invitation(actor: string, token: string) {
     requireId(actor);
     return this.repository.invitation(actor, token);

@@ -111,6 +111,7 @@ class GroupChatCreationAndInvitationTest {
             Project project = new Project();
             project.setProjectId(100L);
             project.setProjectName(request.getProjectName().trim());
+            project.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
             return project;
         });
         ByaiSession group = new ByaiSession();

@@ -9,6 +9,7 @@ import {
 
 function setup() {
   const repo: HistoryRepository = {
+    groupNameExists: vi.fn(async () => false),
     session: vi.fn(async (id: string) => ({
       sessionId: id,
       enterpriseId: "10",
@@ -41,6 +42,28 @@ const message = (overrides: Row = {}) => ({
   ...overrides,
 });
 describe("tenant history use cases", () => {
+  it("retains Unicode whitespace exactly as BE's String.trim does", async () => {
+    const { repo, service } = setup();
+    const name = "\u00a0Team\u00a0";
+    await service.groupNameCheck("20", name);
+    expect(repo.groupNameExists).toHaveBeenCalledWith("20", name);
+  });
+  it("accepts Chinese names under the BE character limit", async () => {
+    const { service } = setup();
+    await expect(service.groupNameCheck("20", "中".repeat(100))).resolves.toEqual({
+      exists: false,
+    });
+    await expect(service.groupNameCheck("20", "中".repeat(101))).rejects.toThrow();
+  });
+  it("normalizes group names and preserves active-name conflicts", async () => {
+    const { repo, service } = setup();
+    vi.mocked(repo.groupNameExists).mockResolvedValue(true);
+    await expect(service.groupNameCheck("20", " Team ")).resolves.toEqual({ exists: true });
+    expect(repo.groupNameExists).toHaveBeenCalledWith("20", "Team");
+    await expect(service.groupNameCheck("20", " ")).rejects.toThrow("INVALID_SESSION_NAME");
+    await expect(service.groupNameCheck("20", undefined)).rejects.toThrow();
+    expect(repo.groupNameExists).toHaveBeenCalledOnce();
+  });
   it("lets a DSH child inherit the root employee while retaining task initiator authorization", async () => {
     const { service, repo } = setup();
     vi.mocked(repo.session).mockImplementation(async (id) => ({

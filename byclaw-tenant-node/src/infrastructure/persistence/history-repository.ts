@@ -1,6 +1,7 @@
 import { messageAcknowledgements } from "./message-ack-reader.js";
 import { invitationPreview } from "./group-invitation.js";
 import { groupList } from "./group-list.js";
+import { groupNameExists } from "./group-name.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type { HistoryRepository, MessageFilter, Row } from "../../application/history.js";
 
@@ -21,6 +22,9 @@ export class SqlHistoryRepository implements HistoryRepository {
   ) {}
   private async read(sql: string, parameters: unknown[] = []): Promise<Row[]> {
     return (await this.db.query(sql, parameters)).map(camel);
+  }
+  groupNameExists(actor: string, name: string) {
+    return groupNameExists(this.db, this.tenantId, actor, name);
   }
   invitation(actor: string, token: string) {
     return invitationPreview(this.db, this.tenantId, actor, token);

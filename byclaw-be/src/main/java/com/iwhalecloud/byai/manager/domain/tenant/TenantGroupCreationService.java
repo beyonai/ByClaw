@@ -66,7 +66,7 @@ public class TenantGroupCreationService {
         List<String> asserted = new ArrayList<>(); asserted.add(Long.toString(tenant.userId()));
         users.forEach(user -> asserted.add(user.memObjId()));
         node.command(tenant, "POST", "/internal/v1/group-chats", id, "CREATE_GROUP", new TenantNodeModels.Fields(Map.of(
-            "sessionName", request.getName(), "sessionContent", request.getGoal() == null ? "" : request.getGoal(),
+            "sessionName", project.getProjectName(), "sessionContent", request.getGoal() == null ? "" : request.getGoal(),
             "projectId", project.getProjectId().toString(), "members", initial,
             "coordinatorAgentId", coordinatorAgentId.toString())), java.util.UUID.randomUUID().toString(), asserted);
         if (!agentIds.isEmpty()) {

@@ -3,6 +3,8 @@ import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
 import { first, insert, nextId, camel } from "./sql-utils.js";
 import { GROUP_COORDINATOR_AGENT_ID } from "../../domain/group-coordination.js";
+import { groupNameExists } from "./group-name.js";
+import { workgroupName } from "../../domain/workgroup-name.js";
 
 /** 创建个人或群会话；群成员与默认设置在外层命令事务内一并写入，项目编排由 BE 负责。 */
 export async function createSession(context: CommandContext): Promise<void> {
@@ -10,8 +12,16 @@ export async function createSession(context: CommandContext): Promise<void> {
     p = command.payload;
   if (await context.session()) throw new DomainError("SESSION_EXISTS");
   const group = command.operation === "CREATE_GROUP";
-  const name = text(p.sessionName, 255, true);
+  const name = group ? workgroupName(p.sessionName) : text(p.sessionName, 255, true);
   if (!name.trim()) throw new DomainError("INVALID_SESSION_NAME");
+  if (group) {
+    // Different session IDs can still compete for one name; serialize the availability check and insert.
+    await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      `group-name:${command.enterpriseId}:${command.userId}:${name}`,
+    ]);
+    if (await groupNameExists(db, command.enterpriseId, command.userId, name))
+      throw new DomainError("GROUP_NAME_EXISTS");
+  }
   if (!group && p.sessionType !== undefined && p.sessionType !== "h_as")
     throw new DomainError("INVALID_SESSION_TYPE");
   await insert(db, "byai_session", {
