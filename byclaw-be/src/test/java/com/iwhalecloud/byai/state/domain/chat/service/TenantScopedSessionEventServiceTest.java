@@ -55,8 +55,11 @@ class TenantScopedSessionEventServiceTest {
             @Override
             public void write(io.netty.channel.ChannelHandlerContext context, Object message,
                               io.netty.channel.ChannelPromise promise) throws Exception {
+                // Wait for the frame to reach the outbound queue before reading it.
+                promise.addListener(future -> {
+                    if (future.isSuccess()) delivery.countDown();
+                });
                 super.write(context, message, promise);
-                delivery.countDown();
             }
         });
         var transport = new com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService(
