@@ -1,5 +1,6 @@
 export type Row = Record<string, any>;
 export interface MessageFilter {
+  filePage?: { before?: string; inclusive?: boolean };
   sessionId?: string;
   commandId?: string;
   ids?: string[];

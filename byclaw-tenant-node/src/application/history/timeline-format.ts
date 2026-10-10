@@ -1,3 +1,4 @@
+import { messageAttachments } from "./attachments.js";
 import type { HistoryRepository, Row } from "./contracts.js";
 import { safeMessage, objectJson, arrayJson, recalled, time } from "./message-format.js";
 
@@ -31,8 +32,7 @@ export async function displayMessages(
     : [];
   const projection = (source: Row, withReply = true): Row => {
     const row = safeMessage(source),
-      meta = objectJson(row.metadata),
-      resources = objectJson(row.relatedResources);
+      meta = objectJson(row.metadata);
     const agentId =
       source.usage === 2
         ? String(
@@ -45,28 +45,7 @@ export async function displayMessages(
               "unknown",
           )
         : undefined;
-    const attachments = recalled(source)
-      ? []
-      : [
-          ...arrayJson(resources.files)
-            .filter((f) => f && f.fileId && f.fileName)
-            .map((f) => ({
-              fileId: f.fileId,
-              fileName: f.fileName,
-              fileUrl: f.fileUrl,
-              mediaType: f.fileType,
-            })),
-          ...(meta.scene === "GROUP_CHAT" && meta.kind === "TASK_RESULT"
-            ? arrayJson(meta.files)
-                .filter((f) => f && f.fileName && f.filePath)
-                .map((f) => ({
-                  fileId: f.fileId,
-                  fileName: f.fileName,
-                  filePath: f.filePath,
-                  cloudResourceId: f.cloudResourceId,
-                }))
-            : []),
-        ];
+    const attachments = messageAttachments(source);
     const task = tasks.get(String(meta.taskId ?? ""));
     const messageAcks = recalled(source)
       ? []

@@ -1,3 +1,4 @@
+import { groupFileMessagePage } from "./group-file-page.js";
 import { messageAcknowledgements } from "./message-ack-reader.js";
 import { invitationPreview } from "./group-invitation.js";
 import { groupList } from "./group-list.js";
@@ -137,6 +138,15 @@ export class SqlHistoryRepository implements HistoryRepository {
     };
   }
   messages(filter: MessageFilter) {
+    if (filter.filePage)
+      return groupFileMessagePage(
+        this.db,
+        this.tenantId,
+        filter.sessionId!,
+        filter.filePage.before,
+        filter.filePage.inclusive === true,
+        filter.limit ?? 100,
+      ).then((rows) => rows.map(camel));
     if (filter.outline)
       return this.read(
         `SELECT * FROM (

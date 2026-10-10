@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
@@ -51,7 +52,8 @@ public class TenantGroupChatRoutingAspect {
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController.*(..))"
-        + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTopicController.*(..))")
+        + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTopicController.*(..))"
+        + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController.*(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
         if (context == null) return call.proceed();
@@ -64,6 +66,10 @@ public class TenantGroupChatRoutingAspect {
         if (args.length == 0 && !"list".equals(method)) throw unsupported();
         String sessionId = args.length > 0 && args[0] instanceof Long id && id > 0 ? id.toString() : null;
         String path = sessionId == null ? null : "/internal/v1/group-chats/" + sessionId;
+        // 文件列表与群列表都使用 list 方法，按控制器区分并保持租户数据归属。
+        if (call.getTarget() instanceof GroupChatFileController) {
+            return read(context, filePath(requirePath(path), args[1], args[2]));
+        }
         // 新增确认接口始终按租户上下文落 Node，不回退到共享消息表。
         if ("acknowledge".equals(method) || "unacknowledge".equals(method)) {
             return ResponseUtil.successResponse(messageAckService.change(context,
@@ -183,6 +189,21 @@ public class TenantGroupChatRoutingAspect {
     private String id(Object value) {
         if (!(value instanceof Long id) || id <= 0) throw unsupported();
         return id.toString();
+    }
+
+    private String filePath(String path, Object requestedSize, Object cursor) {
+        int pageSize = requestedSize == null ? 20 : requestedSize instanceof Integer size ? size : 0;
+        if (pageSize < 1 || pageSize > 50) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pageSize must be between 1 and 50");
+        }
+        StringBuilder result = new StringBuilder(path).append("/files?pageSize=").append(pageSize);
+        if (cursor != null && !cursor.toString().isBlank()) {
+            if (!(cursor instanceof String value) || value.length() > 256 || !value.matches("[A-Za-z0-9_-]+={0,2}")) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid group file cursor");
+            }
+            result.append("&cursor=").append(value);
+        }
+        return result.toString();
     }
 
     private String topicPath(String path, Object limit, Object cursor) {
