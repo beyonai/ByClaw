@@ -1,6 +1,22 @@
 import fs from 'fs';
 import path from 'path';
 
+it('uses equal primary button dimensions and compensates the install glyph whitespace', () => {
+  // JSDOM 不计算 Less 和 SVG 实际尺寸；保护尺寸约定，视觉大小仍需浏览器确认。
+  const styles = fs.readFileSync(path.resolve(__dirname, '../index.module.less'), 'utf8');
+  const primary = styles.match(/\.cardPrimaryActionBtn\s*\{([\s\S]*?)^\}/m)?.[1] || '';
+  const icon = primary.match(/\.cardActionBtnIcon\s*\{([^}]+)/)?.[1] || '';
+  const installIcon = primary.match(/\.installActionIcon\s*\{([^}]+)/)?.[1] || '';
+
+  expect(primary).toContain('width: 32px;');
+  expect(primary).toContain('min-width: 32px;');
+  expect(primary).toContain('height: 32px;');
+  expect(primary).toContain('padding: 0;');
+  expect(primary).toContain('flex-shrink: 0;');
+  expect(icon).toContain('font-size: 16px;');
+  expect(installIcon).toContain('font-size: 18px;');
+});
+
 it('shows a forbidden cursor on disabled cards without blocking action buttons', () => {
   // JSDOM 不计算 Less 光标样式，保护已有禁用样式，点击边界由组件用例覆盖。
   const styles = fs.readFileSync(path.resolve(__dirname, '../index.module.less'), 'utf8');
@@ -29,7 +45,7 @@ it('anchors knowledge tags to the card corner and reserves space with or without
   expect(actionSpace).toContain('padding-right: 48px;');
 });
 
-it('keeps skill corner tags above the lowered actions and reserves title space', () => {
+it('reserves only the measured skill corner tag width above the lowered actions', () => {
   // JSDOM 不计算 Less 布局：静态保护角标定位和操作区间距，实际视觉效果需浏览器确认。
   const styles = fs.readFileSync(path.resolve(__dirname, '../index.module.less'), 'utf8');
   const tag = styles.match(/\.skillPosterTag\s*\{([^}]+)/)?.[1] || '';
@@ -46,8 +62,10 @@ it('keeps skill corner tags above the lowered actions and reserves title space',
   expect(actions).toContain('bottom: auto;');
   expect(actions).toContain('transform: none;');
   expect(actions).toContain('height: 24px;');
-  expect(header).toContain('padding-right: 100px;');
-  expect(headerWithActions).toContain('padding-right: 52px;');
+  expect(header).toContain('padding-right: calc(var(--skill-poster-tag-width, 88px) + 12px + 8px - 22px);');
+  expect(headerWithActions).toContain('margin-right: -48px;');
+  expect(header).not.toContain('padding-right: 100px;');
+  expect(headerWithActions).not.toContain('padding-right: 52px;');
 });
 
 it('keeps knowledge actions below the tag without anchoring them to the card bottom', () => {

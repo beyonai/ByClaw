@@ -1200,7 +1200,7 @@ export default {
   'digitalEmployees.myEmployees': '管理员工',
   'digitalEmployees.official': '企业推荐',
   'digitalEmployees.myCreations': '个人助理',
-  'digitalEmployees.create': '创建数字员工',
+  'digitalEmployees.create': '创建',
   'digitalEmployees.createPersonal': '创建个人员工',
   'digitalEmployees.createPersonalGroup': '创建个人员工组',
   'digitalEmployees.createEnterprise': '创建企业员工',

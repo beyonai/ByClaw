@@ -57,6 +57,9 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 /** Adapts group dispatch to the ordinary private session runtime and decorates its Gateway request. */
 @Service
 public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMemberRoutingService memberRouting;
+
     @Autowired
     private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService coordinationService;
     @Autowired
@@ -355,7 +358,9 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         groupChat.put("initiatorUserId", execution.getInitiatorUserId());
         groupChat.put("targetAgentId", execution.getTargetAgentId());
         gatewayParams.put("groupChat", groupChat);
-        Map<String, Object> scope = coordinationService == null ? null : coordinationService.findScope(context.sessionId);
+        Map<String, Object> storedScope = coordinationService == null ? null : coordinationService.findScope(context.sessionId);
+        Map<String, Object> scope = storedScope == null ? null
+            : memberRouting.withRoutes(storedScope, userService.findById(execution.getInitiatorUserId()).getUserCode());
         if (scope != null) gatewayParams.put("groupCoordination", scope);
         if (scope != null) {
             com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.attachDshTarget(

@@ -19,7 +19,7 @@ export function sessionRoutes(
     const actor = requireId(req.headers["x-actor-user-id"]);
     const parent = requireId(req.params.id);
     await history.access(actor, parent);
-    const page = (await queries.children(actor, parent, record(req.body))) as {
+    const page = (await queries.childrenQuery(actor, parent, record(req.body))) as {
       list: Record<string, unknown>[];
       total: number;
       pageNum: number;
@@ -40,6 +40,24 @@ export function sessionRoutes(
       sessionExts: await history.sessionExtensions(actor, req.params.id),
     };
   });
+  app.get<{ Params: { id: string }; Querystring: { pageNum?: string; pageSize?: string } }>(
+    "/internal/v1/sessions/:id/children",
+    async (req) => {
+      const actor = requireId(req.headers["x-actor-user-id"]);
+      const parentId = requireId(req.params.id);
+      await history.access(actor, parentId);
+      const page = await queries.children(
+        actor,
+        parentId,
+        req.query.pageNum === undefined ? undefined : Number(req.query.pageNum),
+        req.query.pageSize === undefined ? undefined : Number(req.query.pageSize),
+      );
+      const list = await Promise.all(
+        page.list.map((child) => history.access(actor, child.sessionId)),
+      );
+      return { ...page, list };
+    },
+  );
   app.get<{ Params: { id: string }; Querystring: { pageNum?: string; pageSize?: string } }>(
     "/internal/v1/sessions/:id/messages",
     async (req) =>

@@ -17,4 +17,16 @@ describe('my employees search appearance', () => {
       /\.employeeSearch,\s*\.auditSearch\s*\{[^}]*box-sizing: border-box;\s*width: 200px;\s*height: 32px;/
     );
   });
+
+  it('places search at the right of the tabs while retaining a separate filter row', () => {
+    const filters = styles.match(/\.filters\s*\{([^}]+)\}/)?.[1] || '';
+
+    // JSDOM 不计算布局，锁定 tab 右侧的搜索入口及下方独立筛选行。
+    expect(source).toContain('tabBarExtraContent={{ right: employeeSearch }}');
+    expect(filters).toContain('width: 100%;');
+    expect(filters).toContain('justify-content: space-between;');
+    expect(filters).toContain('margin-bottom: 0;');
+    expect(styles).not.toContain('.rightFilters');
+    expect(source).not.toContain('Segmented');
+  });
 });

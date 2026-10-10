@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useIntl, useLocation, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
-import { Button, Dropdown, Empty, Input, Segmented, Select, Space, Spin, Tooltip, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Select, Space, Spin, Tooltip, message } from 'antd';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
@@ -37,7 +37,10 @@ import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter, { getDefaultParams, type IOnOkParams } from './components/ResourceFilter';
-import ResourceQuickFilters from './components/ResourceQuickFilters';
+import ResourceQuickFilters, {
+  ResourceQuickFilterBar,
+  ResourceQuickFilterGroup,
+} from './components/ResourceQuickFilters';
 import { statusOptions, myResourceStatusOptions } from './constants';
 import ResourceList from './components/ResourceList';
 import SkillGroupList from './components/SkillGroupList';
@@ -642,34 +645,13 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const currentMyResourceStatusOptions =
     resourceType === 'SKILL'
       ? [
-        ...myResourceStatusOptions,
-        { label: 'resourceStatus.reviewing', value: '4' },
-        { label: 'resourceStatus.notPassed', value: '5' },
-      ]
+          ...myResourceStatusOptions,
+          { label: 'resourceStatus.reviewing', value: '4' },
+          { label: 'resourceStatus.notPassed', value: '5' },
+        ]
       : myResourceStatusOptions;
   const tabBarExtraContent = (
     <Space>
-      {myResourcesOnly && activeTab === 'enterprise' && (
-        <Segmented
-          value={myResourceScope}
-          options={[
-            { value: 'all', label: intl.formatMessage({ id: 'resourceCenter.myResourcesAll' }) },
-            { value: 'created', label: intl.formatMessage({ id: 'resourceCenter.createdByMe' }) },
-            { value: 'managed', label: intl.formatMessage({ id: 'resourceCenter.managedByMe' }) },
-          ]}
-          onChange={(value) => setMyResourceScope(value as MyResourceScope)}
-        />
-      )}
-      {isMyEnterpriseResources && (
-        <Segmented
-          value={getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus, resourceType)}
-          options={currentMyResourceStatusOptions.map((item) => ({
-            ...item,
-            label: intl.formatMessage({ id: item.label }),
-          }))}
-          onChange={(resourceStatus) => setDropdownParam((previous) => ({ ...previous, resourceStatus }))}
-        />
-      )}
       {isEnterpriseSkillGroupMode && isAdminVip(userInfo) && (
         <Select
           aria-label={intl.formatMessage({ id: 'common.status' })}
@@ -716,7 +698,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           }
           activeTab={activeTab}
           resourceOwnerFilter={false}
-          // 企业状态已移到外层分段控件，个人页固定查询已上架。
+          // 企业状态由外部快捷按钮筛选，个人页固定查询已上架。
           hideStatusFilter
           alwaysShowStatusFilter={false}
           statusOptionsOverride={myResourcesOnly ? currentMyResourceStatusOptions : undefined}
@@ -987,7 +969,21 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
       <CommonTabs
         className={classnames(styles.secondaryTabs, { [styles.myResourcesTabs]: myResourcesOnly })}
         activeKey={activeTab}
-        tabBarExtraContent={myResourcesOnly || activeTab === 'marketplace' ? undefined : tabBarExtraContent}
+        tabBarExtraContent={
+          activeTab === 'marketplace'
+            ? undefined
+            : myResourcesOnly
+              ? {
+                  right: (
+                    // 搜索框位于页签行最右侧，其余管理操作排在搜索框左侧。
+                    <div className={styles.myResourcesTabActions}>
+                      {tabBarExtraContent}
+                      {resourceSearch}
+                    </div>
+                  ),
+                }
+              : tabBarExtraContent
+        }
         items={items}
         onChange={(key: string) => {
           const nextTab = key as ResourceTab;
@@ -1017,12 +1013,29 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           onChange={(param) => setDropdownParam((previous: IOnOkParams) => ({ ...previous, ...param }))}
         />
       )}
-      {/* 与我的数字员工一致：返回、页签、搜索筛选分别占一行。审核页使用自己的工具栏。 */}
-      {myResourcesOnly && (
-        <div className={styles.myResourcesToolbar}>
-          {resourceSearch}
-          {tabBarExtraContent}
-        </div>
+      {/* 管理页沿用浏览页的按钮样式，归属和状态独占一行并保留原查询值。 */}
+      {isMyEnterpriseResources && (
+        <ResourceQuickFilterBar className={styles.myResourcesFilters}>
+          <ResourceQuickFilterGroup
+            title={intl.formatMessage({ id: 'common.belong' })}
+            value={myResourceScope}
+            options={[
+              { value: 'all', label: intl.formatMessage({ id: 'resourceCenter.myResourcesAll' }) },
+              { value: 'created', label: intl.formatMessage({ id: 'resourceCenter.createdByMe' }) },
+              { value: 'managed', label: intl.formatMessage({ id: 'resourceCenter.managedByMe' }) },
+            ]}
+            onChange={(value) => setMyResourceScope(value as MyResourceScope)}
+          />
+          <ResourceQuickFilterGroup
+            title={intl.formatMessage({ id: 'common.status' })}
+            value={getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus, resourceType)}
+            options={currentMyResourceStatusOptions.map((item) => ({
+              ...item,
+              label: intl.formatMessage({ id: item.label }),
+            }))}
+            onChange={(resourceStatus) => setDropdownParam((previous) => ({ ...previous, resourceStatus }))}
+          />
+        </ResourceQuickFilterBar>
       )}
       {!myResourcesOnly && resourceType === 'SKILL' && activeTab === 'marketplace' ? (
         <div ref={marketplaceRef} className={styles.marketplaceFrameContainer}>

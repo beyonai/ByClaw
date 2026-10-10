@@ -49,12 +49,12 @@ public final class TenantNodeModels {
                               String creatorId, String enterpriseId, String projectId,
                               String parentSessionId, List<java.util.Map<String, Object>> sessionExts,
                               java.util.Map<String, Object> groupCoordination, String targetAgentId,
-                              Boolean groupCoordinationChild) {
+                              Boolean groupCoordinationChild, String state, String objectId, String objectType) {
         public SessionView(String sessionId, String sessionName, String sessionType,
                            String createTime, String updateTime, String sessionContent,
                            String creatorId, String enterpriseId, String projectId) {
             this(sessionId, sessionName, sessionType, createTime, updateTime, sessionContent,
-                creatorId, enterpriseId, projectId, null, null, null, null, null);
+                creatorId, enterpriseId, projectId, null, null, null, null, null, null, null, null);
         }
     }
 

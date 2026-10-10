@@ -105,9 +105,12 @@ public class TenantChatRoutingAspect {
                 if (query.getParentSessionId() != null) {
                     if (query.getParentSessionId() <= 0 || query.getObjectId() != null || query.getObjectType() != null)
                         throw unsupported();
+                    int pageNum = query.getPageNum() == null ? 1 : query.getPageNum();
+                    int pageSize = query.getPageSize() == null ? 100 : query.getPageSize();
+                    if (pageNum < 1 || pageNum > 100000 || pageSize < 1 || pageSize > 100) throw badRequest();
                     Page<java.util.Map<String, Object>> children = node.request(context, "POST",
                         "/internal/v1/sessions/" + query.getParentSessionId() + "/children/query",
-                        new SessionQuery(query.getPageNum(), query.getPageSize(),
+                        new SessionQuery(pageNum, pageSize,
                             query.getSearchKeyword() == null ? "" : query.getSearchKeyword(), List.of("h_as"), null),
                         new TypeReference<Page<java.util.Map<String, Object>>>() { });
                     return ResponseUtil.successResponse(children);
