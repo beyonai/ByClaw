@@ -201,7 +201,8 @@ public class EmployeePublicationApplicationService {
                 return view(latest);
             }
             SsResource existing = publications.official(sourceId, tenant);
-            if (fromPersonalUpdate && existing == null) throw new BaseException("尚无官方副本，请先发布到官方推荐");
+            if (fromPersonalUpdate && existing == null) throw new BaseException(
+                com.iwhalecloud.byai.common.i18n.I18nUtil.get("employee.publication.enterprise.copy.required"));
             if (!official && !fromPersonalUpdate && existing != null) throw new BaseException("该员工已有官方副本，请从个人员工卡片发起发布更新");
             SsResource target = official ? requested : fromPersonalUpdate ? existing : null;
             if (target != null) {

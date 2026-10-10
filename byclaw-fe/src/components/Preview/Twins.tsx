@@ -1,12 +1,22 @@
 import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import { Segmented, Spin } from 'antd';
+import { Alert, Segmented, Spin } from 'antd';
+import { useIntl } from '@umijs/max';
 import { EyeOutlined, FileDoneOutlined } from '@ant-design/icons';
 import cn from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import { copyWithMessage } from '@/utils/copy';
 import { BundledLanguage } from 'shiki';
-import { CODE_TEXT_EXTENSIONS } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
+import {
+  AUDIO_PREVIEW_TYPES,
+  HTML_PREVIEW_TYPES,
+  IMAGE_PREVIEW_TYPES,
+  OFFICE_PREVIEW_TYPES,
+  PREVIEW_MIME_TYPES,
+  TEXT_PREVIEW_TYPES,
+  VIDEO_PREVIEW_TYPES,
+  resolvePreviewType,
+} from './formats';
 import { Animated } from '../Animated';
 // import { KeepAlive } from '../KeepAlive';
 import ss from './Twins.module.less';
@@ -28,28 +38,13 @@ const OfficeComponent = React.lazy(() =>
   import('@/components/Preview/Office').then((module) => ({ default: module.Office }))
 );
 
-const typeMap: Record<string, string> = {
-  md: 'text/markdown',
-  txt: 'text/plain',
-  pdf: 'application/pdf',
-  json: 'application/json',
-  h5: 'text/html',
-  html: 'text/html',
-  image: 'image/*',
-  jpg: 'image/jpeg',
-  png: 'image/png',
-  gif: 'image/gif',
-  bmp: 'image/bmp',
-  webp: 'image/webp',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-};
+const MediaPreviewComponent = React.lazy(() => import('@/components/Preview/Media'));
 
 // 文件扩展名 -> shiki 语言。仅收录 shiki/bundle-web 实际打包的语言;传入未打包的 lang 会让 codeToHtml 抛错致预览白屏。
 // 未命中的代码/配置类型(如 go/rust/kotlin)仍按纯文本展示(见 isTextLike + TextHighlight 默认 lang)。
 const langMap: Record<string, BundledLanguage> = {
   md: 'markdown',
+  svg: 'xml',
   json: 'json',
   html: 'html',
   xml: 'xml',
@@ -79,16 +74,24 @@ const langMap: Record<string, BundledLanguage> = {
   yml: 'yaml',
 };
 
-// 纯文本类(可读源码展示):显式文本类型 + 白名单里的代码/配置扩展名(不依赖 langMap,未高亮也纯文本兜底)。
-const isTextLike = (type: string) =>
-  ['txt', 'text', 'log', 'json'].includes(type) || CODE_TEXT_EXTENSIONS.includes(type);
+// SVG 同时提供图片预览和 XML 源码；CSV/TSV 等数据文本沿用可复制的源码预览。
+const isTextLike = (type: string) => TEXT_PREVIEW_TYPES.includes(type);
+const canReadSource = (type: string) => isTextLike(type) || ['md', 'svg', ...HTML_PREVIEW_TYPES].includes(type);
+const officeTypes = OFFICE_PREVIEW_TYPES;
+const visualTypes = [
+  'md',
+  'pdf',
+  ...HTML_PREVIEW_TYPES,
+  ...IMAGE_PREVIEW_TYPES,
+  ...VIDEO_PREVIEW_TYPES,
+  ...AUDIO_PREVIEW_TYPES,
+  ...officeTypes,
+];
 
-const officeTypes = ['pptx', 'docx', 'xlsx'];
-
-const createNamedBlob = (blob: Blob, type: string, title?: string) => {
-  if (!title) return blob;
-
-  return new File([blob], title, { type: typeMap[type] || blob.type });
+const createPreviewBlob = (blob: Blob, type: string, title?: string) => {
+  // SVG、PDF 和媒体解码需要具体 MIME；未提供文件名时同样修正通用二进制响应。
+  const mimeType = PREVIEW_MIME_TYPES[type] || blob.type;
+  return title ? new File([blob], title, { type: mimeType }) : new Blob([blob], { type: mimeType });
 };
 
 export interface TwinsProps {
@@ -103,7 +106,7 @@ export interface TwinsProps {
 export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.ReactNode; className?: string }) => {
   const {
     data,
-    type = 'txt',
+    type: providedType,
     title,
     extra,
     className,
@@ -111,6 +114,8 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
     resolveHtmlResource,
     onHtmlLinkClick,
   } = props;
+  const intl = useIntl();
+  const type = resolvePreviewType(providedType, title, data instanceof Blob ? data.type : undefined);
   const [tab, setTab] = useState<'source' | 'preview'>();
 
   /** 资源链接 - 用于预览 */
@@ -125,7 +130,7 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
     let downloadUrl = uri;
 
     if (!downloadUrl && data instanceof Blob && officeTypes.includes(type)) {
-      downloadUrl = URL.createObjectURL(createNamedBlob(data, type, title));
+      downloadUrl = URL.createObjectURL(createPreviewBlob(data, type, title));
       setTimeout(() => {
         if (downloadUrl) {
           URL.revokeObjectURL(downloadUrl);
@@ -147,64 +152,66 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
   };
 
   useEffect(() => {
-    let _uri: string | undefined;
-
+    let objectUrl: string | undefined;
+    let disposed = false;
     setUri(undefined);
+    setContent(undefined);
+    setLoading(false);
 
     if (data instanceof Blob && !officeTypes.includes(type)) {
-      let blob: Blob = data;
-
-      // 可查看源码:markdown/html 走各自预览,其余文本与代码类型统一读文本高亮。
-      if (type && (isTextLike(type) || ['md', 'h5', 'html'].includes(type))) {
+      if (canReadSource(type)) {
         setLoading(true);
-        blob
+        data
           .text()
-          .then((_text) => {
-            let text = _text;
+          .then((source) => {
+            if (disposed) return;
+            let text = source;
             if (type === 'json') {
               try {
-                text = JSON.stringify(JSON.parse(text), null, 2);
-              } catch (error) {
-                text = _text;
+                text = JSON.stringify(JSON.parse(source), null, 2);
+              } catch {
+                // 非标准 JSON 仍展示原文，避免影响下载或其他格式预览。
               }
             }
             setContent([langMap[type], text]);
           })
-          .finally(() => setLoading(false));
+          .catch(() => {
+            if (!disposed) setContent(undefined);
+          })
+          .finally(() => {
+            if (!disposed) setLoading(false);
+          });
       }
-
-      if (title) {
-        blob = createNamedBlob(data, type, title);
+      objectUrl = URL.createObjectURL(createPreviewBlob(data, type, title));
+      setUri(objectUrl);
+    } else if (typeof data === 'string') {
+      if (canReadSource(type)) setContent([langMap[type], data]);
+      if (type === 'svg' || HTML_PREVIEW_TYPES.includes(type)) {
+        objectUrl = URL.createObjectURL(createPreviewBlob(new Blob([data]), type, title));
+        setUri(objectUrl);
+      } else if ([...IMAGE_PREVIEW_TYPES, ...VIDEO_PREVIEW_TYPES, ...AUDIO_PREVIEW_TYPES].includes(type)) {
+        setUri(data);
       }
+    }
 
-      _uri = URL.createObjectURL(blob);
-      setUri(_uri);
-    }
-    if (data && typeof data === 'string') {
-      setContent([langMap[type], data]);
-    }
     return () => {
-      setContent(undefined);
-      if (_uri) URL.revokeObjectURL(_uri);
+      // 异步文本读取不得覆盖后来打开的文件；只回收本组件创建的 URL。
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [data, type, title]);
 
   const tabs = useMemo(() => {
-    const _tabs: any[] = [];
-    // 可预览
-    if (['h5', 'html', 'pdf', 'md', 'image', 'jpg', 'png', 'gif', 'bmp', 'webp', ...officeTypes].includes(type)) {
-      _tabs.push({ value: 'preview', icon: <EyeOutlined /> });
-    }
-    if (content) {
-      _tabs.push({ value: 'source', icon: <FileDoneOutlined /> });
-    }
-    if (_tabs.length) {
-      setTab(_tabs[0].value);
-    } else {
-      setTab(undefined);
-    }
-    return _tabs;
-  }, [uri, content]);
+    const options = [];
+    if (visualTypes.includes(type)) options.push({ value: 'preview', icon: <EyeOutlined /> });
+    if (content) options.push({ value: 'source', icon: <FileDoneOutlined /> });
+    return options;
+  }, [type, content]);
+
+  useEffect(() => {
+    setTab(tabs[0]?.value as 'source' | 'preview' | undefined);
+  }, [tabs]);
+
   return (
     <section className={cn(ss.twins, className)}>
       <nav className={ss.twins}>
@@ -223,15 +230,15 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
             <AntdIcon type="icon-a-Downloadxiazai" onClick={onDownload} />
           </span>
         )}
-        <span
-          style={{ display: isTextLike(type) || ['h5', 'html', 'md'].includes(type) ? '' : 'none' }}
-          className={ss.icon}
-        >
+        <span style={{ display: canReadSource(type) ? '' : 'none' }} className={ss.icon}>
           <AntdIcon type="icon-a-Copyfuzhi1" onClick={onCopy} />
         </span>
         {extra}
       </nav>
       <div className={ss.twins}>
+        {!loading && !visualTypes.includes(type) && !isTextLike(type) && (
+          <Alert type="info" showIcon message={intl.formatMessage({ id: 'fileRender.formatUnsupported' })} />
+        )}
         {loading && (
           <div className={ss.loading}>
             <Spin />
@@ -248,27 +255,47 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
         >
           <Suspense fallback={<Spin />}>
             {/* PDF 必须保留二进制 URL 交给浏览器预览，避免被 HTML 资源解析分支读取为文本而显示乱码。 */}
-            {type !== 'pdf' && resolveHtmlResource ? (
-              <HtmlRenderComponent
-                content={content?.[1]}
-                data={data instanceof Blob ? data : undefined}
-                resolveResource={resolveHtmlResource}
-                onLinkClick={onHtmlLinkClick}
-              />
-            ) : (
-              <HtmlRenderComponent href={uri} onLinkClick={onHtmlLinkClick} />
-            )}
+            {(HTML_PREVIEW_TYPES.includes(type) || type === 'pdf') &&
+              (type !== 'pdf' && resolveHtmlResource ? (
+                <HtmlRenderComponent
+                  content={content?.[1]}
+                  data={data instanceof Blob ? data : undefined}
+                  resolveResource={resolveHtmlResource}
+                  onLinkClick={onHtmlLinkClick}
+                />
+              ) : (
+                <HtmlRenderComponent href={uri} onLinkClick={onHtmlLinkClick} />
+              ))}
+          </Suspense>
+        </div>
+        <div
+          style={{
+            display: !!uri && tab === 'preview' && IMAGE_PREVIEW_TYPES.includes(type) ? 'block' : 'none',
+          }}
+          className={'full-width full-height'}
+        >
+          <Suspense fallback={<Spin />}>
+            {IMAGE_PREVIEW_TYPES.includes(type) && <ImagePreviewComponent url={uri} title={title} />}
           </Suspense>
         </div>
         <div
           style={{
             display:
-              !!uri && tab === 'preview' && ['jpg', 'png', 'gif', 'bmp', 'webp'].includes(type) ? 'block' : 'none',
+              !!uri && tab === 'preview' && [...VIDEO_PREVIEW_TYPES, ...AUDIO_PREVIEW_TYPES].includes(type)
+                ? 'block'
+                : 'none',
           }}
-          className={'full-width full-height'}
+          className="full-width full-height"
         >
           <Suspense fallback={<Spin />}>
-            <ImagePreviewComponent url={uri} title={title} />
+            {uri && [...VIDEO_PREVIEW_TYPES, ...AUDIO_PREVIEW_TYPES].includes(type) && (
+              <MediaPreviewComponent
+                url={uri}
+                title={title}
+                type={VIDEO_PREVIEW_TYPES.includes(type) ? 'video' : 'audio'}
+                active={tab === 'preview'}
+              />
+            )}
           </Suspense>
         </div>
         <div
@@ -293,7 +320,7 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
 });
 
 export default function Twins(props: TwinsProps) {
-  const { data, type = 'txt', title, resolveMarkdownImage, resolveHtmlResource, onHtmlLinkClick } = props;
+  const { data, type, title, resolveMarkdownImage, resolveHtmlResource, onHtmlLinkClick } = props;
 
   /** 是否全屏 */
   const [fullscreen, setFullscreen] = useState(false);

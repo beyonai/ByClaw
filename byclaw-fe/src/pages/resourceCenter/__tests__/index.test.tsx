@@ -2,11 +2,26 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import ResourceCenter from '..';
 
 const mockResourcesProps = jest.fn();
+const mockSetSearchParams = jest.fn();
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),
+  // mock 工厂会被提升，使用允许的全局对象读取 JSDOM 路由状态。
+  useLocation: () => ({ state: globalThis.history.state }),
+  useSearchParams: () => {
+    const [query, setQuery] = require('react').useState(globalThis.location.search);
+    return [
+      new URLSearchParams(query),
+      (params: URLSearchParams, options: { state?: unknown }) => {
+        mockSetSearchParams(params, options);
+        const nextQuery = `?${params.toString()}`;
+        globalThis.history.pushState(options.state, '', `/resourceCenter${nextQuery}`);
+        setQuery(nextQuery);
+      },
+    ];
+  },
 }));
 
 jest.mock('@/components/AntdIcon', () => ({
@@ -46,6 +61,47 @@ jest.mock('@/pages/files', () => ({
 describe('ResourceCenter', () => {
   beforeEach(() => {
     mockResourcesProps.mockClear();
+    mockSetSearchParams.mockClear();
+    window.history.replaceState({}, '', '/resourceCenter');
+  });
+
+  it('restores the knowledge module and top-level tabs after returning from detail', () => {
+    window.history.replaceState({}, '', '/resourceCenter?resourceTab=knowledge&tab=enterprise');
+    render(<ResourceCenter />);
+
+    expect(screen.getAllByRole('tab')).toHaveLength(4);
+    expect(screen.getByRole('tab', { name: /resource.knowledge/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('KG_DOC')).toBeInTheDocument();
+    expect(screen.queryByText('SKILL')).not.toBeInTheDocument();
+  });
+
+  it('keeps the selected module in the route across a remount', () => {
+    const state = { preserveDetailPanel: true };
+    window.history.replaceState(state, '', '/resourceCenter?tab=enterprise');
+    const { unmount } = render(<ResourceCenter />);
+    fireEvent.click(screen.getByRole('tab', { name: /resource.knowledge/ }));
+
+    expect(new URLSearchParams(window.location.search).get('resourceTab')).toBe('knowledge');
+    expect(new URLSearchParams(window.location.search).get('tab')).toBe('enterprise');
+    expect(mockSetSearchParams).toHaveBeenLastCalledWith(expect.any(URLSearchParams), { state });
+    unmount();
+    render(<ResourceCenter />);
+    expect(screen.getByRole('tab', { name: /resource.knowledge/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('restores my knowledge management and allows returning to the top-level tabs', () => {
+    window.history.replaceState(
+      { resourceCenterMyResourcesOnly: true },
+      '',
+      '/resourceCenter?resourceTab=knowledge&tab=enterprise'
+    );
+    render(<ResourceCenter />);
+
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.getByText('KG_DOC')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'backToAll' }));
+    expect(screen.getAllByRole('tab')).toHaveLength(4);
+    expect(screen.getByRole('tab', { name: /resource.knowledge/ })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('hides the file module while keeping the other resource tabs available', () => {

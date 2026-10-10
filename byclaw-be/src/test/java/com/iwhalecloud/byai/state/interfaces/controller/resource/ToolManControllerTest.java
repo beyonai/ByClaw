@@ -115,7 +115,7 @@ class ToolManControllerTest {
         org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillResourceApplicationService", service);
         var request = new com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto();
         request.setResourceId(10L);
-        String reason = "无法发布到官方推荐：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。";
+        String reason = "无法发布到企业：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。";
         org.mockito.Mockito.when(service.publishSkillToEnterprise(10L)).thenThrow(new IllegalArgumentException(reason));
 
         var response = controller.publishSkillToEnterprise(request);

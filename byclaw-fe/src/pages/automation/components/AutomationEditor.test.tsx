@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { message } from 'antd';
+import { act, fireEvent, render as renderComponent, screen, waitFor } from '@testing-library/react';
+import { ConfigProvider, message } from 'antd';
 import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 import { createScanSource, updateScanSource } from '@/service/devloop';
@@ -53,12 +53,19 @@ const draft: DefaultValueSchema = {
 };
 
 const props = { onCancel: jest.fn(), onSaved: jest.fn() };
+// 草稿测试保留真实表单校验，关闭动画避免异步布局影响保存用例。
+const render = (ui: Parameters<typeof renderComponent>[0]) =>
+  renderComponent(ui, {
+    wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+  });
 const fillDraft = () => {
-  fireEvent.change(screen.getByRole('textbox', { name: 'automation.name' }), { target: { value: 'Daily summary' } });
+  fireEvent.change(screen.getByLabelText('automation.name'), { target: { value: 'Daily summary' } });
   act(() => mockInputProps.onInputDraftChange(draft));
 };
 
 describe('AutomationEditor creation draft', () => {
+  // 保存用例包含两次挂载及真实异步表单校验，断言仍使用默认等待预算。
+  jest.setTimeout(15000);
   beforeEach(() => {
     jest.clearAllMocks();
     mockInputHistory.length = 0;

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { Modal } from 'antd';
+import { fireEvent, render as renderComponent, screen, waitFor } from '@testing-library/react';
+import { ConfigProvider, Modal } from 'antd';
 import TenantDatasource from './index';
 import { listTenants } from '../../service/TenantMgr';
 import { browseTenantTable, executeTenantSql, listTenantTables } from '../../service/TenantDatasource';
@@ -51,6 +51,12 @@ const result = (page = 1, hasNextPage = false) => ({
   truncated: false,
 });
 
+// 保留对象树、页签和数据表交互，关闭动画以避免切换更新跨越用例边界。
+const render = (ui: Parameters<typeof renderComponent>[0]) =>
+  renderComponent(ui, {
+    wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+  });
+
 async function connectTenant() {
   render(<TenantDatasource />);
   await screen.findByRole('option', { name: '测试租户 · 123' });
@@ -60,6 +66,8 @@ async function connectTenant() {
 }
 
 describe('tenant datasource workbench', () => {
+  // 每个用例覆盖连接和多步交互，单步等待仍保留默认预算。
+  jest.setTimeout(15000);
   beforeEach(() => {
     jest.clearAllMocks();
     (listTenants as jest.Mock).mockResolvedValue([
@@ -88,7 +96,7 @@ describe('tenant datasource workbench', () => {
 
   it('requests the next SQL result page from the server', async () => {
     await connectTenant();
-    fireEvent.change(screen.getByPlaceholderText('输入一条 SQL 语句…'), {
+    fireEvent.change(await screen.findByPlaceholderText('输入一条 SQL 语句…'), {
       target: { value: 'SELECT generate_series(1, 1001)' },
     });
     fireEvent.click(screen.getByRole('button', { name: /运行 SQL/ }));
@@ -104,7 +112,7 @@ describe('tenant datasource workbench', () => {
   it('asks for confirmation before sending a destructive statement', async () => {
     await connectTenant();
     const confirm = jest.spyOn(Modal, 'confirm').mockImplementation(jest.fn());
-    fireEvent.change(screen.getByPlaceholderText('输入一条 SQL 语句…'), {
+    fireEvent.change(await screen.findByPlaceholderText('输入一条 SQL 语句…'), {
       target: { value: 'DROP TABLE byai.sample' },
     });
     fireEvent.click(screen.getByRole('button', { name: /运行 SQL/ }));

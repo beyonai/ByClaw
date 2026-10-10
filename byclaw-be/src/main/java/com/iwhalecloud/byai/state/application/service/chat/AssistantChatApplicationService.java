@@ -702,22 +702,26 @@ public class AssistantChatApplicationService {
             fileUpload = JSON.parseObject(globalConf, FileUploadDto.class);
         }
 
+        // 未配置上传参数时不附加业务限制，与前端缺省配置保持一致。
+        if (fileUpload == null) {
+            return;
+        }
         boolean enabled = fileUpload.isEnabled();
         if (!enabled) {
             return;
         }
 
-        // 校验文件数量和文件大小
+        // 数量和单文件大小的 0 均表示不限，仅正数配置参与校验。
         long maxFileCount = fileUpload.getMaxFileCount();
         long maxFileSizeMB = fileUpload.getMaxFileSize();
-        if (files.length > maxFileCount) {
+        if (maxFileCount > 0 && files.length > maxFileCount) {
             throw new BaseException(I18nUtil.get("file.upload.count.exceeded", maxFileCount, files.length));
         }
 
         // 校验文件大小（文件类型不做限制）
         for (MultipartFile multipartFile : files) {
             long size = multipartFile.getSize();
-            if (size > (maxFileSizeMB * 1024 * 1024)) {
+            if (maxFileSizeMB > 0 && size > (maxFileSizeMB * 1024 * 1024)) {
                 // 将字节转换为MB，格式化在国际化文件中定义
                 double sizeMB = size / 1024.0 / 1024.0;
                 throw new BaseException(I18nUtil.get("file.upload.size.exceeded", maxFileSizeMB, sizeMB));

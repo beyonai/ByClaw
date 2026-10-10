@@ -21,11 +21,6 @@ jest.mock('antd', () => {
   };
 });
 
-jest.mock('../../../skillExport', () => ({
-  buildSkillBundle: jest.fn().mockResolvedValue(new Blob(['zip'])),
-  saveSkillFile: jest.fn(),
-}));
-
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
   useSelector: (selector: any) =>
@@ -78,6 +73,7 @@ jest.mock('../../ResourceCard', () => ({
       data-type-tag={String(actionConfig.showResourceTypeTag)}
       data-enterprise-publication={String(actionConfig.enablePublishToEnterprise)}
       data-manage-workspace={String(actionConfig.canManageWorkspaceSkill)}
+      data-skill-export-enabled={String(actionConfig.enableSkillExport)}
     >
       <button onClick={() => actionConfig.onShelf()}>publish</button>
       <button onClick={() => actionConfig.onUnShelf()}>unpublish</button>
@@ -581,47 +577,29 @@ it.each(
   }
 );
 
-it('exports only resource library skills across filtered pages without changing the displayed list', async () => {
-  const { buildSkillBundle, saveSkillFile } = jest.requireMock('../../../skillExport');
-  (listResourceUseAuth as jest.Mock).mockImplementation(({ pageNum }) =>
-    Promise.resolve({
-      data: { list: [{ resourceId: pageNum === 1 ? '1' : '2', resourceBizType: 'SKILL' }], total: 31 },
-    })
-  );
-  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
-    data: [{ skillName: 'local', skillPath: '/workspace/skills/local' }],
-  });
-  const exportContainer = document.createElement('span');
-  document.body.appendChild(exportContainer);
-  renderList({
-    resourceType: 'SKILL',
-    activeTab: 'personal',
-    myResourcesOnly: false,
-    searchValue: 'demo',
-    exportContainer,
-  });
-  await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(1));
-  const exportButton = screen.getByRole('button', { name: /resource\.skillExport\.all/ });
-  expect(exportContainer).toContainElement(exportButton);
-  expect(document.getElementById('SKILLListScroller')).not.toContainElement(exportButton);
-  fireEvent.click(exportButton);
-  await waitFor(() => expect(saveSkillFile).toHaveBeenCalled());
-  expect(listResourceUseAuth).toHaveBeenCalledWith(
-    expect.objectContaining({
-      pageNum: 2,
-      keyword: 'demo',
-      availableOnly: true,
-      resourceStatus: '2',
-    })
-  );
-  expect(buildSkillBundle).toHaveBeenCalledWith(
-    [expect.objectContaining({ resourceId: '1' }), expect.objectContaining({ resourceId: '2' })],
-    undefined
-  );
-  expect(screen.getAllByTestId('resource-card')).toHaveLength(1);
-  expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
-  exportContainer.remove();
-});
+it.each(['personal', 'enterprise', 'favorites', 'installed'])(
+  'keeps single skill export enabled without rendering a bulk export button in %s',
+  async (activeTab) => {
+    (listResourceUseAuth as jest.Mock).mockImplementation(({ pageNum }) =>
+      Promise.resolve({
+        data: { list: [{ resourceId: pageNum === 1 ? '1' : '2', resourceBizType: 'SKILL' }], total: 31 },
+      })
+    );
+    renderList({
+      resourceType: 'SKILL',
+      activeTab,
+      myResourcesOnly: false,
+      searchValue: 'demo',
+    });
+    // 已安装列表合并个人和企业两个查询结果，其余页只查询当前归属。
+    await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(activeTab === 'installed' ? 2 : 1));
+    expect(screen.queryByRole('button', { name: /resource\.skillExport\.all/ })).not.toBeInTheDocument();
+    screen.getAllByTestId('resource-card').forEach((card) => {
+      expect(card).toHaveAttribute('data-skill-export-enabled', 'true');
+    });
+    expect(listResourceUseAuth).not.toHaveBeenCalledWith(expect.objectContaining({ pageNum: 2 }));
+  }
+);
 
 it.each([false, true])(
   'hides skill sharing and preserves publication in available and my personal skills: %s',

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useIntl, useNavigate, useSearchParams } from '@umijs/max';
+import { useIntl, useLocation, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Input } from 'antd';
 
@@ -28,8 +28,19 @@ const KnowledgeDetail: React.FC = () => {
   const resourceBizType = searchParams.get('resourceBizType');
   const resourceSourcePkId = searchParams.get('resourceSourcePkId');
   const fromTab = searchParams.get('fromTab');
-  const knowledgeCenterBackPath =
-    fromTab === 'enterprise' || fromTab === 'personal' ? `/knowledgeCenter?tab=${fromTab}` : '/knowledgeCenter';
+  const location = useLocation();
+  const storedReturnLocation = location.state?.knowledgeDetailReturnLocation;
+  // 仅恢复知识列表的两个入口；直接访问旧详情链接时兼容原知识中心返回地址。
+  const returnLocation =
+    storedReturnLocation?.pathname === '/resourceCenter' || storedReturnLocation?.pathname === '/knowledgeCenter'
+      ? storedReturnLocation
+      : undefined;
+  const knowledgeCenterBackPath = returnLocation
+    ? `${returnLocation.pathname}${returnLocation.search || ''}${returnLocation.hash || ''}`
+    : fromTab === 'enterprise' || fromTab === 'personal'
+      ? `/knowledgeCenter?tab=${fromTab}`
+      : '/knowledgeCenter';
+  const knowledgeCenterBackState = returnLocation?.state;
 
   const intl = useIntl();
   const navigate = useNavigate();
@@ -82,7 +93,7 @@ const KnowledgeDetail: React.FC = () => {
           const res = await queryResourceDetail({ resourceId, resourceBizType, resourceSourcePkId });
           if (!mounted) return;
           if (!res?.resourceId || String(res.resourceId) !== String(resourceId)) {
-            navigate(knowledgeCenterBackPath, { replace: true });
+            navigate(knowledgeCenterBackPath, { replace: true, state: knowledgeCenterBackState });
             return;
           }
           const permissions = (res?.operationPermissions || {}) as ResourceOperationPermissions;
@@ -92,7 +103,7 @@ const KnowledgeDetail: React.FC = () => {
           setBaseInfo(res);
         } catch {
           if (mounted) {
-            navigate(knowledgeCenterBackPath, { replace: true });
+            navigate(knowledgeCenterBackPath, { replace: true, state: knowledgeCenterBackState });
           }
         }
       };
@@ -102,7 +113,16 @@ const KnowledgeDetail: React.FC = () => {
     return () => {
       mounted = false;
     };
-  }, [intl, knowledgeCenterBackPath, navigate, queryResourceDetail, resourceId, resourceBizType, resourceSourcePkId]);
+  }, [
+    intl,
+    knowledgeCenterBackPath,
+    knowledgeCenterBackState,
+    navigate,
+    queryResourceDetail,
+    resourceId,
+    resourceBizType,
+    resourceSourcePkId,
+  ]);
 
   useEffect(() => {
     queryKnowledgeCapability()
@@ -162,7 +182,7 @@ const KnowledgeDetail: React.FC = () => {
           cursor: 'pointer',
         }}
         onClick={() => {
-          navigate(knowledgeCenterBackPath);
+          navigate(knowledgeCenterBackPath, { state: knowledgeCenterBackState });
         }}
       >
         <AntdIcon type="icon-a-Leftzuo" style={{ fontSize: 20 }} />
@@ -174,6 +194,7 @@ const KnowledgeDetail: React.FC = () => {
         allowKnowledgeBaseDelete={knowledgeCapability?.allowKnowledgeBaseDelete}
         canManage={canManageKnowledge}
         backPath={knowledgeCenterBackPath}
+        backState={knowledgeCenterBackState}
       />
       <div className={styles.tabsContainer}>
         <CommonTabs

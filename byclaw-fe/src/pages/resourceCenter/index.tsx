@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Tabs } from 'antd';
 import { DatabaseOutlined, ProductOutlined, ToolOutlined } from '@ant-design/icons';
 // import { FolderOutlined } from '@ant-design/icons';
-import { useIntl } from '@umijs/max';
+import { useIntl, useLocation, useSearchParams } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import Resources from '@/components/Resources';
 // import FilesPage from '@/pages/files';
@@ -13,8 +13,13 @@ type ResourceTabKey = 'knowledge' | 'tool' | 'skill' | 'model';
 
 const ResourceCenter: React.FC = () => {
   const intl = useIntl();
-  const [activeKey, setActiveKey] = useState<ResourceTabKey>('skill');
-  const [myResourcesOnly, setMyResourcesOnly] = useState(false);
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // 资源类型写入路由，详情返回或浏览器后退后仍挂载原来的资源面板。
+  const resourceTab = searchParams.get('resourceTab');
+  const activeKey: ResourceTabKey =
+    resourceTab === 'knowledge' || resourceTab === 'tool' || resourceTab === 'model' ? resourceTab : 'skill';
+  const [myResourcesOnly, setMyResourcesOnly] = useState(() => location.state?.resourceCenterMyResourcesOnly === true);
 
   const items = [
     {
@@ -66,7 +71,9 @@ const ResourceCenter: React.FC = () => {
           items={items}
           onChange={(key) => {
             const nextKey = key as ResourceTabKey;
-            setActiveKey(nextKey);
+            const nextSearchParams = new URLSearchParams(searchParams);
+            nextSearchParams.set('resourceTab', nextKey);
+            setSearchParams(nextSearchParams, { state: location.state });
             setMyResourcesOnly(false);
           }}
         />

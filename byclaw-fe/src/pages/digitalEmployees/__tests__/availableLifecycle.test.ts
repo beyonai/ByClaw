@@ -1,17 +1,22 @@
 import fs from 'fs';
 import path from 'path';
 
-// 浏览页统一关闭管理入口；我的员工页面继续按权限管理生命周期。
+// 各页签统一消费后端员工操作权限。
 describe('available employee lifecycle configuration', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../components/AllDigitalEmployees/index.tsx'), 'utf8');
 
-  it('hides lifecycle actions for available and official employees', () => {
-    expect(source).toContain('enableDigitalEmployeeLifecycle: false');
-    expect(source).toContain('enableDigitalEmployeeDelete: false');
+  it('leaves shelf actions and deletion to backend permissions in every tab', () => {
+    expect(source).toContain('enableDigitalEmployeeLifecycle: true');
+    expect(source).toContain('enableDigitalEmployeeDelete: true');
   });
 
-  it('only opts into set default from the available tab', () => {
-    expect(source).toContain("enableSetDefault: source === 'available'");
+  it('uses backend operation permissions without hiding available employee menu entries', () => {
+    expect(source).toContain('hiddenMenuItemKeys: []');
+    expect(source).not.toContain('digitalEmployeeActionsByPermission:');
+  });
+
+  it('does not restrict set default by the employee page or tab', () => {
+    expect(source).not.toContain('enableSetDefault:');
     const myEmployees = fs.readFileSync(path.resolve(__dirname, '../../myEmployees/index.tsx'), 'utf8');
     expect(myEmployees).not.toContain('enableSetDefault:');
     const sidebarCard = fs.readFileSync(

@@ -7,8 +7,12 @@ export const buildDigitalEmployeeFilterParam = (
   source: 'official' | 'available' | 'favorites' = 'available'
 ) => {
   const permission = filterParam?.permission;
-  // 企业推荐移除类型筛选后忽略旧值，避免隐藏条件继续限制首屏、搜索和分页查询。
-  const employeeType = source === 'official' ? undefined : filterParam?.digitalEmployeeType;
+  // 企业推荐只接受可见的企业类型，避免个人类型旧值改变推荐列表的查询范围。
+  const selectedEmployeeType = filterParam?.digitalEmployeeType;
+  const employeeType =
+    source === 'official' && !['ENTERPRISE_EMPLOYEE', 'ENTERPRISE_GROUP'].includes(selectedEmployeeType || '')
+      ? undefined
+      : selectedEmployeeType;
   const discoverSource = source !== 'available';
   let type: string | undefined;
   if (source === 'available') {

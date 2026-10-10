@@ -1,3 +1,4 @@
+import { PREVIEWABLE_TYPES, resolvePreviewType } from '@/components/Preview/formats';
 import { formatBytes } from '@/utils/file';
 import { Popconfirm } from 'antd';
 import { useIntl } from '@umijs/max';
@@ -35,23 +36,7 @@ export type IProps = {
   previewInDetailPanel?: boolean;
 } & IFileRender;
 
-export const PREVIEWABLE = [
-  'h5',
-  'txt',
-  'html',
-  'pdf',
-  'md',
-  'image',
-  'jpg',
-  'json',
-  'png',
-  'gif',
-  'bmp',
-  'webp',
-  'pptx',
-  'docx',
-  'xlsx',
-];
+export const PREVIEWABLE = PREVIEWABLE_TYPES;
 
 function FileRender(props: IProps) {
   const { fileItem, onClose, rightBottomRender, canQuote, previewInDetailPanel = false } = props;
@@ -72,7 +57,7 @@ function FileRender(props: IProps) {
 
   const nameArr = name?.split('.');
 
-  const fileType = queryFile?.fileType || nameArr?.pop();
+  const fileType = resolvePreviewType(queryFile?.fileType || nameArr?.pop(), name);
   const fileName = nameArr?.join('.');
   const previewTitle = name || fileName || '';
 

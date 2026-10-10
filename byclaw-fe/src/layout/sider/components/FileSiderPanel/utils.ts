@@ -1,7 +1,5 @@
-import {
-  CODE_TEXT_EXTENSIONS,
-  isPreviewable,
-} from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
+import { resolvePreviewType, TEXT_PREVIEW_TYPES } from '@/components/Preview/formats';
+import { isPreviewable } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import { getFileIconType } from '@/constants/icon';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
 import type { FileBrowserItem } from '@/service/fileBrowser';
@@ -37,6 +35,18 @@ const TEXT_FILE_NAMES = new Set([
 
 const BINARY_EXTENSIONS = new Set([
   '7z',
+  'aac',
+  'avif',
+  'heic',
+  'heif',
+  'm4a',
+  'm4v',
+  'ogg',
+  'oga',
+  'ogv',
+  'opus',
+  'tif',
+  'tiff',
   'avi',
   'bmp',
   'class',
@@ -96,7 +106,7 @@ export function isTextPreviewFile(name: string) {
   const extension = getLowerFileName(name).split('.').pop() || '';
   return (
     isTextFallbackFile(name) ||
-    ['csv', 'md', 'txt', 'log', 'json', 'html', 'xml', ...CODE_TEXT_EXTENSIONS].includes(extension)
+    ['md', 'markdown', 'html', 'htm', 'h5', 'svg', ...TEXT_PREVIEW_TYPES].includes(extension)
   );
 }
 
@@ -161,10 +171,7 @@ export function normalizeReferenceItem(item: FileBrowserItem, resourceId: string
 }
 
 export function getFileType(name: string): string {
-  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
-  if (ext === 'jpeg') return 'jpg';
-  if (['html', 'htm'].includes(ext)) return 'html';
-  return ext;
+  return resolvePreviewType(undefined, name);
 }
 
 export function getPreviewFileType(name: string) {

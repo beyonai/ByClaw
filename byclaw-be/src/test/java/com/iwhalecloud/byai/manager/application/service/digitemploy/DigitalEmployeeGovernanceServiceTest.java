@@ -7,6 +7,9 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
+import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
@@ -24,7 +27,8 @@ import static org.mockito.Mockito.*;
 class DigitalEmployeeGovernanceServiceTest {
     UserService users = mock(UserService.class);
     com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper publications = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
-    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, mock(ByaiSystemConfigService.class), publications);
+    SsResExtDigEmployeeService extensions = mock(SsResExtDigEmployeeService.class);
+    DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(users, mock(ByaiSystemConfigService.class), publications, extensions);
     AuthApplicationService auth = spy(new AuthApplicationService());
     PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
     MessageSource originalMessageSource;
@@ -37,6 +41,8 @@ class DigitalEmployeeGovernanceServiceTest {
         ReflectionTestUtils.setField(auth, "privilegeGrantService", grants);
         doReturn(List.of()).when(auth).listAuthPrivilegeGrant(anyString(), any(), anyString(), anyLong(), isNull());
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(1L)).thenReturn(creator);
+        SsResExtDigEmployee employee = new SsResExtDigEmployee(); employee.setAgentType("001");
+        when(extensions.findById(10L)).thenReturn(employee);
     }
     @AfterEach void cleanup() {
         CurrentUserHolder.clearLoginInfo();
@@ -46,6 +52,7 @@ class DigitalEmployeeGovernanceServiceTest {
     void adminvipOwnershipUsesNormalExplicitManagementGrant(String role) {
         EmployeePublicationApplicationServiceTest.login("manager", 2L, List.of(role));
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
+        resource.setOwnerType("enterprise");
         assertThat(auth.hasResourceManagePermission(resource)).isFalse();
         assertThat(auth.hasResourceUseSettingPermission(resource)).isFalse();
         assertThat(auth.hasResourceInstallTargetManagePermission(resource)).isFalse();
@@ -125,6 +132,30 @@ class DigitalEmployeeGovernanceServiceTest {
         assertThatCode(() -> governance.requireDirectMutationAllowed(resource)).doesNotThrowAnyException();
         resource.setComAcctId(2L);
         assertThat(governance.canPublish(resource)).isFalse();
+    }
+
+    /** 发布资格在单条和批量接口中一致，批量查询不退化为逐员工查询。 */
+    @Test void publicationPermissionsRejectGroupsThirdPartyAndMissingExtensionsInBothPaths() {
+        EmployeePublicationApplicationServiceTest.login("author", 7L, List.of());
+        for (String kind : List.of("ordinary", "group", "thirdParty", "externalDev", "invalid", "missing")) {
+            SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 7L);
+            SsResExtDigEmployee extension = new SsResExtDigEmployee();
+            extension.setAgentType("group".equals(kind) ? "017" : "invalid".equals(kind) ? "unknown" : "001");
+            if ("thirdParty".equals(kind)) extension.setCreateType("FROM_THIRD");
+            if ("externalDev".equals(kind)) extension.setAgentDevType("other");
+            if ("missing".equals(kind)) extension = null;
+            ResourceExtDigEmployeeDto row = new ResourceExtDigEmployeeDto();
+            row.setResourceId(10L); row.setSsResExtDigEmployee(extension);
+            when(extensions.findById(10L)).thenReturn(extension);
+            when(extensions.findExtDigEmployeeByIds(List.of(10L))).thenReturn(List.of(row));
+            assertThat(governance.canPublish(resource)).isEqualTo("ordinary".equals(kind));
+            assertThat(governance.canPublishBatch(List.of(resource)).get(10L)).isEqualTo("ordinary".equals(kind));
+        }
+        clearInvocations(extensions);
+        governance.canPublishBatch(List.of(EmployeePublicationApplicationServiceTest.employee(10L, 7L),
+            EmployeePublicationApplicationServiceTest.employee(11L, 7L)));
+        verify(extensions).findExtDigEmployeeByIds(List.of(10L, 11L));
+        verify(extensions, never()).findById(anyLong());
     }
     @Test void officialAuthorCanMaintainAuthorizationAndShelfWhileConfigurationStillRequiresReview() {
         EmployeePublicationApplicationServiceTest.login("author", 7L, List.of());

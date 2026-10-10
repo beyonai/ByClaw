@@ -183,3 +183,48 @@ describe('ResourceInstallDialog employee avatars', () => {
     expect(screen.queryByRole('img')).toBeNull();
   });
 });
+
+describe('ResourceInstallDialog employee type tags', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // 技能、知识、工具走同一选择弹窗，默认个人员工同样使用个人标签。
+  it.each(['SKILL', 'KG_DOC', 'TOOL'])('uses digital employee module tags when installing %s', async (resourceType) => {
+    mockQueryInstallTargetEmployees.mockResolvedValue({
+      code: 0,
+      data: {
+        list: [
+          { resourceId: 'personal-1', resourceName: '个人员工', ownerType: 'personal' },
+          { resourceId: 'default-1', resourceName: '默认员工', ownerType: 'personal_default' },
+          { resourceId: 'enterprise-1', resourceName: '企业员工', ownerType: 'enterprise', installed: true },
+        ],
+        total: 3,
+      },
+    });
+    render(
+      <ResourceInstallDialog
+        open
+        resourceId="resource-1"
+        resourceType={resourceType}
+        targetContext={{ mode: 'select' }}
+        onClose={jest.fn()}
+      />
+    );
+
+    const personalTags = await screen.findAllByText('digitalEmployees.tag.personalEmployee');
+    expect(personalTags).toHaveLength(2);
+    personalTags.forEach((tag) => {
+      expect(tag).toHaveClass('tagText');
+      expect(tag.parentElement).toHaveClass('tag', 'digitalEmployeePersonalTag');
+      expect(tag.parentElement).not.toHaveClass('digitalEmployeeTopRightTag');
+    });
+    const enterpriseTag = screen.getByText('digitalEmployees.tag.enterpriseEmployee');
+    expect(enterpriseTag).toHaveClass('tagText');
+    expect(enterpriseTag.parentElement).toHaveClass('tag', 'digitalEmployeeEnterpriseTag');
+    expect(enterpriseTag.parentElement).not.toHaveClass('digitalEmployeeTopRightTag');
+    expect(screen.getByText('resource.installed')).toBeTruthy();
+    expect(screen.queryByText('resource.personalEmployee')).toBeNull();
+    expect(screen.queryByText('resource.enterpriseEmployee')).toBeNull();
+  });
+});

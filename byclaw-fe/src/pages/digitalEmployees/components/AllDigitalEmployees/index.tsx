@@ -219,7 +219,7 @@ function AllDigitalEmployees(
       }
 
       const selectedFilter = buildFilterParam?.(listTabKey, effectiveFilterParam, source) || {};
-      // 传递真实来源，企业推荐忽略旧类型条件，收藏页保留独立筛选。
+      // 传递真实来源，企业推荐与收藏页分别使用各自的筛选范围。
       const includeRequestFavorites =
         favoriteMode && (source === 'favorites' || selectedFilter.ownerType !== 'personal');
       const params: Record<string, any> = {
@@ -232,7 +232,7 @@ function AllDigitalEmployees(
           ? { includeEmployeeGroup: true, employeeGroupFirst: !includeRequestFavorites }
           : {}),
         ...(includeRequestFavorites ? { includeFavorites: true, favoritesOnly: source === 'favorites' } : {}),
-        // 可用和收藏页的显式类型筛选覆盖默认范围，分页同样生效。
+        // 显式类型筛选覆盖默认范围，保证首屏、搜索和分页使用相同条件。
         ...selectedFilter,
         orderField: 'updateTime',
         orderBy: 'desc',
@@ -403,18 +403,10 @@ function AllDigitalEmployees(
             const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
             if (defaultResourceId) {
               const isDefault = itemIdentity === `${defaultResourceId}`;
-              let canSetDefault = item.canSetDefault;
-              if (isDefault) {
-                canSetDefault = false;
-              } else if (item.operationPermissionsLoaded === true) {
-                canSetDefault =
-                  `${item.resourceStatus ?? item.metaStatus ?? ''}` !== '3' &&
-                  (item.hasManagePermission === true || item.hasUsePermission === true);
-              }
+              // 默认切换只更新展示身份，保留后端 canSetDefault，不在前端重算操作权限。
               return {
                 ...item,
                 isDefault,
-                canSetDefault,
                 ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
               };
             }
@@ -702,9 +694,8 @@ function AllDigitalEmployees(
       digitalEmployeeActionMode
       actionConfig={{
         scene: 'enterprise',
-        enableSetDefault: source === 'available',
-        // “我可用的”统一隐藏授权入口，包括数字员工和员工组。
-        hiddenMenuItemKeys: source === 'available' ? ['authorize', 'use'] : [],
+        // 我的员工不再屏蔽授权等入口，共享卡片也直接按后端操作权限展示。
+        hiddenMenuItemKeys: [],
         onChat: () => chatEmployee(employee),
         onEdit: () => onEditEmployee(employee),
         onAuth: (type: any) => onAuthEmployee(employee, type),
@@ -713,9 +704,9 @@ function AllDigitalEmployees(
         onDeleteData: (feedback) => onDeleteEmployee(employee, feedback),
         onShelf: (feedback) => onChangeShelfStatus(employee, 'shelf', feedback),
         onUnShelf: (feedback) => onChangeShelfStatus(employee, 'unShelf', feedback),
-        // 我可用的和官方推荐只提供浏览操作，生命周期管理统一从我的员工进入。
-        enableDigitalEmployeeLifecycle: false,
-        enableDigitalEmployeeDelete: false,
+        // 各页签均消费后端权限，同一员工的上下架和注销资格不随页面改变。
+        enableDigitalEmployeeLifecycle: true,
+        enableDigitalEmployeeDelete: true,
         // 官方推荐与我可用的复用员工类型标签及其国际化文案。
         showDigitalEmployeeTypeTag: true,
       }}

@@ -1,11 +1,10 @@
-import { history } from '@umijs/max';
+import { history, useIntl } from '@umijs/max';
 import {
   downloadPublicationSkill,
   publicationAction,
   getPublication,
   previewPublication,
   publicationUrl,
-  publicationStatus,
   openEmployeePublication,
   openOfficialEmployee,
   type PublicationDetail,
@@ -35,6 +34,7 @@ export default function PublicationToolbar({
   onSave: () => Promise<PublicationDetail | undefined>;
   onBusyChange?: (value: boolean) => void;
 }) {
+  const intl = useIntl();
   const [busyAction, setBusyAction] = useState<PublicationAction>();
   const busy = !!busyAction;
   const inFlight = useRef(false);
@@ -58,11 +58,11 @@ export default function PublicationToolbar({
         onChange(saved);
       }
       if (action === 'save') {
-        message.success('待发布配置已保存');
+        message.success(intl.formatMessage({ id: 'employeePublication.toolbar.saved' }));
         return;
       }
       if (publishing && current.dependencies.some((dependency) => dependency.error)) {
-        message.error('待发布配置尚未满足发布条件，请处理页面提示后再提交');
+        message.error(intl.formatMessage({ id: 'employeePublication.toolbar.blocked' }));
         return;
       }
       if (publishing) {
@@ -73,19 +73,22 @@ export default function PublicationToolbar({
       const next = await publicationAction(action, current.publication, { comment });
       onChange(next);
       if (action === 'submit' && next.publication.status === 'DRAFT' && next.sourceResourcesChanged) {
-        message.warning('个人员工的关联资源已变化，已更新待发布配置，请核对后再次提交。');
+        message.warning(intl.formatMessage({ id: 'employeePublication.toolbar.sourceChanged' }));
         return;
       }
       if (action === 'refreshTarget') {
-        message.success('已重新对照官方配置，请确认覆盖范围后再提交或审核');
+        message.success(intl.formatMessage({ id: 'employeePublication.toolbar.targetRefreshed' }));
         return;
       }
       if (action === 'revise') history.replace(publicationUrl(next));
       setRejecting(false);
-      if (next.publication.status === 'FAILED') message.error(next.publication.publishError || '发布失败');
-      else message.success(publicationStatus[next.publication.status]);
+      if (next.publication.status === 'FAILED')
+        message.error(next.publication.publishError || intl.formatMessage({ id: 'employeePublication.publishFailed' }));
+      else message.success(intl.formatMessage({ id: `employeePublication.status.${next.publication.status}` }));
     } catch (error: any) {
-      message.error(publicationErrorMessage(error, '保存或操作失败，请刷新后重试'));
+      message.error(
+        publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.toolbar.actionFailed' }))
+      );
     } finally {
       inFlight.current = false;
       setBusyAction(undefined);
@@ -99,15 +102,20 @@ export default function PublicationToolbar({
   const reviewTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—');
   return (
     <div className={styles.toolbar}>
-      <section className={styles.overview} aria-label="发布操作与说明">
+      <section className={styles.overview} aria-label={intl.formatMessage({ id: 'employeePublication.toolbar.title' })}>
         <Space wrap>
-          <strong>发布到官方推荐</strong>
-          <Tag>{publicationStatus[detail.publication.status]}</Tag>
-          {detail.publication.requiresAdminVipReview && <Tag color="gold">仅超管 adminvip 可审核</Tag>}
-          <span>创建者：{detail.publication.authorName}</span>
+          <strong>{intl.formatMessage({ id: 'resource.publishToEnterprise' })}</strong>
+          <Tag>{intl.formatMessage({ id: `employeePublication.status.${detail.publication.status}` })}</Tag>
+          {detail.publication.requiresAdminVipReview && (
+            <Tag color="gold">{intl.formatMessage({ id: 'employeePublication.toolbar.adminVipOnly' })}</Tag>
+          )}
+          <span>
+            {intl.formatMessage({ id: 'employeePublication.authorLabel' })}
+            {detail.publication.authorName}
+          </span>
           {detail.canEdit && (
             <Button loading={busyAction === 'save'} disabled={busy} onClick={() => run('save')}>
-              保存待发布配置
+              {intl.formatMessage({ id: 'employeePublication.toolbar.save' })}
             </Button>
           )}
           {detail.publication.status === 'APPLYING' && (
@@ -116,10 +124,14 @@ export default function PublicationToolbar({
               onClick={() =>
                 getPublication(detail.publication.requestId)
                   .then(onChange)
-                  .catch((error) => message.error(publicationErrorMessage(error, '刷新失败')))
+                  .catch((error) =>
+                    message.error(
+                      publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.refreshFailed' }))
+                    )
+                  )
               }
             >
-              刷新状态
+              {intl.formatMessage({ id: 'employeePublication.toolbar.refreshStatus' })}
             </Button>
           )}
           {detail.canSubmit && (
@@ -129,7 +141,7 @@ export default function PublicationToolbar({
               disabled={publicationDisabled}
               onClick={() => run('submit')}
             >
-              提交发布
+              {intl.formatMessage({ id: 'employeePublication.toolbar.submit' })}
             </Button>
           )}
           {detail.canReview && (
@@ -140,16 +152,18 @@ export default function PublicationToolbar({
                 disabled={publicationDisabled}
                 onClick={() => run('approve')}
               >
-                {['FAILED', 'APPLYING'].includes(detail.publication.status) ? '重试发布' : '通过并发布'}
+                {['FAILED', 'APPLYING'].includes(detail.publication.status)
+                  ? intl.formatMessage({ id: 'employeePublication.retryPublish' })
+                  : intl.formatMessage({ id: 'employeePublication.approveAndPublish' })}
               </Button>
               <Button disabled={busy} onClick={() => setRejecting(true)}>
-                驳回
+                {intl.formatMessage({ id: 'employeePublication.toolbar.reject' })}
               </Button>
             </>
           )}
           {detail.canRevise && (
             <Button loading={busyAction === 'revise'} disabled={busy} onClick={() => run('revise')}>
-              修改并重新申请
+              {intl.formatMessage({ id: 'employeePublication.toolbar.reapply' })}
             </Button>
           )}
           {['REJECTED', 'WITHDRAWN'].includes(detail.publication.status) && !detail.canRevise && (
@@ -157,62 +171,75 @@ export default function PublicationToolbar({
               disabled={busy}
               onClick={() =>
                 openEmployeePublication(detail.publication.sourceId).catch((error) =>
-                  message.error(publicationErrorMessage(error, '打开最新申请失败'))
+                  message.error(
+                    publicationErrorMessage(
+                      error,
+                      intl.formatMessage({ id: 'employeePublication.toolbar.openLatestFailed' })
+                    )
+                  )
                 )
               }
             >
-              查看最新申请
+              {intl.formatMessage({ id: 'employeePublication.toolbar.viewLatest' })}
             </Button>
           )}
           {detail.publication.status === 'PUBLISHED' && detail.publication.officialId && (
             <>
-              <Button onClick={() => openOfficialEmployee(detail.publication.officialId!)}>查看官方副本</Button>
+              <Button onClick={() => openOfficialEmployee(detail.publication.officialId!)}>
+                {intl.formatMessage({ id: 'employeePublication.toolbar.viewOfficial' })}
+              </Button>
               <Button
                 disabled={busy}
                 onClick={() =>
                   openEmployeePublication(detail.publication.sourceId, 'publishUpdate').catch((error) =>
-                    message.error(publicationErrorMessage(error, '无法发起发布更新'))
+                    message.error(
+                      publicationErrorMessage(
+                        error,
+                        intl.formatMessage({ id: 'employeePublication.toolbar.updateFailed' })
+                      )
+                    )
                   )
                 }
               >
-                发布更新
+                {intl.formatMessage({ id: 'employeePublication.toolbar.publishUpdate' })}
               </Button>
             </>
           )}
           {detail.canWithdraw && (
             <Button disabled={busy} onClick={() => run('withdraw')}>
-              撤回申请
+              {intl.formatMessage({ id: 'employeePublication.toolbar.withdraw' })}
             </Button>
           )}
-          {dirty && <span>有未保存的修改，提交发布或通过审核时将自动保存。</span>}
+          {dirty && <span>{intl.formatMessage({ id: 'employeePublication.toolbar.dirtyHint' })}</span>}
         </Space>
         <div className={styles.policy}>
           <InfoCircleOutlined />
           <span>
             {detail.canEdit
-              ? '本页编辑待发布版本。审核通过后创建或更新官方副本，原个人员工不变。'
-              : '本页展示该次申请的配置，审核记录保留。'}
+              ? intl.formatMessage({ id: 'employeePublication.toolbar.editHint' })
+              : intl.formatMessage({ id: 'employeePublication.toolbar.readOnlyHint' })}
           </span>
           <Popover
             trigger="click"
             placement="bottomLeft"
-            title="发布范围与规则"
+            title={intl.formatMessage({ id: 'employeePublication.toolbar.rulesTitle' })}
             content={
-              <div className={styles.rules}>
-                员工面向当前企业全员共享。个人知识、个人工具、失效资源及无法复制的技能不会带入企业员工，不影响员工发布。
-                通过校验的个人技能随员工一起审核，通过后生成企业副本。保留的企业资源沿用原权限。
-                个人记忆、聊天记录和机器人渠道不参与发布。
-              </div>
+              <div className={styles.rules}>{intl.formatMessage({ id: 'employeePublication.toolbar.rules' })}</div>
             }
           >
             <Button type="link" size="small">
-              查看发布规则
+              {intl.formatMessage({ id: 'employeePublication.toolbar.viewRules' })}
             </Button>
           </Popover>
         </div>
       </section>
       {detail.sourceResourcesChanged && detail.canSubmit && (
-        <Alert showIcon type="info" style={{ marginTop: 8 }} message="已同步个人员工最新关联资源，请核对发布清单。" />
+        <Alert
+          showIcon
+          type="info"
+          style={{ marginTop: 8 }}
+          message={intl.formatMessage({ id: 'employeePublication.toolbar.synced' })}
+        />
       )}
       <UpdateTargetNotice
         detail={detail}
@@ -224,13 +251,25 @@ export default function PublicationToolbar({
           style={{ marginTop: 8 }}
           showIcon
           type={detail.publication.status === 'REJECTED' ? 'warning' : 'success'}
-          message={detail.publication.status === 'REJECTED' ? '审核结果：已驳回' : '审核结果：已通过并发布'}
+          message={
+            detail.publication.status === 'REJECTED'
+              ? intl.formatMessage({ id: 'employeePublication.toolbar.rejected' })
+              : intl.formatMessage({ id: 'employeePublication.toolbar.approved' })
+          }
           description={
             <>
-              <div>审核人：{detail.publication.reviewerName || '—'}</div>
-              <div>审核时间：{reviewTime(detail.publication.reviewedAt)}</div>
+              <div>
+                {intl.formatMessage({ id: 'employeePublication.reviewerLabel' })}
+                {detail.publication.reviewerName || '—'}
+              </div>
+              <div>
+                {intl.formatMessage({ id: 'employeePublication.reviewTimeLabel' })}
+                {reviewTime(detail.publication.reviewedAt)}
+              </div>
               <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                {detail.publication.status === 'REJECTED' ? '驳回原因' : '审核说明'}：
+                {detail.publication.status === 'REJECTED'
+                  ? intl.formatMessage({ id: 'employeePublication.toolbar.rejectReasonLabel' })
+                  : intl.formatMessage({ id: 'employeePublication.toolbar.reviewNotesLabel' })}
                 {detail.publication.comment || '—'}
               </div>
             </>
@@ -242,25 +281,39 @@ export default function PublicationToolbar({
           style={{ marginTop: 8 }}
           showIcon
           type="warning"
-          message="上次审核意见"
+          message={intl.formatMessage({ id: 'employeePublication.toolbar.previousComment' })}
           description={
             <>
-              <div>审核人：{detail.previousReview.reviewerName || '—'}</div>
-              <div>审核时间：{reviewTime(detail.previousReview.reviewedAt)}</div>
+              <div>
+                {intl.formatMessage({ id: 'employeePublication.reviewerLabel' })}
+                {detail.previousReview.reviewerName || '—'}
+              </div>
+              <div>
+                {intl.formatMessage({ id: 'employeePublication.reviewTimeLabel' })}
+                {reviewTime(detail.previousReview.reviewedAt)}
+              </div>
               <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                驳回原因：{detail.previousReview.comment || '—'}
+                {intl.formatMessage({ id: 'employeePublication.toolbar.rejectReasonLabel' })}
+                {detail.previousReview.comment || '—'}
               </div>
               <Button
                 type="link"
                 disabled={busy || dirty}
-                title={dirty ? '请先保存当前修改，再查看上次审核记录' : undefined}
+                title={dirty ? intl.formatMessage({ id: 'employeePublication.toolbar.saveBeforePrevious' }) : undefined}
                 onClick={() =>
                   getPublication(detail.previousReview!.requestId)
                     .then((previous) => history.push(publicationUrl(previous)))
-                    .catch((error) => message.error(publicationErrorMessage(error, '打开上次审核记录失败')))
+                    .catch((error) =>
+                      message.error(
+                        publicationErrorMessage(
+                          error,
+                          intl.formatMessage({ id: 'employeePublication.toolbar.openPreviousFailed' })
+                        )
+                      )
+                    )
                 }
               >
-                查看上次审核记录
+                {intl.formatMessage({ id: 'employeePublication.toolbar.viewPrevious' })}
               </Button>
             </>
           }
@@ -271,7 +324,9 @@ export default function PublicationToolbar({
           style={{ marginTop: 8 }}
           showIcon
           type="warning"
-          message={detail.publication.publishError || '待发布配置需要调整'}
+          message={
+            detail.publication.publishError || intl.formatMessage({ id: 'employeePublication.toolbar.adjustRequired' })
+          }
           description={blockers.map((dependency, index) => (
             <div key={`${dependency.resourceId}-${index}`}>
               {dependency.name}：{dependency.error}
@@ -284,13 +339,15 @@ export default function PublicationToolbar({
         dependencies={detail.dependencies.filter((dependency) => !dependency.error)}
         onDownloadSkill={(dependency) =>
           downloadPublicationSkill(detail.publication.requestId, dependency.resourceId).catch((error) =>
-            message.error(publicationErrorMessage(error, '下载技能快照失败'))
+            message.error(
+              publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.toolbar.downloadFailed' }))
+            )
           )
         }
       />
       {confirmationDialog}
       <Modal
-        title="驳回发布申请"
+        title={intl.formatMessage({ id: 'employeePublication.toolbar.rejectTitle' })}
         open={rejecting}
         onCancel={() => !busy && setRejecting(false)}
         onOk={() => run('reject')}
@@ -302,7 +359,7 @@ export default function PublicationToolbar({
           value={comment}
           onChange={(event) => setComment(event.target.value)}
           maxLength={2000}
-          placeholder="请填写驳回原因"
+          placeholder={intl.formatMessage({ id: 'employeePublication.toolbar.rejectPlaceholder' })}
         />
       </Modal>
     </div>

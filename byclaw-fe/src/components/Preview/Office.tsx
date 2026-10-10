@@ -81,14 +81,16 @@ export const Office: Offices = (props: any) => {
   if (type === 'docx' || fileName?.endsWith('.docx')) {
     return <Office.Docx data={data} {...rest} />;
   }
-  if (type === 'excel' || type === 'xlsx' || fileName?.endsWith('.xlsx')) {
-    return <Office.Excel data={data} {...rest} />;
+  if (type === 'excel' || type === 'xlsx' || type === 'xls' || /\.xlsx?$/i.test(fileName || '')) {
+    return (
+      <Office.Excel data={data} type={type === 'xls' || /\.xls$/i.test(fileName || '') ? 'xls' : 'xlsx'} {...rest} />
+    );
   }
   return null;
 };
 
 function OfficeExcel(props: OfficeProps) {
-  const { data, loading: spinning } = props;
+  const { data, loading: spinning, type } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const [inited, setInited] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -153,7 +155,9 @@ function OfficeExcel(props: OfficeProps) {
         .then(([lib]) => {
           if (root && lib) {
             root?.firstElementChild?.remove();
-            return lib.init(root);
+            // 已安装的预览库通过 xls 选项转换旧版工作簿；XLSX 保留原初始化参数。
+            const options: Parameters<typeof lib.init>[1] & { xls: boolean } = { xls: true };
+            return type === 'xls' ? lib.init(root, options) : lib.init(root);
           }
           return null;
         })
@@ -179,7 +183,7 @@ function OfficeExcel(props: OfficeProps) {
     return () => {
       viewer?.destroy();
     };
-  }, [previewData]);
+  }, [previewData, type]);
 
   return (
     <section className={ss.office}>

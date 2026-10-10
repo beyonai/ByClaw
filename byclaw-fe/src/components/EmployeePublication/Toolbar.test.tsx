@@ -10,7 +10,11 @@ import {
   type PublicationDetail,
 } from '@/service/employeePublication';
 
-jest.mock('@umijs/max', () => ({ history: { push: jest.fn(), replace: jest.fn() } }));
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  history: { push: jest.fn(), replace: jest.fn() },
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
 
 jest.mock('@/service/employeePublication', () => ({
   publicationAction: jest.fn(),
@@ -47,8 +51,12 @@ const render = (ui: Parameters<typeof renderComponent>[0]) =>
   });
 
 async function continuePublication() {
-  const dialog = within(await screen.findByRole('dialog', { name: '确认发布到官方推荐' }));
-  const confirm = dialog.getByRole('button', { name: '确认并继续发布' });
+  // 先定位弹窗再单独验证可见性，避免角色查找反复计算整份资源清单的样式。
+  const element = await screen.findByRole('dialog', { hidden: true });
+  await waitFor(() => expect(element).toBeVisible());
+  const dialog = within(element);
+  expect(dialog.getByText('确认发布到企业')).toBeInTheDocument();
+  const confirm = dialog.getByText('确认并继续发布').closest('button')!;
   expect(confirm).toBeEnabled();
   // 确认后会继续执行异步发布，需要等待 Promise 后续的状态更新。
   await act(async () => {
@@ -61,6 +69,7 @@ describe('employee publication controls', () => {
   jest.setTimeout(15000);
 
   beforeEach(() => {
+    mockLocale = 'zh-CN';
     jest.clearAllMocks();
     (publicationAction as jest.Mock).mockReset();
     (previewPublication as jest.Mock)
@@ -71,6 +80,11 @@ describe('employee publication controls', () => {
     jest.spyOn(message, 'warning').mockImplementation(jest.fn());
   });
   afterEach(() => jest.restoreAllMocks());
+
+  it('uses the enterprise publication label in the toolbar', () => {
+    render(<PublicationToolbar detail={candidate} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
+    expect(screen.getByText('发布到企业')).toBeInTheDocument();
+  });
 
   it('shows refreshed resource scope before publishing and returns to the saved configuration without submitting', async () => {
     const saved = { ...candidate, publication: { ...candidate.publication, revision: 4 } };
@@ -582,10 +596,19 @@ describe('employee publication controls', () => {
     const onSave = jest.fn();
     (publicationAction as jest.Mock).mockResolvedValue(failed);
     render(<PublicationToolbar detail={failed} dirty={false} onSave={onSave} onChange={jest.fn()} />);
-    expect(screen.queryByRole('button', { name: '保存待发布配置' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '重试发布' }));
+    expect(screen.queryByText('保存待发布配置')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('重试发布').closest('button')!);
     await continuePublication();
     await waitFor(() => expect(publicationAction).toHaveBeenCalledWith('approve', failed.publication, { comment: '' }));
     expect(onSave).not.toHaveBeenCalled();
   });
+});
+
+it('localizes publication status and editing actions in English', () => {
+  mockLocale = 'en-US';
+  render(<PublicationToolbar detail={candidate} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
+  expect(screen.getByText('Draft')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save proposed configuration' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Submit publication' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Withdraw application' })).toBeInTheDocument();
 });

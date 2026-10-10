@@ -88,20 +88,23 @@ const openNewTemplate = async (catalogId = '54') => {
   await act(async () => {
     render(<WorkgroupTemplateMgr />);
   });
-  const createButton = await screen.findByRole('button', { name: /新建模板/ });
+  // 通过唯一文案定位入口，避免每次交互都计算整张 AntD 表格的可访问名称和可见性。
+  const createButton = await screen.findByText('新建模板');
   await act(async () => {
     fireEvent.click(createButton);
   });
   // 弹窗挂载后仅查询表单区域，减少对背景表格的重复遍历和可见性计算。
-  const dialog = within(await screen.findByRole('dialog'));
-  await dialog.findByRole('option', { name: '市场营销' });
+  const dialogElement = await screen.findByRole('dialog', { hidden: true });
+  expect(dialogElement).toBeVisible();
+  const dialog = within(dialogElement);
+  await dialog.findByText('市场营销', { selector: 'option' });
   await act(async () => {
     fireEvent.change(dialog.getByLabelText('模板名称'), { target: { value: '测试模板' } });
     fireEvent.change(dialog.getByLabelText('资产目录'), { target: { value: catalogId } });
     fireEvent.change(dialog.getByLabelText('模板摘要'), { target: { value: '测试摘要' } });
     fireEvent.change(dialog.getByLabelText('默认工作组名称'), { target: { value: '测试工作组' } });
     fireEvent.change(dialog.getByLabelText('默认工作目标'), { target: { value: '测试目标' } });
-    fireEvent.click(dialog.getByRole('button', { name: '选择测试员工' }));
+    fireEvent.click(dialog.getByText('选择测试员工'));
   });
   return dialog;
 };
@@ -136,7 +139,7 @@ describe('workgroup template saving', () => {
   ])('displays the returned save reason for %p and keeps the form for retry', async (error, expected) => {
     jest.mocked(createManagedWorkgroupTemplate).mockRejectedValueOnce(error);
     const dialog = await openNewTemplate();
-    const saveButton = dialog.getByRole('button', { name: '保存模板' });
+    const saveButton = dialog.getByText('保存模板').closest('button')!;
 
     await act(async () => {
       fireEvent.click(saveButton);
@@ -163,7 +166,7 @@ describe('workgroup template saving', () => {
     const dialog = await openNewTemplate('0');
 
     await act(async () => {
-      fireEvent.click(dialog.getByRole('button', { name: '保存模板' }));
+      fireEvent.click(dialog.getByText('保存模板'));
     });
 
     await waitFor(() => expect(message.success).toHaveBeenCalledWith('模板保存成功'));
@@ -179,7 +182,7 @@ describe('workgroup template saving', () => {
     const dialog = await openNewTemplate();
 
     await act(async () => {
-      fireEvent.click(dialog.getByRole('button', { name: '保存模板' }));
+      fireEvent.click(dialog.getByText('保存模板'));
     });
 
     await waitFor(() => expect(message.error).toHaveBeenCalledWith('Failed to save template'));
@@ -191,14 +194,14 @@ describe('workgroup template saving', () => {
     await act(async () => {
       render(<WorkgroupTemplateMgr />);
     });
-    const editButton = await screen.findByRole('button', { name: /编\s*辑/ });
+    const editButton = await screen.findByText('编辑');
     await act(async () => {
       fireEvent.click(editButton);
     });
-    const dialog = within(await screen.findByRole('dialog'));
+    const dialog = within(await screen.findByRole('dialog', { hidden: true }));
 
     await act(async () => {
-      fireEvent.click(dialog.getByRole('button', { name: '保存模板' }));
+      fireEvent.click(dialog.getByText('保存模板'));
     });
 
     await waitFor(() => expect(message.error).toHaveBeenCalledWith('工作组模板已被修改'));
@@ -215,7 +218,7 @@ describe('workgroup template saving', () => {
     const dialog = await openNewTemplate();
 
     await act(async () => {
-      fireEvent.click(dialog.getByRole('button', { name: '保存模板' }));
+      fireEvent.click(dialog.getByText('保存模板'));
     });
 
     await waitFor(() => expect(message.error).toHaveBeenCalledWith('列表查询失败'));

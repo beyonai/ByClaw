@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider, Modal, message } from 'antd';
 import ProjectDataSources from '../index';
 import {
   listDataSources,
@@ -28,8 +29,31 @@ const source = {
   canManageBinding: true,
 };
 
+// 保留真实表单、菜单和确认流程，关闭动画以避免交互跨用例延续。
+const render = (ui: Parameters<typeof renderComponent>[0]) =>
+  renderComponent(ui, {
+    wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+  });
+
 describe('ProjectDataSources', () => {
+  // 编辑和解绑包含多步真实弹层交互，与已有资源卡片用例使用相同的总时间预算。
+  jest.setTimeout(15000);
+
+  beforeAll(() => {
+    // 静态确认弹窗使用独立 React 根，需要显式应用无动画配置。
+    ConfigProvider.config({
+      holderRender: (children) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
+    });
+  });
+  afterAll(() => ConfigProvider.config({ holderRender: undefined }));
   beforeEach(() => jest.clearAllMocks());
+  afterEach(async () => {
+    cleanup();
+    await act(async () => {
+      Modal.destroyAll();
+      message.destroy();
+    });
+  });
 
   it('emits only an identifier and name on double click, and keeps session management read-only', async () => {
     jest.mocked(querySessionDataSources).mockResolvedValue({ items: [source], total: 1, pageNum: 1, pageSize: 50 });
@@ -71,10 +95,16 @@ describe('ProjectDataSources', () => {
     jest.mocked(saveDataSource).mockResolvedValue(source);
     render(<ProjectDataSources projectId={1} canManage />);
     await screen.findByText('Analytics');
-    fireEvent.click(screen.getByRole('button', { name: 'dataSource.actions' }));
-    fireEvent.click(await screen.findByText('dataSource.edit'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'dataSource.actions' }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByText('dataSource.edit'));
+    });
     fireEvent.change(screen.getByLabelText('dataSource.name'), { target: { value: 'Updated analytics' } });
-    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await act(async () => {
+      fireEvent.click(screen.getByText('common.save'));
+    });
     await waitFor(() =>
       expect(saveDataSource).toHaveBeenCalledWith(
         1,
@@ -89,10 +119,16 @@ describe('ProjectDataSources', () => {
     jest.mocked(changeDataSourceBinding).mockResolvedValue(undefined);
     render(<ProjectDataSources projectId={1} canManage />);
     await screen.findByText('Analytics');
-    fireEvent.click(screen.getByRole('button', { name: 'dataSource.actions' }));
-    fireEvent.click(await screen.findByText('dataSource.unbind'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'dataSource.actions' }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByText('dataSource.unbind'));
+    });
     await screen.findByText('dataSource.unlinkWarning');
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    });
     await waitFor(() => expect(changeDataSourceBinding).toHaveBeenCalledWith('unbind', 1, '17'));
   });
 
