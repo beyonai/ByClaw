@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 /** 任务写入只经过 Node，平台停止执行和文件操作仍在 BE。 */
 @Service
 public class TenantGroupTaskService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService broadcaster;
     private final TenantGroupData data;
     private final ObjectMapper mapper;
     private final TenantGroupTaskStopService tasks;
@@ -38,7 +40,17 @@ public class TenantGroupTaskService {
         if (request.getExpectedPendingPublicationId() != null)
             payload.put("expectedPendingPublicationId", request.getExpectedPendingPublicationId().toString());
         data.write(tenant, "POST", "/tasks/" + taskId + "/pending-publication", groupId, "SAVE_PENDING_PUBLICATION", payload);
-        return data.read(tenant, "group-chat/tasks/" + taskId + "/pending-publication");
+        JsonNode pending = data.read(tenant, "group-chat/tasks/" + taskId + "/pending-publication");
+        if (pending != null && !pending.isNull()) {
+            JSONObject event = new JSONObject();
+            event.put("type", "GROUP_CHAT_TASK_EVENT");
+            event.put("event", "TASK_PUBLICATION_PREPARED");
+            event.put("sessionId", taskId.toString());
+            event.put("taskId", taskId.toString());
+            event.put("pendingPublicationId", pending.path("pendingPublicationId").asText());
+            broadcaster.broadcastTenantRawToUser(tenant, event, null);
+        }
+        return pending;
     }
 
     public void cancel(TenantRequestContext tenant, Long taskId) {
