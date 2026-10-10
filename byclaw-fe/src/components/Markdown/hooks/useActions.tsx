@@ -111,7 +111,7 @@ const HtmlRunner = React.memo((props: { iframeUrl: string; isMessageDone: boolea
     <div className={classNames(styles.htmlRunnerWrapper, 'full-width')} key={iframeUrl}>
       {isMessageDone && (
         <div className="full-height full-width ub ub-ac ub-pc">
-          <IframeRender key={iframeUrl} url={iframeUrl} onMessage={onMessage} />
+          <IframeRender key={iframeUrl} url={iframeUrl} onMessage={onMessage} autoHeight />
         </div>
       )}
       {!isMessageDone && <Spin />}
