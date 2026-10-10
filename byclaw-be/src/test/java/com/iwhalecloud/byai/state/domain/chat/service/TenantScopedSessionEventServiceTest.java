@@ -17,6 +17,25 @@ import org.springframework.data.redis.core.ValueOperations;
 
 class TenantScopedSessionEventServiceTest {
     @Test
+    void terminalWithoutScopeContinuesThroughTenantRootRouting() {
+        var node = mock(TenantNodeClient.class);
+        var redis = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(values.get(anyString())).thenReturn("{\"userId\":20,\"enterpriseId\":10,\"role\":\"MEMBER\"}");
+        var broadcaster = mock(ScopedProjectionBroadcaster.class);
+        var service = new TenantScopedSessionEventService(node, redis, new PythonSseService(),
+            new GatewayStreamEventProcessor(), broadcaster);
+        var terminal = new JSONObject();
+        terminal.put("event_type", "appStreamResponse");
+        terminal.put("metadata", new JSONObject());
+        assertThat(service.handleIfNecessary(50L, terminal)).isFalse();
+        when(values.get(anyString())).thenReturn(null);
+        assertThat(service.handleIfNecessary(50L, terminal)).isNull();
+        verifyNoInteractions(node, broadcaster);
+    }
+
+    @Test
     void childProjectionReachesOnlyTheOwningEnterpriseChannel() throws Exception {
         var node = mock(TenantNodeClient.class);
         var redis = mock(StringRedisTemplate.class);
