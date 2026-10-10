@@ -267,7 +267,7 @@ public class ScriptService extends AbstractChatProcess {
         }
 
         // 多端广播：将用户发送的消息推送到用户的其他设备
-        if (!ctx.continueRunningTrace && ctx.tenantContext == null) {
+        if (!ctx.continueRunningTrace) {
             broadcastUserMessage(ctx);
         }
 
@@ -276,8 +276,8 @@ public class ScriptService extends AbstractChatProcess {
             initEvent(ctx);
         }
 
-        // 多端广播：将 initialization 事件推送到用户的其他设备
-        if (!ctx.continueRunningTrace && ctx.tenantContext == null) {
+        // 后台群任务没有请求端连接，租户初始化也需通过所属租户的广播通道发送。
+        if (!ctx.continueRunningTrace) {
             broadcastInitEvent(ctx);
         }
 
@@ -436,6 +436,10 @@ public class ScriptService extends AbstractChatProcess {
             userMsg.put("data", JSON.toJSON(ctx.askMsg));
             userMsg.put("clientRequestId", ctx.assistantChatDto.getClientRequestId());
             userMsg.put("agentId", ctx.assistantChatDto.getAgentId());
+            if (ctx.tenantContext != null) {
+                multiDeviceBroadcastService.broadcastTenantRawToUser(ctx.tenantContext, userMsg, ctx.senderChannel);
+                return;
+            }
             multiDeviceBroadcastService.broadcastRawToUser(ctx.userId, userMsg, ctx.senderChannel);
         }
         catch (Exception e) {
@@ -733,6 +737,16 @@ public class ScriptService extends AbstractChatProcess {
             dto.setMessageId(ctx.modelAnswerMessageId);
             dto.setQueryMessageId(ctx.userMessageId);
             dto.setMetadata(ctx.assistantChatDto.getMetadata());
+            dto.setTraceId(ctx.traceId);
+            if (ctx.tenantContext != null) {
+                JSONObject event = new JSONObject();
+                event.put("event_type", SseResponseEventEnum.initialization);
+                event.put("data", JSON.toJSONString(dto));
+                event.put("trace_id", ctx.traceId);
+                multiDeviceBroadcastService.broadcastTenantRawEvent(ctx.tenantContext, ctx.sessionId,
+                    event, ctx.senderChannel, ctx.clientRequestId);
+                return;
+            }
             multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
                 SseResponseEventEnum.initialization, JSON.toJSONString(dto), ctx.senderChannel);
         }

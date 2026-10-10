@@ -708,3 +708,13 @@ HACU 工作组列表合并租户 Node 中的新工作组与平台旧库中属于
 ### 群组任务成员路由
 
 群组工作助手的成员委派复用普通聊天的 `TargetAgentResolver`，按任务发起用户的个人参数及全局 `ENABLE_DSH` 解析实际引擎。普通群任务和租户群任务均在可信 Gateway `groupCoordination.effectiveWorkerAgentTypes` 中传递员工 ID 到有效引擎的映射；不修改员工数据库配置。Harness 创建成员前应用该映射，避免历史 `BYCLAW_EXE` 配置绕过 DSH 路由覆盖。两端配套部署，先更新后端再更新 Harness；已开始的任务执行引擎保持冻结，路由配置变更后需新建任务。
+
+### 租户 GROUP_TASK 子会话实时输出
+
+群聊 @ 数字员工创建的租户任务通过后台聊天上下文执行，`suppressUserEvents` 保持关闭；
+只有内部路由评估才抑制用户事件。`NEW_MESSAGE` 创建前端流式上下文，初始化和运行中的 `CHAT_STREAM` 消息按任务发起人及
+`enterpriseId` 推送，仅所属租户的连接可接收。任务子会话是聊天主流；其事件 metadata
+可以不含 `session_scope`，缺失时继续普通租户路由，不进入外部 child/team 投影。
+点击任务卡片后，前端通过运行状态和快照恢复上下文，再按子会话及 trace 接收增量；
+最终历史由租户 Node 提交。排查空白页面时应先检查 WS 是否收到该子会话的
+`initialization`、`answerDelta`，以及后端是否有“租户子会话投影失败”。

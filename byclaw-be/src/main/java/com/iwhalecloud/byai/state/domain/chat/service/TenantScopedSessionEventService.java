@@ -64,7 +64,7 @@ public class TenantScopedSessionEventService {
             return owner(parentId) == null ? null : false;
         TenantRequestContext tenant = owner(parentId);
         if (tenant == null) return null;
-        if ("child".equals(metadata.getString("session_scope"))) {
+        if ("child".equals(scope)) {
             project(tenant, parentId, List.of(event));
             return true;
         }

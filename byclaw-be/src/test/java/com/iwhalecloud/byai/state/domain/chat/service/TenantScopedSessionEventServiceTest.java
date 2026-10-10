@@ -16,6 +16,30 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 class TenantScopedSessionEventServiceTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"root"})
+    void ordinaryEventsKeepTheirTenantRoutingWhenScopeIsAbsentOrNotProjected(String scope) {
+        var node = mock(TenantNodeClient.class);
+        var redis = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        var broadcaster = mock(ScopedProjectionBroadcaster.class);
+        var service = new TenantScopedSessionEventService(node, redis, new PythonSseService(),
+            new GatewayStreamEventProcessor(), broadcaster);
+        JSONObject metadata = new JSONObject();
+        metadata.put("scene", "GROUP_TASK");
+        if (scope != null) metadata.put("session_scope", scope);
+        JSONObject event = new JSONObject();
+        event.put("metadata", metadata);
+
+        when(values.get(anyString())).thenReturn("{\"userId\":20,\"enterpriseId\":10,\"role\":\"MEMBER\"}");
+        assertThat(service.handleIfNecessary(50L, event)).isFalse();
+        when(values.get(anyString())).thenReturn(null);
+        assertThat(service.handleIfNecessary(50L, event)).isNull();
+        verifyNoInteractions(node, broadcaster);
+    }
+
     @Test
     void terminalWithoutScopeContinuesThroughTenantRootRouting() {
         var node = mock(TenantNodeClient.class);
