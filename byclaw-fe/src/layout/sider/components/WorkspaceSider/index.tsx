@@ -808,15 +808,17 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         ))}
 
         {hasMoreSessions && (
-          <div className={styles.sessionListAction}>
+          <div className={classNames(styles.sessionListAction, styles.loadMoreSessionsAction)}>
             <button
               type="button"
-              className={styles.loadMoreSessions}
+              className={classNames(styles.loadMoreSessions, styles.loadMoreSessionsDivider)}
               disabled={sessionState.loadingMore}
               onClick={() => void fetchProjectSessions(sessionScope, { append: true })}
             >
-              {sessionState.loadingMore ? <LoadingOutlined spin /> : null}
-              {intl.formatMessage({ id: 'workspaceSider.loadMore' })}
+              <span className={styles.loadMoreSessionsLabel}>
+                {sessionState.loadingMore ? <LoadingOutlined spin /> : null}
+                {intl.formatMessage({ id: 'workspaceSider.loadMore' })}
+              </span>
             </button>
           </div>
         )}

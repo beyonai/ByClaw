@@ -185,8 +185,119 @@ describe('ResourceCard', () => {
     lifecycleTestTimeout
   );
 
+  // 我的员工按后端权限显示全部管理入口，员工组、下架状态及申请待审核均不能再次屏蔽菜单。
+  it.each([
+    ['001', '2', true],
+    ['017', '2', true],
+    ['001', '3', false],
+    ['017', '3', false],
+  ] as const)(
+    'shows permitted available employee actions for %s / %s / pending %s',
+    (agentType, resourceStatus, pending) => {
+      const onAuth = jest.fn();
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType="DIG_EMPLOYEE"
+          digitalEmployeeActionMode
+          resource={{
+            resourceId: 'available-all-actions',
+            ownerType: 'enterprise',
+            agentType,
+            resourceStatus,
+            useApplyPending: pending,
+            hasUsePermission: true,
+            canSetDefault: true,
+            canEdit: true,
+            canManageAuth: true,
+            canUseAuth: true,
+            canDelete: true,
+            canOnShelf: true,
+            canOffShelf: true,
+            canPublishEmployee: true,
+            employeePublicationStatus: 'PUBLISHED',
+          }}
+          actionConfig={{
+            enableDigitalEmployeeLifecycle: true,
+            enableDigitalEmployeeDelete: true,
+            onAuth,
+          }}
+        />
+      );
+      [
+        'edit',
+        'authorize',
+        'use',
+        'shelfData',
+        'unShelfData',
+        'deleteData',
+        'setDefaultAssistant',
+        'publishEmployee',
+        'viewEmployeePublication',
+      ].forEach((key) => {
+        expect(screen.getByTestId(`resource-menu-${key}`)).toBeInTheDocument();
+      });
+      expect(screen.getByRole('img', { name: 'message' }).closest('button')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('common.manageAuthorization'));
+      fireEvent.click(screen.getByText('common.useAuthorization'));
+      expect(onAuth.mock.calls).toEqual([['mgrAuth'], ['useAuth']]);
+    }
+  );
+
+  it('does not expose available employee actions without backend permissions', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{
+          resourceId: 'available-no-actions',
+          ownerType: 'enterprise',
+          agentType: '017',
+          resourceStatus: '2',
+          hasUsePermission: false,
+          canSetDefault: false,
+          canEdit: false,
+          canManageAuth: false,
+          canUseAuth: false,
+          canDelete: false,
+          canOnShelf: false,
+          canOffShelf: false,
+          canPublishEmployee: false,
+          canApplyUse: false,
+        }}
+        actionConfig={{
+          enableDigitalEmployeeLifecycle: true,
+          enableDigitalEmployeeDelete: true,
+        }}
+      />
+    );
+    expect(screen.queryAllByTestId(/^resource-menu-/)).toHaveLength(0);
+    expect(screen.queryByRole('img', { name: 'message' })).toBeNull();
+    expect(screen.queryByRole('img', { name: 'plus' })).toBeNull();
+  });
+
+  it('preserves permitted employee management actions while a use application is pending', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{
+          resourceId: 'other-scene-pending',
+          resourceStatus: '2',
+          useApplyPending: true,
+          canEdit: true,
+          canManageAuth: true,
+          canUseAuth: true,
+        }}
+      />
+    );
+    expect(screen.getByText('common.editInfo')).toBeInTheDocument();
+    expect(screen.getByText('common.manageAuthorization')).toBeInTheDocument();
+    expect(screen.getByText('common.useAuthorization')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'ellipsis' })).toBeInTheDocument();
+  });
+
   it.each(['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'MCP', 'TOOLKIT', 'AGENT'])(
-    'hides authorization for off-shelf %s and restores permitted actions after publishing',
+    'uses employee authorization flags and preserves other resource shelf rules: %s',
     (resourceBizType) => {
       const client = new QueryClient();
       const onAuth = jest.fn();
@@ -207,8 +318,8 @@ describe('ResourceCard', () => {
         </QueryClientProvider>
       );
       const { rerender } = render(card('3'));
-      expect(screen.queryByText('common.manageAuthorization')).toBeNull();
-      expect(screen.queryByText('common.useAuthorization')).toBeNull();
+      expect(Boolean(screen.queryByText('common.manageAuthorization'))).toBe(resourceBizType === 'DIG_EMPLOYEE');
+      expect(Boolean(screen.queryByText('common.useAuthorization'))).toBe(resourceBizType === 'DIG_EMPLOYEE');
       expect(screen.getByText('common.editInfo')).toBeInTheDocument();
       rerender(card('2'));
       fireEvent.click(screen.getByText('common.manageAuthorization'));
@@ -216,8 +327,8 @@ describe('ResourceCard', () => {
       fireEvent.click(screen.getByText('common.useAuthorization'));
       expect(onAuth).toHaveBeenCalledWith('useAuth');
       rerender(card('3'));
-      expect(screen.queryByText('common.manageAuthorization')).toBeNull();
-      expect(screen.queryByText('common.useAuthorization')).toBeNull();
+      expect(Boolean(screen.queryByText('common.manageAuthorization'))).toBe(resourceBizType === 'DIG_EMPLOYEE');
+      expect(Boolean(screen.queryByText('common.useAuthorization'))).toBe(resourceBizType === 'DIG_EMPLOYEE');
     }
   );
 
@@ -228,7 +339,7 @@ describe('ResourceCard', () => {
     { status: '3' },
     { resourceStatus: 'OFF_SHELF' },
     { resourceStatus: '已下架' },
-  ])('hides authorization for legacy off-shelf status: %j', (status) => {
+  ])('uses backend employee authorization flags regardless of legacy shelf status: %j', (status) => {
     renderWithQueryClient(
       <ResourceCard
         resource={{
@@ -240,8 +351,8 @@ describe('ResourceCard', () => {
         }}
       />
     );
-    expect(screen.queryByText('common.manageAuthorization')).toBeNull();
-    expect(screen.queryByText('common.useAuthorization')).toBeNull();
+    expect(screen.getByText('common.manageAuthorization')).toBeInTheDocument();
+    expect(screen.getByText('common.useAuthorization')).toBeInTheDocument();
   });
 
   it.each([true, false])(
@@ -409,6 +520,8 @@ describe('ResourceCard', () => {
     ['TOOL', 'MCP', 'personal', 'personalTool'],
     ['TOOL', 'TOOLKIT', 'enterprise', 'enterpriseTool'],
     ['TOOL', 'AGENT', 'enterprise', 'enterpriseTool'],
+    ['TOOL', 'MCP_TOOL', 'personal_default', 'personalTool'],
+    ['TOOL', 'TOOL', 'personal', 'personalTool'],
   ])('switches %s / %s from ownership to status in my resources', (resourceType, resourceBizType, ownerType, tag) => {
     const resource = {
       resourceId: 'tag-test',
@@ -427,6 +540,31 @@ describe('ResourceCard', () => {
     expect(screen.getByText(`resource.tag.${tag}`).parentElement).toHaveClass(
       ownerType.startsWith('personal') ? 'digitalEmployeePersonalTag' : 'digitalEmployeeEnterpriseTag'
     );
+    // 知识和工具使用各自的角标布局，保留其他资源的布局边界。
+    const badge = screen.getByText(`resource.tag.${tag}`).parentElement!;
+    if (resourceType === 'KG_DOC') {
+      expect(badge).toHaveClass('knowledgeTopRightTag');
+      expect(badge.parentElement).toHaveClass('knowledgeHeaderWithTag');
+    } else {
+      expect(badge).not.toHaveClass('knowledgeTopRightTag');
+      expect(badge.parentElement).not.toHaveClass('knowledgeHeaderWithTag');
+    }
+    if (resourceType === 'TOOL') {
+      expect(badge).toHaveClass('toolTopRightTag');
+      expect(badge.parentElement).toHaveClass('toolHeaderWithTag');
+      expect(badge).toHaveAttribute('title', `resource.tag.${tag}`);
+    } else {
+      expect(badge).not.toHaveClass('toolTopRightTag');
+      expect(badge.parentElement).not.toHaveClass('toolHeaderWithTag');
+    }
+    if (resourceType === 'SKILL') {
+      expect(badge).toHaveClass('skillTopRightTag');
+      expect(badge.parentElement).toHaveClass('skillHeaderWithTag');
+      expect(badge).toHaveAttribute('title', `resource.tag.${tag}`);
+    } else {
+      expect(badge).not.toHaveClass('skillTopRightTag');
+      expect(badge.parentElement).not.toHaveClass('skillHeaderWithTag');
+    }
     expect(screen.queryByText('resourceStatus.published')).not.toBeInTheDocument();
     view.unmount();
     renderWithQueryClient(
@@ -438,6 +576,155 @@ describe('ResourceCard', () => {
     );
     expect(screen.getByText('resourceStatus.published')).toBeInTheDocument();
     expect(screen.queryByText(`resource.tag.${tag}`)).not.toBeInTheDocument();
+    if (resourceType === 'KG_DOC') {
+      expect(screen.getByText('resourceStatus.published').parentElement).toHaveClass('knowledgeTopRightTag');
+    }
+    if (resourceType === 'TOOL') {
+      expect(screen.getByText('resourceStatus.published').parentElement).toHaveClass('toolTopRightTag');
+    }
+    if (resourceType === 'SKILL') {
+      expect(screen.getByText('resourceStatus.published').parentElement).toHaveClass('skillTopRightTag');
+    }
+  });
+
+  it.each(['SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'TOOL', 'TOOLKIT', 'MCP', 'MCP_TOOL', 'AGENT'])(
+    'positions a %s tag without action space and preserves the card click',
+    (resourceBizType) => {
+      const isKnowledge = resourceBizType.startsWith('KG_');
+      const prefix = resourceBizType === 'SKILL' ? 'skill' : isKnowledge ? 'knowledge' : 'tool';
+      const tagClass = `${prefix}TopRightTag`;
+      const headerClass = `${prefix}HeaderWithTag`;
+      const installLabel = `resource.install${prefix.charAt(0).toUpperCase()}${prefix.slice(1)}`;
+      const onCardClick = jest.fn();
+      const resource = {
+        resourceId: 'resource-corner',
+        resourceName: 'A long resource name that must not overlap the corner tag',
+        resourceBizType,
+        tagName: 'Corner tag',
+        hasUsePermission: true,
+      };
+      // 使用权限同时允许安装；显式关闭目标安装才能构造“无操作区”的布局场景。
+      renderWithQueryClient(
+        <ResourceCard resource={resource} onCardClick={onCardClick} actionConfig={{ canInstallToTarget: false }} />
+      );
+      const badge = screen.getByText('Corner tag').parentElement!;
+      const title = screen.getByText(resource.resourceName);
+      expect(badge).toHaveClass(tagClass);
+      expect(badge).toHaveAttribute('title', 'Corner tag');
+      expect(title.parentElement).toHaveClass(headerClass);
+      expect(title.closest('.resourceInfo')).not.toHaveClass('resourceInfoWithActions');
+      expect(screen.queryByRole('button', { name: installLabel })).not.toBeInTheDocument();
+      fireEvent.click(badge);
+      expect(onCardClick).toHaveBeenCalledWith(resource);
+    }
+  );
+
+  it.each([
+    { resourceBizType: 'KG_DOC', hasUsePermission: false },
+    { resourceBizType: 'KG_QA', hasUsePermission: false },
+    { resourceBizType: 'KG_TERM', hasUsePermission: false },
+    { resourceBizType: 'KG_DOC', hasUsePermission: undefined },
+    { resourceType: 'KG_DOC', hasUsePermission: false },
+    { resourceBizType: 'KG_DOC', hasUsePermission: false, hasManagePermission: true, canViewDetail: true },
+    { resourceBizType: 'KG_DOC', hasUsePermission: false, useApplyPending: true },
+  ])('blocks knowledge detail without use permission: %j', ({ resourceType, ...permissions }) => {
+    const onCardClick = jest.fn();
+    const onCardClickDisabled = jest.fn();
+    const resource = {
+      resourceId: 'unusable-knowledge',
+      resourceName: 'Restricted knowledge',
+      resourceDesc: 'Restricted content',
+      tagName: 'Knowledge tag',
+      ...permissions,
+    };
+    renderWithQueryClient(
+      <ResourceCard
+        resource={resource}
+        resourceType={resourceType}
+        onCardClick={onCardClick}
+        onCardClickDisabled={onCardClickDisabled}
+      />
+    );
+    const title = screen.getByText(resource.resourceName);
+    // 鼠标经过正文和卡片留白均显示禁用；不能用 pointer-events 阻断申请按钮。
+    expect(title.closest('.resourceCard')).toHaveClass('disabledClickCard');
+    expect(title.closest('.resourceCard')).not.toHaveClass('pointer');
+    expect(title.closest('.renderContent')).toHaveClass('disabledClickContent');
+    expect(title.closest('.renderContent')).not.toHaveClass('pointer');
+    fireEvent.click(title);
+    fireEvent.click(screen.getByText(resource.resourceDesc));
+    fireEvent.click(screen.getByText(resource.tagName));
+    expect(onCardClick).not.toHaveBeenCalled();
+    expect(onCardClickDisabled).toHaveBeenCalledTimes(3);
+    expect(onCardClickDisabled).toHaveBeenCalledWith(resource);
+  });
+
+  it('updates knowledge detail access and cursor when use permission changes', () => {
+    const client = new QueryClient();
+    const onCardClick = jest.fn();
+    const card = (hasUsePermission: boolean) => (
+      <QueryClientProvider client={client}>
+        <ResourceCard
+          resource={{
+            resourceId: 'knowledge-permission',
+            resourceName: 'Knowledge access',
+            resourceBizType: 'KG_DOC',
+            hasUsePermission,
+          }}
+          onCardClick={onCardClick}
+        />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(card(false));
+    fireEvent.click(screen.getByText('Knowledge access'));
+    expect(onCardClick).not.toHaveBeenCalled();
+    rerender(card(true));
+    const title = screen.getByText('Knowledge access');
+    expect(title.closest('.resourceCard')).toHaveClass('pointer');
+    expect(title.closest('.renderContent')).toHaveClass('pointer');
+    expect(title.closest('.resourceCard')).not.toHaveClass('disabledClickCard');
+    expect(title.closest('.renderContent')).not.toHaveClass('disabledClickContent');
+    fireEvent.click(title);
+    expect(onCardClick).toHaveBeenCalledTimes(1);
+    rerender(card(false));
+    expect(title.closest('.resourceCard')).toHaveClass('disabledClickCard');
+    fireEvent.click(title);
+    expect(onCardClick).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([true, () => true])('preserves explicit card click restrictions for usable knowledge: %s', (disabled) => {
+    const onCardClick = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'disabled-knowledge',
+          resourceName: 'Disabled knowledge',
+          resourceBizType: 'KG_DOC',
+          hasUsePermission: true,
+        }}
+        cardClickDisabled={disabled}
+        onCardClick={onCardClick}
+      />
+    );
+    const title = screen.getByText('Disabled knowledge');
+    expect(title.closest('.resourceCard')).toHaveClass('disabledClickCard');
+    expect(title.closest('.renderContent')).toHaveClass('disabledClickContent');
+    fireEvent.click(title);
+    expect(onCardClick).not.toHaveBeenCalled();
+  });
+
+  it.each(['SKILL', 'MCP', 'DIG_EMPLOYEE'])('preserves %s detail access without knowledge restrictions', (type) => {
+    const onCardClick = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{ resourceId: 'other-resource', resourceName: 'Other resource', resourceBizType: type }}
+        onCardClick={onCardClick}
+      />
+    );
+    const title = screen.getByText('Other resource');
+    expect(title.closest('.resourceCard')).not.toHaveClass('disabledClickCard');
+    fireEvent.click(title);
+    expect(onCardClick).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -481,6 +768,7 @@ describe('ResourceCard', () => {
     const badge = screen.getByText(`resource.tag.${tag}`).parentElement!;
     const title = screen.getByText('A long skill name that should retain its title space');
     expect(badge).toHaveClass('skillPosterTag', tagClass);
+    expect(badge).toHaveAttribute('title', `resource.tag.${tag}`);
     expect(badge.parentElement).toHaveClass('skillPosterContent');
     expect(title.parentElement).toHaveClass('skillPosterHeaderWithTag');
     expect(title.parentElement).not.toContainElement(badge);
@@ -622,43 +910,40 @@ describe('ResourceCard', () => {
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
-  // 个人页签关闭上下架操作后，编辑和注销员工仍独立遵循各自权限。
+  // 复用方显式关闭生命周期时，编辑和注销仍独立遵循各自权限。
   it.each([
     ['2', 'personal', '001'],
     ['3', 'personal', '001'],
     ['2', 'personal', '017'],
     ['2', 'personal_default', '001'],
-  ])(
-    'hides shelf actions for personal status %s / %s / %s even when permitted',
-    (resourceStatus, ownerType, agentType) => {
-      renderWithQueryClient(
-        <ResourceCard
-          resourceType="DIG_EMPLOYEE"
-          digitalEmployeeActionMode
-          resource={{
-            resourceId: 'personal-lifecycle-employee',
-            ownerType,
-            agentType,
-            resourceStatus,
-            canOnShelf: true,
-            canOffShelf: true,
-            canEdit: true,
-            canDelete: true,
-          }}
-          actionConfig={{
-            scene: 'personal',
-            enableDigitalEmployeeLifecycle: false,
-            enableDigitalEmployeeDelete: true,
-          }}
-        />
-      );
+  ])('supports an explicit lifecycle opt-out for status %s / %s / %s', (resourceStatus, ownerType, agentType) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{
+          resourceId: 'personal-lifecycle-employee',
+          ownerType,
+          agentType,
+          resourceStatus,
+          canOnShelf: true,
+          canOffShelf: true,
+          canEdit: true,
+          canDelete: true,
+        }}
+        actionConfig={{
+          scene: 'personal',
+          enableDigitalEmployeeLifecycle: false,
+          enableDigitalEmployeeDelete: true,
+        }}
+      />
+    );
 
-      expect(screen.queryByText('resource.shelfData')).toBeNull();
-      expect(screen.queryByText('resource.unShelfData')).toBeNull();
-      expect(screen.getByText('common.editInfo')).toBeTruthy();
-      expect(screen.getByText('resource.deleteData')).toBeTruthy();
-    }
-  );
+    expect(screen.queryByText('resource.shelfData')).toBeNull();
+    expect(screen.queryByText('resource.unShelfData')).toBeNull();
+    expect(screen.getByText('common.editInfo')).toBeTruthy();
+    expect(screen.getByText('resource.deleteData')).toBeTruthy();
+  });
 
   // 可用的企业员工与员工组均保留下架入口，确认后调用专用下架回调。
   it.each(['001', '017'])('allows taking an available enterprise %s off shelf', async (agentType) => {
@@ -684,7 +969,7 @@ describe('ResourceCard', () => {
     expect(onUnShelf).toHaveBeenCalledTimes(1);
   });
 
-  it('hides off-shelf action for enterprise employees without operation permissions', () => {
+  it.each([false, undefined])('does not infer shelf actions from edit permission: %s', (permission) => {
     renderWithQueryClient(
       <ResourceCard
         resourceType="DIG_EMPLOYEE"
@@ -693,14 +978,33 @@ describe('ResourceCard', () => {
           resourceId: 'available-enterprise-no-permission',
           ownerType: 'enterprise',
           resourceStatus: '2',
-          canOffShelf: false,
-          canEdit: false,
+          canOffShelf: permission,
+          canOnShelf: permission,
+          canEdit: true,
         }}
         actionConfig={{ enableDigitalEmployeeLifecycle: true }}
       />
     );
 
     expect(screen.queryByText('resource.unShelfData')).toBeNull();
+    expect(screen.queryByText('resource.shelfData')).toBeNull();
+  });
+
+  it.each([false, undefined, true])('uses backend use permission for employee conversation entry: %s', (permission) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="DIG_EMPLOYEE"
+        digitalEmployeeActionMode
+        resource={{
+          resourceId: 'employee-chat-permission',
+          resourceStatus: '2',
+          hasUsePermission: permission,
+          canApplyUse: false,
+          canEdit: true,
+        }}
+      />
+    );
+    expect(Boolean(screen.queryByRole('img', { name: 'message' }))).toBe(permission === true);
   });
 
   it('hides personal employee use authorization while retaining other permitted actions', () => {
@@ -879,6 +1183,11 @@ describe('ResourceCard', () => {
 
     const applyButton = screen.getByRole('button', { name: 'resource.applyUse' });
     expect(applyButton).toHaveClass('ant-btn-circle');
+    if (resourceType === 'KG_DOC') {
+      expect(applyButton.parentElement).toHaveClass('digitalEmployeeActions', 'knowledgeActions');
+      expect(screen.queryByRole('button', { name: 'resource.installKnowledge' })).toBeNull();
+      expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+    }
     expect(screen.queryByTestId('resource-menu-applyUse')).toBeNull();
     expect(screen.queryByRole('button', { name: 'resource.installSkill' })).toBeNull();
     expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
@@ -915,53 +1224,157 @@ describe('ResourceCard', () => {
   });
 
   it.each([
+    ['SKILL', 'SKILL', 'default'],
+    ['SKILL', 'SKILL', 'skillPoster'],
+    ['KG_DOC', 'KG_DOC', 'default'],
+    ['KG_DOC', 'KG_QA', 'default'],
+    ['KG_DOC', 'KG_TERM', 'default'],
+    ['KG_DOC', 'KG_DB', 'default'],
+    ['TOOL', 'TOOL', 'default'],
+    ['TOOL', 'TOOLKIT', 'default'],
+    ['TOOL', 'MCP', 'default'],
+    ['TOOL', 'MCP_TOOL', 'default'],
+    ['TOOL', 'AGENT', 'default'],
+  ] as const)(
+    'shares one primary action alignment across %s / %s / %s states and menu visibility',
+    (resourceType, resourceBizType, variant) => {
+      // 切换申请、待审核、安装及菜单权限，三个模块共用纵向操作区及固定正文留白。
+      const client = new QueryClient();
+      const renderCard = (state: 'apply' | 'pending' | 'install', showMenu: boolean) => (
+        <QueryClientProvider client={client}>
+          <ResourceCard
+            resourceType={resourceType}
+            variant={variant}
+            resource={{
+              resourceId: 'aligned-resource',
+              resourceName: 'Aligned resource',
+              resourceBizType,
+              resourceStatus: '2',
+              hasUsePermission: state === 'install',
+              canApplyUse: state === 'apply',
+              useApplyPending: state === 'pending',
+              canEdit: showMenu,
+            }}
+            actionConfig={{ enableResourceLifecycle: true }}
+          />
+        </QueryClientProvider>
+      );
+      const { rerender } = render(renderCard('apply', true));
+      const states = ['apply', 'pending', 'install'] as const;
+      const actions = screen.getByRole('button', { name: 'resource.applyUse' }).parentElement!;
+
+      for (const state of states) {
+        for (const showMenu of [true, false]) {
+          rerender(renderCard(state, showMenu));
+          const label =
+            state === 'apply'
+              ? 'resource.applyUse'
+              : state === 'pending'
+              ? 'resource.pendingAuthorization'
+              : resourceType === 'SKILL'
+              ? 'resource.installSkill'
+              : resourceType === 'TOOL'
+              ? 'resource.installTool'
+              : 'resource.installKnowledge';
+          const button = screen.getByRole('button', { name: label });
+          expect(button.closest('.resourceCardActions')).toBe(actions);
+          expect(actions).toHaveClass('resourceCardActions');
+          expect(actions.firstElementChild).toContainElement(button);
+          expect(within(actions).getAllByRole('button')).toHaveLength(showMenu ? 2 : 1);
+          const title = screen.getByText('Aligned resource');
+          const content = title.closest(variant === 'skillPoster' ? '.skillPosterBody' : '.resourceInfo');
+          expect(content).toHaveClass('resourceInfoWithActions');
+          expect(content).not.toHaveClass('resourceInfoWithMoreActions');
+        }
+      }
+    }
+  );
+
+  it.each([
     ['SKILL', 'default'],
     ['SKILL', 'skillPoster'],
     ['KG_DOC', 'default'],
     ['TOOL', 'default'],
-  ] as const)('shows a disabled pending use action for %s %s cards', async (resourceType, variant) => {
-    renderWithQueryClient(
-      <ResourceCard
-        resourceType={resourceType}
-        variant={variant}
-        resource={{
-          resourceId: 'resource-pending',
-          resourceBizType: resourceType,
-          resourceStatus: '2',
-          hasUsePermission: false,
-          canApplyUse: true,
-          useApplyPending: true,
-          canEdit: true,
-        }}
-        actionConfig={{ enableResourceLifecycle: true }}
-      />
-    );
+    ['DIG_EMPLOYEE', 'default'],
+  ] as const)(
+    'shows pending status only when hovering the disabled icon for %s %s cards',
+    async (resourceType, variant) => {
+      // JSDOM 不计算尺寸；提供图标与弹层的边界，让真实 Tooltip 完成定位和显示。
+      jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 32,
+        bottom: 32,
+        width: 32,
+        height: 32,
+        toJSON: () => ({}),
+      });
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType={resourceType}
+          variant={variant}
+          digitalEmployeeActionMode={resourceType === 'DIG_EMPLOYEE'}
+          resource={{
+            resourceId: 'resource-pending',
+            resourceBizType: resourceType,
+            agentType: resourceType === 'DIG_EMPLOYEE' ? '017' : undefined,
+            resourceStatus: '2',
+            hasUsePermission: false,
+            canApplyUse: true,
+            useApplyPending: true,
+            canEdit: true,
+          }}
+          actionConfig={{ enableResourceLifecycle: true }}
+        />
+      );
 
-    const pendingButton = screen.getByRole('button', { name: 'resource.pendingAuthorization' });
-    expect(pendingButton).toBeDisabled();
-    expect(screen.queryByText('resource.pendingAuthorization')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'resource.applyUse' })).toBeNull();
-    expect(screen.queryByTestId('resource-menu-applyUse')).toBeNull();
-    expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
-    fireEvent.mouseEnter(pendingButton.parentElement!);
-    expect(await screen.findByText('resource.pendingAuthorization')).toBeInTheDocument();
-  });
+      const pendingButton = screen.getByRole('button', { name: 'resource.pendingAuthorization' });
+      expect(pendingButton).toBeDisabled();
+      if (resourceType === 'DIG_EMPLOYEE') {
+        expect(pendingButton.closest('.resourceCardActions')).toBeNull();
+      }
+      if (resourceType === 'KG_DOC') {
+        expect(pendingButton.parentElement?.parentElement).toHaveClass('digitalEmployeeActions', 'knowledgeActions');
+        expect(screen.queryByRole('button', { name: 'resource.installKnowledge' })).toBeNull();
+        expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+      }
+      expect(screen.queryByText('resource.pendingAuthorization')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'resource.applyUse' })).toBeNull();
+      expect(screen.queryByTestId('resource-menu-applyUse')).toBeNull();
+      expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
+      // disabled 按钮由外层容器接收悬浮，保留图标的无障碍名称但不显示常驻文案。
+      fireEvent.mouseEnter(pendingButton.parentElement!);
+      const tooltip = await screen.findByRole('tooltip');
+      expect(tooltip).toHaveTextContent('resource.pendingAuthorization');
+      await waitFor(() => expect(tooltip).toBeVisible());
+    },
+    lifecycleTestTimeout
+  );
 
   it.each([
-    ['default', true],
-    ['default', false],
-    ['skillPoster', true],
-    ['skillPoster', false],
+    ['SKILL', 'default', true],
+    ['SKILL', 'default', false],
+    ['SKILL', 'skillPoster', true],
+    ['SKILL', 'skillPoster', false],
+    ['KG_DOC', 'default', true],
+    ['KG_DOC', 'default', false],
+    ['TOOL', 'default', true],
+    ['TOOL', 'default', false],
+    ['DIG_EMPLOYEE', 'default', true],
+    ['DIG_EMPLOYEE', 'default', false],
   ] as const)(
-    'keeps the %s card action slots stable after confirmation, menu=%s',
-    async (variant, canEdit) => {
+    'keeps the %s %s card action slots stable after confirmation, menu=%s',
+    async (resourceType, variant, canEdit) => {
       const onApplyUse = jest.fn();
       const ApplyCard = () => {
         const [pending, setPending] = React.useState(false);
         return (
           <ResourceCard
-            resourceType="SKILL"
+            resourceType={resourceType}
             variant={variant}
+            digitalEmployeeActionMode={resourceType === 'DIG_EMPLOYEE'}
             resource={{
               resourceId: 'skill-apply',
               resourceStatus: '2',
@@ -997,8 +1410,9 @@ describe('ResourceCard', () => {
       expect(pendingButton).toHaveClass('ant-btn-circle');
       expect(pendingButton.parentElement?.parentElement).toBe(actions);
       expect(within(actions).getAllByRole('button')).toHaveLength(actionCount);
-      // 文字只在悬浮提示中展示，不会扩展按钮所在操作区的尺寸。
-      expect(within(actions).queryByText('resource.pendingAuthorization')).toBeNull();
+      expect(within(actions).queryByText('resource.pendingAuthorization')).not.toBeInTheDocument();
+      fireEvent.click(pendingButton);
+      expect(onApplyUse).toHaveBeenCalledTimes(1);
       expect(screen.queryByTestId('resource-menu-edit')).toBe(editMenu);
     },
     lifecycleTestTimeout
@@ -1128,34 +1542,188 @@ describe('ResourceCard', () => {
     expect(screen.queryByTestId('resource-menu-install')).toBeNull();
   });
 
-  it('opens target selection and prevents repeated installation while installing', () => {
+  it.each([
+    ['SKILL', 'resource.installSkill'],
+    ['KG_DOC', 'resource.installKnowledge'],
+    ['TOOL', 'resource.installTool'],
+  ])('opens target selection and prevents repeated installation while installing %s', (resourceType, installLabel) => {
     renderWithQueryClient(
       <ResourceCard
-        resourceType="SKILL"
-        resource={{ resourceId: 'skill-1', resourceBizType: 'SKILL', hasUsePermission: true }}
+        resourceType={resourceType}
+        resource={{ resourceId: 'resource-1', resourceBizType: resourceType, hasUsePermission: true }}
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'resource.installSkill' }));
+    fireEvent.click(screen.getByRole('button', { name: installLabel }));
     expect(screen.getByRole('dialog', { name: 'install-dialog' })).toHaveAttribute(
       'data-target-context',
       JSON.stringify({ mode: 'select' })
     );
     fireEvent.click(screen.getByRole('button', { name: 'start-install' }));
-    expect(screen.getByRole('button', { name: 'resource.installSkill' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: installLabel })).toBeDisabled();
   });
 
-  it.each(['KG_DOC', 'TOOL'])('keeps installation in the menu for %s resources', (resourceType) => {
+  // 工具列表类型与业务子类型都使用外露入口，兼容个人列表和当前员工的固定安装目标。
+  it.each(
+    ['TOOL', 'TOOLKIT', 'MCP', 'MCP_TOOL', 'AGENT'].flatMap((resourceBizType) =>
+      [undefined, 'TOOL', resourceBizType].map((resourceType) => ({ resourceBizType, resourceType }))
+    )
+  )(
+    'opens tool installation outside the menu for $resourceType / $resourceBizType',
+    ({ resourceType, resourceBizType }) => {
+      const onCardClick = jest.fn();
+      const targetContext = { mode: 'fixed' as const, digitalEmployeeId: 'employee-1' };
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType={resourceType}
+          onCardClick={onCardClick}
+          resource={{
+            resourceId: 'tool-1',
+            resourceBizType,
+            resourceStatus: '2',
+            hasUsePermission: true,
+            canEdit: true,
+          }}
+          actionConfig={{ enableResourceLifecycle: resourceType === 'TOOL', installTargetContext: targetContext }}
+        />
+      );
+
+      const installButton = screen.getByRole('button', { name: 'resource.installTool' });
+      expect(installButton).toHaveClass('ant-btn-circle');
+      expect(installButton.parentElement).toHaveClass('digitalEmployeeActions', 'resourceCardActions');
+      expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'resource.applyUse' })).toBeNull();
+      expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
+      fireEvent.click(installButton);
+      const dialog = screen.getByRole('dialog', { name: 'install-dialog' });
+      expect(dialog).toHaveAttribute('data-resource-id', 'tool-1');
+      expect(dialog).toHaveAttribute('data-target-context', JSON.stringify(targetContext));
+      expect(onCardClick).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'close-install' }));
+      expect(screen.queryByRole('dialog', { name: 'install-dialog' })).toBeNull();
+      expect(onCardClick).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { resourceStatus: '0' },
+    { resourceStatus: '3' },
+    { resourceStatus: '-1' },
+    { resourceStatus: '2', canInstallToTarget: false },
+    { resourceStatus: '2', hiddenMenuItemKeys: ['install'] },
+    { resourceStatus: '2', installedResourceIds: new Set(['tool-1']) },
+  ])('hides both tool installation entries when unavailable: %j', (state) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="TOOL"
+        resource={{
+          resourceId: 'tool-1',
+          resourceBizType: 'TOOLKIT',
+          resourceStatus: state.resourceStatus,
+          hasUsePermission: true,
+        }}
+        actionConfig={{
+          enableResourceLifecycle: true,
+          canInstallToTarget: state.canInstallToTarget,
+          hiddenMenuItemKeys: state.hiddenMenuItemKeys,
+          installedResourceIds: state.installedResourceIds,
+        }}
+      />
+    );
+    expect(screen.queryByRole('button', { name: 'resource.installTool' })).toBeNull();
+    expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+  });
+
+  it.each(['KG_DB', 'OBJECT', 'VIEW'])('keeps installation in the menu for authorized %s resources', (resourceType) => {
     renderWithQueryClient(
       <ResourceCard
         resourceType={resourceType}
-        resource={{ resourceId: 'resource-1', resourceBizType: resourceType }}
+        resource={{ resourceId: 'resource-1', resourceBizType: resourceType, hasUsePermission: true }}
       />
     );
 
     expect(screen.getByTestId('resource-menu-install')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'resource.installSkill' })).toBeNull();
+    fireEvent.click(screen.getByTestId('resource-menu-install'));
+    expect(screen.getByRole('dialog', { name: 'install-dialog' })).toHaveAttribute('data-resource-id', 'resource-1');
   });
+
+  it.each(['KG_DOC', 'KG_QA', 'KG_TERM', 'KG_DB'])(
+    'opens installation from the circular %s knowledge action without opening card details',
+    (resourceBizType) => {
+      const onCardClick = jest.fn();
+      const targetContext = { mode: 'fixed' as const, digitalEmployeeId: 'employee-1' };
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType="KG_DOC"
+          onCardClick={onCardClick}
+          resource={{
+            resourceId: 'knowledge-1',
+            resourceBizType,
+            resourceStatus: '2',
+            hasUsePermission: true,
+            canEdit: true,
+          }}
+          actionConfig={{ enableResourceLifecycle: true, installTargetContext: targetContext }}
+        />
+      );
+
+      const installButton = screen.getByRole('button', { name: 'resource.installKnowledge' });
+      expect(installButton).toHaveClass('ant-btn-circle');
+      expect(installButton.parentElement).toHaveClass('digitalEmployeeActions', 'knowledgeActions');
+      expect(installButton.closest('.resourceCard')).toHaveClass('knowledgeCard');
+      expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'resource.applyUse' })).toBeNull();
+      expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
+      fireEvent.click(installButton);
+      expect(screen.getByRole('dialog', { name: 'install-dialog' })).toHaveAttribute('data-resource-id', 'knowledge-1');
+      expect(screen.getByRole('dialog', { name: 'install-dialog' })).toHaveAttribute(
+        'data-target-context',
+        JSON.stringify(targetContext)
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'close-install' }));
+      expect(screen.queryByRole('dialog', { name: 'install-dialog' })).toBeNull();
+      expect(onCardClick).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['KG_DOC', 'KG_DB', 'KG_QA', 'KG_TERM', 'TOOL', 'TOOLKIT', 'MCP', 'MCP_TOOL', 'AGENT', 'OBJECT', 'VIEW'])(
+    'hides installation for %s resources without use permission, including pending applications',
+    (resourceType) => {
+      // 申请权限与目标管理权限均不能替代资源使用权限；接口缺少权限字段时也不展示安装。
+      const states = [
+        { hasUsePermission: false, canApplyUse: true, useApplyPending: false },
+        { hasUsePermission: false, canApplyUse: false, useApplyPending: true },
+        { hasUsePermission: undefined, canApplyUse: false, useApplyPending: false },
+      ];
+      for (const state of states) {
+        const { unmount } = renderWithQueryClient(
+          <ResourceCard
+            resourceType={resourceType}
+            resource={{
+              resourceId: 'resource-1',
+              resourceBizType: resourceType,
+              resourceStatus: '2',
+              hasManagePermission: true,
+              ...state,
+            }}
+            actionConfig={{ enableResourceLifecycle: true, canInstallToTarget: true }}
+          />
+        );
+
+        expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+        expect(screen.queryByRole('button', { name: 'resource.installKnowledge' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'resource.installTool' })).toBeNull();
+        expect(screen.queryByRole('dialog', { name: 'install-dialog' })).toBeNull();
+        if (state.canApplyUse) {
+          expect(screen.getByRole('button', { name: 'resource.applyUse' })).toBeInTheDocument();
+        } else if (state.useApplyPending) {
+          expect(screen.getByRole('button', { name: 'resource.pendingAuthorization' })).toBeDisabled();
+        }
+        unmount();
+      }
+    }
+  );
 
   it('hides install knowledge action when current digital employee already installed it', () => {
     renderWithQueryClient(
@@ -1165,6 +1733,7 @@ describe('ResourceCard', () => {
           resourceId: 'knowledge-1',
           resourceName: 'Knowledge',
           resourceBizType: 'KG_DOC',
+          hasUsePermission: true,
         }}
         actionConfig={{
           installedResourceIds: new Set(['knowledge-1']),
@@ -1172,7 +1741,26 @@ describe('ResourceCard', () => {
       />
     );
 
-    expect(screen.queryByText('resource.installKnowledge')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.installKnowledge' })).toBeNull();
+    expect(screen.queryByTestId('resource-menu-install')).toBeNull();
+  });
+
+  it.each([
+    { resourceStatus: '0' },
+    { resourceStatus: '3' },
+    { resourceStatus: '-1' },
+    { resourceStatus: '2', hiddenMenuItemKeys: ['install'] },
+  ])('hides the knowledge install icon when installation is unavailable: %j', (state) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="KG_DOC"
+        resource={{ resourceId: 'knowledge-1', resourceBizType: 'KG_DOC', hasUsePermission: true, ...state }}
+        actionConfig={{ enableResourceLifecycle: true, hiddenMenuItemKeys: state.hiddenMenuItemKeys }}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: 'resource.installKnowledge' })).toBeNull();
+    expect(screen.queryByTestId('resource-menu-install')).toBeNull();
   });
 
   it('hides install action when the fixed digital employee is not manageable', () => {
@@ -1183,12 +1771,14 @@ describe('ResourceCard', () => {
           resourceId: 'knowledge-1',
           resourceName: 'Knowledge',
           resourceBizType: 'KG_DOC',
+          hasUsePermission: true,
         }}
         actionConfig={{ canInstallToTarget: false }}
       />
     );
 
-    expect(screen.queryByText('resource.installKnowledge')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.installKnowledge' })).toBeNull();
+    expect(screen.queryByTestId('resource-menu-install')).toBeNull();
   });
 
   it('shows the default digital employee badge when the digital employee is default', () => {
@@ -1206,8 +1796,8 @@ describe('ResourceCard', () => {
     expect(screen.getByText('resource.defaultDigitalEmployee')).toHaveClass('defaultDigitalEmployeeBadge');
   });
 
-  // 员工卡片保留独立申请按钮和管理操作，不重复展示申请菜单或无使用权限的设为默认。
-  it('keeps the apply button and management actions without apply or default menu entries', () => {
+  // 员工卡片保留独立申请按钮和管理操作，默认入口独立遵循后端 canSetDefault。
+  it('keeps independent apply, default and management actions', () => {
     renderWithQueryClient(
       <ResourceCard
         digitalEmployeeActionMode
@@ -1222,7 +1812,7 @@ describe('ResourceCard', () => {
           canEdit: true,
           canManageAuth: true,
         }}
-        actionConfig={{ enableSetDefault: true, onApplyUse: jest.fn(), onEdit: jest.fn(), onAuth: jest.fn() }}
+        actionConfig={{ onApplyUse: jest.fn(), onEdit: jest.fn(), onAuth: jest.fn() }}
       />
     );
 
@@ -1230,18 +1820,17 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resource.applyUse')).toBeNull();
     expect(screen.getByText('common.editInfo')).toBeTruthy();
     expect(screen.getByText('common.manageAuthorization')).toBeTruthy();
-    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+    expect(screen.getByText('resource.setDefaultAssistant')).toBeInTheDocument();
   });
 
-  // 申请中、不可申请及权限缺失时，也不能仅凭 canSetDefault 展示默认入口。
+  // 有管理权限的员工可以设为默认，前端不重复要求 hasUsePermission。
   it.each([
     { hasUsePermission: false, canApplyUse: true, useApplyPending: true },
     { hasUsePermission: false, canApplyUse: false },
     { hasUsePermission: undefined, canApplyUse: false },
-  ])('hides set default without use permission: %j', (permissions) => {
+  ])('shows backend-permitted set default independently of use permission: %j', (permissions) => {
     renderWithQueryClient(
       <ResourceCard
-        actionConfig={{ enableSetDefault: true }}
         resourceType="DIG_EMPLOYEE"
         digitalEmployeeActionMode
         resource={{
@@ -1254,12 +1843,12 @@ describe('ResourceCard', () => {
       />
     );
 
-    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+    expect(screen.getByText('resource.setDefaultAssistant')).toBeInTheDocument();
     expect(screen.queryByText('resource.applyUse')).toBeNull();
   });
 
-  // 资源中心之外的旧复用场景保持菜单申请，避免影响独立页面。
-  it('keeps the apply use menu outside the resource center action mode', () => {
+  // 工具卡片统一使用圆形申请入口，无需另行启用生命周期操作。
+  it('shows the tool apply icon without enabling lifecycle actions', () => {
     renderWithQueryClient(
       <ResourceCard
         resourceType="TOOL"
@@ -1269,34 +1858,42 @@ describe('ResourceCard', () => {
           canApplyUse: true,
           hasUsePermission: false,
         }}
-        actionConfig={{ enableSetDefault: true, onApplyUse: jest.fn() }}
+        actionConfig={{ onApplyUse: jest.fn() }}
       />
     );
 
-    expect(screen.getByText('resource.applyUse')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'resource.applyUse' })).toBeEnabled();
+    expect(screen.queryByText('resource.applyUse')).toBeNull();
   });
 
-  it.each([false, undefined])('hides set default outside the available tab: %s', (enableSetDefault) => {
+  // 管理员工的个人/企业页签无需显式开启默认入口，数字员工和员工组均按后端权限展示。
+  it.each([
+    ['personal', '001'],
+    ['personal', '017'],
+    ['enterprise', '001'],
+    ['enterprise', '017'],
+  ] as const)('shows set default for a permitted %s / %s employee without page opt-in', (ownerType, agentType) => {
     renderWithQueryClient(
       <ResourceCard
         resource={{
           resourceId: 'employee-other-page',
           resourceBizType: 'DIG_EMPLOYEE',
+          ownerType,
+          agentType,
           hasUsePermission: true,
           canSetDefault: true,
           isDefault: false,
         }}
-        actionConfig={{ enableSetDefault }}
+        actionConfig={{ scene: ownerType }}
       />
     );
-    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+    expect(screen.getByText('resource.setDefaultAssistant')).toBeTruthy();
   });
 
   // 有使用权限且后端允许设为默认时，继续显示默认入口。
   it('shows set default for a usable non-default digital employee', () => {
     renderWithQueryClient(
       <ResourceCard
-        actionConfig={{ enableSetDefault: true }}
         resource={{
           resourceId: 'employee-default',
           resourceName: 'Usable Employee',
@@ -1311,16 +1908,38 @@ describe('ResourceCard', () => {
     expect(screen.getByText('resource.setDefaultAssistant')).toBeTruthy();
   });
 
-  it('does not show set default for the current default digital employee', () => {
+  // 默认身份可来自列表字段或全局默认员工 ID，两种来源都不能覆盖后端允许设置的权限。
+  it.each([
+    { resourceId: 'default-flag-employee', isDefault: true },
+    { resourceId: 'default-agent-1', isDefault: false },
+  ])('shows set default for a permitted current default employee: %j', (identity) => {
     renderWithQueryClient(
       <ResourceCard
-        actionConfig={{ enableSetDefault: true }}
         resource={{
-          resourceId: 'default-agent-1',
+          ...identity,
           resourceName: 'Default Employee',
           resourceBizType: 'DIG_EMPLOYEE',
-          canSetDefault: false,
-          isDefault: true,
+          hasUsePermission: true,
+          canSetDefault: true,
+        }}
+      />
+    );
+
+    expect(screen.getByText('resource.setDefaultAssistant')).toBeTruthy();
+    expect(screen.getByText('resource.defaultDigitalEmployee')).toBeTruthy();
+  });
+
+  it.each([false, undefined])('hides set default when the backend does not grant permission: %s', (canSetDefault) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'employee-no-default-permission',
+          resourceName: 'Unavailable Employee',
+          resourceBizType: 'DIG_EMPLOYEE',
+          hasUsePermission: true,
+          canApplyUse: false,
+          canSetDefault,
+          isDefault: false,
         }}
       />
     );
@@ -1328,22 +1947,30 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
   });
 
-  it('does not infer set default from canApplyUse when canSetDefault is false', () => {
-    renderWithQueryClient(
+  it.each<[string | undefined, string | undefined, string, boolean]>([
+    ['DIG_EMPLOYEE', undefined, '001', false],
+    [undefined, 'DIG_EMPLOYEE', '017', true],
+  ])('uses compact employee styling for %s / %s / %s', (resourceBizType, resourceType, agentType, enableFavorites) => {
+    const { container } = renderWithQueryClient(
       <ResourceCard
-        actionConfig={{ enableSetDefault: true }}
-        resource={{
-          resourceId: 'employee-no-default-permission',
-          resourceName: 'Unavailable Employee',
-          resourceBizType: 'DIG_EMPLOYEE',
-          canApplyUse: false,
-          canSetDefault: false,
-          isDefault: false,
-        }}
+        resourceType={resourceType}
+        enableFavorites={enableFavorites}
+        resource={{ resourceId: 'compact-employee', resourceBizType, agentType, favoriteCount: 1 }}
       />
     );
 
-    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+    expect(container.querySelector('.resourceCard')).toHaveClass('digitalEmployeeCard');
+    if (enableFavorites) {
+      expect(container.querySelector('.resourceCard')).toHaveClass('favoriteCard');
+    }
+  });
+
+  it.each(['KG_DOC', 'TOOLKIT', 'SKILL'])('keeps compact employee styling scoped away from %s', (resourceBizType) => {
+    const { container } = renderWithQueryClient(
+      <ResourceCard resource={{ resourceId: 'other-resource', resourceBizType }} />
+    );
+
+    expect(container.querySelector('.resourceCard')).not.toHaveClass('digitalEmployeeCard');
   });
 
   it('uses personal digital employee tag style for personal digital employees', () => {
@@ -1468,32 +2095,38 @@ describe('personal skill enterprise publication', () => {
     { alreadyExists: true, resourceName: 'Personal skill（企业）' },
     { alreadyExists: false, resourceName: 'Personal skill (Enterprise)' },
     { alreadyExists: true, resourceName: 'Personal skill (Enterprise)' },
-  ])('opens the returned copy: $resourceName (existing=$alreadyExists)', async ({ alreadyExists, resourceName }) => {
-    const onEnterpriseSkillDetail = jest.fn();
-    const publishedSkill = { ...enterpriseSkill, resourceName };
-    (publishSkillToEnterprise as jest.Mock).mockResolvedValue({ resource: publishedSkill, alreadyExists });
-    renderWithQueryClient(
-      <ResourceCard
-        resource={personalSkill}
-        actionConfig={{ onEnterpriseSkillDetail, enablePublishToEnterprise: true }}
-      />
-    );
-    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
-    expect(await screen.findByText('resource.publishToEnterpriseConfirm')).toBeInTheDocument();
-    expect(publishSkillToEnterprise).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
-    await waitFor(() => expect(publishSkillToEnterprise).toHaveBeenCalledTimes(1));
-    expect(publishSkillToEnterprise).toHaveBeenCalledWith('source-skill');
-    expect(
-      await screen.findByText(alreadyExists ? 'resource.enterpriseSkillExists' : 'resource.publishToEnterpriseSuccess')
-    ).toBeInTheDocument();
-    expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
-    expect(screen.getByText('Personal skill')).toBeInTheDocument();
-    expect(emit).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByText('resource.viewEnterpriseSkill'));
-    expect(onEnterpriseSkillDetail).toHaveBeenCalledWith(publishedSkill);
-    expect(personalSkill.ownerType).toBe('personal');
-  });
+  ])(
+    'opens the returned copy: $resourceName (existing=$alreadyExists)',
+    async ({ alreadyExists, resourceName }) => {
+      const onEnterpriseSkillDetail = jest.fn();
+      const publishedSkill = { ...enterpriseSkill, resourceName };
+      (publishSkillToEnterprise as jest.Mock).mockResolvedValue({ resource: publishedSkill, alreadyExists });
+      renderWithQueryClient(
+        <ResourceCard
+          resource={personalSkill}
+          actionConfig={{ onEnterpriseSkillDetail, enablePublishToEnterprise: true }}
+        />
+      );
+      fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+      expect(await screen.findByText('resource.publishToEnterpriseConfirm')).toBeInTheDocument();
+      expect(publishSkillToEnterprise).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+      await waitFor(() => expect(publishSkillToEnterprise).toHaveBeenCalledTimes(1));
+      expect(publishSkillToEnterprise).toHaveBeenCalledWith('source-skill');
+      expect(
+        await screen.findByText(
+          alreadyExists ? 'resource.enterpriseSkillExists' : 'resource.publishToEnterpriseSuccess'
+        )
+      ).toBeInTheDocument();
+      expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
+      expect(screen.getByText('Personal skill')).toBeInTheDocument();
+      expect(emit).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByText('resource.viewEnterpriseSkill'));
+      expect(onEnterpriseSkillDetail).toHaveBeenCalledWith(publishedSkill);
+      expect(personalSkill.ownerType).toBe('personal');
+    },
+    lifecycleTestTimeout
+  );
 
   it.each(['Personal skill（企业）', 'Personal skill (Enterprise)'])(
     'renders the enterprise skill name returned by the server: %s',
@@ -1503,27 +2136,40 @@ describe('personal skill enterprise publication', () => {
     }
   );
 
-  it('shows pending review and a non-blocking personal dependency notice', async () => {
-    (publishSkillToEnterprise as jest.Mock).mockResolvedValue({
-      resource: { ...enterpriseSkill, resourceStatus: 4 },
-      alreadyExists: false,
-      personalDependencies: [{ resourceId: 'knowledge-1', resourceName: '个人知识库', resourceBizType: 'KG_DOC' }],
-    });
-    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
-    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
-    const confirm = await screen.findByRole('button', { name: 'common.confirm' });
-    await act(async () => {
-      fireEvent.click(confirm);
-    });
-    expect(await screen.findByText('resource.enterpriseSkillPending')).toBeInTheDocument();
-    const dependencyDialog = await screen.findByRole('dialog');
-    expect(within(dependencyDialog).getByText('个人知识库')).toBeInTheDocument();
-    expect(within(dependencyDialog).getByText('resource.enterprisePersonalDependenciesWarning')).toBeInTheDocument();
-    expect(publishSkillToEnterprise).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('resource.skillPublicationProgress')).toBeInTheDocument();
-    expect(screen.queryByText('resource.viewEnterpriseSkill')).not.toBeInTheDocument();
-    fireEvent.click(within(dependencyDialog).getByRole('button', { name: 'common.confirm' }));
-  });
+  // 此流程同时创建确认弹层、消息和依赖提醒，沿用发布用例预算，并限定按钮查询范围。
+  it(
+    'shows pending review and a non-blocking personal dependency notice',
+    async () => {
+      (publishSkillToEnterprise as jest.Mock).mockResolvedValue({
+        resource: { ...enterpriseSkill, resourceStatus: 4 },
+        alreadyExists: false,
+        personalDependencies: [{ resourceId: 'knowledge-1', resourceName: '个人知识库', resourceBizType: 'KG_DOC' }],
+      });
+      renderWithQueryClient(
+        <ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+      });
+      const confirmation = (await screen.findByText('resource.publishToEnterpriseConfirm')).closest('.ant-popover')!;
+      await act(async () => {
+        fireEvent.click(within(confirmation).getByRole('button', { name: 'common.confirm', hidden: true }));
+      });
+      expect(await screen.findByText('resource.enterpriseSkillPending')).toBeInTheDocument();
+      const dependencyDialog = (await screen.findByText('resource.enterprisePersonalDependenciesWarning')).closest(
+        '[role="dialog"]'
+      )!;
+      expect(within(dependencyDialog).getByText('个人知识库')).toBeInTheDocument();
+      expect(within(dependencyDialog).getByText('resource.enterprisePersonalDependenciesWarning')).toBeInTheDocument();
+      expect(publishSkillToEnterprise).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('resource.skillPublicationProgress')).toBeInTheDocument();
+      expect(screen.queryByText('resource.viewEnterpriseSkill')).not.toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(within(dependencyDialog).getByRole('button', { name: 'common.confirm', hidden: true }));
+      });
+    },
+    lifecycleTestTimeout
+  );
 
   it('restores the entry when refreshed permissions allow publication after copy removal', () => {
     const client = new QueryClient();
@@ -1541,20 +2187,31 @@ describe('personal skill enterprise publication', () => {
     expect(screen.getByText('resource.publishToEnterprise')).toBeInTheDocument();
   });
 
-  it('reports failures without showing a success message', async () => {
-    const success = jest.spyOn(message, 'success');
-    (publishSkillToEnterprise as jest.Mock).mockRejectedValue('Publication permission revoked');
-    renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
-    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
-    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
-    expect(await screen.findByText('Publication permission revoked')).toBeInTheDocument();
-    expect(success).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
-  });
+  it(
+    'reports failures without showing a success message',
+    async () => {
+      const success = jest.spyOn(message, 'success');
+      (publishSkillToEnterprise as jest.Mock).mockRejectedValue('Publication permission revoked');
+      renderWithQueryClient(
+        <ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByText('resource.publishToEnterprise'));
+      });
+      const confirmation = (await screen.findByText('resource.publishToEnterpriseConfirm')).closest('.ant-popover')!;
+      await act(async () => {
+        fireEvent.click(within(confirmation).getByRole('button', { name: 'common.confirm', hidden: true }));
+      });
+      expect(await screen.findByText('Publication permission revoked')).toBeInTheDocument();
+      expect(success).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+    },
+    lifecycleTestTimeout
+  );
 
   it('shows manifest dependency rejection and keeps publication available for retry', async () => {
     const success = jest.spyOn(message, 'success');
-    const reason = '无法发布到官方推荐：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。';
+    const reason = '无法发布到企业：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。';
     (publishSkillToEnterprise as jest.Mock).mockRejectedValue(reason);
     renderWithQueryClient(<ResourceCard resource={personalSkill} actionConfig={{ enablePublishToEnterprise: true }} />);
     fireEvent.click(screen.getByText('resource.publishToEnterprise'));
@@ -1653,7 +2310,7 @@ describe('digital employee publication entry', () => {
         }}
       />
     );
-    const entry = screen.getByText('发布到官方推荐');
+    const entry = screen.getByText('resource.publishToEnterprise');
     fireEvent.click(entry);
     fireEvent.click(entry);
     expect(openEmployeePublication).toHaveBeenCalledTimes(1);
@@ -1681,12 +2338,12 @@ describe('digital employee publication entry', () => {
         }}
       />
     );
-    fireEvent.click(screen.getByText('发布到官方推荐'));
+    fireEvent.click(screen.getByText('resource.publishToEnterprise'));
     await waitFor(() => expect(error).toHaveBeenCalledWith('仅在用数字员工支持发起发布或更新'));
     error.mockRestore();
   });
   it.each([
-    [undefined, '发布到官方推荐'],
+    [undefined, 'resource.publishToEnterprise'],
     ['DRAFT', '继续发布'],
     ['PENDING', '查看发布进度'],
     ['APPLYING', '查看发布进度'],
@@ -1759,7 +2416,7 @@ describe('digital employee publication entry', () => {
         }}
       />
     );
-    expect(screen.queryByText('发布到官方推荐')).not.toBeInTheDocument();
+    expect(screen.queryByText('resource.publishToEnterprise')).not.toBeInTheDocument();
   });
   // 企业管理页沿用后端权限，官方副本标志不能再次隐藏作者已获准的授权和下架入口。
   it('shows authorization and shelf actions for a manageable published enterprise employee', () => {
@@ -1809,27 +2466,138 @@ describe('digital employee publication entry', () => {
   });
 });
 
-it.each(['inner', 'custom'])('shows export for %s skills without management permissions', async (skillType) => {
-  renderWithQueryClient(
-    <ResourceCard
-      resourceType="SKILL"
-      variant="skillPoster"
-      actionConfig={{ enableSkillExport: true }}
-      resource={{
-        resourceId: 'export-skill',
-        resourceName: 'Export skill',
-        resourceBizType: 'SKILL',
-        skillType,
-        canEdit: false,
-        canDelete: false,
-        canManageAuth: false,
-      }}
-    />
+// 员工和员工组共用卡片，顺序由菜单生成逻辑保证；隐藏授权仍消费后端权限字段。
+it.each(['001', '017'])(
+  'places employee publication immediately before deregistration for agent type %s',
+  (agentType) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'personal-employee',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          resourceStatus: '2',
+          agentType,
+          canSetDefault: true,
+          hasUsePermission: true,
+          canEdit: true,
+          canPublishEmployee: true,
+          canDelete: true,
+          canUseAuth: false,
+          canManageAuth: false,
+        }}
+        actionConfig={{ enableDigitalEmployeeDelete: true }}
+      />
+    );
+    expect(screen.getAllByTestId(/^resource-menu-/).map((item) => item.getAttribute('data-testid'))).toEqual([
+      'resource-menu-setDefaultAssistant',
+      'resource-menu-edit',
+      'resource-menu-publishEmployee',
+      'resource-menu-deleteData',
+    ]);
+  }
+);
+
+it.each(['SKILL', 'KG_DOC', 'TOOLKIT'])(
+  'hides authorization for a personal %s when the backend returns false while preserving editing',
+  (resourceBizType) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType={resourceBizType}
+        resource={{
+          resourceId: 'personal-resource',
+          resourceBizType,
+          ownerType: 'personal',
+          resourceStatus: '2',
+          hasManagePermission: true,
+          hasUsePermission: true,
+          canEdit: true,
+          canManageAuth: false,
+          canUseAuth: false,
+        }}
+      />
+    );
+    expect(screen.queryByTestId('resource-menu-authorize')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('resource-menu-use')).not.toBeInTheDocument();
+    expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
+  }
+);
+
+it.each(['inner', 'custom', 'workspace'])(
+  'shows export for usable %s skills without management permissions',
+  (skillType) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        variant="skillPoster"
+        actionConfig={{ enableSkillExport: true }}
+        resource={{
+          resourceId: 'export-skill',
+          resourceName: 'Export skill',
+          resourceBizType: 'SKILL',
+          skillType,
+          ...(skillType === 'workspace' ? { resourceBacked: false, skillPath: '/skills/export-skill' } : {}),
+          hasUsePermission: true,
+          canEdit: false,
+          canDelete: false,
+          canManageAuth: false,
+        }}
+      />
+    );
+    expect(
+      within(screen.getByTestId('resource-menu-exportSkill')).getByText('resource.skillExport.single')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resource.skillExport.single/ })).not.toBeInTheDocument();
+  }
+);
+
+it.each(
+  ['inner', 'custom', 'workspace'].flatMap((skillType) =>
+    [false, undefined].map((hasUsePermission) => ({ skillType, hasUsePermission }))
+  )
+)(
+  'hides export for $skillType skills without explicit use permission: $hasUsePermission',
+  ({ skillType, hasUsePermission }) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        variant="skillPoster"
+        actionConfig={{ enableSkillExport: true }}
+        resource={{
+          resourceId: 'export-skill',
+          resourceBizType: 'SKILL',
+          skillType,
+          ...(skillType === 'workspace' ? { resourceBacked: false, skillPath: '/skills/export-skill' } : {}),
+          hasUsePermission,
+          // 能编辑或管理使用授权，不代表本人有技能使用权限。
+          canEdit: true,
+          canManageAuth: true,
+          canUseAuth: true,
+        }}
+      />
+    );
+    expect(screen.queryByTestId('resource-menu-exportSkill')).not.toBeInTheDocument();
+    expect(screen.queryByText('resource.skillExport.single')).not.toBeInTheDocument();
+  }
+);
+
+it('updates the single export entry when skill use permission changes', () => {
+  const queryClient = new QueryClient();
+  const renderCard = (hasUsePermission: boolean) => (
+    <QueryClientProvider client={queryClient}>
+      <ResourceCard
+        resourceType="SKILL"
+        actionConfig={{ enableSkillExport: true }}
+        resource={{ resourceId: 'export-skill', resourceBizType: 'SKILL', hasUsePermission }}
+      />
+    </QueryClientProvider>
   );
-  expect(
-    within(screen.getByTestId('resource-menu-exportSkill')).getByText('resource.skillExport.single')
-  ).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /resource.skillExport.single/ })).not.toBeInTheDocument();
+  const { rerender } = render(renderCard(false));
+  expect(screen.queryByTestId('resource-menu-exportSkill')).not.toBeInTheDocument();
+  rerender(renderCard(true));
+  expect(screen.getByTestId('resource-menu-exportSkill')).toBeInTheDocument();
+  rerender(renderCard(false));
+  expect(screen.queryByTestId('resource-menu-exportSkill')).not.toBeInTheDocument();
 });
 
 describe('workspace skill enterprise publication', () => {

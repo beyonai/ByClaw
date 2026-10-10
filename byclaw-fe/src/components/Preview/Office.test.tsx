@@ -7,6 +7,8 @@ const mockPreview = jest.fn();
 const mockDestroy = jest.fn();
 const mockInit = jest.fn();
 const mockPrepare = jest.fn();
+const mockExcelInit = jest.fn();
+const mockRenderExcel = jest.fn();
 
 jest.mock('./preparePptxPreview', () => ({
   preparePptxPreview: (source: ArrayBuffer) => mockPrepare(source),
@@ -21,6 +23,12 @@ jest.mock('@umijs/max', () => ({
 jest.mock('pptx-preview', () => ({
   init: (...args: unknown[]) => mockInit(...args),
 }));
+
+jest.mock('@js-preview/excel', () => ({
+  __esModule: true,
+  default: { init: (...args: unknown[]) => mockExcelInit(...args) },
+}));
+jest.mock('@js-preview/excel/lib/index.css', () => ({}));
 
 class MockResizeObserver {
   private readonly callback: ResizeObserverCallback;
@@ -113,5 +121,33 @@ describe('Office PPTX preview', () => {
     } finally {
       viewer.mockRestore();
     }
+  });
+});
+
+describe('Office legacy Excel preview', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockExcelInit.mockReturnValue({ renderExcel: mockRenderExcel, preview: mockPreview, destroy: mockDestroy });
+    mockRenderExcel.mockResolvedValue(undefined);
+  });
+
+  it('enables the installed XLS converter and passes the original binary buffer', async () => {
+    const source = new ArrayBuffer(16);
+    const { unmount } = render(<Office data={source} type="xls" />);
+    await waitFor(() => {
+      expect(mockExcelInit).toHaveBeenCalledWith(expect.any(HTMLElement), { xls: true });
+      expect(mockRenderExcel).toHaveBeenCalledWith(source);
+    });
+    unmount();
+    expect(mockDestroy).toHaveBeenCalled();
+  });
+
+  it('keeps XLSX on its existing initialization path', async () => {
+    const source = new ArrayBuffer(16);
+    render(<Office data={source} type="xlsx" />);
+    await waitFor(() => {
+      expect(mockExcelInit).toHaveBeenCalledWith(expect.any(HTMLElement));
+      expect(mockRenderExcel).toHaveBeenCalledWith(source);
+    });
   });
 });

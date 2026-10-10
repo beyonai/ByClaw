@@ -2,10 +2,15 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import usePublicationConfirmation from './usePublicationConfirmation';
 import type { PublicationDetail } from '@/service/employeePublication';
 
-jest.mock('@umijs/max', () => ({ getDvaApp: jest.fn() }));
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  getDvaApp: jest.fn(),
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
 
 const originalPublicPath = window.publicPath;
 beforeEach(() => {
+  mockLocale = 'zh-CN';
   delete (window as Window & { publicPath?: string }).publicPath;
 });
 afterEach(() => {
@@ -57,7 +62,7 @@ it('explains exact omissions separately from retained restrictions and permits p
   act(() => {
     pending = confirm(detail);
   });
-  const dialog = within(await screen.findByRole('dialog'));
+  const dialog = within(await screen.findByRole('dialog', { name: '确认发布到企业' }));
   expect(dialog.getByText('发布后保留 3 项资源，2 项不会带入')).toBeInTheDocument();
   expect(dialog.getByText('个人客户库')).toBeInTheDocument();
   expect(dialog.getByText('客户查询工具：个人工具')).toBeInTheDocument();
@@ -136,3 +141,17 @@ it.each([
     });
   }
 );
+
+it('localizes confirmation summaries, resource restrictions and publication actions in English', async () => {
+  mockLocale = 'en-US';
+  render(<Confirmation />);
+  let decision!: ReturnType<typeof confirm>;
+  act(() => {
+    decision = confirm(detail);
+  });
+  const dialog = within(await screen.findByRole('dialog', { name: 'Confirm publication to enterprise' }));
+  expect(dialog.getByText('Resources retained after publication: 3; excluded: 2')).toBeInTheDocument();
+  expect(dialog.getByText('Retained links with restricted access (1)')).toBeInTheDocument();
+  fireEvent.click(dialog.getByRole('button', { name: 'Confirm and continue publishing' }));
+  await expect(decision).resolves.toBe('publish');
+});

@@ -16,8 +16,10 @@ public class FileUploadDto {
 
     private boolean enabled = true;
 
+    /** 单个文件大小上限，按 1024 * 1024 字节换算；0 表示不限大小。 */
     private long maxFileSize = 0L;
 
+    /** 单次上传文件数量上限；0 表示不限数量。 */
     private long maxFileCount = 0L;
 
     /**

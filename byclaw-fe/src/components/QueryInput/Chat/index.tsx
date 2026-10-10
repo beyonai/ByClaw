@@ -492,6 +492,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             <Tooltip title={mentionDigitalEmployeeTip}>
               <span
                 aria-label={mentionDigitalEmployeeTip}
+                data-query-input-tool="mention"
                 className={styles.attachment}
                 role="button"
                 tabIndex={0}
@@ -519,6 +520,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             <Tooltip title={getIntl().formatMessage({ id: 'queryInput.tools.selectSkill' })}>
               <span
                 aria-label={getIntl().formatMessage({ id: 'queryInput.tools.skill' })}
+                data-query-input-tool="skill"
                 className={styles.attachment}
                 onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '#' }))}
               >

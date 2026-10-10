@@ -12,3 +12,13 @@ it('reserves the remaining panel height for loading before any cards arrive', ()
   expect(container).toContain('overflow-y: auto;');
   expect(spin).toContain('height: 100%;');
 });
+
+it('reduces only knowledge row spacing while preserving the shared column spacing', () => {
+  const styles = fs.readFileSync(path.resolve(__dirname, '../index.module.less'), 'utf8');
+  const list = styles.match(/\.employeeList\s*\{([^}]+)/)?.[1] || '';
+  const knowledge = styles.match(/\.knowledgeList\s*\{([^}]+)/)?.[1] || '';
+
+  expect(list).toContain('gap: 20px;');
+  expect(knowledge).toContain('row-gap: 12px;');
+  expect(knowledge).not.toMatch(/(^|\s)gap:/);
+});

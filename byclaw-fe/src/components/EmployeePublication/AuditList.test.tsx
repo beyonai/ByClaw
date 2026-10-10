@@ -11,9 +11,13 @@ import {
 } from '@/service/employeePublication';
 import PublicationAuditList from './AuditList';
 
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
 jest.mock('@/hooks/useEmployeePublicationCapabilities');
 const mockNavigate = jest.fn();
-jest.mock('@umijs/max', () => ({ useNavigate: () => mockNavigate }));
+jest.mock('@umijs/max', () => ({
+  useNavigate: () => mockNavigate,
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
 jest.mock('@/service/employeePublication', () => ({
   getPublication: jest.fn(),
   previewPublication: jest.fn(),
@@ -48,12 +52,14 @@ const render = (ui: Parameters<typeof renderComponent>[0]) =>
   });
 
 async function openApprovalConfirmation() {
-  const approve = await screen.findByRole('button', { name: '通过并发布' });
+  // 审核表格尚在加载时按唯一按钮文案等待，避免角色查询反复计算整张表格的样式而阻塞响应更新。
+  const approve = (await screen.findByText('通过并发布')).closest('button')!;
+  expect(approve).toBeEnabled();
   // 预览返回后才打开确认弹窗，先等待异步状态更新，再在弹窗内查找操作。
   await act(async () => {
     fireEvent.click(approve);
   });
-  return within(screen.getByRole('dialog', { name: '确认发布到官方推荐' }));
+  return within(screen.getByRole('dialog', { name: '确认发布到企业' }));
 }
 
 async function continuePublication(dialog: ReturnType<typeof within>) {
@@ -69,6 +75,7 @@ describe('publication approval in the audit list', () => {
   jest.setTimeout(15000);
 
   beforeEach(() => {
+    mockLocale = 'zh-CN';
     jest.clearAllMocks();
     (previewPublication as jest.Mock)
       .mockReset()
@@ -79,6 +86,12 @@ describe('publication approval in the audit list', () => {
     jest.spyOn(message, 'error').mockImplementation(jest.fn());
   });
   afterEach(() => jest.restoreAllMocks());
+
+  it('describes the published employee as published to the enterprise', async () => {
+    (listPublications as jest.Mock).mockResolvedValue({ list: [{ ...pending, status: 'PUBLISHED' }], total: 1 });
+    render(<PublicationAuditList />);
+    expect(await screen.findByText('本次申请已发布到企业。')).toBeInTheDocument();
+  });
 
   it('keeps the approval kind switch alongside publication filters', async () => {
     render(<PublicationAuditList initialReview toolbarExtra={<button type="button">approval kind switch</button>} />);
@@ -170,7 +183,7 @@ describe('publication approval in the audit list', () => {
   it('does not approve a stale revision rejected by preview', async () => {
     (previewPublication as jest.Mock).mockRejectedValue('申请已被修改，请刷新后再操作');
     render(<PublicationAuditList />);
-    fireEvent.click(await screen.findByRole('button', { name: '通过并发布' }));
+    fireEvent.click(await screen.findByText('通过并发布'));
     await waitFor(() => expect(message.error).toHaveBeenCalledWith('申请已被修改，请刷新后再操作'));
     expect(publicationAction).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -200,7 +213,7 @@ describe('publication approval in the audit list', () => {
     await waitFor(() => expect(publicationAction).toHaveBeenCalledWith('approve', pending));
     await screen.findByText('已发布');
     expect(screen.queryByRole('button', { name: '通过并发布' })).not.toBeInTheDocument();
-    expect(message.success).toHaveBeenCalledWith('审核通过，已发布到官方推荐');
+    expect(message.success).toHaveBeenCalledWith('审核通过，已发布到企业');
     expect(listPublications).toHaveBeenCalledTimes(2);
   });
 
@@ -332,4 +345,19 @@ describe('publication approval in the audit list', () => {
     expect(screen.queryByText('共 99 条申请')).not.toBeInTheDocument();
     expect(listPublications).toHaveBeenLastCalledWith(true, 1);
   });
+});
+
+it('localizes publication statuses, counts, review hints and operations in English', async () => {
+  mockLocale = 'en-US';
+  (useEmployeePublicationCapabilities as jest.Mock).mockReturnValue({ enabled: true, administrator: true });
+  (listPublications as jest.Mock).mockResolvedValue({
+    list: [{ ...pending, employeeName: 'Example employee' }],
+    total: 1,
+  });
+  render(<PublicationAuditList initialReview />);
+  expect(await screen.findByText('Example employee')).toBeInTheDocument();
+  expect(screen.getByText('Pending review')).toBeInTheDocument();
+  expect(screen.getByText('Awaiting administrator review')).toBeInTheDocument();
+  expect(screen.getByText('Total applications: 1')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Approve and publish' })).toBeInTheDocument();
 });

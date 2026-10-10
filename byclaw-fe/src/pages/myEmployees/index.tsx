@@ -356,8 +356,8 @@ const MyEmployeesPage: React.FC = () => {
                   digitalEmployeeActionMode
                   actionConfig={{
                     scene: activeTab,
-                    // 个人页签统一隐藏使用授权入口，企业页签仍按后端权限展示。
-                    hiddenMenuItemKeys: activeTab === 'personal' ? ['use'] : [],
+                    // 授权入口统一消费后端权限，个人资源由后端返回 false，不再按页签二次过滤。
+                    hiddenMenuItemKeys: [],
                     onChat: () => handleChat(employee),
                     onApplyUse: () => handleApplyUse(employee),
                     onEdit: () => handleEdit(employee),
@@ -369,8 +369,8 @@ const MyEmployeesPage: React.FC = () => {
                     onUnShelf: (feedback) => handleShelfStatusChange(employee, 'unShelf', feedback),
                     // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
                     showDigitalEmployeeTypeTag: false,
-                    // 个人页签不提供上下架操作，企业页签继续按权限展示。
-                    enableDigitalEmployeeLifecycle: activeTab === 'enterprise',
+                    // 个人归属的上下架限制由后端控制，不再按页签隐藏获准操作。
+                    enableDigitalEmployeeLifecycle: true,
                     // 个人、企业页签统一按后端 canDelete 展示删除数据入口。
                     enableDigitalEmployeeDelete: true,
                   }}

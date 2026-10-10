@@ -184,6 +184,57 @@ describe('available resource ownership filter', () => {
 });
 
 describe('external quick filter parameters', () => {
+  it.each(
+    ['TOOL', 'KG_DOC'].flatMap((resourceType) =>
+      ['personal', 'enterprise', 'favorites'].map((activeTab) => ({ resourceType, activeTab }))
+    )
+  )(
+    'preserves external business types on confirm and reset in $resourceType / $activeTab',
+    ({ resourceType, activeTab }) => {
+      const onOk = jest.fn();
+      render(
+        <ResourceFilter
+          resourceType={resourceType}
+          activeTab={activeTab}
+          hideStatusFilter
+          hidePermissionFilter
+          hideResourceBizTypeFilter
+          catalogOptions={[
+            { value: '', label: 'All categories' },
+            { value: 'sales', label: 'Sales' },
+          ]}
+          defaultParam={getDefaultParams({
+            catalogId: 'sales',
+            resourceBizTypeList: [resourceType === 'KG_DOC' ? 'KG_QA' : 'MCP'],
+          })}
+          onOk={onOk}
+        />
+      );
+
+      expect(screen.queryByText('resource.type')).toBeNull();
+      expect(screen.queryByText('resource.mcp')).toBeNull();
+      expect(screen.queryByText('resource.kgQa')).toBeNull();
+      fireEvent.click(screen.getByText('common.confirm'));
+      expect(onOk.mock.calls[0][0]).toEqual(expect.objectContaining({ catalogId: 'sales' }));
+      expect(onOk.mock.calls[0][0]).not.toHaveProperty('resourceBizTypeList');
+      fireEvent.click(screen.getByText('common.reset'));
+      fireEvent.click(screen.getByText('common.confirm'));
+      expect(onOk.mock.calls[1][0]).toEqual(expect.objectContaining({ catalogId: '' }));
+      expect(onOk.mock.calls[1][0]).not.toHaveProperty('resourceBizTypeList');
+    }
+  );
+
+  it.each([
+    ['TOOL', 'resource.mcp', 'MCP'],
+    ['KG_DOC', 'resource.kgQa', 'KG_QA'],
+  ])('retains business types for %s consumers without external filters', (resourceType, label, value) => {
+    const onOk = jest.fn();
+    render(<ResourceFilter resourceType={resourceType} defaultParam={getDefaultParams()} onOk={onOk} />);
+    fireEvent.click(screen.getByText(label));
+    fireEvent.click(screen.getByText('common.confirm'));
+    expect(onOk).toHaveBeenLastCalledWith(expect.objectContaining({ resourceBizTypeList: [value] }));
+  });
+
   it('does not confirm or reset hidden ownership and permission conditions', () => {
     const onOk = jest.fn();
     render(

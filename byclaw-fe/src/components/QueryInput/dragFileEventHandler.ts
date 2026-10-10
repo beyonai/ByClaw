@@ -3,6 +3,7 @@ import { getIntl } from '@umijs/max';
 import type { IAgentFileUploadConf } from '@/hooks/useAgentUploadFileConfig';
 // import { validateAccept } from '@/utils/file';
 import { message } from 'antd';
+import { isUploadFileSizeExceeded } from './utils/fileUpload';
 
 interface Props {
   onDropFile: (files: File[]) => any;
@@ -157,12 +158,9 @@ export default class DragFileEventHandler {
         //   }
         // }
         fileCount = acceptFiles.length;
-        if (config.maxFileSize) {
-          const maxFileSize = Number(config.maxFileSize) * 1024 * 1024;
-          acceptFiles = acceptFiles.filter((file) => file.size <= maxFileSize);
-          if (acceptFiles.length !== fileCount) {
-            message.error(getIntl().formatMessage({ id: 'upload.fileSizeLimit' }, { size: config.maxFileSize }));
-          }
+        acceptFiles = acceptFiles.filter((file) => !isUploadFileSizeExceeded(config, file.size));
+        if (acceptFiles.length !== fileCount) {
+          message.error(getIntl().formatMessage({ id: 'upload.fileSizeLimit' }, { size: config.maxFileSize }));
         }
       }
     }

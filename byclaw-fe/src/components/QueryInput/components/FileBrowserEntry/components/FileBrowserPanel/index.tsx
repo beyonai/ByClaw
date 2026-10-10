@@ -1,3 +1,4 @@
+import { resolvePreviewType } from '@/components/Preview/formats';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Input, message, Modal, Tooltip, Upload } from 'antd';
 import { CaretUpOutlined, CaretDownOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
@@ -32,12 +33,7 @@ interface FileBrowserPanelProps {
   mode?: 'full' | 'preview';
 }
 
-function getFileType(name: string): string {
-  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp'].includes(ext)) return ext === 'jpeg' ? 'jpg' : ext;
-  if (['html', 'htm'].includes(ext)) return 'h5';
-  return ext;
-}
+const getFileType = (name: string) => resolvePreviewType(undefined, name);
 
 function canPreviewFile(record: FileBrowserItem) {
   const isDir = record.isDir || (record as any).dir;
@@ -587,11 +583,11 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         const canPreview = canPreviewFile(record);
         const iconType = getFileIconType(v, { isDirectory: isDir });
         const clickable = isDir || canPreview;
-        const onClick = isDir
-          ? () => handleEnterDir(record)
-          : canPreview
-            ? () => handlePreview(record)
-            : () => message.warning(t('fileBrowser.preview.unavailable'));
+        const onClick = () => {
+          if (isDir) return handleEnterDir(record);
+          if (canPreview) return handlePreview(record);
+          return message.warning(t('fileBrowser.preview.unavailable'));
+        };
 
         return (
           <div

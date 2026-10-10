@@ -9,6 +9,7 @@ import {
   queryInstalledResourceIds,
 } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getAgentChatAvatar } from '@/utils/agent';
+import EmployeeTypeTag from '@/pages/digitalEmployees/components/EmployeeTypeTag';
 import type { ResourceInstallTargetContext } from '../../resourceInstallContext';
 import styles from './index.module.less';
 
@@ -310,11 +311,8 @@ const ResourceInstallDialog: React.FC<ResourceInstallDialogProps> = ({
               <div className={styles.employeeInfo}>
                 <div className={styles.employeeTitle}>
                   <span title={employee.resourceName}>{employee.resourceName}</span>
-                  <Tag>
-                    {employee.ownerType === 'enterprise'
-                      ? intl.formatMessage({ id: 'resource.enterpriseEmployee' })
-                      : intl.formatMessage({ id: 'resource.personalEmployee' })}
-                  </Tag>
+                  {/* 三类资源安装共用数字员工模块的归属标签，保持文案、颜色和默认个人类型识别一致。 */}
+                  <EmployeeTypeTag ownerType={employee.ownerType} />
                   {employee.installed && <Tag color="default">{intl.formatMessage({ id: 'resource.installed' })}</Tag>}
                 </div>
                 <div className={styles.employeeDesc} title={employee.resourceDesc}>

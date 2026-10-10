@@ -1,8 +1,10 @@
+import { useIntl } from '@umijs/max';
 import { openPublication, type PublicationDetail } from '@/service/employeePublication';
 import { publicationErrorMessage } from '@/utils/publicationError';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export default function usePublicationDetailLoader(publicationId?: string) {
+  const intl = useIntl();
   const [state, setState] = useState({ id: publicationId, loading: !!publicationId, error: '' });
   const sequence = useRef(0);
   const retryRef = useRef<() => void>();
@@ -38,13 +40,13 @@ export default function usePublicationDetailLoader(publicationId?: string) {
         setState({
           id: publicationId,
           loading: false,
-          error: publicationErrorMessage(error, '发布配置加载失败，请稍后重试'),
+          error: publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.detailLoadFailed' })),
         });
       } finally {
         if (current === sequence.current) inFlight.current = false;
       }
     },
-    [publicationId]
+    [intl, publicationId]
   );
 
   return {

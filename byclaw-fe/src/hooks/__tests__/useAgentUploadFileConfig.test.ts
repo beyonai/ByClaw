@@ -20,6 +20,47 @@ describe('hooks/useAgentUploadFileConfig', () => {
     mockUseSelector.mockReturnValue({ userId: 'user-1' });
   });
 
+  it('defaults to enabled before a user has loaded', () => {
+    mockUseSelector.mockReturnValue(null);
+    const { result } = renderHook(() => useAgentUploadFileConfig([]));
+
+    expect(result.current.globalConfig.enabled).toBe(true);
+    expect(mockPOST).not.toHaveBeenCalled();
+  });
+
+  it.each([null, { code: 0, data: {} }, { code: 0, data: { paramValue: '' } }])(
+    'keeps upload enabled when the backend has no configured value: %p',
+    async (response) => {
+      mockPOST.mockResolvedValue(response as any);
+      const { result } = renderHook(() => useAgentUploadFileConfig([]));
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(result.current.globalConfig).toEqual({
+        enabled: true,
+        allowedFileTypes: [],
+        maxFileSize: 0,
+        maxFileCount: 0,
+      });
+    }
+  );
+
+  it('preserves a configured value without the enabled field', async () => {
+    mockPOST.mockResolvedValue({
+      code: 0,
+      data: { paramValue: JSON.stringify({ maxFileSize: 10, maxFileCount: 0 }) },
+    } as any);
+    const { result } = renderHook(() => useAgentUploadFileConfig([]));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.globalConfig).toEqual({ maxFileSize: 10, maxFileCount: 0 });
+  });
+
   it('loads global config and returns disabled config immediately when globally disabled', async () => {
     mockPOST.mockResolvedValue({
       code: 0,
@@ -39,6 +80,7 @@ describe('hooks/useAgentUploadFileConfig', () => {
       await Promise.resolve();
     });
 
+    expect(result.current.globalConfig.enabled).toBe(false);
     expect(result.current.getAgentUploadFileConfig('agent-1')).toEqual({
       enabled: false,
       allowedFileTypes: ['.png'],

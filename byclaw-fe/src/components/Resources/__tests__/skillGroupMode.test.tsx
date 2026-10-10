@@ -1,4 +1,5 @@
 const mockSetSearchParams = jest.fn();
+const mockNavigate = jest.fn();
 const mockResourceFilterProps = jest.fn();
 let mockAdminVip = true;
 let mockSkillGroupMountCount = 0;
@@ -24,19 +25,24 @@ jest.mock('@umijs/max', () => ({
   }),
   useSelector: (selector: (state: any) => any) =>
     selector({ user: { userInfo: {} }, employees: { defaultDigEmployeeId: 'employee-1' } }),
-  useNavigate: () => jest.fn(),
-  // 组件只读 location.state（透传给 setSearchParams），给个空路由对象即可；漏掉这个 mock 会整套用例报
-  // useLocation is not a function。
-  useLocation: () => ({ pathname: '/', search: '', hash: '', state: undefined, key: 'test' }),
+  useNavigate: () => mockNavigate,
+  // mock 工厂会被提升，使用允许的全局对象读取 JSDOM 路由状态。
+  useLocation: () => ({
+    pathname: globalThis.location.pathname,
+    search: globalThis.location.search,
+    hash: globalThis.location.hash,
+    state: globalThis.history.state,
+    key: 'test',
+  }),
   useSearchParams: () => {
     const [query, setQuery] = require('react').useState(globalThis.location.search);
     const params = new URLSearchParams(query);
     return [
       params,
-      (nextParams: URLSearchParams) => {
-        mockSetSearchParams(nextParams);
+      (nextParams: URLSearchParams, options?: { state?: unknown }) => {
+        mockSetSearchParams(nextParams, options);
         const nextQuery = `?${nextParams.toString()}`;
-        globalThis.history.pushState({}, '', `${globalThis.location.pathname}${nextQuery}`);
+        globalThis.history.pushState(options?.state || {}, '', `${globalThis.location.pathname}${nextQuery}`);
         setQuery(nextQuery);
       },
     ];
@@ -207,9 +213,15 @@ jest.mock('@/components/Resources/components/ResourceList', () => ({
       data-status={dropdownParam?.resourceStatus}
       data-owner-type={dropdownParam?.ownerType || ''}
       data-permission={dropdownParam?.permission || ''}
+      data-biz-types={(dropdownParam?.resourceBizTypeList || []).join(',')}
       data-enterprise-publication={String(enablePublishToEnterprise)}
     >
       <button onClick={() => onDetail({ resourceBizType: 'SKILL', resourceId: 'skill-1' })}>open skill</button>
+      <button
+        onClick={() => onDetail({ resourceBizType: 'KG_DOC', resourceId: 'knowledge-1', ownerType: 'enterprise' })}
+      >
+        open knowledge
+      </button>
       <button onClick={() => onApplyUse({ resourceBizType: 'SKILL', resourceId: 'skill-1' })}>apply use</button>
     </div>
   ),
@@ -297,12 +309,14 @@ jest.mock('@/pages/manager/service/session', () => ({
   ),
 }));
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({ saveTool: jest.fn() }));
-jest.mock('@/constants/knowledge', () => ({ resourceBizTypeMap: {} }));
+jest.mock('@/constants/knowledge', () => ({
+  resourceBizTypeMap: { KG_DOC: 'KG_DOC', KG_QA: 'KG_QA', KG_TERM: 'KG_TERM' },
+}));
 jest.mock('@/utils', () => ({ getRuntimeActualUrl: (value: string) => value }));
 jest.mock('@/utils/auth', () => ({ getToken: () => '', isAdminVip: () => mockAdminVip }));
 
 import React from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import Resources from '..';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 import {
@@ -317,6 +331,7 @@ describe('Resources enterprise skill mode', () => {
       Promise.resolve(paramCode === 'BYAI_BRAND_VERSION' ? { paramValue: 'openSource' } : {})
     );
     mockResourceFilterProps.mockClear();
+    mockNavigate.mockClear();
     mockAdminVip = true;
     (queryFixedEntryOperationCapability as jest.Mock).mockReset();
     (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ canImportEnterpriseSkill: true });
@@ -340,6 +355,52 @@ describe('Resources enterprise skill mode', () => {
       Promise.resolve(paramCode === 'BYAI_BRAND_VERSION' ? { paramValue: version } : {})
     );
   };
+
+  it.each(['personal', 'enterprise', 'favorites'])(
+    'stores the resource center return route from the %s knowledge list',
+    async (tab) => {
+      if (tab === 'favorites') setBrandVersion('commercial');
+      const state = { preserveDetailPanel: true };
+      window.history.replaceState(state, '', `/resourceCenter?resourceTab=knowledge&tab=${tab}#resources`);
+      render(<Resources resourceType="KG_DOC" />);
+      const openKnowledge = await screen.findByText('open knowledge');
+      await act(async () => {
+        fireEvent.click(openKnowledge);
+      });
+
+      const [detailPath, options] = mockNavigate.mock.calls[0];
+      const detailUrl = new URL(detailPath, window.location.origin);
+      expect(detailUrl.pathname).toBe('/knowledgeDetail');
+      expect(detailUrl.searchParams.get('resourceId')).toBe('knowledge-1');
+      expect(detailUrl.searchParams.get('fromTab')).toBe(tab);
+      expect(options.state.knowledgeDetailReturnLocation).toEqual({
+        pathname: '/resourceCenter',
+        search: `?resourceTab=knowledge&tab=${tab}`,
+        hash: '#resources',
+        state: { ...state, resourceCenterMyResourcesOnly: false },
+      });
+    }
+  );
+
+  it('restores the enterprise tab when my knowledge remounts after detail', async () => {
+    window.history.replaceState(
+      { resourceCenterMyResourcesOnly: true },
+      '',
+      '/resourceCenter?resourceTab=knowledge&tab=enterprise'
+    );
+    render(<Resources resourceType="KG_DOC" myResourcesOnly />);
+    await waitFor(() => {
+      expect(screen.getByTestId('resource-list')).toHaveAttribute('data-tab', 'enterprise');
+    });
+    fireEvent.click(screen.getByText('open knowledge'));
+    expect(mockNavigate.mock.calls[0][1].state.knowledgeDetailReturnLocation.state).toEqual({
+      resourceCenterMyResourcesOnly: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'resourceCenter.backToAll' }));
+    expect(mockSetSearchParams).toHaveBeenLastCalledWith(expect.any(URLSearchParams), {
+      state: { resourceCenterMyResourcesOnly: false },
+    });
+  });
 
   it('does not remount the resource list after submitting a use application', async () => {
     (applyResourceUse as jest.Mock).mockReset().mockResolvedValue({ code: 0 });
@@ -497,8 +558,7 @@ describe('Resources enterprise skill mode', () => {
       });
       const importButton = screen.getByRole('button', { name: 'common.import' });
       expect(importButton).toBeEnabled();
-      const exportToolbar = screen.getByTestId('skill-export-toolbar');
-      expect(importButton.compareDocumentPosition(exportToolbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.queryByTestId('skill-export-toolbar')).not.toBeInTheDocument();
       fireEvent.click(importButton);
       expect(screen.getByTestId('resource-import-modal')).toBeInTheDocument();
     }
@@ -516,7 +576,7 @@ describe('Resources enterprise skill mode', () => {
         await Promise.resolve();
       });
       expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
-      expect(screen.getByTestId('skill-export-toolbar')).toBeInTheDocument();
+      expect(screen.queryByTestId('skill-export-toolbar')).not.toBeInTheDocument();
     }
   );
 
@@ -660,7 +720,8 @@ describe('Resources enterprise skill mode', () => {
           ? screen.getByTestId('enterprise-skill-tab-trigger').closest('button')!
           : screen.getByRole('button', { name: 'resource.official' })
       );
-      expect(screen.queryByRole('group', { name: 'resource.type' })).toBeNull();
+      expect(screen.queryAllByRole('group', { name: 'resource.type' })).toHaveLength(resourceType !== 'SKILL' ? 1 : 0);
+      expect(screen.queryByRole('group', { name: 'resource.source' })).toBeNull();
       expect(list).toHaveAttribute('data-owner-type', '');
       expect(list).toHaveAttribute('data-permission', '');
       expect(list).toHaveAttribute('data-catalog-id', '');
@@ -670,8 +731,44 @@ describe('Resources enterprise skill mode', () => {
       const personalLabel = resourceType === 'KG_DOC' ? 'resource.myKnowledge' : `resource.my${suffix}s`;
       fireEvent.click(screen.getByRole('button', { name: personalLabel }));
       expect(screen.getByRole('group', { name: 'resource.type' })).toBeInTheDocument();
+      expect(screen.queryAllByRole('group', { name: 'resource.source' })).toHaveLength(resourceType !== 'SKILL' ? 1 : 0);
       expect(list).toHaveAttribute('data-permission', '');
       expect(screen.queryByRole('button', { name: 'resource.appliedByMe' })).toBeNull();
+    }
+  );
+
+  it.each([
+    ['TOOL', 'resource.mcp', 'MCP', 'resource.toolkit', 'TOOLKIT'],
+    ['KG_DOC', 'resource.kgDoc', 'KG_DOC', 'resource.kgQa', 'KG_QA'],
+  ])(
+    'preserves external %s types when confirming categories and resets them on tab changes',
+    (resourceType, firstLabel, firstValue, secondLabel, secondValue) => {
+      window.history.pushState({}, '', '/resourceCenter?tab=personal');
+      const { rerender } = render(<Resources resourceType={resourceType} />);
+      const list = screen.getByTestId('resource-list');
+      expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hideResourceBizTypeFilter: true })
+      );
+      fireEvent.click(screen.getByRole('button', { name: firstLabel }));
+      expect(list).toHaveAttribute('data-biz-types', firstValue);
+      fireEvent.click(screen.getByTestId('resource-filter'));
+      expect(list).toHaveAttribute('data-catalog-id', 'catalog-1');
+      expect(list).toHaveAttribute('data-biz-types', firstValue);
+
+      fireEvent.click(screen.getByRole('button', { name: 'resource.official' }));
+      expect(list).toHaveAttribute('data-biz-types', '');
+      fireEvent.click(screen.getByRole('button', { name: secondLabel }));
+      expect(list).toHaveAttribute('data-biz-types', secondValue);
+      const types = within(screen.getByRole('button', { name: firstLabel }).closest('[role="group"]')!);
+      fireEvent.click(types.getByRole('button', { name: 'common.all' }));
+      expect(list).toHaveAttribute('data-biz-types', '');
+
+      // 管理工具与知识页沿用原弹层类型筛选，避免更改独立管理布局。
+      rerender(<Resources resourceType={resourceType} myResourcesOnly />);
+      expect(screen.queryByRole('button', { name: firstLabel })).toBeNull();
+      expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hideResourceBizTypeFilter: false })
+      );
     }
   );
 
@@ -686,6 +783,28 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.queryByRole('group', { name: 'resource.type' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'common.belong' })).toBeNull();
   });
+
+  it.each([
+    ['SKILL', 'resourceCenter.enterpriseSkills'],
+    ['KG_DOC', 'resourceCenter.enterpriseKnowledge'],
+    ['TOOL', 'resourceCenter.enterpriseTools'],
+  ])(
+    'shares compact toolbar spacing across personal and enterprise %s management',
+    (resourceType, enterpriseLabel) => {
+      window.history.pushState({}, '', '/resourceCenter?tab=personal');
+      const { container, rerender } = render(<Resources resourceType={resourceType} myResourcesOnly />);
+
+      expect(container.querySelector('.myResourcesToolbar')).toBeInTheDocument();
+      expect(screen.getByTestId('resource-list')).toHaveAttribute('data-tab', 'personal');
+
+      fireEvent.click(screen.getByRole('button', { name: enterpriseLabel }));
+      expect(container.querySelector('.myResourcesToolbar')).toBeInTheDocument();
+      expect(screen.getByTestId('resource-list')).toHaveAttribute('data-tab', 'enterprise');
+
+      rerender(<Resources resourceType={resourceType} />);
+      expect(container.querySelector('.myResourcesToolbar')).toBeNull();
+    }
+  );
 
   it.each([
     ['SKILL', 'resourceCenter.enterpriseSkills'],
@@ -801,7 +920,7 @@ describe('Resources enterprise skill mode', () => {
     fireEvent.keyDown(screen.getByRole('menuitem', { name: 'resource.skillGroup' }), { key: 'Enter' });
 
     expect(window.location.search).toContain('tab=enterprise');
-    expect(mockSetSearchParams).toHaveBeenCalledWith(expect.objectContaining({}));
+    expect(mockSetSearchParams).toHaveBeenCalledWith(expect.any(URLSearchParams), expect.any(Object));
     expect(mockSetSearchParams.mock.calls[0][0].get('kind')).toBe('group');
     cleanup();
     renderAt('?tab=enterprise&kind=group');

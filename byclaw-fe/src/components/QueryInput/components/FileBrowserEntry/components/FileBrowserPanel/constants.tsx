@@ -1,4 +1,11 @@
 import {
+  getPreviewMimeType,
+  isPreviewableName,
+  resolvePreviewType,
+  VIDEO_PREVIEW_TYPES,
+} from '@/components/Preview/formats';
+
+import {
   FileExcelOutlined,
   FileImageOutlined,
   FileMarkdownOutlined,
@@ -56,88 +63,13 @@ export function getFileIcon(name: string, isDir: boolean): React.ReactNode {
   return EXT_ICON_MAP[ext] || <FileOutlined />;
 }
 
-// 常见代码/配置文本扩展名:预览走 shiki 语法高亮(见 Preview/Twins),命中不了具体语言时退化为纯文本。
-export const CODE_TEXT_EXTENSIONS = [
-  'ts',
-  'tsx',
-  'js',
-  'jsx',
-  'mjs',
-  'cjs',
-  'java',
-  'kt',
-  'kts',
-  'py',
-  'go',
-  'rs',
-  'c',
-  'h',
-  'cpp',
-  'cc',
-  'hpp',
-  'cs',
-  'php',
-  'rb',
-  'swift',
-  'scala',
-  'sh',
-  'bash',
-  'zsh',
-  'sql',
-  'vue',
-  'css',
-  'less',
-  'scss',
-  'yaml',
-  'yml',
-  'toml',
-  'ini',
-  'properties',
-  'conf',
-  'gradle',
-  'dockerfile',
-  // xml 已在 PREVIEWABLE_EXTENSIONS 和 Twins 的 langMap 里，但不在这个列表时 isTextLike 为 false，
-  // Twins 既不读文本也不给 source 页签，预览结果是空白。JUnit 测试报告就是 xml。
-  'xml',
-];
+// 保留现有导出供调用方复用，格式定义集中在共享预览层。
+export { CODE_TEXT_EXTENSIONS } from '@/components/Preview/formats';
 
-const PREVIEWABLE_EXTENSIONS = new Set([
-  'md',
-  'txt',
-  'log',
-  'json',
-  'html',
-  'xml',
-  'pdf',
-  'png',
-  'jpg',
-  'jpeg',
-  'gif',
-  'svg',
-  'webp',
-  'bmp',
-  'doc',
-  'docx',
-  'xls',
-  'xlsx',
-  'pptx',
-  'mp4',
-  'avi',
-  'mov',
-  'mkv',
-  ...CODE_TEXT_EXTENSIONS,
-]);
-
-export function isPreviewable(name: string): boolean {
-  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
-  return PREVIEWABLE_EXTENSIONS.has(ext);
-}
-
-const VIDEO_EXTENSIONS = new Set(['mp4', 'avi', 'mov', 'mkv', 'webm']);
+export const isPreviewable = isPreviewableName;
 
 export function isVideo(name: string): boolean {
-  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
-  return VIDEO_EXTENSIONS.has(ext);
+  return VIDEO_PREVIEW_TYPES.includes(resolvePreviewType(undefined, name));
 }
 
 export function formatFileSize(bytes?: number): string {
@@ -149,35 +81,4 @@ export function formatFileSize(bytes?: number): string {
   return `${size} ${units[i]}`;
 }
 
-const MIME_MAP: Record<string, string> = {
-  pdf: 'application/pdf',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  svg: 'image/svg+xml',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  mp4: 'video/mp4',
-  avi: 'video/x-msvideo',
-  mov: 'video/quicktime',
-  mkv: 'video/x-matroska',
-  webm: 'video/webm',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  txt: 'text/plain',
-  log: 'text/plain',
-  md: 'text/plain',
-  json: 'application/json',
-  html: 'text/html',
-  xml: 'text/xml',
-  ppt: 'application/vnd.ms-powerpoint',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  // 代码/配置文件按纯文本取回,交给预览层做语法高亮。
-  ...Object.fromEntries(CODE_TEXT_EXTENSIONS.map((ext) => [ext, 'text/plain'])),
-};
-
-export function getMimeType(name: string): string {
-  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
-  return MIME_MAP[ext] || '';
-}
+export const getMimeType = getPreviewMimeType;

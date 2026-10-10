@@ -1,9 +1,22 @@
+import employeePublication from './zh-CN/employeePublication';
 import dataSource from './zh-CN/dataSource';
 import secondEdition from './zh-CN/secondEdition';
 import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  ...employeePublication,
+  // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
+  'toolCall.defaultTitle': '工具调用',
+  'common.back': '返回',
+  'common.operateFailed': '操作失败',
+  'pagination.selectAll': '全选',
+  'pagination.selected': '已选择',
+  'pagination.items': '项',
+  'common.fail': '失败',
+  'operation.testSetResult.previewFail': '预览失败',
+  'workSpace.fileView.loadFail': '文件加载失败',
+
   'resource.skillExport.single': '导出技能',
   'resource.skillExport.all': '导出',
   'resource.skillExport.invalidBundle': '技能 ZIP 或批量导出包无效，请检查文件',
@@ -265,7 +278,10 @@ export default {
   'resource.tool': '工具',
   'resource.installTool': '安装工具',
   'resource.rowRefreshFailed': '操作已成功，当前资源详情刷新失败，请稍后重试',
-  'resource.publishToEnterprise': '发布到官方推荐',
+  'resource.publishToEnterprise': '发布到企业',
+  'employeePublication.publishToEnterpriseConfirm': '确认发布到企业',
+  'employeePublication.publishedDescription': '本次申请已发布到企业。',
+  'employeePublication.approvedAndPublished': '审核通过，已发布到企业',
   'resource.skillPublicationProgress': '查看发布进度',
   'resource.skillPublicationReviewResult': '查看审核结果',
   'resource.skillPublicationResult': '查看发布结果',
@@ -275,7 +291,7 @@ export default {
     '发布申请已提交，等待管理员审核。可在审批中心的技能申请中查看申请记录。',
   'resource.skillPublicationRejectedDescription':
     '发布申请已被驳回。可修改个人技能后重新提交，系统将创建新的企业快照并保留原审核记录。',
-  'resource.skillPublicationPublishedDescription': '该技能已发布到官方推荐。',
+  'resource.skillPublicationPublishedDescription': '该技能已发布到企业。',
   'resource.skillPublicationOffShelfDescription': '企业副本已下架，请从企业技能中处理上架；不会重复创建发布副本。',
   'resource.skillPublicationRemovedDescription': '当前没有有效的企业副本，可以重新提交发布申请。',
   'resource.skillPublicationUnknownDescription': '当前企业副本状态不支持重新发布，请刷新列表或联系管理员处理。',
@@ -290,10 +306,10 @@ export default {
   'resource.auditApplicationType': '申请类型',
   'resource.skillPublicationAudit': '技能发布',
   'resource.resourceUseAudit': '使用权限',
-  'resource.publishToEnterpriseSuccess': '已发布到官方推荐',
+  'resource.publishToEnterpriseSuccess': '已发布到企业',
   'resource.enterpriseSkillExists': '该技能已有企业副本，请到企业技能中查看或管理',
   'resource.viewEnterpriseSkill': '查看企业技能',
-  'resource.publishToEnterpriseFailed': '发布到官方推荐失败，请稍后重试',
+  'resource.publishToEnterpriseFailed': '发布到企业失败，请稍后重试',
   'resource.installSkill': '安装技能',
   'resource.skillGroup.fallbackCover': '技能组成员封面',
   'resource.skillGroup.memberCount': '{count}个成员',
@@ -407,6 +423,7 @@ export default {
   'resource.marketplaceFullscreen': '全屏查看官方推荐',
   'resource.skillMarketplaceUrlMissing': '官方推荐地址未配置或格式错误',
   'resource.type': '类型',
+  'resource.source': '来源',
   'resource.permission': '权限',
   'resource.selectOrgScope': '选择组织范围',
   'resource.statusActive': '有效',
@@ -957,6 +974,8 @@ export default {
   'citeRender.deleteConfirm': '确定删除该引用吗？',
 
   'fileRender.previewUnavailable': '文件暂时无法预览',
+  'fileRender.mediaUnsupported': '当前浏览器不支持该媒体的编码或文件已损坏，请下载后播放',
+  'fileRender.formatUnsupported': '该格式暂不支持在线预览，请下载后查看',
   'fileRender.deleteConfirm': '确定删除该文件吗？',
   'fileRender.outlineImitate': '大纲仿写',
   'fileRender.contentExtract': '内容提取',
@@ -1201,8 +1220,8 @@ export default {
   'digitalEmployees.noGroupMembers': '暂无小组成员',
   'digitalEmployees.createGroup': '创建数字员工组',
   'digitalEmployees.employeeGroup': '数字员工组',
-  'digitalEmployees.tag.personalEmployee': '个人员工',
-  'digitalEmployees.tag.enterpriseEmployee': '企业员工',
+  'digitalEmployees.tag.personalEmployee': '个人数字员工',
+  'digitalEmployees.tag.enterpriseEmployee': '企业数字员工',
   'digitalEmployees.tag.personalGroup': '个人员工组',
   'digitalEmployees.tag.enterpriseGroup': '企业员工组',
   'digitalEmployees.filter.personalGroup': '个人员工组',

@@ -52,6 +52,26 @@
   height: 148px;
 }
 
+.resourceCard.digitalEmployeeCard {
+  // 保留标题、两行描述和创建者，将底部多余留白收紧到与顶部 12px 内边距一致。
+  height: 134px;
+
+  &.favoriteCard {
+    // 收藏信息单独增加 36px，避免收紧卡片后挤压底部内容。
+    height: 170px;
+  }
+}
+
+.resourceCard.knowledgeCard {
+  // 两行描述、创建者和上下内边距共需约 120px，收紧知识卡片多余的底部空白。
+  height: 128px;
+
+  &.favoriteCard {
+    // 收藏行仍保留独立空间，避免与创建者和操作按钮挤在一起。
+    height: 164px;
+  }
+}
+
 .skillPosterContent {
   position: relative;
   width: 100%;
@@ -134,21 +154,21 @@
 }
 
 .skillPosterHeaderWithTag {
-  // 为最长的角标预留空间；有操作区时复用正文已有的 48px 留白。
-  padding-right: 64px;
+  // 与知识、工具卡片一致，预留角标宽度和标题间距。
+  padding-right: 100px;
 }
 
 .resourceInfoWithActions .skillPosterHeaderWithTag {
-  padding-right: 16px;
+  padding-right: 52px;
 }
 
 .skillPosterTag {
   position: absolute;
   top: 12px;
-  right: 14px;
+  right: 12px;
   z-index: 1;
   flex-shrink: 0;
-  max-width: 72px;
+  max-width: 88px;
   padding: 2px 6px;
   border-radius: 999px;
   color: #6a4af5;
@@ -166,7 +186,7 @@
 
 .skillPosterContent > .skillPosterTag {
   // 归属标签共用的样式会放宽最大宽度，这里限制角标，保护长名称和译文的间距。
-  max-width: 72px;
+  max-width: 88px;
 }
 
 .skillPosterAction {
@@ -327,6 +347,33 @@
   top: 12px;
   right: 12px;
   z-index: 1;
+}
+
+.renderContent .knowledgeTopRightTag {
+  // 相对卡片内容定位，让知识归属/状态标签固定在右上角。
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  max-width: 88px;
+}
+
+.renderContent .toolTopRightTag {
+  // 工具标签固定在卡片右上角，截断长译文时保留悬浮提示。
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  max-width: 88px;
+}
+
+.renderContent .skillTopRightTag {
+  // 默认技能卡片与海报卡片一样固定角标，避免标签挤占标题行。
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  max-width: 88px;
 }
 
 // 数字员工不同状态使用不同语义色，便于快速识别当前生命周期。
@@ -567,6 +614,35 @@
   padding-right: 48px;
 }
 
+.knowledgeHeaderWithTag {
+  // 标签最多占 88px，另留 12px 间距，避免长标题与角标重叠。
+  padding-right: 100px;
+}
+
+.resourceInfoWithActions .knowledgeHeaderWithTag {
+  // 正文已为操作区预留 48px，仅补足标签所需的剩余空间。
+  padding-right: 52px;
+}
+
+.toolHeaderWithTag {
+  // 标签最多占 88px，标题额外预留 12px 间距。
+  padding-right: 100px;
+}
+
+.resourceInfoWithActions .toolHeaderWithTag {
+  // 纵向操作区已占用 48px 正文留白，仅补足角标需要的空间。
+  padding-right: 52px;
+}
+
+.skillHeaderWithTag {
+  // 普通技能卡片保留与海报、知识、工具一致的标题空间。
+  padding-right: 100px;
+}
+
+.resourceInfoWithActions .skillHeaderWithTag {
+  padding-right: 52px;
+}
+
 .resourceName {
   min-width: 0;
   font-size: 16px;
@@ -709,6 +785,8 @@
 
 .digitalEmployeeActions {
   position: absolute;
+  // 申请按钮与禁用按钮共用同一宽度，悬浮提示不参与居中计算。
+  width: 32px;
   right: 14px;
   top: calc(50% + 8px);
   z-index: 2;
@@ -720,9 +798,9 @@
 }
 
 .skillPosterActions {
-  // 技能卡片的操作区下移，为右上角标签留出独立空间。
-  top: auto;
-  bottom: 12px;
+  // 操作区紧接右上角标签，收藏行不改变按钮位置。
+  top: 40px;
+  bottom: auto;
   gap: 4px;
   transform: none;
 
@@ -734,18 +812,51 @@
   }
 }
 
-.applyActionWrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
+.knowledgeActions {
+  // 共用按钮样式，但知识操作区紧接右上角标签，避免贴底造成图标上方大片留白。
+  .skillPosterActions();
+
+  top: 40px;
+  bottom: auto;
 }
 
-.pendingApplyText {
-  color: #8fb8ff;
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
+.digitalEmployeeCard .digitalEmployeeActions {
+  // 员工与知识卡片共用标签下方的定位和按钮间距。
+  .knowledgeActions();
+}
+
+.resourceCardActions {
+  // 技能、知识和工具统一纵向排列：主操作在上、更多操作在下，菜单显隐不改变主按钮位置。
+  top: 40px;
+  bottom: auto;
+  width: 32px;
+  height: auto;
+  flex-direction: column;
+  gap: 4px;
+  transform: none;
+
+  :global {
+    .@{antPrefix}-btn-text {
+      width: 24px;
+      height: 24px;
+      padding: 0;
+    }
+  }
+}
+
+.applyActionWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  cursor: not-allowed;
+
+  // 容器统一接收鼠标事件，确保禁用图标上也能触发悬浮提示。
+  :global(.@{antPrefix}-btn[disabled]) {
+    pointer-events: none;
+  }
 }
 
 .skeletonContainer {

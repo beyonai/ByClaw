@@ -1,3 +1,4 @@
+jest.mock('@umijs/max', () => ({ useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl('zh-CN') }));
 import type { PublicationDependency } from '@/service/employeePublication';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import PublicationResourceSummary from './ResourceSummary';
