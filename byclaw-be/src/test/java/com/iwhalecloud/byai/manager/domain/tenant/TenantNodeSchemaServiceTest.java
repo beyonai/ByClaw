@@ -45,6 +45,30 @@ class TenantNodeSchemaServiceTest {
             () -> service(directory.resolve("missing.zip").toString()).readBundle());
     }
 
+    @Test
+    void schemaUploadUsesHttp11WithoutUpgradeHeaders() throws Exception {
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/schema", exchange -> {
+            boolean upgrade = exchange.getRequestHeaders().containsKey("Upgrade");
+            byte[] received = exchange.getRequestBody().readAllBytes();
+            exchange.sendResponseHeaders(upgrade || received.length != 3 ? 500 : 202, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            var method = TenantNodeSchemaService.class.getDeclaredMethod("send", java.net.URI.class,
+                String.class, byte[].class, String.class, long.class, long.class, java.util.Map.class);
+            method.setAccessible(true);
+            var response = (java.net.http.HttpResponse<?>) method.invoke(service(""),
+                java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/schema"),
+                "POST", new byte[] {1, 2, 3}, "application/zip", 1L, 1L, java.util.Map.of());
+            assertEquals(202, response.statusCode());
+        }
+        finally {
+            server.stop(0);
+        }
+    }
+
     private TenantNodeSchemaService service(String bundlePath) {
         return new TenantNodeSchemaService(null, new ObjectMapper(), bundlePath, "http://opensandbox:9005", "", "token");
     }

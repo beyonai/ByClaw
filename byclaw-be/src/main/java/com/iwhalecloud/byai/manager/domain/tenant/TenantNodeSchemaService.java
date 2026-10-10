@@ -41,7 +41,9 @@ public class TenantNodeSchemaService {
     private final String sandboxBaseUrl;
     private final String sandboxApiKey;
     private final String internalToken;
-    private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    // OpenSandbox's HTTP proxy cannot stream multipart uploads during an h2c upgrade.
+    private final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+        .connectTimeout(Duration.ofSeconds(5)).build();
 
     public TenantNodeSchemaService(JdbcTemplate jdbc, ObjectMapper objectMapper,
                                    @Value("${BYCLAW_TENANT_BASELINE_BUNDLE:}") String bundlePath,
