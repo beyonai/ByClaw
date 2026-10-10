@@ -526,11 +526,43 @@ ALTER TABLE byai.suas_superassist_sub_agent ADD PRIMARY KEY (superassist_sub_age
 ALTER TABLE byai.sys_app_version ADD PRIMARY KEY (version_id);
 ALTER TABLE byai.template_rule_info ADD PRIMARY KEY (template_id);
 
+ALTER TABLE byai.sandbox_service_spec
+    ADD COLUMN owner_scope VARCHAR(16) NOT NULL DEFAULT 'USER';
+ALTER TABLE byai.sandbox_service_spec
+    ADD CONSTRAINT ck_sandbox_service_spec_owner_scope
+        CHECK (owner_scope IN ('USER','TENANT'));
+COMMENT ON COLUMN byai.sandbox_service_spec.owner_scope IS '服务规格归属维度：用户或企业租户';
 
+ALTER TABLE byai.ss_sandbox_record
+    ADD COLUMN owner_scope VARCHAR(16) NOT NULL DEFAULT 'USER';
+ALTER TABLE byai.ss_sandbox_record
+    ADD CONSTRAINT ck_ss_sandbox_record_owner_scope
+        CHECK (owner_scope IN ('USER','TENANT'));
+COMMENT ON COLUMN byai.ss_sandbox_record.owner_scope IS '沙箱实例归属维度：用户或企业租户';
 
--- 项目列表与创建逻辑使用企业归属；历史项目允许为空，不推断或回填租户。
-ALTER TABLE byai.byai_project ADD COLUMN enterprise_id BIGINT;
-COMMENT ON COLUMN byai.byai_project.enterprise_id IS '项目所属企业ID；历史未关联项目为空';
+-- 既有企业表须先检查 enterprise_id 重复/空值；正式迁移补唯一约束前处理脏数据
+ALTER TABLE byai.po_enterprise_info
+    ALTER COLUMN enterprise_id SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_po_enterprise_info_enterprise_id
+    ON byai.po_enterprise_info(enterprise_id);
+
+-- 现有工作组项目仍留平台库，只增加租户归属和跨库建群恢复字段
+ALTER TABLE byai.byai_project
+    ADD COLUMN enterprise_id BIGINT;
+COMMENT ON COLUMN byai.byai_project.enterprise_id IS '项目所属企业租户ID，存量项目待归属回填';
+ALTER TABLE byai.byai_project
+    ADD COLUMN group_create_request_id VARCHAR(64);
+COMMENT ON COLUMN byai.byai_project.group_create_request_id IS '群聊创建幂等请求ID';
+ALTER TABLE byai.byai_project
+    ADD COLUMN group_create_status VARCHAR(16);
+COMMENT ON COLUMN byai.byai_project.group_create_status IS '跨平台库和租户库建群状态：待创建、就绪或失败';
+ALTER TABLE byai.byai_project
+    ADD CONSTRAINT ck_byai_project_group_create_status
+        CHECK (group_create_status IS NULL OR group_create_status IN ('PENDING','READY','FAILED'));
+CREATE UNIQUE INDEX uq_byai_project_tenant_group_request
+    ON byai.byai_project(enterprise_id,group_create_request_id)
+    WHERE group_create_request_id IS NOT NULL;
+CREATE INDEX ix_byai_project_enterprise_id ON byai.byai_project(enterprise_id);
 
 DROP TABLE IF EXISTS byai.tenant_schema_audit;
 DROP TABLE IF EXISTS byai.tenant_config;
