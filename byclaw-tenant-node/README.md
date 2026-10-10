@@ -319,3 +319,5 @@ BE 到 Node 的镜像协议中，`AnswerDelta.seq` 是渲染顺序计数器，�
 租户候选任务标题和模型声明的任务名称按 UTF-8 字节限制截断到 255 字节，保留完整 Unicode 字符，兼容 openGauss VARCHAR 字节上限；群消息正文完整保留。回归覆盖长中文和 emoji 消息。
 
 BE 在任务开始前观察分类时发送空文本 DELTA（`text=""`）及可信 groupDisposition 元数据，不使用终态 messageContent 代替 delta 字段；Node 可以先落任务卡并继续镜像终态答案。
+
+会话运行态帧的 envelope 与 data.sessionId 都必须输出精确字符串；HACU 优先采用 envelope 会话 ID，兼容旧帧的数值 ID 精度丢失。否则 idle 更新到错误会话，任务完成后仍显示停止按钮并阻止续聊。

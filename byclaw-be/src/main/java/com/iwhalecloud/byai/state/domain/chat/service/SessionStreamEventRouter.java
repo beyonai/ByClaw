@@ -618,7 +618,9 @@ public class SessionStreamEventRouter {
         wsMessage.put("type", "SESSION_RUNTIME_STATUS");
         wsMessage.put("sessionId", String.valueOf(runtime.getSessionId()));
         wsMessage.put("traceId", runtime.getTraceId());
-        wsMessage.put("data", JSON.toJSON(runtime));
+        JSONObject runtimePayload = (JSONObject) JSON.toJSON(runtime);
+        runtimePayload.put("sessionId", runtime.getSessionId().toString());
+        wsMessage.put("data", runtimePayload);
         var tenant = tenantScopedSessionEventService == null ? null : tenantScopedSessionEventService.owner(runtime.getSessionId());
         if (tenant != null) {
             multiDeviceBroadcastService.broadcastTenantRawToUser(tenant, wsMessage, null);
