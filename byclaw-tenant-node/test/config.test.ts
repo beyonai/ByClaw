@@ -32,6 +32,17 @@ const env = {
 };
 describe("fixed tenant configuration", () => {
   it.each([undefined, "", "host.containers.internal"])(
+    "advertises Kubernetes Pod IP instead of an unresolvable hostname when launch host is %s",
+    (advertiseHost) => {
+      expect(
+        readConfig({ ...env, ADVERTISE_HOST: advertiseHost, POD_IP: "10.42.2.25" }).advertiseHost,
+      ).toBe("10.42.2.25");
+    },
+  );
+  it("preserves an explicitly configured advertise address in Kubernetes", () => {
+    expect(readConfig({ ...env, POD_IP: "10.42.2.25" }).advertiseHost).toBe("node");
+  });
+  it.each([undefined, "", "host.containers.internal"])(
     "advertises its own container hostname when the launch host is %s",
     (advertiseHost) => {
       expect(readConfig({ ...env, ADVERTISE_HOST: advertiseHost }).advertiseHost).toBe(hostname());

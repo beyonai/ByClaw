@@ -33,6 +33,27 @@ import org.springframework.web.server.ResponseStatusException;
 class TenantSandboxServiceReplacementTest {
 
     @Test
+    void preparesPrivateDatabaseDirectoryBeforeKubernetesCreatesRootOwnedSubPath(@TempDir Path root)
+        throws Exception {
+        var service = new TenantSandboxService(mock(SandboxLifecycleFacade.class), mock(OpenSandboxClient.class),
+            mock(SandboxServiceSpecRepository.class), mock(SsSandboxRecordMapper.class), new ObjectMapper(),
+            "db-image", root.toString(), "node-image", "redis", "6379", "0", "default", "password",
+            "http://be", "token", "host");
+        var prepare = TenantSandboxService.class.getDeclaredMethod("prepareEntrypoint", long.class);
+        prepare.setAccessible(true);
+        prepare.invoke(service, 10291508L);
+        Path data = root.resolve("tenants/10291508/opengauss/data");
+        assertThat(data).isDirectory();
+        assertThat(Files.getPosixFilePermissions(data)).containsExactlyInAnyOrder(
+            java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+            java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE);
+        Files.writeString(data.resolve("keep"), "existing database data");
+        prepare.invoke(service, 10291508L);
+        assertThat(Files.readString(data.resolve("keep"))).isEqualTo("existing database data");
+    }
+
+    @Test
     void deletionReleasesNodeAndDatabaseAndRemovesOnlyTheSelectedTenantVolume(@TempDir Path root)
         throws IOException {
         long tenantId = 11222154L;

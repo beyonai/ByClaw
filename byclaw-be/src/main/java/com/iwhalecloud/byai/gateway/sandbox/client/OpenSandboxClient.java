@@ -235,7 +235,13 @@ public class OpenSandboxClient {
     }
 
     public SandboxEndpoint getSandboxEndpoint(String sandboxId, int port) {
-        String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/endpoints/" + port;
+        return getSandboxEndpoint(sandboxId, port, false);
+    }
+
+    /** Internal TCP consumers need the private address, not an HTTP ingress path. */
+    public SandboxEndpoint getSandboxEndpoint(String sandboxId, int port, boolean resolveInternal) {
+        String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/endpoints/" + port
+            + (resolveInternal ? "?resolve_internal=true" : "");
         log.debug("OpenSandbox沙箱 GET {}", url);
         Request httpRequest = newRequestBuilder(url).get().build();
         return execute(httpRequest, SandboxEndpoint.class);

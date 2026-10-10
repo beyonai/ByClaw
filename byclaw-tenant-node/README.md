@@ -327,3 +327,5 @@ BE 在任务开始前观察分类时发送空文本 DELTA（`text=""`）及可�
 租户待发布内容在 Node 提交并读回成功后，BE 向发起人对应企业频道发送 `GROUP_CHAT_TASK_EVENT/TASK_PUBLICATION_PREPARED`，前端立即重读成果卡片；通知不广播给其他群成员。
 
 租户成果发布的 mention 解析只投影 Node 已鉴权成员的 `memObjType` 和 `memObjId`，不反序列化无关的 ISO 创建/读取日期。文件上传与资源授权继续复用 BE 原有发布流程。
+
+K3s 租户开通：TCP 数据库端点通过 OpenSandbox `resolve_internal=true` 获取 Pod 内网地址；BE 在创建数据库沙箱前预建私有 `opengauss/data` 目录，保持 BE 与租户镜像的 1001:1001 所有者，避免 kubelet 创建 root 所有的 subPath。租户 Node 使用 Downward API 注入的 `POD_IP` 注册服务；显式 `ADVERTISE_HOST` 仍优先，Docker 未注入 Pod IP 时沿用容器 hostname。
