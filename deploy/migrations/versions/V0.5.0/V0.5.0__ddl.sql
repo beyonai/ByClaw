@@ -539,6 +539,9 @@ ALTER TABLE byai.ss_sandbox_record
     ADD CONSTRAINT ck_ss_sandbox_record_owner_scope
         CHECK (owner_scope IN ('USER','TENANT'));
 COMMENT ON COLUMN byai.ss_sandbox_record.owner_scope IS '沙箱实例归属维度：用户或企业租户';
+ALTER TABLE byai.ss_sandbox_record
+    ADD COLUMN enterprise_id BIGINT;
+COMMENT ON COLUMN byai.ss_sandbox_record.enterprise_id IS '沙箱所属企业租户ID；用户沙箱可为空';
 
 -- 既有企业表须先检查 enterprise_id 重复/空值；正式迁移补唯一约束前处理脏数据
 ALTER TABLE byai.po_enterprise_info
