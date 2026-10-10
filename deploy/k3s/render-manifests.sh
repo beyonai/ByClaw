@@ -74,7 +74,6 @@ BYCLAW_BE_REPLICAS="${BYCLAW_BE_REPLICAS:-1}"
 BYCLAW_FE_REPLICAS="${BYCLAW_FE_REPLICAS:-1}"
 BYCLAW_SUPER_REPLICAS="${BYCLAW_SUPER_REPLICAS:-1}"
 BYCLAW_QA_REPLICAS="${BYCLAW_QA_REPLICAS:-1}"
-BYCLAW_QA_WORKER_REPLICAS="${BYCLAW_QA_WORKER_REPLICAS:-1}"
 BYCLAW_DEMO_REPLICAS="${BYCLAW_DEMO_REPLICAS:-1}"
 BYCLAW_DEPLOY_CONFIG_DIR="${BYCLAW_DEPLOY_CONFIG_DIR:-$SCRIPT_DIR/../config}"
 BYCLAW_BE_APPLICATION_PROPERTIES="${BYCLAW_DEPLOY_CONFIG_DIR}/application.properties"
@@ -106,7 +105,6 @@ fi
 
 BE_DOMAINNAME="${BE_DOMAINNAME:-ByaiService}"
 QA_DOMAINNAME="${QA_DOMAINNAME:-byclaw-qa-manager}"
-QA_WORKER_NAME="${QA_WORKER_NAME:-byclaw-qa-worker}"
 HOST="${HOST:-byclaw-be.${NS_SERVICE}.svc.cluster.local}"
 BE_SERVER_PORT="${BE_SERVER_PORT:-8086}"
 BE_WS_PORT="${BE_WS_PORT:-8082}"
@@ -164,7 +162,6 @@ BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS="${BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS:-86
 BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS="${BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS:-600}"
 BYCLAW_QA_KB_MINIO_BUCKET="${BYCLAW_QA_KB_MINIO_BUCKET:-knowledge-base}"
 BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET="${BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET:-knowledge-base-markdown}"
-BYCLAW_QA_BYAI_WORKER_ID="${BYCLAW_QA_BYAI_WORKER_ID:-instant-search-worker-1}"
 MINIO_ENDPOINT="${MINIO_ENDPOINT:-disabled}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-disabled}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-disabled}"
@@ -388,10 +385,6 @@ write_byclaw_runtime_env_files() {
         render_env_line "HOST" "${QA_DOMAINNAME}.${NS_SERVICE}.svc.cluster.local"
         render_env_line "SERVICE_NAME" "$QA_DOMAINNAME"
     } > "$dir/.byclaw-qa-runtime.env"
-    {
-        render_env_line "HOST" "${QA_WORKER_NAME}.${NS_SERVICE}.svc.cluster.local"
-        render_env_line "SERVICE_NAME" "$QA_WORKER_NAME"
-    } > "$dir/.byclaw-qa-worker-runtime.env"
     {
         render_env_line "HOST" "byclaw-demo.${NS_SERVICE}.svc.cluster.local"
         render_env_line "SERVICE_NAME" "byclaw-demo"
@@ -1745,66 +1738,6 @@ spec:
         - name: runtime-env-file
           configMap:
             name: byclaw-qa-runtime-env-file
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ${QA_WORKER_NAME}
-  namespace: ${NS_SERVICE}
-spec:
-  replicas: ${BYCLAW_QA_WORKER_REPLICAS}
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: ${QA_WORKER_NAME}
-  template:
-    metadata:
-      labels:
-        app: ${QA_WORKER_NAME}
-      annotations:
-        byclaw.io/runtime-env-sha256: "${BYCLAW_RUNTIME_ENV_CHECKSUM}"
-    spec:
-      containers:
-        - name: qa-worker
-          image: ${IMAGE_QA}
-          imagePullPolicy: ${BYCLAW_SERVICE_IMAGE_PULL_POLICY}
-          args: ["worker"]
-          envFrom:
-            - configMapRef:
-                name: byclaw-runtime-env
-            - configMapRef:
-                name: byclaw-qa-worker-runtime-env
-            - secretRef:
-                name: byclaw-runtime-secret
-          resources:
-            requests:
-              cpu: "${BYCLAW_QA_CPU_REQUEST:-250m}"
-              memory: "${BYCLAW_QA_MEMORY_REQUEST:-512Mi}"
-            limits:
-              cpu: "${BYCLAW_QA_CPU_LIMIT:-1}"
-              memory: "${BYCLAW_QA_MEMORY_LIMIT:-2Gi}"
-          volumeMounts:
-            - name: config
-              mountPath: /app/config
-              readOnly: true
-            - name: logs
-              mountPath: /app/logs
-              subPath: logs/qa-worker
-            - name: runtime-env-file
-              mountPath: /etc/byclaw/.env
-              subPath: .env
-              readOnly: true
-      volumes:
-        - name: config
-          configMap:
-            name: byclaw-be-config
-        - name: logs
-          persistentVolumeClaim:
-            claimName: ${WORKSPACE_PVC_NAME}
-        - name: runtime-env-file
-          configMap:
-            name: byclaw-qa-worker-runtime-env-file
 ---
 apiVersion: v1
 kind: Service

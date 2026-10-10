@@ -149,21 +149,6 @@ docker network inspect byclaw-network
 2. 查看浏览器开发者工具 (F12) 的 Network 标签，查看请求错误
 3. 检查 Nginx 配置 (`deploy/config/nginx-standalone.conf`)
 
-### 问题 6：QA Worker 不工作
-
-**症状：** QA 任务堆积
-
-**排查步骤：**
-
-1. 检查 QA Worker 日志
-```bash
-cd deploy/standalone
-docker compose logs qa-worker
-```
-
-2. 检查 Redis 连接是否正常
-3. 确认 QA Manager 和 Worker 使用相同的 Redis 配置
-
 ## 日志收集
 
 如果需要收集日志进行排查，可以使用以下命令：

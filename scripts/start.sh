@@ -18,7 +18,7 @@ Options:
   --all            Start all modules (fe, be, qa).
   --fe             Start frontend (byclaw-fe).
   --be             Start backend (byclaw-be).
-  --qa             Start QA services (byclaw-qa, api + worker).
+  --qa             Start QA services (byclaw-qa, manager API).
   --skip-checks    Skip preflight environment checks.
   --help           Show this message.
 
@@ -129,7 +129,6 @@ launch() {
 [[ $START_BE   -eq 1 ]] && launch "be"   "$SCRIPTS/start-be.sh"
 if [[ $START_QA -eq 1 ]]; then
   launch "qa-api" "$SCRIPTS/start-qa.sh" api
-  launch "qa-worker" "$SCRIPTS/start-qa.sh" worker
 fi
 
 # Write PID file for stop.sh

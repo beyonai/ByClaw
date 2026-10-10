@@ -1,14 +1,15 @@
 # byclaw-qa
 
-`byclaw-qa` 是 Byclaw 的问答系统模块，负责知识库管理接口和即时问答 worker。
+`byclaw-qa` 是 Byclaw 的问答系统模块，提供 QA Manager/API，负责知识库管理、入库、构建和检索。
 
 ## 目录说明
 
 - `pyproject.toml`: Python 项目定义与依赖
 - `start.sh`: 模块统一启动入口
-- `worker.py`: 即时问答 worker 启动文件，请求处理时从 Redis 的 `RESOURCE_DIG_EMPLOYEE_{agent_id}` 读取数字员工知识库配置
+- `src/api.py`: QA Manager/API 启动入口
+- `src/worker.py`: 即时问答 Worker 源码，暂不部署
 - `redis_agent_config.py`: Redis 数字员工配置 schema、读取与转换逻辑
-- `byclaw_plugin.py`: 历史插件逻辑，保留但不再作为即时问答 worker 的启动依赖
+- `byclaw_plugin.py`: 历史插件适配逻辑
 
 ## 启动方式
 
@@ -24,11 +25,11 @@ cd byclaw-qa
 ./start.sh api
 ```
 
-`api` 模式会使用 `uvicorn` 启动 `by_qa.main:app`。
+`api` 模式使用 `uvicorn` 启动 `api:app`。默认部署仅启动 Manager/API；Worker 源码及模块内的 `./start.sh worker` 入口保留。Manager 内部的文件构建和实体处理后台任务继续保留。
 
 API 请求会按请求创建模型配置 provider，但默认创建的
 `RedisModelConfigProvider` 会复用进程级 Redis 客户端和连接池，避免按请求建立并滞留
-Redis 连接。worker 显式注入的 Redis 客户端不受该共享逻辑影响。
+Redis 连接。
 
 知识变更通过 by-qa 的统一 `KnowledgeEventPublisher` 上报到
 `/byaiService/devloop/operation/saveOrUpdateObjectFiles`。当前覆盖目录创建、重命名、删除，
@@ -71,12 +72,6 @@ KnowledgeEntity 和 `fileToMarkdownIndex` 请求进入持久化队列时，ByCla
 所有 batch callback 使用持久化的发起人上下文，避免其他请求触发旧批次完成时串用会话。
 本次未增加会话名称查询或前端跳转路由，来源会话使用明确传入的会话 ID。
 
-启动即时问答 worker：
-
-```bash
-./start.sh worker
-```
-
 ## 环境变量约定
 
 `start.sh` 从仓库根目录 `.env` 读取环境变量。
@@ -96,11 +91,10 @@ KnowledgeEntity 和 `fileToMarkdownIndex` 请求进入持久化队列时，ByCla
 - `BYCLAW_QA_GENERATOR_MODEL`
 - `BYCLAW_QA_KB_MINIO_BUCKET`
 - `BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET`
-- `BYCLAW_QA_BYAI_WORKER_ID`
 
 启动脚本会把这些公共变量和 `BYCLAW_QA_*` 变量映射成 `by-qa` 运行时实际读取的变量名。
 
-启动 `api` 或 `worker` 前，`start.sh` 会先检查转换前的源环境变量是否齐全。两种启动模式使用同一份必填清单；检查未通过时脚本会列出缺失变量并退出，不会继续启动服务。
+启动 `api` 前，`start.sh` 会先检查转换前的源环境变量是否齐全。检查未通过时脚本会列出缺失变量并退出。手动运行保留的 `worker` 模式时，需额外配置 `BYCLAW_QA_BYAI_WORKER_ID`。
 
 ## 运行依赖
 
