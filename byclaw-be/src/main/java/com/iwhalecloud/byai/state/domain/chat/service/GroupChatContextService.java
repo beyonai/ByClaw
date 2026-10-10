@@ -607,6 +607,7 @@ public class GroupChatContextService {
                 GroupChatContextResponse.Attachment attachment = new GroupChatContextResponse.Attachment();
                 attachment.setFileId(file.getFileId());
                 attachment.setFileName(file.getFileName());
+                attachment.setFilePath(file.getFilePath());
                 attachment.setFileUrl(file.getFileUrl());
                 if (StringUtils.isNotBlank(file.getFileType())) {
                     attachment.setMediaType(file.getFileType());
