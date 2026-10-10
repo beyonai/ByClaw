@@ -245,6 +245,7 @@ class WebSocketManager {
           const message: WebSocketMessage = JSON.parse(event.data);
           if (message.type === 'SWITCH_TENANT_ACK') {
             this.confirmedEnterpriseId = message.enterpriseId ?? null;
+            if (this.scopedSessionId) this.sendScopedSessionSelection();
           }
           if (isChatTerminal(message)) recordChatChain('fe.final_received', message);
           this.handleMessage(message);
@@ -326,7 +327,7 @@ class WebSocketManager {
         const enterpriseId = getSelectedEnterpriseId();
         this.sendMessage({
           type: enterpriseId ? 'HEARTBEAT' : 'NOTIFICATION',
-          ...(enterpriseId ? { scopedSessionId: '' } : {}),
+          ...(enterpriseId ? { scopedSessionId: this.scopedSessionId } : {}),
         });
       }
     }, 6000); // 每6秒发送一次

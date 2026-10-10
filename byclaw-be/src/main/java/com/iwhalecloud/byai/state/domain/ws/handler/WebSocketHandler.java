@@ -7,6 +7,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.SessionView;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -59,6 +62,9 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
 
     @Autowired
     private TenantContextService tenantContextService;
+
+    @Autowired
+    private TenantNodeClient tenantNodeClient;
 
     @Autowired
     private MultiDeviceBroadcastService multiDeviceBroadcastService;
@@ -235,8 +241,21 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
             return false;
         }
         if (chatMessage.getScopedSessionId() != null && !chatMessage.getScopedSessionId().isBlank()) {
-            sendTenantError(ctx, chatMessage, "personal session cannot be selected in a tenant");
-            return false;
+            String scopedSessionId = chatMessage.getScopedSessionId().trim();
+            if (chatMessage.getType() != MessageType.HEARTBEAT
+                || !scopedSessionId.matches("[1-9][0-9]{0,18}")) {
+                sendTenantError(ctx, chatMessage, "invalid tenant session subscription");
+                return false;
+            }
+            try {
+                Long.parseLong(scopedSessionId);
+                tenantNodeClient.request(tenant, "GET", "/internal/v1/sessions/" + scopedSessionId,
+                    null, new TypeReference<SessionView>() { });
+            }
+            catch (Exception e) {
+                sendTenantError(ctx, chatMessage, "tenant session unavailable");
+                return false;
+            }
         }
         TenantRequestContextHolder.set(tenant);
         return true;

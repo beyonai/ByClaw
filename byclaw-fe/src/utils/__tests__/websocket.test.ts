@@ -222,6 +222,40 @@ describe('utils/websocket', () => {
     });
   });
 
+  it('preserves an exact tenant child subscription across heartbeats and reconnects', () => {
+    mockGetToken.mockReturnValue('token-1');
+    window.localStorage.setItem('SESSION', 'session-1');
+    require('../tenantContext').selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+    const ws = require('../websocket').default;
+    ws.disconnect();
+    ws.init();
+    socketInstance.onopen();
+    socketInstance.onmessage({ data: JSON.stringify({ type: 'SWITCH_TENANT_ACK', enterpriseId: '123' }) });
+    ws.setScopedSessionId('8011237409000004505');
+    jest.advanceTimersByTime(6000);
+    expect(JSON.parse(socketInstance.send.mock.calls.at(-1)[0])).toMatchObject({
+      type: 'HEARTBEAT',
+      enterpriseId: '123',
+      scopedSessionId: '8011237409000004505',
+    });
+    socketInstance.onclose({ code: 1006, reason: 'network failure' });
+    jest.advanceTimersByTime(2000);
+    socketInstances[1].onopen();
+    const switching = JSON.parse(socketInstances[1].send.mock.calls[0][0]);
+    socketInstances[1].onmessage({
+      data: JSON.stringify({
+        type: 'SWITCH_TENANT_ACK',
+        enterpriseId: '123',
+        clientRequestId: switching.clientRequestId,
+      }),
+    });
+    expect(JSON.parse(socketInstances[1].send.mock.calls.at(-1)[0])).toMatchObject({
+      type: 'HEARTBEAT',
+      enterpriseId: '123',
+      scopedSessionId: '8011237409000004505',
+    });
+  });
+
   it('restores the selected tenant with a payload control message after a network reconnect', () => {
     mockGetToken.mockReturnValue('token-1');
     window.localStorage.setItem('SESSION', 'session-1');
