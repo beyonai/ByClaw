@@ -4,8 +4,7 @@
 递归树状研究 —— 从宽问题出发,拆成若干子问题,逐个子问题完整研究,再用发现与 follow-up 深入一层,
 直到达到配置深度,最后聚合为带引用的报告。
 
-研究问题生成、学习结论和报告写作由 Agent 负责。Runner 可用 Jev 对已有 follow-up 给出优先级建议，并在上下文超预算时选择已有证据片段；失败或低置信度时保留原有顺序与裁剪逻辑。已登记研究分支的覆盖/缺失子题可为公网候选增量排序提供上下文；混合或企业资料仅在 `TYPESAFE_ENTERPRISE_ENABLED=true` 时发送。建议不改变研究深度、来源授权或完成标准，原始上下文在成功筛选时另存为 `research.contextArchive`。
-成功的 follow-up、上下文和 crawl 顺序建议可在本会话的 60 秒 sidecar 中复用。sidecar 只含完整会话及候选输入的哈希、原候选索引排列和时间戳；每次命中前重查模型配置、隐私授权、取消及预算。输入变化、超时、文件错误或 Jev 失败时沿用原流程，不把 sidecar 当作研究进度、引用或完成证据。这个优化仍未经过真实联网提速基准。
+研究问题生成、学习结论和报告写作由 Agent 负责。Runner 保持已登记 follow-up 的顺序，并在上下文超预算时按既有规则裁剪；研究深度、来源授权和完成标准由原工作流控制。
 本技能提供流程纪律与持久状态。所有状态写入 <session-dir>/session.json,
 由 `scripts/knowledge-collection.mjs` 统一管理(研究维度: init / plan / branch / aggregate / report)。
 
@@ -60,12 +59,11 @@
    - **内置路由层** ([agent-reach.md](agent-reach.md) → [public-internet.md](sources/public-internet.md)): Exa 搜索、gh、RSS、站内搜索等渠道。
      **验证方式**: 通读 agent-reach.md 及 sources/public-internet.md 路由表,确认本主题是否在其覆盖范围。
    
-   - **online-search** (searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
-     中文引擎(baidu/sogou/360search)、学术类别(`--category science`,含 arxiv/crossref/pubmed/openalex)。
-     **验证方式**: 通读 `skills/knowledge-collection/references/online-search/SKILL.md`,确认引擎可用性与本主题的语言/时效/学术性匹配度。
+   - **online-search** (腾讯 WSA / Search1API 公共网页检索通道): 查询词、语言、时间范围与类别参数由统一 provider 处理。
+     **验证方式**: 通读 `skills/knowledge-collection/references/online-search/SKILL.md`,确认 provider 可用性与本主题的语言/时效/学术性匹配度。
    
    - **hot_discovery** (热度发现通道子技能): 经 bycli 适配器取平台原生热度(`citations`/`downloads`/`stars`/`score`)，
-     与 searxng 并行跑后用其 `merge` 归并，双通道命中优先级最高。
+     与 online-search 并行跑后用其 `merge` 归并，双通道命中优先级最高。
      **验证方式**: 通读 `skills/knowledge-collection/references/online-search/references/hot_discovery/SKILL.md`,检查本主题所属维度
      (packages/science/it/q&a/repos/apps/books/movies 9 个覆盖 vs 
       images/videos/music/files/dictionaries/translate/map/lyrics/radio/weather/icons 11 个无热度源)。
@@ -130,14 +128,12 @@
 三个检索信源互补并行,发现结果统一进入 learnings/citations;**取内容一律经 [agent-reach.md](agent-reach.md) 路由后委派来源执行器**,
 online-search 只负责发现 URL,不得直接抓取网页:
 
-- **时间敏感**(周报/新闻/最新动态): 优先 `public-discover --category news|general`；需要时间窗时，SearXNG 独立调试可传 `--time-range week|day`
-  (时间窗过滤一步到位,baidu/bing/sogou 支持);
-- **学术/标准**: 优先 `public-discover --category science`(arxiv/crossref/pubmed/openalex),
-  不带 `--time-range`(science 引擎不支持时间窗,传了会过滤为空);
+- **时间敏感**(周报/新闻/最新动态): 优先 `public-discover --category news|general --time-range week|day`；
+- **学术/标准**: 优先 `public-discover --category science`；
 - **英文技术/代码**: 优先内置路由层的 Exa(擅长英文技术文档与代码上下文)与 `gh`(搜 GitHub);
-- **公共 URL 发现**: `public-discover` 与 SearXNG **并行**运行
+- **公共 URL 发现**: `public-discover` 统一编排 online-search 与
   `online-search/references/hot_discovery`(子技能),它经 bycli 适配器取平台原生热度字段
-  (`citations`/`downloads`/`stars`/`score`),再用其 `merge` 子命令归并两个通道。
+  (`citations`/`downloads`/`stars`/`score`),再用其 `merge` 子命令归并两个通道。状态中的 `searxng` 是历史通道标识，不表示运行时仍调用 SearXNG。
   归并输出的 `groups.bothChannels` 是双通道命中,优先级最高。
   **覆盖边界**: 热度集中在 packages/science/it/q&a/repos/apps/books/movies 9 个维度;
   images/videos/music/files/dictionaries/translate/map/lyrics/radio/weather/icons 这 11 个维度

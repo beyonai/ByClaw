@@ -1,9 +1,9 @@
 ---
 name: online-search
-description: 公共网页 URL 发现通道；用于可选 TypeSafe Jev、腾讯 WSA、Search1API、SearXNG 与 hot-discovery 的受控检索场景。
+description: 公共网页 URL 发现通道；用于腾讯 WSA、Search1API、SearXNG 与 hot-discovery 的受控检索场景。
 ---
 
-# Online Search（可选 Jev、WSA/Search1API 与 SearXNG 降级）
+# Online Search（可选 WSA/Search1API 与 SearXNG 降级）
 
 > `knowledge-collection public-discover` 必须通过统一 online-search provider 调用本能力。已配置的 WSA 与
 > Search1API 并发执行；两者均不可用或失败时使用 SearXNG。合法空结果不得改写为基础设施故障，
@@ -19,7 +19,6 @@ description: 公共网页 URL 发现通道；用于可选 TypeSafe Jev、腾讯 
 
 统一 online-search provider 会探测 WSA 与 Search1API 能力并合并跨 provider 的 URL 命中证据。
 两者未启用、凭据缺失、超时、鉴权失败、限流或响应无效等情况下，调用基于 SearXNG（249 引擎元搜索内核）的进程内 CLI。
-若配置 `TYPESAFE_API_KEY`，TypeSafe Jev 可在检索前做有界规划，并在硬过滤后进行候选重排；缺失、关闭或失败时必须原样保留现有输入和排序。Jev 不能授权 URL 或替代正文验证。
 SearXNG 每次调用起一个进程，完成搜索后向 stdout 输出单个 JSON 对象并退出；**不启动 Web 服务、
 不监听端口、不写缓存**。
 
@@ -62,6 +61,8 @@ searxng-cli "查询词" [参数...]
 | `--max-results` | 最多返回的结果条数 | `20` |
 | `--timeout` | 单次搜索超时上限（秒） | `10` |
 | `--list-engines` | 列出全部可用引擎（按类别分组）后退出 | - |
+
+检索使用请求中的查询、分类和时间范围；候选过滤与排序使用既有确定性规则。
 
 ## 示例
 

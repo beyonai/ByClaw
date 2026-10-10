@@ -37,7 +37,7 @@
     {
       "name": "online-search",
       "path": "online-search.md",
-      "description": "可选 TypeSafe Jev 规划和重排、可选腾讯 WSA/Search1API、SearXNG 降级的公共网页 URL 发现。"
+      "description": "腾讯 WSA/Search1API 与 hot-discovery 协同的公共网页 URL 发现、预算与恢复规则。"
     }
   ]
 }

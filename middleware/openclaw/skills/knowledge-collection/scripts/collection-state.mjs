@@ -144,12 +144,11 @@ export function registerControlledAcquisitionEvidence(paths, evidence, options =
   });
 }
 
-function assertMaterializedTopic(session, authorization, canonicalItem, sanitizedAbsolute, topicEvidence) {
+function assertMaterializedTopic(session, authorization, canonicalItem, sanitizedAbsolute) {
   if (authorization?.authorizationKind !== 'public-discover') return null;
   const topicRelevance = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
     title: canonicalItem.title,
     markdown: fs.readFileSync(sanitizedAbsolute, 'utf8'),
-    topicEvidence,
   });
   if (!['matched', 'not-required'].includes(topicRelevance.status)) {
     throw new Error(`MATERIALIZED_CONTENT_NOT_RELEVANT: 实际正文与任务主题不匹配（${topicRelevance.status}）`);
@@ -845,10 +844,8 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
     throw new Error('canonicalItem.url 必须与 inventory.sourceUrl 一致');
   }
   const materializedTopicRelevance = assertMaterializedTopic(
-    session, discoveryCandidate, update.canonicalItem, sanitizedAbsolute, update.topicEvidence,
+    session, discoveryCandidate, update.canonicalItem, sanitizedAbsolute,
   );
-  if (materializedTopicRelevance?.topicEvidence) inventory.topicEvidence = clone(materializedTopicRelevance.topicEvidence);
-  else delete inventory.topicEvidence;
 
   const previous = inventory.materialization || {};
   const oldPaths = [previous.markdownPath, previous.sanitizedPath]
@@ -1351,7 +1348,6 @@ function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult
       const assessment = assessMaterializedTopic(gate.topicContract, {
         title: canonical?.title || item.title || '',
         markdown: fs.readFileSync(absolute, 'utf8'),
-        topicEvidence: item.topicEvidence,
       });
       if (!['matched', 'not-required'].includes(assessment.status)) {
         valid = false;
@@ -1467,7 +1463,6 @@ function validatePromotionEvidence(paths, session) {
       const topic = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
         title: receipt.analysis?.title || item.canonicalItem?.title || '',
         markdown: sanitizedMarkdown,
-        topicEvidence: receipt.topicEvidence,
       });
       if (!['matched', 'not-required'].includes(topic.status)
         || topic.status !== item.verifiedTopicStatus) {
