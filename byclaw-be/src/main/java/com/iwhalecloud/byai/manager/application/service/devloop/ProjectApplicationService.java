@@ -24,6 +24,8 @@ import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingSer
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectResourceService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.WorkgroupNameService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectSessionService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectShareFileService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
@@ -87,6 +89,9 @@ import java.util.*;
 @Slf4j
 @Service
 public class ProjectApplicationService {
+
+    @Autowired
+    private WorkgroupNameService workgroupNames;
 
     private static final Logger logger = LoggerFactory.getLogger(ProjectApplicationService.class);
 
@@ -203,12 +208,24 @@ public class ProjectApplicationService {
         return createProject(dto, ProjectType.HACU);
     }
 
+    private Long currentEnterpriseId() {
+        var tenant = TenantRequestContextHolder.get();
+        Long enterpriseId = tenant == null ? CurrentUserHolder.getEnterpriseId() : Long.valueOf(tenant.enterpriseId());
+        return enterpriseId == null ? 1L : enterpriseId;
+    }
+
     private Project createProject(ProjectDTO dto, String projectType) {
         String projectName = normalizeProjectName(dto.getProjectName());
         if (projectName.isEmpty()) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.required");
         }
-        if (projectService.existsProjectName(projectName, CurrentUserHolder.getCurrentUserId(), null)) {
+        Long enterpriseId = currentEnterpriseId();
+        Long creatorId = CurrentUserHolder.getCurrentUserId();
+        boolean duplicate = ProjectType.HACU.equals(projectType)
+            ? projectService.existsNonWorkgroupProjectName(projectName, creatorId, enterpriseId)
+                || workgroupNames.exists(projectName, creatorId, enterpriseId)
+            : projectService.existsProjectName(projectName, creatorId, enterpriseId, null);
+        if (duplicate) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
         }
         this.validateProjectDescription(dto.getDescription());
@@ -226,7 +243,7 @@ public class ProjectApplicationService {
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
         project.setDeleteFlag(DeleteFlag.NORMAL);
-        project.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
+        project.setEnterpriseId(enterpriseId);
         projectService.save(project);
 
         saveProjectRepos(project.getProjectId(), dto.getRepos());
@@ -363,7 +380,10 @@ public class ProjectApplicationService {
             if (projectName.isEmpty()) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.required");
             }
-            if (projectService.existsProjectName(projectName, project.getCreateBy(), dto.getProjectId())) {
+            // 同名历史 HACU 项目可以共存；原样提交名称不应阻止编辑其他字段。
+            if (!projectName.equals(project.getProjectName())
+                && projectService.existsProjectName(projectName, project.getCreateBy(),
+                    project.getEnterpriseId(), dto.getProjectId())) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
             }
             project.setProjectName(projectName);

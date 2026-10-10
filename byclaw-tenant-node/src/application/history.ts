@@ -55,6 +55,8 @@ export class HistoryService {
   publication = (...args: Parameters<GroupHistory["publication"]>) =>
     this.group.publication(...args);
   groups = (...args: Parameters<GroupHistory["groups"]>) => this.group.groups(...args);
+  groupNameCheck = (...args: Parameters<GroupHistory["nameCheck"]>) =>
+    this.group.nameCheck(...args);
   management = (...args: Parameters<GroupHistory["management"]>) => this.group.management(...args);
   detail = (...args: Parameters<GroupHistory["detail"]>) => this.group.detail(...args);
   settings = (...args: Parameters<GroupHistory["settings"]>) => this.group.settings(...args);

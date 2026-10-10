@@ -164,7 +164,7 @@ public class GroupChatApplicationService {
         session.setSessionName(project.getProjectName());
         session.setSessionType(SessionType.HS_AS.getCode());
         session.setCreatorId(operatorId);
-        session.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
+        session.setEnterpriseId(project.getEnterpriseId());
         session.setCreateTime(new Date());
         session.setUpdateTime(new Date());
         sessionService.save(session);

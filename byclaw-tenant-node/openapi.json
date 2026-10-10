@@ -6437,6 +6437,58 @@
         },
         "description": "Authorize the parent and each child; returns parentSessionId and public external sessionExts."
       }
+    },
+    "/internal/v1/group-chats/name-check": {
+      "post": {
+        "summary": "Check active workgroup name within the trusted tenant and creator",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dissolved workgroups do not reserve names",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["exists"],
+                  "properties": {
+                    "exists": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

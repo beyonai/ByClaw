@@ -189,7 +189,9 @@ describe("group write permission", () => {
     vi.mocked(s.ctx.session).mockResolvedValue(null);
     s.query.mockImplementation(async (sql) => (sql.includes("nextval") ? [{ id: "1" }] : []));
     await createSession(s.ctx);
-    const [sql, parameters] = s.query.mock.calls[0]!;
+    const [sql, parameters] = s.query.mock.calls.find(([sql]) =>
+      sql.startsWith("INSERT INTO byai.byai_session "),
+    )!;
     expect(sql).toContain("session_content");
     expect(parameters).toContain("shared goal");
   });

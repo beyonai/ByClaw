@@ -39,6 +39,9 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
   app.post("/internal/v1/group-chats/invitations/validate", async (req) =>
     service.invitation(actor(req), body(req).token),
   );
+  app.post("/internal/v1/group-chats/name-check", async (req) =>
+    service.groupNameCheck(actor(req), body(req).name),
+  );
   app.get<{ Params: { taskId: string } }>(
     "/internal/v1/group-chat/tasks/:taskId/publication",
     async (req) => service.publication(actor(req), req.params.taskId),

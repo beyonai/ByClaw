@@ -22,6 +22,17 @@ class ProjectServiceNameTest {
     private ProjectMapper mapper;
     private ProjectService service;
 
+    @Test
+    void isolatesNameChecksToTheSelectedTenant() {
+        when(mapper.selectCount(any())).thenReturn(0L);
+
+        service.existsProjectName("workspace", 88L, 10L, null);
+
+        LambdaQueryWrapper<Project> query = capturedQuery();
+        assertThat(query.getSqlSegment()).contains("enterprise_id =");
+        assertThat(query.getParamNameValuePairs().values()).contains(10L);
+    }
+
     @BeforeEach
     void setUp() {
         if (TableInfoHelper.getTableInfo(Project.class) == null) {
@@ -37,25 +48,25 @@ class ProjectServiceNameTest {
     void checksOnlyUndeletedProjectsOfTheCreator() {
         when(mapper.selectCount(any())).thenReturn(1L);
 
-        assertThat(service.existsProjectName("workspace", 88L, null)).isTrue();
+        assertThat(service.existsProjectName("workspace", 88L, 1L, null)).isTrue();
 
         LambdaQueryWrapper<Project> query = capturedQuery();
         assertThat(query.getSqlSegment()).contains("create_by =", "project_name =", "delete_flag =")
             .doesNotContain("project_id <>");
         assertThat(query.getParamNameValuePairs().values())
-            .containsExactlyInAnyOrder("0", 88L, "workspace");
+            .containsExactlyInAnyOrder("0", 88L, "workspace", 1L);
     }
 
     @Test
     void excludesTheEditedProjectWithinItsCreatorScope() {
         when(mapper.selectCount(any())).thenReturn(0L);
 
-        assertThat(service.existsProjectName("workspace", 88L, 1001L)).isFalse();
+        assertThat(service.existsProjectName("workspace", 88L, 1L, 1001L)).isFalse();
 
         LambdaQueryWrapper<Project> query = capturedQuery();
         assertThat(query.getSqlSegment()).contains("create_by =", "project_id <>");
         assertThat(query.getParamNameValuePairs().values())
-            .containsExactlyInAnyOrder("0", 88L, "workspace", 1001L);
+            .containsExactlyInAnyOrder("0", 88L, "workspace", 1L, 1001L);
     }
 
     @SuppressWarnings("unchecked")

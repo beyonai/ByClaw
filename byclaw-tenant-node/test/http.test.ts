@@ -9,10 +9,11 @@ afterEach(async () => {
 function setup(ready = true) {
   const execute = vi.fn(async () => ({ committed: true }));
   const apply = vi.fn(async () => undefined);
+  const groupNameCheck = vi.fn(async () => ({ exists: false }));
   const services = {
     commands: { execute },
     mirror: { apply },
-    history: { detail: vi.fn(async () => ({ sessionId: "30" })) },
+    history: { detail: vi.fn(async () => ({ sessionId: "30" })), groupNameCheck },
     sessions: {},
     schema: { accept: vi.fn(async () => ({ status: "PENDING" })) },
     connected: () => true,
@@ -24,10 +25,30 @@ function setup(ready = true) {
   const verify = vi.fn();
   const app = createApp(config, services, {}, { verifyClient: verify, logger: false });
   apps.push(app);
-  return { app, execute, apply, verify };
+  return { app, execute, apply, verify, groupNameCheck };
 }
 const headers = { "x-enterprise-id": "10", "x-tenant-generation": "7", "x-actor-user-id": "20" };
 describe("protected tenant HTTP", () => {
+  it("checks group names using the trusted actor and rejects foreign tenants", async () => {
+    const s = setup();
+    const response = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/name-check",
+      headers,
+      payload: { name: "Team", actor: "21" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ exists: false });
+    expect(s.groupNameCheck).toHaveBeenCalledWith("20", "Team");
+    const denied = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/name-check",
+      headers: { ...headers, "x-enterprise-id": "11" },
+      payload: { name: "Team" },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(s.groupNameCheck).toHaveBeenCalledOnce();
+  });
   it("accepts a scoped feedback command at the existing message boundary", async () => {
     const s = setup();
     const response = await s.app.inject({
