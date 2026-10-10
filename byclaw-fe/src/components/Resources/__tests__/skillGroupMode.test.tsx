@@ -239,7 +239,7 @@ jest.mock('@/components/Resources/components/ResourceFilter', () => ({
       </button>
     );
   },
-  getDefaultParams: () => ({ resourceStatus: '2' }),
+  getDefaultParams: (defaultParam = {}) => ({ resourceStatus: '2', ...defaultParam }),
 }));
 jest.mock('@/components/Resources/components/ResourceImport', () => ({
   __esModule: true,
@@ -513,26 +513,64 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
   });
 
-  it('hides official skill import while permissions load and when the query fails', async () => {
+  it.each<[string, string, boolean | undefined]>([
+    ['KG_DOC', 'canImportEnterpriseKg', false],
+    ['KG_DOC', 'canImportEnterpriseKg', undefined],
+    ['TOOL', 'canImportEnterpriseToolkit', false],
+    ['TOOL', 'canImportEnterpriseToolkit', undefined],
+  ])('hides enterprise %s import with capability %s set to %s', async (resourceType, capabilityKey, allowed) => {
     setBrandVersion('openSource');
-    let rejectCapability!: (reason: Error) => void;
-    (queryFixedEntryOperationCapability as jest.Mock).mockImplementation(
-      () =>
-        new Promise((_resolve, reject) => {
-          rejectCapability = reject;
-        })
-    );
-    renderAt('?tab=enterprise');
+    (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ [capabilityKey]: allowed });
+    window.history.pushState({}, '', '/resourceCenter?tab=enterprise');
+    render(<Resources resourceType={resourceType} />);
 
     await act(async () => {
       await Promise.resolve();
     });
+    // 无权限时不保留禁用按钮，也不会打开导入弹窗。
     expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
-    await act(async () => {
-      rejectCapability(new Error('unavailable'));
-    });
-    expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('resource-import-modal')).not.toBeInTheDocument();
   });
+
+  it.each([
+    ['KG_DOC', 'canImportEnterpriseKg'],
+    ['TOOL', 'canImportEnterpriseToolkit'],
+  ])('opens enterprise %s import when %s is granted', async (resourceType, capabilityKey) => {
+    setBrandVersion('openSource');
+    (queryFixedEntryOperationCapability as jest.Mock).mockResolvedValue({ [capabilityKey]: true });
+    window.history.pushState({}, '', '/resourceCenter?tab=enterprise');
+    render(<Resources resourceType={resourceType} />);
+
+    const importButton = await screen.findByRole('button', { name: 'common.import' });
+    expect(importButton).toBeEnabled();
+    fireEvent.click(importButton);
+    expect(screen.getByTestId('resource-import-modal')).toBeInTheDocument();
+  });
+
+  it.each(['SKILL', 'KG_DOC', 'TOOL'])(
+    'hides enterprise %s import while permissions load and when the query fails',
+    async (resourceType) => {
+      setBrandVersion('openSource');
+      let rejectCapability!: (reason: Error) => void;
+      (queryFixedEntryOperationCapability as jest.Mock).mockImplementation(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectCapability = reject;
+          })
+      );
+      window.history.pushState({}, '', '/resourceCenter?tab=enterprise');
+      render(<Resources resourceType={resourceType} />);
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
+      await act(async () => {
+        rejectCapability(new Error('unavailable'));
+      });
+      expect(screen.queryByRole('button', { name: 'common.import' })).not.toBeInTheDocument();
+    }
+  );
 
   it.each(['openSource', 'commercial', 'custom', '', undefined, null])(
     'keeps personal skill import available without official import permission for brand: %s',
@@ -721,7 +759,9 @@ describe('Resources enterprise skill mode', () => {
       const personalLabel = resourceType === 'KG_DOC' ? 'resource.myKnowledge' : `resource.my${suffix}s`;
       fireEvent.click(screen.getByRole('button', { name: personalLabel }));
       expect(screen.getByRole('group', { name: 'resource.type' })).toBeInTheDocument();
-      expect(screen.queryAllByRole('group', { name: 'resource.source' })).toHaveLength(resourceType !== 'SKILL' ? 1 : 0);
+      expect(screen.queryAllByRole('group', { name: 'resource.source' })).toHaveLength(
+        resourceType !== 'SKILL' ? 1 : 0
+      );
       expect(list).toHaveAttribute('data-permission', '');
       expect(screen.queryByRole('button', { name: 'resource.appliedByMe' })).toBeNull();
     }
@@ -753,12 +793,17 @@ describe('Resources enterprise skill mode', () => {
       fireEvent.click(types.getByRole('button', { name: 'common.all' }));
       expect(list).toHaveAttribute('data-biz-types', '');
 
-      // 管理工具与知识页沿用原弹层类型筛选，避免更改独立管理布局。
+      // 知识管理页也使用外部类型筛选，工具管理页继续沿用原弹层。
       rerender(<Resources resourceType={resourceType} myResourcesOnly />);
-      expect(screen.queryByRole('button', { name: firstLabel })).toBeNull();
-      expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
-        expect.objectContaining({ hideResourceBizTypeFilter: false })
-      );
+      if (resourceType === 'KG_DOC') {
+        expect(screen.getByRole('button', { name: firstLabel })).toBeInTheDocument();
+        expect(screen.queryByTestId('resource-filter')).toBeNull();
+      } else {
+        expect(screen.queryByRole('button', { name: firstLabel })).toBeNull();
+        expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
+          expect.objectContaining({ hideResourceBizTypeFilter: false })
+        );
+      }
     }
   );
 
@@ -775,6 +820,42 @@ describe('Resources enterprise skill mode', () => {
   });
 
   it.each([
+    ['SKILL', 'resourceCenter.personalSkills', 'resourceCenter.enterpriseSkills'],
+    ['KG_DOC', 'resourceCenter.personalKnowledge', 'resourceCenter.enterpriseKnowledge'],
+    ['TOOL', 'resourceCenter.personalTools', 'resourceCenter.enterpriseTools'],
+  ])(
+    'defaults %s management status to all on entry and tab changes',
+    (resourceType, personalLabel, enterpriseLabel) => {
+      window.history.pushState({ resourceCenterMyResourcesOnly: true }, '', '/resourceCenter?tab=enterprise');
+      const { rerender } = render(<Resources resourceType={resourceType} myResourcesOnly />);
+      const expectAllStatus = () => {
+        const statuses = within(screen.getByRole('group', { name: 'common.status' }));
+        expect(statuses.getByRole('button', { name: 'common.all' })).toHaveAttribute('aria-pressed', 'true');
+        expect(statuses.getByRole('button', { name: 'resourceStatus.published' })).toHaveAttribute(
+          'aria-pressed',
+          'false'
+        );
+        expect(screen.getByTestId('resource-list')).toHaveAttribute('data-status', '');
+      };
+      expectAllStatus();
+      fireEvent.click(
+        within(screen.getByRole('group', { name: 'common.status' })).getByRole('button', {
+          name: 'resourceStatus.unpublished',
+        })
+      );
+      fireEvent.click(screen.getByRole('button', { name: personalLabel }));
+      fireEvent.click(screen.getByRole('button', { name: enterpriseLabel }));
+      expectAllStatus();
+
+      // 从浏览页重新进入管理时，也不能带入浏览页固定的“已上架”状态。
+      rerender(<Resources resourceType={resourceType} />);
+      rerender(<Resources resourceType={resourceType} myResourcesOnly />);
+      fireEvent.click(screen.getByRole('button', { name: enterpriseLabel }));
+      expectAllStatus();
+    }
+  );
+
+  it.each([
     ['SKILL', 'resourceCenter.enterpriseSkills'],
     ['KG_DOC', 'resourceCenter.enterpriseKnowledge'],
     ['TOOL', 'resourceCenter.enterpriseTools'],
@@ -782,7 +863,12 @@ describe('Resources enterprise skill mode', () => {
     window.history.pushState({}, '', '/resourceCenter?tab=personal');
     const { container } = render(<Resources resourceType={resourceType} myResourcesOnly />);
 
-    expect(container.querySelector('.myResourcesFilters')).toBeNull();
+    if (resourceType === 'KG_DOC') {
+      expect(container.querySelector('.myResourcesFilters')).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'resource.type' })).toBeInTheDocument();
+    } else {
+      expect(container.querySelector('.myResourcesFilters')).toBeNull();
+    }
     fireEvent.click(screen.getByRole('button', { name: enterpriseLabel }));
     const permissions = within(screen.getByRole('group', { name: 'common.belong' }));
     const status = within(screen.getByRole('group', { name: 'common.status' }));
@@ -855,7 +941,7 @@ describe('Resources enterprise skill mode', () => {
     window.history.pushState({}, '', '/resourceCenter?tab=personal');
     render(<Resources resourceType={resourceType} myResourcesOnly />);
 
-    if (resourceType === 'SKILL') {
+    if (resourceType === 'SKILL' || resourceType === 'KG_DOC') {
       expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
     } else {
       expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
@@ -867,7 +953,7 @@ describe('Resources enterprise skill mode', () => {
       );
     }
     fireEvent.click(screen.getByRole('button', { name: enterpriseLabel }));
-    if (resourceType === 'SKILL') {
+    if (resourceType === 'SKILL' || resourceType === 'KG_DOC') {
       expect(screen.queryByTestId('resource-filter')).not.toBeInTheDocument();
     } else {
       expect(mockResourceFilterProps).toHaveBeenLastCalledWith(
@@ -905,6 +991,74 @@ describe('Resources enterprise skill mode', () => {
       expect(screen.queryByRole('button', { name: 'resourceStatus.reviewing' })).toBeNull();
       expect(screen.queryByRole('button', { name: 'resourceStatus.notPassed' })).toBeNull();
     }
+  });
+
+  it.each(['personal', 'enterprise'])('filters knowledge types directly in the %s management row', (activeTab) => {
+    window.history.pushState({ resourceCenterMyResourcesOnly: true }, '', `/resourceCenter?tab=${activeTab}`);
+    render(<Resources resourceType="KG_DOC" myResourcesOnly />);
+    const list = screen.getByTestId('resource-list');
+    const typeGroup = screen.getByRole('group', { name: 'resource.type' });
+    const types = within(typeGroup);
+
+    // 类型外置后不保留空弹层，且不挤占页签和搜索所在行。
+    expect(screen.queryByTestId('resource-filter')).toBeNull();
+    expect(screen.getByTestId('resource-tab-bar')).not.toContainElement(typeGroup);
+    expect(typeGroup.parentElement).toHaveClass('myResourcesFilters');
+    expect(types.getAllByRole('button')).toHaveLength(3);
+    expect(types.getByRole('button', { name: 'common.all' })).toHaveAttribute('aria-pressed', 'true');
+
+    if (activeTab === 'enterprise') {
+      const scopeGroup = screen.getByRole('group', { name: 'common.belong' });
+      const statusGroup = screen.getByRole('group', { name: 'common.status' });
+      expect(scopeGroup.parentElement).toBe(typeGroup.parentElement);
+      expect(statusGroup.parentElement).toBe(typeGroup.parentElement);
+      fireEvent.click(within(scopeGroup).getByRole('button', { name: 'resourceCenter.managedByMe' }));
+      fireEvent.click(within(statusGroup).getByRole('button', { name: 'resourceStatus.unpublished' }));
+    } else {
+      expect(screen.queryByRole('group', { name: 'common.belong' })).toBeNull();
+      expect(screen.queryByRole('group', { name: 'common.status' })).toBeNull();
+    }
+
+    for (const [label, value] of [
+      ['resource.kgDoc', 'KG_DOC'],
+      ['resource.kgQa', 'KG_QA'],
+      ['common.all', ''],
+    ]) {
+      const button = types.getByRole('button', { name: label });
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(list).toHaveAttribute('data-biz-types', value);
+      expect(list).toHaveAttribute('data-management-scope', activeTab === 'enterprise' ? 'managed' : 'all');
+      expect(list).toHaveAttribute('data-status', activeTab === 'enterprise' ? '3' : '2');
+    }
+
+    // 切换个人/企业知识时重置类型、归属和状态，防止旧条件影响新页签。
+    fireEvent.click(types.getByRole('button', { name: 'resource.kgQa' }));
+    if (activeTab === 'enterprise') {
+      fireEvent.click(
+        within(screen.getByRole('group', { name: 'common.belong' })).getByRole('button', {
+          name: 'resourceCenter.createdByMe',
+        })
+      );
+      fireEvent.click(
+        within(screen.getByRole('group', { name: 'common.status' })).getByRole('button', {
+          name: 'resourceStatus.draft',
+        })
+      );
+      expect(list).toHaveAttribute('data-biz-types', 'KG_QA');
+      expect(list).toHaveAttribute('data-management-scope', 'created');
+      expect(list).toHaveAttribute('data-status', '0');
+    }
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: activeTab === 'enterprise' ? 'resourceCenter.personalKnowledge' : 'resourceCenter.enterpriseKnowledge',
+      })
+    );
+    expect(list).toHaveAttribute('data-biz-types', '');
+    expect(list).toHaveAttribute('data-management-scope', 'all');
+    expect(list).toHaveAttribute('data-status', activeTab === 'enterprise' ? '2' : '');
+    const resetTypes = within(screen.getByRole('group', { name: 'resource.type' }));
+    expect(resetTypes.getByRole('button', { name: 'common.all' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it.each([

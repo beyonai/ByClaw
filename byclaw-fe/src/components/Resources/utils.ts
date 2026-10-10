@@ -115,7 +115,8 @@ export const getResourceQueryStatus = (
   resourceType?: string
 ): string => {
   if (!myResourcesOnly || activeTab === 'personal') return '2';
-  const value = `${status ?? '2'}`;
+  // 企业管理页未指定状态时查看全部，与外部状态按钮的默认选中项保持一致。
+  const value = `${status ?? ''}`;
   const allowedStatuses = resourceType === 'SKILL' ? ['', '0', '2', '3', '4', '5'] : ['', '0', '2', '3'];
   return allowedStatuses.includes(value) ? value : '2';
 };

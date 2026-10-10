@@ -344,10 +344,9 @@
 }
 
 .digitalEmployeeTopRightTag {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 1;
+  // 员工类型标签参与标题行布局，直接约束名称宽度，避免盖住文字和省略号。
+  position: static;
+  flex-shrink: 0;
 }
 
 .renderContent .knowledgeTopRightTag {
@@ -606,9 +605,23 @@
   overflow: hidden;
 }
 
-.resourceInfoHeaderWithTag {
-  // 标签采用绝对定位，标题仅预留卡片边缘间距，避免额外空白导致名称过早省略。
-  padding-right: 16px;
+.resourceInfoHeader.resourceInfoHeaderWithTag {
+  // 标签占用实际宽度，名称使用剩余空间；保持标签与卡片上边距对齐。
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.resourceInfoHeaderWithTag .resourceName {
+  // 覆盖通用 ub-f1 的不可收缩规则，单行溢出在名称自身显示省略号。
+  flex: 1 1 0%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourceInfoWithActions .resourceInfoHeaderWithTag {
+  // 按钮位于标签下方，标题行用回正文为按钮预留的 48px，标签仍靠卡片右侧。
+  margin-right: -48px;
 }
 
 .resourceInfoWithActions {

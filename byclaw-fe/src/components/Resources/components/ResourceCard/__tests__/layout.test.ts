@@ -99,6 +99,25 @@ it('compacts digital employee cards with symmetric padding and space for favorit
   expect(content).toContain('padding: 12px;');
 });
 
+it('lets employee tags occupy title space and truncates the title itself', () => {
+  // JSDOM 不计算实际溢出，保护标签参与布局、名称可收缩和 CSS 单行省略规则。
+  const styles = fs.readFileSync(path.resolve(__dirname, '../index.module.less'), 'utf8');
+  const tag = styles.match(/\.digitalEmployeeTopRightTag\s*\{([^}]+)/)?.[1] || '';
+  const header = styles.match(/\.resourceInfoHeader\.resourceInfoHeaderWithTag\s*\{([^}]+)/)?.[1] || '';
+  const title = styles.match(/\.resourceInfoHeaderWithTag\s+\.resourceName\s*\{([^}]+)/)?.[1] || '';
+  const headerWithActions =
+    styles.match(/\.resourceInfoWithActions\s+\.resourceInfoHeaderWithTag\s*\{([^}]+)/)?.[1] || '';
+
+  expect(tag).toContain('position: static;');
+  expect(tag).toContain('flex-shrink: 0;');
+  expect(header).toContain('gap: 8px;');
+  expect(title).toContain('flex: 1 1 0%;');
+  expect(title).toContain('overflow: hidden;');
+  expect(title).toContain('text-overflow: ellipsis;');
+  expect(title).toContain('white-space: nowrap;');
+  expect(headerWithActions).toContain('margin-right: -48px;');
+});
+
 it('keeps pending icon slots fixed and uses the same employee and knowledge alignment', () => {
   // JSDOM 不计算尺寸：保护固定按钮槽位，交互用例覆盖悬浮提示和确认前后的状态切换。
   const styles = fs.readFileSync(path.resolve(__dirname, '../index.module.less'), 'utf8');

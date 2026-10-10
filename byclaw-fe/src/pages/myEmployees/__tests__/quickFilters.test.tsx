@@ -94,6 +94,21 @@ describe('employee management quick filters', () => {
     }
   });
 
+  it('defaults enterprise management to all statuses on entry', async () => {
+    renderPage();
+    await waitFor(() => expect(queryMyCreated).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('tab', { name: 'myEmployees.enterprise' }));
+    const statuses = within(screen.getByRole('group', { name: 'common.status' }));
+    expect(statuses.getByRole('button', { name: 'myEmployees.all' })).toHaveAttribute('aria-pressed', 'true');
+    expect(statuses.getByRole('button', { name: 'resourceStatus.published' })).toHaveAttribute('aria-pressed', 'false');
+    await waitFor(() =>
+      expect(queryManagedEnterpriseEmployees).toHaveBeenLastCalledWith(
+        expect.objectContaining({ includeAllResourceStatus: true })
+      )
+    );
+    expect((queryManagedEnterpriseEmployees as jest.Mock).mock.calls.at(-1)?.[0]).not.toHaveProperty('resourceStatus');
+  });
+
   it('preserves enterprise scope and status filters and resets them when switching tabs', async () => {
     renderPage();
     await waitFor(() => expect(queryMyCreated).toHaveBeenCalled());

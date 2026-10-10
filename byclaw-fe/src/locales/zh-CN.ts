@@ -1368,6 +1368,7 @@ export default {
   'approvalCenter.skill': '技能申请',
   'approvalCenter.knowledge': '知识申请',
   'approvalCenter.tool': '工具申请',
+  'approvalCenter.searchPlaceholder': '搜索资源名称',
   'approvalCenter.employeeUse': '使用授权审核',
   'approvalCenter.employeePublication': '员工发布审核',
   'approvalCenter.employeeUpdatePending':

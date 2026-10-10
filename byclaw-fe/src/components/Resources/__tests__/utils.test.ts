@@ -13,6 +13,13 @@ const ALL_RESOURCE_BIZ_TYPE_VALUES = ['MCP', 'TOOLKIT', 'AGENT'];
 const ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES = ['KG_DOC', 'KG_TERM', 'KG_QA'];
 
 describe('components/Resources utils', () => {
+  it.each(['SKILL', 'KG_DOC', 'TOOL'])('defaults enterprise %s management to all statuses', (resourceType) => {
+    expect(getResourceQueryStatus('enterprise', true, undefined, resourceType)).toBe('');
+    expect(getResourceQueryStatus('enterprise', true, '', resourceType)).toBe('');
+    expect(getResourceQueryStatus('enterprise', false, undefined, resourceType)).toBe('2');
+    expect(getResourceQueryStatus('personal', true, undefined, resourceType)).toBe('2');
+  });
+
   it.each(['4', '5'])('allows review status %s only in my enterprise skills', (status) => {
     expect(getResourceQueryStatus('enterprise', true, status, 'SKILL')).toBe(status);
     expect(getResourceQueryStatus('enterprise', false, status, 'SKILL')).toBe('2');

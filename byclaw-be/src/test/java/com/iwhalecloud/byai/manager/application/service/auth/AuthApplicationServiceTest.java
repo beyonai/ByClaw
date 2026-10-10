@@ -49,6 +49,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.MessageSource;
 import org.springframework.data.redis.core.SetOperations;
@@ -71,6 +72,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -96,8 +98,10 @@ class AuthApplicationServiceTest {
         }
     }
 
-    @Test
-    void sharedAuditQueryFiltersPublicationByReviewerRoleAndTenant() {
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"  ", " 财务 Alpha "})
+    void sharedAuditQueryFiltersPublicationByReviewerRoleAndTenant(String keyword) {
         var service = new AuthApplicationService();
         var publications = mock(com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService.class);
         var grants = mock(PrivilegeGrantMapper.class);
@@ -117,15 +121,59 @@ class AuthApplicationServiceTest {
         target.setOwnerType("enterprise");
         target.setResourceStatus(4);
         target.setComAcctId(1L);
-        when(grants.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).thenReturn(List.of(row));
+        String normalizedKeyword = org.apache.commons.lang3.StringUtils.trimToNull(keyword);
+        when(grants.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), normalizedKeyword))
+            .thenReturn(List.of(row));
         when(resources.selectBatchIds(any())).thenReturn(List.of(target));
         when(publications.canReview(target)).thenReturn(true);
-        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).containsExactly(row);
+        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), keyword)).containsExactly(row);
         when(publications.canReview(target)).thenReturn(false);
-        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
+        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), keyword)).isEmpty();
         when(publications.canReview(target)).thenReturn(true);
         target.setComAcctId(2L);
-        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"))).isEmpty();
+        assertThat(service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), keyword)).isEmpty();
+    }
+
+    @Test
+    void sharedAuditSearchNormalizesKeywordAndPreservesLegacyScope() {
+        var service = new AuthApplicationService();
+        var grants = mock(PrivilegeGrantMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
+        service.queryDigitalEmployeeUseApplyAudit(true, List.of(" KG_DOC ", "KG_QA", "KG_TERM"), " 财务 Alpha ");
+        verify(grants).queryDigitalEmployeeUseApplyAudit(true, List.of("KG_DOC", "KG_QA", "KG_TERM"), "财务 Alpha");
+        service.queryDigitalEmployeeUseApplyAudit(false);
+        service.queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"));
+        verify(grants).queryDigitalEmployeeUseApplyAudit(false, List.of("DIG_EMPLOYEE"), null);
+        verify(grants).queryDigitalEmployeeUseApplyAudit(false, List.of("SKILL"), null);
+        // 不合法的资源类型不能借助搜索扩展为默认员工范围。
+        service.queryDigitalEmployeeUseApplyAudit(false, List.of("INVALID"), "Alpha");
+        verify(grants, never()).queryDigitalEmployeeUseApplyAudit(false, List.of("DIG_EMPLOYEE"), "Alpha");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    void sharedAuditSearchStillRequiresUseAuditPermission(String bizType) {
+        var service = spy(new AuthApplicationService());
+        var grants = mock(PrivilegeGrantMapper.class);
+        var resources = mock(SsResourceMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        SsResource target = enterpriseResource(601L, 1L);
+        target.setResourceBizType(bizType);
+        var row = new com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo();
+        row.setResourceId(601L);
+        row.setAuditType("USE");
+        when(resources.selectBatchIds(any())).thenReturn(List.of(target));
+        for (boolean history : List.of(false, true)) {
+            when(grants.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务"))
+                .thenReturn(List.of(row));
+            // 命中名称的记录也必须通过使用审核权限校验，待审核和历史使用相同口径。
+            doReturn(false).when(service).hasResourceUseSettingPermission(target);
+            assertThat(service.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务")).isEmpty();
+            doReturn(true).when(service).hasResourceUseSettingPermission(target);
+            assertThat(service.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务"))
+                .containsExactly(row);
+        }
     }
 
     @Test

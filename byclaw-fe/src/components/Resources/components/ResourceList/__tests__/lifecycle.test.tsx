@@ -467,6 +467,14 @@ it.each(['SKILL', 'KG_DOC', 'TOOL'])('forces published requests for my personal 
   expect(listResourceUseAuth).toHaveBeenCalledWith(expect.objectContaining({ resourceStatus: '2' }));
 });
 
+it.each(['SKILL', 'KG_DOC', 'TOOL'])('defaults enterprise %s requests to all statuses', async (resourceType) => {
+  renderList({ resourceType, activeTab: 'enterprise', dropdownParam: {} });
+  await screen.findByTestId('resource-card');
+  expect(listResourceUseAuth).toHaveBeenCalledWith(
+    expect.objectContaining({ resourceStatus: '', excludeDeleted: true })
+  );
+});
+
 it.each(['1', '-1'])('drops removed enterprise status %s', async (resourceStatus) => {
   renderList({ activeTab: 'enterprise', dropdownParam: { resourceStatus } });
   await screen.findByTestId('resource-card');

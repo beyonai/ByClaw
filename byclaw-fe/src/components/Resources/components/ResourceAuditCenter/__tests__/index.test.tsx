@@ -26,6 +26,12 @@ const render = (ui: Parameters<typeof renderComponent>[0]) =>
 // 全量钩子中为发布审核预留渲染和确认的总预算，查找及断言仍使用默认超时。
 const publicationAuditTestTimeout = 15000;
 
+const advanceSearchTimers = async (milliseconds: number) => {
+  await act(async () => {
+    jest.advanceTimersByTime(milliseconds);
+  });
+};
+
 describe('ResourceAuditCenter', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -86,6 +92,135 @@ describe('ResourceAuditCenter', () => {
       history: true,
       resourceBizTypeList: ['SKILL'],
     });
+  });
+
+  it.each(['SKILL', 'KG_DOC', 'TOOL'])(
+    'debounces server search in pending and history lists for %s without changing total counts',
+    async (resourceType) => {
+      const resourceBizTypeList = getBaseResourceBizTypeList(resourceType);
+      mockQueryResourceUseApplyAudit.mockImplementation(({ history, keyword = '' }) =>
+        Promise.resolve({
+          data: ['财务 Alpha', '销售 Beta']
+            .filter((name) => name.toLowerCase().includes(keyword))
+            .map((name) => ({
+              resourceId: name,
+              resourceName: `${history ? '历史' : '待审'}${name}`,
+              resourceBizType: resourceBizTypeList[0],
+              userId: 'applicant',
+              applyStatus: history ? 'X' : 'P',
+            })),
+        })
+      );
+      const onPendingCountChange = jest.fn();
+      render(
+        <ResourceAuditCenter resourceBizTypeList={resourceBizTypeList} onPendingCountChange={onPendingCountChange} />
+      );
+      await screen.findByText('待审销售 Beta');
+      expect(onPendingCountChange).toHaveBeenLastCalledWith(2);
+      const input = screen.getByPlaceholderText('approvalCenter.searchPlaceholder');
+      mockQueryResourceUseApplyAudit.mockClear();
+      jest.useFakeTimers();
+      try {
+        fireEvent.change(input, { target: { value: 'a' } });
+        act(() => jest.advanceTimersByTime(200));
+        fireEvent.change(input, { target: { value: ' ALP ' } });
+        act(() => jest.advanceTimersByTime(299));
+        expect(mockQueryResourceUseApplyAudit).not.toHaveBeenCalled();
+        await advanceSearchTimers(1);
+        expect(mockQueryResourceUseApplyAudit).toHaveBeenCalledTimes(1);
+        expect(mockQueryResourceUseApplyAudit).toHaveBeenLastCalledWith({
+          history: false,
+          resourceBizTypeList,
+          keyword: 'alp',
+        });
+        expect(screen.getByText('待审财务 Alpha')).toBeInTheDocument();
+        expect(screen.queryByText('待审销售 Beta')).not.toBeInTheDocument();
+        expect(onPendingCountChange).toHaveBeenLastCalledWith(2);
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
+        });
+        expect(mockQueryResourceUseApplyAudit).toHaveBeenLastCalledWith({
+          history: true,
+          resourceBizTypeList,
+          keyword: 'alp',
+        });
+        expect(screen.getByText('历史财务 Alpha')).toBeInTheDocument();
+        // 已加载的历史缓存必须随关键词失效，无匹配时不能残留上一轮结果。
+        fireEvent.change(input, { target: { value: '不存在' } });
+        await advanceSearchTimers(300);
+        expect(screen.queryByText('历史财务 Alpha')).not.toBeInTheDocument();
+        expect(mockQueryResourceUseApplyAudit).toHaveBeenCalledWith({
+          history: true,
+          resourceBizTypeList,
+          keyword: '不存在',
+        });
+        fireEvent.change(input, { target: { value: '' } });
+        await advanceSearchTimers(300);
+        expect(mockQueryResourceUseApplyAudit).toHaveBeenCalledWith({ history: true, resourceBizTypeList });
+        expect(screen.getByText('历史销售 Beta')).toBeInTheDocument();
+        expect(onPendingCountChange).toHaveBeenLastCalledWith(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    }
+  );
+
+  it('ignores late responses from a previous search', async () => {
+    render(<ResourceAuditCenter resourceBizTypeList={['SKILL']} />);
+    await screen.findByText('待审核技能');
+    let resolveOld!: (response: any) => void;
+    let resolveNew!: (response: any) => void;
+    mockQueryResourceUseApplyAudit
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNew = resolve;
+          })
+      );
+    const input = screen.getByPlaceholderText('approvalCenter.searchPlaceholder');
+    jest.useFakeTimers();
+    try {
+      fireEvent.change(input, { target: { value: '旧' } });
+      await advanceSearchTimers(300);
+      fireEvent.change(input, { target: { value: '新' } });
+      await advanceSearchTimers(300);
+      const row = { resourceId: '1', resourceBizType: 'SKILL', userId: '1', applyStatus: 'P' };
+      await act(async () => resolveNew({ data: [{ ...row, resourceName: '新搜索结果' }] }));
+      await act(async () => resolveOld({ data: [{ ...row, resourceName: '旧搜索结果' }] }));
+      expect(screen.getByText('新搜索结果')).toBeInTheDocument();
+      expect(screen.queryByText('旧搜索结果')).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('clears the keyword and cancels the pending debounce when switching resource tabs', async () => {
+    const { rerender } = render(<ResourceAuditCenter key="skill" resourceBizTypeList={['SKILL']} />);
+    await screen.findByText('待审核技能');
+    mockQueryResourceUseApplyAudit.mockClear();
+    jest.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByPlaceholderText('approvalCenter.searchPlaceholder'), { target: { value: '技能' } });
+      await act(async () => {
+        rerender(<ResourceAuditCenter key="knowledge" resourceBizTypeList={['KG_DOC', 'KG_QA', 'KG_TERM']} />);
+      });
+      await advanceSearchTimers(300);
+      expect(screen.getByPlaceholderText('approvalCenter.searchPlaceholder')).toHaveValue('');
+      expect(mockQueryResourceUseApplyAudit).toHaveBeenCalledTimes(1);
+      expect(mockQueryResourceUseApplyAudit).toHaveBeenCalledWith({
+        history: false,
+        resourceBizTypeList: ['KG_DOC', 'KG_QA', 'KG_TERM'],
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('approves a pending resource application', async () => {

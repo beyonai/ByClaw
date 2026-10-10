@@ -183,15 +183,18 @@ describe('manager resources service', () => {
     });
   });
 
-  it('should call the resource audit endpoint with resource business types', () => {
-    const payload = { history: false, resourceBizTypeList: ['SKILL', 'KG_DOC'] };
-    queryResourceUseApplyAudit(payload);
-    expect(mockPOST).toHaveBeenCalledWith(
-      '/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit',
-      payload,
-      { responseCfg: { customHandle: true } }
-    );
-  });
+  it.each([false, true])(
+    'passes the search keyword and resource scope to the audit endpoint (history=%s)',
+    (history) => {
+      const payload = { history, resourceBizTypeList: ['SKILL', 'KG_DOC'], keyword: '财务 Alpha' };
+      queryResourceUseApplyAudit(payload);
+      expect(mockPOST).toHaveBeenCalledWith(
+        '/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit',
+        payload,
+        { responseCfg: { customHandle: true } }
+      );
+    }
+  );
 
   it('should call approveUseApply with the approve endpoint', () => {
     const payload = { resourceId: '10042909', applyUserId: '1' };

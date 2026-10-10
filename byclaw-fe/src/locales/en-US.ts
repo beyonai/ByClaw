@@ -1416,6 +1416,7 @@ export default {
   'approvalCenter.skill': 'Skill applications',
   'approvalCenter.knowledge': 'Knowledge applications',
   'approvalCenter.tool': 'Tool applications',
+  'approvalCenter.searchPlaceholder': 'Search resource name',
   'approvalCenter.employeeUse': 'Use authorization review',
   'approvalCenter.employeePublication': 'Employee publication review',
   'approvalCenter.employeeUpdatePending':

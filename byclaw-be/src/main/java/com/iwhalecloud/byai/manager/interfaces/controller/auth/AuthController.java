@@ -217,7 +217,7 @@ public class AuthController {
         @RequestBody ResourceUseApplyHistoryQo qo) {
         return ResponseUtil.successResponse(I18nUtil.get("auth.use.apply.list.query.success"),
             authApplicationService.queryDigitalEmployeeUseApplyAudit(qo == null ? null : qo.getHistory(),
-                qo == null ? null : qo.getResourceBizTypeList()));
+                qo == null ? null : qo.getResourceBizTypeList(), qo == null ? null : qo.getKeyword()));
     }
 
     /**
