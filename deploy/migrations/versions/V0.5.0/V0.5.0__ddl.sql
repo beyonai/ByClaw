@@ -703,3 +703,23 @@ COMMENT ON COLUMN byai.tenant_schema_audit.started_at IS '开始执行时间';
 COMMENT ON COLUMN byai.tenant_schema_audit.finished_at IS '执行结束时间';
 
 
+
+-- 租户组织挂接：供组织树、批量添加成员和租户删除使用。
+CREATE TABLE IF NOT EXISTS byai.tenant_organization (
+    enterprise_id BIGINT NOT NULL,
+    org_id BIGINT NOT NULL,
+    added_by BIGINT NOT NULL,
+    added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_tenant_organization PRIMARY KEY (enterprise_id, org_id),
+    CONSTRAINT fk_tenant_organization_enterprise FOREIGN KEY (enterprise_id)
+        REFERENCES byai.po_enterprise_info (enterprise_id),
+    CONSTRAINT fk_tenant_organization_org FOREIGN KEY (org_id)
+        REFERENCES byai.po_organization (org_id)
+);
+CREATE INDEX IF NOT EXISTS ix_tenant_organization_org
+    ON byai.tenant_organization (org_id, enterprise_id);
+COMMENT ON TABLE byai.tenant_organization IS '企业租户与平台组织的挂接关系';
+COMMENT ON COLUMN byai.tenant_organization.enterprise_id IS '所属企业租户ID';
+COMMENT ON COLUMN byai.tenant_organization.org_id IS '挂接的平台组织ID';
+COMMENT ON COLUMN byai.tenant_organization.added_by IS '挂接组织的操作人ID';
+COMMENT ON COLUMN byai.tenant_organization.added_at IS '组织挂接时间';
