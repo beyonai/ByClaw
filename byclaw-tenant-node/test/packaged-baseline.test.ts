@@ -37,5 +37,14 @@ describe("packaged V0.5.0 tenant baseline", () => {
       kind: "index",
       name: "idx_group_chat_task_running_turn",
     });
+    // Fresh tenant databases need the same acknowledgement storage as upgraded tenants.
+    expect(validated[0]?.manifest.objects).toContainEqual({
+      kind: "table",
+      name: "byai_group_chat_message_ack",
+    });
+    expect(validated[0]?.manifest.objects).toContainEqual({
+      kind: "index",
+      name: "idx_group_chat_message_ack_message",
+    });
   });
 });

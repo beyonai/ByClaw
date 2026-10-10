@@ -166,7 +166,7 @@ API 路径对应 `command-routes.ts` 和 OpenAPI。HTTP 正常结果是**事务�
 
 确认结果包含 `messageId` 和 `acknowledgements[{messageId,userId,userName,acknowledgedAt}]`，时间为毫秒时间戳。Node 只持久化；BE 提交成功后广播 `MESSAGE_ACK_UPDATED`。群上下文、搜索、消息定位和话题消息返回确认列表及当前用户的 `canAcknowledge`。该操作不推进已读游标，不新增聊天消息。
 
-部署前须在租户数据库中创建 `byai.byai_group_chat_message_ack`；表结构沿用 `deploy/migrations/versions/V0.5.0/V0.5.0__ddl.sql`。主库 SQL 与租户 baseline 是独立制品，仅合并主库建表语句不会更新租户数据库；新租户 baseline 和已有租户升级都需要包含此表。
+`V0.5.0__baseline__ddl.sql` 与打包 ZIP 已包含 `byai.byai_group_chat_message_ack`、联合主键及消息确认查询索引；新租户初始化可直接创建。主库 SQL 与租户 baseline 是独立制品，仅合并主库建表语句不会更新已有租户数据库；已有租户升级仍需由部署执行器检查并补齐此表。2026-10-10 与 229《百应开源》租户库的同引擎 catalog 对照为 15 张表、272 列、43 个索引、21 个约束和 2 个序列，结构及指纹一致。
 
 输入消息保留 INPUT 的 commandId；回答行只保留最近一次已提交的出站 commandId，后续事件会覆盖旧 ID。该接口查询当前行，不保存逐事件审计历史，404 不能作为“事件从未落库”的证明。旧出站事件应结合稳定 answerMessageId、后续消息状态和源流记录对账。
 
@@ -319,3 +319,11 @@ BE 到 Node 的镜像协议中，`AnswerDelta.seq` 是渲染顺序计数器，�
 租户候选任务标题和模型声明的任务名称按 UTF-8 字节限制截断到 255 字节，保留完整 Unicode 字符，兼容 openGauss VARCHAR 字节上限；群消息正文完整保留。回归覆盖长中文和 emoji 消息。
 
 BE 在任务开始前观察分类时发送空文本 DELTA（`text=""`）及可信 groupDisposition 元数据，不使用终态 messageContent 代替 delta 字段；Node 可以先落任务卡并继续镜像终态答案。
+
+会话运行态帧的 envelope 与 data.sessionId 都必须输出精确字符串；HACU 优先采用 envelope 会话 ID，兼容旧帧的数值 ID 精度丢失。否则 idle 更新到错误会话，任务完成后仍显示停止按钮并阻止续聊。
+
+无浏览器租户头的外部执行器发布接口仅可恢复已登记的大整数租户任务：使用 BE 派发注册的可信归属，匹配登录用户并重新检查租户成员资格，再由 Node 校验任务权限。普通个人任务保留原路由；不根据请求正文或可变用户默认空间猜测租户。
+
+租户待发布内容在 Node 提交并读回成功后，BE 向发起人对应企业频道发送 `GROUP_CHAT_TASK_EVENT/TASK_PUBLICATION_PREPARED`，前端立即重读成果卡片；通知不广播给其他群成员。
+
+租户成果发布的 mention 解析只投影 Node 已鉴权成员的 `memObjType` 和 `memObjId`，不反序列化无关的 ISO 创建/读取日期。文件上传与资源授权继续复用 BE 原有发布流程。

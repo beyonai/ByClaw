@@ -21,6 +21,10 @@ public class TenantGroupTaskRoutingAspect {
     private TenantGroupTaskService tenantTasks;
     @org.springframework.beans.factory.annotation.Autowired
     private TenantGroupPublicationService publications;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.chat.service.TenantScopedSessionEventService projections;
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantContextService contexts;
     private final TenantNodeClient node;
     private final ByaiGroupChatTaskMapper legacyTasks;
     private final ByaiGroupChatMentionMapper legacyMembership;
@@ -37,8 +41,19 @@ public class TenantGroupTaskRoutingAspect {
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTaskController.*(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
-        if (context == null) return call.proceed();
         Object[] args = call.getArgs();
+        if (context == null && args.length > 0 && args[0] instanceof Long registeredTask
+            && registeredTask >= 8_000_000_000_000_000_000L && projections != null) {
+            var registered = projections.registeredOwner(registeredTask);
+            if (registered != null) {
+                var user = com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.getLoginInfo();
+                if (user == null || !Long.valueOf(registered.userId()).equals(user.getUserId())) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant task owner required");
+                }
+                context = contexts.validate(Long.toString(registered.enterpriseId()));
+            }
+        }
+        if (context == null) return call.proceed();
         if (args.length == 0 || !(args[0] instanceof Long taskId) || taskId <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid group task");
         }
