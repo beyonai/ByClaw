@@ -686,3 +686,7 @@ HACU 工作组列表合并租户 Node 中的新工作组与平台旧库中属于
 租户工作组的 `POST /group-chats/{sessionId}/members` 支持添加数字员工和当前企业的有效成员：BE 检查当前成员邀请权限；数字员工须为已上架的企业资源或操作者有权访问的个人资源，真人须已有该企业的有效成员关系。BE 将已校验的真人 ID 作为成员断言随 `ADD_MEMBERS` 命令交给租户 Node，并为新真人或现有真人补齐群内数字员工使用授权。`DELETE /group-chats/{sessionId}/members/{type}/{id}` 将成员移除命令交给租户 Node，由 Node 校验群主或管理员权限，拒绝移除群主。`DELETE /group-chats/{sessionId}` 将解散命令交给租户 Node，由 Node 校验群主身份并将工作组标记为已解散；`POST /group-chats/{sessionId}/dissolution-acknowledgment` 同样路由到 Node，记录成员的解散确认。`POST /api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents` 在携带租户上下文且指定工作组时，使用租户 Node 校验添加权限；旧工作组继续使用原权限校验。HACU 在该候选查询中发送当前租户上下文。租户任务详情和待发布内容从 Node 读取；读取交付信号前先通过 Node 校验发起人身份。角色变更、转让群主及租户任务写操作仍待后续实现。
 
 平台管理员可调用 `POST /admin/tenants/delete`，提交企业 ID 与完全一致的租户名称。删除请求先将状态设为 `DELETING` 并阻止新的开通和租户访问，再在同一开通锁下删除该租户历代 Node/数据库沙箱、`tenants/<企业ID>` 私有持久化目录、Redis 配置快照、租户成员及组织关联和连接配置。外部资源删除失败时保留删除标记并定时重试，状态显示 `DELETE_FAILED`；全部清理后标记 `DELETED` 并从租户列表隐藏。企业主记录、开通请求 ID、删除状态及沙箱/建表审计记录留作追踪，其他租户的目录与共享沙箱规格不会被清理。
+
+### 群组任务成员路由
+
+群组工作助手的成员委派复用普通聊天的 `TargetAgentResolver`，按任务发起用户的个人参数及全局 `ENABLE_DSH` 解析实际引擎。普通群任务和租户群任务均在可信 Gateway `groupCoordination.effectiveWorkerAgentTypes` 中传递员工 ID 到有效引擎的映射；不修改员工数据库配置。Harness 创建成员前应用该映射，避免历史 `BYCLAW_EXE` 配置绕过 DSH 路由覆盖。两端配套部署，先更新后端再更新 Harness；已开始的任务执行引擎保持冻结，路由配置变更后需新建任务。

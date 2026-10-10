@@ -47,6 +47,9 @@ class TenantGroupCoordinationServiceTest {
 
     @BeforeEach
     void history() {
+        var memberRouting = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMemberRoutingService.class);
+        when(memberRouting.withRoutes(any(), any())).thenAnswer(call -> call.getArgument(0));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "memberRouting", memberRouting);
         service.configureHistory(files, new GroupChatDispatchPromptBuilder(), users);
         Users user = new Users(); user.setUserId(20L); user.setUserCode("user-20");
         when(users.findById(20L)).thenReturn(user);

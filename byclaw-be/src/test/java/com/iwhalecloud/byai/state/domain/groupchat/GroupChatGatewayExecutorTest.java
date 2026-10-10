@@ -77,6 +77,9 @@ class GroupChatGatewayExecutorTest {
         SandboxUserContextRunner runner = mock(SandboxUserContextRunner.class);
         executor = new GroupChatGatewayExecutor(script, messages, users, resources, tokens,
             new GroupChatDispatchPromptBuilder(), members, new GroupChatMemberUidCodec(), executions, sequences, runner);
+        var memberRouting = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMemberRoutingService.class);
+        when(memberRouting.withRoutes(any(), any())).thenAnswer(call -> call.getArgument(0));
+        org.springframework.test.util.ReflectionTestUtils.setField(executor, "memberRouting", memberRouting);
         executor.configureTurnTransactions(mock(PlatformTransactionManager.class), tasks);
         executor.configureContextFiles(historyFiles, taskAuthorization);
         when(historyFiles.prepareGroupHistory(any(), any(), any(), any()))
