@@ -158,6 +158,13 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         }
         gatewayParams.put("groupCoordinator", coordinatorMetadata);
         Object decorated = appendHistory(context, map, content, gatewayParams);
+        gatewayParams.put("cwd", "/by/.sessions/" + context.sessionId);
+        // Reuse the ordinary task contract, including the explicit user-confirmed publication intent.
+        decorated = decorateText(decorated, text -> {
+            String delivery = prompts.appendTaskDeliveryReminder(text, context.sessionId);
+            return "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())
+                ? prompts.appendPublicationPreparation(delivery, context.sessionId) : delivery;
+        });
         if ("COORDINATED".equals(map.get("mode"))) {
             return decorateText(decorated, text -> text + "\n\n本次请求已由平台确定为 GROUP_TASK。你是群组工作助手，只能协调本次 allowedAgentIds 中的数字员工。"
                 + "通过结构化协作工具委派并接收结果；正文中的 @ 仅用于展示。不要重新判断或降级为 CHAT。"

@@ -76,6 +76,19 @@ class TenantChatRoutingAspectTest {
     }
 
     @Test
+    void tenantChildQueryUsesItsAuthorizedNodeParent() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(8L, 123L, "OWNER");
+        TenantRequestContextHolder.set(context);
+        ByaiSessionQo query = new ByaiSessionQo();
+        query.setParentSessionId(456L); query.setPageNum(1); query.setPageSize(100);
+        when(node.request(eq(context), eq("POST"), eq("/internal/v1/sessions/456/children/query"), any(), any()))
+            .thenReturn(new Page<>(java.util.List.of(), 0L, 1, 100, 0));
+        ResponseUtil<?> result = (ResponseUtil<?>) aspect.route(call("qryConversations", query));
+        assertThat(result.getCode()).isZero();
+        assertThat(((Page<?>) result.getData()).pageSize()).isEqualTo(100);
+    }
+
+    @Test
     void projectSessionListUsesTenantNodeWithProjectFilter() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(8L, 123L, "OWNER");
         TenantRequestContextHolder.set(context);

@@ -13,11 +13,14 @@ import { sendGroupMessage } from "./group-message-writer.js";
 import { updateFeedback, updateMessageStructure } from "./message-update-writer.js";
 
 import { acknowledgeMessage } from "./message-ack-writer.js";
+import { ensureExternalChild, saveExternalChild } from "./external-child-writer.js";
 
 import { nickname, directSession } from "./group-management.js";
 import { createInvitation } from "./group-invitation.js";
 import { cancelTask, checkpointPublication } from "./task-control.js";
 const handlers = {
+  ENSURE_EXTERNAL_CHILD: ensureExternalChild,
+  SAVE_EXTERNAL_CHILD: saveExternalChild,
   SET_NICKNAME: nickname,
   CREATE_DIRECT_SESSION: directSession,
   CREATE_INVITATION: createInvitation,
@@ -67,6 +70,8 @@ class SqlCommandTransaction implements CommandTransaction {
     return new CommandContext(this.db, command).authorize();
   }
   async previous(command: TenantCommand) {
+    // Child projections carry their own durable binding/watermark; do not copy full snapshots into command receipts.
+    if (["ENSURE_EXTERNAL_CHILD", "SAVE_EXTERNAL_CHILD"].includes(command.operation)) return null;
     const row = await first(
       this.db,
       "SELECT ext_param_value FROM byai.byai_session_ext WHERE session_id=$1 AND ext_param_code=$2",
@@ -86,6 +91,7 @@ class SqlCommandTransaction implements CommandTransaction {
   }
   /** 复用 session_ext 存幂等结果，与业务变更同事务提交，不新增独立回执表。 */
   async record(command: TenantCommand, result: Record<string, any>): Promise<void> {
+    if (["ENSURE_EXTERNAL_CHILD", "SAVE_EXTERNAL_CHILD"].includes(command.operation)) return;
     await new CommandContext(this.db, command).setExtension(
       `node_command:${command.requestId}`,
       JSON.stringify({ hash: command.requestHash, userId: command.userId, result }),

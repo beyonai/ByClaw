@@ -15,7 +15,10 @@ export class HistoryService {
   private readonly group: GroupHistory;
   private readonly timeline: TimelineHistory;
   private readonly topic: TopicHistory;
-  constructor(tenantId: string, repository: HistoryRepository) {
+  constructor(
+    tenantId: string,
+    private readonly repository: HistoryRepository,
+  ) {
     this.permission = new HistoryAccess(tenantId, repository);
     this.basic = new TraditionalHistory(tenantId, repository);
     this.group = new GroupHistory(tenantId, repository);
@@ -23,6 +26,22 @@ export class HistoryService {
     this.topic = new TopicHistory(tenantId, repository);
   }
   access = (...args: Parameters<HistoryAccess["access"]>) => this.permission.access(...args);
+  async sessionExtensions(actor: string, sessionId: string) {
+    await this.permission.access(actor, sessionId);
+    return (await this.repository.extensions(sessionId)).filter((row) =>
+      [
+        "external_session_id",
+        "external_root_session_id",
+        "external_parent_session_id",
+        "external_team_id",
+        "external_message_id",
+        "external_session_status",
+        "child_name",
+        "child_role",
+        "event_source",
+      ].includes(row.extParamCode),
+    );
+  }
   traditional = (...args: Parameters<TraditionalHistory["traditional"]>) =>
     this.basic.traditional(...args);
   byIds = (...args: Parameters<TraditionalHistory["byIds"]>) => this.basic.byIds(...args);

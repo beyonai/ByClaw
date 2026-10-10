@@ -46,7 +46,16 @@ public final class TenantNodeModels {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record SessionView(String sessionId, String sessionName, String sessionType,
                               String createTime, String updateTime, String sessionContent,
-                              String creatorId, String enterpriseId, String projectId) {
+                              String creatorId, String enterpriseId, String projectId,
+                              String parentSessionId, List<java.util.Map<String, Object>> sessionExts,
+                              java.util.Map<String, Object> groupCoordination, String targetAgentId,
+                              Boolean groupCoordinationChild) {
+        public SessionView(String sessionId, String sessionName, String sessionType,
+                           String createTime, String updateTime, String sessionContent,
+                           String creatorId, String enterpriseId, String projectId) {
+            this(sessionId, sessionName, sessionType, createTime, updateTime, sessionContent,
+                creatorId, enterpriseId, projectId, null, null, null, null, null);
+        }
     }
 
     public record MessageQuery(String sessionId, int pageNum, int pageSize) {
@@ -208,7 +217,7 @@ public final class TenantNodeModels {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record MirrorAnswerMetadata(String role, String agentId, String mode,
                                        String resourceName, String resourceType, String resourceId,
-                                       String agentType, MirrorUsedModel usedModel) {
+                                       String agentType, MirrorUsedModel usedModel, String messageRenderVersion) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

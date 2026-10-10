@@ -35,6 +35,9 @@ public class ChatRuntimeState {
 
     private Long userId;
 
+    /** Trusted routing identity must survive Redis recovery; never infer it from worker metadata. */
+    private com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext tenantContext;
+
     /** Preserve the server-owned membership boundary through runtime recovery. */
     private Long sessionMemberAgentId;
 

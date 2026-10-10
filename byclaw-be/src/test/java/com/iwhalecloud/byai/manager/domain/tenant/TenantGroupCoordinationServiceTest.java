@@ -157,10 +157,21 @@ class TenantGroupCoordinationServiceTest {
         assertThat(result.toString()).contains("群组工作助手", "结构化协助请求").doesNotContain("文案员工");
         assertThat(gateway).containsKeys("groupCoordination", "groupCoordinator", "groupChat", "groupContextSnapshot");
         assertThat(result.toString()).contains("/by/context/group-history.json", "请先读取");
+        assertThat(result.toString()).contains("/by/.sessions/50/.byclaw/task-delivery.json");
         ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
         verify(node).request(eq(tenant), eq("POST"), eq("/internal/v1/group-chats/30/context"), body.capture(), any());
         assertThat(body.getValue()).containsEntry("beforeMessageId", "8000000010000000201").containsEntry("agentContext", true);
         assertThat(gateway.get("groupCoordinator")).isEqualTo(Map.of("id", "90", "name", "群组工作助手"));
+    }
+
+    @Test
+    void publicationIntentUsesExistingPreparationToolWithoutPublishingAutomatically() {
+        stored(scope("DIRECT"), "42");
+        when(resources.findById(90L)).thenReturn(coordinator());
+        AssistantChatDto request = request(42L);
+        request.setMessageIntent("prepare_group_task_publication");
+        Object result = service.decorate(executionContext(request), "发布成果", new HashMap<>());
+        assertThat(result.toString()).contains("调用 prepare_group_task_publication", "等待用户在卡片中确认");
     }
 
     @Test

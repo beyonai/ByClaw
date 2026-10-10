@@ -102,7 +102,17 @@ public class TenantChatRoutingAspect {
                         new TypeReference<SessionView>() { });
                     return ResponseUtil.successResponse(new Page<>(List.of(session), 1, 1, 1, 1));
                 }
-                if (query.getParentSessionId() != null || query.getObjectId() != null
+                if (query.getParentSessionId() != null) {
+                    if (query.getParentSessionId() <= 0 || query.getObjectId() != null || query.getObjectType() != null)
+                        throw unsupported();
+                    Page<java.util.Map<String, Object>> children = node.request(context, "POST",
+                        "/internal/v1/sessions/" + query.getParentSessionId() + "/children/query",
+                        new SessionQuery(query.getPageNum(), query.getPageSize(),
+                            query.getSearchKeyword() == null ? "" : query.getSearchKeyword(), List.of("h_as"), null),
+                        new TypeReference<Page<java.util.Map<String, Object>>>() { });
+                    return ResponseUtil.successResponse(children);
+                }
+                if (query.getObjectId() != null
                     || query.getObjectType() != null) {
                     throw unsupported();
                 }

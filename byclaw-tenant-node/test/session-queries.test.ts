@@ -2,8 +2,40 @@ import { describe, expect, it, vi } from "vitest";
 import { SessionQueries } from "../src/application/session-queries.js";
 import { SqlSessionRepository } from "../src/infrastructure/persistence/session-repository.js";
 import type { SqlSession } from "../src/application/database-ports.js";
+import Fastify from "fastify";
+import { sessionRoutes } from "../src/interfaces/http/session-routes.js";
+import type { HistoryService } from "../src/application/history.js";
 
 describe("tenant session query", () => {
+  it("loads child sessions after authorizing their parent", async () => {
+    const list = vi.fn(async () => ({
+      list: [{ sessionId: "51", parentSessionId: "50" }],
+      total: 1,
+    }));
+    const access = vi.fn(async (_actor: string, sessionId: string) => ({
+      sessionId,
+      ...(sessionId === "51" ? { parentSessionId: "50" } : {}),
+    }));
+    const sessionExtensions = vi.fn(async () => []);
+    const app = Fastify();
+    sessionRoutes(app, new SessionQueries({ list }), {
+      access,
+      sessionExtensions,
+    } as unknown as HistoryService);
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/v1/sessions/50/children/query",
+      headers: { "x-actor-user-id": "8" },
+      payload: { pageNum: 1, pageSize: 20 },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().list).toEqual([
+      { sessionId: "51", parentSessionId: "50", sessionExts: [] },
+    ]);
+    expect(access).toHaveBeenCalledWith("8", "50");
+    expect(list).toHaveBeenCalledWith("8", 1, 20, "", ["h_as"], undefined, undefined, "50");
+    await app.close();
+  });
   it("filters agent history inside the tenant and actor boundary", async () => {
     const sql = vi.fn(async () => []);
     const query = new SessionQueries(new SqlSessionRepository({ query: sql }, "123"));

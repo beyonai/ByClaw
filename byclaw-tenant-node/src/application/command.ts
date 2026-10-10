@@ -1,6 +1,8 @@
 import type { TenantIdentity } from "../domain/tenant.js";
 export const operations = [
   "CREATE_SESSION",
+  "ENSURE_EXTERNAL_CHILD",
+  "SAVE_EXTERNAL_CHILD",
   "CREATE_GROUP",
   "UPDATE_SESSION",
   "DELETE_SESSION",

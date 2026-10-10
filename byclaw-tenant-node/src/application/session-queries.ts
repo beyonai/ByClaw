@@ -11,12 +11,19 @@ export interface SessionRepository {
     types: string[],
     projectId?: string,
     agentId?: string,
+    parentSessionId?: string,
   ): Promise<unknown>;
 }
 /** 个人会话查询入口；校验分页及类型，按当前用户查询；私有任务过滤由仓储完成。 */
 export class SessionQueries {
   constructor(private readonly repository: SessionRepository) {}
   async list(actor: string, input: Record<string, any>) {
+    return this.query(actor, input);
+  }
+  async children(actor: string, parentSessionId: string, input: Record<string, any>) {
+    return this.query(actor, input, requireId(parentSessionId));
+  }
+  private async query(actor: string, input: Record<string, any>, parentSessionId?: string) {
     if (
       Object.keys(input).some(
         (key) =>
@@ -41,6 +48,17 @@ export class SessionQueries {
           ? "-1"
           : requireId(input.projectId);
     const agentId = input.agentId == null ? undefined : requireId(input.agentId);
+    if (parentSessionId)
+      return this.repository.list(
+        actor,
+        page,
+        size,
+        keyword,
+        types,
+        projectId,
+        agentId,
+        parentSessionId,
+      );
     if (agentId) return this.repository.list(actor, page, size, keyword, types, projectId, agentId);
     return projectId
       ? this.repository.list(actor, page, size, keyword, types, projectId)

@@ -210,6 +210,16 @@ hash 的字节约定：递归按 JSON 对象键的 UTF-16 字典顺序排序，�
 
 ## 验证与联调边界
 
+### 租户任务事件、子会话与交付
+
+BE 在任务输入时保存可信的租户归属，Redis 恢复上下文保留同一身份。外部子 Agent 的会话、消息和绑定写入该租户 Node；`POST /internal/v1/sessions/{id}/children/query` 先校验父会话，再沿父链校验各子会话与任务发起人。会话详情和子会话列表返回导航所需的 `parentSessionId` 与外部 `sessionExts`，普通会话列表排除子会话。
+
+`ENSURE_EXTERNAL_CHILD` 复用稳定子会话与消息 ID；`SAVE_EXTERNAL_CHILD` 使用 `expectedStreamId` 校验读取水位，提交消息正文、结构化事件、推理记录、最终正文和新水位后才允许 ACK。后端按 Stream 水位及逻辑事件序号去重，较新的 `child_turn` 重置上轮内容，过期轮次不覆盖新内容。后续状态事件保留已写入的最终正文。子会话消息使用既有 `created_seq` 和 `storage_version` 字段，无需新增数据库结构。
+
+实时父会话事件、运行状态和子会话快照、增量及状态帧均携带 `enterpriseId`，仅发给同一用户在对应企业的频道，并通过 Redis Pub/Sub 送达其他 BE 实例。接收实例按自己的子会话订阅选择正文或状态通知，再生成增量；消息元数据保留 `messageRenderVersion=v2`、本地父会话 ID 和外部运行标识。群回显只提取文本或明确的最终答案，任务计划、团队快照及文件变更保留在结构化消息中。DIRECT 与 COORDINATED 任务均通知终态。
+
+任务请求复用原链路的 `.byclaw/task-delivery.json` 交付信号指引；用户发起 `prepare_group_task_publication` 时追加发布准备工具指引，由用户在待发布卡片中确认。部署此修复需要同时更新 BE 与租户 Node；既有历史任务的错误正文、缺失绑定或交付信号不会自动补写。
+
 启动入口自动读取模块根目录的 `.env`，不依赖调试器工作目录，已有环境变量优先。
 
 本地填写 `.env` 后运行 `pnpm dev`，或调试 `src/dev.ts`。开发入口默认监听 `127.0.0.1`，把示例状态目录改为模块内 `.tenant-state/`；TLS 路径未填写或仍为 `/run/secrets/` 时，用 OpenSSL 自动生成本地 CA、Node 证书和 BE 客户端证书，保存至 `.tenant-state/dev-tls/`，有效证书重复启动会复用。自定义证书路径保持不变。私钥仅当前用户可读，目录已被 gitignore 排除；不会安装系统信任证书。

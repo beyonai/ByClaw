@@ -26,6 +26,9 @@ public class TenantChatMirrorService {
     private final ObjectMapper objectMapper;
     private final GroupChatEventPublisher groupEvents;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantScopedSessionEventService tenantProjections;
+
     public TenantChatMirrorService(TenantNodeClient node, ObjectMapper objectMapper,
         GroupChatEventPublisher groupEvents) {
         this.node = node;
@@ -34,6 +37,7 @@ public class TenantChatMirrorService {
     }
 
     public void input(ChatProcessContext context) {
+        if (tenantProjections != null) tenantProjections.remember(context.sessionId, context.tenantContext);
         String userMessageId = context.userMessageId.toString();
         node.mirror(context.tenantContext, event(context, "INPUT", "0", "input-" + userMessageId,
             new MirrorInputPayload(userMessageId, Long.toString(context.tenantContext.userId()), null,
@@ -43,8 +47,10 @@ public class TenantChatMirrorService {
     public void terminal(ChatProcessContext context) {
         String answerMessageId = context.modelAnswerMessageId.toString();
         String content = context.messageContext.getExplicitFinalAnswer();
-        if (content == null) content = context.messageContext.getAnswerText().toString();
-        MirrorAnswerMetadata metadata = metadata(context.assistantChatDto.getMetadata());
+        if (content == null) content = visibleText(context.messageContext);
+        boolean ordered = java.util.stream.Stream.concat(context.messageContext.getAnswerMessageList().stream(),
+            context.messageContext.getReasonMessageList().stream()).anyMatch(segment -> segment.getSeq() != null);
+        MirrorAnswerMetadata metadata = metadata(context.assistantChatDto.getMetadata(), ordered);
         node.mirror(context.tenantContext, event(context, context.gatewayError ? "ERROR" : "TERMINAL",
             "1", "terminal-" + answerMessageId,
             new MirrorAnswerPayload(answerMessageId, context.taskId.toString(), content, content,
@@ -66,7 +72,7 @@ public class TenantChatMirrorService {
             Object groupId = task.get("groupSessionId");
             if (groupId == null) return;
             Object coordination = params.get("groupCoordination");
-            if (coordination instanceof Map<?, ?> scope && "COORDINATED".equals(scope.get("mode"))) {
+            if (task.get("status") != null && task.get("turnStatus") != null) {
                 JSONObject status = new JSONObject();
                 status.put("type", "GROUP_CHAT_EVENT");
                 status.put("event", "TASK_STATUS_CHANGED");
@@ -76,10 +82,10 @@ public class TenantChatMirrorService {
                 status.put("targetAgentId", task.get("targetAgentId"));
                 status.put("status", task.get("status"));
                 status.put("turnStatus", task.get("turnStatus"));
-                status.put("groupCoordination", coordination);
+                if (coordination != null) status.put("groupCoordination", coordination);
                 groupEvents.publishTenant(context.tenantContext, Long.valueOf(groupId.toString()), status);
-                return;
             }
+            if (coordination instanceof Map<?, ?> scope && "COORDINATED".equals(scope.get("mode"))) return;
             if (context.gatewayError || messageId == null) return;
             List<MessageView> committed = node.request(context.tenantContext, "POST",
                 "/internal/v1/assiman/getMessageByIds", Map.of("messageIds", List.of(messageId.toString())),
@@ -105,10 +111,26 @@ public class TenantChatMirrorService {
         }
     }
 
-    private MirrorAnswerMetadata metadata(String value) {
-        if (value == null || value.isBlank()) return null;
+    static String visibleText(com.iwhalecloud.byai.state.domain.chat.model.MessageContext message) {
+        if (message.getAnswerMessageList().isEmpty()) return message.getAnswerText().toString();
+        StringBuilder text = new StringBuilder();
+        for (var segment : message.getAnswerMessageList()) {
+            if (!"1002".equals(segment.getContentType()) || segment.getChoices() == null) continue;
+            for (var choice : segment.getChoices()) {
+                if (choice.getDelta() != null && choice.getDelta().getContent() != null)
+                    text.append(choice.getDelta().getContent());
+            }
+        }
+        return text.toString();
+    }
+
+    private MirrorAnswerMetadata metadata(String value, boolean ordered) {
+        if ((value == null || value.isBlank()) && !ordered) return null;
         try {
-            return objectMapper.readValue(value, MirrorAnswerMetadata.class);
+            var metadata = value == null || value.isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(value);
+            if (ordered && metadata instanceof com.fasterxml.jackson.databind.node.ObjectNode object)
+                object.put("messageRenderVersion", "v2");
+            return objectMapper.treeToValue(metadata, MirrorAnswerMetadata.class);
         } catch (JsonProcessingException error) {
             throw new IllegalArgumentException("tenant answer metadata is invalid", error);
         }

@@ -85,6 +85,54 @@ class SessionStreamEventRouterLiveDedupTest {
         return dataJson;
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void tenantRootEventsReachTheEnterpriseChannelDuringBackgroundExecution(boolean runtimeEvent) {
+        var own = new io.netty.channel.embedded.EmbeddedChannel();
+        var personal = new io.netty.channel.embedded.EmbeddedChannel();
+        own.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("11");
+        var channels = mock(com.iwhalecloud.byai.state.domain.ws.manager.ChannelManager.class);
+        when(channels.getChannels(7L)).thenReturn(java.util.Set.of(own, personal));
+        var transport = new MultiDeviceBroadcastService(channels,
+            mock(org.springframework.data.redis.core.StringRedisTemplate.class),
+            mock(org.springframework.data.redis.listener.RedisMessageListenerContainer.class),
+            mock(ChatRuntimeInstance.class), "test");
+        ReflectionTestUtils.setField(router, "multiDeviceBroadcastService", transport);
+        var context = liveCtx("0-0");
+        context.userId = 7L;
+        context.tenantContext = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(7L, 11L, "MEMBER");
+        context.transport = ChatTransport.HTTP_SSE;
+        context.gatewayEventQueue = new java.util.concurrent.LinkedBlockingQueue<>();
+        when(gatewayStreamEventProcessor.normalizeEventType(any(), any())).thenReturn("answerDelta");
+        if (runtimeEvent) {
+            var redis = mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+            org.springframework.data.redis.core.ValueOperations<String, String> values = mock(org.springframework.data.redis.core.ValueOperations.class);
+            when(redis.opsForValue()).thenReturn(values);
+            when(values.get(anyString())).thenReturn("{\"userId\":7,\"enterpriseId\":11,\"role\":\"MEMBER\"}");
+            ReflectionTestUtils.setField(router, "tenantScopedSessionEventService", new TenantScopedSessionEventService(
+                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class), redis,
+                pythonSseService, gatewayStreamEventProcessor, mock(ScopedProjectionBroadcaster.class)));
+            var runtimes = mockField("sessionRuntimeStateService", SessionRuntimeStateService.class);
+            when(runtimes.isRuntimeEvent(any())).thenReturn(true);
+            var runtime = new com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState();
+            runtime.setSessionId(10L); runtime.setTraceId("trace-1");
+            when(runtimes.applyEvent(any(), any())).thenReturn(runtime);
+            mockField("sessionService", com.iwhalecloud.byai.state.domain.session.service.SessionService.class);
+        }
+        try {
+            assertThat(router.dispatch(event("100-0", "answerDelta")).shouldAcknowledge()).isTrue();
+            io.netty.handler.codec.http.websocketx.TextWebSocketFrame frame = own.readOutbound();
+            assertThat(frame).isNotNull();
+            try {
+                var payload = JSONObject.parseObject(frame.text());
+                assertThat(payload.getString("enterpriseId")).isEqualTo("11");
+                assertThat(payload.getString("type")).isEqualTo(runtimeEvent ? "SESSION_RUNTIME_STATUS" : "CHAT_STREAM");
+                if (!runtimeEvent) assertThat(payload.getString("event")).isEqualTo("answerDelta");
+            } finally { frame.release(); }
+            assertThat((Object) personal.readOutbound()).isNull();
+        } finally { own.finishAndReleaseAll(); personal.finishAndReleaseAll(); }
+    }
+
     @Test
     void liveIncrementalReplayIsNotPushedTwice() {
         when(gatewayStreamEventProcessor.normalizeEventType(any(), any()))

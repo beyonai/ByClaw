@@ -10,6 +10,17 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class TenantNodeModelsSerializationTest {
+    @org.junit.jupiter.api.Test
+    void exactSessionViewRetainsChildBindingsAndScope() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var session = mapper.readValue("{\"sessionId\":\"51\",\"parentSessionId\":\"50\","
+            + "\"sessionExts\":[{\"extParamCode\":\"external_session_id\",\"extParamValue\":\"dsh-child\"}]}",
+            TenantNodeModels.SessionView.class);
+        var result = mapper.valueToTree(session);
+        org.assertj.core.api.Assertions.assertThat(result.path("parentSessionId").asText()).isEqualTo("50");
+        org.assertj.core.api.Assertions.assertThat(result.path("sessionExts").get(0).path("extParamValue").asText())
+            .isEqualTo("dsh-child");
+    }
 
     @Test
     void historicalMessagesCanBeWrittenByThePublicApiJsonConverter() {

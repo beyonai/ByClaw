@@ -14,6 +14,7 @@ export class SqlSessionRepository implements SessionRepository {
     types: string[],
     projectId?: string,
     agentId?: string,
+    parentSessionId?: string,
   ) {
     const params = projectId
       ? [this.enterpriseId, actor, `%${keyword}%`, types, projectId]
@@ -26,6 +27,12 @@ export class SqlSessionRepository implements SessionRepository {
       const agentParam = `$${params.length}`;
       where += ` AND creator_id=$2 AND (object_id::text=${agentParam} OR EXISTS(SELECT 1 FROM byai.byai_session_member a WHERE a.session_id=byai_session.session_id AND a.mem_obj_type='AGENT' AND a.mem_obj_id::text=${agentParam} AND a.com_acct_id=$1))`;
     }
+    if (parentSessionId) {
+      params.push(parentSessionId);
+      where += ` AND parent_session_id=$${params.length}`;
+    } else {
+      where += " AND parent_session_id IS NULL";
+    }
     const limitParam = params.length + 1;
     const offsetParam = params.length + 2;
     const [total] = await this.db.query(
@@ -33,7 +40,7 @@ export class SqlSessionRepository implements SessionRepository {
       params,
     );
     const list = await this.db.query(
-      `SELECT session_id::text AS "sessionId",session_name AS "sessionName",session_type AS "sessionType",session_content AS "sessionContent",creator_id::text AS "creatorId",enterprise_id::text AS "enterpriseId",project_id::text AS "projectId",create_time AS "createTime",update_time AS "updateTime" FROM byai.byai_session WHERE ${where} ORDER BY update_time DESC,session_id DESC LIMIT $${limitParam} OFFSET $${offsetParam}`,
+      `SELECT session_id::text AS "sessionId",parent_session_id::text AS "parentSessionId",session_name AS "sessionName",session_type AS "sessionType",session_content AS "sessionContent",creator_id::text AS "creatorId",enterprise_id::text AS "enterpriseId",project_id::text AS "projectId",create_time AS "createTime",update_time AS "updateTime" FROM byai.byai_session WHERE ${where} ORDER BY update_time DESC,session_id DESC LIMIT $${limitParam} OFFSET $${offsetParam}`,
       [...params, size, (page - 1) * size],
     );
     return { list, total: Number(total?.count ?? 0), pageNum: page, pageSize: size };

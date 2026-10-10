@@ -41,6 +41,45 @@ const message = (overrides: Row = {}) => ({
   ...overrides,
 });
 describe("tenant history use cases", () => {
+  it("lets a DSH child inherit the root employee while retaining task initiator authorization", async () => {
+    const { service, repo } = setup();
+    vi.mocked(repo.session).mockImplementation(async (id) => ({
+      sessionId: id,
+      enterpriseId: "10",
+      creatorId: "20",
+      sessionType: id === "30" ? "hs_as" : "h_as",
+      ...(id === "51" ? { parentSessionId: "50", objectId: "90" } : {}),
+    }));
+    vi.mocked(repo.task).mockImplementation(async (id) =>
+      id === "50"
+        ? {
+            taskSessionId: "50",
+            groupSessionId: "30",
+            initiatorUserId: "20",
+            targetAgentId: "90",
+          }
+        : null,
+    );
+    vi.mocked(repo.extensions).mockImplementation(async (id) =>
+      id === "50"
+        ? [
+            {
+              extParamCode: "group_coordination_scope",
+              extParamValue: JSON.stringify({
+                schemaVersion: "byclaw.group-coordination/v1",
+                mode: "COORDINATED",
+                taskSessionId: "50",
+                groupSessionId: "30",
+                coordinatorAgentId: "90",
+                allowedAgentIds: ["42"],
+              }),
+            },
+          ]
+        : [{ extParamCode: "event_source", extParamValue: "EXTERNAL_CHILD" }],
+    );
+    await expect(service.access("20", "51")).resolves.toMatchObject({ targetAgentId: "90" });
+    await expect(service.access("21", "51")).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
+  });
   it("allows a group member who did not create the group", async () => {
     const { service, repo } = setup();
     await service.detail("21", "30");

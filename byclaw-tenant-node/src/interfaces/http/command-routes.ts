@@ -14,6 +14,8 @@ export function commandRoutes(
 ): void {
   const routes: ["POST" | "PATCH" | "DELETE", string, Operation][] = [
     ["POST", "/sessions", "CREATE_SESSION"],
+    ["POST", "/sessions/:id/external-children", "ENSURE_EXTERNAL_CHILD"],
+    ["POST", "/sessions/:id/external-child-projection", "SAVE_EXTERNAL_CHILD"],
     ["PATCH", "/sessions/:id", "UPDATE_SESSION"],
     ["DELETE", "/sessions/:id", "DELETE_SESSION"],
     ["POST", "/group-chats", "CREATE_GROUP"],

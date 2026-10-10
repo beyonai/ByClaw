@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeInstance;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
 import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 import com.iwhalecloud.byai.state.domain.ws.manager.ChannelManager;
 
@@ -116,12 +117,25 @@ public class MultiDeviceBroadcastService implements MessageListener {
     private long scopedWriteTimeoutMillis = 5000;
 
     public void broadcastScopedProjection(Long userId, String contextKey, JSONObject message, boolean terminal) {
+        broadcastScopedProjection(userId, null, contextKey, message, terminal);
+    }
+
+    public void broadcastTenantScopedProjection(Long userId, Long enterpriseId, String contextKey,
+                                                JSONObject message, boolean terminal) {
+        if (enterpriseId == null) throw new IllegalArgumentException("tenant projection enterprise required");
+        message.put("enterpriseId", enterpriseId.toString());
+        broadcastScopedProjection(userId, enterpriseId.toString(), contextKey, message, terminal);
+        publish(userId, enterpriseId.toString(), message.toJSONString(), message.getString("type"), contextKey, terminal);
+    }
+
+    private int broadcastScopedProjection(Long userId, String enterpriseId, String contextKey,
+                                           JSONObject message, boolean terminal) {
         if (userId == null || contextKey == null || message == null) {
-            return;
+            return 0;
         }
         Set<Channel> channels = channelManager.getChannels(userId);
         if (channels.isEmpty()) {
-            return;
+            return 0;
         }
         JSONObject data = message.getJSONObject("data");
         String text = message.toJSONString();
@@ -130,11 +144,18 @@ public class MultiDeviceBroadcastService implements MessageListener {
         ScopedFrame frame = new ScopedFrame(key, message, text, ByteBufUtil.utf8Bytes(text), terminal,
             true, null, null);
         ScopedFrame statusFrame = scopedSessionId == null ? null : statusFrame(scopedSessionId, message, terminal);
+        if (statusFrame != null && enterpriseId != null) {
+            statusFrame.message().put("enterpriseId", enterpriseId);
+            String statusText = statusFrame.message().toJSONString();
+            statusFrame = new ScopedFrame(statusFrame.key(), statusFrame.message(), statusText,
+                ByteBufUtil.utf8Bytes(statusText), terminal, false, statusFrame.statusSessionId(), statusFrame.statusSignature());
+        }
+        int sentCount = 0;
         for (Channel channel : channels) {
             if (!channel.isActive()) {
                 continue;
             }
-            if (channel.attr(Constant.ATT_ENTERPRISE_ID).get() != null) {
+            if (!Objects.equals(enterpriseId, channel.attr(Constant.ATT_ENTERPRISE_ID).get())) {
                 continue;
             }
             ScopedOutboundState state = channel.attr(SCOPED_OUTBOUND).get();
@@ -154,7 +175,9 @@ public class MultiDeviceBroadcastService implements MessageListener {
             else {
                 state.enqueue(frame);
             }
+            sentCount++;
         }
+        return sentCount;
     }
 
     private ScopedFrame statusFrame(String scopedSessionId, JSONObject message, boolean terminal) {
@@ -451,6 +474,17 @@ public class MultiDeviceBroadcastService implements MessageListener {
 
     public void broadcastRawEvent(Long userId, Long sessionId, JSONObject dataJson,
                                   Channel senderChannel, String clientRequestId) {
+        broadcastRawEvent(userId, null, sessionId, dataJson, senderChannel, clientRequestId);
+    }
+
+    public void broadcastTenantRawEvent(TenantRequestContext tenant, Long sessionId, JSONObject dataJson,
+                                        Channel senderChannel, String clientRequestId) {
+        broadcastRawEvent(tenant.userId(), Long.toString(tenant.enterpriseId()), sessionId, dataJson,
+            senderChannel, clientRequestId);
+    }
+
+    private void broadcastRawEvent(Long userId, String enterpriseId, Long sessionId, JSONObject dataJson,
+                                   Channel senderChannel, String clientRequestId) {
         if (userId == null || dataJson == null) {
             return;
         }
@@ -473,7 +507,8 @@ public class MultiDeviceBroadcastService implements MessageListener {
             message.put("metadata", metadata);
         }
 
-        broadcastFrame(userId, message.toJSONString(), senderChannel, eventType);
+        if (enterpriseId != null) message.put("enterpriseId", enterpriseId);
+        broadcastFrame(userId, enterpriseId, message.toJSONString(), senderChannel, eventType);
     }
 
     /**
@@ -492,6 +527,16 @@ public class MultiDeviceBroadcastService implements MessageListener {
         String messageType = message.getString("type");
         int sentCount = broadcastLocally(userId, frameText, senderChannel, messageType);
         publish(userId, frameText, messageType);
+        return sentCount;
+    }
+
+    public int broadcastTenantRawToUser(TenantRequestContext tenant, JSONObject message, Channel senderChannel) {
+        String enterpriseId = Long.toString(tenant.enterpriseId());
+        message.put("enterpriseId", enterpriseId);
+        String frameText = message.toJSONString();
+        String messageType = message.getString("type");
+        int sentCount = broadcastLocally(tenant.userId(), enterpriseId, frameText, senderChannel, messageType);
+        publish(tenant.userId(), enterpriseId, frameText, messageType);
         return sentCount;
     }
 
@@ -518,7 +563,14 @@ public class MultiDeviceBroadcastService implements MessageListener {
             if (userId == null || StringUtils.isBlank(frameText)) {
                 return 0;
             }
-            return broadcastLocally(userId, frameText, null, envelope.getString("messageType"));
+            if ("SCOPED_PROJECTION".equals(envelope.getString("delivery"))) {
+                String enterpriseId = envelope.getString("enterpriseId");
+                String contextKey = envelope.getString("contextKey");
+                if (StringUtils.isBlank(enterpriseId) || StringUtils.isBlank(contextKey)) return 0;
+                return broadcastScopedProjection(userId, enterpriseId, contextKey, JSONObject.parseObject(frameText),
+                    envelope.getBooleanValue("terminal"));
+            }
+            return broadcastLocally(userId, envelope.getString("enterpriseId"), frameText, null, envelope.getString("messageType"));
         }
         catch (Exception e) {
             log.warn("忽略无效的跨实例 WebSocket 广播消息: {}", e.getMessage());
@@ -527,11 +579,19 @@ public class MultiDeviceBroadcastService implements MessageListener {
     }
 
     private void broadcastFrame(Long userId, String frameText, Channel senderChannel, String messageType) {
-        broadcastLocally(userId, frameText, senderChannel, messageType);
-        publish(userId, frameText, messageType);
+        broadcastFrame(userId, null, frameText, senderChannel, messageType);
+    }
+
+    private void broadcastFrame(Long userId, String enterpriseId, String frameText, Channel senderChannel, String messageType) {
+        broadcastLocally(userId, enterpriseId, frameText, senderChannel, messageType);
+        publish(userId, enterpriseId, frameText, messageType);
     }
 
     private int broadcastLocally(Long userId, String frameText, Channel senderChannel, String messageType) {
+        return broadcastLocally(userId, null, frameText, senderChannel, messageType);
+    }
+
+    private int broadcastLocally(Long userId, String enterpriseId, String frameText, Channel senderChannel, String messageType) {
         Set<Channel> channels = channelManager.getChannels(userId);
         JSONObject terminal = ChatChainLog.terminalFrame(frameText);
         int sentCount = 0;
@@ -542,7 +602,7 @@ public class MultiDeviceBroadcastService implements MessageListener {
             if (!channel.isActive()) {
                 continue;
             }
-            if (channel.attr(Constant.ATT_ENTERPRISE_ID).get() != null) {
+            if (!Objects.equals(enterpriseId, channel.attr(Constant.ATT_ENTERPRISE_ID).get())) {
                 continue;
             }
             try {
@@ -567,12 +627,27 @@ public class MultiDeviceBroadcastService implements MessageListener {
     }
 
     private void publish(Long userId, String frameText, String messageType) {
+        publish(userId, null, frameText, messageType);
+    }
+
+    private void publish(Long userId, String enterpriseId, String frameText, String messageType) {
+        publish(userId, enterpriseId, frameText, messageType, null, false);
+    }
+
+    private void publish(Long userId, String enterpriseId, String frameText, String messageType,
+                         String contextKey, boolean terminal) {
         JSONObject envelope = new JSONObject();
         envelope.put("schemaVersion", ENVELOPE_SCHEMA_VERSION);
         envelope.put("sourceInstanceId", runtimeInstance.getInstanceId());
         envelope.put("userId", userId);
+        if (enterpriseId != null) envelope.put("enterpriseId", enterpriseId);
         envelope.put("messageType", messageType);
         envelope.put("frameText", frameText);
+        if (contextKey != null) {
+            envelope.put("delivery", "SCOPED_PROJECTION");
+            envelope.put("contextKey", contextKey);
+            envelope.put("terminal", terminal);
+        }
         try {
             stringRedisTemplate.convertAndSend(pubsubTopicName, envelope.toJSONString());
         }

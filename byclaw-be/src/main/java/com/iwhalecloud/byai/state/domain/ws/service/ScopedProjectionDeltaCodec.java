@@ -58,6 +58,7 @@ final class ScopedProjectionDeltaCodec {
         delta.put("type", DELTA_TYPE);
         delta.put("sessionId", currentEnvelope.getString("sessionId"));
         delta.put("streamId", currentEnvelope.getString("streamId"));
+        if (currentEnvelope.containsKey("enterpriseId")) delta.put("enterpriseId", currentEnvelope.getString("enterpriseId"));
         delta.put("data", payload);
         return delta;
     }

@@ -55,7 +55,15 @@ export class HistoryAccess {
         if (parent.groupCoordination) {
           const scope = parseGroupCoordination(parent.groupCoordination)!;
           const target = session.objectId == null ? undefined : String(session.objectId);
-          if (!target || !scope.allowedAgentIds.includes(target))
+          const externalChild = (await this.repository.extensions(sessionId)).some(
+            (row) => row.extParamCode === "event_source" && row.extParamValue === "EXTERNAL_CHILD",
+          );
+          if (
+            !target ||
+            (externalChild
+              ? target !== parent.targetAgentId
+              : !scope.allowedAgentIds.includes(target))
+          )
             throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
           session.groupCoordination = scope;
           session.groupCoordinationChild = true;

@@ -6110,6 +6110,333 @@
           }
         }
       }
+    },
+    "/internal/v1/sessions/{id}/external-children": {
+      "post": {
+        "summary": "ENSURE_EXTERNAL_CHILD",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "description": "规范十进制 signed bigint ID；禁止 JS Number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantCommand"
+              }
+            }
+          }
+        },
+        "description": "Create or reload a stable external child binding in the authorized parent tenant."
+      }
+    },
+    "/internal/v1/sessions/{id}/external-child-projection": {
+      "post": {
+        "summary": "SAVE_EXTERNAL_CHILD",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "description": "规范十进制 signed bigint ID；禁止 JS Number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantCommand"
+              }
+            }
+          }
+        },
+        "description": "Commit a full external child projection after checking expectedStreamId; returns the committed message including storageVersion and finalContent."
+      }
+    },
+    "/internal/v1/sessions/{id}/children/query": {
+      "post": {
+        "summary": "Query authorized external child sessions",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "description": "规范十进制 signed bigint ID；禁止 JS Number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "description": "Authorize the parent and each child; returns parentSessionId and public external sessionExts."
+      }
     }
   },
   "components": {
@@ -6214,6 +6541,8 @@
             "type": "string",
             "enum": [
               "CREATE_SESSION",
+              "ENSURE_EXTERNAL_CHILD",
+              "SAVE_EXTERNAL_CHILD",
               "CREATE_GROUP",
               "UPDATE_SESSION",
               "DELETE_SESSION",
