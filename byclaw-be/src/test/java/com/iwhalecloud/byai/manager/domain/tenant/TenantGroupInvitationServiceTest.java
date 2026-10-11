@@ -134,7 +134,8 @@ class TenantGroupInvitationServiceTest {
         Object[] args = invitation();
         ((GroupChatInvitationTokenRequest) args[0]).setEnterpriseId("123");
         assertThatThrownBy(() -> service.resolve("validateInvitation", args, null))
-            .hasMessage("Invitation tenant mismatch");
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+            .hasMessageContaining("Invitation tenant mismatch");
         verifyNoInteractions(contexts, data);
     }
 

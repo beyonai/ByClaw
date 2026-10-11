@@ -42,7 +42,8 @@ public class TenantGroupInvitationService {
         var link = links.selectInvitationByToken(token);
         String hint = ((GroupChatInvitationTokenRequest) args[0]).getEnterpriseId();
         if (hint != null && (link == null || !hint.equals(String.valueOf(link.getComAcctId()))))
-            throw new IllegalArgumentException("Invitation tenant mismatch");
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                "Invitation tenant mismatch");
         if (link == null) return fallback;
         if (link.getComAcctId() == null || link.getComAcctId() <= 1) return null;
         if (!"ACTIVE".equals(link.getStatus()) || link.getCreatorId() == null
