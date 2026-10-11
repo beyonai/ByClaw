@@ -28,11 +28,12 @@ public class TenantGroupMemberService {
     private final AuthApplicationService resourceAuthorization;
     private final TenantMembershipMapper tenantMemberships;
     private final UsersMapper users;
+    private final com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher events;
 
     public TenantGroupMemberService(TenantNodeClient node, ByaiGroupChatMentionMapper legacyMembership,
         GroupChatAuthorizationService legacyAuthorization, SsResourceService resources,
         AuthApplicationService resourceAuthorization, TenantMembershipMapper tenantMemberships,
-        UsersMapper users) {
+        UsersMapper users, com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher events) {
         this.node = node;
         this.legacyMembership = legacyMembership;
         this.legacyAuthorization = legacyAuthorization;
@@ -40,6 +41,7 @@ public class TenantGroupMemberService {
         this.resourceAuthorization = resourceAuthorization;
         this.tenantMemberships = tenantMemberships;
         this.users = users;
+        this.events = events;
     }
 
     public void requireInvite(Long sessionId, String type) {
@@ -64,13 +66,14 @@ public class TenantGroupMemberService {
         Map<String, Object> detail = requireInvite(context, sessionId, type);
         List<TenantNodeModels.InvitedMember> members = prepareMembers(context, type, request.getId());
         String id = sessionId.toString();
+        TenantNodeModels.CommandResult added;
         if ("USER".equals(type)) {
             List<String> tenantMemberIds = new java.util.ArrayList<>();
             tenantMemberIds.add(Long.toString(context.userId()));
             members.stream().map(TenantNodeModels.InvitedMember::memObjId).distinct()
                 .filter(memberId -> !memberId.equals(Long.toString(context.userId())))
                 .forEach(tenantMemberIds::add);
-            node.command(context, "POST", "/internal/v1/group-chats/" + id + "/members", id,
+            added = node.command(context, "POST", "/internal/v1/group-chats/" + id + "/members", id,
                 "ADD_MEMBERS", new TenantNodeModels.AddMembers(members), UUID.randomUUID().toString(),
                 tenantMemberIds);
             List<Long> agentIds = rows(detail.get("members")).stream()
@@ -81,7 +84,7 @@ public class TenantGroupMemberService {
             }
         }
         else {
-            node.command(context, "POST", "/internal/v1/group-chats/" + id + "/members", id,
+            added = node.command(context, "POST", "/internal/v1/group-chats/" + id + "/members", id,
                 "ADD_MEMBERS", new TenantNodeModels.AddMembers(members));
             for (Map<String, Object> member : rows(detail.get("members"))) {
                 if ("USER".equals(member.get("memObjType"))) {
@@ -90,6 +93,7 @@ public class TenantGroupMemberService {
                 }
             }
         }
+        TenantGroupMembershipEvents.publish(events, context, sessionId, added);
         return rows(nodeDetail(context, sessionId).get("members")).stream()
             .filter(member -> type.equals(member.get("memObjType"))
                 && request.getId().stream().anyMatch(idValue -> idValue.toString().equals(member.get("memObjId"))))

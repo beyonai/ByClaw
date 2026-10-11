@@ -88,6 +88,7 @@ public class TenantGroupManagementService {
             JsonNode value = result.data();
             if (value.has("messageId")) notification.put("messageId", value.get("messageId").asText());
             if (value.has("recalled")) notification.put("recalled", value.get("recalled").asBoolean());
+            if (value.has("content")) notification.put("content", value.get("content").asText());
             if (value.has("recall")) notification.put("recall", mapper.convertValue(value.get("recall"), Map.class));
             for (JsonNode task : value.path("tasks")) tasks.stop(tenant, task);
         }

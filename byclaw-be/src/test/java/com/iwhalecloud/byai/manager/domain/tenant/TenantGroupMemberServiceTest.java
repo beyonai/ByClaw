@@ -33,7 +33,7 @@ class TenantGroupMemberServiceTest {
     private final TenantMembershipMapper tenantMemberships = mock(TenantMembershipMapper.class);
     private final UsersMapper users = mock(UsersMapper.class);
     private final TenantGroupMemberService service = new TenantGroupMemberService(node, legacyMembership,
-        legacyAuthorization, resources, resourceAuthorization, tenantMemberships, users);
+        legacyAuthorization, resources, resourceAuthorization, tenantMemberships, users, mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher.class));
     private final TenantRequestContext context = new TenantRequestContext(57L, 11221076L, "MEMBER");
     private final Long groupId = 2104891116955410432L;
 

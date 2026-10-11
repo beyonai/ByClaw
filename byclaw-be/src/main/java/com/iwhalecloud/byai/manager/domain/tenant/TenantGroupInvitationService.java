@@ -118,7 +118,8 @@ public class TenantGroupInvitationService {
         String id = preview.path("groupNumber").asText();
         String name = CurrentUserHolder.getCurrentUserName();
         boolean alreadyMember = preview.path("alreadyMember").asBoolean();
-        if (!alreadyMember) data.write(tenant, "POST", "/join", id, "JOIN_GROUP", Map.of("token", token,
+        TenantNodeModels.CommandResult joined = null;
+        if (!alreadyMember) joined = data.write(tenant, "POST", "/join", id, "JOIN_GROUP", Map.of("token", token,
             "joinLinkAuthorized", true, "memName", name == null ? "" : name));
         JsonNode members = data.read(tenant, "group-chats/" + id).path("members");
         java.util.List<Long> agentIds = new java.util.ArrayList<>();
@@ -129,11 +130,7 @@ public class TenantGroupInvitationService {
         }
         if (result == null) throw new IllegalStateException("Tenant group join could not be confirmed");
         if (!agentIds.isEmpty()) grants.grantDigitalEmployeesToUser(agentIds, tenant.userId());
-        var event = new com.alibaba.fastjson.JSONObject();
-        event.put("type", "GROUP_CHAT_EVENT");
-        event.put("event", "MEMBER_ADDED");
-        event.put("sessionId", id);
-        if (!alreadyMember) events.publishTenant(tenant, Long.valueOf(id), event);
+        if (!alreadyMember) TenantGroupMembershipEvents.publish(events, tenant, Long.valueOf(id), joined);
         ((com.fasterxml.jackson.databind.node.ObjectNode) result).put("enterpriseId", Long.toString(tenant.enterpriseId()));
         return result;
     }
