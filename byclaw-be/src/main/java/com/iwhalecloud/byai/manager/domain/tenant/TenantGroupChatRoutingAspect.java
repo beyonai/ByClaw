@@ -101,9 +101,7 @@ public class TenantGroupChatRoutingAspect {
                 if (path == null || args.length != 3 || !(args[1] instanceof String type)
                     || !(args[2] instanceof Long memberId) || memberId <= 0
                     || !("USER".equals(type) || "AGENT".equals(type))) throw unsupported();
-                node.command(context, "DELETE", path + "/members", sessionId,
-                    "REMOVE_MEMBER", new TenantNodeModels.RemoveMember(type, memberId.toString()));
-                return ResponseUtil.successResponse(null);
+                return ResponseUtil.successResponse(management.change(context, "remove", Long.valueOf(sessionId), args));
             }
             case "settings": return read(context, requirePath(path) + "/settings");
             case "updateSettings": {

@@ -3,7 +3,7 @@ import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
 import { first, insert, nextId, camel } from "./sql-utils.js";
 
-import { invitationNotice } from "./member-notice.js";
+import { membershipNotice } from "./member-notice.js";
 /** 邀请用户须有 BE 的 ACTIVE 成员断言；邀请 AGENT 须有资源授权，普通成员还受群设置限制。 */
 export async function addMembers(context: CommandContext): Promise<Record<string, any>> {
   const { command, db } = context,
@@ -45,7 +45,7 @@ export async function addMembers(context: CommandContext): Promise<Record<string
       create_time: new Date(),
     });
     systemEvents.push(
-      await invitationNotice(context, {
+      await membershipNotice(context, {
         memObjId: member.memObjId,
         memObjType: member.memObjType,
         memName: text(member.memName ?? "", 255),
@@ -55,7 +55,7 @@ export async function addMembers(context: CommandContext): Promise<Record<string
   return { data: { systemEvents } };
 }
 /** 区分主动离群与管理移除；OWNER 先转让，ADMIN 不能移除另一个 ADMIN。 */
-export async function removeMember(context: CommandContext): Promise<void> {
+export async function removeMember(context: CommandContext): Promise<Record<string, any> | void> {
   const { command, db } = context,
     self = command.operation === "LEAVE_GROUP";
   const type = self ? "USER" : (command.payload.memObjType ?? "USER");
@@ -71,10 +71,21 @@ export async function removeMember(context: CommandContext): Promise<void> {
   if (target.userRole === "OWNER") throw new DomainError("OWNER_TRANSFER_REQUIRED");
   if (!self)
     await context.requireRole(target.userRole === "ADMIN" ? ["OWNER"] : ["OWNER", "ADMIN"]);
+  const notice = await membershipNotice(
+    context,
+    {
+      memObjId: id,
+      memObjType: type,
+      memName: target.memName ?? "",
+    },
+    command.userId,
+    self ? "MEMBER_LEFT" : "MEMBER_REMOVED",
+  );
   await db.query(
     "DELETE FROM byai.byai_session_member WHERE byai_session_member_id=$1 AND com_acct_id=$2",
     [target.byaiSessionMemberId, command.enterpriseId],
   );
+  return { data: { systemEvents: [notice] } };
 }
 /** 仅 OWNER 可调整角色或转让；降级原 OWNER 与升级新 OWNER 在同一命令事务完成。 */
 export async function changeRole(context: CommandContext): Promise<void> {

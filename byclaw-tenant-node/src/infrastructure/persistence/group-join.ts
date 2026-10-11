@@ -3,7 +3,7 @@ import { DomainError } from "../../domain/errors.js";
 import { invitationPreview } from "./group-invitation.js";
 import { text } from "../../domain/values.js";
 import { first, insert, nextId } from "./sql-utils.js";
-import { invitationNotice } from "./member-notice.js";
+import { membershipNotice } from "./member-notice.js";
 /** BE 验证链接后，Node 再检查群状态与链接开关，仅把当前用户加入为 MEMBER。 */
 export async function joinGroup(context: CommandContext): Promise<Record<string, any> | void> {
   const { command, db } = context;
@@ -35,7 +35,7 @@ export async function joinGroup(context: CommandContext): Promise<Record<string,
     com_acct_id: command.enterpriseId,
     create_time: new Date(),
   });
-  const notice = await invitationNotice(
+  const notice = await membershipNotice(
     context,
     {
       memObjId: command.userId,

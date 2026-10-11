@@ -2,19 +2,25 @@ import type { CommandContext } from "./command-context.js";
 import { insert, nextId } from "./sql-utils.js";
 import { nextSequence } from "./message-fields.js";
 
-/** Called only after a new member insert, under the command's group lock and transaction. */
-export async function invitationNotice(
+/** Called only for a new membership change, under the command's group lock and transaction. */
+export async function membershipNotice(
   context: CommandContext,
   member: { memObjId: string; memObjType: string; memName: string },
   operatorId = context.command.userId,
+  eventType: "MEMBER_INVITED" | "MEMBER_LEFT" | "MEMBER_REMOVED" = "MEMBER_INVITED",
 ): Promise<Record<string, any>> {
   const { command, db } = context;
   const operator = await context.member(operatorId);
   const operatorName = operator?.memName || operatorId;
   const memberName = member.memName || member.memObjId;
-  const content = `${operatorName} 邀请 ${memberName} 加入工作组`;
+  const content =
+    eventType === "MEMBER_LEFT"
+      ? `${memberName} 离开了工作组`
+      : eventType === "MEMBER_REMOVED"
+        ? `${operatorName} 将 ${memberName} 移出工作组`
+        : `${operatorName} 邀请 ${memberName} 加入工作组`;
   const systemEvent = {
-    eventType: "MEMBER_INVITED",
+    eventType,
     operatorId,
     operatorName,
     memberId: member.memObjId,

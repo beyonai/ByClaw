@@ -60,6 +60,11 @@ public class TenantGroupManagementService {
                     id, transfer ? "TRANSFER_OWNER" : "SET_ROLE", payload);
                 event = transfer ? "OWNERSHIP_TRANSFERRED" : "MEMBER_UPDATED";
             }
+            case "remove" -> {
+                result = data.write(tenant, "DELETE", "/members", id, "REMOVE_MEMBER",
+                    Map.of("memObjType", args[1].toString(), "memObjId", args[2].toString()));
+                event = "MEMBER_REMOVED";
+            }
             case "leave" -> {
                 result = data.write(tenant, "POST", "/leave", id, "LEAVE_GROUP", Map.of());
                 event = "MEMBER_REMOVED";
@@ -79,6 +84,11 @@ public class TenantGroupManagementService {
                     Map.of("agentId", ((DirectSessionCreateRequest) args[1]).getAgentId().toString())).data();
             }
             default -> throw new IllegalArgumentException("Unknown tenant group operation");
+        }
+        if ("leave".equals(method) || "remove".equals(method)) {
+            TenantGroupMembershipEvents.publish(events, tenant, groupId, result, "MEMBER_REMOVED",
+                mapper.convertValue(before.path("members"), List.class));
+            return null;
         }
         JSONObject notification = new JSONObject();
         notification.put("type", "GROUP_CHAT_EVENT");
