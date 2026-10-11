@@ -20,17 +20,17 @@ public class TenantGroupInvitationService {
     private final AuthApplicationService grants;
     private final GroupChatEventPublisher events;
     private final com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper links;
-    private final TenantContextService contexts;
+    private final TenantAdminMemberService memberships;
 
     public TenantGroupInvitationService(TenantGroupData data, UserService users,
         AuthApplicationService grants, GroupChatEventPublisher events,
-        com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper links, TenantContextService contexts) {
+        com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper links, TenantAdminMemberService memberships) {
         this.data = data;
         this.users = users;
         this.grants = grants;
         this.events = events;
         this.links = links;
-        this.contexts = contexts;
+        this.memberships = memberships;
     }
 
     /** Public invitations resolve the tenant from server-owned metadata, never from a browser selector. */
@@ -40,12 +40,21 @@ public class TenantGroupInvitationService {
         if (token == null || !token.matches("[A-Za-z0-9]{8}"))
             throw new IllegalArgumentException("Invitation is invalid or expired");
         var link = links.selectInvitationByToken(token);
+        String hint = ((GroupChatInvitationTokenRequest) args[0]).getEnterpriseId();
+        if (hint != null && (link == null || !hint.equals(String.valueOf(link.getComAcctId()))))
+            throw new IllegalArgumentException("Invitation tenant mismatch");
         if (link == null) return fallback;
         if (link.getComAcctId() == null || link.getComAcctId() <= 1) return null;
         if (!"ACTIVE".equals(link.getStatus()) || link.getCreatorId() == null
             || link.getExpireTime() == null || !link.getExpireTime().isAfter(java.time.LocalDateTime.now()))
             throw new IllegalArgumentException("Invitation is invalid or expired");
-        if ("joinInvitation".equals(method)) return contexts.validate(link.getComAcctId().toString());
+        if ("joinInvitation".equals(method)) {
+            Long caller = CurrentUserHolder.getCurrentUserId();
+            if (caller == null || caller <= 0)
+                throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED,
+                    "Login required");
+            return new TenantRequestContext(caller, link.getComAcctId(), "MEMBER");
+        }
         Long userId = CurrentUserHolder.getCurrentUserId();
         return new TenantRequestContext(userId != null && userId > 0 ? userId : link.getCreatorId(),
             link.getComAcctId(), "MEMBER");
@@ -73,12 +82,14 @@ public class TenantGroupInvitationService {
             throw new IllegalStateException("Unable to save invitation routing");
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public Object handle(TenantRequestContext tenant, String method, Object[] args) {
         if ("createInvitation".equals(method)) {
             ((jakarta.servlet.http.HttpServletResponse) args[1]).setHeader("Cache-Control", "no-store");
             JsonNode invitation = data.write(tenant, "POST", "/invitations", args[0].toString(),
                 "CREATE_INVITATION", Map.of("token", token())).data();
             index(tenant, Long.parseLong(args[0].toString()), invitation);
+            ((com.fasterxml.jackson.databind.node.ObjectNode) invitation).put("enterpriseId", Long.toString(tenant.enterpriseId()));
             return invitation;
         }
         String token = ((GroupChatInvitationTokenRequest) args[0]).getToken();
@@ -95,9 +106,18 @@ public class TenantGroupInvitationService {
                 ((com.fasterxml.jackson.databind.node.ObjectNode) preview).put("alreadyMember", false);
             return preview;
         }
+        var user = users.findById(tenant.userId());
+        if (user == null || !"A".equals(user.getState()) || "Y".equals(user.getIsLocked())
+            || user.getUserExpDate() != null && user.getUserExpDate().getTime() <= System.currentTimeMillis())
+            throw new IllegalArgumentException("Login required");
+        memberships.joinByInvitation(tenant.enterpriseId(), preview.path("inviterId").asLong());
+        // The package row lock remains held by this transaction: re-read after admission so
+        // concurrent retries observe the first join and do not repeat writes or member events.
+        preview = data.query(tenant, "group-chats/invitations/validate", Map.of("token", token));
         String id = preview.path("groupNumber").asText();
         String name = CurrentUserHolder.getCurrentUserName();
-        data.write(tenant, "POST", "/join", id, "JOIN_GROUP", Map.of("token", token,
+        boolean alreadyMember = preview.path("alreadyMember").asBoolean();
+        if (!alreadyMember) data.write(tenant, "POST", "/join", id, "JOIN_GROUP", Map.of("token", token,
             "joinLinkAuthorized", true, "memName", name == null ? "" : name));
         JsonNode members = data.read(tenant, "group-chats/" + id).path("members");
         java.util.List<Long> agentIds = new java.util.ArrayList<>();
@@ -106,12 +126,13 @@ public class TenantGroupInvitationService {
             if ("AGENT".equals(member.path("memObjType").asText())) agentIds.add(member.path("memObjId").asLong());
             if ("USER".equals(member.path("memObjType").asText()) && member.path("memObjId").asLong() == tenant.userId()) result = member;
         }
+        if (result == null) throw new IllegalStateException("Tenant group join could not be confirmed");
         if (!agentIds.isEmpty()) grants.grantDigitalEmployeesToUser(agentIds, tenant.userId());
         var event = new com.alibaba.fastjson.JSONObject();
         event.put("type", "GROUP_CHAT_EVENT");
         event.put("event", "MEMBER_ADDED");
         event.put("sessionId", id);
-        events.publishTenant(tenant, Long.valueOf(id), event);
+        if (!alreadyMember) events.publishTenant(tenant, Long.valueOf(id), event);
         ((com.fasterxml.jackson.databind.node.ObjectNode) result).put("enterpriseId", Long.toString(tenant.enterpriseId()));
         return result;
     }

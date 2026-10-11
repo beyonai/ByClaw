@@ -14,11 +14,15 @@ import org.junit.jupiter.api.Test;
 
 class TenantGroupInvitationServiceTest {
     private final MessageShareLinkMapper links = mock(MessageShareLinkMapper.class);
-    private final TenantContextService contexts = mock(TenantContextService.class);
+    private final TenantAdminMemberService contexts = mock(TenantAdminMemberService.class);
     private final UserService users = mock(UserService.class);
     private final TenantGroupData data = mock(TenantGroupData.class);
+    private final GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
     private final TenantGroupInvitationService service = new TenantGroupInvitationService(data,
-        users, mock(AuthApplicationService.class), mock(GroupChatEventPublisher.class), links, contexts);
+        users, mock(AuthApplicationService.class), events, links, contexts);
+
+    @org.junit.jupiter.api.AfterEach
+    void clearLogin() { com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.clearLoginInfo(); }
 
     private Object[] invitation() {
         var request = new GroupChatInvitationTokenRequest();
@@ -40,16 +44,16 @@ class TenantGroupInvitationServiceTest {
     }
 
     @Test
-    void joiningRequiresActualLoginMembershipInsteadOfInviterIdentity() {
+    void joiningRequiresActualLoginInsteadOfInviterIdentity() {
         var link = new MessageShareLink();
         link.setComAcctId(10292148L);
         link.setCreatorId(27L);
         link.setStatus("ACTIVE");
         link.setExpireTime(java.time.LocalDateTime.now().plusDays(1));
         when(links.selectInvitationByToken("Abcd1234")).thenReturn(link);
-        when(contexts.validate("10292148")).thenThrow(new IllegalArgumentException("Login required"));
+
         assertThatThrownBy(() -> service.resolve("joinInvitation", invitation(), null))
-            .hasMessage("Login required");
+            .hasMessageContaining("Login required");
         verifyNoInteractions(data);
     }
 
@@ -83,6 +87,55 @@ class TenantGroupInvitationServiceTest {
         assertThat(preview.path("alreadyMember").asBoolean()).isFalse();
         assertThat(preview.has("inviterId")).isFalse();
         assertThat(preview.path("enterpriseId").asText()).isEqualTo("10292148");
+    }
+
+    @Test
+    void repeatedJoiningReadsTheExistingMemberWithoutRepeatingNodeWritesOrEvents() throws Exception {
+        var tenant = new TenantRequestContext(77L, 10292148L, "MEMBER");
+        var mapper = new ObjectMapper();
+        when(data.query(eq(tenant), anyString(), any())).thenReturn(mapper.readTree(
+            "{\"groupNumber\":\"9001\",\"inviterId\":\"27\",\"alreadyMember\":true}"));
+        var active = new com.iwhalecloud.byai.manager.entity.users.Users();
+        active.setState("A");
+        when(users.findById(27L)).thenReturn(active);
+        when(users.findById(77L)).thenReturn(active);
+        when(data.read(eq(tenant), anyString())).thenAnswer(call -> mapper.readTree(
+            "{\"members\":[{\"sessionId\":\"9001\",\"memObjType\":\"USER\",\"memObjId\":\"77\"}]}"));
+        for (int i = 0; i < 2; i++) {
+            var result = (com.fasterxml.jackson.databind.JsonNode) service.handle(tenant, "joinInvitation", invitation());
+            assertThat(result.path("sessionId").asText()).isEqualTo("9001");
+            assertThat(result.path("enterpriseId").asText()).isEqualTo("10292148");
+        }
+        verify(data, never()).write(any(), anyString(), anyString(), anyString(), anyString(), any());
+        verifyNoInteractions(events);
+    }
+
+    @Test
+    void authenticatedGuestsResolveTheirOwnIdentityBeforeInvitationAdmission() {
+        var link = new MessageShareLink();
+        link.setComAcctId(10292148L);
+        link.setCreatorId(27L);
+        link.setStatus("ACTIVE");
+        link.setExpireTime(java.time.LocalDateTime.now().plusDays(1));
+        when(links.selectInvitationByToken("Abcd1234")).thenReturn(link);
+        var caller = new com.iwhalecloud.byai.common.login.bean.LoginInfo();
+        caller.setUserId(77L);
+        com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.setLoginInfo(caller);
+        assertThat(service.resolve("joinInvitation", invitation(), null))
+            .isEqualTo(new TenantRequestContext(77L, 10292148L, "MEMBER"));
+        verifyNoInteractions(contexts, data);
+    }
+
+    @Test
+    void aModifiedTenantHintCannotRedirectAnInvitation() {
+        var link = new MessageShareLink();
+        link.setComAcctId(10292148L);
+        when(links.selectInvitationByToken("Abcd1234")).thenReturn(link);
+        Object[] args = invitation();
+        ((GroupChatInvitationTokenRequest) args[0]).setEnterpriseId("123");
+        assertThatThrownBy(() -> service.resolve("validateInvitation", args, null))
+            .hasMessage("Invitation tenant mismatch");
+        verifyNoInteractions(contexts, data);
     }
 
     @Test
