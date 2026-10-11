@@ -19,19 +19,67 @@ public class TenantGroupInvitationService {
     private final UserService users;
     private final AuthApplicationService grants;
     private final GroupChatEventPublisher events;
+    private final com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper links;
+    private final TenantContextService contexts;
 
     public TenantGroupInvitationService(TenantGroupData data, UserService users,
-        AuthApplicationService grants, GroupChatEventPublisher events) {
+        AuthApplicationService grants, GroupChatEventPublisher events,
+        com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper links, TenantContextService contexts) {
         this.data = data;
         this.users = users;
         this.grants = grants;
         this.events = events;
+        this.links = links;
+        this.contexts = contexts;
+    }
+
+    /** Public invitations resolve the tenant from server-owned metadata, never from a browser selector. */
+    public TenantRequestContext resolve(String method, Object[] args, TenantRequestContext fallback) {
+        if ("createInvitation".equals(method)) return fallback;
+        String token = ((GroupChatInvitationTokenRequest) args[0]).getToken();
+        if (token == null || !token.matches("[A-Za-z0-9]{8}"))
+            throw new IllegalArgumentException("Invitation is invalid or expired");
+        var link = links.selectInvitationByToken(token);
+        if (link == null) return fallback;
+        if (link.getComAcctId() == null || link.getComAcctId() <= 1) return null;
+        if (!"ACTIVE".equals(link.getStatus()) || link.getCreatorId() == null
+            || link.getExpireTime() == null || !link.getExpireTime().isAfter(java.time.LocalDateTime.now()))
+            throw new IllegalArgumentException("Invitation is invalid or expired");
+        if ("joinInvitation".equals(method)) return contexts.validate(link.getComAcctId().toString());
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        return new TenantRequestContext(userId != null && userId > 0 ? userId : link.getCreatorId(),
+            link.getComAcctId(), "MEMBER");
+    }
+
+    private void index(TenantRequestContext tenant, long groupId, JsonNode invitation) {
+        var existing = links.selectInvitationBySessionId(groupId);
+        if (existing != null && !java.util.Objects.equals(existing.getComAcctId(), tenant.enterpriseId()))
+            throw new IllegalStateException("Invitation identity conflict");
+        var link = new com.iwhalecloud.byai.manager.entity.message.MessageShareLink();
+        link.setLinkType("GROUP_INVITATION");
+        link.setLinkId(groupId);
+        link.setLinkToken(invitation.path("token").asText());
+        link.setCreatorId(tenant.userId());
+        link.setComAcctId(tenant.enterpriseId());
+        link.setStatus("ACTIVE");
+        link.setAccessPermission("PUBLIC");
+        var now = java.time.LocalDateTime.now();
+        link.setCreateTime(now);
+        link.setUpdateTime(now);
+        link.setCurrentAccessCount(0L);
+        link.setExpireTime(java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(
+            invitation.path("expiresAt").asLong()), java.time.ZoneId.systemDefault()));
+        if ((existing == null ? links.insert(link) : links.updateInvitation(link)) != 1)
+            throw new IllegalStateException("Unable to save invitation routing");
     }
 
     public Object handle(TenantRequestContext tenant, String method, Object[] args) {
         if ("createInvitation".equals(method)) {
             ((jakarta.servlet.http.HttpServletResponse) args[1]).setHeader("Cache-Control", "no-store");
-            return data.write(tenant, "POST", "/invitations", args[0].toString(), "CREATE_INVITATION", Map.of("token", token())).data();
+            JsonNode invitation = data.write(tenant, "POST", "/invitations", args[0].toString(),
+                "CREATE_INVITATION", Map.of("token", token())).data();
+            index(tenant, Long.parseLong(args[0].toString()), invitation);
+            return invitation;
         }
         String token = ((GroupChatInvitationTokenRequest) args[0]).getToken();
         JsonNode preview = data.query(tenant, "group-chats/invitations/validate", Map.of("token", token));
@@ -42,6 +90,9 @@ public class TenantGroupInvitationService {
         if ("validateInvitation".equals(method)) {
             ((jakarta.servlet.http.HttpServletResponse) args[1]).setHeader("Cache-Control", "no-store");
             ((com.fasterxml.jackson.databind.node.ObjectNode) preview).remove("inviterId");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) preview).put("enterpriseId", Long.toString(tenant.enterpriseId()));
+            if (CurrentUserHolder.getCurrentUserId() == null || CurrentUserHolder.getCurrentUserId() <= 0)
+                ((com.fasterxml.jackson.databind.node.ObjectNode) preview).put("alreadyMember", false);
             return preview;
         }
         String id = preview.path("groupNumber").asText();
@@ -61,6 +112,7 @@ public class TenantGroupInvitationService {
         event.put("event", "MEMBER_ADDED");
         event.put("sessionId", id);
         events.publishTenant(tenant, Long.valueOf(id), event);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) result).put("enterpriseId", Long.toString(tenant.enterpriseId()));
         return result;
     }
 

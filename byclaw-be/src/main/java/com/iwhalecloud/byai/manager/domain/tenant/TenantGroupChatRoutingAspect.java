@@ -56,12 +56,15 @@ public class TenantGroupChatRoutingAspect {
         + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController.*(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
-        if (context == null) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
-        if ("defaultAssistant".equals(method)) return call.proceed();
-        if (List.of("createInvitation", "validateInvitation", "joinInvitation").contains(method))
+        if (List.of("createInvitation", "validateInvitation", "joinInvitation").contains(method)) {
+            context = invitations.resolve(method, args, context);
+            if (context == null) return call.proceed();
             return ResponseUtil.successResponse(invitations.handle(context, method, args));
+        }
+        if (context == null) return call.proceed();
+        if ("defaultAssistant".equals(method)) return call.proceed();
         if ("create".equals(method)) return create(call, context, (GroupChatCreateRequest) args[0]);
         if (args.length == 0 && !"list".equals(method)) throw unsupported();
         String sessionId = args.length > 0 && args[0] instanceof Long id && id > 0 ? id.toString() : null;

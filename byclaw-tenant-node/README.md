@@ -329,3 +329,7 @@ BE 在任务开始前观察分类时发送空文本 DELTA（`text=""`）及可�
 租户成果发布的 mention 解析只投影 Node 已鉴权成员的 `memObjType` 和 `memObjId`，不反序列化无关的 ISO 创建/读取日期。文件上传与资源授权继续复用 BE 原有发布流程。
 
 K3s 租户开通：TCP 数据库端点通过 OpenSandbox `resolve_internal=true` 获取 Pod 内网地址；BE 在创建数据库沙箱前预建私有 `opengauss/data` 目录，保持 BE 与租户镜像的 1001:1001 所有者，避免 kubelet 创建 root 所有的 subPath。租户 Node 使用 Downward API 注入的 `POD_IP` 注册服务；显式 `ADVERTISE_HOST` 仍优先，Docker 未注入 Pod IP 时沿用容器 hostname。
+
+BE 每 5 分钟核对已开通租户的权威配置，在租约剩余不足 12 小时时续期 24 小时并重新发布 Redis 快照。续期保留 generation、fencingToken 和凭据版本，通过开通锁与状态比较更新避免覆盖删除或并发状态变更。新登录从默认企业开始，租户选择仅在当前登录会话有效。
+
+租户工作组邀请码仍由 Node 校验并持久化，BE 在现有分享链接表保存邀请码与租户的路由元数据，使无痕访问无需租户选择凭证即可预览。匿名预览不返回邀请人 ID 或冒用其成员身份；加入使用实际登录者并核验目标租户成员资格。
