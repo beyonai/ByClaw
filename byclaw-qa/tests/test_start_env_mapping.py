@@ -7,6 +7,8 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import pytest
+
 
 def _write_fake_uv(fake_bin: Path, exec_log: Path, env_log: Path) -> None:
     uv_path = fake_bin / "uv"
@@ -74,6 +76,40 @@ def _custom_storage_provider_source_env() -> dict[str, str]:
 
 def _write_env(path: Path, values: dict[str, str]) -> None:
     path.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n")
+
+
+@pytest.mark.parametrize("mode", ["api", "worker"])
+@pytest.mark.parametrize("dimensions,expected", [(None, "1024"), ("", "1024"), ("768", "768")])
+def test_start_exports_embedding_fallback_from_module_env(
+    tmp_path: Path, mode: str, dimensions: str | None, expected: str
+) -> None:
+    qa_dir = tmp_path / "byclaw-qa"
+    qa_dir.mkdir()
+    shutil.copy2(Path(__file__).resolve().parents[1] / "start.sh", qa_dir / "start.sh")
+    fallback = {
+        "BYCLAW_INIT_EMBEDDING_MODEL_NO": "test-embedding",
+        "BYCLAW_INIT_EMBEDDING_URL": "https://embedding.example/v1",
+        "BYCLAW_INIT_EMBEDDING_API_TOKEN": "test-token",
+    }
+    if dimensions is not None:
+        fallback["BYCLAW_INIT_EMBEDDING_DIMENSIONS"] = dimensions
+    _write_env(qa_dir / ".env", {
+        **_complete_source_env(), **fallback, "BYCLAW_QA_BYAI_WORKER_ID": "test-worker",
+    })
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    runner = fake_bin / "uv"
+    runner.write_text("#!/usr/bin/env bash\nenv\n")
+    runner.chmod(runner.stat().st_mode | stat.S_IXUSR)
+    result = subprocess.run(
+        ["bash", str(qa_dir / "start.sh"), mode], cwd=qa_dir,
+        env={"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
+        text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    fallback["BYCLAW_INIT_EMBEDDING_DIMENSIONS"] = expected
+    for key, value in fallback.items():
+        assert f"{key}={value}" in result.stdout.splitlines()
 
 
 def test_start_maps_file_storage_minio_source_env(tmp_path: Path) -> None:

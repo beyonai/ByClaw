@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import redis_model_config
+from redis.exceptions import ConnectionError as RedisConnectionError
 from by_qa.core.model_config import LLMModelProfile
 from exceptions import ModelConfigError, ModelNotFoundError
 from redis_model_config import (
@@ -19,6 +20,20 @@ from redis_model_config import (
     _first_non_empty,
     _parse_positive_int,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_embedding_fallback_env(monkeypatch):
+    for suffix in ("MODEL_NO", "URL", "API_TOKEN", "DIMENSIONS"):
+        monkeypatch.delenv(f"BYCLAW_INIT_EMBEDDING_{suffix}", raising=False)
+
+
+@pytest.fixture
+def embedding_fallback_env(monkeypatch):
+    values = {"MODEL_NO": "env-embedding", "URL": "https://embedding.example/v1",
+              "API_TOKEN": "test-token"}
+    for suffix, value in values.items():
+        monkeypatch.setenv(f"BYCLAW_INIT_EMBEDDING_{suffix}", value)
 
 
 # --- _decode_redis_json ---
@@ -425,3 +440,76 @@ async def test_embedding_requires_positive_dimensions(mock_redis, dimensions):
     with patch("redis_model_config.get_settings", return_value=MagicMock(embedding_dimension=None)):
         with pytest.raises(ModelConfigError, match="Embedding"):
             await RedisModelConfigProvider(mock_redis).get_config("embedding")
+
+
+@pytest.mark.parametrize("dimensions,expected", [(None, 1024), ("", 1024), ("  ", 1024), ("768", 768)])
+async def test_missing_redis_embedding_uses_env(
+    mock_redis, embedding_fallback_env, monkeypatch, dimensions, expected
+):
+    mock_redis.hgetall.return_value = {}
+    if dimensions is not None:
+        monkeypatch.setenv("BYCLAW_INIT_EMBEDDING_DIMENSIONS", dimensions)
+    with patch("redis_model_config.get_settings", return_value=MagicMock(
+        embedding_dimension=4096, embedding_distance_metric="cosine"
+    )):
+        config = await RedisModelConfigProvider(mock_redis).get_config(LLMModelProfile.EMBEDDING)
+    assert (config.model_name, config.base_url, config.api_key, config.dimension) == (
+        "env-embedding", "https://embedding.example/v1", "test-token", expected
+    )
+    assert config.distance_metric == "cosine"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("url", ""), ("url", "请用户替换"), ("url", "not-a-url"),
+    ("authToken", ""), ("authToken", "secret\nvalue"), ("modelCode", ""),
+    ("instanceParam", '{"dimensions":0}'), ("instanceParam", "invalid-json"),
+])
+async def test_invalid_redis_embedding_uses_env(mock_redis, embedding_fallback_env, field, value):
+    model = _make_embedding_model()
+    model[field] = value
+    mock_redis.hgetall.return_value = _make_redis_payload(embedding_models=[model])
+    with patch("redis_model_config.get_settings", return_value=MagicMock(embedding_dimension=None)):
+        config = await RedisModelConfigProvider(mock_redis).get_config("embedding")
+    assert config.model_name == "env-embedding"
+    assert config.dimension == 1024
+
+
+@pytest.mark.parametrize("payload", [{b"EMBEDDING": b"invalid-json"},
+                                     {b"EMBEDDING": b"{}"}, {b"EMBEDDING": b"[]"}])
+async def test_malformed_redis_embedding_uses_env(mock_redis, embedding_fallback_env, payload):
+    mock_redis.hgetall.return_value = payload
+    assert (await RedisModelConfigProvider(mock_redis).get_config("embedding")).model_name == "env-embedding"
+
+
+@pytest.mark.parametrize("suffix,value", [
+    ("MODEL_NO", ""), ("MODEL_NO", "请用户替换"), ("URL", ""), ("URL", "bad-url"),
+    ("API_TOKEN", ""), ("API_TOKEN", "secret\nvalue"),
+    ("DIMENSIONS", "0"), ("DIMENSIONS", "-1"), ("DIMENSIONS", "1.5"), ("DIMENSIONS", "invalid"),
+])
+async def test_invalid_env_fallback_fails(mock_redis, embedding_fallback_env, monkeypatch, suffix, value):
+    mock_redis.hgetall.return_value = {}
+    monkeypatch.setenv(f"BYCLAW_INIT_EMBEDDING_{suffix}", value)
+    with pytest.raises(ModelConfigError, match="Embedding") as error:
+        await RedisModelConfigProvider(mock_redis).get_config("embedding")
+    assert "secret" not in str(error.value)
+
+
+async def test_valid_redis_embedding_takes_priority(mock_redis, embedding_fallback_env, monkeypatch):
+    mock_redis.hgetall.return_value = _make_redis_payload(embedding_models=[_make_embedding_model()])
+    monkeypatch.setenv("BYCLAW_INIT_EMBEDDING_DIMENSIONS", "invalid")
+    config = await RedisModelConfigProvider(mock_redis).get_config("embedding")
+    assert (config.model_name, config.dimension) == ("emb", 1536)
+
+
+async def test_redis_connection_error_does_not_fall_back(mock_redis, embedding_fallback_env):
+    mock_redis.hgetall.side_effect = RedisConnectionError("unavailable")
+    with pytest.raises(RedisConnectionError):
+        await RedisModelConfigProvider(mock_redis).get_config("embedding")
+
+
+async def test_embedding_fallback_does_not_replace_llm_config(mock_redis, embedding_fallback_env):
+    mock_redis.hgetall.return_value = {}
+    provider = RedisModelConfigProvider(mock_redis)
+    await provider.get_config("embedding")
+    with pytest.raises(ModelNotFoundError):
+        await provider.get_config("standard")

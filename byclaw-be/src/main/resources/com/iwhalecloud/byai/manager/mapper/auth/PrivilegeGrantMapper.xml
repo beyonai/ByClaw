@@ -573,8 +573,28 @@
             </if>
         </where>
         <choose>
+            <!-- 资源中心“我的”按时间查找最近变更的资源，空更新时间回退创建时间。 -->
+            <when test="sortMode == 'UPDATED_DESC'">
+                order by coalesce(a.update_time, a.create_time) desc,
+                         a.resource_id desc
+            </when>
+            <!-- 企业推荐先按添加数量；收藏不可用时不引用未参与关联的 fc 表。 -->
+            <when test="sortMode == 'POPULARITY_DESC'">
+                order by coalesce(uc.use_count, 0) desc,
+                         <if test="includeFavorites == true and favoriteTenantId != null">
+                             coalesce(fc.favorite_count, 0) desc,
+                         </if>
+                         coalesce(a.update_time, a.create_time) desc,
+                         a.resource_id desc
+            </when>
             <when test="includeFavorites == true and favoriteTenantId != null">
                 order by coalesce(fc.favorite_count, 0) desc,
+                         coalesce(a.update_time, a.create_time) desc,
+                         a.resource_id desc
+            </when>
+            <!-- 配置技能弹窗按已有添加人数在数据库分页前排序；同人数用时间和主键稳定顺序。 -->
+            <when test="sortByUseCount == true and resourceBizTypeList != null and resourceBizTypeList.size() == 1 and resourceBizTypeList.contains('SKILL')">
+                order by coalesce(uc.use_count, 0) desc,
                          coalesce(a.update_time, a.create_time) desc,
                          a.resource_id desc
             </when>

@@ -15,8 +15,116 @@ import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/** 执行实际列表 SQL，校验收藏排序在分页之前且不扩大资源可见范围。 */
+/** 执行实际列表 SQL，校验资源中心与收藏排序在分页之前且不扩大资源可见范围。 */
 class ResourceFavoriteQueryIntegrationTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    void managementSortsByTimeAcrossStatesAndPreservesOwnerScope(String type) throws Exception {
+        for (String owner : List.of("personal", "enterprise")) {
+            try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+                initialize(connection);
+                int[] states = {0, 2, 3};
+                for (long id = 1; id <= 35; id++) {
+                    int status = "personal".equals(owner) ? 2 : states[(int) (id % 3)];
+                    resource(connection, id, type, 22, owner, status);
+                }
+                resource(connection, 40, type, 22, owner, -1);
+                resource(connection, 41, type, 22, owner, 2);
+                try (var statement = connection.createStatement()) {
+                    statement.executeUpdate("UPDATE ss_resource SET update_time = NULL, create_time = 36 WHERE resource_id = 4");
+                    statement.executeUpdate("UPDATE ss_resource SET update_time = 36 WHERE resource_id = 3");
+                    statement.executeUpdate("UPDATE ss_resource SET create_by = 99 WHERE resource_id = 41");
+                }
+                Map<String, Object> params = new HashMap<>();
+                params.put("userId", 11L);
+                params.put("platformManager", true);
+                params.put("ownerType", owner);
+                params.put("includeAllEnterpriseOwnerType", "enterprise".equals(owner));
+                params.put("permission", "personal".equals(owner) ? "CREATED_BY_ME" : "MANAGEABLE_BY_ME");
+                params.put("resourceBizTypeList", List.of(type));
+                params.put("resourceStatus", "personal".equals(owner) ? "2" : "");
+                params.put("excludeDeleted", true);
+                params.put("sortMode", "UPDATED_DESC");
+                List<Long> ids = queryTwoPageIds(connection, type, params);
+                List<Long> expected = new ArrayList<>(List.of(4L, 3L));
+                for (long id = 35; id >= 5; id--) {
+                    expected.add(id);
+                }
+                expected.addAll(List.of(2L, 1L));
+                // 同时间按 ID 降序，空更新时间取创建时间；最近下架的 35 仍按时间排在前面。
+                assertThat(ids).containsExactlyElementsOf(expected).doesNotContain(40L, 41L);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    void resourceCenterTabSortsApplyBeforePaginationWithOptionalFavorites(String type) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            initialize(connection);
+            for (long id = 1; id <= 35; id++) {
+                resource(connection, id, type, 22, "enterprise", 2);
+            }
+            for (long id = 1001; id <= 1004; id++) {
+                resource(connection, id, "DIG_EMPLOYEE", 22, "enterprise", id == 1004 ? 3 : 2);
+            }
+            try (var statement = connection.createStatement()) {
+                // 4 的更新时间为空，创建时间与 3 的更新时间相同，需以 ID 降序打破并列。
+                statement.executeUpdate("UPDATE ss_resource SET update_time = NULL, create_time = 3 WHERE resource_id = 4");
+                statement.executeUpdate("""
+                    INSERT INTO ss_resource_rel_detail VALUES
+                        (1001, 1), (1001, 1), (1002, 1), (1003, 1), (1004, 1),
+                        (1001, 2), (1002, 2), (1004, 2), (1001, 3), (1002, 3),
+                        (1001, 4), (1001, 4), (1001, 4), (1002, 4)
+                    """);
+                statement.executeUpdate("""
+                    INSERT INTO byai_resource_favorite_count VALUES
+                        (22, 2, 100), (22, 3, 4), (22, 4, 4), (22, 5, 200), (33, 1, 999)
+                    """);
+            }
+            Map<String, Object> params = new HashMap<>();
+            params.put("userId", 11L);
+            params.put("ownerType", "enterprise");
+            params.put("includeAllEnterpriseOwnerType", true);
+            params.put("resourceBizTypeList", List.of(type));
+            params.put("keyword", "visible");
+            for (boolean includeFavorites : List.of(false, true)) {
+                params.put("includeFavorites", includeFavorites);
+                params.put("favoriteTenantId", includeFavorites ? 22L : null);
+                params.put("sortMode", "POPULARITY_DESC");
+                List<Long> popularIds = queryTwoPageIds(connection, type, params);
+                List<Long> expectedPopularIds = new ArrayList<>(includeFavorites
+                    ? List.of(1L, 2L, 4L, 3L, 5L) : List.of(1L, 4L, 3L, 2L));
+                for (long id = 35; id >= (includeFavorites ? 6 : 5); id--) {
+                    expectedPopularIds.add(id);
+                }
+                // 添加数量先于收藏数量；重复关联和已下架员工不增加添加数量。
+                assertThat(popularIds).containsExactlyElementsOf(expectedPopularIds);
+
+                params.put("sortMode", "UPDATED_DESC");
+                List<Long> updatedIds = queryTwoPageIds(connection, type, params);
+                List<Long> expectedUpdatedIds = new ArrayList<>();
+                for (long id = 35; id >= 1; id--) {
+                    expectedUpdatedIds.add(id);
+                }
+                // 按更新时间排序时，热门但较旧的资源不会压过较新的未添加资源。
+                assertThat(updatedIds).containsExactlyElementsOf(expectedUpdatedIds);
+            }
+        }
+    }
+
+    private List<Long> queryTwoPageIds(Connection connection, String type, Map<String, Object> params) throws Exception {
+        List<Row> first = query(connection, type, params, 0);
+        List<Row> second = query(connection, type, params, 30);
+        assertThat(first).hasSize(30);
+        assertThat(second).hasSize(5);
+        List<Long> ids = new ArrayList<>(first.stream().map(Row::id).toList());
+        ids.addAll(second.stream().map(Row::id).toList());
+        assertThat(ids).doesNotHaveDuplicates();
+        return ids;
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "MCP"})
     void listsSortBeforePaginationPreserveOfficialVisibilityAndIsolateFavorites(String type) throws Exception {

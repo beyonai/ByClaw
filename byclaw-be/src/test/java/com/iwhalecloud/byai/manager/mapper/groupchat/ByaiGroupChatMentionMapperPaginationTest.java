@@ -6,8 +6,10 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.ibatis.datasource.unpooled.UnpooledDataSource;
 import org.apache.ibatis.mapping.Environment;
@@ -17,6 +19,7 @@ import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.sqlite.Function;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.github.pagehelper.Page;
@@ -191,6 +194,149 @@ class ByaiGroupChatMentionMapperPaginationTest {
             assertThat(session.getMapper(ByaiGroupChatMentionMapper.class).selectMyGroups(30L, null))
                 .extracting(GroupChatListItemResponse::getSessionId)
                 .containsExactly(10L, 20L);
+        }
+    }
+
+    @Test
+    void latestMessageProjectionReadsOnlyVisibleGroupPartitions() throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-visible-message-partitions.sqlite").toAbsolutePath();
+        initializeSchema(jdbcUrl);
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+            Statement statement = connection.createStatement()) {
+            statement.execute("""
+                INSERT INTO byai_session VALUES
+                    (40, 'another user group', NULL, 100, 'hs_as', NULL, '2026-09-11 15:00:00', '2026-09-11 15:00:00'),
+                    (50, 'another enterprise group', NULL, 200, 'hs_as', NULL, '2026-09-11 15:00:00', '2026-09-11 15:00:00'),
+                    (60, 'other session type', NULL, 100, 'other', NULL, '2026-09-11 15:00:00', '2026-09-11 15:00:00'),
+                    (70, 'enterprise one group', NULL, 1, 'hs_as', NULL, '2026-09-11 15:00:00', '2026-09-11 15:00:00')
+                """);
+            statement.execute("""
+                INSERT INTO byai_session_member VALUES
+                    (40, 'MEMBER', NULL, 'USER', 31),
+                    (50, 'MEMBER', NULL, 'USER', 30),
+                    (60, 'MEMBER', NULL, 'USER', 30),
+                    (70, 'MEMBER', NULL, 'USER', 30)
+                """);
+            statement.execute("""
+                INSERT INTO byai_message(message_id, session_id, message_content, create_time, creator_id, creator_name)
+                VALUES (300, 30, 'acknowledged dissolved group', '2026-09-11 15:00:00', 31, 'user 31'),
+                       (400, 40, 'another user message', '2026-09-11 15:00:00', 31, 'user 31'),
+                       (500, 50, 'another enterprise message', '2026-09-11 15:00:00', 31, 'user 31'),
+                       (600, 60, 'other session message', '2026-09-11 15:00:00', 31, 'user 31'),
+                       (700, 70, 'enterprise one message', '2026-09-11 15:00:00', 31, 'user 31')
+                """);
+            statement.execute("ALTER TABLE byai_message RENAME TO message_storage");
+            // Observe actual content projection rather than timing a tiny fixture or inspecting SQL text.
+            statement.execute("""
+                CREATE VIEW byai_message AS
+                SELECT message_id, session_id, observe_message_partition(session_id, message_content) AS message_content,
+                       related_resources, metadata, create_time, creator_id, creator_name,
+                       recalled_at, recalled_by, archived_at
+                FROM message_storage
+                """);
+        }
+        Long[] enterpriseIds = { null, 1L, 100L, 200L };
+        List<List<Long>> visibleGroups = List.of(List.of(70L, 50L, 10L, 20L), List.of(70L, 50L, 10L, 20L),
+            List.of(10L, 20L), List.of(50L));
+        for (int index = 0; index < enterpriseIds.length; index++) {
+            List<Long> projectedSessionIds = new ArrayList<>();
+            try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
+                Function.create(session.getConnection(), "observe_message_partition", new Function() {
+                    @Override
+                    protected void xFunc() throws java.sql.SQLException {
+                        projectedSessionIds.add(value_long(0));
+                        result(value_text(1));
+                    }
+                });
+                Page<GroupChatListItemResponse> page = PageHelper.startPage(1, 1);
+                assertThat(session.getMapper(ByaiGroupChatMentionMapper.class).selectMyGroups(30L, enterpriseIds[index]))
+                    .extracting(GroupChatListItemResponse::getSessionId).containsExactly(visibleGroups.get(index).get(0));
+                assertThat(page.getTotal()).isEqualTo(visibleGroups.get(index).size());
+                assertThat(projectedSessionIds).as("projected groups for enterprise %s", enterpriseIds[index])
+                    .isNotEmpty().containsOnlyElementsOf(visibleGroups.get(index));
+            }
+            finally {
+                PageHelper.clearPage();
+            }
+        }
+    }
+
+    @Test
+    void paginationTotalDoesNotReadMessageRows() throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-count-without-messages.sqlite").toAbsolutePath();
+        initializeSchema(jdbcUrl);
+        AtomicInteger messageTimeReads = new AtomicInteger();
+        try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
+            Function.create(session.getConnection(), "observe_message_time", new Function() {
+                @Override
+                protected void xFunc() throws java.sql.SQLException {
+                    messageTimeReads.incrementAndGet();
+                    result(value_text(0));
+                }
+            });
+            try (Statement statement = session.getConnection().createStatement()) {
+                statement.execute("ALTER TABLE byai_message RENAME TO message_storage");
+                // Window ordering must evaluate this expression, even when an outer COUNT drops message content.
+                statement.execute("""
+                    CREATE VIEW byai_message AS
+                    SELECT message_id, session_id, message_content, related_resources, metadata,
+                           observe_message_time(create_time) AS create_time, creator_id, creator_name,
+                           recalled_at, recalled_by, archived_at
+                    FROM message_storage
+                    """);
+            }
+            ByaiGroupChatMentionMapper mapper = session.getMapper(ByaiGroupChatMentionMapper.class);
+            assertThat(PageHelper.count(() -> mapper.selectMyGroups(30L, 100L))).isEqualTo(2L);
+            assertThat(messageTimeReads).hasValue(0);
+        }
+        finally {
+            PageHelper.clearPage();
+        }
+    }
+
+    @Test
+    void paginationPreservesEmptyArchivedOnlyAndRecalledLatestGroups() throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-latest-boundaries.sqlite").toAbsolutePath();
+        initializeSchema(jdbcUrl);
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+            Statement statement = connection.createStatement()) {
+            statement.execute("""
+                INSERT INTO byai_session VALUES
+                    (40, 'empty group', NULL, 100, 'hs_as', NULL, '2026-09-11 15:00:00', '2026-09-11 09:00:00'),
+                    (50, 'archived only group', NULL, 100, 'hs_as', NULL, '2026-09-11 14:00:00', '2026-09-11 09:00:00'),
+                    (60, 'recalled latest group', NULL, 100, 'hs_as', NULL, '2026-09-11 09:00:00', '2026-09-11 09:00:00')
+                """);
+            statement.execute("""
+                INSERT INTO byai_session_member VALUES
+                    (40, 'MEMBER', NULL, 'USER', 30),
+                    (50, 'MEMBER', NULL, 'USER', 30),
+                    (60, 'MEMBER', NULL, 'USER', 30)
+                """);
+            statement.execute("""
+                INSERT INTO byai_message(message_id, session_id, message_content, create_time, creator_id,
+                    creator_name, recalled_at, recalled_by, archived_at)
+                VALUES (500, 50, 'archived', '2026-09-11 17:00:00', 31, 'user 31', NULL, NULL, '2026-09-11'),
+                       (600, 60, 'recalled', '2026-09-11 16:00:00', 31, 'user 31', '2026-09-11 16:30:00', 31, NULL)
+                """);
+        }
+        try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
+            ByaiGroupChatMentionMapper mapper = session.getMapper(ByaiGroupChatMentionMapper.class);
+            List<GroupChatListItemResponse> groups = mapper.selectMyGroups(30L, 100L);
+            assertThat(groups).extracting(GroupChatListItemResponse::getSessionId).containsExactly(60L, 40L, 50L, 10L, 20L);
+            assertThat(groups.get(0).isLatestMessageRecalled()).isTrue();
+            assertThat(groups.get(0).getLatestMessageId()).isEqualTo(600L);
+            assertThat(groups.get(0).getUnreadMessageCount()).isEqualTo(1L);
+            for (int index : new int[] { 1, 2 }) {
+                assertThat(groups.get(index).getLatestMessageId()).isNull();
+                assertThat(groups.get(index).getUnreadMessageCount()).isZero();
+            }
+            Page<GroupChatListItemResponse> page = PageHelper.startPage(2, 2);
+            assertThat(mapper.selectMyGroups(30L, 100L))
+                .extracting(GroupChatListItemResponse::getSessionId).containsExactly(50L, 10L);
+            assertThat(page.getTotal()).isEqualTo(5L);
+        }
+        finally {
+            PageHelper.clearPage();
         }
     }
 

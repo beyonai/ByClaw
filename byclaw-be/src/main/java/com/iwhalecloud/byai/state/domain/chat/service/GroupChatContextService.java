@@ -531,6 +531,17 @@ public class GroupChatContextService {
         }
     }
 
+    /** 文件列表只读取 related_resources，避免混入任务结果元数据中的云盘文件。 */
+    public Map<Long, List<GroupChatContextResponse.Attachment>> relatedResourceAttachmentsForMessages(
+        List<ByaiMessage> messages) {
+        Map<Long, List<GroupChatContextResponse.Attachment>> result = new HashMap<>();
+        for (ByaiMessage message : messages) {
+            result.put(message.getMessageId(), message.isRecalled() ? List.of()
+                : Objects.requireNonNullElseGet(toAttachments(message.getRelatedResources()), List::of));
+        }
+        return result;
+    }
+
     /** 批量复用时间线附件投影，避免列表为每条消息重复查询历史云盘信息。 */
     public Map<Long, List<GroupChatContextResponse.Attachment>> attachmentsForMessages(List<ByaiMessage> messages) {
         Map<Long, List<GroupChatContextResponse.Attachment>> result = new HashMap<>();

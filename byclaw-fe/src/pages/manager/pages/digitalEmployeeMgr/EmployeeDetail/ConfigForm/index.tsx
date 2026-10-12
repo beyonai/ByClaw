@@ -45,6 +45,11 @@ import { getByParamGroupCode } from '@/pages/manager/service/System';
 import { getCatalogOnResource, getDcSystemConfigListByStandType } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { listResourceUseAuth, queryResourceDetailListByIds } from '@/pages/manager/service/resources';
+import {
+  ResourceQuickFilterBar,
+  ResourceQuickFilterGroup,
+} from '@/components/Resources/components/ResourceQuickFilters';
+import { PERMISSION_AUTHORIZED_TO_ME_VALUE, PERMISSION_CREATED_BY_ME_VALUE } from '@/components/Resources/constants';
 import ExampleModal from './ExampleModal';
 import MemoryConfigModal from './MemoryConfigModal';
 import AbilityBoundaryModal from './AbilityBoundaryModal';
@@ -626,6 +631,7 @@ const ConfigForm = (props) => {
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
   const [bundledSkillModalOpen, setBundledSkillModalOpen] = useState(false);
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
+  const [bundledSkillPermission, setBundledSkillPermission] = useState('');
   const [bundledSkillPagination, setBundledSkillPagination] = useState({
     pageNum: 1,
     pageSize: BUNDLED_SKILL_PAGE_SIZE,
@@ -741,6 +747,9 @@ const ConfigForm = (props) => {
       const pageNum = Number(params.pageNum || 1);
       const pageSize = Number(params.pageSize || BUNDLED_SKILL_PAGE_SIZE);
       const keyword = trim(params.keyword || '');
+      // 个人技能已屏蔽授权操作，所有查询都只保留本人创建；企业技能允许按归属细分。
+      const permission =
+        bundledSkillOwnerType === 'personal' ? PERMISSION_CREATED_BY_ME_VALUE : params.permission || '';
       const append = !!params.append;
       const requestId = ++bundledSkillRequestIdRef.current;
       setBundledSkillLoading(true);
@@ -748,13 +757,19 @@ const ConfigForm = (props) => {
         const res = await listResourceUseAuth({
           resourceBizTypeList: ['SKILL'],
           ownerType: bundledSkillOwnerType,
+          // 绑定候选仅限本人创建或有效授权的技能，避免企业标签切到平台全量资源。
+          availableOnly: true,
+          // 两个技能标签统一由后端按添加人数排序，搜索及后续分页也沿用同一顺序。
+          sortByUseCount: true,
           pageNum,
           pageSize,
           // 配置技能搜索和配置工具/知识保持一致，交给后端按关键字查询。
           keyword,
+          // 归属筛选交给后端登录上下文处理，保证分页总数与结果一致。
+          ...(permission ? { permission } : {}),
         });
 
-        // 切换 tab 或搜索后忽略旧请求，防止慢响应覆盖当前范围的列表。
+        // 切换 tab、搜索或归属筛选后忽略旧请求，防止慢响应覆盖当前范围的列表。
         if (requestId !== bundledSkillRequestIdRef.current) return;
         const pageInfo = res?.data || res || {};
         const list = pageInfo?.list || pageInfo?.rows || [];
@@ -807,6 +822,7 @@ const ConfigForm = (props) => {
   useEffect(() => {
     if (!canConfigureResources || !bundledSkillModalOpen) return;
     setBundledSkillSearchName('');
+    setBundledSkillPermission('');
     setBundledSkillOptions([]);
     setBundledSkillPagination({ pageNum: 1, pageSize: BUNDLED_SKILL_PAGE_SIZE, total: 0, current: 1 });
     bundledSkillLoadMoreLockRef.current = false;
@@ -1545,9 +1561,28 @@ const ConfigForm = (props) => {
         pageNum: 1,
         pageSize: bundledSkillPagination.pageSize || BUNDLED_SKILL_PAGE_SIZE,
         keyword,
+        permission: bundledSkillPermission,
       });
     },
-    [bundledSkillPagination.pageSize, bundledSkillSearchName, fetchBundledSkills]
+    [bundledSkillPagination.pageSize, bundledSkillPermission, bundledSkillSearchName, fetchBundledSkills]
+  );
+
+  const filterBundledSkills = useCallback(
+    (permission: string) => {
+      if (permission === bundledSkillPermission) return;
+      // 切换归属范围时保留搜索词和已选技能，只重置列表及分页。
+      setBundledSkillPermission(permission);
+      setBundledSkillOptions([]);
+      setBundledSkillPagination((prev) => ({ ...prev, pageNum: 1, current: 1, total: 0 }));
+      bundledSkillLoadMoreLockRef.current = false;
+      fetchBundledSkills({
+        pageNum: 1,
+        pageSize: bundledSkillPagination.pageSize || BUNDLED_SKILL_PAGE_SIZE,
+        keyword: bundledSkillSearchName,
+        permission,
+      });
+    },
+    [bundledSkillPagination.pageSize, bundledSkillPermission, bundledSkillSearchName, fetchBundledSkills]
   );
 
   const loadMoreBundledSkills = useCallback(() => {
@@ -1559,6 +1594,7 @@ const ConfigForm = (props) => {
       pageNum: bundledSkillPagination.pageNum + 1,
       pageSize: bundledSkillPagination.pageSize || BUNDLED_SKILL_PAGE_SIZE,
       keyword: bundledSkillSearchName,
+      permission: bundledSkillPermission,
       append: true,
     });
   }, [
@@ -1567,6 +1603,7 @@ const ConfigForm = (props) => {
     bundledSkillPagination.pageNum,
     bundledSkillPagination.pageSize,
     bundledSkillPagination.total,
+    bundledSkillPermission,
     bundledSkillSearchName,
     fetchBundledSkills,
   ]);
@@ -3559,6 +3596,32 @@ const ConfigForm = (props) => {
           <Tabs
             activeKey={bundledSkillOwnerType}
             onChange={setBundledSkillTab}
+            tabBarExtraContent={
+              bundledSkillOwnerType === 'enterprise'
+                ? {
+                    right: (
+                      <ResourceQuickFilterBar className={styles.bundledSkillFilters}>
+                        <ResourceQuickFilterGroup
+                          title={intl.formatMessage({ id: 'common.belong' })}
+                          options={[
+                            { value: '', label: intl.formatMessage({ id: 'common.all' }) },
+                            {
+                              value: PERMISSION_CREATED_BY_ME_VALUE,
+                              label: intl.formatMessage({ id: 'resource.createdByMe' }),
+                            },
+                            {
+                              value: PERMISSION_AUTHORIZED_TO_ME_VALUE,
+                              label: intl.formatMessage({ id: 'resource.authorizedToMe' }),
+                            },
+                          ]}
+                          value={bundledSkillPermission}
+                          onChange={filterBundledSkills}
+                        />
+                      </ResourceQuickFilterBar>
+                    ),
+                  }
+                : undefined
+            }
             items={[
               ...(effectiveOwnerType === 'enterprise'
                 ? []

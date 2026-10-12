@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { Modal, message } from 'antd';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider, Modal, message } from 'antd';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import {
   createFolder,
@@ -108,13 +108,23 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => jest.restoreAllMocks());
+afterEach(async () => {
+  cleanup();
+  // 清理弹窗和全局消息根，避免失败或超时用例的弹层与计时器影响后续目录操作。
+  await act(async () => {
+    Modal.destroyAll();
+    message.destroy();
+  });
+  jest.restoreAllMocks();
+});
 
 const openPanel = async () => {
   // 等待模拟目录请求及其派生 effect 完成，避免状态更新跨到后续交互或用例。
   await act(async () => {
     render(
-      <FileResourcePanel scope="project" sessionId="s1" projectId={42} resourceId="100" onOpenDetail={jest.fn()} />
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <FileResourcePanel scope="project" sessionId="s1" projectId={42} resourceId="100" onOpenDetail={jest.fn()} />
+      </ConfigProvider>
     );
   });
   await screen.findByRole('button', { name: 'old.md:rename' });
@@ -231,7 +241,10 @@ const expandMoveFolder = async (name: string) => {
   const dialog = screen.getByRole('dialog');
   const title = await within(dialog).findByText(name);
   const row = title.closest('.ant-tree-treenode')!;
-  fireEvent.click(row.querySelector('.ant-tree-switcher')!);
+  // 展开会异步加载目录并更新树，完成本层状态更新后再下钻下一层。
+  await act(async () => {
+    fireEvent.click(row.querySelector('.ant-tree-switcher')!);
+  });
 };
 
 it('expands the move root when directory data arrives after the dialog opens', async () => {
@@ -261,7 +274,19 @@ it('expands the move root when directory data arrives after the dialog opens', a
   await waitFor(() => expect(root).toHaveAttribute('aria-expanded', 'true'));
 });
 
+// 真实树的两层加载、移动和刷新共享用例预算，沿用同文件目录创建用例的 15 秒上限。
 it('loads nested move destinations and submits the selected full directory path', async () => {
+  jest.mocked(moveKnowledgeItems).mockResolvedValueOnce({
+    data: [
+      {
+        sourcePath: '/reports/old.md',
+        targetPath: '/reports/monthly/archive/old.md',
+        success: true,
+        error: null,
+      },
+    ],
+    summary: { total: 1, succeeded: 1, failed: 0 },
+  });
   jest.mocked(queryProjectCloudDrive).mockImplementation(async (_resourceId, path) => {
     if (path === '/') return items;
     if (path === '/reports/') {
@@ -276,7 +301,9 @@ it('loads nested move destinations and submits the selected full directory path'
     return [];
   });
   await openPanel();
-  fireEvent.click(screen.getByRole('button', { name: 'old.md:move' }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'old.md:move' }));
+  });
   await expandMoveFolder('reports');
   await expandMoveFolder('monthly');
   const dialog = screen.getByRole('dialog');
@@ -284,7 +311,9 @@ it('loads nested move destinations and submits the selected full directory path'
   expect(within(dialog).queryByText('ignored.txt')).not.toBeInTheDocument();
   expect(queryProjectCloudDrive).toHaveBeenCalledWith(100, '/reports/', 'zh-CN');
   expect(queryProjectCloudDrive).toHaveBeenCalledWith(100, '/reports/monthly/', 'zh-CN');
-  fireEvent.click(within(dialog).getByRole('button', { name: /OK|确.*定/i }));
+  await act(async () => {
+    fireEvent.click(within(dialog).getByRole('button', { name: /OK|确.*定/i }));
+  });
   await waitFor(() =>
     expect(moveKnowledgeItems).toHaveBeenCalledWith({
       resourceId: 100,
@@ -293,7 +322,7 @@ it('loads nested move destinations and submits the selected full directory path'
     })
   );
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-});
+}, 15000);
 
 it('marks an empty move destination as a leaf while keeping it selectable', async () => {
   jest.mocked(queryProjectCloudDrive).mockImplementation(async (_resourceId, path) => (path === '/' ? items : []));
