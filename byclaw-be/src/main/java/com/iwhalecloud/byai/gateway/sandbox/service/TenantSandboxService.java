@@ -407,6 +407,10 @@ public class TenantSandboxService {
         Path target = tenantDirectory.resolve("byclaw-tenant-entrypoint.py");
         try {
             Files.createDirectories(tenantDirectory);
+            // Create the subPath as the BE/tenant-image owner before kubelet creates it as root.
+            Path dataDirectory = tenantDirectory.resolve("data");
+            Files.createDirectories(dataDirectory);
+            Files.setPosixFilePermissions(dataDirectory, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
             try (var source = new ClassPathResource("tenant/opengauss-entrypoint.py").getInputStream()) {
                 Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
             }

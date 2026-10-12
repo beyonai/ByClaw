@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -10,13 +11,12 @@ import { runPublicDiscover } from './public-discovery.mjs';
 import { verifyCandidate } from './candidate-verifier.mjs';
 import { blockProbeRun, createProbeRun, pauseProbeRun, readProbeRun, reserveProbeAttempt } from './probe-state.mjs';
 import { ensureSessionSkeleton, loadSession, newSession, persistSession, sessionPaths } from './session.mjs';
-import { sourcePlanIdentity } from './jev/source-plan.mjs';
-import { runHotDiscoveryWave } from './hot-discovery-runtime.mjs';
-import { searchHotDiscovery } from '../references/online-search/references/hot_discovery/scripts/hot_discovery.mjs';
+import { runHotDiscoveryWave, sourcePlanIdentity } from './hot-discovery-runtime.mjs';
+import { parseDeclarations, searchHotDiscovery } from '../references/online-search/references/hot_discovery/scripts/hot_discovery.mjs';
 
 const input = { query: 'DeepSeek', fallbackQuery: 'DeepSeek architecture', requestedCount: 1,
   category: 'it', language: 'en', manualPolicy: 'pause' };
-const disabled = { TYPESAFE_ENABLED: 'false' };
+const environment = {};
 function setup() {
   const root = mkdtempSync(join(tmpdir(), 'discovery-recovery-'));
   ensureSessionSkeleton(root);
@@ -36,7 +36,7 @@ function addCandidate(paths, id) {
   persistSession(paths, session);
   return candidate;
 }
-const unavailable = (paths, attempt) => verifyCandidate(paths, attempt, { environment: disabled,
+const unavailable = (paths, attempt) => verifyCandidate(paths, attempt, { environment,
   acquire: async () => ({ status: 'unavailable', reasonCode: 'HTTP_FAILED' }) });
 
 for (const channel of ['online', 'hot']) {
@@ -54,11 +54,11 @@ for (const channel of ['online', 'hot']) {
         }
         return {};
       };
-      const paused = await runPublicCollect(paths, input, { environment: disabled, discover });
+      const paused = await runPublicCollect(paths, input, { environment, discover });
       assert.equal(paused.status, failure === 'challenge' ? 'paused-user-action' : 'infrastructure-blocked');
       const before = calls.length;
       const finished = await runPublicCollect(paths, { 'run-id': paused.runId, resume: true },
-        { environment: disabled, discover });
+        { environment, discover });
       assert.deepEqual(calls[before], [input.query, channel]);
       assert.equal(finished.status, 'failed');
       assert.deepEqual(readProbeRun(paths).discoveryRounds.map((round) => round.query), [input.query, input.fallbackQuery]);
@@ -78,9 +78,9 @@ test('discovery skip retains authorized candidates, skips blocked channel, and k
     }
     return {};
   };
-  const paused = await runPublicCollect(paths, input, { environment: disabled, discover });
+  const paused = await runPublicCollect(paths, input, { environment, discover });
   const finished = await runPublicCollect(paths, { 'run-id': paused.runId, skip: true },
-    { environment: disabled, discover, verify: unavailable });
+    { environment, discover, verify: unavailable });
   assert.equal(finished.status, 'failed');
   assert.equal(finished.attempts.terminal, 1);
   assert.deepEqual(calls, [[input.query, 'online'], [input.query, 'hot'],
@@ -110,12 +110,12 @@ test('probe skip cleanup failure charges elapsed time and retry retains remainin
     ownedSession: { sessionId: 'owned-cleanup' } });
   let clock = 0;
   const paused = await runPublicCollect(paths, { 'run-id': run.runId, skip: true }, {
-    environment: disabled, now: () => clock, cleanup: async () => { clock += 250; throw Error('cleanup failed'); },
+    environment, now: () => clock, cleanup: async () => { clock += 250; throw Error('cleanup failed'); },
   });
   assert.equal(paused.status, 'infrastructure-blocked');
   assert.equal(readProbeRun(paths).remainingBudgetMs, 9750);
   const finished = await runPublicCollect(paths, { 'run-id': run.runId, skip: true }, {
-    environment: disabled, now: () => clock, cleanup: async (id) => { assert.equal(id, 'owned-cleanup'); clock += 100; },
+    environment, now: () => clock, cleanup: async (id) => { assert.equal(id, 'owned-cleanup'); clock += 100; },
     discover: async () => ({}),
   });
   assert.equal(finished.status, 'failed');
@@ -177,6 +177,22 @@ for (const recovery of ['resume', 'skip']) {
   });
 }
 
+function persistAcceptedSourcePlan(paths, args, waves) {
+  const session = loadSession(paths).session;
+  const sources = args.sources.split(',');
+  const declarations = parseDeclarations(readFileSync(new URL(
+    '../references/online-search/references/hot_discovery/adapters.md', import.meta.url), 'utf8'));
+  const planInput = { query: args.query, effectiveCategory: args.category, sources,
+    constraints: { category: args.category, tiers: '1,2,3', explicit: sources, language: args.language,
+      requestedCount: args['requested-count'], taskQuery: session.task.query,
+      sourceScope: session.task.sourceScope, topicContract: session.task.discoveryGate.topicContract,
+      declarationIdentity: sourcePlanIdentity(declarations) } };
+  session.task.publicCollectRun.hotSourcePlan = { identity: sourcePlanIdentity(planInput), waves, cursor: 0, nextWave: true,
+    effective: { query: args.query, category: args.category, language: args.language, timeRange: null, source: 'automatic' },
+    waveIds: waves.map(() => randomUUID()), diagnostic: { status: 'used' } };
+  persistSession(paths, session);
+}
+
 for (const planned of [false, true]) {
   for (const recovery of ['resume', 'skip']) {
     for (const failure of ['challenge', 'infrastructure']) {
@@ -184,26 +200,28 @@ for (const planned of [false, true]) {
       const paths = setup();
       const fixture = hotFixture(['baidu', 'hackernews', 'stackoverflow'], { failure });
       const waves = [];
-      let continuing = false;
-      const discover = (target, args, context) => runPublicDiscover(target, { ...args, sources: 'baidu,hackernews,stackoverflow' }, {
-        environment: planned && !continuing ? {} : disabled, orchestrationRunId: context.runId, channelMode: context.channel,
+      const discover = (target, args, context) => {
+        const request = { ...args, sources: 'baidu,hackernews,stackoverflow' };
+        if (planned && context.channel === 'hot' && !readProbeRun(paths).hotSourcePlan) {
+          persistAcceptedSourcePlan(paths, request, [['baidu', 'hackernews', 'stackoverflow']]);
+        }
+        return runPublicDiscover(target, request, {
+        environment, orchestrationRunId: context.runId, channelMode: context.channel,
         remainingBudgetMs: () => context.remainingBudgetMs,
         runOnlineSearch: async () => ({ ok: true, document: { query: args.query, results: [] } }),
-        ...(planned ? { planSourceWaves: async (planInput) => ({ identity: sourcePlanIdentity(planInput),
-          waves: [['baidu', 'hackernews', 'stackoverflow']], diagnostic: { status: 'used' } }) } : {}),
         runProcess: async (spec) => {
           waves.push(spec.args[spec.args.indexOf('--wave-id') + 1]);
           return fixture.runner(spec);
         },
       });
-      const paused = await runPublicCollect(paths, input, { environment: disabled, discover, verify: unavailable });
+      };
+      const paused = await runPublicCollect(paths, input, { environment, discover, verify: unavailable });
       assert.equal(paused.status, failure === 'challenge' ? 'paused-user-action' : 'infrastructure-blocked');
       const firstRun = readProbeRun(paths);
       if (planned) assert.equal(firstRun.hotSourcePlan.cursor, 0);
       fixture.resolve();
-      continuing = true;
       const finished = await runPublicCollect(paths, { 'run-id': paused.runId, [recovery]: true },
-        { environment: disabled, discover, verify: unavailable });
+        { environment, discover, verify: unavailable });
       assert.equal(finished.status, 'failed');
       assert.equal(waves[1], waves[0]);
       if (planned) assert.deepEqual(readProbeRun(paths).hotSourcePlan.waveIds, firstRun.hotSourcePlan.waveIds);
@@ -237,7 +255,7 @@ test('real online discovery challenge resumes the same gate without consuming an
   const paths = setup();
   const queries = [];
   const discover = (target, args, context) => runPublicDiscover(target, args, {
-    environment: disabled, orchestrationRunId: context.runId, channelMode: context.channel,
+    environment, orchestrationRunId: context.runId, channelMode: context.channel,
     runOnlineSearch: async () => {
       queries.push(args.query);
       return { ok: true, document: { query: args.query, results: [], ...(queries.length === 1
@@ -245,64 +263,55 @@ test('real online discovery challenge resumes the same gate without consuming an
     },
     runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }) }),
   });
-  const paused = await runPublicCollect(paths, input, { environment: disabled, discover });
+  const paused = await runPublicCollect(paths, input, { environment, discover });
   assert.equal(paused.status, 'paused-user-action');
-  const finished = await runPublicCollect(paths, { 'run-id': paused.runId, resume: true }, { environment: disabled, discover });
+  const finished = await runPublicCollect(paths, { 'run-id': paused.runId, resume: true }, { environment, discover });
   assert.equal(finished.status, 'failed');
   assert.deepEqual(queries, [input.query, input.query, input.fallbackQuery]);
   assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 2);
 });
 
 for (const failure of ['challenge', 'infrastructure']) {
-  for (const changedJev of ['disabled', 'unavailable', 'different']) {
-    test(`real online effective request survives ${failure} with Jev ${changedJev}`, async () => {
-      const paths = setup();
-      const requests = [];
-      let continuing = false;
-      let jevCalls = 0;
-      const discover = (target, args, context) => runPublicDiscover(target, args, {
-        environment: context.channel === 'hot' || (continuing && changedJev === 'disabled') ? disabled : {},
-        orchestrationRunId: context.runId, channelMode: context.channel,
-        runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }) }),
-        callJev: async ({ questions }) => {
-          jevCalls++;
-          if (continuing && changedJev === 'unavailable') throw Error('offline Jev unavailable');
-          const choices = { query: continuing ? 'q0' : 'q1', category: 'c0', timeRange: 't0', source: continuing ? 's0' : 's1' };
-          return { ok: true, document: { answers: Object.fromEntries(Object.keys(questions).map((field) => [field,
-            { type: 'choice', choice: choices[field], confidence: 0.99 }])) } };
-        },
-        runOnlineSearch: async (request) => {
-          const persisted = readProbeRun(paths).onlineDiscoveryExecution;
-          assert.equal(persisted?.effective.query, request.query);
-          assert.equal(persisted?.effective.source, request.source || 'automatic');
-          requests.push({ ...request });
-          if (!continuing) {
-            if (failure === 'infrastructure') throw Error('offline transport unavailable');
-            return { ok: true, document: { query: request.query, results: [],
-              requiresUserAction: { kind: 'captcha', source: 'github' } } };
-          }
-          return { ok: true, document: { query: request.query, results: [] } };
-        },
-      });
-      const paused = await runPublicCollect(paths, { ...input, query: 'DeepSeek architecture', fallbackQuery: 'DeepSeek inference' },
-        { environment: disabled, discover });
-      assert.equal(paused.status, failure === 'challenge' ? 'paused-user-action' : 'infrastructure-blocked');
-      assert.equal(requests[0].query, 'DeepSeek');
-      assert.equal(requests[0].source, 'github');
-      assert.equal(jevCalls, 1);
-      continuing = true;
-      const finished = await runPublicCollect(paths, { 'run-id': paused.runId, resume: true }, { environment: disabled, discover });
-      assert.equal(finished.status, 'failed');
-      assert.deepEqual(requests[1], requests[0]);
-      assert.equal(requests[2].query, 'DeepSeek inference');
-      assert.equal(requests[2].source, undefined);
-      assert.equal(requests.length, 3);
-      assert.equal(jevCalls, changedJev === 'disabled' ? 1 : 2);
-      assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 2);
-      assert.deepEqual(readProbeRun(paths).discoveryRounds.map((round) => round.query), ['DeepSeek architecture', 'DeepSeek inference']);
-      assert.equal(readProbeRun(paths).remainingBudgetMs <= paused.pause.remainingBudgetMs, true);
+  test(`persisted online effective request survives ${failure} recovery`, async () => {
+    const paths = setup();
+    const requests = [];
+    let continuing = false;
+    const discover = (target, args, context) => runPublicDiscover(target, args, {
+      environment, orchestrationRunId: context.runId, channelMode: context.channel,
+      runProcess: async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }) }),
+      runOnlineSearch: async (request) => {
+        const persisted = readProbeRun(paths).onlineDiscoveryExecution;
+        assert.equal(persisted?.effective.query, request.query);
+        assert.equal(persisted?.effective.source, request.source || 'automatic');
+        requests.push({ ...request });
+        if (!continuing) {
+          if (failure === 'infrastructure') throw Error('offline transport unavailable');
+          return { ok: true, document: { query: request.query, results: [],
+            requiresUserAction: { kind: 'captcha', source: 'github' } } };
+        }
+        return { ok: true, document: { query: request.query, results: [] } };
+      },
     });
-  }
+    const paused = await runPublicCollect(paths, { ...input, query: 'DeepSeek architecture', fallbackQuery: 'DeepSeek inference' },
+      { environment, discover });
+    assert.equal(paused.status, failure === 'challenge' ? 'paused-user-action' : 'infrastructure-blocked');
+    assert.equal(requests[0].query, 'DeepSeek architecture');
+    assert.equal(requests[0].source, undefined);
+    const saved = loadSession(paths).session;
+    saved.task.publicCollectRun.onlineDiscoveryExecution.effective.query = 'DeepSeek';
+    saved.task.publicCollectRun.onlineDiscoveryExecution.effective.source = 'github';
+    persistSession(paths, saved);
+    continuing = true;
+    const finished = await runPublicCollect(paths, { 'run-id': paused.runId, resume: true }, { environment, discover });
+    assert.equal(finished.status, 'failed');
+    assert.deepEqual(requests[1], { ...requests[0], query: 'DeepSeek', source: 'github' });
+    assert.equal(requests[2].query, 'DeepSeek inference');
+    assert.equal(requests[2].source, undefined);
+    assert.equal(requests.length, 3);
+    assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 2);
+    assert.deepEqual(readProbeRun(paths).discoveryRounds.map((round) => round.query), ['DeepSeek architecture', 'DeepSeek inference']);
+    assert.equal(readProbeRun(paths).remainingBudgetMs <= paused.pause.remainingBudgetMs, true);
+  });
 }
 
 test('online continuation rejects invalid effective parameters and changed request identity before dispatch', async () => {
@@ -314,7 +323,7 @@ test('online continuation rejects invalid effective parameters and changed reque
     const discover = async (target, args, context) => {
       try {
         return await runPublicDiscover(target, { ...args, ...(continuing && change === 'page' ? { pageno: '2' } : {}) }, {
-          environment: disabled, orchestrationRunId: context.runId, channelMode: context.channel,
+          environment, orchestrationRunId: context.runId, channelMode: context.channel,
           runOnlineSearch: async (request) => {
             dispatched++;
             return { ok: true, document: { query: request.query, results: [],
@@ -323,7 +332,7 @@ test('online continuation rejects invalid effective parameters and changed reque
         });
       } catch (error) { errors.push(error); throw error; }
     };
-    const paused = await runPublicCollect(paths, input, { environment: disabled, discover });
+    const paused = await runPublicCollect(paths, input, { environment, discover });
     assert.equal(paused.status, 'paused-user-action');
     const current = loadSession(paths).session;
     const execution = current.task.publicCollectRun.onlineDiscoveryExecution;
@@ -333,7 +342,7 @@ test('online continuation rejects invalid effective parameters and changed reque
     else if (change !== 'page') execution.effective[change] = 'outside-authorized-options';
     persistSession(paths, current);
     continuing = true;
-    const resumed = await runPublicCollect(paths, { 'run-id': paused.runId, resume: true }, { environment: disabled, discover });
+    const resumed = await runPublicCollect(paths, { 'run-id': paused.runId, resume: true }, { environment, discover });
     assert.equal(resumed.status, 'infrastructure-blocked');
     assert.equal(dispatched, 1, change);
     assert.match(errors[0]?.message || '', /ONLINE_DISCOVERY_EXECUTION_INVALID/, change);
@@ -373,7 +382,7 @@ test('infrastructure skip identifies the interrupted source when execution diffe
 
 for (const profile of [false, true]) {
   for (const recovery of ['resume', 'skip']) {
-    test(`persisted ${profile ? 'profile' : 'generic'} legacy ${recovery} ignores newly valid source advice`, async () => {
+    test(`persisted ${profile ? 'profile' : 'generic'} checkpoint ${recovery} preserves source progress and budget`, async () => {
       const paths = setup();
       if (profile) {
         const session = loadSession(paths).session;
@@ -388,25 +397,12 @@ for (const profile of [false, true]) {
         onInvoke: (_source, timeoutMs) => { timeouts.push(timeoutMs); clock += 1000; } });
       const waves = [];
       const documents = [];
-      let sourcePlans = 0;
-      let queryPlans = 0;
       const discover = async (target, args, context) => {
         if (context.round > 1) return {}; // The regression concerns continuation of the original round.
         return runPublicDiscover(target, { ...args, sources: sources.join(','), timeout: '10' }, {
           environment: {}, orchestrationRunId: context.runId, channelMode: context.channel,
           budgetNow: () => 0, now: () => clock,
           runOnlineSearch: async () => ({ ok: true, document: { query: args.query, results: [] } }),
-          planDiscovery: async (planning) => {
-            queryPlans++;
-            return { effective: { query: planning.query, category: planning.category, language: planning.language,
-              timeRange: planning.timeRange, source: 'automatic' }, jev: { status: 'fallback' } };
-          },
-          planSourceWaves: async (planning) => {
-            sourcePlans++;
-            return { identity: sourcePlanIdentity(planning),
-              waves: sourcePlans === 1 ? [] : [sources.slice(0, 3), ...(profile ? [sources.slice(3)] : [])],
-              diagnostic: { status: 'used' } };
-          },
           runProcess: async (spec) => {
             waves.push(spec.args[spec.args.indexOf('--wave-id') + 1]);
             const result = await fixture.runner(spec);
@@ -415,18 +411,14 @@ for (const profile of [false, true]) {
           },
         });
       };
-      const paused = await runPublicCollect(paths, request, { environment: disabled, now: () => clock, discover, verify: unavailable });
+      const paused = await runPublicCollect(paths, request, { environment, now: () => clock, discover, verify: unavailable });
       assert.equal(paused.status, 'paused-user-action');
-      assert.equal(sourcePlans, 1);
       assert.equal(readProbeRun(paths).hotSourcePlan, undefined);
-      const queryPlansBefore = queryPlans;
       fixture.resolve();
       clock += 100000;
       const finished = await runPublicCollect(paths, { 'run-id': paused.runId, [recovery]: true },
-        { environment: disabled, now: () => clock, discover, verify: unavailable });
+        { environment, now: () => clock, discover, verify: unavailable });
       assert.equal(finished.status, 'failed');
-      assert.equal(sourcePlans, 1);
-      assert.equal(queryPlans, queryPlansBefore);
       assert.equal(waves[1], waves[0]);
       assert.deepEqual(fixture.calls, [sources[0], sources[1], ...(recovery === 'resume' ? [sources[1]] : []), ...sources.slice(2)]);
       assert.equal(documents[1].adapterStats[sources[0]].status, 'ok');

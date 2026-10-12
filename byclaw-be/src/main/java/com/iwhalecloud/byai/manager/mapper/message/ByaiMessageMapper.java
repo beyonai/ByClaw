@@ -138,6 +138,11 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
     List<ByaiMessage> selectVisibleAfterMessageId(@Param("sessionId") Long sessionId,
         @Param("messageId") Long messageId, @Param("limit") Integer limit);
 
+    /** 分批读取附件候选消息，不加载正文、思考或工具日志；允许续读游标消息中的剩余附件。 */
+    List<ByaiMessage> selectGroupFileMessagePage(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("includeCursor") boolean includeCursor,
+        @Param("limit") int limit);
+
     List<ByaiMessage> searchVisibleGroupMessages(@Param("sessionId") Long sessionId,
         @Param("keyword") String keyword, @Param("scope") String scope,
         @Param("senderType") String senderType, @Param("contentType") String contentType,

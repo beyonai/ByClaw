@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test *.test.mjs jev/*.test.mjs online-search/*.test.mjs"
+    "test": "node --test *.test.mjs online-search/*.test.mjs"
   },
   "optionalDependencies": {
     "tencentcloud-sdk-nodejs": "4.1.304"

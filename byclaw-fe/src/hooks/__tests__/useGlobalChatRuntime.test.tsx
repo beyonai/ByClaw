@@ -111,6 +111,58 @@ describe('hooks/useGlobalChatRuntime', () => {
     expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
   });
 
+  it('uses exact envelope IDs when legacy runtime payload IDs were rounded', () => {
+    renderHook(() => useGlobalChatRuntime());
+
+    const onSessionRuntime = mockWebSocketManager.onMessage.mock.calls.find(
+      ([type]) => type === 'SESSION_RUNTIME_STATUS'
+    )![1];
+    act(() => {
+      onSessionRuntime({
+        type: 'SESSION_RUNTIME_STATUS',
+        sessionId: '8011237409000004638',
+        traceId: 'trace-1',
+        data: {
+          sessionId: 8011237409000004638,
+          traceId: 'trace-1',
+          source: 'integration-a',
+          status: 'running',
+          activeAgentCount: 2,
+          activeChildCount: 1,
+          waitingInteractionCount: 0,
+          rootActive: false,
+          acceptingInput: true,
+          revision: 1,
+          changedAt: 1000,
+        },
+      });
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('8011237409000004638')).toBe(true);
+    expect(chatSessionRuntimeManager.getSessionRuntime('8011237409000004638')?.activeAgentCount).toBe(2);
+    expect(chatSessionRuntimeManager.canAcceptInput('8011237409000004638')).toBe(true);
+    act(() =>
+      onSessionRuntime({
+        sessionId: '8011237409000004638',
+        data: {
+          sessionId: 8011237409000004638,
+          traceId: 'trace-1',
+          source: 'integration-a',
+          status: 'idle',
+          active: false,
+          rootActive: false,
+          activeAgentCount: 0,
+          activeChildCount: 0,
+          waitingInteractionCount: 0,
+          acceptingInput: true,
+          revision: 2,
+          changedAt: 1001,
+        },
+      })
+    );
+    expect(chatSessionRuntimeManager.isSessionRunning('8011237409000004638')).toBe(false);
+  });
+
   afterEach(() => {
     jest.useRealTimers();
   });

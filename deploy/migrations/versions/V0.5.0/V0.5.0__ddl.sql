@@ -479,6 +479,7 @@ ALTER TABLE byai.permission_group_categories ADD PRIMARY KEY (id);
 ALTER TABLE byai.permission_group_excluded_objects ADD PRIMARY KEY (id);
 ALTER TABLE byai.permission_group_resources ADD PRIMARY KEY (id);
 ALTER TABLE byai.permission_groups ADD PRIMARY KEY (id);
+ALTER TABLE byai.po_enterprise_info ADD PRIMARY KEY (enterprise_id);
 ALTER TABLE byai.po_login_log ADD PRIMARY KEY (log_id);
 ALTER TABLE byai.po_manage_log ADD PRIMARY KEY (log_id);
 ALTER TABLE byai.po_organization ADD PRIMARY KEY (org_id);
@@ -525,7 +526,46 @@ ALTER TABLE byai.suas_superassist_sub_agent ADD PRIMARY KEY (superassist_sub_age
 ALTER TABLE byai.sys_app_version ADD PRIMARY KEY (version_id);
 ALTER TABLE byai.template_rule_info ADD PRIMARY KEY (template_id);
 
+ALTER TABLE byai.sandbox_service_spec
+    ADD COLUMN owner_scope VARCHAR(16) NOT NULL DEFAULT 'USER';
+ALTER TABLE byai.sandbox_service_spec
+    ADD CONSTRAINT ck_sandbox_service_spec_owner_scope
+        CHECK (owner_scope IN ('USER','TENANT'));
+COMMENT ON COLUMN byai.sandbox_service_spec.owner_scope IS '服务规格归属维度：用户或企业租户';
 
+ALTER TABLE byai.ss_sandbox_record
+    ADD COLUMN owner_scope VARCHAR(16) NOT NULL DEFAULT 'USER';
+ALTER TABLE byai.ss_sandbox_record
+    ADD CONSTRAINT ck_ss_sandbox_record_owner_scope
+        CHECK (owner_scope IN ('USER','TENANT'));
+COMMENT ON COLUMN byai.ss_sandbox_record.owner_scope IS '沙箱实例归属维度：用户或企业租户';
+ALTER TABLE byai.ss_sandbox_record
+    ADD COLUMN enterprise_id BIGINT;
+COMMENT ON COLUMN byai.ss_sandbox_record.enterprise_id IS '沙箱所属企业租户ID；用户沙箱可为空';
+
+-- 既有企业表须先检查 enterprise_id 重复/空值；正式迁移补唯一约束前处理脏数据
+ALTER TABLE byai.po_enterprise_info
+    ALTER COLUMN enterprise_id SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_po_enterprise_info_enterprise_id
+    ON byai.po_enterprise_info(enterprise_id);
+
+-- 现有工作组项目仍留平台库，只增加租户归属和跨库建群恢复字段
+ALTER TABLE byai.byai_project
+    ADD COLUMN enterprise_id BIGINT;
+COMMENT ON COLUMN byai.byai_project.enterprise_id IS '项目所属企业租户ID，存量项目待归属回填';
+ALTER TABLE byai.byai_project
+    ADD COLUMN group_create_request_id VARCHAR(64);
+COMMENT ON COLUMN byai.byai_project.group_create_request_id IS '群聊创建幂等请求ID';
+ALTER TABLE byai.byai_project
+    ADD COLUMN group_create_status VARCHAR(16);
+COMMENT ON COLUMN byai.byai_project.group_create_status IS '跨平台库和租户库建群状态：待创建、就绪或失败';
+ALTER TABLE byai.byai_project
+    ADD CONSTRAINT ck_byai_project_group_create_status
+        CHECK (group_create_status IS NULL OR group_create_status IN ('PENDING','READY','FAILED'));
+CREATE UNIQUE INDEX uq_byai_project_tenant_group_request
+    ON byai.byai_project(enterprise_id,group_create_request_id)
+    WHERE group_create_request_id IS NOT NULL;
+CREATE INDEX ix_byai_project_enterprise_id ON byai.byai_project(enterprise_id);
 
 DROP TABLE IF EXISTS byai.tenant_schema_audit;
 DROP TABLE IF EXISTS byai.tenant_config;
@@ -663,3 +703,23 @@ COMMENT ON COLUMN byai.tenant_schema_audit.started_at IS '开始执行时间';
 COMMENT ON COLUMN byai.tenant_schema_audit.finished_at IS '执行结束时间';
 
 
+
+-- 租户组织挂接：供组织树、批量添加成员和租户删除使用。
+CREATE TABLE IF NOT EXISTS byai.tenant_organization (
+    enterprise_id BIGINT NOT NULL,
+    org_id BIGINT NOT NULL,
+    added_by BIGINT NOT NULL,
+    added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_tenant_organization PRIMARY KEY (enterprise_id, org_id),
+    CONSTRAINT fk_tenant_organization_enterprise FOREIGN KEY (enterprise_id)
+        REFERENCES byai.po_enterprise_info (enterprise_id),
+    CONSTRAINT fk_tenant_organization_org FOREIGN KEY (org_id)
+        REFERENCES byai.po_organization (org_id)
+);
+CREATE INDEX IF NOT EXISTS ix_tenant_organization_org
+    ON byai.tenant_organization (org_id, enterprise_id);
+COMMENT ON TABLE byai.tenant_organization IS '企业租户与平台组织的挂接关系';
+COMMENT ON COLUMN byai.tenant_organization.enterprise_id IS '所属企业租户ID';
+COMMENT ON COLUMN byai.tenant_organization.org_id IS '挂接的平台组织ID';
+COMMENT ON COLUMN byai.tenant_organization.added_by IS '挂接组织的操作人ID';
+COMMENT ON COLUMN byai.tenant_organization.added_at IS '组织挂接时间';

@@ -45,6 +45,7 @@ class TenantWebSocketStopTest {
         WebSocketHandler handler = new WebSocketHandler();
         ReflectionTestUtils.setField(handler, "tenantContextService", tenants);
         ReflectionTestUtils.setField(handler, "chatService", proxy.getProxy());
+        ReflectionTestUtils.setField(handler, "tenantNodeClient", node);
         LoginInfo user = new LoginInfo();
         user.setUserId(1L);
         user.setUserCode("tester");
@@ -60,6 +61,41 @@ class TenantWebSocketStopTest {
     void clearContext() {
         CurrentUserHolder.clearLoginInfo();
         TenantRequestContextHolder.clear();
+    }
+
+    @Test
+    void tenantChildSubscriptionAuthorizesExactIdAndCanBeCleared() {
+        EmbeddedChannel channel = channel();
+        try {
+            channel.writeInbound(new TextWebSocketFrame(
+                "{\"type\":\"HEARTBEAT\",\"enterpriseId\":\"123\",\"scopedSessionId\":\"8011237409000004505\"}"));
+            TextWebSocketFrame response = channel.readOutbound();
+            assertThat(response.text()).contains("HEARTBEAT");
+            response.release();
+            assertThat(channel.attr(Constant.ATT_SCOPED_SESSION_ID).get()).isEqualTo("8011237409000004505");
+            verify(node).request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/8011237409000004505"), any(), any());
+            channel.writeInbound(new TextWebSocketFrame(
+                "{\"type\":\"HEARTBEAT\",\"enterpriseId\":\"123\",\"scopedSessionId\":\"\"}"));
+            ((TextWebSocketFrame) channel.readOutbound()).release();
+            assertThat(channel.attr(Constant.ATT_SCOPED_SESSION_ID).get()).isNull();
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test
+    void inaccessibleTenantChildCannotReplaceExistingSubscription() {
+        EmbeddedChannel channel = channel();
+        try {
+            channel.attr(Constant.ATT_SCOPED_SESSION_ID).set("42");
+            when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/99"), any(), any()))
+                .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+            channel.writeInbound(new TextWebSocketFrame(
+                "{\"type\":\"HEARTBEAT\",\"enterpriseId\":\"123\",\"scopedSessionId\":\"99\"}"));
+            TextWebSocketFrame response = channel.readOutbound();
+            assertThat(response.text()).contains("ERROR");
+            response.release();
+            verify(node).request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/99"), any(), any());
+            assertThat(channel.attr(Constant.ATT_SCOPED_SESSION_ID).get()).isEqualTo("42");
+        } finally { channel.finishAndReleaseAll(); }
     }
 
     @Test

@@ -16,7 +16,6 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.page.PageInfo;
-import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.RemoveMember;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
@@ -37,6 +36,7 @@ class TenantGroupChatRoutingAspectTest {
     private final GroupChatReadService legacy = mock(GroupChatReadService.class);
     private final ByaiGroupChatMentionMapper memberships = mock(ByaiGroupChatMentionMapper.class);
     private final TenantGroupMemberService memberService = mock(TenantGroupMemberService.class);
+    private final TenantGroupManagementService management = mock(TenantGroupManagementService.class);
     private final TenantGroupCreationService creation = mock(TenantGroupCreationService.class);
     private final TenantGroupChatRoutingAspect aspect = new TenantGroupChatRoutingAspect(node, legacy, memberships,
         new ObjectMapper(), memberService);
@@ -46,6 +46,7 @@ class TenantGroupChatRoutingAspectTest {
     void setUp() {
         originalEnvironment = System.getProperty("BE_ENV");
         ReflectionTestUtils.setField(aspect, "creation", creation);
+        ReflectionTestUtils.setField(aspect, "management", management);
     }
 
     @AfterEach
@@ -237,8 +238,8 @@ class TenantGroupChatRoutingAspectTest {
             "AGENT", 10000713L));
 
         assertThat(response.getCode()).isZero();
-        verify(node).command(context, "DELETE", "/internal/v1/group-chats/9000000000000000001/members",
-            "9000000000000000001", "REMOVE_MEMBER", new RemoveMember("AGENT", "10000713"));
+        verify(management).change(eq(context), eq("remove"), eq(9000000000000000001L),
+            org.mockito.AdditionalMatchers.aryEq(new Object[]{9000000000000000001L, "AGENT", 10000713L}));
     }
 
     @Test

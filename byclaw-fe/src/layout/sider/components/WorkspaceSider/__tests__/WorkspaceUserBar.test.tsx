@@ -38,6 +38,7 @@ describe('WorkspaceUserBar', () => {
   it('shows the user avatar and name and opens the migrated user menu on click', async () => {
     render(<WorkspaceUserBar />);
 
+    expect(screen.queryByRole('button', { name: 'tenantSwitcher.open' })).not.toBeInTheDocument();
     expect(screen.getByText('用户')).toBeInTheDocument();
     expect(screen.getByText('测试用户')).toBeInTheDocument();
     expect(screen.queryByText('业务管理')).not.toBeInTheDocument();

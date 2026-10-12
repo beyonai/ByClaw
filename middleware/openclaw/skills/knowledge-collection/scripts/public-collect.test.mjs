@@ -118,32 +118,21 @@ test('hot source waves verify current candidates before requesting the next wave
   assert.equal(result.status, 'complete');
 });
 
-test('second round uses a bounded feedback query and failure preserves exact fallback query', async () => {
-  for (const succeeds of [true, false]) {
-    const paths = setup();
-    const queries = [];
-    let choices = 0;
-    const result = await runPublicCollect(paths, { ...input, requestedCount: 1 }, {
-      environment: {}, callJev: async () => {
-        choices++;
-        return succeeds ? { ok: true, document: { answers: { query: { type: 'choice', choice: 'q1', confidence: 0.95 } } } }
-          : { ok: false, diagnostic: { code: 'TYPESAFE_HTTP_503' } };
-      },
-      discover: async (_paths, args, context) => {
-        queries.push(args.query);
-        if (context.round === 1 && context.channel === 'online') addCandidates(paths, [candidate('failed-topic')]);
-        return {};
-      },
-      verify: async (targetPaths, attempt) => verifyCandidate(targetPaths, attempt, { environment: {},
-        acquire: async () => ({ status: 'unavailable', reasonCode: 'ABSTRACT_ONLY' }) }),
-    });
-    assert.equal(choices, 1);
-    assert.deepEqual(queries, [input.query, input.query,
-      succeeds ? `${input.fallbackQuery} 全文` : input.fallbackQuery,
-      succeeds ? `${input.fallbackQuery} 全文` : input.fallbackQuery]);
-    assert.equal(result.status, 'failed');
-    assert.equal(loadSession(paths).session.task.publicCollectRun.discoveryRounds.length, 2);
-  }
+test('second round preserves the exact fallback query after failed acquisition', async () => {
+  const paths = setup();
+  const queries = [];
+  const result = await runPublicCollect(paths, { ...input, requestedCount: 1 }, {
+    discover: async (_paths, args, context) => {
+      queries.push(args.query);
+      if (context.round === 1 && context.channel === 'online') addCandidates(paths, [candidate('failed-topic')]);
+      return {};
+    },
+    verify: async (targetPaths, attempt) => verifyCandidate(targetPaths, attempt, {
+      acquire: async () => ({ status: 'unavailable', reasonCode: 'ABSTRACT_ONLY' }) }),
+  });
+  assert.deepEqual(queries, [input.query, input.query, input.fallbackQuery, input.fallbackQuery]);
+  assert.equal(result.status, 'failed');
+  assert.equal(loadSession(paths).session.task.publicCollectRun.discoveryRounds.length, 2);
 });
 
 test('a discovery user gate pauses before probing or dispatching a fallback query', async () => {
@@ -196,30 +185,13 @@ test('probes an authorized user URL before running public discovery', async () =
   assert.equal(result.deliverableArticleCount, 1);
 });
 
-test('two failed acquisitions trigger one bounded rerank and stop after successful delivery', async () => {
+test('failed acquisitions preserve deterministic priority and stop after successful delivery', async () => {
   const paths = setup();
-  const researchSession = loadSession(paths).session;
-  researchSession.task.followups = ['evaluation'];
-  researchSession.research.branches = [{ status: 'done', query: 'architecture', researchGoal: 'architecture details',
-    followups: ['failure modes'] }];
-  persistSession(paths, researchSession);
   const candidates = ['a-fail', 'b-fail', 'c-slow', 'd-success'].map((id) => candidate(id));
   const order = [];
-  let reranks = 0;
   const result = await runPublicCollect(paths, { ...input, requestedCount: 1 }, {
     environment: {},
     discover: async () => addCandidates(paths, candidates),
-    rankCandidates: async (_request, remaining, options) => {
-      reranks += 1;
-      assert.equal(options.optimizeDelivery, true);
-      assert.equal(options.feedback.length, 2);
-      assert.ok(options.feedback.every((entry) => !entry.delivered));
-      assert.ok(options.remainingBudgetMs() <= 2000);
-      assert.deepEqual(options.evidenceContext, {
-        coveredSubtopics: ['architecture details'], missingSubtopics: ['evaluation', 'failure modes'],
-      });
-      return { candidates: [...remaining].reverse(), diagnostic: { status: 'used' } };
-    },
     verify: async (targetPaths, attempt) => {
       const id = loadSession(paths).session.task.publicCollectRun.attempts.find((row) => row.attemptId === attempt.attemptId).candidateId;
       order.push(id);
@@ -231,9 +203,7 @@ test('two failed acquisitions trigger one bounded rerank and stop after successf
     },
   });
   assert.equal(result.status, 'complete');
-  assert.deepEqual(order, ['a-fail', 'b-fail', 'd-success']);
-  assert.equal(reranks, 1);
-  assert.equal(loadSession(paths).session.task.publicCollectRun.scheduling.afterAttemptCount, 2);
+  assert.deepEqual(order, ['a-fail', 'b-fail', 'c-slow', 'd-success']);
 });
 
 test('probes high priority before normal and stops at requested unique count', async () => {

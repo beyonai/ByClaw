@@ -1,3 +1,4 @@
+import { truncateUtf8 } from "../../domain/values.js";
 import type { CommandContext } from "./command-context.js";
 import { first, insert, nextId } from "./sql-utils.js";
 import { DomainError } from "../../domain/errors.js";
@@ -61,7 +62,7 @@ export async function createGroupTasks(
       parent_session_id: command.sessionId,
       creator_id: command.userId,
       enterprise_id: command.enterpriseId,
-      session_name: content.slice(0, 255) || "群聊任务",
+      session_name: truncateUtf8(content, 255) || "群聊任务",
       session_type: "h_as",
       state: coordinated ? "GROUP_TASK" : "GROUP_TASK_CANDIDATE",
       object_id: agentId,
@@ -77,7 +78,7 @@ export async function createGroupTasks(
         dispatch_id: dispatchId,
         initiator_user_id: command.userId,
         target_agent_id: agentId,
-        task_name: content.slice(0, 255) || "群聊任务",
+        task_name: truncateUtf8(content, 255) || "群聊任务",
         status: "ACTIVE",
         turn_status: "QUEUED",
         create_time: new Date(),

@@ -1,6 +1,4 @@
 import { verifyCandidate } from './candidate-verifier.mjs';
-import { withJevRun } from './jev/run-context.mjs';
-import { selectFeedbackQuery } from './jev/source-plan.mjs';
 import { finalizeVerifiedProbeRun, registerArxivAcquisitionVariant } from './collection-state.mjs';
 import { summarizePromotedDelivery } from './delivery-state.mjs';
 import {
@@ -18,11 +16,8 @@ import {
   updateProbeBudget,
 } from './probe-state.mjs';
 import { finalizePublicDiscoveryRound, runPublicDiscover } from './public-discovery.mjs';
-import { loadSession, persistSession, withSessionLock } from './session.mjs';
+import { loadSession } from './session.mjs';
 import { cleanupProbeSession } from './web-acquirer.mjs';
-import { rankCandidates } from './jev/candidate-ranker.mjs';
-import { collectionFeedback, schedulingEvidence, collectedPublicCandidates } from './jev/delivery-policy.mjs';
-import { researchEvidenceContext } from './jev/research-evidence.mjs';
 
 const MAX_DISCOVERY_ROUNDS = 2;
 
@@ -90,11 +85,7 @@ function prepareCandidate(paths, candidate) {
   });
 }
 
-export function runPublicCollect(paths, rawInput, options = {}) {
-  return withJevRun(() => runPublicCollectInContext(paths, rawInput, options));
-}
-
-async function runPublicCollectInContext(paths, rawInput, options = {}) {
+export async function runPublicCollect(paths, rawInput, options = {}) {
   const now = options.now || Date.now;
   const startedAt = now();
   const requestedRunId = rawInput?.runId || rawInput?.['run-id'];
@@ -184,38 +175,6 @@ async function runPublicCollectInContext(paths, rawInput, options = {}) {
     targetPaths, attempt, { remainingBudgetMs: context.remainingBudgetMs, environment: options.environment || process.env },
   ));
   let lastFailure = null;
-  let lastFeedbackCount = 0;
-  let scheduledIds = [];
-  const chooseCandidate = async (session, currentRun, available) => {
-    const feedback = collectionFeedback(session, currentRun);
-    const failedTail = feedback.slice(-2);
-    const finishedCount = currentRun.attempts.filter((attempt) => attempt.finishedAt).length;
-    if (available.length > 1 && finishedCount >= lastFeedbackCount + 2
-      && failedTail.length === 2 && failedTail.every((row) => !row.delivered)) {
-      lastFeedbackCount = finishedCount;
-      const deadline = now() + Math.min(2000, remainingBudgetMs() / 20);
-      const ranked = await (options.rankCandidates || rankCandidates)(session.task.query,
-        schedulingEvidence(session, available), {
-          optimizeDelivery: true, feedback, collectedCandidates: collectedPublicCandidates(session),
-          evidenceContext: researchEvidenceContext(session, options.environment || process.env),
-          environment: options.environment || process.env,
-          remainingBudgetMs: () => Math.max(0, Math.min(deadline - now(), remainingBudgetMs())),
-        });
-      scheduledIds = ranked.diagnostic.status === 'used' ? ranked.candidates.map((candidate) => candidate.candidateId) : [];
-      withSessionLock(paths, 'public-collect-scheduling', () => {
-        const current = loadSession(paths, { persistMigration: false }).session;
-        if (current.task.publicCollectRun?.runId !== currentRun.runId) return;
-        current.task.publicCollectRun.scheduling = { ...ranked.diagnostic, afterAttemptCount: finishedCount,
-          candidateIds: scheduledIds.slice(0, 100) };
-        persistSession(paths, current);
-      });
-    }
-    // Authorization/priority are owned by the existing state machine; only reorder peers.
-    return available.find((candidate) => candidate.origin === 'user-provided')
-      || scheduledIds.map((id) => available.find((candidate) => candidate.candidateId === id
-        && candidate.probePriority === available[0]?.probePriority)).find(Boolean)
-      || available[0];
-  };
   const executeVerification = async (attemptId) => {
     try {
       return await verify(paths, { runId: run.runId, attemptId }, {
@@ -282,15 +241,7 @@ async function runPublicCollectInContext(paths, rawInput, options = {}) {
       break;
     }
     const roundIndex = run.discoveryRounds.length;
-    let query = run.discoveryReservation?.query || (roundIndex === 0 ? run.input.query : run.input.fallbackQuery);
-    if (roundIndex > 0 && !run.discoveryReservation) {
-      const current = loadSession(paths, { persistMigration: false }).session;
-      const selected = await selectFeedbackQuery({ query: run.input.query, fallbackQuery: run.input.fallbackQuery,
-        subject: current.task.discoveryGate.topicContract?.normalizedSubject,
-        feedback: collectionFeedback(current, run) }, { environment: options.environment || process.env,
-        callJev: options.callJev, remainingBudgetMs });
-      query = selected.query;
-    }
+    const query = run.discoveryReservation?.query || (roundIndex === 0 ? run.input.query : run.input.fallbackQuery);
     let channel = run.discoveryReservation?.channel || 'online';
     let roundCandidateCount = 0;
     while (channel) {
@@ -341,7 +292,7 @@ async function runPublicCollectInContext(paths, rawInput, options = {}) {
         }
         const available = unattemptedCandidates(session, run);
         roundCandidateCount = Math.max(roundCandidateCount, available.length);
-        const discovered = await chooseCandidate(session, run, available);
+        const discovered = available.find((candidate) => candidate.origin === 'user-provided') || available[0];
         if (remainingBudgetMs() <= 0) {
           lastFailure = 'TOTAL_BUDGET_EXHAUSTED';
           break;

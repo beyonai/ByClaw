@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS byai.byai_group_chat_task (
     publish_by           BIGINT,
     create_time          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    current_turn_id      BIGINT,
+    current_turn_trace_id VARCHAR(255),
     CONSTRAINT pk_byai_group_chat_task PRIMARY KEY (task_session_id),
     CONSTRAINT uk_group_chat_task_dispatch UNIQUE (dispatch_id)
 );
@@ -163,6 +165,21 @@ CREATE TABLE IF NOT EXISTS byai.byai_group_chat_topic (
 );
 
 
+-- 群消息“收到”确认：每个被@真人用户独立确认，确认不是新的群消息。
+CREATE TABLE IF NOT EXISTS byai.byai_group_chat_message_ack (
+    session_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    user_name VARCHAR(255) NOT NULL,
+    acknowledged_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_group_chat_message_ack PRIMARY KEY (session_id, message_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_chat_message_ack_message
+    ON byai.byai_group_chat_message_ack (session_id, message_id, acknowledged_at);
+
+COMMENT ON TABLE byai.byai_group_chat_message_ack IS '群消息被@真人用户的收到确认，不产生新消息';
+
 COMMENT ON COLUMN byai.byai_session.project_id IS '平台工作组ID；-1表示默认项目';
 
 COMMENT ON COLUMN byai.byai_session.last_seq IS '会话内最后提交的消息序号';
@@ -233,3 +250,8 @@ CREATE INDEX IF NOT EXISTS idx_byai_message_session_message ON byai.byai_message
 CREATE INDEX IF NOT EXISTS idx_byai_message_session_ref ON byai.byai_message(session_id, message_ref);
 
 CREATE INDEX IF NOT EXISTS idx_byai_message_session_topic_time ON byai.byai_message(session_id, topic_id, create_time DESC, message_id DESC);
+
+COMMENT ON COLUMN byai.byai_group_chat_task.current_turn_id IS '当前轮次启动占位标识，用于隔离迟到的启动失败回调';
+COMMENT ON COLUMN byai.byai_group_chat_task.current_turn_trace_id IS '当前轮次实际trace，用于完成回调与落库结果补偿';
+CREATE INDEX IF NOT EXISTS idx_group_chat_task_running_turn
+    ON byai.byai_group_chat_task (status, turn_status, task_session_id);

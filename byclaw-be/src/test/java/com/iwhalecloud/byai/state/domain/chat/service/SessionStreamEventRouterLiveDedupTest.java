@@ -120,7 +120,7 @@ class SessionStreamEventRouterLiveDedupTest {
             var runtimes = mockField("sessionRuntimeStateService", SessionRuntimeStateService.class);
             when(runtimes.isRuntimeEvent(any())).thenReturn(true);
             var runtime = new com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState();
-            runtime.setSessionId(10L); runtime.setTraceId("trace-1");
+            runtime.setSessionId(8011237409000004638L); runtime.setTraceId("trace-1");
             when(runtimes.applyEvent(any(), any())).thenReturn(runtime);
             mockField("sessionService", com.iwhalecloud.byai.state.domain.session.service.SessionService.class);
         }
@@ -136,6 +136,8 @@ class SessionStreamEventRouterLiveDedupTest {
                 assertThat(payload.getString("enterpriseId")).isEqualTo("11");
                 assertThat(payload.getString("type")).isEqualTo(runtimeEvent ? "SESSION_RUNTIME_STATUS" : "CHAT_STREAM");
                 if (!runtimeEvent) assertThat(payload.getString("event")).isEqualTo("answerDelta");
+                else assertThat(payload.getJSONObject("data").get("sessionId"))
+                    .isEqualTo("8011237409000004638");
             } finally { frame.release(); }
             assertThat((Object) personal.readOutbound()).isNull();
             assertThat((Object) foreign.readOutbound()).isNull();

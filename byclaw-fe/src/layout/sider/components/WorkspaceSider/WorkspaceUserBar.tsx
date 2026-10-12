@@ -6,7 +6,6 @@ import AntdIcon from '@/components/AntdIcon';
 import useUserDropdown from '@/layout/header/useUserDropdown';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import SandboxStatusIndicator from '../SandboxStatus';
-import TenantSwitcher from './TenantSwitcher';
 import styles from './index.module.less';
 
 const WorkspaceUserBar: React.FC = () => {
@@ -21,7 +20,6 @@ const WorkspaceUserBar: React.FC = () => {
   const avatarText = getDisplayUserNameInChat(userName);
   return (
     <div className={styles.workspaceUserFooter}>
-      <TenantSwitcher />
       <div className={styles.workspaceUserBar}>
         <Dropdown
           trigger={['click']}

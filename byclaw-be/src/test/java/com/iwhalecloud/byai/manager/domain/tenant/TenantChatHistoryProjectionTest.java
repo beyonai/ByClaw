@@ -38,4 +38,17 @@ class TenantChatHistoryProjectionTest {
 
         assertThat(answer.getMessageStruct()).isEqualTo("original");
     }
+    @Test
+    void legacyTenantOrderedHistoryRestoresNumericSequencesWithoutRoundingIds() {
+        MessageView answer = new MessageView();
+        answer.setRole("assistant");
+        answer.setMessageStruct("[{\"seq\":\"2\",\"contentType\":\"2008\",\"messageId\":\"8011237409000004498\"}]");
+        answer.setInferLog("[{\"seq\":\"1\",\"contentType\":\"1001\"}]");
+        TenantChatHistoryProjection.project(answer);
+        assertThat(JSON.parseArray(answer.getMessageStruct()).getJSONObject(0).get("seq")).isInstanceOf(Integer.class);
+        assertThat(JSON.parseArray(answer.getInferLog()).getJSONObject(0).get("seq")).isInstanceOf(Integer.class);
+        assertThat(JSON.parseArray(answer.getMessageStruct()).getJSONObject(0).get("messageId"))
+            .isEqualTo("8011237409000004498");
+    }
+
 }

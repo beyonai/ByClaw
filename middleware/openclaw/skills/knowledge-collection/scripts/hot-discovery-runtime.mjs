@@ -1,4 +1,10 @@
+import { createHash } from 'node:crypto';
 import { createHotRuntimeState, hotRequestIdentity } from '../references/online-search/references/hot_discovery/scripts/hot_runtime_state.mjs';
+
+// Keep the identity format of persisted execution checkpoints stable.
+export function sourcePlanIdentity(input) {
+  return createHash('sha256').update(JSON.stringify({ version: 1, ...input })).digest('hex');
+}
 
 function parsedDocument(outcome) {
   if (outcome?.code !== 0) return null;

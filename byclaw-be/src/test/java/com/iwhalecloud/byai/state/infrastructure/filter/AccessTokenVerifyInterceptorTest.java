@@ -92,20 +92,40 @@ class AccessTokenVerifyInterceptorTest {
     }
 
     @Test
-    void allowsInvitationValidationThroughUrlMatcher() {
+    void anonymousInvitationPreviewCannotInheritThePreviousRequestUser() {
         AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
         interceptor.init();
         var login = new LoginInfo();
         login.setUserId(99L);
         CurrentUserHolder.setLoginInfo(login);
-        var request = new MockHttpServletRequest("GET", "/byaiService/group-chats/invitations/validate");
+        var request = new MockHttpServletRequest("POST", "/byaiService/group-chats/invitations/validate");
         request.setContextPath("/byaiService");
         request.setServletPath("/group-chats/invitations/validate");
         request.addHeader("accessToken", "invalid-token");
         var response = new MockHttpServletResponse();
 
         assertTrue(interceptor.preHandle(request, response, new Object()));
-        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(99L);
+        assertThat(CurrentUserHolder.getLoginInfo()).isNull();
+    }
+
+    @Test
+    void authenticatedInvitationPreviewUsesTheActualTokenUser() {
+        var interceptor = new AccessTokenVerifyInterceptor();
+        interceptor.init();
+        JwtTokenFilter jwt = mock(JwtTokenFilter.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwt);
+        LoginInfo caller = new LoginInfo();
+        caller.setUserId(77L);
+        when(jwt.doFilter(null, "caller-token")).thenAnswer(invocation -> {
+            CurrentUserHolder.setLoginInfo(caller);
+            return true;
+        });
+        var request = request("POST", "/byaiService/group-chats/invitations/validate", "/byaiService");
+        request.addHeader("beyond-token", "caller-token");
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(77L);
+        interceptor.afterCompletion(request, new MockHttpServletResponse(), new Object(), null);
+        assertThat(CurrentUserHolder.getLoginInfo()).isNull();
     }
 
     @Test

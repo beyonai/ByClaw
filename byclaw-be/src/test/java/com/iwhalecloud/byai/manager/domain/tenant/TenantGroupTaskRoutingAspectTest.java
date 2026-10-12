@@ -34,6 +34,7 @@ class TenantGroupTaskRoutingAspectTest {
     @AfterEach
     void clear() {
         TenantRequestContextHolder.clear();
+        com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.clearLoginInfo();
     }
 
     @Test
@@ -83,6 +84,46 @@ class TenantGroupTaskRoutingAspectTest {
         assertThat(response.getData()).isEqualTo(pending);
         verify(call, never()).proceed();
         verifyNoInteractions(legacyTasks, legacyMembership);
+    }
+
+    @Test
+    void headerlessExecutorTaskUsesTrustedOwnerAndCurrentMembership() throws Throwable {
+        var projections = mock(com.iwhalecloud.byai.state.domain.chat.service.TenantScopedSessionEventService.class);
+        var contexts = mock(TenantContextService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(aspect, "projections", projections);
+        org.springframework.test.util.ReflectionTestUtils.setField(aspect, "contexts", contexts);
+        var user = new com.iwhalecloud.byai.common.login.bean.LoginInfo();
+        user.setUserId(57L);
+        com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.setLoginInfo(user);
+        Long taskId = 8011222473000000033L;
+        when(projections.registeredOwner(taskId)).thenReturn(tenant);
+        when(contexts.validate("11222473")).thenReturn(tenant);
+        when(node.request(eq(tenant), eq("GET"),
+            eq("/internal/v1/group-chat/tasks/" + taskId + "/pending-publication"), eq(null), any()))
+            .thenReturn(Map.of("taskId", taskId.toString()));
+        ProceedingJoinPoint call = call("pending", taskId);
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call);
+        assertThat(response.getData()).isEqualTo(Map.of("taskId", taskId.toString()));
+        verify(contexts).validate("11222473");
+        verify(call, never()).proceed();
+        assertThat(TenantRequestContextHolder.get()).isNull();
+    }
+
+    @Test
+    void foreignExecutorCannotUseRegisteredTenantTask() throws Throwable {
+        var projections = mock(com.iwhalecloud.byai.state.domain.chat.service.TenantScopedSessionEventService.class);
+        var contexts = mock(TenantContextService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(aspect, "projections", projections);
+        org.springframework.test.util.ReflectionTestUtils.setField(aspect, "contexts", contexts);
+        var user = new com.iwhalecloud.byai.common.login.bean.LoginInfo(); user.setUserId(99L);
+        com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.setLoginInfo(user);
+        Long taskId = 8011222473000000033L;
+        when(projections.registeredOwner(taskId)).thenReturn(tenant);
+        ProceedingJoinPoint call = call("pending", taskId);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> aspect.route(call))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verifyNoInteractions(node, contexts);
+        verify(call, never()).proceed();
     }
 
     private ProceedingJoinPoint call(String method, Long taskId) throws Exception {
