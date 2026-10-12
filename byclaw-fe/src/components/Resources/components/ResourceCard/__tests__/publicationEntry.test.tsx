@@ -4,13 +4,21 @@ jest.mock('@/service/employeePublication', () => ({
 }));
 import { openEmployeePublication } from '@/service/employeePublication';
 jest.mock('@umijs/max', () => ({
-  getIntl: () => ({
-    formatMessage: ({ id }: { id: string }) => id,
-  }),
+  getIntl: () => {
+    const messages = jest.requireActual('@/locales/zh-CN/employeePublication').default;
+    return {
+      formatMessage: ({ id }: { id: string }) =>
+        messages[id as keyof typeof messages] || (id === 'resource.publishToEnterprise' ? '发布到企业' : id),
+    };
+  },
   getLocale: () => 'zh-CN',
-  useIntl: () => ({
-    formatMessage: ({ id }: { id: string }) => id,
-  }),
+  useIntl: () => {
+    const messages = jest.requireActual('@/locales/zh-CN/employeePublication').default;
+    return {
+      formatMessage: ({ id }: { id: string }) =>
+        messages[id as keyof typeof messages] || (id === 'resource.publishToEnterprise' ? '发布到企业' : id),
+    };
+  },
   useDispatch: () => jest.fn(),
   useSelector: (selector: any) =>
     selector({
@@ -121,7 +129,7 @@ describe('digital employee publication entry', () => {
         }}
       />
     );
-    const entry = screen.getByText('发布到官方推荐');
+    const entry = screen.getByText('发布到企业');
     fireEvent.click(entry);
     fireEvent.click(entry);
     expect(openEmployeePublication).toHaveBeenCalledTimes(1);
@@ -149,12 +157,12 @@ describe('digital employee publication entry', () => {
         }}
       />
     );
-    fireEvent.click(screen.getByText('发布到官方推荐'));
+    fireEvent.click(screen.getByText('发布到企业'));
     await waitFor(() => expect(error).toHaveBeenCalledWith('仅在用数字员工支持发起发布或更新'));
     error.mockRestore();
   });
   it.each([
-    [undefined, '发布到官方推荐'],
+    [undefined, '发布到企业'],
     ['DRAFT', '继续发布'],
     ['PENDING', '查看发布进度'],
     ['APPLYING', '查看发布进度'],
@@ -227,7 +235,7 @@ describe('digital employee publication entry', () => {
         }}
       />
     );
-    expect(screen.queryByText('发布到官方推荐')).not.toBeInTheDocument();
+    expect(screen.queryByText('发布到企业')).not.toBeInTheDocument();
   });
   it('opens an official copy in its ordinary editor without preparing a publication', async () => {
     (openEmployeePublication as jest.Mock).mockReset();
