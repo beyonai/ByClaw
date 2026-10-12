@@ -138,8 +138,8 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
         "chatlab-cli@${CHATLAB_CLI_VERSION}" \
     && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null
 
-ARG OPENCLI_VERSION=2.1.61
-ARG OPENCLI_EXTENSION_VERSION=2.1.23
+ARG OPENCLI_VERSION=2.1.63
+ARG OPENCLI_EXTENSION_VERSION=2.1.24
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
@@ -220,6 +220,7 @@ RUN set -eux; \
         x11vnc -version; \
         test "$(bycli --version)" = "${OPENCLI_VERSION}"; \
         test -f /opt/opencli/extension/manifest.json; \
+        node -e 'const manifest = require("/opt/opencli/extension/manifest.json"); if (manifest.version !== process.argv[1] || !manifest.permissions?.includes("system.display")) process.exit(1)' "${OPENCLI_EXTENSION_VERSION}"; \
         ;; \
     esac; \
     rm -rf /var/lib/apt/lists/*
