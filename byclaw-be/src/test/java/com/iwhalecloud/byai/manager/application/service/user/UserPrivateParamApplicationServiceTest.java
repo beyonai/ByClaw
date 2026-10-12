@@ -187,6 +187,26 @@ class UserPrivateParamApplicationServiceTest {
     }
 
     @Test
+    void deepSeekWebSearchCredentialNeverEntersSandboxEnvironmentCache() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+        ReflectionTestUtils.setField(service, "stringRedisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        UserPrivateParam deepSeek = credential("DEEPSEEK_WEB_SEARCH_API_KEY", "deepseek-secret");
+        deepSeek.setSourceRef("deepseek-web-search");
+        when(mapper.selectList(any())).thenReturn(List.of(deepSeek, credential("OTHER_VALUE", "kept")));
+
+        assertThat(service.refreshPrivateParamCacheNow(1001L, "tester", 9001L)).isTrue();
+
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(valueOperations).set(eq("byai:user:private_params:tester"), payload.capture());
+        assertThat(payload.getValue())
+            .contains("OTHER_VALUE", "kept")
+            .doesNotContain("DEEPSEEK_WEB_SEARCH_API_KEY", "deepseek-secret");
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void reconciliationScansConnectorManagedUsersInBatchesAndRebuildsCurrentSnapshots() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
