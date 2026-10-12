@@ -1368,6 +1368,7 @@ export default {
   'approvalCenter.skill': '技能申请',
   'approvalCenter.knowledge': '知识申请',
   'approvalCenter.tool': '工具申请',
+  'approvalCenter.searchPlaceholder': '搜索资源名称',
   'approvalCenter.employeeUse': '使用授权审核',
   'approvalCenter.employeePublication': '员工发布审核',
   'approvalCenter.employeeUpdatePending':
@@ -1411,10 +1412,6 @@ export default {
   'workspaceSider.fileCenter': '文件中心',
   'workspaceSider.projectSection': '项目列表',
   'workspaceSider.localSessions': '本地会话',
-  'tenantSwitcher.open': '切换企业空间',
-  'tenantSwitcher.personal': '个人空间',
-  'tenantSwitcher.unavailable': '开通中',
-  'tenantSwitcher.switchFailed': '切换企业失败，请重试',
   'workspaceSider.tasks': '任务',
   'workspaceSider.projectCount': '项目 ({count})',
   'workspaceSider.collapseSidebar': '收起侧边栏',

@@ -147,7 +147,12 @@ const EmployFormModal = (props) => {
 
   useEffect(() => {
     const firstAgentType = get(agentTypeOptions, '0.value');
-    if (digitalType === 'FROM_MANUALLY' && firstAgentType && !form.getFieldValue('agentType')) {
+    // 仅有一种可创建类型时强制选中，避免隐藏字段保留旧值而传递错误的员工类型。
+    if (
+      digitalType === 'FROM_MANUALLY' &&
+      firstAgentType &&
+      (agentTypeOptions.length === 1 || !form.getFieldValue('agentType'))
+    ) {
       form.setFieldsValue({
         agentType: firstAgentType,
       });
@@ -237,11 +242,12 @@ const EmployFormModal = (props) => {
             <SandboxCardRadio />
           </Form.Item>
         )}
-        {/* 数字员工类型 */}
+        {/* 单一类型无需用户选择；保留隐藏表单项以参与校验并传递 agentType。 */}
         {digitalType === 'FROM_MANUALLY' && (
           <Form.Item
             label={intl.formatMessage({ id: 'employFormModal.employeeType' })}
             name="agentType"
+            hidden={agentTypeOptions.length < 2}
             rules={[
               {
                 required: true,

@@ -139,5 +139,5 @@ public interface PrivilegeGrantMapper extends BaseMapper<PrivilegeGrant> {
 
     /** 批量查询资源审核中心的待审核或历史申请，避免按资源逐条查询。 */
     List<DigitalEmployeeUseApplyAuditVo> queryDigitalEmployeeUseApplyAudit(@Param("history") boolean history,
-        @Param("resourceBizTypeList") List<String> resourceBizTypeList);
+        @Param("resourceBizTypeList") List<String> resourceBizTypeList, @Param("keyword") String keyword);
 }

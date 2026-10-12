@@ -151,7 +151,7 @@ cd ../..
 ### 5.2 使用统一脚本启动
 
 ```bash
-# 启动全部本地模块：fe、be、qa-api、qa-worker、data
+# 启动全部本地模块：fe、be、qa-api、data
 ./scripts/start.sh --all
 
 # 常用组合：只启动前后端
@@ -204,7 +204,6 @@ mvn -B -f pom.xml spring-boot:run \
 # QA
 cd byclaw-qa
 ./start.sh api
-./start.sh worker
 
 # DataCloud
 cd byclaw-data
@@ -260,7 +259,6 @@ curl http://localhost:8086/byaiService/actuator/health
 tail -f logs/fe.log
 tail -f logs/be.log
 tail -f logs/qa-api.log
-tail -f logs/qa-worker.log
 tail -f logs/data.log
 
 # 前端开发地址
@@ -317,7 +315,7 @@ docker pull ghcr.io/beyonai/byclaw/byclaw-fe:main
 - MinIO 是否启动
 - `FILE_STORAGE_MINIO_*` 是否正确
 - `BYCLAW_QA_*` 配置是否完整
-- QA API 和 QA Worker 是否都已启动
+- QA Manager/API 是否已启动
 
 ## 9. 功能操作入口
 

@@ -6,8 +6,8 @@
     "min": 1,
     "max": 1
   },
-  "sqlSha256": "086820e65a34ac89409f04aedba273214d7e371c5167658ebec5a459f0d3c19b",
-  "catalogDigest": "aa4bb6e4606b2f57e9f5c0d014247a1b709720b71a80e154f2c349dafc8a6973",
+  "sqlSha256": "ce76c4f0adf24e3eec7c0878cc0ebdb91c8815973b761b90449b95ec48b71840",
+  "catalogDigest": "ab7df6aee6efe6c671c179e147fa755f5ca14d77422e497ed3c52fb1ad78c880",
   "objects": [
     {
       "kind": "sequence",
@@ -72,6 +72,10 @@
     {
       "kind": "table",
       "name": "byai_group_chat_topic"
+    },
+    {
+      "kind": "table",
+      "name": "byai_group_chat_message_ack"
     },
     {
       "kind": "index",
@@ -168,6 +172,14 @@
     {
       "kind": "index",
       "name": "idx_byai_message_session_topic_time"
+    },
+    {
+      "kind": "index",
+      "name": "idx_group_chat_task_running_turn"
+    },
+    {
+      "kind": "index",
+      "name": "idx_group_chat_message_ack_message"
     }
   ]
 }

@@ -7,8 +7,6 @@ import { spawn } from 'node:child_process';
 import * as enterpriseCollection from './enterprise-collection.mjs';
 import { dispatchEnterpriseBatch } from './enterprise/dispatcher.mjs';
 import { ensureSessionSkeleton, newSession } from './session.mjs';
-import { currentJevRun } from './jev/run-context.mjs';
-import { safeCallJev } from './jev/safe-call.mjs';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'enterprise-collection.mjs');
 const collectionScriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
@@ -98,26 +96,15 @@ await (async () => {
 })();
 
 await (async () => {
-  const root = await mkdtemp(join(tmpdir(), 'enterprise-entry-batch-context-'));
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-entry-batch-contract-'));
   try {
     const parent = await createParentSession(root, ['dingtalk', 'feishu'], join(root, 'parent'), {
       query: 'enterprise test', materializationTarget: 'all',
     });
-    const contexts = [];
-    let inferenceCalls = 0;
-    const callJev = async () => {
-      inferenceCalls++;
-      return { ok: true, document: { answers: {
-        source: { type: 'choice', choice: 'dingtalk', confidence: 0.95 },
-      } } };
-    };
+    const searchedSources = [];
     const adapter = (source) => ({ connector: source, search: async (request) => {
-      contexts.push(currentJevRun());
+      searchedSources.push(source);
       assert.equal(request.taskContract.materializationTarget, 'all');
-      const payload = { state: { query: 'enterprise test' }, questions: {
-        source: { type: 'choice', criteria: { dingtalk: 'dingtalk' } },
-      } };
-      assert.equal((await safeCallJev(payload, { environment: {}, callJev })).ok, true);
       return { status: 'complete' };
     } });
     for (let index = 0; index < 2; index++) {
@@ -131,15 +118,11 @@ await (async () => {
         throw Error('batch probe complete');
       } }), /batch probe complete/);
     }
-    assert.ok(contexts.every(Boolean));
-    assert.equal(contexts[0], contexts[1]);
-    assert.equal(contexts[2], contexts[3]);
-    assert.notEqual(contexts[0], contexts[2]);
-    assert.equal(inferenceCalls, 2);
+    assert.deepEqual(searchedSources, ['dingtalk', 'feishu', 'dingtalk', 'feishu']);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-  console.log('PASS search-all entrypoint shares context within a batch and isolates invocations');
+  console.log('PASS search-all entrypoint preserves the parent contract for each source');
 })();
 
 await (async () => {

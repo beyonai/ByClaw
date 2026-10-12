@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthRedBlackDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyHistoryQo;
 import java.util.List;
 import java.util.Locale;
 import org.junit.jupiter.api.AfterEach;
@@ -33,6 +34,22 @@ class AuthControllerTest {
     @AfterEach void cleanup() {
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", originalMessages);
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void resourceAuditSearchForwardsKeywordAndScope(boolean history) {
+        AuthController controller = new AuthController();
+        AuthApplicationService auth = mock(AuthApplicationService.class);
+        ReflectionTestUtils.setField(controller, "authApplicationService", auth);
+        ResourceUseApplyHistoryQo request = new ResourceUseApplyHistoryQo();
+        request.setHistory(history);
+        request.setResourceBizTypeList(List.of("MCP", "TOOLKIT", "AGENT"));
+        request.setKeyword("财务");
+        controller.queryDigitalEmployeeUseApplyAudit(request);
+        verify(auth).queryDigitalEmployeeUseApplyAudit(history, List.of("MCP", "TOOLKIT", "AGENT"), "财务");
+        controller.queryDigitalEmployeeUseApplyAudit(null);
+        verify(auth).queryDigitalEmployeeUseApplyAudit(null, null, null);
     }
 
     /** 旧使用授权、分享、归属及批量接口也必须通过个人资源校验，不可绕过新人员设置接口。 */

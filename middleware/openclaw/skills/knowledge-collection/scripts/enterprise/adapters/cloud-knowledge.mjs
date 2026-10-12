@@ -6,7 +6,6 @@ import { createArtifactWriter } from '../shared/artifact-writer.mjs';
 import { runCli, positiveEnv } from '../shared/cli-runner.mjs';
 import { deriveCollectionStatus, SOURCE_IDENTITY, handledOutcome, inventoryCounts } from '../shared/status-model.mjs';
 import { readCloudResumeCandidates, readResumeCandidates } from '../shared/resume.mjs';
-import { prioritizeItems } from '../../jev/selection.mjs';
 import { loadSession, persistSession, sessionPaths } from '../../session.mjs';
 import { validateSelectedRequest } from '../../selected-delivery.mjs';
 
@@ -349,12 +348,7 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
       }
     }
     const unique = [...new Map(allCandidates.map((item) => [`${item.resourceId}\n${item.filePath}`, item])).values()];
-    const legacyFound = sortCandidates(unique).slice(0, request.limit);
-    const recommendation = dependencies.deferJevRanking
-      ? { items: legacyFound, diagnostic: { status: 'skipped', code: 'RANKING_OWNED_BY_UNIFIED_SEARCH' } }
-      : await prioritizeItems(request.query, legacyFound, { ...dependencies.jevOptions, environment: env,
-        privateData: true, purpose: 'Recommend useful enterprise documents before download. Prefer relevance, complementary evidence, supported formats and lower conversion cost.' });
-    const found = recommendation.items;
+    const found = sortCandidates(unique).slice(0, request.limit);
     const inventory = found.map((candidate) => inventoryItem(candidate, candidate.rawArtifacts));
     const discoverySucceeded = groups.length === 0 || failures.length < groups.length;
     const status = deriveCollectionStatus({
@@ -370,7 +364,6 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
     } : null;
     const sourceMetadata = {
       ...identity, operation: 'search', metadataOnly: true,
-      candidateRanking: recommendation.diagnostic,
       discovery: { groupsRequested: groups.length, groupsSucceeded: groups.length - failures.length, groupsFailed: failures, rawMatches: allCandidates.length, uniqueMatches: unique.length, returnedMatches: found.length, limitReached: found.length === request.limit },
       ...(terminal ? { terminal } : {}),
     };

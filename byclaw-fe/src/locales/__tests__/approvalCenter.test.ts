@@ -7,6 +7,7 @@ it.each([
   ['approvalCenter.skill', '技能申请', 'Skill applications'],
   ['approvalCenter.knowledge', '知识申请', 'Knowledge applications'],
   ['approvalCenter.tool', '工具申请', 'Tool applications'],
+  ['approvalCenter.searchPlaceholder', '搜索资源名称', 'Search resource name'],
   ['approvalCenter.employeeUse', '使用授权审核', 'Use authorization review'],
   ['approvalCenter.employeePublication', '员工发布审核', 'Employee publication review'],
 ])('localizes approval center label %s', (key, chinese, english) => {

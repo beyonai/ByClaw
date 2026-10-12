@@ -1,13 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ApiOutlined,
   CheckCircleFilled,
   DatabaseOutlined,
   DisconnectOutlined,
   EllipsisOutlined,
   FileTextOutlined,
   GlobalOutlined,
-  GithubOutlined,
   LinkOutlined,
   LoadingOutlined,
   QrcodeOutlined,
@@ -22,7 +20,6 @@ import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
 import { getIntl, useIntl, useSelector } from '@umijs/max';
 
-import AntdIcon from '@/components/AntdIcon';
 import { OVERLAY_DRAWER_WIDTH } from '@/components/MainDrawer/constants';
 import {
   getConnectorAuthorization,
@@ -45,6 +42,7 @@ import styles from './index.module.less';
 import CredentialHelpCard from './CredentialHelpCard';
 import CredentialFields from './CredentialFields';
 import GlobalAccountSection from './GlobalAccountSection';
+import { getConnectorIcon } from './connectorIcons';
 
 dayjs.extend(customParseFormat);
 dayjs.extend(utc);
@@ -142,26 +140,6 @@ type ConnectorControlProps = {
 
   /** 外部已选连接器点击时打开统一资源选择面板。 */
   onOpenResourcePicker?: () => void;
-};
-
-// 已有官方图标的连接器按接口编码匹配，其余平台使用统一图标，列表内容完全以后端返回为准。
-const connectorIconMap: Record<string, React.ReactNode> = {
-  dingtalk: <AntdIcon type="icon-dingding1" />,
-  wecom: <AntdIcon type="icon-qiyeweixin" />,
-  lark: <AntdIcon type="icon-feishu" />,
-  github: <GithubOutlined />,
-  'ima-openapi': <FileTextOutlined />,
-  'weixin-official-api': <GlobalOutlined />,
-  'weixin-open-platform': <LinkOutlined />,
-};
-
-const getConnectorIcon = (connectorCode: string, connectorName?: string) => {
-  if (connectorIconMap[connectorCode]) return connectorIconMap[connectorCode];
-  const name = connectorName || '';
-  if (name.includes('公众号')) return <GlobalOutlined />;
-  if (name.includes('开放平台')) return <LinkOutlined />;
-  if (name.toUpperCase().includes('IMA')) return <FileTextOutlined />;
-  return <ApiOutlined />;
 };
 
 // 不再过滤接口数据，所有连接器都保留后端的 ID、编码、名称和描述。

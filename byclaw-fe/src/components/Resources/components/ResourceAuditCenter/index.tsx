@@ -97,6 +97,7 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
   const intl = useIntl();
   const [auditFilter, setAuditFilter] = useState<AuditFilter>('pending');
   const [pendingRows, setPendingRows] = useState<AuditRow[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
   const [historyRows, setHistoryRows] = useState<AuditRow[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -104,6 +105,12 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
   const [actionKey, setActionKey] = useState('');
   const requestSequence = useRef({ pending: 0, history: 0 });
   const employeeMode = resourceBizTypeList.includes('DIG_EMPLOYEE');
+  const { auditKeyword, setAuditKeyword, debouncedKeyword, filteredRows } = useAuditSearch(
+    auditFilter === 'pending' ? pendingRows : historyRows
+  );
+  // 员工保留现有本地搜索；其他资源在防抖后交由后端统一筛选待审核及历史记录。
+  const queryKeyword = employeeMode ? '' : debouncedKeyword;
+  const auditRows = employeeMode ? filteredRows : auditFilter === 'pending' ? pendingRows : historyRows;
 
   const bizTypeKey = resourceBizTypeList.join(',');
   const loadAuditRows = useCallback(
@@ -113,7 +120,11 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
       const setLoadingState = history ? setHistoryLoading : setLoading;
       setLoadingState(true);
       try {
-        const response = await queryResourceUseApplyAudit({ history, resourceBizTypeList });
+        const response = await queryResourceUseApplyAudit({
+          history,
+          resourceBizTypeList,
+          ...(queryKeyword ? { keyword: queryKeyword } : {}),
+        });
         if (sequence !== requestSequence.current[scope]) return;
         const rows = getAuditRows(response, history, resourceBizTypeList);
         if (history) {
@@ -121,6 +132,8 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
           setHistoryLoaded(true);
         } else {
           setPendingRows(rows);
+          // 搜索命中的数量不能覆盖未筛选的待审核总数。
+          if (!queryKeyword) setPendingCount(rows.length);
         }
       } catch (error: any) {
         if (sequence === requestSequence.current[scope]) {
@@ -130,7 +143,7 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
         if (sequence === requestSequence.current[scope]) setLoadingState(false);
       }
     },
-    [intl, resourceBizTypeList]
+    [intl, queryKeyword, resourceBizTypeList]
   );
 
   useEffect(() => {
@@ -152,14 +165,8 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
   }, [auditFilter, historyLoaded, loadAuditRows]);
 
   useEffect(() => {
-    onPendingCountChange?.(pendingRows.length);
-  }, [onPendingCountChange, pendingRows.length]);
-
-  const {
-    auditKeyword,
-    setAuditKeyword,
-    filteredRows: auditRows,
-  } = useAuditSearch(auditFilter === 'pending' ? pendingRows : historyRows);
+    onPendingCountChange?.(pendingCount);
+  }, [onPendingCountChange, pendingCount]);
   const auditLoading = auditFilter === 'pending' ? loading : historyLoading;
 
   const handleAudit = useCallback(
@@ -181,6 +188,7 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
         }
         const nextStatus = action === 'approve' ? 'approved' : 'rejected';
         setPendingRows((rows) => rows.filter((item) => getAuditRowKey(item) !== getAuditRowKey(row)));
+        setPendingCount((count) => Math.max(0, count - 1));
         if (historyLoaded) {
           setHistoryRows((rows) => [
             { ...row, applyStatus: nextStatus, auditTime: new Date().toISOString() },
@@ -326,16 +334,16 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
   return (
     <div className={styles.panel}>
       <div className={styles.filter}>
-        {employeeMode && (
-          <Input
-            className={styles.search}
-            suffix={<SearchOutlined />}
-            allowClear
-            placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
-            value={auditKeyword}
-            onChange={(event) => setAuditKeyword(event.target.value)}
-          />
-        )}
+        <Input
+          className={styles.search}
+          suffix={<SearchOutlined />}
+          allowClear
+          placeholder={intl.formatMessage({
+            id: employeeMode ? 'myEmployees.searchPlaceholder' : 'approvalCenter.searchPlaceholder',
+          })}
+          value={auditKeyword}
+          onChange={(event) => setAuditKeyword(event.target.value)}
+        />
         {/* 员工审批类型切换跟随搜索框，复用同一行筛选工具栏。 */}
         {toolbarExtra}
         <Segmented

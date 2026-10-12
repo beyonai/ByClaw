@@ -41,7 +41,7 @@ import ResourceQuickFilters, {
   ResourceQuickFilterBar,
   ResourceQuickFilterGroup,
 } from './components/ResourceQuickFilters';
-import { statusOptions, myResourceStatusOptions } from './constants';
+import { statusOptions, myResourceStatusOptions, knowledgeResourceBizTypeOptions } from './constants';
 import ResourceList from './components/ResourceList';
 import SkillGroupList from './components/SkillGroupList';
 import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
@@ -51,7 +51,12 @@ import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { getToken, isAdminVip } from '@/utils/auth';
 import { get, trim } from 'lodash';
-import { buildSkillMarketplaceUrl, getResourceQueryStatus, isSkillMarketplaceInstalledMessage } from './utils';
+import {
+  buildSkillMarketplaceUrl,
+  getResourceQueryStatus,
+  isAllResourceBizTypeSelected,
+  isSkillMarketplaceInstalledMessage,
+} from './utils';
 import styles from './index.module.less';
 
 interface IResourceItem {
@@ -100,6 +105,10 @@ const MANAGEMENT_TAB_MESSAGE_IDS: Record<string, { personal: string; enterprise:
   TOOL: { personal: 'resourceCenter.personalTools', enterprise: 'resourceCenter.enterpriseTools' },
 };
 
+// 管理页默认查看全部状态，进入页面及切换页签时统一重置，避免漏掉草稿和已下架资源。
+const getDefaultResourceParams = (myResourcesOnly: boolean) =>
+  getDefaultParams(myResourcesOnly ? { resourceStatus: '' } : {});
+
 const getBannerUrl = (bannerList: any[], labels: string | string[]) => {
   const labelList = Array.isArray(labels) ? labels : [labels];
   const banner = bannerList.find((item) => labelList.includes(item?.label));
@@ -136,7 +145,6 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   };
   const resourceName = getResourceName();
   const knowledgeCapabilityDisabledTip = intl.formatMessage({ id: 'resource.thirdPartyKnowledgeBaseMode' });
-  const noPermissionDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
   const navigate = useNavigate();
   const location = useLocation();
   const { placeholder: skillDetailDrawerHolder, show: showSkillDetailDrawer } = useSkillDetailDrawer();
@@ -232,7 +240,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
   const [selectRecord, setSelectRecord] = useState<any>(null);
   const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
-  const [dropdownParam, setDropdownParam] = useState<any>(getDefaultParams());
+  const [dropdownParam, setDropdownParam] = useState<any>(getDefaultResourceParams(myResourcesOnly));
   const [refreshKey, setRefreshKey] = useState(0);
   const [knowledgeCapability, setKnowledgeCapability] = useState<KnowledgeCapability | null>(null);
   const [fixedEntryCapability, setFixedEntryCapability] = useState<FixedEntryOperationCapability | null>(null);
@@ -260,7 +268,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     setCatalogId('');
     setSearchValue('');
     setDebouncedSearchValue('');
-    setDropdownParam(getDefaultParams());
+    setDropdownParam(getDefaultResourceParams(myResourcesOnly));
   }, [myResourcesOnly]);
 
   const topLevelCatalogList = React.useMemo(() => getTopLevelCatalogs(catalogList), [catalogList]);
@@ -350,7 +358,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
         setCatalogId('');
         setSearchValue('');
         setDebouncedSearchValue('');
-        setDropdownParam(getDefaultParams());
+        setDropdownParam(getDefaultResourceParams(myResourcesOnly));
         setActiveTab('personal');
         // 中心页内部筛选只更新查询参数，需保留从右侧资源面板带来的返回位置和面板保持状态。
         setSearchParams(nextSearchParams, { state: location.state });
@@ -362,7 +370,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     return () => {
       EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
     };
-  }, [EventEmitter, location.state, refreshList, resourceType, searchParams, setSearchParams]);
+  }, [EventEmitter, location.state, myResourcesOnly, refreshList, resourceType, searchParams, setSearchParams]);
 
   // 防抖定时器
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
@@ -446,12 +454,12 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   }, [activeTab, brandVersion, brandVersionLoaded, fixedEntryCapability, resourceType]);
 
   // 我可用的技能在所有版本开放导入；官方推荐保留品牌和角色规则，其他资源仍限制为开源版。
+  // 导入权限未确认或被拒绝时直接隐藏入口，避免展示无法操作的按钮。
   const showImportEntry =
-    activeTab === 'favorites'
-      ? false
-      : resourceType === 'SKILL' && activeTab === 'enterprise'
-        ? canImportCurrentEnterpriseResource
-        : (resourceType === 'SKILL' && activeTab === 'personal') || brandVersion === 'openSource';
+    canImportCurrentEnterpriseResource &&
+    activeTab !== 'favorites' &&
+    ((resourceType === 'SKILL' && (activeTab === 'personal' || activeTab === 'enterprise')) ||
+      brandVersion === 'openSource');
 
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
@@ -612,7 +620,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     setCatalogId('');
     setSearchValue('');
     setDebouncedSearchValue('');
-    setDropdownParam(getDefaultParams());
+    setDropdownParam(getDefaultResourceParams(myResourcesOnly));
     setSearchParams(nextSearchParams, { state: location.state });
   };
   const resourceSearch = (
@@ -639,16 +647,18 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     />
   );
   const isMyEnterpriseResources = myResourcesOnly && activeTab === 'enterprise';
+  // 知识管理页的类型直接在筛选行生效，个人和企业页签共用同一组业务类型。
+  const showMyKnowledgeTypeFilter = myResourcesOnly && resourceType === 'KG_DOC';
   // 管理列表、技能组和官方技能市场使用独立筛选范围，不挂载资源卡片的快捷条件。
   const showQuickFilters = !myResourcesOnly && !isEnterpriseSkillGroupMode && activeTab !== 'marketplace';
   // 技能申请人可在自己的企业资源中查看待审核和驳回项，官方推荐仍只查询已上架资源。
   const currentMyResourceStatusOptions =
     resourceType === 'SKILL'
       ? [
-          ...myResourceStatusOptions,
-          { label: 'resourceStatus.reviewing', value: '4' },
-          { label: 'resourceStatus.notPassed', value: '5' },
-        ]
+        ...myResourceStatusOptions,
+        { label: 'resourceStatus.reviewing', value: '4' },
+        { label: 'resourceStatus.notPassed', value: '5' },
+      ]
       : myResourceStatusOptions;
   const tabBarExtraContent = (
     <Space>
@@ -661,7 +671,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           onChange={(resourceStatus) => setDropdownParam((previous) => ({ ...previous, resourceStatus }))}
         />
       )}
-      {!isEnterpriseSkillGroupMode && !(myResourcesOnly && resourceType === 'SKILL') && (
+      {!isEnterpriseSkillGroupMode && !(myResourcesOnly && resourceType === 'SKILL') && !showMyKnowledgeTypeFilter && (
         <ResourceFilter
           key={`${resourceType}-${activeTab}-${myResourcesOnly}`}
           resourceType={resourceType}
@@ -733,18 +743,11 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
       )}
 
       {!myResourcesOnly && showImportEntry && (
-        <Tooltip
-          title={
-            !canImportCurrentEnterpriseResource
-              ? noPermissionDisabledTip
-              : intl.formatMessage({ id: 'resource.import.resourceCodeOverwrite' })
-          }
-        >
+        <Tooltip title={intl.formatMessage({ id: 'resource.import.resourceCodeOverwrite' })}>
           <span>
             <Button
               icon={<UploadOutlined />}
               type="primary"
-              disabled={!canImportCurrentEnterpriseResource}
               onClick={() => {
                 if (!canImportCurrentEnterpriseResource) {
                   return;
@@ -974,14 +977,14 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
             ? undefined
             : myResourcesOnly
               ? {
-                  right: (
-                    // 搜索框位于页签行最右侧，其余管理操作排在搜索框左侧。
-                    <div className={styles.myResourcesTabActions}>
-                      {tabBarExtraContent}
-                      {resourceSearch}
-                    </div>
-                  ),
-                }
+                right: (
+                  // 搜索框位于页签行最右侧，其余管理操作排在搜索框左侧。
+                  <div className={styles.myResourcesTabActions}>
+                    {tabBarExtraContent}
+                    {resourceSearch}
+                  </div>
+                ),
+              }
               : tabBarExtraContent
         }
         items={items}
@@ -995,7 +998,7 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           setCatalogId('');
           setSearchValue('');
           setDebouncedSearchValue('');
-          setDropdownParam(getDefaultParams());
+          setDropdownParam(getDefaultResourceParams(myResourcesOnly));
           if (myResourcesOnly) {
             setMyResourceScope('all');
           }
@@ -1013,28 +1016,49 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           onChange={(param) => setDropdownParam((previous: IOnOkParams) => ({ ...previous, ...param }))}
         />
       )}
-      {/* 管理页沿用浏览页的按钮样式，归属和状态独占一行并保留原查询值。 */}
-      {isMyEnterpriseResources && (
+      {/* 管理页沿用浏览页的按钮样式，类型、归属和状态共用筛选行并保留原查询值。 */}
+      {(isMyEnterpriseResources || showMyKnowledgeTypeFilter) && (
         <ResourceQuickFilterBar className={styles.myResourcesFilters}>
-          <ResourceQuickFilterGroup
-            title={intl.formatMessage({ id: 'common.belong' })}
-            value={myResourceScope}
-            options={[
-              { value: 'all', label: intl.formatMessage({ id: 'resourceCenter.myResourcesAll' }) },
-              { value: 'created', label: intl.formatMessage({ id: 'resourceCenter.createdByMe' }) },
-              { value: 'managed', label: intl.formatMessage({ id: 'resourceCenter.managedByMe' }) },
-            ]}
-            onChange={(value) => setMyResourceScope(value as MyResourceScope)}
-          />
-          <ResourceQuickFilterGroup
-            title={intl.formatMessage({ id: 'common.status' })}
-            value={getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus, resourceType)}
-            options={currentMyResourceStatusOptions.map((item) => ({
-              ...item,
-              label: intl.formatMessage({ id: item.label }),
-            }))}
-            onChange={(resourceStatus) => setDropdownParam((previous) => ({ ...previous, resourceStatus }))}
-          />
+          {showMyKnowledgeTypeFilter && (
+            <ResourceQuickFilterGroup
+              title={intl.formatMessage({ id: 'resource.type' })}
+              value={
+                isAllResourceBizTypeSelected(dropdownParam.resourceBizTypeList, resourceType)
+                  ? ''
+                  : dropdownParam.resourceBizTypeList?.[0]
+              }
+              options={knowledgeResourceBizTypeOptions.map((item) => ({
+                ...item,
+                label: intl.formatMessage({ id: item.label }),
+              }))}
+              onChange={(bizType) =>
+                setDropdownParam((previous) => ({ ...previous, resourceBizTypeList: bizType ? [bizType] : [] }))
+              }
+            />
+          )}
+          {isMyEnterpriseResources && (
+            <>
+              <ResourceQuickFilterGroup
+                title={intl.formatMessage({ id: 'common.belong' })}
+                value={myResourceScope}
+                options={[
+                  { value: 'all', label: intl.formatMessage({ id: 'resourceCenter.myResourcesAll' }) },
+                  { value: 'created', label: intl.formatMessage({ id: 'resourceCenter.createdByMe' }) },
+                  { value: 'managed', label: intl.formatMessage({ id: 'resourceCenter.managedByMe' }) },
+                ]}
+                onChange={(value) => setMyResourceScope(value as MyResourceScope)}
+              />
+              <ResourceQuickFilterGroup
+                title={intl.formatMessage({ id: 'common.status' })}
+                value={getResourceQueryStatus(activeTab, myResourcesOnly, dropdownParam.resourceStatus, resourceType)}
+                options={currentMyResourceStatusOptions.map((item) => ({
+                  ...item,
+                  label: intl.formatMessage({ id: item.label }),
+                }))}
+                onChange={(resourceStatus) => setDropdownParam((previous) => ({ ...previous, resourceStatus }))}
+              />
+            </>
+          )}
         </ResourceQuickFilterBar>
       )}
       {!myResourcesOnly && resourceType === 'SKILL' && activeTab === 'marketplace' ? (

@@ -10,7 +10,8 @@ describe('audit center permission contract', () => {
 
   it('keeps approve and reject actions independent of card permissions', () => {
     expect(source).not.toContain('canAuditUse');
-    expect(source).toContain('queryResourceUseApplyAudit({ history, resourceBizTypeList })');
+    expect(source).toContain('queryResourceUseApplyAudit({');
+    expect(source).toContain('...(queryKeyword ? { keyword: queryKeyword } : {})');
     expect(source).toContain("handleAudit(row, 'approve')");
     expect(source).toContain("handleAudit(row, 'reject')");
     expect(source).toContain('await approveUseApply(params)');

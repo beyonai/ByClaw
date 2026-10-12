@@ -55,7 +55,7 @@ byclaw-fe ── REST / WebSocket / SSE ── byclaw-be
               ┌───────────────────────────┼───────────────────────────┐
               ▼                           ▼                           ▼
         byclaw-qa                                             byclaw-exe
-  Knowledge base / QA Worker                             Skills / Extensions
+  Knowledge base / Retrieval API                             Skills / Extensions
               │                                                   │
               └───────────────────────┬───────────────────────────┘
                               ▼                       ▼
@@ -104,7 +104,7 @@ flowchart TB
     nginx --> fe["byclaw-fe<br/>Portal / Console / Chat UI"]
     fe --> be["byclaw-be<br/>Core API / AuthZ / Resource Governance / Gateway Routing"]
     be --> ws["WebSocket / SSE<br/>Streaming Sessions"]
-    be --> qa["byclaw-qa<br/>Knowledge Base / QA Worker"]
+    be --> qa["byclaw-qa<br/>Knowledge Base / Retrieval API"]
     be --> exe["byclaw-exe<br/>Skills / Extensions"]
     be --> sandbox["OpenSandbox<br/>Isolated Execution Environment"]
     sandbox --> sandboxRuntime["Sandbox Container<br/>byclaw-openclaw / Agent Runtime"]
@@ -117,7 +117,7 @@ flowchart TB
 |--------|----------------|------------------|
 | `byclaw-fe` | Web portal and admin console | Chat, knowledge center, digital employees, work center, tool center, sandbox pages, mobile adaptation |
 | `byclaw-be` | Core backend and unified gateway | AuthN/AuthZ, session management, resource management, digital employee management, file management, Feign calls, WebSocket |
-| `byclaw-qa` | Knowledge base and QA service | Knowledge import, index building, retrieval QA, QA Worker, knowledge resource mapping |
+| `byclaw-qa` | Knowledge base and QA service | Knowledge import, index building, retrieval QA, knowledge resource mapping |
 | `byclaw-exe` | Extension plugins and skill scripts | Skills, Extensions, business scripts, capability extensions |
 | `middleware` | Runtime infrastructure | Redis, MinIO, OpenGauss, OpenSandbox, and related runtime dependencies |
 
@@ -173,7 +173,6 @@ flowchart TB
     lb --> feC["byclaw-fe<br/>Nginx + Static Assets"]
     feC --> beC["byclaw-be<br/>HTTP 8086 / WS 8082"]
     beC --> qaApi["byclaw-qa-manager<br/>API 8000"]
-    beC --> qaWorker["byclaw-qa-worker<br/>Background Consumer"]
     beC --> sandboxC["OpenSandbox<br/>Sandbox Scheduling / Lease Management"]
     sandboxC --> sandboxContainer["Sandbox Container<br/>On-demand / Auto-reclaimed"]
     sandboxContainer --> openclawC["byclaw-openclaw<br/>Agent Runtime"]
@@ -188,18 +187,17 @@ flowchart TB
     qaApi --> redisC
     qaApi --> dbC
     qaApi --> minioC
-    qaWorker --> redisC
     sandboxContainer --> mount["File Mounts / Personal Data Space"]
     minioC --> mount
 ```
 
 - **Middleware layer**: Starts Redis, MinIO, OpenGauss, OpenSandbox, and other infrastructure components first. OpenSandbox is responsible for launching sandbox containers on demand.
-- **Application layer**: Starts `byclaw-fe`, `byclaw-be`, `byclaw-qa-manager`, and `byclaw-qa-worker`.
+- **Application layer**: Starts `byclaw-fe`, `byclaw-be`, and `byclaw-qa-manager`.
 - **Access layer**: The frontend container embeds Nginx, exposes HTTP / HTTPS, and forwards backend APIs, WebSocket, file browsing, and sandbox-related requests.
 - **Configuration layer**: Injects database, Redis, MinIO, model, sandbox, port, and domain configuration through the root `.env` file and `deploy/config`.
 - **Execution layer**: `byclaw-openclaw` runs inside sandbox containers launched by OpenSandbox. Skills, Extensions, and external business APIs are loaded through the sandbox execution environment on demand.
 
-In production, databases, cache, object storage, QA Workers, and OpenSandbox can be scaled independently. Frontend and backend services remain stateless or weakly stateful, sharing state through Redis and the database.
+In production, databases, cache, object storage, and OpenSandbox can be scaled independently. Frontend and backend services remain stateless or weakly stateful, sharing state through Redis and the database.
 
 ### Security Architecture
 

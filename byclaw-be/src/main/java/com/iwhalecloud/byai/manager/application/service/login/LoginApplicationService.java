@@ -148,7 +148,8 @@ public class LoginApplicationService {
         loginInfo.setAvatar(users.getAvatar());
         loginInfo.setEmail(users.getEmail());
         loginInfo.setRegisterType(users.getRegisterType());
-        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId(users.getUserId()));
+        // A new login starts in the platform default space; tenant selection is session-scoped.
+        loginInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId());
         loginInfo.setComAcctId(loginInfo.getEnterpriseId());
         loginInfo.setUsersOrganizations(organizationService.findUsersOrganizationByUserId(users.getUserId()));
         // 管理组织

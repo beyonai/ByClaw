@@ -384,3 +384,44 @@ async def test_get_config_no_prologue_model_id_uses_type_list(mock_redis):
 
     assert config.model_name == "typelist-model"
     mock_redis.hget.assert_not_called()
+
+
+@pytest.mark.parametrize("profile,factory", [("standard", _make_llm_model), ("embedding", _make_embedding_model)])
+@pytest.mark.parametrize("field,value", [
+    ("url", "请用户替换"), ("url", ""), ("url", "not-a-url"),
+    ("authToken", "请用户替换"), ("authToken", ""),
+    ("authToken", "secret\nvalue"), ("authToken", "secret中文"),
+    ("modelCode", ""),
+])
+async def test_unconfigured_model_fails_before_client_creation(mock_redis, profile, factory, field, value):
+    model = factory()
+    model[field] = value
+    mock_redis.hgetall.return_value = _make_redis_payload(
+        llm_models=[model] if profile == "standard" else [],
+        embedding_models=[model] if profile == "embedding" else [],
+    )
+    with patch("redis_model_config.ModelConfig") as config_class:
+        with pytest.raises(ModelConfigError) as error:
+            await RedisModelConfigProvider(mock_redis).get_config(profile)
+        assert "模型管理" in str(error.value)
+        if profile == "embedding":
+            assert "Embedding" in str(error.value)
+        assert "secret" not in str(error.value)
+        config_class.assert_not_called()
+
+
+async def test_missing_embedding_has_actionable_message(mock_redis):
+    mock_redis.hgetall.return_value = {}
+    with pytest.raises(ModelConfigError, match="Embedding") as error:
+        await RedisModelConfigProvider(mock_redis).get_config("embedding")
+    assert "默认模型" in str(error.value)
+
+
+@pytest.mark.parametrize("dimensions", [0, -1, None])
+async def test_embedding_requires_positive_dimensions(mock_redis, dimensions):
+    mock_redis.hgetall.return_value = _make_redis_payload(
+        embedding_models=[_make_embedding_model(dimensions=dimensions)]
+    )
+    with patch("redis_model_config.get_settings", return_value=MagicMock(embedding_dimension=None)):
+        with pytest.raises(ModelConfigError, match="Embedding"):
+            await RedisModelConfigProvider(mock_redis).get_config("embedding")

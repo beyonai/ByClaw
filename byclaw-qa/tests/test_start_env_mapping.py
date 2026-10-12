@@ -52,7 +52,6 @@ def _complete_source_env() -> dict[str, str]:
         "BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS": "600",
         "BYCLAW_QA_KB_MINIO_BUCKET": "knowledge-base",
         "BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET": "knowledge-base-markdown",
-        "BYCLAW_QA_BYAI_WORKER_ID": "instant-search-worker-1",
     }
 
 
@@ -69,7 +68,6 @@ def _custom_storage_provider_source_env() -> dict[str, str]:
         "BYCLAW_QA_AGENT_DATA_PATH": "agent_data",
         "BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS": "86400",
         "BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS": "600",
-        "BYCLAW_QA_BYAI_WORKER_ID": "instant-search-worker-1",
         "BY_QA_STORAGE_PROVIDER": "byclaw_userfs_storage:build_byclaw_userfs_storage_provider",
     }
 
@@ -313,3 +311,16 @@ def test_start_preserves_explicit_byai_langfuse_enabled(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "BYAI_LANGFUSE_ENABLED=false" in env_log.read_text().splitlines()
+
+
+def test_manual_worker_start_still_requires_worker_id(tmp_path: Path) -> None:
+    script = tmp_path / "start.sh"
+    shutil.copy2(Path(__file__).resolve().parents[1] / "start.sh", script)
+    _write_env(tmp_path / ".env", _complete_source_env())
+    result = subprocess.run(
+        ["bash", str(script), "worker"], cwd=tmp_path,
+        env={"PATH": os.environ.get("PATH", "")},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "BYCLAW_QA_BYAI_WORKER_ID" in result.stderr

@@ -851,13 +851,20 @@ public class AuthApplicationService {
      */
     public List<DigitalEmployeeUseApplyAuditVo> queryDigitalEmployeeUseApplyAudit(Boolean history,
                                                                                     List<String> resourceBizTypeList) {
+        return queryDigitalEmployeeUseApplyAudit(history, resourceBizTypeList, null);
+    }
+
+    /** 关键词仅缩小候选集合，查询后仍执行原有资源审核权限及技能上架租户校验。 */
+    public List<DigitalEmployeeUseApplyAuditVo> queryDigitalEmployeeUseApplyAudit(Boolean history,
+        List<String> resourceBizTypeList, String keyword) {
         List<String> auditBizTypes = normalizeAuditBizTypes(resourceBizTypeList);
         if (CollectionUtils.isNotEmpty(resourceBizTypeList) && CollectionUtils.isEmpty(auditBizTypes)) {
             return Collections.emptyList();
         }
         // 先一次联表查询真正存在申请的记录，避免遍历全部数字员工并逐个查询申请、用户和扩展信息。
         List<DigitalEmployeeUseApplyAuditVo> candidates = privilegeGrantMapper
-            .queryDigitalEmployeeUseApplyAudit(Boolean.TRUE.equals(history), auditBizTypes);
+            .queryDigitalEmployeeUseApplyAudit(Boolean.TRUE.equals(history), auditBizTypes,
+                StringUtils.trimToNull(keyword));
         if (CollectionUtils.isEmpty(candidates)) {
             return Collections.emptyList();
         }

@@ -35,6 +35,7 @@ from exceptions import (
     ByclawQAError,
     ConfigurationError,
     ModelConfigError,
+    ModelSetupRequiredError,
     ModelNotFoundError,
     StorageError,
     UserResolutionError,
@@ -569,6 +570,13 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
                 event_type=event_type_mod.EventType.ANSWER_DELTA.value,
             )
             return message
+        except ModelSetupRequiredError as exc:
+            message = exc.message
+            await context.emit_chunk(
+                message,
+                event_type=event_type_mod.EventType.ANSWER_DELTA.value,
+            )
+            return message
         except ModelNotFoundError as exc:
             logger.error("Model not found for agent_id=%s: %s", agent_id, exc)
             message = t(Msg.ERR_MODEL_NOT_FOUND)
@@ -601,6 +609,11 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
         final_answer_parts: list[str] = []
         has_error = False
         aggregator_instance_ids: set[str] = set()
+
+        from redis_model_config import RedisModelConfigProvider
+        provider = RedisModelConfigProvider(context.redis)
+        await provider.get_config("embedding")
+        await provider.get_config("standard")
 
         async with InstantQAEngine(config=config) as engine:
             async with aclosing(engine.stream_search(input_data)) as stream:
@@ -671,12 +684,7 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
         final_answer = "".join(final_answer_parts).strip()
         if final_answer and not has_error:
             from by_qa.qa.services.llm_service import LLMService
-            from redis_model_config import RedisModelConfigProvider
-
-            # This provider is used for report filename generation only —
-            # the search engine loads its own model config internally via InstantQAEngine.
-            provider = RedisModelConfigProvider(context.redis)
-            await provider.load_cache()
+            # Reuse the validated provider for report filename generation.
             llm_service = LLMService(provider=provider)
             filename = await generate_report_filename(final_answer, llm_service)
             report_uploaded = await upload_report(final_answer, filename, session_id, user_code)

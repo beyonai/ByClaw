@@ -63,9 +63,16 @@ public class TenantGroupPublicationService {
             Map<String, Object> value = mapper.convertValue(file, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
             value.put("resourceAuthorized", true); authorized.add(value);
         }
-        var parsed = mentions.parseMembers(mapper.convertValue(group.path("members"),
-            new com.fasterxml.jackson.core.type.TypeReference<List<com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember>>() {}),
-            task.path("targetAgentId").asLong(), text);
+        // Mention parsing needs only authorized member identities, not Node ISO timestamps.
+        List<com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember> memberIdentities = new ArrayList<>();
+        for (JsonNode member : group.path("members")) {
+            var identity = new com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember();
+            identity.setMemObjType(member.path("memObjType").asText());
+            if (!member.path("memObjId").isMissingNode() && !member.path("memObjId").isNull())
+                identity.setMemObjId(member.path("memObjId").asLong());
+            memberIdentities.add(identity);
+        }
+        var parsed = mentions.parseMembers(memberIdentities, task.path("targetAgentId").asLong(), text);
         text = parsed.normalizedContent();
         Map<String, Object> payload = new HashMap<>();
         payload.put("metadata", Map.of("resourceList", parsed.resourceList(), "targetAgentId", task.path("targetAgentId").asText()));

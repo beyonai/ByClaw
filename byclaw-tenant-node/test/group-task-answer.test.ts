@@ -48,6 +48,14 @@ describe("tenant group task answer", () => {
     expect(message![1]).toContain("30");
     expect(message![1]).toContain("42");
     expect(message![1]).toContain("完成");
+    const metadata = message![1]!.find(
+      (value) => typeof value === "string" && value.startsWith('{"scene"'),
+    );
+    expect(JSON.parse(metadata as string)).toMatchObject({
+      kind: "TASK_RESULT",
+      taskId: "50",
+      sourceMessageId: "40",
+    });
     expect(db.query.mock.calls.some(([sql]) => sql.includes("turn_status='WAITING_USER'"))).toBe(
       true,
     );
@@ -62,6 +70,21 @@ describe("tenant group task answer", () => {
       answer(),
     );
     expect(db.query.mock.calls.some(([sql]) => sql.includes("turn_status='FAILED'"))).toBe(true);
+    expect(
+      db.query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_message")),
+    ).toBe(false);
+  });
+
+  it("keeps progress private when the terminal event has no final answer", async () => {
+    const db = database();
+    await projectGroupTaskAnswer(db, "10", event({ sessionId: "50", eventType: "TERMINAL" }), {
+      ...answer(),
+      content: "先读取历史。",
+      finalContent: "",
+    });
+    expect(db.query.mock.calls.some(([sql]) => sql.includes("turn_status='WAITING_USER'"))).toBe(
+      true,
+    );
     expect(
       db.query.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO byai.byai_message")),
     ).toBe(false);

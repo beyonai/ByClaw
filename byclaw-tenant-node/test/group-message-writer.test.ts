@@ -80,6 +80,24 @@ describe("tenant group message", () => {
     expect(insert![1]).toContain("hacu-request");
   });
 
+  it("bounds Chinese and emoji candidate titles by openGauss UTF-8 bytes", async () => {
+    const { context, query } = setup({
+      chatContent: "让各个成员自我介绍😀".repeat(40),
+      resourceList: [{ resourceType: "DIG_EMPLOYEE", resourceId: "42" }],
+    });
+    const original = query.getMockImplementation()!;
+    query.mockImplementation(async (sql, parameters = []) => {
+      if (sql.startsWith("INSERT INTO byai.byai_session (")) {
+        const columns = sql.slice(sql.indexOf("(") + 1, sql.indexOf(")")).split(",");
+        const name = parameters[columns.indexOf("session_name")] as string;
+        expect(Buffer.byteLength(name)).toBeLessThanOrEqual(255);
+        expect(name).not.toContain("�");
+      }
+      return original(sql, parameters);
+    });
+    expect((await sendGroupMessage(context)).dispatches).toHaveLength(1);
+  });
+
   it("creates only a private candidate execution for a single agent greeting", async () => {
     const { context, query } = setup({
       chatContent: "@助手 你好",

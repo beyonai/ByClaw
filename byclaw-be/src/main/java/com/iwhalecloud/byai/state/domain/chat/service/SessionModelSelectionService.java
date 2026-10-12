@@ -14,6 +14,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.ModelConfigurationValidator;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
@@ -159,6 +160,9 @@ public class SessionModelSelectionService {
         }
         else {
             effective = modelOverride != null ? modelOverride : resolveConfiguredModel(dto).orElse(null);
+        }
+        if (effective != null) {
+            ModelConfigurationValidator.validate(aiModelService.getModel(effective.getModelId()));
         }
         resolveThinkingLevel(dto, effective, record);
         dto.setSessionModelSelection(effective);

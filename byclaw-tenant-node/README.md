@@ -166,7 +166,7 @@ API 路径对应 `command-routes.ts` 和 OpenAPI。HTTP 正常结果是**事务�
 
 确认结果包含 `messageId` 和 `acknowledgements[{messageId,userId,userName,acknowledgedAt}]`，时间为毫秒时间戳。Node 只持久化；BE 提交成功后广播 `MESSAGE_ACK_UPDATED`。群上下文、搜索、消息定位和话题消息返回确认列表及当前用户的 `canAcknowledge`。该操作不推进已读游标，不新增聊天消息。
 
-部署前须在租户数据库中创建 `byai.byai_group_chat_message_ack`；表结构沿用 `deploy/migrations/versions/V0.5.0/V0.5.0__ddl.sql`。主库 SQL 与租户 baseline 是独立制品，仅合并主库建表语句不会更新租户数据库；新租户 baseline 和已有租户升级都需要包含此表。
+`V0.5.0__baseline__ddl.sql` 与打包 ZIP 已包含 `byai.byai_group_chat_message_ack`、联合主键及消息确认查询索引；新租户初始化可直接创建。主库 SQL 与租户 baseline 是独立制品，仅合并主库建表语句不会更新已有租户数据库；已有租户升级仍需由部署执行器检查并补齐此表。2026-10-10 与 229《百应开源》租户库的同引擎 catalog 对照为 15 张表、272 列、43 个索引、21 个约束和 2 个序列，结构及指纹一致。
 
 输入消息保留 INPUT 的 commandId；回答行只保留最近一次已提交的出站 commandId，后续事件会覆盖旧 ID。该接口查询当前行，不保存逐事件审计历史，404 不能作为“事件从未落库”的证明。旧出站事件应结合稳定 answerMessageId、后续消息状态和源流记录对账。
 
@@ -221,6 +221,12 @@ BE 在任务输入时保存可信的租户归属，Redis 恢复上下文保留�
 实时父会话事件、运行状态和子会话快照、增量及状态帧均携带 `enterpriseId`，仅发给同一用户在对应企业的频道，并通过 Redis Pub/Sub 送达其他 BE 实例。接收实例按自己的子会话订阅选择正文或状态通知，再生成增量；消息元数据保留 `messageRenderVersion=v2`、本地父会话 ID 和外部运行标识。群回显只提取文本或明确的最终答案，任务计划、团队快照及文件变更保留在结构化消息中。DIRECT 与 COORDINATED 任务均通知终态。
 
 任务请求复用原链路的 `.byclaw/task-delivery.json` 交付信号指引；用户发起 `prepare_group_task_publication` 时追加发布准备工具指引，由用户在待发布卡片中确认。部署此修复需要同时更新 BE 与租户 Node；既有历史任务的错误正文、缺失绑定或交付信号不会自动补写。
+
+HACU 租户任务会话的 WebSocket `STOP_CHAT` 与 HTTP 停止接口共用 Node 会话/消息授权，授权成功后才读取共享运行态并执行取消；`STOP_CHAT_ACK` 携带请求标识、字符串消息 ID 和企业 ID。新候选会话沿用 `CHAT_REPLY`/`TASK_ACK` 分类，兼容旧任务链路的自动成果标记为 `TASK_RESULT`。实时广播复用 Node 的撤回安全历史投影，包含任务标识、回复引用和资源字段；`canAcknowledge` 由各接收者按自身身份计算。旧自动回复仅在其消息 ID 与任务的 `publishMessageId` 匹配时补充成果类型，无需改写历史数据或执行迁移。
+
+私有任务历史保留过程文字；仅收到明确最终答案而没有文本增量时，历史正文回退到最终答案，避免刷新后答复为空。群成果只使用明确最终答案或最后一个推理/工具事件之后的末段正文。没有最终正文时更新任务终态但不发布空成果。此修复需部署 BE 和租户 Node，单独更新 HACU 前端无法消除旧后端的停止拒绝及广播字段缺失；已保存的旧过程文字不自动清理。
+
+候选会话的状态写入和完成时间判断共用参数时，显式转换为 `varchar`，避免 openGauss 将同一参数分别推断为 `text` 与 `varchar`，造成群回复落库返回 503。设置 `TENANT_NODE_TEST_DATABASE_URL` 后，`pnpm test` 会额外执行真实 PostgreSQL/openGauss 的 CHAT/TASK SQL 回归；这些用例只执行 `EXPLAIN`，不会修改数据库数据或表结构。
 
 启动入口自动读取模块根目录的 `.env`，不依赖调试器工作目录，已有环境变量优先。
 
@@ -293,3 +299,47 @@ BE 公共路径保持不变。带租户上下文的群消息、群管理与任�
 `GET /internal/v1/sessions/{id}/children?pageNum=1&pageSize=100` 用于 GROUP_TASK 的成员导航。节点先沿用历史读取规则校验父任务，再按当前企业、当前用户及父会话分页查询，并逐一校验子会话。任务仍需由发起人访问，成员仍需位于原任务调度范围内；普通个人会话列表继续排除群任务。返回会话保留字符串 ID、`parentSessionId`、`state`、`objectId` 和 `objectType`。
 
 BE 的会话资源查询通过节点校验租户会话，不回退查询个人会话库。未关联项目（包括 `projectId=-1`）的已授权租户会话返回空资源页；关联平台项目时继续使用平台项目与数据源权限校验。
+
+### V0.5.0 租户任务轮次基线修复
+
+租户基线及配套 ZIP/manifest 必须包含 `byai_group_chat_task.current_turn_id`、`current_turn_trace_id` 和 `idx_group_chat_task_running_turn`。就绪检查会拒绝缺少轮次字段的库，避免任务续聊在业务阶段才失败。`tenant/V0.5.0__ddl.sql` 为已有租户的同版本补丁；openGauss 不支持 `ADD COLUMN IF NOT EXISTS`，执行器须在同一事务中检查字段存在性及类型，再执行缺失字段的 ALTER，并更新 schema 的 catalog 指纹。该补丁不回填历史任务状态。
+
+生成新基线 manifest 时，应在同引擎的临时空库执行完整基线后，使用 Node 的 `catalogDigest` 计算指纹；已有租户的修复指纹按实际 catalog 计算，不可直接覆盖为新建库指纹。修改 SQL 后须同步生成 `baseline/V0.5.0__baseline.zip` 和 manifest；`packaged-baseline.test.ts` 验证发布 ZIP 与迁移源及 manifest 一致。BE 的打包资源包含该 ZIP，部署时需同步更新。
+
+### 专家团父子会话渲染序号
+
+BE 到 Node 的镜像协议中，`AnswerDelta.seq` 是渲染顺序计数器，必须输出 JSON 数字；消息、会话及任务业务 ID 仍为字符串。旧镜像中的字符串序号由 BE 历史投影转换为安全整数，仅调整响应，不修改库中历史及业务 ID。否则有序渲染器会退回纯文本，专家团活动卡和工具过程无法回显。回归同时验证大整数业务 ID 保真、渲染序号类型及旧父子任务历史。
+
+租户子会话实时订阅通过 HEARTBEAT 的字符串 `scopedSessionId` 选择；BE 在更新频道前调用 Node 会话读取接口校验用户权限。空字符串取消订阅，拒绝访问时保留原订阅；HACU 心跳保留选中会话，重连的企业切换确认后恢复订阅。
+
+任务页 `/api/v1/sessionResources/query` 必须携带租户上下文并经过 BE 租户校验，随后从 Node 授权读取会话；未绑定项目（含 `projectId=-1`）的父子任务返回空资源页，不查询平台个人会话。
+
+租户话题列表路由到 Node 的 `/group-chats/{id}/topics` 集合，不能用群详情响应替代列表；话题消息继续使用对应 topicId 的消息接口。文件页共用 HACU 的任务文件、工作组云盘和对话上传组件及现有文件资源接口，不新增租户专属文件存储。
+
+租户候选任务标题和模型声明的任务名称按 UTF-8 字节限制截断到 255 字节，保留完整 Unicode 字符，兼容 openGauss VARCHAR 字节上限；群消息正文完整保留。回归覆盖长中文和 emoji 消息。
+
+BE 在任务开始前观察分类时发送空文本 DELTA（`text=""`）及可信 groupDisposition 元数据，不使用终态 messageContent 代替 delta 字段；Node 可以先落任务卡并继续镜像终态答案。
+
+会话运行态帧的 envelope 与 data.sessionId 都必须输出精确字符串；HACU 优先采用 envelope 会话 ID，兼容旧帧的数值 ID 精度丢失。否则 idle 更新到错误会话，任务完成后仍显示停止按钮并阻止续聊。
+
+无浏览器租户头的外部执行器发布接口仅可恢复已登记的大整数租户任务：使用 BE 派发注册的可信归属，匹配登录用户并重新检查租户成员资格，再由 Node 校验任务权限。普通个人任务保留原路由；不根据请求正文或可变用户默认空间猜测租户。
+
+租户待发布内容在 Node 提交并读回成功后，BE 向发起人对应企业频道发送 `GROUP_CHAT_TASK_EVENT/TASK_PUBLICATION_PREPARED`，前端立即重读成果卡片；通知不广播给其他群成员。
+
+租户成果发布的 mention 解析只投影 Node 已鉴权成员的 `memObjType` 和 `memObjId`，不反序列化无关的 ISO 创建/读取日期。文件上传与资源授权继续复用 BE 原有发布流程。
+
+K3s 租户开通：TCP 数据库端点通过 OpenSandbox `resolve_internal=true` 获取 Pod 内网地址；BE 在创建数据库沙箱前预建私有 `opengauss/data` 目录，保持 BE 与租户镜像的 1001:1001 所有者，避免 kubelet 创建 root 所有的 subPath。租户 Node 使用 Downward API 注入的 `POD_IP` 注册服务；显式 `ADVERTISE_HOST` 仍优先，Docker 未注入 Pod IP 时沿用容器 hostname。
+
+BE 每 5 分钟核对已开通租户的权威配置，在租约剩余不足 12 小时时续期 24 小时并重新发布 Redis 快照。续期保留 generation、fencingToken 和凭据版本，通过开通锁与状态比较更新避免覆盖删除或并发状态变更。新登录从默认企业开始，租户选择仅在当前登录会话有效。
+
+租户工作组邀请码仍由 Node 校验并持久化，BE 在现有分享链接表保存邀请码与租户的路由元数据，使无痕访问无需租户选择凭证即可预览。匿名预览不返回邀请人 ID 或冒用其成员身份；加入使用实际登录者，接受有效邀请后在套餐额度内建立租户 MEMBER 身份。套餐行锁与 Node 群锁保护重复/并发入群，复用成员并保留原角色；停用成员不能自动恢复。
+
+邀请预览匿名时清理线程登录身份；携带登录令牌时验证实际用户。链接可附带 enterpriseId，但路由必须与服务端邀请码绑定一致。确认一次后自动加入租户、加入群组并切换工作空间，重复请求不重复增加成员或占用额度。
+
+### 租户群成员与撤回提示
+
+邀请链接入群和成员面板邀请都在 Node 的会话锁与命令事务内新增成员并写入 `usage=5`、`kind=SYSTEM_EVENT` 的系统消息，保存邀请人和成员姓名快照。已有成员、重复提交及重放命令不会重复新增历史提示。BE 在提交后广播成员变更和 `MESSAGE_CREATED`，离线用户通过群历史读取相同提示。
+
+撤回仍保留原消息行、取消关联任务并脱敏正文及附件；首次撤回将操作者姓名快照保存在现有 metadata 中。实时事件、历史消息和群列表摘要使用相同撤回身份与文案，重复撤回不会改变首次操作者或时间，也不会创建额外系统消息。无姓名快照的旧撤回记录保留“消息已撤回”的兼容展示。
+
+退群和管理移除同样在成员变更事务内保存 `MEMBER_LEFT` / `MEMBER_REMOVED` 系统消息与姓名快照；BE 使用操作前成员列表广播 `MEMBER_REMOVED` 和 `MESSAGE_CREATED`，离开者不需要再通过操作后的群读取权限。目标已不存在时不重复写提示。

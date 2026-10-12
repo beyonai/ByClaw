@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatStatusRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
+import com.iwhalecloud.byai.state.domain.ws.model.ChatMessage;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -74,14 +75,7 @@ public class TenantChatRuntimeRoutingAspect {
             case "stopChat": {
                 StopChatDto request = (StopChatDto) args[1];
                 if (request == null) throw invalid();
-                session(context, request.getSessionId());
-                if (request.getMessageId() != null) {
-                    RunningChatInfo active = running.getRunning(request.getSessionId());
-                    if (active == null || !request.getMessageId().equals(active.getModelAnswerMessageId())) {
-                        MessageView message = message(context, request.getMessageId());
-                        if (!request.getSessionId().toString().equals(message.sessionId())) throw invalid();
-                    }
-                }
+                authorizeStop(context, request.getSessionId(), request.getMessageId());
                 return call.proceed();
             }
             case "getSessionStatus":
@@ -124,6 +118,28 @@ public class TenantChatRuntimeRoutingAspect {
             }
             default:
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant chat operation is not ready");
+        }
+    }
+
+    /** WebSocket STOP_CHAT must use the same tenant authorization as the HTTP endpoint. */
+    @Around("execution(* com.iwhalecloud.byai.state.domain.ws.service.ChatService.stopChat(..))")
+    public Object stopWebSocket(ProceedingJoinPoint call) throws Throwable {
+        TenantRequestContext context = TenantRequestContextHolder.get();
+        if (context != null) {
+            ChatMessage request = (ChatMessage) call.getArgs()[1];
+            if (request == null) throw invalid();
+            authorizeStop(context, request.getSessionId(), request.getMessageId());
+        }
+        return call.proceed();
+    }
+
+    private void authorizeStop(TenantRequestContext context, Long sessionId, Long messageId) {
+        session(context, sessionId);
+        if (messageId == null) return;
+        RunningChatInfo active = running.getRunning(sessionId);
+        if (active == null || !messageId.equals(active.getModelAnswerMessageId())) {
+            MessageView message = message(context, messageId);
+            if (!sessionId.toString().equals(message.sessionId())) throw invalid();
         }
     }
 

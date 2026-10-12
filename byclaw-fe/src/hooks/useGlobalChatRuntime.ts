@@ -109,7 +109,7 @@ export default function useGlobalChatRuntime() {
         if (!payload) return;
         handleSessionRuntimeState({
           ...payload,
-          sessionId: `${payload.sessionId || message.sessionId || ''}`,
+          sessionId: `${message.sessionId || payload.sessionId || ''}`,
           traceId: `${payload.traceId || message.traceId || ''}`,
         });
       } catch (error) {

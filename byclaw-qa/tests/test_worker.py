@@ -1257,6 +1257,7 @@ async def test_process_command_skips_upload_when_no_final_answer():
         patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock()) as mock_gen,
         patch.object(worker_module, "upload_report", AsyncMock()) as mock_upload,
+        patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
 
     ):
         result = await worker.process_command(command, context)
@@ -1264,3 +1265,36 @@ async def test_process_command_skips_upload_when_no_final_answer():
     assert result == ""
     mock_gen.assert_not_awaited()
     mock_upload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_embedding_setup_error_is_shown_before_search_starts():
+    from exceptions import ModelSetupRequiredError
+    worker = InstantSearchWorker()
+    config = {"retrieval": {"knowledge_bases": [
+        {"kb_code": "kb-1", "kb_name": "知识库", "path": "/s", "service_name": "svc"}
+    ]}}
+    command = SimpleNamespace(
+        extra_payload={"agent_id": "agent-1"},
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
+        content="query",
+    )
+    context = SimpleNamespace(
+        redis=AsyncMock(), emit_chunk=AsyncMock(), session_id="s1",
+        agent_runtime_state=SimpleNamespace(session_manager=SimpleNamespace(user_code="u1")),
+        get_trace_parent_observation_id=lambda: uuid.uuid4().hex,
+        trace_id=lambda: uuid.uuid4().hex,
+    )
+    message = "请先配置并启用默认 Embedding 模型"
+    provider = AsyncMock()
+    provider.get_config.side_effect = ModelSetupRequiredError(message)
+    with (
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(SimpleNamespace(), None))),
+        patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=config),
+        patch("redis_model_config.RedisModelConfigProvider", return_value=provider),
+        patch.object(worker_module, "InstantQAEngine") as engine,
+    ):
+        result = await worker.process_command(command, context)
+    assert result == message
+    context.emit_chunk.assert_any_await(message, event_type="answer_delta")
+    engine.assert_not_called()

@@ -45,6 +45,7 @@ class TenantNodeClientTest {
         var delta = new com.iwhalecloud.byai.state.common.dto.AnswerDelta();
         delta.setMessageId(8000000123000000001L);
         delta.setTaskId(8000000123000000002L);
+        delta.setSeq(42L);
         for (ObjectMapper mapper : List.of(new ObjectMapper(),
             new com.iwhalecloud.byai.state.infrastructure.filter.WebMvcConfiguration()
                 .jacksonObjectMapper(new org.springframework.http.converter.json.Jackson2ObjectMapperBuilder()))) {
@@ -54,6 +55,8 @@ class TenantNodeClientTest {
                 .isEqualTo("8000000123000000001");
             assertThat(structure.get("messageStruct").get(0).get("taskId").textValue())
                 .isEqualTo("8000000123000000002");
+            assertThat(structure.get("messageStruct").get(0).get("seq").isIntegralNumber()).isTrue();
+            assertThat(structure.get("messageStruct").get(0).get("seq").longValue()).isEqualTo(42L);
             var query = wire.readTree(wire.writeValueAsBytes(new TenantNodeModels.MessageQuery("456", 1L, 20L)));
             assertThat(query.get("pageNum").isInt()).isTrue();
             assertThat(query.get("pageSize").intValue()).isEqualTo(20);

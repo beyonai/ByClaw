@@ -34,6 +34,9 @@ public interface TenantAdminTenantMapper {
     int updateConfig(@Param("enterpriseId") long enterpriseId, @Param("code") String code,
                      @Param("value") String value);
 
+    int renewReadyLease(@Param("enterpriseId") long enterpriseId, @Param("expectedState") String expectedState,
+                        @Param("renewedState") String renewedState);
+
     int deleteConfig(@Param("enterpriseId") long enterpriseId, @Param("code") String code);
 
     List<TenantConfigRow> selectConfigs(@Param("enterpriseId") long enterpriseId);

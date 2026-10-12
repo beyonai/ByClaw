@@ -27,6 +27,11 @@ class ModelConfigError(ByclawQAError):
     pass
 
 
+class ModelSetupRequiredError(ModelConfigError):
+    """Safe, actionable model setup error that can be shown to users."""
+    pass
+
+
 class ModelNotFoundError(ModelConfigError):
     """Required model not found in Redis model registry."""
     pass

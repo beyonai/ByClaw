@@ -8,11 +8,13 @@ import asyncio
 from contextvars import ContextVar
 from dataclasses import fields, is_dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from by_qa.config import get_settings
 from by_qa.core import logger
 from by_qa.core.model_config import LLMModelProfile, ModelConfig, ModelConfigProvider
-from exceptions import ModelConfigError, ModelNotFoundError
+from exceptions import ModelConfigError, ModelNotFoundError, ModelSetupRequiredError
+from i18n import Msg, t
 from redis_runtime import init_shared_redis_from_env
 
 
@@ -62,6 +64,7 @@ class RedisModelConfigProvider(ModelConfigProvider):
         profile_value = model_type.value if isinstance(model_type, LLMModelProfile) else model_type
         if profile_value in LLM_PROFILES:
             model = await self._load_first_llm_model()
+            _validate_model_connection(model, LLM_MODEL_TYPE)
             return self._build_model_config(
                 model,
                 temperature=_extract_temperature(model),
@@ -69,13 +72,16 @@ class RedisModelConfigProvider(ModelConfigProvider):
         if profile_value == EMBEDDING_PROFILE:
             settings = get_settings()
             model = await self._load_first_model_by_type(EMBEDDING_MODEL_TYPE)
+            _validate_model_connection(model, EMBEDDING_MODEL_TYPE)
+            dimension = _extract_embedding_dimension(
+                model, fallback=getattr(settings, "embedding_dimension", None)
+            )
+            if dimension is None:
+                raise ModelSetupRequiredError(t(Msg.ERR_EMBEDDING_SETUP_REQUIRED))
             return self._build_model_config(
                 model,
                 temperature=0.0,
-                dimension=_extract_embedding_dimension(
-                    model,
-                    fallback=getattr(settings, "embedding_dimension", None),
-                ),
+                dimension=dimension,
                 distance_metric=getattr(settings, "embedding_distance_metric", None),
             )
         raise ModelConfigError(f"Unknown model_type: {model_type!r}")
@@ -124,6 +130,8 @@ class RedisModelConfigProvider(ModelConfigProvider):
     async def _load_first_model_by_type(self, redis_model_type: str) -> dict[str, Any]:
         models = await self._load_models_by_type(redis_model_type)
         if not models:
+            if redis_model_type == EMBEDDING_MODEL_TYPE:
+                raise ModelSetupRequiredError(t(Msg.ERR_EMBEDDING_SETUP_REQUIRED))
             raise ModelNotFoundError(
                 f"No {redis_model_type} model found in Redis key {AI_MODEL_TYPE_REDIS_KEY}"
             )
@@ -166,6 +174,23 @@ class RedisModelConfigProvider(ModelConfigProvider):
             AI_MODEL_TYPE_REDIS_KEY,
             _build_logged_model_configs(self._models_by_type),
         )
+
+
+def _validate_model_connection(model: dict[str, Any], model_type: str) -> None:
+    message = t(Msg.ERR_EMBEDDING_SETUP_REQUIRED if model_type == EMBEDDING_MODEL_TYPE
+                else Msg.ERR_LLM_SETUP_REQUIRED)
+    values = [model.get(key) for key in ("url", "authToken", "modelCode")]
+    if any(not isinstance(value, str) or not value.strip() or "请用户替换" in value
+           for value in values):
+        raise ModelSetupRequiredError(message)
+    endpoint, token, _ = values
+    try:
+        url = urlsplit(endpoint)
+        valid_url = url.scheme in {"http", "https"} and bool(url.hostname)
+    except ValueError:
+        valid_url = False
+    if not valid_url or any(ord(char) < 33 or ord(char) > 126 for char in token):
+        raise ModelSetupRequiredError(message)
 
 
 def _decode_redis_json(value: Any) -> Any:

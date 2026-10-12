@@ -775,6 +775,38 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resourceStatus.published')).not.toBeInTheDocument();
   });
 
+  describe('employee title and type tag layout', () => {
+    it.each([
+      { ownerType: 'personal', agentType: '016', showActions: false, tag: 'personalEmployee' },
+      { ownerType: 'enterprise', agentType: '016', showActions: true, tag: 'enterpriseEmployee' },
+      { ownerType: 'personal', agentType: '017', showActions: true, tag: 'personalGroup' },
+      { ownerType: 'enterprise', agentType: '017', showActions: false, tag: 'enterpriseGroup' },
+    ])('places $tag next to the title with actions: $showActions', ({ ownerType, agentType, showActions, tag }) => {
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType="DIG_EMPLOYEE"
+          digitalEmployeeActionMode={showActions}
+          resource={{
+            resourceId: 'employee-title',
+            resourceName: '刘皇叔的代码文档补全大助手长标题',
+            resourceBizType: 'DIG_EMPLOYEE',
+            ownerType,
+            agentType,
+            resourceStatus: '2',
+          }}
+        />
+      );
+      const title = screen.getByText('刘皇叔的代码文档补全大助手长标题');
+      const badge = screen.getByText(`digitalEmployees.tag.${tag}`).parentElement!;
+      expect(title).toHaveClass('resourceName', 'ant-typography-ellipsis');
+      expect(title.parentElement).toHaveClass('resourceInfoHeaderWithTag');
+      expect(title.parentElement).toContainElement(badge);
+      expect(badge).toHaveClass('digitalEmployeeTopRightTag');
+      expect(badge.previousElementSibling).toBe(title);
+      expect(title.closest('.resourceInfo')!.classList.contains('resourceInfoWithActions')).toBe(showActions);
+    });
+  });
+
   describe('skill poster title space', () => {
     const originalResizeObserver = Object.getOwnPropertyDescriptor(global, 'ResizeObserver');
     let tagWidth: number;

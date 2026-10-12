@@ -19,8 +19,7 @@ import { deliveryCompleteForSession } from './delivery-state.mjs';
 import {
   ensureSessionSkeleton, loadSession, newSession, persistSession, sessionPaths,
 } from './session.mjs';
-import { mergeUnifiedCandidates, prioritizeUnifiedCandidates } from './unified-candidates.mjs';
-import { enterpriseInferenceAllowed } from './jev/safe-call.mjs';
+import { mergeUnifiedCandidates } from './unified-candidates.mjs';
 
 const execFileAsync = promisify(execFile);
 const TIME_RANGE_MILLISECONDS = Object.freeze({
@@ -183,7 +182,6 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
   let cloudOutcome = null;
   let cloudMetadata = null;
   const timeRange = inferredTimeRange(query, args['time-range']);
-  const jevOptions = { ...dependencies.jevOptions, environment: dependencies.jevOptions?.environment || process.env };
   try {
     const publicPaths = await childSession(parent, publicRoot, 'public-internet');
     let cloudResourceId = cloudAuthorized
@@ -201,18 +199,17 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
         ? { schemaVersion: '1.0', resources: [{ resourceId: cloudResourceId, directoryPath: '/', origin: 'user-input' }] }
         : null;
     const cloudAvailable = Boolean(cloudScope?.resources?.length);
-    const finalRankingAllowed = !cloudAvailable || enterpriseInferenceAllowed(jevOptions.environment);
     const cloudPaths = cloudAvailable
       ? await childSession(parent, cloudRoot, 'cloud-knowledge', cloudScope) : null;
     const cloudAdapter = cloudAvailable
-      ? (dependencies.createCloudKnowledgeAdapter || createCloudKnowledgeAdapter)({ ...dependencies, deferJevRanking: true })
+      ? (dependencies.createCloudKnowledgeAdapter || createCloudKnowledgeAdapter)(dependencies)
       : null;
     const [publicSettled, cloudSettled] = await Promise.all([
       (dependencies.runPublicDiscover || runPublicDiscover)(publicPaths, {
         query,
         category: args.category || 'general',
         ...(timeRange ? { 'time-range': timeRange } : {}),
-      }, { ...dependencies.publicDiscoverOptions, deferCandidateRanking: finalRankingAllowed })
+      }, dependencies.publicDiscoverOptions || {})
         .then((value) => ({ ok: true, value }))
         .catch((error) => ({ ok: false, error })),
       cloudAdapter && cloudPaths
@@ -260,12 +257,10 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
       dependencies.now || (() => new Date()),
     );
     const cloudItems = cloudFreshness.candidates;
-    const legacyCandidates = mergeUnifiedCandidates(query, {
+    const candidates = mergeUnifiedCandidates(query, {
       publicCandidates: publicItems,
       cloudCandidates: cloudItems,
     });
-    const ranked = await prioritizeUnifiedCandidates(query, legacyCandidates, jevOptions);
-    const candidates = ranked.items;
     const inventory = candidates.map((candidate) => candidate.source === 'cloud-knowledge'
       ? { ...candidate, itemId: candidate.candidateId, sourceSkill: 'project-cloud-knowledge', backend: 'project-cloud-knowledge', sourceUrl: candidate.sourceUrl, rawArtifacts: [], media: { coverStatus: 'not-present', coverCount: 0, materializedCoverCount: 0, reason: null }, materialization: { status: 'pending', markdownPath: null, sanitizedPath: null, pendingArtifactCleanup: [], reason: 'unified discovery; materialization is deferred', contentGranularity: 'unknown' } }
       : publicInventory(candidate));
@@ -290,7 +285,7 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
             ...(cloudOutcome?.reason ? { reason: cloudOutcome.reason } : {}),
           },
         },
-        ranking: { schemaVersion: '1.0', candidateCount: candidates.length, jev: ranked.diagnostic },
+        ranking: { schemaVersion: '1.0', candidateCount: candidates.length },
         freshness: {
           timeRange,
           excludedKnownOutOfRange: freshness.excludedKnownOutOfRange,

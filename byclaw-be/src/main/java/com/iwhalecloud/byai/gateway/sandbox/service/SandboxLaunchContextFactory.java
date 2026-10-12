@@ -28,6 +28,7 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.manager.application.service.devloop.GitHubCredentialResolver;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.ModelConfigurationValidator;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
@@ -267,10 +268,7 @@ public class SandboxLaunchContextFactory {
             }
 
             ModelDto modelDto = aiModelService.getModel(String.valueOf(modelId));
-            if (modelDto == null) {
-                LOGGER.warn("未查询到模型信息，资源ID：{}，modelId：{}", resourceId, modelId);
-                return envs;
-            }
+            ModelConfigurationValidator.validate(modelDto);
 
             if (StringUtils.isNotBlank(modelDto.getUrl())) {
                 envs.put("model_base_url", modelDto.getUrl());
@@ -294,6 +292,9 @@ public class SandboxLaunchContextFactory {
             envs.put("NODE_OPTIONS", "--max-old-space-size=4096");
 
             LOGGER.info("沙箱环境变量构建完成，资源ID：{}，modelId：{}，model_name：{}", resourceId, modelId, modelDto.getModelCode());
+        }
+        catch (ModelConfigurationValidator.InvalidModelConfigurationException e) {
+            throw e;
         }
         catch (Exception e) {
             LOGGER.error("构建沙箱环境变量异常，资源ID：{}", resourceId, e);

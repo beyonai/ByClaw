@@ -1416,6 +1416,7 @@ export default {
   'approvalCenter.skill': 'Skill applications',
   'approvalCenter.knowledge': 'Knowledge applications',
   'approvalCenter.tool': 'Tool applications',
+  'approvalCenter.searchPlaceholder': 'Search resource name',
   'approvalCenter.employeeUse': 'Use authorization review',
   'approvalCenter.employeePublication': 'Employee publication review',
   'approvalCenter.employeeUpdatePending':
@@ -1460,10 +1461,6 @@ export default {
   'workspaceSider.fileCenter': 'File Center',
   'workspaceSider.projectSection': 'Project list',
   'workspaceSider.localSessions': 'Local sessions',
-  'tenantSwitcher.open': 'Switch enterprise space',
-  'tenantSwitcher.personal': 'Personal space',
-  'tenantSwitcher.unavailable': 'Provisioning',
-  'tenantSwitcher.switchFailed': 'Unable to switch enterprise. Please try again.',
   'workspaceSider.tasks': 'Tasks',
   'workspaceSider.projectCount': 'Projects ({count})',
   'workspaceSider.collapseSidebar': 'Collapse sidebar',

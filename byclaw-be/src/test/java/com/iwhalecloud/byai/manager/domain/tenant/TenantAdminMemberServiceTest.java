@@ -71,6 +71,79 @@ class TenantAdminMemberServiceTest {
             org.mockito.ArgumentMatchers.anyLong());
     }
 
+    @Test
+    void aValidGroupInvitationCanAdmitAnOrdinaryUserToTheTenant() {
+        LoginInfo login = new LoginInfo();
+        login.setUserId(77L);
+        CurrentUserHolder.setLoginInfo(login);
+        readyBasicTenant();
+        TenantMemberRow inviter = user();
+        inviter.setUserId(1L);
+        inviter.setStatus("ACTIVE");
+        when(memberMapper.selectMember(123L, 1L)).thenReturn(inviter);
+        when(sequenceService.nextVal()).thenReturn(88L);
+        when(memberMapper.insertMember(88L, 123L, 77L, 1L)).thenReturn(1);
+        service.joinByInvitation(123L, 1L);
+        verify(memberMapper).insertMember(88L, 123L, 77L, 1L);
+    }
+
+    @Test
+    void anInvitationCannotReactivateADisabledTenantMember() {
+        LoginInfo login = new LoginInfo();
+        login.setUserId(77L);
+        CurrentUserHolder.setLoginInfo(login);
+        readyBasicTenant();
+        TenantMemberRow inviter = user();
+        inviter.setUserId(1L);
+        inviter.setStatus("ACTIVE");
+        when(memberMapper.selectMember(123L, 1L)).thenReturn(inviter);
+        TenantMemberRow disabled = user();
+        disabled.setStatus("DISABLED");
+        when(memberMapper.selectMember(123L, 77L)).thenReturn(disabled);
+        assertThatThrownBy(() -> service.joinByInvitation(123L, 1L))
+            .hasMessageContaining("explicit re-enable");
+        verify(memberMapper, never()).insertMember(org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void invitationAdmissionStillRespectsTenantMemberLimit() {
+        LoginInfo login = new LoginInfo();
+        login.setUserId(77L);
+        CurrentUserHolder.setLoginInfo(login);
+        readyBasicTenant();
+        TenantMemberRow inviter = user();
+        inviter.setUserId(1L);
+        inviter.setStatus("ACTIVE");
+        when(memberMapper.selectMember(123L, 1L)).thenReturn(inviter);
+        when(memberMapper.countActiveMembers(123L)).thenReturn(10);
+        assertThatThrownBy(() -> service.joinByInvitation(123L, 1L)).hasMessageContaining("member limit reached");
+    }
+
+    @Test
+    void repeatedAdmissionPreservesExistingMembershipEvenWhenTheQuotaIsFull() {
+        LoginInfo login = new LoginInfo();
+        login.setUserId(77L);
+        CurrentUserHolder.setLoginInfo(login);
+        readyBasicTenant();
+        TenantMemberRow inviter = user();
+        inviter.setUserId(1L);
+        inviter.setStatus("ACTIVE");
+        when(memberMapper.selectMember(123L, 1L)).thenReturn(inviter);
+        TenantMemberRow existing = user();
+        existing.setStatus("ACTIVE");
+        existing.setRole("OWNER");
+        when(memberMapper.selectMember(123L, 77L)).thenReturn(existing);
+        when(memberMapper.countActiveMembers(123L)).thenReturn(10);
+        service.joinByInvitation(123L, 1L);
+        service.joinByInvitation(123L, 1L);
+        verify(memberMapper, never()).insertMember(org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.anyLong());
+        assertThat(existing.getRole()).isEqualTo("OWNER");
+    }
+
     private void readyBasicTenant() {
         when(memberMapper.selectPackageSnapshotForUpdate(123L)).thenReturn("{\"memberLimit\":10}");
         when(memberMapper.selectProvisionState(123L)).thenReturn("{\"status\":\"READY\"}");

@@ -4,6 +4,7 @@ import { TraditionalHistory } from "./history/traditional.js";
 import { GroupHistory } from "./history/groups.js";
 import { TimelineHistory } from "./history/timeline.js";
 import { TopicHistory } from "./history/topics.js";
+import { GroupFileHistory } from "./history/files.js";
 export type { HistoryRepository, MessageFilter, Row } from "./history/contracts.js";
 export { safeMessage, objectJson } from "./history/message-format.js";
 export { bounded } from "./history/paging.js";
@@ -15,6 +16,7 @@ export class HistoryService {
   private readonly group: GroupHistory;
   private readonly timeline: TimelineHistory;
   private readonly topic: TopicHistory;
+  private readonly fileQuery: GroupFileHistory;
   constructor(
     tenantId: string,
     private readonly repository: HistoryRepository,
@@ -24,6 +26,7 @@ export class HistoryService {
     this.group = new GroupHistory(tenantId, repository);
     this.timeline = new TimelineHistory(tenantId, repository);
     this.topic = new TopicHistory(tenantId, repository);
+    this.fileQuery = new GroupFileHistory(tenantId, repository);
   }
   access = (...args: Parameters<HistoryAccess["access"]>) => this.permission.access(...args);
   async sessionExtensions(actor: string, sessionId: string) {
@@ -70,6 +73,7 @@ export class HistoryService {
   context = (...args: Parameters<TimelineHistory["context"]>) => this.timeline.context(...args);
   search = (...args: Parameters<TimelineHistory["search"]>) => this.timeline.search(...args);
   around = (...args: Parameters<TimelineHistory["around"]>) => this.timeline.around(...args);
+  files = (...args: Parameters<GroupFileHistory["files"]>) => this.fileQuery.files(...args);
   topics = (...args: Parameters<TopicHistory["topics"]>) => this.topic.topics(...args);
   topicMessages = (...args: Parameters<TopicHistory["topicMessages"]>) =>
     this.topic.topicMessages(...args);

@@ -69,6 +69,47 @@ public class TenantDbProvisioningService {
         this.dbProbeHost = dbProbeHost;
     }
 
+    /** Renew only authoritative READY snapshots; serialize with provisioning and deletion. */
+    @org.springframework.scheduling.annotation.Scheduled(
+        initialDelayString = "${tenant.lease.renew-initial-delay-ms:30000}",
+        fixedDelayString = "${tenant.lease.renew-delay-ms:300000}")
+    public void renewReadyLeases() {
+        for (var tenant : tenantMapper.selectTenants(null, null, null, "createdAt", "asc")) {
+            long enterpriseId = tenant.getEnterpriseId();
+            String key = "tenant:provision:db:" + enterpriseId;
+            String token = UUID.randomUUID().toString();
+            if (!Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(key, token, LOCK_TTL))) continue;
+            try {
+                if (deletionRequested(enterpriseId)) continue;
+                Map<String, String> config = readConfig(enterpriseId);
+                var state = objectMapper.readTree(config.get("PROVISION_STATE"));
+                if (state == null || !"READY".equals(state.path("status").asText())) continue;
+                Instant lease = Instant.parse(state.path("leaseUntil").asText());
+                if (lease.isBefore(Instant.now().plus(Duration.ofHours(12)))) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) state).put("leaseUntil",
+                        Instant.now().plus(Duration.ofHours(24)).toString());
+                    String renewed = objectMapper.writeValueAsString(state);
+                    if (tenantMapper.renewReadyLease(enterpriseId, config.get("PROVISION_STATE"), renewed) != 1) {
+                        // A concurrent delete/status change wins; never publish the stale READY snapshot.
+                        continue;
+                    }
+                    config.put("PROVISION_STATE", renewed);
+                }
+                // Also repair a missed Redis publication without advancing authority versions.
+                if (!configPublisher.publish(enterpriseId, config)) {
+                    throw new IllegalStateException("tenant lease publication was rejected");
+                }
+            }
+            catch (Exception error) {
+                LOG.warn("Tenant lease renewal deferred for enterprise {}: {}", enterpriseId,
+                    error.getClass().getSimpleName());
+            }
+            finally {
+                releaseLock(key, token);
+            }
+        }
+    }
+
     public void request(long enterpriseId) {
         if (deletionRequested(enterpriseId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant deletion is in progress");

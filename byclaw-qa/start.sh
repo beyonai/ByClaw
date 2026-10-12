@@ -177,8 +177,7 @@ collect_required_source_missing_env() {
         BYCLAW_QA_PORT \
         BYCLAW_QA_AGENT_DATA_PATH \
         BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS \
-        BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS \
-        BYCLAW_QA_BYAI_WORKER_ID
+        BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS
     collect_missing_redis_source_env "$missing_ref"
     if using_custom_storage_provider; then
         return 0
@@ -204,6 +203,9 @@ check_required_env() {
     local mode="$1"
     local missing=()
     collect_required_source_missing_env missing
+    if [[ "$mode" == "worker" ]]; then
+        collect_missing_env missing BYCLAW_QA_BYAI_WORKER_ID
+    fi
 
     if (( ${#missing[@]} > 0 )); then
         print_missing_env "$mode" "${missing[@]}"

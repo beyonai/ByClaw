@@ -107,6 +107,16 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
     "/internal/v1/group-chats/:id/messages/:messageId/context",
     async (req) => service.around(actor(req), session(req), req.params.messageId),
   );
+  app.get<{ Params: { id: string }; Querystring: { pageSize?: string; cursor?: string } }>(
+    "/internal/v1/group-chats/:id/files",
+    async (req) =>
+      service.files(
+        actor(req),
+        session(req),
+        req.query.pageSize === undefined ? undefined : Number(req.query.pageSize),
+        cursor(req.query.cursor),
+      ),
+  );
   app.get("/internal/v1/group-chats/:id/tasks", async (req) =>
     service.tasks(actor(req), session(req)),
   );

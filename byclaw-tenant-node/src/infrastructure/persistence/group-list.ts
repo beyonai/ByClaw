@@ -21,7 +21,7 @@ export async function groupList(
       `SELECT s.session_id,s.session_name AS name,s.project_id,u.user_role AS role,u.last_read_message_id,
         ${latest("message_id")} AS latest_message_id,${latest("message_content")} AS latest_message_content,
         ${latest("create_time")} AS latest_message_time,${latest("creator_id")} AS latest_message_creator_id,
-        ${latest("creator_name")} AS latest_message_creator_name,${latest("metadata")} AS latest_message_metadata,${latest("recalled_at")} AS latest_message_recalled_at,
+        ${latest("creator_name")} AS latest_message_creator_name,${latest("metadata")} AS latest_message_metadata,${latest("recalled_at")} AS latest_message_recalled_at,${latest("recalled_by")} AS latest_message_recalled_by,
         ${unread} AS unread_count,${unread} AS unread_message_count,(SELECT COUNT(*) ${mention}) AS unread_mention_count,
         (SELECT MAX(x.message_id) ${mention}) AS latest_mention_message_id ${predicate}
         ORDER BY COALESCE(${latest("create_time")},s.update_time,s.create_time) DESC,s.session_id DESC LIMIT $3 OFFSET $4`,
