@@ -595,6 +595,71 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void enterpriseCreationSynchronizesResourcesAfterCreatorPrivilegesAndBeforeShelfEvent() {
+        CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
+        DigitalEmployeeDTO dto = createDto(); dto.setOwnerType(OwnerType.ENTERPRISE);
+        dto.setFrontAccess(true); dto.setRelTools(List.of("custom-tool"));
+        when(sequenceService.nextVal()).thenReturn(100L);
+
+        SsResource created = service.saveDigitalEmployee(dto);
+
+        // 返回值是资源 DTO 副本；授权和事件必须校验保存时使用的同一个资源实体。
+        ArgumentCaptor<SsResource> resourceCaptor = ArgumentCaptor.forClass(SsResource.class);
+        verify(ssResourceService).saveResource(resourceCaptor.capture());
+        SsResource savedResource = resourceCaptor.getValue();
+        assertThat(savedResource.getResourceId()).isEqualTo(100L).isEqualTo(created.getResourceId());
+
+        InOrder order = inOrder(authApplicationService, resourceEventService);
+        order.verify(authApplicationService).ensureCreatorDefaultPrivileges(savedResource);
+        order.verify(authApplicationService).synchronizeDigitalEmployeeResourceUsers(savedResource, List.of("custom-tool"));
+        order.verify(resourceEventService).sendResourceShelfEvent(savedResource);
+    }
+
+    @Test
+    void failedResourceAuthorizationDoesNotSendCreationShelfEventOrSuccessNotifications() {
+        CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
+        DigitalEmployeeDTO dto = createDto(); dto.setOwnerType(OwnerType.ENTERPRISE); dto.setFrontAccess(true);
+        when(sequenceService.nextVal()).thenReturn(100L);
+        org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(authApplicationService)
+            .synchronizeDigitalEmployeeResourceUsers(any(), any());
+
+        assertThatThrownBy(() -> service.saveDigitalEmployee(dto)).hasMessage("resource denied");
+
+        verifyNoInteractions(resourceEventService, operationLogService, digEmployeeChangeEventPublisher);
+    }
+
+    @Test
+    void enterpriseUpdateSynchronizesFinalBindingsBeforeRuntimeRefresh() {
+        DigitalEmployeeApplicationService updater = updateServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.ENTERPRISE, 1L);
+        prepareFullUpdate(employee, List.of(), List.of());
+        DigitalEmployeeDTO dto = updateDto(); dto.setOwnerType(OwnerType.ENTERPRISE);
+        // 空数组表示本次删除编码型工具，不能从旧运行镜像中把工具重新带回同步范围。
+        dto.setRelTools(List.of());
+
+        updater.updateDigitalEmployee(dto);
+
+        InOrder order = inOrder(updater, authApplicationService, digitalEmployeeRuntimeRefreshService);
+        order.verify(updater).rebuildAndSaveDigitalEmployeeRelSkills(100L);
+        order.verify(authApplicationService).synchronizeDigitalEmployeeResourceUsers(employee, List.of());
+        order.verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, dto);
+    }
+
+    @Test
+    void failedResourceAuthorizationStopsUpdateBeforeRuntimeRefresh() {
+        DigitalEmployeeApplicationService updater = updateServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.ENTERPRISE, 1L);
+        prepareFullUpdate(employee, List.of(), List.of());
+        DigitalEmployeeDTO dto = updateDto(); dto.setOwnerType(OwnerType.ENTERPRISE);
+        org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(authApplicationService)
+            .synchronizeDigitalEmployeeResourceUsers(any(), any());
+
+        assertThatThrownBy(() -> updater.updateDigitalEmployee(dto)).hasMessage("resource denied");
+
+        verifyNoInteractions(digitalEmployeeRuntimeRefreshService, resourceEventService, operationLogService);
+    }
+
+    @Test
     void saveDigitalEmployeeCanonicalizesCreatedSkillBeforeRebuildAndLeavesNonSkillUnchanged() {
         DigitalEmployeeApplicationService createService = updateServiceSpy();
         DigitalEmployeeDTO dto = createDto(300L, 400L);
@@ -1061,6 +1126,31 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "TOOL", "TOOLKIT", "MCP", "MCP_TOOL", "AGENT", "OBJECT", "VIEW"})
+    void enterpriseResourceInstallationLocksEmployeeAndSynchronizesAfterBinding(String type) {
+        DigitalEmployeeApplicationService installer = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.ENTERPRISE, 1L); employee.setComAcctId(201L);
+        SsResource resource = new SsResource(); resource.setResourceId(400L); resource.setResourceBizType(type);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L); dto.setRelIds(List.of(400L));
+        when(ssResourceService.findById(100L)).thenReturn(employee);
+        when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
+        when(ssResourceService.findByIdList(List.of(400L))).thenReturn(List.of(resource));
+        when(authApplicationService.hasResourceUsePermission(resource)).thenReturn(true);
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of());
+        doReturn(new DigitalEmployeeDetailsDTO()).when(installer).findDetailsById(any(EmployeeIdDTO.class));
+
+        installer.installDigitalEmployeeRelResources(dto);
+
+        InOrder order = inOrder(skillGroupMapper, ssResourceRelDetailService, authApplicationService);
+        order.verify(skillGroupMapper).selectDigitalEmployeeForUpdate(100L, 201L);
+        order.verify(ssResourceRelDetailService).save(any(SsResourceRelDetail.class));
+        order.verify(authApplicationService).synchronizeDigitalEmployeeResourceUsers(employee, null);
+        verifySnapshotRefresh(installer, employee, 1);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = { "KG_DOC", "MCP" })
     void installDigitalEmployeeRelResources_rejectsMixedInstallWhenNonSkillHasNoUsePermission(String resourceBizType) {
         DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
@@ -1162,10 +1252,11 @@ class DigitalEmployeeApplicationServiceTest {
         verify(ssResourceRelDetailService, never()).findByResourceId(100L);
     }
 
-    @Test
-    void installSkillGroupSnapshotCreatesCanonicalGroupOnlyRelationsInInputOrderAndRefreshesOnce() {
+    @ParameterizedTest
+    @ValueSource(strings = {OwnerType.PERSONAL, OwnerType.ENTERPRISE})
+    void installSkillGroupSnapshotCreatesCanonicalGroupOnlyRelationsInInputOrderAndRefreshesOnce(String ownerType) {
         DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
-        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource employee = buildDigitalEmployee(100L, ownerType, 1L);
         employee.setComAcctId(201L);
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(302L, 301L)))
             .thenReturn(List.of());
@@ -1178,6 +1269,7 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(result.getTotalSkillIds()).containsExactly(302L, 301L);
         assertThat(result.getInstalledSkillIds()).containsExactly(302L, 301L);
         assertThat(result.getExistingSkillIds()).isEmpty();
+        verify(authApplicationService).synchronizeDigitalEmployeeResourceUsers(employee, null);
         ArgumentCaptor<SsResourceRelDetail> inserted = ArgumentCaptor.forClass(SsResourceRelDetail.class);
         verify(skillGroupMapper, times(2)).insertDigitalEmployeeSkillIfAbsent(inserted.capture());
         assertThat(inserted.getAllValues()).extracting(SsResourceRelDetail::getRelResourceId)

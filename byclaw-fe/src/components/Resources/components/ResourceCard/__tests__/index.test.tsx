@@ -2490,15 +2490,16 @@ describe('digital employee publication entry', () => {
     await waitFor(() => expect(error).toHaveBeenCalledWith('仅在用数字员工支持发起发布或更新'));
     error.mockRestore();
   });
+  // intl mock 返回消息键，状态入口断言同步使用消息键，实际译文由国际化用例覆盖。
   it.each([
     [undefined, 'resource.publishToEnterprise'],
-    ['DRAFT', '继续发布'],
-    ['PENDING', '查看发布进度'],
-    ['APPLYING', '查看发布进度'],
-    ['REJECTED', '查看审核结果'],
-    ['WITHDRAWN', '查看发布申请'],
-    ['FAILED', '查看发布结果'],
-    ['PUBLISHED', '发布更新'],
+    ['DRAFT', 'employeePublication.entry.continuePublish'],
+    ['PENDING', 'employeePublication.entry.progress'],
+    ['APPLYING', 'employeePublication.entry.progress'],
+    ['REJECTED', 'employeePublication.entry.reviewResult'],
+    ['WITHDRAWN', 'employeePublication.entry.application'],
+    ['FAILED', 'employeePublication.entry.result'],
+    ['PUBLISHED', 'employeePublication.toolbar.publishUpdate'],
   ])('shows the entry for %s and opens the existing request', async (status, label) => {
     (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
     renderWithQueryClient(
@@ -2536,8 +2537,8 @@ describe('digital employee publication entry', () => {
     expect(openEmployeePublication).toHaveBeenCalledTimes(1);
   });
   it.each([
-    ['DRAFT', '继续发布更新'],
-    ['PENDING', '查看更新进度'],
+    ['DRAFT', 'employeePublication.entry.continueUpdate'],
+    ['PENDING', 'employeePublication.entry.updateProgress'],
   ])('identifies a %s update candidate separately from an initial publication', (status, label) => {
     renderWithQueryClient(
       <ResourceCard

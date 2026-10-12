@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import type { ReactNode } from 'react';
 import { queryManagedEnterpriseEmployees, queryMyCreated } from '@/service/digitalEmployees';
@@ -109,28 +109,39 @@ describe('employee management quick filters', () => {
     expect((queryManagedEnterpriseEmployees as jest.Mock).mock.calls.at(-1)?.[0]).not.toHaveProperty('resourceStatus');
   });
 
+  // 此用例连续验证多个筛选请求及页签重置，为真实 AntD 交互保留 15 秒总预算。
   it('preserves enterprise scope and status filters and resets them when switching tabs', async () => {
-    renderPage();
-    await waitFor(() => expect(queryMyCreated).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('tab', { name: 'myEmployees.enterprise' }));
-    await waitFor(() => expect(queryManagedEnterpriseEmployees).toHaveBeenCalled());
+    // 请求均为立即返回的 mock；等待 effect 和响应状态更新完成后直接断言，避免逐步轮询。
+    await act(async () => {
+      renderPage();
+    });
+    const clickAndFlush = async (element: HTMLElement) => {
+      await act(async () => {
+        fireEvent.click(element);
+      });
+    };
+    expect(queryMyCreated).toHaveBeenCalled();
+    // 在真实页签内按文案定位，避免反复计算整页的无障碍名称和 CSS 可见性。
+    const tabs = within(screen.getByRole('tablist', { hidden: true }));
+    const enterpriseTab = tabs.getByText('myEmployees.enterprise').closest<HTMLElement>('[role="tab"]')!;
+    const personalTab = tabs.getByText('myEmployees.personal').closest<HTMLElement>('[role="tab"]')!;
+    await clickAndFlush(enterpriseTab);
+    expect(queryManagedEnterpriseEmployees).toHaveBeenCalled();
     const types = within(screen.getByRole('group', { name: 'resource.type' }));
     const permissions = within(screen.getByRole('group', { name: 'common.belong' }));
     const statuses = within(screen.getByRole('group', { name: 'common.status' }));
-    fireEvent.click(types.getByRole('button', { name: 'myEmployees.group' }));
+    await clickAndFlush(types.getByText('myEmployees.group'));
 
     for (const [label, type] of [
       ['myEmployees.createdByMe', 'owner'],
       ['myEmployees.managedByMe', 'managerExcludingOwner'],
       ['myEmployees.all', 'ownerOrManager'],
     ]) {
-      const button = permissions.getByRole('button', { name: label });
-      fireEvent.click(button);
+      const button = permissions.getByText(label);
+      await clickAndFlush(button);
       expect(button).toHaveClass('option', 'active');
-      await waitFor(() =>
-        expect(queryManagedEnterpriseEmployees).toHaveBeenLastCalledWith(
-          expect.objectContaining({ type, agentType: '017', includeEmployeeGroup: false })
-        )
+      expect(queryManagedEnterpriseEmployees).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type, agentType: '017', includeEmployeeGroup: false })
       );
     }
     for (const [label, resourceStatus] of [
@@ -138,41 +149,33 @@ describe('employee management quick filters', () => {
       ['resourceStatus.published', 2],
       ['resourceStatus.unpublished', 3],
     ] as const) {
-      const button = statuses.getByRole('button', { name: label });
-      fireEvent.click(button);
+      const button = statuses.getByText(label);
+      await clickAndFlush(button);
       expect(button).toHaveClass('option', 'active');
-      await waitFor(() =>
-        expect(queryManagedEnterpriseEmployees).toHaveBeenLastCalledWith(
-          expect.objectContaining({ type: 'ownerOrManager', agentType: '017', resourceStatus })
-        )
+      expect(queryManagedEnterpriseEmployees).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'ownerOrManager', agentType: '017', resourceStatus })
       );
       expect((queryManagedEnterpriseEmployees as jest.Mock).mock.calls.at(-1)?.[0]).not.toHaveProperty(
         'includeAllResourceStatus'
       );
     }
-    fireEvent.click(statuses.getByRole('button', { name: 'myEmployees.all' }));
-    await waitFor(() =>
-      expect(queryManagedEnterpriseEmployees).toHaveBeenLastCalledWith(
-        expect.objectContaining({ includeAllResourceStatus: true })
-      )
+    await clickAndFlush(statuses.getByText('myEmployees.all'));
+    expect(queryManagedEnterpriseEmployees).toHaveBeenLastCalledWith(
+      expect.objectContaining({ includeAllResourceStatus: true })
     );
     expect((queryManagedEnterpriseEmployees as jest.Mock).mock.calls.at(-1)?.[0]).not.toHaveProperty('resourceStatus');
 
-    fireEvent.click(screen.getByRole('tab', { name: 'myEmployees.personal' }));
-    await waitFor(() =>
-      expect(queryMyCreated).toHaveBeenLastCalledWith(
-        expect.objectContaining({ type: 'owner', agentType: undefined, includeEmployeeGroup: true })
-      )
+    await clickAndFlush(personalTab);
+    expect(queryMyCreated).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'owner', agentType: undefined, includeEmployeeGroup: true })
     );
-    fireEvent.click(screen.getByRole('tab', { name: 'myEmployees.enterprise' }));
+    await clickAndFlush(enterpriseTab);
     for (const title of ['resource.type', 'common.belong', 'common.status']) {
       const group = within(screen.getByRole('group', { name: title }));
-      expect(group.getByRole('button', { name: 'myEmployees.all' })).toHaveAttribute('aria-pressed', 'true');
+      expect(group.getByText('myEmployees.all')).toHaveAttribute('aria-pressed', 'true');
     }
-    await waitFor(() =>
-      expect(queryManagedEnterpriseEmployees).toHaveBeenLastCalledWith(
-        expect.objectContaining({ type: 'ownerOrManager', agentType: undefined, includeAllResourceStatus: true })
-      )
+    expect(queryManagedEnterpriseEmployees).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'ownerOrManager', agentType: undefined, includeAllResourceStatus: true })
     );
-  });
+  }, 15000);
 });
