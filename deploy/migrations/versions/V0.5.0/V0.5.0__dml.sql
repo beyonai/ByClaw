@@ -451,7 +451,7 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 		"workerAgentType": "BYCLAW_EXE",
 		"catalogId": 0,
 		"relToolCodes": null,
-		"relSkillCodes": "bycli",
+		"relSkillCodes": "bycli,gbrain",
 		"isRelDefaultDataset": "Y",
 		"workStandard": "1. Judge the task category before replying, including knowledge planning, material sorting, upload construction, retrieval debugging, performance optimization and troubleshooting. 2. Prioritize actionable steps rather than conceptual explanations for knowledge base construction demands. 3. Remind users to confirm target knowledge base, directory, resource ownership and impact scope when operating upload, deletion, permission configuration and resource association. 4. Actively point out document defects such as invalid front matter, undefined metadata fields, duplicate titles, messy directories and meaningless filenames, and provide repair suggestions. 5. Do not guess root causes for unknown faults, troubleshoot in order: frontend request, BE datasetController, QA knowledge service, FsOperation/MinIO, resource table and permissions. 6. Output FAQs, glossaries, metadata schemas and directory structures with structured Markdown for direct copy and use. 7. Do not confirm system operation success unless tools return clear success feedback. 8. Remind risks and confirmation points for destructive operations such as deletion, overwriting, batch import and rebuild which may damage existing knowledge assets."
 	}]
@@ -527,38 +527,3 @@ WHERE enterprise_id = 10291378
   AND NOT EXISTS (SELECT 1 FROM byai.byai_project WHERE enterprise_id = 10291378)
   AND NOT EXISTS (SELECT 1 FROM byai.byai_session WHERE enterprise_id = 10291378)
   AND NOT EXISTS (SELECT 1 FROM byai.byai_message WHERE enterprise_id = 10291378);
-
-
--- gbrain runtime removal: begin
--- OpenClaw 镜像已移除 gbrain；只删除相关配置，保留其他 MCP、模型和用户数据。
-UPDATE byai.sandbox_service_spec
-SET spec_json = jsonb_set(spec_json, '{env}', jsonb_delete(spec_json -> 'env',
-    ARRAY['GBRAIN_HOME', 'GBRAIN_MODEL', 'GBRAIN_EMBEDDING_MODEL', 'GBRAIN_EMBEDDING_DIMENSIONS']), false)
-WHERE service_key = 'openclaw' AND jsonb_typeof(spec_json -> 'env') = 'object';
-
-UPDATE byai.sandbox_service_spec
-SET template_json = jsonb_set(template_json, '{mcp,servers}',
-    jsonb_delete(template_json #> '{mcp,servers}', 'gbrain'::text), false)
-WHERE service_key = 'openclaw' AND jsonb_typeof(template_json #> '{mcp,servers}') = 'object';
-
--- 旧模板误将环境变量放在 servers.env 下；只移除 GBRAIN_HOME 及清理后的空对象。
-UPDATE byai.sandbox_service_spec
-SET template_json = jsonb_set(template_json, '{mcp,servers,env}',
-    jsonb_delete(template_json #> '{mcp,servers,env}', 'GBRAIN_HOME'::text), false)
-WHERE service_key = 'openclaw' AND jsonb_typeof(template_json #> '{mcp,servers,env}') = 'object';
-
-UPDATE byai.sandbox_service_spec
-SET template_json = jsonb_set(template_json, '{mcp,servers}',
-    jsonb_delete(template_json #> '{mcp,servers}', 'env'::text), false)
-WHERE service_key = 'openclaw' AND (template_json #> '{mcp,servers,env}') = '{}'::jsonb;
-
--- 不再向新用户展示镜像中已移除的内置技能。
-UPDATE byai.byai_system_config c
-SET param_value = (
-    SELECT COALESCE(json_agg(skill), '[]'::json)::text
-    FROM jsonb_array_elements(c.param_value::jsonb) skill
-    WHERE (skill ->> 'skillCode') IS DISTINCT FROM 'gbrain'
-)
-WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND jsonb_typeof(c.param_value::jsonb) = 'array';
--- gbrain runtime removal: end
