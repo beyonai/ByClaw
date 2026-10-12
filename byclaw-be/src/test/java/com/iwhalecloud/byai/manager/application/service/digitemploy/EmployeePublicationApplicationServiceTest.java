@@ -15,10 +15,12 @@ import com.iwhalecloud.byai.manager.mapper.resource.*;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -45,6 +47,7 @@ class EmployeePublicationApplicationServiceTest {
     DigitalEmployeeDetailsDTO personalDetails;
 
     @BeforeEach void setup() {
+        LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
             new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(), "publication-test"),
             DigitalEmployeePublication.class);
@@ -78,7 +81,10 @@ class EmployeePublicationApplicationServiceTest {
         when(publications.lock(100L, 1L)).thenReturn(publication);
         when(publications.current(10L, 1L)).thenReturn(publication);
     }
-    @AfterEach void cleanup() { CurrentUserHolder.clearLoginInfo(); }
+    @AfterEach void cleanup() {
+        CurrentUserHolder.clearLoginInfo();
+        LocaleContextHolder.resetLocaleContext();
+    }
     static void login(String code, Long id, List<String> roles) {
         LoginInfo info = new LoginInfo(); info.setUserCode(code); info.setUserId(id); info.setUserName(code);
         info.setEnterpriseId(1L); info.setUsersOrganizations(roles.stream().map(role -> {
