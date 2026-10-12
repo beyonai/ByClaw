@@ -267,7 +267,6 @@ COPY middleware/openclaw/startAll.sh \
      middleware/openclaw/start-chrome.sh \
      middleware/openclaw/start-opencli.sh \
      middleware/openclaw/start-openclaw.sh \
-     middleware/openclaw/start-gbrain.sh \
      /usr/local/bin/
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
@@ -279,8 +278,7 @@ RUN chmod +x \
     /usr/local/bin/start-vnc.sh \
     /usr/local/bin/start-chrome.sh \
     /usr/local/bin/start-opencli.sh \
-    /usr/local/bin/start-openclaw.sh \
-    /usr/local/bin/start-gbrain.sh
+    /usr/local/bin/start-openclaw.sh
 
 RUN set -eux; \
     export DWS_VERSION="${DWS_VERSION}"; \
@@ -290,13 +288,10 @@ RUN set -eux; \
     command -v lark-cli; \
     zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null
 
-# 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
+# 安装 Bun 运行环境 — 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
 RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
 ENV PATH="/root/.bun/bin:/usr/local/bin:$PATH"
-
-# add gbrain（官方原版）
-RUN bun install -g github:garrytan/gbrain
 
 # rm
 RUN rm -fr /root/.agents/skills

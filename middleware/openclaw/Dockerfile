@@ -368,7 +368,6 @@ COPY middleware/openclaw/startAll.sh \
      middleware/openclaw/start-chrome.sh \
      middleware/openclaw/start-opencli.sh \
      middleware/openclaw/start-openclaw.sh \
-     middleware/openclaw/start-gbrain.sh \
      /usr/local/bin/
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
@@ -380,8 +379,7 @@ RUN chmod +x \
     /usr/local/bin/start-vnc.sh \
     /usr/local/bin/start-chrome.sh \
     /usr/local/bin/start-opencli.sh \
-    /usr/local/bin/start-openclaw.sh \
-    /usr/local/bin/start-gbrain.sh
+    /usr/local/bin/start-openclaw.sh
 
 # DWS CLI:amd64 用 byclaw-be 预下载的 v1.0.52 二进制(与后端同源,避免构建时联网下载);
 # arm64 无预下载包,回退到官方 install.sh(按 DWS_VERSION 安装)。
@@ -404,7 +402,7 @@ RUN set -eux; \
     test "$(lark-cli --version)" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
     lark-cli minutes +detail --help | grep -q -- '--output-dir'
 
-# 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
+# 安装 Bun 运行环境 — 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
 RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
 ENV BUN_INSTALL=/usr/local \
