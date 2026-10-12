@@ -22,13 +22,13 @@ export async function groupFileMessagePage(
   }
   parameters.push(limit);
   return db.query(
-    `SELECT m.message_id,m.session_id,m.create_time,m.related_resources,m.metadata
+    `SELECT m.message_id,m.session_id,m.create_time,m.related_resources
     FROM byai.byai_message m
     JOIN byai.byai_session s ON s.session_id=m.session_id
     ${boundary}
     WHERE s.enterprise_id=$1 AND m.session_id=$2
       AND m.archived_at IS NULL AND m.recalled_at IS NULL AND m.usage IN(1,2)
-      AND (NULLIF(TRIM(m.related_resources),'') IS NOT NULL OR NULLIF(TRIM(m.metadata),'') IS NOT NULL)
+      AND NULLIF(TRIM(m.related_resources),'') IS NOT NULL
       ${condition}
     ORDER BY m.create_time DESC NULLS LAST,m.message_id DESC
     LIMIT $${parameters.length}`,
