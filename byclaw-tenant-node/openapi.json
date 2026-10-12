@@ -4724,6 +4724,7 @@
     "/internal/v1/group-chats/{id}/files": {
       "get": {
         "summary": "Group message files, newest first with a fixed file page size",
+        "description": "Returns only related_resources.files attachments; metadata.files are excluded.",
         "parameters": [
           {
             "$ref": "#/components/parameters/enterprise"

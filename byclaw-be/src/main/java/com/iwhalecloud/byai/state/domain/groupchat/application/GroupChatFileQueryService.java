@@ -49,7 +49,7 @@ public class GroupChatFileQueryService {
             List<ByaiMessage> rows = messages.selectGroupFileMessagePage(sessionId, beforeMessageId,
                 includeCursor, MESSAGE_BATCH_SIZE);
             if (rows == null || rows.isEmpty()) break;
-            Map<Long, List<GroupChatContextResponse.Attachment>> projected = context.attachmentsForMessages(rows);
+            Map<Long, List<GroupChatContextResponse.Attachment>> projected = context.relatedResourceAttachmentsForMessages(rows);
             for (ByaiMessage row : rows) {
                 List<GroupChatContextResponse.Attachment> attachments = projected.getOrDefault(row.getMessageId(), List.of());
                 // 游标消息也参与查询，从已返回附件的下一项继续，避免多文件消息跨页时丢失剩余项。
@@ -100,6 +100,6 @@ public class GroupChatFileQueryService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
 
-    /** 附件位置基于时间线投影后的有效附件顺序；同一文件在不同消息中分别返回。 */
+    /** 附件位置基于 related_resources 中有效附件的顺序；同一文件在不同消息中分别返回。 */
     private record Cursor(Long messageId, int attachmentIndex) {}
 }

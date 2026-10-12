@@ -112,6 +112,18 @@
         WHERE enterprise_id = #{enterpriseId} AND params_code = #{code}
     </update>
 
+    <update id="renewReadyLease">
+        UPDATE byai.tenant_config
+        SET params_value = #{renewedState}
+        WHERE enterprise_id = #{enterpriseId} AND params_code = 'PROVISION_STATE'
+          AND params_value = #{expectedState}
+          AND NOT EXISTS (
+              SELECT 1 FROM byai.tenant_config marker
+              WHERE marker.enterprise_id = #{enterpriseId}
+                AND marker.params_code = 'TENANT_DELETE_REQUESTED' AND marker.params_value = 'true'
+          )
+    </update>
+
     <delete id="deleteConfig">
         DELETE FROM byai.tenant_config
         WHERE enterprise_id = #{enterpriseId} AND params_code = #{code}

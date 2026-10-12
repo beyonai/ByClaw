@@ -2,7 +2,7 @@ import { DomainError } from "../../domain/errors.js";
 import { requireId } from "../../domain/values.js";
 import type { Row } from "./contracts.js";
 import { HistoryAccess } from "./access.js";
-import { messageAttachments } from "./attachments.js";
+import { relatedResourceAttachments } from "./attachments.js";
 import { time } from "./message-format.js";
 import { bounded, encodeCursor } from "./paging.js";
 
@@ -23,7 +23,7 @@ export class GroupFileHistory extends HistoryAccess {
         limit: 100,
       });
       for (const row of rows) {
-        const attachments = messageAttachments(row);
+        const attachments = relatedResourceAttachments(row);
         const start = resume && row.messageId === resume.messageId ? resume.index + 1 : 0;
         for (let index = start; index < attachments.length; index++) {
           // 多发现一个有效附件才设置 hasMore，避免普通消息或损坏附件造成空的下一页。

@@ -99,9 +99,7 @@ export async function displayMessages(
         !messageAcks.some((ack) => ack.userId === actor),
       attachments,
       recalled: recalled(source),
-      recall: recalled(source)
-        ? { operatorId: row.recalledBy, recalledAt: time(row.recalledAt) }
-        : null,
+      recall: recalled(source) ? row.recall : null,
       replyTo: reply
         ? {
             ...projection(reply, false),

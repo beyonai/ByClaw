@@ -70,6 +70,15 @@ public class ResourceUseAuthQo extends AuthQo implements Serializable {
     @ApiModelProperty(value = "是否仅查询当前用户可用资源", required = false)
     private Boolean availableOnly;
 
+    /** 配置技能弹窗按卡片添加人数排序，其他列表未指定时沿用原有排序。 */
+    @ApiModelProperty(value = "是否按添加人数降序排序，仅技能查询生效", required = false)
+    private Boolean sortByUseCount;
+
+    /** 资源中心浏览及管理页的默认排序；未指定时保留其他查询场景的排序规则。 */
+    @ApiModelProperty(value = "排序模式：UPDATED_DESC-最近更新，POPULARITY_DESC-添加数量、收藏数量、最近更新",
+        allowableValues = "UPDATED_DESC,POPULARITY_DESC", required = false)
+    private String sortMode;
+
     /**
      * 权限筛选：CREATED_BY_ME、AUTHORIZED_TO_ME、MANAGEABLE_BY_ME、MANAGED_BY_ME、PENDING_MY_APPROVAL、APPLIED_BY_ME。
      * MANAGEABLE_BY_ME 表示本人创建或授权本人管理的资源；MANAGED_BY_ME 排除本人创建的资源。

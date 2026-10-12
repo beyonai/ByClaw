@@ -33,7 +33,7 @@ class GroupChatFilePageMapperTest {
         assertThat(config.hasStatement(QUERY)).as("file pagination query is registered").isTrue();
         try (var session = new SqlSessionFactoryBuilder().build(config).openSession(true)) {
             List<ByaiMessage> rows = session.selectList(QUERY, parameters(null, false, 2));
-            assertThat(rows).extracting(ByaiMessage::getMessageId).containsExactly(5L, 10L);
+            assertThat(rows).extracting(ByaiMessage::getMessageId).containsExactly(5L, 11L);
             assertThat(rows).allSatisfy(row -> {
                 assertThat(row.getSessionId()).isEqualTo(10L);
                 assertThat(row.getCreateTime()).isNotNull();
@@ -41,7 +41,7 @@ class GroupChatFilePageMapperTest {
                 assertThat(row.getInferLog()).isNull();
             });
             assertThat(rows.get(0).getRelatedResources()).contains("files");
-            assertThat(rows.get(1).getMetadata()).contains("TASK_RESULT");
+            assertThat(rows).allSatisfy(row -> assertThat(row.getMetadata()).isNull());
         }
     }
 
@@ -51,7 +51,7 @@ class GroupChatFilePageMapperTest {
         assertThat(config.hasStatement(QUERY)).as("file pagination query is registered").isTrue();
         try (var session = new SqlSessionFactoryBuilder().build(config).openSession(true)) {
             List<ByaiMessage> inclusive = session.selectList(QUERY, parameters(10L, true, 10));
-            assertThat(inclusive).extracting(ByaiMessage::getMessageId).containsExactly(10L, 11L, 30L, 20L);
+            assertThat(inclusive).extracting(ByaiMessage::getMessageId).containsExactly(11L, 30L, 20L);
             List<ByaiMessage> older = session.selectList(QUERY, parameters(10L, false, 10));
             assertThat(older).extracting(ByaiMessage::getMessageId).containsExactly(11L, 30L, 20L);
             assertThat(session.<ByaiMessage>selectList(QUERY, parameters(99L, true, 10))).isEmpty();
@@ -84,7 +84,7 @@ class GroupChatFilePageMapperTest {
         for (boolean inclusive : List.of(false, true)) {
             String sql = config.getMappedStatement(QUERY).getBoundSql(parameters(10L, inclusive, 10)).getSql();
             assertThat(new PGWallProvider(new WallConfig()).check(sql).getViolations()).isEmpty();
-            assertThat(sql).doesNotContain("message_content", "infer_log", "call_logs", "COUNT(", "OFFSET");
+            assertThat(sql).doesNotContain("message_content", "infer_log", "call_logs", "metadata", "COUNT(", "OFFSET");
         }
     }
 

@@ -131,15 +131,13 @@ describe('approval center', () => {
     async (tab, allowedTypes) => {
       window.history.replaceState({}, '', `/approvalCenter?tab=${tab}`);
       await render(<ApprovalCenter />);
-      // 本用例检查角色、名称和类型隔离，跳过 JSDOM 的 CSS 可见性计算；仍保留真实页签。
-      const tabs = within(screen.getByRole('tablist', { hidden: true }));
-      for (const name of ['employee', 'skill', 'knowledge', 'tool']) {
-        expect(tabs.getByRole('tab', { name: new RegExp(`approvalCenter.${name}`), hidden: true })).toBeInTheDocument();
+      // 带 name 的角色查询仍会计算无障碍名称及样式；一次收集真实页签，再检查文案和选中态。
+      const tabs = within(screen.getByRole('tablist', { hidden: true })).getAllByRole('tab', { hidden: true });
+      expect(tabs).toHaveLength(4);
+      for (const [index, name] of ['employee', 'skill', 'knowledge', 'tool'].entries()) {
+        expect(tabs[index]).toHaveTextContent(`approvalCenter.${name}`);
+        expect(tabs[index]).toHaveAttribute('aria-selected', String(name === tab));
       }
-      expect(tabs.getByRole('tab', { name: new RegExp(`approvalCenter.${tab}`), hidden: true })).toHaveAttribute(
-        'aria-selected',
-        'true'
-      );
       for (const history of [false, true]) {
         if (history) {
           await act(async () => {

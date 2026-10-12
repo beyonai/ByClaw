@@ -305,16 +305,16 @@ sh deploy.sh init
 
 ### 首次使用前配置模型
 
-数据库初始化脚本会创建一个预置 LLM（`glm-5-turbo`）和一个预置 Embedding 模型
-（`text-embedding-3-small`），但其中的 API 地址和 API Token 都只是“请用户替换”的占位值，
-**不能直接用于模型调用**。首次登录后，请先进入「管理后台 > 模型管理」完成以下配置：
+数据库初始化脚本会创建一个预置 LLM（`model_id=-2000`，默认 `glm-5-turbo`）和一个预置 Embedding 模型
+（`model_id=-2001`，默认 `text-embedding-3-small`）。地址和 Token 是“请用户替换”的占位值，
+**不能直接用于模型调用**。
 
-1. 编辑或新建一个实际可用的 LLM，填写供应商、协议、模型名称、供应商模型编码、API Endpoint、API Token 和上下文长度；使用 OpenAI 兼容协议时，API Endpoint 应填写对应供应商的基础地址。
-2. 编辑或新建一个实际可用的 Embedding 模型，填写相同的连接信息，并确认向量维度（初始化值为 `1536`）和批大小与供应商接口一致。
-3. 分别执行模型调试；调试成功后启用模型，并将可用的 LLM 和 Embedding 模型设为各自类型的默认模型。
+在 `.env` 中填写 `BYCLAW_INIT_LLM_*` 和 `BYCLAW_INIT_EMBEDDING_*`（至少包括 `MODEL_NO`、`URL`、`API_TOKEN`）后启动后端。对应记录仍包含“请用户替换”，且这三项通过可用性校验时，启动过程会更新模型编号、模型名称、地址和 Token，Token 加密存储，并把状态改为启用后同步到 Redis。模型名称与模型编码相同，环境变量里不单独配置模型名称。LLM 的 `model_protocol` 为空时写成 `OpenAI`。`URL` 填到 `/v1` 为止，例如 `https://api.example.com/v1`；调用 LLM 时补 `/chat/completions`，调用 Embedding 时补 `/embeddings`。误填成 `https://api.example.com/v1/chat/completions` 或 `https://api.example.com/v1/embeddings` 时，会截成 `https://api.example.com/v1` 再写入数据库。已经配置过的模型不会被覆盖。上下文长度默认 `128000`，`MAX_TOKENS` 默认 `1024`，Embedding 维度默认 `1024`，都写在 `.env` 里，也可以改成实际模型的值。Embedding 还可以同时填写 `MAX_BATCH_SIZE`。
+
+也可以在首次登录后进入「管理后台 > 模型管理」手工编辑：填写供应商、协议、模型名称、模型编码、API Endpoint、API Token 和上下文长度；Embedding 还需确认向量维度（初始化值为 `1536`）和批大小。调试成功后启用模型，并设为该类型的默认模型。
 
 不要把真实 API Token 提交到仓库或写入初始化 SQL。数据库已经初始化后，修改
-`deploy/middleware/initdb/04_dml.sql` 不会更新现有数据，应通过「模型管理」修改配置。
+`deploy/middleware/initdb/04_dml.sql` 不会更新现有数据。占位记录可通过上述环境变量在下次启动时补齐，已改过的记录请在「模型管理」中修改。
 
 **QA 必须配置可用的 Embedding 模型后，才能正常提供知识库入库、检索等服务；容器启动或健康检查通过不代表这些服务已可用。**
 

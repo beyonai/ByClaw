@@ -274,6 +274,11 @@ do
     map_prefixed_env "$var_name"
 done
 
+# RedisModelConfigProvider reads BYCLAW_INIT_EMBEDDING_MODEL_NO, _URL and
+# _API_TOKEN directly from the exported environment when Redis config is invalid.
+# Keep these optional: valid Redis configuration does not require fallback values.
+default_env_if_unset "BYCLAW_INIT_EMBEDDING_DIMENSIONS" "1024"
+
 default_env_if_unset "DB_URL" "ignore"
 default_env_if_unset "EMBEDDING_MODEL_NAME" "ignore"
 default_env_if_unset "EMBEDDING_BASE_URL" "ignore"

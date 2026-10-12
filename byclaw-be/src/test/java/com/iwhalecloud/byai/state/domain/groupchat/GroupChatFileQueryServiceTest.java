@@ -107,7 +107,7 @@ class GroupChatFileQueryServiceTest {
     }
 
     @Test
-    void preservesTaskPreviewFieldsAndImagesWithoutCountingInvalidAttachments() {
+    void ignoresMetadataFilesAndPreservesValidRelatedResourceImages() {
         ByaiMessage row = upload(100L, 3000, "image");
         JSONObject resources = JSON.parseObject(row.getRelatedResources());
         resources.getJSONArray("files").getJSONObject(0).put("fileType", "image/png");
@@ -116,12 +116,14 @@ class GroupChatFileQueryServiceTest {
         row.setMetadata("{\"scene\":\"GROUP_CHAT\",\"kind\":\"TASK_RESULT\",\"files\":["
             + "{\"fileName\":\"report.md\",\"filePath\":\"/cloud/report.md\",\"cloudResourceId\":\"700\"},{}]}");
         stored.add(row);
+        ByaiMessage metadataOnly = upload(50L, 2000);
+        metadataOnly.setRelatedResources(null);
+        metadataOnly.setMetadata(row.getMetadata());
+        stored.add(metadataOnly);
         var page = service.list(10L, 2, null);
-        assertThat(page.getFiles()).hasSize(2);
+        assertThat(ids(page)).containsExactly("image");
         assertThat(page.getFiles().get(0).getAttachment().getMediaType()).isEqualTo("image/png");
-        var taskFile = page.getFiles().get(1).getAttachment();
-        assertThat(taskFile.getFilePath()).isEqualTo("/cloud/report.md");
-        assertThat(taskFile.getCloudResourceId()).isEqualTo("700");
+
         assertThat(page.isHasMore()).isFalse();
         assertThat(page.getNextCursor()).isNull();
     }

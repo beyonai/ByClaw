@@ -279,7 +279,8 @@ describe('publication approval in the audit list', () => {
     const row = screen.getByRole('row', { name: /待发布员工/ });
     expect(within(row).getByText('创建者：作者')).toBeInTheDocument();
     expect(within(row).getByText('审核人：审核管理员')).toBeInTheDocument();
-    expect(within(row).getByText('审核于 2026-09-27 18:30')).toBeInTheDocument();
+    // 中文标签与时间直接拼接，校验完整信息时兼容语言模板的空白差异。
+    expect(within(row).getByText(/审核于\s*2026-09-27 18:30/)).toBeInTheDocument();
     expect(within(row).getByText('2026-09-27 19:00')).toBeInTheDocument();
     expect(within(row).getByText('已补全说明，可以发布。')).toBeInTheDocument();
     expect(within(row).getByText('资源同步失败，请检查技能文件。')).toBeInTheDocument();
