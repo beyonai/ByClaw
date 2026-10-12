@@ -80,6 +80,30 @@
         ) AS latest_mention_message_id
     </sql>
 
+    <sql id="VisibleGroupConditions">
+        member.mem_obj_type = 'USER'
+        AND member.mem_obj_id = #{userId}
+        AND session.session_type = 'hs_as'
+        <if test="enterpriseId != null and enterpriseId != 1">
+            AND session.enterprise_id = #{enterpriseId}
+        </if>
+        AND (session.state IS NULL OR session.state != 'GROUP_DISSOLVED'
+             OR (member.user_role != 'OWNER' AND NOT EXISTS (
+                 SELECT 1 FROM byai_session_ext acknowledgment
+                 WHERE acknowledgment.session_id = session.session_id
+                   AND acknowledgment.ext_param_code = CONCAT('group_dissolution_ack_', member.mem_obj_id)
+                   AND acknowledgment.ext_param_value = 'true'
+             )))
+    </sql>
+
+    <!-- PageHelper uses this total query without sorting or projecting message history. -->
+    <select id="selectMyGroupsScoped_COUNT" resultType="long">
+        SELECT COUNT(1)
+        FROM byai_session_member member
+        JOIN byai_session session ON session.session_id = member.session_id
+        WHERE <include refid="VisibleGroupConditions" />
+    </select>
+
     <select id="selectMyGroupsScoped" resultMap="GroupListItemMap">
         SELECT session.session_id,
                session.session_name,
@@ -134,22 +158,16 @@
                    ) AS latest_row_num
             FROM byai_message message
             WHERE message.archived_at IS NULL
+              AND message.session_id IN (
+                  SELECT session.session_id
+                  FROM byai_session_member member
+                  JOIN byai_session session ON session.session_id = member.session_id
+                  WHERE <include refid="VisibleGroupConditions" />
+              )
         ) latest
           ON latest.session_id = session.session_id
          AND latest.latest_row_num = 1
-        WHERE member.mem_obj_type = 'USER'
-          AND member.mem_obj_id = #{userId}
-          AND session.session_type = 'hs_as'
-          <if test="enterpriseId != null and enterpriseId != 1">
-              AND session.enterprise_id = #{enterpriseId}
-          </if>
-          AND (session.state IS NULL OR session.state != 'GROUP_DISSOLVED'
-               OR (member.user_role != 'OWNER' AND NOT EXISTS (
-                   SELECT 1 FROM byai_session_ext acknowledgment
-                   WHERE acknowledgment.session_id = session.session_id
-                     AND acknowledgment.ext_param_code = CONCAT('group_dissolution_ack_', member.mem_obj_id)
-                     AND acknowledgment.ext_param_value = 'true'
-               )))
+        WHERE <include refid="VisibleGroupConditions" />
         ORDER BY COALESCE(latest.create_time, session.update_time, session.create_time) DESC,
                  session.session_id DESC
     </select>
