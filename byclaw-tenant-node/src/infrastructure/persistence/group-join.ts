@@ -3,8 +3,9 @@ import { DomainError } from "../../domain/errors.js";
 import { invitationPreview } from "./group-invitation.js";
 import { text } from "../../domain/values.js";
 import { first, insert, nextId } from "./sql-utils.js";
+import { membershipNotice } from "./member-notice.js";
 /** BE 验证链接后，Node 再检查群状态与链接开关，仅把当前用户加入为 MEMBER。 */
-export async function joinGroup(context: CommandContext): Promise<void> {
+export async function joinGroup(context: CommandContext): Promise<Record<string, any> | void> {
   const { command, db } = context;
   if ((await context.session())?.sessionType !== "hs_as")
     throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
@@ -34,4 +35,14 @@ export async function joinGroup(context: CommandContext): Promise<void> {
     com_acct_id: command.enterpriseId,
     create_time: new Date(),
   });
+  const notice = await membershipNotice(
+    context,
+    {
+      memObjId: command.userId,
+      memObjType: "USER",
+      memName: text(command.payload.memName ?? "", 255),
+    },
+    invitation.inviterId,
+  );
+  return { data: { systemEvents: [notice] } };
 }

@@ -70,6 +70,37 @@ public class TenantAdminMemberService {
         return new TenantMemberView(Long.toString(user.getUserId()), userCode, user.getUserName(), "MEMBER", "ACTIVE");
     }
 
+    /** Called only after Node has validated the accepted group invitation and its inviter. */
+    @Transactional
+    public void joinByInvitation(long enterpriseId, long inviterId) {
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        if (userId == null || userId <= 0)
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login required");
+        String snapshot = memberMapper.selectPackageSnapshotForUpdate(enterpriseId);
+        int limit = memberLimit(snapshot);
+        try {
+            if (!"READY".equals(objectMapper.readTree(memberMapper.selectProvisionState(enterpriseId))
+                .path("status").asText()))
+                throw new IllegalArgumentException();
+        }
+        catch (Exception error) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant is not ready");
+        }
+        TenantMemberRow inviter = memberMapper.selectMember(enterpriseId, inviterId);
+        if (inviter == null || !"ACTIVE".equals(inviter.getStatus()))
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "inviter membership required");
+        TenantMemberRow existing = memberMapper.selectMember(enterpriseId, userId);
+        if (existing != null) {
+            if (!"ACTIVE".equals(existing.getStatus()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "disabled membership requires explicit re-enable");
+            return;
+        }
+        if (memberMapper.countActiveMembers(enterpriseId) >= limit)
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant member limit reached");
+        if (memberMapper.insertMember(sequenceService.nextVal(), enterpriseId, userId, inviterId) != 1)
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant membership could not be confirmed");
+    }
+
     private TenantMemberView toView(TenantMemberRow row) {
         return new TenantMemberView(Long.toString(row.getUserId()), row.getUserCode(), row.getUserName(),
             row.getRole(), row.getStatus());

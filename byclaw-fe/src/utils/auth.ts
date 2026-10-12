@@ -102,6 +102,8 @@ export const setUserToken = (userTokens: any) => {
   const { sessionId, token, ssoToken } = userTokens || {};
 
   if (sessionId) {
+    // A tenant selection belongs to one login session, never to the next login.
+    if (sessionId !== getSessionKey()) clearSelectedEnterprise();
     setSessionKey(sessionId);
     setPortalSessionKey(sessionId);
   }

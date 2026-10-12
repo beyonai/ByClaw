@@ -25,6 +25,7 @@ describe('utils/auth', () => {
     jest.clearAllMocks();
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     localStorage.clear();
+    sessionStorage.clear();
     Object.defineProperty(window, 'location', {
       value: {
         origin: 'https://example.com',
@@ -68,6 +69,21 @@ describe('utils/auth', () => {
     expect(localStorage.getItem(auth.ssotokenKey)).toBeNull();
   });
 
+  it('fresh login clears the previous session tenant selection', () => {
+    const auth = loadAuthModule();
+    localStorage.setItem('SESSION', 'old-session');
+    sessionStorage.setItem('BYCLAW_TAB_ENTERPRISE', JSON.stringify({ enterpriseId: '42', sessionId: 'old-session' }));
+    auth.setUserToken({ sessionId: 'new-session' });
+    expect(sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBeNull();
+  });
+
+  it('token refresh in the same login session preserves tenant selection', () => {
+    const auth = loadAuthModule();
+    localStorage.setItem('SESSION', 'current-session');
+    sessionStorage.setItem('BYCLAW_TAB_ENTERPRISE', 'selected-tenant');
+    auth.setUserToken({ sessionId: 'current-session', token: 'refreshed' });
+    expect(sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBe('selected-tenant');
+  });
   it('setUserToken writes session, portal session, token and sso token', () => {
     const auth = loadAuthModule();
     const cookie = require('../cookie').default;

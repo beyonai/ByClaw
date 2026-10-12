@@ -14,6 +14,59 @@ class TenantDbProvisioningServiceTest {
     private static final String SANDBOX_ID = "803cfd04-ca9f-44f5-b2e1-85d8afeae0b2";
 
     @Test
+    void renewsExpiredReadyLeaseWithoutChangingAuthorityVersions() throws Exception {
+        verifyLeaseRenewal(false, true);
+    }
+
+    @Test
+    void deletionRequestedTenantNeverRenewsItsLease() throws Exception {
+        verifyLeaseRenewal(true, false);
+    }
+
+    @Test
+    void concurrentStateChangePreventsPublishingStaleReadyLease() throws Exception {
+        verifyLeaseRenewal(false, false);
+    }
+
+    private void verifyLeaseRenewal(boolean deleting, boolean expectedPublish) throws Exception {
+        var tenants = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper.class);
+        var publisher = org.mockito.Mockito.mock(TenantConfigPublisher.class);
+        var redis = org.mockito.Mockito.mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+        var values = org.mockito.Mockito.mock(org.springframework.data.redis.core.ValueOperations.class);
+        org.mockito.Mockito.when(redis.opsForValue()).thenReturn(values);
+        org.mockito.Mockito.when(values.setIfAbsent(org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(java.time.Duration.class))).thenReturn(true);
+        var row = new com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantRow();
+        row.setEnterpriseId(42L);
+        org.mockito.Mockito.when(tenants.selectTenants(null, null, null, "createdAt", "asc")).thenReturn(java.util.List.of(row));
+        org.mockito.Mockito.when(tenants.selectConfig(42L, "TENANT_DELETE_REQUESTED")).thenReturn(deleting ? "true" : null);
+        var config = new com.iwhalecloud.byai.manager.mapper.tenant.TenantConfigRow();
+        config.setParamsCode("PROVISION_STATE");
+        config.setParamsValue("{\"status\":\"READY\",\"generation\":\"7\",\"fencingToken\":\"9\",\"leaseUntil\":\"2000-01-01T00:00:00Z\"}");
+        org.mockito.Mockito.when(tenants.selectConfigs(42L)).thenReturn(java.util.List.of(config));
+        org.mockito.Mockito.when(tenants.renewReadyLease(org.mockito.ArgumentMatchers.eq(42L),
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString())).thenReturn(expectedPublish ? 1 : 0);
+        org.mockito.Mockito.when(publisher.publish(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.anyMap())).thenReturn(true);
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var service = new TenantDbProvisioningService(tenants, null, null, publisher, null, null, redis, mapper, Runnable::run, "");
+        var renew = TenantDbProvisioningService.class.getDeclaredMethod("renewReadyLeases");
+        renew.invoke(service);
+        if (expectedPublish) {
+            var captured = org.mockito.ArgumentCaptor.forClass(java.util.Map.class);
+            org.mockito.Mockito.verify(publisher).publish(org.mockito.ArgumentMatchers.eq(42L), captured.capture());
+            var state = mapper.readTree((String) captured.getValue().get("PROVISION_STATE"));
+            assertEquals("READY", state.path("status").asText());
+            assertEquals("7", state.path("generation").asText());
+            assertEquals("9", state.path("fencingToken").asText());
+            assertTrue(java.time.Instant.parse(state.path("leaseUntil").asText()).isAfter(java.time.Instant.now()));
+        } else {
+            org.mockito.Mockito.verifyNoInteractions(publisher);
+            org.mockito.Mockito.verify(tenants, org.mockito.Mockito.never()).updateConfig(
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+        }
+    }
+
+    @Test
     void retriesTransientDatabaseStartupFailure() throws Exception {
         AtomicInteger calls = new AtomicInteger();
         TenantDbProvisioningService.retryConnectionProbe(() -> {

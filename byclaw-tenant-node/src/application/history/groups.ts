@@ -1,3 +1,4 @@
+import { recallIdentity, recallContent } from "./message-format.js";
 import { bounded } from "./paging.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId } from "../../domain/values.js";
@@ -93,7 +94,17 @@ export class GroupHistory extends HistoryAccess {
     const result = await this.repository.groups(actor, pageNum, pageSize);
     const list = await Promise.all(
       result.list.map(async (r) => {
-        const { latestMessageRecalledAt, latestMessageMetadata, ...summary } = r;
+        const {
+          latestMessageRecalledAt,
+          latestMessageRecalledBy,
+          latestMessageMetadata,
+          ...summary
+        } = r;
+        const recalledMessage = {
+          recalledAt: latestMessageRecalledAt,
+          recalledBy: latestMessageRecalledBy,
+          metadata: latestMessageMetadata,
+        };
         const resources = arrayJson(objectJson(latestMessageMetadata).resourceList);
         const names = new Map(
           resources
@@ -112,7 +123,8 @@ export class GroupHistory extends HistoryAccess {
         return {
           ...summary,
           latestMessageRecalled: latestMessageRecalledAt != null,
-          latestMessageContent: latestMessageRecalledAt ? "消息已撤回" : preview,
+          latestMessageContent: latestMessageRecalledAt ? recallContent(recalledMessage) : preview,
+          latestMessageRecall: latestMessageRecalledAt ? recallIdentity(recalledMessage) : null,
           members: (await this.repository.members(r.sessionId))
             .slice(0, 9)
             .map((m) => ({ memObjType: m.memObjType, memObjId: m.memObjId, memName: m.memName })),

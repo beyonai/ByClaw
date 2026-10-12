@@ -65,6 +65,10 @@ public class UserPrivateParamApplicationService {
 
     private static final String PARAM_SOURCE_CONNECTOR = "CONNECTOR";
 
+    private static final String DEEPSEEK_WEB_SEARCH_CONNECTOR = "deepseek-web-search";
+
+    private static final String DEEPSEEK_WEB_SEARCH_API_KEY = "DEEPSEEK_WEB_SEARCH_API_KEY";
+
     private static final Pattern PARAM_KEY_PATTERN = Pattern.compile("[A-Z_][A-Z0-9_]{0,127}");
 
     @Autowired
@@ -478,6 +482,11 @@ public class UserPrivateParamApplicationService {
         for (UserPrivateParam param : params) {
             if (com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.isPrivateMailParam(param)) {
                 continue; // Keep mail secrets out of the generic environment cache.
+            }
+            if (PARAM_SOURCE_CONNECTOR.equals(param.getParamSource())
+                    && DEEPSEEK_WEB_SEARCH_CONNECTOR.equals(param.getSourceRef())
+                    && DEEPSEEK_WEB_SEARCH_API_KEY.equals(param.getParamKey())) {
+                continue; // Backend-proxy-only credential; never expose it to a user sandbox.
             }
             if (!NORMAL.equals(param.getStatus()) || StringUtils.isBlank(param.getParamValueCipher())) {
                 continue;

@@ -58,7 +58,7 @@ describe("group file pagination", () => {
     expect(last.hasMore).toBe(false);
     expect(last.nextCursor).toBeNull();
   });
-  it("preserves task preview fields and skips malformed attachments", async () => {
+  it("ignores metadata files and skips malformed related resources", async () => {
     const { stored, service } = setup();
     expect(typeof service.files).toBe("function");
     const message = row("100", "image");
@@ -68,13 +68,10 @@ describe("group file pagination", () => {
       kind: "TASK_RESULT",
       files: [{ fileName: "report.md", filePath: "/cloud/report.md", cloudResourceId: "700" }, {}],
     };
-    stored.push(message);
+    stored.push(message, { messageId: "50", metadata: message.metadata });
     const page = await service.files("20", "30", 2);
-    expect(page.files).toHaveLength(2);
-    expect(page.files[1]?.attachment).toMatchObject({
-      filePath: "/cloud/report.md",
-      cloudResourceId: "700",
-    });
+    expect(page.files.map((file) => file.attachment.fileId)).toEqual(["image"]);
+    expect(page.nextCursor).toBeNull();
     expect(page.hasMore).toBe(false);
   });
   it("continues scanning sparse candidate batches until the page is full", async () => {
@@ -113,6 +110,7 @@ describe("group file pagination", () => {
     const [sql, parameters] = query.mock.calls[0]! as unknown as [string, unknown[]];
     expect(sql).not.toContain("SELECT m.*");
     expect(sql).not.toContain("message_content");
+    expect(sql).not.toContain("metadata");
     expect(sql).toContain("m.recalled_at IS NULL");
     expect(sql).toContain("s.enterprise_id=$1");
     expect(sql).toContain("NULLS LAST");

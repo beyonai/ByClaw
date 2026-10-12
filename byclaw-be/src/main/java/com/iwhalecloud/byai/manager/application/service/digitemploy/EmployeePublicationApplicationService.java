@@ -460,6 +460,8 @@ public class EmployeePublicationApplicationService {
                     auth.ensureCreatorDefaultPrivileges(official);
                     dependencies.grantAudience(official, tenant);
                 }
+                // 只在审核通过的配置落地时补权限；草稿保存不会提前授权绑定资源。
+                auth.synchronizeDigitalEmployeeResourceUsers(official, snapshot.getRelTools());
                 runtimeAttempted[0] = true;
                 if (!employees.syncPublicationOpenClawWorkSpace(official.getResourceId(), snapshot)) throw new BaseException("官方员工运行配置同步失败，请重试发布");
                 publication.setOfficialId(official.getResourceId());

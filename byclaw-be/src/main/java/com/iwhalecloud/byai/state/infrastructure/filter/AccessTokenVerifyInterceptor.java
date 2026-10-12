@@ -209,7 +209,10 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             if (this.isAnonymousVerificationRequest(request)) {
                 return true;
             }
-            if (this.checkUrlByRegex(url)) {
+            boolean invitationPreview = this.isExactPostRequestPath(request, "/group-chats/invitations/validate");
+            if (invitationPreview) CurrentUserHolder.clearLoginInfo();
+            if (this.checkUrlByRegex(url) && !(invitationPreview
+                && StringUtils.isNotEmpty(request.getHeader("beyond-token")))) {
                 return true;
             }
 
@@ -419,6 +422,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception e) {
+        CurrentUserHolder.clearLoginInfo();
     }
 
     /**

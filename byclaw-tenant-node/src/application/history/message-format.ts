@@ -19,6 +19,21 @@ export const arrayJson = (value: unknown): any[] => {
 export const time = (value: unknown) =>
   value instanceof Date ? value.getTime() : new Date(value as string).getTime();
 export const recalled = (row: Row) => row.recalledAt != null;
+export function recallIdentity(row: Row): Row {
+  const snapshot = objectJson(objectJson(row.metadata).recall);
+  return {
+    operatorId: String(row.recalledBy),
+    operatorName:
+      snapshot.operatorId === String(row.recalledBy) && typeof snapshot.operatorName === "string"
+        ? snapshot.operatorName
+        : "",
+    recalledAt: time(row.recalledAt),
+  };
+}
+export function recallContent(row: Row): string {
+  const name = recallIdentity(row).operatorName;
+  return name ? `${name} 撤回了一条消息` : "消息已撤回";
+}
 /** 撤回消息清除正文、附件及非展示元数据，仅保留撤回身份和安全展示字段。 */
 export function safeMessage(row: Row): Row {
   if (!recalled(row)) return { ...row, complete: row.isComplete };
@@ -38,9 +53,10 @@ export function safeMessage(row: Row): Row {
     recalled: true,
     recalledAt: row.recalledAt,
     recalledBy: row.recalledBy,
+    recall: recallIdentity(row),
     isComplete: true,
     complete: true,
-    messageContent: "消息已撤回",
+    messageContent: recallContent(row),
     metadata: JSON.stringify(
       Object.fromEntries(
         ["scene", "kind", "taskId", "clientRequestId", "agentId"]

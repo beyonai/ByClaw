@@ -75,13 +75,17 @@ class LoginApplicationServiceTest {
         SuasSuperassist superassist = new SuasSuperassist();
         superassist.setDefaultDigEmployeeId(200L);
 
-        when(enterpriseInfoService.getEnterpriseId(1L)).thenReturn(99L);
+        when(enterpriseInfoService.getEnterpriseId(1L)).thenReturn(21L);
+        when(enterpriseInfoService.getEnterpriseId()).thenReturn(99L);
         when(organizationService.findUsersOrganizationByUserId(1L)).thenReturn(List.of());
         when(privilegeGrantService.findUserManageOrg(1L)).thenReturn(List.of());
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         LoginInfo result = service.getLoginInfo(users);
 
+        assertThat(result.getEnterpriseId()).isEqualTo(99L);
+        assertThat(result.getComAcctId()).isEqualTo(99L);
+        verify(enterpriseInfoService, never()).getEnterpriseId(1L);
         assertThat(result.getUserId()).isEqualTo(1L);
         assertThat(result.getAssistantId()).isEqualTo(7L);
         assertThat(result.getDefaultDigEmployeeId()).isEqualTo(200L);

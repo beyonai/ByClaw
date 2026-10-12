@@ -93,8 +93,22 @@ interface ResourceListProps {
   enableFavorites?: boolean;
 }
 
+interface ResourceListSection {
+  key: string;
+  titleId?: string;
+  items: IResourceItem[];
+}
+
 const PAGE_SIZE_DEFAULT = 30;
 const WIDE_CARD_RESOURCE_TYPES = new Set(['KG_DOC', 'TOOL']);
+const RESOURCE_CENTER_SORT_MODES: Record<string, string | undefined> = {
+  personal: 'UPDATED_DESC',
+  enterprise: 'POPULARITY_DESC',
+};
+const RESOURCE_MANAGEMENT_SORT_MODES: Record<string, string | undefined> = {
+  personal: 'UPDATED_DESC',
+  enterprise: 'UPDATED_DESC',
+};
 
 const collectInstalledResourceIds = (response: any) => {
   if (response?.code !== undefined && ![0, 200].includes(Number(response.code))) {
@@ -152,6 +166,22 @@ const ResourceList: React.FC<ResourceListProps> = ({
   // hasMore 只按已加载的“已资源化技能”数量与 total 比较，避免提前判定到底而漏翻页。
   const loadedResourcedCount = useMemo(() => list.filter((item) => !isWorkspaceSkill(item)).length, [list]);
   const hasMore = pageInfo.total > loadedResourcedCount;
+  const resourceSections = useMemo<ResourceListSection[]>(() => {
+    if (!myResourcesOnly || resourceType !== 'SKILL' || activeTab !== 'personal') {
+      return [{ key: 'resources', items: list }];
+    }
+    const workspaceRows = list.filter(isWorkspaceSkill);
+    if (!workspaceRows.length) return [{ key: 'resources', items: list }];
+    // 目录技能独立于资源库分页，分区展示以免被误认为参与了后端的全量时间排序。
+    return [
+      { key: 'workspace', titleId: 'resourceCenter.directorySkills', items: workspaceRows },
+      {
+        key: 'registered',
+        titleId: 'resourceCenter.resourceLibrarySkills',
+        items: list.filter((item) => !isWorkspaceSkill(item)),
+      },
+    ].filter((section) => section.items.length > 0);
+  }, [activeTab, list, myResourcesOnly, resourceType]);
   const isSkillPosterMode = resourceType === 'SKILL' && skillCardViewMode === 'new';
   // 知识和工具卡片信息较多，尤其右侧资源面板打开时，需要减少列数以保证名称和描述可读。
   const useWideCardLayout = WIDE_CARD_RESOURCE_TYPES.has(resourceType);
@@ -195,6 +225,9 @@ const ResourceList: React.FC<ResourceListProps> = ({
         ),
       };
       const availableOnly = !myResourcesOnly && activeTab === 'personal';
+      // 管理页两个 tab 统一按更新时间；浏览页继续按 tab 用途排序，收藏页保留原有口径。
+      const sortModes = myResourcesOnly ? RESOURCE_MANAGEMENT_SORT_MODES : RESOURCE_CENTER_SORT_MODES;
+      const sortMode = ['SKILL', 'KG_DOC', 'TOOL'].includes(resourceType) ? sortModes[activeTab] : undefined;
       const selectedOwnerType =
         availableOnly && ['personal', 'enterprise'].includes(rawFilterParam?.ownerType)
           ? rawFilterParam.ownerType
@@ -239,6 +272,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
               // 我可用的和官方推荐只显示上架资源；管理列表保留状态筛选。
               ...(!myResourcesOnly ? { resourceStatus: '2' } : {}),
               ...(myResourcePermission ? { permission: myResourcePermission } : {}),
+              ...(sortMode ? { sortMode } : {}),
               resourceBizTypeList: ownerFilterParam.resourceBizTypeList?.length
                 ? ownerFilterParam.resourceBizTypeList
                 : baseResourceBizTypeList,
@@ -646,23 +680,32 @@ const ResourceList: React.FC<ResourceListProps> = ({
               overflow: 'visible',
             }}
           >
-            <div className={styles.categorySection}>
-              <div
-                className={
-                  isSkillPosterMode
-                    ? styles.skillPosterList
-                    : [
-                      styles.employeeList,
-                      useWideCardLayout ? styles.wideResourceList : '',
-                      resourceType === 'KG_DOC' ? styles.knowledgeList : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')
-                }
+            {resourceSections.map((section) => (
+              <section
+                key={section.key}
+                className={styles.categorySection}
+                aria-label={section.titleId ? intl.formatMessage({ id: section.titleId }) : undefined}
               >
-                {list.map((item) => renderResourceCard(item))}
-              </div>
-            </div>
+                {section.titleId && (
+                  <h3 className={styles.sectionTitle}>{intl.formatMessage({ id: section.titleId })}</h3>
+                )}
+                <div
+                  className={
+                    isSkillPosterMode
+                      ? styles.skillPosterList
+                      : [
+                        styles.employeeList,
+                        useWideCardLayout ? styles.wideResourceList : '',
+                        resourceType === 'KG_DOC' ? styles.knowledgeList : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')
+                  }
+                >
+                  {section.items.map((item) => renderResourceCard(item))}
+                </div>
+              </section>
+            ))}
           </InfiniteScroll>
         )}
       </Spin>

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import asyncio
+import os
 from contextvars import ContextVar
 from dataclasses import fields, is_dataclass
 from typing import Any
@@ -60,8 +61,10 @@ class RedisModelConfigProvider(ModelConfigProvider):
             self._log_loaded_cache()
 
     async def get_config(self, model_type: str | LLMModelProfile) -> ModelConfig:
-        await self.load_cache()
         profile_value = model_type.value if isinstance(model_type, LLMModelProfile) else model_type
+        if profile_value == EMBEDDING_PROFILE:
+            return await self._get_embedding_config()
+        await self.load_cache()
         if profile_value in LLM_PROFILES:
             model = await self._load_first_llm_model()
             _validate_model_connection(model, LLM_MODEL_TYPE)
@@ -69,8 +72,12 @@ class RedisModelConfigProvider(ModelConfigProvider):
                 model,
                 temperature=_extract_temperature(model),
             )
-        if profile_value == EMBEDDING_PROFILE:
-            settings = get_settings()
+        raise ModelConfigError(f"Unknown model_type: {model_type!r}")
+
+    async def _get_embedding_config(self) -> ModelConfig:
+        settings = get_settings()
+        try:
+            await self.load_cache()
             model = await self._load_first_model_by_type(EMBEDDING_MODEL_TYPE)
             _validate_model_connection(model, EMBEDDING_MODEL_TYPE)
             dimension = _extract_embedding_dimension(
@@ -78,13 +85,27 @@ class RedisModelConfigProvider(ModelConfigProvider):
             )
             if dimension is None:
                 raise ModelSetupRequiredError(t(Msg.ERR_EMBEDDING_SETUP_REQUIRED))
-            return self._build_model_config(
-                model,
-                temperature=0.0,
-                dimension=dimension,
-                distance_metric=getattr(settings, "embedding_distance_metric", None),
+        except (ModelConfigError, ValueError, TypeError):
+            # Only invalid configuration falls back; Redis connection failures
+            # must still propagate. Never log payloads or credentials here.
+            model = {
+                "modelCode": os.getenv("BYCLAW_INIT_EMBEDDING_MODEL_NO", ""),
+                "url": os.getenv("BYCLAW_INIT_EMBEDDING_URL", ""),
+                "authToken": os.getenv("BYCLAW_INIT_EMBEDDING_API_TOKEN", ""),
+            }
+            _validate_model_connection(model, EMBEDDING_MODEL_TYPE)
+            dimension = _parse_positive_int(
+                os.getenv("BYCLAW_INIT_EMBEDDING_DIMENSIONS", "").strip() or "1024"
             )
-        raise ModelConfigError(f"Unknown model_type: {model_type!r}")
+            if dimension is None:
+                raise ModelSetupRequiredError(t(Msg.ERR_EMBEDDING_SETUP_REQUIRED)) from None
+            logger.info("Using environment fallback for Embedding model configuration")
+        return self._build_model_config(
+            model,
+            temperature=0.0,
+            dimension=dimension,
+            distance_metric=getattr(settings, "embedding_distance_metric", None),
+        )
 
     async def _load_model_by_id(self, model_id: str) -> dict[str, Any] | None:
         # The prologue model is used as-is without ability validation;

@@ -1,3 +1,8 @@
+import {
+  objectJson,
+  recallIdentity,
+  recallContent,
+} from "../../application/history/message-format.js";
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
@@ -163,16 +168,21 @@ export async function recallMessage(context: CommandContext): Promise<Record<str
     messageId = requireId(command.payload.messageId);
   const message = await first(
     db,
-    "SELECT creator_id,usage FROM byai.byai_message WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3 AND archived_at IS NULL",
+    "SELECT creator_id,usage,metadata FROM byai.byai_message WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3 AND archived_at IS NULL",
     [command.sessionId, messageId, command.enterpriseId],
   );
   if (!message) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
   if (![1, 2].includes(message.usage)) throw new DomainError("SYSTEM_MESSAGE_CANNOT_BE_RECALLED");
   if (message.usage !== 1 || message.creatorId !== command.userId)
     await context.requireRole(["OWNER", "ADMIN"]);
+  const metadata = objectJson(message.metadata);
+  metadata.recall = {
+    operatorId: command.userId,
+    operatorName: (await context.member())?.memName || command.userId,
+  };
   await db.query(
-    "UPDATE byai.byai_message SET recalled_at=COALESCE(recalled_at,CURRENT_TIMESTAMP),recalled_by=COALESCE(recalled_by,$1) WHERE message_id=$2 AND session_id=$3 AND enterprise_id=$4",
-    [command.userId, messageId, command.sessionId, command.enterpriseId],
+    "UPDATE byai.byai_message SET recalled_at=COALESCE(recalled_at,CURRENT_TIMESTAMP),recalled_by=COALESCE(recalled_by,$1),metadata=CASE WHEN recalled_at IS NULL THEN $5 ELSE metadata END WHERE message_id=$2 AND session_id=$3 AND enterprise_id=$4",
+    [command.userId, messageId, command.sessionId, command.enterpriseId, JSON.stringify(metadata)],
   );
   // 按源消息取消任务；重复撤回仍返回取消任务，供 BE 重试未完成的外部停止。
   await db.query(
@@ -191,7 +201,7 @@ export async function recallMessage(context: CommandContext): Promise<Record<str
   );
   const saved = await first(
     db,
-    "SELECT recalled_at,recalled_by FROM byai.byai_message WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3",
+    "SELECT recalled_at,recalled_by,metadata FROM byai.byai_message WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3",
     [command.sessionId, messageId, command.enterpriseId],
   );
   return {
@@ -199,7 +209,8 @@ export async function recallMessage(context: CommandContext): Promise<Record<str
       messageId,
       tasks,
       recalled: true,
-      recall: { operatorId: saved!.recalledBy, recalledAt: new Date(saved!.recalledAt).getTime() },
+      recall: recallIdentity(saved!),
+      content: recallContent(saved!),
     },
   };
 }

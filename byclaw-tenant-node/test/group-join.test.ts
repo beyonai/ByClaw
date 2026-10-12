@@ -44,9 +44,11 @@ describe("BE-authorized group joins", () => {
     const query = vi.fn(async (sql: string) =>
       sql.includes("SELECT ext_param_code")
         ? [{ ext_param_code: "group_member_invite_user_enabled", ext_param_value: "true" }]
-        : sql.includes("nextval")
-          ? [{ id: "40" }]
-          : [],
+        : sql.includes("RETURNING last_seq")
+          ? [{ last_seq: "1" }]
+          : sql.includes("nextval")
+            ? [{ id: "40" }]
+            : [],
     );
     const context = new CommandContext(
       { query },

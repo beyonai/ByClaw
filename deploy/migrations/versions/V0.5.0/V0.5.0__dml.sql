@@ -527,3 +527,48 @@ WHERE enterprise_id = 10291378
   AND NOT EXISTS (SELECT 1 FROM byai.byai_project WHERE enterprise_id = 10291378)
   AND NOT EXISTS (SELECT 1 FROM byai.byai_session WHERE enterprise_id = 10291378)
   AND NOT EXISTS (SELECT 1 FROM byai.byai_message WHERE enterprise_id = 10291378);
+
+-- DeepSeek 联网检索连接器与内置 Skill。
+-- 用户 API Key 由 AK_SK 授权流程写入连接器受管密文存储；迁移中不包含任何真实凭据。
+
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config,
+    runtime_manifest, sort, status_cd
+)
+SELECT
+    nextval('byai.seq_any_table'),
+    'deepseek-web-search',
+    'DeepSeek 联网检索',
+    '使用 DeepSeek 原生联网检索发现公开网页来源',
+    'SYSTEM',
+    'deepseek-web-search',
+    'deepseek-web-search',
+    'AK_SK',
+    '{"credentialForm":{"helpUrl":"https://platform.deepseek.com/api_keys","helpLinkText":"前往 DeepSeek 获取 API Key","helpText":"连接器作用：使用你独立授权的 DeepSeek API Key 执行联网检索，返回网页标题、链接、摘要和发布时间。\n\n获取步骤：\n1. 点击下方链接登录 DeepSeek 开放平台。\n2. 创建并复制 API Key。\n3. 返回本页填写 API Key，点击“保存并连接”。\n\n安全提示：API Key 相当于账号密码，仅填写在本授权表单中，不要发送到聊天、截图、工单或代码仓库。禁用连接器后联网检索立即不可用；解除授权会删除受管凭据。","fields":[{"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048,"required":true}]}}',
+    '{"baseUrl":"https://api.deepseek.com/anthropic/v1","model":"deepseek-v4-flash","apiVersion":"2023-06-01","maxTokens":4096,"maxUses":5,"timeoutSeconds":30,"maxResults":20}',
+    '{"schemaVersion":"1.0","id":"deepseek-web-search","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["node","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["DEEPSEEK_WEB_SEARCH_API_KEY"],"environment":{}},"skill":{"code":"deepseek-web-search","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+    59,
+    '00A'
+    WHERE NOT EXISTS (
+    SELECT 1
+    FROM byai.byai_connector_info
+    WHERE connector_code = 'deepseek-web-search'
+);
+
+-- 重放时同步模板配置，但不修改已有用户授权记录。
+UPDATE byai.byai_connector_info
+SET connector_name = 'DeepSeek 联网检索',
+    description = '使用 DeepSeek 原生联网检索发现公开网页来源',
+    connector_type = 'SYSTEM',
+    provider_code = 'deepseek-web-search',
+    skill_code = 'deepseek-web-search',
+    auth_mode = 'AK_SK',
+    auth_config = '{"credentialForm":{"helpUrl":"https://platform.deepseek.com/api_keys","helpLinkText":"前往 DeepSeek 获取 API Key","helpText":"连接器作用：使用你独立授权的 DeepSeek API Key 执行联网检索，返回网页标题、链接、摘要和发布时间。\n\n获取步骤：\n1. 点击下方链接登录 DeepSeek 开放平台。\n2. 创建并复制 API Key。\n3. 返回本页填写 API Key，点击“保存并连接”。\n\n安全提示：API Key 相当于账号密码，仅填写在本授权表单中，不要发送到聊天、截图、工单或代码仓库。禁用连接器后联网检索立即不可用；解除授权会删除受管凭据。","fields":[{"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048,"required":true}]}}',
+    request_config = '{"baseUrl":"https://api.deepseek.com/anthropic/v1","model":"deepseek-v4-flash","apiVersion":"2023-06-01","maxTokens":4096,"maxUses":5,"timeoutSeconds":30,"maxResults":20}',
+    runtime_manifest = '{"schemaVersion":"1.0","id":"deepseek-web-search","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["node","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["DEEPSEEK_WEB_SEARCH_API_KEY"],"environment":{}},"skill":{"code":"deepseek-web-search","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+    sort = 59,
+    status_cd = '00A',
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'deepseek-web-search';
+
