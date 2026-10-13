@@ -18,6 +18,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatFileQueryService;
+import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
@@ -259,6 +261,32 @@ class TenantGroupChatRoutingAspectTest {
         verify(node).command(context, "PATCH", "/internal/v1/group-chats/9000000000000000001/settings",
             "9000000000000000001", "UPDATE_SETTINGS",
             new TenantNodeModels.GroupSettings(null, null, true, null));
+    }
+
+    @Test
+    void tenantFileListPreservesNodeUploaderFieldsAndAvoidsLegacyQuery() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        Map<String, Object> page = Map.of("files", List.of(Map.of(
+            "messageId", "9000000000000000001", "uploaderId", "9007199254740993",
+            "uploaderName", "张三", "uploaderType", "USER", "attachment", Map.of("fileId", "71"))),
+            "pageSize", 20, "hasMore", false);
+        String path = "/internal/v1/group-chats/11221825/files?pageSize=20";
+        when(node.request(eq(context), eq("GET"), eq(path), eq(null), any())).thenReturn(page);
+        GroupChatFileQueryService files = mock(GroupChatFileQueryService.class);
+        ProceedingJoinPoint call = mock(ProceedingJoinPoint.class);
+        MethodSignature signature = mock(MethodSignature.class);
+        when(signature.getMethod()).thenReturn(GroupChatFileController.class.getMethod("list",
+            Long.class, Integer.class, String.class));
+        when(call.getSignature()).thenReturn(signature);
+        when(call.getTarget()).thenReturn(new GroupChatFileController(files));
+        when(call.getArgs()).thenReturn(new Object[]{11221825L, null, null});
+
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call);
+
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData()).isEqualTo(page);
+        verifyNoInteractions(files, legacy, memberships);
     }
 
     private ProceedingJoinPoint call(String method, Object... args) {

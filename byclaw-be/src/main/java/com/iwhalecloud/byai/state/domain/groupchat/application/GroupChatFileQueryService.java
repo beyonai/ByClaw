@@ -65,6 +65,12 @@ public class GroupChatFileQueryService {
                     GroupChatFileListResponse.FileItem item = new GroupChatFileListResponse.FileItem();
                     item.setMessageId(String.valueOf(row.getMessageId()));
                     item.setCreatedAt(row.getCreateTime() == null ? null : row.getCreateTime().getTime());
+                    // 作者由服务端消息列确定，附件元数据及被 @ 的资源不能改变上传者身份。
+                    item.setUploaderId(row.getCreatorId() == null ? null : String.valueOf(row.getCreatorId()));
+                    item.setUploaderName(row.getCreatorName() == null || row.getCreatorName().isBlank()
+                        ? null : row.getCreatorName());
+                    if (Integer.valueOf(1).equals(row.getUsage())) item.setUploaderType("USER");
+                    else if (Integer.valueOf(2).equals(row.getUsage())) item.setUploaderType("AGENT");
                     item.setAttachment(attachments.get(index));
                     response.getFiles().add(item);
                     lastIncluded = new Cursor(row.getMessageId(), index);
