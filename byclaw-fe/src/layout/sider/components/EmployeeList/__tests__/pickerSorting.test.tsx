@@ -24,12 +24,16 @@ jest.mock('@/components/QueryInput/withDrag', () => ({
   __esModule: true,
   default:
     () =>
-    ({ children }: any) =>
-      children,
+      ({ children }: any) =>
+        children,
   DragType: { digitalEmployee: 'digitalEmployee' },
 }));
 jest.mock('@/components/EmptyTips', () => () => null);
-jest.mock('../EmployeeCard', () => ({ employee }: any) => <div data-testid="employee">{employee.agentId}</div>);
+jest.mock('../EmployeeCard', () => ({ employee }: any) => (
+  <div data-testid="employee" data-default={String(employee.isDefault)}>
+    {employee.agentId}
+  </div>
+));
 jest.mock('antd', () => ({
   Divider: () => null,
   Skeleton: () => null,
@@ -41,7 +45,11 @@ jest.mock('@/components/InfiniteScroll', () => ({
   default: ({ children, next, hasMore }: any) => (
     <div>
       {children}
-      {hasMore && <button onClick={next}>load more</button>}
+      {hasMore && (
+        <button type="button" onClick={next}>
+          load more
+        </button>
+      )}
     </div>
   ),
 }));
@@ -106,9 +114,47 @@ describe('new task employee picker sorting', () => {
     });
     await waitFor(() => expect(screen.getAllByTestId('employee')).toHaveLength(2));
     expect(screen.getAllByTestId('employee').map((item) => item.textContent)).toEqual(['9', '1']);
+    expect(screen.getAllByTestId('employee').map((item) => item.dataset.default)).toEqual(['true', 'false']);
     expect(queryMyCreatedAndSubscribedAgentsV2).toHaveBeenCalledTimes(3);
     (queryMyCreatedAndSubscribedAgentsV2 as jest.Mock).mock.calls.forEach(([params]) => {
       expect(params).toMatchObject({ sortMode: 'DEFAULT_USAGE_DESC', pageNum: 1, keyword: 'employee' });
     });
+  });
+
+  it('discards an old pending page when a default outside the loaded page becomes first', async () => {
+    let resolveOldPage!: (value: any) => void;
+    (queryMyCreatedAndSubscribedAgentsV2 as jest.Mock)
+      .mockResolvedValueOnce({ list: Array.from({ length: 30 }, (_, index) => row(index + 1)), pageNum: 1, total: 60 })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOldPage = resolve;
+          })
+      )
+      .mockResolvedValueOnce({
+        list: [
+          { ...row(50), isDefault: true },
+          { ...row(1), isDefault: false },
+        ],
+        pageNum: 1,
+        total: 2,
+      });
+    render(<AllEmployees includeEmployeeGroups compactCard />);
+    await waitFor(() => expect(screen.getAllByTestId('employee')).toHaveLength(30));
+    fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+
+    await act(async () => {
+      mockEvents.on.mock.calls
+        .filter(([event]) => event === 'beyond-update-employee')
+        .forEach(([, handler]) => handler({ defaultResourceId: '50' }));
+    });
+    await waitFor(() => expect(screen.getAllByTestId('employee').map((item) => item.textContent)).toEqual(['50', '1']));
+    await act(async () => {
+      resolveOldPage({ list: [row(31), row(50)], pageNum: 2, total: 60 });
+    });
+
+    expect(screen.getAllByTestId('employee').map((item) => item.textContent)).toEqual(['50', '1']);
+    expect(screen.getAllByTestId('employee').map((item) => item.dataset.default)).toEqual(['true', 'false']);
+    expect(screen.queryByRole('button', { name: 'load more' })).toBeNull();
   });
 });

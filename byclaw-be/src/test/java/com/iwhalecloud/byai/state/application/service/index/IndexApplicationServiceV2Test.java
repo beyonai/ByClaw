@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
+import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.qo.index.DiscoverQo;
 import com.iwhalecloud.byai.manager.qo.index.MyAuthEmployQo;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
@@ -40,6 +41,7 @@ class IndexApplicationServiceV2Test {
 
     private IndexService indexService;
     private IndexApplicationServiceV2 service;
+    private SuasSuperassistService suasSuperassistService;
 
     @BeforeEach
     void setUp() {
@@ -49,7 +51,7 @@ class IndexApplicationServiceV2Test {
         AuthApplicationService authApplicationService = mock(AuthApplicationService.class);
         SandboxService sandboxService = mock(SandboxService.class);
         SsResourceCatalogService ssResourceCatalogService = mock(SsResourceCatalogService.class);
-        SuasSuperassistService suasSuperassistService = mock(SuasSuperassistService.class);
+        suasSuperassistService = mock(SuasSuperassistService.class);
         when(authApplicationService.queryResourceOperationPermissionsBatch(any()))
             .thenReturn(Collections.emptyMap());
 
@@ -84,8 +86,17 @@ class IndexApplicationServiceV2Test {
     void pickerResolvesCurrentUserDefaultAndNinetyDayWindowBeforeQuery() {
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);
-        loginInfo.setDefaultDigEmployeeId(101L);
+        loginInfo.setAssistantId(10L);
+        loginInfo.setDefaultDigEmployeeId(100L);
         CurrentUserHolder.setLoginInfo(loginInfo);
+        SuasSuperassist superassist = new SuasSuperassist();
+        superassist.setDefaultDigEmployeeId(101L);
+        when(suasSuperassistService.findById(10L)).thenReturn(superassist);
+        AuthDigitEmployVo oldDefault = new AuthDigitEmployVo();
+        oldDefault.setId(100L);
+        oldDefault.setAgentType(DigitalEmployType.AGENT_TYPE_GROUP.getCode());
+        AuthDigitEmployVo newDefault = new AuthDigitEmployVo();
+        newDefault.setId(101L);
         MyAuthEmployQo qo = new MyAuthEmployQo();
         qo.setSortMode("DEFAULT_USAGE_DESC");
         qo.setDefaultDigitalEmployeeId(999L);
@@ -97,10 +108,51 @@ class IndexApplicationServiceV2Test {
             assertThat(query.getRecentlyStartDate().getTime())
                 .isBetween(DateUtils.addDays(new Date(before), -90).getTime(),
                     DateUtils.addDays(new Date(), -90).getTime());
-            return Collections.emptyList();
+            assertThat(CurrentUserHolder.getDefaultDigEmployeeId()).isEqualTo(101L);
+            return List.of(newDefault, oldDefault);
         });
 
         service.queryMyAuthEmploy(qo);
+        assertThat(newDefault.getIsDefault()).isTrue();
+        assertThat(oldDefault.getIsDefault()).isFalse();
+    }
+
+    @Test
+    void defaultBindingIsReloadedAfterSwitchingWithoutRefreshingLoginSnapshot() {
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        loginInfo.setDefaultDigEmployeeId(100L);
+        SuasSuperassist superassist = new SuasSuperassist();
+        superassist.setDefaultDigEmployeeId(101L);
+        when(suasSuperassistService.findById(1L)).thenReturn(superassist);
+        when(indexService.selectAuthDigitEmploy(any())).thenReturn(Collections.emptyList());
+        MyAuthEmployQo qo = new MyAuthEmployQo();
+
+        service.queryMyAuthEmploy(qo);
+        assertThat(qo.getDefaultDigitalEmployeeId()).isEqualTo(101L);
+
+        // 模拟另一会话切换默认员工，本请求仍带着上一次登录快照。
+        superassist.setDefaultDigEmployeeId(102L);
+        service.queryMyAuthEmploy(qo);
+        assertThat(qo.getDefaultDigitalEmployeeId()).isEqualTo(102L);
+        assertThat(loginInfo.getDefaultDigEmployeeId()).isEqualTo(102L);
+    }
+
+    @Test
+    void clearedOrMissingDefaultBindingDoesNotRestoreStaleLoginDefault() {
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        loginInfo.setDefaultDigEmployeeId(100L);
+        when(suasSuperassistService.findById(1L)).thenReturn(new SuasSuperassist(), null);
+        when(indexService.selectAuthDigitEmploy(any())).thenReturn(Collections.emptyList());
+        MyAuthEmployQo qo = new MyAuthEmployQo();
+
+        service.queryMyAuthEmploy(qo);
+        assertThat(qo.getDefaultDigitalEmployeeId()).isNull();
+        assertThat(loginInfo.getDefaultDigEmployeeId()).isNull();
+
+        loginInfo.setDefaultDigEmployeeId(100L);
+        service.queryMyAuthEmploy(qo);
+        assertThat(qo.getDefaultDigitalEmployeeId()).isNull();
+        assertThat(loginInfo.getDefaultDigEmployeeId()).isNull();
     }
 
     @Test

@@ -3,6 +3,7 @@ jest.mock('@/service/employeePublication', () => ({
   openEmployeePublication: jest.fn(),
 }));
 import { openEmployeePublication } from '@/service/employeePublication';
+let mockDefaultEmployeeId = 'default-agent-1';
 jest.mock('@umijs/max', () => ({
   getIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
@@ -16,11 +17,11 @@ jest.mock('@umijs/max', () => ({
     selector({
       user: {
         userInfo: {
-          defaultDigEmployeeId: 'default-agent-1',
+          defaultDigEmployeeId: mockDefaultEmployeeId,
         },
       },
       employees: {
-        defaultDigEmployeeId: 'default-agent-1',
+        defaultDigEmployeeId: mockDefaultEmployeeId,
       },
     }),
 }));
@@ -126,6 +127,10 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
 
 // 卡片包含真实确认弹层与全局消息；只增加用例总预算，不延长查找/断言超时。
 const lifecycleTestTimeout = 15000;
+
+beforeEach(() => {
+  mockDefaultEmployeeId = 'default-agent-1';
+});
 
 beforeAll(() => {
   // 静态 message/Modal 使用独立 React 根，需要单独关闭动画，才能沿用容器内的测试配置。
@@ -1930,6 +1935,7 @@ describe('ResourceCard', () => {
   });
 
   it('shows the default digital employee badge when the digital employee is default', () => {
+    mockDefaultEmployeeId = '';
     renderWithQueryClient(
       <ResourceCard
         resource={{
@@ -1942,6 +1948,32 @@ describe('ResourceCard', () => {
     );
 
     expect(screen.getByText('resource.defaultDigitalEmployee')).toHaveClass('defaultDigitalEmployeeBadge');
+  });
+
+  it('removes the previous group default badge when the current default ID changes despite stale list flags', () => {
+    mockDefaultEmployeeId = 'old-group';
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const cards = () => (
+      <QueryClientProvider client={client}>
+        <div data-testid="old-group">
+          <ResourceCard
+            resource={{ resourceId: 'old-group', resourceBizType: 'DIG_EMPLOYEE', agentType: '017', isDefault: true }}
+          />
+        </div>
+        <div data-testid="new-employee">
+          <ResourceCard resource={{ resourceId: 'new-employee', resourceBizType: 'DIG_EMPLOYEE', isDefault: false }} />
+        </div>
+      </QueryClientProvider>
+    );
+    const view = render(cards());
+    expect(within(screen.getByTestId('old-group')).getByText('resource.defaultDigitalEmployee')).toBeInTheDocument();
+
+    mockDefaultEmployeeId = 'new-employee';
+    view.rerender(cards());
+
+    expect(within(screen.getByTestId('old-group')).queryByText('resource.defaultDigitalEmployee')).toBeNull();
+    expect(within(screen.getByTestId('new-employee')).getByText('resource.defaultDigitalEmployee')).toBeInTheDocument();
+    expect(screen.getAllByText('resource.defaultDigitalEmployee')).toHaveLength(1);
   });
 
   // 员工卡片保留独立申请按钮和管理操作，默认入口独立遵循后端 canSetDefault。
@@ -2056,7 +2088,7 @@ describe('ResourceCard', () => {
     expect(screen.getByText('resource.setDefaultAssistant')).toBeTruthy();
   });
 
-  // 默认身份可来自列表字段或全局默认员工 ID，两种来源都不能覆盖后端允许设置的权限。
+  // 全局默认身份优先于列表标记，但不能覆盖后端允许设置的权限。
   it.each([
     { resourceId: 'default-flag-employee', isDefault: true },
     { resourceId: 'default-agent-1', isDefault: false },
@@ -2074,7 +2106,9 @@ describe('ResourceCard', () => {
     );
 
     expect(screen.getByText('resource.setDefaultAssistant')).toBeTruthy();
-    expect(screen.getByText('resource.defaultDigitalEmployee')).toBeTruthy();
+    expect(Boolean(screen.queryByText('resource.defaultDigitalEmployee'))).toBe(
+      identity.resourceId === mockDefaultEmployeeId
+    );
   });
 
   it.each([false, undefined])('hides set default when the backend does not grant permission: %s', (canSetDefault) => {

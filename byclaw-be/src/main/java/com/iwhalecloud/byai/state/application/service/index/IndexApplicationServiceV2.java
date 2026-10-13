@@ -157,10 +157,7 @@ public class IndexApplicationServiceV2 {
      * @return 当前用户绑定的默认数字员工资源 ID
      */
     private Long resolveCurrentUserDefaultDigitalEmployeeId() {
-        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
-        if (defaultDigEmployeeId != null) {
-            return defaultDigEmployeeId;
-        }
+        // 默认绑定可在其他请求/会话中切换，不能让登录快照覆盖数据库中的最新绑定。
         Long assistantId = CurrentUserHolder.getAssistantId();
         if (assistantId == null || assistantId <= 0) {
             assistantId = CurrentUserHolder.getCurrentUserId();
@@ -169,7 +166,12 @@ public class IndexApplicationServiceV2 {
             return null;
         }
         SuasSuperassist suasSuperassist = suasSuperassistService.findById(assistantId);
-        return suasSuperassist == null ? null : suasSuperassist.getDefaultDigEmployeeId();
+        Long defaultDigEmployeeId = suasSuperassist == null ? null : suasSuperassist.getDefaultDigEmployeeId();
+        if (CurrentUserHolder.getLoginInfo() != null) {
+            // 后续批量权限回填也使用同一个默认 ID，避免排序、标签和 canSetDefault 不一致。
+            CurrentUserHolder.getLoginInfo().setDefaultDigEmployeeId(defaultDigEmployeeId);
+        }
+        return defaultDigEmployeeId;
     }
 
     /**

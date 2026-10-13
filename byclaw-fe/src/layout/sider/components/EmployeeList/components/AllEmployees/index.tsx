@@ -111,7 +111,8 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
           return mergedResponse;
         })
         .then((res) => {
-          if (!res) return;
+          // 切换默认会重新加载首页，忽略已取消的旧分页响应，避免旧默认和顺序回写。
+          if (!res || abortController.signal.aborted) return;
           const { list, ...pageInfo } = res;
           // 联网搜索数字员工不能被手动@出来，只能通过点击按钮切换
           const employeeList = (list || [])

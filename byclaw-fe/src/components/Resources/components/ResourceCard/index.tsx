@@ -566,10 +566,10 @@ const RenderContent = (props: ResourceCardProps) => {
       isTruthyFlag(resource.canApplyUse);
   const resourceIdentity = `${resource.resourceId ?? resource.id ?? ''}`;
   const defaultEmployeeIdentity = `${defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`;
+  // 已知当前默认 ID 时，以该唯一身份为准，避免旧列表的 isDefault 残留出第二个默认标签。
   const isDefaultDigitalEmployee =
     isDigitalEmployeeResource &&
-    (isTruthyFlag(resource.isDefault) ||
-      (Boolean(defaultEmployeeIdentity) && resourceIdentity === defaultEmployeeIdentity));
+    (defaultEmployeeIdentity ? resourceIdentity === defaultEmployeeIdentity : isTruthyFlag(resource.isDefault));
   const showResourceTypeTag = actionConfig?.showResourceTypeTag === true;
   const normalizedOwnerType = `${ownerType || ''}`.toLowerCase();
   // 未资源化的工作空间技能来自个人技能列表，接口没有 ownerType。
