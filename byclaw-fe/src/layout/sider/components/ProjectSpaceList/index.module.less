@@ -2313,20 +2313,17 @@
 }
 
 .repoNodeGitActions {
+  // GitHub 图标作为行尾的固定宽度槽位参与弹性布局，不再绝对定位悬浮在目录名之上：
+  // 目录名在剩余宽度内正常省略，省略号与图标之间的间距由父级 gap(4px) + 本节点 margin-left(4px) 组成。
+  // 行尾三点操作按钮的槽位由 FileSiderPanel 的 treeTitleContentActionSlot 统一预留。
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  position: absolute;
-  top: 50%;
-  right: 32px;
   flex: 0 0 auto;
-  margin-left: 0;
-  transform: translateY(-50%);
-  z-index: 2;
-}
-
-.treeTitleContent:has(.repoNodeGitActions) .treeTitleName {
-  padding-right: 68px;
+  width: 28px;
+  height: 28px;
+  margin-left: 4px;
 }
 
 .codeChangePopover {

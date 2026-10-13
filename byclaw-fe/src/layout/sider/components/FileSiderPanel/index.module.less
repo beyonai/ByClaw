@@ -414,6 +414,18 @@
   }
 }
 
+// 行尾存在附加节点（如「项目空间」的 GitHub 图标）时，附加节点以固定槽位参与弹性布局，
+// 目录名的省略交给剩余宽度决定；此时不再叠加 hover 态的 32px 内边距，避免名称被二次压缩、省略号提前出现。
+.treeTitleContent.treeTitleContentWithExtra:hover .treeTitleName {
+  padding-right: 0;
+}
+
+// 行尾同时存在三点操作按钮时，为这个绝对定位在行尾（right: 0，宽 28px）的按钮预留槽位，
+// 使附加节点落在按钮左侧，两者互不遮挡。
+.treeTitleContent.treeTitleContentActionSlot {
+  padding-right: 32px;
+}
+
 .treeTitleContentActionVisible {
   .treeActionTrigger {
     opacity: 1;

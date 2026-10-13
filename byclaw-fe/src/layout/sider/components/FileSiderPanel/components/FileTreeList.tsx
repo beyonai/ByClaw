@@ -202,6 +202,10 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
               onDoubleClick={(_, node) => onNodeDoubleClick(node as unknown as FileTreeItem)}
               titleRender={(item) => {
                 const treeItem = item as FileTreeItem;
+                // 行尾附加节点只求值一次：既用于渲染，也作为「本行是否需要为它预留槽位」的判据。
+                const nodeExtra = getNodeExtra?.(treeItem);
+                const actionItems = getActionItems(treeItem);
+                const hasActions = Boolean(showActions && actionItems?.length);
                 const hasItemMeta =
                   showItemMeta &&
                   Boolean(
@@ -223,6 +227,9 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                   <span
                     className={[
                       styles.treeTitleContent,
+                      // 附加节点以固定槽位参与弹性布局；同时出现三点按钮时再为它预留行尾槽位。
+                      nodeExtra ? styles.treeTitleContentWithExtra : '',
+                      nodeExtra && hasActions ? styles.treeTitleContentActionSlot : '',
                       directoryExpanded ? styles.treeTitleContentExpanded : '',
                       directoryCurrent ? styles.treeTitleContentCurrent : '',
                     ]
@@ -252,12 +259,12 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                         ) : null}
                       </span>
                     </FilePathTooltip>
-                    {showActions && getActionItems(treeItem)?.length ? (
+                    {hasActions ? (
                       <Dropdown
                         trigger={['hover']}
                         overlayClassName={employeeStyles.mydropdown}
                         menu={{
-                          items: getActionItems(treeItem),
+                          items: actionItems,
                           onClick: ({ key, domEvent }) => {
                             domEvent.stopPropagation();
                             onAction(key, treeItem);
@@ -273,7 +280,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                         </span>
                       </Dropdown>
                     ) : null}
-                    {getNodeExtra?.(treeItem)}
+                    {nodeExtra}
                   </span>
                 );
               }}

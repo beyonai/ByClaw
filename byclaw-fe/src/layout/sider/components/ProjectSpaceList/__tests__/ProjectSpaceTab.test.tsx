@@ -16,25 +16,31 @@ jest.mock('@/service/fileBrowser', () => ({ renameFile: jest.fn() }));
 jest.mock('@/service/knowledgeCenter', () => ({}));
 jest.mock('@/components/ProjectCloudDrive', () => ({ queryProjectCloudDrive: jest.fn() }));
 
-// 保留真实菜单生成逻辑，隔离目录树与文件预览，检查传给公共文件树的菜单内容。
-jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', () => (props: any) => (
-  <div>
-    {props.items.map((item: any) => (
-      <div key={item.path} data-testid={item.name}>
-        {props.getActionItems(item).map((action: any) => (
-          <button
-            key={action.key}
-            role="menuitem"
-            data-danger={action.danger ? 'true' : undefined}
-            onClick={() => props.onAction(action.key, item)}
-          >
-            {action.label}
-          </button>
-        ))}
-      </div>
-    ))}
-  </div>
-));
+// 保留真实菜单生成逻辑，隔离目录树与文件预览，检查传给公共文件树的菜单内容；
+// 同时把 FileSpaceBlock 收到的 getNodeExtra 捕获到测试作用域，用于断言 GitHub 图标的渲染守卫。
+let mockGetNodeExtra: ((item: any) => any) | undefined;
+
+jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', () => (props: any) => {
+  mockGetNodeExtra = props.getNodeExtra;
+  return (
+    <div>
+      {props.items.map((item: any) => (
+        <div key={item.path} data-testid={item.name}>
+          {props.getActionItems(item).map((action: any) => (
+            <button
+              key={action.key}
+              role="menuitem"
+              data-danger={action.danger ? 'true' : undefined}
+              onClick={() => props.onAction(action.key, item)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+});
 
 it('uses the shared file menu spacing for every project-space action and keeps delete dangerous', async () => {
   jest.mocked(listProjectSpaceTree).mockResolvedValue([
@@ -60,6 +66,25 @@ it('uses the shared file menu spacing for every project-space action and keeps d
   const folder = within(screen.getByTestId('reports'));
   expect(folder.queryByText('fileBrowser.action.preview')).not.toBeInTheDocument();
   expect(folder.queryByText('projectSpace.projectDrive.save')).not.toBeInTheDocument();
+});
+
+it('renders the GitHub action only for git repository rows in the project space tree', async () => {
+  jest.mocked(listProjectSpaceTree).mockResolvedValue([
+    { name: 'reports', path: 'reports', type: 'directory', gitRepository: true },
+    { name: 'docs', path: 'docs', type: 'directory' },
+  ] as any);
+
+  render(<ProjectSpaceTab projectId={42} resourceId="100" projectCloudResourceId="200" />);
+  await screen.findByTestId('reports');
+
+  expect(mockGetNodeExtra).toBeDefined();
+  const gitNode = mockGetNodeExtra!({ name: 'reports', path: 'reports', isDir: true, gitRepository: true } as any);
+  expect(gitNode).toBeTruthy();
+  const gitView = render(<>{gitNode}</>);
+  expect(gitView.getByLabelText('GitHub')).toBeInTheDocument();
+  gitView.unmount();
+
+  expect(mockGetNodeExtra!({ name: 'docs', path: 'docs', isDir: true } as any)).toBeNull();
 });
 
 it('enables rename only for a changed nonempty name and guards Enter submission', async () => {
