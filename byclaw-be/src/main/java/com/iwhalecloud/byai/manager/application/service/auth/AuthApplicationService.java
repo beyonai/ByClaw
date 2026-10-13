@@ -673,6 +673,10 @@ public class AuthApplicationService {
 
         // 3. 使用人员设置按后台直接授权口径写入 FORCE_USE。
         AuthRedBlackDTO authDto = buildResourceMemberAuthDto(ssResource, GrantType.FORCE_USE, qo);
+        if (Boolean.TRUE.equals(qo.getIncludeUseGrantFamily())
+            && !ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType())) {
+            prepareMergedResourceUseAuthorization(authDto);
+        }
         applyResourceMemberAuthorization(ssResource, authDto);
 
         // 4. 同步撤销本次授权用户在该资源上的待审申请（status_cd: P -> X），
@@ -681,6 +685,67 @@ public class AuthApplicationService {
 
         // 名单写入后读取最终有效使用人，覆盖新授权以及历史遗漏的绑定资源权限。
         synchronizeDigitalEmployeeResourceUsers(ssResource, null);
+    }
+
+    /**
+     * 合并抽屉的删除同时覆盖 AVAILABLE_USE，保留仍选中的原始记录及有效期。
+     * 新增对象仍走 FORCE_USE；已有 AVAILABLE_USE 的对象不转换类型，也不重复新增黑名单。
+     * 数字员工/员工组不走此入口，避免改变组授权同步的原有契约。
+     */
+    private void prepareMergedResourceUseAuthorization(AuthRedBlackDTO authDto) {
+        CompareVo availableRemoved = new CompareVo();
+        CompareVo forceRemoved = new CompareVo();
+        authDto.setRedList(reconcileMergedUseTargets(authDto, authDto.getRedList(), Color.RED,
+            availableRemoved.getRedDelMap(), forceRemoved.getRedDelMap()));
+        authDto.setBlackList(reconcileMergedUseTargets(authDto, authDto.getBlackList(), Color.BLACK,
+            availableRemoved.getBlackDelMap(), forceRemoved.getBlackDelMap()));
+        refreshMergedUseRemovals(authDto, availableRemoved, GrantType.AVAILABLE_USE);
+        refreshMergedUseRemovals(authDto, forceRemoved, GrantType.FORCE_USE);
+    }
+
+    private void refreshMergedUseRemovals(AuthRedBlackDTO authDto, CompareVo removed, String grantType) {
+        Set<Long> removedUserIds = extractInvolvedUserIds(removed, authDto.getGrantObjType(), authDto.getGrantObjId());
+        if (!removedUserIds.isEmpty()) {
+            syncAuthChangedUsersAfterCommit(removedUserIds, grantType);
+        }
+    }
+
+    private List<AuthDTO> reconcileMergedUseTargets(AuthRedBlackDTO authDto, List<AuthDTO> requested,
+        String color, Map<String, PrivilegeGrant> availableRemoved, Map<String, PrivilegeGrant> forceRemoved) {
+        Set<String> requestedKeys = requested.stream()
+            .map(target -> buildGrantTargetKey(color, target.getGrantToObjType(), target.getGrantToObjId()))
+            .collect(Collectors.toSet());
+        Set<String> retainedAvailableKeys = removeUnselectedUseGrants(authDto, requestedKeys, color,
+            GrantType.AVAILABLE_USE, availableRemoved);
+        Set<String> forceKeys = removeUnselectedUseGrants(authDto, requestedKeys, color,
+            GrantType.FORCE_USE, forceRemoved);
+        if (retainedAvailableKeys.isEmpty()) {
+            return requested;
+        }
+        // 原来只有 AVAILABLE_USE 的对象无需再写 FORCE_USE；同时有两种记录时保留已有 FORCE_USE。
+        return requested.stream().filter(target -> {
+            String key = buildGrantTargetKey(color, target.getGrantToObjType(), target.getGrantToObjId());
+            return !retainedAvailableKeys.contains(key) || forceKeys.contains(key);
+        }).collect(Collectors.toList());
+    }
+
+    private Set<String> removeUnselectedUseGrants(AuthRedBlackDTO authDto, Set<String> requestedKeys,
+        String color, String grantType, Map<String, PrivilegeGrant> removed) {
+        List<PrivilegeGrant> history = privilegeGrantService.findPrivilegeGrant(grantType,
+            authDto.getGrantObjType(), authDto.getGrantObjId(), color);
+        Set<String> retainedKeys = new HashSet<>();
+        for (PrivilegeGrant grant : history) {
+            String targetKey = buildGrantTargetKey(color, grant.getGrantToObjType(), grant.getGrantToObjId());
+            if (requestedKeys.contains(targetKey)) {
+                retainedKeys.add(targetKey);
+            } else {
+                String key = buildPrivilegeGrantKey(grant) + "|" + buildPrivilegeGrantValue(grant);
+                // 两种使用授权均逐条撤销，避免同对象的历史重复记录在 Map 去重后仍有一条生效。
+                handleDel(grantType, Collections.singletonMap(key, grant));
+                removed.put(key, grant);
+            }
+        }
+        return retainedKeys;
     }
 
     /** 企业员工保存/授权共用入口；个人资源及员工组的现有授权契约保持独立。 */
@@ -2963,6 +3028,8 @@ public class AuthApplicationService {
     private boolean shouldSkipSameDimensionDuplicateGrant(String grantType, PrivilegeGrant privilegeGrant) {
         List<String> sameFamilyGrantTypes = resolveSameFamilyGrantTypes(grantType);
         if (CollectionUtils.isEmpty(sameFamilyGrantTypes) || privilegeGrant == null
+            // 已有红名单授权不能阻止新增排除对象，红黑名单必须分别处理。
+            || !Color.RED.equalsIgnoreCase(privilegeGrant.getGrantToType())
             || StringUtils.isBlank(privilegeGrant.getGrantToObjType()) || privilegeGrant.getGrantToObjId() == null) {
             return false;
         }
@@ -3014,7 +3081,15 @@ public class AuthApplicationService {
 
         // 查询授权信息
         LambdaQueryWrapper<PrivilegeGrant> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(PrivilegeGrant::getGrantType, authDetailQo.getGrantType());
+        boolean includeUseGrantFamily = Boolean.TRUE.equals(authDetailQo.getIncludeUseGrantFamily())
+            && !ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(authDetailQo.getGrantObjType())
+            && (GrantType.AVAILABLE_USE.equals(authDetailQo.getGrantType())
+                || GrantType.FORCE_USE.equals(authDetailQo.getGrantType()));
+        if (includeUseGrantFamily) {
+            queryWrapper.in(PrivilegeGrant::getGrantType, List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE));
+        } else {
+            queryWrapper.eq(PrivilegeGrant::getGrantType, authDetailQo.getGrantType());
+        }
         queryWrapper.eq(PrivilegeGrant::getGrantObjType, authDetailQo.getGrantObjType());
         queryWrapper.eq(PrivilegeGrant::getGrantObjId, authDetailQo.getGrantObjId());
         queryWrapper.eq(PrivilegeGrant::getStatusCd, "A");

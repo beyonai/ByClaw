@@ -112,11 +112,13 @@ public class IndexApplicationServiceV2 {
         // 按用户近 90 天使用频次降序排列
         myAuthEmployQo.setRecentlyStartDate(DateUtils.addDays(new Date(), -90));
 
+        // 默认员工必须在数据库分页前参与排序，避免仅在当前页内置顶而遗漏后续页的默认员工。
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
+        myAuthEmployQo.setDefaultDigitalEmployeeId(defaultDigitalEmployeeId);
         Page<AuthDigitEmployVo> page = PageHelper.startPage(myAuthEmployQo.getPageNum(), myAuthEmployQo.getPageSize());
         List<AuthDigitEmployVo> authDigitEmployVos = indexService.selectAuthDigitEmploy(myAuthEmployQo);
 
         // 为每个数字员工设置是否有记忆（优化：批量查询）
-        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
             this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);

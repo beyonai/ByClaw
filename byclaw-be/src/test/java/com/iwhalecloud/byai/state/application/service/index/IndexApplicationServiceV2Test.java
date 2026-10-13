@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.index;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -11,6 +13,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.qo.index.DiscoverQo;
+import com.iwhalecloud.byai.manager.qo.index.MyAuthEmployQo;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
 import com.iwhalecloud.byai.manager.vo.index.DigitEmployMarketExtVo;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
@@ -18,7 +21,9 @@ import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextSer
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
+import org.apache.commons.lang3.time.DateUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,7 +76,39 @@ class IndexApplicationServiceV2Test {
 
     @AfterEach
     void tearDown() {
+        PageHelper.clearPage();
         CurrentUserHolder.setLoginInfo(null);
+    }
+
+    @Test
+    void pickerResolvesCurrentUserDefaultAndNinetyDayWindowBeforeQuery() {
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(1L);
+        loginInfo.setDefaultDigEmployeeId(101L);
+        CurrentUserHolder.setLoginInfo(loginInfo);
+        MyAuthEmployQo qo = new MyAuthEmployQo();
+        qo.setSortMode("DEFAULT_USAGE_DESC");
+        qo.setDefaultDigitalEmployeeId(999L);
+        long before = System.currentTimeMillis();
+        when(indexService.selectAuthDigitEmploy(any())).thenAnswer(invocation -> {
+            MyAuthEmployQo query = invocation.getArgument(0);
+            // 必须在 Mapper 查询时就有真实默认员工，不能查询完当前页后才补默认标识。
+            assertThat(query.getDefaultDigitalEmployeeId()).isEqualTo(101L);
+            assertThat(query.getRecentlyStartDate().getTime())
+                .isBetween(DateUtils.addDays(new Date(before), -90).getTime(),
+                    DateUtils.addDays(new Date(), -90).getTime());
+            return Collections.emptyList();
+        });
+
+        service.queryMyAuthEmploy(qo);
+    }
+
+    @Test
+    void defaultEmployeeSortingIdentityCannotBeProvidedByClient() throws Exception {
+        MyAuthEmployQo qo = new ObjectMapper().readValue(
+            "{\"sortMode\":\"DEFAULT_USAGE_DESC\",\"defaultDigitalEmployeeId\":999}", MyAuthEmployQo.class);
+        assertThat(qo.getSortMode()).isEqualTo("DEFAULT_USAGE_DESC");
+        assertThat(qo.getDefaultDigitalEmployeeId()).isNull();
     }
 
     @Test
