@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.mapper.index;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.github.pagehelper.parser.CountSqlParser;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -14,7 +15,7 @@ import org.apache.ibatis.scripting.xmltags.XMLLanguageDriver;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
-/** 执行真实 Mapper SQL，验证两种排序在分页前生效，默认员工不会突破可见范围。 */
+/** 执行真实 Mapper SQL 和 PageHelper 计数 SQL，验证分页排序与可见范围。 */
 class IndexMapperEmployeeSortingTest {
 
     @Test
@@ -46,14 +47,32 @@ class IndexMapperEmployeeSortingTest {
         }
     }
 
-    private List<Long> queryPages(Connection connection, String sortMode, Long defaultId) throws Exception {
+    @Test
+    void paginationCountPreservesGroupAndPermissionFiltersForEverySortMode() throws Exception {
+        try (Connection connection = database()) {
+            for (String sortMode : new String[] {"DEFAULT_USAGE_DESC", "GROUP_UPDATED_DESC", null}) {
+                Map<String, Object> params = parameters(sortMode, 6L);
+                assertCount(connection, boundSql(params), params, 7L);
+                // 默认员工为员工组时，排除员工组的条件仍需同时作用于总数查询。
+                params.put("excludeEmployeeGroup", true);
+                assertCount(connection, boundSql(params), params, 5L);
+                params.put("userId", 12L);
+                assertCount(connection, boundSql(params), params, 0L);
+            }
+        }
+    }
+
+    private Map<String, Object> parameters(String sortMode, Long defaultId) {
         Map<String, Object> params = new HashMap<>();
         params.put("userId", 11L);
         params.put("recentlyStartDate", "2026-07-15 00:00:00");
         params.put("sortMode", sortMode);
         params.put("defaultDigitalEmployeeId", defaultId);
+        return params;
+    }
+
+    private BoundSql boundSql(Map<String, Object> params) throws Exception {
         String path = "/com/iwhalecloud/byai/manager/mapper/index/IndexMapper.xml";
-        BoundSql boundSql;
         try (var input = getClass().getResourceAsStream(path)) {
             assertThat(input).isNotNull();
             String xml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
@@ -62,9 +81,33 @@ class IndexMapperEmployeeSortingTest {
             int bodyStart = xml.indexOf('>', start) + 1;
             int end = xml.indexOf("</select>", bodyStart);
             String script = "<script>" + xml.substring(bodyStart, end) + "</script>";
-            boundSql = new XMLLanguageDriver().createSqlSource(new Configuration(), script, Map.class)
+            return new XMLLanguageDriver().createSqlSource(new Configuration(), script, Map.class)
                 .getBoundSql(params);
         }
+    }
+
+    private void assertCount(Connection connection, BoundSql boundSql, Map<String, Object> params, long expected)
+        throws Exception {
+        String countSql = new CountSqlParser().getSmartCountSql(boundSql.getSql());
+        // SQLite 容忍聚合查询按非聚合列排序，因此还要显式阻止 PostgreSQL 报错的 ORDER BY 回归。
+        assertThat(countSql).doesNotContainIgnoringCase("order by");
+        try (var statement = connection.prepareStatement(countSql)) {
+            // 使用原始 BoundSql 的映射绑定，确保计数改写没有丢失参数或打乱参数顺序。
+            for (int i = 0; i < boundSql.getParameterMappings().size(); i++) {
+                statement.setObject(i + 1, params.get(boundSql.getParameterMappings().get(i).getProperty()));
+            }
+            try (var rows = statement.executeQuery()) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getLong(1)).isEqualTo(expected);
+                assertThat(rows.next()).isFalse();
+            }
+        }
+    }
+
+    private List<Long> queryPages(Connection connection, String sortMode, Long defaultId) throws Exception {
+        Map<String, Object> params = parameters(sortMode, defaultId);
+        BoundSql boundSql = boundSql(params);
+        assertCount(connection, boundSql, params, 7L);
         List<Long> ids = new ArrayList<>();
         for (int offset = 0; offset < 9; offset += 3) {
             try (var statement = connection.prepareStatement(boundSql.getSql() + " limit 3 offset " + offset)) {

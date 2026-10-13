@@ -141,6 +141,10 @@
                    else null
                end as grantType,
                k.latest_grant_time
+               <!-- 参数放在查询列中，避免 PageHelper 计数时保留带参数的 ORDER BY，生成非法聚合 SQL。 -->
+               <if test="sortMode == 'DEFAULT_USAGE_DESC'">
+                   , case when a.resource_id = #{defaultDigitalEmployeeId} then 0 else 1 end as default_employee_priority
+               </if>
         from ss_resource a
                  left join ss_res_ext_dig_employee b
                      on a.resource_id = b.resource_id
@@ -300,7 +304,7 @@
         <!-- 两个入口的排序均在分页前完成；ID 降序保证同时间记录跨页时顺序稳定。 -->
         <choose>
             <when test="sortMode == 'DEFAULT_USAGE_DESC'">
-                order by case when a.resource_id = #{defaultDigitalEmployeeId} then 0 else 1 end asc,
+                order by default_employee_priority asc,
                          COALESCE(d.total, 0) desc,
                          COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
                          a.create_time desc,
