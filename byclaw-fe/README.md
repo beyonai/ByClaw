@@ -172,6 +172,10 @@ const target = 'http://your-api-server:8569';
 
 ## 文档
 
+聊天 VNC 入口只选择 `status === 'RUNNING'` 且包含 `instanceEndpoints.vnc` 的沙箱。
+访问地址使用后端返回的 VNC 端点，保留 token 等查询参数；相对地址基于当前网页域名解析，
+并设置 `autoconnect=true`、`resize=scale`。没有符合条件的沙箱时返回空地址。
+
 - [快速入门](docs/quick-start/README.md)
 - [架构设计](docs/architecture/README.md)
 - [API 文档](docs/api/README.md)
