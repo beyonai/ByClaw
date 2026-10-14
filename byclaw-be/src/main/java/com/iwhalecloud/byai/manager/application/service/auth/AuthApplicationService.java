@@ -36,7 +36,6 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitServi
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SuperassistSubAgentService;
-import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
@@ -51,7 +50,6 @@ import com.iwhalecloud.byai.manager.entity.position.Position;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.station.Station;
-import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.entity.users.UsersOrganization;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
@@ -201,9 +199,6 @@ public class AuthApplicationService {
 
     @Autowired
     private SuperassistSubAgentService superassistSubAgentService;
-
-    @Autowired
-    private SuasSuperassistService suasSuperassistService;
 
     @Autowired
     private SsResourceMapper ssResourceMapper;
@@ -3577,10 +3572,6 @@ public class AuthApplicationService {
         Set<Long> useBlacklistedIds = collectBatchGrantIds(grants, useGrantTypes, Color.BLACK);
         Set<Long> usePermittedIds = collectBatchGrantIds(grants, useGrantTypes, Color.RED);
         Set<Long> pendingUseApplyIds = queryCurrentUserPendingUseApplyResourceIds(existingResourceIds, resourceBizTypes);
-        boolean containsDigitalEmployee = resources.stream()
-            .anyMatch(resource -> resource != null
-                && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(resource.getResourceBizType()));
-        Long defaultDigitalEmployeeId = containsDigitalEmployee ? resolveCurrentUserDefaultDigitalEmployeeId() : null;
         List<Long> skillResourceIds = resources.stream()
             .filter(resource -> ResourceBizTypeEnum.SKILL.name().equals(resource.getResourceBizType()))
             .map(SsResource::getResourceId)
@@ -3604,8 +3595,7 @@ public class AuthApplicationService {
             }
             result.put(resource.getResourceId(), buildResourceOperationPermissions(resource, currentUserId,
                 managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds,
-                defaultDigitalEmployeeId, innerSkillResourceIds,
-                employeePublishPermissions.getOrDefault(resource.getResourceId(), false)));
+                innerSkillResourceIds, employeePublishPermissions.getOrDefault(resource.getResourceId(), false)));
             ResourceOperationPermissionsVo permission = result.get(resource.getResourceId());
             if (permission.isCanPublishToEnterprise()) {
                 permission.setSkillPublication(skillPublications.get(resource.getResourceId()));
@@ -3617,15 +3607,15 @@ public class AuthApplicationService {
 
     private ResourceOperationPermissionsVo buildResourceOperationPermissions(SsResource ssResource,
                                                                              Long currentUserId, Set<Long> managePrivilegeIds, Set<Long> useBlacklistedIds, Set<Long> usePermittedIds,
-                                                                             Set<Long> pendingUseApplyIds, Long defaultDigitalEmployeeId,
+                                                                             Set<Long> pendingUseApplyIds,
                                                                              Set<Long> innerSkillResourceIds) {
         return buildResourceOperationPermissions(ssResource, currentUserId, managePrivilegeIds, useBlacklistedIds,
-            usePermittedIds, pendingUseApplyIds, defaultDigitalEmployeeId, innerSkillResourceIds, null);
+            usePermittedIds, pendingUseApplyIds, innerSkillResourceIds, null);
     }
 
     private ResourceOperationPermissionsVo buildResourceOperationPermissions(SsResource ssResource,
                                                                              Long currentUserId, Set<Long> managePrivilegeIds, Set<Long> useBlacklistedIds, Set<Long> usePermittedIds,
-                                                                             Set<Long> pendingUseApplyIds, Long defaultDigitalEmployeeId,
+                                                                             Set<Long> pendingUseApplyIds,
                                                                              Set<Long> innerSkillResourceIds, Boolean canPublishEmployee) {
         ResourceOperationPermissionsVo vo = new ResourceOperationPermissionsVo();
         Long resourceId = ssResource.getResourceId();
@@ -3637,7 +3627,7 @@ public class AuthApplicationService {
         boolean canManage =
             hasResourceMemberSettingPermission(ssResource, currentUserId, managePrivilegeIds);
         boolean hasUsePermission =
-            hasResourceUsePermission(ssResource, currentUserId, useBlacklistedIds, usePermittedIds);
+            hasResourceUsePermission(ssResource, currentUserId, managePrivilegeIds, useBlacklistedIds, usePermittedIds);
         boolean useApplyPending = !hasUsePermission && pendingUseApplyIds != null
             && pendingUseApplyIds.contains(resourceId);
         vo.setHasManagePermission(canManage);
@@ -3659,7 +3649,6 @@ public class AuthApplicationService {
             vo.setCanUseAuth(false);
             vo.setCanDelete(false);
             vo.setCanApplyUse(false);
-            vo.setCanSetDefault(false);
             vo.setCanRestore(false);
             vo.setCanOnShelf(false);
             vo.setCanOffShelf(false);
@@ -3679,16 +3668,15 @@ public class AuthApplicationService {
         boolean canEdit = isDigitalEmployee
             ? (canManage || isBoundDefaultDigEmployee)
             : (canManage && !isDefaultResource);
-        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource && !isInnerSkillResource);
+        // adminvip 可维护内置技能的展示信息，删除和上下架仍保留内置技能只读限制。
+        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource
+            && (!isInnerSkillResource || CurrentUserHolder.isAdminVip()));
         vo.setCanManageAuth(canManage && !isDefaultResource && !isPersonalAssistantResource);
         vo.setCanUseAuth(canSetUse);
         vo.setCanDelete(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
             && !isWhaleAgentExternalKnowledgeOrToolResource && !isInnerSkillResource);
-        vo.setCanApplyUse(!isPersonalResourceUseApplyUnsupported
+        vo.setCanApplyUse(!hasUsePermission && !isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource, currentUserId, useBlacklistedIds, usePermittedIds, pendingUseApplyIds));
-        // 与单条权限一致，设为默认不再额外按全局管理角色放行；adminvip 已包含在 canManage 中。
-        vo.setCanSetDefault(canSetDefaultDigitalEmployee(ssResource, canManage, hasUsePermission,
-            defaultDigitalEmployeeId));
 
         // 数字员工的上下架/删除权限还需要结合当前资源状态和创建者身份判断，保持与单条权限查询一致。
         if (isDigitalEmployee) {
@@ -3705,31 +3693,6 @@ public class AuthApplicationService {
         applyResourceCenterLifecyclePermissions(ssResource, vo, currentUserId);
         applyPersonalResourceAuthorizationPermissions(ssResource, vo);
         return vo;
-    }
-
-    private boolean canSetDefaultDigitalEmployee(SsResource ssResource, boolean canManage, boolean hasUsePermission,
-                                                 Long defaultDigitalEmployeeId) {
-        return ssResource != null
-            && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType())
-            && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
-            && !Objects.equals(ssResource.getResourceId(), defaultDigitalEmployeeId)
-            && (canManage || hasUsePermission);
-    }
-
-    private Long resolveCurrentUserDefaultDigitalEmployeeId() {
-        Long defaultDigitalEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
-        if (defaultDigitalEmployeeId != null) {
-            return defaultDigitalEmployeeId;
-        }
-        Long assistantId = CurrentUserHolder.getAssistantId();
-        if (assistantId == null || assistantId <= 0) {
-            assistantId = CurrentUserHolder.getCurrentUserId();
-        }
-        if (assistantId == null || assistantId <= 0) {
-            return null;
-        }
-        SuasSuperassist superassist = suasSuperassistService.findById(assistantId);
-        return superassist == null ? null : superassist.getDefaultDigEmployeeId();
     }
 
     private boolean hasResourceMemberSettingPermission(SsResource ssResource, Long currentUserId,
@@ -3754,8 +3717,8 @@ public class AuthApplicationService {
         return managePrivilegeIds != null && managePrivilegeIds.contains(ssResource.getResourceId());
     }
 
-    private boolean hasResourceUsePermission(SsResource ssResource, Long currentUserId, Set<Long> useBlacklistedIds,
-                                             Set<Long> usePermittedIds) {
+    private boolean hasResourceUsePermission(SsResource ssResource, Long currentUserId, Set<Long> managePrivilegeIds,
+                                             Set<Long> useBlacklistedIds, Set<Long> usePermittedIds) {
         if (ssResource == null || ssResource.getResourceId() == null
             || StringUtils.isBlank(ssResource.getResourceBizType())
             || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
@@ -3767,6 +3730,11 @@ public class AuthApplicationService {
         }
         Long resourceId = ssResource.getResourceId();
         if (currentUserId.equals(ssResource.getCreateBy()) || isCurrentUserBoundDefaultPersonalResource(ssResource)) {
+            return true;
+        }
+        // 与单条查询一致：有效显式管理授权可用于使用，adminvip 身份兜底不计入此集合。
+        // 管理和使用红黑名单分别计算，不能将使用黑名单套到已生效的管理授权上。
+        if (managePrivilegeIds != null && managePrivilegeIds.contains(resourceId)) {
             return true;
         }
         if (useBlacklistedIds != null && useBlacklistedIds.contains(resourceId)) {
@@ -3889,7 +3857,6 @@ public class AuthApplicationService {
             vo.setCanUseAuth(false);
             vo.setCanDelete(false);
             vo.setCanApplyUse(false);
-            vo.setCanSetDefault(false);
             vo.setCanRestore(false);
             vo.setCanOnShelf(false);
             vo.setCanOffShelf(false);
@@ -3914,17 +3881,16 @@ public class AuthApplicationService {
             : (canManage && !isDefaultResource);
         // 默认超级助手是登录初始化的个人底座资源，即使当前用户绑定为默认助理，也不开放编辑入口。
 
-        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource && !isInnerSkillResource); // 移除 !isDefaultSuperAssistantResource
+        // 与列表权限一致：内置技能仅向 adminvip 开放基础信息编辑。
+        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource
+            && (!isInnerSkillResource || CurrentUserHolder.isAdminVip()));
         vo.setCanManageAuth(canManage && !isDefaultResource
             && !isPersonalAssistantResource); // 移除 !isDefaultSuperAssistantResource
         vo.setCanUseAuth(canSetUse); // 移除 !isDefaultSuperAssistantResource
         vo.setCanDelete(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
             && !isWhaleAgentExternalKnowledgeOrToolResource && !isInnerSkillResource); // _main 结尾的资源禁止删除
-        vo.setCanApplyUse(!isPersonalResourceUseApplyUnsupported
+        vo.setCanApplyUse(!hasUsePermission && !isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource)); // 移除 !isDefaultSuperAssistantResource
-        Long defaultDigitalEmployeeId = isDigitalEmployee ? resolveCurrentUserDefaultDigitalEmployeeId() : null;
-        vo.setCanSetDefault(canSetDefaultDigitalEmployee(ssResource, canManage, hasUsePermission,
-            defaultDigitalEmployeeId));
 
         Integer resourceStatus = ssResource.getResourceStatus();
         String ownerType = ssResource.getOwnerType();

@@ -88,11 +88,6 @@ public class ResourceOperationPermissionsVo {
     private boolean useApplyPending;
 
     /**
-     * 是否可设为默认（仅数字员工类型有意义，其他业务类型为 false）。
-     */
-    private boolean canSetDefault;
-
-    /**
      * 旧客户端上架兼容字段；已注销数据永远为 false。
      */
     private boolean canRestore;

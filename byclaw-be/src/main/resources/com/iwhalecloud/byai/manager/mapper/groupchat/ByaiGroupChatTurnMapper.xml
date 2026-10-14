@@ -127,7 +127,7 @@
             OR trigger_message_id = #{messageId} ORDER BY execution_id LIMIT 1
     </select>
     <select id="lockGroup" resultType="java.lang.Long">
-        SELECT session_id FROM byai_session WHERE session_id = #{groupId} FOR UPDATE
+        SELECT session_id FROM byai_session WHERE session_id = #{groupId}
     </select>
     <select id="selectAnchor" resultMap="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper.BaseResultMap">
         SELECT * FROM byai_group_chat_execution WHERE root_message_id = #{rootId}
@@ -137,7 +137,7 @@
 
     <!-- 锁定重读必须清理普通查询快照，不得从 MyBatis 缓存复用旧的运行状态。 -->
     <select id="selectForUpdateById" resultMap="BaseResultMap" flushCache="true" useCache="false">
-        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn WHERE execution_id = #{turnId} FOR UPDATE
+        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn WHERE execution_id = #{turnId}
     </select>
 
     <!-- 补偿只发现执行标识；完整状态由处理事务锁定重读。 -->

@@ -48,6 +48,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatConte
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispatchPromptBuilder;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.GroupMember;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
@@ -85,6 +86,9 @@ class GroupChatGatewayExecutorTest {
         when(historyFiles.prepareGroupHistory(any(), any(), any(), any()))
             .thenReturn(new GroupChatSessionContextFileService.ContextFile(
                 "GROUP_PUBLIC", "/by/.sessions/60/.byclaw/context/turn/group-history.json", "20"));
+        when(historyFiles.prepareGroupMembers(any(), any(), any(), any(), any()))
+            .thenReturn(new GroupChatSessionContextFileService.ContextFile(
+                "GROUP_MEMBERS", "/by/.sessions/60/.byclaw/context/members/group-members.json", "20"));
         Users user = new Users();
         user.setUserCode("user30");
         user.setUserName("用户三十");
@@ -149,7 +153,10 @@ class GroupChatGatewayExecutorTest {
         Map<String, Object> params = new HashMap<>();
         params.put("groupChat", Map.of("conversationKey", "60"));
         String decorated = (String) executor.decorate(context, child.getMessageContent(), params);
-        assertThat(decorated).contains("group-chat-disposition.json", "HUMAN_30", "用户三十", "[任务交付提醒]", "/by/.sessions/60/.byclaw/task-delivery.json");
+        assertThat(decorated).contains("group-chat-disposition.json", "group-members.json", "[任务交付提醒]",
+                "/by/.sessions/60/.byclaw/task-delivery.json")
+            .doesNotContain("HUMAN_30", "用户三十");
+        assertThat(decorated).containsOnlyOnce("/by/.sessions/60/.byclaw/context/members/group-members.json");
         assertThat(child.getMessageContent()).doesNotContain("group-chat-disposition.json");
         Map<?, ?> groupChat = (Map<?, ?>) params.get("groupChat");
         assertThat(groupChat.get("contextToken")).isEqualTo("signed-context-token");
@@ -179,6 +186,7 @@ class GroupChatGatewayExecutorTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void coordinationPromptSkipsClassificationAndDisclosesOnlyItsSelectedWorkers() {
         var scopeService = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
         org.springframework.test.util.ReflectionTestUtils.setField(executor, "coordinationService", scopeService);
@@ -202,12 +210,21 @@ class GroupChatGatewayExecutorTest {
         context.assistantChatDto.setAgentId(40L);
         Map<String, Object> params = new HashMap<>();
         String outbound = (String) executor.decorate(context, "作业", params);
-        assertThat(outbound).contains("Employee50", "统一协调").doesNotContain("Employee70", "Employee90", "group-chat-disposition.json");
+        assertThat(outbound).contains("group-members.json", "统一协调")
+            .doesNotContain("Employee50", "Employee70", "Employee90", "group-chat-disposition.json");
         assertThat(params).containsEntry("groupCoordination", scope);
         scope.put("mode", "DIRECT"); scope.put("coordinatorAgentId", "90");
         outbound = (String) executor.decorate(context, "作业", params);
-        assertThat(outbound).contains("Employee90", "group_request_assistance")
-            .doesNotContain("Employee50", "Employee70");
+        assertThat(outbound).contains("group-members.json", "group_request_assistance")
+            .doesNotContain("Employee50", "Employee70", "Employee90");
+        // 验证交给文件准备流程的名单仍遵循服务端协作范围。
+        ArgumentCaptor<List<GroupMember>> memberFiles = ArgumentCaptor.forClass(List.class);
+        verify(historyFiles, Mockito.times(2)).prepareGroupMembers(eq("user30"), any(), eq(context.traceId),
+            any(), memberFiles.capture());
+        assertThat(memberFiles.getAllValues().get(0))
+            .containsExactly(new GroupMember("Employee50", "DIG_EMPLOYEE_50"));
+        assertThat(memberFiles.getAllValues().get(1))
+            .containsExactly(new GroupMember("Employee90", "DIG_EMPLOYEE_90"));
     }
 
     @Test
@@ -225,7 +242,7 @@ class GroupChatGatewayExecutorTest {
         context.traceId = ScriptService.getTraceId(81L, 82L);
         String content = (String) executor.decorate(context, "修改报告", new HashMap<>());
         assertThat(content).startsWith("修改报告").contains("[任务交付提醒]", "/by/.sessions/60/.byclaw/task-delivery.json")
-            .doesNotContain("群聊判定协议", "group-chat-disposition.json");
+            .doesNotContain("群聊判定协议", "group-chat-disposition.json", "group-members.json");
         assertThat(context.assistantChatDto.getChatContent()).isEqualTo("修改报告");
         for (String status : List.of("PUBLISHED", "CANCELLED")) {
             task.setStatus(status);
@@ -460,6 +477,38 @@ class GroupChatGatewayExecutorTest {
     }
 
     @Test
+    void memberPreparationFailureStopsDispatchWithoutReturningADanglingPath() {
+        execution.setTraceId(ScriptService.getTraceId(61L, 70L));
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.userMessageId = 61L;
+        context.traceId = execution.getTraceId();
+        context.assistantChatDto.setAgentId(40L);
+        when(historyFiles.prepareGroupMembers(eq("user30"), any(), eq(context.traceId), eq(61L), any()))
+            .thenThrow(new ChatTurnPreparationException("成员上下文准备失败，请重试", new IllegalStateException("storage")));
+
+        assertThatThrownBy(() -> executor.decorate(context, child.getMessageContent(), new HashMap<>()))
+            .isInstanceOf(ChatTurnPreparationException.class).hasMessage("成员上下文准备失败，请重试");
+        assertThat(child.getMessageContent()).isEqualTo("{{DIG_EMPLOYEE_40}} 请生成报告");
+    }
+
+    @Test
+    void scopedPrivateTaskFollowupIncludesMemberFileWithoutInlineRoster() {
+        var scopeService = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(executor, "coordinationService", scopeService);
+        when(scopeService.findScope(60L)).thenReturn(Map.of("mode", "DIRECT", "coordinatorAgentId", "40",
+            "taskSessionId", "60", "allowedAgentIds", List.of("50")));
+        ChatProcessContext context = taskContext(40L);
+
+        String outbound = (String) executor.decorate(context, "继续任务", new HashMap<>());
+
+        assertThat(outbound).contains("group-members.json", "[任务交付提醒]", "group_request_assistance")
+            .doesNotContain("HUMAN_30", "用户三十", "group-chat-disposition.json");
+        verify(historyFiles).prepareGroupMembers(eq("user30"), any(), eq(context.traceId), eq(81L), any());
+    }
+
+    @Test
     void attachmentPayloadReceivesPromptWithoutChangingOriginalContent() {
         execution.setTraceId(ScriptService.getTraceId(61L, 70L));
         ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
@@ -471,7 +520,7 @@ class GroupChatGatewayExecutorTest {
         JSONArray content = JSON.parseArray("[{\"role\":\"user\",\"content\":{\"text\":\"分析附件\",\"files\":[{\"name\":\"report.txt\"}]}}]");
         JSONArray decorated = (JSONArray) executor.decorate(context, content, new HashMap<>());
         assertThat(decorated.getJSONObject(0).getJSONObject("content").getString("text"))
-            .contains("群聊判定协议");
+            .contains("群聊判定协议", "group-members.json").doesNotContain("HUMAN_30", "用户三十");
         assertThat(content.getJSONObject(0).getJSONObject("content").getString("text")).isEqualTo("分析附件");
         assertThat(decorated.getJSONObject(0).getJSONObject("content").getJSONArray("files"))
             .isEqualTo(content.getJSONObject(0).getJSONObject("content").getJSONArray("files"));

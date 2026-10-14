@@ -677,6 +677,7 @@ describe("MCP transport chain", () => {
         metadata: { resource_id: "m3" },
         mcp: {
           server_url: "http://mcp.test",
+          session_id: "existing-session",
           tools: [{ name: "run", input_schema: { type: "object" } }],
         },
       };

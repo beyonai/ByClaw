@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONWriter;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -1172,6 +1173,23 @@ public class ByClawSkillResourceApplicationService {
         SsResExtSkill extSkill = ssResExtSkillService.findById(skillResource.getResourceId());
         if (extSkill == null) {
             return null;
+        }
+        if (StringUtils.equalsIgnoreCase(extSkill.getSkillType(), SsResExtSkillService.INNER_SKILL_TYPE)) {
+            // 内置技能随镜像发布，编辑展示信息不能递增版本、改写运行标识或登记上传包。
+            // 保留原 JSON 的扩展字段；历史空记录才从当前资源和扩展表补齐元数据。
+            Map<String, Object> content = JSON.parseObject(extSkill.getTargetContent());
+            if (content == null) {
+                content = JSON.parseObject(buildTargetContent(skillResource, extSkill, null, null));
+                content.put("skillUrl", extSkill.getSkillUrl());
+            }
+            content.put("resourceName", skillResource.getResourceName());
+            content.put("resourceDesc", skillResource.getResourceDesc());
+            content.put("avatar", skillResource.getAvatar());
+            content.put("catalogId", skillResource.getCatalogId());
+            extSkill.setTargetContent(JSON.toJSONString(content, JSONWriter.Feature.WriteNulls));
+            ssResExtSkillService.update(extSkill);
+            // 调用方沿用资源状态校验，只同步标准 JSON，不触发普通技能包刷新。
+            return extSkill.getTargetContent();
         }
         extSkill.setVersion(ssResExtSkillService.nextVersion(extSkill.getVersion()));
         extSkill.setSyncStatus("SUCCESS");

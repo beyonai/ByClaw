@@ -51,7 +51,6 @@ interface IResourceItem {
   useApplyPending?: boolean;
   resourceStatus?: number | string;
   metaStatus?: number | string;
-  canSetDefault?: boolean;
   skillType?: string;
   sourceType?: string;
   version?: string;
@@ -619,9 +618,9 @@ const ResourceList: React.FC<ResourceListProps> = ({
       onCardClick={() => onDetail(item)}
       actionConfig={{
         scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
+        // 管理授权、使用授权交由卡片按后端权限和资源状态判断，不按 personal 页签额外隐藏。
         // 我可用的技能保留发布入口，由卡片判断版本和发布权限；浏览页仍隐藏其他生命周期操作。
         hiddenMenuItemKeys: [
-          ...(activeTab === 'personal' ? ['authorize', 'use'] : []),
           ...(resourceType === 'SKILL' && activeTab === 'personal' ? ['share'] : []),
           ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete'] : []),
           ...(!myResourcesOnly && !(resourceType === 'SKILL' && activeTab === 'personal')
