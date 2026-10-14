@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.state.infrastructure.filter.sub.AccessTokenFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -124,8 +125,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 Pattern pattern = Pattern.compile(regex);
                 matcherList.add(pattern);
             }
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error(e.getMessage(), e);
         }
 
@@ -135,9 +135,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
      * 如果session已经存在，需要进行session的用户信息和token信息的比对 如果session里面，不存在用户信息的，需要添加用户信息 如果session 里面，存在的用户信息和token里面的一致，直接返回成功
      * 如果session 里面，存在的用户信息和token信息不一致，需要进行更新
      *
-     * @param request 请求
+     * @param request  请求
      * @param response 响应
-     * @param handler 处理
+     * @param handler  处理
      * @return 返回
      */
     @Override
@@ -220,7 +220,13 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 return urlFilter.doFilter(request);
             }
 
+            // 优先走session共享
             HttpSession httpSession = request.getSession(false);
+            String userCode = this.getSessionString(httpSession, "USER_CODE");
+            if (StringUtils.isNotEmpty(userCode)) {
+                return sessionFilter.doFilter(httpSession);
+            }
+
             // Explicit credentials identify this request. A browser may carry a shared
             // session cookie from another tab/account, so it must not override the token.
             String systemCode = request.getHeader("system-code");
@@ -247,10 +253,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 return res;
             }
 
-            String userCode = this.getSessionString(httpSession, "USER_CODE");
-            if (StringUtils.isNotEmpty(userCode)) {
-                return sessionFilter.doFilter(httpSession);
-            }
 
             // 单点登陆token
             String ssoToken = request.getHeader("SSO-TOKEN");
@@ -268,8 +270,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 logRequestInfo(request, url);
             }
             throw new RuntimeException(I18nUtil.get("access.token.verify.signature.null", url));
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error(e.getMessage(), e);
             if (this.isOrchestratorRuntimeRequest(request)) {
                 response.setStatus(HttpStatus.UNAUTHORIZED.value());
@@ -384,7 +385,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         }
         return ("GET".equalsIgnoreCase(request.getMethod()) || "HEAD".equalsIgnoreCase(request.getMethod()))
             && (matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
-                || matchesConfiguredPrefix(request, artifactDownloadPathPrefix));
+            || matchesConfiguredPrefix(request, artifactDownloadPathPrefix));
     }
 
     private boolean endsWithConfiguredPath(String path, String expectedPath) {
@@ -408,7 +409,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     /**
      * 从session中获取属性
      *
-     * @param httpSession 会话信息
+     * @param httpSession   会话信息
      * @param attributeName 属性名称
      * @return String
      */
@@ -429,7 +430,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
      * 错误封装处理
      *
      * @param response 响应
-     * @param errMsg 错误信息
+     * @param errMsg   错误信息
      */
     private void setLoginError(HttpServletResponse response, String errMsg) {
         response.setStatus(HttpStatus.UNAUTHORIZED.value());
@@ -442,8 +443,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         String jsonString = JSONObject.toJSONString(resultObject);
         try {
             response.getWriter().write(jsonString);
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             logger.error(e.getMessage(), e);
         }
     }
@@ -514,7 +514,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
      * 记录完整的请求信息到日志 包括多层代理的真实IP地址、请求头、用户信息等
      *
      * @param request HTTP请求对象
-     * @param url 请求URL
+     * @param url     请求URL
      */
     private void logRequestInfo(HttpServletRequest request, String url) {
         try {
@@ -579,8 +579,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                     }
                     logInfo.append("  ").append(headerName).append(": ").append(headerValueStr.toString()).append("\n");
                 }
-            }
-            else {
+            } else {
                 logInfo.append("  无请求头信息\n");
             }
 
@@ -605,16 +604,13 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                             String attrValueStr = this.maskSensitiveInfo(attrName, attrValue);
                             logInfo.append("    ").append(attrName).append(": ").append(attrValueStr).append("\n");
                         }
-                    }
-                    else {
+                    } else {
                         logInfo.append("  Session属性: 无\n");
                     }
-                }
-                else {
+                } else {
                     logInfo.append("  无Session信息\n");
                 }
-            }
-            catch (Exception e) {
+            } catch (Exception e) {
                 logInfo.append("  获取Session信息失败: ").append(e.getMessage()).append("\n");
             }
 
@@ -646,16 +642,14 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                     }
                     logInfo.append("  ").append(paramName).append(": ").append(paramValueStr.toString()).append("\n");
                 }
-            }
-            else {
+            } else {
                 logInfo.append("  无请求参数\n");
             }
 
             logInfo.append("==========================================\n");
 
             logger.error(logInfo.toString());
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("记录请求信息时发生异常: " + e.getMessage(), e);
         }
     }
@@ -677,8 +671,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             int index = forwardedFor.indexOf(",");
             if (index != -1) {
                 ip = forwardedFor.substring(0, index).trim();
-            }
-            else {
+            } else {
                 ip = forwardedFor.trim();
             }
         }
@@ -732,7 +725,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     /**
      * 敏感信息脱敏处理 对密码、token等敏感信息进行脱敏，避免在日志中明文输出
      *
-     * @param key 属性名或参数名
+     * @param key   属性名或参数名
      * @param value 属性值或参数值
      * @return 脱敏后的字符串
      */
@@ -754,8 +747,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             int length = valueStr.length();
             if (length <= 6) {
                 return "******";
-            }
-            else {
+            } else {
                 return valueStr.substring(0, 3) + "******" + valueStr.substring(length - 3);
             }
         }
