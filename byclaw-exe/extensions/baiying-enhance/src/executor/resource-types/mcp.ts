@@ -52,6 +52,7 @@ export async function executeMcp(params: {
 
   const mcp = isRecord(capability.mcp) ? (capability.mcp as Dict) : {};
   const serverUrl = asString(mcp.server_url);
+  const mcpSessionId = asString(mcp.session_id);
   const transferType = normalizeMcpTransferType(
     mcp.transfer_type ?? mcp.transferType ?? mcp.mcpType ?? mcp.mcp_type,
   );
@@ -98,7 +99,11 @@ export async function executeMcp(params: {
     },
     authContext: params.authContext,
     session: params.session,
-    extraHeaders: { ...resourceHeaders, ...(params.forwardHeaders ?? {}) },
+    extraHeaders: {
+      ...resourceHeaders,
+      ...(params.forwardHeaders ?? {}),
+      ...(mcpSessionId ? { "Mcp-Session-Id": mcpSessionId } : {}),
+    },
   });
   ensureMcpIdentityHeaders(headers);
   applyEnvAuthOverrides(headers);
