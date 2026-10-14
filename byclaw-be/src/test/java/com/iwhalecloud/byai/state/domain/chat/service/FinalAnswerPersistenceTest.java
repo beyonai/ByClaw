@@ -10,6 +10,10 @@ import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.domain.ws.manager.NettyArrayOutputStream;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -49,7 +53,7 @@ class FinalAnswerPersistenceTest {
     }
 
     @Test
-    void websocketLiveAndRecoveryReplayDoNotCompleteOnFinalAnswer() {
+    void websocketFinalReachesInitiatorOnceWhileRecoveryOnlyAccumulates() {
         for (boolean recovery : new boolean[] {false, true}) {
             SessionStreamEventRouter router = new SessionStreamEventRouter();
             OutputStreamManager contexts = mock(OutputStreamManager.class);
@@ -70,16 +74,39 @@ class FinalAnswerPersistenceTest {
             ctx.recoveryOnly = recovery;
             ctx.messageContext = new MessageContext();
             ctx.messageContext.getAnswerText().append("intermediate");
+            EmbeddedChannel channel = new EmbeddedChannel(new ChannelInboundHandlerAdapter());
+            ctx.res = new NettyArrayOutputStream(channel.pipeline().firstContext(), "request", "CHAT_STREAM");
             when(contexts.getContext("10", "turn")).thenReturn(ctx);
             JSONObject event = JSON.parseObject("{\"session_id\":\"10\",\"trace_id\":\"turn\","
                 + "\"source_agent_type\":\"target\",\"stream_id\":\"100-0\",\"event_type\":\"finalAnswer\","
                 + "\"final_content\":\"final\"}");
-            router.dispatch(event);
-            router.dispatch(event);
-            assertThat(ctx.messageContext.persistenceContent()).isEqualTo("final");
-            assertThat(ctx.messageContext.returnAnswerText()).isEqualTo("intermediate");
-            assertThat(ctx.messageContext.getComplete()).isNotEqualTo(true);
-            assertThat(ctx.terminalStreamId).isNull();
+            try {
+                router.dispatch(event);
+                router.dispatch(event);
+                assertThat(ctx.messageContext.persistenceContent()).isEqualTo("final");
+                assertThat(ctx.messageContext.returnAnswerText()).isEqualTo("intermediate");
+                assertThat(ctx.messageContext.getComplete()).isNotEqualTo(true);
+                assertThat(ctx.terminalStreamId).isNull();
+                if (!recovery) {
+                    TextWebSocketFrame frame = channel.readOutbound();
+                    assertThat(frame).isNotNull();
+                    try {
+                        JSONObject message = JSON.parseObject(frame.text());
+                        assertThat(message.getString("type")).isEqualTo("CHAT_STREAM");
+                        assertThat(message.getString("event")).isEqualTo("finalAnswer");
+                        assertThat(message.getString("sessionId")).isEqualTo("10");
+                        assertThat(message.getString("clientRequestId")).isEqualTo("request");
+                        assertThat(message.getJSONObject("data").getString("final_content")).isEqualTo("final");
+                    }
+                    finally {
+                        frame.release();
+                    }
+                }
+                assertThat((Object) channel.readOutbound()).isNull();
+            }
+            finally {
+                channel.finishAndReleaseAll();
+            }
         }
     }
 

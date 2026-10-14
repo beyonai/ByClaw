@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
+import com.iwhalecloud.byai.state.domain.chat.model.FinalAnswerContent;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
@@ -240,6 +241,10 @@ public class SessionStreamEventRouter {
         else {
             pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
                 messageContext, ctx.getAgentIds(), ctx);
+            if (FinalAnswerContent.isFinalEvent(eventType)) {
+                // 最终正文已由 PythonSseService 保存；通过当前输出流推送给发起端，不将其视为会话结束。
+                CompletionsUtils.responseWrite(ctx.res, eventType, eventData, ctx.sessionId);
+            }
         }
         boolean terminalResponse = SseResponseEventEnum.appStreamResponse.equals(eventType);
         if (terminalResponse && messageContext != null) {
