@@ -36,7 +36,7 @@ type IState = {
 
   beyondSmartModePopoverOpen: boolean;
   selectedResourceAgentIds: string;
-  // undefined=本会话未选择（不发送 relModelId）；'-1'=显式默认模型；正数=模型主键。
+  // 未选择或旧默认值使用 Auto；正数为用户手选的模型主键。
   selectedModelId?: string;
   // 按会话记住选择，避免切换会话后把 A 会话的模型带到 B 会话。
   selectedModelBySession: Record<string, string>;
@@ -284,8 +284,12 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         mode,
         agentType: myAgentType,
         agentId,
-        // 仅在用户为本会话显式选择时发送：'-1' = 默认模型（清除覆盖），正数 = 模型主键。
-        ...modelSelectionPayload(this.state.selectedModelId, this.state.selectedThinkingLevel),
+        // 显示模型选择器的会话默认使用 Auto；用户选择具体模型时按模型 ID 发送。
+        ...modelSelectionPayload(
+          this.state.selectedModelId,
+          this.state.selectedThinkingLevel,
+          Boolean(this.props.enableModelSelect || window.byclawDesktop)
+        ),
         ...chatSettings,
       },
       msgOpt: {

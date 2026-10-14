@@ -62,6 +62,51 @@ class AutoModelRoutingTest extends I18nTestSupport {
             .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test void autoIsAdvertisedWithoutAnyGatewayOrCandidateConfiguration() {
+        var jev = mock(JevDecisionClient.class);
+        var models = mock(AiModelService.class);
+        var routing = new AutoModelRoutingService(new AutoModelRoutingProperties(), jev, models,
+            mock(TokenQuotaService.class), mock(StringRedisTemplate.class), mock(ParamService.class));
+        assertThat(routing.capabilities()).containsEntry("autoAvailable", true).containsEntry("gatewayConfigured", false);
+        verifyNoInteractions(models);
+        assertThat(new JevDecisionClient(new AutoModelRoutingProperties(), "synthetic-test-key").configured()).isTrue();
+    }
+
+    @Test void missingGatewayKeyProducesAnActionableError() {
+        var fixture = new RoutingFixture();
+        when(fixture.jev.configured()).thenReturn(false);
+        try (var user = mockStatic(CurrentUserHolder.class)) {
+            user.when(CurrentUserHolder::getCurrentUserId).thenReturn(7L);
+            assertThatThrownBy(() -> fixture.route("no-key"))
+                .isInstanceOfSatisfying(AutoModelRoutingService.RoutingException.class, error -> {
+                    assertThat(error.getErrorCode()).isEqualTo("AUTO_GATEWAY_KEY_MISSING");
+                    assertThat(error.getMessage()).contains("AI_GATEWAY_API_KEY");
+                });
+        }
+    }
+
+    @Test void inaccessibleModelsAreExcludedFromAutomaticSelection() throws Exception {
+        var fixture = new RoutingFixture();
+        try (var user = mockStatic(CurrentUserHolder.class)) {
+            user.when(CurrentUserHolder::getCurrentUserId).thenReturn(7L);
+            fixture.dto.setClientRequestId("private-model");
+            var chosen = fixture.routing.route(fixture.dto, id -> "43".equals(id) ?
+                Optional.of(new SessionModelSelection(id, "test-model", "Test", "Test")) : Optional.empty());
+            assertThat(chosen.getModelId()).isEqualTo("43");
+            verify(fixture.jev, never()).evaluate(anyMap());
+        }
+    }
+
+    @Test void aMalformedModelRecordDoesNotBlockOtherEnabledModels() throws Exception {
+        var fixture = new RoutingFixture();
+        when(fixture.hash.get(anyString(), eq("42"))).thenReturn("invalid-json");
+        try (var user = mockStatic(CurrentUserHolder.class)) {
+            user.when(CurrentUserHolder::getCurrentUserId).thenReturn(7L);
+            assertThat(fixture.route("malformed-record").getModelId()).isEqualTo("43");
+            verify(fixture.jev, never()).evaluate(anyMap());
+        }
+    }
+
     @Test void autoCannotCarryAnOldManualModelOrThinkingLevel() {
         var dto = new AssistantChatDto();
         dto.setModelSelectionMode("auto");
@@ -93,7 +138,7 @@ class AutoModelRoutingTest extends I18nTestSupport {
             var state = org.mockito.ArgumentCaptor.forClass(Map.class);
             verify(fixture.jev, times(3)).evaluate(state.capture());
             String metadata = JSON.toJSONString(state.getValue().get("candidateModels"));
-            assertThat(metadata).contains("test-model", "128000", "supportsTools").doesNotContain("synthetic-test-token", "example.com", "profiles");
+            assertThat(metadata).contains("test-model", "128000", "supportsImages").doesNotContain("synthetic-test-token", "example.com", "profiles");
             verify(fixture.values, never()).set(startsWith("byai:chat:session_model:"), anyString(), any(java.time.Duration.class));
             verify(fixture.values, atLeastOnce()).set(startsWith("byai:chat:run_model:"), anyString(), any(java.time.Duration.class));
         }
@@ -101,8 +146,7 @@ class AutoModelRoutingTest extends I18nTestSupport {
 
     @Test void imageInputUsesExistingAbilityAndSkipsJevForOnlyCompatibleModel() throws Exception {
         var fixture = new RoutingFixture();
-        fixture.second.setInstanceParam(Map.of("abilities", List.of("7"), "autoRouting",
-            Map.of("enabled", true, "capabilities", List.of("tools"))));
+        fixture.second.setInstanceParam(Map.of("abilities", List.of("7")));
         fixture.publish(fixture.second);
         when(fixture.params.getChatHistories(1L, 3)).thenReturn(List.of(Map.of("role", "user", "content", "![page.png](https://example.com/page.png)")));
         try (var user = mockStatic(CurrentUserHolder.class)) {
@@ -114,9 +158,9 @@ class AutoModelRoutingTest extends I18nTestSupport {
         }
     }
 
-    @Test void unknownToolsAndInsufficientContextCannotEnterCandidatePool() throws Exception {
+    @Test void disabledModelsAndInsufficientContextCannotEnterCandidatePool() throws Exception {
         var fixture = new RoutingFixture();
-        fixture.first.setInstanceParam(Map.of("abilities", List.of("3")));
+        fixture.first.setStatus(0);
         fixture.second.setMaxContentToken("100");
         fixture.publish(fixture.first); fixture.publish(fixture.second);
         try (var user = mockStatic(CurrentUserHolder.class)) {
@@ -130,7 +174,6 @@ class AutoModelRoutingTest extends I18nTestSupport {
 
     @Test void compatibleSystemDefaultIsFallbackWithoutProfiles() throws Exception {
         var fixture = new RoutingFixture();
-        fixture.config.setFallbackModelIds(List.of("unavailable"));
         when(fixture.models.getDefaultChatModel()).thenReturn(fixture.second);
         when(fixture.jev.evaluate(anyMap())).thenThrow(new java.io.IOException("timeout"));
         try (var user = mockStatic(CurrentUserHolder.class)) {
@@ -152,9 +195,9 @@ class AutoModelRoutingTest extends I18nTestSupport {
         final AutoModelRoutingService routing;
         final AssistantChatDto dto = new AssistantChatDto();
         RoutingFixture() {
-            config.setEnabled(true); config.setFallbackModelIds(List.of("43"));
             when(jev.configured()).thenReturn(true);
             when(models.getModelList()).thenReturn(List.of(first, second));
+            when(models.getDefaultChatModel()).thenReturn(second);
             when(params.supportsAutoRouting(10L)).thenReturn(true);
             when(params.getChatHistories(1L, 3)).thenReturn(List.of());
             when(redis.opsForValue()).thenReturn(values); when(redis.opsForHash()).thenReturn(hash);
@@ -199,7 +242,8 @@ class AutoModelRoutingTest extends I18nTestSupport {
         ModelDto model = new ModelDto();
         model.setInstanceId(id); model.setModelCode("test-model"); model.setAuthToken("synthetic-test-token");
         model.setUrl("https://example.com/v1"); model.setMaxContentToken("128000");
-        model.setInstanceParam(Map.of("autoRouting", Map.of("enabled", true, "capabilities", List.of("tools", "vision"))));
+        model.setStatus(1); model.setModelType("LLM");
+        model.setInstanceParam(Map.of("abilities", List.of("3")));
         return model;
     }
 }

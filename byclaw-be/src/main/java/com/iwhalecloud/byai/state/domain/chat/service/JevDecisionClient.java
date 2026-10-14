@@ -33,7 +33,7 @@ public class JevDecisionClient {
     }
 
     private String key() {
-        return config.getApiKey().isBlank() ? environmentKey : config.getApiKey();
+        return environmentKey;
     }
 
     static Map<String, Object> buildEvaluation(Map<String, Object> state) {

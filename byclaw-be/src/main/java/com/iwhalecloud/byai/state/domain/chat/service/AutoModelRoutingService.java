@@ -51,10 +51,8 @@ public class AutoModelRoutingService {
     }
 
     public Map<String, Object> capabilities() {
-        boolean available = TenantRequestContextHolder.get() == null && config.isEnabled() && jev.configured() && config.getTimeoutMs() > 0 &&
-            models.getModelList().stream().anyMatch(model -> annotation(model) != null);
-        return Map.of("protocolVersion", 1, "autoAvailable", available,
-            "modes", available ? List.of("default", "manual", "auto") : List.of("default", "manual"));
+        return Map.of("protocolVersion", 1, "autoAvailable", true,
+            "gatewayConfigured", jev.configured(), "modes", List.of("default", "manual", "auto"));
     }
 
     public static boolean isAuto(AssistantChatDto dto) {
@@ -113,7 +111,7 @@ public class AutoModelRoutingService {
             return snapshot;
         }
         if (resume) throw failure("AUTO_SNAPSHOT_MISSING", "auto.model.snapshotMissing");
-        if (!config.isEnabled() || !jev.configured()) throw failure("AUTO_DISABLED", "auto.model.disabled");
+        if (!jev.configured()) throw failure("AUTO_GATEWAY_KEY_MISSING", "auto.model.disabled");
         String lockKey = scope + ":routing";
         if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(lockKey, requestId, Duration.ofSeconds(30)))) {
             throw failure("AUTO_ROUTING_BUSY", "auto.model.busy");
@@ -175,10 +173,15 @@ public class AutoModelRoutingService {
             if (indexed.getInstanceId() == null || !indexed.getInstanceId().matches("[1-9]\\d*")) continue;
             Object raw = redis.opsForHash().get(com.iwhalecloud.byai.common.constants.staticdata.RedisConfig.AI_MODEL_KEY, indexed.getInstanceId());
             if (!(raw instanceof String content)) continue;
-            ModelDto model = JSON.parseObject(content, ModelDto.class);
-            AutoModelRoutingProperties.Candidate annotation = annotation(model);
-            if (annotation == null || !annotation.getCapabilities().contains("tools") ||
-                (vision && !supportsVision(model))) continue;
+            ModelDto model;
+            try { model = JSON.parseObject(content, ModelDto.class); }
+            catch (RuntimeException error) {
+                log.warn("model.route.invalid-candidate modelId={} errorType={}", indexed.getInstanceId(), error.getClass().getSimpleName());
+                continue;
+            }
+            if (model == null || !indexed.getInstanceId().equals(model.getInstanceId())) continue;
+            if ((StringUtils.isNotBlank(model.getModelType()) && !"LLM".equalsIgnoreCase(model.getModelType())) ||
+                !Integer.valueOf(1).equals(model.getStatus()) || (vision && !supportsVision(model))) continue;
             int window;
             try { window = Integer.parseInt(model.getMaxContentToken()); } catch (RuntimeException e) { continue; }
             if (window < contextBudget) continue;
@@ -188,9 +191,9 @@ public class AutoModelRoutingService {
             catch (RuntimeException e) { continue; }
             if (subjectToQuota(selection)) { quotaBlocked = true; continue; }
             selection.setModelConfigVersion(digest(content));
-            candidates.add(new Usable(selection, annotation, model));
+            candidates.add(new Usable(selection, model));
         }
-        candidates.sort(Comparator.comparingInt((Usable c) -> c.annotation.getPriority()).thenComparing(c -> c.selection.getModelId()));
+        candidates.sort(Comparator.comparing(c -> c.selection.getModelId()));
         if (candidates.isEmpty()) throw failure(quotaBlocked ? "AUTO_QUOTA_EXCEEDED" : "AUTO_NO_COMPATIBLE_MODEL",
             quotaBlocked ? "auto.model.quota" : "auto.model.noCandidate");
         String reason = "single_candidate";
@@ -236,19 +239,6 @@ public class AutoModelRoutingService {
         return result;
     }
 
-    private AutoModelRoutingProperties.Candidate annotation(ModelDto model) {
-        var override = config.getCandidates().stream().filter(c -> String.valueOf(c.getModelId()).equals(model.getInstanceId())).findFirst();
-        if (override.isPresent()) return validAnnotation(override.get()) ? override.get() : null;
-        Object raw = model.getInstanceParam() == null ? null : model.getInstanceParam().get("autoRouting");
-        if (!(raw instanceof Map<?, ?> map) || !Boolean.TRUE.equals(map.get("enabled"))) return null;
-        var candidate = JSON.parseObject(JSON.toJSONString(raw), AutoModelRoutingProperties.Candidate.class);
-        return validAnnotation(candidate) ? candidate : null;
-    }
-
-    private boolean validAnnotation(AutoModelRoutingProperties.Candidate candidate) {
-        return candidate.getCapabilities() != null && candidate.getCapabilities().contains("tools");
-    }
-
     private Map<String, Object> decisionMetadata(Usable candidate) {
         ModelDto model = candidate.model;
         Map<String, Object> metadata = new LinkedHashMap<>();
@@ -259,8 +249,8 @@ public class AutoModelRoutingService {
         metadata.put("providerName", StringUtils.defaultIfBlank(model.getProviderName(), provider instanceof String name ? name : ""));
         metadata.put("contextTokens", Integer.parseInt(model.getMaxContentToken()));
         metadata.put("supportsImages", supportsVision(model));
-        metadata.put("supportsTools", true);
-        metadata.put("description", abbreviate(StringUtils.defaultString(candidate.annotation.getDescription()), 1000));
+        Object description = model.getInstanceParam() == null ? null : model.getInstanceParam().get("routingDescription");
+        metadata.put("description", description instanceof String text ? abbreviate(text, 1000) : "");
         // Missing prices and measured performance remain unknown; never infer them from a provider brand.
         return metadata;
     }
@@ -273,10 +263,6 @@ public class AutoModelRoutingService {
     }
 
     private Usable fallback(List<Usable> candidates) {
-        for (String id : config.getFallbackModelIds()) {
-            var match = candidates.stream().filter(c -> id.equals(c.selection.getModelId())).findFirst();
-            if (match.isPresent()) return match.get();
-        }
         ModelDto defaultModel = models.getDefaultChatModel();
         return candidates.stream().filter(c -> defaultModel != null && defaultModel.getInstanceId().equals(c.selection.getModelId())).findFirst()
             .orElse(candidates.get(0));
@@ -344,6 +330,6 @@ public class AutoModelRoutingService {
         public RoutingException(String errorCode, String message) { super(message); this.errorCode = errorCode; }
         public String getErrorCode() { return errorCode; }
     }
-    private record Usable(SessionModelSelection selection, AutoModelRoutingProperties.Candidate annotation, ModelDto model) {}
+    private record Usable(SessionModelSelection selection, ModelDto model) {}
     public record Decision(String modelId, double confidence, boolean uncertain) {}
 }

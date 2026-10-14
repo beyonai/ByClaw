@@ -85,23 +85,41 @@ describe('reasoning label density', () => {
 });
 
 describe('Auto model choice', () => {
-  it('shows Auto after capability discovery and sends a distinct picker token', async () => {
+  it('shows Auto by default and sends a distinct picker token', async () => {
     mockUserInfo = { userId: 27 };
     mockGetMyModels.mockResolvedValue({ data: { rows: [] } } as any);
     mockGetPublicModels.mockResolvedValue({ data: { rows: [] } } as any);
     (getModelSelectionCapabilities as jest.Mock).mockResolvedValue({ data: { autoAvailable: true } });
     const onChange = jest.fn();
     const view = render(<ModelSelect allowWeb value="-1" onChange={onChange} />);
+    await act(async () => {});
     const auto = await view.findByTestId('model-row-auto');
     fireEvent.click(auto);
     expect(onChange).toHaveBeenCalledWith('auto');
   });
 
-  it('keeps Auto hidden when the backend does not support it', async () => {
+  it('shows Auto even when capability discovery would report unavailable', async () => {
     mockUserInfo = { userId: 27 };
     (getModelSelectionCapabilities as jest.Mock).mockResolvedValue({ data: { autoAvailable: false } });
     const view = render(<ModelSelect allowWeb onChange={jest.fn()} />);
-    await waitFor(() => expect(getModelSelectionCapabilities).toHaveBeenCalled());
-    expect(view.queryByTestId('model-row-auto')).toBeNull();
+    await act(async () => {});
+    expect(view.getByTestId('model-row-auto')).toBeInTheDocument();
+    expect(getModelSelectionCapabilities).not.toHaveBeenCalled();
+    expect(view.queryByText('ui.model.default')).toBeNull();
+  });
+
+  it('uses Auto for an empty or legacy default selection and preserves a manual selection', async () => {
+    mockUserInfo = { userId: 27 };
+    mockGetMyModels.mockResolvedValue({ data: { rows: [{ id: '42', displayName: 'Manual model' }] } } as any);
+    const onChange = jest.fn();
+    const view = render(<ModelSelect allowWeb onChange={onChange} />);
+    expect(view.getByTestId('model-row-auto').className).toContain('selected');
+    view.rerender(<ModelSelect allowWeb value="-1" onChange={onChange} />);
+    expect(view.getByTestId('model-row-auto').className).toContain('selected');
+    const manual = await view.findByTestId('model-row-42');
+    fireEvent.click(manual);
+    expect(onChange).toHaveBeenCalledWith('42');
+    view.rerender(<ModelSelect allowWeb value="42" onChange={onChange} />);
+    expect(view.getByTestId('model-row-auto').className).not.toContain('selected');
   });
 });

@@ -280,7 +280,7 @@ public class ParamService {
      */
     boolean supportsAutoRouting(Long agentId) {
         return (agentId == null || !digitalEmployeeGroupApplicationService.isGroup(agentId)) &&
-            Set.of("BY_SUPER", "BYCLAW_EXE").contains(resolveWorkerAgentType(agentId));
+            Set.of("BY_SUPER", "BYCLAW_EXE", "BYCLAW_DSH").contains(resolveWorkerAgentType(agentId));
     }
 
     String resolveWorkerAgentType(Long agentId) {

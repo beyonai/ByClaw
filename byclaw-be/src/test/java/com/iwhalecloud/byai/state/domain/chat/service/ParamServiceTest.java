@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGroupApplicationService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,5 +48,19 @@ class ParamServiceTest {
 
         assertThat(service.resolveWorkerAgentType(404L)).isEqualTo(WorkerAgentType.BYCLAW_EXE.getCode());
         verify(ssResourceService).findById(404L);
+    }
+    @Test
+    void autoSupportsDshEmployeesButRejectsGroupsAndOtherWorkers() {
+        var groups = mock(DigitalEmployeeGroupApplicationService.class);
+        ReflectionTestUtils.setField(service, "digitalEmployeeGroupApplicationService", groups);
+        SsResource resource = new SsResource();
+        resource.setWorkerAgentType("BYCLAW_DSH");
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        assertThat(service.supportsAutoRouting(100L)).isTrue();
+        when(groups.isGroup(100L)).thenReturn(true);
+        assertThat(service.supportsAutoRouting(100L)).isFalse();
+        when(groups.isGroup(100L)).thenReturn(false);
+        resource.setWorkerAgentType(WorkerAgentType.BYCLAW_QA.getCode());
+        assertThat(service.supportsAutoRouting(100L)).isFalse();
     }
 }

@@ -3,12 +3,7 @@ import { useIntl, useSelector } from '@umijs/max';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AppstoreOutlined, CloudOutlined, LaptopOutlined, UserOutlined } from '@ant-design/icons';
 import { Select, Slider, Spin, Tabs, Tag, Empty, Tooltip } from 'antd';
-import {
-  getModelSelectionCapabilities,
-  getModelSelectionPreference,
-  getMyModels,
-  getPublicModels,
-} from '@/pages/models/service';
+import { getModelSelectionPreference, getMyModels, getPublicModels } from '@/pages/models/service';
 import {
   THINKING_LEVEL_DEFAULT_SIGNAL,
   resolveThinkingPanelLevel,
@@ -104,7 +99,6 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
     public: [],
   });
   const [loading, setLoading] = useState(false);
-  const [autoAvailable, setAutoAvailable] = useState(false);
   const currentValueRef = useRef(value);
   currentValueRef.current = value;
   const [open, setOpen] = useState(false);
@@ -115,9 +109,7 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
   // 悬停面板中的调整先按模型暂存；点击对应模型行后，模型与档位才一起生效。
   const [draftLevels, setDraftLevels] = useState<Record<string, string>>({});
   const storageKey = 'byclaw.desktop.selected-model';
-  const current = value === undefined || value === null || `${value}` === '' ? undefined : `${value}`;
-  // '-1' 是父组件显式选择「默认模型」的信号，区别于「本会话尚未选择」。
-  const explicitDefault = current === '-1';
+  const current = !value || `${value}` === '-1' ? AUTO_MODEL_CHOICE : `${value}`;
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -188,22 +180,14 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
   }, [authIdentity, desktop, enabled]);
 
   useEffect(() => {
-    if (!enabled || !authIdentity || typeof getModelSelectionCapabilities !== 'function') return undefined;
+    if (!enabled || !authIdentity) return undefined;
     let cancelled = false;
-    setAutoAvailable(false);
-    getModelSelectionCapabilities()
-      .then((response) => {
-        if (!cancelled) setAutoAvailable(response?.data?.autoAvailable === true);
-      })
-      .catch(() => {
-        if (!cancelled) setAutoAvailable(false);
-      });
     if (sessionId && /^\d+$/.test(sessionId)) {
       getModelSelectionPreference(sessionId)
         .then((response) => {
           if (cancelled || currentValueRef.current !== undefined) return;
           const preference = response?.data;
-          if (preference?.mode === 'auto') onChange(AUTO_MODEL_CHOICE);
+          if (preference?.mode === 'auto' || preference?.mode === 'default') onChange(AUTO_MODEL_CHOICE);
           else if (preference?.mode === 'manual' && preference.modelId) onChange(`${preference.modelId}`);
         })
         .catch(() => {});
@@ -212,18 +196,6 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
       cancelled = true;
     };
   }, [authIdentity, enabled, sessionId]);
-
-  // Preserve the original picker behavior: a new desktop session always gets
-  // a usable default model, while an explicitly selected model is untouched.
-  // 网页端不自动选中，空值即「默认模型」；显式选择「默认模型」时也不自动改回。
-  useEffect(() => {
-    if (!desktop || explicitDefault) return;
-    if (value !== undefined && value !== null && `${value}` !== '') return;
-    const saved = window.localStorage.getItem(storageKey);
-    const all = [...groups.local, ...groups.mine, ...groups.public];
-    const first = all.find((item) => item.id === saved) || groups.local[0] || groups.mine[0] || groups.public[0];
-    if (first) onChange(first.id);
-  }, [desktop, explicitDefault, groups, value, onChange]);
 
   const selectModel = (next?: string) => {
     if (desktop && next) window.localStorage.setItem(storageKey, next);
@@ -259,7 +231,6 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
   );
 
   const isAutoChoice = current === AUTO_MODEL_CHOICE;
-  const isDefaultChoice = current === undefined || explicitDefault;
   const selectedModel = allModels.find((item) => item.id === current);
   // 右栏展示悬停中的模型，否则展示当前会话模型；两种状态都可直接调整。
   const previewModel = previewModelId ? allModels.find((item) => item.id === previewModelId) : undefined;
@@ -387,7 +358,7 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
           intl.formatMessage({ id: isAutoChoice ? 'ui.model.auto' : 'ui.model.default' })
         )
       }
-      placeholder={intl.formatMessage({ id: 'ui.model.default' })}
+      placeholder={intl.formatMessage({ id: 'ui.model.auto' })}
       loading={loading}
       suffixIcon={loading ? <Spin size="small" /> : <AppstoreOutlined />}
       options={options}
@@ -399,27 +370,14 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
           <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key as typeof activeTab)} items={tabs} />
           <div className={styles.body}>
             <div className={styles.list}>
-              {autoAvailable && (!desktop || (sessionId && /^\d+$/.test(sessionId))) && (
-                <div
-                  data-testid="model-row-auto"
-                  className={`${styles.item} ${isAutoChoice ? styles.selected : ''}`}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => selectModel(AUTO_MODEL_CHOICE)}
-                  onMouseEnter={() => setPreviewModelId(undefined)}
-                >
-                  <span className={styles.option}>{intl.formatMessage({ id: 'ui.model.auto' })}</span>
-                </div>
-              )}
               <div
-                key="__default__"
-                className={`${styles.item} ${isDefaultChoice ? styles.selected : ''}`}
+                data-testid="model-row-auto"
+                className={`${styles.item} ${isAutoChoice ? styles.selected : ''}`}
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => selectModel(undefined)}
+                onClick={() => selectModel(AUTO_MODEL_CHOICE)}
                 onMouseEnter={() => setPreviewModelId(undefined)}
               >
-                <span className={styles.option}>
-                  <span>{intl.formatMessage({ id: 'ui.model.default' })}</span>
-                </span>
+                <span className={styles.option}>{intl.formatMessage({ id: 'ui.model.auto' })}</span>
               </div>
               {options.length ? (
                 options.map((option) => (
