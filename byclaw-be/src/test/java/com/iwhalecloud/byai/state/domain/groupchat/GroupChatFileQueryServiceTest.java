@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.groupchat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -107,7 +108,7 @@ class GroupChatFileQueryServiceTest {
     }
 
     @Test
-    void preservesTaskPreviewFieldsAndImagesWithoutCountingInvalidAttachments() {
+    void ignoresMetadataFilesAndPreservesValidRelatedResourceImages() {
         ByaiMessage row = upload(100L, 3000, "image");
         JSONObject resources = JSON.parseObject(row.getRelatedResources());
         resources.getJSONArray("files").getJSONObject(0).put("fileType", "image/png");
@@ -116,12 +117,14 @@ class GroupChatFileQueryServiceTest {
         row.setMetadata("{\"scene\":\"GROUP_CHAT\",\"kind\":\"TASK_RESULT\",\"files\":["
             + "{\"fileName\":\"report.md\",\"filePath\":\"/cloud/report.md\",\"cloudResourceId\":\"700\"},{}]}");
         stored.add(row);
+        ByaiMessage metadataOnly = upload(50L, 2000);
+        metadataOnly.setRelatedResources(null);
+        metadataOnly.setMetadata(row.getMetadata());
+        stored.add(metadataOnly);
         var page = service.list(10L, 2, null);
-        assertThat(page.getFiles()).hasSize(2);
+        assertThat(ids(page)).containsExactly("image");
         assertThat(page.getFiles().get(0).getAttachment().getMediaType()).isEqualTo("image/png");
-        var taskFile = page.getFiles().get(1).getAttachment();
-        assertThat(taskFile.getFilePath()).isEqualTo("/cloud/report.md");
-        assertThat(taskFile.getCloudResourceId()).isEqualTo("700");
+
         assertThat(page.isHasMore()).isFalse();
         assertThat(page.getNextCursor()).isNull();
     }
@@ -178,6 +181,60 @@ class GroupChatFileQueryServiceTest {
             .andExpect(jsonPath("$.data.hasMore").value(true))
             .andExpect(jsonPath("$.data.nextCursor").isString());
         mvc.perform(get("/group-chats/10/files").param("pageSize", "0")).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getEndpointReturnsTrustedUploadersForUserAndAgentAttachments() throws Exception {
+        ByaiMessage user = upload(100L, 3000, "a", "b");
+        user.setUsage(1);
+        user.setCreatorId(9007199254740993L);
+        user.setCreatorName("张三");
+        // 客户端附件字段和任务目标不能覆盖消息写入时保存的真实作者。
+        user.setMetadata("{\"uploaderId\":\"999\",\"uploaderName\":\"伪造姓名\",\"targetAgentId\":\"888\"}");
+        JSONObject resources = JSON.parseObject(user.getRelatedResources());
+        resources.getJSONArray("files").getJSONObject(0).put("uploaderId", "999");
+        resources.getJSONArray("files").getJSONObject(0).put("uploaderName", "伪造姓名");
+        user.setRelatedResources(resources.toJSONString());
+        ByaiMessage agent = upload(50L, 2000, "c");
+        agent.setUsage(2);
+        agent.setCreatorId(88L);
+        agent.setCreatorName("研究助手");
+        agent.setMetadata("{\"scene\":\"GROUP_CHAT\",\"targetAgentId\":\"999\"}");
+        stored.add(user);
+        stored.add(agent);
+        var mvc = MockMvcBuilders.standaloneSetup(new GroupChatFileController(service)).build();
+        mvc.perform(get("/group-chats/10/files").param("pageSize", "3"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.files[0].uploaderId").value("9007199254740993"))
+            .andExpect(jsonPath("$.data.files[0].uploaderName").value("张三"))
+            .andExpect(jsonPath("$.data.files[0].uploaderType").value("USER"))
+            .andExpect(jsonPath("$.data.files[1].uploaderId").value("9007199254740993"))
+            .andExpect(jsonPath("$.data.files[1].uploaderName").value("张三"))
+            .andExpect(jsonPath("$.data.files[1].uploaderType").value("USER"))
+            .andExpect(jsonPath("$.data.files[2].uploaderId").value("88"))
+            .andExpect(jsonPath("$.data.files[2].uploaderName").value("研究助手"))
+            .andExpect(jsonPath("$.data.files[2].uploaderType").value("AGENT"));
+    }
+
+    @Test
+    void missingUploaderDoesNotFallBackToMetadataOrMentionedAgents() throws Exception {
+        ByaiMessage agent = upload(100L, 3000, "a");
+        agent.setUsage(2);
+        agent.setCreatorName("  ");
+        agent.setResComIds("[777]");
+        agent.setMetadata("{\"scene\":\"GROUP_CHAT\",\"targetAgentId\":\"999\",\"uploaderName\":\"伪造姓名\"}");
+        stored.add(agent);
+        // 缺失用途的历史候选不伪造身份类型；实际 SQL 仍只返回真人和员工消息。
+        stored.add(upload(50L, 2000, "b"));
+        var mvc = MockMvcBuilders.standaloneSetup(new GroupChatFileController(service)).build();
+        mvc.perform(get("/group-chats/10/files"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.files[0].uploaderId").value(nullValue()))
+            .andExpect(jsonPath("$.data.files[0].uploaderName").value(nullValue()))
+            .andExpect(jsonPath("$.data.files[0].uploaderType").value("AGENT"))
+            .andExpect(jsonPath("$.data.files[1].uploaderId").value(nullValue()))
+            .andExpect(jsonPath("$.data.files[1].uploaderName").value(nullValue()))
+            .andExpect(jsonPath("$.data.files[1].uploaderType").doesNotExist());
     }
 
     private List<String> ids(GroupChatFileListResponse page) {

@@ -24,6 +24,9 @@ public class ResourceMemberSettingQo {
      */
     private Long orgId;
 
+    /** 名单来自合并使用授权抽屉时，同时对账 AVAILABLE_USE；旧客户端仍只维护 FORCE_USE。 */
+    private Boolean includeUseGrantFamily;
+
     /**
      * 红名单
      */

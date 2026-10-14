@@ -47,19 +47,19 @@ export async function listMcpToolsLive(params: {
   forwardHeaders?: Record<string, string>;
   timeoutMs?: number;
   fetchImpl?: FetchLike;
-}): Promise<{ tools: Dict[] | null; error: ExecutorFailure | null }> {
+}): Promise<{ tools: Dict[] | null; sessionId: string | null; error: ExecutorFailure | null }> {
   const mcp = isRecord(params.capability.mcp) ? (params.capability.mcp as Dict) : {};
   const serverUrl = nonEmptyString(mcp.server_url);
   const transferType = normalizeMcpTransferType(
     mcp.transfer_type ?? mcp.transferType ?? mcp.mcpType ?? mcp.mcp_type,
   );
   if (!serverUrl) {
-    return { tools: null, error: makeError("MCP_SERVER_NOT_FOUND", "MCP Server URL not found") };
+    return { tools: null, sessionId: null, error: makeError("MCP_SERVER_NOT_FOUND", "MCP Server URL not found") };
   }
 
   const { headers: resourceHeaders, error: resourceError } = buildResourceMcpHeaders(params.capability);
   if (resourceError) {
-    return { tools: null, error: resourceError };
+    return { tools: null, sessionId: null, error: resourceError };
   }
 
   const { headers } = mergeAuthHeaders({
@@ -120,12 +120,14 @@ export async function listMcpToolsLive(params: {
       if (!isRecord(listPayload)) {
         return {
           tools: null,
+          sessionId: null,
           error: makeError("MCP_DISCOVERY_FAILED", "MCP tools/list returned invalid payload (legacy SSE)"),
         };
       }
       if ("error" in listPayload) {
         return {
           tools: null,
+          sessionId: null,
           error: makeError("MCP_DISCOVERY_FAILED", String(listPayload.error)),
         };
       }
@@ -141,10 +143,11 @@ export async function listMcpToolsLive(params: {
           output_schema: tool.outputSchema ?? tool.output_schema,
         });
       }
-      return { tools: normalized, error: null };
+      return { tools: normalized, sessionId: null, error: null };
     } catch (err) {
       return {
         tools: null,
+        sessionId: null,
         error: makeError(
           "MCP_DISCOVERY_FAILED",
           `MCP legacy SSE discovery failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -173,6 +176,7 @@ export async function listMcpToolsLive(params: {
   if ("error" in initRes) {
     return {
       tools: null,
+      sessionId: null,
       error: makeError(
         "MCP_DISCOVERY_FAILED",
         `MCP initialize failed: ${initRes.error instanceof Error ? initRes.error.message : String(initRes.error)}`,
@@ -183,6 +187,7 @@ export async function listMcpToolsLive(params: {
   if (initResponse.status === 401 || initResponse.status === 403) {
     return {
       tools: null,
+      sessionId: null,
       error: makeError(
         "MCP_DISCOVERY_UNAUTHORIZED",
         `MCP initialize unauthorized: HTTP ${initResponse.status}`,
@@ -192,6 +197,7 @@ export async function listMcpToolsLive(params: {
   if (initResponse.status !== 200 && initResponse.status !== 202) {
     return {
       tools: null,
+      sessionId: null,
       error: makeError(
         "MCP_DISCOVERY_FAILED",
         `MCP initialize failed: HTTP ${initResponse.status}`,
@@ -214,15 +220,24 @@ export async function listMcpToolsLive(params: {
   }).headers;
   applyEnvAuthOverrides(notificationHeaders);
 
-  // notifications/initialized - fire and forget
-  void callMcpJsonRpc({
+  const initializedRes = await callMcpJsonRpc({
     transferType,
     url: serverUrl,
     payload: { jsonrpc: "2.0", method: "notifications/initialized", params: {} },
     headers: notificationHeaders,
     timeoutMs,
     fetchImpl: params.fetchImpl,
-  }).catch(() => undefined);
+  });
+  if ("error" in initializedRes) {
+    return {
+      tools: null,
+      sessionId,
+      error: makeError(
+        "MCP_DISCOVERY_FAILED",
+        `MCP notifications/initialized failed: ${initializedRes.error instanceof Error ? initializedRes.error.message : String(initializedRes.error)}`,
+      ),
+    };
+  }
 
   const listRes = await callMcpJsonRpc({
     transferType,
@@ -235,6 +250,7 @@ export async function listMcpToolsLive(params: {
   if ("error" in listRes) {
     return {
       tools: null,
+      sessionId,
       error: makeError(
         "MCP_DISCOVERY_FAILED",
         `MCP tools/list failed: ${listRes.error instanceof Error ? listRes.error.message : String(listRes.error)}`,
@@ -245,6 +261,7 @@ export async function listMcpToolsLive(params: {
   if (listResponse.status === 401 || listResponse.status === 403) {
     return {
       tools: null,
+      sessionId,
       error: makeError(
         "MCP_DISCOVERY_UNAUTHORIZED",
         `MCP tools/list unauthorized: HTTP ${listResponse.status}`,
@@ -256,6 +273,7 @@ export async function listMcpToolsLive(params: {
   if (!isRecord(payload)) {
     return {
       tools: null,
+      sessionId,
       error: makeError(
         "MCP_DISCOVERY_FAILED",
         `MCP tools/list returned invalid payload: HTTP ${listResponse.status}`,
@@ -265,6 +283,7 @@ export async function listMcpToolsLive(params: {
   if ("error" in payload) {
     return {
       tools: null,
+      sessionId,
       error: makeError("MCP_DISCOVERY_FAILED", String(payload.error)),
     };
   }
@@ -281,7 +300,7 @@ export async function listMcpToolsLive(params: {
       output_schema: tool.outputSchema ?? tool.output_schema,
     });
   }
-  return { tools: normalized, error: null };
+  return { tools: normalized, sessionId, error: null };
 }
 
 function normalizeMcpTransferType(raw: unknown): "sse" | "streamable_http" {
@@ -398,7 +417,7 @@ export async function refreshMcpCapability(params: {
   if (!isRecord(params.capability.mcp)) {
     return params.capability;
   }
-  const { tools, error } = await listMcpToolsLive({
+  const { tools, sessionId, error } = await listMcpToolsLive({
     capability: params.capability,
     authContext: params.authContext,
     session: params.session,
@@ -408,6 +427,7 @@ export async function refreshMcpCapability(params: {
   if (tools && tools.length > 0) {
     const mcp = params.capability.mcp as NonNullable<Capability["mcp"]>;
     mcp.tools = tools as Capability["mcp"]["tools"];
+    mcp.session_id = sessionId ?? undefined;
     params.capability._mcp_live_error = null;
     params.capability._discovery_source = `${params.capability._discovery_source ?? "unknown"}+mcp_live`;
     return params.capability;

@@ -28,6 +28,8 @@ describe('resource navigation translations', () => {
     ['myEmployees.enterprise', '企业员工', 'Enterprise employees'],
     ['resourceCenter.personalSkills', '个人技能', 'Personal skills'],
     ['resourceCenter.enterpriseSkills', '企业技能', 'Enterprise skills'],
+    ['resourceCenter.directorySkills', '目录技能', 'Directory skills'],
+    ['resourceCenter.resourceLibrarySkills', '资源库技能', 'Resource library skills'],
     ['resourceCenter.personalKnowledge', '个人知识', 'Personal knowledge'],
     ['resourceCenter.enterpriseKnowledge', '企业知识', 'Enterprise knowledge'],
     ['resourceCenter.personalTools', '个人工具', 'Personal tools'],

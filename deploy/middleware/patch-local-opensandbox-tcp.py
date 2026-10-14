@@ -72,6 +72,16 @@ def patch(source: str) -> str:
         if source.count(delete_marker) != 1:
             raise RuntimeError("Unsupported OpenSandbox server version; stopped-container delete patch was not applied")
         source = source.replace(delete_marker, delete_replacement)
+    # Keep all tar entries and the two standard end blocks, but omit Python's
+    # extra 10 KiB record padding (Podman archive API may report broken pipe).
+    archive_marker = 'data=tar_stream.getvalue()'
+    archive_replacement = 'data=tar_stream.getvalue()[:tar.offset + 1024]'
+    if archive_replacement not in source:
+        if source.count(archive_marker) != 2:
+            raise RuntimeError("Unsupported OpenSandbox server version; tar padding patch was not applied")
+        source = source.replace(archive_marker, archive_replacement)
+    elif source.count(archive_replacement) != 2 or archive_marker in source.replace(archive_replacement, ""):
+        raise RuntimeError("Incomplete OpenSandbox tar padding patch")
     return source
 
 

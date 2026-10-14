@@ -59,11 +59,6 @@ public class DigitalEmployeeVo extends DigitalEmployeeDTO {
     private Boolean canApplyUse;
 
     /**
-     * 是否可设为默认个人助理
-     */
-    private Boolean canSetDefault;
-
-    /**
      * 是否已由列表接口批量回填当前用户的操作权限。
      */
     private Boolean operationPermissionsLoaded;

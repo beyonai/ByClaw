@@ -2,7 +2,6 @@ import { getRuntimeActualUrl, getRootUnAuthPagePath } from '@/utils';
 import cookie from './cookie';
 import { isNil } from 'lodash';
 import { getDcSystemConfigValueByCodes } from '@/service/layout';
-import { clearSelectedEnterprise } from './tenantContext';
 
 export const sessionKey = 'SESSION';
 export const portalSessionKey = 'PORTAL-SESSION';
@@ -22,7 +21,6 @@ export const loginRedirect = (search: Record<string, string> = {}) => {
 };
 
 export const clearToken = () => {
-  clearSelectedEnterprise();
   // 只清理认证相关 cookie 和 localStorage，避免影响其他业务 cookie。
   cookie.delete(sessionKey);
   cookie.delete(portalSessionKey);
@@ -102,8 +100,6 @@ export const setUserToken = (userTokens: any) => {
   const { sessionId, token, ssoToken } = userTokens || {};
 
   if (sessionId) {
-    // A tenant selection belongs to one login session, never to the next login.
-    if (sessionId !== getSessionKey()) clearSelectedEnterprise();
     setSessionKey(sessionId);
     setPortalSessionKey(sessionId);
   }

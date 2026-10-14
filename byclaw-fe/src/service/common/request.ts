@@ -21,7 +21,6 @@ import axios, { AxiosProgressEvent, AxiosResponse, InternalAxiosRequestConfig, M
 import { get, isPlainObject, throttle, isNil } from 'lodash';
 import { logout } from '../user';
 import { getDesktopLocalRequest } from './desktopLocal';
-import { getTenantContext, getTenantSwitchSeq, hasStoredTenantSelection } from '@/utils/tenantContext';
 
 declare module 'axios' {
   // 录制器需要在 409 时保留服务端原始响应，供调用方自行处理。
@@ -63,34 +62,6 @@ const maxQuantityMap: Record<
     sign: AbortController;
   }
 > = {};
-
-// Tenant context is sent only to chat APIs whose BE handlers enforce tenant routing.
-const tenantChatPaths = new Set([
-  '/byaiService/assiman/qryConversations',
-  '/byaiService/project/session/listByQo',
-  '/byaiService/assiman/getMessages',
-  '/byaiService/assiman/getMessageOutline',
-  '/byaiService/assiman/getMessageByIds',
-  '/byaiService/assiman/updateConversation',
-  '/byaiService/assiman/removeConversation',
-  '/byaiService/assiman/updateMessage',
-  '/byaiService/assiman/updateMesFeedback',
-  '/byaiService/assiman/deleteMessage',
-  '/byaiService/assiman/querySessionByAgent',
-  '/byaiService/group/batchReadMessages',
-  '/byaiService/group/addForwardMessage',
-  '/byaiService/group/createGroupChat',
-  '/byaiService/group/addMessage',
-  '/byaiService/chat/getMessageById',
-  '/byaiService/chat/runningStatus',
-  '/byaiService/chat/runningSnapshot',
-  '/byaiService/chat/stopChat',
-  '/byaiService/chat/updateMessageStructById',
-  '/byaiService/chat/sessionStatus',
-  '/byaiService/chat/getTraceIdByMessageId',
-  '/byaiService/api/v1/sessionResources/query',
-  '/byaiService/api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents',
-]);
 
 let globalLogoutPromise: Promise<void> | null = null;
 
@@ -353,28 +324,12 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
     }
   }
   // 在创建 Axios 请求时固定凭证，响应晚到时仍可判断它属于哪个登录会话。
-  const tenantSwitchSeq = getTenantSwitchSeq();
-  const tenantContext = getTenantContext();
-  const requestPath = url.split('?')[0];
-  const isTenantChatRequest =
-    tenantChatPaths.has(requestPath) ||
-    requestPath.startsWith('/byaiService/assiman/getForwardMessage/') ||
-    requestPath === '/byaiService/group-chats' ||
-    requestPath.startsWith('/byaiService/group-chats/') ||
-    requestPath.startsWith('/byaiService/group-chat/tasks/');
-  if (isTenantChatRequest && hasStoredTenantSelection() && !tenantContext) {
-    return Promise.reject(new Error('Tenant context expired; select a space again'));
-  }
   const headers: Record<string, string> = {
     ...(config.headers || {}),
     [tokenKey]: getToken(),
     [ssotokenKey]: getssoToken(),
     'x-session-id': getSessionKey(),
   };
-  if (tenantContext && isTenantChatRequest) {
-    headers['X-Enterprise-Id'] = tenantContext.enterpriseId;
-    headers['X-Tenant-Context'] = tenantContext.tenantContextToken;
-  }
   if (languageConf) {
     headers.language = getLocale();
   }
@@ -400,9 +355,6 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
         preserveErrorResponse: responseCfg?.preserveErrorResponse,
       })
       .then((res) => {
-        if (tenantSwitchSeq !== getTenantSwitchSeq()) {
-          throw new Error('Tenant changed while request was pending');
-        }
         if (config && config.responseType === 'blob') {
           // @ts-ignore
           const disposition = res.headers.get('content-disposition') || '';

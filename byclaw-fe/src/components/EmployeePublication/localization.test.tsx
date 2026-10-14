@@ -36,7 +36,8 @@ it('localizes summary counts and refreshes expanded content after switching lang
   const ui = <ResourceSummary dependencies={dependencies} onDownloadSkill={jest.fn()} />;
   const { rerender } = render(ui);
   expect(screen.getByText('1 项不会带入')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '展开说明' }));
+  // AntD 图标名称也会进入按钮的无障碍名称，按可见译文定位展开操作。
+  fireEvent.click(screen.getByRole('button', { name: /展开说明/ }));
   mockLocale = 'en-US';
   rerender(<ResourceSummary dependencies={dependencies} onDownloadSkill={jest.fn()} />);
   expect(screen.getByText('Excluded resources: 1')).toBeInTheDocument();

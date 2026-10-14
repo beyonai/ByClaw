@@ -320,8 +320,6 @@ public class ResourceAuthVo extends AuthVo {
 
     private Boolean canRestore;
 
-    private Boolean canSetDefault;
-
     private Boolean canOnShelf;
 
     private Boolean canOffShelf;

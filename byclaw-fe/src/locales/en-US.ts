@@ -1436,6 +1436,8 @@ export default {
   'resourceCenter.enterprise': 'Enterprise',
   'resourceCenter.personalSkills': 'Personal skills',
   'resourceCenter.enterpriseSkills': 'Enterprise skills',
+  'resourceCenter.directorySkills': 'Directory skills',
+  'resourceCenter.resourceLibrarySkills': 'Resource library skills',
   'resourceCenter.personalKnowledge': 'Personal knowledge',
   'resourceCenter.enterpriseKnowledge': 'Enterprise knowledge',
   'resourceCenter.personalTools': 'Personal tools',

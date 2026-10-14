@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { message } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceList from '..';
@@ -132,6 +132,145 @@ beforeEach(() => {
 });
 
 afterEach(() => jest.restoreAllMocks());
+
+it.each(
+  ['SKILL', 'KG_DOC', 'TOOL'].flatMap((resourceType) =>
+    ['personal', 'enterprise'].flatMap((activeTab) =>
+      [false, true].map((enableFavorites) => ({ resourceType, activeTab, enableFavorites }))
+    )
+  )
+)(
+  'keeps backend sorting across pages for $resourceType / $activeTab / favorites=$enableFavorites',
+  async ({ resourceType, activeTab, enableFavorites }) => {
+    const firstIds = Array.from({ length: 30 }, (_, index) => String(30 - index));
+    const row = (resourceId: string) => ({ resourceId, resourceBizType: resourceType, ownerType: 'enterprise' });
+    (listResourceUseAuth as jest.Mock)
+      .mockResolvedValueOnce({ data: { list: firstIds.map(row), total: 31 } })
+      .mockResolvedValueOnce({ data: { list: [row('31')], total: 31 } });
+    renderList({
+      resourceType,
+      activeTab,
+      enableFavorites,
+      myResourcesOnly: false,
+      searchValue: 'query',
+      catalogId: '20',
+      // “我的”标签切到企业来源时仍按标签选择时间排序，筛选也不能覆盖默认排序。
+      dropdownParam: { ownerType: 'enterprise', permission: 'CREATED_BY_ME', sortMode: 'STALE_MODE' },
+    });
+    await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
+    const sortMode = activeTab === 'personal' ? 'UPDATED_DESC' : 'POPULARITY_DESC';
+    const request = (listResourceUseAuth as jest.Mock).mock.calls[0][0];
+    expect(request).toEqual(
+      expect.objectContaining({ keyword: 'query', catalogId: '20', permission: 'CREATED_BY_ME', sortMode, pageNum: 1 })
+    );
+    if (activeTab === 'enterprise' && enableFavorites) {
+      expect(request).toEqual(expect.objectContaining({ includeFavorites: true, favoritesOnly: false }));
+    } else {
+      expect(request).not.toHaveProperty('includeFavorites');
+    }
+    fireEvent.click(screen.getByTestId('resource-load-more'));
+    await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(31));
+    expect(listResourceUseAuth).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyword: 'query', catalogId: '20', permission: 'CREATED_BY_ME', sortMode, pageNum: 2 })
+    );
+    // 前端只按后端顺序追加，尾页的较大资源 ID 不能被本地排序插到前面。
+    expect(screen.getAllByTestId('resource-card').map((card) => card.getAttribute('data-resource-id'))).toEqual([
+      ...firstIds,
+      '31',
+    ]);
+    expect(queryWorkspacePersonalSkillList).not.toHaveBeenCalled();
+  }
+);
+
+it.each([
+  { resourceType: 'KG_DOC', activeTab: 'favorites', myResourcesOnly: false, enableFavorites: true },
+  { resourceType: 'DIG_EMPLOYEE', activeTab: 'enterprise', myResourcesOnly: false },
+])('keeps resource center default sorting out of other scenes (%j)', async (scene) => {
+  renderList(scene);
+  await screen.findByTestId('resource-card');
+  expect((listResourceUseAuth as jest.Mock).mock.calls[0][0]).not.toHaveProperty('sortMode');
+});
+
+it.each(
+  ['SKILL', 'KG_DOC', 'TOOL'].flatMap((resourceType) =>
+    ['personal', 'enterprise'].flatMap((activeTab) =>
+      ['all', 'created', 'managed'].map((myResourceScope) => ({ resourceType, activeTab, myResourceScope }))
+    )
+  )
+)(
+  'keeps management time sorting across pages for $resourceType / $activeTab / $myResourceScope',
+  async ({ resourceType, activeTab, myResourceScope }) => {
+    const firstIds = Array.from({ length: 30 }, (_, index) => String(30 - index));
+    const row = (resourceId: string) => ({ resourceId, resourceBizType: resourceType, ownerType: activeTab });
+    (listResourceUseAuth as jest.Mock)
+      .mockResolvedValueOnce({ data: { list: firstIds.map(row), total: 31 } })
+      .mockResolvedValueOnce({ data: { list: [row('31')], total: 31 } });
+    renderList({
+      resourceType,
+      activeTab,
+      myResourceScope,
+      searchValue: 'query',
+      enableFavorites: true,
+      dropdownParam: { resourceStatus: '3', sortMode: 'POPULARITY_DESC' },
+    });
+    await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(30));
+    const permission =
+      activeTab === 'personal' || myResourceScope === 'created'
+        ? 'CREATED_BY_ME'
+        : myResourceScope === 'managed'
+        ? 'MANAGED_BY_ME'
+        : 'MANAGEABLE_BY_ME';
+    const expected = {
+      sortMode: 'UPDATED_DESC',
+      ownerType: activeTab,
+      resourceStatus: activeTab === 'personal' ? '2' : '3',
+      permission,
+      excludeDeleted: true,
+      keyword: 'query',
+    };
+    expect(listResourceUseAuth).toHaveBeenLastCalledWith(expect.objectContaining({ ...expected, pageNum: 1 }));
+    expect((listResourceUseAuth as jest.Mock).mock.calls[0][0]).not.toHaveProperty('includeFavorites');
+    fireEvent.click(screen.getByTestId('resource-load-more'));
+    await waitFor(() => expect(screen.getAllByTestId('resource-card')).toHaveLength(31));
+    expect(listResourceUseAuth).toHaveBeenLastCalledWith(expect.objectContaining({ ...expected, pageNum: 2 }));
+    expect(screen.getAllByTestId('resource-card').map((card) => card.getAttribute('data-resource-id'))).toEqual([
+      ...firstIds,
+      '31',
+    ]);
+    expect(screen.queryByRole('heading', { name: 'resourceCenter.directorySkills' })).not.toBeInTheDocument();
+  }
+);
+
+it('separates personal directory skills from backend paged skills without counting directories toward pagination', async () => {
+  const firstIds = Array.from({ length: 30 }, (_, index) => String(30 - index));
+  const row = (resourceId: string) => ({ resourceId, resourceBizType: 'SKILL', ownerType: 'personal' });
+  (listResourceUseAuth as jest.Mock)
+    .mockResolvedValueOnce({ data: { list: firstIds.map(row), total: 31 } })
+    .mockResolvedValueOnce({ data: { list: [row('31')], total: 31 } });
+  (queryWorkspacePersonalSkillList as jest.Mock).mockResolvedValue({
+    data: [
+      { skillName: 'local-a', skillPath: '/skills/local-a', personalWorkspace: true },
+      { skillName: 'local-b', skillPath: '/skills/local-b', personalWorkspace: true },
+    ],
+  });
+  renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: true });
+  const directories = within(await screen.findByRole('region', { name: 'resourceCenter.directorySkills' }));
+  const registered = within(screen.getByRole('region', { name: 'resourceCenter.resourceLibrarySkills' }));
+  expect(directories.getAllByTestId('resource-card')).toHaveLength(2);
+  expect(registered.getAllByTestId('resource-card')).toHaveLength(30);
+  fireEvent.click(screen.getByTestId('resource-load-more'));
+  await waitFor(() => expect(registered.getAllByTestId('resource-card')).toHaveLength(31));
+  expect(directories.getAllByTestId('resource-card')).toHaveLength(2);
+  expect(queryWorkspacePersonalSkillList).toHaveBeenCalledTimes(1);
+  expect(registered.getAllByTestId('resource-card').map((card) => card.getAttribute('data-resource-id'))).toEqual([
+    ...firstIds,
+    '31',
+  ]);
+  expect(listResourceUseAuth).toHaveBeenLastCalledWith(
+    expect.objectContaining({ sortMode: 'UPDATED_DESC', pageNum: 2, permission: 'CREATED_BY_ME' })
+  );
+  expect(screen.queryByTestId('resource-load-more')).not.toBeInTheDocument();
+});
 
 it.each(['SKILL', 'KG_DOC', 'TOOL'])('shows loading while the initial %s request is pending', async (resourceType) => {
   let finish!: (value: any) => void;
@@ -421,6 +560,9 @@ it.each(
   const cards = await screen.findAllByTestId('resource-card');
   for (const card of cards) {
     const hiddenKeys = JSON.parse(card.getAttribute('data-hidden-menu-keys') || '[]');
+    // 三个模块的浏览页和管理页均保留授权入口资格，由卡片继续校验后端权限和资源状态。
+    expect(hiddenKeys).not.toContain('authorize');
+    expect(hiddenKeys).not.toContain('use');
     for (const key of ['shelfData', 'unShelfData', 'deleteData', 'delete']) {
       expect(hiddenKeys.includes(key)).toBe(!props.myResourcesOnly);
     }
@@ -628,6 +770,8 @@ it('loads personal directories without a default employee and trusts their perso
   });
   renderList({ resourceType: 'SKILL', activeTab: 'personal', myResourcesOnly: true });
   expect(await screen.findByTestId('resource-card')).toHaveAttribute('data-manage-workspace', 'true');
+  expect(screen.getByRole('region', { name: 'resourceCenter.directorySkills' })).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'resourceCenter.resourceLibrarySkills' })).not.toBeInTheDocument();
   expect(queryWorkspacePersonalSkillList).toHaveBeenCalledWith({ keyword: '', personalWorkspace: true });
   const { queryInstalledResourceIds } = jest.requireMock('@/pages/manager/service/DigitalEmployeeMgr');
   expect(queryInstalledResourceIds).not.toHaveBeenCalled();

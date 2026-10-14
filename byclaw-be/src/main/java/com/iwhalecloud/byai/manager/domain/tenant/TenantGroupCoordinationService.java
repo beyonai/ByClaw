@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.UnaryOperator;
@@ -17,6 +18,8 @@ import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispatchPromptBuilder;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.GroupMember;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMemberUidCodec;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
@@ -41,6 +44,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
     private final GroupWorkAssistantService assistants;
     private final SsResourceService resources;
     private final AuthApplicationService authorization;
+    private final GroupChatMemberUidCodec uidCodec;
     private GroupChatSessionContextFileService contextFiles;
     private GroupChatDispatchPromptBuilder prompts;
     private UserService users;
@@ -54,11 +58,12 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
     }
 
     public TenantGroupCoordinationService(TenantNodeClient node, GroupWorkAssistantService assistants,
-        SsResourceService resources, AuthApplicationService authorization) {
+        SsResourceService resources, AuthApplicationService authorization, GroupChatMemberUidCodec uidCodec) {
         this.node = node;
         this.assistants = assistants;
         this.resources = resources;
         this.authorization = authorization;
+        this.uidCodec = uidCodec;
     }
 
     public Map<String, Object> coordinator(TenantRequestContext tenant, Long groupId) {
@@ -91,8 +96,9 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
     }
 
     @SuppressWarnings("unchecked")
-    private void validateRequest(TenantRequestContext tenant, AssistantChatDto request) {
-        if (tenant == null || request == null || request.getSessionId() == null) return;
+    private List<?> validateRequest(TenantRequestContext tenant, AssistantChatDto request) {
+        if (tenant == null || request == null || request.getSessionId() == null) return null;
+        List<?> groupMembers = null;
         Map<String, Object> session = node.request(tenant, "GET", "/internal/v1/sessions/" + request.getSessionId(),
             null, new TypeReference<Map<String, Object>>() { });
         Map<String, Object> params = request.getExtParams() == null ? new HashMap<>() : new HashMap<>(request.getExtParams());
@@ -133,11 +139,10 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
                 && (params.containsKey("multiAgent") || params.containsKey("multi_agent"))) throw forbidden();
             List<String> allowed = scope.get("allowedAgentIds") instanceof List<?> ids
                 ? ids.stream().map(Object::toString).toList() : List.of();
-            Map<String, Object> group = node.request(tenant, "GET", "/internal/v1/group-chats/" + scope.get("groupSessionId"),
-                null, new TypeReference<Map<String, Object>>() { });
-            List<String> currentMembers = group.get("members") instanceof List<?> rows ? rows.stream()
+            groupMembers = readGroupMembers(tenant, String.valueOf(scope.get("groupSessionId")));
+            List<String> currentMembers = groupMembers.stream()
                 .filter(value -> value instanceof Map<?, ?> member && "AGENT".equals(member.get("memObjType")))
-                .map(value -> String.valueOf(((Map<?, ?>) value).get("memObjId"))).toList() : List.of();
+                .map(value -> String.valueOf(((Map<?, ?>) value).get("memObjId"))).toList();
             if (!currentMembers.contains(String.valueOf(scope.get("coordinatorAgentId")))) throw forbidden();
             if (!currentMembers.containsAll(allowed)) throw forbidden();
             if (request.getAgentId() == null) throw forbidden();
@@ -157,20 +162,22 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
             if (!child) params.put("tenantGroupTask", scope.get("taskSessionId"));
         }
         request.setExtParams(params);
+        return groupMembers;
     }
 
     @Override
     public Object decorate(ChatProcessContext context, Object content, Map<String, Object> gatewayParams) {
         if (context == null || context.tenantContext == null) return content;
-        validateRequest(context.tenantContext, context.assistantChatDto);
+        // 复用本次授权检查返回的名单，不把可由客户端伪造的成员数据保存在 extParams 中。
+        List<?> groupMembers = validateRequest(context.tenantContext, context.assistantChatDto);
         Object scope = context.assistantChatDto.getExtParams().get("groupCoordination");
         if (!(scope instanceof Map<?, ?> map)) {
             Object dispatch = context.assistantChatDto.getExtParams().get("groupDispatch");
             if (dispatch instanceof Map<?, ?> candidate
                 && Boolean.TRUE.equals(context.assistantChatDto.getExtParams().get("tenantGroupCandidate"))) {
                 gatewayParams.put("cwd", "/by/.sessions/" + context.sessionId);
-                Object decorated = appendHistory(context, Map.of("groupSessionId", candidate.get("groupSessionId"),
-                    "taskSessionId", candidate.get("candidateSessionId")), content, gatewayParams);
+                Object decorated = appendContext(context, Map.of("groupSessionId", candidate.get("groupSessionId"),
+                    "taskSessionId", candidate.get("candidateSessionId")), content, gatewayParams, groupMembers);
                 return decorateText(decorated, text -> candidatePrompt(text, candidate, context.sessionId));
             }
             return content;
@@ -188,7 +195,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
             coordinatorMetadata.put("workerAgentType", coordinator.getWorkerAgentType());
         }
         gatewayParams.put("groupCoordinator", coordinatorMetadata);
-        Object decorated = appendHistory(context, map, content, gatewayParams);
+        Object decorated = appendContext(context, map, content, gatewayParams, groupMembers);
         gatewayParams.put("cwd", "/by/.sessions/" + context.sessionId);
         Object dispatch = context.assistantChatDto.getExtParams().get("groupDispatch");
         if (dispatch instanceof Map<?, ?> candidate && Boolean.TRUE.equals(context.assistantChatDto.getExtParams().get("tenantGroupCandidate"))
@@ -223,7 +230,9 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
             + "\n\n只有判定为 TASK 时才适用以下任务交付约定；CHAT 只需正常回答用户，不执行任务交付流程。", sessionId);
     }
 
-    private Object appendHistory(ChatProcessContext context, Map<?, ?> scope, Object content, Map<String, Object> gatewayParams) {
+    /** Node 提供群历史和成员关系，BE 只负责准备文件及出站读取提示。 */
+    private Object appendContext(ChatProcessContext context, Map<?, ?> scope, Object content, Map<String, Object> gatewayParams,
+        List<?> groupMembers) {
         if (context.userMessageId == null || context.traceId == null || contextFiles == null) {
             throw new ChatTurnPreparationException("历史上下文身份不完整，请重试", null);
         }
@@ -264,12 +273,63 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         request.setTargetAgentId(context.assistantChatDto.getAgentId());
         var initiator = users.findById(context.tenantContext.userId());
         if (initiator == null) throw forbidden();
+        List<?> members = groupMembers == null ? readGroupMembers(context.tenantContext, groupId) : groupMembers;
+        // 无协作范围的候选会话也必须确认实际执行员工仍在当前租户群内。
+        if (members.stream().noneMatch(value -> value instanceof Map<?, ?> member
+            && "AGENT".equals(member.get("memObjType"))
+            && context.assistantChatDto.getAgentId().toString().equals(String.valueOf(member.get("memObjId"))))) throw forbidden();
         var file = contextFiles.prepareGroupSnapshot(initiator.getUserCode(), request, context.traceId, context.userMessageId, snapshot);
+        var membersFile = contextFiles.prepareGroupMemberSnapshot(initiator.getUserCode(), request, context.traceId,
+            context.userMessageId, snapshot, buildMemberRoster(members, context.assistantChatDto.getAgentId(), scope));
         gatewayParams.put("groupContextSnapshot", file.snapshot());
         gatewayParams.put("groupChat", Map.of("schemaVersion", "byclaw.group-chat-ref/v1", "conversationKey", groupId,
             "beforeMessageId", boundary, "childSessionId", context.sessionId.toString(),
             "initiatorUserId", context.tenantContext.userId(), "targetAgentId", context.assistantChatDto.getAgentId()));
-        return decorateText(content, text -> prompts.appendGroupHistory(text, file));
+        return decorateText(content, text -> prompts.appendGroupMembers(prompts.appendGroupHistory(text, file), membersFile));
+    }
+
+    private List<?> readGroupMembers(TenantRequestContext tenant, String groupId) {
+        Map<String, Object> group = node.request(tenant, "GET", "/internal/v1/group-chats/" + groupId,
+            null, new TypeReference<Map<String, Object>>() { });
+        if (group == null || !(group.get("members") instanceof List<?> members)) throw forbidden();
+        return members;
+    }
+
+    /** 名单使用本轮实际执行者和服务端协作范围；群内名称缺失时补充平台基础资料。 */
+    private List<GroupMember> buildMemberRoster(List<?> members, Long actualAgentId, Map<?, ?> scope) {
+        String coordinatorId = scope.get("coordinatorAgentId") == null ? null : scope.get("coordinatorAgentId").toString();
+        List<?> allowed = scope.get("allowedAgentIds") instanceof List<?> ids ? ids : List.of();
+        List<GroupMember> roster = new ArrayList<>();
+        for (Object value : members) {
+            if (!(value instanceof Map<?, ?> member)) continue;
+            AgentMetaEnum type = switch (String.valueOf(member.get("memObjType"))) {
+                case "USER" -> AgentMetaEnum.HUMAN;
+                case "AGENT" -> AgentMetaEnum.DIG_EMPLOYEE;
+                default -> null;
+            };
+            if (type == null) continue;
+            var identity = uidCodec.decode(type.getCode() + "_" + member.get("memObjId"));
+            if (identity.isEmpty()) continue;
+            Long id = identity.get().resourceId();
+            if (type == AgentMetaEnum.DIG_EMPLOYEE) {
+                if (id.equals(actualAgentId)) continue;
+                if (coordinatorId != null && !(coordinatorId.equals(actualAgentId.toString())
+                    ? allowed.contains(id.toString()) : coordinatorId.equals(id.toString()))) continue;
+            }
+            String name = memberName(member, type, id);
+            if (name != null && !name.isBlank()) roster.add(new GroupMember(name, uidCodec.encode(type, id)));
+        }
+        return List.copyOf(roster);
+    }
+
+    private String memberName(Map<?, ?> member, AgentMetaEnum type, Long id) {
+        if (member.get("memName") instanceof String name && !name.isBlank()) return name;
+        if (type == AgentMetaEnum.HUMAN) {
+            var user = users.findById(id);
+            return user == null ? null : user.getUserName();
+        }
+        var employee = resources.findById(id);
+        return employee == null ? null : employee.getResourceName();
     }
 
     private Object decorateText(Object content, UnaryOperator<String> decorator) {

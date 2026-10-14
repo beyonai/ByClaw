@@ -15,13 +15,17 @@ export function resolveSandboxesInfo(sandboxesInfo: ISandboxesInfoState) {
 }
 
 export function getVNCUrl(sandboxesInfo: ISandboxesInfo[]) {
-  const vncSandboxInst = sandboxesInfo.find((item) => get(item, 'instanceEndpoints.vnc'));
+  const vncSandboxInst = sandboxesInfo.find((item) => item.status === 'RUNNING' && get(item, 'instanceEndpoints.vnc'));
   if (!vncSandboxInst) return '';
 
-  const { sandboxId } = vncSandboxInst;
-
-  // 生产由 Nginx、本地由 Umi 开发代理转发同一前缀，iframe 和 noVNC WebSocket 始终保持同源。
-  const url = `${window.location.origin}/v1/sandboxes/${sandboxId}/proxy/8081/?autoconnect=true&resize=scale`;
+  // 使用后端端点，保留 token；代理目录补斜杠，使 noVNC 静态资源和 WebSocket 使用正确的相对路径。
+  const endpoint = new URL(vncSandboxInst.instanceEndpoints!.vnc, window.location.origin);
+  if (/\/proxy\/\d+$/.test(endpoint.pathname)) {
+    endpoint.pathname += '/';
+  }
+  endpoint.searchParams.set('autoconnect', 'true');
+  endpoint.searchParams.set('resize', 'scale');
+  const url = endpoint.toString();
 
   CookieUtil.set('novncUrl', url);
 
