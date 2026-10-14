@@ -180,77 +180,104 @@ describe('utils/websocket', () => {
     );
   });
 
-  const storeLegacyEnterprise = () => {
-    window.localStorage.setItem('SESSION', 'session-1');
-    window.sessionStorage.setItem(
-      'BYCLAW_TAB_ENTERPRISE',
-      JSON.stringify({
-        enterpriseId: '123',
-        sessionId: 'session-1',
-        tenantContextToken: 'legacy-context',
-        expiresAt: '2099-01-01T00:00:00Z',
-      })
-    );
-  };
-
-  it('ignores legacy enterprise storage when opening, sending and receiving messages', () => {
+  it('switches tenants over the existing socket after an acknowledgment', async () => {
     mockGetToken.mockReturnValue('token-1');
-    storeLegacyEnterprise();
+    window.localStorage.setItem('SESSION', 'session-1');
     const ws = require('../websocket').default;
-    const handler = jest.fn();
-    ws.onMessage('NOTIFICATION', handler);
+    const { getSelectedEnterpriseId } = require('../tenantContext');
 
+    ws.disconnect();
     ws.init();
     socketInstance.onopen();
-    expect(socketInstance.send).not.toHaveBeenCalled();
-    ws.sendMessage({ type: 'LLM_MESSAGE', chatContent: 'hello' });
-    expect(JSON.parse(socketInstance.send.mock.calls.at(-1)[0])).toEqual({
-      language: 'zh-CN',
-      type: 'LLM_MESSAGE',
-      chatContent: 'hello',
-    });
+    const originalSocket = socketInstance;
+    const switching = ws.switchTenant('123', 'context-token', '2099-01-01T00:00:00Z');
+    await Promise.resolve();
+    const outbound = JSON.parse(socketInstance.send.mock.calls[socketInstance.send.mock.calls.length - 1][0]);
+    expect(outbound).toMatchObject({ type: 'SWITCH_TENANT', enterpriseId: '123' });
+    expect(getSelectedEnterpriseId()).toBeNull();
+
     socketInstance.onmessage({
-      data: JSON.stringify({ type: 'NOTIFICATION', enterpriseId: '456', session: { sessionId: '1' } }),
+      data: JSON.stringify({
+        type: 'SWITCH_TENANT_ACK',
+        enterpriseId: '123',
+        clientRequestId: outbound.clientRequestId,
+      }),
     });
-    expect(handler).toHaveBeenCalledWith({
-      type: 'NOTIFICATION',
-      enterpriseId: '456',
-      session: { sessionId: '1' },
+    await switching;
+    expect(getSelectedEnterpriseId()).toBe('123');
+    expect(socketInstance).toBe(originalSocket);
+    expect(WebSocketMock).toHaveBeenCalledTimes(1);
+
+    ws.sendMessage({ type: 'HEARTBEAT', scopedSessionId: '' });
+    expect(JSON.parse(socketInstance.send.mock.calls[socketInstance.send.mock.calls.length - 1][0])).toMatchObject({
+      type: 'HEARTBEAT',
+      enterpriseId: '123',
     });
 
-    socketInstance.onclose({ code: 1006, reason: 'network failure' });
-    jest.advanceTimersByTime(2000);
-    socketInstances[1].onopen();
-    expect(socketInstances[1].send).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(6000);
+    expect(JSON.parse(socketInstance.send.mock.calls[socketInstance.send.mock.calls.length - 1][0])).toMatchObject({
+      type: 'HEARTBEAT',
+      enterpriseId: '123',
+      scopedSessionId: '',
+    });
   });
 
-  it('preserves an exact scoped child subscription across heartbeats and reconnects', () => {
+  it('preserves an exact tenant child subscription across heartbeats and reconnects', () => {
     mockGetToken.mockReturnValue('token-1');
-    storeLegacyEnterprise();
+    window.localStorage.setItem('SESSION', 'session-1');
+    require('../tenantContext').selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
     const ws = require('../websocket').default;
-    const selection = {
-      language: 'zh-CN',
-      type: 'HEARTBEAT',
-      scopedSessionId: '8011237409000004505',
-    };
-    ws.setScopedSessionId(selection.scopedSessionId);
+    ws.disconnect();
     ws.init();
     socketInstance.onopen();
-    expect(JSON.parse(socketInstance.send.mock.calls.at(-1)[0])).toEqual(selection);
+    socketInstance.onmessage({ data: JSON.stringify({ type: 'SWITCH_TENANT_ACK', enterpriseId: '123' }) });
+    ws.setScopedSessionId('8011237409000004505');
     jest.advanceTimersByTime(6000);
-    expect(JSON.parse(socketInstance.send.mock.calls.at(-1)[0])).toEqual(selection);
+    expect(JSON.parse(socketInstance.send.mock.calls.at(-1)[0])).toMatchObject({
+      type: 'HEARTBEAT',
+      enterpriseId: '123',
+      scopedSessionId: '8011237409000004505',
+    });
+    socketInstance.onclose({ code: 1006, reason: 'network failure' });
+    jest.advanceTimersByTime(2000);
+    socketInstances[1].onopen();
+    const switching = JSON.parse(socketInstances[1].send.mock.calls[0][0]);
+    socketInstances[1].onmessage({
+      data: JSON.stringify({
+        type: 'SWITCH_TENANT_ACK',
+        enterpriseId: '123',
+        clientRequestId: switching.clientRequestId,
+      }),
+    });
+    expect(JSON.parse(socketInstances[1].send.mock.calls.at(-1)[0])).toMatchObject({
+      type: 'HEARTBEAT',
+      enterpriseId: '123',
+      scopedSessionId: '8011237409000004505',
+    });
+  });
+
+  it('restores the selected tenant with a payload control message after a network reconnect', () => {
+    mockGetToken.mockReturnValue('token-1');
+    window.localStorage.setItem('SESSION', 'session-1');
+    const { selectEnterprise } = require('../tenantContext');
+    selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
+    const ws = require('../websocket').default;
+
+    ws.disconnect();
+    ws.init();
+    socketInstance.onopen();
+    expect(socketInstance.url).not.toContain('enterpriseId');
+    expect(JSON.parse(socketInstance.send.mock.calls[0][0])).toMatchObject({
+      type: 'SWITCH_TENANT',
+      enterpriseId: '123',
+    });
 
     socketInstance.onclose({ code: 1006, reason: 'network failure' });
     jest.advanceTimersByTime(2000);
     socketInstances[1].onopen();
-    expect(JSON.parse(socketInstances[1].send.mock.calls.at(-1)[0])).toEqual(selection);
-    jest.advanceTimersByTime(6000);
-    expect(JSON.parse(socketInstances[1].send.mock.calls.at(-1)[0])).toEqual(selection);
-    ws.setScopedSessionId(undefined);
-    jest.advanceTimersByTime(6000);
-    expect(JSON.parse(socketInstances[1].send.mock.calls.at(-1)[0])).toEqual({
-      language: 'zh-CN',
-      type: 'NOTIFICATION',
+    expect(JSON.parse(socketInstances[1].send.mock.calls[0][0])).toMatchObject({
+      type: 'SWITCH_TENANT',
+      enterpriseId: '123',
     });
   });
 
