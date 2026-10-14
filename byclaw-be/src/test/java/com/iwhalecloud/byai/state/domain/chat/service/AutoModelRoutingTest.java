@@ -144,6 +144,26 @@ class AutoModelRoutingTest extends I18nTestSupport {
         }
     }
 
+    @Test void redisStringModelRecordsReachJevWithoutArrayConversionErrors() throws Exception {
+        var fixture = new RoutingFixture();
+        when(fixture.jev.evaluate(anyMap())).thenReturn(JSON.parseObject(decision(0.9)));
+        var routing = new AutoModelRoutingService(fixture.config, fixture.jev, new AiModelService(),
+            mock(TokenQuotaService.class), fixture.redis, fixture.params);
+        fixture.dto.setClientRequestId("redis-strings");
+        try (var user = mockStatic(CurrentUserHolder.class);
+            var cache = mockStatic(com.iwhalecloud.byai.common.util.RedisUtil.class)) {
+            user.when(CurrentUserHolder::getCurrentUserId).thenReturn(7L);
+            cache.when(() -> com.iwhalecloud.byai.common.util.RedisUtil.hmGetAll(
+                com.iwhalecloud.byai.common.constants.staticdata.RedisConfig.AI_MODEL_KEY))
+                .thenReturn(List.of(JSON.toJSONString(fixture.first), JSON.toJSONString(fixture.second)));
+            var result = routing.route(fixture.dto,
+                id -> Optional.of(new SessionModelSelection(id, "test-model", "Test", "Test")));
+            assertThat(result.getModelId()).isEqualTo("42");
+            assertThat(result.getModelRouting()).containsEntry("reason", "model_choice");
+            verify(fixture.jev).evaluate(anyMap());
+        }
+    }
+
     @Test void imageInputUsesExistingAbilityAndSkipsJevForOnlyCompatibleModel() throws Exception {
         var fixture = new RoutingFixture();
         fixture.second.setInstanceParam(Map.of("abilities", List.of("7")));
