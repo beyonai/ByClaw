@@ -36,7 +36,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthor
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessagePreview;
 
-/** 在发起人的私有工作区保存冻结历史；文件全部写成功之后才能附加到出站提示。 */
+/** 在发起人的私有工作区保存冻结上下文；文件全部写成功之后才能附加到出站提示。 */
 @Service
 public class GroupChatSessionContextFileService {
     private static final int PAGE_SIZE = 200;
@@ -74,12 +74,38 @@ public class GroupChatSessionContextFileService {
     /** Tenant callers supply a snapshot already authorized by the owning Node; storage remains shared. */
     public ContextFile prepareGroupSnapshot(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, GroupChatContextResponse snapshot) {
-        if (groupRequest == null || snapshot == null || !Objects.equals(groupRequest.getConversationKey(), snapshot.getConversationKey())
-            || snapshot.getSnapshot() == null
-            || !Objects.equals(groupRequest.getBeforeMessageId(), snapshot.getSnapshot().getBeforeMessageId())) {
-            throw new ChatTurnPreparationException("历史上下文边界无效，请重试", null);
+        requireMatchingSnapshot(groupRequest, snapshot, "历史上下文边界无效，请重试");
+        return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, snapshot, null).get(0);
+    }
+
+    /** 租户名单与历史快照由所属 Node 鉴权，存储流程仍校验发起人的工作区身份。 */
+    public ContextFile prepareGroupMemberSnapshot(String userCode, GroupChatContextRequest groupRequest, String traceId,
+        Long currentUserMessageId, GroupChatContextResponse snapshot, List<GroupMember> members) {
+        requireMatchingSnapshot(groupRequest, snapshot, "成员上下文边界无效，请重试");
+        if (members == null) {
+            throw new ChatTurnPreparationException("成员上下文准备失败，请重试",
+                new IllegalArgumentException("Missing member roster"));
         }
-        return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, snapshot).get(0);
+        return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, snapshot, members).get(0);
+    }
+
+    private void requireMatchingSnapshot(GroupChatContextRequest request, GroupChatContextResponse snapshot, String failureMessage) {
+        if (request == null || StringUtils.isBlank(request.getConversationKey()) || snapshot == null
+            || !Objects.equals(request.getConversationKey(), snapshot.getConversationKey())
+            || snapshot.getSnapshot() == null
+            || !Objects.equals(request.getBeforeMessageId(), snapshot.getSnapshot().getBeforeMessageId())) {
+            throw new ChatTurnPreparationException(failureMessage, null);
+        }
+    }
+
+    /** 单独冻结已按协作范围过滤的成员名单，供 Agent 在需要引用成员时读取。 */
+    public ContextFile prepareGroupMembers(String userCode, GroupChatContextRequest groupRequest, String traceId,
+        Long currentUserMessageId, List<GroupMember> members) {
+        if (members == null) {
+            throw new ChatTurnPreparationException("成员上下文准备失败，请重试",
+                new IllegalArgumentException("Missing member roster"));
+        }
+        return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, null, members).get(0);
     }
 
     /** 任务切换执行员工时提供群背景和此前任务正文，两份文件全部就绪才返回。 */
@@ -92,20 +118,28 @@ public class GroupChatSessionContextFileService {
     /** 仅复用私有存储流程；业务入口分别表达群聊派发和任务接手。 */
     private List<ContextFile> prepare(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, boolean includeTaskHistory) {
-        return prepare(userCode, groupRequest, traceId, currentUserMessageId, includeTaskHistory, null);
+        return prepare(userCode, groupRequest, traceId, currentUserMessageId, includeTaskHistory, null, null);
     }
 
     private List<ContextFile> prepare(String userCode, GroupChatContextRequest groupRequest, String traceId,
-        Long currentUserMessageId, boolean includeTaskHistory, GroupChatContextResponse authorizedSnapshot) {
+        Long currentUserMessageId, boolean includeTaskHistory, GroupChatContextResponse authorizedSnapshot,
+        List<GroupMember> members) {
+        String failureMessage = members == null ? "历史上下文准备失败，请重试" : "成员上下文准备失败，请重试";
         try {
             if (StringUtils.isBlank(userCode) || StringUtils.isBlank(traceId) || groupRequest == null
                 || groupRequest.getChildSessionId() == null || groupRequest.getChildSessionId() <= 0
                 || currentUserMessageId == null || currentUserMessageId <= 0
-                || groupRequest.getInitiatorUserId() == null || groupRequest.getBeforeMessageId() == null) {
+                || groupRequest.getInitiatorUserId() == null || groupRequest.getBeforeMessageId() == null
+                || (members != null && (groupRequest.getTargetAgentId() == null || groupRequest.getTargetAgentId() <= 0))) {
                 throw new IllegalArgumentException("Missing server context identity");
             }
+            List<GroupMember> frozenMembers = members == null ? null : List.copyOf(members);
             String identity = groupRequest.getConversationKey() + ":" + groupRequest.getChildSessionId() + ":"
                 + groupRequest.getBeforeMessageId() + ":" + currentUserMessageId + ":" + traceId + ":" + includeTaskHistory;
+            // 成员快照独立于历史快照，并区分读取员工，防止复用另一员工的可引用范围。
+            if (frozenMembers != null) {
+                identity += ":GROUP_MEMBERS:" + groupRequest.getTargetAgentId();
+            }
             String turnKey = HexFormat.of().formatHex(digest().digest(identity.getBytes(StandardCharsets.UTF_8)));
             return userContextRunner.callAsUser(userCode, () -> {
                 // 同轮的本机重入串行；跨实例派发仍由已有数据库 turn claim 约束。
@@ -115,10 +149,11 @@ public class GroupChatSessionContextFileService {
                         else if (!Objects.equals(CurrentUserHolder.getCurrentUserId(), groupRequest.getInitiatorUserId())) {
                             throw new IllegalArgumentException("Context owner does not match initiator");
                         }
-                        return prepareCurrent(groupRequest, currentUserMessageId, includeTaskHistory, turnKey, authorizedSnapshot);
+                        return prepareCurrent(groupRequest, currentUserMessageId, includeTaskHistory, turnKey,
+                            authorizedSnapshot, frozenMembers);
                     }
                     catch (Exception error) {
-                        throw new ChatTurnPreparationException("历史上下文准备失败，请重试", error);
+                        throw new ChatTurnPreparationException(failureMessage, error);
                     }
                 }
             });
@@ -127,7 +162,7 @@ public class GroupChatSessionContextFileService {
             throw error;
         }
         catch (Exception error) {
-            throw new ChatTurnPreparationException("历史上下文准备失败，请重试", error);
+            throw new ChatTurnPreparationException(failureMessage, error);
         }
     }
 
@@ -146,15 +181,17 @@ public class GroupChatSessionContextFileService {
     }
 
     private List<ContextFile> prepareCurrent(GroupChatContextRequest request, Long boundary, boolean taskHistory,
-        String turnKey, GroupChatContextResponse authorizedSnapshot) throws IOException {
+        String turnKey, GroupChatContextResponse authorizedSnapshot, List<GroupMember> members) throws IOException {
         String directory = "/.sessions/" + request.getChildSessionId() + "/.byclaw/context/" + turnKey;
         List<ContextFile> files = new ArrayList<>();
-        files.add(new ContextFile("GROUP_PUBLIC", "/by" + directory + "/group-history.json",
+        files.add(new ContextFile(members == null ? "GROUP_PUBLIC" : "GROUP_MEMBERS",
+            "/by" + directory + (members == null ? "/group-history.json" : "/group-members.json"),
             request.getBeforeMessageId()));
         if (taskHistory) {
             files.add(new ContextFile("TASK_PRIVATE", "/by" + directory + "/task-history.jsonl", boundary.toString()));
         }
-        String marker = directory + "/complete.json";
+        // 成员文件使用独立完成标记，保留已有历史完成标记的文件数量和校验契约。
+        String marker = directory + (members == null ? "/complete.json" : "/members-complete.json");
         // UserFS 的缺文件读取在部分后端会抛异常，用目录清单判定缺失，存储故障必须中止。
         List<String> existing = Objects.requireNonNull(userFS.list(directory, 1), "Missing storage listing");
         if (existing.contains(marker) || existing.contains("/by" + marker)) {
@@ -168,6 +205,9 @@ public class GroupChatSessionContextFileService {
                 try (BufferedWriter writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
                     if ("GROUP_PUBLIC".equals(file.kind())) {
                         writer.write(objectMapper.writeValueAsString(groupHistoryForExport(request, authorizedSnapshot)));
+                    }
+                    else if ("GROUP_MEMBERS".equals(file.kind())) {
+                        writer.write(objectMapper.writeValueAsString(members));
                     }
                     else {
                         writeTaskHistory(writer, request.getChildSessionId(), boundary);
@@ -371,6 +411,9 @@ public class GroupChatSessionContextFileService {
     }
 
     public record TaskHandoffHistory(ContextFile groupHistory, ContextFile taskHistory) { }
+
+    /** 成员名称和 uid 由服务端生成，只用于查找成员和展示引用。 */
+    public record GroupMember(String name, String uid) { }
 
     private record FileProof(long size, String checksum) { }
 }
