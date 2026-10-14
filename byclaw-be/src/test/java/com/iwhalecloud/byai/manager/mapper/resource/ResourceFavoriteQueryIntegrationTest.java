@@ -12,11 +12,67 @@ import java.util.Map;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.scripting.xmltags.XMLLanguageDriver;
 import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** 执行实际列表 SQL，校验资源中心与收藏排序在分页之前且不扩大资源可见范围。 */
 class ResourceFavoriteQueryIntegrationTest {
+
+    @Test
+    void employeeRecommendationsReuseHistoricalUsageBeforePaginationAndKeepFavoriteSorting() throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            initialize(connection);
+            for (long id = 1; id <= 35; id++) {
+                resource(connection, id, "DIG_EMPLOYEE", 22, "enterprise", 2);
+            }
+            try (var statement = connection.createStatement()) {
+                statement.executeUpdate("UPDATE ss_resource SET create_time = resource_id");
+                statement.executeUpdate("""
+                    INSERT INTO ss_res_ext_dig_employee(resource_id, agent_type)
+                    VALUES (1, '017'), (2, '017'), (3, '017'), (4, '017')
+                    """);
+                // 同热度先比较修改时间、创建时间，最后用 ID 打破完全并列。
+                statement.executeUpdate("UPDATE ss_resource SET update_time = 2 WHERE resource_id IN (3, 4)");
+                statement.executeUpdate("UPDATE ss_resource SET create_time = 3 WHERE resource_id = 4");
+                statement.executeUpdate("UPDATE ss_resource SET create_time = 4 WHERE resource_id = 2");
+                statement.executeUpdate("UPDATE ss_resource SET create_time = 100 WHERE resource_id = 6");
+                statement.executeUpdate("""
+                    INSERT INTO byai_session_member VALUES
+                        (1, 'AGENT'), (1, 'AGENT'), (2, 'AGENT'), (3, 'AGENT'), (4, 'AGENT'),
+                        (5, 'AGENT'), (5, 'AGENT'), (5, 'AGENT'),
+                        (6, 'AGENT'), (6, 'AGENT'), (7, 'AGENT'), (7, 'AGENT'),
+                        (2, 'DOC'), (2, 'DOC'), (2, 'DOC')
+                    """);
+                statement.executeUpdate("INSERT INTO byai_resource_favorite_count VALUES (22, 6, 100)");
+            }
+            Map<String, Object> params = new HashMap<>();
+            params.put("userId", 11L);
+            params.put("ownerType", "enterprise");
+            params.put("includeAllEnterpriseOwnerType", true);
+            params.put("includeEmployeeGroup", true);
+            params.put("employeeGroupFirst", true);
+            params.put("orderField", "updateTime");
+            params.put("orderBy", "desc");
+
+            List<Long> expected = new ArrayList<>(List.of(1L, 2L, 4L, 3L, 5L, 7L, 6L));
+            for (long id = 35; id >= 8; id--) {
+                expected.add(id);
+            }
+            assertThat(queryTwoPageIds(connection, "DIG_EMPLOYEE", params)).containsExactlyElementsOf(expected);
+
+            // 即使员工组优先参数同时存在，商业版仍优先执行原收藏数、修改时间、ID 排序。
+            params.put("includeFavorites", true);
+            params.put("favoriteTenantId", 22L);
+            List<Long> favoriteExpected = new ArrayList<>(List.of(6L));
+            for (long id = 35; id >= 8; id--) {
+                favoriteExpected.add(id);
+            }
+            favoriteExpected.addAll(List.of(7L, 5L, 4L, 3L, 2L, 1L));
+            assertThat(queryTwoPageIds(connection, "DIG_EMPLOYEE", params))
+                .containsExactlyElementsOf(favoriteExpected);
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})

@@ -572,3 +572,22 @@ SET connector_name = 'DeepSeek 联网检索',
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code = 'deepseek-web-search';
 
+-- 用户 API Key 由 AK_SK 授权流程写入连接器受管密文存储；全局兜底密钥仅引用部署环境变量。
+
+INSERT INTO byai.byai_system_config (
+    param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc
+)
+SELECT
+    nextval('byai.seq_any_table'),
+    'text',
+    'WEB_SEARCH_APIKEY',
+    '联网检索全局 API Key 配置',
+    'WEB_SEARCH_APIKEY',
+    '{"deepseek-web-search":"${DEEPSEEK_WEB_SEARCH_API_KEY}"}',
+    '联网检索提供方全局兜底凭据字典，字典键使用连接器编码。请保留环境变量占位符，不要在数据库中填写明文密钥。'
+    WHERE NOT EXISTS (
+    SELECT 1
+    FROM byai.byai_system_config
+    WHERE param_code = 'WEB_SEARCH_APIKEY'
+);
+

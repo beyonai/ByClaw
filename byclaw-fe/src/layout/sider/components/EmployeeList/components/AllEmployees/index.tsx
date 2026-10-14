@@ -92,10 +92,12 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
         pageSize,
         keyword: searchName,
       };
-      // 加号弹窗需要员工和员工组按同一后端排序整体返回，不能拆成两次请求后再拼接。
+      // 加号弹窗在分页前按默认员工、近90天使用次数、时间和 ID 排序，员工组参与同一列表。
       const requests = [
         queryMyCreatedAndSubscribedAgentsV2(
-          props.includeEmployeeGroups ? { ...requestPayload, excludeEmployeeGroup: false } : requestPayload,
+          props.includeEmployeeGroups
+            ? { ...requestPayload, excludeEmployeeGroup: false, sortMode: 'DEFAULT_USAGE_DESC' }
+            : requestPayload,
           abortController
         ),
       ];
@@ -109,7 +111,8 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
           return mergedResponse;
         })
         .then((res) => {
-          if (!res) return;
+          // 切换默认会重新加载首页，忽略已取消的旧分页响应，避免旧默认和顺序回写。
+          if (!res || abortController.signal.aborted) return;
           const { list, ...pageInfo } = res;
           // 联网搜索数字员工不能被手动@出来，只能通过点击按钮切换
           const employeeList = (list || [])
@@ -193,8 +196,9 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
           'agentId'
         );
 
-        // pinList置顶数据，unpinList取消置顶数据
-        if (!isEmpty(pinList) || !isEmpty(unpinList)) {
+        // 加号弹窗只遵循默认员工和使用频次排序，手动置顶事件不能改变其位置。
+        // 其他入口仍响应 pinList/unpinList 的原有置顶规则。
+        if (!props.includeEmployeeGroups && (!isEmpty(pinList) || !isEmpty(unpinList))) {
           const newList = [...prevList];
           // 置顶：将pinList中的数据放在第一条
           if (!isEmpty(pinList)) {
@@ -243,7 +247,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
     return () => {
       EventEmitter.off('beyond-update-employee', handler);
     };
-  }, [EventEmitter, getSearch, searchName]);
+  }, [EventEmitter, getSearch, searchName, props.includeEmployeeGroups]);
 
   useEffect(() => {
     const handler = (param: { defaultResourceId?: string | number }) => {

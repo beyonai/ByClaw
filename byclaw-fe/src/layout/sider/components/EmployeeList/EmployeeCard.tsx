@@ -158,17 +158,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   const TagRender = useCallback(
     (item: IAgentCache) => {
       if (isInput) {
-        // 加号/@候选列表仍只显示默认标签；员工组额外显示组标签，帮助用户区分两类资源。
-        if (`${item?.agentType}` === '017') {
-          const groupTag = `${item?.tagName || ''}`.trim();
-          return (
-            <span className={styles.tag}>
-              <span className={styles.tagText}>
-                {groupTag || intl.formatMessage({ id: 'common.digitalEmployeeGroup', defaultMessage: '数字员工组' })}
-              </span>
-            </span>
-          );
-        }
+        // 加号/@候选列表对员工和员工组采用相同规则，仅展示默认身份。
         return (
           <span className={classNames(styles.defaultTag)}>
             <span className={styles.tagText}>{defaultTagText}</span>

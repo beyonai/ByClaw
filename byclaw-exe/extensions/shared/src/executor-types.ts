@@ -47,6 +47,8 @@ export type CapabilityAgent = {
 export type CapabilityMcp = {
   server_url?: unknown;
   transfer_type?: unknown;
+  /** Runtime-only Streamable HTTP session returned by MCP initialize. */
+  session_id?: unknown;
   resource_code?: unknown;
   headers?: Record<string, string>;
   tools?: CapabilityTool[];

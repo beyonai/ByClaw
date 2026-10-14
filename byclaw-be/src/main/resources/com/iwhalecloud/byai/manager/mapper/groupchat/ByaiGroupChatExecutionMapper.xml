@@ -48,7 +48,7 @@
 
     <select id="selectForUpdateByCandidateSessionId" resultMap="BaseResultMap">
         SELECT <include refid="BaseColumns" /> FROM byai_group_chat_execution
-        WHERE candidate_session_id = #{candidateSessionId} FOR UPDATE
+        WHERE candidate_session_id = #{candidateSessionId}
     </select>
 
     <update id="bindRuntime">

@@ -86,7 +86,6 @@
         WHERE connector_type = 'ACCOUNT_TEMPLATE'
           AND status_cd = '00A'
         ORDER BY sort ASC, connector_id ASC
-        FOR UPDATE
     </select>
 
     <select id="selectConnectionsByUserId" resultType="com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto">

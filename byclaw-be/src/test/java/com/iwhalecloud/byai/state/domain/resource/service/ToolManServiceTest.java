@@ -21,8 +21,12 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceArtifact;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.MessageSource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -341,8 +345,95 @@ class ToolManServiceTest {
         verify(ssResourceRelDetailService, never()).removeAllByResourceIdOrRelResourceId(anyLong());
     }
 
-    @Test
-    void deleteManagedResource_rejectsInnerSkillEvenWithManagePermission() {
+    @ParameterizedTest
+    @CsvSource({
+        "personal, adminvip, 2, true, true",
+        "enterprise, AdMiNvIp, 2, true, true",
+        "enterprise, adminvip, 3, true, true",
+        "personal, creator, 2, true, false",
+        "enterprise, manager, 2, true, false",
+        "enterprise, platform, 2, true, false",
+        "personal, adminvip, -1, true, false",
+        "enterprise, adminvip, -1, true, false",
+        "enterprise, adminvip, 2, false, false"
+    })
+    void updateInnerSkillBasicInfoRequiresAdminVipAndKeepsStatusGuards(String ownerType, String identity,
+        int status, boolean canManage, boolean allowed) {
+        ToolManService service = new ToolManService();
+        var resources = mock(SsResourceService.class);
+        var auth = mock(AuthApplicationService.class);
+        var skills = mock(SsResExtSkillService.class);
+        var skillApplication = mock(ByClawSkillResourceApplicationService.class);
+        var storage = mock(ResourceArtifactStorageService.class);
+        var artifacts = mock(SsResourceArtifactService.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", resources);
+        ReflectionTestUtils.setField(service, "authApplicationService", auth);
+        ReflectionTestUtils.setField(service, "ssResExtSkillService", skills);
+        ReflectionTestUtils.setField(service, "byClawSkillResourceApplicationService", skillApplication);
+        ReflectionTestUtils.setField(service, "resourceArtifactStorageService", storage);
+        ReflectionTestUtils.setField(service, "ssResourceArtifactService", artifacts);
+        ReflectionTestUtils.setField(service, "datasetSystem", "");
+        prepareI18nUtil();
+        LoginInfo login = new LoginInfo();
+        login.setUserId(10001L);
+        login.setUserCode(identity);
+        if ("platform".equals(identity)) {
+            var role = new com.iwhalecloud.byai.common.login.bean.UsersOrganization();
+            role.setUserType("PLAT_MAN");
+            login.setUsersOrganizations(List.of(role));
+        }
+        CurrentUserHolder.setLoginInfo(login);
+
+        SsResource resource = new SsResource();
+        resource.setResourceId(802L);
+        resource.setResourceBizType("SKILL");
+        resource.setResourceCode("mail");
+        resource.setResourceName("Mail");
+        resource.setResourceDesc("Original description");
+        resource.setResourceVersionId("1.0.0");
+        resource.setOwnerType(ownerType);
+        resource.setResourceStatus(status);
+        SsResExtSkill ext = new SsResExtSkill();
+        ext.setResourceId(802L);
+        ext.setSkillType("inner");
+        when(resources.findByIdForUpdate(802L)).thenReturn(resource);
+        when(auth.hasResourceManagePermission(resource)).thenReturn(canManage);
+        when(skills.findById(802L)).thenReturn(ext);
+        String targetContent = "{\"resourceId\":802,\"resourceName\":\"邮箱\"}";
+        when(skillApplication.refreshSkillBasicInfo(resource)).thenReturn(targetContent);
+
+        if (allowed) {
+            service.updateResourceBasicInfo(802L, "邮箱", "邮件操作说明", "mail.png", 20L);
+            assertThat(resource.getResourceName()).isEqualTo("邮箱");
+            assertThat(resource.getResourceDesc()).isEqualTo("邮件操作说明");
+            assertThat(resource.getAvatar()).isEqualTo("mail.png");
+            assertThat(resource.getCatalogId()).isEqualTo(20L);
+            assertThat(resource.getResourceCode()).isEqualTo("mail");
+            assertThat(resource.getResourceVersionId()).isEqualTo("1.0.0");
+            assertThat(resource.getOwnerType()).isEqualTo(ownerType);
+            assertThat(resource.getResourceStatus()).isEqualTo(status);
+            verify(resources).updateResourceEntity(resource);
+            verify(skillApplication).refreshSkillBasicInfo(resource);
+            if (status == 2) {
+                verify(storage).syncResourceJsonByBizType(targetContent, "SKILL", 802L);
+                verify(artifacts).upsertStandardJsonArtifact(802L, "SKILL", "resource-basic-info-sync");
+            } else {
+                org.mockito.Mockito.verifyNoInteractions(storage, artifacts);
+            }
+        } else {
+            String expectedError = !canManage ? "user.permission.nopermission"
+                : status == -1 ? "resource.lifecycle.status.invalid" : "byclaw.skill.inner.readonly";
+            assertThatThrownBy(() -> service.updateResourceBasicInfo(802L, "邮箱", "邮件操作说明", "mail.png", 20L))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining(expectedError);
+            assertThat(resource.getResourceName()).isEqualTo("Mail");
+            verify(resources, never()).updateResourceEntity(any(SsResource.class));
+            org.mockito.Mockito.verifyNoInteractions(skillApplication, storage, artifacts);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", "manager"})
+    void innerSkillLifecycleRemainsReadonlyEvenForAdminVip(String identity) {
         ToolManService service = new ToolManService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         AuthApplicationService authApplicationService = mock(AuthApplicationService.class);
@@ -354,12 +445,18 @@ class ToolManServiceTest {
         ReflectionTestUtils.setField(service, "datasetSystem", "");
         prepareI18nUtil();
 
+        LoginInfo login = new LoginInfo();
+        login.setUserId(10001L);
+        login.setUserCode(identity);
+        CurrentUserHolder.setLoginInfo(login);
+
         SsResource skillResource = new SsResource();
         skillResource.setResourceId(802L);
         skillResource.setResourceName("inner-skill");
         skillResource.setResourceCode("inner-skill");
         skillResource.setResourceBizType(ResourceBizType.SKILL.getCode());
         skillResource.setOwnerType("enterprise");
+        skillResource.setResourceStatus(2);
 
         SsResExtSkill extSkill = new SsResExtSkill();
         extSkill.setResourceId(802L);
@@ -373,8 +470,22 @@ class ToolManServiceTest {
         assertThatThrownBy(() -> service.deleteManagedResource(802L))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("byclaw.skill.inner.readonly");
+        assertThatThrownBy(() -> service.unShelfResource(802L))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("byclaw.skill.inner.readonly");
+        skillResource.setResourceStatus(3);
+        assertThatThrownBy(() -> service.shelfResource(802L))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("byclaw.skill.inner.readonly");
+        assertThatThrownBy(() -> service.deregisterResource(802L))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("byclaw.skill.inner.readonly");
+        assertThatThrownBy(() -> service.deleteResourceAndAllRel(802L))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("byclaw.skill.inner.readonly");
 
         verify(ssResourceService, never()).removeById(anyLong());
+        verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
     }
 
     @Test

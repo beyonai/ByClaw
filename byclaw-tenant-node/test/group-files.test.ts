@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import Fastify from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import { HistoryService, type HistoryRepository, type Row } from "../src/application/history.js";
@@ -58,6 +59,54 @@ describe("group file pagination", () => {
     expect(last.hasMore).toBe(false);
     expect(last.nextCursor).toBeNull();
   });
+  it("returns trusted user and agent uploaders across attachment pages", async () => {
+    const { stored, service } = setup();
+    const user = row("100", "a", "b", "c");
+    Object.assign(user, {
+      usage: 1,
+      creatorId: "9007199254740993",
+      creatorName: "张三",
+      metadata: { uploaderId: "999", uploaderName: "伪造姓名", targetAgentId: "888" },
+    });
+    Object.assign(user.relatedResources.files[0], { uploaderId: "999", uploaderName: "伪造姓名" });
+    const agent = row("50", "d");
+    Object.assign(agent, {
+      usage: 2,
+      creatorId: "88",
+      creatorName: "研究助手",
+      metadata: { scene: "GROUP_CHAT", targetAgentId: "999" },
+    });
+    stored.push(user, agent);
+    const first = await service.files("20", "30", 2);
+    expect(first.files).toMatchObject([
+      { uploaderId: "9007199254740993", uploaderName: "张三", uploaderType: "USER" },
+      { uploaderId: "9007199254740993", uploaderName: "张三", uploaderType: "USER" },
+    ]);
+    const second = await service.files("20", "30", 2, first.nextCursor!);
+    expect(second.files).toMatchObject([
+      { uploaderId: "9007199254740993", uploaderName: "张三", uploaderType: "USER" },
+      { uploaderId: "88", uploaderName: "研究助手", uploaderType: "AGENT" },
+    ]);
+  });
+  it("keeps missing uploaders nullable without borrowing metadata or mentions", async () => {
+    const { stored, service } = setup();
+    const agent = row("100", "a");
+    Object.assign(agent, {
+      usage: 2,
+      creatorName: "  ",
+      resComIds: "[777]",
+      metadata: { scene: "GROUP_CHAT", targetAgentId: "999", uploaderName: "伪造姓名" },
+    });
+    stored.push(agent, row("50", "b"));
+    const page = await service.files("20", "30", 2);
+    expect(page.files[0]).toMatchObject({
+      uploaderId: null,
+      uploaderName: null,
+      uploaderType: "AGENT",
+    });
+    expect(page.files[1]).toMatchObject({ uploaderId: null, uploaderName: null });
+    expect(page.files[1]).not.toHaveProperty("uploaderType");
+  });
   it("ignores metadata files and skips malformed related resources", async () => {
     const { stored, service } = setup();
     expect(typeof service.files).toBe("function");
@@ -116,6 +165,73 @@ describe("group file pagination", () => {
     expect(sql).toContain("NULLS LAST");
     expect(sql).toContain("(m.create_time,m.message_id)<=");
     expect(parameters).toEqual(["10", "30", "9007199254740993", 100]);
+  });
+  it("projects stored uploader columns without loading content or metadata", async () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec(`
+        ATTACH DATABASE ':memory:' AS byai;
+        CREATE TABLE byai.byai_session (session_id TEXT, enterprise_id TEXT);
+        CREATE TABLE byai.byai_message (
+          message_id TEXT, session_id TEXT, create_time INTEGER, related_resources TEXT,
+          usage INTEGER, creator_id TEXT, creator_name TEXT, archived_at INTEGER, recalled_at INTEGER,
+          message_content TEXT, infer_log TEXT, call_logs TEXT, metadata TEXT
+        );
+        INSERT INTO byai.byai_session VALUES ('30','10');
+        INSERT INTO byai.byai_message VALUES
+          ('100','30',3000,'{"files":[{"fileId":"a"}]}',1,'9007199254740993','张三',NULL,NULL,'body','thinking','logs','{}'),
+          ('50','30',2000,'{"files":[{"fileId":"b"}]}',2,'88','研究助手',NULL,NULL,'body','thinking','logs','{}');
+      `);
+      const db = {
+        query: async (sql: string, parameters: unknown[] = []) => {
+          const bindings: unknown[] = [];
+          const statement = sql.replace(/\$(\d+)/g, (_placeholder, index) => {
+            bindings.push(parameters[Number(index) - 1]);
+            return "?";
+          });
+          return database.prepare(statement).all(...(bindings as any[])) as Row[];
+        },
+      } as SqlSession;
+      const repository = new SqlHistoryRepository(db, "10");
+      const messages = await repository.messages({ sessionId: "30", filePage: {}, limit: 100 });
+      expect(messages).toMatchObject([
+        { usage: 1, creatorId: "9007199254740993", creatorName: "张三" },
+        { usage: 2, creatorId: "88", creatorName: "研究助手" },
+      ]);
+      for (const message of messages) {
+        for (const key of ["messageContent", "inferLog", "callLogs", "metadata"])
+          expect(message).not.toHaveProperty(key);
+      }
+    } finally {
+      database.close();
+    }
+  });
+  it("serializes uploader fields through the internal file endpoint", async () => {
+    const { stored, service } = setup();
+    stored.push(
+      Object.assign(row("100", "a"), {
+        usage: 1,
+        creatorId: "9007199254740993",
+        creatorName: "张三",
+      }),
+    );
+    stored.push(Object.assign(row("50", "b"), { usage: 2 }));
+    const app = Fastify();
+    historyRoutes(app, service);
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/internal/v1/group-chats/30/files?pageSize=2",
+        headers: { "x-actor-user-id": "20" },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().files).toMatchObject([
+        { uploaderId: "9007199254740993", uploaderName: "张三", uploaderType: "USER" },
+        { uploaderId: null, uploaderName: null, uploaderType: "AGENT" },
+      ]);
+    } finally {
+      await app.close();
+    }
   });
   it("exposes the internal GET endpoint with pageSize and cursor", async () => {
     const app = Fastify();

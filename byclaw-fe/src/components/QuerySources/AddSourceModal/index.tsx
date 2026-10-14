@@ -3,11 +3,10 @@
  * 添加来源弹窗，包含Web搜索区域和文件上传选项
  */
 
-import React, { useCallback, useState, useRef, useMemo } from 'react';
-import { useIntl } from '@umijs/max';
 import { Modal, Button, Upload, Input, message } from 'antd';
 import { UploadOutlined, FileTextOutlined, ArrowLeftOutlined, InboxOutlined } from '@ant-design/icons';
 import type { UploadFile, UploadProps } from 'antd/es/upload';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import styles from './index.less';
 import useGlobal from '@/hooks/useGlobal';
 import { validateAccept } from '@/utils/file';
@@ -16,8 +15,6 @@ type ModalView = 'main' | 'pasteUrl' | 'pasteText';
 
 /** 添加来源弹窗组件Props */
 interface AddSourceModalProps {
-
-  /** 是否可见 */
   visible: boolean;
 
   /** 关闭回调 */
@@ -49,8 +46,6 @@ const AddSourceModal: React.FC<AddSourceModalProps> = (props) => {
   const fileListRef = useRef<UploadFile[]>([]);
 
   const { uploadFileConfig } = useGlobal();
-  const intl = useIntl();
-
   const handleClose = useCallback(() => {
     onClose();
     // 重置状态
@@ -79,14 +74,6 @@ const AddSourceModal: React.FC<AddSourceModalProps> = (props) => {
   const handleFileUpload = useCallback(
     async (file: File) => {
       if (!onFileUpload || !validateAccept(file, accept)) return false;
-
-      if (maxFileSize) {
-        const maxFileSizeNumber = Number(maxFileSize) * 1024 * 1024;
-        if (file.size > maxFileSizeNumber) {
-          message.error(intl.formatMessage({ id: 'upload.fileSizeLimit' }, { size: maxFileSize }));
-          return false;
-        }
-      }
 
       setIsUploading(true);
       handleClose(); // 关闭弹窗

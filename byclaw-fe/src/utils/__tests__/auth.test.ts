@@ -57,6 +57,7 @@ describe('utils/auth', () => {
     localStorage.setItem(auth.portalSessionKey, 'p1');
     localStorage.setItem(auth.tokenKey, 't1');
     localStorage.setItem(auth.ssotokenKey, 'sso1');
+    sessionStorage.setItem('BYCLAW_TAB_ENTERPRISE', 'unrelated-session-data');
 
     auth.clearToken();
 
@@ -67,21 +68,26 @@ describe('utils/auth', () => {
     expect(localStorage.getItem(auth.portalSessionKey)).toBeNull();
     expect(localStorage.getItem(auth.tokenKey)).toBeNull();
     expect(localStorage.getItem(auth.ssotokenKey)).toBeNull();
+    expect(sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBe('unrelated-session-data');
   });
 
-  it('fresh login clears the previous session tenant selection', () => {
+  it('fresh login replaces authentication without changing unrelated session storage', () => {
     const auth = loadAuthModule();
     localStorage.setItem('SESSION', 'old-session');
     sessionStorage.setItem('BYCLAW_TAB_ENTERPRISE', JSON.stringify({ enterpriseId: '42', sessionId: 'old-session' }));
     auth.setUserToken({ sessionId: 'new-session' });
-    expect(sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBeNull();
+    expect(auth.getSessionKey()).toBe('new-session');
+    expect(sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBe(
+      JSON.stringify({ enterpriseId: '42', sessionId: 'old-session' })
+    );
   });
 
-  it('token refresh in the same login session preserves tenant selection', () => {
+  it('token refresh preserves unrelated session storage', () => {
     const auth = loadAuthModule();
     localStorage.setItem('SESSION', 'current-session');
     sessionStorage.setItem('BYCLAW_TAB_ENTERPRISE', 'selected-tenant');
     auth.setUserToken({ sessionId: 'current-session', token: 'refreshed' });
+    expect(auth.getToken()).toBe('refreshed');
     expect(sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBe('selected-tenant');
   });
   it('setUserToken writes session, portal session, token and sso token', () => {

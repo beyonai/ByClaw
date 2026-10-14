@@ -88,7 +88,6 @@ import { clearToken, isCurrentAuthSnapshot, loginRedirect } from '@/utils/auth';
 import { getModelState, getRootUnAuthPagePath } from '@/utils';
 import { showRequestErrorModal } from '@/utils/antdAppModal';
 import { logout } from '../user';
-import { clearSelectedEnterprise, selectEnterprise } from '@/utils/tenantContext';
 
 import { GET, globalLogout, POST } from '../common/request';
 import { setResourceFavorite } from '../resourceFavorites';
@@ -119,108 +118,69 @@ describe('Service Common Request', () => {
   beforeEach(() => {
     setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
     jest.clearAllMocks();
-    clearSelectedEnterprise();
+    window.sessionStorage.clear();
     window.localStorage.removeItem('SESSION');
     (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(true);
   });
 
-  it('does not attach tenant headers when the system switch is off despite a stored selection', async () => {
+  it.each([
+    '/byaiService/assiman/qryConversations',
+    '/byaiService/project/session/listByQo',
+    '/byaiService/group-chats',
+    '/byaiService/group-chat/tasks/50/pending-publication',
+    '/byaiService/api/v1/sessionResources/query',
+  ])('uses login headers without restoring legacy tenant scope: %s', async (url) => {
     window.localStorage.setItem('SESSION', 'session-key');
-    selectEnterprise('123', 'context-token', '2099-01-01');
-    setMultiTenancyConfig(null);
-    const url = '/byaiService/group-chats';
-    mockRequest.mockResolvedValue({ data: { code: 0, data: [] }, config: { url } });
-    await POST(url, {});
+    window.sessionStorage.setItem(
+      'BYCLAW_TAB_ENTERPRISE',
+      JSON.stringify({
+        enterpriseId: '123',
+        sessionId: 'session-key',
+        tenantContextToken: 'legacy-context',
+        expiresAt: '2099-01-01T00:00:00Z',
+      })
+    );
+    mockRequest.mockResolvedValue({ data: { code: 0, data: { ok: true } }, config: { url } });
+
+    await expect(POST(url, {})).resolves.toEqual({ ok: true });
+    expect(mockRequest.mock.calls[0][0].headers).toMatchObject({
+      'x-token': 'access-token',
+      'x-sso-token': 'sso-token',
+      'x-session-id': 'session-key',
+    });
     expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
     expect(mockRequest.mock.calls[0][0].headers['X-Tenant-Context']).toBeUndefined();
   });
 
-  it('keeps the existing chat URL and attaches tenant headers only in tenant space', async () => {
-    mockRequest.mockResolvedValue({
+  it('does not block group requests because legacy tenant storage is expired', async () => {
+    window.sessionStorage.setItem(
+      'BYCLAW_TAB_ENTERPRISE',
+      JSON.stringify({ enterpriseId: '123', sessionId: 'old-session', expiresAt: '2000-01-01T00:00:00Z' })
+    );
+    const url = '/byaiService/group-chat/tasks/50/pending-publication';
+    mockRequest.mockResolvedValue({ data: { code: 0, data: [] }, config: { url } });
+
+    await expect(GET(url)).resolves.toEqual([]);
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a pending response valid when the multi-tenancy configuration changes', async () => {
+    let resolveResponse!: (response: unknown) => void;
+    mockRequest.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveResponse = resolve;
+        })
+    );
+    const promise = POST('/byaiService/assiman/qryConversations', {});
+    await Promise.resolve();
+    setMultiTenancyConfig(null);
+    resolveResponse({
       data: { code: 0, data: { list: [] } },
       config: { url: '/byaiService/assiman/qryConversations' },
     });
-    await POST('/byaiService/assiman/qryConversations', {});
-    expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
-    await POST('/byaiService/project/session/listByQo', { projectId: 42 });
-    expect(mockRequest.mock.calls[1][0].headers['X-Enterprise-Id']).toBeUndefined();
-    window.localStorage.setItem('SESSION', 'session-key');
-    selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
-    await POST('/byaiService/assiman/qryConversations', {});
-    expect(mockRequest.mock.calls[2][0]).toMatchObject({
-      url: '/byaiService/assiman/qryConversations',
-      headers: { 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' },
-    });
-    await POST('/byaiService/project/session/listByQo', { projectId: 42 });
-    expect(mockRequest.mock.calls[3][0]).toMatchObject({
-      url: '/byaiService/project/session/listByQo',
-      headers: { 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' },
-    });
-  });
 
-  it.each(['/byaiService/chat/getAiModeList', '/byaiService/chat/getAssistant', '/byaiService/chat/getTermsOptions'])(
-    'keeps shared catalog requests outside tenant routing: %s',
-    async (url) => {
-      window.localStorage.setItem('SESSION', 'session-key');
-      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
-      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
-      await POST(url, {});
-      expect(mockRequest.mock.calls[0][0].headers['X-Enterprise-Id']).toBeUndefined();
-    }
-  );
-
-  it.each(['delivery-status', 'pending-publication', 'cancel', 'prepare-publication', 'complete-publication'])(
-    'routes group task %s with the selected tenant context',
-    async (action) => {
-      window.localStorage.setItem('SESSION', 'session-key');
-      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
-      const url = `/byaiService/group-chat/tasks/50/${action}`;
-      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
-      try {
-        await POST(url, {});
-        expect(mockRequest.mock.calls[0][0].headers).toEqual(
-          expect.objectContaining({ 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' })
-        );
-      } finally {
-        clearSelectedEnterprise();
-        window.localStorage.removeItem('SESSION');
-      }
-    }
-  );
-
-  it.each(['/byaiService/api/v1/sessionResources/query'])(
-    'routes session resources %s with the selected tenant context',
-    async (url) => {
-      window.localStorage.setItem('SESSION', 'session-key');
-      selectEnterprise('123', 'context-token', '2099-01-01T00:00:00Z');
-      mockRequest.mockResolvedValue({ data: { code: 0, data: {} }, config: { url } });
-      try {
-        await POST(url, {});
-        expect(mockRequest.mock.calls[0][0].headers).toEqual(
-          expect.objectContaining({ 'X-Enterprise-Id': '123', 'X-Tenant-Context': 'context-token' })
-        );
-      } finally {
-        clearSelectedEnterprise();
-        window.localStorage.removeItem('SESSION');
-      }
-    }
-  );
-
-  it('blocks group task requests when the selected tenant context has expired', async () => {
-    window.localStorage.setItem('SESSION', 'session-key');
-    const expiresAt = Date.now() + 60000;
-    selectEnterprise('123', 'expired-context', new Date(expiresAt).toISOString());
-    const clock = jest.spyOn(Date, 'now').mockReturnValue(expiresAt + 1);
-    try {
-      await expect(GET('/byaiService/group-chat/tasks/50/pending-publication')).rejects.toThrow(
-        'Tenant context expired; select a space again'
-      );
-      expect(mockRequest).not.toHaveBeenCalled();
-    } finally {
-      clock.mockRestore();
-      clearSelectedEnterprise();
-      window.localStorage.removeItem('SESSION');
-    }
+    await expect(promise).resolves.toEqual({ list: [] });
   });
 
   it('globalLogout clears local auth state and redirects when a user exists', async () => {

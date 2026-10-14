@@ -50,7 +50,7 @@ describe('upload button visibility', () => {
   });
 });
 
-describe('upload count and size limits', () => {
+describe('upload count limits and server-side size validation', () => {
   it.each([undefined, null, {}, { maxFileSize: 0, maxFileCount: 0 }])(
     'does not impose limits for missing or zero configuration: %p',
     (config) => {
@@ -68,13 +68,13 @@ describe('upload count and size limits', () => {
     expect(isUploadFileSizeExceeded(config, 100 * 1024 * 1024)).toBe(false);
   });
 
-  it('enforces the size limit independently of an unlimited file count', () => {
+  it('does not enforce the configured size limit in the frontend', () => {
     const config = { maxFileCount: 0, maxFileSize: 10 };
     const sizeLimit = 10 * 1024 * 1024;
 
     expect(isUploadFileCountExceeded(config, 100)).toBe(false);
     expect(isUploadFileSizeExceeded(config, sizeLimit - 1)).toBe(false);
     expect(isUploadFileSizeExceeded(config, sizeLimit)).toBe(false);
-    expect(isUploadFileSizeExceeded(config, sizeLimit + 1)).toBe(true);
+    expect(isUploadFileSizeExceeded(config, sizeLimit + 1)).toBe(false);
   });
 });
