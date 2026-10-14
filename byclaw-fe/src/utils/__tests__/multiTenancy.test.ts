@@ -1,11 +1,14 @@
-import { isMultiTenancyEnabled, setMultiTenancyConfig } from '../multiTenancy';
-import { getTenantContext, hasStoredTenantSelection, selectEnterprise } from '../tenantContext';
-
-jest.mock('@umijs/max', () => ({ getDvaApp: jest.fn() }));
+import {
+  isMultiTenancyEnabled,
+  resetMultiTenancyConfig,
+  setMultiTenancyConfig,
+  useMultiTenancy,
+} from '../multiTenancy';
+import { act, renderHook } from '@testing-library/react';
 
 beforeEach(() => {
-  window.localStorage.setItem('SESSION', 'session-1');
   window.sessionStorage.clear();
+  resetMultiTenancyConfig();
 });
 
 it.each([
@@ -21,16 +24,20 @@ it.each([
 ])('keeps tenants disabled for a missing, empty or nonmatching config: %p', (config) => {
   setMultiTenancyConfig(config);
   expect(isMultiTenancyEnabled()).toBe(false);
-  expect(() => selectEnterprise('123', 'token', '2099-01-01')).toThrow('Multi-tenancy is disabled');
 });
 
-it('enables tenants only for the exact configured string and clears stale scope when disabled', () => {
-  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
+it('publishes loaded and enabled config state without modifying legacy tab storage', () => {
+  window.sessionStorage.setItem('BYCLAW_TAB_ENTERPRISE', 'legacy-selection');
+  const { result } = renderHook(() => useMultiTenancy());
+  expect(result.current).toEqual({ loaded: false, enabled: false });
+  act(() => setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' }));
   expect(isMultiTenancyEnabled()).toBe(true);
-  selectEnterprise('123', 'token', '2099-01-01');
-  expect(getTenantContext()?.enterpriseId).toBe('123');
-  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
-  expect(getTenantContext()).toBeNull();
-  expect(hasStoredTenantSelection()).toBe(false);
-  expect(window.sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBeNull();
+  expect(result.current).toEqual({ loaded: true, enabled: true });
+  act(() => setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' }));
+  expect(isMultiTenancyEnabled()).toBe(false);
+  expect(result.current).toEqual({ loaded: true, enabled: false });
+  expect(window.sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBe('legacy-selection');
+  act(() => resetMultiTenancyConfig());
+  expect(result.current).toEqual({ loaded: false, enabled: false });
+  expect(window.sessionStorage.getItem('BYCLAW_TAB_ENTERPRISE')).toBe('legacy-selection');
 });

@@ -25,7 +25,6 @@ export const setMultiTenancyConfig = (config: unknown): void => {
     (config as Record<string, unknown>)[MULTI_TENANCY_CONFIG_CODE] === '1';
   if (state.enabled !== enabled) revision += 1;
   state = { loaded: true, enabled };
-  if (!enabled && typeof window !== 'undefined') window.sessionStorage.removeItem('BYCLAW_TAB_ENTERPRISE');
   listeners.forEach((listener) => listener());
 };
 
