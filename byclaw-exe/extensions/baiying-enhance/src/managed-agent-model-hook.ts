@@ -1,4 +1,4 @@
-import { setSessionModelPreparer } from "../../shared/src/session-model-runtime.js";
+import { setSessionModelPreparer, getRunModelSnapshot } from "../../shared/src/session-model-runtime.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { hasManagedProviderConfigDrift } from "./agent-registry.js";
 import type { ProviderBundle } from "./agent-adapter.js";
@@ -354,9 +354,10 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   agentId?: string;
   /** 会话级模型覆盖的 `provider/model` 引用；提供时优先于数字员工配置模型。 */
   modelRefOverride?: string;
+  strict?: boolean;
 }): Promise<void> {
   const agentId = params.agentId?.trim() || resolveAgentIdFromSessionKey(params.sessionKey);
-  if (!agentId?.startsWith(MANAGED_AGENT_PREFIX)) {
+  if (!agentId?.startsWith(MANAGED_AGENT_PREFIX) && !params.strict) {
     return;
   }
   const overrideParsed = params.modelRefOverride
@@ -378,12 +379,14 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   }
   const sessionApi = params.api.runtime?.agent?.session;
   if (!sessionApi?.updateSessionStoreEntry || !sessionApi?.resolveStorePath) {
+    if (params.strict) throw new Error("Auto session model/effort update API unavailable");
     return;
   }
   const cfg = currentRuntimeConfig(params.api);
   const storePath = sessionApi.resolveStorePath(cfg.session?.store, { agentId });
   const sessionKey = params.sessionKey?.trim();
   if (!storePath || !sessionKey) {
+    if (params.strict) throw new Error("Auto session model context unavailable");
     return;
   }
   await sessionApi.updateSessionStoreEntry({
@@ -410,27 +413,31 @@ export async function syncManagedAgentThinkingLevelForInbound(params: {
   sessionKey?: string;
   agentId?: string;
   thinkingLevel?: RuntimeThinkingLevel;
+  strict?: boolean;
 }): Promise<void> {
   const thinkingLevel = params.thinkingLevel;
   if (!thinkingLevel) {
     return;
   }
   const agentId = params.agentId?.trim() || resolveAgentIdFromSessionKey(params.sessionKey);
-  if (!agentId?.startsWith(MANAGED_AGENT_PREFIX)) {
+  if (!agentId?.startsWith(MANAGED_AGENT_PREFIX) && !params.strict) {
     return;
   }
   const sessionApi = params.api.runtime?.agent?.session;
   if (!sessionApi?.updateSessionStoreEntry || !sessionApi?.resolveStorePath) {
+    if (params.strict) throw new Error("Auto session model/effort update API unavailable");
     return;
   }
   const sessionKey = params.sessionKey?.trim();
   if (!sessionKey) {
+    if (params.strict) throw new Error("Auto session context unavailable");
     return;
   }
   const storePath = sessionApi.resolveStorePath(currentRuntimeConfig(params.api).session?.store, {
     agentId,
   });
   if (!storePath) {
+    if (params.strict) throw new Error("Auto session store unavailable");
     return;
   }
   await sessionApi.updateSessionStoreEntry({
@@ -462,21 +469,28 @@ export function registerManagedAgentModelHooks(
   );
 
   setSessionModelPreparer(
-    aimodelRunSync ? async (sessionId) => {
-      await resolveSessionModelOverride({
+    aimodelRunSync ? async (sessionId, snapshot, sessionKey) => {
+      const resolved = await resolveSessionModelOverride({
         api,
         pluginConfig: aimodelRunSync.pluginConfig,
         sessionId,
+        ...(snapshot ? { modelId: snapshot.modelId, modelConfigVersion: snapshot.modelConfigVersion } : {}),
         aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
         log: api.logger,
       });
+      if (snapshot) {
+        if (!resolved || !sessionKey) throw new Error("Auto model preparation failed");
+        await syncManagedAgentSessionModelForInbound({ api, sessionKey, modelRefOverride: resolved.modelRef, strict: true });
+        await syncManagedAgentThinkingLevelForInbound({ api, sessionKey, thinkingLevel: snapshot.thinkingLevel, strict: true });
+      }
     } : undefined,
   );
 
   api.on("before_dispatch", async (event, ctx) => {
     const sessionKey = ctx.sessionKey?.trim() || event.sessionKey?.trim();
     const agentId = resolveAgentIdFromSessionKey(sessionKey) ?? ctx.agentId?.trim();
-    if (aimodelRunSync) {
+    const snapshot = getRunModelSnapshot(sessionKey);
+    if (aimodelRunSync && !snapshot) {
       await syncMainAgentSessionModelForInbound({
         api,
         sessionKey,
@@ -489,9 +503,11 @@ export function registerManagedAgentModelHooks(
           api,
           pluginConfig: aimodelRunSync.pluginConfig,
           sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
+          ...(snapshot ? { modelId: snapshot.modelId, modelConfigVersion: snapshot.modelConfigVersion } : {}),
           aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
           log: api.logger,
         }).catch((error: unknown) => {
+          if (snapshot) throw error;
           api.logger.warn(
             `baiying-enhance: session model override resolve failed: ${
               error instanceof Error ? error.message : String(error)
@@ -505,8 +521,9 @@ export function registerManagedAgentModelHooks(
       sessionKey,
       agentId,
       ...(sessionModelOverride ? { modelRefOverride: sessionModelOverride.modelRef } : {}),
+      ...(snapshot ? { strict: true } : {}),
     });
-    const sessionThinkingLevel = aimodelRunSync
+    const sessionThinkingLevel = snapshot?.thinkingLevel ?? (aimodelRunSync
       ? await resolveSessionThinkingLevel({
           sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
           log: api.logger,
@@ -518,23 +535,26 @@ export function registerManagedAgentModelHooks(
           );
           return undefined;
         })
-      : undefined;
+      : undefined);
     await syncManagedAgentThinkingLevelForInbound({
       api,
       sessionKey,
       agentId,
       ...(sessionThinkingLevel ? { thinkingLevel: sessionThinkingLevel } : {}),
+      ...(snapshot ? { strict: true } : {}),
     });
   }, { priority: BAIYING_ENHANCE_HOOK_PRIORITY });
 
   api.on("before_model_resolve", async (_event, ctx) => {
     await attachLangfuseSessionToActiveSpan(ctx);
     const agentId = ctx.agentId?.trim() || resolveAgentIdFromSessionKey(ctx.sessionKey);
+    const snapshot = getRunModelSnapshot(ctx.sessionKey);
     if (aimodelRunSync) {
       const sessionOverride = await resolveSessionModelOverride({
         api,
         pluginConfig: aimodelRunSync.pluginConfig,
         sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
+        ...(snapshot ? { modelId: snapshot.modelId, modelConfigVersion: snapshot.modelConfigVersion } : {}),
         aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
         log: api.logger,
       });
@@ -594,6 +614,10 @@ export function registerManagedAgentModelHooks(
   api.on("before_prompt_build", async (_event, ctx) => {
     await attachLangfuseSessionToActiveSpan(ctx);
     const agentId = ctx.agentId?.trim() || resolveAgentIdFromSessionKey(ctx.sessionKey);
+    const snapshot = getRunModelSnapshot(ctx.sessionKey);
+    if (snapshot) {
+      return { appendSystemContext: `Auto selected runtime model: ${ctx.modelProviderId}/${ctx.modelId}. Use this runtime fact for model identity.` };
+    }
     const managedContext = buildManagedAgentRuntimeModelSystemContext({
       cfg: currentRuntimeConfig(api),
       agentId,

@@ -440,6 +440,18 @@ describe("RunIngressService group chat snapshot", () => {
     expect(resolve).toHaveBeenCalledTimes(2);
   });
 
+  it("never silently falls back when the frozen Auto execution model fails", async () => {
+    const runService = fakeRunService();
+    const resolve = vi.fn();
+    const resolveByModelId = vi.fn().mockRejectedValue(new Error("Auto model unavailable"));
+    const ingress = new RunIngressService(runService.impl, async () => ({ userCode: "creator" }),
+      catalog([]), undefined, { info: vi.fn(), warn: vi.fn() }, { resolve, resolveByModelId });
+    await expect(ingress.createSessionRun({ beyondToken: PRINCIPAL_TOKEN, sourceAgentId: "10000249",
+      relModelId: "42", autoModel: true, message: "hello" })).rejects.toThrow("Auto model unavailable");
+    expect(resolve).not.toHaveBeenCalled();
+    expect(runService.createSessionRun).not.toHaveBeenCalled();
+  });
+
   it("rejects unavailable resource models instead of reusing instance-local configuration", async () => {
     const runService = fakeRunService();
     const resolve = vi

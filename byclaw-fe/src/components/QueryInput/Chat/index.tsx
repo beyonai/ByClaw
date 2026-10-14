@@ -1,3 +1,4 @@
+import { modelSelectionPayload } from '@/utils/modelSelection';
 /* eslint-disable react/react-in-jsx-scope */
 import React from 'react';
 // @ts-ignore
@@ -284,9 +285,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         agentType: myAgentType,
         agentId,
         // 仅在用户为本会话显式选择时发送：'-1' = 默认模型（清除覆盖），正数 = 模型主键。
-        ...(this.state.selectedModelId ? { relModelId: this.state.selectedModelId } : {}),
-        // 思考强度同理：'-1' = 跟随默认（清除档位覆盖），其余为档位值。
-        ...(this.state.selectedThinkingLevel ? { relThinkingLevel: this.state.selectedThinkingLevel } : {}),
+        ...modelSelectionPayload(this.state.selectedModelId, this.state.selectedThinkingLevel),
         ...chatSettings,
       },
       msgOpt: {
@@ -584,6 +583,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
           <ModelSelect
             key={`desktop-model-${this.props.sessionId || 'new'}`}
             allowWeb={this.props.enableModelSelect}
+            sessionId={this.props.sessionId}
             value={this.state.selectedModelId}
             onChange={this.onModelSelectChange}
             level={this.state.selectedThinkingLevel}

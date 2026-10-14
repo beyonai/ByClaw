@@ -1,6 +1,6 @@
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 
-import { getMyModels, getPublicModels } from '@/pages/models/service';
+import { getModelSelectionCapabilities, getMyModels, getPublicModels } from '@/pages/models/service';
 import ModelSelect, { reasoningLabelStrideFor } from '.';
 
 let mockUserInfo: Record<string, unknown> | null = null;
@@ -19,7 +19,12 @@ jest.mock('@ant-design/icons', () => ({
 
 jest.mock('antd', () => ({
   Empty: () => null,
-  Select: () => null,
+  Select: ({ dropdownRender, labelRender }: any) => (
+    <div>
+      {labelRender?.()}
+      {dropdownRender?.()}
+    </div>
+  ),
   Slider: () => null,
   Spin: () => null,
   Tabs: () => null,
@@ -28,6 +33,8 @@ jest.mock('antd', () => ({
 }));
 
 jest.mock('@/pages/models/service', () => ({
+  getModelSelectionCapabilities: jest.fn().mockResolvedValue({ data: { autoAvailable: true } }),
+  getModelSelectionPreference: jest.fn().mockResolvedValue({ data: { mode: 'default' } }),
   getMyModels: jest.fn(),
   getPublicModels: jest.fn(),
 }));
@@ -74,5 +81,27 @@ describe('reasoning label density', () => {
 
   it('increases the regular sampling interval on narrower tracks', () => {
     expect(reasoningLabelStrideFor(160, widths)).toBe(3);
+  });
+});
+
+describe('Auto model choice', () => {
+  it('shows Auto after capability discovery and sends a distinct picker token', async () => {
+    mockUserInfo = { userId: 27 };
+    mockGetMyModels.mockResolvedValue({ data: { rows: [] } } as any);
+    mockGetPublicModels.mockResolvedValue({ data: { rows: [] } } as any);
+    (getModelSelectionCapabilities as jest.Mock).mockResolvedValue({ data: { autoAvailable: true } });
+    const onChange = jest.fn();
+    const view = render(<ModelSelect allowWeb value="-1" onChange={onChange} />);
+    const auto = await view.findByTestId('model-row-auto');
+    fireEvent.click(auto);
+    expect(onChange).toHaveBeenCalledWith('auto');
+  });
+
+  it('keeps Auto hidden when the backend does not support it', async () => {
+    mockUserInfo = { userId: 27 };
+    (getModelSelectionCapabilities as jest.Mock).mockResolvedValue({ data: { autoAvailable: false } });
+    const view = render(<ModelSelect allowWeb onChange={jest.fn()} />);
+    await waitFor(() => expect(getModelSelectionCapabilities).toHaveBeenCalled());
+    expect(view.queryByTestId('model-row-auto')).toBeNull();
   });
 });

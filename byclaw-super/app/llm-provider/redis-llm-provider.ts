@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createDecipheriv } from "node:crypto";
 import type {
   LlmProviderConfig,
@@ -84,13 +85,16 @@ export class RedisFirstLlmProvider {
   }
 
   /** 按 BE 返回的模型实例主键解析运行配置；该路径不允许静默回退到默认模型。 */
-  async resolveByModelId(modelId: string): Promise<LlmProviderConfig> {
+  async resolveByModelId(modelId: string, expectedVersion?: string): Promise<LlmProviderConfig> {
     const normalizedModelId = requiredString(modelId, "modelId");
     const raw = await this.#redis.hget(this.#modelConfigRedisKey, normalizedModelId);
     if (raw === null) {
       throw new Error(
         `missing Redis hash field ${this.#modelConfigRedisKey}:${normalizedModelId}`,
       );
+    }
+    if (expectedVersion && createHash("sha256").update(raw).digest("hex") !== expectedVersion) {
+      throw new Error("Auto execution model configuration changed");
     }
     const parsed = JSON.parse(Buffer.isBuffer(raw) ? raw.toString("utf8") : raw) as unknown;
     if (!isRecord(parsed)) {

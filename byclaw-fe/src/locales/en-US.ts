@@ -164,6 +164,8 @@ export default {
   'ui.model.loading': 'Loading…',
   'ui.model.empty': 'No models available',
   'ui.model.current': 'Current conversation model',
+  'ui.model.auto': 'Auto',
+  'ui.model.auto.fallback': 'Auto fallback',
   'ui.model.default': 'Default model',
   'ui.model.reasoning.supported': 'Tiered reasoning',
   'ui.model.reasoning.title': 'Reasoning effort',

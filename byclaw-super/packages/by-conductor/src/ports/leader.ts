@@ -124,6 +124,8 @@ export interface LeaderSession {
 
 /** Run 入站时选定的 Leader 模型资源；恢复时读取该资源的当前有效配置。 */
 export interface LeaderModelSelection {
+  selectionMode?: "auto";
+  modelConfigVersion?: string;
   /** ByAI 模型实例主键，对应 byai:aimodel:config 的 Hash field。 */
   modelId: string;
   /**

@@ -133,6 +133,8 @@ export default {
   'ui.model.loading': '加载中…',
   'ui.model.empty': '暂无模型',
   'ui.model.current': '当前会话模型',
+  'ui.model.auto': 'Auto 自动选模',
+  'ui.model.auto.fallback': '自动选模已兜底',
   'ui.model.default': '默认模型',
   'ui.model.reasoning.supported': '支持分档',
   'ui.model.reasoning.title': '推理强度',

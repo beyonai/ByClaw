@@ -94,7 +94,7 @@ public class ChatService {
                     ? tokenQuotaService.isModelSubjectToQuota(message.getAgentId())
                     : tokenQuotaService.isModelSubjectToQuotaByModelId(
                         sessionModelSelectionService.parseModelId(selectedModel.getModelId()));
-            if (currentUser != null
+            if (!com.iwhalecloud.byai.state.domain.chat.service.AutoModelRoutingService.isAuto(message) && currentUser != null
                     && subjectToQuota
                     && tokenQuotaService.isQuotaExceeded(currentUser.getUserId())) {
                 JSONObject error = new JSONObject();

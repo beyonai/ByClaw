@@ -5,7 +5,7 @@
 
 import { chatChainLog } from "./chat-chain-log.js";
 import path from "node:path";
-import { prepareSessionModelForDispatch } from "../../shared/src/session-model-runtime.js";
+import { prepareSessionModelForDispatch, parseRunModelSnapshot, bindRunModelSnapshot } from "../../shared/src/session-model-runtime.js";
 import {
   detectMime,
   fetchRemoteMedia,
@@ -396,6 +396,7 @@ export async function deliverReplyToAgentViaSdk(
     agent_id?: unknown;
     agent_code?: unknown;
     agent_name?: unknown;
+    run_model?: unknown;
   };
   const extraPayload = {
     ...rawExtraPayload,
@@ -430,10 +431,13 @@ export async function deliverReplyToAgentViaSdk(
 
   const { result, meta, release } = await runSessionDispatchExclusiveLeased(sessionKey, async () => {
     assertContextRecoveryIdle(sessionKey, message.language);
+    const snapshot = parseRunModelSnapshot(extraPayload.run_model);
+    bindRunModelSnapshot(sessionKey, snapshot);
+    try {
     // Provider registration can replace the runtime config. Complete it before
     // taking the snapshot that OpenClaw retains throughout this dispatch.
     await awaitWithAbort(
-      prepareSessionModelForDispatch(message.sessionId),
+      prepareSessionModelForDispatch(message.sessionId, snapshot, sessionKey),
       deps.abortController?.signal,
     );
     const dispatchCfg = await waitForBaiyingAgentConfig({
@@ -453,6 +457,10 @@ export async function deliverReplyToAgentViaSdk(
       extraPayload,
       laneMetadata,
     });
+    } catch (error) {
+      bindRunModelSnapshot(sessionKey, undefined);
+      throw error;
+    }
   }, { signal: deps.abortController?.signal });
 
   if (meta.queued) {
@@ -473,6 +481,7 @@ export async function deliverReplyToAgentViaSdk(
       } finally {
         // Keep the FIFO lease through FINAL_ANSWER and APP_STREAM_RESPONSE so the
         // next inbound cannot take ownership of the transcript between them.
+        bindRunModelSnapshot(sessionKey, undefined);
         release();
       }
     },

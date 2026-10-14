@@ -78,6 +78,9 @@ public class SessionModelSelectionService {
 
     private static final String CAPABILITY_ADAPTIVE = "adaptive";
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private AutoModelRoutingService autoModelRoutingService;
+
     private final ByaiAimodelMapper byaiAimodelMapper;
 
     private final AiModelService aiModelService;
@@ -142,14 +145,29 @@ public class SessionModelSelectionService {
         if (dto == null) {
             return Optional.empty();
         }
+        if (autoModelRoutingService != null) autoModelRoutingService.restoreResumeMode(dto);
+        AutoModelRoutingService.validate(dto);
         if (dto.isSessionModelResolved()) {
             return Optional.ofNullable(dto.getSessionModelSelection());
+        }
+        if (AutoModelRoutingService.isAuto(dto)) {
+            dto.setRelThinkingLevel("-1");
+            SessionModelSelection auto = autoModelRoutingService.route(dto, id -> resolve(id).map(selection -> {
+                resolveThinkingLevel(dto, selection, null);
+                return selection;
+            }));
+            dto.setSessionModelSelection(auto);
+            dto.setSessionModelResolved(true);
+            return Optional.of(auto);
         }
         SessionModelSelection record = readSessionOverrideRecord(dto.getSessionId()).orElse(null);
         // 会话覆盖记录为双轴结构：仅当模型轴非空时才可作为模型回退来源。
         SessionModelSelection modelOverride = record != null && StringUtils.isNotBlank(record.getModelId()) ? record
             : null;
         Optional<SessionModelSelection> selected = resolve(dto.getRelModelId());
+        if ("manual".equals(dto.getModelSelectionMode()) && selected.isEmpty()) {
+            throw new AutoModelRoutingService.RoutingException("INVALID_MODEL_SELECTION", com.iwhalecloud.byai.common.i18n.I18nUtil.get("auto.model.invalid"));
+        }
         SessionModelSelection effective;
         if (selected.isPresent()) {
             effective = selected.get();
@@ -328,6 +346,15 @@ public class SessionModelSelectionService {
         if (dto == null || dto.getSessionId() == null) {
             return;
         }
+        if (dto.getModelSelectionMode() != null && StringUtils.isBlank(dto.getTraceId()) && !"RESUME".equalsIgnoreCase(dto.getActionType())) {
+            stringRedisTemplate.opsForValue().set("byai:chat:model_preference:" + CurrentUserHolder.getCurrentUserId() + ":" + dto.getSessionId(),
+                JSON.toJSONString(Map.of("mode", dto.getModelSelectionMode(), "modelId", StringUtils.defaultString(dto.getRelModelId()))), Duration.ofDays(30));
+        }
+        if (AutoModelRoutingService.isAuto(dto)) {
+            deleteSessionOverride(dto.getSessionId());
+            return;
+        }
+        if (autoModelRoutingService != null) autoModelRoutingService.clearActiveSnapshot(dto);
         SessionModelSelection record = readSessionOverrideRecord(dto.getSessionId()).orElse(null);
         SessionModelSelection modelAxis = resolveModelAxis(dto, record);
         SessionModelSelection effective = dto.getSessionModelSelection();

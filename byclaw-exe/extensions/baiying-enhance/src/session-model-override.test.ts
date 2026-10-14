@@ -49,3 +49,16 @@ describe("session model configuration refresh", () => {
     await expect(resolveSessionModelOverride(params)).resolves.toMatchObject({ modelRef: "baiying-m-42/qwen3.6-plus" });
   });
 });
+
+
+it("Auto uses its explicit model instead of the old Redis session override", async () => {
+  let cfg = {};
+  const params = { sessionId: "s", modelId: "43", pluginConfig: {}, log: { warn: vi.fn(), info: vi.fn() },
+    api: { runtime: { config: { current: () => cfg, loadConfig: () => cfg,
+      mutateConfigFile: async ({ mutate }: any) => { cfg = await mutate(cfg); } } } } as never };
+  expect(await resolveSessionModelOverride(params)).toMatchObject({ providerKey: "baiying-m-43" });
+  expect(getJsonByKey.mock.calls.some(([key]) => key.startsWith("byai:chat:session_model:"))).toBe(false);
+  await expect(resolveSessionModelOverride({ ...params, modelConfigVersion: "old-version" })).rejects.toThrow("configuration changed");
+  getJsonByKey.mockResolvedValue(null);
+  await expect(resolveSessionModelOverride(params)).rejects.toThrow("Auto execution model is unavailable");
+});

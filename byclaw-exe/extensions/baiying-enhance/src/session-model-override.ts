@@ -69,6 +69,8 @@ export async function resolveSessionModelOverride(params: {
     api: OpenClawPluginApi;
     pluginConfig: BaiyingEnhancePluginConfig;
     sessionId?: string;
+    modelId?: string;
+    modelConfigVersion?: string;
     aimodelSecretResolverScriptPath?: string;
     log: LoggerLike;
 }): Promise<SessionModelOverrideRef | undefined> {
@@ -76,8 +78,8 @@ export async function resolveSessionModelOverride(params: {
     if (!sessionId) {
         return undefined;
     }
-    const payload = await readOverridePayload({ sessionId, log: params.log });
-    const modelId = readString(payload?.raw, "modelId");
+    const payload = params.modelId ? null : await readOverridePayload({ sessionId, log: params.log });
+    const modelId = params.modelId || readString(payload?.raw, "modelId");
     if (!modelId) {
         return undefined;
     }
@@ -91,10 +93,14 @@ export async function resolveSessionModelOverride(params: {
         log: { warn: (message) => params.log.warn?.(message), info: (message) => params.log.info?.(message) },
     });
     if (!bundle) {
+        if (params.modelId) throw new Error("Auto execution model is unavailable");
         params.log.warn?.(
             `baiying-enhance: session model override unavailable, sessionId=${sessionId}, modelId=${modelId}; falling back to agent model`,
         );
         return undefined;
+    }
+    if (params.modelConfigVersion && params.modelConfigVersion !== bundle.hash) {
+        throw new Error("Auto execution model configuration changed");
     }
     const cfg = currentRuntimeConfig(params.api);
     if (!hasManagedProviderConfigDrift(cfg, bundle.providerKey, bundle.provider)) {

@@ -42,7 +42,7 @@ export interface ResourceModelResolver {
     systemCode?: string;
   }): Promise<LeaderModelSelection>;
   /** 会话级模型覆盖：按模型主键直接解析，供用户在对话框切换模型时使用。 */
-  resolveByModelId?(modelId: string): Promise<LeaderModelSelection>;
+  resolveByModelId?(modelId: string, expectedVersion?: string): Promise<LeaderModelSelection>;
 }
 
 interface AuthenticatedIngressRequest {
@@ -61,6 +61,9 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
    * 存在且可解析时优先于数字员工配置模型；解析失败回退配置模型。
    */
   relModelId?: string;
+  /** Auto freezes this ID and must fail rather than silently use another model. */
+  autoModel?: boolean;
+  autoModelConfigVersion?: string;
   context?: SessionContextInput;
   /** 已规范化的附件（由各入口在调用前 normalize）；缺省为空数组。 */
   attachments?: RunAttachment[];
@@ -566,18 +569,20 @@ export class RunIngressService {
   ): Promise<LeaderModelSelection | undefined> {
     const resourceId = input.sourceAgentId?.trim();
     if (!resourceId || !this.resourceModels) {
+      if (input.autoModel) throw new Error("Auto execution model resolver unavailable");
       return undefined;
     }
     const overrideModelId = input.relModelId?.trim();
     if (overrideModelId && this.resourceModels.resolveByModelId) {
       try {
-        const override = await this.resourceModels.resolveByModelId(overrideModelId);
+        const override = await this.resourceModels.resolveByModelId(overrideModelId, input.autoModelConfigVersion);
         this.logger?.info(
           { resourceId, modelId: override.modelId },
           "会话级模型覆盖生效，本轮使用用户选择的模型",
         );
-        return override;
+        return input.autoModel ? { ...override, selectionMode: "auto" } : override;
       } catch (error) {
+        if (input.autoModel) throw error;
         const normalized = error instanceof Error ? error : new Error(String(error));
         this.logger?.warn(
           {
@@ -590,6 +595,7 @@ export class RunIngressService {
         );
       }
     }
+    if (input.autoModel) throw new Error("Auto execution model ID unavailable");
     return this.resourceModels.resolve({
       resourceId,
       beyondToken: input.beyondToken,

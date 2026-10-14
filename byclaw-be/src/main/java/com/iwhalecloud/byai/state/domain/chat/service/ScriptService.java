@@ -110,6 +110,9 @@ public class ScriptService extends AbstractChatProcess {
     private ParamService paramService;
 
     @Autowired
+    private AutoModelRoutingService autoModelRoutingService;
+
+    @Autowired
     private SessionService sessionService;
 
     @Autowired
@@ -240,6 +243,7 @@ public class ScriptService extends AbstractChatProcess {
         if (!ctx.continueRunningTrace) {
             ctx.traceId = getTraceId(ctx.userMessageId, ctx.modelAnswerMessageId);
         }
+        if (autoModelRoutingService != null) autoModelRoutingService.bindTrace(ctx.assistantChatDto, ctx.traceId);
 
         // 先绑定实际 trace 再下发，避免极快的完成回调早于任务轮次落库。
         if (ctx.assistantChatDto.getGroupTaskTurnId() != null) {
@@ -772,6 +776,7 @@ public class ScriptService extends AbstractChatProcess {
         SessionModelSelection usedModel = assistantChatDto.getSessionModelSelection();
         if (usedModel != null && StringUtils.isNotBlank(usedModel.getModelId())) {
             metadata.put("usedModel", usedModel.toMetadata());
+            if (usedModel.getModelRouting() != null) metadata.put("modelRouting", usedModel.getModelRouting());
         }
         // 增加智能体，聊天消息等标题，头像信息
         try {

@@ -195,7 +195,7 @@ function createOrchestration(input: {
   const leaders = new LazyPiLeaderFactory(
     () => buildPiRuntimeConfig(config, database, llmProvider.resolve(), undefined, logger),
     async (selection: LeaderModelSelection) => {
-      const modelConfig = await llmProvider.resolveByModelId(selection.modelId);
+      const modelConfig = await llmProvider.resolveByModelId(selection.modelId, selection.modelConfigVersion);
       return buildPiRuntimeConfig(
         config,
         database,

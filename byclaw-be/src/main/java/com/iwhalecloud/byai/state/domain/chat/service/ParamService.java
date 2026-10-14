@@ -130,6 +130,13 @@ public class ParamService {
         if (effectiveModel == null) {
             return;
         }
+        if (effectiveModel.getModelRouting() != null) {
+            params.put("run_model", Map.of("schemaVersion", 1, "runId", effectiveModel.getRunId(),
+                "selectionMode", "auto", "modelId", effectiveModel.getModelId(),
+                "modelConfigVersion", effectiveModel.getModelConfigVersion(),
+                "thinkingLevel", effectiveModel.getThinkingLevel(),
+                "policyVersion", effectiveModel.getModelRouting().get("policyVersion")));
+        }
         params.put("rel_model_id", effectiveModel.getModelId());
         params.put("rel_model_code", effectiveModel.getModelCode());
         params.put("rel_model_name", effectiveModel.getModelName());
@@ -271,6 +278,11 @@ public class ParamService {
     /**
      * 未指定数字员工时直接路由到公共超级助手；非空 ID 仍按资源配置路由，资源不存在时兼容旧 OpenClaw。
      */
+    boolean supportsAutoRouting(Long agentId) {
+        return (agentId == null || !digitalEmployeeGroupApplicationService.isGroup(agentId)) &&
+            Set.of("BY_SUPER", "BYCLAW_EXE").contains(resolveWorkerAgentType(agentId));
+    }
+
     String resolveWorkerAgentType(Long agentId) {
         if (agentId == null) {
             return WorkerAgentType.BY_SUPER.getCode();

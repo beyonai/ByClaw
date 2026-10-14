@@ -141,6 +141,9 @@ public class AssistantChatService {
     @Autowired
     private SessionModelSelectionService sessionModelSelectionService;
 
+    @Autowired
+    private AutoModelRoutingService autoModelRoutingService;
+
     /**
      * 研发派发待接单放行钩子;manager 侧实现,未装配时聊天链路不受影响。
      * 必须延迟取:实现方 DevloopApplicationService 反过来依赖本类下发提示词,直接注入会构成 bean 环
@@ -188,6 +191,7 @@ public class AssistantChatService {
             SpanUtil.input(span, assistantChatDto.getChatContent());
         }
         try {
+            AutoModelRoutingService.validate(assistantChatDto);
             long firstTextStartTime = System.currentTimeMillis();
             long time01 = System.currentTimeMillis();
             // 给Netty使用
@@ -208,6 +212,9 @@ public class AssistantChatService {
                 return;
             }
 
+            if (AutoModelRoutingService.isAuto(assistantChatDto) && TenantRequestContextHolder.get() != null) {
+                throw new AutoModelRoutingService.RoutingException("AUTO_UNSUPPORTED_RUNTIME", I18nUtil.get("auto.model.unsupported"));
+            }
             applyDefaultPersonalAssistant(assistantChatDto);
 
             // 处理sessionId相关逻辑,校验消息发送权限
@@ -261,6 +268,9 @@ public class AssistantChatService {
                 if (taskGuard != null) {
                     taskGuard.failTurnStart(assistantChatDto.getSessionId(), groupTaskTurnId);
                 }
+            }
+            if (autoModelRoutingService != null && AutoModelRoutingService.isAuto(assistantChatDto)) {
+                autoModelRoutingService.releaseRouting(assistantChatDto);
             }
             cleanupResources(userInfo, outputStream);
         }
@@ -565,9 +575,12 @@ public class AssistantChatService {
             }
         }
 
+        // Keep routing codes machine-readable while displaying the localized message.
+        ErrorReponse errorResponse = ErrorReponse.error(e.getMessage());
+        if (e instanceof AutoModelRoutingService.RoutingException routingError) errorResponse.setErrorCode(routingError.getErrorCode());
         // 其他异常的处理
         CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.error,
-            JSON.toJSONString(ErrorReponse.error(e.getMessage())), assistantChatDto.getSessionId());
+            JSON.toJSONString(errorResponse), assistantChatDto.getSessionId());
         throw e;
     }
 

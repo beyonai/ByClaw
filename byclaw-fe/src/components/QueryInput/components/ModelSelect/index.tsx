@@ -1,8 +1,14 @@
+import { AUTO_MODEL_CHOICE } from '@/utils/modelSelection';
 import { useIntl, useSelector } from '@umijs/max';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AppstoreOutlined, CloudOutlined, LaptopOutlined, UserOutlined } from '@ant-design/icons';
 import { Select, Slider, Spin, Tabs, Tag, Empty, Tooltip } from 'antd';
-import { getMyModels, getPublicModels } from '@/pages/models/service';
+import {
+  getModelSelectionCapabilities,
+  getModelSelectionPreference,
+  getMyModels,
+  getPublicModels,
+} from '@/pages/models/service';
 import {
   THINKING_LEVEL_DEFAULT_SIGNAL,
   resolveThinkingPanelLevel,
@@ -21,6 +27,7 @@ type Props = {
    * 网页端仅在个人数字员工会话传入 true，渲染我的/公共两 tab 并额外提供「默认模型」。
    */
   allowWeb?: boolean;
+  sessionId?: string;
 
   /** 本会话已显式选择的思考强度：undefined=未选择，'-1'=跟随默认，其余为档位。 */
   level?: string;
@@ -81,7 +88,7 @@ type Model = {
   source: 'local' | 'mine' | 'public';
   reasoning?: ModelReasoningConfig;
 };
-const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level, onLevelChange }) => {
+const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level, onLevelChange, sessionId }) => {
   const intl = useIntl();
   const authIdentity = useSelector(({ user }: any) => {
     const userInfo = user?.userInfo;
@@ -97,6 +104,9 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
     public: [],
   });
   const [loading, setLoading] = useState(false);
+  const [autoAvailable, setAutoAvailable] = useState(false);
+  const currentValueRef = useRef(value);
+  currentValueRef.current = value;
   const [open, setOpen] = useState(false);
   const [previewModelId, setPreviewModelId] = useState<string | undefined>(undefined);
   const [reasoningLabelStride, setReasoningLabelStride] = useState(1);
@@ -177,6 +187,32 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
     };
   }, [authIdentity, desktop, enabled]);
 
+  useEffect(() => {
+    if (!enabled || !authIdentity || typeof getModelSelectionCapabilities !== 'function') return undefined;
+    let cancelled = false;
+    setAutoAvailable(false);
+    getModelSelectionCapabilities()
+      .then((response) => {
+        if (!cancelled) setAutoAvailable(response?.data?.autoAvailable === true);
+      })
+      .catch(() => {
+        if (!cancelled) setAutoAvailable(false);
+      });
+    if (sessionId && /^\d+$/.test(sessionId)) {
+      getModelSelectionPreference(sessionId)
+        .then((response) => {
+          if (cancelled || currentValueRef.current !== undefined) return;
+          const preference = response?.data;
+          if (preference?.mode === 'auto') onChange(AUTO_MODEL_CHOICE);
+          else if (preference?.mode === 'manual' && preference.modelId) onChange(`${preference.modelId}`);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [authIdentity, enabled, sessionId]);
+
   // Preserve the original picker behavior: a new desktop session always gets
   // a usable default model, while an explicitly selected model is untouched.
   // 网页端不自动选中，空值即「默认模型」；显式选择「默认模型」时也不自动改回。
@@ -222,6 +258,7 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
     [activeTab, groups]
   );
 
+  const isAutoChoice = current === AUTO_MODEL_CHOICE;
   const isDefaultChoice = current === undefined || explicitDefault;
   const selectedModel = allModels.find((item) => item.id === current);
   // 右栏展示悬停中的模型，否则展示当前会话模型；两种状态都可直接调整。
@@ -294,11 +331,12 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
     return () => observer.disconnect();
   }, [open, reasoningLevelsKey, reasoningLevels.length]);
 
-  const reasoningHint = draftLevel
-    ? intl.formatMessage({ id: 'ui.model.reasoning.pending' })
-    : reasoningPanelIsCurrent && explicitLevel
-      ? intl.formatMessage({ id: 'ui.model.reasoning.applied' })
-      : intl.formatMessage({ id: 'ui.model.reasoning.followingDefault' });
+  let reasoningHint = intl.formatMessage({ id: 'ui.model.reasoning.followingDefault' });
+  if (draftLevel) {
+    reasoningHint = intl.formatMessage({ id: 'ui.model.reasoning.pending' });
+  } else if (reasoningPanelIsCurrent && explicitLevel) {
+    reasoningHint = intl.formatMessage({ id: 'ui.model.reasoning.applied' });
+  }
   if (!enabled) return null;
   const tabs = [
     {
@@ -346,7 +384,7 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
             {selectedModel.provider && <Tag bordered={false}>{selectedModel.provider}</Tag>}
           </span>
         ) : (
-          intl.formatMessage({ id: 'ui.model.default' })
+          intl.formatMessage({ id: isAutoChoice ? 'ui.model.auto' : 'ui.model.default' })
         )
       }
       placeholder={intl.formatMessage({ id: 'ui.model.default' })}
@@ -361,6 +399,17 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
           <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key as typeof activeTab)} items={tabs} />
           <div className={styles.body}>
             <div className={styles.list}>
+              {autoAvailable && (!desktop || (sessionId && /^\d+$/.test(sessionId))) && (
+                <div
+                  data-testid="model-row-auto"
+                  className={`${styles.item} ${isAutoChoice ? styles.selected : ''}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectModel(AUTO_MODEL_CHOICE)}
+                  onMouseEnter={() => setPreviewModelId(undefined)}
+                >
+                  <span className={styles.option}>{intl.formatMessage({ id: 'ui.model.auto' })}</span>
+                </div>
+              )}
               <div
                 key="__default__"
                 className={`${styles.item} ${isDefaultChoice ? styles.selected : ''}`}
@@ -396,7 +445,7 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
                 />
               )}
             </div>
-            {reasoningPanelModel && (
+            {!isAutoChoice && reasoningPanelModel && (
               <div
                 className={styles.reasoning}
                 data-testid="model-reasoning-panel"

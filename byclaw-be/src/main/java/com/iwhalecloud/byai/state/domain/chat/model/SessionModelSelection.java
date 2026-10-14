@@ -23,6 +23,14 @@ public class SessionModelSelection {
     /** 模型主键（byai_aimodel.model_id），同时是 Redis byai:aimodel:config 的 hash field。 */
     private String modelId;
 
+    private String modelConfigVersion;
+
+    private String runId;
+
+    private String requestHash;
+
+    private Map<String, Object> modelRouting;
+
     /** 模型编码，运行时调用使用。 */
     private String modelCode;
 

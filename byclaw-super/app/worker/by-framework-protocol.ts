@@ -218,6 +218,18 @@ export function commandRelModelId(command: {
 }): string | undefined {
   const extra = command.extraPayload ?? {};
   const raw = recordScalar(extra, "rel_model_id") ?? recordScalar(extra, "relModelId");
+  if (extra.run_model !== undefined) {
+    if (!isRecord(extra.run_model)) throw new Error("Invalid Auto model snapshot");
+    const snapshot = extra.run_model;
+    if (snapshot.schemaVersion !== 1 || snapshot.selectionMode !== "auto" ||
+        typeof snapshot.runId !== "string" || !snapshot.runId ||
+        typeof snapshot.modelId !== "string" || !/^[1-9]\d*$/.test(snapshot.modelId) || snapshot.modelId !== raw ||
+        typeof snapshot.modelConfigVersion !== "string" || !snapshot.modelConfigVersion ||
+        typeof snapshot.policyVersion !== "string" || !snapshot.policyVersion ||
+        !isThinkingLevel(snapshot.thinkingLevel)) {
+      throw new Error("Invalid Auto model snapshot");
+    }
+  }
   return raw && /^[1-9]\d*$/.test(raw) ? raw : undefined;
 }
 
@@ -408,4 +420,10 @@ export function delay(milliseconds: number): Promise<void> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+
+export function commandRunModelVersion(command: { extraPayload?: Readonly<Record<string, unknown>> }): string | undefined {
+  const snapshot = command.extraPayload?.run_model;
+  return isRecord(snapshot) && typeof snapshot.modelConfigVersion === "string" ? snapshot.modelConfigVersion : undefined;
 }

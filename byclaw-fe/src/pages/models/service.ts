@@ -36,3 +36,11 @@ export async function getPublicModels(params: any) {
 export async function setModelStatus(params: { id: number | string; status: string }) {
   return POST<Resp>('/byaiService/personal/model/setStatus', { ...params }, withCustomHandle);
 }
+
+export async function getModelSelectionCapabilities() {
+  return GET<Resp>('/byaiService/personal/model/selectionCapabilities', {}, withCustomHandle);
+}
+
+export async function getModelSelectionPreference(sessionId: string) {
+  return GET<Resp>('/byaiService/personal/model/selectionPreference', { sessionId }, withCustomHandle);
+}

@@ -55,8 +55,8 @@ export class ByClawBeResourceModelResolver {
   }
 
   /** 会话级模型覆盖：直接按模型主键解析，跳过资源详情查询。 */
-  async resolveByModelId(modelId: string): Promise<LeaderModelSelection> {
-    return resolveLeaderModelSelection(this.#llmProvider, modelId);
+  async resolveByModelId(modelId: string, expectedVersion?: string): Promise<LeaderModelSelection> {
+    return resolveLeaderModelSelection(this.#llmProvider, modelId, expectedVersion);
   }
 }
 
@@ -64,14 +64,18 @@ export class ByClawBeResourceModelResolver {
 export async function resolveLeaderModelSelection(
   llmProvider: Pick<RedisFirstLlmProvider, "resolveByModelId">,
   rawModelId: unknown,
+  expectedVersion?: string,
 ): Promise<LeaderModelSelection> {
   const modelId = requiredScalar(rawModelId, "modelId");
-  const config = await llmProvider.resolveByModelId(modelId);
+  const config = expectedVersion
+    ? await llmProvider.resolveByModelId(modelId, expectedVersion)
+    : await llmProvider.resolveByModelId(modelId);
   // 模型配置的默认思考档位随选择一起冻结：调用方未下发 thinkingLevel 时作为兜底，
   // 使管理员的 defaultLevel 在缺少会话选择时同样生效（词表外取值一律丢弃）。
   const defaultThinkingLevel = config.reasoning?.defaultLevel;
   return {
     modelId,
+    ...(expectedVersion ? { modelConfigVersion: expectedVersion } : {}),
     ...(isThinkingLevel(defaultThinkingLevel) ? { defaultThinkingLevel } : {}),
   };
 }

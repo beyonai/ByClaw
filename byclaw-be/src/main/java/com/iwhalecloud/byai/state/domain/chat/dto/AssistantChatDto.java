@@ -77,6 +77,9 @@ public class AssistantChatDto {
     @Schema(description = "使用的模型ID(用户选择)；-1=默认模型", example = "1")
     private String relModelId;
 
+    /** auto/default/manual; absent preserves legacy callers. */
+    private String modelSelectionMode;
+
     /**
      * 会话级思考强度(用户选择)。取值见 THINKING_LEVELS；-1 表示「跟随默认」（清除会话档位覆盖）；
      * 缺失表示本轮不改动已有覆盖。

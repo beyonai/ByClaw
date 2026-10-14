@@ -29,6 +29,7 @@ import {
   commandLogFields,
   commandOrchestratorRef,
   commandRelModelId,
+  commandRunModelVersion,
   commandSessionContext,
   commandSourceAgentId,
   commandString,
@@ -72,6 +73,8 @@ interface AskCommandData {
   attachments: ReturnType<typeof extractUserInput>["attachments"];
   thinkingLevel: ReturnType<typeof commandThinkingLevel>;
   relModelId: ReturnType<typeof commandRelModelId>;
+  autoModel: boolean;
+  autoModelConfigVersion: string | undefined;
   groupChatRef: ReturnType<typeof commandGroupChatRef>;
   orchestrator: ReturnType<typeof commandOrchestratorRef>;
   sessionContext: ReturnType<typeof commandSessionContext>;
@@ -315,6 +318,8 @@ class ByFrameworkAskCommandHandler {
       attachments,
       thinkingLevel: commandThinkingLevel(command),
       relModelId: commandRelModelId(command),
+      autoModel: command.extraPayload?.run_model !== undefined,
+      autoModelConfigVersion: commandRunModelVersion(command),
       groupChatRef: commandGroupChatRef(command),
       orchestrator: commandOrchestratorRef(command),
       sessionContext: commandSessionContext(command),
@@ -337,6 +342,8 @@ class ByFrameworkAskCommandHandler {
       // 未下发档位时不传该字段，让 ingress 回落到模型 defaultLevel。
       ...(data.thinkingLevel ? { thinkingLevel: data.thinkingLevel } : {}),
       ...(data.relModelId ? { relModelId: data.relModelId } : {}),
+      ...(data.autoModel ? { autoModel: true } : {}),
+      ...(data.autoModelConfigVersion ? { autoModelConfigVersion: data.autoModelConfigVersion } : {}),
       ...(data.attachments.length > 0 ? { attachments: data.attachments } : {}),
       ...(sourceAgentId ? { sourceAgentId } : {}),
       ...(command.header.sessionId ? { externalSessionId: command.header.sessionId } : {}),

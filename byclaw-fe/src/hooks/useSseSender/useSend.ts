@@ -72,7 +72,7 @@ export default function useSend(params: IParam) {
           clientRequestId,
           language: getLocale(),
           chatContent: DOMPurify.sanitize(text),
-          relModelId: -1,
+          ...(payload?.modelSelectionMode ? {} : { relModelId: -1 }),
           accessTerminal: 'Web',
           sessionId,
           chatId: sessionId,

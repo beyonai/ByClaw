@@ -3,6 +3,7 @@ import { AskAgentCommand, MessageHeader } from "@byclaw/by-framework";
 import { describe, expect, it } from "vitest";
 import {
   commandOrchestratorRef,
+  commandRelModelId,
   commandSessionContext,
   commandSourceAgentId,
   extractUserInput,
@@ -207,3 +208,13 @@ function command(extraPayload: Record<string, unknown>): AskAgentCommand {
     extraPayload,
   );
 }
+
+
+describe("Auto execution model snapshot", () => {
+  const snapshot = { schemaVersion: 1, runId: "run-1", selectionMode: "auto", modelId: "42", thinkingLevel: "medium", modelConfigVersion: "v1", policyVersion: "auto-v1" };
+  it("accepts a consistent frozen ID and rejects invalid or mismatching snapshots", () => {
+    expect(commandRelModelId({ extraPayload: { rel_model_id: "42", run_model: snapshot } })).toBe("42");
+    expect(() => commandRelModelId({ extraPayload: { rel_model_id: "43", run_model: snapshot } })).toThrow();
+    expect(() => commandRelModelId({ extraPayload: { rel_model_id: "42", run_model: { ...snapshot, thinkingLevel: "invalid" } } })).toThrow();
+  });
+});
