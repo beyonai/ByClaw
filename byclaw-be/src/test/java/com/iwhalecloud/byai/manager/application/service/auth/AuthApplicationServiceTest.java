@@ -21,12 +21,12 @@ import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
-import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
 import com.iwhalecloud.byai.manager.dto.auth.AuthRedBlackDTO;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.entity.organization.Organization;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.station.Station;
 import com.iwhalecloud.byai.manager.entity.users.Users;
@@ -48,6 +48,7 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -279,12 +280,10 @@ class AuthApplicationServiceTest {
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
         StationService stationService = mock(StationService.class);
-        SuasSuperassistService suasSuperassistService = mock(SuasSuperassistService.class);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "organizationService", organizationService);
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
-        ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
         if (ReflectionTestUtils.getField(service, "privilegeGrantMapper") == null) {
             ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         }
@@ -295,7 +294,6 @@ class AuthApplicationServiceTest {
         when(organizationService.findEffectiveOrganizationIdsByUserId(any())).thenReturn(Set.of());
         when(positionService.findPositionByUserId(any())).thenReturn(List.of());
         when(stationService.getStationByUserId(any())).thenReturn(null);
-        when(suasSuperassistService.findById(any())).thenReturn(null);
     }
 
     @ParameterizedTest
@@ -354,6 +352,52 @@ class AuthApplicationServiceTest {
         resource.setOwnerType("personal");
         resource.setResourceBizType("TOOLKIT");
         assertThat(service.canPublishSkillToEnterprise(resource)).isFalse();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "personal, adminvip", "enterprise, AdMiNvIp",
+        "personal, creator", "enterprise, creator",
+        "personal, manager", "enterprise, manager",
+        "personal, platform", "enterprise, platform"
+    })
+    void innerSkillBasicInfoEditIsAdminVipOnlyInListAndDetail(String ownerType, String identity) {
+        PrivilegeGrant grant = manageGrant(601L, 2L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL");
+        AuthApplicationService service = newExplicitUserPermissionService(
+            "manager".equals(identity) ? List.of(grant) : List.of());
+        LoginInfo login = loginInfo(2L);
+        login.setUserCode(identity);
+        if ("platform".equals(identity)) {
+            UsersOrganization role = new UsersOrganization();
+            role.setUserType(UserType.PLAT_MAN);
+            login.setUsersOrganizations(List.of(role));
+        }
+        CurrentUserHolder.setLoginInfo(login);
+        SsResource resource = enterpriseResource(601L, "creator".equals(identity) ? 2L : 1L);
+        resource.setResourceBizType("SKILL");
+        resource.setOwnerType(ownerType);
+        prepareOperationPermissionQueries(service, resource);
+        SsResExtSkill ext = new SsResExtSkill();
+        ext.setResourceId(601L);
+        ext.setSkillType("inner");
+        var skills = (SsResExtSkillService) ReflectionTestUtils.getField(service, "ssResExtSkillService");
+        when(skills.findById(601L)).thenReturn(ext);
+        when(skills.findByIds(any())).thenReturn(List.of(ext));
+
+        for (int status : List.of(2, 3, -1)) {
+            resource.setResourceStatus(status);
+            var detail = service.queryResourceOperationPermissions(601L);
+            var row = service.queryResourceOperationPermissionsBatch(List.of(601L)).get(601L);
+            for (ResourceOperationPermissionsVo permissions : List.of(detail, row)) {
+                assertThat(permissions.isCanEdit()).isEqualTo("adminvip".equalsIgnoreCase(identity) && status != -1);
+                // 开放展示信息编辑不授予内置技能上下架、注销或恢复权限。
+                assertThat(permissions.isCanDelete()).isFalse();
+                assertThat(permissions.isCanOnShelf()).isFalse();
+                assertThat(permissions.isCanOffShelf()).isFalse();
+                assertThat(permissions.isCanRestore()).isFalse();
+            }
+        }
     }
 
     @Test
@@ -1619,8 +1663,6 @@ class AuthApplicationServiceTest {
                 assertThat(permissions.isCanEdit()).isEqualTo(adminVip);
                 assertThat(permissions.isCanManageAuth()).isEqualTo(adminVip);
                 assertThat(permissions.isCanUseAuth()).isEqualTo(adminVip);
-                // 无显式授权时，只有 adminvip 的数字员工可设为默认，单条与批量均不能凭角色放行。
-                assertThat(permissions.isCanSetDefault()).isEqualTo(adminVip && "DIG_EMPLOYEE".equals(bizType));
                 // 管理账号特判不额外授予使用权限。
                 assertThat(permissions.isHasUsePermission()).isFalse();
             }
@@ -1636,6 +1678,114 @@ class AuthApplicationServiceTest {
         AuthApplicationService granted = newExplicitUserPermissionService(List.of(
             manageGrant(602L, 2L, GrantToObjType.USER, Color.RED, "A")));
         assertThat(granted.hasResourceManagePermission(enterpriseResource(602L, 1L))).isTrue();
+    }
+
+    /** 默认入口和提交校验共用使用权限，管理/使用红黑名单在单条、批量查询中必须保持相同语义。 */
+    @ParameterizedTest
+    @CsvSource({
+        "true, false, false, false, true",
+        "true, true, false, false, false",
+        "true, false, false, true, true",
+        "true, true, true, false, true",
+        "false, false, true, false, true",
+        "false, false, true, true, false",
+        "false, false, false, false, false"
+    })
+    void digitalEmployeeUsePermissions_matchSingleAndBatch(boolean manageRed, boolean manageBlack,
+                                                          boolean useRed, boolean useBlack, boolean expectedUse) {
+        List<PrivilegeGrant> grants = new ArrayList<>();
+        if (manageRed) {
+            grants.add(manageGrant(620L, 2L, GrantToObjType.USER, Color.RED, "A"));
+        }
+        if (manageBlack) {
+            grants.add(manageGrant(620L, 2L, GrantToObjType.USER, Color.BLACK, "A"));
+        }
+        if (useRed) {
+            grants.add(useGrant(620L, 2L, GrantToObjType.USER, Color.RED, "A"));
+        }
+        if (useBlack) {
+            grants.add(useGrant(620L, 2L, GrantToObjType.USER, Color.BLACK, "A"));
+        }
+        grants.forEach(grant -> grant.setGrantObjType(ResourceBizTypeEnum.DIG_EMPLOYEE.name()));
+        AuthApplicationService service = newExplicitUserPermissionService(grants);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(620L, 1L);
+        resource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        prepareOperationPermissionQueries(service, resource);
+
+        ResourceOperationPermissionsVo single = service.queryResourceOperationPermissions(620L);
+        ResourceOperationPermissionsVo batch = service.queryResourceOperationPermissionsBatch(List.of(620L)).get(620L);
+
+        assertThat(single.isHasUsePermission()).isEqualTo(expectedUse);
+        assertThat(batch).usingRecursiveComparison().isEqualTo(single);
+        assertThat(batch.isCanApplyUse()).isEqualTo(!expectedUse && !useBlack);
+        assertThat(batch.isUseApplyPending()).isFalse();
+    }
+
+    /** 组织、岗位和驻地上的有效管理授权同样计入使用权限，不依赖补写使用授权记录。 */
+    @ParameterizedTest
+    @EnumSource(ExplicitGrantSource.class)
+    void digitalEmployeeUsePermissions_includeInheritedManagementInSingleAndBatch(ExplicitGrantSource source) {
+        PrivilegeGrant grant = manageGrant(621L, source.targetId, source.grantToObjType, Color.RED, "A");
+        grant.setGrantObjType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        AuthApplicationService service = newExplicitUserPermissionService(List.of(grant));
+        configureMembership(service, source);
+        CurrentUserHolder.setLoginInfo(loginInfo(3L));
+        SsResource resource = enterpriseResource(621L, 1L);
+        resource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        prepareOperationPermissionQueries(service, resource);
+
+        ResourceOperationPermissionsVo single = service.queryResourceOperationPermissions(621L);
+        ResourceOperationPermissionsVo batch = service.queryResourceOperationPermissionsBatch(List.of(621L)).get(621L);
+
+        assertThat(batch).usingRecursiveComparison().isEqualTo(single);
+        assertThat(batch.isHasUsePermission()).isTrue();
+        assertThat(batch.isCanApplyUse()).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PENDING", "EXPIRED", "FUTURE", "OFF_SHELF", "DELETED"})
+    void digitalEmployeeUsePermissions_rejectUnavailableGrantsAndResources(String state) {
+        PrivilegeGrant grant = manageGrant(622L, 2L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        SsResource resource = enterpriseResource(622L, 1L);
+        resource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        switch (state) {
+            case "PENDING":
+                grant.setGrantType(GrantType.AVAILABLE_USE);
+                grant.setStatusCd("P");
+                break;
+            case "EXPIRED":
+                grant.setExpDate(new java.util.Date(System.currentTimeMillis() - 60000));
+                break;
+            case "FUTURE":
+                grant.setEffDate(new java.util.Date(System.currentTimeMillis() + 60000));
+                break;
+            case "OFF_SHELF":
+                resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+                break;
+            case "DELETED":
+                resource.setResourceStatus(ResourceStatus.DELETE.getNum());
+                break;
+            default:
+                throw new IllegalArgumentException(state);
+        }
+        AuthApplicationService service = newExplicitUserPermissionService(List.of(grant));
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        prepareOperationPermissionQueries(service, resource);
+        if ("PENDING".equals(state)) {
+            PrivilegeGrantMapper mapper =
+                (PrivilegeGrantMapper) ReflectionTestUtils.getField(service, "privilegeGrantMapper");
+            when(mapper.selectList(any())).thenReturn(List.of(grant));
+        }
+
+        ResourceOperationPermissionsVo single = service.queryResourceOperationPermissions(622L);
+        ResourceOperationPermissionsVo batch = service.queryResourceOperationPermissionsBatch(List.of(622L)).get(622L);
+
+        assertThat(batch).usingRecursiveComparison().isEqualTo(single);
+        assertThat(batch.isHasUsePermission()).isFalse();
+        assertThat(batch.isUseApplyPending()).isEqualTo("PENDING".equals(state));
+        assertThat(batch.isCanApplyUse()).isEqualTo("EXPIRED".equals(state) || "FUTURE".equals(state));
     }
 
     @Test
@@ -2576,6 +2726,17 @@ class AuthApplicationServiceTest {
         when(positionService.findPositionByUserId(any())).thenReturn(List.of());
         when(stationService.getStationByUserId(any())).thenReturn(null);
         return service;
+    }
+
+    private void prepareOperationPermissionQueries(AuthApplicationService service, SsResource resource) {
+        SsResourceMapper mapper = mock(SsResourceMapper.class);
+        SsResourceService resourceService = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "ssResourceService", resourceService);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
+        ReflectionTestUtils.setField(service, "ssResExtSkillService", mock(SsResExtSkillService.class));
+        when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
+        when(resourceService.findById(resource.getResourceId())).thenReturn(resource);
     }
 
     private DigitalEmployeeResourceAuthorizationService mockEmployeeResourceSynchronization(AuthApplicationService service) {

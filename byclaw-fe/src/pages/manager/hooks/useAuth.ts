@@ -19,6 +19,11 @@ function useAuth({
   const [detailLoading, setDetailLoading] = useState(false);
 
   const grantType = grantTypeMap[authType];
+  // 资源中心合并显示正式使用授权；数字员工及员工组保留各自的授权同步契约。
+  const includeUseGrantFamily =
+    authType === 'useAuth' &&
+    grantObjType !== 'DIG_EMPLOYEE' &&
+    authApiPath === '/byaiService/auth/privilegeGrant/setResourceUsers';
 
   // 详情item格式化出参
   const getGrantItem = useCallback(
@@ -48,6 +53,7 @@ function useAuth({
       grantType, // 授权类型 AVAILABLE_USE:使用授权,FORCE_USE：强制使用,ALLOW_MANAGE:管理授权
       grantObjType, // 授权资源类型,AGNET:智能体,DOC:文档库,DB:数据库,PLUGIN:插件,TOOL:工具,CATLOGUE:文档库目录,TAG:标签
       grantObjId,
+      ...(includeUseGrantFamily ? { includeUseGrantFamily: true } : {}),
     })
       .then((detailRes) => {
         if (detailRes && detailRes.code === 0) {
@@ -64,7 +70,7 @@ function useAuth({
       .finally(() => {
         setDetailLoading(false);
       });
-  }, [grantType, grantObjType, grantObjId, getGrantItem]);
+  }, [grantType, grantObjType, grantObjId, getGrantItem, includeUseGrantFamily]);
 
   // 编辑授权
   const setAuth = useCallback(
@@ -95,6 +101,7 @@ function useAuth({
           redList: authObjectList,
           blackList: blackObjectList,
           resourceId: grantObjId, // 资源授权使用
+          ...(includeUseGrantFamily ? { includeUseGrantFamily: true } : {}),
         };
         // 开发态：传递pid参数
         if (pid) {
@@ -134,7 +141,19 @@ function useAuth({
         });
       }
     },
-    [redList, blackList, authLoading, grantType, grantObjType, grantObjId, orgId, transFormGrandItem, pid, authApiPath]
+    [
+      redList,
+      blackList,
+      authLoading,
+      grantType,
+      grantObjType,
+      grantObjId,
+      orgId,
+      transFormGrandItem,
+      pid,
+      authApiPath,
+      includeUseGrantFamily,
+    ]
   );
 
   // 初始化详情

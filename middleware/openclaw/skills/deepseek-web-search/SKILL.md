@@ -1,6 +1,6 @@
 ---
 name: deepseek-web-search
-description: 使用用户独立授权的 DeepSeek Web Search 连接器检索最新互联网信息。用户要求联网搜索、查找最新资料、核实当前信息或需要网页来源时使用。连接器未授权或已禁用时不可使用。
+description: 使用 DeepSeek Web Search 连接器检索最新互联网信息。用户要求联网搜索、查找最新资料、核实当前信息或需要网页来源时使用。优先使用用户个人授权，无可用个人授权时由后端使用平台全局配置。
 metadata:
   openclaw:
     requires:
@@ -10,7 +10,7 @@ byclaw_managed: true
 
 # DeepSeek 联网检索
 
-通过后端连接器代理执行联网检索。API Key 由当前用户在连接器页面独立授权并加密保存，不会下发给 Skill 或沙箱。
+通过后端连接器代理执行联网检索。后端优先使用当前用户在连接器页面独立授权并加密保存的 API Key；只有个人配置已开启且本次调用成功时才使用个人结果，其他情况均自动尝试平台全局配置。API Key 不会下发给 Skill 或沙箱。
 
 脚本复用平台服务发现注入的 `BYAI_SERVICE_BASE_URL`（兼容 `KN_MANAGER_URL` 和本地 BE 地址变量）定位 ByClaw 后端，并复用当前运行环境的 Beyond-Token；没有 Token 时兼容平台 Session 与签名认证。不得由模型传入服务地址、用户身份或认证信息。
 
@@ -32,10 +32,10 @@ node scripts/deepseek-web-search.mjs \
 
 ## 启用与禁用
 
-- 只有当前用户已完成 DeepSeek Web Search 连接器授权且连接器处于启用状态时，后端才执行请求。
-- 用户禁用或解除授权后，后端拒绝请求；不得改用环境变量、直接请求 DeepSeek、读取配置文件等方式绕过。
-- 收到 `DEEPSEEK_WEB_SEARCH_CONNECTOR_NOT_AUTHORIZED` 时，提示用户先在连接器页面完成独立授权。
-- 收到 `DEEPSEEK_WEB_SEARCH_CONNECTOR_DISABLED` 时，提示用户到连接器页面重新开启连接器。
+- 连接器模板必须处于启用状态；后端按“有效个人配置 → 平台全局配置”的顺序选择凭据。
+- 个人配置不存在、关闭、过期、无权限或调用不可用时，Skill 不自行读取环境变量或配置文件，后端从统一的 `WEB_SEARCH_APIKEY` 提供方字典中解析并尝试全局兜底凭据。
+- 收到 `DEEPSEEK_WEB_SEARCH_CONNECTOR_NOT_AUTHORIZED` 时，表示个人和全局配置都不可用，提示用户前往连接器页面配置或重新授权。
+- 收到 `DEEPSEEK_WEB_SEARCH_CONNECTOR_DISABLED` 时，表示平台连接器模板已关闭，提示用户联系管理员启用连接器。
 
 ## 安全约束
 

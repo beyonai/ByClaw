@@ -4,7 +4,6 @@
  */
 
 import React, { useCallback, useState, useRef, useMemo } from 'react';
-import { useIntl } from '@umijs/max';
 import { Modal, Button, Upload, Input, message } from 'antd';
 import { UploadOutlined, FileTextOutlined, ArrowLeftOutlined, InboxOutlined } from '@ant-design/icons';
 import type { UploadFile, UploadProps } from 'antd/es/upload';
@@ -49,8 +48,6 @@ const AddSourceModal: React.FC<AddSourceModalProps> = (props) => {
   const fileListRef = useRef<UploadFile[]>([]);
 
   const { uploadFileConfig } = useGlobal();
-  const intl = useIntl();
-
   const handleClose = useCallback(() => {
     onClose();
     // 重置状态

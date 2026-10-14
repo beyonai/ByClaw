@@ -33,7 +33,7 @@ public class DiscoverQo extends AuthQo {
     /** 官方推荐合并查询时同时返回数字员工组和数字员工。 */
     private Boolean includeEmployeeGroup;
 
-    /** 官方推荐合并查询时按数字员工组优先、同类型按修改时间倒序排列。 */
+    /** 未开启收藏的企业推荐按员工组优先，再按历史使用次数、修改时间、创建时间和 ID 倒序排列。 */
     private Boolean employeeGroupFirst;
 
     /**

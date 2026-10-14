@@ -46,7 +46,8 @@ class GroupChatRecallMapperTest {
         var locking = config.getMappedStatement(ByaiMessageMapper.class.getName() + ".selectForRecall");
         assertThat(locking.isFlushCacheRequired()).isTrue();
         assertThat(locking.isUseCache()).isFalse();
-        assertThat(locking.getBoundSql(Map.of("sessionId", 10L, "messageId", 1L)).getSql()).contains("FOR UPDATE");
+        assertThat(locking.getBoundSql(Map.of("sessionId", 10L, "messageId", 1L)).getSql())
+            .doesNotContainIgnoringCase("FOR UPDATE");
         try (var session = new SqlSessionFactoryBuilder().build(config).openSession(true)) {
             var mapper = session.getMapper(ByaiMessageMapper.class);
             assertThat(mapper.recallGroupMessage(10L, 1L, 7L, new Date(5000))).isEqualTo(1);

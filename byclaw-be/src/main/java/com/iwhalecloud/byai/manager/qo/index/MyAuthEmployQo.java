@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.qo.index;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.iwhalecloud.byai.manager.qo.auth.AuthQo;
 import lombok.Getter;
 import lombok.Setter;
@@ -19,6 +20,16 @@ public class MyAuthEmployQo extends AuthQo {
      * 按用户近 90 天使用频次降序排列,设置从前90天开始
      */
     private Date recentlyStartDate;
+
+    /**
+     * DEFAULT_USAGE_DESC：对话选择器默认员工优先，再按近90天使用次数排序；
+     * GROUP_UPDATED_DESC：我的员工按员工组优先，再按更新时间排序。未传时保留其他入口的原排序。
+     */
+    private String sortMode;
+
+    /** 仅由服务端填充当前用户的默认员工 ID，在分页前排序，不接受客户端指定。 */
+    @JsonIgnore
+    private Long defaultDigitalEmployeeId;
 
     /**
      * all:全部,owner:我创建的,authorize:授权给我的

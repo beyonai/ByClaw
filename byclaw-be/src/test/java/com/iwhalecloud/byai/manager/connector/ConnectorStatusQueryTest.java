@@ -30,7 +30,7 @@ class ConnectorStatusQueryTest {
     }
 
     @Test
-    void activeAccountTemplatesCanBeLockedInStableOrder() throws Exception {
+    void activeAccountTemplatesAreQueriedInStableOrderWithoutRowLocks() throws Exception {
         String sql = read(
             "byclaw-be/src/main/resources/com/iwhalecloud/byai/manager/mapper/connector/ConnectorInfoMapper.xml");
 
@@ -38,9 +38,9 @@ class ConnectorStatusQueryTest {
             "selectaccounttemplatesforupdate",
             "connector_type = 'account_template'",
             "status_cd = '00a'",
-            "order by sort asc, connector_id asc",
-            "for update"
+            "order by sort asc, connector_id asc"
         );
+        assertThat(sql).doesNotContain("for update");
     }
 
     private String read(String relativePath) throws Exception {

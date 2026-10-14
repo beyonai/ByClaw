@@ -36,6 +36,7 @@ jest.mock('@/utils/messgae', () => ({
 import { fetchEventSource } from '@fortaine/fetch-event-source';
 import { globalLogout } from '@/service/common/request';
 import { generateSignature } from '@/utils/signature';
+import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 import { answerDeltaHandler } from '../useSseSender/util';
 
 import SendHelper, { ERROR_STATUS } from '../useSseSender/sendHelper';
@@ -46,13 +47,49 @@ describe('hooks/useSseSender/sendHelper', () => {
   let consoleLogSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    window.sessionStorage.clear();
+    window.localStorage.setItem('SESSION', 'session-value');
+    setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
     jest.clearAllMocks();
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
+    window.sessionStorage.clear();
+    window.localStorage.removeItem('SESSION');
     consoleLogSpy.mockRestore();
   });
+
+  it.each(['2099-01-01T00:00:00Z', '2000-01-01T00:00:00Z'])(
+    'sends and receives chat streams independently of legacy tenant storage: %s',
+    async (expiresAt) => {
+      window.sessionStorage.setItem(
+        'BYCLAW_TAB_ENTERPRISE',
+        JSON.stringify({
+          enterpriseId: '123',
+          sessionId: 'session-value',
+          tenantContextToken: 'legacy-context',
+          expiresAt,
+        })
+      );
+      const callback = jest.fn();
+      mockFetchEventSource.mockImplementation(async (_url, options: any) => {
+        setMultiTenancyConfig(null);
+        options.onmessage({ event: 'answerDelta', id: '1', data: JSON.stringify({ messageId: 'm1' }) });
+      });
+
+      await expect(new SendHelper().send({}, { callback }).promise).resolves.toEqual({});
+      const options = mockFetchEventSource.mock.calls[0][1]!;
+      expect(options.headers).toMatchObject({ 'x-token': 'token-value', 'x-sso-token': 'sso-token' });
+      expect(options.headers).not.toHaveProperty('X-Enterprise-Id');
+      expect(options.headers).not.toHaveProperty('X-Tenant-Context');
+      expect(options.signal?.aborted).toBe(false);
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ messageId: 'm1' }),
+        expect.objectContaining({ event: 'answerDelta' })
+      );
+    }
+  );
 
   it('sends SSE requests with auth and signature headers and forwards payloads to callback', async () => {
     const callback = jest.fn();

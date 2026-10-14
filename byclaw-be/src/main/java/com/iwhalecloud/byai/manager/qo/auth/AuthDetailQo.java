@@ -20,6 +20,9 @@ public class AuthDetailQo {
     @NotEmpty(message = "{authdetailqo.authType.notempty}")
     private String grantType;
 
+    /** 合并查询两种正式使用授权；未传时保留按单一 grantType 查询的旧接口契约。 */
+    private Boolean includeUseGrantFamily;
+
     /**
      * 资源类型,AGENT:智能体,DOC:文档,DB:数据源,PLUGIN:插件,TOOL:工具,CATLOGUE:文档库目录,TAG:标签
      */

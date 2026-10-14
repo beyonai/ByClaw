@@ -112,11 +112,13 @@ public class IndexApplicationServiceV2 {
         // 按用户近 90 天使用频次降序排列
         myAuthEmployQo.setRecentlyStartDate(DateUtils.addDays(new Date(), -90));
 
+        // 默认员工必须在数据库分页前参与排序，避免仅在当前页内置顶而遗漏后续页的默认员工。
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
+        myAuthEmployQo.setDefaultDigitalEmployeeId(defaultDigitalEmployeeId);
         Page<AuthDigitEmployVo> page = PageHelper.startPage(myAuthEmployQo.getPageNum(), myAuthEmployQo.getPageSize());
         List<AuthDigitEmployVo> authDigitEmployVos = indexService.selectAuthDigitEmploy(myAuthEmployQo);
 
         // 为每个数字员工设置是否有记忆（优化：批量查询）
-        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
             this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
@@ -155,10 +157,7 @@ public class IndexApplicationServiceV2 {
      * @return 当前用户绑定的默认数字员工资源 ID
      */
     private Long resolveCurrentUserDefaultDigitalEmployeeId() {
-        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
-        if (defaultDigEmployeeId != null) {
-            return defaultDigEmployeeId;
-        }
+        // 默认绑定可在其他请求/会话中切换，不能让登录快照覆盖数据库中的最新绑定。
         Long assistantId = CurrentUserHolder.getAssistantId();
         if (assistantId == null || assistantId <= 0) {
             assistantId = CurrentUserHolder.getCurrentUserId();
@@ -167,12 +166,17 @@ public class IndexApplicationServiceV2 {
             return null;
         }
         SuasSuperassist suasSuperassist = suasSuperassistService.findById(assistantId);
-        return suasSuperassist == null ? null : suasSuperassist.getDefaultDigEmployeeId();
+        Long defaultDigEmployeeId = suasSuperassist == null ? null : suasSuperassist.getDefaultDigEmployeeId();
+        if (CurrentUserHolder.getLoginInfo() != null) {
+            // 同步当前请求的默认身份，避免排序、标签和绑定资源权限使用不同的默认 ID。
+            CurrentUserHolder.getLoginInfo().setDefaultDigEmployeeId(defaultDigEmployeeId);
+        }
+        return defaultDigEmployeeId;
     }
 
     /**
      * 回填左侧列表专用的运行时展示字段：
-     * 1. isDefault/canSetDefault 只根据当前用户默认数字员工 ID 判断；
+     * 1. isDefault 只根据当前用户默认数字员工 ID 判断；
      * 2. tagName 不再依赖扩展表落库值，按 ownerType/resourceCode/agentType 运行时计算。
      */
     private void fillDefaultAndRuntimeTag(AuthDigitEmployVo authDigitEmployVo, Long defaultDigitalEmployeeId) {
@@ -182,7 +186,6 @@ public class IndexApplicationServiceV2 {
         boolean isDefault = defaultDigitalEmployeeId != null
             && Objects.equals(authDigitEmployVo.getId(), defaultDigitalEmployeeId);
         authDigitEmployVo.setIsDefault(isDefault);
-        authDigitEmployVo.setCanSetDefault(!isDefault);
         authDigitEmployVo.setTagName(buildRuntimeDigitalEmployeeTagName(authDigitEmployVo.getOwnerType(),
             authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType(), authDigitEmployVo.getCreateType()));
     }
@@ -515,7 +518,6 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setCanDelete(permissions.isCanDelete());
         digitalEmployee.setCanApplyUse(permissions.isCanApplyUse());
         digitalEmployee.setUseApplyPending(permissions.isUseApplyPending());
-        digitalEmployee.setCanSetDefault(permissions.isCanSetDefault());
         digitalEmployee.setCanRestore(permissions.isCanRestore());
         digitalEmployee.setCanOnShelf(permissions.isCanOnShelf());
         digitalEmployee.setCanOffShelf(permissions.isCanOffShelf());
@@ -543,7 +545,6 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setCanDelete(permissions.isCanDelete());
         digitalEmployee.setCanApplyUse(permissions.isCanApplyUse());
         digitalEmployee.setUseApplyPending(permissions.isUseApplyPending());
-        digitalEmployee.setCanSetDefault(permissions.isCanSetDefault());
         digitalEmployee.setCanRestore(permissions.isCanRestore());
         digitalEmployee.setCanOnShelf(permissions.isCanOnShelf());
         digitalEmployee.setCanOffShelf(permissions.isCanOffShelf());

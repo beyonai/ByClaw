@@ -256,7 +256,7 @@ class AccessTokenVerifyInterceptorTest {
     }
 
     @Test
-    void explicitBeyondTokenWinsOverSharedBrowserSession() {
+    void sharedBrowserSessionWinsOverExplicitBeyondToken() {
         AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
         JwtTokenFilter jwt = mock(JwtTokenFilter.class);
         SessionFilter session = mock(SessionFilter.class);
@@ -271,18 +271,11 @@ class AccessTokenVerifyInterceptorTest {
         MockHttpSession cookieSession = new MockHttpSession();
         cookieSession.setAttribute("USER_CODE", "another-account");
         request.setSession(cookieSession);
-        when(jwt.doFilter(null, "platform-admin-token")).thenAnswer(invocation -> {
-            LoginInfo tokenUser = new LoginInfo();
-            tokenUser.setUserId(27L);
-            tokenUser.setUserCode("0027024710");
-            CurrentUserHolder.setLoginInfo(tokenUser);
-            return true;
-        });
+        when(session.doFilter(cookieSession)).thenReturn(true);
 
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
-        assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("0027024710");
-        verifyNoInteractions(session);
-        verify(login).shareSession(cookieSession, CurrentUserHolder.getLoginInfo());
+        verify(session).doFilter(cookieSession);
+        verifyNoInteractions(jwt, login);
     }
 
     @Test

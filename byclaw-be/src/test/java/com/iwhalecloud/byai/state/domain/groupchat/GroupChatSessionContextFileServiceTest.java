@@ -7,10 +7,12 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
@@ -49,6 +51,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAu
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispatchPromptBuilder;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.ContextFile;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.GroupMember;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.TaskHandoffHistory;
 
 class GroupChatSessionContextFileServiceTest {
@@ -158,6 +161,171 @@ class GroupChatSessionContextFileServiceTest {
         String prompt = new GroupChatDispatchPromptBuilder().appendGroupHistory("原始输入", first.get(0));
         assertThat(prompt).startsWith("原始输入").contains(first.get(0).agentPath(), "群聊的历史对话")
             .doesNotContain("任务", "GROUP_PUBLIC", "TASK_PRIVATE", "beforeMessageId", "truncation", "task-history");
+    }
+
+    @Test
+    void memberRosterFreezesRetriesWithoutChangingTheHistoryCompletionContract() throws Exception {
+        ContextFile history = prepare("members", false).get(0);
+        String historyMarker = history.agentPath().substring(3).replace("group-history.json", "complete.json");
+        byte[] originalProof = objects.get(historyMarker).clone();
+        List<GroupMember> roster = List.of(new GroupMember("用户三十", "HUMAN_30"),
+            new GroupMember("助理\"名称", "DIG_EMPLOYEE_50"));
+
+        ContextFile file = service.prepareGroupMembers("initiator", request, "members", 500L, roster);
+
+        assertThat(file.agentPath()).startsWith("/by/.sessions/60/.byclaw/context/")
+            .endsWith("/group-members.json");
+        assertThat(new ObjectMapper().readTree(body(file))).isEqualTo(new ObjectMapper().readTree(
+            "[{\"name\":\"用户三十\",\"uid\":\"HUMAN_30\"},{\"name\":\"助理\\\"名称\",\"uid\":\"DIG_EMPLOYEE_50\"}]"));
+        List<GroupMember> changed = List.of(new GroupMember("新增成员", "HUMAN_31"));
+        ContextFile retried = service.prepareGroupMembers("initiator", request, "members", 500L, changed);
+        assertThat(retried.agentPath()).isEqualTo(file.agentPath());
+        assertThat(body(retried)).isEqualTo(body(file)).doesNotContain("新增成员");
+        ContextFile next = service.prepareGroupMembers("initiator", request, "next-members", 501L, changed);
+        assertThat(next.agentPath()).isNotEqualTo(file.agentPath());
+        assertThat(body(next)).contains("新增成员", "HUMAN_31").doesNotContain("HUMAN_30");
+        assertThat(objects.get(historyMarker)).isEqualTo(originalProof);
+        assertThat(prepare("members", false).get(0).agentPath()).isEqualTo(history.agentPath());
+        verify(groupContext, times(1)).load(request);
+    }
+
+    @Test
+    void memberSnapshotsKeepEmptyRostersAndDifferentReadersIsolated() throws Exception {
+        ContextFile empty = service.prepareGroupMembers("initiator", request, "reader", 500L, List.of());
+        assertThat(new ObjectMapper().readTree(body(empty))).isEqualTo(new ObjectMapper().readTree("[]"));
+        request.setTargetAgentId(41L);
+        ContextFile other = service.prepareGroupMembers("initiator", request, "reader", 500L,
+            List.of(new GroupMember("另一位助理", "DIG_EMPLOYEE_40")));
+        assertThat(other.agentPath()).isNotEqualTo(empty.agentPath());
+        assertThat(body(other)).contains("DIG_EMPLOYEE_40");
+        verify(groupContext, never()).load(any());
+        verify(messages, never()).selectTaskHistoryPage(anyLong(), anyLong(), anyLong(), anyInt());
+    }
+
+    @Test
+    void failedMemberUploadDoesNotInvalidateHistoryAndRetryReplacesPartialData() {
+        ContextFile history = prepare("member-upload", false).get(0);
+        when(storage.write(any(InputStream.class), anyLong(), anyString(), anyString())).thenAnswer(call -> {
+            String path = call.getArgument(3);
+            if (path.endsWith("group-members.json") && !objects.containsKey("member-upload-failed")) {
+                objects.put(path, "partial".getBytes(StandardCharsets.UTF_8));
+                objects.put("member-upload-failed", new byte[0]);
+                throw new IllegalStateException("storage unavailable");
+            }
+            objects.put(path, call.getArgument(0, InputStream.class).readAllBytes());
+            return new FileMetadata();
+        });
+        List<GroupMember> roster = List.of(new GroupMember("用户三十", "HUMAN_30"));
+
+        assertThatThrownBy(() -> service.prepareGroupMembers("initiator", request, "member-upload", 500L, roster))
+            .isInstanceOf(ChatTurnPreparationException.class).hasMessage("成员上下文准备失败，请重试");
+
+        assertThat(objects.keySet()).noneMatch(path -> path.endsWith("members-complete.json"));
+        assertThat(prepare("member-upload", false).get(0).agentPath()).isEqualTo(history.agentPath());
+        ContextFile retried = service.prepareGroupMembers("initiator", request, "member-upload", 500L, roster);
+        assertThat(body(retried)).contains("HUMAN_30").doesNotContain("partial");
+        assertThat(objects.keySet()).anyMatch(path -> path.endsWith("members-complete.json"));
+    }
+
+    @Test
+    void completedMemberSnapshotRejectsCorruption() {
+        List<GroupMember> roster = List.of(new GroupMember("用户三十", "HUMAN_30"));
+        ContextFile file = service.prepareGroupMembers("initiator", request, "member-corruption", 500L, roster);
+        objects.put(file.agentPath().substring(3), "partial".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service.prepareGroupMembers("initiator", request, "member-corruption", 500L, roster))
+            .isInstanceOf(ChatTurnPreparationException.class).hasMessage("成员上下文准备失败，请重试");
+    }
+
+    @Test
+    void memberSnapshotRechecksMembershipAndOwnerBeforeReusingCompletedFiles() {
+        service.prepareGroupMembers("initiator", request, "member-authorization", 500L, List.of());
+        request.setInitiatorUserId(99L);
+        assertThatThrownBy(() -> service.prepareGroupMembers("initiator", request, "member-owner", 500L, List.of()))
+            .isInstanceOf(ChatTurnPreparationException.class).hasRootCauseMessage("Context owner does not match initiator");
+        request.setInitiatorUserId(30L);
+        doThrow(new IllegalArgumentException("No longer a group member"))
+            .when(groupAuthorization).requireCurrentUserMember(10L);
+
+        assertThatThrownBy(() -> service.prepareGroupMembers("initiator", request, "member-authorization", 500L, List.of()))
+            .isInstanceOf(ChatTurnPreparationException.class).hasRootCauseMessage("No longer a group member");
+    }
+
+    @Test
+    void missingMemberRosterOrReaderDoesNotProduceAHistoryFile() {
+        assertThatThrownBy(() -> service.prepareGroupMembers("initiator", request, "missing-roster", 500L, null))
+            .isInstanceOf(ChatTurnPreparationException.class).hasMessage("成员上下文准备失败，请重试");
+        request.setTargetAgentId(null);
+        assertThatThrownBy(() -> service.prepareGroupMembers("initiator", request, "missing-reader", 500L, List.of()))
+            .isInstanceOf(ChatTurnPreparationException.class).hasMessage("成员上下文准备失败，请重试");
+        assertThat(objects).isEmpty();
+        verify(groupContext, never()).load(any());
+    }
+
+    @Test
+    void tenantMemberSnapshotKeepsFrozenDataWithoutSharedGroupQueries() {
+        GroupChatContextResponse snapshot = authorizedGroupSnapshot();
+        ContextFile file = service.prepareGroupMemberSnapshot("initiator", request, "tenant-members", 500L, snapshot,
+            List.of(new GroupMember("租户成员", "HUMAN_30")));
+        ContextFile retried = service.prepareGroupMemberSnapshot("initiator", request, "tenant-members", 500L, snapshot,
+            List.of(new GroupMember("后来加入", "HUMAN_31")));
+
+        assertThat(retried.agentPath()).isEqualTo(file.agentPath());
+        assertThat(body(retried)).contains("租户成员", "HUMAN_30").doesNotContain("后来加入", "HUMAN_31");
+        ContextFile next = service.prepareGroupMemberSnapshot("initiator", request, "tenant-next", 501L, snapshot,
+            List.of(new GroupMember("后来加入", "HUMAN_31")));
+        assertThat(next.agentPath()).isNotEqualTo(file.agentPath());
+        assertThat(body(next)).contains("后来加入", "HUMAN_31");
+        verifyNoInteractions(groupAuthorization, taskAuthorization, groupContext, messages);
+    }
+
+    @Test
+    void tenantMemberSnapshotValidatesGroupBoundaryAndRosterBeforeWriting() {
+        GroupChatContextResponse snapshot = authorizedGroupSnapshot();
+        assertThatThrownBy(() -> service.prepareGroupMemberSnapshot("initiator", request, "no-proof", 500L, null, List.of()))
+            .isInstanceOf(ChatTurnPreparationException.class);
+        snapshot.setConversationKey("99");
+        assertThatThrownBy(() -> service.prepareGroupMemberSnapshot("initiator", request, "wrong-group", 500L, snapshot, List.of()))
+            .isInstanceOf(ChatTurnPreparationException.class);
+        snapshot.setConversationKey("10");
+        snapshot.getSnapshot().setBeforeMessageId("21");
+        assertThatThrownBy(() -> service.prepareGroupMemberSnapshot("initiator", request, "wrong-boundary", 500L, snapshot, List.of()))
+            .isInstanceOf(ChatTurnPreparationException.class);
+        snapshot.getSnapshot().setBeforeMessageId("20");
+        assertThatThrownBy(() -> service.prepareGroupMemberSnapshot("initiator", request, "no-roster", 500L, snapshot, null))
+            .isInstanceOf(ChatTurnPreparationException.class);
+        assertThat(objects).isEmpty();
+    }
+
+    @Test
+    void tenantMemberSnapshotRechecksWorkspaceOwnerBeforeReusingACompletedFile() {
+        GroupChatContextResponse snapshot = authorizedGroupSnapshot();
+        service.prepareGroupMemberSnapshot("initiator", request, "tenant-owner", 500L, snapshot, List.of());
+        LoginInfo otherUser = new LoginInfo(); otherUser.setUserId(99L);
+        CurrentUserHolder.setLoginInfo(otherUser);
+
+        assertThatThrownBy(() -> service.prepareGroupMemberSnapshot("initiator", request, "tenant-owner", 500L, snapshot, List.of()))
+            .isInstanceOf(ChatTurnPreparationException.class).hasRootCauseMessage("Context owner does not match initiator");
+    }
+
+    @Test
+    void tenantMemberSnapshotDoesNotAcceptAnUnboundGroupIdentity() {
+        GroupChatContextResponse snapshot = authorizedGroupSnapshot();
+        request.setConversationKey(null);
+        snapshot.setConversationKey(null);
+
+        assertThatThrownBy(() -> service.prepareGroupMemberSnapshot("initiator", request, "unbound-group", 500L, snapshot, List.of()))
+            .isInstanceOf(ChatTurnPreparationException.class);
+        assertThat(objects).isEmpty();
+    }
+
+    private GroupChatContextResponse authorizedGroupSnapshot() {
+        GroupChatContextResponse snapshot = new GroupChatContextResponse();
+        snapshot.setConversationKey("10");
+        GroupChatContextResponse.Snapshot boundary = new GroupChatContextResponse.Snapshot();
+        boundary.setBeforeMessageId("20");
+        snapshot.setSnapshot(boundary);
+        return snapshot;
     }
 
     @Test

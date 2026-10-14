@@ -503,7 +503,7 @@ class SkillGroupContractTest {
     }
 
     @Test
-    void activeSkillBatchLockIsTenantTypeStatusGuardedSortedAndForUpdate() throws Exception {
+    void activeSkillBatchQueryIsTenantTypeStatusGuardedAndSorted() throws Exception {
         Configuration configuration = buildMapperConfiguration();
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("skillIds", List.of(20002L, 20001L));
@@ -517,11 +517,11 @@ class SkillGroupContractTest {
                 .contains("skill_resource.resource_biz_type = 'skill'")
                 .contains("skill_resource.resource_status = 2")
                 .contains("order by skill_resource.resource_id asc")
-                .endsWith("for update");
+                .doesNotContain("for update");
     }
 
     @Test
-    void groupLockAndScopedUpdateBoundSqlAreTenantAndTypeGuarded() throws Exception {
+    void groupQueryAndScopedUpdateBoundSqlAreTenantAndTypeGuarded() throws Exception {
         Configuration configuration = buildMapperConfiguration();
         String lockSql = normalizedBoundSql(configuration, "selectGroupForUpdate", Map.of(
                 "groupId", 10001L, "comAcctId", 60001L)).getSql();
@@ -529,7 +529,7 @@ class SkillGroupContractTest {
                 .contains("resource_id = ?")
                 .contains("com_acct_id = ?")
                 .contains("resource_biz_type = 'skill_group'")
-                .endsWith("for update");
+                .doesNotContain("for update");
 
         SsResource group = new SsResource();
         group.setResourceId(10001L);
@@ -556,16 +556,16 @@ class SkillGroupContractTest {
     }
 
     @Test
-    void employeeLockAndSkillRelationSqlAreScopedLegacySafeAndAvoidJsonCasts() throws Exception {
+    void employeeQueryAndSkillRelationSqlAreScopedLegacySafeAndAvoidJsonCasts() throws Exception {
         Configuration configuration = buildMapperConfiguration();
         String lockSql = normalizedBoundSql(configuration, "selectDigitalEmployeeForUpdate", Map.of(
                 "digitalEmployeeId", 30001L, "comAcctId", 60001L)).getSql();
-        // 企业过滤暂时停用，仍须按员工 ID、资源类型查询并保留行锁。
+        // 企业过滤暂时停用，仍须按员工 ID、资源类型查询。
         assertThat(lockSql)
                 .contains("resource_id = ?")
                 .doesNotContain("com_acct_id = ?")
                 .contains("resource_biz_type = 'dig_employee'")
-                .endsWith("for update");
+                .doesNotContain("for update");
 
         Map<String, Object> allParameters = new HashMap<>();
         allParameters.put("digitalEmployeeId", 30001L);

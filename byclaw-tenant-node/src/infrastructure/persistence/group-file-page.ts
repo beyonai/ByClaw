@@ -22,7 +22,7 @@ export async function groupFileMessagePage(
   }
   parameters.push(limit);
   return db.query(
-    `SELECT m.message_id,m.session_id,m.create_time,m.related_resources
+    `SELECT m.message_id,m.session_id,m.create_time,m.usage,m.creator_id,m.creator_name,m.related_resources
     FROM byai.byai_message m
     JOIN byai.byai_session s ON s.session_id=m.session_id
     ${boundary}

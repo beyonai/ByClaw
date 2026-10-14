@@ -4724,7 +4724,7 @@
     "/internal/v1/group-chats/{id}/files": {
       "get": {
         "summary": "Group message files, newest first with a fixed file page size",
-        "description": "Returns only related_resources.files attachments; metadata.files are excluded.",
+        "description": "Returns only related_resources.files attachments; metadata.files are excluded. Uploader identity comes from server-stored message creator_id, creator_name and usage, never attachment metadata or mentioned/target agents.",
         "parameters": [
           {
             "$ref": "#/components/parameters/enterprise"
@@ -4770,7 +4770,63 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "type": "object",
+                  "required": ["files", "pageSize", "hasMore", "nextCursor"],
+                  "properties": {
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "messageId",
+                          "createdAt",
+                          "uploaderId",
+                          "uploaderName",
+                          "attachment"
+                        ],
+                        "properties": {
+                          "messageId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "integer",
+                            "format": "int64",
+                            "nullable": true
+                          },
+                          "uploaderId": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Server-stored message creator ID; string preserves bigint precision."
+                          },
+                          "uploaderName": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Server-stored message creator name; absent or blank names return null."
+                          },
+                          "uploaderType": {
+                            "type": "string",
+                            "enum": ["USER", "AGENT"],
+                            "description": "USER for usage=1, AGENT for usage=2; omitted when usage is unknown."
+                          },
+                          "attachment": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    },
+                    "pageSize": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
                 }
               }
             }
