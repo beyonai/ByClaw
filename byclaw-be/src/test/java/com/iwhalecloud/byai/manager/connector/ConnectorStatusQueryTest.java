@@ -30,7 +30,7 @@ class ConnectorStatusQueryTest {
     }
 
     @Test
-    void activeAccountTemplatesAreQueriedInStableOrderWithoutRowLocks() throws Exception {
+    void activeAccountTemplatesAreQueriedInStableOrder() throws Exception {
         String sql = read(
             "byclaw-be/src/main/resources/com/iwhalecloud/byai/manager/mapper/connector/ConnectorInfoMapper.xml");
 

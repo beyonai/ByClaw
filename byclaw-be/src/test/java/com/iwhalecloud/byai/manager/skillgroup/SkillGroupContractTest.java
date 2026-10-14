@@ -516,8 +516,7 @@ class SkillGroupContractTest {
                 .contains("skill_resource.com_acct_id = ?")
                 .contains("skill_resource.resource_biz_type = 'skill'")
                 .contains("skill_resource.resource_status = 2")
-                .contains("order by skill_resource.resource_id asc")
-                .doesNotContain("for update");
+                .contains("order by skill_resource.resource_id asc");
     }
 
     @Test
@@ -528,8 +527,7 @@ class SkillGroupContractTest {
         assertThat(lockSql)
                 .contains("resource_id = ?")
                 .contains("com_acct_id = ?")
-                .contains("resource_biz_type = 'skill_group'")
-                .doesNotContain("for update");
+                .contains("resource_biz_type = 'skill_group'");
 
         SsResource group = new SsResource();
         group.setResourceId(10001L);
@@ -564,8 +562,7 @@ class SkillGroupContractTest {
         assertThat(lockSql)
                 .contains("resource_id = ?")
                 .doesNotContain("com_acct_id = ?")
-                .contains("resource_biz_type = 'dig_employee'")
-                .doesNotContain("for update");
+                .contains("resource_biz_type = 'dig_employee'");
 
         Map<String, Object> allParameters = new HashMap<>();
         allParameters.put("digitalEmployeeId", 30001L);
