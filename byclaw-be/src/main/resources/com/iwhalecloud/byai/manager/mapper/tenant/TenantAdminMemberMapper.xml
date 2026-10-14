@@ -21,7 +21,6 @@
     <select id="selectPackageSnapshotForUpdate" resultType="string">
         SELECT params_value FROM byai.tenant_config
         WHERE enterprise_id = #{enterpriseId} AND params_code = 'PACKAGE_CONTENT_SNAPSHOT'
-        FOR UPDATE
     </select>
 
     <select id="selectProvisionState" resultType="string">

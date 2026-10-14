@@ -17,13 +17,11 @@
     <insert id="ensureCount">
         insert into byai_resource_favorite_count (com_acct_id, resource_id, favorite_count)
         values (#{tenantId}, #{resourceId}, 0)
-        on conflict (com_acct_id, resource_id) do nothing
     </insert>
 
     <select id="lockCount" resultType="long">
         select favorite_count from byai_resource_favorite_count
         where com_acct_id = #{tenantId} and resource_id = #{resourceId}
-        for update
     </select>
 
     <insert id="insertFavorite">
