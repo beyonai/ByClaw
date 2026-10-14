@@ -119,7 +119,6 @@
         WHERE group_resource.resource_id = #{groupId}
           AND group_resource.com_acct_id = #{comAcctId}
           AND group_resource.resource_biz_type = 'SKILL_GROUP'
-        FOR UPDATE
     </select>
 
     <select id="selectDigitalEmployeeForUpdate"
@@ -130,7 +129,6 @@
           <!-- 暂停按当前企业过滤，避免可编辑员工在保存加锁时被判为不存在；保留条件供恢复。 -->
           <!-- AND digital_employee.com_acct_id = #{comAcctId} -->
           AND digital_employee.resource_biz_type = 'DIG_EMPLOYEE'
-        FOR UPDATE
     </select>
 
     <select id="selectActiveSkillsForUpdate"
@@ -152,7 +150,6 @@
             </otherwise>
         </choose>
         ORDER BY skill_resource.resource_id ASC
-        FOR UPDATE
     </select>
 
     <update id="updateGroupFields">

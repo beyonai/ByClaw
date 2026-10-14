@@ -536,7 +536,6 @@
     <select id="selectForRecall" resultMap="BaseResultMap" flushCache="true" useCache="false">
         SELECT <include refid="Base_Column_List" /> FROM byai_message
         WHERE session_id = #{sessionId} AND message_id = #{messageId}
-        FOR UPDATE
     </select>
 
     <update id="recallGroupMessage">
