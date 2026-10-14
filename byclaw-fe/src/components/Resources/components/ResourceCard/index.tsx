@@ -85,7 +85,6 @@ export interface IResourceCardItem {
   skillPublication?: SkillPublicationSummary;
   canUnShelf?: boolean;
   canDeleteData?: boolean;
-  canSetDefault?: boolean;
   canRestore?: boolean;
   approveStatus?: string;
   useApplyPending?: boolean;
@@ -697,7 +696,6 @@ const RenderContent = (props: ResourceCardProps) => {
       normalizedStatus === '-1' ? 'digitalEmployeeStatusDeleted' : `digitalEmployeeStatus${normalizedStatus}`;
   }
   const topRightTag = displayTopRightTag;
-  const isInnerSkill = isInnerSkillResource(resource, resourceType);
   const isInstalledResource = Boolean(
     resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`)
   );
@@ -918,24 +916,20 @@ const RenderContent = (props: ResourceCardProps) => {
   }, [resource.resourceId, resource.id, resource.agentId, resource.employeePublicationStatus]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
-    const {
-      canEdit,
-      canManageAuth,
-      canUseAuth,
-      canApplyUse,
-      canDelete,
-      canOnShelf,
-      canOffShelf,
-      canSetDefault,
-      canRestore,
-    } = resource || {};
+    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canDelete, canOnShelf, canOffShelf, canRestore } =
+      resource || {};
     const items: NonNullable<MenuProps['items']> = [];
     // 注销为终态，即使列表中残留旧权限也不展示可操作入口。
     if (isCancelledResource) return items;
     const digitalEmployeeStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
 
-    // 所有员工卡片按后端权限展示设为默认，不再按页签或当前默认身份隐藏。
-    if (isDigitalEmployeeResource && canSetDefault === true) {
+    // 默认入口要求实际使用权限，并与默认标签共用身份判断，切换后同步隐藏新默认的入口。
+    if (
+      isDigitalEmployeeResource &&
+      resource.hasUsePermission === true &&
+      !isDefaultDigitalEmployee &&
+      digitalEmployeeStatus !== '3'
+    ) {
       items.push({
         key: 'setDefaultAssistant',
         label: (
@@ -954,8 +948,8 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 编辑信息
-    if (canEdit && !isInnerSkill) {
+    // 内置技能的 adminvip 编辑资格由后端统一计算，不再按技能类型重复隐藏。
+    if (canEdit) {
       items.push({
         key: 'edit',
         label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'common.editInfo' })} />,
@@ -1286,7 +1280,6 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canUseAuth,
     resource?.canApplyUse,
     canApplyUseForStatus,
-    resource?.canSetDefault,
     resource?.canDelete,
     resource?.canOnShelf,
     resource?.canOffShelf,
@@ -1301,7 +1294,6 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.resourceId,
     resource?.skillType,
     resourceType,
-    isInnerSkill,
     isInstalledResource,
     canShowInstallAction,
     useCardInstallAction,

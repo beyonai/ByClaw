@@ -57,7 +57,7 @@ jest.mock('@/components/Resources/components/ResourceCard', () => ({
       data-favorites={String(enableFavorites)}
       data-favorited={String(resource.favorited)}
       data-default={String(resource.isDefault)}
-      data-can-set-default={String(resource.canSetDefault)}
+      data-has-use-permission={String(resource.hasUsePermission)}
       data-lifecycle={String(actionConfig.enableDigitalEmployeeLifecycle)}
       data-delete={String(actionConfig.enableDigitalEmployeeDelete)}
       data-hidden-actions={actionConfig.hiddenMenuItemKeys.join(',')}
@@ -144,13 +144,13 @@ describe('commercial employee favorite lists', () => {
     expect(card).toHaveAttribute('data-hidden-actions', hiddenActions);
   });
 
-  // 设置默认后的事件更新默认标识并刷新权限，不隐藏当前员工入口，也不能放大其他员工的后端权限。
+  // 默认切换只更新身份并刷新目标行，不能改变其他员工的使用权限。
   it.each(['available', 'official', 'favorites'] as const)(
-    'preserves backend set-default permissions after switching the default in %s',
+    'preserves use permissions after switching the default in %s',
     async (source) => {
       const employees = [
-        { ...row(1), hasUsePermission: true, canSetDefault: true, operationPermissionsLoaded: true },
-        { ...row(2), hasUsePermission: true, canSetDefault: false, operationPermissionsLoaded: true },
+        { ...row(1), hasUsePermission: true, operationPermissionsLoaded: true },
+        { ...row(2), hasUsePermission: false, operationPermissionsLoaded: true },
       ];
       (getAllDigitalEmployeesV2 as jest.Mock).mockResolvedValue({ list: employees, total: 2, pageNum: 1 });
       (queryMyCreatedAndSubscribedAgentsV2 as jest.Mock).mockResolvedValue({ list: employees, total: 2, pageNum: 1 });
@@ -158,7 +158,7 @@ describe('commercial employee favorite lists', () => {
       jest.mocked(getCompositeAppInfo).mockImplementation(async ({ resourceId }) => {
         const employee = employees.find((item) => String(item.resourceId) === String(resourceId));
         return employee
-          ? { ...employee, operationPermissions: { hasUsePermission: true, canSetDefault: employee.canSetDefault } }
+          ? { ...employee, operationPermissions: { hasUsePermission: employee.hasUsePermission } }
           : undefined;
       });
       render(<AllDigitalEmployees source={source} mode="all" hideCategories />);
@@ -170,9 +170,9 @@ describe('commercial employee favorite lists', () => {
       });
       const cards = screen.getAllByTestId('card');
       expect(cards[0]).toHaveAttribute('data-default', 'true');
-      expect(cards[0]).toHaveAttribute('data-can-set-default', 'true');
+      expect(cards[0]).toHaveAttribute('data-has-use-permission', 'true');
       expect(cards[1]).toHaveAttribute('data-default', 'false');
-      expect(cards[1]).toHaveAttribute('data-can-set-default', 'false');
+      expect(cards[1]).toHaveAttribute('data-has-use-permission', 'false');
       expect(getCompositeAppInfo).toHaveBeenCalledWith({ resourceId: '1' });
       expect(getCompositeAppInfo).toHaveBeenCalledTimes(1);
     }

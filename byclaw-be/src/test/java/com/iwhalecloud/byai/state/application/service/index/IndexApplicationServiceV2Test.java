@@ -216,13 +216,11 @@ class IndexApplicationServiceV2Test {
 
         assertThat(personalAssistant.getTagName()).isEqualTo("digemployee.tag.personal.assistant");
         assertThat(personalAssistant.getIsDefault()).isTrue();
-        assertThat(personalAssistant.getCanSetDefault()).isFalse();
         assertThat(qaAgent.getTagName()).isEqualTo("digemployee.tag.agent.qa");
         assertThat(qaAgent.getIsDefault()).isFalse();
-        assertThat(qaAgent.getCanSetDefault()).isTrue();
         assertThat(thirdPartyPersonalAssistant.getTagName()).isEqualTo("digemployee.tag.third.party");
         assertThat(employeeGroup.getTagName()).isEqualTo("digemployee.tag.agent.group");
-        assertThat(employeeGroup.getCanSetDefault()).isTrue();
+        assertThat(employeeGroup.getIsDefault()).isFalse();
     }
 
     @Test

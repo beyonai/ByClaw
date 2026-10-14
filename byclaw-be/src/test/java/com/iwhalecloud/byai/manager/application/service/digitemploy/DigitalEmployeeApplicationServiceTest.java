@@ -224,8 +224,10 @@ class DigitalEmployeeApplicationServiceTest {
         verify(operationLogService).recordOperationLog(eq(newResource), eq(OperationTypeEnum.UPDATE));
     }
 
-    @Test
-    void setDefaultDigitalEmployee_allowsUseAuthorizedDigitalEmployee() {
+    @ParameterizedTest
+    @ValueSource(strings = {"zhangsan", "adminvip"})
+    void setDefaultDigitalEmployee_allowsUseAuthorizedDigitalEmployee(String userCode) {
+        CurrentUserHolder.getLoginInfo().setUserCode(userCode);
         SetDefaultDigitalEmployeeDTO dto = new SetDefaultDigitalEmployeeDTO();
         dto.setResourceId(200L);
 
@@ -246,26 +248,47 @@ class DigitalEmployeeApplicationServiceTest {
         verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
     }
 
-    @Test
-    void setDefaultDigitalEmployee_allowsManageAuthorizedDigitalEmployee() {
+    /** 管理身份只能维护资源，未获使用权限时不得将资源绑定为默认对话员工。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"zhangsan", "adminvip"})
+    void setDefaultDigitalEmployee_rejectsManageOnlyDigitalEmployee(String userCode) {
+        CurrentUserHolder.getLoginInfo().setUserCode(userCode);
         SetDefaultDigitalEmployeeDTO dto = new SetDefaultDigitalEmployeeDTO();
         dto.setResourceId(201L);
 
-        SsResource managedResource = buildDigitalEmployee(201L, OwnerType.PERSONAL, 2L);
-        SuasSuperassist superassist = new SuasSuperassist();
-        superassist.setSuperassistId(7L);
-        superassist.setDefaultDigEmployeeId(100L);
-
+        SsResource managedResource = buildDigitalEmployee(201L, OwnerType.ENTERPRISE, 2L);
         when(ssResourceService.findById(201L)).thenReturn(managedResource);
         when(authApplicationService.hasResourceManagePermission(managedResource)).thenReturn(true);
-        when(suasSuperassistService.findById(7L)).thenReturn(superassist);
+        when(authApplicationService.hasResourceUsePermission(managedResource, 1L)).thenReturn(false);
 
-        SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
+        assertThatThrownBy(() -> service.setDefaultDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class)
+            .hasMessageContaining("digemployee.default.set.resource.permission.invalid");
 
-        assertThat(result.getNewResourceId()).isEqualTo(201L);
-        assertThat(superassist.getDefaultDigEmployeeId()).isEqualTo(201L);
-        verify(suasSuperassistService).updateById(superassist);
+        assertThat(CurrentUserHolder.getDefaultDigEmployeeId()).isEqualTo(100L);
+        verify(authApplicationService).hasResourceUsePermission(managedResource, 1L);
+        verifyNoInteractions(suasSuperassistService, operationLogService);
         verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {3, -1})
+    void setDefaultDigitalEmployee_rejectsInactiveEmployeeEvenForAdminVip(int status) {
+        CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
+        SsResource resource = buildDigitalEmployee(201L, OwnerType.ENTERPRISE, 1L);
+        resource.setResourceStatus(status);
+        SetDefaultDigitalEmployeeDTO dto = new SetDefaultDigitalEmployeeDTO();
+        dto.setResourceId(201L);
+        when(ssResourceService.findById(201L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        // 使用真实状态校验，确认下架/注销优先于创建者和管理员身份。
+        when(authApplicationService.hasResourceUsePermission(resource, 1L)).thenCallRealMethod();
+
+        assertThatThrownBy(() -> service.setDefaultDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class)
+            .hasMessageContaining("digemployee.default.set.resource.permission.invalid");
+        assertThat(CurrentUserHolder.getDefaultDigEmployeeId()).isEqualTo(100L);
+        verifyNoInteractions(suasSuperassistService, operationLogService);
     }
 
     @Test

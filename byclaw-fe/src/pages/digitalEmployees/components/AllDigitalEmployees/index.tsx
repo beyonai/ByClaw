@@ -405,7 +405,7 @@ function AllDigitalEmployees(
             const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
             if (defaultResourceId) {
               const isDefault = itemIdentity === `${defaultResourceId}`;
-              // 默认切换只更新展示身份，保留后端 canSetDefault，不在前端重算操作权限。
+              // 默认切换只更新身份，卡片结合原有使用权限同步默认标签和设置入口。
               return {
                 ...item,
                 isDefault,

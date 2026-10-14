@@ -1960,6 +1960,96 @@ class ByClawSkillResourceApplicationServiceTest {
             eq("chat-upload-skill-json"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"personal", "enterprise"})
+    void refreshInnerSkillBasicInfoPreservesVersionPackageAndRuntimeMetadata(String ownerType) {
+        SsResource resource = new SsResource();
+        resource.setResourceId(7201L);
+        resource.setResourceCode("mail");
+        resource.setResourceName("邮箱");
+        resource.setResourceDesc("邮件操作说明");
+        resource.setAvatar("mail.png");
+        resource.setCatalogId(20L);
+        resource.setResourceBizType("SKILL");
+        resource.setResourceStatus(2);
+        resource.setOwnerType(ownerType);
+        resource.setResourceVersionId("1.0.0");
+
+        SsResExtSkill ext = new SsResExtSkill();
+        ext.setResourceId(7201L);
+        ext.setSkillType("inner");
+        ext.setSourceType("SYSTEM_BUILTIN");
+        ext.setVersion("1.0.0");
+        ext.setSkillUrl("");
+        ext.setSkillPackageFormat("zip");
+        ext.setSkillOriginalFilename("mail.zip");
+        ext.setSkillPackageSize(123L);
+        ext.setSkillPackageHash("original-hash");
+        ext.setSyncStatus("SUCCESS");
+        ext.setLastSyncTime(java.time.LocalDateTime.of(2026, 10, 1, 12, 0));
+        var original = com.alibaba.fastjson2.JSON.parseObject("""
+            {"resourceId":7201,"resourceCode":"mail","resourceName":"Mail","resourceDesc":"Original",
+             "skillType":"inner","sourceType":"SYSTEM_BUILTIN","version":"1.0.0","skillUrl":"",
+             "skillPath":"/app/skills/mail","skillDocObjectKey":"builtin/mail/SKILL.md",
+             "sourceDownloadUrl":"","runtimeConfig":{"command":"mail","enabled":true},"optionalRuntime":null,
+             "skillPackageHash":"original-hash","avatar":"old.png","catalogId":10}
+            """);
+        original.put("ownerType", ownerType);
+        ext.setTargetContent(com.alibaba.fastjson2.JSON.toJSONString(original,
+            com.alibaba.fastjson2.JSONWriter.Feature.WriteNulls));
+        SsResExtSkill before = new SsResExtSkill();
+        org.springframework.beans.BeanUtils.copyProperties(ext, before);
+        when(ssResExtSkillService.findById(7201L)).thenReturn(ext);
+
+        String content = service.refreshSkillBasicInfo(resource);
+
+        var expected = com.alibaba.fastjson2.JSON.parseObject(before.getTargetContent());
+        expected.put("resourceName", "邮箱");
+        expected.put("resourceDesc", "邮件操作说明");
+        expected.put("avatar", "mail.png");
+        expected.put("catalogId", 20);
+        assertThat(com.alibaba.fastjson2.JSON.parseObject(content)).isEqualTo(expected);
+        assertThat(ext).usingRecursiveComparison().ignoringFields("targetContent").isEqualTo(before);
+        assertThat(resource.getResourceVersionId()).isEqualTo("1.0.0");
+        verify(ssResExtSkillService).update(ext);
+        verify(ssResExtSkillService, never()).nextVersion(any());
+        verify(ssResExtSkillService, never()).saveOrUpdate(any());
+        // 标准 JSON 由基础信息入口同步，不能在这里重新登记上传包或刷新员工运行文件。
+        org.mockito.Mockito.verifyNoInteractions(resourceArtifactStorageService, ssResourceArtifactService,
+            digitalEmployeeApplicationService, digitalEmployeeRuntimeRefreshService);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @ValueSource(strings = {"null"})
+    void refreshInnerSkillBasicInfoFillsMissingMetadataWithoutChangingItsVersion(String previousContent) {
+        SsResource resource = new SsResource();
+        resource.setResourceId(7201L);
+        resource.setResourceCode("mail");
+        resource.setResourceName("邮箱");
+        resource.setResourceBizType("SKILL");
+        resource.setOwnerType("enterprise");
+        SsResExtSkill ext = new SsResExtSkill();
+        ext.setResourceId(7201L);
+        ext.setSkillType("inner");
+        ext.setSourceType("SYSTEM_BUILTIN");
+        ext.setVersion("1.0.0");
+        ext.setSkillUrl("");
+        ext.setTargetContent(previousContent);
+        when(ssResExtSkillService.findById(7201L)).thenReturn(ext);
+
+        var content = com.alibaba.fastjson2.JSON.parseObject(service.refreshSkillBasicInfo(resource));
+
+        assertThat(content.getLong("resourceId")).isEqualTo(7201L);
+        assertThat(content.getString("resourceCode")).isEqualTo("mail");
+        assertThat(content.getString("ownerType")).isEqualTo("enterprise");
+        assertThat(content.getString("skillType")).isEqualTo("inner");
+        assertThat(content.getString("version")).isEqualTo("1.0.0");
+        assertThat(content.getString("skillUrl")).isEmpty();
+        verify(ssResExtSkillService, never()).nextVersion(any());
+        org.mockito.Mockito.verifyNoInteractions(resourceArtifactStorageService, ssResourceArtifactService);
+    }
+
     @Test
     void installThirdPartySkill_logsPermissionContextWhenManagePermissionIsDenied() {
         SsResource digitalEmployee = new SsResource();

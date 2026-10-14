@@ -560,6 +560,9 @@ it.each(
   const cards = await screen.findAllByTestId('resource-card');
   for (const card of cards) {
     const hiddenKeys = JSON.parse(card.getAttribute('data-hidden-menu-keys') || '[]');
+    // 三个模块的浏览页和管理页均保留授权入口资格，由卡片继续校验后端权限和资源状态。
+    expect(hiddenKeys).not.toContain('authorize');
+    expect(hiddenKeys).not.toContain('use');
     for (const key of ['shelfData', 'unShelfData', 'deleteData', 'delete']) {
       expect(hiddenKeys.includes(key)).toBe(!props.myResourcesOnly);
     }

@@ -1062,7 +1062,10 @@ public class ToolManService {
         // 商业版本（dataset.system=WHALE_AGENT）下，知识/工具由智能体门户发布，本系统不允许编辑。
         validateCommercialEditionKnowledgeOrToolWritable(resource);
         validateResourceManagePermission(resource);
-        validateInnerSkillReadonly(resource);
+        // 豁免仅限本入口的名称、描述、图片和分类；共享只读校验继续保护删除和上下架。
+        if (!CurrentUserHolder.isAdminVip()) {
+            validateInnerSkillReadonly(resource);
+        }
 
         if (ResourceLifecyclePolicy.supports(resource)
             && Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
