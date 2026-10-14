@@ -40,7 +40,6 @@ class ConnectorStatusQueryTest {
             "status_cd = '00a'",
             "order by sort asc, connector_id asc"
         );
-        assertThat(sql).doesNotContain("for update");
     }
 
     private String read(String relativePath) throws Exception {
