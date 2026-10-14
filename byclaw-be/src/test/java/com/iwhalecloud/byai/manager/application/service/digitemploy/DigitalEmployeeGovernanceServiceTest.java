@@ -253,7 +253,7 @@ class DigitalEmployeeGovernanceServiceTest {
 
     private ResourceOperationPermissionsVo officialPermissions(SsResource resource, Set<Long> manageIds) {
         return ReflectionTestUtils.invokeMethod(auth, "buildResourceOperationPermissions", resource,
-            CurrentUserHolder.getCurrentUserId(), manageIds, Set.of(), Set.of(), Set.of(), null, Set.of());
+            CurrentUserHolder.getCurrentUserId(), manageIds, Set.of(), Set.of(), Set.of(), Set.of());
     }
     @ParameterizedTest @ValueSource(strings = {"adminvip", "PLAT_MAN"})
     void administratorsCanSaveOfficialCopyDirectly(String identity) {

@@ -562,7 +562,6 @@ public class DigitalEmployeeApplicationService {
         employee.setCanDelete(permissions.isCanDelete());
         employee.setCanApplyUse(permissions.isCanApplyUse());
         employee.setUseApplyPending(permissions.isUseApplyPending());
-        employee.setCanSetDefault(permissions.isCanSetDefault());
         employee.setCanRestore(permissions.isCanRestore());
         employee.setCanOnShelf(permissions.isCanOnShelf());
         employee.setCanOffShelf(permissions.isCanOffShelf());
@@ -590,7 +589,6 @@ public class DigitalEmployeeApplicationService {
         employee.setCanDelete(permissions.isCanDelete());
         employee.setCanApplyUse(permissions.isCanApplyUse());
         employee.setUseApplyPending(permissions.isUseApplyPending());
-        employee.setCanSetDefault(permissions.isCanSetDefault());
         employee.setCanRestore(permissions.isCanRestore());
         employee.setCanOnShelf(permissions.isCanOnShelf());
         employee.setCanOffShelf(permissions.isCanOffShelf());
@@ -2466,14 +2464,13 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 有使用或管理权限的数字员工均可设为默认，和资源权限接口的 canSetDefault 口径保持一致。
+     * 默认员工会实际参与对话，必须具备有效使用权限；管理员身份不能绕过使用授权。
      */
     private boolean canCurrentUserSetAsDefault(SsResource resource, Long currentUserId) {
         if (resource == null || currentUserId == null) {
             return false;
         }
-        return authApplicationService.hasResourceManagePermission(resource)
-            || authApplicationService.hasResourceUsePermission(resource, currentUserId);
+        return authApplicationService.hasResourceUsePermission(resource, currentUserId);
     }
 
     /**

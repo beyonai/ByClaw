@@ -168,7 +168,7 @@ public class IndexApplicationServiceV2 {
         SuasSuperassist suasSuperassist = suasSuperassistService.findById(assistantId);
         Long defaultDigEmployeeId = suasSuperassist == null ? null : suasSuperassist.getDefaultDigEmployeeId();
         if (CurrentUserHolder.getLoginInfo() != null) {
-            // 后续批量权限回填也使用同一个默认 ID，避免排序、标签和 canSetDefault 不一致。
+            // 同步当前请求的默认身份，避免排序、标签和绑定资源权限使用不同的默认 ID。
             CurrentUserHolder.getLoginInfo().setDefaultDigEmployeeId(defaultDigEmployeeId);
         }
         return defaultDigEmployeeId;
@@ -176,7 +176,7 @@ public class IndexApplicationServiceV2 {
 
     /**
      * 回填左侧列表专用的运行时展示字段：
-     * 1. isDefault/canSetDefault 只根据当前用户默认数字员工 ID 判断；
+     * 1. isDefault 只根据当前用户默认数字员工 ID 判断；
      * 2. tagName 不再依赖扩展表落库值，按 ownerType/resourceCode/agentType 运行时计算。
      */
     private void fillDefaultAndRuntimeTag(AuthDigitEmployVo authDigitEmployVo, Long defaultDigitalEmployeeId) {
@@ -186,7 +186,6 @@ public class IndexApplicationServiceV2 {
         boolean isDefault = defaultDigitalEmployeeId != null
             && Objects.equals(authDigitEmployVo.getId(), defaultDigitalEmployeeId);
         authDigitEmployVo.setIsDefault(isDefault);
-        authDigitEmployVo.setCanSetDefault(!isDefault);
         authDigitEmployVo.setTagName(buildRuntimeDigitalEmployeeTagName(authDigitEmployVo.getOwnerType(),
             authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType(), authDigitEmployVo.getCreateType()));
     }
@@ -519,7 +518,6 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setCanDelete(permissions.isCanDelete());
         digitalEmployee.setCanApplyUse(permissions.isCanApplyUse());
         digitalEmployee.setUseApplyPending(permissions.isUseApplyPending());
-        digitalEmployee.setCanSetDefault(permissions.isCanSetDefault());
         digitalEmployee.setCanRestore(permissions.isCanRestore());
         digitalEmployee.setCanOnShelf(permissions.isCanOnShelf());
         digitalEmployee.setCanOffShelf(permissions.isCanOffShelf());
@@ -547,7 +545,6 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setCanDelete(permissions.isCanDelete());
         digitalEmployee.setCanApplyUse(permissions.isCanApplyUse());
         digitalEmployee.setUseApplyPending(permissions.isUseApplyPending());
-        digitalEmployee.setCanSetDefault(permissions.isCanSetDefault());
         digitalEmployee.setCanRestore(permissions.isCanRestore());
         digitalEmployee.setCanOnShelf(permissions.isCanOnShelf());
         digitalEmployee.setCanOffShelf(permissions.isCanOffShelf());

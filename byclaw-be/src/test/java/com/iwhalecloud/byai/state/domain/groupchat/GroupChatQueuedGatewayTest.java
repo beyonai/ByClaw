@@ -95,6 +95,9 @@ class GroupChatQueuedGatewayTest {
         when(historyFiles.prepareGroupHistory(any(), any(), any(), any()))
             .thenReturn(new GroupChatSessionContextFileService.ContextFile(
                 "GROUP_PUBLIC", "/by/.sessions/60/.byclaw/context/turn/group-history.json", "20"));
+        when(historyFiles.prepareGroupMembers(any(), any(), any(), any(), any()))
+            .thenReturn(new GroupChatSessionContextFileService.ContextFile(
+                "GROUP_MEMBERS", "/by/.sessions/60/.byclaw/context/members/group-members.json", "20"));
         turn = new ByaiGroupChatTurn();
         turn.setExecutionId(52L);
         turn.setAnchorExecutionId(50L);
@@ -217,7 +220,7 @@ class GroupChatQueuedGatewayTest {
         when(turns.selectByTrace(ctx.traceId)).thenReturn(turn);
         String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, new HashMap<>());
         assertThat(content).startsWith(CURRENT_MESSAGE + "\n\n")
-            .contains("群聊追问", turn.getInputContent(), "请在群里直接 @我")
+            .contains("群聊追问", turn.getInputContent(), "请在群里直接 @我", "group-members.json")
             .doesNotContain("group-chat-disposition.json", "[任务交付提醒]");
         assertThat(task.getStatus()).isEqualTo("PUBLISHED");
     }

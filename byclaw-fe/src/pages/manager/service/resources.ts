@@ -643,7 +643,6 @@ export interface ResourceOperationPermissions {
   canUseAuth: boolean; // 是否可设置使用授权
   canDelete: boolean; // 是否有删除权限
   canApplyUse: boolean; // 是否可以申请使用
-  canSetDefault: boolean; // 是否有设为默认权限
   canRestore: boolean; // 是否有恢复权限
   canOnShelf?: boolean; // 是否可上架
   canOffShelf?: boolean; // 是否可下架

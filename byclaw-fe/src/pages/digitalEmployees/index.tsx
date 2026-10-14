@@ -43,7 +43,6 @@ const getListOperationPermissions = (employee: any) => {
     canDelete: employee.canDelete === true,
     canApplyUse: employee.canApplyUse === true,
     useApplyPending: employee.useApplyPending === true,
-    canSetDefault: employee.canSetDefault === true,
     canRestore: employee.canRestore === true,
     canOnShelf: employee.canOnShelf === true,
     canOffShelf: employee.canOffShelf === true,

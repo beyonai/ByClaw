@@ -174,7 +174,7 @@ public class AuthController {
     }
 
     /**
-     * 查询当前用户对指定资源的操作权限（编辑/管理授权/使用授权/注销/使用申请/使用审核 + 数字员工的设为默认）。 资源不存在时抛 BaseException。
+     * 查询当前用户对指定资源的操作权限（编辑/管理授权/使用授权/注销/使用申请/使用审核）。 资源不存在时抛 BaseException。
      *
      * @author qin.guoquan
      * @date 2026-05-06

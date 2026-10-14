@@ -246,8 +246,6 @@ public class DigitEmployMarketVo {
 
     private Boolean useApplyPending;
 
-    private Boolean canSetDefault;
-
     private Boolean canRestore;
 
     private Boolean canOnShelf;
