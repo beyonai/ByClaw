@@ -33,7 +33,7 @@ class GroupChatFilePageMapperTest {
         assertThat(config.hasStatement(QUERY)).as("file pagination query is registered").isTrue();
         try (var session = new SqlSessionFactoryBuilder().build(config).openSession(true)) {
             List<ByaiMessage> rows = session.selectList(QUERY, parameters(null, false, 2));
-            assertThat(rows).extracting(ByaiMessage::getMessageId).containsExactly(5L, 10L);
+            assertThat(rows).extracting(ByaiMessage::getMessageId).containsExactly(5L, 11L);
             assertThat(rows).allSatisfy(row -> {
                 assertThat(row.getSessionId()).isEqualTo(10L);
                 assertThat(row.getCreateTime()).isNotNull();
@@ -41,7 +41,13 @@ class GroupChatFilePageMapperTest {
                 assertThat(row.getInferLog()).isNull();
             });
             assertThat(rows.get(0).getRelatedResources()).contains("files");
-            assertThat(rows.get(1).getMetadata()).contains("TASK_RESULT");
+            assertThat(rows.get(0).getUsage()).isEqualTo(1);
+            assertThat(rows.get(0).getCreatorId()).isEqualTo(9007199254740993L);
+            assertThat(rows.get(0).getCreatorName()).isEqualTo("张三");
+            assertThat(rows.get(1).getUsage()).isEqualTo(2);
+            assertThat(rows.get(1).getCreatorId()).isEqualTo(88L);
+            assertThat(rows.get(1).getCreatorName()).isEqualTo("研究助手");
+            assertThat(rows).allSatisfy(row -> assertThat(row.getMetadata()).isNull());
         }
     }
 
@@ -51,7 +57,7 @@ class GroupChatFilePageMapperTest {
         assertThat(config.hasStatement(QUERY)).as("file pagination query is registered").isTrue();
         try (var session = new SqlSessionFactoryBuilder().build(config).openSession(true)) {
             List<ByaiMessage> inclusive = session.selectList(QUERY, parameters(10L, true, 10));
-            assertThat(inclusive).extracting(ByaiMessage::getMessageId).containsExactly(10L, 11L, 30L, 20L);
+            assertThat(inclusive).extracting(ByaiMessage::getMessageId).containsExactly(11L, 30L, 20L);
             List<ByaiMessage> older = session.selectList(QUERY, parameters(10L, false, 10));
             assertThat(older).extracting(ByaiMessage::getMessageId).containsExactly(11L, 30L, 20L);
             assertThat(session.<ByaiMessage>selectList(QUERY, parameters(99L, true, 10))).isEmpty();
@@ -84,7 +90,7 @@ class GroupChatFilePageMapperTest {
         for (boolean inclusive : List.of(false, true)) {
             String sql = config.getMappedStatement(QUERY).getBoundSql(parameters(10L, inclusive, 10)).getSql();
             assertThat(new PGWallProvider(new WallConfig()).check(sql).getViolations()).isEmpty();
-            assertThat(sql).doesNotContain("message_content", "infer_log", "call_logs", "COUNT(", "OFFSET");
+            assertThat(sql).doesNotContain("message_content", "infer_log", "call_logs", "metadata", "COUNT(", "OFFSET");
         }
     }
 
@@ -105,11 +111,11 @@ class GroupChatFilePageMapperTest {
         try (Connection connection = DriverManager.getConnection(url); Statement sql = connection.createStatement()) {
             sql.execute("CREATE TABLE byai_message (message_id BIGINT, session_id BIGINT, create_time TIMESTAMP, "
                 + "related_resources TEXT, metadata TEXT, usage INTEGER, archived_at TIMESTAMP, "
-                + "recalled_at TIMESTAMP, message_content TEXT, infer_log TEXT)");
+                + "recalled_at TIMESTAMP, message_content TEXT, infer_log TEXT, creator_id BIGINT, creator_name TEXT)");
             sql.execute("INSERT INTO byai_message(message_id,session_id,create_time,related_resources,metadata,usage,message_content,infer_log) VALUES "
                 + "(5,10,3000,'{\"files\":[{}]}',NULL,1,'body','large log'),"
                 + "(10,10,2000.2,NULL,'{\"scene\":\"GROUP_CHAT\",\"kind\":\"TASK_RESULT\",\"files\":[{}]}',2,'body','log'),"
-                + "(11,10,2000.1,'{\"files\":[{}]}',NULL,1,NULL,NULL),"
+                + "(11,10,2000.1,'{\"files\":[{}]}',NULL,2,NULL,NULL),"
                 + "(20,10,1000,'{\"files\":[{}]}',NULL,1,NULL,NULL),"
                 + "(30,10,1000,'{\"files\":[{}]}',NULL,1,NULL,NULL),"
                 + "(31,10,4000,NULL,NULL,1,'text only',NULL),"
@@ -118,6 +124,8 @@ class GroupChatFilePageMapperTest {
                 + "(41,10,4000,'{\"files\":[{}]}',NULL,1,NULL,NULL),"
                 + "(42,10,4000,'{\"files\":[{}]}',NULL,5,NULL,NULL),"
                 + "(99,11,5000,'{\"files\":[{}]}',NULL,1,NULL,NULL)");
+            sql.execute("UPDATE byai_message SET creator_id=9007199254740993,creator_name='张三' WHERE message_id=5");
+            sql.execute("UPDATE byai_message SET creator_id=88,creator_name='研究助手' WHERE message_id=11");
             sql.execute("UPDATE byai_message SET archived_at=1 WHERE message_id=40");
             sql.execute("UPDATE byai_message SET recalled_at=1 WHERE message_id=41");
         }

@@ -57,7 +57,7 @@ jest.mock('@/components/Resources/components/ResourceCard', () => ({
       data-favorites={String(enableFavorites)}
       data-favorited={String(resource.favorited)}
       data-default={String(resource.isDefault)}
-      data-can-set-default={String(resource.canSetDefault)}
+      data-has-use-permission={String(resource.hasUsePermission)}
       data-lifecycle={String(actionConfig.enableDigitalEmployeeLifecycle)}
       data-delete={String(actionConfig.enableDigitalEmployeeDelete)}
       data-hidden-actions={actionConfig.hiddenMenuItemKeys.join(',')}
@@ -84,6 +84,50 @@ describe('commercial employee favorite lists', () => {
     (queryMyCreatedAndSubscribedAgentsV2 as jest.Mock).mockResolvedValue({ list: [row(1)], total: 1, pageNum: 1 });
   });
 
+  it('keeps group-first sorting for available employee search and pagination', async () => {
+    const first = [
+      { ...row(22), agentType: '017' },
+      ...Array.from({ length: 19 }, (_, index) => ({ ...row(21 - index), agentType: '016' })),
+    ];
+    (queryMyCreatedAndSubscribedAgentsV2 as jest.Mock).mockImplementation(async ({ pageNum }) => ({
+      list: pageNum === 1 ? first : [row(2), row(1)],
+      total: 22,
+      pageNum,
+    }));
+    const ref = React.createRef<any>();
+    render(<AllDigitalEmployees ref={ref} source="available" mode="all" hideCategories />);
+    await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(20));
+    await act(async () => {
+      await ref.current.getSearch('employee');
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+    await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(22));
+    const requests = (queryMyCreatedAndSubscribedAgentsV2 as jest.Mock).mock.calls.map(([params]) => params);
+    expect(requests).toHaveLength(3);
+    requests.forEach((params) => {
+      expect(params).toMatchObject({ sortMode: 'GROUP_UPDATED_DESC', pageSize: 20 });
+      expect(params).not.toHaveProperty('orderField');
+    });
+    expect(requests[1]).toMatchObject({ pageNum: 1, keyword: 'employee' });
+    expect(requests[2]).toMatchObject({ pageNum: 2, keyword: 'employee' });
+    expect(screen.getAllByTestId('card').map((card) => card.getAttribute('data-id'))).toEqual(
+      Array.from({ length: 22 }, (_, index) => String(22 - index))
+    );
+
+    // 清空搜索后从第一页重新开始，后续分页也不能继续携带旧关键词。
+    await act(async () => {
+      await ref.current.getSearch('');
+    });
+    await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(20));
+    fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+    await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(22));
+    const clearedRequests = (queryMyCreatedAndSubscribedAgentsV2 as jest.Mock).mock.calls.slice(-2);
+    expect(clearedRequests.map(([params]) => params.pageNum)).toEqual([1, 2]);
+    clearedRequests.forEach(([params]) => {
+      expect(params).toMatchObject({ keyword: '', sortMode: 'GROUP_UPDATED_DESC' });
+    });
+  });
+
   // 员工和员工组共用页签配置，我的员工不再屏蔽授权及上下架，收藏页也统一遵循后端操作权限。
   it.each([
     ['available', 'employee', true, true, ''],
@@ -100,13 +144,13 @@ describe('commercial employee favorite lists', () => {
     expect(card).toHaveAttribute('data-hidden-actions', hiddenActions);
   });
 
-  // 设置默认后的事件更新默认标识并刷新权限，不隐藏当前员工入口，也不能放大其他员工的后端权限。
+  // 默认切换只更新身份并刷新目标行，不能改变其他员工的使用权限。
   it.each(['available', 'official', 'favorites'] as const)(
-    'preserves backend set-default permissions after switching the default in %s',
+    'preserves use permissions after switching the default in %s',
     async (source) => {
       const employees = [
-        { ...row(1), hasUsePermission: true, canSetDefault: true, operationPermissionsLoaded: true },
-        { ...row(2), hasUsePermission: true, canSetDefault: false, operationPermissionsLoaded: true },
+        { ...row(1), hasUsePermission: true, operationPermissionsLoaded: true },
+        { ...row(2), hasUsePermission: false, operationPermissionsLoaded: true },
       ];
       (getAllDigitalEmployeesV2 as jest.Mock).mockResolvedValue({ list: employees, total: 2, pageNum: 1 });
       (queryMyCreatedAndSubscribedAgentsV2 as jest.Mock).mockResolvedValue({ list: employees, total: 2, pageNum: 1 });
@@ -114,7 +158,7 @@ describe('commercial employee favorite lists', () => {
       jest.mocked(getCompositeAppInfo).mockImplementation(async ({ resourceId }) => {
         const employee = employees.find((item) => String(item.resourceId) === String(resourceId));
         return employee
-          ? { ...employee, operationPermissions: { hasUsePermission: true, canSetDefault: employee.canSetDefault } }
+          ? { ...employee, operationPermissions: { hasUsePermission: employee.hasUsePermission } }
           : undefined;
       });
       render(<AllDigitalEmployees source={source} mode="all" hideCategories />);
@@ -126,9 +170,9 @@ describe('commercial employee favorite lists', () => {
       });
       const cards = screen.getAllByTestId('card');
       expect(cards[0]).toHaveAttribute('data-default', 'true');
-      expect(cards[0]).toHaveAttribute('data-can-set-default', 'true');
+      expect(cards[0]).toHaveAttribute('data-has-use-permission', 'true');
       expect(cards[1]).toHaveAttribute('data-default', 'false');
-      expect(cards[1]).toHaveAttribute('data-can-set-default', 'false');
+      expect(cards[1]).toHaveAttribute('data-has-use-permission', 'false');
       expect(getCompositeAppInfo).toHaveBeenCalledWith({ resourceId: '1' });
       expect(getCompositeAppInfo).toHaveBeenCalledTimes(1);
     }
@@ -238,6 +282,54 @@ describe('commercial employee favorite lists', () => {
     });
     expect(allParams).not.toHaveProperty('agentType');
   });
+
+  it.each([false, true])(
+    'preserves recommendation sort mode through search and paging: favorites=%s',
+    async (enabled) => {
+      const first = Array.from({ length: 20 }, (_, index) => row(index + 1));
+      (getAllDigitalEmployeesV2 as jest.Mock).mockImplementation(async ({ pageNum }) => ({
+        list: pageNum === 1 ? first : [row(21)],
+        total: 21,
+        pageNum,
+      }));
+      const ref = React.createRef<any>();
+      render(<AllDigitalEmployees ref={ref} source="official" mode="all" enableFavorites={enabled} hideCategories />);
+      await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(20));
+      await act(async () => {
+        await ref.current.getSearch('employee');
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+      await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(21));
+      const requests = (getAllDigitalEmployeesV2 as jest.Mock).mock.calls.map(([params]) => params);
+      expect(requests.map((params) => params.pageNum)).toEqual([1, 1, 2]);
+      expect(requests.map((params) => params.keyword)).toEqual(['', 'employee', 'employee']);
+      requests.forEach((params) => {
+        expect(params).toMatchObject({ includeEmployeeGroup: true, employeeGroupFirst: !enabled });
+        if (enabled) {
+          expect(params).toMatchObject({ includeFavorites: true, favoritesOnly: false });
+        } else {
+          expect(params).not.toHaveProperty('includeFavorites');
+        }
+      });
+
+      await act(async () => {
+        await ref.current.getSearch('');
+      });
+      await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(20));
+      fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+      await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(21));
+      const clearedRequests = (getAllDigitalEmployeesV2 as jest.Mock).mock.calls.slice(-2);
+      expect(clearedRequests.map(([params]) => params.pageNum)).toEqual([1, 2]);
+      clearedRequests.forEach(([params]) => {
+        expect(params).toMatchObject({ keyword: '', employeeGroupFirst: !enabled });
+        if (enabled) {
+          expect(params).toMatchObject({ includeFavorites: true, favoritesOnly: false });
+        } else {
+          expect(params).not.toHaveProperty('includeFavorites');
+        }
+      });
+    }
+  );
 
   it('leaves available employees and noncommercial recommendations on their original requests', async () => {
     const available = render(<AllDigitalEmployees source="available" mode="all" enableFavorites hideCategories />);

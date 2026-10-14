@@ -2,9 +2,18 @@ import { DomainError } from "../../domain/errors.js";
 import { requireId } from "../../domain/values.js";
 import type { Row } from "./contracts.js";
 import { HistoryAccess } from "./access.js";
-import { messageAttachments } from "./attachments.js";
+import { relatedResourceAttachments } from "./attachments.js";
 import { time } from "./message-format.js";
 import { bounded, encodeCursor } from "./paging.js";
+
+interface GroupFileItem {
+  messageId: string;
+  createdAt: number | null;
+  uploaderId: string | null;
+  uploaderName: string | null;
+  uploaderType?: "USER" | "AGENT";
+  attachment: Row;
+}
 
 /** 从最新群消息向前补足文件页；游标保留同一消息内的附件位置。 */
 export class GroupFileHistory extends HistoryAccess {
@@ -15,7 +24,7 @@ export class GroupFileHistory extends HistoryAccess {
     let before = resume?.messageId;
     let inclusive = resume !== undefined;
     let last: { messageId: string; index: number } | undefined;
-    const files: { messageId: string; createdAt: number | null; attachment: Row }[] = [];
+    const files: GroupFileItem[] = [];
     while (true) {
       const rows = await this.repository.messages({
         sessionId,
@@ -23,7 +32,9 @@ export class GroupFileHistory extends HistoryAccess {
         limit: 100,
       });
       for (const row of rows) {
-        const attachments = messageAttachments(row);
+        const attachments = relatedResourceAttachments(row);
+        // 使用服务端消息作者列；附件、任务目标和被 @ 的资源不参与上传者解析。
+        const uploaderType = row.usage === 1 ? "USER" : row.usage === 2 ? "AGENT" : undefined;
         const start = resume && row.messageId === resume.messageId ? resume.index + 1 : 0;
         for (let index = start; index < attachments.length; index++) {
           // 多发现一个有效附件才设置 hasMore，避免普通消息或损坏附件造成空的下一页。
@@ -37,6 +48,9 @@ export class GroupFileHistory extends HistoryAccess {
           files.push({
             messageId: row.messageId,
             createdAt: row.createTime == null ? null : time(row.createTime),
+            uploaderId: row.creatorId == null ? null : String(row.creatorId),
+            uploaderName: row.creatorName?.trim() ? row.creatorName : null,
+            ...(uploaderType === undefined ? {} : { uploaderType }),
             attachment: attachments[index]!,
           });
           last = { messageId: row.messageId, index };

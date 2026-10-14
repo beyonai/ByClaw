@@ -234,8 +234,10 @@ function AllDigitalEmployees(
         ...(includeRequestFavorites ? { includeFavorites: true, favoritesOnly: source === 'favorites' } : {}),
         // 显式类型筛选覆盖默认范围，保证首屏、搜索和分页使用相同条件。
         ...selectedFilter,
-        orderField: 'updateTime',
-        orderBy: 'desc',
+        // 我的员工由后端先按员工组、再按时间和 ID 排序，保证分区展示与分页顺序一致。
+        ...(source === 'available'
+          ? { sortMode: 'GROUP_UPDATED_DESC' }
+          : { orderField: 'updateTime', orderBy: 'desc' }),
       };
 
       if (catalogId !== undefined && catalogId !== null && `${catalogId}` !== '' && catalogId !== ALL_CATEGORY_KEY) {
@@ -403,7 +405,7 @@ function AllDigitalEmployees(
             const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
             if (defaultResourceId) {
               const isDefault = itemIdentity === `${defaultResourceId}`;
-              // 默认切换只更新展示身份，保留后端 canSetDefault，不在前端重算操作权限。
+              // 默认切换只更新身份，卡片结合原有使用权限同步默认标签和设置入口。
               return {
                 ...item,
                 isDefault,
@@ -770,8 +772,9 @@ function AllDigitalEmployees(
               <InfiniteScroll
                 ref={infiniteScrollRef}
                 next={() => {
+                  // 搜索由 ref.getSearch 发起，所有页签翻页都复用已提交的关键词，避免回退到空的 searchName。
                   return myGetAllDigitalEmployeesV2(
-                    favoriteMode ? activeKeywordRef.current : searchName || '',
+                    activeKeywordRef.current,
                     curActiveLink,
                     source === 'favorites'
                       ? Math.floor(visibleList.length / paginationInfo.pageSize) + 1

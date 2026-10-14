@@ -33,9 +33,9 @@ public class SsResExtMcpService {
 
     private static final Logger logger = LoggerFactory.getLogger(SsResExtMcpService.class);
 
-    private static final Duration MCP_VALIDATION_CONNECT_TIMEOUT = Duration.ofSeconds(20);
+    private static final Duration MCP_VALIDATION_CONNECT_TIMEOUT = Duration.ofSeconds(60);
 
-    private static final Duration MCP_VALIDATION_REQUEST_TIMEOUT = Duration.ofSeconds(20);
+    private static final Duration MCP_VALIDATION_REQUEST_TIMEOUT = Duration.ofSeconds(60);
 
     private static final Set<String> READ_TOOL_KEYWORDS = Set.of("query", "list", "get", "search", "find", "detail",
         "read", "select", "page", "count", "describe", "lookup", "fetch");

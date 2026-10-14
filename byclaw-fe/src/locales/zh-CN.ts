@@ -1385,6 +1385,8 @@ export default {
   'resourceCenter.enterprise': '企业',
   'resourceCenter.personalSkills': '个人技能',
   'resourceCenter.enterpriseSkills': '企业技能',
+  'resourceCenter.directorySkills': '目录技能',
+  'resourceCenter.resourceLibrarySkills': '资源库技能',
   'resourceCenter.personalKnowledge': '个人知识',
   'resourceCenter.enterpriseKnowledge': '企业知识',
   'resourceCenter.personalTools': '个人工具',

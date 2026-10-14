@@ -899,7 +899,8 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.queryByRole('group', { name: 'common.belong' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'common.status' })).toBeNull();
     expect(list).toHaveAttribute('data-management-scope', 'all');
-    expect(list).toHaveAttribute('data-status', '2');
+    // 管理页切回个人资源时恢复全部状态，不能沿用浏览页的固定上架条件。
+    expect(list).toHaveAttribute('data-status', '');
   });
 
   it.each([
@@ -1029,7 +1030,7 @@ describe('Resources enterprise skill mode', () => {
       expect(button).toHaveAttribute('aria-pressed', 'true');
       expect(list).toHaveAttribute('data-biz-types', value);
       expect(list).toHaveAttribute('data-management-scope', activeTab === 'enterprise' ? 'managed' : 'all');
-      expect(list).toHaveAttribute('data-status', activeTab === 'enterprise' ? '3' : '2');
+      expect(list).toHaveAttribute('data-status', activeTab === 'enterprise' ? '3' : '');
     }
 
     // 切换个人/企业知识时重置类型、归属和状态，防止旧条件影响新页签。
@@ -1056,7 +1057,7 @@ describe('Resources enterprise skill mode', () => {
     );
     expect(list).toHaveAttribute('data-biz-types', '');
     expect(list).toHaveAttribute('data-management-scope', 'all');
-    expect(list).toHaveAttribute('data-status', activeTab === 'enterprise' ? '2' : '');
+    expect(list).toHaveAttribute('data-status', '');
     const resetTypes = within(screen.getByRole('group', { name: 'resource.type' }));
     expect(resetTypes.getByRole('button', { name: 'common.all' })).toHaveAttribute('aria-pressed', 'true');
   });
@@ -1312,12 +1313,14 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.queryByRole('button', { name: 'resourceCenter.auditCenter' })).not.toBeInTheDocument();
     expect(screen.getByTestId('resource-list')).toBeInTheDocument();
 
-    // 返回入口和搜索均独立于页签，避免再次挤进同一行。
+    // 返回入口单独一行，搜索统一放在管理页签右侧，且只保留一个输入框。
     const personalTab = screen.getByRole('button', { name: 'resourceCenter.personalSkills' });
     const backButton = screen.getByRole('button', { name: 'resourceCenter.backToAll' });
     const searchInput = screen.getByPlaceholderText('common.inputKeyword');
     expect(personalTab.parentElement).not.toContainElement(backButton);
-    expect(personalTab.parentElement).not.toContainElement(searchInput);
+    expect(personalTab.parentElement).toContainElement(searchInput);
+    expect(searchInput.parentElement).toHaveClass('myResourcesTabActions');
+    expect(searchInput.parentElement?.lastElementChild).toBe(searchInput);
     expect(screen.getAllByPlaceholderText('common.inputKeyword')).toHaveLength(1);
 
     fireEvent.click(backButton);

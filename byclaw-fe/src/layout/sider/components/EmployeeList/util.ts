@@ -29,7 +29,6 @@ export function updateDefaultEmployee(items: IAgentCache[], defaultResourceId: s
       return {
         ...item,
         isDefault,
-        canSetDefault: !isDefault, // todo: 以后拓展需要
       };
     })
   );

@@ -3,6 +3,7 @@ jest.mock('@/service/employeePublication', () => ({
   openEmployeePublication: jest.fn(),
 }));
 import { openEmployeePublication } from '@/service/employeePublication';
+let mockDefaultEmployeeId = 'default-agent-1';
 jest.mock('@umijs/max', () => ({
   getIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
@@ -16,11 +17,11 @@ jest.mock('@umijs/max', () => ({
     selector({
       user: {
         userInfo: {
-          defaultDigEmployeeId: 'default-agent-1',
+          defaultDigEmployeeId: mockDefaultEmployeeId,
         },
       },
       employees: {
-        defaultDigEmployeeId: 'default-agent-1',
+        defaultDigEmployeeId: mockDefaultEmployeeId,
       },
     }),
 }));
@@ -127,6 +128,10 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
 // 卡片包含真实确认弹层与全局消息；只增加用例总预算，不延长查找/断言超时。
 const lifecycleTestTimeout = 15000;
 
+beforeEach(() => {
+  mockDefaultEmployeeId = 'default-agent-1';
+});
+
 beforeAll(() => {
   // 静态 message/Modal 使用独立 React 根，需要单独关闭动画，才能沿用容器内的测试配置。
   ConfigProvider.config({
@@ -185,7 +190,7 @@ describe('ResourceCard', () => {
     lifecycleTestTimeout
   );
 
-  // 我的员工按后端权限显示全部管理入口，员工组、下架状态及申请待审核均不能再次屏蔽菜单。
+  // 管理入口沿用后端权限；设为默认还要过滤下架，不能由管理能力绕过使用状态。
   it.each([
     ['001', '2', true],
     ['017', '2', true],
@@ -206,7 +211,6 @@ describe('ResourceCard', () => {
             resourceStatus,
             useApplyPending: pending,
             hasUsePermission: true,
-            canSetDefault: true,
             canEdit: true,
             canManageAuth: true,
             canUseAuth: true,
@@ -230,12 +234,12 @@ describe('ResourceCard', () => {
         'shelfData',
         'unShelfData',
         'deleteData',
-        'setDefaultAssistant',
         'publishEmployee',
         'viewEmployeePublication',
       ].forEach((key) => {
         expect(screen.getByTestId(`resource-menu-${key}`)).toBeInTheDocument();
       });
+      expect(Boolean(screen.queryByTestId('resource-menu-setDefaultAssistant'))).toBe(resourceStatus === '2');
       expect(screen.getByRole('img', { name: 'message' }).closest('button')).toBeInTheDocument();
       fireEvent.click(screen.getByText('common.manageAuthorization'));
       fireEvent.click(screen.getByText('common.useAuthorization'));
@@ -254,7 +258,6 @@ describe('ResourceCard', () => {
           agentType: '017',
           resourceStatus: '2',
           hasUsePermission: false,
-          canSetDefault: false,
           canEdit: false,
           canManageAuth: false,
           canUseAuth: false,
@@ -438,23 +441,27 @@ describe('ResourceCard', () => {
     lifecycleTestTimeout
   );
 
-  it('clears the processing toast and permits retry after a lifecycle failure', async () => {
-    const operation = jest.fn().mockRejectedValueOnce(new Error('Operation failed')).mockResolvedValue(undefined);
-    renderWithQueryClient(
-      <ResourceCard
-        resource={{ resourceId: 'retry', resourceBizType: 'SKILL', ownerType: 'personal', canDelete: true }}
-        actionConfig={{ enableResourceLifecycle: true, onDeleteData: operation }}
-      />
-    );
-    fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
-    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
-    expect(await screen.findByText('Operation failed')).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
-    fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
-    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
-    await waitFor(() => expect(operation).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
-  });
+  it(
+    'clears the processing toast and permits retry after a lifecycle failure',
+    async () => {
+      const operation = jest.fn().mockRejectedValueOnce(new Error('Operation failed')).mockResolvedValue(undefined);
+      renderWithQueryClient(
+        <ResourceCard
+          resource={{ resourceId: 'retry', resourceBizType: 'SKILL', ownerType: 'personal', canDelete: true }}
+          actionConfig={{ enableResourceLifecycle: true, onDeleteData: operation }}
+        />
+      );
+      fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
+      fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+      expect(await screen.findByText('Operation failed')).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+      fireEvent.click(screen.getByText('resource.lifecycle.deleteData'));
+      fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+      await waitFor(() => expect(operation).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.queryAllByText('common.processing')).toHaveLength(0));
+    },
+    lifecycleTestTimeout
+  );
 
   it.each([true, false])('respects hidden deletion for workspace skills: %s', (hidden) => {
     renderWithQueryClient(
@@ -1028,23 +1035,27 @@ describe('ResourceCard', () => {
     ['TOOL', 'MCP', 'Tool'],
     ['TOOL', 'AGENT', 'Tool'],
     ['TOOL', undefined, 'Tool'],
-  ])('uses module-specific delete wording for %s / %s', async (resourceType, resourceBizType, label) => {
-    const onDelete = jest.fn();
-    renderWithQueryClient(
-      <ResourceCard
-        resourceType={resourceType}
-        resource={{ resourceId: 'resource-delete', resourceBizType, canDelete: true }}
-        actionConfig={{ onDelete }}
-      />
-    );
+  ])(
+    'uses module-specific delete wording for %s / %s',
+    async (resourceType, resourceBizType, label) => {
+      const onDelete = jest.fn();
+      renderWithQueryClient(
+        <ResourceCard
+          resourceType={resourceType}
+          resource={{ resourceId: 'resource-delete', resourceBizType, canDelete: true }}
+          actionConfig={{ onDelete }}
+        />
+      );
 
-    expect(screen.queryByText('common.deleteResource')).toBeNull();
-    fireEvent.click(screen.getByText(`resource.delete${label}`));
-    expect(await screen.findByText(`resource.delete${label}Confirm`)).toBeTruthy();
-    expect(onDelete).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
-    expect(onDelete).toHaveBeenCalledTimes(1);
-  });
+      expect(screen.queryByText('common.deleteResource')).toBeNull();
+      fireEvent.click(screen.getByText(`resource.delete${label}`));
+      expect(await screen.findByText(`resource.delete${label}Confirm`)).toBeTruthy();
+      expect(onDelete).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+      expect(onDelete).toHaveBeenCalledTimes(1);
+    },
+    lifecycleTestTimeout
+  );
 
   // 复用方显式关闭生命周期时，编辑和注销仍独立遵循各自权限。
   it.each([
@@ -1930,6 +1941,7 @@ describe('ResourceCard', () => {
   });
 
   it('shows the default digital employee badge when the digital employee is default', () => {
+    mockDefaultEmployeeId = '';
     renderWithQueryClient(
       <ResourceCard
         resource={{
@@ -1937,15 +1949,60 @@ describe('ResourceCard', () => {
           resourceName: 'Default Employee',
           resourceBizType: 'DIG_EMPLOYEE',
           isDefault: true,
+          hasUsePermission: true,
         }}
       />
     );
 
     expect(screen.getByText('resource.defaultDigitalEmployee')).toHaveClass('defaultDigitalEmployeeBadge');
+    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
   });
 
-  // 员工卡片保留独立申请按钮和管理操作，默认入口独立遵循后端 canSetDefault。
-  it('keeps independent apply, default and management actions', () => {
+  it('switches default badges and actions together despite stale list flags', () => {
+    mockDefaultEmployeeId = 'old-group';
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const cards = () => (
+      <QueryClientProvider client={client}>
+        <div data-testid="old-group">
+          <ResourceCard
+            resource={{
+              resourceId: 'old-group',
+              resourceBizType: 'DIG_EMPLOYEE',
+              agentType: '017',
+              isDefault: true,
+              hasUsePermission: true,
+            }}
+          />
+        </div>
+        <div data-testid="new-employee">
+          <ResourceCard
+            resource={{
+              resourceId: 'new-employee',
+              resourceBizType: 'DIG_EMPLOYEE',
+              isDefault: false,
+              hasUsePermission: true,
+            }}
+          />
+        </div>
+      </QueryClientProvider>
+    );
+    const view = render(cards());
+    expect(within(screen.getByTestId('old-group')).getByText('resource.defaultDigitalEmployee')).toBeInTheDocument();
+    expect(within(screen.getByTestId('old-group')).queryByText('resource.setDefaultAssistant')).toBeNull();
+    expect(within(screen.getByTestId('new-employee')).getByText('resource.setDefaultAssistant')).toBeInTheDocument();
+
+    mockDefaultEmployeeId = 'new-employee';
+    view.rerender(cards());
+
+    expect(within(screen.getByTestId('old-group')).queryByText('resource.defaultDigitalEmployee')).toBeNull();
+    expect(within(screen.getByTestId('new-employee')).getByText('resource.defaultDigitalEmployee')).toBeInTheDocument();
+    expect(screen.getAllByText('resource.defaultDigitalEmployee')).toHaveLength(1);
+    expect(within(screen.getByTestId('old-group')).getByText('resource.setDefaultAssistant')).toBeInTheDocument();
+    expect(within(screen.getByTestId('new-employee')).queryByText('resource.setDefaultAssistant')).toBeNull();
+  });
+
+  // 无使用权限的管理员仍可申请和维护资源，但不能将它设为默认。
+  it('keeps apply and management actions without exposing set default to a manager without use permission', () => {
     renderWithQueryClient(
       <ResourceCard
         digitalEmployeeActionMode
@@ -1956,7 +2013,7 @@ describe('ResourceCard', () => {
           canApplyUse: true,
           resourceStatus: '2',
           hasUsePermission: false,
-          canSetDefault: true,
+          hasManagePermission: true,
           canEdit: true,
           canManageAuth: true,
         }}
@@ -1968,15 +2025,16 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resource.applyUse')).toBeNull();
     expect(screen.getByText('common.editInfo')).toBeTruthy();
     expect(screen.getByText('common.manageAuthorization')).toBeTruthy();
-    expect(screen.getByText('resource.setDefaultAssistant')).toBeInTheDocument();
+    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
   });
 
-  // 有管理权限的员工可以设为默认，前端不重复要求 hasUsePermission。
+  // 不能申请、申请中和缺少权限字段均不代表拥有使用权限，不能通过申请入口取反放行。
   it.each([
-    { hasUsePermission: false, canApplyUse: true, useApplyPending: true },
+    { hasUsePermission: false, canApplyUse: true, useApplyPending: false },
+    { hasUsePermission: false, canApplyUse: false, useApplyPending: true },
     { hasUsePermission: false, canApplyUse: false },
     { hasUsePermission: undefined, canApplyUse: false },
-  ])('shows backend-permitted set default independently of use permission: %j', (permissions) => {
+  ])('hides set default without use permission: %j', (permissions) => {
     renderWithQueryClient(
       <ResourceCard
         resourceType="DIG_EMPLOYEE"
@@ -1985,13 +2043,14 @@ describe('ResourceCard', () => {
           resourceId: 'employee-unavailable',
           resourceName: 'Unavailable Employee Group',
           resourceStatus: '2',
-          canSetDefault: true,
+          agentType: '017',
+          hasManagePermission: true,
           ...permissions,
         }}
       />
     );
 
-    expect(screen.getByText('resource.setDefaultAssistant')).toBeInTheDocument();
+    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
     expect(screen.queryByText('resource.applyUse')).toBeNull();
   });
 
@@ -2014,7 +2073,7 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resource.applyUse')).toBeNull();
   });
 
-  // 管理员工的个人/企业页签无需显式开启默认入口，数字员工和员工组均按后端权限展示。
+  // 各页签的数字员工和员工组统一按实际使用权限展示默认入口。
   it.each([
     ['personal', '001'],
     ['personal', '017'],
@@ -2029,7 +2088,6 @@ describe('ResourceCard', () => {
           ownerType,
           agentType,
           hasUsePermission: true,
-          canSetDefault: true,
           isDefault: false,
         }}
         actionConfig={{ scene: ownerType }}
@@ -2038,7 +2096,7 @@ describe('ResourceCard', () => {
     expect(screen.getByText('resource.setDefaultAssistant')).toBeTruthy();
   });
 
-  // 有使用权限且后端允许设为默认时，继续显示默认入口。
+  // 无需专门的默认操作权限字段，有使用权限的非默认员工即可显示入口。
   it('shows set default for a usable non-default digital employee', () => {
     renderWithQueryClient(
       <ResourceCard
@@ -2047,7 +2105,6 @@ describe('ResourceCard', () => {
           resourceName: 'Usable Employee',
           resourceBizType: 'DIG_EMPLOYEE',
           hasUsePermission: true,
-          canSetDefault: true,
           isDefault: false,
         }}
       />
@@ -2056,11 +2113,11 @@ describe('ResourceCard', () => {
     expect(screen.getByText('resource.setDefaultAssistant')).toBeTruthy();
   });
 
-  // 默认身份可来自列表字段或全局默认员工 ID，两种来源都不能覆盖后端允许设置的权限。
+  // 标签和入口使用同一份全局默认身份，旧行标记不能隐藏原默认或放行新默认。
   it.each([
     { resourceId: 'default-flag-employee', isDefault: true },
     { resourceId: 'default-agent-1', isDefault: false },
-  ])('shows set default for a permitted current default employee: %j', (identity) => {
+  ])('uses the current default ID for both the badge and set-default action: %j', (identity) => {
     renderWithQueryClient(
       <ResourceCard
         resource={{
@@ -2068,32 +2125,38 @@ describe('ResourceCard', () => {
           resourceName: 'Default Employee',
           resourceBizType: 'DIG_EMPLOYEE',
           hasUsePermission: true,
-          canSetDefault: true,
         }}
       />
     );
 
-    expect(screen.getByText('resource.setDefaultAssistant')).toBeTruthy();
-    expect(screen.getByText('resource.defaultDigitalEmployee')).toBeTruthy();
-  });
-
-  it.each([false, undefined])('hides set default when the backend does not grant permission: %s', (canSetDefault) => {
-    renderWithQueryClient(
-      <ResourceCard
-        resource={{
-          resourceId: 'employee-no-default-permission',
-          resourceName: 'Unavailable Employee',
-          resourceBizType: 'DIG_EMPLOYEE',
-          hasUsePermission: true,
-          canApplyUse: false,
-          canSetDefault,
-          isDefault: false,
-        }}
-      />
+    expect(Boolean(screen.queryByText('resource.setDefaultAssistant'))).toBe(
+      identity.resourceId !== mockDefaultEmployeeId
     );
-
-    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+    expect(Boolean(screen.queryByText('resource.defaultDigitalEmployee'))).toBe(
+      identity.resourceId === mockDefaultEmployeeId
+    );
   });
+
+  it.each(['3', '-1'])(
+    'hides set default for inactive employees despite stale use permission: %s',
+    (resourceStatus) => {
+      renderWithQueryClient(
+        <ResourceCard
+          resource={{
+            resourceId: 'inactive-employee',
+            resourceName: 'Unavailable Employee',
+            resourceBizType: 'DIG_EMPLOYEE',
+            hasUsePermission: true,
+            canApplyUse: false,
+            resourceStatus,
+            isDefault: false,
+          }}
+        />
+      );
+
+      expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+    }
+  );
 
   it.each<[string | undefined, string | undefined, string, boolean]>([
     ['DIG_EMPLOYEE', undefined, '001', false],
@@ -2490,15 +2553,16 @@ describe('digital employee publication entry', () => {
     await waitFor(() => expect(error).toHaveBeenCalledWith('仅在用数字员工支持发起发布或更新'));
     error.mockRestore();
   });
+  // intl mock 返回消息键，状态入口断言同步使用消息键，实际译文由国际化用例覆盖。
   it.each([
     [undefined, 'resource.publishToEnterprise'],
-    ['DRAFT', '继续发布'],
-    ['PENDING', '查看发布进度'],
-    ['APPLYING', '查看发布进度'],
-    ['REJECTED', '查看审核结果'],
-    ['WITHDRAWN', '查看发布申请'],
-    ['FAILED', '查看发布结果'],
-    ['PUBLISHED', '发布更新'],
+    ['DRAFT', 'employeePublication.entry.continuePublish'],
+    ['PENDING', 'employeePublication.entry.progress'],
+    ['APPLYING', 'employeePublication.entry.progress'],
+    ['REJECTED', 'employeePublication.entry.reviewResult'],
+    ['WITHDRAWN', 'employeePublication.entry.application'],
+    ['FAILED', 'employeePublication.entry.result'],
+    ['PUBLISHED', 'employeePublication.toolbar.publishUpdate'],
   ])('shows the entry for %s and opens the existing request', async (status, label) => {
     (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
     renderWithQueryClient(
@@ -2536,8 +2600,8 @@ describe('digital employee publication entry', () => {
     expect(openEmployeePublication).toHaveBeenCalledTimes(1);
   });
   it.each([
-    ['DRAFT', '继续发布更新'],
-    ['PENDING', '查看更新进度'],
+    ['DRAFT', 'employeePublication.entry.continueUpdate'],
+    ['PENDING', 'employeePublication.entry.updateProgress'],
   ])('identifies a %s update candidate separately from an initial publication', (status, label) => {
     renderWithQueryClient(
       <ResourceCard
@@ -2626,7 +2690,6 @@ it.each(['001', '017'])(
           ownerType: 'personal',
           resourceStatus: '2',
           agentType,
-          canSetDefault: true,
           hasUsePermission: true,
           canEdit: true,
           canPublishEmployee: true,
@@ -2670,6 +2733,40 @@ it.each(['SKILL', 'KG_DOC', 'TOOLKIT'])(
     expect(screen.getByTestId('resource-menu-edit')).toBeInTheDocument();
   }
 );
+
+it.each(
+  ['personal', 'enterprise'].flatMap((ownerType) => [true, false, undefined].map((canEdit) => ({ ownerType, canEdit })))
+)('uses backend edit permission for $ownerType inner skills: $canEdit', ({ ownerType, canEdit }) => {
+  const onEdit = jest.fn();
+  renderWithQueryClient(
+    <ResourceCard
+      resourceType="SKILL"
+      variant="skillPoster"
+      resource={{
+        resourceId: 'inner-skill',
+        resourceBizType: 'SKILL',
+        resourceStatus: '2',
+        ownerType,
+        skillType: 'inner',
+        canEdit,
+        canDelete: false,
+        canOnShelf: false,
+        canOffShelf: false,
+      }}
+      actionConfig={{ onEdit, enableResourceLifecycle: true }}
+    />
+  );
+  if (canEdit) {
+    fireEvent.click(screen.getByText('common.editInfo'));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  } else {
+    expect(screen.queryByTestId('resource-menu-edit')).not.toBeInTheDocument();
+    expect(onEdit).not.toHaveBeenCalled();
+  }
+  expect(screen.queryByTestId('resource-menu-deleteData')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('resource-menu-shelfData')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('resource-menu-unShelfData')).not.toBeInTheDocument();
+});
 
 it.each(['inner', 'custom', 'workspace'])(
   'shows export for usable %s skills without management permissions',

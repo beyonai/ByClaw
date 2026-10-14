@@ -228,6 +228,25 @@ class EmployeePublicationApplicationServiceTest {
         verify(transactions).rollback(any());
         verify(employees).restorePublicationRuntimeAfterRollback(anyLong());
     }
+    @Test void publicationSynchronizesResourceUseAfterRelationsAndBeforeRuntime() {
+        login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PUBLISHED");
+        var order = inOrder(extensions, auth, dependencies, employees);
+        order.verify(extensions).save(any());
+        order.verify(auth).ensureCreatorDefaultPrivileges(any());
+        order.verify(dependencies).grantAudience(any(), eq(1L));
+        order.verify(auth).synchronizeDigitalEmployeeResourceUsers(any(), any());
+        order.verify(employees).syncPublicationOpenClawWorkSpace(anyLong(), any());
+    }
+    @Test void publicationResourceAuthorizationFailureRollsBackBeforeRuntime() {
+        login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
+        doThrow(new BaseException("resource grant failed")).when(auth).synchronizeDigitalEmployeeResourceUsers(any(), any());
+        var result = service.approve(request());
+        assertThat(result.publication().getStatus()).isEqualTo("FAILED");
+        verify(transactions).rollback(any());
+        verify(employees, never()).syncPublicationOpenClawWorkSpace(anyLong(), any());
+    }
     @Test void failedInitialPublicationCanBeRetriedByAdmin() {
         login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("FAILED");
         publication.setPublishError("old error");
@@ -241,6 +260,7 @@ class EmployeePublicationApplicationServiceTest {
         DigitalEmployeeDTO dto = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
         dto.setResourceName("修改后名称"); request.setEmployee(dto);
         service.save(request);
+        verify(auth, never()).synchronizeDigitalEmployeeResourceUsers(any(), any());
         assertThat(publication.getEmployeeName()).isEqualTo("修改后名称(企业)");
         verify(resources, never()).updateById(any(SsResource.class));
         verifyNoInteractions(extensions);

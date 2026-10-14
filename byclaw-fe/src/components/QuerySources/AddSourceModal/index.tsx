@@ -80,14 +80,6 @@ const AddSourceModal: React.FC<AddSourceModalProps> = (props) => {
     async (file: File) => {
       if (!onFileUpload || !validateAccept(file, accept)) return false;
 
-      if (maxFileSize) {
-        const maxFileSizeNumber = Number(maxFileSize) * 1024 * 1024;
-        if (file.size > maxFileSizeNumber) {
-          message.error(intl.formatMessage({ id: 'upload.fileSizeLimit' }, { size: maxFileSize }));
-          return false;
-        }
-      }
-
       setIsUploading(true);
       handleClose(); // 关闭弹窗
 

@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -28,9 +30,15 @@ import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageView;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
+import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMemberUidCodec;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispatchPromptBuilder;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.ContextFile;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.GroupMember;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -39,7 +47,8 @@ class TenantGroupCoordinationServiceTest {
     private final GroupWorkAssistantService assistants = mock(GroupWorkAssistantService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
     private final AuthApplicationService grants = mock(AuthApplicationService.class);
-    private final TenantGroupCoordinationService service = new TenantGroupCoordinationService(node, assistants, resources, grants);
+    private final TenantGroupCoordinationService service = new TenantGroupCoordinationService(node, assistants, resources, grants,
+        new GroupChatMemberUidCodec());
     private final TenantRequestContext tenant = new TenantRequestContext(20L, 10L, "MEMBER");
 
     private final UserService users = mock(UserService.class);
@@ -60,6 +69,8 @@ class TenantGroupCoordinationServiceTest {
             .thenReturn(Map.of("conversationKey", "30", "snapshot", Map.of("beforeMessageId", "8000000010000000201"), "messages", List.of()));
         when(files.prepareGroupSnapshot(eq("user-20"), any(), any(), any(), any())).thenAnswer(call ->
             new ContextFile("GROUP_PUBLIC", "/by/context/group-history.json", call.getArgument(1, GroupChatContextRequest.class).getBeforeMessageId(), call.getArgument(4)));
+        when(files.prepareGroupMemberSnapshot(eq("user-20"), any(), any(), any(), any(), any()))
+            .thenReturn(new ContextFile("GROUP_MEMBERS", "/by/context/group-members.json", "8000000010000000201"));
     }
 
     @AfterEach
@@ -159,7 +170,7 @@ class TenantGroupCoordinationServiceTest {
 
         assertThat(result.toString()).contains("群组工作助手", "结构化协助请求").doesNotContain("文案员工");
         assertThat(gateway).containsKeys("groupCoordination", "groupCoordinator", "groupChat", "groupContextSnapshot");
-        assertThat(result.toString()).contains("/by/context/group-history.json", "请先读取");
+        assertThat(result.toString()).contains("/by/context/group-history.json", "请先读取", "group-members.json");
         assertThat(result.toString()).contains("/by/.sessions/50/.byclaw/task-delivery.json");
         ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
         verify(node).request(eq(tenant), eq("POST"), eq("/internal/v1/group-chats/30/context"), body.capture(), any());
@@ -180,7 +191,7 @@ class TenantGroupCoordinationServiceTest {
 
         String result = service.decorate(executionContext(request), "hello", new HashMap<>()).toString();
 
-        assertThat(result).contains("TASK 还是 CHAT", "\"dispatchId\":\"70\"", "只有判定为 TASK 时才适用")
+        assertThat(result).contains("TASK 还是 CHAT", "\"dispatchId\":\"70\"", "只有判定为 TASK 时才适用", "group-members.json")
             .doesNotContain("平台确定为 GROUP_TASK", "处理自己的任务", "\"dispatchId\":\"999\"");
         assertThat(request.getExtParams()).containsEntry("tenantGroupCandidate", true)
             .containsEntry("groupDispatch", candidate(target));
@@ -250,7 +261,7 @@ class TenantGroupCoordinationServiceTest {
         ChatProcessContext context = executionContext(request);
         Map<String, Object> gateway = new HashMap<>();
         Object result = service.decorate(context, "协作制作视频", gateway);
-        assertThat(result.toString()).contains("GROUP_TASK", "不要重新判断", "请先读取");
+        assertThat(result.toString()).contains("GROUP_TASK", "不要重新判断", "请先读取", "group-members.json");
         assertThat(request.getExtParams()).doesNotContainKeys("groupChat", "groupContextSnapshot");
         assertThat(((Map<?, ?>) gateway.get("groupChat")).get("beforeMessageId")).isEqualTo("8000000010000000201");
         assertThat(gateway.get("groupContextSnapshot")).isNotNull();
@@ -281,6 +292,155 @@ class TenantGroupCoordinationServiceTest {
         when(node.request(eq(tenant), eq("POST"), eq("/internal/v1/assiman/getMessageByIds"), any(), any())).thenReturn(List.of(foreign));
         assertThatThrownBy(() -> service.decorate(executionContext(request(90L)), "继续任务", new HashMap<>()))
             .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"COORDINATED,90", "DIRECT,42"})
+    @SuppressWarnings("unchecked")
+    void memberFileUsesAuthorizedNodeRosterAndReusesTheScopeValidationRead(String mode, long target) {
+        stored(scope(mode), Long.toString(target));
+        when(resources.findById(90L)).thenReturn(coordinator());
+        AssistantChatDto request = request(target);
+        Map<String, Object> gateway = new HashMap<>();
+
+        String result = service.decorate(executionContext(request), "制作视频", gateway).toString();
+
+        assertThat(result).containsOnlyOnce("/by/context/group-members.json")
+            .doesNotContain("群内昵称", "文案员工", "检索员工", "未选员工", "HUMAN_20");
+        ArgumentCaptor<List<GroupMember>> roster = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<GroupChatContextRequest> context = ArgumentCaptor.forClass(GroupChatContextRequest.class);
+        ArgumentCaptor<GroupChatContextResponse> snapshot = ArgumentCaptor.forClass(GroupChatContextResponse.class);
+        verify(files).prepareGroupMemberSnapshot(eq("user-20"), context.capture(), eq("trace-60"), eq(60L),
+            snapshot.capture(), roster.capture());
+        assertThat(context.getValue().getTargetAgentId()).isEqualTo(target);
+        assertThat(snapshot.getValue().getConversationKey()).isEqualTo("30");
+        assertThat(snapshot.getValue().getSnapshot().getBeforeMessageId()).isEqualTo("8000000010000000201");
+        if ("COORDINATED".equals(mode)) {
+            assertThat(roster.getValue()).containsExactly(new GroupMember("群内昵称", "HUMAN_20"),
+                new GroupMember("文案员工", "DIG_EMPLOYEE_42"), new GroupMember("检索员工", "DIG_EMPLOYEE_43"));
+        }
+        else {
+            assertThat(roster.getValue()).containsExactly(new GroupMember("群内昵称", "HUMAN_20"),
+                new GroupMember("群内助手", "DIG_EMPLOYEE_90"));
+        }
+        verify(node, times(1)).request(eq(tenant), eq("GET"), eq("/internal/v1/group-chats/30"), eq(null), any());
+        assertThat(gateway).doesNotContainKey("members");
+        assertThat(request.getExtParams()).doesNotContainKey("members");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void unscopedCandidateAlsoGetsAFileWithNodeMembersExceptItself() {
+        stored(scope("DIRECT"), "42");
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
+            .thenReturn(Map.of("state", "GROUP_TASK_CANDIDATE", "groupDispatch", candidate(42)));
+
+        String result = service.decorate(executionContext(request(42L)), "hello", new HashMap<>()).toString();
+
+        assertThat(result).contains("group-members.json", "\"dispatchId\":\"70\"")
+            .doesNotContain("群内昵称", "文案员工", "检索员工", "未选员工", "HUMAN_20");
+        ArgumentCaptor<List<GroupMember>> roster = ArgumentCaptor.forClass(List.class);
+        verify(files).prepareGroupMemberSnapshot(eq("user-20"), any(), eq("trace-60"), eq(60L), any(), roster.capture());
+        assertThat(roster.getValue()).containsExactly(new GroupMember("群内昵称", "HUMAN_20"),
+            new GroupMember("群内助手", "DIG_EMPLOYEE_90"), new GroupMember("检索员工", "DIG_EMPLOYEE_43"),
+            new GroupMember("未选员工", "DIG_EMPLOYEE_77"));
+        verify(node, times(1)).request(eq(tenant), eq("GET"), eq("/internal/v1/group-chats/30"), eq(null), any());
+    }
+
+    @Test
+    void unscopedCandidateRejectsAnEmployeeWhoHasLeftTheGroup() {
+        stored(scope("DIRECT"), "42");
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
+            .thenReturn(Map.of("state", "GROUP_TASK_CANDIDATE", "groupDispatch", candidate(42)));
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chats/30"), eq(null), any()))
+            .thenReturn(Map.of("members", List.of(Map.of("memObjType", "USER", "memObjId", "20", "memName", "群内昵称"))));
+
+        assertThatThrownBy(() -> service.decorate(executionContext(request(42L)), "hello", new HashMap<>()))
+            .isInstanceOf(ResponseStatusException.class);
+        verify(files, never()).prepareGroupMemberSnapshot(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void inheritedCoordinationChildOnlyReferencesItsCoordinatorAndHumanMembers() {
+        stored(scope("COORDINATED"), "42");
+        Map<String, Object> parentScope = new HashMap<>(scope("COORDINATED"));
+        parentScope.put("taskSessionId", "40");
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
+            .thenReturn(Map.of("groupCoordination", parentScope, "targetAgentId", "42", "groupCoordinationChild", true));
+        when(resources.findById(90L)).thenReturn(coordinator());
+
+        String result = service.decorate(executionContext(request(42L)), "继续协作", new HashMap<>()).toString();
+
+        assertThat(result).containsOnlyOnce("/by/context/group-members.json");
+        ArgumentCaptor<List<GroupMember>> roster = ArgumentCaptor.forClass(List.class);
+        verify(files).prepareGroupMemberSnapshot(eq("user-20"), any(), any(), any(), any(), roster.capture());
+        assertThat(roster.getValue()).containsExactly(new GroupMember("群内昵称", "HUMAN_20"),
+            new GroupMember("群内助手", "DIG_EMPLOYEE_90"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void switchedTaskEmployeeGetsItsOwnMemberContextIdentity() {
+        stored(scope("DIRECT"), "42");
+        when(resources.findById(90L)).thenReturn(coordinator());
+
+        service.decorate(executionContext(request(43L)), "继续任务", new HashMap<>());
+
+        ArgumentCaptor<GroupChatContextRequest> context = ArgumentCaptor.forClass(GroupChatContextRequest.class);
+        ArgumentCaptor<List<GroupMember>> roster = ArgumentCaptor.forClass(List.class);
+        verify(files).prepareGroupMemberSnapshot(eq("user-20"), context.capture(), eq("trace-60"), eq(60L), any(), roster.capture());
+        assertThat(context.getValue().getTargetAgentId()).isEqualTo(43L);
+        assertThat(roster.getValue()).containsExactly(new GroupMember("群内昵称", "HUMAN_20"),
+            new GroupMember("群内助手", "DIG_EMPLOYEE_90"));
+    }
+
+    @Test
+    void memberUploadFailureStopsTenantDecoration() {
+        stored(scope("DIRECT"), "42");
+        when(resources.findById(90L)).thenReturn(coordinator());
+        when(files.prepareGroupMemberSnapshot(eq("user-20"), any(), any(), any(), any(), any()))
+            .thenThrow(new ChatTurnPreparationException("成员上下文准备失败，请重试", new IllegalStateException("storage")));
+
+        assertThatThrownBy(() -> service.decorate(executionContext(request(42L)), "制作视频", new HashMap<>()))
+            .isInstanceOf(ChatTurnPreparationException.class).hasMessage("成员上下文准备失败，请重试");
+    }
+
+    @Test
+    void tenantAttachmentPayloadKeepsOriginalFilesAndBody() {
+        stored(scope("DIRECT"), "42");
+        when(resources.findById(90L)).thenReturn(coordinator());
+        JSONArray content = JSON.parseArray("[{\"role\":\"user\",\"content\":{\"text\":\"分析附件\",\"files\":[{\"name\":\"report.txt\"}]}}]");
+
+        JSONArray decorated = (JSONArray) service.decorate(executionContext(request(42L)), content, new HashMap<>());
+
+        assertThat(decorated.getJSONObject(0).getJSONObject("content").getString("text"))
+            .containsOnlyOnce("/by/context/group-members.json").doesNotContain("HUMAN_20", "文案员工");
+        assertThat(content.getJSONObject(0).getJSONObject("content").getString("text")).isEqualTo("分析附件");
+        assertThat(decorated.getJSONObject(0).getJSONObject("content").getJSONArray("files"))
+            .isEqualTo(content.getJSONObject(0).getJSONObject("content").getJSONArray("files"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void missingNodeNamesFallBackToPlatformIdentityWithoutChangingMemberUid() {
+        stored(scope("DIRECT"), "42");
+        when(resources.findById(90L)).thenReturn(coordinator());
+        Users user = new Users(); user.setUserId(20L); user.setUserCode("user-20"); user.setUserName("平台用户");
+        when(users.findById(20L)).thenReturn(user);
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chats/30"), eq(null), any()))
+            .thenReturn(Map.of("members", List.of(
+                Map.of("memObjType", "USER", "memObjId", "20", "memName", ""),
+                Map.of("memObjType", "AGENT", "memObjId", "90"),
+                Map.of("memObjType", "AGENT", "memObjId", "42"),
+                Map.of("memObjType", "AGENT", "memObjId", "43"))));
+
+        service.decorate(executionContext(request(42L)), "hello", new HashMap<>());
+
+        ArgumentCaptor<List<GroupMember>> roster = ArgumentCaptor.forClass(List.class);
+        verify(files).prepareGroupMemberSnapshot(eq("user-20"), any(), any(), any(), any(), roster.capture());
+        assertThat(roster.getValue()).containsExactly(new GroupMember("平台用户", "HUMAN_20"),
+            new GroupMember("群组工作助手", "DIG_EMPLOYEE_90"));
     }
 
     private ChatProcessContext executionContext(AssistantChatDto request) {
@@ -318,9 +478,11 @@ class TenantGroupCoordinationServiceTest {
             .thenReturn(Map.of("groupCoordination", scope, "targetAgentId", target));
         when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chats/30"), eq(null), any()))
             .thenReturn(Map.of("members", List.of(
-                Map.of("memObjType", "AGENT", "memObjId", "90"),
-                Map.of("memObjType", "AGENT", "memObjId", "42"),
-                Map.of("memObjType", "AGENT", "memObjId", "43"))));
+                Map.of("memObjType", "USER", "memObjId", "20", "memName", "群内昵称"),
+                Map.of("memObjType", "AGENT", "memObjId", "90", "memName", "群内助手"),
+                Map.of("memObjType", "AGENT", "memObjId", "42", "memName", "文案员工"),
+                Map.of("memObjType", "AGENT", "memObjId", "43", "memName", "检索员工"),
+                Map.of("memObjType", "AGENT", "memObjId", "77", "memName", "未选员工"))));
     }
 
     private SsResource coordinator() {

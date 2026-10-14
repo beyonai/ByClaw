@@ -14,7 +14,10 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import java.util.List;
 import java.util.Map;
+import java.util.Date;
 import org.junit.jupiter.api.Test;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 class DeepSeekWebSearchRuntimeServiceTest {
 
@@ -23,11 +26,13 @@ class DeepSeekWebSearchRuntimeServiceTest {
     private final ConnectorManifestService manifestService = mock(ConnectorManifestService.class);
     private final DeepSeekWebSearchClient client = mock(DeepSeekWebSearchClient.class);
     private final DeepSeekWebSearchBatchExecutor batchExecutor = mock(DeepSeekWebSearchBatchExecutor.class);
+    private final ByaiSystemConfigService systemConfigService = mock(ByaiSystemConfigService.class);
     private final DeepSeekWebSearchRuntimeService service = new DeepSeekWebSearchRuntimeService(
-        connectorInfoService, connectionStateService, manifestService, client, batchExecutor);
+        connectorInfoService, connectionStateService, manifestService, client, batchExecutor,
+        systemConfigService, new ObjectMapper());
 
     @Test
-    void disabledConnectorCannotReadOrUseCredential() {
+    void disabledPersonalAuthorizationWithoutGlobalCredentialPromptsConfiguration() {
         ConnectorInfo connector = connector();
         when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
         ConnectorAuth disabledAuthorization = new ConnectorAuth();
@@ -37,7 +42,7 @@ class DeepSeekWebSearchRuntimeServiceTest {
 
         assertThatThrownBy(() -> service.search(42L, "latest news", 5))
             .isInstanceOf(DeepSeekWebSearchException.class)
-            .hasMessageContaining("CONNECTOR_NOT_ENABLED");
+            .hasMessageContaining("CONNECTOR_NOT_AUTHORIZED");
 
         verify(manifestService, never()).readManagedCredentials(
             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
@@ -47,7 +52,7 @@ class DeepSeekWebSearchRuntimeServiceTest {
     }
 
     @Test
-    void revokedOrMissingAuthorizationIsReportedSeparatelyFromDisabled() {
+    void missingPersonalAndGlobalAuthorizationPromptsConfiguration() {
         ConnectorInfo connector = connector();
         when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
         when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(null);
@@ -72,6 +77,183 @@ class DeepSeekWebSearchRuntimeServiceTest {
         when(client.search(connector, "secret", "latest news", 5)).thenReturn(expected);
 
         assertThat(service.search(42L, "latest news", 5)).isEqualTo(expected);
+        verify(systemConfigService, never()).getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG);
+    }
+
+    @Test
+    void connectorDisabledWhilePersonalSearchRunsIsNotTreatedAsCredentialFallback() {
+        ConnectorInfo connector = connector();
+        ConnectorInfo disabled = connector();
+        disabled.setStatusCd("00X");
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE))
+            .thenReturn(connector, disabled);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(enabledAuthorization());
+        when(manifestService.readManagedCredentials(42L, connector, DeepSeekWebSearchCredentialFormProvider.MANAGED_KEYS))
+            .thenReturn(Map.of(DeepSeekWebSearchCredentialFormProvider.API_KEY, "secret"));
+        when(client.search(connector, "secret", "latest news", 5))
+            .thenReturn(new DeepSeekWebSearchResult(List.of(), false));
+
+        assertThatThrownBy(() -> service.search(42L, "latest news", 5))
+            .isInstanceOf(DeepSeekWebSearchException.class)
+            .hasMessageContaining("CONNECTOR_NOT_ENABLED");
+        verify(systemConfigService, never()).getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG);
+    }
+
+    @Test
+    void disabledPersonalAuthorizationFallsBackToGlobalCredential() {
+        ConnectorInfo connector = connector();
+        ConnectorAuth authorization = enabledAuthorization();
+        authorization.setEnableFlag("N");
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(authorization);
+        when(systemConfigService.getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG))
+            .thenReturn("{\"deepseek-web-search\":\" global-secret \"}");
+        DeepSeekWebSearchResult expected = new DeepSeekWebSearchResult(List.of(), false);
+        when(client.search(connector, "global-secret", "latest news", 5)).thenReturn(expected);
+
+        assertThat(service.search(42L, "latest news", 5)).isEqualTo(expected);
+
+        verify(manifestService, never()).readManagedCredentials(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void expiredPersonalAuthorizationFallsBackToGlobalCredential() {
+        ConnectorInfo connector = connector();
+        ConnectorAuth authorization = enabledAuthorization();
+        authorization.setExpireTime(new Date(System.currentTimeMillis() - 1_000));
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(authorization);
+        when(systemConfigService.getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG))
+            .thenReturn("{\"deepseek-web-search\":\"global-secret\"}");
+        DeepSeekWebSearchResult expected = new DeepSeekWebSearchResult(List.of(), false);
+        when(client.search(connector, "global-secret", "latest news", 5)).thenReturn(expected);
+
+        assertThat(service.search(42L, "latest news", 5)).isEqualTo(expected);
+    }
+
+    @Test
+    void invalidPersonalCredentialRetriesWithGlobalCredential() {
+        ConnectorInfo connector = connector();
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(enabledAuthorization());
+        when(manifestService.readManagedCredentials(42L, connector, DeepSeekWebSearchCredentialFormProvider.MANAGED_KEYS))
+            .thenReturn(Map.of(DeepSeekWebSearchCredentialFormProvider.API_KEY, "personal-secret"));
+        when(systemConfigService.getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG))
+            .thenReturn("{\"deepseek-web-search\":\"global-secret\"}");
+        when(client.search(connector, "personal-secret", "latest news", 5))
+            .thenThrow(new DeepSeekWebSearchException("CONNECTOR_CREDENTIAL_INVALID", "expired"));
+        DeepSeekWebSearchResult expected = new DeepSeekWebSearchResult(List.of(), false);
+        when(client.search(connector, "global-secret", "latest news", 5)).thenReturn(expected);
+
+        assertThat(service.search(42L, "latest news", 5)).isEqualTo(expected);
+    }
+
+    @Test
+    void unavailableEnabledPersonalCredentialRetriesWithGlobalCredential() {
+        ConnectorInfo connector = connector();
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(enabledAuthorization());
+        when(manifestService.readManagedCredentials(42L, connector, DeepSeekWebSearchCredentialFormProvider.MANAGED_KEYS))
+            .thenReturn(Map.of(DeepSeekWebSearchCredentialFormProvider.API_KEY, "personal-secret"));
+        when(systemConfigService.getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG))
+            .thenReturn("{\"deepseek-web-search\":\"global-secret\"}");
+        when(client.search(connector, "personal-secret", "latest news", 5))
+            .thenThrow(new DeepSeekWebSearchException("DEEPSEEK_WEB_SEARCH_UNAVAILABLE", "provider unavailable"));
+        DeepSeekWebSearchResult expected = new DeepSeekWebSearchResult(List.of(), false);
+        when(client.search(connector, "global-secret", "latest news", 5)).thenReturn(expected);
+
+        assertThat(service.search(42L, "latest news", 5)).isEqualTo(expected);
+    }
+
+    @Test
+    void unavailablePersonalAndGlobalCredentialsPromptConnectorConfiguration() {
+        ConnectorInfo connector = connector();
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(null);
+        when(systemConfigService.getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG)).thenReturn("  ");
+
+        assertThatThrownBy(() -> service.search(42L, "latest news", 5))
+            .isInstanceOf(DeepSeekWebSearchException.class)
+            .hasMessageContaining("CONNECTOR_NOT_AUTHORIZED")
+            .hasMessageContaining("connector settings");
+    }
+
+    @Test
+    void unresolvedGlobalEnvironmentPlaceholderIsNotUsedAsCredential() {
+        ConnectorInfo connector = connector();
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(null);
+        when(systemConfigService.getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG))
+            .thenReturn("{\"deepseek-web-search\":\"${DEEPSEEK_WEB_SEARCH_API_KEY}\"}");
+
+        assertThatThrownBy(() -> service.search(42L, "latest news", 5))
+            .isInstanceOf(DeepSeekWebSearchException.class)
+            .hasMessageContaining("CONNECTOR_NOT_AUTHORIZED");
+
+        verify(client, never()).search(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    void invalidGlobalCredentialPromptsConnectorConfiguration() {
+        ConnectorInfo connector = connector();
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(null);
+        when(systemConfigService.getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG))
+            .thenReturn("{\"deepseek-web-search\":\"global-secret\"}");
+        when(client.search(connector, "global-secret", "latest news", 5))
+            .thenThrow(new DeepSeekWebSearchException("CONNECTOR_CREDENTIAL_INVALID", "expired"));
+
+        assertThatThrownBy(() -> service.search(42L, "latest news", 5))
+            .isInstanceOf(DeepSeekWebSearchException.class)
+            .hasMessageContaining("CONNECTOR_NOT_AUTHORIZED")
+            .hasMessageContaining("connector settings");
+    }
+
+    @Test
+    void unavailableGlobalCredentialPromptsConnectorConfiguration() {
+        ConnectorInfo connector = connector();
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(null);
+        when(systemConfigService.getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG))
+            .thenReturn("{\"deepseek-web-search\":\"global-secret\"}");
+        when(client.search(connector, "global-secret", "latest news", 5))
+            .thenThrow(new DeepSeekWebSearchException("DEEPSEEK_WEB_SEARCH_UNAVAILABLE", "provider unavailable"));
+
+        assertThatThrownBy(() -> service.search(42L, "latest news", 5))
+            .isInstanceOf(DeepSeekWebSearchException.class)
+            .hasMessageContaining("CONNECTOR_NOT_AUTHORIZED")
+            .hasMessageContaining("connector settings");
+    }
+
+    @Test
+    void ignoresKeysForOtherWebSearchProviders() {
+        ConnectorInfo connector = connector();
+        when(connectorInfoService.findByCode(DeepSeekWebSearchRuntimeService.CONNECTOR_CODE)).thenReturn(connector);
+        when(connectionStateService.findActiveAuthorization("42", 100L)).thenReturn(null);
+        when(systemConfigService.getDcSystemConfigValueByCode(
+            DeepSeekWebSearchRuntimeService.GLOBAL_API_KEY_CONFIG))
+            .thenReturn("{\"another-search\":\"other-secret\"}");
+
+        assertThatThrownBy(() -> service.search(42L, "latest news", 5))
+            .isInstanceOf(DeepSeekWebSearchException.class)
+            .hasMessageContaining("CONNECTOR_NOT_AUTHORIZED");
+
+        verify(client, never()).search(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test

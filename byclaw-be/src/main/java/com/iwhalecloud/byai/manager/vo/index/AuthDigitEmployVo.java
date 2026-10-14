@@ -126,11 +126,6 @@ public class AuthDigitEmployVo {
     private Boolean isDefault;
 
     /**
-     * 是否允许当前用户将该数字员工设为默认助理。
-     */
-    private Boolean canSetDefault;
-
-    /**
      * 优先返回订阅的授权类型
      */
     private String grantType;

@@ -562,7 +562,6 @@ public class DigitalEmployeeApplicationService {
         employee.setCanDelete(permissions.isCanDelete());
         employee.setCanApplyUse(permissions.isCanApplyUse());
         employee.setUseApplyPending(permissions.isUseApplyPending());
-        employee.setCanSetDefault(permissions.isCanSetDefault());
         employee.setCanRestore(permissions.isCanRestore());
         employee.setCanOnShelf(permissions.isCanOnShelf());
         employee.setCanOffShelf(permissions.isCanOffShelf());
@@ -590,7 +589,6 @@ public class DigitalEmployeeApplicationService {
         employee.setCanDelete(permissions.isCanDelete());
         employee.setCanApplyUse(permissions.isCanApplyUse());
         employee.setUseApplyPending(permissions.isUseApplyPending());
-        employee.setCanSetDefault(permissions.isCanSetDefault());
         employee.setCanRestore(permissions.isCanRestore());
         employee.setCanOnShelf(permissions.isCanOnShelf());
         employee.setCanOffShelf(permissions.isCanOffShelf());
@@ -959,12 +957,17 @@ public class DigitalEmployeeApplicationService {
         // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存,当前运行时改读 DIG_EMPLOYEE_{resourceId}.
         // this.syncDigEmployeeSkillsToRedisQuietly(ssResource.getResourceId());
 
-        // 前台的直接上架给予使用权限
+        authApplicationService.ensureCreatorDefaultPrivileges(ssResource);
+
+        if (!isEmployeeGroup) {
+            // 初始化创建者权限后补齐绑定资源使用权限，资源授权失败与员工创建一起回滚。
+            authApplicationService.synchronizeDigitalEmployeeResourceUsers(ssResource, digitalEmployeeDTO.getRelTools());
+        }
+
+        // 绑定资源权限校验成功后再发送上架事件，避免失败创建被提前通知为可用。
         if (isFrontAccess) {
             resourceEventService.sendResourceShelfEvent(ssResource);
         }
-
-        authApplicationService.ensureCreatorDefaultPrivileges(ssResource);
 
         if (isEmployeeGroup) {
             digitalEmployeeGroupApplicationService.saveGroupConfiguration(ssResource, digitalEmployeeDTO);
@@ -1224,6 +1227,8 @@ public class DigitalEmployeeApplicationService {
             this.reconcileDigitalEmployeeUpdateRelations(ssResource, relIds, resourceRelDetails,
                 digitalEmployeeDTO.getRelResourceInfoList());
             this.rebuildAndSaveDigitalEmployeeRelSkills(resourceId);
+            // 使用保存后的完整关联，既补本次新增资源，也修复现有使用人的历史权限遗漏。
+            authApplicationService.synchronizeDigitalEmployeeResourceUsers(ssResource, digitalEmployeeDTO.getRelTools());
         }
         // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存,当前运行时改读 DIG_EMPLOYEE_{resourceId}.
         // this.syncDigEmployeeSkillsToRedisQuietly(resourceId);
@@ -1351,6 +1356,10 @@ public class DigitalEmployeeApplicationService {
             ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
         } else {
             ssResource = ssResourceService.findById(digitalEmployeeId);
+            // 企业员工的知识/工具安装也会补使用人权限，必须与人员授权共用员工行锁。
+            if (ssResource != null && OwnerType.ENTERPRISE.equals(ssResource.getOwnerType())) {
+                ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
+            }
         }
         this.validateResourceInstallPermission(ssResource, installRelResources);
 
@@ -1364,6 +1373,7 @@ public class DigitalEmployeeApplicationService {
 
         this.compareSsResourceRelDetail(ssResource, new ArrayList<>(mergedRelIds), resourceRelDetails, null);
         this.canonicalizeManualSkillRelations(digitalEmployeeId, installRelResources);
+        authApplicationService.synchronizeDigitalEmployeeResourceUsers(ssResource, null);
         this.refreshRuntimeAfterSnapshotMutation(ssResource);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
@@ -1426,6 +1436,7 @@ public class DigitalEmployeeApplicationService {
         }
 
         if (changed) {
+            authApplicationService.synchronizeDigitalEmployeeResourceUsers(digitalEmployee, null);
             this.refreshRuntimeAfterSnapshotMutation(digitalEmployee);
         }
         return result;
@@ -2453,14 +2464,13 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 有使用或管理权限的数字员工均可设为默认，和资源权限接口的 canSetDefault 口径保持一致。
+     * 默认员工会实际参与对话，必须具备有效使用权限；管理员身份不能绕过使用授权。
      */
     private boolean canCurrentUserSetAsDefault(SsResource resource, Long currentUserId) {
         if (resource == null || currentUserId == null) {
             return false;
         }
-        return authApplicationService.hasResourceManagePermission(resource)
-            || authApplicationService.hasResourceUsePermission(resource, currentUserId);
+        return authApplicationService.hasResourceUsePermission(resource, currentUserId);
     }
 
     /**

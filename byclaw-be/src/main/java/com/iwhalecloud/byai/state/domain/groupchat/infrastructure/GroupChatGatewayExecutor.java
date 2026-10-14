@@ -46,7 +46,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationExcepti
 import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMemberUidCodec;
-import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispatchPromptBuilder.GroupMemberPrompt;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.GroupMember;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
@@ -404,18 +404,26 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             decorated = decorateText(content, text -> promptBuilder.appendGroupHistory(text, groupHistory));
         }
         if (groupHistory.snapshot() != null) gatewayParams.put("groupContextSnapshot", groupHistory.snapshot());
-        if (Objects.equals(execution.getTraceId(), context.traceId) && "RUNNING".equals(execution.getStatus())) {
+        boolean runningDispatch = Objects.equals(execution.getTraceId(), context.traceId)
+            && "RUNNING".equals(execution.getStatus());
+        // 保留原有成员提示的适用分支，只在文件就绪后统一追加一次可选参考。
+        if (runningDispatch || (task != null && scope != null)) {
+            GroupChatSessionContextFileService.ContextFile membersFile = contextFileService.prepareGroupMembers(
+                initiator.getUserCode(), historyRequest, context.traceId, context.userMessageId, buildMemberRoster(execution));
+            decorated = decorateText(decorated, text -> promptBuilder.appendGroupMembers(text, membersFile));
+        }
+        if (runningDispatch) {
             return decorateText(decorated, text -> {
                 String dispatchContent = turn == null ? text : promptBuilder.appendTurnContext(text, turn.getInputContent());
                 if (turn != null && "CHAT_CONTINUATION".equals(turn.getPhase())) {
-                    return promptBuilder.appendChatContinuation(dispatchContent, buildMemberRoster(execution));
+                    return promptBuilder.appendChatContinuation(dispatchContent);
                 }
                 if (scope != null && "COORDINATED".equals(scope.get("mode"))) {
                     return promptBuilder.appendTaskDeliveryReminder(promptBuilder.appendCoordination(dispatchContent,
-                        scope, buildMemberRoster(execution)), context.sessionId);
+                        scope), context.sessionId);
                 }
                 return promptBuilder.appendTaskDeliveryReminder(promptBuilder.append(dispatchContent,
-                    execution.getExecutionId(), context.sessionId, buildMemberRoster(execution)), context.sessionId);
+                    execution.getExecutionId(), context.sessionId), context.sessionId);
             });
         }
         // 私有任务续聊不重复分类，文件提示和交付提醒只作用于出站请求。
@@ -424,7 +432,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         }
         return decorateText(decorated, text -> {
             String taskContent = promptBuilder.appendTaskDeliveryReminder(scope == null ? text
-                : promptBuilder.appendCoordination(text, scope, buildMemberRoster(execution)), context.sessionId);
+                : promptBuilder.appendCoordination(text, scope), context.sessionId);
             return "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())
                 ? promptBuilder.appendPublicationPreparation(taskContent, context.sessionId) : taskContent;
         });
@@ -500,8 +508,8 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         throw new IllegalArgumentException("Group dispatch requires textual message content");
     }
 
-    private List<GroupMemberPrompt> buildMemberRoster(ByaiGroupChatExecution execution) {
-        List<GroupMemberPrompt> roster = new ArrayList<>();
+    private List<GroupMember> buildMemberRoster(ByaiGroupChatExecution execution) {
+        List<GroupMember> roster = new ArrayList<>();
         List<ByaiSessionMember> members = memberService.findSessionMembers(execution.getGroupSessionId(), null, null);
         if (members == null) {
             return roster;
@@ -521,7 +529,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             if (MemObjType.USER.name().equals(member.getMemObjType())) {
                 Users user = userService.findById(member.getMemObjId());
                 if (user != null && user.getUserName() != null) {
-                    roster.add(new GroupMemberPrompt(user.getUserName(),
+                    roster.add(new GroupMember(user.getUserName(),
                         uidCodec.encode(AgentMetaEnum.HUMAN, member.getMemObjId())));
                 }
             }
@@ -531,7 +539,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                     : coordinatorId.equals(member.getMemObjId().toString()))) continue;
                 SsResource memberAgent = resourceService.findById(member.getMemObjId());
                 if (memberAgent != null && memberAgent.getResourceName() != null) {
-                    roster.add(new GroupMemberPrompt(memberAgent.getResourceName(),
+                    roster.add(new GroupMember(memberAgent.getResourceName(),
                         uidCodec.encode(AgentMetaEnum.DIG_EMPLOYEE, member.getMemObjId())));
                 }
             }

@@ -74,7 +74,27 @@ KnowledgeEntity 和 `fileToMarkdownIndex` 请求进入持久化队列时，ByCla
 
 ## 环境变量约定
 
-`start.sh` 从仓库根目录 `.env` 读取环境变量。
+`start.sh` 读取模块目录 `byclaw-qa/.env`，也接收进程环境变量；standalone 部署通过
+Compose 的 `env_file` 注入仓库根目录 `.env`。
+
+Embedding 优先使用 Redis `byai:aimodel:typelist` 中的模型配置；缺失或配置内容无效时，
+回退到以下环境变量（API 启动及后续 Provider 调用均适用）：
+
+```dotenv
+BYCLAW_INIT_EMBEDDING_MODEL_NO=
+BYCLAW_INIT_EMBEDDING_URL=
+BYCLAW_INIT_EMBEDDING_API_TOKEN=
+BYCLAW_INIT_EMBEDDING_DIMENSIONS=1024
+```
+
+模型编码、HTTP(S) 地址和 Token 必须同时有效，不能使用“请用户替换”占位值。
+维度未设置或留空时，`start.sh` 会导出默认值 1024；绕过脚本直接调用 Provider 也有相同默认值。
+显式设置时必须为正整数，且应与模型实际输出一致。
+回退维度独立于旧的 `EMBEDDING_DIMENSION` / `BYCLAW_QA_EMBEDDING_DIMENSION` 设置。
+Redis 有效时不使用上述回退值，也不会把环境变量配置写回 Redis。
+两处配置都无效时继续报模型配置错误；Redis 连接故障不会触发此回退。
+这里的校验仅检查配置内容，不会请求模型接口探测可用性或向量维度。
+本次仅支持 Embedding 回退，`BYCLAW_INIT_LLM_*` 不参与 QA 的 LLM 选择。
 
 其中，项目公共基础设施配置建议放在仓库根目录 `.env` 中，例如：
 

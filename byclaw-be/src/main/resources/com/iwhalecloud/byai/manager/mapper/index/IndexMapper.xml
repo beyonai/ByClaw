@@ -141,6 +141,10 @@
                    else null
                end as grantType,
                k.latest_grant_time
+               <!-- 参数放在查询列中，避免 PageHelper 计数时保留带参数的 ORDER BY，生成非法聚合 SQL。 -->
+               <if test="sortMode == 'DEFAULT_USAGE_DESC'">
+                   , case when a.resource_id = #{defaultDigitalEmployeeId} then 0 else 1 end as default_employee_priority
+               </if>
         from ss_resource a
                  left join ss_res_ext_dig_employee b
                      on a.resource_id = b.resource_id
@@ -297,13 +301,31 @@
                 and b.machine_channel like concat('%', #{machineChannel}, '%')
             </if>
         </where>
-        <!-- 先按当前用户近90天使用次数倒序，次数相同再按最近修改时间倒序。 -->
-        order by COALESCE(d.total, 0) desc,
-                 COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
-                 a.create_time desc,
-                 COALESCE(c.is_top, 0) desc,
-                 COALESCE(c.top_time, '1970-01-01 00:00:00') desc,
-                 COALESCE(k.latest_grant_time, '1970-01-01 00:00:00') desc
+        <!-- 两个入口的排序均在分页前完成；ID 降序保证同时间记录跨页时顺序稳定。 -->
+        <choose>
+            <when test="sortMode == 'DEFAULT_USAGE_DESC'">
+                order by default_employee_priority asc,
+                         COALESCE(d.total, 0) desc,
+                         COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
+                         a.create_time desc,
+                         a.resource_id desc
+            </when>
+            <when test="sortMode == 'GROUP_UPDATED_DESC'">
+                order by case when b.agent_type = '017' then 0 else 1 end asc,
+                         COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
+                         a.create_time desc,
+                         a.resource_id desc
+            </when>
+            <otherwise>
+                <!-- 未指定场景的旧入口继续使用原排序。 -->
+                order by COALESCE(d.total, 0) desc,
+                         COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
+                         a.create_time desc,
+                         COALESCE(c.is_top, 0) desc,
+                         COALESCE(c.top_time, '1970-01-01 00:00:00') desc,
+                         COALESCE(k.latest_grant_time, '1970-01-01 00:00:00') desc
+            </otherwise>
+        </choose>
     </select>
 
     <select id="queryMyUsual" resultMap="AuthDigitEmployVoResultMap">
@@ -834,9 +856,12 @@
                          a.resource_id desc
             </when>
             <when test="employeeGroupFirst == true">
+                <!-- 未开启收藏的企业推荐复用现有历史使用次数，在分页前按组、热度、时间和 ID 排序。 -->
                 order by case when b.agent_type = '017' then 0 else 1 end asc,
+                         COALESCE(d.total, 0) desc,
                          COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
-                         a.create_time desc
+                         a.create_time desc,
+                         a.resource_id desc
             </when>
             <when test="orderField == 'use' and orderBy == 'asc'">
                 order by case when a.resource_status = 3 then 1 else 0 end asc,

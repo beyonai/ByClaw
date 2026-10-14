@@ -4,11 +4,39 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.iwhalecloud.byai.manager.domain.resource.request.ResourceUseAuthQo;
 import java.util.List;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class AuthControllerResourceScopeTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "CREATED_BY_ME", "AUTHORIZED_TO_ME"})
+    void enterpriseSkillConfigurationKeepsAvailableScopeForEveryFilter(String permission) {
+        ResourceUseAuthQo request = request("SKILL");
+        request.setAvailableOnly(true);
+        request.setPermission(permission);
+        request.setIncludeAllEnterpriseOwnerType(true);
+        ReflectionTestUtils.invokeMethod(new AuthController(), "enrichResourceListScope", request);
+        // 三个归属筛选都保留可用资源口径，不能恢复平台全部企业技能查询。
+        assertThat(request.getIncludeAllEnterpriseOwnerType()).isFalse();
+        assertThat(request.getPermission()).isEqualTo(permission);
+    }
+
+    @Test
+    void personalSkillConfigurationKeepsCreatorScopeWithoutDefaultResources() {
+        ResourceUseAuthQo request = request("SKILL");
+        request.setOwnerType("personal");
+        request.setAvailableOnly(true);
+        request.setPermission("CREATED_BY_ME");
+        request.setIncludeAllEnterpriseOwnerType(true);
+        ReflectionTestUtils.invokeMethod(new AuthController(), "enrichResourceListScope", request);
+        assertThat(request.getOwnerType()).isEqualTo("personal");
+        assertThat(request.getPermission()).isEqualTo("CREATED_BY_ME");
+        assertThat(request.getIncludeAllEnterpriseOwnerType()).isFalse();
+        assertThat(request.getIncludeDefaultOwnerType()).isFalse();
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})

@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { buildResourceCallAgentPayload } from "./mcp.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { refreshMcpCapability } from "../mcp-client.js";
+import { buildResourceCallAgentPayload, executeMcp } from "./mcp.js";
+
+vi.mock("../call-agent.js", () => ({
+  executeViaCallAgent: vi.fn(),
+}));
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("buildResourceCallAgentPayload", () => {
   it("adds resource_ids alongside OBJECT resource codes", () => {
@@ -42,5 +51,113 @@ describe("buildResourceCallAgentPayload", () => {
       call_view_ids: ["todo_view"],
       resource_ids: ["10810924"],
     });
+  });
+});
+
+describe("streamable HTTP MCP session lifecycle", () => {
+  it("initializes a session before tools/call when capability has no session id", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2024-11-05" } }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json", "mcp-session-id": "session-fallback" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jsonrpc: "2.0", id: 2, result: { ok: true } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeMcp({
+      capability: {
+        resource_type: "MCP",
+        name: "mcp",
+        metadata: { resource_id: "mcp-1" },
+        mcp: {
+          server_url: "http://mcp.test",
+          transfer_type: "streamable_http",
+          tools: [{ name: "run", input_schema: { type: "object" } }],
+        },
+      } as never,
+      action: "run",
+      parameters: {},
+      authContext: { session: "", userId: "", headers: {} },
+    });
+
+    expect(result.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ method: "initialize" });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      method: "notifications/initialized",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({ method: "tools/call" });
+    const notificationHeaders = fetchMock.mock.calls[1]?.[1]?.headers as Record<string, string>;
+    const callHeaders = fetchMock.mock.calls[2]?.[1]?.headers as Record<string, string>;
+    expect(notificationHeaders["Mcp-Session-Id"]).toBe("session-fallback");
+    expect(callHeaders["Mcp-Session-Id"]).toBe("session-fallback");
+  });
+
+  it("uses the discovery session for the subsequent tools/call request", async () => {
+    const discoveryFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2024-11-05" } }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json", "mcp-session-id": "session-123" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            result: { tools: [{ name: "run", inputSchema: { type: "object" } }] },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    const capability = {
+      resource_type: "MCP",
+      name: "mcp",
+      metadata: { resource_id: "mcp-1" },
+      mcp: { server_url: "http://mcp.test", transfer_type: "streamable_http", tools: [] },
+    };
+
+    await refreshMcpCapability({
+      capability: capability as never,
+      authContext: { session: "", userId: "", headers: {} },
+      fetchImpl: discoveryFetch as unknown as typeof fetch,
+    });
+
+    const callFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { ok: true } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", callFetch);
+
+    const result = await executeMcp({
+      capability: capability as never,
+      action: "run",
+      parameters: {},
+      authContext: { session: "", userId: "", headers: {} },
+    });
+
+    expect(result.success).toBe(true);
+    const callHeaders = callFetch.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(callHeaders["Mcp-Session-Id"]).toBe("session-123");
   });
 });
