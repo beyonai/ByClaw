@@ -52,7 +52,7 @@ export async function executeMcp(params: {
 
   const mcp = isRecord(capability.mcp) ? (capability.mcp as Dict) : {};
   const serverUrl = asString(mcp.server_url);
-  const mcpSessionId = asString(mcp.session_id);
+  let mcpSessionId = asString(mcp.session_id);
   const transferType = normalizeMcpTransferType(
     mcp.transfer_type ?? mcp.transferType ?? mcp.mcpType ?? mcp.mcp_type,
   );
@@ -110,6 +110,21 @@ export async function executeMcp(params: {
   const { request_headers } = getCommonGatewayMetadata(params.parameters);
   if (request_headers) {
     Object.assign(headers, request_headers);
+  }
+
+  if (transferType === "streamable_http" && !mcpSessionId) {
+    const initialized = await initializeStreamableHttpSession({
+      serverUrl,
+      headers,
+      timeoutMs: params.timeoutMs ?? 30_000,
+      signal: params.signal,
+    });
+    if ("error" in initialized) {
+      return initialized.error;
+    }
+    mcpSessionId = initialized.sessionId;
+    headers["Mcp-Session-Id"] = mcpSessionId;
+    mcp.session_id = mcpSessionId;
   }
 
   debugMcpSessionHeaders({
@@ -171,6 +186,76 @@ export async function executeMcp(params: {
       action: toolInfo.name,
     },
   };
+}
+
+async function initializeStreamableHttpSession(params: {
+  serverUrl: string;
+  headers: Record<string, string>;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<{ sessionId: string } | { error: ExecutorFailure }> {
+  const initResult = await postJson({
+    url: params.serverUrl,
+    payload: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "openclaw-baiying-executor", version: "1.0" },
+      },
+    },
+    headers: params.headers,
+    timeoutMs: params.timeoutMs,
+    signal: params.signal,
+  });
+  if ("error" in initResult) {
+    return {
+      error: makeError("MCP_CALL_FAILED", `MCP initialize failed: ${initResult.error.error}`),
+    };
+  }
+  if (initResult.response.status !== 200 && initResult.response.status !== 202) {
+    return {
+      error: makeError(
+        "MCP_CALL_FAILED",
+        `MCP initialize failed: HTTP ${initResult.response.status}`,
+      ),
+    };
+  }
+
+  const sessionId = initResult.response.headers.get("mcp-session-id")?.trim() ?? "";
+  if (!sessionId) {
+    return {
+      error: makeError("MCP_CALL_FAILED", "MCP initialize response missing Mcp-Session-Id"),
+    };
+  }
+
+  const sessionHeaders = { ...params.headers, "Mcp-Session-Id": sessionId };
+  const notificationResult = await postJson({
+    url: params.serverUrl,
+    payload: { jsonrpc: "2.0", method: "notifications/initialized", params: {} },
+    headers: sessionHeaders,
+    timeoutMs: params.timeoutMs,
+    signal: params.signal,
+  });
+  if ("error" in notificationResult) {
+    return {
+      error: makeError(
+        "MCP_CALL_FAILED",
+        `MCP notifications/initialized failed: ${notificationResult.error.error}`,
+      ),
+    };
+  }
+  if (notificationResult.response.status !== 200 && notificationResult.response.status !== 202) {
+    return {
+      error: makeError(
+        "MCP_CALL_FAILED",
+        `MCP notifications/initialized failed: HTTP ${notificationResult.response.status}`,
+      ),
+    };
+  }
+  return { sessionId };
 }
 
 function normalizeMcpTransferType(raw: unknown): "sse" | "streamable_http" {
