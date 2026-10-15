@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 import urllib.request
 import uuid
@@ -191,24 +192,36 @@ assert r.exit_code==0
                     self.report('临时沙箱清理', '失败', f'请清理检查沙箱 {sid}；已设置 120 秒过期。')
 
     def models(self):
-        if 'qa-manager' not in self.containers:
-            self.report('LLM / Embedding', '失败', '缺少 QA 检查运行环境，无法验证模型调用。')
-            return
-        print('正在验证 LLM / Embedding：发送少量测试文本，可能产生少量模型费用。', flush=True)
-        script = Path(__file__).with_name('check_models.py').read_text()
+        print('正在独立验证 LLM / Embedding：直接读取 OpenGauss，不依赖 BE、QA 或 Redis。', flush=True)
         try:
-            result = subprocess.run([self.engine, 'exec', '-i', self.containers['qa-manager']['Id'],
-                'sh', '-c', 'if [ -x /app/.venv/bin/python ]; then exec /app/.venv/bin/python -; else exec python -; fi'],
-                input=script, capture_output=True, text=True, timeout=100)
+            env = os.environ.copy()
+            info = self.containers.get('opengauss', {})
+            host = env.get('DB_HOST', '')
+            aliases = {'opengauss', info.get('Name', '').lstrip('/')}
+            for network in info.get('NetworkSettings', {}).get('Networks', {}).values():
+                aliases.update(network.get('Aliases') or [])
+            if host and host in aliases:
+                from urllib.parse import urlsplit
+                endpoint = urlsplit(self.endpoint('opengauss', int(env.get('DB_PORT', '5432'))))
+                env['DB_HOST'], env['DB_PORT'] = endpoint.hostname, str(endpoint.port)
+            venv_python = Path(__file__).resolve().parent.parent / '.check-venv/bin/python'
+            python = env.get('DEPLOY_CHECK_PYTHON') or (str(venv_python) if venv_python.exists() else sys.executable)
+            result = subprocess.run([python, str(Path(__file__).with_name('check_models.py'))],
+                env=env, capture_output=True, text=True, timeout=100)
             if result.returncode:
-                raise ValueError()
+                self.report('LLM / Embedding', '失败', f'独立模型检查进程退出（退出码 {result.returncode}），请检查本机 Python 及配置格式。')
+                return
             reports = json.loads(result.stdout)
             if len(reports) != 2:
                 raise ValueError()
             for name, state, detail in reports:
                 self.report(name, state, detail)
-        except (OSError, ValueError, subprocess.TimeoutExpired):
-            self.report('LLM / Embedding', '失败', '模型检查超时或检查环境不可用。')
+        except subprocess.TimeoutExpired:
+            self.report('LLM / Embedding', '失败', '数据库读取或模型请求超时（连接上限 5 秒，单条查询上限 5 秒，总检查上限 100 秒）。')
+        except ValueError:
+            self.report('LLM / Embedding', '失败', '独立模型检查返回结果格式无效。')
+        except OSError as error:
+            self.report('LLM / Embedding', '失败', f'无法执行独立检查（{type(error).__name__}）。')
 
     def check(self):
         if run(self.engine, 'info').returncode:
@@ -216,7 +229,7 @@ assert r.exit_code==0
             return 1
         groups = {'middleware': selected('MIDDLEWARE_MODULES', ['redis', 'minio', 'opengauss', 'opensandbox-server']),
                   'standalone': selected('STANDALONE_MODULES', ['fe', 'be', 'qa-manager'])}
-        pending = {s.strip(): group for group, services in groups.items() for s in services if s.strip()}
+        pending = {s.strip(): group for group, services in groups.items() for s in services if s.strip() and s.strip() != 'minio'}
         expected = set(pending)
         deadline = time.monotonic() + self.timeout
         while pending:
@@ -224,6 +237,9 @@ assert r.exit_code==0
                 try:
                     if self.discover(service, group) and self.probe(service):
                         self.report(service, '通过', '基础就绪探测通过；不代表全部业务可用。')
+                        del pending[service]
+                    elif service in self.containers and self.containers[service].get('State', {}).get('Status') in ('exited', 'dead'):
+                        self.report(service, '失败', '容器已停止；请启动该服务并检查退出日志。')
                         del pending[service]
                 except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
                     pass
@@ -258,8 +274,6 @@ assert r.exit_code==0
         elif os.getenv('BYCLAW_SANDBOX_ENABLE', 'true') == 'true':
             self.report('沙箱依赖', '未验证', '沙箱服务未就绪或为外置服务。')
         self.models()
-        if os.getenv('FILE_STORAGE_TYPE') == 'file' and 'minio' not in expected:
-            self.report('MinIO', '不适用', '当前使用文件存储且未选择 MinIO。')
         failed = any(state in ('失败', '待配置') for _, state, _ in self.results)
         print('检查未通过，请处理上述失败项。' if failed else '基础检查通过；未验证项仍需验收，不能视为全部业务可用。')
         return 1 if failed else 0

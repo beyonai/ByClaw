@@ -190,6 +190,6 @@ sh deploy.sh check
 sh deploy.sh check --deep
 ```
 
-基础检查验证所选容器、数据库初始化查询、Redis PING、HTTP 就绪、FE 到 BE 代理和沙箱引擎中的 OpenClaw 镜像。检查默认创建 120 秒过期的临时沙箱，验证 execd/启动脚本注入并删除，不启动真实数字员工；从 QA 容器读取 BE 同步到 Redis 的模型配置，分别发起一次 LLM（最多 128 输出 token）和 Embedding 请求，可能产生少量费用。`--deep` 仅为兼容旧命令，与普通检查行为相同。
+基础检查验证所选容器、数据库初始化查询、Redis PING、HTTP 就绪、FE 到 BE 代理和沙箱引擎中的 OpenClaw 镜像。检查默认创建 120 秒过期的临时沙箱，验证 execd/启动脚本注入并删除，不启动真实数字员工；使用 `.env` 的 `DB_HOST/DB_PORT/DB_DATABASE/DB_SCHEMA/DB_USER/DB_PASS` 直接读取 OpenGauss 中启用的默认 LLM 和所有启用的 `EMBEDDING` 类型模型（Embedding 不要求默认标签），并解密 Token（不依赖 BE、QA 或 Redis），从执行检查的本机对每个选中模型发起一次请求（LLM 最多 128 输出 token），可能产生少量费用。`--deep` 仅为兼容旧命令，与普通检查行为相同。
 
-失败返回非零；“未验证”不会被当作业务成功。QA 容器具备 Python/psycopg/redis 时，还会从应用网络检查数据库必要字段、Redis 认证，并核对数据库 OpenClaw 镜像规格。该探测不支持 Redis Cluster；缺少运行环境时显示“未验证”。模型检查支持 OpenAI 兼容接口，验证实际回答及向量维度。检查不会打印 Token 或原始日志，不自动拉镜像、改模型或重启服务。此入口面向本机 Docker/Podman，PowerShell、K3s 和远程引擎暂未接入。
+检查在启动流程结束后执行，检查失败或 Python 报错不会停止或回滚已启动容器，但启动脚本返回非零退出码。失败返回非零；“未验证”不会被当作业务成功。QA 容器具备 Python/psycopg/redis 时，还会从应用网络检查数据库必要字段、Redis 认证，并核对数据库 OpenClaw 镜像规格。该探测不支持 Redis Cluster；缺少运行环境时显示“未验证”。模型检查支持 OpenAI 兼容接口，验证实际回答及向量维度。检查不会打印 Token 或原始日志，不自动拉镜像、改模型或重启服务。此入口面向本机 Docker/Podman，PowerShell、K3s 和远程引擎暂未接入。
