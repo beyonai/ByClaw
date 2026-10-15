@@ -1,0 +1,33 @@
+.finalSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border: 0;
+  color: var(--beyond-color-text-tertiary);
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--beyond-color-primary, #6f5cff);
+    outline-offset: 2px;
+  }
+
+  // 只隐藏同级过程节点，保持卡片挂载状态；最终正文与分隔线一直可见。
+  &[data-collapsed='true'] ~ :not(.finalContent):not(.finalDivider) {
+    display: none;
+  }
+}
+
+.finalDivider {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--beyond-color-border-secondary, #e8e8e8);
+}
+
+.finalContent {
+  min-width: 0;
+}

@@ -143,6 +143,42 @@ ws://localhost:8082/ws/chat?token=YOUR_JWT_TOKEN
 | isEnd | boolean | 是否为最后一块 |
 | usage | object | Token 使用情况 |
 
+### 最终正文事件 (finalAnswer)
+
+Redis Stream 会话中的 `finalAnswer`（兼容 `final_answer`）会在服务端保存最终正文后，通过当前 WebSocket
+输出流推送给发起端。使用 `CHAT_STREAM` 包装时，消息示例如下：
+
+```json
+{
+  "type": "CHAT_STREAM",
+  "clientRequestId": "request_123",
+  "requestId": "request_123",
+  "sessionId": "123",
+  "event": "finalAnswer",
+  "data": {
+    "event": "finalAnswer",
+    "sessionId": 123,
+    "final_content": "最终答复正文"
+  }
+}
+```
+
+该事件提供完整最终正文，不作为 `answerDelta` 追加，也不代表会话完成；正常完成仍由 `appStreamResponse`
+触发。历史 trace、非目标 Agent、已处理的重复事件及仅恢复聚合的上下文不会向发起端发送此事件。
+其他在线设备仍通过现有多端广播接收事件，HTTP SSE 发起端的处理逻辑保持不变。
+
+前端将流式 `final_content` 与历史消息接口的 `finalContent` 统一保存为消息级 `finalContent`，不追加到
+`messageList`。V2 消息收到有效最终正文后，按去重前的 `seq` 顺序合并并对连续的思考、回答片段分组：
+只有发生两次及以上通道切换时，才显示“任务已结束”入口并默认折叠过程。最多一次切换时，沿用原有
+思考块入口并直接展示最终正文，不增加外层入口和分隔线；只有最终正文的 V2 消息也直接展示。
+流式与历史消息使用相同规则，消息状态仍由原有完成或错误事件更新。没有有效最终正文或使用旧版渲染
+路径时，保留各自原有的处理逻辑。
+
+展开时仍按现有顺序展示思考与回答片段，最终正文一直可见。仅在尾部普通文本片段或相邻尾部文本的拼接
+与最终正文一致时，排除这部分重复展示；原始列表和结构化卡片保留。点击入口只切换过程节点的显隐，
+不新增缩进、不卸载过程组件；重复最终正文事件不重置用户的展开选择。
+复制答复时优先使用最终正文，没有最终正文时仍复制原有回答片段。
+
 ### 错误消息 (error)
 
 ```json

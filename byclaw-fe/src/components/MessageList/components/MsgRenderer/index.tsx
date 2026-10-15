@@ -17,6 +17,8 @@ type IProps = {
   msg: IMessage;
   updateMessage: (message: IMessage) => IMessage;
   hideThinking?: boolean;
+  hiddenAnswerItems?: ReadonlySet<IMessageListItem>;
+  hideText?: boolean;
 };
 
 const CompRenderer = React.memo(
@@ -50,7 +52,7 @@ const CompRenderer = React.memo(
 );
 
 function MsgRenderer(props: IProps) {
-  const { msg, hideThinking, updateMessage } = props;
+  const { msg, hideThinking, updateMessage, hiddenAnswerItems, hideText } = props;
 
   const { text, messageList, msgId } = msg;
 
@@ -74,12 +76,13 @@ function MsgRenderer(props: IProps) {
   return (
     <>
       {!hideThinking && <ThinkingProcessRender msg={msg} updateMessage={updateMessage} />}
-      {text && (
+      {text && !hideText && (
         <div className="askText">
           <Markdown msg={msg} text={displayTextMarkdown} />
         </div>
       )}
       {messageList?.map((messageListItem, messageIdx) => {
+        if (hiddenAnswerItems?.has(messageListItem)) return null;
         const key = `${msgId}_message_${messageIdx}`;
 
         const { content, contentType } = messageListItem;

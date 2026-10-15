@@ -14,6 +14,7 @@ import { isTextContentType } from '@/utils/messgae';
 import { substanceHandler } from '@/hooks/useChat/util';
 import { updateExistingMessage } from '@/utils/messageItemUpdate';
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
+import { getFinalContent } from '@/utils/finalAnswer';
 import useGlobal from '@/hooks/useGlobal';
 
 import { IMessageListItem } from '@/typescript/message';
@@ -364,6 +365,14 @@ function useHandler(props: IProps) {
         if (sseMsg.clientRequestId) {
           chatSessionRuntimeManager.updateTrace(sseMsg.clientRequestId, sseRes.traceId);
         }
+      }
+
+      if (['finalAnswer', 'final_answer'].includes(sseMsg.event)) {
+        const finalContent = getFinalContent(sseRes.finalContent);
+
+        // 最终正文控制展示，但完成状态仍由现有的结束或错误事件决定。
+        if (finalContent !== undefined) newAnswerMsg.finalContent = finalContent;
+        return onionsProps;
       }
 
       if (!sseRes.message) return onionsProps;

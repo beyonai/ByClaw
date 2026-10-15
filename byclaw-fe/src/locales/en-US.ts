@@ -1858,6 +1858,7 @@ export default {
 
   // IndicatorDrawer Component
   'thinkingProcess.done': 'Completed',
+  'message.taskEnded': 'Task ended',
   'thinkingProcess.thinking': 'Thinking...',
   'thinkingProcess.foundReferences': 'Found {count} references',
 
