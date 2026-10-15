@@ -79,6 +79,7 @@ import {
 } from './backend-service-discovery.ts'
 import { sanitizeByClawOperationalLog } from './operational-log.ts'
 import { installDefaultWebSearchPolicy } from './default-web-search-policy.ts'
+import { registerMediaGenerationTools } from './media-generation/index.ts'
 
 /** Root bindings consumed by the optional employee-selector preset plugin. */
 export interface ByClawEmployeeRoots {
@@ -699,6 +700,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       llmRequestLogLevel: config.llmRequestLogLevel,
     })
     installBrowserText(ctx)
+    registerMediaGenerationTools(ctx, { redis })
     if (modelRouting.enabled) {
       await installByClawModelCatalog(ctx, models, modelRouting.modelIds)
       modelRoutingBinding = installByClawModelRouting(ctx, models, modelRouting.modelIds)
