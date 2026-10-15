@@ -8,20 +8,44 @@ interface Props {
 }
 
 export default function CredentialFields({ fields, customImap = false }: Props) {
+  const input = (field: ConnectorCredentialField) => {
+    if (field.inputType === 'password') {
+      return (
+        <Input.Password autoComplete="off" maxLength={field.maxLength} placeholder={field.placeholder ?? undefined} />
+      );
+    }
+    if (field.inputType === 'textarea') {
+      return (
+        <Input.TextArea
+          autoComplete="off"
+          maxLength={field.maxLength}
+          placeholder={field.placeholder ?? undefined}
+          rows={4}
+        />
+      );
+    }
+    return (
+      <Input
+        autoComplete="off"
+        maxLength={field.maxLength}
+        placeholder={field.placeholder ?? undefined}
+        type={field.inputType === 'number' ? 'number' : 'text'}
+      />
+    );
+  };
+
   const renderField = (field: ConnectorCredentialField) => (
     <Form.Item
       className={styles.credentialField}
       key={field.key}
       label={field.label}
       name={field.key}
+      initialValue={field.defaultValue ?? undefined}
+      extra={field.description ?? undefined}
       rules={[{ required: true, whitespace: true, message: `请输入${field.label}` }]}
       style={{ gridColumn: /^(imap|smtp)(Port|Encryption)$/.test(field.key) ? undefined : '1 / -1' }}
     >
-      {field.inputType === 'password' ? (
-        <Input.Password autoComplete="off" maxLength={field.maxLength} />
-      ) : (
-        <Input autoComplete="off" maxLength={field.maxLength} />
-      )}
+      {input(field)}
     </Form.Item>
   );
 

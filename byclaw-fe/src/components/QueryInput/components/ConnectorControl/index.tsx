@@ -216,7 +216,7 @@ const hasValidCredentialForm = (
   ) {
     return false;
   }
-  if (credentialForm.fields.length < 1 || credentialForm.fields.length > 8) return false;
+  if (credentialForm.fields.length < 1 || credentialForm.fields.length > 16) return false;
   if (
     credentialForm.helpText !== undefined &&
     credentialForm.helpText !== null &&
@@ -248,8 +248,19 @@ const hasValidCredentialForm = (
       field.label.trim().length <= 100 &&
       Number.isInteger(field.maxLength) &&
       field.maxLength > 0 &&
-      field.maxLength <= 2048 &&
-      (field.inputType === 'text' || field.inputType === 'password');
+      field.maxLength <= 8192 &&
+      ['text', 'password', 'number', 'textarea'].includes(field.inputType) &&
+      (field.defaultValue === undefined ||
+        field.defaultValue === null ||
+        (field.inputType !== 'password' &&
+          typeof field.defaultValue === 'string' &&
+          field.defaultValue.length <= field.maxLength)) &&
+      (field.placeholder === undefined ||
+        field.placeholder === null ||
+        (typeof field.placeholder === 'string' && field.placeholder.trim().length > 0 && field.placeholder.length <= 2048)) &&
+      (field.description === undefined ||
+        field.description === null ||
+        (typeof field.description === 'string' && field.description.trim().length > 0 && field.description.length <= 500));
     if (valid) keys.add(field.key);
     return valid;
   });
