@@ -7,10 +7,17 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGroupApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
+import java.io.ByteArrayOutputStream;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class ParamServiceTest {
@@ -47,5 +54,27 @@ class ParamServiceTest {
 
         assertThat(service.resolveWorkerAgentType(404L)).isEqualTo(WorkerAgentType.BYCLAW_EXE.getCode());
         verify(ssResourceService).findById(404L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"HARNESS", "BY_SUPER"})
+    void getParams_preservesExpertTeamWorkerAndOrchestration(String workerAgentType) {
+        var groups = mock(DigitalEmployeeGroupApplicationService.class);
+        ReflectionTestUtils.setField(service, "digitalEmployeeGroupApplicationService", groups);
+        ReflectionTestUtils.setField(service, "resourceAuthContextService", mock(ResourceAuthContextService.class));
+        SsResource group = new SsResource();
+        group.setResourceId(100L);
+        group.setWorkerAgentType(workerAgentType);
+        when(ssResourceService.findById(100L)).thenReturn(group);
+        when(groups.isGroup(100L)).thenReturn(true);
+        AssistantChatDto dto = new AssistantChatDto();
+        dto.setAgentId(100L);
+        ChatProcessContext ctx = new ChatProcessContext(new ByteArrayOutputStream(), dto);
+
+        Map<String, Object> params = service.getParams(ctx);
+
+        assertThat(params).containsEntry("worker_agent_type", workerAgentType)
+            .containsEntry("orchestrator", Map.of("schemaVersion", "byclaw.orchestrator-ref/v1",
+                "kind", "EXPERT_TEAM", "id", "100"));
     }
 }

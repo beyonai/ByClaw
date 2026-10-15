@@ -10,7 +10,7 @@ deploy/
 ├── config/              # 共享配置（nginx.conf, application.properties, logback.xml）
 │   └── nginx-standalone.conf.tpl  # 拆分模式 nginx 模板（端口从 .env 读取）
 ├── middleware/           # 中间件：Redis、MinIO、OpenGauss、OpenSandbox
-└── standalone/          # 拆分模式：fe、be、super、qa、data 各自独立镜像
+└── standalone/          # 拆分模式：fe、be、qa、data 各自独立镜像
 ```
 
 ## 前置条件
@@ -144,12 +144,10 @@ sh start-all.sh
 
 # 或单独启停
 sh start-be.sh              # 后端
-sh start-super.sh           # Super
 sh start-fe.sh              # 前端（会自动从模板生成 nginx 配置）
 sh start-qa-manager.sh      # QA Manager
 
 sh stop-be.sh
-sh stop-super.sh
 sh stop-fe.sh
 sh stop-qa-manager.sh
 ```
@@ -159,8 +157,8 @@ sh stop-qa-manager.sh
 在 `.env` 中设置 `STANDALONE_MODULES` 可以只启动指定的服务：
 
 ```bash
-# 只启动前端、后端和 Super
-STANDALONE_MODULES=fe,be,super
+# 只启动前端和后端
+STANDALONE_MODULES=fe,be
 
 # 不设置或留空 = 启动全部
 # STANDALONE_MODULES=
@@ -170,7 +168,6 @@ STANDALONE_MODULES=fe,be,super
 |------|--------|---------|---------|
 | 前端 (fe) | `fe` | 8080 / 8443 | `NGINX_PORT` / `NGINX_HTTPS_PORT` |
 | 后端 (be) | `be` | 8086 / 8082 | `BE_SERVER_PORT` / `BE_WS_PORT` |
-| Super | `super` | 3000 | `BYCLAW_SUPER_PORT` |
 | QA Manager | `qa-manager` | 8090 | `BYCLAW_QA_PORT` |
 
 ### Nginx 配置模板
