@@ -18,6 +18,28 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - 🛠️ **工具集成** - 灵活的插件和工具编排
 - 📊 **数据分析** - 对话分析和性能监控
 
+## Super 运行时兼容
+
+`byclaw.super-enabled` 默认 `false`，可通过环境变量 `BYCLAW_SUPER_ENABLED` 配置。
+关闭时，最终目标为 `BY_SUPER` 的公共聊天、默认超级助手、专家团、群聊成员及历史请求透传的
+`sourceAgentType=BY_SUPER` 都转到当前用户的 Harness/DSH Worker（`BYCLAW_DSH_<userCode>`）。
+此规则不受 `ENABLE_DSH=0` 影响；其他 Worker 仍使用原有路由策略。
+旧开关 `byclaw.route-by-super-to-user-sandbox` 已移除。
+
+开启兼容开关允许路由到外部部署的 `BY_SUPER` Worker；部署包不再自带 Super 服务。
+个人或全局 `ENABLE_DSH=1` 的原有策略仍然优先生效，Resume 保留原目标覆盖规则，
+但最终 `BY_SUPER` 目标仍受兼容开关限制。数据库中的 `BY_SUPER` 逻辑类型继续保留，无需数据迁移。
+专家团保留资源配置的 `HARNESS` / `BY_SUPER` 类型，并向运行时传递 `EXPERT_TEAM` 编排信息。
+
+下线前需完成或终止 Super 中的在途任务；路由兼容不会迁移其 Run、子任务回调或待交互状态。
+历史消息可继续查看，切换后的新请求由 DSH 执行。上线验收需使用有效模型，验证普通聊天及专家团实际执行；
+仅 Worker 在线或容器健康不代表编排能力已验证。
+
+Standalone 和 K3s 默认部署已移除 Super 服务及专用镜像、运行参数。
+升级已有环境时先处理在途任务，再停止并删除旧容器；K3s 需清理旧 `byclaw-super` Deployment、Service
+和 `byclaw-super-runtime-env` ConfigMap。仅更新 Compose / apply 新清单不会自动删除旧资源。
+开关恢复为 `true` 时需自行部署兼容的 Super Worker，并接入同一套 by-framework Redis。
+
 ## 技能导入并发与外部子会话恢复
 
 技能导入、审核与审核后的运行文件刷新按技能编码共享 Spring Integration `RedisLockRegistry`。

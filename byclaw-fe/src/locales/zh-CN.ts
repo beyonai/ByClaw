@@ -1801,6 +1801,7 @@ export default {
 
   // IndicatorDrawer组件
   'thinkingProcess.done': '已思考结束',
+  'message.taskEnded': '任务已结束',
   'thinkingProcess.thinking': '深度思考中...',
   'thinkingProcess.foundReferences': '找到 {count} 篇参考资料',
 

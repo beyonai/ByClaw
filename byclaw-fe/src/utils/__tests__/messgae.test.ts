@@ -47,6 +47,24 @@ describe('utils/messgae', () => {
     jest.clearAllMocks();
   });
 
+  it('loads final-only history and keeps its body through message initialization', () => {
+    const message = fetchMessageHandler({
+      usage: '2',
+      messageId: 'final-only',
+      finalContent: '**最终答复**',
+    });
+
+    expect(message.finalContent).toBe('**最终答复**');
+    expect(hasVisibleMessageContent(message)).toBe(true);
+    expect(initAnswerMessage(message).finalContent).toBe('**最终答复**');
+  });
+
+  it.each(['', '  ', '[DONE]', { title: 'card' }])('rejects invalid historical final bodies: %s', (finalContent) => {
+    const message = fetchMessageHandler({ usage: '2', messageId: 'empty', finalContent });
+    expect(message.finalContent).toBeUndefined();
+    expect(hasVisibleMessageContent(message)).toBe(false);
+  });
+
   it('getMsgId uses crypto when available', () => {
     const getRandomValues = jest.fn((arr: Uint32Array) => {
       arr[0] = 123;

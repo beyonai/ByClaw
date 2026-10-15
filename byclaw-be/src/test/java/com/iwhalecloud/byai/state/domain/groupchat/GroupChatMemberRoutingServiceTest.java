@@ -16,6 +16,29 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 class GroupChatMemberRoutingServiceTest {
     @Test
+    void legacySuperMembersFollowCompatibilitySwitchEvenWhenPersonalDshIsDisabled() {
+        var resources = mock(SsResourceService.class);
+        var personal = mock(UserPrivateParamCacheReader.class);
+        var global = mock(ByaiSystemConfigService.class);
+        var routes = new TargetAgentResolver();
+        ReflectionTestUtils.setField(routes, "systemParamTargetAgentResolver",
+            new SystemParamTargetAgentResolver(global, personal, resources));
+        var service = new GroupChatMemberRoutingService(resources, routes);
+        var coordinator = new SsResource(); coordinator.setWorkerAgentType("BY_SUPER");
+        when(resources.findById(9L)).thenReturn(coordinator);
+        when(personal.getValue("u", "ENABLE_DSH")).thenReturn("0");
+        Map<String, Object> scope = Map.of("coordinatorAgentId", "9", "allowedAgentIds", List.of());
+
+        assertThat(service.withRoutes(scope, "u").get("effectiveWorkerAgentTypes"))
+            .isEqualTo(Map.of("9", "BYCLAW_DSH_u"));
+
+        ReflectionTestUtils.setField(routes, "superEnabled", true);
+        assertThat(service.withRoutes(scope, "u").get("effectiveWorkerAgentTypes"))
+            .isEqualTo(Map.of("9", "BY_SUPER"));
+        assertThat(coordinator.getWorkerAgentType()).isEqualTo("BY_SUPER");
+    }
+
+    @Test
     void memberRoutesFollowPersonalAndGlobalChatPolicyWithoutChangingResourceConfiguration() {
         var resources = mock(SsResourceService.class);
         var personal = mock(UserPrivateParamCacheReader.class);

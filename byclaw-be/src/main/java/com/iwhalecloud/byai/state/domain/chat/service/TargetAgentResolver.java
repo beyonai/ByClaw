@@ -31,8 +31,8 @@ public class TargetAgentResolver {
     @Autowired
     private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
 
-    @Value("${byclaw.route-by-super-to-user-sandbox:false}")
-    private boolean routeBySuperToUserSandbox;
+    @Value("${byclaw.super-enabled:false}")
+    private boolean superEnabled;
 
     /**
      * 根据基础 workerAgentType、agentId、sourceAgentType 与 userCode 计算最终 targetAgentType。
@@ -46,24 +46,22 @@ public class TargetAgentResolver {
     public String resolveAgentType(String workerAgentType, Long agentId, String resumeAgentType, String userCode) {
         String targetAgentType = workerAgentType;
 
-        if (routeBySuperToUserSandbox && agentId != null
-                && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
-            targetAgentType = buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode);
-        }
-        else if (agentId == null && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
-            // agentId 为空代表公共超级助手入口；不能被旧会话透传的 BYCLAW_EXE sourceAgentType 覆盖。
-            targetAgentType = WorkerAgentType.BY_SUPER.getCode();
-        }
-        else if (StringUtils.isNotBlank(targetAgentType)
+        if (StringUtils.isNotBlank(targetAgentType)
                 && targetAgentType.startsWith(WorkerAgentType.DEBUG.getCode())) {
             targetAgentType = WorkerAgentType.DEBUG.getCode() + "_" + agentId;
         }
 
         targetAgentType = resolveUserSandboxAgentType(targetAgentType, userCode);
         if (StringUtils.isNotBlank(resumeAgentType)) {
-            return resumeAgentType;
+            targetAgentType = resumeAgentType;
         }
-        targetAgentType = systemParamTargetAgentResolver.resolve(targetAgentType, agentId, userCode);
+        else {
+            targetAgentType = systemParamTargetAgentResolver.resolve(targetAgentType, agentId, userCode);
+        }
+        // 在所有覆盖规则之后执行，防止历史 Resume 或资源配置绕过 Super 兼容开关。
+        if (!superEnabled && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
+            targetAgentType = buildUserAgentType(WorkerAgentType.HARNESS, userCode);
+        }
         return resolveRuntimeAgentType(targetAgentType, userCode);
     }
 

@@ -175,7 +175,7 @@ public class ParamService {
             orchestrator.put("kind", "EXPERT_TEAM");
             orchestrator.put("id", String.valueOf(group.getResourceId()));
             params.put("orchestrator", orchestrator);
-            params.put("worker_agent_type", WorkerAgentType.BY_SUPER.getCode());
+            params.put("worker_agent_type", group.getWorkerAgentType());
             params.put("agent_code", group.getResourceCode());
             params.put("agent_name", group.getResourceName());
             params.put("agent_type", DigitalEmployeeGroupApplicationService.GROUP_AGENT_TYPE);
@@ -269,7 +269,8 @@ public class ParamService {
     }
 
     /**
-     * 未指定数字员工时直接路由到公共超级助手；非空 ID 仍按资源配置路由，资源不存在时兼容旧 OpenClaw。
+     * 未指定数字员工时使用公共超级助手逻辑类型，最终目标由 Super 兼容开关决定；
+     * 非空 ID 仍按资源配置解析，资源不存在时兼容旧 OpenClaw。
      */
     String resolveWorkerAgentType(Long agentId) {
         if (agentId == null) {

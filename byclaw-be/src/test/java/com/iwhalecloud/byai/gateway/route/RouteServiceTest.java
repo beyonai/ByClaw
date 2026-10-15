@@ -41,6 +41,8 @@ import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEve
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -362,8 +364,34 @@ class RouteServiceTest {
         verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
     }
 
+    @ParameterizedTest
+    @CsvSource({",", "1001,", "1001,BY_SUPER"})
+    void route_sendsSuperRequestsToDshAndChecksWorkerReadiness(Long agentId, String sourceAgentType) throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BY_SUPER.getCode(), agentId);
+        ctx.getAssistantChatDto().setSourceAgentType(sourceAgentType);
+        ctx.getParams().put("orchestrator", Map.of("kind", "EXPERT_TEAM", "id", "1001"));
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        InOrder ordered = inOrder(workerRouteReadinessService, gatewayClient);
+        ordered.verify(workerRouteReadinessService).ensureReady(eq("u1"), eq(agentId), eq("BYCLAW_DSH_u1"), any());
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        ordered.verify(gatewayClient).sendMessage(eq("BYCLAW_DSH_u1"), eq("3"), eq("hello"),
+                eq("u1"), eq("testUser"), anyString(), eq("-1"), eq("2"), eq(ctx.getTraceId()),
+                paramsCaptor.capture(), any());
+        assertThat(paramsCaptor.getValue()).containsEntry("orchestrator",
+                Map.of("kind", "EXPERT_TEAM", "id", "1001"));
+    }
+
     @Test
     void route_sendsDefaultSuperAssistantToBySuperWithoutUserSuffix() throws Exception {
+        ReflectionTestUtils.setField(targetAgentResolver, "superEnabled", true);
         ChatProcessContext ctx = buildContext(WorkerAgentType.BY_SUPER.getCode(), 1001L);
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any()))
