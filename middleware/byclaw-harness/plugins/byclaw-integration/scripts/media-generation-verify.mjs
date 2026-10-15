@@ -18,8 +18,8 @@ import { generateOpenAiImage } from '../src/media-generation/providers/openai-im
 import { saveWordTimingArtifact } from '../src/media-generation/artifacts.ts'
 
 const pluginEntry = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8')
-assert.match(pluginEntry, /import \{ registerMediaGenerationTools \} from '\.\/media-generation\/index\.ts'/u)
-assert.match(pluginEntry, /registerMediaGenerationTools\(ctx, \{ redis \}\)/u)
+assert.match(pluginEntry, /resolvePluginMediaModel/u)
+assert.doesNotMatch(pluginEntry, /registerMediaGenerationTools\(ctx/u)
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 assert.match(packageJson.scripts.verify, /media-generation-verify\.mjs/u)

@@ -61,6 +61,7 @@ import { resolveByClawByRoot, resolveByClawLocalE2eStorageRoot, resolveByClawInb
 import { ByClawDshWorkerRuntime } from './worker-runtime.ts'
 import { ByClawDshSandboxBusyPublisher } from './sandbox-busy.ts'
 import {
+  decryptByClawAuthToken,
   BYCLAW_REDIS_MODEL_ENABLED_ENV,
   DSH_LLM_LOG_ENV,
   ByClawDynamicModelRuntime,
@@ -79,7 +80,7 @@ import {
 } from './backend-service-discovery.ts'
 import { sanitizeByClawOperationalLog } from './operational-log.ts'
 import { installDefaultWebSearchPolicy } from './default-web-search-policy.ts'
-import { registerMediaGenerationTools } from './media-generation/index.ts'
+import { resolvePluginMediaModel } from './media-generation/plugin-model.ts'
 
 /** Root bindings consumed by the optional employee-selector preset plugin. */
 export interface ByClawEmployeeRoots {
@@ -700,7 +701,6 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       llmRequestLogLevel: config.llmRequestLogLevel,
     })
     installBrowserText(ctx)
-    registerMediaGenerationTools(ctx, { redis })
     if (modelRouting.enabled) {
       await installByClawModelCatalog(ctx, models, modelRouting.modelIds)
       modelRoutingBinding = installByClawModelRouting(ctx, models, modelRouting.modelIds)
@@ -955,6 +955,8 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       baseUrl, userCode, byRoot,
       resolveAuthHeaders: async () => (await resolveByClawAuthorization(redis, userCode)).authHeaders,
       resolveSourcePath: source => resolveByClawInboundPath(source, byRoot),
+      resolveSessionRoot: agentId => workspaceRegistry.get(agentId)?.sessionRoot,
+      resolveMediaModel: (type, modelId) => resolvePluginMediaModel(redis, type, { modelId, decrypt: decryptByClawAuthToken }),
     }
     sessions = new ByClawDshSessionRuntime(ctx, {
       workspace,

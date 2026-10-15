@@ -1,5 +1,6 @@
 /** Awaited extension point for trusted ByClaw session composition. */
 
+import type { MediaModel } from '@byclaw/media-runtime'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { AskAgentCommand } from '@byclaw/by-framework'
@@ -13,6 +14,10 @@ export interface ByClawSessionHost {
   resolveAuthHeaders(): Promise<Record<string, string>>
   /** Translate a virtual /by/ path into this user's mounted filesystem. */
   resolveSourcePath(source: string): string
+  /** Authoritative byclaw-context workspace for this Agent. */
+  resolveSessionRoot?(agentId: string): string | undefined
+  /** Resolve enabled media configuration without exposing credentials to tools. */
+  resolveMediaModel?(type: 'IMAGE_GENERATION' | 'TTS', modelId?: string): Promise<MediaModel>
 }
 
 /** Trusted command and Agent context supplied before input admission. */

@@ -305,3 +305,17 @@ Integration now requires `@byclaw/dsh-todo-execution`. Ordinary employee Agent r
 INFO 日志 `[byclaw-super-assistant] bound` 显示会话和工具白名单；禁止调用返回 `SUPER_ASSISTANT_EXECUTION_DENIED`。本地验证：`node --import tsx/esm plugins/byclaw-integration/scripts/super-assistant-policy-verify.mjs`。
 
 超级助手先调用 `byclaw_route_task(task)` 获取 Jev 返回的 `template_id`，再用该 ID 和相同任务调用 `byclaw_instantiate_template`。启动时仅校验当前 Agent 最近一次成功选择，不再重新调用 Jev；选择只能使用一次，失败或重启后需重新选人。
+
+### 文生图与文本转语音插件
+
+`byclaw-image` 与 `byclaw-tts` 通过 `byclaw/session-setup` 绑定当前用户的会话工具，使用与 byclaw-context 相同的 workspace registry 读取 `session_root`。图片固定保存到 `session_root/image/`，语音固定保存到 `session_root/tts/`。工具输入不接受路径、端点或凭据。
+
+超级助手允许直接调用这两个已注册的媒体工具；其他命令、浏览器、文件写入与业务工具仍按原策略委派给员工。安装两个 bundle 后才具备能力，白名单本身不会注册工具。
+
+模型从 Redis 已启用的 IMAGE_GENERATION/TTS 默认项解析。部署可用 `BYCLAW_IMAGE_MODEL_ID` / `BYCLAW_TTS_MODEL_ID` 或各插件 `config.modelId` 指定模型 ID。旧配置供应商标记有误时，可在部署层显式设置插件 `config.provider` / `config.protocol`；这不会修改 Redis，全局配置应在模型管理中修正。凭据仍从所选模型读取并使用现有解密方法，不向模型暴露。
+
+供应商、音色及协议限制见 `../byclaw-image/README.md`、`../byclaw-tts/README.md`。不存在的能力会明确报错，前端通用协议标签不代表供应商支持所有功能。
+
+媒体连接器与独立插件：用户连接器投影（`/by/.connector-auth/.model/image.json`、`tts.json`）优先于系统默认模型；仅文件不存在时回退 Redis，损坏或不匹配的配置直接报错。显式部署 modelId 可选择测试/指定模型。连接器协议明确映射到真实供应商适配器，不根据端点猜测。旧 `media-generation` 注册入口不再全局挂载，启用 `byclaw-image` 与 `byclaw-tts` bundle 后，分别使用会话级 `image_generate` 和 `text_to_speech`；旧 `speech_generate` 名称不再自动注册。连接器既有校验及测试保留，生成不会自动重试。
+
+连接器迁移约定：旧 `options.defaultVoice` 在没有显式 `voice`/`speaker` 时映射为默认音色；原 OpenAI 图片显式 Authorization 和火山 TTS 显式 X-Api-Key / X-Api-Resource-Id 保留优先级。新插件将 `readTimeoutSeconds` 作为整个生成调用的总时间预算，最多 30 分钟（更大配置归一到 30 分钟）；不再分别应用旧连接器的 connectTimeoutSeconds / readTimeoutSeconds，也不采用 maxRetryCount 自动重试，避免重复计费。
