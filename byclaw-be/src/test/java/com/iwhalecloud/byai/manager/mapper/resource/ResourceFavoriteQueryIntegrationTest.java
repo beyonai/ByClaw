@@ -252,6 +252,46 @@ class ResourceFavoriteQueryIntegrationTest {
         }
     }
 
+    @Test
+    void controlledEnterpriseViewingIsIndependentFromUseAndFiltersBeforePagination() throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            initialize(connection);
+            for (long id = 1; id <= 5; id++) resource(connection, id, "SKILL", 22, "enterprise", 2);
+            try (var statement = connection.createStatement()) {
+                statement.executeUpdate("UPDATE ss_resource SET create_by = 99, view_auth_controlled = TRUE WHERE resource_id < 5");
+                statement.executeUpdate("""
+                    INSERT INTO au_privilege_grant
+                       (grant_obj_id, grant_obj_type, grant_to_obj_type, grant_to_obj_id, grant_type, grant_to_type, status_cd)
+                   VALUES (1, 'SKILL', 'USER', 11, 'ALLOW_VIEW', 'RED', 'A'),
+                          (1, 'SKILL', 'USER', 11, 'FORCE_USE', 'BLACK', 'A'),
+                          (2, 'SKILL', 'ORG', 30, 'ALLOW_VIEW', 'RED', 'A'),
+                          (3, 'SKILL', 'POST', 40, 'FORCE_USE', 'RED', 'A'),
+                          (4, 'CATALOG', 'USER', 11, 'FORCE_USE', 'RED', 'A')
+                   """);
+            }
+            Map<String, Object> params = new HashMap<>();
+            params.put("userId", 11L);
+            params.put("viewTenantId", 22L);
+            params.put("userOrgIds", List.of(30L));
+            params.put("userPositionIds", List.of(40L));
+            params.put("ownerType", "enterprise");
+            params.put("resourceBizTypeList", List.of("SKILL"));
+            params.put("includeAllEnterpriseOwnerType", true);
+            assertThat(query(connection, "SKILL", params, 0)).extracting(Row::id)
+                .containsExactlyInAnyOrder(1L, 2L, 3L, 5L);
+            params.put("availableOnly", true);
+            params.put("includeAllEnterpriseOwnerType", false);
+            assertThat(query(connection, "SKILL", params, 0)).extracting(Row::id)
+                .containsExactlyInAnyOrder(3L, 5L);
+            params.put("userId", 12L);
+            params.put("userOrgIds", List.of());
+            params.put("userPositionIds", List.of());
+            params.put("availableOnly", false);
+            params.put("includeAllEnterpriseOwnerType", true);
+            assertThat(query(connection, "SKILL", params, 0)).extracting(Row::id).containsExactly(5L);
+        }
+    }
+
     private List<Row> query(Connection connection, String type, Map<String, Object> params, int offset) throws Exception {
         String file = "DIG_EMPLOYEE".equals(type) ? "index/IndexMapper.xml" : "auth/PrivilegeGrantMapper.xml";
         String id = "DIG_EMPLOYEE".equals(type) ? "discover" : "listResourceAuth";
@@ -303,7 +343,7 @@ class ResourceFavoriteQueryIntegrationTest {
         try (var statement = connection.createStatement()) {
             statement.execute("""
                 CREATE TABLE ss_resource(resource_id INTEGER PRIMARY KEY, resource_biz_type TEXT, com_acct_id INTEGER,
-                    owner_type TEXT, resource_status INTEGER, resource_name TEXT, resource_code TEXT,
+                    owner_type TEXT, view_auth_controlled BOOLEAN DEFAULT FALSE, use_auth_controlled BOOLEAN DEFAULT FALSE, resource_status INTEGER, resource_name TEXT, resource_code TEXT,
                     resource_desc TEXT, avatar TEXT, catalog_id INTEGER, create_by INTEGER, update_time INTEGER,
                     create_time INTEGER, system_code TEXT, resource_source_pk_id TEXT, resource_type TEXT,
                     sample TEXT, tags TEXT, resource_version_id INTEGER, host_type TEXT, man_org_id INTEGER,
@@ -327,7 +367,7 @@ class ResourceFavoriteQueryIntegrationTest {
             statement.execute("CREATE TABLE byai_session_member(mem_obj_id INTEGER, mem_obj_type TEXT)");
             statement.execute("""
                 CREATE TABLE au_privilege_grant(grant_obj_id INTEGER, grant_obj_type TEXT, grant_to_type TEXT,
-                    status_cd TEXT, grant_type TEXT, grant_to_obj_type TEXT, grant_to_obj_id INTEGER, create_date TEXT)
+                    status_cd TEXT, grant_type TEXT, grant_to_obj_type TEXT, grant_to_obj_id INTEGER, create_date TEXT, eff_date TEXT, exp_date TEXT)
                 """);
             statement.execute("""
                 CREATE TABLE byai_resource_favorite_count(com_acct_id INTEGER, resource_id INTEGER,

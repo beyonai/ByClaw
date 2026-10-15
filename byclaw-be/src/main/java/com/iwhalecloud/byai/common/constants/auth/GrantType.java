@@ -13,6 +13,8 @@ public final class GrantType {
     /**
      * 使用授权
      */
+    public static final String ALLOW_VIEW = "ALLOW_VIEW";
+
     public static final String AVAILABLE_USE = "AVAILABLE_USE";
 
     /** 技能上架审核申请，不属于任何有效授权类型。 */

@@ -95,6 +95,9 @@ public class ResourceCurlService {
     private SsResourceService ssResourceService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService authApplicationService;
+
+    @Autowired
     private SsResExtToolKitService ssResExtToolKitService;
 
     @Autowired
@@ -298,6 +301,10 @@ public class ResourceCurlService {
 
         if (resource == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        if ((Boolean.TRUE.equals(resource.getViewAuthControlled()) || Boolean.TRUE.equals(resource.getUseAuthControlled()))
+            && !authApplicationService.hasResourceAccessPermission(resource)) {
+            throw new IllegalArgumentException("无权读取或调试资源内容");
         }
         String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
 

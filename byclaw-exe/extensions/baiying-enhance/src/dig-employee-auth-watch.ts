@@ -1,3 +1,5 @@
+import { parseAuthorizedIds } from "./resource-authorization.js";
+export { parseAuthorizedIds } from "./resource-authorization.js";
 import {
   createRedisClient,
   hasRedisConnectionConfig,
@@ -21,48 +23,6 @@ const HASH_CHANGE_EVENTS = new Set(["hset", "hmset", "hdel", "del", "expired"]);
 
 function normalizeId(value: unknown): string {
   return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
-}
-
-function collectAuthorizedId(value: unknown, out: Set<string>): void {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return;
-  }
-  const parsed = value as Record<string, unknown>;
-  const bizType = normalizeId(parsed.resourceBizType || parsed.resourceType).toUpperCase();
-  const resourceId = normalizeId(parsed.resourceId || parsed.id || parsed.sourcePkId);
-  if (resourceId && (!bizType || bizType === "DIG_EMPLOYEE")) {
-    out.add(resourceId);
-  }
-}
-
-export function parseAuthorizedIds(payload: Record<string, string>): Set<string> {
-  const out = new Set<string>();
-  for (const [field, value] of Object.entries(payload)) {
-    const fieldId = normalizeId(field);
-    const trimmed = String(value ?? "").trim();
-    if (!trimmed) {
-      continue;
-    }
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(trimmed) as unknown;
-        if (Array.isArray(parsed)) {
-          for (const item of parsed) {
-            collectAuthorizedId(item, out);
-          }
-        } else {
-          collectAuthorizedId(parsed, out);
-        }
-      } catch {
-        // ignore parse failures and continue best-effort extraction.
-      }
-      continue;
-    }
-    if (/^\d+$/.test(fieldId) && trimmed.toUpperCase() === "DIG_EMPLOYEE") {
-      out.add(fieldId);
-    }
-  }
-  return out;
 }
 
 export function isRedisKeyspaceNotificationsEnabled(notifyKeyspaceEvents: string): boolean {
@@ -124,6 +84,7 @@ export function createDigEmployeeAuthWatch(params: {
   let keyspaceEnabled = false;
   let nextPollDelayMs: number | undefined;
   let initialAuthEmitted = false;
+  let resourceAuthFingerprint = "";
 
   const shareUserCodeKey = `SHARE_BFM_USER_CODE_${userCode}`;
   const authKeyOf = (uid: string) => `USER:RESOURCES:AUTH:${uid}`;
@@ -171,14 +132,15 @@ export function createDigEmployeeAuthWatch(params: {
     reconnectTimer.unref?.();
   };
 
-  const emitIfChanged = async (nextIds: Set<string>) => {
+  const emitIfChanged = async (nextIds: Set<string>, fingerprint = "") => {
     authKeyMissingSince = 0;
     lastUnavailableReason = "";
     const isFirstReady = !initialAuthEmitted;
-    if (authFilterEnabled && isSameSet(authorizedIds, nextIds) && !isFirstReady) {
+    if (authFilterEnabled && isSameSet(authorizedIds, nextIds) && resourceAuthFingerprint === fingerprint && !isFirstReady) {
       return;
     }
     initialAuthEmitted = true;
+    resourceAuthFingerprint = fingerprint;
     const previousCount = authorizedIds.size;
     authFilterEnabled = true;
     authorizedIds = nextIds;
@@ -271,7 +233,7 @@ export function createDigEmployeeAuthWatch(params: {
       return;
     }
     const raw = await redis.hgetall(authKey);
-    await emitIfChanged(parseAuthorizedIds(raw ?? {}));
+    await emitIfChanged(parseAuthorizedIds(raw ?? {}), JSON.stringify(Object.entries(raw ?? {}).sort(([a], [b]) => a.localeCompare(b))));
   };
 
   const refreshAuth = async (): Promise<void> => {

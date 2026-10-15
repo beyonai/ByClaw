@@ -374,6 +374,7 @@ export default {
   'resource.skillGroup.uninstallAllTooltip':
     'Also remove the manual-installation and other skill-group reference sources for these skills.',
   'resource.skillGroup.manualSource': 'Manually installed',
+  'resource.skillGroup.automaticSource': 'Automatic sync binding',
   'resource.skillGroup.otherGroupSource': 'Also from: {groups}',
   'resource.skillGroup.uninstallSuccess': 'Skill group uninstalled successfully',
   'resource.skillGroup.uninstallRefreshFailed':

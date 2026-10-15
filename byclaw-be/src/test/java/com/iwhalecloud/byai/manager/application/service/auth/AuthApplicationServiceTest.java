@@ -2320,6 +2320,7 @@ class AuthApplicationServiceTest {
     @Test
     void buildUserAuthResources_inheritsParentOrganizationAuthorization() {
         AuthApplicationService service = new AuthApplicationService();
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mock(SsResourceMapper.class));
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
@@ -2353,13 +2354,14 @@ class AuthApplicationServiceTest {
         Map<String, String> resources = service.buildUserAuthResources(1001L);
 
         assertThat(resources).containsEntry("500", ResourceBizTypeEnum.AGENT.name());
-        verify(privilegeGrantService).findPrivilegeByQo(argThat(qo -> GrantToObjType.ORG.equals(qo.getGrantToObjType())
+        verify(privilegeGrantService, times(2)).findPrivilegeByQo(argThat(qo -> GrantToObjType.ORG.equals(qo.getGrantToObjType())
             && qo.getGrantToObjIds().containsAll(Set.of(10L, 20L))));
     }
 
     @Test
     void buildUserAuthResources_descendantOrganizationBlacklistOverridesParentAuthorization() {
         AuthApplicationService service = new AuthApplicationService();
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mock(SsResourceMapper.class));
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
@@ -2405,6 +2407,7 @@ class AuthApplicationServiceTest {
     @Test
     void buildUserAuthResources_excludesRemovedResources() {
         AuthApplicationService service = new AuthApplicationService();
+        ReflectionTestUtils.setField(service, "ssResourceMapper", mock(SsResourceMapper.class));
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
@@ -2828,7 +2831,7 @@ class AuthApplicationServiceTest {
         for (PrivilegeGrantQo qo : captor.getAllValues()) {
             assertThat(qo.getGrantObjIds()).containsExactlyInAnyOrder(601L, 602L, 603L);
             assertThat(qo.getGrantTypes()).containsExactlyInAnyOrder(
-                GrantType.ALLOW_MANAGE, GrantType.AVAILABLE_USE, GrantType.FORCE_USE);
+                GrantType.ALLOW_MANAGE, GrantType.AVAILABLE_USE, GrantType.FORCE_USE, GrantType.ALLOW_VIEW);
         }
         assertThat(result.get(601L).isHasManagePermission()).isFalse();
         assertThat(result.get(601L).isHasUsePermission()).isFalse();

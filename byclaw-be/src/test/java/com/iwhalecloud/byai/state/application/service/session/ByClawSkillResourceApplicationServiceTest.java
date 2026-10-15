@@ -1582,6 +1582,48 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     @Test
+    void enterpriseSyncUsesStableCodeAndDefersAssociationAndPublication() {
+        String url = "https://example.invalid/skill.zip";
+        var syncing = spy(service);
+        doReturn(skillZipBytes("zip-inner-name")).when(syncing).downloadThirdPartySkillPackage(url);
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(call -> {
+            SsResource created = call.getArgument(0); created.setResourceId(7301L); return created;
+        });
+        var root = com.alibaba.fastjson.JSON.parseObject("{\"systemCode\":\"WHALE_AGENT\",\"resourceCode\":\"stable-business-code\",\"resourceName\":\"技能介绍\",\"downloadUrl\":\"" + url + "\"}");
+        var result = syncing.syncEnterpriseSkill(root, 10L);
+        assertThat(result).containsEntry("resourceId", "7301").containsEntry("updated", false);
+        var capture = ArgumentCaptor.forClass(SsResource.class);
+        verify(ssResourceService).saveResource(capture.capture());
+        assertThat(capture.getValue().getResourceCode()).isEqualTo("stable-business-code");
+        assertThat(capture.getValue().getOwnerType()).isEqualTo("enterprise");
+        verify(ssResourceRelDetailService, never()).save(any());
+        verify(resourceArtifactStorageService, never()).syncResourceJsonByBizType(any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
+    }
+
+    @Test
+    void enterpriseSyncKeepsOffShelfLifecycleAndPackageVersionForIdenticalBytes() {
+        String url = "https://example.invalid/rotated-signature.zip";
+        byte[] bytes = skillZipBytes("demo");
+        var syncing = spy(service);
+        doReturn(bytes).when(syncing).downloadThirdPartySkillPackage(url);
+        SsResource resource = new SsResource(); resource.setResourceId(7301L); resource.setOwnerType("enterprise");
+        resource.setResourceBizType("SKILL"); resource.setResourceStatus(3); resource.setResourceCode("stable-code");
+        when(ssResourceService.findByImportIdentity("WHALE_AGENT", "SKILL", "stable-code")).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(resource)).thenReturn(resource);
+        SsResExtSkill ext = new SsResExtSkill(); ext.setResourceId(7301L); ext.setVersion("7");
+        ext.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
+        when(ssResExtSkillService.findById(7301L)).thenReturn(ext);
+        var root = com.alibaba.fastjson.JSON.parseObject("{\"systemCode\":\"WHALE_AGENT\",\"resourceCode\":\"stable-code\",\"resourceName\":\"新介绍\",\"downloadUrl\":\"" + url + "\"}");
+        var result = syncing.syncEnterpriseSkill(root, 10L);
+        assertThat(result).containsEntry("updated", true).containsEntry("packageChanged", false);
+        assertThat(resource.getResourceStatus()).isEqualTo(3);
+        assertThat(ext.getVersion()).isEqualTo("7");
+        verify(ssResExtSkillService, never()).nextVersion(any());
+    }
+
+    @Test
     void installThirdPartySkill_createsWhaleAgentSkillBindsEmployeeAndRefreshesRuntime() {
         String downloadUrl = "https://market.example/market-skill.zip";
         String resourceCode = DigestUtils.sha256Hex(downloadUrl);

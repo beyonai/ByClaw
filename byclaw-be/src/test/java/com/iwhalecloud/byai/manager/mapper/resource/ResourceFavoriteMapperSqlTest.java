@@ -57,8 +57,12 @@ class ResourceFavoriteMapperSqlTest {
             String sql = sql(query[0], query[1], Map.of(
                 "userId", 11L, "favoriteTenantId", 22L, "includeFavorites", true,
                 "ownerType", "enterprise", "includeAllEnterpriseOwnerType", true));
-            assertThat(sql).contains("fc.com_acct_id = ?", "uf.com_acct_id = ?")
-                .doesNotContain("a.com_acct_id = ?");
+            assertThat(sql).contains("fc.com_acct_id = ?", "uf.com_acct_id = ?");
+            if (query[1].endsWith("listResourceAuth")) {
+                assertThat(sql).contains("coalesce(a.view_auth_controlled, false) = false");
+            } else {
+                assertThat(sql).doesNotContain("a.com_acct_id = ?");
+            }
         }
     }
 
