@@ -96,6 +96,8 @@ public class ResourceAuthApplicationService {
 
         // 添加用户权限上下文信息
         resourceAuthContextService.setCurrentUserAuthQo(resourceUseAuthQo);
+        resourceUseAuthQo.setViewGlobalManager(authApplicationService.isCurrentUserGlobalResourceManager());
+        resourceUseAuthQo.setViewTenantId(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.getEnterpriseId());
         resourceUseAuthQo.setFavoriteTenantId(null);
         if (Boolean.TRUE.equals(resourceUseAuthQo.getIncludeFavorites())
             || Boolean.TRUE.equals(resourceUseAuthQo.getFavoritesOnly())) {
@@ -127,6 +129,13 @@ public class ResourceAuthApplicationService {
                 BeanUtils.copyProperties(permission, row, "resourceId", "ownerType");
             }
             row.setOperationPermissionsLoaded(permission != null);
+            if (permission != null && !permission.isCanViewDetail()) {
+                row.setSkillUrl(null);
+                row.setTargetContent(null);
+                row.setSkillPackageHash(null);
+                row.setSkillOriginalFilename(null);
+                row.setSyncError(null);
+            }
         }
     }
 

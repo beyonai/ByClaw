@@ -98,6 +98,21 @@ import org.mockito.InOrder;
 
 class DigitalEmployeeApplicationServiceTest {
 
+    @Test
+    void editorRejectsNewControlledResourceWithoutUsePermissionButRetainsExistingBinding() {
+        SsResource employee = new SsResource(); employee.setResourceId(100L);
+        SsResource child = new SsResource(); child.setResourceId(200L); child.setResourceBizType("TOOLKIT");
+        child.setUseAuthControlled(true);
+        when(ssResourceService.findByIdList(List.of(200L))).thenReturn(List.of(child));
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service, "reconcileDigitalEmployeeUpdateRelations",
+            employee, List.of(200L), List.of(), List.of())).isInstanceOf(BaseException.class);
+        verify(ssResourceRelDetailService, never()).save(any());
+        SsResourceRelDetail relation = new SsResourceRelDetail(); relation.setRelResourceId(200L);
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(service, "reconcileDigitalEmployeeUpdateRelations",
+            employee, List.of(200L), List.of(relation), List.of())).doesNotThrowAnyException();
+        verify(ssResourceRelDetailService).updateById(relation);
+    }
+
     private SsResourceService ssResourceService;
     private SsResExtDigEmployeeService ssResExtDigEmployeeService;
     private SsResExtSkillService ssResExtSkillService;
@@ -157,6 +172,8 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", mockMessageSource);
 
         service = new DigitalEmployeeApplicationService();
+        ReflectionTestUtils.setField(service, "resourceBindingSourceService",
+            mock(com.iwhalecloud.byai.manager.application.service.resource.ResourceBindingSourceService.class));
         ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "ssResExtDigEmployeeService", ssResExtDigEmployeeService);

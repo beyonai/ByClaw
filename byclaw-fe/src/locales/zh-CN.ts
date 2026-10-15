@@ -329,6 +329,7 @@ export default {
   'resource.skillGroup.uninstallPreserveTooltip': '保留仍由手工安装或其他技能组引用的技能。',
   'resource.skillGroup.uninstallAllTooltip': '同时移除这些技能的手工安装和其他技能组引用来源。',
   'resource.skillGroup.manualSource': '手工安装',
+  'resource.skillGroup.automaticSource': '同步自动关联',
   'resource.skillGroup.otherGroupSource': '同时来自：{groups}',
   'resource.skillGroup.uninstallSuccess': '技能组卸载成功',
   'resource.skillGroup.uninstallRefreshFailed': '技能组已卸载，但页面刷新失败，请手动刷新',

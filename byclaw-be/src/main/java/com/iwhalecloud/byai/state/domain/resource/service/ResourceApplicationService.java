@@ -168,7 +168,29 @@ public class ResourceApplicationService {
             return null;
         }
 
+        boolean controlled = Boolean.TRUE.equals(ssResource.getViewAuthControlled())
+            || Boolean.TRUE.equals(ssResource.getUseAuthControlled());
+        if (controlled && !authApplicationService.hasResourceViewPermission(ssResource)) {
+            throw new IllegalArgumentException("无权查看资源基础信息");
+        }
         ResourceDetailVo resourceDetailVo = new ResourceDetailVo();
+        if (controlled && !authApplicationService.hasResourceAccessPermission(ssResource)) {
+            // Metadata whitelist: no host, schema, package URL, service configuration or member details.
+            resourceDetailVo.setResourceId(ssResource.getResourceId());
+            resourceDetailVo.setResourceName(ssResource.getResourceName());
+            resourceDetailVo.setResourceDesc(ssResource.getResourceDesc());
+            resourceDetailVo.setResourceCode(ssResource.getResourceCode());
+            resourceDetailVo.setResourceBizType(ssResource.getResourceBizType());
+            resourceDetailVo.setOwnerType(ssResource.getOwnerType());
+            resourceDetailVo.setAvatar(ssResource.getAvatar());
+            resourceDetailVo.setCatalogId(ssResource.getCatalogId());
+            resourceDetailVo.setResourceStatus(ssResource.getResourceStatus());
+            resourceDetailVo.setResourceVersionId(ssResource.getResourceVersionId());
+            resourceDetailVo.setCreateTime(ssResource.getCreateTime());
+            resourceDetailVo.setUpdateTime(ssResource.getUpdateTime());
+            resourceDetailVo.setOperationPermissions(authApplicationService.queryResourceOperationPermissions(ssResource.getResourceId()));
+            return resourceDetailVo;
+        }
         BeanUtils.copyProperties(ssResource, resourceDetailVo);
         if (Constants.ResourceBizType.DIG_EMPLOYEE.equalsIgnoreCase(ssResource.getResourceBizType())) {
             SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(ssResource.getResourceId());

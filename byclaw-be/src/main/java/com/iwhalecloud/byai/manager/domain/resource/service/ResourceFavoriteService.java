@@ -64,13 +64,15 @@ public class ResourceFavoriteService {
             || !"enterprise".equals(resource.getOwnerType())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "resource.favorite.unavailable");
         }
-        // 允许取消已下架/注销资源的收藏；新增收藏仍遵守上架和黑名单限制。
-        if (Boolean.TRUE.equals(qo.getFavorited())
-            && (!Integer.valueOf(2).equals(resource.getResourceStatus())
-                || authApplicationService.queryCurrentUserUseBlacklistedResourceIds(
-                    List.of(resource.getResourceId()), List.of(resource.getResourceBizType()))
-                    .contains(resource.getResourceId()))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "resource.favorite.unavailable");
+        // Removing an old favorite remains possible after access is revoked.
+        boolean controlled = Boolean.TRUE.equals(resource.getViewAuthControlled()) || Boolean.TRUE.equals(resource.getUseAuthControlled());
+        if (Boolean.TRUE.equals(qo.getFavorited())) {
+            boolean visible = controlled ? authApplicationService.hasResourceViewPermission(resource)
+                : !authApplicationService.queryCurrentUserUseBlacklistedResourceIds(
+                    List.of(resource.getResourceId()), List.of(resource.getResourceBizType())).contains(resource.getResourceId());
+            if (!Integer.valueOf(2).equals(resource.getResourceStatus()) || !visible) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "resource.favorite.unavailable");
+            }
         }
         mapper.ensureCount(qo.getResourceId(), tenantId);
         // 仅锁定本资源的计数行，防止并发收藏/取消造成计数与关系不一致。

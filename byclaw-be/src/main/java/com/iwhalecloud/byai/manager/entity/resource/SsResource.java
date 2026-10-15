@@ -43,6 +43,15 @@ public class SsResource implements Serializable {
      */
     private String systemCode;
 
+    /** 企业同步独立查看范围接管标志。 */
+    private Boolean viewAuthControlled;
+
+    /** 防止共享员工安装流程扩展第三方同步的使用范围。 */
+    private Boolean useAuthControlled;
+
+    /** 同步关联对账的资源版本。 */
+    private Long thirdSyncRevision;
+
     /**
      * 存放智能体平台或BOT的resourceId
      */

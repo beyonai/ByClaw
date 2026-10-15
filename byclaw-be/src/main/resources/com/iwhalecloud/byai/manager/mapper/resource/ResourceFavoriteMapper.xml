@@ -9,7 +9,7 @@
     </select>
 
     <select id="selectResource" resultType="com.iwhalecloud.byai.manager.entity.resource.SsResource">
-        select resource_id, resource_biz_type, owner_type, resource_status, com_acct_id
+        select resource_id, resource_biz_type, owner_type, resource_status, com_acct_id, view_auth_controlled, use_auth_controlled
         from ss_resource
         where resource_id = #{resourceId} and com_acct_id = #{tenantId}
     </select>

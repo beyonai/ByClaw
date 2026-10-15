@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.application.service.session;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONWriter;
+import com.alibaba.fastjson.JSONObject;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -353,6 +354,58 @@ public class ByClawSkillResourceApplicationService {
         syncSkillTargetContent(resolvedUserCode, resource, extSkill, true);
         rebuildAndScheduleSkillRuntimeRefresh(new LinkedHashSet<>(Collections.singletonList(resolvedDigId)));
         return new SkillImportResult(resource, extSkill, updated);
+    }
+
+    /** Enterprise synchronization has a stable external identity and does not install into the caller's employee. */
+    public Map<String, Object> syncEnterpriseSkill(JSONObject root, Long catalogId) {
+        String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
+        String code = StringUtils.trimToEmpty(root.getString("resourceCode"));
+        String name = StringUtils.trimToEmpty(root.getString("resourceName"));
+        String url = StringUtils.trimToEmpty(root.getString("downloadUrl"));
+        if (!SystemCode.isValid(systemCode) || StringUtils.isAnyBlank(code, name, url)) {
+            throw new IllegalArgumentException("技能同步需要有效 systemCode、resourceCode、resourceName 和 downloadUrl");
+        }
+        if (code.length() > 250 || code.contains("/") || code.contains("\\") || ".".equals(code) || "..".equals(code)
+            || code.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("技能 resourceCode 不能包含路径分隔符、控制字符或超过 250 个字符");
+        }
+        byte[] bytes = downloadThirdPartySkillPackage(url);
+        SkillPackageMetadata inspected = inspectSkillPackage(new ByteArrayMultipartFile(
+            resolveThirdPartySkillFilename(url), bytes, PACKAGE_CONTENT_TYPE));
+        SkillPackageMetadata metadata = new SkillPackageMetadata(name, code,
+            StringUtils.defaultIfBlank(root.getString("resourceDesc"), inspected.skillDesc()),
+            inspected.originalFilename(), inspected.size());
+        SsResource existing = ssResourceService.findByImportIdentity(systemCode, "SKILL", code);
+        SsResExtSkill previous = existing == null ? null : ssResExtSkillService.findById(existing.getResourceId());
+        boolean changed = previous == null || !DigestUtils.sha256Hex(bytes).equals(previous.getSkillPackageHash());
+        Integer previousStatus = existing == null ? null : existing.getResourceStatus();
+        Date previousPublishTime = existing == null ? null : existing.getPublishTime();
+        SsResource resource = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, catalogId, existing, systemCode);
+        if (existing == null) {
+            authApplicationService.ensureCreatorDefaultPrivileges(resource);
+        } else {
+            resource.setResourceStatus(previousStatus);
+            resource.setPublishTime(previousPublishTime);
+        }
+        resource.setResourceVersionId(StringUtils.defaultIfBlank(root.getString("version"), "1.0"));
+        ssResourceService.updateResourceEntity(resource);
+        SsResExtSkill ext = saveOrUpdateSkillExt(CurrentUserHolder.getCurrentUserCode(), resource, bytes, metadata,
+            null, null, "THIRD_PARTY_SYNC", null);
+        // Publication is performed by the durable job after the resource and authorization transaction commits.
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("resourceId", String.valueOf(resource.getResourceId()));
+        result.put("updated", existing != null);
+        result.put("packageChanged", changed);
+        return result;
+    }
+
+    /** Called with the sync resource row lock after commit; failures are retried by the durable sync job. */
+    public void publishEnterpriseSyncArtifacts(Long resourceId) {
+        SsResource resource = ssResourceService.findById(resourceId);
+        SsResExtSkill ext = ssResExtSkillService.findById(resourceId);
+        if (resource == null || ext == null) throw new IllegalStateException("技能同步资源不存在");
+        syncSkillTargetContent(CurrentUserHolder.getCurrentUserCode(), resource, ext, false);
+        resourceArtifactStorageService.syncResourceJsonByBizType(ext.getTargetContent(), "SKILL", resourceId);
     }
 
     public ObjectZipImportResult previewSkillZipImportConflicts(MultipartFile[] files, String ownerType) {
@@ -1698,7 +1751,8 @@ public class ByClawSkillResourceApplicationService {
         String packageFileName = metadata.originalFilename();
         String skillHubDirectory = buildSkillHubDirectory(skillResource.getOwnerType(), userCode);
         // 目录同步和审核包均按资源、内容隔离，事务回滚或审核驳回都不会覆盖线上 ZIP。
-        if (SOURCE_TYPE_WORKSPACE_CENTER_SYNC.equals(sourceType) || SOURCE_TYPE_IMPORT_REVIEW.equals(sourceType)) {
+        if (SOURCE_TYPE_WORKSPACE_CENTER_SYNC.equals(sourceType) || SOURCE_TYPE_IMPORT_REVIEW.equals(sourceType)
+            || "THIRD_PARTY_SYNC".equals(sourceType)) {
             String directory = SOURCE_TYPE_IMPORT_REVIEW.equals(sourceType) ? "/import-review/" : "/directory-sync/";
             skillHubDirectory += directory + skillResource.getResourceId() + "/" + DigestUtils.sha256Hex(packageBytes);
         }
@@ -1718,7 +1772,8 @@ public class ByClawSkillResourceApplicationService {
         extSkill.setSkillType(SsResExtSkillService.DEFAULT_SKILL_TYPE);
         extSkill.setSourceType(StringUtils.defaultIfBlank(sourceType, SOURCE_TYPE_SKILL_MANAGE_IMPORT));
         extSkill.setVersion(existing == null ? SsResExtSkillService.DEFAULT_VERSION
-            : ssResExtSkillService.nextVersion(existing.getVersion()));
+            : "THIRD_PARTY_SYNC".equals(sourceType) && DigestUtils.sha256Hex(packageBytes).equals(existing.getSkillPackageHash())
+                ? existing.getVersion() : ssResExtSkillService.nextVersion(existing.getVersion()));
         extSkill.setSkillUrl(skillUrl);
         extSkill.setSkillPackageFormat(SsResExtSkillService.DEFAULT_PACKAGE_FORMAT);
         extSkill.setSkillOriginalFilename(packageFileName);
