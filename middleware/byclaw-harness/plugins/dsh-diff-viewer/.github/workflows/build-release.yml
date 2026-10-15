@@ -1,0 +1,116 @@
+# Build the plugin and attach the packed tarball to a GitHub Release.
+#
+# The plugin's devDependencies are `link:` into a local deepseek-harness
+# checkout (the plugin repo's build-time dependency source), so this workflow
+# checks out that harness and builds it before building the plugin. The harness
+# ref is PINNED to the rc.5-era commit the plugin's source targets: harness
+# master moves (rc.6 retracted the ui-primitives shiki exports this plugin
+# consumes), and a pinned build keeps releases reproducible.
+#
+# Triggered on release publish (attach to that release) or manually.
+name: build-release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach the tarball to (defaults to the latest release)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          # The plugin's devDependencies are `link:../dsh2026/...` relative to
+          # the plugin root; check it into a named subdir so that relative
+          # target lands on the harness checkout below (GITHUB_WORKSPACE itself
+          # already carries the repo name, so a root checkout would shift the
+          # link target one level too high).
+          path: dsh-diff-viewer
+
+      - name: Checkout deepseek-harness (plugin build-time dependency source)
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          # rc.7-era master (release/dsh-0.1.0-rc.7 merge); the plugin's link:
+          # devDependencies resolve into this checkout at
+          # ../dsh2026/deepseek-harness/... — the layout this repo's
+          # pnpm-lock.yaml records.
+          ref: 99f6f02fec0d0dd7d99a03ceefc4ee03d28a77e7
+          path: dsh2026/deepseek-harness
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # Match the harness's declared packageManager (pnpm@11.7.0): pnpm 10
+          # installs a different public-hoist layout, which breaks shiki
+          # resolution from the linked harness sources during the plugin tests.
+          version: 11.7.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: dsh2026/deepseek-harness/pnpm-lock.yaml
+
+      - name: Build harness (tsc emits lib/types, tsdown emits lib runtimes)
+        working-directory: dsh2026/deepseek-harness
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build:lib
+
+      - name: 'Install plugin (link: targets now exist)'
+        working-directory: dsh-diff-viewer
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck, test, build
+        working-directory: dsh-diff-viewer
+        run: pnpm run check
+
+      - name: Verify committed lib matches the fresh build
+        working-directory: dsh-diff-viewer
+        run: |
+          # lib/ is committed so `github:` repo-url installs work (issue #8);
+          # a source change without a rebuilt lib would ship stale artifacts
+          # to that install path, so the gate fails the release instead.
+          if ! git diff --exit-code -- lib/; then
+            echo "::error::lib/ differs from the fresh build — rebuild and commit lib/ together with source changes"
+            exit 1
+          fi
+
+      - name: Pack release tarball
+        working-directory: dsh-diff-viewer
+        run: |
+          # The devDependencies are link: into the harness checkout; strip them
+          # from the packed manifest (npm pack reads the working package.json)
+          # so a plain consumer install never tries to resolve those links.
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));delete p.devDependencies;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+          mkdir -p dist
+          npm pack --pack-destination dist
+          # Rename to a versionless fixed name so
+          # releases/latest/download/dsh-external-dsh-diff-viewer.tgz always
+          # points at the newest build.
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));const fixed=p.name.replace(/^@/,'').replace('/','-')+'.tgz';const packed=fs.readdirSync('dist').find(f=>f.endsWith('.tgz'));if(packed&&packed!==fixed){fs.renameSync('dist/'+packed,'dist/'+fixed)}"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: dsh-diff-viewer
+        run: |
+          # Release-publish runs attach to that release; a manual dispatch
+          # attaches to the latest release unless a tag input is given.
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release view --json tagName --jq .tagName)
+          fi
+          gh release upload "$TAG" dist/*.tgz --clobber

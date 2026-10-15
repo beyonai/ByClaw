@@ -1,0 +1,8 @@
+rootProject.name = rootDir.name
+rootProject.name = 'u-root'
+include(subprojects)
+include (:oops
+include ":ok"
+include "${dynamic}"
+include ':'
+includeBuild '../platform'

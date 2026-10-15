@@ -1,0 +1,10 @@
+<project>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <artifactId>bom</artifactId>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <artifactId>solo-app</artifactId>
+</project>

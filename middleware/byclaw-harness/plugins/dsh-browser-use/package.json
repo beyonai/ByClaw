@@ -1,0 +1,67 @@
+{
+  "name": "@byclaw/dsh-browser-use",
+  "version": "0.1.0",
+  "description": "Isolated natural-language browser automation for DeepSeek Harness agents",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./goal": {
+      "types": "./lib/goal-types.d.ts",
+      "default": "./lib/goal-types.js"
+    }
+  },
+  "files": [
+    "lib",
+    "scripts/vnc-isolation-integration.mjs",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md"
+  ],
+  "scripts": {
+    "link:dsh": "node scripts/link-dsh.mjs",
+    "clean": "node scripts/clean-build.mjs",
+    "build": "npm run link:dsh && npm run clean && tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test": "vitest run",
+    "test:vnc-integration": "node scripts/vnc-isolation-integration.mjs",
+    "typecheck": "npm run link:dsh && tsc -p tsconfig.json --noEmit",
+    "verify": "pnpm test && pnpm typecheck && pnpm build"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-app-boot": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-base": "0.1.5-rc.2",
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1",
+    "@byclaw/jev-client": "workspace:*"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/korvo873/byclaw-dsh.git",
+    "directory": "plugins/dsh-browser-use"
+  },
+  "private": true
+}

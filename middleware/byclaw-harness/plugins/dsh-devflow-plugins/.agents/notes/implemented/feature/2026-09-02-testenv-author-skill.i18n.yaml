@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state.
+2026-09-02-testenv-author-skill.md: 0ec44956c0a8ed960a9353b2f39a162daee881f4
+2026-09-02-testenv-author-skill.zh.md: aa3617c2a3db1d7885d934710bb475ca60bea1cf

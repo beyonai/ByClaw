@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state.
+2026-08-31-devflow-stage-centric-kanban.md: b4edb08cc39431f383bf322f3f1f84fed76e40c1
+2026-08-31-devflow-stage-centric-kanban.zh.md: 2c091f08cc988c747a23ba379f84704849f99fee

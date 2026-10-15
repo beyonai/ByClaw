@@ -1,0 +1,123 @@
+.dock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--dsw-alias-border-secondary, rgba(0, 0, 0, 0.1));
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.92));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.title {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary, #171717);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary, #777);
+}
+
+.experts {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.expert {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px 5px 5px;
+  border: 1px solid var(--dsw-alias-border-secondary, rgba(0, 0, 0, 0.12));
+  border-radius: 999px;
+  color: var(--dsw-alias-label-primary, #171717);
+  background: var(--dsw-alias-bg-layer-2, #fff);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+}
+
+button.expert {
+  cursor: pointer;
+}
+
+button.expert:hover {
+  border-color: var(--dsw-alias-state-business-primary, #356ae6);
+}
+
+.avatar,
+.fallback {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.avatar {
+  object-fit: cover;
+}
+
+.fallback {
+  display: grid;
+  place-items: center;
+  color: white;
+  background: var(--dsw-alias-state-business-primary, #356ae6);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.copy {
+  display: flex;
+  min-width: 0;
+  max-width: 130px;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.copy strong,
+.copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.copy strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.copy small {
+  color: var(--dsw-alias-label-tertiary, #777);
+  font-size: 10px;
+}
+
+.check {
+  color: var(--dsw-alias-label-tertiary, #777);
+  font-size: 12px;
+}
+
+.expert[data-state='working'] .check {
+  color: var(--dsw-alias-state-business-primary, #356ae6);
+}
+
+.expert[data-state='completed'] .check {
+  color: var(--dsw-alias-state-success, #2e9b54);
+}
+
+.expert[data-state='failed'] .check {
+  color: var(--dsw-alias-state-danger, #d13c3c);
+}

@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state.
+2026-09-02-testenv-bootstrap-survey-protocol.md: c442de4e81b982fe83de29da3b7fae91f3dcfc8e
+2026-09-02-testenv-bootstrap-survey-protocol.zh.md: ccab76e909357315c006f0efbea2f6b2a631c428

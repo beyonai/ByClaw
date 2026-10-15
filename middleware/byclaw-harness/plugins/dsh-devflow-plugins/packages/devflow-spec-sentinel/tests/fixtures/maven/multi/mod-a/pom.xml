@@ -1,0 +1,11 @@
+<project>
+  <parent>
+    <artifactId>aggregator</artifactId>
+  </parent>
+  <dependencies>
+    <dependency>
+      <artifactId>junit</artifactId>
+    </dependency>
+  </dependencies>
+  <artifactId>mod-a-artifact</artifactId>
+</project>

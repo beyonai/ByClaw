@@ -1,0 +1,28 @@
+# Replace the shipped sandboxed Bash provider while preserving its defaults.
+# The ByClaw provider subclasses it, forwards the explicit child env, and
+# routes eligible commands through rtk (Rust Token Killer) to compress
+# output. Requires the `rtk` binary on PATH; without it, command routing is
+# the identity transform and only the env forwarding applies.
+- id: bash-sandbox
+  disabled: true
+
+# Host plugins share Redis credentials; model-facing descriptions contain no values.
+- id: credentials
+  disabled: true
+
+# Keep the settings file provider and add the busy-Enter environment default.
+- id: settings
+  disabled: true
+
+- insert:
+    - id: byclaw-credentials
+      name: '@byclaw/dsh-bash-provider/credentials'
+
+    - id: byclaw-settings
+      name: '@byclaw/dsh-bash-provider/settings'
+
+    - id: byclaw-bash-provider
+      name: '@byclaw/dsh-bash-provider'
+      disabled: !!js process.platform === 'win32'
+      config:
+        timeoutMs: 60000

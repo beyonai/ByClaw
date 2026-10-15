@@ -1,0 +1,8 @@
+- insert:
+    - id: byclaw-browser-use
+      name: '@byclaw/dsh-browser-use'
+      config:
+        maxContexts: 4
+        maxQueue: 32
+        idleBrowserMs: 30000
+        leaseTimeoutMs: 900000

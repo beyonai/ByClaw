@@ -50,6 +50,7 @@ jobs:
               - "middleware/redis/**"
               - ".github/workflows/docker-build-middleware.yml"
             openclaw:
+              - "middleware/builtin/**"
               - "middleware/openclaw/**"
               - "byclaw-exe/extensions/**"
               - ".github/workflows/docker-build-middleware.yml"

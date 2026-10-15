@@ -1,0 +1,338 @@
+diff --git a/packages/client/ui-primitives/src/index.ts b/packages/client/ui-primitives/src/index.ts
+index 05baf26f..ec01f3e4 100644
+--- a/packages/client/ui-primitives/src/index.ts
++++ b/packages/client/ui-primitives/src/index.ts
+@@ -41,6 +41,13 @@ export { WebBlock } from './WebBlock.tsx'
+ export type { WebBlockProps, WebSearchBlockProps, WebFetchBlockProps, WebSourceView } from './WebBlock.tsx'
+ export { CodeBlock } from './markdown/CodeBlock.tsx'
+ export type { CodeBlockProps } from './markdown/CodeBlock.tsx'
++// The per-line shiki token path, shared with the read card and the external
++// diff-viewer plugin (a platform module: cross-package callers import these
++// through the package root, never the src subpath).
++export { grammarLoadCount, highlightLines, subscribeGrammarLoaded } from './markdown/highlight.ts'
++export type { HighlightSpan } from './markdown/highlight.ts'
++export { useCopyFeedback } from './use-copy-feedback.ts'
++export type { CopyFeedback } from './use-copy-feedback.ts'
+ export { JsonBlock } from './markdown/JsonBlock.tsx'
+ export { MarkdownText } from './markdown/MarkdownText.tsx'
+ export type { MarkdownCodeLabels, MarkdownFileMentions } from './markdown/MarkdownText.tsx'
+diff --git a/packages/client/ui-tool/src/client/apply.ts b/packages/client/ui-tool/src/client/apply.ts
+index ec2f0b8e..5963c4c5 100644
+--- a/packages/client/ui-tool/src/client/apply.ts
++++ b/packages/client/ui-tool/src/client/apply.ts
+@@ -26,12 +26,16 @@ export function apply(ctx: ClientContext): void {
+     locale: NS,
+     children: {
+       'tool.call.toolview': { kind: 'keyed', scope: 'session' },
++      'tool.call.diffcard': { kind: 'chain', scope: 'session' },
+     },
+   }, ToolCallTree))
+ 
+   ctx.slots.inject('conversation.details.tool', () => ctx.slots.register({
+     name: 'conversation.details.tool',
+     locale: NS,
++    children: {
++      'tool.details.diffcard': { kind: 'chain', scope: 'session' },
++    },
+   }, ToolDetails))
+ 
+   ctx.plugin(bashToolviewSample)
+diff --git a/packages/client/ui-tool/src/client/contract/slots.ts b/packages/client/ui-tool/src/client/contract/slots.ts
+index 26039efc..4b4f5e8e 100644
+--- a/packages/client/ui-tool/src/client/contract/slots.ts
++++ b/packages/client/ui-tool/src/client/contract/slots.ts
+@@ -1,13 +1,28 @@
+ /** Tool UI slot declarations and their composed component props. */
++import type { ReactNode } from 'react'
+ import type { PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+ import type { ToolCallBlock } from '@deepseek-ai/dsh-client-runtime/client'
+ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+ import type {} from '@deepseek-ai/dsh-client-locale/client'
++import type { DiffCardModel } from '../tool/models/diff-card-model.ts'
++
++export type { DiffCardModel } from '../tool/models/diff-card-model.ts'
+ 
+ declare module '@deepseek-ai/dsh-client-ui-slots' {
+   interface SlotMap {
+     /** Keyed atomic Tool call view, dispatched by the wire Tool name. */
+     'tool.call.toolview': { kind: 'keyed'; scope: 'session'; owner: ToolCallOwnerProps }
++    /**
++     * Chain-rendered diff card body for a write/edit call in the chat flow.
++     * The first registration whose selector matches renders the card; the
++     * stock bundle falls back to DiffBlock, and an external plugin (e.g. the
++     * diff-viewer) registers its own at higher priority to replace it.
++     * Declared by the chat tree; the details panel has its own
++     * `tool.details.diffcard` (one declarer per slot).
++     */
++    'tool.call.diffcard': { kind: 'chain'; scope: 'session'; owner: DiffCardOwnerProps }
++    /** The details-panel twin of {@link 'tool.call.diffcard'}. */
++    'tool.details.diffcard': { kind: 'chain'; scope: 'session'; owner: DiffCardOwnerProps }
+   }
+ }
+ 
+@@ -25,6 +40,22 @@ export interface ToolCallOwnerProps {
+   openFile: (path: string) => void
+   /** Inspect this call in the trajectory view when available. */
+   inspect?: (() => void) | undefined
++  /**
++   * Render a diff card through the `tool.call.diffcard` chain (the stock
++   * fallback draws DiffBlock). Provided by the tree's renderer so atomic
++   * views can draw the diff surface without knowing which surface is active.
++   */
++  renderDiff?: ((card: DiffCardModel, maxLines?: number, className?: string) => ReactNode) | undefined
++}
++
++/** Owner currency for the chain-rendered diff card body. */
++export interface DiffCardOwnerProps {
++  /** The derived diff-card material the renderer draws. */
++  card: DiffCardModel
++  /** Height cap in body rows; absent = uncapped (the details panel). */
++  maxLines?: number | undefined
++  /** Render-site layout class (row indentation, panel padding). */
++  className?: string | undefined
+ }
+ 
+ /** Full props of a registered atomic Tool view. */
+@@ -32,8 +63,10 @@ export type ToolCallViewProps = PropsRuntime<'tool.call.toolview'>
+ 
+ /** Full props of the Tool call-tree renderer registered as a `tool-call` Chat Node. */
+ export type ToolTreeProps = PropsRuntime<'conversation.chat.node', 'tool-call'>
+-  & PropsRenderSlots<'tool.call.toolview'>
++  & PropsRenderSlots<'tool.call.toolview' | 'tool.call.diffcard'>
+   & PropsLocale<'conversation'>
+ 
+ /** Full props of the selected Tool output renderer in the details panel. */
+-export type ToolDetailsProps = PropsRuntime<'conversation.details.tool'> & PropsLocale<'conversation'>
++export type ToolDetailsProps = PropsRuntime<'conversation.details.tool'>
++  & PropsRenderSlots<'tool.details.diffcard'>
++  & PropsLocale<'conversation'>
+diff --git a/packages/client/ui-tool/src/client/tool/ToolCallTree.tsx b/packages/client/ui-tool/src/client/tool/ToolCallTree.tsx
+index db3ed0af..42717f51 100644
+--- a/packages/client/ui-tool/src/client/tool/ToolCallTree.tsx
++++ b/packages/client/ui-tool/src/client/tool/ToolCallTree.tsx
+@@ -1,7 +1,8 @@
+ /** Root/subcall Tool composition with one keyed atomic dispatch path. */
+ import { memo, useMemo, type ReactNode } from 'react'
++import { DiffBlock, DEFAULT_DIFF_MAX_LINES } from '@deepseek-ai/dsh-client-ui-primitives'
+ import type { ToolCallBlock } from '@deepseek-ai/dsh-client-runtime/client'
+-import type { ToolCallOwnerProps, ToolTreeProps } from '../contract/slots.ts'
++import type { DiffCardModel, ToolCallOwnerProps, ToolTreeProps } from '../contract/slots.ts'
+ import { GenericToolCard } from './toolviews/GenericToolCard.tsx'
+ import css from './ToolCallTree.module.css'
+ 
+@@ -12,14 +13,23 @@ function callName(node: ToolCallBlock): string {
+ 
+ /** One atomic call dispatched through the Tool-owned keyed slot. */
+ const ToolCall = memo(function ToolCall({
+-  renderSlot, callId, toolName, block, openFile, selected, cwd, inspectCall, t, children,
+-}: Pick<ToolTreeProps, 'renderSlot' | 'openFile' | 'cwd' | 'inspectCall' | 't'> & {
++  renderSlot, renderSlotChain, callId, toolName, block, openFile, selected, cwd, inspectCall, t, children,
++}: Pick<ToolTreeProps, 'renderSlot' | 'renderSlotChain' | 'openFile' | 'cwd' | 'inspectCall' | 't'> & {
+   callId: string
+   toolName: string
+   block: ToolCallBlock
+   selected: boolean
+   children?: ReactNode
+ }) {
++  // The diff-card renderer: routes through the `tool.call.diffcard` chain so an
++  // external plugin can replace the surface, falling back to the stock DiffBlock.
++  const renderDiff = useMemo(
++    () => (card: DiffCardModel, maxLines?: number, className?: string): ReactNode =>
++      renderSlotChain('tool.call.diffcard', { card, maxLines, className }, {
++        fallback: <DiffBlock {...card.card} maxLines={maxLines ?? DEFAULT_DIFF_MAX_LINES} className={className} />,
++      }),
++    [renderSlotChain],
++  )
+   const owner: ToolCallOwnerProps = useMemo(() => ({
+     callId,
+     toolName,
+@@ -27,7 +37,8 @@ const ToolCall = memo(function ToolCall({
+     openFile,
+     cwd,
+     inspect: () => { inspectCall(callId) },
+-  }), [callId, toolName, block, openFile, cwd, inspectCall])
++    renderDiff,
++  }), [callId, toolName, block, openFile, cwd, inspectCall, renderDiff])
+   return (
+     <div
+       className={css.callRow}
+@@ -45,13 +56,14 @@ const ToolCall = memo(function ToolCall({
+ })
+ 
+ const ToolCallBranch = memo(function ToolCallBranch({
+-  renderSlot, block, selectedCallId, cwd, openFile, inspectCall, t,
+-}: Pick<ToolTreeProps, 'renderSlot' | 'selectedCallId' | 'cwd' | 'openFile' | 'inspectCall' | 't'> & {
++  renderSlot, renderSlotChain, block, selectedCallId, cwd, openFile, inspectCall, t,
++}: Pick<ToolTreeProps, 'renderSlot' | 'renderSlotChain' | 'selectedCallId' | 'cwd' | 'openFile' | 'inspectCall' | 't'> & {
+   block: ToolCallBlock
+ }) {
+   return (
+     <ToolCall
+       renderSlot={renderSlot}
++      renderSlotChain={renderSlotChain}
+       callId={block.callId}
+       toolName={callName(block)}
+       block={block}
+@@ -67,6 +79,7 @@ const ToolCallBranch = memo(function ToolCallBranch({
+             <ToolCallBranch
+               key={child.callId}
+               renderSlot={renderSlot}
++              renderSlotChain={renderSlotChain}
+               block={child}
+               selectedCallId={selectedCallId}
+               cwd={cwd}
+@@ -88,12 +101,13 @@ const ToolCallBranch = memo(function ToolCallBranch({
+  * @returns the Tool call tree.
+  */
+ export function ToolCallTree({
+-  renderSlot, node, selectedCallId, cwd, openFile, inspectCall, t,
++  renderSlot, renderSlotChain, node, selectedCallId, cwd, openFile, inspectCall, t,
+ }: ToolTreeProps) {
+   const block = node.data.root
+   return (
+     <ToolCallBranch
+       renderSlot={renderSlot}
++      renderSlotChain={renderSlotChain}
+       block={block}
+       selectedCallId={selectedCallId}
+       cwd={cwd}
+diff --git a/packages/client/ui-tool/src/client/tool/ToolDetails.tsx b/packages/client/ui-tool/src/client/tool/ToolDetails.tsx
+index 6420128f..738eb4ff 100644
+--- a/packages/client/ui-tool/src/client/tool/ToolDetails.tsx
++++ b/packages/client/ui-tool/src/client/tool/ToolDetails.tsx
+@@ -1,5 +1,5 @@
+ /** Card-aware output body for the selected Tool call in details. */
+-import { DiffBlock, ReadBlock, SearchBlock, TerminalBlock, WebBlock } from '@deepseek-ai/dsh-client-ui-primitives'
++import { DiffBlock, DEFAULT_DIFF_MAX_LINES, ReadBlock, SearchBlock, TerminalBlock, WebBlock } from '@deepseek-ai/dsh-client-ui-primitives'
+ import type { ToolDetailsProps } from '../contract/slots.ts'
+ import { diffCardModel } from './models/diff-card-model.ts'
+ import { readCardModel } from './models/read-card-model.ts'
+@@ -13,16 +13,17 @@ import css from './ToolDetails.module.css'
+ interface ToolDetailsContentProps {
+   block: ToolDetailsProps['block']
+   cwd?: ToolDetailsProps['cwd']
++  renderSlotChain?: ToolDetailsProps['renderSlotChain']
+   t: ToolDetailsProps['t']
+ }
+ 
+ /**
+  * Render the selected Tool call's structured output when its presentation
+  * intent is known, otherwise preserve the flattened result text.
+- * @param props - selected call slice, workspace root, and locale seat.
++ * @param props - selected call slice, workspace root, diff-chain seat, and locale seat.
+  * @returns the details output body.
+  */
+-export function ToolDetails({ block, cwd, t }: ToolDetailsContentProps) {
++export function ToolDetails({ block, cwd, renderSlotChain, t }: ToolDetailsContentProps) {
+   const terminal = terminalCardModel(block, cwd)
+   if (terminal !== null) {
+     return (
+@@ -37,7 +38,15 @@ export function ToolDetails({ block, cwd, t }: ToolDetailsContentProps) {
+   const read = readCardModel(block, cwd)
+   if (read !== null) { return <ReadBlock {...read} className={css.read} /> }
+   const diff = diffCardModel(block)
+-  if (diff !== null) return <DiffBlock {...diff.card} className={css.cardBody} />
++  if (diff !== null) {
++    // The diff surface routes through the `tool.details.diffcard` chain so an
++    // external plugin can replace it; the stock DiffBlock is the fallback.
++    return renderSlotChain !== undefined
++      ? renderSlotChain('tool.details.diffcard', { card: diff, className: css.cardBody }, {
++        fallback: <DiffBlock {...diff.card} maxLines={DEFAULT_DIFF_MAX_LINES} className={css.cardBody} />,
++      })
++      : <DiffBlock {...diff.card} className={css.cardBody} />
++  }
+   const search = searchCardModel(block)
+   if (search !== null) {
+     return (
+diff --git a/packages/client/ui-tool/src/client/tool/components/ToolRow.tsx b/packages/client/ui-tool/src/client/tool/components/ToolRow.tsx
+index bd4add42..ab11fe3b 100644
+--- a/packages/client/ui-tool/src/client/tool/components/ToolRow.tsx
++++ b/packages/client/ui-tool/src/client/tool/components/ToolRow.tsx
+@@ -24,7 +24,8 @@ import {
+ } from '@deepseek-ai/dsh-client-ui-primitives'
+ import type { WebBlockProps } from '@deepseek-ai/dsh-client-ui-primitives'
+ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+-import { CHAT_DIFF_MAX_LINES, type DiffCardModel } from '../models/diff-card-model.ts'
++import type { DiffCardModel } from '../models/diff-card-model.ts'
++import { CHAT_DIFF_MAX_LINES } from '../models/diff-card-model.ts'
+ import { CHAT_READ_MAX_LINES, type ReadCardModel } from '../models/read-card-model.ts'
+ import { CHAT_SEARCH_MAX_LINES, type SearchCardModel } from '../models/search-card-model.ts'
+ import { terminalBlockLabels, type TerminalCardModel } from '../models/terminal-card-model.ts'
+@@ -65,9 +66,15 @@ export interface ToolRowProps {
+   /**
+    * Diff-card material for a call whose render intent is a diff card (derived by
+    * `diffCardModel`); it replaces the text body when present, the same way
+-   * `terminal` does.
++   * `terminal` does. The card body itself renders through `renderDiff` when
++   * supplied (the `tool.call.diffcard` chain), else the stock DiffBlock.
+    */
+   diff?: DiffCardModel | null | undefined
++  /**
++   * Render a diff card through the `tool.call.diffcard` chain; absent = the
++   * stock DiffBlock surface. The tree supplies this to atomic views.
++   */
++  renderDiff?: ((card: DiffCardModel, maxLines?: number, className?: string) => ReactNode) | undefined
+   /**
+    * Read-card material for a call whose render intent is a read card (derived by
+    * `readCardModel`); it replaces the text body with the file's line-numbered,
+@@ -138,6 +145,7 @@ export function ToolRow({
+   errorSummary,
+   terminal,
+   diff,
++  renderDiff,
+   read,
+   search,
+   web,
+@@ -244,7 +252,9 @@ export function ToolRow({
+               />
+             )
+             : diffBody !== null
+-              ? <DiffBlock {...diffBody.card} maxLines={CHAT_DIFF_MAX_LINES} className={css.diffBody} />
++              ? renderDiff !== undefined
++                ? renderDiff(diffBody, CHAT_DIFF_MAX_LINES, css.diffBody)
++                : <DiffBlock {...diffBody.card} maxLines={CHAT_DIFF_MAX_LINES} className={css.diffBody} />
+               : readBody !== null
+                 ? <ReadBlock {...readBody} maxLines={CHAT_READ_MAX_LINES} className={css.readBody} />
+                 : searchBody !== null
+diff --git a/packages/client/ui-tool/src/client/tool/toolviews/GenericToolCard.tsx b/packages/client/ui-tool/src/client/tool/toolviews/GenericToolCard.tsx
+index bd7eded3..a30750f8 100644
+--- a/packages/client/ui-tool/src/client/tool/toolviews/GenericToolCard.tsx
++++ b/packages/client/ui-tool/src/client/tool/toolviews/GenericToolCard.tsx
+@@ -33,7 +33,7 @@ export interface GenericToolCardProps extends ToolCallOwnerProps {
+   t: ToolTreeProps['t']
+ }
+ 
+-export function GenericToolCard({ toolName, block, cwd, openFile, inspect, t }: GenericToolCardProps) {
++export function GenericToolCard({ toolName, block, cwd, openFile, inspect, renderDiff, t }: GenericToolCardProps) {
+   const model = toolRowModel(toolName, block, cwd)
+   const terminal = terminalCardModel(block, cwd)
+   const read = readCardModel(block, cwd)
+@@ -65,6 +65,7 @@ export function GenericToolCard({ toolName, block, cwd, openFile, inspect, t }:
+       errorSummary={model.errorSummary}
+       terminal={terminal}
+       diff={diff}
++      renderDiff={renderDiff}
+       read={read}
+       search={search}
+       web={web}
+diff --git a/packages/client/ui-tool/src/client/tool/toolviews/file-mutation-row.tsx b/packages/client/ui-tool/src/client/tool/toolviews/file-mutation-row.tsx
+index 9616dab7..cad2d0bf 100644
+--- a/packages/client/ui-tool/src/client/tool/toolviews/file-mutation-row.tsx
++++ b/packages/client/ui-tool/src/client/tool/toolviews/file-mutation-row.tsx
+@@ -29,7 +29,7 @@ type FileMutationRowProps = ToolCallViewProps & PropsLocale<'conversation'>
+  * model-facing error text through its Output section and its first line in the
+  * collapsed summary instead.
+  */
+-export function FileMutationRow({ toolName, block, cwd, openFile, inspect, t }: FileMutationRowProps) {
++export function FileMutationRow({ toolName, block, cwd, openFile, inspect, renderDiff, t }: FileMutationRowProps) {
+   const model = toolRowModel(toolName, block, cwd)
+   const diff = diffCardModel(block)
+   return (
+@@ -44,6 +44,7 @@ export function FileMutationRow({ toolName, block, cwd, openFile, inspect, t }:
+       output={model.output}
+       errorSummary={model.errorSummary}
+       diff={diff}
++      renderDiff={renderDiff}
+       state={model.state}
+       filePath={model.filePath}
+       onOpenFile={openFile}

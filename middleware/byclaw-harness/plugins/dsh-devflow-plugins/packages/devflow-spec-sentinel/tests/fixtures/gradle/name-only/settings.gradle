@@ -1,0 +1,2 @@
+// the petclinic shape: a name, no includes
+rootProject.name = 'spring-petclinic'

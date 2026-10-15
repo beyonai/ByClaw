@@ -1,0 +1,73 @@
+{
+  "name": "@zhchxiao123/dsh-devflow-bundle",
+  "version": "0.4.0-dev.8",
+  "description": "One-command install for the devflow plugin line: the bundle patch that mounts every devflow plugin into a DeepSeek Harness profile",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhchxiao123/dsh-devflow-plugins.git",
+    "directory": "packages/devflow-bundle"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@zhchxiao123/dsh-devflow": "workspace:^",
+    "@zhchxiao123/dsh-devflow-agent-gate": "workspace:^",
+    "@zhchxiao123/dsh-devflow-artifact-gate": "workspace:^",
+    "@zhchxiao123/dsh-devflow-command": "workspace:^",
+    "@zhchxiao123/dsh-devflow-filesystem": "workspace:^",
+    "@zhchxiao123/dsh-devflow-fs-guard": "workspace:^",
+    "@zhchxiao123/dsh-devflow-gates": "workspace:^",
+    "@zhchxiao123/dsh-devflow-guidance": "workspace:^",
+    "@zhchxiao123/dsh-devflow-iron-rules": "workspace:^",
+    "@zhchxiao123/dsh-devflow-review-gate": "workspace:^",
+    "@zhchxiao123/dsh-devflow-parent-gate": "workspace:^",
+    "@zhchxiao123/dsh-devflow-spec": "workspace:^",
+    "@zhchxiao123/dsh-devflow-spec-filesystem": "workspace:^",
+    "@zhchxiao123/dsh-devflow-spec-sentinel": "workspace:^",
+    "@zhchxiao123/dsh-devflow-spec-tool": "workspace:^",
+    "@zhchxiao123/dsh-devflow-tool": "workspace:^",
+    "@zhchxiao123/dsh-devflow-worktree": "workspace:^",
+    "@zhchxiao123/dsh-devflow-ui": "workspace:^",
+    "@zhchxiao123/dsh-devflow-web": "workspace:^"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2"
+  },
+  "scripts": {
+    "prepublishOnly": "node -e \"for (const f of require('./package.json').files.filter(f=>!f.includes('*'))) if (!require('node:fs').existsSync(f)) { console.error('prepublishOnly: '+f+' is missing; run pnpm run build at the repo root'); process.exit(1) }\""
+  }
+}

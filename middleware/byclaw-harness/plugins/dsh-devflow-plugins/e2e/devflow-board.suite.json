@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "name": "Devflow board acceptance on the local Harness Web GUI",
+  "baseUrl": "http://127.0.0.1:3082",
+  "buildProbe": {
+    "path": "/devflow/api/build-info",
+    "method": "POST",
+    "format": "json",
+    "field": [
+      "value",
+      "buildId"
+    ],
+    "instanceField": [
+      "value",
+      "instanceId"
+    ],
+    "expected": "f0428405c2c414dddbe36f6b6be0a40af1f472f9267dc4f3dce61e518e0ca5c6"
+  },
+  "cases": [
+    {
+      "id": "open-board",
+      "steps": [
+        {
+          "kind": "goto",
+          "path": "/"
+        },
+        {
+          "kind": "act",
+          "prompt": "Open the right sidebar using the top-right sidebar icon. Open Devflow in the sidebar start page. Make the Devflow panel fullscreen and switch it to List view so task cards are visible."
+        },
+        {
+          "kind": "assert",
+          "prompt": "The Devflow task board is visible: it shows the task list or board with at least one card entry, not a login error page."
+        }
+      ]
+    },
+    {
+      "id": "open-card-detail",
+      "steps": [
+        {
+          "kind": "goto",
+          "path": "/"
+        },
+        {
+          "kind": "act",
+          "prompt": "Open the right sidebar using the top-right sidebar icon. Open Devflow in the sidebar start page. Make the Devflow panel fullscreen and switch it to List view so task cards are visible."
+        },
+        {
+          "kind": "act",
+          "prompt": "Open the task card titled Devflow 页面 Midscene 真实验收（看板与卡片详情）."
+        },
+        {
+          "kind": "assert",
+          "prompt": "The detail view of the card titled Devflow 页面 Midscene 真实验收（看板与卡片详情） is visible and shows its acceptance criteria content."
+        }
+      ]
+    }
+  ]
+}

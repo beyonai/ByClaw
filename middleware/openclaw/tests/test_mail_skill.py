@@ -18,7 +18,7 @@ ENTRYPOINT = 'python3 /app/skills/mail/scripts/mailctl.py'
 def assert_docker_mail_contract(testcase, dockerfile):
     testcase.assertRegex(
         dockerfile,
-        r'COPY\s+middleware/openclaw/skills/\s+/app/skills/',
+        r'COPY\s+middleware/builtin/skills/\s+/app/skills/',
         'the image must copy the bundled mail skill',
     )
     expected_checks = (

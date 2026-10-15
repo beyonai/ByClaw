@@ -1,0 +1,11 @@
+# The testenv bundle patch: the `dsh.bundle.patch` layer of this package.
+#
+# `dsh plugin --profile <name> add @zhchxiao123/dsh-devflow-testenv` installs
+# the package, and this patch is what mounts it — no profile editing. The
+# package injects only `skills`, so the row composes into any profile that
+# carries a skill registry, with or without the devflow bundle.
+- insert:
+    # The bundled devflow-e2e-bootstrap-runbook skill, which is the whole
+    # package. No tools and no configuration.
+    - id: testenv
+      name: '@zhchxiao123/dsh-devflow-testenv'

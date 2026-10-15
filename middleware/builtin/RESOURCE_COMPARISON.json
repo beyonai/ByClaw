@@ -1,0 +1,153 @@
+{
+  "basis": "harness 2026.9.8 fe42f0391b6b3679a1945364b3b6aebb137ba9fe",
+  "policy": "harness wins same-name conflicts; retain OpenClaw-only source files; exclude generated build/release/cache and old locks",
+  "openclaw_comparison": {
+    "skills": {
+      "original_files": 504,
+      "identical": 431,
+      "changed_to_harness_or_portable_version": [
+        "deepseek-web-search/SKILL.md",
+        "by-doc-to-markdown/SKILL.md",
+        "by-doc-to-markdown/scripts/by-doc-to-markdown.mjs",
+        "podcast-video/scripts/assemble.py",
+        "mail/scripts/iwhalecloud-mail.mjs",
+        "mail/scripts/mailctl.py",
+        "mail/scripts/collection-facade.mjs",
+        "mail/scripts/mail_runtime/config.py",
+        "knowledge-organizer/SKILL.md",
+        "knowledge-organizer/knowledge-organizer-ingest/SKILL.md",
+        "knowledge-organizer/knowledge-organizer-build/SKILL.md",
+        "knowledge-organizer/knowledge-organizer-organize/SKILL.md",
+        "slide-deck/references/design-system.md",
+        "knowledge-collection/SKILL.md",
+        "knowledge-collection/references/online-search.md",
+        "knowledge-collection/references/collection-contract.md",
+        "knowledge-collection/references/manifest.json",
+        "knowledge-collection/references/online-search/references/hot_discovery/SKILL.md",
+        "knowledge-collection/references/online-search/references/hot_discovery/scripts/bycli_integration.test.mjs",
+        "knowledge-collection/references/online-search/references/hot_discovery/scripts/bycli_integration.mjs",
+        "knowledge-collection/references/sources/public-internet.md",
+        "knowledge-collection/scripts/command-router.mjs",
+        "knowledge-collection/scripts/public-discovery.mjs",
+        "knowledge-collection/scripts/web-acquirer.mjs",
+        "knowledge-collection/scripts/candidate-verifier.test.mjs",
+        "knowledge-collection/scripts/enterprise-collection.mjs",
+        "knowledge-collection/scripts/probe-state.mjs",
+        "knowledge-collection/scripts/unified-search.mjs",
+        "knowledge-collection/scripts/public-discovery.test.mjs",
+        "knowledge-collection/scripts/knowledge-collection.mjs",
+        "knowledge-collection/scripts/unified-search.test.mjs",
+        "knowledge-collection/scripts/web-acquirer.test.mjs",
+        "knowledge-collection/scripts/session.mjs",
+        "knowledge-collection/scripts/candidate-verifier.mjs",
+        "knowledge-collection/scripts/publish-delivery.mjs",
+        "knowledge-collection/scripts/knowledge-collection.test.mjs",
+        "knowledge-collection/scripts/collection-state.mjs",
+        "knowledge-collection/scripts/enterprise/adapters/cloud-knowledge.mjs",
+        "knowledge-collection/scripts/enterprise/adapters/cloud-knowledge.test.mjs",
+        "knowledge-collection/scripts/online-search/searxng.mjs",
+        "knowledge-collection/scripts/routing/channels.mjs",
+        "notice/scripts/notice-send.mjs",
+        "github-code-analysis/scripts/gh-token.mjs",
+        "crm-demo-showcase/SKILL.md",
+        "crm-demo-showcase/references/python-env.md",
+        "crm-demo-showcase/scripts/utils.py",
+        "crm-demo-showcase/scenarios/01-new-user.md",
+        "crm-demo-showcase/scenarios/03-object-view.md",
+        "crm-demo-showcase/scenarios/04-query-performance.md",
+        "crm-demo-showcase/scenarios/02-product-philosophy.md",
+        "crm-demo-showcase/scenarios/07-multi-hop.md",
+        "crm-demo-showcase/demos/01-data-query.md",
+        "crm-demo-showcase/demos/04-data-operations.md",
+        "crm-demo-showcase/demos/03-ambiguity-handling.md",
+        "crm-demo-showcase/demos/02-data-statistics.md",
+        "project-task-status-update/scripts/update_task_status.py",
+        "ima-skill/SKILL.md",
+        "bycli/SKILL.md",
+        "bycli/evals/evals.json",
+        "bycli/references/browser.md",
+        "bycli/references/weixin.md",
+        "bycli/references/autofix.md",
+        "bycli/scripts/bridge-bootstrap.test.mjs",
+        "bycli/scripts/weixin-login-gate.mjs",
+        "bycli/scripts/bridge-bootstrap.mjs",
+        "bycli/scripts/weixin-browser-runner.mjs",
+        "bycli/scripts/weixin-browser-runner.test.mjs",
+        "bycli/scripts/weixin-login-gate.test.mjs",
+        "github-issues-mgmt/scripts/gh-token.mjs",
+        "collect-knowledge-documents/SKILL.md",
+        "super-skill-manager/tests/lifecycle.test.mjs",
+        "super-skill-manager/scripts/providers/builtin-repo.mjs",
+        "project-context/SKILL.md"
+      ],
+      "missing": []
+    },
+    "runtime-tools": {
+      "original_files": 1,
+      "identical": 0,
+      "changed_to_harness_or_portable_version": [
+        "git-credential.mjs"
+      ],
+      "missing": []
+    },
+    "cli": {
+      "original_files": 1,
+      "identical": 0,
+      "changed_to_harness_or_portable_version": [
+        "dws"
+      ],
+      "missing": []
+    },
+    "callcli": {
+      "original_files": 27,
+      "identical": 17,
+      "changed_to_harness_or_portable_version": [
+        "pyproject.toml",
+        "examples/invoke-baiying-capability/references/capability-contract.md",
+        "examples/invoke-baiying-capability/agents/openai.yaml",
+        "src/callcli/sse.py",
+        "src/callcli/resource_catalog.py",
+        "src/callcli/errors.py",
+        "src/callcli/__main__.py",
+        "src/callcli/snapshot.py",
+        "src/callcli/executors/__init__.py",
+        "src/callcli/executors/tool.py"
+      ],
+      "missing": []
+    },
+    "dbcli": {
+      "original_files": 32,
+      "identical": 27,
+      "changed_to_harness_or_portable_version": [
+        "AGENT_SKILL_DEVELOPMENT.md",
+        "DESIGN.md",
+        "tests/test_discovery_client.py",
+        "src/dbcli/discovery_client.py",
+        "src/dbcli/policy.py"
+      ],
+      "missing": []
+    },
+    "kbcli": {
+      "original_files": 15,
+      "identical": 8,
+      "changed_to_harness_or_portable_version": [
+        "AGENT_SKILL_DEVELOPMENT.md",
+        "DESIGN.md",
+        "tests/test_kbcli.py",
+        "examples/byai-knowledge-agent/SKILL.md",
+        "examples/byai-knowledge-agent/references/commands.md",
+        "src/kbcli/cli.py",
+        "src/kbcli/contracts.py"
+      ],
+      "missing": []
+    },
+    "groksearchcli": {
+      "original_files": 18,
+      "identical": 17,
+      "changed_to_harness_or_portable_version": [
+        "pyproject.toml"
+      ],
+      "missing": []
+    }
+  }
+}
