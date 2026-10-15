@@ -6,13 +6,32 @@ import { recordFailedCollectionItem, recordPendingCollectionItem } from './colle
 import { assertExternalSessionWriteAllowed } from './probe-state.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
 import { assertNoSensitiveKeys, loadSession, persistSession, withSessionLock } from './session.mjs';
-import { assertPolicy, digest, ensureDirectory, fileEntry, safeFile, sourceUrl, workUrl } from './douyin-artifacts.mjs';
+import { assertPolicy, digest, ensureDirectory, fileEntry, safeFile, sourceUrl, sourceWorkId, workUrl } from './douyin-artifacts.mjs';
 
 const ACTION = 'acquire-douyin';
 const HUMAN_ERRORS = new Set(['AUTH_REQUIRED', 'CAPTCHA', 'MFA_REQUIRED', 'ENVIRONMENT_VALIDATION', 'RATE_LIMITED']);
 const BRIDGE_SCRIPT = fileURLToPath(new URL('../../bycli/scripts/bridge-bootstrap.mjs', import.meta.url));
 const fail = code => { throw Object.assign(new Error(code), { code }); };
 const relative = (root, file) => path.relative(root, file).split(path.sep).join('/');
+function commandBudgets(environment) {
+  const maxTimeoutMs = 2147483647;
+  const parse = value => {
+    if (value === undefined) return undefined;
+    if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)
+      || !Number.isSafeInteger(Number(value)) || Number(value) > maxTimeoutMs) fail('DOUYIN_TIMEOUT_CONFIG_INVALID');
+    return Number(value);
+  };
+  const browserSeconds = parse(environment.BYCLI_BROWSER_COMMAND_TIMEOUT);
+  const outerMs = parse(environment.KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS);
+  return Object.fromEntries([['download', 300, 300000], ['read', 60, 120000]].map(([command, defaultSeconds, minimumMs]) => {
+    const innerSeconds = browserSeconds ?? defaultSeconds;
+    // Let byCLI finish and report its own timeout before terminating its process group.
+    const requiredMs = Math.max(minimumMs, innerSeconds * 1000 + 60000);
+    if (requiredMs > maxTimeoutMs || outerMs !== undefined && outerMs < requiredMs) fail('DOUYIN_TIMEOUT_CONFIG_INVALID');
+    return [command, { timeoutMs: outerMs ?? requiredMs,
+      env: { ...environment, BYCLI_BROWSER_COMMAND_TIMEOUT: String(innerSeconds) } }];
+  }));
+}
 function codeOf(value) {
   const text = `${value?.stderr || ''} ${value?.stdout || ''} ${value?.message || ''}`;
   if (value?.timedOut || value?.signal || value?.exitCode === null || /timeout/i.test(text)) return 'COMMAND_EXEC_UNCERTAIN';
@@ -97,7 +116,7 @@ function videoEntries(paths, target, rows, requestedUrl) {
   const video = rows.find(row => row.type === 'video'), metadata = rows.find(row => row.type === 'metadata');
   if (!video || !metadata || typeof video.aweme_id !== 'string' || metadata.aweme_id !== video.aweme_id) fail('DOUYIN_WORK_ID_INVALID');
   const id = video.aweme_id, canonicalUrl = workUrl(id);
-  const requestedId = new URL(requestedUrl).pathname.match(/^\/(?:video|note)\/(\d+)/)?.[1];
+  const requestedId = sourceWorkId(requestedUrl);
   if (requestedId && requestedId !== id) fail('DOUYIN_WORK_ID_MISMATCH');
   const files = [video, metadata].map(row => {
     const expected = path.join(target, 'download', `${id}.${row.type === 'video' ? 'mp4' : 'json'}`);
@@ -154,6 +173,7 @@ export async function runDouyinAcquire(paths, args, options = {}) {
   const confirmation = args?.['verification-confirmed'] ?? false;
   if (![true, false, 'true', 'false'].includes(confirmation)) throw new Error('DOUYIN_CONFIRMATION_INVALID');
   const confirmed = confirmation === true || confirmation === 'true';
+  const budgets = commandBudgets(options.environment || process.env);
   assertExternalSessionWriteAllowed(paths, ACTION);
   const { session } = loadSession(paths, { persistMigration: false });
   assertPolicy(session);
@@ -164,13 +184,14 @@ export async function runDouyinAcquire(paths, args, options = {}) {
   const lock = path.join(parent, '.execution.lock');
   try { fs.mkdirSync(lock, { mode: 0o700 }); } catch (error) { if (error.code === 'EEXIST') fail('ACQUISITION_BUSY'); throw error; }
   try {
-    return await acquireLocked(paths, target, itemId, url, confirmed, options);
+    return await acquireLocked(paths, target, itemId, url, confirmed, options, budgets);
   } finally { fs.rmdirSync(lock); }
 }
-async function acquireLocked(paths, target, itemId, url, confirmed, options) {
+async function acquireLocked(paths, target, itemId, url, confirmed, options, budgets) {
   const runProcess = options.runProcess || runCli;
   const environment = options.environment || process.env;
-  const execute = (bin, argv, timeoutMs = 60000) => runProcess(bin, argv, { timeoutMs, maxOutputBytes: 10 * 1024 * 1024, env: environment });
+  const execute = (bin, argv, budget = {}) => runProcess(bin, argv,
+    { timeoutMs: 60000, maxOutputBytes: 10 * 1024 * 1024, env: environment, ...budget });
   const { session } = loadSession(paths, { persistMigration: false });
   const runs = session.task.douyinAcquisitionRuns || [];
   if (runs.some(row => row.sourceUrl === url && row.itemId !== itemId)) fail('ACQUISITION_IDENTITY_CONFLICT');
@@ -217,7 +238,7 @@ async function acquireLocked(paths, target, itemId, url, confirmed, options) {
     const flags = ['--keep-tab', 'true', '--site-session', 'persistent', '--window', 'background', '-f', 'json'];
     if (state.step === 'download') {
       state.phase = 'executing'; saveState(paths, target, state);
-      const rows = parsed(await execute('bycli', ['douyin', 'download', url, '--output', path.join(target, 'download'), '--metadata', 'true', ...flags], 300000));
+      const rows = parsed(await execute('bycli', ['douyin', 'download', url, '--output', path.join(target, 'download'), '--metadata', 'true', ...flags], budgets.download));
       const media = videoEntries(paths, target, rows, url);
       state.workId = media.id; state.canonicalUrl = media.canonicalUrl; state.files = media.files;
       state.step = 'read'; saveState(paths, target, state);
@@ -225,7 +246,7 @@ async function acquireLocked(paths, target, itemId, url, confirmed, options) {
     }
     state.phase = 'executing'; saveState(paths, target, state);
     let rows;
-    try { rows = parsed(await execute('bycli', ['douyin', 'read', state.canonicalUrl, '--comments', '0', '--replies', '0', ...flags])); }
+    try { rows = parsed(await execute('bycli', ['douyin', 'read', state.canonicalUrl, '--comments', '0', '--replies', '0', ...flags], budgets.read)); }
     catch (error) {
       if (!['API_ERROR', 'EMPTY_RESULT', 'SUBTITLE_UNAVAILABLE', 'SUBTITLE_FETCH_FAILED'].includes(codeOf(error))) throw error;
       state.subtitleStatus = 'unavailable';

@@ -16,11 +16,11 @@ const BROWSER = [
   { name: 'window', choices: ['foreground', 'background'] },
 ];
 const args = extra => ({ 'item-id': 'video', 'source-url': SOURCE, ...extra });
-function fixture(t, extra = {}) {
+function fixture(t, extra = {}, source = SOURCE) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kc-douyin-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   cmdInit({ 'session-dir': root, query: '归档抖音视频', 'source-scope': '["public-internet"]',
-    'direct-urls': JSON.stringify([SOURCE]), 'required-content-granularity': 'any' });
+    'direct-urls': JSON.stringify([source]), 'required-content-granularity': 'any' });
   const paths = sessionPaths(root);
   if (Object.keys(extra).length) {
     const { session } = loadSession(paths);
@@ -31,8 +31,8 @@ function fixture(t, extra = {}) {
 }
 function executor(options = {}) {
   const calls = [];
-  const runProcess = async (bin, argv) => {
-    calls.push({ bin, argv });
+  const runProcess = async (bin, argv, processOptions) => {
+    calls.push({ bin, argv, processOptions });
     const ok = value => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: '' });
     if (argv[0] === 'list') return ok(['download', 'read'].map(name => ({ site: 'douyin', name })));
     if (argv.includes('--help')) return ok({ site: 'douyin', name: argv[1], access: 'read', browser: true,
@@ -88,6 +88,84 @@ test('missing official subtitles still completes video acquisition without ASR',
   assert.equal(receipt.subtitleStatus, 'not-provided');
   assert.deepEqual(receipt.files.map(file => file.kind), ['video', 'metadata']);
   assert.equal(fake.calls.some(call => /ffmpeg|whisper|transcrib/.test(call.bin)), false);
+});
+
+test('modal links preserve authorized source and verify the downloaded work before reading subtitles', async t => {
+  const source = `https://www.douyin.com/jingxuan?modal_id=${ID}`;
+  const { paths } = fixture(t, {}, source), fake = executor();
+  const result = await runDouyinAcquire(paths, args({ 'source-url': source }), fake);
+  assert.equal(result.ok, true);
+  const receipt = JSON.parse(fs.readFileSync(result.executorResultFile));
+  assert.equal(receipt.sourceUrl, source);
+  assert.equal(receipt.workId, ID);
+  const commands = fake.calls.filter(call => call.argv[0] === 'douyin' && !call.argv.includes('--help'));
+  assert.equal(commands[0].argv[2], source);
+  assert.equal(commands[1].argv[2], `https://www.douyin.com/video/${ID}`);
+});
+
+test('modal work mismatch stops before subtitle acquisition or registering a successful receipt', async t => {
+  const source = 'https://www.douyin.com/jingxuan?modal_id=99';
+  const { paths } = fixture(t, {}, source), fake = executor();
+  const result = await runDouyinAcquire(paths, args({ 'source-url': source }), fake);
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, 'DOUYIN_WORK_ID_MISMATCH');
+  assert.equal(fake.calls.some(call => call.argv[1] === 'read' && !call.argv.includes('--help')), false);
+  assert.equal(loadSession(paths).session.task.douyinAcquisitions?.length || 0, 0);
+});
+
+test('download and subtitle subprocesses receive independent default budgets with cleanup headroom', async t => {
+  const { paths } = fixture(t), fake = executor();
+  const environment = Object.freeze({ PATH: '/fixture/bin' });
+  assert.equal((await runDouyinAcquire(paths, args(), { ...fake, environment })).ok, true);
+  const commands = fake.calls.filter(call => call.argv[0] === 'douyin' && !call.argv.includes('--help'));
+  assert.deepEqual(commands.map(call => [call.argv[1], call.processOptions.timeoutMs,
+    call.processOptions.env.BYCLI_BROWSER_COMMAND_TIMEOUT]), [['download', 360000, '300'], ['read', 120000, '60']]);
+  for (const command of commands) assert.equal(command.processOptions.env.PATH, environment.PATH);
+  assert.equal(fake.calls[0].processOptions.env, environment);
+  assert.equal(environment.BYCLI_BROWSER_COMMAND_TIMEOUT, undefined);
+});
+
+for (const [environment, expectedOuter] of [
+  [{ BYCLI_BROWSER_COMMAND_TIMEOUT: '900' }, 960000],
+  [{ BYCLI_BROWSER_COMMAND_TIMEOUT: '900', KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS: '1200000' }, 1200000],
+]) {
+  test(`honors a longer browser budget and a compatible explicit outer budget ${JSON.stringify(environment)}`, async t => {
+    const { paths } = fixture(t), fake = executor();
+    const original = { ...environment };
+    assert.equal((await runDouyinAcquire(paths, args(), { ...fake, environment: Object.freeze(environment) })).ok, true);
+    const commands = fake.calls.filter(call => call.argv[0] === 'douyin' && !call.argv.includes('--help'));
+    for (const command of commands) {
+      assert.equal(command.processOptions.timeoutMs, expectedOuter);
+      assert.equal(command.processOptions.env.BYCLI_BROWSER_COMMAND_TIMEOUT, '900');
+    }
+    assert.deepEqual(environment, original);
+  });
+}
+
+for (const environment of [
+  ...['0', '-1', '', '1.5', 'Infinity', '1e3', '2147424'].map(value => ({ BYCLI_BROWSER_COMMAND_TIMEOUT: value })),
+  ...['0', '-1', '', '1.5', '2147483648', '300000'].map(value => ({ KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS: value })),
+  { BYCLI_BROWSER_COMMAND_TIMEOUT: '900', KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS: '900000' },
+  { BYCLI_BROWSER_COMMAND_TIMEOUT: '60', KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS: '120000' },
+]) {
+  test(`rejects invalid or insufficient timeout budget before external execution and state writes ${JSON.stringify(environment)}`, async t => {
+    const { paths, root } = fixture(t), fake = executor();
+    const previousSession = fs.readFileSync(paths.session);
+    await assert.rejects(runDouyinAcquire(paths, args(), { ...fake, environment }), /DOUYIN_TIMEOUT_CONFIG_INVALID/);
+    assert.equal(fake.calls.length, 0);
+    assert.equal(fs.existsSync(path.join(root, 'raw/bycli/douyin')), false);
+    assert.deepEqual(fs.readFileSync(paths.session), previousSession);
+  });
+}
+
+test('increasing the timeout after uncertain execution cannot replay the stopped acquisition', async t => {
+  const { paths } = fixture(t), fake = executor({ fail: command => command === 'download', exitCode: 75, errorCode: 'TIMEOUT' });
+  const result = await runDouyinAcquire(paths, args(), { ...fake, environment: {} });
+  assert.equal(result.errorCode, 'COMMAND_EXEC_UNCERTAIN');
+  assert.equal(result.phase, 'stopped');
+  const before = fake.calls.length;
+  await assert.rejects(runDouyinAcquire(paths, args(), { ...fake, environment: { BYCLI_BROWSER_COMMAND_TIMEOUT: '900' } }), /ACQUISITION_STOPPED/);
+  assert.equal(fake.calls.length, before);
 });
 
 test('optional subtitle API failure preserves the successful video archive', async t => {

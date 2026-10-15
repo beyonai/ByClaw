@@ -159,9 +159,13 @@ bycli douyin read "<作品 ID、HTTPS 链接或分享文案>" -f json
 bycli douyin download "<同一作品目标>" --output "<授权输出目录>" --metadata true -f json
 ```
 
+抖音 Adapter 可直接解析 `https://www.douyin.com/jingxuan?modal_id=<数字作品 ID>`；沿用用户给出的链接，不手工转换或猜测作品 ID。长视频可在首次执行前设置 `BYCLI_BROWSER_COMMAND_TIMEOUT=300` 或按实际任务提高到更大的正整数秒值，外部执行工具须为连接、导航、下载及清理留足总时间；该预算不保证某个大小的视频一定成功。
+
 `read` 返回作品、默认不读取的可选评论、实际可用的官方字幕和 `limitations`。字幕 `status=available` 时使用真实 `cues[].from/to/text`；无字幕或 `unavailable` 时如实说明，不从标题或评论编造口播，不执行 ASR、抽帧或视频理解。当前实现最多读取前三条官方字幕轨道、每轨 1 MiB，解析 JSON/VTT/SRT；有字幕也不证明覆盖整段视频，不能宣称获得完整全文。
 
 委派采集归档只由已初始化会话的 `knowledge-collection acquire-douyin` 串行调用 `read` 与 `download --metadata true`，网站执行器不另跑这两条命令、不反向加载采集 Skill、不手工写归档回执。Runner 独占一次 bridge 预检，外层不另跑 bootstrap、doctor 或套其他 Runner。明确认证或人工验证时保留原 session、TAB 和证据并 STOP；只有用户明确完成验证后，根 Agent 才可对原 `acquire-douyin` 命令添加 `--verification-confirmed true` 续采，不重做桥接。字幕缺失不触发认证重试。未委派的直接查询继续遵循本 Skill 的浏览器前置与 STOP 规则。
+
+抖音采集 Runner 默认给下载子进程 300 秒内层预算、给字幕读取 60 秒；显式 `BYCLI_BROWSER_COMMAND_TIMEOUT` 会覆盖两个默认值，外层预算分别至少为内层加 60 秒且不短于 300/120 秒。长视频可在 `acquire-douyin` 命令前设置 `BYCLI_BROWSER_COMMAND_TIMEOUT=900`，外层自动至少为 960 秒；`KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS` 的显式外层值也须满足余量，非法或过短值在执行前拒绝。执行工具预算还须覆盖整次预检、下载、读取和清理。超时结果不确定时保留现场，不自动改超时、item ID、URL 或目录重试。文件落盘和归档成功不等于网页可下载或预览，后两项仅按实际验证结果报告。
 
 ### 通用 flag
 
