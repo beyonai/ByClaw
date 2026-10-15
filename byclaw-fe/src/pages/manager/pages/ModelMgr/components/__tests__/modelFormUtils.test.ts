@@ -305,6 +305,9 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
   });
 
   describe('getDefaultLlmDebugSuffix', () => {
+    it('uses the Responses endpoint for its explicit protocol', () => {
+      expect(getDefaultLlmDebugSuffix('OpenAI Responses')).toBe('/responses');
+    });
     it('uses anthropic messages endpoint for Anthropic protocol', () => {
       expect(getDefaultLlmDebugSuffix('Anthropic')).toBe('/v1/messages');
     });
@@ -512,6 +515,84 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
 
       expect(result.url).toBe('https://api.anthropic.com/v1/messages');
       expect(result.max_tokens).toBe(1024);
+      expect(result.headers['anthropic-version']).toBe('2023-06-01');
+    });
+
+    it('keeps custom Anthropic headers ahead of the default API version', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            modelProtocol: 'Anthropic',
+            apiToken: 'test-token',
+            headers: [
+              { key: 'Anthropic-Version', value: 'custom-version' },
+              { key: 'x-api-key', value: 'custom-key' },
+            ],
+          },
+        })
+      );
+      expect(result.headers['Anthropic-Version']).toBe('custom-version');
+      expect(result.headers['x-api-key']).toBe('custom-key');
+      expect(result.headers).not.toHaveProperty('anthropic-version');
+    });
+
+    it('preserves a Responses prompt and respects a manually changed or cleared output budget', () => {
+      const formValues = {
+        modelType: 'LLM',
+        modelProtocol: 'OpenAI Responses',
+        apiEndpoint: 'https://api.openai.com/v1',
+      };
+      const prevText = JSON.stringify({
+        url: 'https://api.openai.com/v1/responses',
+        input: 'custom prompt',
+        max_output_tokens: 99,
+      });
+      const preserved = JSON.parse(buildAutoDebugRequestText({ formValues, prevText }));
+      expect(preserved).toMatchObject({ input: 'custom prompt', max_output_tokens: 99 });
+      const edited = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: { ...formValues, maxTokens: 2048 },
+          prevText,
+          changedKeys: ['maxTokens'],
+        })
+      );
+      expect(edited).toMatchObject({ input: 'custom prompt', max_output_tokens: 2048 });
+      const cleared = JSON.parse(buildAutoDebugRequestText({ formValues, prevText, syncFormParameters: true }));
+      expect(cleared).not.toHaveProperty('max_output_tokens');
+      expect(cleared).not.toHaveProperty('max_tokens');
+      expect(cleared).not.toHaveProperty('enable_thinking');
+    });
+
+    it('preserves native rerank inputs and parameters without carrying text generation fields', () => {
+      const input = { query: 'custom query', documents: ['first', 'second'] };
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'RERANK',
+            modelProtocol: 'Qwen',
+            providerName: 'Bailian',
+            apiToken: 'new-token',
+            apiEndpoint: 'https://proxy.example/api/rerank',
+            modelCode: 'gte-rerank-v2',
+          },
+          prevText: JSON.stringify({
+            input,
+            parameters: { top_n: 1 },
+            headers: { Authorization: 'Bearer old-token' },
+            temperature: 0.5,
+            max_tokens: 99,
+          }),
+          syncFormParameters: true,
+        })
+      );
+      expect(result).toEqual({
+        url: 'https://proxy.example/api/rerank',
+        headers: { Authorization: 'Bearer new-token' },
+        model: 'gte-rerank-v2',
+        input,
+        parameters: { top_n: 1 },
+      });
     });
 
     it('adds reasoning effort when DeepSeek thinking is enabled', () => {

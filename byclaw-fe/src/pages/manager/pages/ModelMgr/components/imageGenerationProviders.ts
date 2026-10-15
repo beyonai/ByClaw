@@ -10,6 +10,22 @@ export type ImageGenerationProviderDefinition = {
 
 export const IMAGE_GENERATION_PROVIDERS: readonly ImageGenerationProviderDefinition[] = [
   {
+    providerName: 'BAILIAN',
+    label: 'Alibaba Cloud Model Studio',
+    modelProtocol: 'BAILIAN_IMAGE',
+    apiEndpoint: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+    modelCode: 'qwen-image-3.0-pro',
+    managerDebug: 'openclaw',
+  },
+  {
+    providerName: 'TOKENHUB',
+    label: 'Tencent TokenHub',
+    modelProtocol: 'TOKENHUB_IMAGE',
+    apiEndpoint: 'https://tokenhub.tencentmaas.com/v1/wand/hunyuan-image/v35-generation',
+    modelCode: 'hy-image-v3.5-preview',
+    managerDebug: 'openclaw',
+  },
+  {
     providerName: 'COMFYUI',
     label: 'ComfyUI',
     modelProtocol: 'COMFY_IMAGE',
@@ -125,7 +141,8 @@ export function getImageGenerationProvider(value?: any): ImageGenerationProvider
   if (!normalized) return undefined;
   return IMAGE_GENERATION_PROVIDERS.find(
     (provider) =>
-      provider.providerName === normalized || provider.aliases?.some((alias) => normalizeProviderName(alias) === normalized)
+      provider.providerName === normalized ||
+      provider.aliases?.some((alias) => normalizeProviderName(alias) === normalized)
   );
 }
 

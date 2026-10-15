@@ -9,6 +9,8 @@ import {
 describe('image generation provider catalog', () => {
   it('matches the OpenClaw native providers and the ByClaw Volcengine extension', () => {
     expect(IMAGE_GENERATION_PROVIDER_OPTIONS.map((item) => item.value)).toEqual([
+      'BAILIAN',
+      'TOKENHUB',
       'COMFYUI',
       'DEEPINFRA',
       'FAL',
@@ -59,9 +61,13 @@ describe('image generation provider catalog', () => {
     expect(supportsManagerImageDebug(undefined, 'MINIMAX_IMAGE')).toBe(true);
     expect(supportsManagerImageDebug(undefined, 'UNKNOWN_IMAGE')).toBe(false);
     expect(supportsManagerImageDebug(undefined, 'OPENAI_IMAGE')).toBe(false);
+    expect(supportsManagerImageDebug('BAILIAN', 'BAILIAN_IMAGE')).toBe(false);
+    expect(supportsManagerImageDebug('TOKENHUB', 'TOKENHUB_IMAGE')).toBe(false);
   });
 
   it.each([
+    ['BAILIAN_IMAGE', 'BAILIAN'],
+    ['TOKENHUB_IMAGE', 'TOKENHUB'],
     ['COMFY_IMAGE', 'COMFYUI'],
     ['DEEPINFRA_IMAGE', 'DEEPINFRA'],
     ['FAL_IMAGE', 'FAL'],

@@ -19,6 +19,8 @@ final class ImageModelProviderResolver {
         String protocol = modelProtocol.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
         // 仅匹配已知图片协议；Qwen、OpenAI 等通用协议不能唯一确定图片提供商。
         return switch (protocol) {
+            case "BAILIAN_IMAGE" -> "BAILIAN";
+            case "TOKENHUB_IMAGE" -> "TOKENHUB";
             case "COMFY_IMAGE" -> "COMFYUI";
             case "DEEPINFRA_IMAGE" -> "DEEPINFRA";
             case "FAL_IMAGE" -> "FAL";

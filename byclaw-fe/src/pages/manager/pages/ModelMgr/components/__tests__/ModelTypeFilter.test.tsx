@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { readFileSync, readdirSync } from 'fs';
 import { resolve } from 'path';
 import commonStyles from '@/pages/manager/less/commonTabList.less';
+import { getSourceSystemList } from '@/pages/manager/service/OrgMgr';
 import ModelMgr from '../../index';
 import styles from '../../index.module.less';
 
@@ -22,6 +23,8 @@ jest.mock('@/pages/manager/service/System', () => ({
 jest.mock('@/pages/manager/service/session', () => ({
   getDcSystemConfigListByStandType: () => Promise.resolve({ data: [] }),
 }));
+jest.mock('@/pages/manager/service/OrgMgr', () => ({ getSourceSystemList: jest.fn() }));
+const mockLoadSystems = getSourceSystemList as jest.Mock;
 jest.mock('@/pages/manager/hooks/useShowModal', () => ({
   __esModule: true,
   default: () => [{}, { handleShow: jest.fn(), onCancel: jest.fn() }],
@@ -45,6 +48,7 @@ jest.mock('../ModelHeroPanel', () => ({ onReset, activeFilterCount }: any) => (
 describe('model list queries and scrolling', () => {
   beforeEach(() => {
     mockDispatch.mockClear();
+    mockLoadSystems.mockReset().mockResolvedValue({ data: [] });
     // 同步执行首屏响应后的滚动复位，避免动画帧影响触底场景。
     jest.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
       callback(0);
@@ -53,6 +57,91 @@ describe('model list queries and scrolling', () => {
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it.each(['百应', 'ByAI'])('uses the configured system name %s in previews, dropdowns and selections', async (label) => {
+    mockLoadSystems.mockResolvedValue({
+      data: [
+        { systemCode: 'BYAI', systemName: label },
+        { systemCode: 'UNUSED', systemName: 'Unused system' },
+      ],
+    });
+    const { container } = render(<ModelMgr />);
+    await act(async () => {});
+    expect(mockLoadSystems).toHaveBeenCalledWith({ types: ['DIG_EMPLOYEE'] });
+    const overviewRequest = mockDispatch.mock.calls.find(([request]) => request.payload?.pageSize === 2000)![0];
+    act(() => overviewRequest.success({ rows: [{ systems: ['BYAI', 'BYAI', 'custom_system'] }] }));
+    const group = within(screen.getByRole('group', { name: 'modelMgr.filterSystem' }));
+    expect(group.getAllByText(label).find((item) => !item.closest('[aria-hidden="true"]'))).toBeVisible();
+    expect(group.queryByText('BYAI')).not.toBeInTheDocument();
+    expect(group.queryByText('Unused system')).not.toBeInTheDocument();
+    expect(group.getAllByText('custom_system').find((item) => !item.closest('[aria-hidden="true"]'))).toBeVisible();
+
+    fireEvent.mouseEnter(group.getByText('modelMgr.filterSystem').parentElement!);
+    const option = await screen.findByText(label, { selector: 'div.text' });
+    fireEvent.click(option);
+    expect(group.getByText(label)).toBeVisible();
+    const latestRequest = () => mockDispatch.mock.calls[mockDispatch.mock.calls.length - 1][0];
+    expect(latestRequest().payload).toMatchObject({ pageNum: 1, system: 'BYAI' });
+
+    // 显示名称不能替代查询编码，触底分页也必须继续透传编码。
+    act(() => latestRequest().success({ rows: [{ id: 'model-1' }], total: 13, pageIndex: 1, pageSize: 12 }));
+    fireEvent.scroll(container.querySelector(`.${styles.cardList}`)!);
+    expect(latestRequest().payload).toMatchObject({ pageNum: 2, system: 'BYAI' });
+
+    fireEvent.click(group.getByRole('img', { name: 'close-circle' }));
+    expect(latestRequest().payload).toMatchObject({ pageNum: 1, system: undefined });
+    fireEvent.click(group.getAllByText(label).find((item) => !item.closest('[aria-hidden="true"]'))!);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    expect(latestRequest().payload).toMatchObject({ pageNum: 1, system: undefined });
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled();
+  });
+
+  it('updates an already selected system when its configured name arrives after the model list', async () => {
+    let resolveSystems!: (response: any) => void;
+    mockLoadSystems.mockReturnValue(
+      new Promise((resolveResponse) => {
+        resolveSystems = resolveResponse;
+      })
+    );
+    render(<ModelMgr />);
+    await act(async () => {});
+    const overviewRequest = mockDispatch.mock.calls.find(([request]) => request.payload?.pageSize === 2000)![0];
+    act(() => overviewRequest.success({ rows: [{ systems: ['BYAI'] }] }));
+    const group = within(screen.getByRole('group', { name: 'modelMgr.filterSystem' }));
+    fireEvent.click(group.getAllByText('BYAI').find((item) => !item.closest('[aria-hidden="true"]'))!);
+    expect(mockDispatch.mock.calls[mockDispatch.mock.calls.length - 1][0].payload.system).toBe('BYAI');
+    const requestCount = mockDispatch.mock.calls.length;
+
+    await act(async () => {
+      resolveSystems({ data: [{ systemCode: 'BYAI', systemName: '百应' }] });
+    });
+    expect(group.getByText('百应')).toBeVisible();
+    expect(group.queryByText('BYAI')).not.toBeInTheDocument();
+    expect(mockDispatch).toHaveBeenCalledTimes(requestCount);
+  });
+
+  it.each(['failed', 'empty', 'invalid', 'blank name'])(
+    'retains usable system filters with %s source data',
+    async (scenario) => {
+      if (scenario === 'failed') {
+        mockLoadSystems.mockRejectedValue(new Error('unavailable'));
+      } else {
+        const data = scenario === 'invalid' ? {} : scenario === 'blank name' ? [{ systemCode: 'BYAI', systemName: ' ' }] : [];
+        mockLoadSystems.mockResolvedValue({ data });
+      }
+      render(<ModelMgr />);
+      await act(async () => {});
+      const overviewRequest = mockDispatch.mock.calls.find(([request]) => request.payload?.pageSize === 2000)![0];
+      act(() => overviewRequest.success({ rows: [{ systems: ['BYAI', 'super_assistant'] }] }));
+      const group = within(screen.getByRole('group', { name: 'modelMgr.filterSystem' }));
+      expect(group.getAllByText('modelMgr.system.superAssistant')).not.toHaveLength(0);
+      fireEvent.click(group.getAllByText('BYAI').find((item) => !item.closest('[aria-hidden="true"]'))!);
+      expect(mockDispatch.mock.calls[mockDispatch.mock.calls.length - 1][0].payload).toMatchObject({
+        pageNum: 1,
+        system: 'BYAI',
+      });
+    }
+  );
 
   it('applies height constraints to the list parent when shared CSS Module classes are scoped', async () => {
     // 事件测试不能发现父容器被内容撑高的问题，这里加载真实样式校验高度约束是否命中实际节点。

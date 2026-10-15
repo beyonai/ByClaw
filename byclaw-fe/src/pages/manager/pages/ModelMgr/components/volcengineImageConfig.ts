@@ -1,16 +1,27 @@
 /** 火山图片配置独立于旧图片表单，避免 MiniMax 参数混入 Ark 请求。 */
 export const VOLCENGINE_IMAGE_PROTOCOL = 'VOLCENGINE_IMAGE';
 
-export const SEEDREAM_MODEL_PRESETS = ['doubao-seedream-4-0-250828', 'doubao-seedream-5-0-260128'];
+export const SEEDREAM_MODEL_PRESETS = [
+  'doubao-seedream-4-0-250828',
+  'doubao-seedream-5-0-260128',
+  'doubao-seedream-5-0-pro-260628',
+  'doubao-seedream-5-0-flash-260915',
+];
 
 export function isVolcengineImage(values: any) {
   return values?.modelType === 'IMAGE_GENERATION' && values?.modelProtocol === VOLCENGINE_IMAGE_PROTOCOL;
 }
 
 export function getSeedreamSizeSuggestions(modelCode?: string) {
+  if (isSeedreamSingleImageModel(modelCode)) return ['1K', '1.5K', '2K'];
   if (modelCode?.startsWith('doubao-seedream-4-0-')) return ['1K', '2K', '4K'];
   // 自定义 ep ID 无法推断能力，允许手工填写尺寸，不擅自切换型号或套用其他版本能力。
   return ['2K'];
+}
+
+/** Pro/Flash 只支持单图，不能带入旧版的组图开关和 SSE 参数。 */
+export function isSeedreamSingleImageModel(modelCode?: string) {
+  return modelCode === 'doubao-seedream-5-0-pro-260628' || modelCode === 'doubao-seedream-5-0-flash-260915';
 }
 
 export function buildVolcengineImageParam(values: any) {
@@ -21,8 +32,9 @@ export function buildVolcengineImageParam(values: any) {
     size: config.size || '2K',
     response_format: config.responseFormat || 'url',
     watermark: config.watermark ?? true,
-    sequential_image_generation: 'disabled',
-    stream: false,
+    ...(isSeedreamSingleImageModel(values?.modelCode)
+      ? {}
+      : { sequential_image_generation: 'disabled', stream: false }),
   };
 }
 

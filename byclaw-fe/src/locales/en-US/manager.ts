@@ -447,8 +447,10 @@ export default {
     'Keep model basics, connection parameters, and debug input in one workspace to reduce context switching.',
   'modelMgr.modal.basicConfig': 'Basic configuration',
   'modelMgr.modal.basicConfigDesc':
-    'Define the model name, code, and type first. These fields drive filtering and invocation later.',
-  'modelMgr.modal.identityGroup': 'Identity',
+    'Configure the model name, code, type, API Token, application scope, and model status.',
+  'modelMgr.modal.moreConfig': 'More configuration',
+  'modelMgr.modal.moreConfigDesc':
+    'Adjust the endpoint, protocol, custom headers, timeouts, retries, and model parameters as needed.',
   'modelMgr.modal.connectionSecurity': 'Connection & security',
   'modelMgr.modal.connectionSecurityDesc':
     'Configure endpoint, credentials, and custom headers so the request path stays stable.',
@@ -512,13 +514,9 @@ export default {
   'modelMgr.modal.presencePenalty': 'Presence Penalty',
   'modelMgr.modal.providerRequired': 'Please select a model provider',
   'modelMgr.modal.providerPlaceholder': 'Select model provider',
+  'modelMgr.modal.presetNoResults': 'No matching official template. Configure a model manually below.',
   'modelMgr.modal.quickPreset': 'Official model template (optional)',
-  'modelMgr.modal.quickPresetPlaceholder': 'Search official model templates, or configure another model below',
-  'modelMgr.modal.quickPresetHint':
-    'Uses official documentation, not custom names from saved models. Enter your own API key; manually edited fields are kept.',
-  'modelMgr.modal.presetAppliedHint':
-    'Model preset recognized; manual settings are preserved. Check the endpoint and parameters when using a proxy.',
-  'modelMgr.modal.presetSource': 'Reference documentation',
+  'modelMgr.modal.quickPresetPlaceholder': 'Search models or developers across all registered versions',
   'modelMgr.modal.presetLabelWithDeveloper': '{model} · {developer}',
   'modelMgr.modal.presetLabelWithChannel': '{model} · {developer} (via {channel})',
   'modelMgr.modal.presetDeveloper.zhipu': 'Zhipu AI',
@@ -531,19 +529,35 @@ export default {
   'modelMgr.modal.presetDeveloper.openai': 'OpenAI',
   'modelMgr.modal.presetDeveloper.xai': 'xAI',
   'modelMgr.modal.presetDeveloper.bytedance': 'ByteDance',
+  'modelMgr.modal.presetDeveloper.tencent': 'Tencent Hunyuan',
+  'modelMgr.modal.presetDeveloper.xiaomi': 'Xiaomi',
+  'modelMgr.modal.presetDeveloper.stepfun': 'StepFun',
+  'modelMgr.modal.presetDeveloper.baidu': 'Baidu',
+  'modelMgr.modal.presetDeveloper.iflytek': 'iFLYTEK',
+  'modelMgr.modal.presetDeveloper.baai': 'BAAI',
+  'modelMgr.modal.presetDeveloper.netease': 'NetEase Youdao',
+  'modelMgr.modal.presetDeveloper.baichuan': 'Baichuan',
+  'modelMgr.modal.presetDeveloper.sensetime': 'SenseTime',
+  'modelMgr.modal.presetChannel.tokenhub': 'Tencent TokenHub',
+  'modelMgr.modal.presetChannel.aistudio': 'Baidu AI Studio',
+  'modelMgr.modal.presetChannel.siliconflow': 'SiliconFlow',
+  'modelMgr.modal.multimodalEmbeddingPresetHint':
+    'This model uses a multimodal embedding API. Debugging starts with text input; clients must support its request format and vector dimensions.',
+  'modelMgr.modal.presetContextUnspecifiedHint':
+    'The API does not specify a uniform input limit. Context length defaults to 202752; adjust it to your service limits.',
   'modelMgr.modal.presetChannel.bailian': 'Alibaba Cloud Model Studio',
   'modelMgr.modal.presetChannel.kimiCode': 'Kimi Code',
   'modelMgr.modal.presetChannel.volcengine': 'Volcengine Ark',
   'modelMgr.modal.presetThinkingRequiredHint':
     'This model only supports thinking mode on this channel. Keep Thinking enabled.',
   'modelMgr.modal.kimiCodePresetHint':
-    'Kimi-K2.8-Preview uses kimi-for-coding on Kimi Code. An active Kimi Code subscription and its API key are required. Kimi Open Platform keys and endpoints are not interchangeable. Public documentation does not specify a separate output ceiling, so Max Tokens is left blank; set it according to your service limits.',
+    'Kimi-K2.8-Preview uses kimi-for-coding on Kimi Code. An active Kimi Code subscription and its API key are required. Kimi Open Platform keys and endpoints are not interchangeable. Public documentation does not specify a separate output ceiling. Max Tokens defaults to a system budget of 65536; adjust it to your service limits.',
   'modelMgr.modal.unknownModelHint':
-    'No unique preset found. Check the type, protocol and endpoint, and enter the actual context length in parameters (except image models).',
-  'modelMgr.modal.moreBasicSettings': 'More basic settings (optional)',
+    'No unique preset found. Check the type, protocol and endpoint, and review the default context length of 202752 in More configuration (except image models).',
+  'modelMgr.modal.moreBasicSettings': 'More basic settings',
   'modelMgr.modal.advancedConnection': 'Advanced connection: headers, timeouts and retries',
   'modelMgr.modal.automaticParamsHint':
-    'Known models use official context and output ceilings; expand to adjust. Unpublished output limits are left blank. Confirm context length for unknown models; sampling is optional. Available output also depends on input length and thinking mode.',
+    'Official ceilings take precedence. When unpublished, context length defaults to 202752 and text model Max Tokens defaults to 65536, capped by the known context length. Adjust these defaults to your service limits; sampling is optional. Available output also depends on input length and thinking mode.',
   'modelMgr.modal.providerOptionalHint':
     'Optional; used for provider-specific parameters. Keep existing values when editing.',
   'modelMgr.modal.imageProviderHint':
@@ -574,7 +588,8 @@ export default {
     'When fields on the left change, the debug input syncs automatically. This works best after the main configuration is filled in.',
   'modelMgr.modal.debugTipSave':
     'For a new model, use "Save and continue" first so you have a model ID before running debug.',
-  'modelMgr.modal.footerHint': 'Finish the model basics and connection setup first, then save or debug.',
+  'modelMgr.modal.footerHint':
+    'Fill in Basic configuration and confirm the endpoint and model parameters in More configuration before saving or debugging.',
   'modelMgr.modal.copyInputSuccess': 'Request copied',
   'modelMgr.modal.copyOutputSuccess': 'Output copied',
   'modelMgr.modal.debugTableView': 'Table',

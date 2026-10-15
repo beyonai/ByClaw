@@ -9,9 +9,9 @@ import {
   buildDebugDefaults,
   buildModelUpsertPayload,
   DEFAULT_CONTEXT_TOKENS,
-  DEFAULT_MAX_TOKENS,
   formatReasoningEffortMapText,
   getDefaultFormValues,
+  getDefaultMaxTokens,
   getImageGenerationDefaultFormValues,
   getImageProviderTransitionFormValues,
   getModelTypeTransitionFormValues,
@@ -82,7 +82,7 @@ const SharedModelFormModal: React.FC<Props> = ({
   const modelTypeOptions = useModelTypeOptions(open);
   const [abilityOptions, setAbilityOptions] = useState<Option[]>([]);
   const [systemOptions, setSystemOptions] = useState<Option[]>([]);
-  const [activeSections, setActiveSections] = useState<string[]>(['basic', 'connection', 'params']);
+  const [activeSections, setActiveSections] = useState<string[]>(['basic']);
   const [submitAction, setSubmitAction] = useState<'save_continue' | 'save_close' | null>(null);
   const [savedNewId, setSavedNewId] = useState<string | number | undefined>(undefined);
   const savedNewIdRef = useRef<string | number | undefined>(undefined);
@@ -142,9 +142,8 @@ const SharedModelFormModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (!open) return;
-    setActiveSections(
-      type === 'add' ? ['basic', 'connection'] : ['basic', 'connection', 'params', ...(showTags ? ['tags'] : [])]
-    );
+    // 新增时优先填写基础配置，编辑和调试时展开更多配置便于核对已有参数。
+    setActiveSections(type === 'add' ? ['basic'] : ['basic', 'more']);
 
     if (showTags && loadAbilityOptions) {
       loadAbilityOptions()
@@ -212,7 +211,7 @@ const SharedModelFormModal: React.FC<Props> = ({
             contextTokens: detail.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
             temperature: detail.temperature ?? 0.7,
             topP: detail.topP ?? 0.9,
-            maxTokens: detail.maxTokens ?? DEFAULT_MAX_TOKENS,
+            maxTokens: detail.maxTokens ?? getDefaultMaxTokens(detail.contextTokens),
             frequencyPenalty: detail.frequencyPenalty ?? 0,
             presencePenalty: detail.presencePenalty ?? 0,
             reasoningConfig: detail.reasoningConfig ?? getDefaultFormValues().reasoningConfig,
@@ -297,7 +296,7 @@ const SharedModelFormModal: React.FC<Props> = ({
     const firstNamePath = error?.errorFields?.[0]?.name;
     if (Array.isArray(firstNamePath) && firstNamePath.length) {
       // 折叠区内的必填/格式错误必须先展开，避免用户看不到保存失败的原因。
-      setActiveSections(['basic', 'connection', 'params', 'tags', 'basicExtra', 'connectionExtra']);
+      setActiveSections(['basic', 'more', 'basicExtra']);
       requestAnimationFrame(() => form.scrollToField?.(firstNamePath, { behavior: 'smooth' }));
     }
   };
@@ -422,8 +421,13 @@ const SharedModelFormModal: React.FC<Props> = ({
           Object.entries({ ...connection, ...defaults }).forEach(([key, value]) => form.setFieldValue(key, value));
         }
       }
-      if (changedKeys.includes('modelCode')) {
+      // 手动确认上下文后同步收窄缺省输出预算；显式填写的 Max Tokens 仍优先。
+      if (changedKeys.includes('modelCode') || changedKeys.includes('contextTokens')) {
         const patch = applyModelAutofill(autofillRef.current, fromPreset ? {} : changedValues, syncedValues);
+        // 自动切换类型/协议也要重建调试路径，防止同一厂商的 embeddings/responses 路径互相残留。
+        ['modelType', 'modelProtocol'].forEach((key) => {
+          if (key in patch && patch[key] !== syncedValues[key] && !changedKeys.includes(key)) changedKeys.push(key);
+        });
         // 避免 AntD 深合并把上一型号的 reasoning/image 参数留在新模板中。
         Object.entries(patch).forEach(([key, value]) => form.setFieldValue(key, value));
         syncedValues = { ...syncedValues, ...patch };

@@ -38,7 +38,10 @@ async function renderForm(type: 'add' | 'edit' = 'add', detail: Record<string, a
     saveModelRequest,
     runDebugRequest: jest.fn(),
     extractModelIdFromSave: (res: any) => res.data.id,
-    statusOptions: [{ label: 'Enabled', value: 'ENABLED' }],
+    statusOptions: [
+      { label: 'Enabled', value: 'ENABLED' },
+      { label: 'Disabled', value: 'DISABLED' },
+    ],
     showTags: true,
     loadAbilityOptions: jest.fn().mockResolvedValue([
       { label: 'Chat model', value: '3' },
@@ -57,6 +60,11 @@ async function renderForm(type: 'add' | 'edit' = 'add', detail: Record<string, a
 
 async function change(label: string, value: string) {
   await act(async () => {
+    // 接入地址已移入更多配置，手动填写时先模拟用户展开所在分组。
+    if (label === 'apiEndpoint') {
+      const more = screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' });
+      if (more.getAttribute('aria-expanded') === 'false') fireEvent.click(more);
+    }
     fireEvent.change(screen.getByLabelText(`modelMgr.modal.${label}`), { target: { value } });
   });
 }
@@ -75,25 +83,98 @@ describe('new model quick setup', () => {
 
   it('preselects the chat application scope and submits it when creating a model', async () => {
     const save = await renderForm();
+    expect(screen.getByLabelText('modelMgr.modal.apiToken')).toBeVisible();
+    ['ability', 'status'].forEach((field) => {
+      expect(screen.getByLabelText(`modelMgr.modal.${field}`).closest('.ant-form-item')).not.toBeVisible();
+    });
     const abilitySelect = screen.getByLabelText('modelMgr.modal.ability').closest('.ant-select')! as HTMLElement;
     expect(within(abilitySelect).getByTitle('Chat model')).toBeInTheDocument();
     await change('modelCode', 'MiniMax-M3');
     await change('apiToken', 'test-token');
     await clickSave();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save.mock.calls[0][0].abilities).toEqual(['3']);
+    expect(save.mock.calls[0][0]).toMatchObject({ abilities: ['3'], status: 'ENABLED' });
+  });
+
+  it('reopens basic configuration when the required API Token is missing', async () => {
+    const save = await renderForm();
+    await change('modelCode', 'MiniMax-M3');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.basicConfig' }));
+    });
+    expect(screen.getByLabelText('modelMgr.modal.apiToken')).not.toBeVisible();
+    await clickSave();
+    expect(await screen.findByText('modelMgr.modal.apiTokenRequired')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'modelMgr.modal.basicConfig' })).toHaveAttribute('aria-expanded', 'true');
+    expect(save).not.toHaveBeenCalled();
+    await change('apiToken', 'test-token');
+    await clickSave();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0][0].apiToken).toBe('test-token');
+  });
+
+  it('omits redundant template copy and its empty hint area while keeping autofill', async () => {
+    await renderForm();
+    expect(screen.queryByText('modelMgr.modal.identityGroup')).not.toBeInTheDocument();
+    expect(screen.queryByText('modelMgr.modal.quickPresetHint')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('modelMgr.modal.quickPreset')).toBeInTheDocument();
+
+    await change('modelCode', 'text-embedding-v4');
+    expect(screen.getByLabelText('modelMgr.modal.displayName')).toHaveValue('text-embedding-v4');
+    expect(screen.getByLabelText('modelMgr.modal.contextTokens')).toHaveValue('8192');
+    expect(screen.queryByText('modelMgr.modal.presetAppliedHint')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'modelMgr.modal.presetSource' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('rebuilds debug paths when autofill switches between embeddings and Responses on the same endpoint', async () => {
+    const save = await renderForm();
+    await change('apiToken', 'test-token');
+    await change('modelCode', 'text-embedding-3-small');
+    expect(JSON.parse(screen.getByTestId('debug-input').textContent!)).toMatchObject({
+      url: 'https://api.openai.com/v1/embeddings',
+      model: 'text-embedding-3-small',
+      input: expect.any(String),
+    });
+    await change('modelCode', 'gpt-6.1-sol');
+    const responses = JSON.parse(screen.getByTestId('debug-input').textContent!);
+    expect(responses).toMatchObject({
+      url: 'https://api.openai.com/v1/responses',
+      model: 'gpt-6.1-sol',
+      max_output_tokens: 128000,
+      input: [{ role: 'user', content: expect.any(String) }],
+      reasoning: { effort: 'medium' },
+    });
+    expect(responses).not.toHaveProperty('messages');
+    await change('modelCode', 'text-embedding-3-large');
+    const embedding = JSON.parse(screen.getByTestId('debug-input').textContent!);
+    expect(embedding.url).toBe('https://api.openai.com/v1/embeddings');
+    expect(embedding).not.toHaveProperty('max_output_tokens');
+    await clickSave();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0][0]).toMatchObject({
+      modelType: 'EMBEDDING',
+      modelProtocol: 'OpenAI',
+      modelCode: 'text-embedding-3-large',
+      apiToken: 'test-token',
+    });
   });
 
   it('preserves a cleared application scope across model changes and save-and-continue', async () => {
     const save = await renderForm();
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.tagConfig' }));
+      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreBasicSettings' }));
     });
     const abilitySelect = screen.getByLabelText('modelMgr.modal.ability').closest('.ant-select')! as HTMLElement;
+    expect(abilitySelect).toBeVisible();
     await act(async () => {
       fireEvent.mouseDown(abilitySelect.querySelector('.ant-select-clear')!);
     });
     expect(within(abilitySelect).queryByTitle('Chat model')).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreBasicSettings' }));
+    });
+    expect(abilitySelect).not.toBeVisible();
     await change('modelCode', 'MiniMax-M3');
     await change('modelCode', 'deepseek-v4-pro');
     await change('apiToken', 'test-token');
@@ -107,8 +188,8 @@ describe('new model quick setup', () => {
   });
 
   it.each([
-    ['zh-CN', 'Qwen3.6-Plus · 阿里云（阿里云百炼接入）'],
-    ['en-US', 'Qwen3.6-Plus · Alibaba Cloud (via Alibaba Cloud Model Studio)'],
+    ['zh-CN', 'qwen3.6-plus · 阿里云（阿里云百炼接入）'],
+    ['en-US', 'qwen3.6-plus · Alibaba Cloud (via Alibaba Cloud Model Studio)'],
   ])('offers localized official templates without arbitrary saved names: %s', async (locale, expectedLabel) => {
     mockIntl.locale = locale;
     await renderForm('add', { displayName: 'Example test model', modelCode: 'model2' });
@@ -123,7 +204,7 @@ describe('new model quick setup', () => {
     });
     await change('modelCode', 'model2');
     expect(screen.getByLabelText('modelMgr.modal.modelCode')).toHaveValue('model2');
-    expect(screen.getByLabelText('modelMgr.modal.contextTokens')).toHaveValue('');
+    expect(screen.getByLabelText('modelMgr.modal.contextTokens')).toHaveValue('202752');
   });
 
   it('preserves a custom saved model when editing, even when it is not an official template', async () => {
@@ -162,7 +243,7 @@ describe('new model quick setup', () => {
       'Kimi-K2.8-Preview (kimi-for-coding) · 月之暗面（Kimi Code接入）',
       'kimi-for-coding',
       1048576,
-      undefined,
+      65536,
       true,
     ],
   ])(
@@ -230,11 +311,9 @@ describe('new model quick setup', () => {
 
   it('starts with advanced settings collapsed and saves a selected Seedream preset with only a key', async () => {
     const save = await renderForm();
-    expect(screen.getByRole('button', { name: 'modelMgr.modal.paramConfig' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    );
+    expect(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByLabelText('modelMgr.modal.connectTimeoutSec')).not.toBeVisible();
+    expect(screen.getByLabelText('modelMgr.modal.apiEndpoint')).not.toBeVisible();
     expect(screen.getByLabelText('modelMgr.modal.systemTags')).not.toBeVisible();
     fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.quickPreset'));
     await change('quickPreset', 'doubao-seedream-4-0-250828');
@@ -304,7 +383,7 @@ describe('new model quick setup', () => {
     await change('modelCode', 'deepseek-v4-pro');
     await change('apiToken', 'test-token');
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.paramConfig' }));
+      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
     });
     await act(async () => {
       fireEvent.click(screen.getByRole('switch', { name: 'modelMgr.modal.reasoningEnabled' }));
@@ -331,7 +410,7 @@ describe('new model quick setup', () => {
     await change('modelCode', 'MiniMax-M3');
     await change('apiToken', 'test-token');
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.paramConfig' }));
+      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
     });
     await change('contextTokens', '2000000');
     await clickSave();
@@ -343,31 +422,90 @@ describe('new model quick setup', () => {
     expect(save.mock.calls[0][0].contextTokens).toBe(2000000);
   });
 
-  it('opens a hidden validation error for unknown models and accepts smaller valid limits', async () => {
+  it.each(['private-alias', 'sensenova-6.8-flash-lite'])(
+    'fills and saves both defaults when official capacities are missing: %s',
+    async (modelCode) => {
+      const save = await renderForm();
+      await change('modelCode', modelCode);
+      if (modelCode === 'private-alias') await change('apiEndpoint', 'https://proxy.example/v1');
+      await change('apiToken', 'test-token');
+      expect(screen.getByLabelText('modelMgr.modal.contextTokens')).toHaveValue('202752');
+      expect(screen.getByLabelText('modelMgr.modal.maxTokens')).toHaveValue('65536');
+      await clickSave();
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+      expect(save.mock.calls[0][0]).toMatchObject({ modelCode, contextTokens: 202752, maxTokens: 65536 });
+    }
+  );
+
+  it('validates a manually cleared context and accepts smaller valid limits', async () => {
     const save = await renderForm();
     await change('modelCode', 'private-alias');
     await change('apiEndpoint', 'https://proxy.example/v1');
     await change('apiToken', 'test-token');
+    expect(screen.getByLabelText('modelMgr.modal.maxTokens')).toHaveValue('65536');
+    expect(screen.getByLabelText('modelMgr.modal.contextTokens')).toHaveValue('202752');
     expect(screen.getByText('modelMgr.modal.unknownModelHint')).toBeInTheDocument();
+    await change('contextTokens', '');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
+    });
+    expect(screen.getByLabelText('modelMgr.modal.contextTokens')).not.toBeVisible();
     await clickSave();
     expect(save).not.toHaveBeenCalled();
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'modelMgr.modal.paramConfig' })).toHaveAttribute(
-        'aria-expanded',
-        'true'
-      )
+      expect(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' })).toHaveAttribute('aria-expanded', 'true')
     );
     await change('contextTokens', '8192');
+    expect(screen.getByLabelText('modelMgr.modal.maxTokens')).toHaveValue('8192');
     await change('maxTokens', '1024');
     await change('temperature', '0.7');
+    await change('connectTimeoutSec', '45');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
+    });
+    // 合并后的连接和参数字段收起后仍注册在表单中，保存不能丢失手动填写的值。
+    expect(screen.getByLabelText('modelMgr.modal.connectTimeoutSec')).not.toBeVisible();
+    expect(screen.getByLabelText('modelMgr.modal.contextTokens')).not.toBeVisible();
     await clickSave();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save.mock.calls[0][0]).toMatchObject({ contextTokens: 8192, maxTokens: 1024, temperature: 0.7 });
+    expect(save.mock.calls[0][0]).toMatchObject({
+      apiEndpoint: 'https://proxy.example/v1',
+      contextTokens: 8192,
+      maxTokens: 1024,
+      temperature: 0.7,
+      connectTimeoutSec: 45,
+    });
     expect(JSON.parse(screen.getByTestId('debug-input').textContent!)).toMatchObject({
       max_tokens: 1024,
       temperature: 0.7,
     });
   });
+
+  it.each([
+    [undefined, undefined, 65536],
+    [128000, undefined, 65536],
+    [32768, undefined, 32768],
+    [128000, 8192, 8192],
+  ])(
+    'uses the same edit fallback without replacing saved output budgets: %s / %s',
+    async (contextTokens, maxTokens, expected) => {
+      const save = await renderForm('edit', {
+        displayName: 'Existing model',
+        modelType: 'LLM',
+        modelCode: 'custom-model',
+        modelProtocol: 'OpenAI',
+        apiEndpoint: 'https://proxy.example/v1',
+        apiToken: 'test-token',
+        contextTokens,
+        maxTokens,
+      });
+      expect(screen.getByLabelText('modelMgr.modal.maxTokens')).toHaveValue(String(expected));
+      expect(screen.getByLabelText('modelMgr.modal.contextTokens')).toHaveValue(String(contextTokens ?? 202752));
+      await clickSave('common.confirm');
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+      expect(save.mock.calls[0][0]).toMatchObject({ contextTokens: contextTokens ?? 202752, maxTokens: expected });
+    }
+  );
 
   it.each([{ abilities: [] }, { abilities: ['6'] }])('preserves saved values: %j', async ({ abilities }) => {
     const detail = {
@@ -383,9 +521,12 @@ describe('new model quick setup', () => {
       temperature: 0.3,
       topP: 0.7,
       abilities,
+      status: 'DISABLED',
     };
     const save = await renderForm('edit', detail);
     await waitFor(() => expect(screen.getByLabelText('modelMgr.modal.displayName')).toHaveValue('Existing'));
+    expect(screen.getByRole('button', { name: 'modelMgr.modal.basicConfig' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.queryByLabelText('modelMgr.modal.quickPreset')).not.toBeInTheDocument();
     await change('displayName', 'Renamed');
     await clickSave('common.confirm');
@@ -400,7 +541,7 @@ describe('new model quick setup', () => {
     await clickSave('modelMgr.modal.saveAndContinue');
     await waitFor(() => expect(screen.queryByLabelText('modelMgr.modal.quickPreset')).not.toBeInTheDocument());
     await change('modelCode', 'private-alias');
-    fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.paramConfig' }));
+    fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
     await change('temperature', '0.4');
     await clickSave();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));

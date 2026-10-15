@@ -17,18 +17,63 @@ jest.mock('@/pages/manager/service/System', () => ({
   getByParamGroupCode: jest.fn().mockResolvedValue({ data: { byaiSystemConfigLists: [] } }),
 }));
 
-jest.mock('../ModelFormSection', () => ({ title, children }: any) => (
-  <section aria-label={title}>{children}</section>
-));
+jest.mock('../ModelFormSection', () => {
+  const ModelFormSection = jest.requireActual('../ModelFormSection').default;
+  return (props: any) => (
+    <section aria-label={props.title}>
+      <ModelFormSection {...props} />
+    </section>
+  );
+});
 
 describe('ModelFormFields section placement', () => {
+  it.each(['BAILIAN_IMAGE', 'TOKENHUB_IMAGE'])(
+    'does not offer MiniMax-only controls for the dedicated %s image protocol',
+    async (modelProtocol) => {
+      let form: FormInstance;
+      const TestForm = () => {
+        [form] = Form.useForm();
+        return (
+          <ConfigProvider theme={{ token: { motion: false } }}>
+            <ModelFormFields
+              simplified
+              form={form}
+              modalTitle="model"
+              systemOptions={[]}
+              abilityOptions={[]}
+              modelTypeOptions={[]}
+              statusOptions={[]}
+              tokenVisible={false}
+              setTokenVisible={jest.fn()}
+              isSectionOpen={() => true}
+              toggleSection={jest.fn()}
+              onValuesChange={jest.fn()}
+            />
+          </ConfigProvider>
+        );
+      };
+      await act(async () => {
+        render(<TestForm />);
+      });
+      await act(async () => {
+        form!.setFieldsValue({ modelType: 'IMAGE_GENERATION', modelProtocol });
+      });
+      expect(screen.getByLabelText('modelMgr.modal.imagePrompt')).toBeVisible();
+      ['aspectRatio', 'imageCount', 'responseFormat', 'promptOptimizer'].forEach((field) => {
+        expect(screen.queryByLabelText(`modelMgr.modal.${field}`)).not.toBeInTheDocument();
+      });
+    }
+  );
   it.each([
     ['modelMgr.modal.moreBasicSettings', 'modelMgr.modal.systemTags'],
-    ['modelMgr.modal.advancedConnection', 'modelMgr.modal.headers'],
+    ['modelMgr.modal.moreBasicSettings', 'modelMgr.modal.ability'],
+    ['modelMgr.modal.moreBasicSettings', 'modelMgr.modal.status'],
+    ['modelMgr.modal.moreConfig', 'modelMgr.modal.headers'],
+    ['modelMgr.modal.moreConfig', 'modelMgr.modal.contextTokens'],
   ])('keeps the disclosure arrow and content in sync for %s', async (buttonName, contentLabel) => {
     const TestForm = () => {
       const [form] = Form.useForm();
-      const [openSections, setOpenSections] = useState<string[]>([]);
+      const [openSections, setOpenSections] = useState<string[]>(['basic']);
       return (
         <ConfigProvider theme={{ token: { motion: false } }}>
           <ModelFormFields
@@ -61,6 +106,7 @@ describe('ModelFormFields section placement', () => {
     expect(button).toHaveAttribute('aria-expanded', 'false');
     expect(button.querySelector('[data-icon="right"]')).toBeInTheDocument();
     expect(content).not.toBeVisible();
+    expect(screen.getByLabelText('modelMgr.modal.apiToken')).toBeVisible();
 
     fireEvent.click(button);
     expect(button).toHaveAttribute('aria-expanded', 'true');
@@ -71,15 +117,22 @@ describe('ModelFormFields section placement', () => {
     expect(button).toHaveAttribute('aria-expanded', 'false');
     expect(button.querySelector('[data-icon="right"]')).toBeInTheDocument();
     expect(content).not.toBeVisible();
+    expect(screen.getByLabelText('modelMgr.modal.apiToken')).toBeVisible();
   });
 
-  it.each([{ systems: [] }, { systems: ['BY_CLAW'] }])('keeps system tags in basic configuration: %j', async ({ systems }) => {
+  it.each([
+    { simplified: true, systems: [] },
+    { simplified: true, systems: ['BY_CLAW'] },
+    { simplified: false, systems: [] },
+    { simplified: false, systems: ['BY_CLAW'] },
+  ])('groups credentials and application fields in basic configuration: %j', async ({ simplified, systems }) => {
     let form: FormInstance;
     const TestForm = () => {
       [form] = Form.useForm();
       return (
         <ConfigProvider theme={{ token: { motion: false } }}>
           <ModelFormFields
+            simplified={simplified}
             form={form}
             modalTitle="model"
             systemOptions={[{ label: 'ByClaw', value: 'BY_CLAW' }]}
@@ -103,15 +156,21 @@ describe('ModelFormFields section placement', () => {
       form!.setFieldsValue({ systems });
     });
 
-    // 系统标签只出现在首张基础配置卡片，应用范围和状态继续留在应用配置中。
+    // 新增和编辑共用两组字段布局，凭证和应用字段只在基础配置注册一次。
     const sections = screen.getAllByRole('region');
     const basic = screen.getByRole('region', { name: 'modelMgr.modal.basicConfig' });
-    const application = screen.getByRole('region', { name: 'modelMgr.modal.tagConfig' });
-    expect(sections[0]).toBe(basic);
-    expect(within(basic).getByLabelText('modelMgr.modal.systemTags')).toBeInTheDocument();
-    expect(within(application).queryByLabelText('modelMgr.modal.systemTags')).not.toBeInTheDocument();
-    expect(within(application).getByLabelText('modelMgr.modal.ability')).toBeInTheDocument();
-    expect(within(application).getByLabelText('modelMgr.modal.status')).toBeInTheDocument();
+    const more = screen.getByRole('region', { name: 'modelMgr.modal.moreConfig' });
+    expect(sections).toEqual([basic, more]);
+    ['systemTags', 'apiToken', 'ability', 'status'].forEach((field) => {
+      expect(within(basic).getByLabelText(`modelMgr.modal.${field}`).closest('.ant-form-item')).toBeVisible();
+      expect(screen.getAllByLabelText(`modelMgr.modal.${field}`)).toHaveLength(1);
+      expect(within(more).queryByLabelText(`modelMgr.modal.${field}`)).not.toBeInTheDocument();
+    });
+    ['modelProtocol', 'apiEndpoint', 'connectTimeoutSec', 'contextTokens', 'temperature'].forEach((field) => {
+      expect(within(more).getByLabelText(`modelMgr.modal.${field}`).closest('.ant-form-item')).toBeVisible();
+      expect(within(basic).queryByLabelText(`modelMgr.modal.${field}`)).not.toBeInTheDocument();
+    });
+    expect(within(more).getByText('modelMgr.modal.headers')).toBeVisible();
     expect(form!.getFieldValue('systems')).toEqual(systems);
 
     const scopeInput = within(basic).getByLabelText('适用场景');

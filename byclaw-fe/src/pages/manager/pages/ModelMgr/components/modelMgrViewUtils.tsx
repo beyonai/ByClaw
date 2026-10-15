@@ -58,21 +58,3 @@ export const renderAbilityTags = (abilities: any[], abilityLabelMap: Record<stri
     </>
   );
 };
-
-export const renderSystemTags = (intl: IntlShape, systems: any[], systemLabelMap: Record<string, string> = {}) => {
-  const arr = Array.isArray(systems) ? systems : [];
-  return (
-    <>
-      {arr.map((item) => {
-        const label = systemLabelMap?.[`${item}`] || getSystemName(intl, `${item}`);
-        const iconText = `${label}`.trim().slice(0, 2).toUpperCase();
-        return (
-          <Tag key={`sys_${item}`} className={classNames(styles.enhancedTag, styles.tagToneslate)}>
-            <span className={styles.tagIcon}>{iconText || 'SY'}</span>
-            {label}
-          </Tag>
-        );
-      })}
-    </>
-  );
-};

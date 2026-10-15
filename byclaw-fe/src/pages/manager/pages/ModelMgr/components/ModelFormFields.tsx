@@ -24,7 +24,8 @@ import {
 } from './imageGenerationProviders';
 import VolcengineImageFields from './VolcengineImageFields';
 import { isVolcengineImage, SEEDREAM_MODEL_PRESETS } from './volcengineImageConfig';
-import { findModelFormPreset, getModelPresetLimits, getPresetOptions, MODEL_FORM_PRESETS } from './modelFormPresets';
+import { findModelFormPreset, getModelPresetLimits, MODEL_FORM_PRESETS } from './modelFormPresets';
+import ModelPresetPicker from './ModelPresetPicker';
 
 const { TextArea } = Input;
 
@@ -153,7 +154,10 @@ const ModelFormFields: React.FC<Props> = ({
         }),
         { label: 'Qwen', value: 'Qwen' },
       ]
-    : [...MODEL_PROTOCOL_OPTIONS].filter((item) => item.value !== 'MINIMAX_IMAGE');
+    : [...MODEL_PROTOCOL_OPTIONS].filter(
+        (item) =>
+          item.value !== 'MINIMAX_IMAGE' && (item.value !== 'Volcengine Multimodal' || currentModelType === 'EMBEDDING')
+      );
   const defaultProviderOptions = useMemo(
     () => [
       { label: 'OpenAI', value: 'OpenAI' },
@@ -220,12 +224,10 @@ const ModelFormFields: React.FC<Props> = ({
   //   () => [
   //     { key: 'basic', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.basicConfig' }) },
   //     {
-  //       key: 'connection',
+  //       key: 'more',
   //       icon: <RightOutlined />,
-  //       label: intl.formatMessage({ id: 'modelMgr.modal.connectionSecurity' }),
+  //       label: intl.formatMessage({ id: 'modelMgr.modal.moreConfig' }),
   //     },
-  //     { key: 'params', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.paramConfig' }) },
-  //     { key: 'tags', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.tagConfig' }) },
   //   ],
   //   [intl]
   // );
@@ -290,65 +292,17 @@ const ModelFormFields: React.FC<Props> = ({
           open={isSectionOpen('basic')}
           onToggle={() => toggleSection('basic')}
         >
-          <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.identityGroup' })}</div>
           {canAutofill ? (
             <>
-              <Form.Item
-                label={intl.formatMessage({ id: 'modelMgr.modal.quickPreset' })}
-                extra={intl.formatMessage({ id: 'modelMgr.modal.quickPresetHint' })}
-              >
-                <Select
-                  aria-label={intl.formatMessage({ id: 'modelMgr.modal.quickPreset' })}
-                  showSearch
-                  value={undefined}
-                  filterOption={(input, option) => {
-                    // 展示名称可与 API 型号不同，仍允许按真实型号（如 ZHIPU/GLM-5.3-Flash）查找。
-                    const preset = MODEL_FORM_PRESETS.find(({ id }) => id === option?.value);
-                    return `${option?.label || ''} ${preset?.values.modelCode || ''}`
-                      .toLowerCase()
-                      .includes(input.toLowerCase());
-                  }}
-                  placeholder={intl.formatMessage({ id: 'modelMgr.modal.quickPresetPlaceholder' })}
-                  options={getPresetOptions(
-                    MODEL_FORM_PRESETS,
-                    intl.locale,
-                    (preset) =>
-                      intl.formatMessage(
-                        {
-                          id: preset.channel
-                            ? 'modelMgr.modal.presetLabelWithChannel'
-                            : 'modelMgr.modal.presetLabelWithDeveloper',
-                        },
-                        {
-                          model: preset.label,
-                          developer: intl.formatMessage({ id: `modelMgr.modal.presetDeveloper.${preset.developer}` }),
-                          channel: preset.channel
-                            ? intl.formatMessage({ id: `modelMgr.modal.presetChannel.${preset.channel}` })
-                            : '',
-                        }
-                      ),
-                    (preset) =>
-                      preset.developer
-                        ? intl.formatMessage({ id: `modelMgr.modal.presetDeveloper.${preset.developer}` })
-                        : ''
-                  )}
-                  onChange={onPresetSelect}
-                />
+              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.quickPreset' })}>
+                <ModelPresetPicker onSelect={onPresetSelect} />
               </Form.Item>
-              {currentModelCode ? (
+              {/* 仅在需要确认实际配置或模板使用限制时展示说明，普通模板不额外占用提示区域。 */}
+              {currentModelCode && (!currentPreset || currentPreset.noticeId) ? (
                 <div className={styles.hintBlock} role="status">
                   {intl.formatMessage({
-                    id: currentPreset ? 'modelMgr.modal.presetAppliedHint' : 'modelMgr.modal.unknownModelHint',
+                    id: currentPreset?.noticeId || 'modelMgr.modal.unknownModelHint',
                   })}
-                  {currentPreset?.noticeId ? <div>{intl.formatMessage({ id: currentPreset.noticeId })}</div> : null}
-                  {currentPreset?.source ? (
-                    <>
-                      {' '}
-                      <a href={currentPreset.source} target="_blank" rel="noreferrer">
-                        {intl.formatMessage({ id: 'modelMgr.modal.presetSource' })}
-                      </a>
-                    </>
-                  ) : null}
                 </div>
               ) : null}
             </>
@@ -379,9 +333,9 @@ const ModelFormFields: React.FC<Props> = ({
             >
               {canAutofill ? (
                 <AutoComplete
-                  options={[...new Set(MODEL_FORM_PRESETS.map((preset) => preset.values.modelCode))].map((value) => ({
-                    value,
-                  }))}
+                  options={[...new Set(MODEL_FORM_PRESETS.map((preset) => preset.values.modelCode))]
+                    .sort(new Intl.Collator(intl.locale, { numeric: true, sensitivity: 'base' }).compare)
+                    .map((value) => ({ value }))}
                   filterOption={(input, option) => `${option?.value}`.toLowerCase().includes(input.toLowerCase())}
                   placeholder={intl.formatMessage({ id: 'modelMgr.modal.modelCodePlaceholder' })}
                 >
@@ -414,10 +368,19 @@ const ModelFormFields: React.FC<Props> = ({
               <Select options={modelTypeOptions} />
             </Form.Item>
           </div>
+          {/* 必填凭证直接展示，应用配置集中放在下方可展开的更多基本信息中。 */}
+          <Form.Item
+            label={intl.formatMessage({ id: 'modelMgr.modal.apiToken' })}
+            name="apiToken"
+            rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.apiTokenRequired' }) }]}
+          >
+            <ApiTokenComp tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} />
+          </Form.Item>
           {/* 可选配置入口用右箭头表示收起、下箭头表示展开，与内容显隐共用状态。 */}
           {simplified ? (
             <Button
               type="link"
+              className={styles.basicExtraToggle}
               icon={isSectionOpen('basicExtra') ? <DownOutlined aria-hidden /> : <RightOutlined aria-hidden />}
               onClick={() => toggleSection('basicExtra')}
               aria-expanded={isSectionOpen('basicExtra')}
@@ -426,6 +389,19 @@ const ModelFormFields: React.FC<Props> = ({
             </Button>
           ) : null}
           <div hidden={simplified && !isSectionOpen('basicExtra')}>
+            <div className={styles.grid2}>
+              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.ability' })} name="abilities">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder={intl.formatMessage({ id: 'modelMgr.modal.abilityPlaceholder' })}
+                  options={abilityOptions.filter((item) => item.value !== '1')}
+                />
+              </Form.Item>
+              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.status' })} name="status">
+                <Select options={statusOptions} />
+              </Form.Item>
+            </div>
             {/* 系统归属属于模型基础信息，与名称、型号和类型集中配置。 */}
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.systemTags' })} name="systems">
               <Select
@@ -449,10 +425,10 @@ const ModelFormFields: React.FC<Props> = ({
         </ModelFormSection>
 
         <ModelFormSection
-          title={intl.formatMessage({ id: 'modelMgr.modal.connectionSecurity' })}
-          desc={intl.formatMessage({ id: 'modelMgr.modal.connectionSecurityDesc' })}
-          open={isSectionOpen('connection')}
-          onToggle={() => toggleSection('connection')}
+          title={intl.formatMessage({ id: 'modelMgr.modal.moreConfig' })}
+          desc={intl.formatMessage({ id: 'modelMgr.modal.moreConfigDesc' })}
+          open={isSectionOpen('more')}
+          onToggle={() => toggleSection('more')}
         >
           <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.endpointGroup' })}</div>
           <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.modelProtocol' })} name="modelProtocol">
@@ -470,25 +446,7 @@ const ModelFormFields: React.FC<Props> = ({
             <Input placeholder={apiEndpointPlaceholder} />
           </Form.Item>
 
-          <Form.Item
-            label={intl.formatMessage({ id: 'modelMgr.modal.apiToken' })}
-            name="apiToken"
-            rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.apiTokenRequired' }) }]}
-          >
-            <ApiTokenComp tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} />
-          </Form.Item>
-
-          {simplified ? (
-            <Button
-              type="link"
-              icon={isSectionOpen('connectionExtra') ? <DownOutlined aria-hidden /> : <RightOutlined aria-hidden />}
-              onClick={() => toggleSection('connectionExtra')}
-              aria-expanded={isSectionOpen('connectionExtra')}
-            >
-              {intl.formatMessage({ id: 'modelMgr.modal.advancedConnection' })}
-            </Button>
-          ) : null}
-          <div hidden={simplified && !isSectionOpen('connectionExtra')}>
+          <div>
             <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.authGroup' })}</div>
             <Form.List name="headers">
               {(fields, { add, remove }) => (
@@ -546,16 +504,12 @@ const ModelFormFields: React.FC<Props> = ({
               </Form.Item>
             </div>
           </div>
-        </ModelFormSection>
-
-        <ModelFormSection
-          title={intl.formatMessage({ id: 'modelMgr.modal.paramConfig' })}
-          desc={intl.formatMessage({
-            id: simplified ? 'modelMgr.modal.automaticParamsHint' : 'modelMgr.modal.paramConfigDesc',
-          })}
-          open={isSectionOpen('params')}
-          onToggle={() => toggleSection('params')}
-        >
+          <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.paramConfig' })}</div>
+          <div className={styles.hintBlock}>
+            {intl.formatMessage({
+              id: simplified ? 'modelMgr.modal.automaticParamsHint' : 'modelMgr.modal.paramConfigDesc',
+            })}
+          </div>
           {!isImageGenerationModel ? (
             <>
               <Form.Item
@@ -639,7 +593,7 @@ const ModelFormFields: React.FC<Props> = ({
                 </Form.Item>
                 {isVolcengine ? (
                   <VolcengineImageFields modelCode={currentModelCode} />
-                ) : (
+                ) : ['BAILIAN_IMAGE', 'TOKENHUB_IMAGE'].includes(currentModelProtocol) ? null : (
                   <>
                     <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.aspectRatio' })} name="aspectRatio">
                       <Select
@@ -846,27 +800,6 @@ const ModelFormFields: React.FC<Props> = ({
                 rows={4}
                 className={styles.fullWidth}
               />
-            </Form.Item>
-          </div>
-        </ModelFormSection>
-
-        <ModelFormSection
-          title={intl.formatMessage({ id: 'modelMgr.modal.tagConfig' })}
-          desc={intl.formatMessage({ id: 'modelMgr.modal.tagConfigDesc' })}
-          open={isSectionOpen('tags')}
-          onToggle={() => toggleSection('tags')}
-        >
-          <div className={styles.grid2}>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.ability' })} name="abilities">
-              <Select
-                mode="multiple"
-                allowClear
-                placeholder={intl.formatMessage({ id: 'modelMgr.modal.abilityPlaceholder' })}
-                options={abilityOptions.filter((item) => item.value !== '1')}
-              />
-            </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.status' })} name="status">
-              <Select options={statusOptions} />
             </Form.Item>
           </div>
         </ModelFormSection>

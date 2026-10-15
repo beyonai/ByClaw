@@ -1,7 +1,14 @@
 import { cloneDeep, isEqual } from 'lodash';
 import { IMAGE_GENERATION_PROVIDERS } from './imageGenerationProviders';
-import { DEFAULT_REASONING_CONFIG, getDefaultFormValues } from './modelFormUtils';
+import {
+  DEFAULT_CONTEXT_TOKENS,
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_REASONING_CONFIG,
+  getDefaultFormValues,
+  getDefaultMaxTokens,
+} from './modelFormUtils';
 import { SEEDREAM_MODEL_PRESETS } from './volcengineImageConfig';
+import { DOMESTIC_MODEL_PRESETS } from './domesticModelPresets';
 
 type Values = Record<string, any>;
 export type ModelFormPreset = {
@@ -24,8 +31,14 @@ const OFFICIAL_IMAGE_TEMPLATES: Record<
 > = {
   GOOGLE: {
     developer: 'google',
-    models: ['gemini-3.1-flash-image-preview'],
-    source: 'https://ai.google.dev/gemini-api/docs/image-generation',
+    models: [
+      'gemini-3.1-flash-image-preview',
+      'gemini-nano-banana-2.1',
+      'gemini-3.1-flash-image',
+      'gemini-3.1-flash-lite-image',
+      'gemini-3-pro-image',
+    ],
+    source: 'https://ai.google.dev/gemini-api/docs/generate-content/image-generation',
   },
   MINIMAX: {
     developer: 'minimax',
@@ -51,10 +64,77 @@ const OFFICIAL_IMAGE_TEMPLATES: Record<
 };
 
 // 仅登记明确型号；limits 保存 2026-10-15 核对的官方渠道上限，统一用于新建填充和校验。
-// 未公布独立输出上限的型号不设置 maxTokens，不能把示例值或上下文长度当作输出上限。
+// 未公布独立输出上限的型号不设置 limits.maxTokens，系统默认预算只写入 values。
 // https://platform.minimax.io/docs/api-reference/text-openai-api
 // https://api-docs.deepseek.com/api/list-models/
 const MODEL_PRESET_DEFINITIONS: ModelFormPreset[] = [
+  ...DOMESTIC_MODEL_PRESETS,
+  ...['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna'].map((modelCode) => ({
+    id: `openai:${modelCode}`,
+    label: modelCode,
+    developer: 'openai',
+    source: `https://developers.openai.com/api/docs/models/${modelCode}`,
+    limits: { contextTokens: 1050000, maxTokens: 128000 },
+    values: {
+      modelCode,
+      modelType: 'LLM',
+      providerName: 'OpenAI',
+      // GPT-6 的工具调用使用 Responses；不把仅支持纯文本的 Chat Completions 作为默认入口。
+      modelProtocol: 'OpenAI Responses',
+      apiEndpoint: 'https://api.openai.com/v1',
+      reasoningConfig: {
+        ...DEFAULT_REASONING_CONFIG,
+        enabled: true,
+        capability: 'effort',
+        compatFormat: 'openai',
+        defaultLevel: 'medium',
+        supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      reasoningEffortMapText: JSON.stringify({
+        low: 'low',
+        medium: 'medium',
+        high: 'high',
+        xhigh: 'xhigh',
+        max: 'max',
+      }),
+    },
+  })),
+  ...[
+    { modelCode: 'gemini-4-argon', defaultLevel: 'medium', supportsMinimal: false },
+    { modelCode: 'gemini-3.8-flash', defaultLevel: 'medium', supportsMinimal: false },
+    { modelCode: 'gemini-3.6-flash', defaultLevel: 'medium', supportsMinimal: true },
+    { modelCode: 'gemini-3.5-flash-lite', defaultLevel: 'minimal', supportsMinimal: true },
+    { modelCode: 'gemini-3.1-flash-lite', defaultLevel: 'minimal', supportsMinimal: true },
+  ].map(({ modelCode, defaultLevel, supportsMinimal }) => ({
+    id: `google:${modelCode}`,
+    label: modelCode,
+    developer: 'google',
+    source: `https://ai.google.dev/gemini-api/docs/models/${modelCode}`,
+    // Argon 的长输出需额外接口配置，此处登记普通同步请求的输出上限。
+    limits: { contextTokens: 1048576, maxTokens: 65536 },
+    values: {
+      modelCode,
+      modelType: 'LLM',
+      providerName: 'Google',
+      modelProtocol: 'OpenAI',
+      apiEndpoint: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      reasoningConfig: {
+        ...DEFAULT_REASONING_CONFIG,
+        enabled: true,
+        capability: 'effort',
+        compatFormat: 'openai',
+        defaultLevel,
+        supportedEfforts: [...(supportsMinimal ? ['minimal'] : []), 'low', 'medium', 'high'],
+      },
+      // Gemini 兼容接口接收原始程度，不能使用旧配置中 low -> high 的兼容映射。
+      reasoningEffortMapText: JSON.stringify({
+        ...(supportsMinimal ? { minimal: 'minimal' } : {}),
+        low: 'low',
+        medium: 'medium',
+        high: 'high',
+      }),
+    },
+  })),
   {
     id: 'minimax:MiniMax-M3',
     label: 'MiniMax-M3',
@@ -111,10 +191,35 @@ const MODEL_PRESET_DEFINITIONS: ModelFormPreset[] = [
     },
   })),
   // 百炼公开模型使用同一兼容协议；保留渠道说明，不能将本地用户的命名或能力值当作官方参数。
+  // 千问展示名统一使用百炼文档登记的 API 型号，文本、向量和重排不混用市场名与接口名。
   ...[
+    ...['plus', 'flash'].map((variant) => ({
+      modelCode: `qwen3.7-${variant}`,
+      label: `qwen3.7-${variant}`,
+      developer: 'alibaba',
+      contextTokens: 1000000,
+      maxTokens: 131072,
+      page: `qwen3-7-${variant}`,
+    })),
+    {
+      modelCode: 'qwen3.8-max',
+      label: 'qwen3.8-max',
+      developer: 'alibaba',
+      contextTokens: 1000000,
+      maxTokens: 131072,
+      page: 'qwen3-8-max',
+    },
+    {
+      modelCode: 'qwen3.8-flash',
+      label: 'qwen3.8-flash',
+      developer: 'alibaba',
+      contextTokens: 1000000,
+      maxTokens: 131072,
+      page: 'qwen3-8-flash',
+    },
     {
       modelCode: 'qwen3.6-plus',
-      label: 'Qwen3.6-Plus',
+      label: 'qwen3.6-plus',
       developer: 'alibaba',
       contextTokens: 1000000,
       maxTokens: 65536,
@@ -122,7 +227,7 @@ const MODEL_PRESET_DEFINITIONS: ModelFormPreset[] = [
     },
     {
       modelCode: 'qwen3.7-max',
-      label: 'Qwen3.7-Max',
+      label: 'qwen3.7-max',
       developer: 'alibaba',
       contextTokens: 1000000,
       maxTokens: 131072,
@@ -256,44 +361,100 @@ const MODEL_PRESET_DEFINITIONS: ModelFormPreset[] = [
       reasoningEffortMapText: JSON.stringify({ low: 'low', high: 'high', max: 'max' }),
     },
   },
-  {
-    id: 'anthropic:claude-sonnet-5',
-    label: 'claude-sonnet-5',
-    developer: 'anthropic',
-    source: 'https://platform.claude.com/docs/en/models/sonnet-5/overview',
-    limits: { contextTokens: 1000000, maxTokens: 128000 },
-    values: {
-      modelCode: 'claude-sonnet-5',
-      modelType: 'LLM',
-      providerName: 'Anthropic',
-      modelProtocol: 'Anthropic',
-      apiEndpoint: 'https://api.anthropic.com',
-      // Sonnet 5 不接收非默认采样值或手动 thinking budget，使用自适应思考。
-      reasoningConfig: {
-        ...DEFAULT_REASONING_CONFIG,
-        enabled: true,
-        capability: 'adaptive',
-        compatFormat: 'anthropic',
-        defaultLevel: 'adaptive',
+  ...['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-sonnet-5'].map(
+    (modelCode) => ({
+      id: `anthropic:${modelCode}`,
+      label: modelCode,
+      developer: 'anthropic',
+      source: 'https://platform.claude.com/docs/en/models/overview',
+      limits: { contextTokens: 1000000, maxTokens: 128000 },
+      values: {
+        modelCode,
+        modelType: 'LLM',
+        providerName: 'Anthropic',
+        modelProtocol: 'Anthropic',
+        apiEndpoint: 'https://api.anthropic.com',
+        // 新一代 Claude 使用自适应思考，不继承其他厂商的采样值或手动思考预算。
+        reasoningConfig: {
+          ...DEFAULT_REASONING_CONFIG,
+          enabled: true,
+          capability: 'adaptive',
+          compatFormat: 'anthropic',
+          defaultLevel: 'adaptive',
+        },
       },
-    },
-  },
-  {
-    id: 'bailian:text-embedding-v4',
-    label: 'text-embedding-v4',
+    })
+  ),
+  ...[
+    { modelCode: 'text-embedding-v4', contextTokens: 8192 },
+    { modelCode: 'qwen3.7-text-embedding', contextTokens: 128000 },
+    { modelCode: 'qwen3.7-text-embedding-flash', contextTokens: 128000 },
+  ].map(({ modelCode, contextTokens }) => ({
+    id: `bailian:${modelCode}`,
+    label: modelCode,
     developer: 'alibaba',
     channel: 'bailian',
     source: 'https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api',
-    limits: { contextTokens: 8192 },
+    // 使用同步 API 文档的单条输入限制，而非模型介绍页的理论上下文。
+    limits: { contextTokens },
     values: {
-      modelCode: 'text-embedding-v4',
+      modelCode,
       modelType: 'EMBEDDING',
       providerName: 'Bailian',
       modelProtocol: 'OpenAI',
       apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       // 向量维度沿用服务端默认值，不继承任何环境知识库的自定义维度。
     },
+  })),
+  ...['text-embedding-3-small', 'text-embedding-3-large'].map((modelCode) => ({
+    id: `openai:${modelCode}`,
+    label: modelCode,
+    developer: 'openai',
+    source: 'https://developers.openai.com/api/docs/guides/embeddings',
+    limits: { contextTokens: 8192 },
+    values: {
+      modelCode,
+      modelType: 'EMBEDDING',
+      providerName: 'OpenAI',
+      modelProtocol: 'OpenAI',
+      apiEndpoint: 'https://api.openai.com/v1',
+    },
+  })),
+  {
+    id: 'google:gemini-embedding-001',
+    label: 'gemini-embedding-001',
+    developer: 'google',
+    source: 'https://ai.google.dev/gemini-api/docs/models/gemini-embedding-001',
+    limits: { contextTokens: 2048 },
+    values: {
+      modelCode: 'gemini-embedding-001',
+      modelType: 'EMBEDDING',
+      providerName: 'Google',
+      modelProtocol: 'OpenAI',
+      apiEndpoint: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    },
   },
+  ...[
+    { modelCode: 'qwen3.7-text-rerank', contextTokens: 30000 },
+    { modelCode: 'gte-rerank-v2', contextTokens: 30000 },
+    { modelCode: 'qwen3-rerank', contextTokens: 4000 },
+    { modelCode: 'qwen3-vl-rerank', contextTokens: 8000 },
+  ].map(({ modelCode, contextTokens }) => ({
+    id: `bailian:${modelCode}`,
+    label: modelCode,
+    developer: 'alibaba',
+    channel: 'bailian',
+    source: 'https://help.aliyun.com/zh/model-studio/text-rerank-api',
+    limits: { contextTokens },
+    values: {
+      modelCode,
+      modelType: 'RERANK',
+      providerName: 'Bailian',
+      modelProtocol: 'Qwen',
+      // DashScope 重排使用完整服务地址和嵌套 input；不能拼接通用 /rerank。
+      apiEndpoint: 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank',
+    },
+  })),
   // 仅复用已支持的协议与连接地址，候选型号由官方目录明确登记。
   ...IMAGE_GENERATION_PROVIDERS.filter((provider) => OFFICIAL_IMAGE_TEMPLATES[provider.providerName]).flatMap(
     (provider) =>
@@ -321,10 +482,17 @@ const MODEL_PRESET_DEFINITIONS: ModelFormPreset[] = [
   ),
 ];
 
-// 容量只维护一份，自动填充值与校验上限同步；图片模板不附加文本 token 参数。
+// 官方上限优先；缺失时补前端配置默认值，不写入 limits，图片模板不附加文本容量。
 export const MODEL_FORM_PRESETS: ModelFormPreset[] = MODEL_PRESET_DEFINITIONS.map((preset) => ({
   ...preset,
-  values: { ...preset.values, ...preset.limits },
+  values: {
+    ...preset.values,
+    ...(preset.values.modelType === 'LLM' ? { maxTokens: getDefaultMaxTokens(preset.limits?.contextTokens) } : {}),
+    ...preset.limits,
+    ...(preset.values.modelType !== 'IMAGE_GENERATION'
+      ? { contextTokens: preset.limits?.contextTokens ?? DEFAULT_CONTEXT_TOKENS }
+      : {}),
+  },
 }));
 
 export function getNewModelFormValues() {
@@ -332,9 +500,9 @@ export function getNewModelFormValues() {
     ...getDefaultFormValues(),
     // 数字员工的公共问答模型按标签 3 筛选；仅新增时默认选中“对话模型”，编辑仍回显已保存配置。
     abilities: ['3'],
-    // 未识别模型时不宣称容量或强制传采样值；超时/重试继续使用原有连接策略。
-    contextTokens: undefined,
-    maxTokens: undefined,
+    // 未识别型号先带入配置默认值；识别模板后以官方上限替换，手动值仍优先。
+    contextTokens: DEFAULT_CONTEXT_TOKENS,
+    maxTokens: DEFAULT_MAX_TOKENS,
     temperature: undefined,
     topP: undefined,
     frequencyPenalty: undefined,
@@ -392,6 +560,16 @@ export function applyModelAutofill(
   if (preset && (!state.edited.has('modelType') || values.modelType === preset.values.modelType)) {
     Object.assign(suggestions, preset.values);
   }
+  const modelType = suggestions.modelType ?? values.modelType;
+  // 图片模型不使用上下文；向量和重排只保留输入容量，不带入文本输出预算。
+  if (modelType === 'IMAGE_GENERATION') suggestions.contextTokens = undefined;
+  if (modelType !== 'LLM') {
+    suggestions.maxTokens = undefined;
+  } else if (!preset?.limits?.maxTokens) {
+    suggestions.maxTokens = getDefaultMaxTokens(
+      state.edited.has('contextTokens') ? values.contextTokens : suggestions.contextTokens
+    );
+  }
   suggestions.displayName = `${values.modelCode || ''}`.trim().slice(0, 50);
   delete suggestions.modelCode;
   return applyAutofillFields(state, values, suggestions);
@@ -411,25 +589,17 @@ export function applyAutofillFields(state: ModelAutofillState, values: Values, s
   return patch;
 }
 
-/** 同厂商的型号连续排列，厂商内按型号自然排序；仍返回平铺选项，不改变模板 ID 或调用配置。 */
+/** 全列表按型号自然排序，厂商与渠道仅作为展示后缀，不改变模板 ID 或调用配置。 */
 export function getPresetOptions(
   presets = MODEL_FORM_PRESETS,
   locale = 'zh-CN',
-  formatLabel: (preset: ModelFormPreset) => string = (preset) => preset.label,
-  formatDeveloper: (preset: ModelFormPreset) => string = (preset) => preset.developer || ''
+  formatLabel: (preset: ModelFormPreset) => string = (preset) => preset.label
 ) {
   const collator = new Intl.Collator(locale, { numeric: true, sensitivity: 'base' });
-  return (
-    presets
-      // 使用模型厂商，而非接入渠道，避免百炼下的 GLM、Kimi 混为同一家；缺少厂商时沿用型号排序。
-      .map((preset) => ({ preset, developerLabel: formatDeveloper(preset) || preset.label }))
-      .sort(
-        (left, right) =>
-          collator.compare(left.developerLabel, right.developerLabel) ||
-          collator.compare(left.preset.label, right.preset.label)
-      )
-      .map(({ preset }) => ({ value: preset.id, label: formatLabel(preset) }))
-  );
+  // 拷贝后排序，保持目录定义及同名不同渠道的稳定顺序。
+  return [...presets]
+    .sort((left, right) => collator.compare(left.label, right.label))
+    .map((preset) => ({ value: preset.id, label: formatLabel(preset) }));
 }
 
 /** 官方渠道的限额只用于当前新增配置；代理、自定义协议和旧记录继续由其实际服务决定。 */

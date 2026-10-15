@@ -6,6 +6,7 @@ import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import useShowModal from '@/pages/manager/hooks/useShowModal';
 import commonStyles from '@/pages/manager/less/commonTabList.less';
 import type { ITreeData } from '@/pages/manager/pages/OrgMgr/components/TreeFilter';
+import { getSourceSystemList } from '@/pages/manager/service/OrgMgr';
 import { getDcSystemConfigListByStandType } from '@/pages/manager/service/session';
 import ModelCardItem from './components/ModelCardItem';
 import ModelCardSection from './components/ModelCardSection';
@@ -13,6 +14,7 @@ import ModelFormModal from './components/ModelFormModal';
 import ModelFilterPanel from './components/ModelFilterPanel';
 import ModelHeroPanel from './components/ModelHeroPanel';
 import useModelTypeOptions from './components/useModelTypeOptions';
+import { SYSTEM_SOURCE_TYPES } from './components/modelFormUtils';
 import { getSystemName, type ModelStatus } from './components/modelMgrViewUtils';
 import styles from './index.module.less';
 
@@ -68,9 +70,8 @@ const ModelMgr: React.FC = () => {
   const [modelTypeSelectedList, setModelTypeSelectedList] = useState<ITreeData[]>([]);
   const [statusSelectedList, setStatusSelectedList] = useState<ITreeData[]>([]);
   const [abilitySelectedList, setAbilitySelectedList] = useState<ITreeData[]>([]);
-  const [systemSelectedList, setSystemSelectedList] = useState<ITreeData[]>([]);
-  const [systemTreeData, setSystemTreeData] = useState<ITreeData[]>([]);
-  const [systemLabelMap, setSystemLabelMap] = useState<Record<string, string>>({});
+  const [systemCodes, setSystemCodes] = useState<string[]>([]);
+  const [systemLabelMap, setSystemLabelMap] = useState<Map<string, string>>(new Map());
 
   const [formState, formAction] = useShowModal();
 
@@ -99,7 +100,23 @@ const ModelMgr: React.FC = () => {
     return map;
   }, [abilityTreeData]);
 
-  // System filters are loaded from the API, aligned with digital employee sources.
+  // 筛选项仍取已配置模型的系统编码，显示名称与编辑弹窗共用系统来源接口。
+  const systemTreeData = useMemo<ITreeData[]>(
+    () =>
+      systemCodes.map((key) => ({
+        label: systemLabelMap.get(key) || getSystemName(intl, key),
+        key,
+        keypath: key,
+      })),
+    [intl, systemCodes, systemLabelMap]
+  );
+
+  // 按编码派生选中项，名称晚于模型列表返回时，已选文案也会同步更新。
+  const systemSelectedList = useMemo<ITreeData[]>(
+    () =>
+      system ? [{ label: systemLabelMap.get(system) || getSystemName(intl, system), key: system, keypath: system }] : [],
+    [intl, system, systemLabelMap]
+  );
 
   const activeFilterCount = [modelType, status, ability, system, keyword.trim()].filter(Boolean).length;
 
@@ -182,26 +199,18 @@ const ModelMgr: React.FC = () => {
       },
       success: (res: any) => {
         const rows = Array.isArray(res?.rows) ? res.rows : Array.isArray(res?.list) ? res.list : [];
-        const nextSystemLabelMap: Record<string, string> = {};
+        const nextSystemCodes = new Set<string>();
         rows.forEach((item: any) => {
           const systems = Array.isArray(item?.systems) ? item.systems : [];
           systems.forEach((systemItem: any) => {
             const value = `${systemItem ?? ''}`.trim();
-            if (!value || nextSystemLabelMap[value]) return;
-            nextSystemLabelMap[value] = getSystemName(intl, value);
+            if (value) nextSystemCodes.add(value);
           });
         });
-        setSystemLabelMap(nextSystemLabelMap);
-        setSystemTreeData(
-          Object.keys(nextSystemLabelMap).map((key) => ({
-            label: nextSystemLabelMap[key],
-            key,
-            keypath: key,
-          }))
-        );
+        setSystemCodes([...nextSystemCodes]);
       },
     });
-  }, [dispatch, intl]);
+  }, [dispatch]);
 
   const resetAndFetch = useCallback(
     (override?: Partial<{ keyword: string; modelType?: string; status?: ModelStatus; ability?: string; system?: string }>) => {
@@ -223,6 +232,28 @@ const ModelMgr: React.FC = () => {
     fetchList({ pageNum: 1, pageSize: pagination.pageSize });
     fetchOverviewStats();
   }, []);
+
+  useEffect(() => {
+    let canceled = false;
+    getSourceSystemList({ types: SYSTEM_SOURCE_TYPES })
+      .then((res: any) => {
+        const sources = Array.isArray(res?.data) ? res.data : [];
+        const labels = new Map<string, string>();
+        sources.forEach((item: any) => {
+          const code = `${item?.systemCode ?? ''}`.trim();
+          const name = `${item?.systemName ?? ''}`.trim();
+          if (code && name) labels.set(code, name);
+        });
+        if (!canceled) setSystemLabelMap(labels);
+      })
+      .catch(() => {
+        // 名称加载失败时保留原有文案或编码，避免影响模型列表及筛选。
+        if (!canceled) setSystemLabelMap(new Map());
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [intl]);
 
   useEffect(() => {
     // Ability filters are served by /system/staticdata/getDcSystemConfigListByStandType (standType=MODEL_TAGS).
@@ -257,7 +288,6 @@ const ModelMgr: React.FC = () => {
     setSystem(undefined);
     setStatusSelectedList([]);
     setAbilitySelectedList([]);
-    setSystemSelectedList([]);
     setPagination((p) => ({ ...p, pageIndex: 1 }));
     fetchList({
       pageNum: 1,
@@ -435,7 +465,6 @@ const ModelMgr: React.FC = () => {
           intl={intl}
           record={record}
           abilityLabelMap={abilityLabelMap}
-          systemLabelMap={systemLabelMap}
           onSetStatus={setStatusAction}
           onSetDefault={setDefaultAction}
           onEdit={(item) => formAction.handleShow('edit', item)}
@@ -444,7 +473,7 @@ const ModelMgr: React.FC = () => {
         />
       );
     },
-    [abilityLabelMap, formAction, intl, setDefaultAction, systemLabelMap]
+    [abilityLabelMap, formAction, intl, setDefaultAction]
   );
 
   const loadNextPage = useCallback(() => {
@@ -517,7 +546,6 @@ const ModelMgr: React.FC = () => {
           }}
           onSystemOk={(v) => {
             const next = v?.[0]?.key || undefined;
-            setSystemSelectedList(v || []);
             setSystem(next);
             setPagination((p) => ({ ...p, pageIndex: 1 }));
             resetAndFetch({ system: next });

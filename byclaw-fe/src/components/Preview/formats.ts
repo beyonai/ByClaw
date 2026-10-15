@@ -44,7 +44,9 @@ export const CODE_TEXT_EXTENSIONS = [
 export const IMAGE_PREVIEW_TYPES = ['image', 'jpg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'avif', 'apng'];
 export const VIDEO_PREVIEW_TYPES = ['video', 'mp4', 'webm', 'mov', 'm4v', 'ogv', 'avi', 'mkv'];
 export const AUDIO_PREVIEW_TYPES = ['audio', 'mp3', 'wav', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'flac'];
-export const OFFICE_PREVIEW_TYPES = ['pptx', 'docx', 'xlsx', 'xls'];
+export const LEGACY_OFFICE_PREVIEW_TYPES = ['doc', 'ppt'];
+export const OFFICE_PREVIEW_TYPES = ['pptx', 'docx', 'xlsx', 'xls', ...LEGACY_OFFICE_PREVIEW_TYPES];
+export const DELIMITED_PREVIEW_TYPES = ['csv', 'tsv'];
 export const TEXT_PREVIEW_TYPES = ['txt', 'log', 'json', 'jsonl', 'ndjson', 'csv', 'tsv', ...CODE_TEXT_EXTENSIONS];
 export const HTML_PREVIEW_TYPES = ['html', 'h5'];
 
@@ -99,9 +101,9 @@ export const PREVIEW_MIME_TYPES: Record<string, string> = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  // 已知二进制 MIME 供下载及类型识别使用，不代表已具备在线解码器。
   doc: 'application/msword',
   ppt: 'application/vnd.ms-powerpoint',
+  // 已知二进制 MIME 供下载及类型识别使用，不代表已具备在线解码器。
   tif: 'image/tiff',
   tiff: 'image/tiff',
   heic: 'image/heic',
