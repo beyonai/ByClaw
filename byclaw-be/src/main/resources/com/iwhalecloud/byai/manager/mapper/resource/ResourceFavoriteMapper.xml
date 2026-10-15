@@ -11,7 +11,13 @@
     <select id="selectResource" resultType="com.iwhalecloud.byai.manager.entity.resource.SsResource">
         select resource_id, resource_biz_type, owner_type, resource_status, com_acct_id, view_auth_controlled, use_auth_controlled
         from ss_resource
-        where resource_id = #{resourceId} and com_acct_id = #{tenantId}
+        where resource_id = #{resourceId}
+          and (
+              com_acct_id = #{tenantId}
+              or (com_acct_id is null and owner_type = 'enterprise'
+                  and coalesce(view_auth_controlled, false) = false
+                  and coalesce(use_auth_controlled, false) = false)
+          )
     </select>
 
     <insert id="insertCount">
