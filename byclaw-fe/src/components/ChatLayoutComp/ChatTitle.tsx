@@ -21,12 +21,14 @@ import { saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
 import useAppStore from '@/models/common/useAppStore';
 import ChildSessionNavigator from './ChildSessionNavigator';
 import AgentTeamsHeaderActivity from './AgentTeamsHeaderActivity';
+import type { IMessage } from '@/typescript/message';
 
 interface ChatTitleProps {
   sessionId?: string;
   currentSession?: ISession;
   suffix?: React.ReactNode;
   lastAnswer?: any;
+  latestDigitalEmployeeMessage?: IMessage;
   agentType: IAgentType;
   projectId?: number;
   projectName?: string;
@@ -126,7 +128,7 @@ export default function ChatTitle(props: ChatTitleProps) {
                 sessionId={sessionId}
                 sessionName={titleSession.sessionName}
               />
-              <VNC />
+              <VNC sessionId={sessionId} latestDigitalEmployeeMessage={props.latestDigitalEmployeeMessage} />
               {isAdminVip(userInfo) && (
                 <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>
                   <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />

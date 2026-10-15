@@ -2,20 +2,20 @@ import { useCallback, useEffect, useRef } from 'react';
 
 // @ts-ignore
 import { useDispatch } from '@umijs/max';
-import { assign, get, isPlainObject, isString, last, set, isNil, pick, isEmpty } from 'lodash';
+import { assign, get, isPlainObject, isString, last, set, isNil, pick } from 'lodash';
 
-import useAppStore from '@/models/common/useAppStore';
-import { IMessageState, SSEEventStatus, SSEMessageType, IObjectType } from '@/constants/message';
+import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
 
 import { initAnswerMessage, initQueryMessage } from '@/utils/messgae';
-import { getVNCUrl, resolveSandboxesInfo } from '@/utils/chat';
+import { isVncToolMessage } from '@/utils/chatVnc';
 import { isTextContentType } from '@/utils/messgae';
 
 import { substanceHandler } from '@/hooks/useChat/util';
-import { updateExistingMessage } from '@/utils/messageItemUpdate';
+import { isSameUpdatableMessage, updateExistingMessage } from '@/utils/messageItemUpdate';
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFinalContent } from '@/utils/finalAnswer';
 import useGlobal from '@/hooks/useGlobal';
+import useVncOpener from '@/hooks/useVncOpener';
 
 import { IMessageListItem } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
@@ -53,9 +53,9 @@ function useHandler(props: IProps) {
 
   const dispatch = useDispatch();
 
-  const { sandboxesInfo, setSiderCollapsed } = useAppStore();
   const globalContext = useGlobal();
   const { agentInfo, sessionId: curSessionId, EventEmitter } = globalContext;
+  const openVnc = useVncOpener(curSessionId);
 
   const curAgentCodeRef = useRef<string | undefined>('');
   const curSessioneRef = useRef<string | undefined>('');
@@ -559,91 +559,23 @@ function useHandler(props: IProps) {
     (onionsProps: IOnionsProps) => {
       const { sseRes, newAnswerMsg } = onionsProps;
       if (newAnswerMsg?.sessionId !== curSessioneRef.current) return onionsProps;
-      if (!sseRes) return onionsProps;
-
-      const isByCliCommand = (inputBody: unknown) => {
-        let body: Record<string, unknown>;
-        if (typeof inputBody === 'string') {
-          try {
-            body = JSON.parse(inputBody);
-          } catch (error) {
-            return false;
-          }
-        } else {
-          body = inputBody as Record<string, unknown>;
-        }
-        if ('command' in body && typeof body?.command === 'string') {
-          return (
-            body?.command?.startsWith('bycli') ||
-            body?.command?.includes('web-acquirer.mjs') ||
-            body?.command?.includes('ima.mjs') ||
-            body?.command?.includes('bycli_integration.mjs') ||
-            body?.command?.includes('public-discovery.mjs') ||
-            body?.command?.includes('public-collect')
-          );
-        }
-        if ('path' in body && typeof body?.path === 'string') {
-          return body?.path?.toLocaleLowerCase()?.includes('/bycli/skill.md');
-        }
-        return false;
-      };
-      const isBrowserToolName = (toolName: string) => {
-        return toolName.includes('jarvis_run_flow') || toolName.includes('browser');
-      };
-
-      if (`${SSEMessageType.toolCall}` === `${sseRes?.message?.contentType}`) {
-        const substance = get(sseRes, 'message.content.substance');
-        try {
-          let input: unknown;
-          let title: string;
-          let body: { title: string; input: unknown };
-          if (typeof substance === 'string') {
-            body = JSON.parse(substance);
-          } else {
-            body = substance as { title: string; input: unknown };
-          }
-          ({ title, input } = body);
-          if (!isBrowserToolName(title) && !isByCliCommand(input)) {
-            return onionsProps;
-          }
-        } catch (error) {
-          return onionsProps;
-        }
-      } else if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
-        const jsonStr = get(sseRes, 'message.content.substance.json', '');
-        try {
-          const jsonObj = JSON.parse(jsonStr);
-          if (!isByCliCommand(jsonObj)) return onionsProps;
-        } catch (error) {
-          return onionsProps;
-        }
-      } else if ([`${SSEMessageType.thinkStatusTitle}`].includes(`${sseRes?.message?.contentType}`)) {
-        const toolTitle = get(sseRes, 'message.content.substance.title') || '';
-        if (sseRes?.message?.objectType !== IObjectType.toolCall || !isBrowserToolName(toolTitle)) {
-          return onionsProps;
-        }
-      } else {
-        return onionsProps;
+      const incomingMessage = sseRes?.message;
+      let mergedMessage: IMessageListItem | undefined;
+      if (`${incomingMessage?.contentType}` === `${SSEMessageType.toolCall}`) {
+        mergedMessage = [...(newAnswerMsg.thinkList || []), ...(newAnswerMsg.messageList || [])].find((item) =>
+          isSameUpdatableMessage(item, incomingMessage)
+        );
       }
+      // Tool results omit input; the preceding message handler preserves it by orderId.
+      if (!isVncToolMessage(mergedMessage || incomingMessage)) return onionsProps;
 
-      void resolveSandboxesInfo(useAppStore.getState().sandboxesInfo).then((resolvedSandboxesInfo) => {
-        if (isEmpty(resolvedSandboxesInfo)) return;
-        const url = getVNCUrl(resolvedSandboxesInfo);
-
-        setSiderCollapsed(true);
-        EventEmitter.emit('beyond-main-driver-open-type', {
-          drawerType: 'vnc',
-          canClose: true,
-          width: '50vw',
-        });
-        EventEmitter.emit('beyond-main-driver-message', {
-          url,
-        });
-      });
+      const answerId = newAnswerMsg.messageId || newAnswerMsg.msgId;
+      const toolId = get(sseRes, 'message.content.orderId') || get(sseRes, 'message.uuid') || 'browser';
+      openVnc({ key: `${answerId}:${toolId}` });
 
       return onionsProps;
     },
-    [sandboxesInfo]
+    [openVnc]
   );
 
   return {

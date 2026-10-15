@@ -47,6 +47,7 @@ import { isNotificationSession } from '@/utils/session';
 import { qryConversations } from '@/service/layout';
 import { isExternalChildSession } from '@/utils/scopedSession';
 import { useChatResourceProject } from './ChatResourceWorkspace/useChatResourceProject';
+import { getLatestDigitalEmployeeMessage } from '@/utils/chatVnc';
 
 type IProps = {
   sessionId: string;
@@ -529,6 +530,10 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     onBeforeSend,
   });
   const lastMsg = last(messageList);
+  const latestDigitalEmployeeMessage = useMemo(
+    () => getLatestDigitalEmployeeMessage(messageList, sessionId),
+    [messageList, sessionId]
+  );
   const latestTaskPlan = useMemo(() => selectLatestTaskPlan(messageList, sessionId), [messageList, sessionId]);
 
   const guardedSendQuery = useCallback(
@@ -707,6 +712,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
               <ChatTitle
                 sessionId={sessionId}
                 lastAnswer={lastAnswer}
+                latestDigitalEmployeeMessage={latestDigitalEmployeeMessage}
                 currentSession={currentSession}
                 agentType={myAgentType}
                 projectId={sessionProjectId}
