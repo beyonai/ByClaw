@@ -2,6 +2,8 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.i18n.LocaleContext;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
@@ -26,6 +28,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.domain.ws.service.WebSocketI18nSupport;
 import java.util.List;
 import java.util.UUID;
 
@@ -171,11 +174,18 @@ public class SessionStreamEventRouter {
             return StreamDispatchResult.HANDLED;
         }
 
-        WebSocketRouteResult routeResult = routeWebSocketEvent(ctx, dataJson);
-        if (routeResult.shouldBroadcast) {
-            broadcastToOtherDevices(ctx, dataJson);
+        LocaleContext previousLocaleContext = LocaleContextHolder.getLocaleContext();
+        try {
+            WebSocketI18nSupport.applyLocale(ctx.language, ctx.loginInfo);
+            WebSocketRouteResult routeResult = routeWebSocketEvent(ctx, dataJson);
+            if (routeResult.shouldBroadcast) {
+                broadcastToOtherDevices(ctx, dataJson);
+            }
+            return routeResult.dispatchResult;
         }
-        return routeResult.dispatchResult;
+        finally {
+            LocaleContextHolder.setLocaleContext(previousLocaleContext);
+        }
     }
 
     private StreamDispatchResult handleMissingParent(Long sessionId, List<JSONObject> events) {
@@ -313,6 +323,7 @@ public class SessionStreamEventRouter {
 
     private boolean handleWebSocketError(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
         String errorMsg = metadata != null ? metadata.getString("error") : "unknown gateway error";
+        errorMsg = gatewayStreamEventProcessor.presentErrorMessage(metadata, errorMsg);
         if (ctx.recoveryOnly) {
             ctx.gatewayError = true;
             return true;
