@@ -1,8 +1,6 @@
-import { Tag } from 'antd';
 import React from 'react';
 import type { ITreeData } from '@/pages/manager/pages/OrgMgr/components/TreeFilter';
 import TreeFilter from '@/pages/manager/pages/OrgMgr/components/TreeFilter';
-import type { FilterChip } from './modelMgrViewUtils';
 import styles from '../index.module.less';
 
 type IntlShape = {
@@ -11,14 +9,15 @@ type IntlShape = {
 
 type Props = {
   intl: IntlShape;
-  resultSummary: string;
+  modelTypeTreeData: ITreeData[];
+  modelTypeSelectedList: ITreeData[];
+  onModelTypeOk: (list: ITreeData[]) => void;
   statusTreeData: ITreeData[];
   abilityTreeData: ITreeData[];
   systemTreeData: ITreeData[];
   statusSelectedList: ITreeData[];
   abilitySelectedList: ITreeData[];
   systemSelectedList: ITreeData[];
-  filterChips: FilterChip[];
   onStatusOk: (list: ITreeData[]) => void;
   onAbilityOk: (list: ITreeData[]) => void;
   onSystemOk: (list: ITreeData[]) => void;
@@ -26,55 +25,46 @@ type Props = {
 
 const ModelFilterPanel: React.FC<Props> = ({
   intl,
-  resultSummary,
+  modelTypeTreeData,
+  modelTypeSelectedList,
+  onModelTypeOk,
   statusTreeData,
   abilityTreeData,
   systemTreeData,
   statusSelectedList,
   abilitySelectedList,
   systemSelectedList,
-  filterChips,
   onStatusOk,
   onAbilityOk,
   onSystemOk,
 }) => {
   return (
     <div className={styles.filterPanel}>
-      <div className={styles.filterHeader}>
-        <div className={styles.filterTitle}>{intl.formatMessage({ id: 'modelMgr.filterTitle' })}</div>
-        <div className={styles.filterSummary}>{resultSummary}</div>
-      </div>
-
+      {/* 复用原版筛选组件，恢复悬停浮窗、双列选项及选中后的清除交互。 */}
       <div className={styles.filterRow}>
-        <TreeFilter
-          title={intl.formatMessage({ id: 'modelMgr.filterStatus' })}
-          treeData={statusTreeData}
-          selectedList={statusSelectedList}
-          onOk={onStatusOk}
-        />
-        <TreeFilter
-          title={intl.formatMessage({ id: 'modelMgr.filterAbility' })}
-          treeData={abilityTreeData}
-          selectedList={abilitySelectedList}
-          onOk={onAbilityOk}
-        />
-        <TreeFilter
-          title={intl.formatMessage({ id: 'modelMgr.filterSystem' })}
-          treeData={systemTreeData}
-          selectedList={systemSelectedList}
-          onOk={onSystemOk}
-        />
+        {[
+          { key: 'ModelType', options: modelTypeTreeData, selected: modelTypeSelectedList, onChange: onModelTypeOk },
+          { key: 'Ability', options: abilityTreeData, selected: abilitySelectedList, onChange: onAbilityOk },
+          { key: 'Status', options: statusTreeData, selected: statusSelectedList, onChange: onStatusOk },
+          { key: 'System', options: systemTreeData, selected: systemSelectedList, onChange: onSystemOk },
+        ].map((group) => (
+          <div
+            key={group.key}
+            className={styles.filterField}
+            role="group"
+            aria-label={intl.formatMessage({ id: `modelMgr.filter${group.key}` })}
+          >
+            <TreeFilter
+              title={intl.formatMessage({ id: `modelMgr.filter${group.key}` })}
+              treeData={group.options}
+              selectedList={group.selected}
+              onOk={group.onChange}
+              previewMaxWidth={420}
+              previewItemMaxWidth={140}
+            />
+          </div>
+        ))}
       </div>
-
-      {!!filterChips.length && (
-        <div className={styles.filterChips}>
-          {filterChips.map((chip) => (
-            <Tag key={chip.key} closable onClose={chip.onClose} className={styles.filterChip}>
-              {chip.label}
-            </Tag>
-          ))}
-        </div>
-      )}
     </div>
   );
 };

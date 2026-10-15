@@ -5,7 +5,7 @@ export type ImageGenerationProviderDefinition = {
   apiEndpoint: string;
   modelCode: string;
   aliases?: readonly string[];
-  managerDebug: 'minimax' | 'openclaw';
+  managerDebug: 'minimax' | 'volcengine' | 'openclaw';
 };
 
 export const IMAGE_GENERATION_PROVIDERS: readonly ImageGenerationProviderDefinition[] = [
@@ -107,7 +107,7 @@ export const IMAGE_GENERATION_PROVIDERS: readonly ImageGenerationProviderDefinit
     apiEndpoint: 'https://ark.cn-beijing.volces.com/api/v3/images/generations',
     modelCode: 'doubao-seedream-5-0-260128',
     aliases: ['DOUBAO', 'ARK'],
-    managerDebug: 'openclaw',
+    managerDebug: 'volcengine',
   },
 ];
 
@@ -134,6 +134,12 @@ export function getImageGenerationProviderByProtocol(protocol?: any): ImageGener
   return IMAGE_GENERATION_PROVIDERS.find((provider) => normalizeProviderName(provider.modelProtocol) === normalized);
 }
 
+/** 只为缺失值补全已知图片协议的提供商，保留已有名称和别名，不猜测通用协议或自定义地址。 */
+export function resolveImageGenerationProviderName(providerName?: string, modelProtocol?: string) {
+  if (providerName?.trim()) return providerName;
+  return getImageGenerationProviderByProtocol(modelProtocol)?.providerName;
+}
+
 export function getImageProviderFormValues(providerName?: any) {
   const provider = getImageGenerationProvider(providerName) || getImageGenerationProvider('MINIMAX')!;
   return {
@@ -144,6 +150,14 @@ export function getImageProviderFormValues(providerName?: any) {
   };
 }
 
-export function supportsManagerImageDebug(providerName?: any) {
-  return getImageGenerationProvider(providerName || 'MINIMAX')?.managerDebug === 'minimax';
+export function supportsManagerImageDebug(providerName?: any, modelProtocol?: any) {
+  const resolvedProvider = resolveImageGenerationProviderName(providerName, modelProtocol);
+
+  // 火山调试必须显式选中图片协议，不根据名称猜测或改写旧模型的协议。
+  if (modelProtocol === 'VOLCENGINE_IMAGE') {
+    return getImageGenerationProvider(resolvedProvider)?.providerName === 'VOLCENGINE';
+  }
+  return (
+    getImageGenerationProvider(resolvedProvider || (!modelProtocol ? 'MINIMAX' : undefined))?.managerDebug === 'minimax'
+  );
 }

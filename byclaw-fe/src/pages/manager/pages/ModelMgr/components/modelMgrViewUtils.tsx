@@ -9,12 +9,6 @@ type IntlShape = {
 
 export type ModelStatus = 'ENABLED' | 'DISABLED' | 'TESTING';
 
-export type FilterChip = {
-  key: string;
-  label: string;
-  onClose: () => void;
-};
-
 export const systemNameMap: Record<string, string> = {
   super_assistant: 'modelMgr.system.superAssistant',
   chatbi: 'chatbi',

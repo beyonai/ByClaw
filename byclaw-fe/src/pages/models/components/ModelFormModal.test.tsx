@@ -33,9 +33,55 @@ const renderForm = (type: 'add' | 'edit' = 'add') => {
 };
 
 describe('models/components/ModelFormModal', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockSharedModelFormProps = undefined;
+  });
+
+  it('uses the personal JSON image endpoint and returns the upstream image response', async () => {
+    const data = { data: [{ url: 'https://example.test/image.jpeg' }] };
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ code: 0, data }) });
+    const signal = new AbortController().signal;
+    const onDelta = jest.fn();
+    const props = renderForm();
+    await expect(
+      props.runDebugRequest({ modelId: 42, modelType: 'IMAGE_GENERATION', input: '{}', signal, onDelta })
+    ).resolves.toEqual({ output: JSON.stringify(data, null, 2) });
+    expect(global.fetch).toHaveBeenCalledWith('/byaiService/personal/model/debugImageGeneration', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: '42', input: '{}' }),
+      signal,
+    });
+    expect(onDelta).not.toHaveBeenCalled();
+  });
+
+  it('keeps the existing LLM stream endpoint and delta behavior', async () => {
+    const read = jest
+      .fn()
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array([111, 107]) })
+      .mockResolvedValueOnce({ done: true });
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, body: { getReader: () => ({ read }) } });
+    const props = renderForm();
+    const onDelta = jest.fn();
+    await expect(props.runDebugRequest({ modelId: 42, modelType: 'LLM', input: '{}', onDelta })).resolves.toEqual({
+      output: 'ok',
+    });
+    expect(global.fetch).toHaveBeenCalledWith('/byaiService/personal/model/debug', expect.any(Object));
+    expect(onDelta).toHaveBeenCalledWith('ok');
+  });
+
+  it('reports image API failures rather than treating HTTP 200 as success', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ code: 40001, msg: 'invalid model' }) });
+    await expect(
+      renderForm().runDebugRequest({ modelId: 42, modelType: 'IMAGE_GENERATION', input: '{}' })
+    ).rejects.toThrow('invalid model');
   });
 
   it.each(['add', 'edit'] as const)('loads ability and system tag options for the %s form', async (type) => {

@@ -1,4 +1,9 @@
-import { getImageGenerationProviderByProtocol, getImageProviderFormValues } from './imageGenerationProviders';
+import {
+  getImageGenerationProviderByProtocol,
+  getImageProviderFormValues,
+  resolveImageGenerationProviderName,
+} from './imageGenerationProviders';
+import { buildVolcengineImageParam, compactImageGenerationConfig, isVolcengineImage } from './volcengineImageConfig';
 
 export type DebugInputMode = 'template' | 'auto';
 
@@ -13,14 +18,14 @@ export type ModelTagItem = {
 export const SYSTEM_SOURCE_TYPES = ['DIG_EMPLOYEE'];
 export const DEFAULT_CONTEXT_TOKENS = 1024 * 198;
 export const MAX_CONTEXT_TOKENS = 2000 * 1000;
-export const MIN_CONTEXT_TOKENS = 200000;
+export const MIN_CONTEXT_TOKENS = 1;
 export const CONTEXT_TOKENS_CONFIG = {
   min: MIN_CONTEXT_TOKENS,
   max: MAX_CONTEXT_TOKENS,
   step: 1000,
 };
 export const DEFAULT_MAX_TOKENS = 1024 * 64;
-export const MIN_MAX_TOKENS = 65536;
+export const MIN_MAX_TOKENS = 1;
 export const IMAGE_GENERATION_DEFAULTS = {
   ...getImageProviderFormValues('MINIMAX'),
   prompt: '',
@@ -102,8 +107,27 @@ export function isExampleApiEndpointPlaceholder(value?: any) {
   return normalized === 'https://api.example.com/v1' || normalized === 'https://api.example.com/anthropic';
 }
 
-export function getImageProviderTransitionFormValues(providerName?: any) {
-  return getImageProviderFormValues(providerName);
+export function getImageProviderTransitionFormValues(providerName?: any, currentValues?: any) {
+  // 清空提供商只按现有协议补全，不能触发 MiniMax 预设覆盖自定义地址、型号和协议。
+  if (!`${providerName ?? ''}`.trim()) {
+    return { providerName: resolveImageGenerationProviderName(undefined, currentValues?.modelProtocol) };
+  }
+  const next = getImageProviderFormValues(providerName);
+  const previous = getImageGenerationProviderByProtocol(currentValues?.modelProtocol);
+  if (!currentValues || (next.providerName !== 'VOLCENGINE' && previous?.providerName !== 'VOLCENGINE')) return next;
+  // 新火山分支只替换空值或上一提供商预设值，保留用户填写的型号和代理地址。
+  return {
+    providerName: next.providerName,
+    modelProtocol: next.modelProtocol,
+    apiEndpoint:
+      !currentValues.apiEndpoint || currentValues.apiEndpoint === previous?.apiEndpoint
+        ? next.apiEndpoint
+        : currentValues.apiEndpoint,
+    modelCode:
+      !currentValues.modelCode || currentValues.modelCode === previous?.modelCode
+        ? next.modelCode
+        : currentValues.modelCode,
+  };
 }
 
 export function getImageGenerationDefaultFormValues() {
@@ -115,6 +139,7 @@ export function getDefaultFormValues() {
     status: 'ENABLED',
     abilities: [],
     systems: [],
+    applicabilityScope: '',
     modelType: 'LLM',
     modelProtocol: 'OpenAI',
     // 仅靠 placeholder 展示样例，不预填实际默认值。
@@ -148,6 +173,7 @@ export function getModelTypeSwitchFormValues(modelType: any) {
     return {
       ...getImageGenerationDefaultFormValues(),
       modelType: normalizedType,
+      imageGenerationConfig: undefined,
       apiToken: '',
       headers: [{ key: '', value: '' }],
     };
@@ -164,6 +190,7 @@ export function getModelTypeSwitchFormValues(modelType: any) {
     apiToken: '',
     headers: [{ key: '', value: '' }],
     prompt: undefined,
+    imageGenerationConfig: undefined,
     aspectRatio: undefined,
     imageCount: undefined,
     responseFormat: undefined,
@@ -264,6 +291,21 @@ export function buildRerankHeaders(options: { formApiToken?: any; formHeaders?: 
 }
 
 export function buildDebugPayload(values: any) {
+  if (isVolcengineImage(values)) {
+    return {
+      input: {
+        providerName: 'VOLCENGINE',
+        modelProtocol: 'VOLCENGINE_IMAGE',
+        url: `${values?.apiEndpoint || ''}`.trim(),
+        headers: buildLlmHeaders({
+          formApiToken: values?.apiToken,
+          formHeaders: values?.headers,
+          prevHeaders: values?.prevHeaders,
+        }),
+        param: buildVolcengineImageParam(values),
+      },
+    };
+  }
   const imageCount = Number(values?.imageCount ?? values?.n);
   const seed = Number(values?.seed);
   const param: Record<string, any> = {
@@ -376,6 +418,9 @@ export function buildModelUpsertPayload(options: {
 }) {
   const { values, type, dataId, savedNewId } = options;
   const restValues = { ...(values || {}) };
+  if (normalizeModelType(values?.modelType) === 'IMAGE_GENERATION') {
+    restValues.providerName = resolveImageGenerationProviderName(values?.providerName, values?.modelProtocol);
+  }
   [
     'reasoningEffortMapText',
     'prompt',
@@ -385,13 +430,16 @@ export function buildModelUpsertPayload(options: {
     'promptOptimizer',
     'seed',
   ].forEach((key) => delete restValues[key]);
+  const imageConfig = compactImageGenerationConfig(restValues.imageGenerationConfig);
+  if (imageConfig) restValues.imageGenerationConfig = imageConfig;
+  else delete restValues.imageGenerationConfig;
 
   const id =
     type === 'edit' || type === 'debug'
       ? dataId
       : type === 'add' && savedNewId !== null && savedNewId !== undefined
-        ? savedNewId
-        : undefined;
+      ? savedNewId
+      : undefined;
 
   return {
     ...(id !== null && id !== undefined ? { id } : {}),
@@ -483,6 +531,7 @@ export function buildAutoDebugRequestText(options: {
   prevText?: string;
   changedKeys?: string[];
   previousApiEndpoint?: string;
+  syncFormParameters?: boolean;
   defaultUserMessage?: string;
   defaultRerankQuery?: string;
   defaultRerankDocs?: Array<{ text: string; metadata: { id: number }; score: number }>;
@@ -493,6 +542,7 @@ export function buildAutoDebugRequestText(options: {
     prevText,
     changedKeys,
     previousApiEndpoint,
+    syncFormParameters = false,
     defaultUserMessage,
     defaultRerankQuery,
     defaultRerankDocs,
@@ -504,7 +554,7 @@ export function buildAutoDebugRequestText(options: {
     return JSON.stringify(
       buildDebugPayload({
         ...formValues,
-        prevHeaders: !isTypeSwitch ? prevObj?.headers : undefined,
+        prevHeaders: !isTypeSwitch && !syncFormParameters ? prevObj?.headers : undefined,
       }).input,
       null,
       2
@@ -532,7 +582,7 @@ export function buildAutoDebugRequestText(options: {
     const headersObj = buildLlmHeaders({
       formApiToken: formValues?.apiToken,
       formHeaders: formValues?.headers,
-      prevHeaders: prevObj?.headers,
+      prevHeaders: syncFormParameters ? undefined : prevObj?.headers,
     });
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
     const defaultMessages = [{ role: 'user', content: defaultUserMessage ?? "How's the weather today?" }];
@@ -540,16 +590,21 @@ export function buildAutoDebugRequestText(options: {
       !isTypeSwitch && Array.isArray(prevObj?.messages) && prevObj.messages.length
         ? prevObj.messages
         : prevText && `${prevText}`.trim() && !prevObj
-          ? [{ role: 'user', content: `${prevText}` }]
-          : defaultMessages;
+        ? [{ role: 'user', content: `${prevText}` }]
+        : defaultMessages;
 
-    const temperature = !isTypeSwitch && typeof prevObj?.temperature === 'number' ? prevObj.temperature : 0.1;
+    const temperature = syncFormParameters
+      ? formValues?.temperature
+      : !isTypeSwitch && typeof prevObj?.temperature === 'number'
+      ? prevObj.temperature
+      : 0.1;
     const stream = !isTypeSwitch && typeof prevObj?.stream === 'boolean' ? prevObj.stream : true;
     // 调试请求 max_tokens 跟左侧高级参数「Max Tokens」对齐：填多少就同步多少。
     const maxTokensChanged = Array.isArray(changedKeys) && changedKeys.includes('maxTokens');
     const formMaxTokens = Number(formValues?.maxTokens);
     let maxTokens: number | undefined;
     if (
+      !syncFormParameters &&
       !isTypeSwitch &&
       !maxTokensChanged &&
       typeof prevObj?.max_tokens === 'number' &&
@@ -567,10 +622,41 @@ export function buildAutoDebugRequestText(options: {
       model: modelNoOrCode,
       ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
       messages,
-      temperature,
+      ...(temperature !== undefined && temperature !== null ? { temperature } : {}),
       stream,
     };
-    applyReasoningDebugParams(req, formValues);
+    if (syncFormParameters) {
+      // 新增表单的自动请求使用同一份配置；留空的采样参数交给上游默认策略。
+      [
+        ['topP', 'top_p'],
+        ['frequencyPenalty', 'frequency_penalty'],
+        ['presencePenalty', 'presence_penalty'],
+      ].forEach(([field, param]) => {
+        if (typeof formValues?.[field] === 'number') req[param] = formValues[field];
+      });
+      const reasoning = formValues?.reasoningConfig;
+      if (reasoning?.compatFormat === 'deepseek' && formValues?.modelProtocol === 'OpenAI') {
+        req.thinking = { type: reasoning.enabled ? 'enabled' : 'disabled' };
+        if (reasoning.enabled) {
+          applyReasoningDebugParams(req, formValues);
+          // 新模板声明支持的程度直接使用；历史配置仍沿用原来的兼容映射。
+          const effortMap = safeParseReasoningEffortMap(formValues?.reasoningEffortMapText);
+          if (!effortMap?.[reasoning.defaultLevel] && reasoning.supportedEfforts?.includes(reasoning.defaultLevel)) {
+            req.reasoning_effort = reasoning.defaultLevel;
+          }
+        }
+      } else if (
+        formValues?.providerName === 'MINIMAX' &&
+        formValues?.modelCode === 'MiniMax-M3' &&
+        formValues?.modelProtocol === 'OpenAI'
+      ) {
+        req.thinking = { type: reasoning?.enabled ? 'adaptive' : 'disabled' };
+      } else if (reasoning?.capability && reasoning.capability !== 'unsupported') {
+        applyReasoningDebugParams(req, formValues);
+      }
+    } else {
+      applyReasoningDebugParams(req, formValues);
+    }
     return JSON.stringify(req, null, 2);
   }
 
@@ -597,11 +683,11 @@ export function buildAutoDebugRequestText(options: {
       defaultRerankDocs && defaultRerankDocs.length >= 4
         ? defaultRerankDocs
         : [
-          { text: 'Beijing food recommendation', metadata: { id: 0 }, score: 0 },
-          { text: 'Tianjin travel guide', metadata: { id: 1 }, score: 0 },
-          { text: 'Beginner dev tutorial', metadata: { id: 2 }, score: 0 },
-          { text: 'Forbidden City travel guide', metadata: { id: 3 }, score: 0 },
-        ];
+            { text: 'Beijing food recommendation', metadata: { id: 0 }, score: 0 },
+            { text: 'Tianjin travel guide', metadata: { id: 1 }, score: 0 },
+            { text: 'Beginner dev tutorial', metadata: { id: 2 }, score: 0 },
+            { text: 'Forbidden City travel guide', metadata: { id: 3 }, score: 0 },
+          ];
 
     const query =
       !isTypeSwitch && typeof prevObj?.query === 'string' && prevObj.query.trim() ? prevObj.query : defaultQuery;

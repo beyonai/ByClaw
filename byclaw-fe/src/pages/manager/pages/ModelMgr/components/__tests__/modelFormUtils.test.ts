@@ -86,6 +86,18 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
   });
 
   describe('buildModelUpsertPayload', () => {
+    it.each(['适用于知识问答\n支持中文资料', ''])('preserves intended use text including clearing: %j', (scope) => {
+      for (const type of ['add', 'edit']) {
+        expect(
+          buildModelUpsertPayload({
+            values: { ...getDefaultFormValues(), applicabilityScope: scope },
+            type,
+            dataId: '123',
+          })
+        ).toMatchObject({ applicabilityScope: scope });
+      }
+    });
+
     it('removes transient image debug fields before saving model metadata', () => {
       expect(
         buildModelUpsertPayload({

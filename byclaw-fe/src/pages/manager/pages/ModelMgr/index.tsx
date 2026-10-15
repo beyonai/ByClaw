@@ -12,7 +12,8 @@ import ModelCardSection from './components/ModelCardSection';
 import ModelFormModal from './components/ModelFormModal';
 import ModelFilterPanel from './components/ModelFilterPanel';
 import ModelHeroPanel from './components/ModelHeroPanel';
-import { getSystemName, type FilterChip, type ModelStatus } from './components/modelMgrViewUtils';
+import useModelTypeOptions from './components/useModelTypeOptions';
+import { getSystemName, type ModelStatus } from './components/modelMgrViewUtils';
 import styles from './index.module.less';
 
 type ModelTagItem = {
@@ -37,7 +38,7 @@ const initPagination = {
 const ModelMgr: React.FC = () => {
   const intl = useIntl();
   const dispatch = useDispatch();
-  const pageScrollRef = useRef<HTMLDivElement | null>(null);
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
   // 滚动触底加载下一页时加本地锁，避免 loading 状态回写前重复发起请求。
   const loadMoreLockRef = useRef(false);
   const isLoading = useSelector(({ loading }: any) => loading.effects['modelMgr/getModelListByPage']);
@@ -57,18 +58,14 @@ const ModelMgr: React.FC = () => {
 
   const [list, setList] = useState<any[]>([]);
   const [pagination, setPagination] = useState(initPagination);
-  const [overviewStats, setOverviewStats] = useState({
-    total: 0,
-    enabledCount: 0,
-    testingCount: 0,
-    disabledCount: 0,
-  });
 
+  const [modelType, setModelType] = useState<string | undefined>(undefined);
   const [status, setStatus] = useState<ModelStatus | undefined>(undefined);
   const [ability, setAbility] = useState<string | undefined>(undefined);
   const [system, setSystem] = useState<string | undefined>(undefined);
   const [keyword, setKeyword] = useState('');
 
+  const [modelTypeSelectedList, setModelTypeSelectedList] = useState<ITreeData[]>([]);
   const [statusSelectedList, setStatusSelectedList] = useState<ITreeData[]>([]);
   const [abilitySelectedList, setAbilitySelectedList] = useState<ITreeData[]>([]);
   const [systemSelectedList, setSystemSelectedList] = useState<ITreeData[]>([]);
@@ -76,6 +73,12 @@ const ModelMgr: React.FC = () => {
   const [systemLabelMap, setSystemLabelMap] = useState<Record<string, string>>({});
 
   const [formState, formAction] = useShowModal();
+
+  const modelTypeOptions = useModelTypeOptions();
+  const modelTypeTreeData = useMemo<ITreeData[]>(
+    () => modelTypeOptions.map(({ label, value }) => ({ label, key: value, keypath: value })),
+    [modelTypeOptions]
+  );
 
   const statusTreeData = useMemo<ITreeData[]>(
     () => [
@@ -98,17 +101,7 @@ const ModelMgr: React.FC = () => {
 
   // System filters are loaded from the API, aligned with digital employee sources.
 
-  const activeFilterCount = [status, ability, system, keyword.trim()].filter(Boolean).length;
-  const resultSummary = useMemo(() => {
-    if (!pagination.total) return intl.formatMessage({ id: 'modelMgr.resultEmpty' });
-    return intl.formatMessage(
-      { id: 'modelMgr.resultSummary' },
-      {
-        total: pagination.total,
-        current: list.length,
-      }
-    );
-  }, [intl, list.length, pagination.total]);
+  const activeFilterCount = [modelType, status, ability, system, keyword.trim()].filter(Boolean).length;
 
   const fetchList = useCallback(
     (
@@ -116,6 +109,7 @@ const ModelMgr: React.FC = () => {
         pageNum: number;
         pageSize: number;
         keyword: string;
+        modelType?: string;
         status?: ModelStatus;
         ability?: string;
         system?: string;
@@ -123,6 +117,7 @@ const ModelMgr: React.FC = () => {
       }>
     ) => {
       const hasKeyword = !!params && Object.prototype.hasOwnProperty.call(params, 'keyword');
+      const hasModelType = !!params && Object.prototype.hasOwnProperty.call(params, 'modelType');
       const hasStatus = !!params && Object.prototype.hasOwnProperty.call(params, 'status');
       const hasAbility = !!params && Object.prototype.hasOwnProperty.call(params, 'ability');
       const hasSystem = !!params && Object.prototype.hasOwnProperty.call(params, 'system');
@@ -140,6 +135,7 @@ const ModelMgr: React.FC = () => {
           pageNum,
           pageSize,
           keyword: nextKeyword?.trim() || undefined,
+          modelType: hasModelType ? params?.modelType : modelType,
           status: nextStatus,
           ability: nextAbility,
           system: nextSystem,
@@ -163,9 +159,9 @@ const ModelMgr: React.FC = () => {
           setPagination({ pageIndex, pageSize: newPageSize, total });
           loadMoreLockRef.current = false;
           if (!append) {
-            // 搜索、筛选、刷新后回到顶部，避免停留在底部时立即再次触底加载。
+            // 搜索、筛选、刷新后将列表回到顶部，避免停留在底部时立即再次触底加载。
             requestAnimationFrame(() => {
-              if (pageScrollRef.current) pageScrollRef.current.scrollTop = 0;
+              if (listScrollRef.current) listScrollRef.current.scrollTop = 0;
             });
           }
         },
@@ -174,7 +170,7 @@ const ModelMgr: React.FC = () => {
         },
       });
     },
-    [dispatch, pagination, keyword, status, ability, system]
+    [dispatch, pagination, keyword, modelType, status, ability, system]
   );
 
   const fetchOverviewStats = useCallback(() => {
@@ -203,28 +199,23 @@ const ModelMgr: React.FC = () => {
             keypath: key,
           }))
         );
-        setOverviewStats({
-          total: res?.total ?? rows.length,
-          enabledCount: rows.filter((item: any) => item?.status === 'ENABLED').length,
-          testingCount: rows.filter((item: any) => item?.status === 'TESTING').length,
-          disabledCount: rows.filter((item: any) => item?.status === 'DISABLED').length,
-        });
       },
     });
   }, [dispatch, intl]);
 
   const resetAndFetch = useCallback(
-    (override?: Partial<{ keyword: string; status?: ModelStatus; ability?: string; system?: string }>) => {
+    (override?: Partial<{ keyword: string; modelType?: string; status?: ModelStatus; ability?: string; system?: string }>) => {
       fetchList({
         pageNum: 1,
         pageSize: pagination.pageSize,
         keyword: override && Object.prototype.hasOwnProperty.call(override, 'keyword') ? override.keyword : keyword,
+        modelType: override && Object.prototype.hasOwnProperty.call(override, 'modelType') ? override.modelType : modelType,
         status: override && Object.prototype.hasOwnProperty.call(override, 'status') ? override.status : status,
         ability: override && Object.prototype.hasOwnProperty.call(override, 'ability') ? override.ability : ability,
         system: override && Object.prototype.hasOwnProperty.call(override, 'system') ? override.system : system,
       });
     },
-    [fetchList, pagination.pageSize, keyword, status, ability, system]
+    [fetchList, pagination.pageSize, keyword, modelType, status, ability, system]
   );
 
   useEffect(() => {
@@ -259,6 +250,8 @@ const ModelMgr: React.FC = () => {
 
   const clearFilters = useCallback(() => {
     setKeyword('');
+    setModelType(undefined);
+    setModelTypeSelectedList([]);
     setStatus(undefined);
     setAbility(undefined);
     setSystem(undefined);
@@ -270,68 +263,12 @@ const ModelMgr: React.FC = () => {
       pageNum: 1,
       pageSize: pagination.pageSize,
       keyword: '',
+      modelType: undefined,
       status: undefined,
       ability: undefined,
       system: undefined,
     });
   }, [fetchList, pagination.pageSize]);
-
-  const filterChips = useMemo(() => {
-    const chips: FilterChip[] = [];
-
-    if (status) {
-      chips.push({
-        key: 'status',
-        label: `${intl.formatMessage({ id: 'modelMgr.filterStatus' })} · ${
-          statusTreeData.find((item) => item.key === status)?.label || status
-        }`,
-        onClose: () => {
-          setStatus(undefined);
-          setStatusSelectedList([]);
-          resetAndFetch({ status: undefined });
-        },
-      });
-    }
-
-    if (ability) {
-      chips.push({
-        key: 'ability',
-        label: `${intl.formatMessage({ id: 'modelMgr.filterAbility' })} · ${abilityLabelMap?.[ability] || ability}`,
-        onClose: () => {
-          setAbility(undefined);
-          setAbilitySelectedList([]);
-          resetAndFetch({ ability: undefined });
-        },
-      });
-    }
-
-    if (system) {
-      chips.push({
-        key: 'system',
-        label: `${intl.formatMessage({ id: 'modelMgr.filterSystem' })} · ${
-          systemLabelMap?.[system] || getSystemName(intl, system)
-        }`,
-        onClose: () => {
-          setSystem(undefined);
-          setSystemSelectedList([]);
-          resetAndFetch({ system: undefined });
-        },
-      });
-    }
-
-    if (keyword.trim()) {
-      chips.push({
-        key: 'keyword',
-        label: `${intl.formatMessage({ id: 'modelMgr.searchLabel' })} · ${keyword.trim()}`,
-        onClose: () => {
-          setKeyword('');
-          resetAndFetch({ keyword: '' });
-        },
-      });
-    }
-
-    return chips;
-  }, [ability, abilityLabelMap, intl, keyword, resetAndFetch, status, statusTreeData, system, systemLabelMap]);
 
   // 无限滚动列表执行状态类操作后统一回第一页，避免只刷新当前分页导致前面已加载数据丢失。
   const setStatusAction = (record: any, nextStatus: ModelStatus) => {
@@ -521,7 +458,7 @@ const ModelMgr: React.FC = () => {
     });
   }, [actionLoading, fetchList, isLoading, list.length, pagination.pageIndex, pagination.pageSize, pagination.total]);
 
-  const handlePageScroll = useCallback(
+  const handleListScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
       const target = event.currentTarget;
       const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
@@ -534,8 +471,8 @@ const ModelMgr: React.FC = () => {
   );
 
   return (
-    <div className={`${styles.modelMgr} ${commonStyles.commonTabList}`} ref={pageScrollRef} onScroll={handlePageScroll}>
-      <div className={classNames(commonStyles.tabContent, 'minH0')}>
+    <div className={`${styles.modelMgr} ${commonStyles.commonTabList}`}>
+      <div className={classNames(commonStyles.tabContent, styles.pageContent)}>
         <ModelHeroPanel
           intl={intl}
           keyword={keyword}
@@ -546,22 +483,24 @@ const ModelMgr: React.FC = () => {
           onCompleteConfig={completeAllModelConfigAction}
           completeLoading={!!completeLoading}
           activeFilterCount={activeFilterCount}
-          total={overviewStats.total}
-          enabledCount={overviewStats.enabledCount}
-          testingCount={overviewStats.testingCount}
-          disabledCount={overviewStats.disabledCount}
         />
 
         <ModelFilterPanel
           intl={intl}
-          resultSummary={resultSummary}
+          modelTypeTreeData={modelTypeTreeData}
+          modelTypeSelectedList={modelTypeSelectedList}
+          onModelTypeOk={(v) => {
+            const next = v?.[0]?.key || undefined;
+            setModelTypeSelectedList(v || []);
+            setModelType(next);
+            resetAndFetch({ modelType: next });
+          }}
           statusTreeData={statusTreeData}
           abilityTreeData={abilityTreeData}
           systemTreeData={systemTreeData}
           statusSelectedList={statusSelectedList}
           abilitySelectedList={abilitySelectedList}
           systemSelectedList={systemSelectedList}
-          filterChips={filterChips}
           onStatusOk={(v) => {
             const next = v?.[0]?.key ? (v[0].key as ModelStatus) : undefined;
             setStatusSelectedList(v || []);
@@ -587,6 +526,8 @@ const ModelMgr: React.FC = () => {
 
         <ModelCardSection
           intl={intl}
+          scrollRef={listScrollRef}
+          onScroll={handleListScroll}
           list={list}
           isLoading={!!isLoading}
           actionLoading={!!actionLoading}

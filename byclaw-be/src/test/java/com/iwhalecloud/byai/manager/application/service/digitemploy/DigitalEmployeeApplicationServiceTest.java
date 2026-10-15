@@ -617,6 +617,45 @@ class DigitalEmployeeApplicationServiceTest {
             .containsExactly(null, null, null, null, null);
     }
 
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {""})
+    void saveDigitalEmployee_allowsEmptyOptionalModels(String imageModelId) {
+        DigitalEmployeeDTO dto = createDto();
+        dto.setImageModelId(imageModelId);
+        dto.setTtsModelId(null);
+        when(sequenceService.nextVal()).thenReturn(100L);
+
+        // 模型列表可能为空，创建员工不能依赖文生图或语音模型已配置。
+        SsResource created = service.saveDigitalEmployee(dto);
+
+        assertThat(created.getResourceId()).isEqualTo(100L);
+        ArgumentCaptor<SsResExtDigEmployee> extCaptor = ArgumentCaptor.forClass(SsResExtDigEmployee.class);
+        verify(ssResExtDigEmployeeService).save(extCaptor.capture());
+        assertThat(extCaptor.getValue().getTtsModelId()).isNull();
+        verifyNoInteractions(aiModelService);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {""})
+    void updateDigitalEmployee_allowsEmptyOptionalModels(String imageModelId) {
+        DigitalEmployeeApplicationService updater = updateServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        prepareFullUpdate(employee, List.of(), List.of());
+        DigitalEmployeeDTO dto = updateDto();
+        dto.setImageModelId(imageModelId);
+        dto.setTtsModelId(null);
+
+        updater.updateDigitalEmployee(dto);
+
+        ArgumentCaptor<SsResExtDigEmployee> extCaptor = ArgumentCaptor.forClass(SsResExtDigEmployee.class);
+        verify(ssResExtDigEmployeeService).update(extCaptor.capture());
+        assertThat(extCaptor.getValue().getTtsModelId()).isNull();
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, dto);
+        verifyNoInteractions(aiModelService);
+    }
+
     @Test
     void enterpriseCreationSynchronizesResourcesAfterCreatorPrivilegesAndBeforeShelfEvent() {
         CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
