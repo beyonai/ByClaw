@@ -7,6 +7,7 @@ import {
   buildByClawInboundTurnContext,
   ByClawSessionWorkspaceRegistry,
   byClawInboundText,
+  byClawInboundTurnContextDeclaration,
   resolveByClawByRoot,
   resolveByClawStorageLayout,
   assertByClawRootBinding,

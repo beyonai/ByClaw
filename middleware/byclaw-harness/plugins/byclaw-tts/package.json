@@ -1,0 +1,12 @@
+{
+  "name": "@byclaw/byclaw-tts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "exports": { ".": "./src/index.js", "./adapters": "./src/adapters.js" },
+  "files": ["src", "cordis.patch.yml", "README.md"],
+  "scripts": { "test": "node --test tests/*.test.js", "build": "node --check src/adapters.js" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "dependencies": { "@byclaw/media-runtime": "workspace:*" }
+}
