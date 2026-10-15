@@ -47,6 +47,9 @@ jest.mock('@/components/Preview/Image', () => ({ url, title }: { url?: string; t
 jest.mock('@/components/Preview/Media', () => ({ type }: { type: string }) => (
   <div data-testid="media-preview">{type}</div>
 ));
+jest.mock('@/components/Preview/Delimited', () => ({ content }: { content: string }) => (
+  <div data-testid="table-preview">{content}</div>
+));
 
 describe('PreViewFile binary and relative resource handling', () => {
   let createObjectURL: jest.Mock;
@@ -184,7 +187,7 @@ describe('PreViewFile binary and relative resource handling', () => {
     expect(createObjectURL.mock.calls[1][0].type).toBe('image/svg+xml');
   });
 
-  it.each(['csv', 'tsv', 'jsonl', 'ndjson', 'xml', 'yaml', 'txt'])('shows text content for %s', async (type) => {
+  it.each(['jsonl', 'ndjson', 'xml', 'yaml', 'txt'])('shows text content for %s', async (type) => {
     const blob = new Blob(['first,second\n1,2']);
     Object.defineProperty(blob, 'text', { value: () => Promise.resolve('first,second\n1,2') });
     render(<PreViewFile data={blob} type={type} title={`data.${type}`} />);
@@ -207,7 +210,22 @@ describe('PreViewFile binary and relative resource handling', () => {
     expect(mockHtmlRender).not.toHaveBeenCalled();
   });
 
-  it.each(['xls', 'xlsx', 'docx', 'pptx'])('passes the original %s binary to Office', async (type) => {
+  it.each(['csv', 'tsv'])('offers a table by default and preserves %s source and download', async (type) => {
+    const content = type === 'tsv' ? 'first\tsecond\n1\t2' : 'first,second\n1,2';
+    const blob = new Blob([content]);
+    Object.defineProperty(blob, 'text', { value: () => Promise.resolve(content) });
+    render(<PreViewFile data={blob} type={type} title={`data.${type}`} />);
+    await waitFor(() => expect(screen.getByTestId('table-preview')).toBeVisible());
+    expect(screen.getByTestId('source-preview')).toHaveTextContent('first');
+    const choices = screen.getAllByRole('radio');
+    fireEvent.click(choices[1]);
+    expect(screen.getByTestId('source-preview')).toBeVisible();
+    expect(screen.getByTestId('table-preview')).not.toBeVisible();
+    fireEvent.click(screen.getByTestId('icon-a-Downloadxiazai'));
+    expect(createObjectURL.mock.calls[0][0].size).toBe(blob.size);
+  });
+
+  it.each(['xls', 'xlsx', 'docx', 'pptx', 'doc', 'ppt'])('passes the original %s binary to Office', async (type) => {
     const blob = new Blob(['office content']);
     render(<PreViewFile data={blob} type={type} title={`report.${type}`} />);
     await waitFor(() => expect(screen.getByTestId('office-preview')).toBeVisible());
@@ -231,7 +249,7 @@ describe('PreViewFile binary and relative resource handling', () => {
     expect(screen.getByTestId('source-preview')).not.toHaveTextContent('old content');
   });
 
-  it.each(['doc', 'ppt', 'tiff', 'heic'])('shows an explicit fallback for %s and preserves download', async (type) => {
+  it.each(['tiff', 'heic', 'psd'])('shows an explicit fallback for %s and preserves download', async (type) => {
     render(<PreViewFile data={new Blob(['binary content'])} type={type} title={`file.${type}`} />);
     expect(screen.getByText('fileRender.formatUnsupported')).toBeVisible();
     fireEvent.click(screen.getByTestId('icon-a-Downloadxiazai'));

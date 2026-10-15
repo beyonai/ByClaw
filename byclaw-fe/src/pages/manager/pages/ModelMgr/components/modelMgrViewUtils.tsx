@@ -9,12 +9,6 @@ type IntlShape = {
 
 export type ModelStatus = 'ENABLED' | 'DISABLED' | 'TESTING';
 
-export type FilterChip = {
-  key: string;
-  label: string;
-  onClose: () => void;
-};
-
 export const systemNameMap: Record<string, string> = {
   super_assistant: 'modelMgr.system.superAssistant',
   chatbi: 'chatbi',
@@ -57,24 +51,6 @@ export const renderAbilityTags = (abilities: any[], abilityLabelMap: Record<stri
         return (
           <Tag key={`ab_${item}`} className={classNames(styles.enhancedTag, styles[`tagTone${getTagTone(`${item}`)}`])}>
             <span className={styles.tagIcon}>{iconText || 'AI'}</span>
-            {label}
-          </Tag>
-        );
-      })}
-    </>
-  );
-};
-
-export const renderSystemTags = (intl: IntlShape, systems: any[], systemLabelMap: Record<string, string> = {}) => {
-  const arr = Array.isArray(systems) ? systems : [];
-  return (
-    <>
-      {arr.map((item) => {
-        const label = systemLabelMap?.[`${item}`] || getSystemName(intl, `${item}`);
-        const iconText = `${label}`.trim().slice(0, 2).toUpperCase();
-        return (
-          <Tag key={`sys_${item}`} className={classNames(styles.enhancedTag, styles.tagToneslate)}>
-            <span className={styles.tagIcon}>{iconText || 'SY'}</span>
             {label}
           </Tag>
         );

@@ -1,9 +1,10 @@
 import { getMimeType, isPreviewable, isVideo } from './constants';
 
 describe('knowledge file preview support', () => {
-  it('previews PPTX in the browser but rejects legacy PPT', () => {
+  it('recognizes both native PPTX and converted legacy PPT previews', () => {
     expect(isPreviewable('slides.pptx')).toBe(true);
-    expect(isPreviewable('slides.ppt')).toBe(false);
+    expect(isPreviewable('slides.ppt')).toBe(true);
+    expect(isPreviewable('report.doc')).toBe(true);
   });
 
   it.each(['svg', 'jpeg', 'ico', 'avif', 'apng', 'csv', 'tsv', 'xls', 'webm', 'mp3', 'wav', 'm4a', 'flac', 'htm'])(

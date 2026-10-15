@@ -88,6 +88,11 @@ const getDeltaText = (payload: any) => {
   if (!payload) return '';
   if (typeof payload === 'string') return payload;
 
+  // Responses 的正文增量直接位于 delta；结束事件含完整正文，不能再次追加。
+  if (typeof payload?.type === 'string' && payload.type.startsWith('response.')) {
+    return payload.type === 'response.output_text.delta' && typeof payload.delta === 'string' ? payload.delta : '';
+  }
+
   // Anthropic Messages API SSE: content_block_delta + delta.text
   if (payload?.type === 'content_block_delta') {
     const anthropicText = payload?.delta?.text;
@@ -189,16 +194,21 @@ export async function debugModelStream(params: any) {
     if (!raw) return false;
     if (raw === '[DONE]') return true;
 
+    let parsed: any;
     try {
-      const parsed = JSON.parse(raw);
-      const delta = getDeltaText(parsed);
-      if (delta) {
-        output += delta;
-        onDelta?.(delta);
-      }
+      parsed = JSON.parse(raw);
     } catch (error) {
       output += raw;
       onDelta?.(raw);
+      return false;
+    }
+    if (parsed?.type === 'response.failed' || parsed?.type === 'error') {
+      throw new Error(parsed.response?.error?.message || parsed.error?.message || parsed.message || parsed.type);
+    }
+    const delta = getDeltaText(parsed);
+    if (delta) {
+      output += delta;
+      onDelta?.(delta);
     }
 
     return false;

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.dto.aimodel;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.iwhalecloud.byai.common.util.LongToStringSerializer;
 import java.io.Serializable;
@@ -51,6 +52,9 @@ public class ModelVO implements Serializable {
     /** 系统标签列表 */
     private List<String> systems;
 
+    /** 适用范围说明 */
+    private String applicabilityScope;
+
     /** API Endpoint */
     private String apiEndpoint;
 
@@ -99,4 +103,8 @@ public class ModelVO implements Serializable {
      * 扩展json参数
      */
     private String extendParam;
+
+    /** 图片默认参数，与历史 extendParam 独立；未配置时不改变旧响应结构。 */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Map<String, Object> imageGenerationConfig;
 }

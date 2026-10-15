@@ -9,6 +9,7 @@ import { copyWithMessage } from '@/utils/copy';
 import { BundledLanguage } from 'shiki';
 import {
   AUDIO_PREVIEW_TYPES,
+  DELIMITED_PREVIEW_TYPES,
   HTML_PREVIEW_TYPES,
   IMAGE_PREVIEW_TYPES,
   OFFICE_PREVIEW_TYPES,
@@ -39,6 +40,7 @@ const OfficeComponent = React.lazy(() =>
 );
 
 const MediaPreviewComponent = React.lazy(() => import('@/components/Preview/Media'));
+const DelimitedPreviewComponent = React.lazy(() => import('@/components/Preview/Delimited'));
 
 // 文件扩展名 -> shiki 语言。仅收录 shiki/bundle-web 实际打包的语言;传入未打包的 lang 会让 codeToHtml 抛错致预览白屏。
 // 未命中的代码/配置类型(如 go/rust/kotlin)仍按纯文本展示(见 isTextLike + TextHighlight 默认 lang)。
@@ -74,7 +76,7 @@ const langMap: Record<string, BundledLanguage> = {
   yml: 'yaml',
 };
 
-// SVG 同时提供图片预览和 XML 源码；CSV/TSV 等数据文本沿用可复制的源码预览。
+// SVG、CSV/TSV 同时提供可视化预览和可复制的源码。
 const isTextLike = (type: string) => TEXT_PREVIEW_TYPES.includes(type);
 const canReadSource = (type: string) => isTextLike(type) || ['md', 'svg', ...HTML_PREVIEW_TYPES].includes(type);
 const officeTypes = OFFICE_PREVIEW_TYPES;
@@ -86,6 +88,7 @@ const visualTypes = [
   ...VIDEO_PREVIEW_TYPES,
   ...AUDIO_PREVIEW_TYPES,
   ...officeTypes,
+  ...DELIMITED_PREVIEW_TYPES,
 ];
 
 const createPreviewBlob = (blob: Blob, type: string, title?: string) => {
@@ -307,11 +310,23 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
           </Suspense>
         </div>
         <div
+          style={{
+            display: !!content && tab === 'preview' && DELIMITED_PREVIEW_TYPES.includes(type) ? 'block' : 'none',
+          }}
+          className="full-width full-height"
+        >
+          <Suspense fallback={<Spin />}>
+            {content && DELIMITED_PREVIEW_TYPES.includes(type) && (
+              <DelimitedPreviewComponent content={content[1]} type={type as 'csv' | 'tsv'} />
+            )}
+          </Suspense>
+        </div>
+        <div
           style={{ display: data && tab === 'preview' && officeTypes.includes(type) ? 'block' : 'none' }}
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            <OfficeComponent data={data} type={type} />
+            <OfficeComponent data={data} type={type} fileName={title} />
           </Suspense>
         </div>
       </div>

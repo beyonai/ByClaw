@@ -55,11 +55,37 @@ describe('FileSiderPanel project space paths', () => {
     }
   );
 
-  it.each(['doc', 'ppt', 'tiff', 'tif', 'heic', 'heif'])(
-    'does not read unsupported %s binary files as source text',
-    (type) => {
-      expect(canPreviewFile({ name: `file.${type}`, path: `/file.${type}`, isDir: false })).toBe(false);
-      expect(getPreviewFileType(`file.${type}`)).toBe(type);
-    }
-  );
+  it.each(['doc', 'ppt'])('routes legacy %s to conversion instead of text', (type) => {
+    expect(canPreviewFile({ name: `file.${type}`, path: `/file.${type}`, isDir: false })).toBe(true);
+    expect(getPreviewFileType(`file.${type}`)).toBe(type);
+  });
+
+  it.each([
+    'tiff',
+    'tif',
+    'heic',
+    'heif',
+    'psd',
+    'ai',
+    'sketch',
+    'parquet',
+    'sqlite',
+    'db',
+    'odt',
+    'ods',
+    'odp',
+    'wps',
+    'et',
+    'dps',
+    'key',
+    'pages',
+    'numbers',
+    'amr',
+    'flv',
+    '3gp',
+    'tgz',
+  ])('does not read unsupported %s binary files as source text', (type) => {
+    expect(canPreviewFile({ name: `file.${type}`, path: `/file.${type}`, isDir: false })).toBe(false);
+    expect(getPreviewFileType(`file.${type}`)).toBe(type);
+  });
 });

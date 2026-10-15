@@ -3,7 +3,7 @@ import classNames from 'classnames';
 import dayjs from 'dayjs';
 import React from 'react';
 import styles from '../index.module.less';
-import { renderAbilityTags, renderStatusTag, renderSystemTags, type ModelStatus } from './modelMgrViewUtils';
+import { renderAbilityTags, renderStatusTag, type ModelStatus } from './modelMgrViewUtils';
 
 const DEFAULT_MODEL_TYPES = new Set(['LLM', 'EMBEDDING']);
 const DEFAULT_DIALOG_MODEL_ABILITY_CODE = '1';
@@ -17,7 +17,6 @@ type Props = {
   intl: any;
   record: any;
   abilityLabelMap: Record<string, string>;
-  systemLabelMap: Record<string, string>;
   onSetStatus: (record: any, nextStatus: ModelStatus) => void;
   onSetDefault: (record: any) => void;
   onEdit: (record: any) => void;
@@ -29,7 +28,6 @@ const ModelCardItem: React.FC<Props> = ({
   intl,
   record,
   abilityLabelMap,
-  systemLabelMap,
   onSetStatus,
   onSetDefault,
   onEdit,
@@ -44,7 +42,6 @@ const ModelCardItem: React.FC<Props> = ({
     providerName,
     contextTokens,
     abilities: abilitiesArr,
-    systems: systemsArr,
     updatedAt,
     isDefault,
   } = record || {};
@@ -134,22 +131,12 @@ const ModelCardItem: React.FC<Props> = ({
           </div>
         </div>
 
+        {/* 卡片仅展示应用范围，系统标签仍用于筛选和表单配置。 */}
         <div className={styles.section}>
           <div className={styles.sectionLabel}>{intl.formatMessage({ id: 'modelMgr.filterAbility' })}</div>
           <div className={styles.tagRow}>
             {Array.isArray(abilitiesArr) && abilitiesArr.length ? (
               renderAbilityTags(abilitiesArr, abilityLabelMap)
-            ) : (
-              <span className={styles.emptyText}>-</span>
-            )}
-          </div>
-        </div>
-
-        <div className={styles.section}>
-          <div className={styles.sectionLabel}>{intl.formatMessage({ id: 'modelMgr.filterSystem' })}</div>
-          <div className={styles.tagRow}>
-            {Array.isArray(systemsArr) && systemsArr.length ? (
-              renderSystemTags(intl, systemsArr, systemLabelMap)
             ) : (
               <span className={styles.emptyText}>-</span>
             )}

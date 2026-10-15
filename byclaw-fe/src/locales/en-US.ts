@@ -1019,6 +1019,17 @@ export default {
   'fileRender.previewUnavailable': 'File preview is temporarily unavailable',
   'fileRender.mediaUnsupported': 'This browser cannot decode the media or the file is damaged. Download it to play.',
   'fileRender.formatUnsupported': 'Online preview is unavailable for this format. Download it to view.',
+  'fileRender.legacyNotice':
+    'Converted previews may differ from the original layout. Animations and embedded objects do not play. Download to get the original file.',
+  'fileRender.legacyFailed':
+    'Conversion failed. The file may be damaged, encrypted, or exceed preview limits. Download it to view.',
+  'fileRender.legacyTooLarge': 'This legacy Office file exceeds 20 MiB. Download it to view.',
+  'fileRender.delimitedTable': 'Table data preview',
+  'fileRender.delimitedColumn': 'Column {number}',
+  'fileRender.delimitedMalformed': 'Invalid delimiter or quote syntax. Switch to source to view the original content.',
+  'fileRender.delimitedTooLarge': 'Table text exceeds 2 MiB. Download it to view.',
+  'fileRender.delimitedTruncated':
+    'Showing only the first {rows} rows and {columns} columns. View the source or download for the full content.',
   'fileRender.deleteConfirm': 'Are you sure to delete this file?',
   'fileRender.outlineImitate': 'Outline Imitation',
   'fileRender.contentExtract': 'Content Extraction',

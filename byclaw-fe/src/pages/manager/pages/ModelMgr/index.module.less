@@ -1,31 +1,27 @@
 .modelMgr {
-  --hero-bg: linear-gradient(135deg, #f5f9ff 0%, #eef6ff 46%, #f7fbff 100%);
-  --hero-border: #cfe0ff;
   --brand-blue: #165dff;
   --brand-blue-soft: #ebf3ff;
   --text-1: #0d1b2a;
   --text-2: #42526b;
   --text-3: #7b8ba1;
   --line: #dfe7f2;
-  --panel-bg: #ffffff;
 
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
   min-height: 0;
-  // 模型列表关闭内部滚动后，由页面容器承接滚动，避免双滚动条且保证列表可继续下滑。
-  overflow-y: auto;
-  overflow-x: hidden;
+  // 页面保持固定高度，仅卡片列表滚动，标题、操作栏和筛选条件始终可见。
+  overflow: hidden;
   padding: 16px 16px 0;
 
-  :global {
-    .tabContent {
-      display: flex;
-      flex-direction: column;
-      flex: 1;
-      min-height: 0;
-    }
+  // 使用本页的局部类约束中间容器；共享 tabContent 经 CSS Modules 转换后无法被全局选择器命中。
+  .pageContent {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .spinWrapper {
@@ -42,12 +38,11 @@
     }
   }
 
+  // 顶部与筛选区使用页面背景，压缩相邻区域叠加的纵向留白。
   .heroPanel {
-    padding: 18px 20px;
-    margin-bottom: 16px;
-    background: var(--hero-bg);
-    border: 1px solid var(--hero-border);
-    border-radius: 18px;
+    flex-shrink: 0;
+    padding: 18px 20px 6px;
+    margin-bottom: 4px;
   }
 
   .heroHeader {
@@ -62,13 +57,6 @@
     font-weight: 600;
     font-size: 22px;
     line-height: 30px;
-  }
-
-  .heroDesc {
-    margin-top: 6px;
-    color: var(--text-2);
-    font-size: 13px;
-    line-height: 20px;
   }
 
   .searchInput {
@@ -97,88 +85,52 @@
     }
   }
 
-  .statsRow {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin-top: 18px;
-  }
-
-  .statCard {
-    padding: 14px 16px;
-    background: rgba(255, 255, 255, 0.78);
-    border: 1px solid rgba(22, 93, 255, 0.08);
-    border-radius: 14px;
-    backdrop-filter: blur(8px);
-  }
-
-  .statLabel {
-    color: var(--text-3);
-    font-size: 12px;
-    line-height: 18px;
-  }
-
-  .statValue {
-    margin-top: 6px;
-    color: var(--text-1);
-    font-weight: 600;
-    font-size: 28px;
-    line-height: 34px;
-  }
-
   .filterPanel {
-    padding: 14px 16px;
-    margin-bottom: 14px;
-    background: var(--panel-bg);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-  }
-
-  .filterHeader {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-
-  .filterTitle {
-    color: var(--text-1);
-    font-weight: 600;
-    font-size: 14px;
-  }
-
-  .filterSummary {
-    color: var(--text-3);
-    font-size: 12px;
+    flex-shrink: 0;
+    padding: 6px 16px;
+    margin-bottom: 4px;
   }
 
   .filterRow {
     display: flex;
-    align-items: center;
+    // 筛选条按内容占宽，空间不足时整体换行，不产生横向滚动。
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 8px 16px;
   }
 
-  .filterChips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 12px;
-  }
+  .filterField {
+    flex: 0 0 auto;
+    max-width: 100%;
 
-  .filterChip {
-    padding: 4px 10px;
-    background: var(--brand-blue-soft);
-    border: none;
-    border-radius: 999px;
-    color: var(--brand-blue);
+    > div {
+      max-width: 100%;
+
+      > div:first-child {
+        flex-shrink: 0;
+        white-space: nowrap;
+      }
+
+      > div:last-child {
+        flex-wrap: wrap;
+
+        // 限制单个预览值的宽度，避免长模型类型撑满整行；仅影响本页筛选条。
+        > span,
+        > div > span:first-child {
+          flex-shrink: 0;
+          max-width: 140px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+      }
+    }
   }
 
   .cardList {
     flex: 1;
     min-height: 0;
     position: relative;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .cardItem {
@@ -187,7 +139,8 @@
     flex-direction: column;
     width: 100%;
     height: 100%;
-    min-height: 356px;
+    // 移除系统标签区后，同步扣除该区块及间距的预留高度。
+    min-height: 272px;
     overflow: hidden;
     background: radial-gradient(circle at top right, rgba(22, 93, 255, 0.1), transparent 34%),
       linear-gradient(180deg, #fff 0%, #fbfdff 100%);
@@ -569,17 +522,10 @@
     }
   }
 
-  @media (max-width: 1200px) {
-    .statsRow {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
   @media (max-width: 768px) {
     padding: 12px 12px 0;
 
     .heroHeader,
-    .filterHeader,
     .cardBottom {
       flex-direction: column;
       align-items: flex-start;
@@ -594,7 +540,6 @@
       width: 100%;
     }
 
-    .statsRow,
     .metaGrid {
       grid-template-columns: 1fr;
     }

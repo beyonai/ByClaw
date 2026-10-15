@@ -27,7 +27,7 @@ jest.mock('./useDownload', () => () => ({ downloading: false }));
 describe('message attachment preview formats', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it.each(['SVG', 'JPEG', 'ico', 'avif', 'csv', 'tsv', 'xls', 'webm', 'mp3', 'm4a', 'pdf', 'docx', 'pptx'])(
+  it.each(['SVG', 'JPEG', 'ico', 'avif', 'csv', 'tsv', 'xls', 'webm', 'mp3', 'm4a', 'pdf', 'docx', 'pptx', 'doc', 'ppt'])(
     'offers the preview action for %s attachments',
     (type) => {
       const fileItem: IFile = {

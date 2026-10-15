@@ -12,6 +12,8 @@ describe('shared file preview formats', () => {
     ['table.csv', 'csv', 'text/csv'],
     ['table.tsv', 'tsv', 'text/tab-separated-values'],
     ['report.xls', 'xls', 'application/vnd.ms-excel'],
+    ['report.DOC', 'doc', 'application/msword'],
+    ['slides.PPT', 'ppt', 'application/vnd.ms-powerpoint'],
     ['clip.webm', 'webm', 'video/webm'],
     ['clip.mp4', 'mp4', 'video/mp4'],
     ['recording.mp3', 'mp3', 'audio/mpeg'],
@@ -41,7 +43,7 @@ describe('shared file preview formats', () => {
     expect(resolvePreviewType()).toBe('txt');
   });
 
-  it.each(['archive.zip', 'old.doc', 'old.ppt', 'scan.tiff', 'photo.heic', 'program.exe', 'README'])(
+  it.each(['archive.zip', 'scan.tiff', 'photo.heic', 'program.exe', 'README'])(
     'does not advertise an unavailable decoder for %s',
     (name) => expect(isPreviewableName(name)).toBe(false)
   );

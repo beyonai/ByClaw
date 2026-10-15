@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AdaptedManagedAgent } from "./agent-adapter.js";
-import { mergeManagedAgentsIntoConfig } from "./agent-registry.js";
+import { defaultModelDefinition, mergeManagedAgentsIntoConfig } from "./agent-registry.js";
 import {
   DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
   parseBaiyingAimodelProviderBundle,
@@ -70,6 +70,44 @@ function createAimodelTypeListPayload() {
 }
 
 describe("Baiying AI model config", () => {
+  it.each([
+    [undefined, "128000", 65536],
+    [null, "128000", 65536],
+    [0, "128000", 65536],
+    [undefined, undefined, 65536],
+    [undefined, "32768", 32768],
+    [8192, "128000", 8192],
+    ["131072", "1048576", 131072],
+  ])(
+    "uses the form output default only when the saved value is absent or invalid: %s / %s",
+    (maxTokens, contextWindow, expected) => {
+      const payload = createAimodelPayload();
+      Object.assign(payload.raw, { instanceParam: { maxTokens }, maxContentToken: contextWindow });
+      const provider = parseBaiyingAimodelProviderBundle({
+        payload,
+        modelId: "test",
+        secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+      });
+      expect(provider?.maxTokens).toBe(expected);
+      expect(defaultModelDefinition(provider!).maxTokens).toBe(expected);
+    },
+  );
+
+  it.each([
+    [128000, 65536],
+    [32768, 32768],
+  ])(
+    "uses the same fallback when a provider reaches the registry without maxTokens: %s",
+    (contextWindow, expected) => {
+      const provider = parseBaiyingAimodelProviderBundle({
+        payload: createAimodelPayload(),
+        modelId: "test",
+        secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+      })!;
+      expect(defaultModelDefinition({ ...provider, contextWindow, maxTokens: undefined }).maxTokens).toBe(expected);
+    },
+  );
+
   it.each([undefined, { enabled: false, capability: "binary", compatFormat: "qwen" }])(
     "keeps Qwen thinking transport available to explicitly turn it off: %j", (reasoningConfig) => {
       const payload = createAimodelPayload();

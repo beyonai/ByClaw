@@ -171,6 +171,8 @@ public class ModelManagementApplicationService {
             entity.setSourceType(existing.getSourceType());
             entity.setOwnerType(existing.getOwnerType());
 
+            preserveOptionalImageConfig(request, existing, entity);
+
             // 更新TokenSaver模型名称
             this.updateTokenSaverModelName(existing);
         } else {
@@ -187,6 +189,46 @@ public class ModelManagementApplicationService {
         Map<String, String> data = new HashMap<>(1);
         data.put("id", String.valueOf(modelId));
         return data;
+    }
+
+    /**
+     * 旧客户端不会提交图片默认参数，编辑基础信息时不能将其抹掉。
+     * 仅兼容这两个可选字段，不改变其他既有字段的更新语义；空字符串/空对象仍可显式清空。
+     */
+    private void preserveOptionalImageConfig(ModelUpsertRequest request, ByaiAimodel existing, ByaiAimodel entity) {
+        if (StringUtil.isEmpty(existing.getInParams())) {
+            return;
+        }
+        JSONObject previous;
+        try {
+            previous = JSONObject.parseObject(existing.getInParams());
+        } catch (RuntimeException e) {
+            // 历史损坏 JSON 不应阻止用户重新保存修复，也不输出可能包含凭证的原始内容。
+            log.warn("Cannot preserve optional model config, modelId={}", existing.getModelId());
+            return;
+        }
+        JSONObject next = JSONObject.parseObject(entity.getInParams());
+        if (previous == null || next == null) {
+            return;
+        }
+        if (!request.isExtendParamProvided() && previous.containsKey("extendParam")) {
+            next.put("extendParam", previous.get("extendParam"));
+        }
+        if (request.getImageGenerationConfig() == null && previous.containsKey("imageGenerationConfig")) {
+            next.put("imageGenerationConfig", previous.get("imageGenerationConfig"));
+        }
+        entity.setInParams(next.toJSONString());
+    }
+
+    /** 新增个人图片调试入口只允许本人拥有的图片模型，拒绝时不改变模型状态。 */
+    public void validatePersonalImageDebugAccess(Long modelId, Long currentUserId) {
+        ByaiAimodel model = modelId == null ? null : byaiAimodelDomainService.getById(modelId);
+        if (model == null || currentUserId == null || currentUserId <= 0 || !currentUserId.equals(model.getCreateBy())
+            || !"PERSONAL".equalsIgnoreCase(model.getOwnerType())
+            || !"IMAGE_GENERATION".equals(model.getModelType())) {
+            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001,
+                "aimodel.debug.image.personal.required");
+        }
     }
 
 
@@ -434,6 +476,26 @@ public class ModelManagementApplicationService {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.contextTokens.required");
         }
         validateReasoningConfig(request.getReasoningConfig(), request.getMaxTokens());
+        if (DEFAULT_MODEL_TYPE_IMAGE_GENERATION.equals(modelType)
+            && "VOLCENGINE_IMAGE".equals(request.getModelProtocol())) {
+            validateVolcengineImageConfig(request.getImageGenerationConfig());
+        }
+    }
+
+    /** 只校验新火山配置的已知字段，不收紧任何旧提供商配置。 */
+    private void validateVolcengineImageConfig(Map<String, Object> config) {
+        if (config == null) {
+            return;
+        }
+        Object size = config.get("size");
+        Object format = config.get("responseFormat");
+        Object watermark = config.get("watermark");
+        if ((size != null && (!(size instanceof String value)
+            || (!value.isEmpty() && !value.matches("(?:[1-9]\\d*K|[1-9]\\d*x[1-9]\\d*)"))))
+            || (format != null && !"url".equals(format) && !"b64_json".equals(format))
+            || (watermark != null && !(watermark instanceof Boolean))) {
+            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.image.config.invalid");
+        }
     }
 
     /**
@@ -550,11 +612,17 @@ public class ModelManagementApplicationService {
         if (inParams.get("systems") != null) {
             vo.setSystems(JSON.parseArray(JSON.toJSONString(inParams.get("systems")), String.class));
         }
+        if (inParams.get("applicabilityScope") != null) {
+            vo.setApplicabilityScope(MapParamUtil.getStringValue(inParams, "applicabilityScope"));
+        }
         if (inParams.get("headers") != null) {
             vo.setHeaders(parseHeaders(inParams.get("headers")));
         }
         if (inParams.get("extendParam") != null) {
             vo.setExtendParam(MapParamUtil.getStringValue(inParams, "extendParam"));
+        }
+        if (inParams.get("imageGenerationConfig") instanceof Map<?, ?>) {
+            vo.setImageGenerationConfig(JSONObject.parseObject(JSON.toJSONString(inParams.get("imageGenerationConfig"))));
         }
     }
 
@@ -811,10 +879,17 @@ public class ModelManagementApplicationService {
      */
     private Map<String, Object> buildInParamsFromRequest(ModelUpsertRequest request, Long modelId) {
         Map<String, Object> inParams = new HashMap<>();
-        putIfNonEmpty(inParams, "providerName", request.getProviderName());
+        String providerName = request.getProviderName();
+        if (DEFAULT_MODEL_TYPE_IMAGE_GENERATION.equals(
+            normalizeModelType(request.getModelType(), DEFAULT_MODEL_TYPE_LLM))) {
+            providerName = ImageModelProviderResolver.resolve(providerName, request.getModelProtocol());
+        }
+        putIfNonEmpty(inParams, "providerName", providerName);
         putIfNonEmpty(inParams, "modelProtocol", request.getModelProtocol());
         putIfNonEmptyCollection(inParams, "abilities", request.getAbilities());
         putIfNonEmptyCollection(inParams, "systems", request.getSystems());
+        // 沿用系统标签的元数据存储方式；保留空字符串，支持编辑时清空适用范围。
+        putIfNonNull(inParams, "applicabilityScope", request.getApplicabilityScope());
         putIfNonEmptyCollection(inParams, "headers", request.getHeaders());
         putIfNonNull(inParams, "connectTimeoutSec", request.getConnectTimeoutSec());
         putIfNonNull(inParams, "readTimeoutSec", request.getReadTimeoutSec());
@@ -827,6 +902,7 @@ public class ModelManagementApplicationService {
         putIfNonNull(inParams, "presencePenalty", request.getPresencePenalty());
         putIfNonNull(inParams, "reasoningConfig", normalizeReasoningConfigForStorage(request.getReasoningConfig()));
         putIfNonNull(inParams, "extendParam", request.getExtendParam());
+        putIfNonNull(inParams, "imageGenerationConfig", request.getImageGenerationConfig());
         if (modelId != null) {
             inParams.put("updatedAt", formatUpdatedAt(new Date()));
         }
