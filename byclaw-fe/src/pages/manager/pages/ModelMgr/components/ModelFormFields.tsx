@@ -1,4 +1,4 @@
-import { EyeInvisibleOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
+import { DownOutlined, EyeInvisibleOutlined, EyeOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { AutoComplete, Button, Form, Input, InputNumber, Select, Slider, Space, Switch } from 'antd';
 import React, { useMemo } from 'react';
 import { trim } from 'lodash';
@@ -301,9 +301,37 @@ const ModelFormFields: React.FC<Props> = ({
                   aria-label={intl.formatMessage({ id: 'modelMgr.modal.quickPreset' })}
                   showSearch
                   value={undefined}
-                  optionFilterProp="label"
+                  filterOption={(input, option) => {
+                    // 展示名称可与 API 型号不同，仍允许按真实型号（如 ZHIPU/GLM-5.3-Flash）查找。
+                    const preset = MODEL_FORM_PRESETS.find(({ id }) => id === option?.value);
+                    return `${option?.label || ''} ${preset?.values.modelCode || ''}`
+                      .toLowerCase()
+                      .includes(input.toLowerCase());
+                  }}
                   placeholder={intl.formatMessage({ id: 'modelMgr.modal.quickPresetPlaceholder' })}
-                  options={getPresetOptions()}
+                  options={getPresetOptions(
+                    MODEL_FORM_PRESETS,
+                    intl.locale,
+                    (preset) =>
+                      intl.formatMessage(
+                        {
+                          id: preset.channel
+                            ? 'modelMgr.modal.presetLabelWithChannel'
+                            : 'modelMgr.modal.presetLabelWithDeveloper',
+                        },
+                        {
+                          model: preset.label,
+                          developer: intl.formatMessage({ id: `modelMgr.modal.presetDeveloper.${preset.developer}` }),
+                          channel: preset.channel
+                            ? intl.formatMessage({ id: `modelMgr.modal.presetChannel.${preset.channel}` })
+                            : '',
+                        }
+                      ),
+                    (preset) =>
+                      preset.developer
+                        ? intl.formatMessage({ id: `modelMgr.modal.presetDeveloper.${preset.developer}` })
+                        : ''
+                  )}
                   onChange={onPresetSelect}
                 />
               </Form.Item>
@@ -312,6 +340,7 @@ const ModelFormFields: React.FC<Props> = ({
                   {intl.formatMessage({
                     id: currentPreset ? 'modelMgr.modal.presetAppliedHint' : 'modelMgr.modal.unknownModelHint',
                   })}
+                  {currentPreset?.noticeId ? <div>{intl.formatMessage({ id: currentPreset.noticeId })}</div> : null}
                   {currentPreset?.source ? (
                     <>
                       {' '}
@@ -385,8 +414,14 @@ const ModelFormFields: React.FC<Props> = ({
               <Select options={modelTypeOptions} />
             </Form.Item>
           </div>
+          {/* 可选配置入口用右箭头表示收起、下箭头表示展开，与内容显隐共用状态。 */}
           {simplified ? (
-            <Button type="link" onClick={() => toggleSection('basicExtra')} aria-expanded={isSectionOpen('basicExtra')}>
+            <Button
+              type="link"
+              icon={isSectionOpen('basicExtra') ? <DownOutlined aria-hidden /> : <RightOutlined aria-hidden />}
+              onClick={() => toggleSection('basicExtra')}
+              aria-expanded={isSectionOpen('basicExtra')}
+            >
               {intl.formatMessage({ id: 'modelMgr.modal.moreBasicSettings' })}
             </Button>
           ) : null}
@@ -446,6 +481,7 @@ const ModelFormFields: React.FC<Props> = ({
           {simplified ? (
             <Button
               type="link"
+              icon={isSectionOpen('connectionExtra') ? <DownOutlined aria-hidden /> : <RightOutlined aria-hidden />}
               onClick={() => toggleSection('connectionExtra')}
               aria-expanded={isSectionOpen('connectionExtra')}
             >

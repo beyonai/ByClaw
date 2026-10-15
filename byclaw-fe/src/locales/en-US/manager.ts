@@ -512,18 +512,38 @@ export default {
   'modelMgr.modal.presencePenalty': 'Presence Penalty',
   'modelMgr.modal.providerRequired': 'Please select a model provider',
   'modelMgr.modal.providerPlaceholder': 'Select model provider',
-  'modelMgr.modal.quickPreset': 'Quick model setup (optional)',
-  'modelMgr.modal.quickPresetPlaceholder': 'Search for a provider and model, or enter the details below',
-  'modelMgr.modal.quickPresetHint': 'Fills configuration while keeping manually edited fields. Enter your own API key.',
+  'modelMgr.modal.quickPreset': 'Official model template (optional)',
+  'modelMgr.modal.quickPresetPlaceholder': 'Search official model templates, or configure another model below',
+  'modelMgr.modal.quickPresetHint':
+    'Uses official documentation, not custom names from saved models. Enter your own API key; manually edited fields are kept.',
   'modelMgr.modal.presetAppliedHint':
     'Model preset recognized; manual settings are preserved. Check the endpoint and parameters when using a proxy.',
   'modelMgr.modal.presetSource': 'Reference documentation',
+  'modelMgr.modal.presetLabelWithDeveloper': '{model} · {developer}',
+  'modelMgr.modal.presetLabelWithChannel': '{model} · {developer} (via {channel})',
+  'modelMgr.modal.presetDeveloper.zhipu': 'Zhipu AI',
+  'modelMgr.modal.presetDeveloper.moonshot': 'Moonshot AI',
+  'modelMgr.modal.presetDeveloper.alibaba': 'Alibaba Cloud',
+  'modelMgr.modal.presetDeveloper.minimax': 'MiniMax',
+  'modelMgr.modal.presetDeveloper.deepseek': 'DeepSeek',
+  'modelMgr.modal.presetDeveloper.anthropic': 'Anthropic',
+  'modelMgr.modal.presetDeveloper.google': 'Google',
+  'modelMgr.modal.presetDeveloper.openai': 'OpenAI',
+  'modelMgr.modal.presetDeveloper.xai': 'xAI',
+  'modelMgr.modal.presetDeveloper.bytedance': 'ByteDance',
+  'modelMgr.modal.presetChannel.bailian': 'Alibaba Cloud Model Studio',
+  'modelMgr.modal.presetChannel.kimiCode': 'Kimi Code',
+  'modelMgr.modal.presetChannel.volcengine': 'Volcengine Ark',
+  'modelMgr.modal.presetThinkingRequiredHint':
+    'This model only supports thinking mode on this channel. Keep Thinking enabled.',
+  'modelMgr.modal.kimiCodePresetHint':
+    'Kimi-K2.8-Preview uses kimi-for-coding on Kimi Code. An active Kimi Code subscription and its API key are required. Kimi Open Platform keys and endpoints are not interchangeable. Public documentation does not specify a separate output ceiling, so Max Tokens is left blank; set it according to your service limits.',
   'modelMgr.modal.unknownModelHint':
     'No unique preset found. Check the type, protocol and endpoint, and enter the actual context length in parameters (except image models).',
   'modelMgr.modal.moreBasicSettings': 'More basic settings (optional)',
   'modelMgr.modal.advancedConnection': 'Advanced connection: headers, timeouts and retries',
   'modelMgr.modal.automaticParamsHint':
-    'Known models use presets. Confirm the context length for unknown models. Output budget and sampling parameters are optional; expand to adjust.',
+    'Known models use official context and output ceilings; expand to adjust. Unpublished output limits are left blank. Confirm context length for unknown models; sampling is optional. Available output also depends on input length and thinking mode.',
   'modelMgr.modal.providerOptionalHint':
     'Optional; used for provider-specific parameters. Keep existing values when editing.',
   'modelMgr.modal.imageProviderHint':

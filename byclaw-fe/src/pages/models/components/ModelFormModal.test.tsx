@@ -1,5 +1,6 @@
 import { act, render } from '@testing-library/react';
 import ModelFormModal from './ModelFormModal';
+import { getMyModels, getPublicModels } from '../service';
 
 const mockGetSourceSystemList = jest.fn();
 const mockGetDcSystemConfigListByStandType = jest.fn();
@@ -25,6 +26,8 @@ jest.mock('@/pages/manager/pages/ModelMgr/components/SharedModelFormModal', () =
 jest.mock('../service', () => ({
   getMyModelDetail: jest.fn(),
   upsertMyModel: jest.fn(),
+  getMyModels: jest.fn(),
+  getPublicModels: jest.fn(),
 }));
 
 const renderForm = (type: 'add' | 'edit' = 'add') => {
@@ -42,6 +45,15 @@ describe('models/components/ModelFormModal', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSharedModelFormProps = undefined;
+  });
+
+  it('does not copy personal or public model records into official templates', () => {
+    const row = { id: 7, modelCode: 'model2', modelType: 'LLM', apiEndpoint: 'https://example.test/v1' };
+    (getMyModels as jest.Mock).mockResolvedValue({ code: 0, data: { rows: [row], total: 1 } });
+    (getPublicModels as jest.Mock).mockResolvedValue({ code: 0, data: { rows: [row], total: 1 } });
+    expect(renderForm()).not.toHaveProperty('loadConfiguredPresets');
+    expect(getMyModels).not.toHaveBeenCalled();
+    expect(getPublicModels).not.toHaveBeenCalled();
   });
 
   it('uses the personal JSON image endpoint and returns the upstream image response', async () => {

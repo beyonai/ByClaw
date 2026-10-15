@@ -1,3 +1,4 @@
+import type { ModelFormPreset } from '../modelFormPresets';
 import {
   applyAutofillFields,
   applyModelAutofill,
@@ -5,10 +6,354 @@ import {
   findModelFormPreset,
   getModelPresetLimits,
   getNewModelFormValues,
+  getPresetOptions,
+  MODEL_FORM_PRESETS,
 } from '../modelFormPresets';
 import { buildAutoDebugRequestText, buildModelUpsertPayload } from '../modelFormUtils';
+import { getImageGenerationProvider } from '../imageGenerationProviders';
 
 describe('deterministic model form presets', () => {
+  // 独立列出核实过的规格，覆盖模板 -> 表单 -> 保存/调试，防止再统一回落为示例输出预算。
+  it.each<[string, number, number]>([
+    ['MiniMax-M3', 1000000, 524288],
+    ['MiniMax-M2.7', 204800, 204800],
+    ['MiniMax-M2.7-highspeed', 204800, 204800],
+    ['deepseek-flash', 1048576, 393216],
+    ['deepseek-v4-pro', 1048576, 393216],
+    ['qwen3.6-plus', 1000000, 65536],
+    ['qwen3.7-max', 1000000, 131072],
+    ['glm-5.1', 202745, 131072],
+    ['glm-5.2', 1048576, 131072],
+    ['glm-5.3', 1048576, 131072],
+    ['ZHIPU/GLM-5.3-Flash', 1048576, 131072],
+    ['kimi-k2.6', 262144, 16384],
+    ['kimi-k2.7-code', 262144, 16384],
+    ['kimi-k3', 1048576, 1048576],
+    ['claude-sonnet-5', 1000000, 128000],
+  ])('fills and submits official context/output ceilings for %s', (modelCode, contextTokens, maxTokens) => {
+    const state = createModelAutofillState();
+    const initial = { ...getNewModelFormValues(), modelCode };
+    const values = { ...initial, ...applyModelAutofill(state, { modelCode }, initial) };
+    expect(values).toMatchObject({ contextTokens, maxTokens });
+    expect(getModelPresetLimits(values)).toEqual({ contextTokens, maxTokens });
+    expect(buildModelUpsertPayload({ values })).toMatchObject({ contextTokens, maxTokens });
+    const debug = JSON.parse(buildAutoDebugRequestText({ formValues: values, syncFormParameters: true }));
+    expect(debug.max_tokens).toBe(maxTokens);
+  });
+
+  it('clears the previous output cap for Kimi Code when no official output ceiling is published', () => {
+    const state = createModelAutofillState();
+    let values: Record<string, any> = { ...getNewModelFormValues(), modelCode: 'deepseek-flash' };
+    values = { ...values, ...applyModelAutofill(state, {}, values) };
+    const prevText = buildAutoDebugRequestText({ formValues: values, syncFormParameters: true });
+    values.modelCode = 'kimi-for-coding';
+    values = { ...values, ...applyModelAutofill(state, { modelCode: values.modelCode }, values) };
+    expect(values.contextTokens).toBe(1048576);
+    expect(values.maxTokens).toBeUndefined();
+    expect(getModelPresetLimits(values)).toEqual({ contextTokens: 1048576 });
+    expect(buildModelUpsertPayload({ values }).maxTokens).toBeUndefined();
+    const debug = JSON.parse(buildAutoDebugRequestText({ formValues: values, syncFormParameters: true, prevText }));
+    expect(debug).not.toHaveProperty('max_tokens');
+  });
+
+  it.each([4096, undefined])('keeps manually entered or cleared capacity across template switches: %s', (maxTokens) => {
+    const state = createModelAutofillState();
+    let values: Record<string, any> = { ...getNewModelFormValues(), modelCode: 'MiniMax-M3' };
+    values = { ...values, ...applyModelAutofill(state, {}, values) };
+    const manual = { contextTokens: 200000, maxTokens };
+    values = { ...values, ...manual };
+    applyModelAutofill(state, manual, values);
+    ['deepseek-flash', 'kimi-for-coding', 'glm-5.3'].forEach((modelCode) => {
+      values = { ...values, modelCode };
+      values = { ...values, ...applyModelAutofill(state, { modelCode }, values) };
+      expect(values).toMatchObject(manual);
+      expect(buildModelUpsertPayload({ values })).toMatchObject(manual);
+    });
+  });
+
+  it('only fills input capacity for embeddings and does not attach text capacities to image templates', () => {
+    const embedding = findModelFormPreset('text-embedding-v4')!.values;
+    expect(embedding.contextTokens).toBe(8192);
+    expect(embedding).not.toHaveProperty('maxTokens');
+    MODEL_FORM_PRESETS.filter(({ values }) => values.modelType === 'IMAGE_GENERATION').forEach(({ values }) => {
+      expect(values).not.toHaveProperty('contextTokens');
+      expect(values).not.toHaveProperty('maxTokens');
+    });
+  });
+
+  it.each([
+    ['GLM-5.3', 'bailian:glm-5.3', 'glm-5.3'],
+    ['GLM-5.3-Flash', 'bailian:ZHIPU/GLM-5.3-Flash', 'ZHIPU/GLM-5.3-Flash'],
+    ['GLM-5.2', 'bailian:glm-5.2', 'glm-5.2'],
+    ['GLM-5.1', 'bailian:glm-5.1', 'glm-5.1'],
+    ['MiniMax-M3', 'minimax:MiniMax-M3', 'MiniMax-M3'],
+    ['Kimi-K3', 'bailian:kimi-k3', 'kimi-k3'],
+    ['Kimi-K2.8-Preview', 'kimi-code:kimi-for-coding', 'kimi-for-coding'],
+    ['Kimi-K2.7-Code', 'bailian:kimi-k2.7-code', 'kimi-k2.7-code'],
+    ['Kimi-K2.6', 'bailian:kimi-k2.6', 'kimi-k2.6'],
+    ['DeepSeek-V4.1-Flash', 'deepseek:deepseek-flash', 'deepseek-flash'],
+    ['DeepSeek-V4-Pro', 'deepseek:deepseek-v4-pro', 'deepseek-v4-pro'],
+  ])('finds %s by its public name and saves the channel-specific API ID', (name, presetId, modelCode) => {
+    expect(
+      getPresetOptions()
+        .find(({ value }) => value === presetId)
+        ?.label.toLowerCase()
+    ).toContain(name.toLowerCase());
+    const state = createModelAutofillState();
+    const values = { ...getNewModelFormValues(), modelCode, apiToken: 'test-token' };
+    const filled = { ...values, ...applyModelAutofill(state, { modelCode }, values, presetId) };
+    const payload = buildModelUpsertPayload({ values: filled });
+    const debug = JSON.parse(buildAutoDebugRequestText({ formValues: filled, syncFormParameters: true }));
+    expect(payload).toMatchObject({ modelType: 'LLM', modelProtocol: 'OpenAI', modelCode, apiToken: 'test-token' });
+    expect(payload.contextTokens).toBeGreaterThan(0);
+    expect(debug.model).toBe(modelCode);
+    expect(debug.url).toBe(`${filled.apiEndpoint}/chat/completions`);
+    expect(payload).not.toHaveProperty('noticeId');
+    expect(payload).not.toHaveProperty('source');
+    expect(payload).not.toHaveProperty('developer');
+    expect(payload).not.toHaveProperty('channel');
+  });
+
+  it.each(['glm-5.3', 'ZHIPU/GLM-5.3-Flash', 'kimi-k3'])(
+    'enables thinking and uses only supported effort values for %s',
+    (modelCode) => {
+      const values = findModelFormPreset(modelCode)!.values;
+      const defaultDebug = JSON.parse(buildAutoDebugRequestText({ formValues: values, syncFormParameters: true }));
+      expect(defaultDebug).toMatchObject({ enable_thinking: true, reasoning_effort: 'max' });
+      ['low', 'high', 'max'].forEach((defaultLevel) => {
+        const formValues = { ...values, reasoningConfig: { ...values.reasoningConfig, defaultLevel } };
+        const debug = JSON.parse(buildAutoDebugRequestText({ formValues, syncFormParameters: true }));
+        expect(debug).toMatchObject({ enable_thinking: true, reasoning_effort: defaultLevel });
+        ['thinking_budget', 'chat_template_kwargs', 'temperature', 'top_p'].forEach((key) =>
+          expect(debug).not.toHaveProperty(key)
+        );
+        expect(buildModelUpsertPayload({ values: formValues }).reasoningConfig).toMatchObject({
+          enabled: true,
+          defaultLevel,
+          compatFormat: 'bailian',
+          supportedEfforts: ['low', 'high', 'max'],
+        });
+      });
+    }
+  );
+
+  it('keeps K2.7 Code thinking on without sending unsupported effort, sampling or budget parameters', () => {
+    const values = findModelFormPreset('kimi-k2.7-code')!.values;
+    const debug = JSON.parse(buildAutoDebugRequestText({ formValues: values, syncFormParameters: true }));
+    expect(debug.enable_thinking).toBe(true);
+    ['reasoning_effort', 'thinking_budget', 'temperature', 'top_p'].forEach((key) =>
+      expect(debug).not.toHaveProperty(key)
+    );
+    expect(getModelPresetLimits(values)).toEqual({ contextTokens: 262144, maxTokens: 16384 });
+  });
+
+  it('keeps Kimi Code credentials and model ID separate from the open platform and preserves low effort', () => {
+    const preset = findModelFormPreset('kimi-for-coding')!;
+    expect(preset.values.apiEndpoint).toBe('https://api.kimi.com/coding/v1');
+    expect(preset.noticeId).toBe('modelMgr.modal.kimiCodePresetHint');
+    expect(findModelFormPreset('kimi-k2.8-preview')).toBeUndefined();
+    const values = {
+      ...preset.values,
+      reasoningConfig: { ...preset.values.reasoningConfig, defaultLevel: 'low' },
+    };
+    const debug = JSON.parse(buildAutoDebugRequestText({ formValues: values, syncFormParameters: true }));
+    expect(debug).toMatchObject({ model: 'kimi-for-coding', reasoning_effort: 'low' });
+    expect(debug).not.toHaveProperty('enable_thinking');
+    expect(debug).not.toHaveProperty('chat_template_kwargs');
+    expect(buildModelUpsertPayload({ values }).reasoningConfig.effortMap).toEqual({
+      low: 'low',
+      high: 'high',
+      max: 'max',
+    });
+  });
+
+  it('switches to new templates without retaining old automatic sampling or overwriting manual connection fields', () => {
+    const state = createModelAutofillState();
+    let values: Record<string, any> = { ...getNewModelFormValues(), modelCode: 'MiniMax-M3' };
+    values = { ...values, ...applyModelAutofill(state, {}, values) };
+    const manual = {
+      apiEndpoint: 'https://proxy.example/v1',
+      modelProtocol: 'Anthropic',
+      providerName: 'custom-provider',
+      displayName: 'Custom deployment',
+      maxTokens: 4096,
+      apiToken: 'test-token',
+      headers: [{ key: 'X-Project', value: 'custom' }],
+    };
+    values = { ...values, ...manual, modelCode: 'kimi-for-coding' };
+    values = { ...values, ...applyModelAutofill(state, manual, values) };
+    expect(values).toMatchObject(manual);
+    expect(values.temperature).toBeUndefined();
+    expect(values.topP).toBeUndefined();
+    expect(getModelPresetLimits(values)).toBeUndefined();
+    values.modelCode = 'glm-5.1';
+    values = { ...values, ...applyModelAutofill(state, {}, values) };
+    expect(values).toMatchObject(manual);
+    expect(values.contextTokens).toBe(202745);
+    expect(values.reasoningEffortMapText).toBeUndefined();
+    expect(values.reasoningConfig).toMatchObject({ enabled: false, compatFormat: 'bailian' });
+  });
+
+  it('keeps official templates separate from saved aliases and supported gateway protocols', () => {
+    const codes = MODEL_FORM_PRESETS.map((preset) => preset.values.modelCode);
+    expect(codes).toEqual(
+      expect.arrayContaining([
+        'MiniMax-M2.7-highspeed',
+        'MiniMax-M3',
+        'deepseek-flash',
+        'kimi-k2.6',
+        'qwen3.6-plus',
+        'qwen3.7-max',
+        'glm-5.2',
+        'claude-sonnet-5',
+        'text-embedding-v4',
+        'image-01',
+        'doubao-seedream-4-0-250828',
+        'doubao-seedream-5-0-260128',
+      ])
+    );
+    ['model2', 'tts', 'workflow', 'MiniMax-M2.7-highspeed2', 'deepseek-v4.1-flash:cloud'].forEach((code) => {
+      expect(codes).not.toContain(code);
+      expect(findModelFormPreset(code)).toBeUndefined();
+    });
+    expect(new Set(MODEL_FORM_PRESETS.map(({ id }) => id)).size).toBe(MODEL_FORM_PRESETS.length);
+    MODEL_FORM_PRESETS.forEach(({ source, values }) => {
+      expect(source).toMatch(/^https:\/\//);
+      expect(values).not.toHaveProperty('apiToken');
+      expect(values).not.toHaveProperty('headers');
+      expect(values).not.toHaveProperty('id');
+      expect(values.apiEndpoint).not.toMatch(/localhost|127\.0\.0\.1|example\./);
+    });
+    // 移出模板目录不等于删除协议；已有 ComfyUI、LiteLLM 配置仍使用原来的协议注册项。
+    expect(getImageGenerationProvider('COMFYUI')?.modelProtocol).toBe('COMFY_IMAGE');
+    expect(getImageGenerationProvider('LITELLM')?.modelProtocol).toBe('LITELLM_IMAGE');
+    expect(MODEL_FORM_PRESETS.some(({ values }) => ['COMFYUI', 'LITELLM'].includes(values.providerName))).toBe(false);
+  });
+
+  it('fills Bailian capabilities and keeps their wire parameters distinct from other providers', () => {
+    const values = findModelFormPreset('qwen3.6-plus')!.values;
+    expect(values).toMatchObject({
+      modelProtocol: 'OpenAI',
+      apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      contextTokens: 1000000,
+    });
+    const debug = JSON.parse(buildAutoDebugRequestText({ formValues: values, syncFormParameters: true }));
+    expect(debug.enable_thinking).toBe(false);
+    expect(debug).not.toHaveProperty('thinking');
+    expect(debug).not.toHaveProperty('chat_template_kwargs');
+    expect(getModelPresetLimits(values)?.maxTokens).toBe(65536);
+  });
+
+  it('clears automatic sampling for Sonnet and clears generation budgets for embedding templates', () => {
+    const state = createModelAutofillState();
+    let values: Record<string, any> = { ...getNewModelFormValues(), modelCode: 'MiniMax-M3' };
+    values = { ...values, ...applyModelAutofill(state, {}, values) };
+    values.modelCode = 'claude-sonnet-5';
+    values = { ...values, ...applyModelAutofill(state, {}, values) };
+    const debug = JSON.parse(buildAutoDebugRequestText({ formValues: values, syncFormParameters: true }));
+    expect(debug).not.toHaveProperty('temperature');
+    expect(debug).not.toHaveProperty('top_p');
+    expect(debug.thinking).toMatchObject({ type: 'adaptive' });
+    expect(debug.thinking).not.toHaveProperty('budget_tokens');
+    values.modelCode = 'text-embedding-v4';
+    values = { ...values, ...applyModelAutofill(state, {}, values) };
+    expect(values).toMatchObject({ modelType: 'EMBEDDING', contextTokens: 8192 });
+    expect(values.maxTokens).toBeUndefined();
+    expect(values.temperature).toBeUndefined();
+  });
+
+  it('falls back to model names when developers are absent without merging variants or reordering the catalog', () => {
+    const presets: ModelFormPreset[] = [
+      {
+        id: 'environment',
+        label: 'Zeta',
+        source: '',
+        values: { modelCode: 'zeta' },
+      },
+      { id: 'builtin', label: 'Alpha 10', source: '', values: { modelCode: 'alpha-10' } },
+      {
+        id: 'personal',
+        label: 'alpha 2',
+        source: '',
+        values: { modelCode: 'same-model', modelProtocol: 'OpenAI' },
+      },
+      {
+        id: 'public',
+        label: 'Alpha 2',
+        source: '',
+        values: { modelCode: 'same-model', modelProtocol: 'Anthropic' },
+      },
+    ];
+    expect(getPresetOptions(presets, 'en-US')).toEqual([
+      { value: 'personal', label: 'alpha 2' },
+      { value: 'public', label: 'Alpha 2' },
+      { value: 'builtin', label: 'Alpha 10' },
+      { value: 'environment', label: 'Zeta' },
+    ]);
+    // 渠道后缀不抢占型号的排序优先级，也不会改变选项 ID 对应的调用配置。
+    const valuesBefore = JSON.stringify(presets.map(({ values }) => values));
+    expect(getPresetOptions(presets, 'en-US', ({ label }) => `${label} · Developer (via Channel)`)).toEqual([
+      { value: 'personal', label: 'alpha 2 · Developer (via Channel)' },
+      { value: 'public', label: 'Alpha 2 · Developer (via Channel)' },
+      { value: 'builtin', label: 'Alpha 10 · Developer (via Channel)' },
+      { value: 'environment', label: 'Zeta · Developer (via Channel)' },
+    ]);
+    expect(JSON.stringify(presets.map(({ values }) => values))).toBe(valuesBefore);
+    expect(presets.map(({ id }) => id)).toEqual(['environment', 'builtin', 'personal', 'public']);
+    expect(findModelFormPreset('same-model', undefined, presets)).toBeUndefined();
+    expect(findModelFormPreset('same-model', 'public', presets)?.values.modelProtocol).toBe('Anthropic');
+  });
+
+  it.each(['zh-CN', 'en-US'])('keeps every developer together across model types and channels: %s', (locale) => {
+    const before = JSON.stringify(MODEL_FORM_PRESETS);
+    const options = getPresetOptions(MODEL_FORM_PRESETS, locale);
+    const ordered = options.map(({ value }) => MODEL_FORM_PRESETS.find(({ id }) => id === value)!);
+    // image-01 与文本模型必须相邻，不能因 I/M 首字母不同被 Kimi 隔开。
+    const minimaxStart = ordered.findIndex(({ developer }) => developer === 'minimax');
+    expect(ordered.slice(minimaxStart, minimaxStart + 4).map(({ values }) => values.modelCode)).toEqual([
+      'image-01',
+      'MiniMax-M2.7',
+      'MiniMax-M2.7-highspeed',
+      'MiniMax-M3',
+    ]);
+    new Set(ordered.map(({ developer }) => developer)).forEach((developer) => {
+      const indices = ordered.flatMap((preset, index) => (preset.developer === developer ? [index] : []));
+      expect(indices[indices.length - 1] - indices[0] + 1).toBe(indices.length);
+    });
+    expect(options).toHaveLength(MODEL_FORM_PRESETS.length);
+    expect(JSON.stringify(MODEL_FORM_PRESETS)).toBe(before);
+  });
+
+  it('sorts localized developer names first and model versions naturally within each developer', () => {
+    const presets = [
+      { id: 'zhipu-10', label: 'GLM-10', developer: 'zhipu' },
+      { id: 'alibaba-10', label: 'Qwen-10', developer: 'alibaba' },
+      { id: 'zhipu-2', label: 'GLM-2', developer: 'zhipu' },
+      { id: 'bytedance', label: 'Seedream', developer: 'bytedance' },
+      { id: 'alibaba-2', label: 'Qwen-2', developer: 'alibaba' },
+    ].map((preset) => ({ ...preset, channel: 'bailian', source: '', values: {} }));
+    // 三家共用同一渠道时仍按实际模型厂商排列，并使用界面文案而非英文内部标识排序。
+    const names: Record<string, string> = { alibaba: '阿里云', bytedance: '字节跳动', zhipu: '智谱' };
+    expect(
+      getPresetOptions(presets, 'zh-CN', undefined, ({ developer }) => names[developer!]).map(({ value }) => value)
+    ).toEqual(['alibaba-2', 'alibaba-10', 'zhipu-2', 'zhipu-10', 'bytedance']);
+  });
+
+  it('sorts Chinese display names by pinyin and retains separate options with identical labels', () => {
+    const presets = ['智谱', '阿里云', '豆包', '豆包'].map((label, index) => ({
+      id: String(index),
+      label,
+      source: '',
+      values: {},
+    }));
+    expect(getPresetOptions(presets, 'zh-CN')).toEqual([
+      { value: '1', label: '阿里云' },
+      { value: '2', label: '豆包' },
+      { value: '3', label: '豆包' },
+      { value: '0', label: '智谱' },
+    ]);
+  });
+
   it('fills a known Seedream version without changing credentials or custom headers', () => {
     const state = createModelAutofillState();
     const values = {
@@ -65,8 +410,8 @@ describe('deterministic model form presets', () => {
     expect(findModelFormPreset('ep-private')).toBeUndefined();
   });
 
-  it('requires an explicit channel for duplicate model codes and does not mutate preset objects', () => {
-    expect(findModelFormPreset('gpt-image-2')).toBeUndefined();
+  it('selects the official image channel and does not mutate preset objects', () => {
+    expect(findModelFormPreset('gpt-image-2')?.id).toBe('OPENAI:gpt-image-2');
     expect(findModelFormPreset('gpt-image-2', 'OPENAI:gpt-image-2')?.values.providerName).toBe('OPENAI');
     const state = createModelAutofillState();
     const values = { ...getNewModelFormValues(), modelCode: 'doubao-seedream-4-0-250828' };
