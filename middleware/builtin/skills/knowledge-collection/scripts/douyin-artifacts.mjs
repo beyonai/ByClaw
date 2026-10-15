@@ -4,18 +4,30 @@ import path from 'node:path';
 import { isInside } from './session.mjs';
 
 export const digest = data => crypto.createHash('sha256').update(data).digest('hex');
-export function sourceUrl(value) {
+function parseSource(value) {
   let url;
   try { url = new URL(value); } catch { throw new Error('DOUYIN_SOURCE_INVALID'); }
   if (url.protocol !== 'https:' || url.username || url.password || url.port
-    || !['v.douyin.com', 'www.douyin.com', 'douyin.com'].includes(url.hostname)
-    || !(/^\/[A-Za-z0-9_-]+\/?$/.test(url.pathname) && url.hostname === 'v.douyin.com'
-      || /^\/(?:video|note)\/\d+\/?$/.test(url.pathname))) throw new Error('DOUYIN_SOURCE_INVALID');
+    || !['v.douyin.com', 'www.douyin.com', 'douyin.com'].includes(url.hostname)) throw new Error('DOUYIN_SOURCE_INVALID');
+  const pathId = url.pathname.match(/^\/(?:video|note)\/(\d+)\/?$/)?.[1];
+  const modalIds = url.searchParams.getAll('modal_id');
+  if (modalIds.length > 1 || modalIds.length === 1 && !/^\d{1,30}$/.test(modalIds[0])
+    || pathId && modalIds.length && pathId !== modalIds[0]) throw new Error('DOUYIN_SOURCE_INVALID');
+  const isShort = url.hostname === 'v.douyin.com' && /^\/[A-Za-z0-9_-]+\/?$/.test(url.pathname);
+  const isModal = ['www.douyin.com', 'douyin.com'].includes(url.hostname)
+    && (url.pathname === '/' || /^\/jingxuan\/?$/.test(url.pathname)) && modalIds.length === 1;
+  if (!isShort && !pathId && !isModal) throw new Error('DOUYIN_SOURCE_INVALID');
   if ([...url.searchParams.keys()].some(key => /token|cookie|session|auth|secret|password/i.test(key))) {
     throw new Error('DOUYIN_SOURCE_INVALID');
   }
   url.hash = '';
-  return url.href;
+  return { url, workId: pathId ?? modalIds[0] };
+}
+export function sourceUrl(value) {
+  return parseSource(value).url.href;
+}
+export function sourceWorkId(value) {
+  return parseSource(value).workId;
 }
 export function workUrl(id) {
   if (typeof id !== 'string' || !/^\d{1,30}$/.test(id)) throw new Error('DOUYIN_WORK_ID_INVALID');

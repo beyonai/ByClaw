@@ -14,11 +14,11 @@ const WORK_ID = '18446744073709551615';
 const CANONICAL = `https://www.douyin.com/video/${WORK_ID}`;
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
-function fixture(t, { subtitles = false, registered = true, subtitleStatus = 'not-provided' } = {}) {
+function fixture(t, { subtitles = false, registered = true, subtitleStatus = 'not-provided', source = SOURCE } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-materializer-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   cmdInit({ 'session-dir': root, query: '归档用户提供的抖音视频',
-    'source-scope': '["public-internet"]', 'direct-urls': JSON.stringify([SOURCE]),
+    'source-scope': '["public-internet"]', 'direct-urls': JSON.stringify([source]),
     'required-content-granularity': 'any' });
   const paths = sessionPaths(root);
   const itemId = 'selected-video';
@@ -43,7 +43,7 @@ function fixture(t, { subtitles = false, registered = true, subtitleStatus = 'no
   });
   const artifact = `${raw}/executor-result.json`;
   const executor = { schemaVersion: '1.0', executor: 'bycli', adapter: 'douyin', status: 'saved', exitCode: 0,
-    itemId, sourceUrl: SOURCE, workId: WORK_ID, canonicalUrl: CANONICAL,
+    itemId, sourceUrl: source, workId: WORK_ID, canonicalUrl: CANONICAL,
     subtitleStatus: subtitles ? 'available' : subtitleStatus,
     limitations: ['未执行音频转录。'], files };
   const writeReceipt = () => {
@@ -51,7 +51,7 @@ function fixture(t, { subtitles = false, registered = true, subtitleStatus = 'no
     fs.writeFileSync(path.join(root, artifact), bytes);
     if (registered) {
       const { session } = loadSession(paths);
-      session.task.douyinAcquisitions = [{ itemId, sourceUrl: SOURCE, artifact, sha256: hash(bytes) }];
+      session.task.douyinAcquisitions = [{ itemId, sourceUrl: source, artifact, sha256: hash(bytes) }];
       persistSession(paths, session);
     }
   };
@@ -174,6 +174,31 @@ test('source authorization must still match the registered receipt', t => {
   f.executor.sourceUrl = 'https://v.douyin.com/another/';
   f.writeReceipt();
   assert.throws(() => materialize(f), /SOURCE_NOT_AUTHORIZED|AUTHORIZATION/);
+});
+
+for (const source of ['https://www.douyin.com/jingxuan?modal_id=99',
+  'https://douyin.com/?modal_id=99', 'https://www.douyin.com/video/99']) {
+  test(`authorized source cannot materialize a different work (${source})`, t => {
+    const f = fixture(t, { source });
+    assert.throws(() => materialize(f), /DOUYIN_WORK_IDENTITY/);
+    assert.equal(fs.existsSync(path.join(f.root, 'sanitized/items', f.itemId)), false);
+    assert.equal(fs.existsSync(path.join(f.root, 'markdown/items', f.itemId)), false);
+    assert.equal(loadSession(f.paths).session.task.douyinMaterializations, undefined);
+    assert.ok(fs.existsSync(path.join(f.root, f.executor.files[0].artifact)));
+  });
+}
+
+test('matching modal source retains the authorized URL in the materialized item', t => {
+  const source = `https://www.douyin.com/jingxuan?recommend=1&modal_id=${WORK_ID}`;
+  const f = fixture(t, { source });
+  const result = materialize(f);
+  const payload = JSON.parse(fs.readFileSync(result.collectPayloadPath, 'utf8'));
+  assert.equal(payload.sourceUrl, source);
+  assert.equal(payload.canonicalItem.url, source);
+  assert.ok(fs.readFileSync(path.join(f.root, payload.sanitizedPath), 'utf8').includes(source));
+  cmdCollect(f.paths, { 'item-json-file': result.collectPayloadPath });
+  assert.equal(collectionStatus(f.paths).deliveryComplete, true);
+  assert.equal(collectionStatus(f.paths).contentGranularity['full-text'], 0);
 });
 
 test('a raw artifact outside the controlled item directory is refused', t => {

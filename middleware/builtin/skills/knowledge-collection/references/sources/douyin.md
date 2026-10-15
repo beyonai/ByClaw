@@ -4,7 +4,7 @@
 
 ## 初始化与来源授权
 
-遵循主 Skill 的 Session Root、唯一会话及交付路径规则。输入是分享文案时，先只提取其中用户实际提供的 HTTPS 抖音 URL，不预先打开短链、不猜作品 ID。首次 `init --direct-urls` 登记提取的 URL；`acquire-douyin --source-url` 必须沿用该已授权 URL，短链跳转由 Adapter 在执行时处理。
+遵循主 Skill 的 Session Root、唯一会话及交付路径规则。输入是分享文案时，先只提取其中用户实际提供的 HTTPS 抖音 URL，不预先打开短链、不猜作品 ID。支持短链、`/video/<id>`、`/note/<id>` 及 `/jingxuan?modal_id=<数字作品 ID>` 链接。首次 `init --direct-urls` 登记提取的原始 URL；`acquire-douyin --source-url` 必须沿用该已授权 URL，短链跳转与 `modal_id` 解析由 Adapter 在执行时处理，Agent 不手工替换为另一个 URL 或作品 ID。
 
 采用 `public-internet`、`selected`、`requiredContentGranularity=any`，不传 `--workflow`，建立 operator 会话。该路径归档视频，不走 `public-collect` 文章全文、通用 `web`、`acquire-web` 或 `materialize-web`，不增加其他来源。
 
@@ -43,6 +43,21 @@ node /app/skills/knowledge-collection/scripts/knowledge-collection.mjs status --
 
 Runner 先对已授权 URL 调用 `bycli douyin download --metadata true` 保存视频及元数据，再用返回作品 ID 对应的规范 `video/<id>` URL 调用 `bycli douyin read` 获取同一作品的官方字幕，避免再次解析分享短链。原始执行证据与受控结果保存在 `raw/bycli/douyin/<id>/`，其中执行器回执为 `executor-result.json`。本入口只归档视频；图文、缺失视频地址、空文件或下载失败都必须按实际结果报告，不能用标题、封面或已保存元数据代替视频成功。
 
+## 长视频与超时预算
+
+Runner 默认向下载子进程设置 `BYCLI_BROWSER_COMMAND_TIMEOUT=300`（秒），读取字幕时默认为 60 秒；调用环境显式设置的正整数值会覆盖这两个默认值。外层进程预算分别至少为内层预算加 60 秒，并且下载不短于 300 秒、读取不短于 120 秒。因此默认下载外层为 360 秒，读取为 120 秒。
+
+长视频可在首次采集前提高内层预算，例如在本 Skill 根目录运行：
+
+```bash
+BYCLI_BROWSER_COMMAND_TIMEOUT=900 node scripts/knowledge-collection.mjs acquire-douyin \
+  --session-dir <dir> --item-id <id> --source-url <已授权原始 URL>
+```
+
+此例下载和读取的外层预算均自动至少为 960 秒。`KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS` 可显式设置外层预算（毫秒），必须为正整数且至少比内层预算多 60 秒；非法或过短配置会在执行前被拒绝。调用 Runner 的 Bash/执行工具还须为整次流程的预检、下载、读取和清理留出总时间，不能把某一个子步骤的预算当作整个流程上限。300 秒或更长预算均不保证某个文件大小的视频一定下载成功，实际结果以执行器回执和文件校验为准。
+
+超时或中断后，业务结果可能不确定。保留原会话、状态与已有产物并报告原始结果；不得仅调高超时后自动重放，也不得换 item ID、URL 或输出目录绕过终态保护。普通超时不构成已完成登录验证的证据。
+
 ## 桥接与认证续采
 
 `acquire-douyin` 独占一次 bridge 预检和本次执行预算；根 Agent 不先跑 bridge-bootstrap、doctor、daemon status，不套其他 Runner。桥接不可用时保留原会话并报告返回的诊断，不自行启动或重启浏览器、不另建会话绕过。
@@ -65,4 +80,6 @@ node /app/skills/knowledge-collection/scripts/knowledge-collection.mjs acquire-d
 
 本路径 `contentGranularity` 固定为 `unknown`，不产生 `fullTextEvidence`，不计文章数量。标题、描述、评论、官方字幕和下载成功分别按实际证据报告；禁止把它们拼成未经验证的完整视频转录。视频及已物化字幕的资产路径和哈希进入受控登记，后续链接只指向实际存在的本地文件。
 
-最后以 `status.collection.deliveryComplete` 判定归档交付是否完成，并报告视频文件、字幕状态和覆盖限制。用户指定了保存路径且状态允许交付时，由根 Agent 执行既有 `publish --session-dir <dir> --delivery-handle <init 返回的 handle>`；视频、元数据和字幕作为已登记 assets 随 Markdown 交付，不手工复制到用户目录。`deliveryInput.files` 仍指向交付后的 Markdown，下游可通过其本地链接追溯附件；按主 Skill 在首次最终答复原样回显 `deliveryInput`。
+最后以 `status.collection.deliveryComplete` 判定服务器内部归档是否完成，并报告视频文件、字幕状态和覆盖限制。用户指定了保存路径且状态允许交付时，由根 Agent 执行既有 `publish --session-dir <dir> --delivery-handle <init 返回的 handle>`，以发布结果验证指定目录交付；视频、元数据和字幕作为已登记 assets 随 Markdown 交付，不手工复制到用户目录。`deliveryInput.files` 仍指向交付后的 Markdown，下游可通过其本地链接追溯附件；按主 Skill 在首次最终答复原样回显 `deliveryInput`。
+
+服务器归档、指定目录发布、浏览器下载与预览是分别验证的结果。归档或 `publish` 成功不能证明网页下载或预览可用；没有实际浏览器验证时明确标注“网页下载/预览未验证”。大文件交付失败需沿用户实际访问的前端和后端链路定位；仅观察到 DSH `/api/file` 返回 413，不能断言它就是鲸智业务下载链路的根因。

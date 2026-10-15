@@ -4,7 +4,7 @@ import path from 'node:path';
 import { authorizePublicSource } from './discovery-authorization.mjs';
 import { assertExternalSessionWriteAllowed } from './probe-state.mjs';
 import { loadSession, persistSession, requireString, withSessionLock } from './session.mjs';
-import { assertPolicy, digest, fileEntry, safeFile, sourceUrl, workUrl } from './douyin-artifacts.mjs';
+import { assertPolicy, digest, fileEntry, safeFile, sourceUrl, sourceWorkId, workUrl } from './douyin-artifacts.mjs';
 
 const ITEM_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const HASH = /^[a-f0-9]{64}$/;
@@ -171,6 +171,10 @@ export function runDouyinMaterialize(paths, args) {
     if (executor.sourceUrl !== authorizedSource || registration[0].sourceUrl !== authorizedSource
       || !authorizePublicSource(session.task.discoveryGate, authorizedSource)) {
       fail('SOURCE_NOT_AUTHORIZED_BY_DISCOVERY', '作品来源尚未获得授权');
+    }
+    const expectedWorkId = sourceWorkId(authorizedSource);
+    if (expectedWorkId !== undefined && expectedWorkId !== executor.workId) {
+      fail('DOUYIN_WORK_IDENTITY', '作品身份与已授权来源不匹配');
     }
     validateFileKinds(executor.files, executor.subtitleStatus);
     const files = executor.files.map(entry => verifyEntry(paths, entry, rawPrefix));
