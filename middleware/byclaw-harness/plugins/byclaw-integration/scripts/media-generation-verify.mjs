@@ -15,6 +15,7 @@ import {
 import { generateVolcengineTtsV3 } from '../src/media-generation/providers/volcengine-tts-v3.ts'
 import { loadSystemDefaultMediaModel } from '../src/media-generation/system-model.ts'
 import { generateOpenAiImage } from '../src/media-generation/providers/openai-image.ts'
+import { saveWordTimingArtifact } from '../src/media-generation/artifacts.ts'
 
 const pluginEntry = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8')
 assert.match(pluginEntry, /import \{ registerMediaGenerationTools \} from '\.\/media-generation\/index\.ts'/u)
@@ -122,8 +123,22 @@ const audio = await generateVolcengineTtsV3({
   fetchImpl: async (input, init) => {
     observedRequest = { input: String(input), init }
     return new Response(
-      `${JSON.stringify({ code: 0, data: Buffer.from('audio-a').toString('base64') })}\n`
-      + JSON.stringify({ code: 20000000, data: Buffer.from('audio-b').toString('base64') }),
+      `${JSON.stringify({
+        code: 0,
+        data: Buffer.from('audio-a').toString('base64'),
+        sentence: {
+          text: '你好',
+          words: [{ word: '你', startTime: 0.1, endTime: 0.3, confidence: 0.9 }],
+        },
+      })}\n`
+      + JSON.stringify({
+        code: 20000000,
+        data: Buffer.from('audio-b').toString('base64'),
+        sentence: {
+          text: '你好',
+          words: [{ word: '好', startTime: 0.3, endTime: 0.6, confidence: 0.8 }],
+        },
+      }),
       { status: 200, headers: { 'x-tt-logid': 'log-1' } },
     )
   },
@@ -133,6 +148,26 @@ assert.equal(audio.mimeType, 'audio/mpeg')
 assert.equal(observedRequest.input, validTts.apiEndpoint)
 assert.equal(observedRequest.init.headers['X-Api-Key'], 'test-secret')
 assert.equal(observedRequest.init.headers['X-Api-Resource-Id'], 'seed-tts-2.0')
+assert.equal(JSON.parse(observedRequest.init.body).req_params.audio_params.enable_subtitle, true)
+assert.deepEqual(audio.wordTimings, [
+  { word: '你', startTime: 0.1, endTime: 0.3, confidence: 0.9 },
+  { word: '好', startTime: 0.3, endTime: 0.6, confidence: 0.8 },
+])
+const wordTimingArtifact = await saveWordTimingArtifact(root, audio.wordTimings, {
+  text: '你好',
+  providerRequestId: audio.providerRequestId,
+})
+assert.equal(wordTimingArtifact.kind, 'word-timing')
+assert.equal(wordTimingArtifact.mimeType, 'application/json')
+assert.match(wordTimingArtifact.path, /word-timing-[0-9a-f-]+\.json$/u)
+assert.deepEqual(JSON.parse(await readFile(wordTimingArtifact.path, 'utf8')), {
+  schemaVersion: 1,
+  unit: 'second',
+  granularity: 'provider-word',
+  text: '你好',
+  providerRequestId: 'log-1',
+  words: audio.wordTimings,
+})
 
 const redisValues = new Map([
   [`byai:aimodel:typelist\0TTS`, JSON.stringify([{ instanceId: '42', modelType: 'TTS', status: 1, isDefault: 1 }])],

@@ -1,11 +1,8 @@
-import { randomUUID } from 'node:crypto'
-import { mkdir, rename, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import { modelFetch } from '../model-fetch.ts'
+import { saveMediaArtifact, saveWordTimingArtifact } from './artifacts.ts'
 import { generateOpenAiImage } from './providers/openai-image.ts'
 import { generateVolcengineTtsV3 } from './providers/volcengine-tts-v3.ts'
 import {
@@ -29,20 +26,6 @@ async function mediaModel(options: MediaRuntimeOptions, capability: MediaCapabil
     projectionPath: resolveMediaProjectionPath(capability),
     loadSystemDefault: () => loadSystemDefaultMediaModel(options.redis, capability),
   })
-}
-
-async function saveArtifact(workspace: string, kind: 'image' | 'audio', bytes: Buffer, mimeType: string) {
-  if (bytes.length === 0 || bytes.length > 50 * 1024 * 1024) throw new Error('MEDIA_ARTIFACT_INVALID')
-  const root = join(workspace, '.generated-media')
-  await mkdir(root, { recursive: true, mode: 0o700 })
-  const extension = mimeType === 'audio/wav' ? 'wav'
-    : mimeType === 'audio/ogg' ? 'ogg' : mimeType.startsWith('audio/') ? 'mp3'
-      : mimeType === 'image/jpeg' ? 'jpg' : 'png'
-  const path = join(root, `${kind}-${randomUUID()}.${extension}`)
-  const temporary = `${path}.tmp`
-  await writeFile(temporary, bytes, { mode: 0o600 })
-  await rename(temporary, path)
-  return { kind, path, mimeType, byteSize: bytes.length }
 }
 
 function configurationRequired(capability: MediaCapability, error: unknown) {
@@ -87,7 +70,7 @@ export function registerMediaGenerationTools(ctx: Context, options: MediaRuntime
         if (model.source === 'system-default') return configurationRequired('IMAGE', error)
         throw error
       }
-      const artifacts = await Promise.all(generated.map(image => saveArtifact(workspace, 'image', image.bytes, image.mimeType)))
+      const artifacts = await Promise.all(generated.map(image => saveMediaArtifact(workspace, 'image', image.bytes, image.mimeType)))
       return { json: JSON.stringify({ source: model.source, model: model.modelName, artifacts }) }
     },
   }))
@@ -135,8 +118,20 @@ export function registerMediaGenerationTools(ctx: Context, options: MediaRuntime
         if (model.source === 'system-default') return configurationRequired('TTS', error)
         throw error
       }
-      const artifact = await saveArtifact(workspace, 'audio', generated.bytes, generated.mimeType)
-      return { json: JSON.stringify({ source: model.source, model: model.modelName, artifact, providerRequestId: generated.providerRequestId }) }
+      const [artifact, wordTimingArtifact] = await Promise.all([
+        saveMediaArtifact(workspace, 'audio', generated.bytes, generated.mimeType),
+        saveWordTimingArtifact(workspace, generated.wordTimings, {
+          text: args.text,
+          providerRequestId: generated.providerRequestId,
+        }),
+      ])
+      return { json: JSON.stringify({
+        source: model.source,
+        model: model.modelName,
+        artifact,
+        wordTimingArtifact,
+        providerRequestId: generated.providerRequestId,
+      }) }
     },
   }))
 }
