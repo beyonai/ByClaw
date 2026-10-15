@@ -252,6 +252,43 @@ class ResourceFavoriteQueryIntegrationTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    void legacyUnscopedFavoritesRemainVisibleAndIsolatedByTenantAndUser(String type) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            initialize(connection);
+            for (long id = 905; id <= 908; id++) {
+                resource(connection, id, type, 33, "enterprise", 2);
+            }
+            try (var statement = connection.createStatement()) {
+                statement.executeUpdate("UPDATE ss_resource SET com_acct_id=NULL WHERE resource_id IN (905,906,907)");
+                statement.executeUpdate("UPDATE ss_resource SET view_auth_controlled=NULL, use_auth_controlled=NULL WHERE resource_id=905");
+                statement.executeUpdate("UPDATE ss_resource SET view_auth_controlled=TRUE WHERE resource_id=906");
+                statement.executeUpdate("UPDATE ss_resource SET use_auth_controlled=TRUE WHERE resource_id=907");
+                statement.executeUpdate("INSERT INTO byai_resource_favorite_count VALUES (22,905,2),(23,905,7)");
+                statement.executeUpdate("INSERT INTO byai_resource_favorite VALUES (22,11,905),(22,12,905),(23,11,905),(22,11,906),(22,11,907),(22,11,908)");
+            }
+            Map<String, Object> params = new HashMap<>();
+            params.put("userId", 11L);
+            params.put("favoriteTenantId", 22L);
+            params.put("viewTenantId", 22L);
+            params.put("includeFavorites", true);
+            params.put("favoritesOnly", true);
+            params.put("includeEmployeeGroup", true);
+            params.put("includeAllEnterpriseOwnerType", true);
+            params.put("ownerType", "enterprise");
+            params.put("resourceBizTypeList", List.of(type));
+
+            assertThat(query(connection, type, params, 0)).containsExactly(new Row(905L, 2L, true));
+            params.put("userId", 13L);
+            assertThat(query(connection, type, params, 0)).isEmpty();
+            params.put("userId", 11L);
+            params.put("favoriteTenantId", 23L);
+            params.put("viewTenantId", 23L);
+            assertThat(query(connection, type, params, 0)).containsExactly(new Row(905L, 7L, true));
+        }
+    }
+
     @Test
     void controlledEnterpriseViewingIsIndependentFromUseAndFiltersBeforePagination() throws Exception {
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {

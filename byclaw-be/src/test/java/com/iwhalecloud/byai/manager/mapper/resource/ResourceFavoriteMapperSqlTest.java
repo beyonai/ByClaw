@@ -35,6 +35,7 @@ class ResourceFavoriteMapperSqlTest {
             assertThat(sql).contains("fc.com_acct_id = ? and fc.resource_id = a.resource_id")
                 .contains("uf.user_id = ? and uf.resource_id = a.resource_id")
                 .contains("a.com_acct_id = ?")
+                .contains("or (a.com_acct_id is null and coalesce(a.view_auth_controlled, false) = false and coalesce(a.use_auth_controlled, false) = false)")
                 .contains("a.owner_type = 'enterprise' and a.resource_status = 2")
                 .contains("and uf.resource_id is not null")
                 .contains("order by coalesce(fc.favorite_count, 0) desc")
@@ -71,6 +72,16 @@ class ResourceFavoriteMapperSqlTest {
         String xml = read("resource/ResourceFavoriteMapper.xml");
         assertThat(xml).contains("set favorite_count = favorite_count + #{delta}")
             .doesNotContain("on conflict", "for update", "update ss_resource", "update_time", "au_privilege_grant");
+    }
+
+    @Test
+    void mutationLookupOnlyAcceptsSameTenantOrUncontrolledLegacyEnterpriseResources() throws Exception {
+        String sql = sql("resource/ResourceFavoriteMapper.xml", "selectResource", Map.of(
+            "resourceId", 33L, "tenantId", 22L));
+        assertThat(sql).contains("where resource_id = ? and ( com_acct_id = ?")
+            .contains("or (com_acct_id is null and owner_type = 'enterprise'")
+            .contains("coalesce(view_auth_controlled, false) = false")
+            .contains("coalesce(use_auth_controlled, false) = false");
     }
 
     private String[][] queries() {

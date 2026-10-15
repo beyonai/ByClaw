@@ -442,7 +442,12 @@
                 and a.owner_type = 'enterprise' and a.resource_status = 2
                 and a.resource_biz_type != 'SKILL_GROUP'
                 <if test="favoritesOnly == true">
-                    and a.com_acct_id = #{favoriteTenantId}
+                    and (
+                        a.com_acct_id = #{favoriteTenantId}
+                        or (a.com_acct_id is null
+                            and coalesce(a.view_auth_controlled, false) = false
+                            and coalesce(a.use_auth_controlled, false) = false)
+                    )
                     and uf.resource_id is not null
                 </if>
             </if>

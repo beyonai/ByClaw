@@ -92,6 +92,45 @@ class ResourceFavoriteWriteIntegrationTest {
         assertCounts(1);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    void legacyUnscopedResourcesCanBeFavoritedWithCountsIsolatedByTenant(String type) {
+        jdbc.update("UPDATE ss_resource SET resource_biz_type=?, com_acct_id=NULL, view_auth_controlled=NULL, use_auth_controlled=NULL WHERE resource_id=33", type);
+
+        assertThat(set(0, 11L, true).favoriteCount()).isEqualTo(1);
+        assertThat(set(1, 11L, true).favoriteCount()).isEqualTo(1);
+        assertThat(set(1, 12L, true).favoriteCount()).isEqualTo(2);
+        assertThat(set(0, 11L, 23L, true).favoriteCount()).isEqualTo(1);
+        assertThat(set(0, 11L, false).favoriteCount()).isEqualTo(1);
+        assertCounts(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM byai_resource_favorite WHERE com_acct_id=23 AND resource_id=33", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT favorite_count FROM byai_resource_favorite_count WHERE com_acct_id=23 AND resource_id=33", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT com_acct_id FROM ss_resource WHERE resource_id=33", Long.class)).isNull();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,false", "false,true", "true,true"})
+    void legacyCompatibilityDoesNotExposeControlledOrOtherTenantResources(boolean viewControlled, boolean useControlled) {
+        jdbc.update("UPDATE ss_resource SET com_acct_id=NULL, view_auth_controlled=?, use_auth_controlled=? WHERE resource_id=33", viewControlled, useControlled);
+        assertThat(realMapper.selectResource(33L, 22L)).isNull();
+        assertThat(realMapper.selectResource(34L, 22L)).isNull();
+        assertThatThrownBy(() -> set(0, 11L, true))
+            .isInstanceOfSatisfying(ResponseStatusException.class, error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
+        verifyNoInteractions(auth);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM byai_resource_favorite", Long.class)).isZero();
+    }
+
+    @Test void legacyResourcesStillRequireShelfAvailabilityAndRespectUseBlacklists() {
+        jdbc.update("UPDATE ss_resource SET com_acct_id=NULL, resource_status=3 WHERE resource_id=33");
+        assertThatThrownBy(() -> set(0, 11L, true))
+            .isInstanceOfSatisfying(ResponseStatusException.class, error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+        jdbc.update("UPDATE ss_resource SET resource_status=2 WHERE resource_id=33");
+        when(auth.queryCurrentUserUseBlacklistedResourceIds(any(), any())).thenReturn(Set.of(33L));
+        assertThatThrownBy(() -> set(0, 11L, true))
+            .isInstanceOfSatisfying(ResponseStatusException.class, error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM byai_resource_favorite", Long.class)).isZero();
+    }
+
     @Test void cancellationOfOffShelfResourceAndMissingHistoricalCounterWorks() {
         jdbc.update("UPDATE ss_resource SET resource_status=3 WHERE resource_id=33");
         jdbc.update("INSERT INTO byai_resource_favorite VALUES(22,11,33,CURRENT_TIMESTAMP)");
@@ -166,7 +205,11 @@ class ResourceFavoriteWriteIntegrationTest {
     }
 
     private ResourceFavoriteVo set(int node, Long userId, boolean target) {
-        var login = new LoginInfo(); login.setUserId(userId); login.setEnterpriseId(22L);
+        return set(node, userId, 22L, target);
+    }
+
+    private ResourceFavoriteVo set(int node, Long userId, Long tenantId, boolean target) {
+        var login = new LoginInfo(); login.setUserId(userId); login.setEnterpriseId(tenantId);
         CurrentUserHolder.setLoginInfo(login);
         try {
             var input = new ResourceFavoriteQo(); input.setResourceId(33L); input.setFavorited(target);
