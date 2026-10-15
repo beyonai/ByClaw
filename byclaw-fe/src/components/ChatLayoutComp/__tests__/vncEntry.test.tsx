@@ -189,6 +189,40 @@ describe('chat remote computer entry', () => {
     expect(mockOpenVnc).not.toHaveBeenCalled();
   });
 
+  it('keeps an opened desktop entry across new answers and permits reopening during another answer', () => {
+    mockMessages = [employeeMessage('answer-1', true)];
+    const view = render(renderChat());
+    act(() => mockEventEmitter.emit('beyond-chat-vnc-opened', { sessionId: 'session-1' }));
+
+    mockMessages = [...mockMessages, employeeMessage('answer-2')];
+    view.rerender(renderChat());
+    act(() => mockEventEmitter.emit('beyond-driver-close'));
+    fireEvent.click(screen.getByTitle('common.remoteComputer'));
+    const options = mockOpenVnc.mock.calls[0][0];
+
+    mockMessages = [...mockMessages, employeeMessage('answer-3')];
+    view.rerender(renderChat());
+    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
+    expect(options.isCurrent()).toBe(true);
+  });
+
+  it('resets an opened desktop entry on A to B to A navigation', () => {
+    mockMessages = [employeeMessage('answer-1')];
+    const view = render(renderChat());
+    act(() => mockEventEmitter.emit('beyond-chat-vnc-opened', { sessionId: 'session-1' }));
+    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
+
+    mockMessages = [employeeMessage('answer-2', false, 'session-2')];
+    view.rerender(renderChat('session-2'));
+    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
+    act(() => mockEventEmitter.emit('beyond-chat-vnc-opened', { sessionId: 'session-1' }));
+    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
+
+    mockMessages = [employeeMessage('answer-1')];
+    view.rerender(renderChat());
+    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
+  });
+
   it('keeps pending opening during updates to the same answer and cancels it for a new answer', () => {
     mockMessages = [employeeMessage('answer-1', true)];
     const view = render(renderChat());

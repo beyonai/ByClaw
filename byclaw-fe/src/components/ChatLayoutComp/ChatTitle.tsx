@@ -128,7 +128,11 @@ export default function ChatTitle(props: ChatTitleProps) {
                 sessionId={sessionId}
                 sessionName={titleSession.sessionName}
               />
-              <VNC sessionId={sessionId} latestDigitalEmployeeMessage={props.latestDigitalEmployeeMessage} />
+              <VNC
+                key={sessionId}
+                sessionId={sessionId}
+                latestDigitalEmployeeMessage={props.latestDigitalEmployeeMessage}
+              />
               {isAdminVip(userInfo) && (
                 <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>
                   <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />

@@ -49,14 +49,16 @@ describe('useVncOpener', () => {
     await flush();
 
     expect(mockSetSiderCollapsed).toHaveBeenCalledWith(true);
-    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-main-driver-open-type', {
+    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(1, 'beyond-main-driver-open-type', {
       drawerType: 'vnc',
       canClose: true,
       width: '50vw',
     });
-    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-main-driver-message', {
+    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(2, 'beyond-main-driver-message', {
       url: `${window.location.origin}/v1/sandboxes/test/proxy/8081/?token=test-token&autoconnect=true&resize=scale`,
     });
+    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(3, 'beyond-chat-vnc-opened', { sessionId: 'session-a' });
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
     expect(mockRefreshSandboxes).not.toHaveBeenCalled();
   });
 
@@ -68,7 +70,8 @@ describe('useVncOpener', () => {
     await flush();
 
     expect(mockRefreshSandboxes).toHaveBeenCalledTimes(1);
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(2);
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
+    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: 'session-a' });
   });
 
   it('retries STARTING sandboxes until there is a usable RUNNING endpoint', async () => {
@@ -82,7 +85,8 @@ describe('useVncOpener', () => {
     await act(async () => {
       await jest.advanceTimersByTimeAsync(2000);
     });
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(2);
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
+    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: 'session-a' });
   });
 
   it('stops retrying missing endpoints without opening an empty iframe', async () => {
@@ -126,7 +130,8 @@ describe('useVncOpener', () => {
     await act(async () => resolveSandboxes(readySandboxes));
     act(() => result.current({ key: 'answer-a:tool-a' }));
     await flush();
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(2);
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
+    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: 'session-a' });
   });
 
   it('allows a manual reopen after the desktop was closed', async () => {
@@ -135,7 +140,11 @@ describe('useVncOpener', () => {
     await flush();
     act(() => result.current());
     await flush();
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(4);
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(6);
+    expect(mockEventEmitter.emit.mock.calls.filter(([event]) => event === 'beyond-chat-vnc-opened')).toEqual([
+      ['beyond-chat-vnc-opened', { sessionId: 'session-a' }],
+      ['beyond-chat-vnc-opened', { sessionId: 'session-a' }],
+    ]);
   });
 
   it.each(['session-b', 'session-a'])('discards an old request after switching away and to %s', async (target) => {
@@ -164,6 +173,28 @@ describe('useVncOpener', () => {
     isLatest = false;
     await act(async () => resolveSandboxes(readySandboxes));
     expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('reports only the current session when an earlier session request resolves later', async () => {
+    let resolveOldSandboxes: (value: any) => void = () => {};
+    mockAppState.sandboxesInfo = new Promise((resolve) => {
+      resolveOldSandboxes = resolve;
+    });
+    const { result, rerender } = renderHook(({ sessionId }) => useVncOpener(sessionId), {
+      initialProps: { sessionId: 'session-a' },
+    });
+    act(() => result.current());
+    rerender({ sessionId: 'session-b' });
+    mockAppState.sandboxesInfo = readySandboxes;
+    act(() => result.current());
+    await flush();
+
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
+    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(3, 'beyond-chat-vnc-opened', { sessionId: 'session-b' });
+
+    await act(async () => resolveOldSandboxes(readySandboxes));
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
+    expect(mockEventEmitter.emit).not.toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: 'session-a' });
   });
 
   it('cancels delayed retries on unmount', async () => {

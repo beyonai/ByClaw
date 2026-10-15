@@ -97,6 +97,7 @@ export default function useVncOpener(sessionId?: string) {
             width: '50vw',
           });
           emitterRef.current.emit('beyond-main-driver-message', { url });
+          emitterRef.current.emit('beyond-chat-vnc-opened', { sessionId: view.sessionId });
           return;
         }
 
