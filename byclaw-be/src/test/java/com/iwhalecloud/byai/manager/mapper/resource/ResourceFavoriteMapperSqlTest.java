@@ -69,9 +69,8 @@ class ResourceFavoriteMapperSqlTest {
     @Test
     void mutationSqlUsesUniqueKeysAndCountTable() throws Exception {
         String xml = read("resource/ResourceFavoriteMapper.xml");
-        assertThat(xml).contains("on conflict (com_acct_id, user_id, resource_id) do nothing")
-            .contains("set favorite_count = favorite_count + #{delta}")
-            .doesNotContain("update ss_resource", "update_time", "au_privilege_grant");
+        assertThat(xml).contains("set favorite_count = favorite_count + #{delta}")
+            .doesNotContain("on conflict", "for update", "update ss_resource", "update_time", "au_privilege_grant");
     }
 
     private String[][] queries() {
