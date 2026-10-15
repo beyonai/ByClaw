@@ -180,3 +180,16 @@ STANDALONE_MODULES=fe,be
 `start-fe.sh` 和 `start-all.sh` 会自动调用生成脚本，从 `.env` 读取 `BE_SERVER_PORT`、`BE_WS_PORT` 和 `BYCLAW_SANDBOX_PORT` 替换模板中的占位符，并初始化开发环境 `localhost` HTTPS 证书。修改 nginx 配置只需编辑 `.tpl` 模板文件。
 
 旧版本升级：需单独停止并删除旧 `qa-worker` 容器，或 K3s 中的旧 Worker Deployment 及专用 ConfigMap；更新部署清单不会自动删除旧实例。QA Manager 及数据卷保留。
+
+## 部署环境检查
+
+Shell 入口 `sh deploy.sh init` / `update` 和 `sh deploy/start-standalone.sh` 启动结束时自动检查环境，启动失败也会输出检查结果。需本机 Python 3；检查默认等待 120 秒，可通过 `DEPLOY_CHECK_TIMEOUT` 设置。单独检查：
+
+```bash
+sh deploy.sh check
+sh deploy.sh check --deep
+```
+
+基础检查验证所选容器、数据库初始化查询、Redis PING、HTTP 就绪、FE 到 BE 代理和沙箱引擎中的 OpenClaw 镜像。检查默认创建 120 秒过期的临时沙箱，验证 execd/启动脚本注入并删除，不启动真实数字员工；从 QA 容器读取 BE 同步到 Redis 的模型配置，分别发起一次 LLM（最多 128 输出 token）和 Embedding 请求，可能产生少量费用。`--deep` 仅为兼容旧命令，与普通检查行为相同。
+
+失败返回非零；“未验证”不会被当作业务成功。QA 容器具备 Python/psycopg/redis 时，还会从应用网络检查数据库必要字段、Redis 认证，并核对数据库 OpenClaw 镜像规格。该探测不支持 Redis Cluster；缺少运行环境时显示“未验证”。模型检查支持 OpenAI 兼容接口，验证实际回答及向量维度。检查不会打印 Token 或原始日志，不自动拉镜像、改模型或重启服务。此入口面向本机 Docker/Podman，PowerShell、K3s 和远程引擎暂未接入。
