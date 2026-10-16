@@ -1,9 +1,9 @@
 const fileIconTypeGroups: Record<string, string[]> = {
-  PPT: ['ppt', 'pptx'],
-  Excel: ['excel', 'xls', 'xlsx', 'csv', 'ods', 'table'],
-  jishiben: ['text', 'txt', 'record', 'ocr', 'file'],
+  PPT: ['ppt', 'pptx', 'odp', 'pptm', 'ppsx', 'potx'],
+  Excel: ['excel', 'xls', 'xlsx', 'csv', 'ods', 'table', 'xlsm', 'xltx'],
+  jishiben: ['text', 'txt', 'record', 'ocr', 'file', 'eml', 'msg'],
   markdown: ['md', 'markdown'],
-  Word: ['word', 'doc', 'docx', 'rtf', 'epub'],
+  Word: ['word', 'doc', 'docx', 'rtf', 'epub', 'odt', 'docm', 'dotx'],
   PDF: ['paper', 'pdf'],
   Image: [
     'image',
@@ -24,6 +24,9 @@ const fileIconTypeGroups: Record<string, string[]> = {
     'heif',
     'hif',
     'jxl',
+    'jp2',
+    'ppm',
+    'tga',
     'raw',
     'dng',
     'cr2',
@@ -49,8 +52,8 @@ const fileIconTypeGroups: Record<string, string[]> = {
   java: ['java'],
   shipin: ['mp4', 'avi', 'mov', 'mkv', 'webm'],
   yinpin: ['mp3', 'wav', 'flac'],
-  'a-Data-fileshujuwenjian': ['zip', 'rar', '7z', 'tar', 'gz', 'other'],
-  'a-Codedaima': ['js', 'ts', 'jsx', 'tsx', 'py', 'c', 'cpp', 'go', 'rs', 'rb', 'sh'],
+  'a-Data-fileshujuwenjian': ['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'other'],
+  'a-Codedaima': ['js', 'ts', 'jsx', 'tsx', 'py', 'c', 'cpp', 'go', 'rs', 'rb', 'sh', 'ipynb'],
   wenjianjialanse: ['folder', 'chat'],
 };
 
@@ -80,6 +83,7 @@ export const getFileIconType = (
   }
 
   const normalizedFileName = String(fileName || '').toLowerCase();
+  if (/\.png\.alpha$/.test(normalizedFileName) || normalizedFileName === 'png.alpha') return 'Image';
   const ext = normalizedFileName.includes('.') ? normalizedFileName.split('.').pop() : normalizedFileName;
 
   return (ext && fileIconTypeMap[ext]) || defaultIconType;

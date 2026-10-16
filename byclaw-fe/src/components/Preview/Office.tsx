@@ -28,6 +28,7 @@ interface OfficeProps {
   type?: string;
   loading?: boolean;
   fileName?: string;
+  onPreviewError?: () => void;
 }
 
 type DocxProps = Omit<OfficeProps, 'type' | 'fileName'>;
@@ -111,6 +112,9 @@ function OfficeExcel(props: OfficeProps) {
             setPreviewData(buffer);
           }
         })
+        .catch(() => {
+          if (!disposed) props.onPreviewError?.();
+        })
         .finally(() => {
           if (!disposed) {
             setLoading(false);
@@ -127,6 +131,7 @@ function OfficeExcel(props: OfficeProps) {
 
   useLayoutEffect(() => {
     let viewer: ExcelPreviewer | undefined;
+    let disposed = false;
     const root = rootRef.current;
     const task1 = new Promise<typeof jsPreviewExcel | undefined>((resolve) => {
       if (libs.jsPreviewExcel) {
@@ -157,6 +162,8 @@ function OfficeExcel(props: OfficeProps) {
       // 保证资源都加载完
       const task = Promise.all([task1, task2])
         .then(([lib]) => {
+          if (disposed) return null;
+          if (!lib) throw new Error('Excel preview library unavailable');
           if (root && lib) {
             root?.firstElementChild?.remove();
             // 已安装的预览库通过 xls 选项转换旧版工作簿；XLSX 保留原初始化参数。
@@ -166,13 +173,17 @@ function OfficeExcel(props: OfficeProps) {
           return null;
         })
         .finally(() => {
-          setInited(true);
+          if (!disposed) setInited(true);
         });
 
       // 加载预览
       setLoading(true);
       task
         .then((preview) => {
+          if (disposed) {
+            preview?.destroy();
+            return;
+          }
           if (preview) {
             viewer = preview;
           }
@@ -182,9 +193,15 @@ function OfficeExcel(props: OfficeProps) {
           }
           return viewer?.preview(previewData) || Promise.resolve();
         })
-        .finally(() => setLoading(false));
+        .catch(() => {
+          if (!disposed) props.onPreviewError?.();
+        })
+        .finally(() => {
+          if (!disposed) setLoading(false);
+        });
     }
     return () => {
+      disposed = true;
       viewer?.destroy();
     };
   }, [previewData, type]);
@@ -290,7 +307,7 @@ function OfficePdf({ data, loading: spinning }: DocxProps) {
   );
 }
 
-function OfficeDocx({ data, loading: spinning }: DocxProps) {
+function OfficeDocx({ data, loading: spinning, onPreviewError }: DocxProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<[w: number, h: number]>([0, 0]);
   const [previewer, initPreviewer] = useState<JsDocxPreview>();
@@ -298,15 +315,24 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
   const [buffer, setBuffer] = useState<ArrayBuffer>();
 
   useEffect(() => {
+    let active = true;
     if (data instanceof Blob) {
       setLoading(true);
       data
         .arrayBuffer()
         .then((buffer) => {
-          setBuffer(buffer);
+          if (active) setBuffer(buffer);
         })
-        .finally(() => setLoading(false));
+        .catch(() => {
+          if (active) onPreviewError?.();
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
     }
+    return () => {
+      active = false;
+    };
   }, [data]);
 
   useLayoutEffect(() => {
@@ -325,14 +351,20 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
       });
     }
 
-    loadLib.then((docxInit) => {
-      if (ref.current) {
-        temp = docxInit(ref.current, {});
-        initPreviewer(temp);
-      }
-    });
+    let active = true;
+    loadLib
+      .then((docxInit) => {
+        if (active && ref.current) {
+          temp = docxInit(ref.current, {});
+          initPreviewer(temp);
+        }
+      })
+      .catch(() => {
+        if (active) onPreviewError?.();
+      });
 
     return () => {
+      active = false;
       obs.disconnect();
       temp?.destroy();
       initPreviewer(undefined);
@@ -340,9 +372,20 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
   }, [ref]);
 
   useLayoutEffect(() => {
+    let active = true;
     if (buffer && previewer) {
-      previewer.preview(buffer);
+      // 解析失败交回变体面板提示；文件切换后不显示旧文件的错误。
+      Promise.resolve()
+        .then(() => {
+          if (active) return previewer.preview(buffer);
+        })
+        .catch(() => {
+          if (active) onPreviewError?.();
+        });
     }
+    return () => {
+      active = false;
+    };
   }, [buffer, previewer]);
 
   return (

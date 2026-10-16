@@ -51,6 +51,46 @@ describe('archive preview', () => {
     expect(worker.dispose).toHaveBeenCalled();
   });
 
+  it.each(['rar', '7z', 'tar'] as const)('routes %s through its decoder and reuses child preview', async (type) => {
+    worker.request.mockImplementation(async (operation) =>
+      operation === 'openNativeArchive' ? entries : new Uint8Array([65, 44, 66]).buffer
+    );
+    render(<Archive data={blob()} type={type} renderFile={renderFile} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'common.preview' }));
+    expect(await screen.findByTestId('inner-file')).toHaveTextContent('资料/report.csv');
+    expect(worker.request).toHaveBeenCalledWith(
+      'openNativeArchive',
+      expect.objectContaining({ type }),
+      expect.any(Array)
+    );
+    expect(worker.request).toHaveBeenLastCalledWith('zipEntry', { name: '资料/report.csv' });
+  });
+
+  it.each(['gz', 'tgz'] as const)('passes the %s filename and reuses child preview', async (type) => {
+    worker.request.mockImplementation(async (operation) =>
+      operation === 'openCompressedArchive' ? entries : new Uint8Array([65, 44, 66]).buffer
+    );
+    render(<Archive data={blob()} type={type} fileName="report.csv.gz" renderFile={renderFile} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'common.preview' }));
+    expect(await screen.findByTestId('inner-file')).toHaveTextContent('资料/report.csv');
+    expect(worker.request).toHaveBeenCalledWith(
+      'openCompressedArchive',
+      expect.objectContaining({ type, fileName: 'report.csv.gz' }),
+      expect.any(Array)
+    );
+  });
+
+  it.each([
+    ['unsupported', 'archiveUnsupportedFile'],
+    ['invalid', 'archiveFailed'],
+    ['timeout', 'binaryTimeout'],
+  ] as const)('shows %s errors when opening RAR', async (code, key) => {
+    worker.request.mockRejectedValue(new BinaryPreviewError(code));
+    render(<Archive data={blob()} type="rar" renderFile={renderFile} />);
+    expect(await screen.findByText(`fileRender.${key}`)).toBeVisible();
+    expect(worker.dispose).toHaveBeenCalled();
+  });
+
   it('ignores a pending extraction when another archive replaces it', async () => {
     let resolveOld!: (value: ArrayBuffer) => void;
     worker.request.mockImplementation(async (operation) => {

@@ -13,6 +13,10 @@ import {
   DECODED_IMAGE_PREVIEW_TYPES,
   DELIMITED_PREVIEW_TYPES,
   DOCUMENT_DATA_PREVIEW_TYPES,
+  OPEN_DOCUMENT_PREVIEW_TYPES,
+  NOTEBOOK_PREVIEW_TYPES,
+  OFFICE_VARIANT_PREVIEW_TYPES,
+  EMAIL_PREVIEW_TYPES,
   EBOOK_PREVIEW_TYPES,
   DATABASE_PREVIEW_TYPES,
   HTML_PREVIEW_TYPES,
@@ -27,6 +31,7 @@ import { Animated } from '../Animated';
 // import { KeepAlive } from '../KeepAlive';
 import ss from './Twins.module.less';
 import type { MarkdownImageResolver } from './Md';
+import type { OfficeVariantType } from './officeVariantTypes';
 
 const HtmlRenderComponent = React.lazy(() =>
   import('@/components/Preview/Html').then((module) => ({ default: module.HtmlRender }))
@@ -52,6 +57,10 @@ const RtfComponent = React.lazy(() => import('@/components/Preview/Rtf'));
 const OdsComponent = React.lazy(() => import('@/components/Preview/Ods'));
 const EpubComponent = React.lazy(() => import('@/components/Preview/Epub'));
 const SqliteComponent = React.lazy(() => import('@/components/Preview/Sqlite'));
+const OpenDocumentComponent = React.lazy(() => import('@/components/Preview/OpenDocument'));
+const NotebookComponent = React.lazy(() => import('@/components/Preview/Notebook'));
+const OfficeVariantComponent = React.lazy(() => import('@/components/Preview/OfficeVariant'));
+const EmlComponent = React.lazy(() => import('@/components/Preview/Eml'));
 
 // 文件扩展名 -> shiki 语言。仅收录 shiki/bundle-web 实际打包的语言;传入未打包的 lang 会让 codeToHtml 抛错致预览白屏。
 // 未命中的代码/配置类型(如 go/rust/kotlin)仍按纯文本展示(见 isTextLike + TextHighlight 默认 lang)。
@@ -103,6 +112,10 @@ const visualTypes = [
   ...officeTypes,
   ...DELIMITED_PREVIEW_TYPES,
   ...DOCUMENT_DATA_PREVIEW_TYPES,
+  ...OPEN_DOCUMENT_PREVIEW_TYPES,
+  ...NOTEBOOK_PREVIEW_TYPES,
+  ...OFFICE_VARIANT_PREVIEW_TYPES,
+  ...EMAIL_PREVIEW_TYPES,
   ...EBOOK_PREVIEW_TYPES,
   ...DATABASE_PREVIEW_TYPES,
 ];
@@ -361,6 +374,34 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
             </Suspense>
           </div>
         )}
+        {OFFICE_VARIANT_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <OfficeVariantComponent data={data} type={type as OfficeVariantType} />
+            </Suspense>
+          </div>
+        )}
+        {EMAIL_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <EmlComponent data={data} type={type as 'eml' | 'msg'} />
+            </Suspense>
+          </div>
+        )}
+        {OPEN_DOCUMENT_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <OpenDocumentComponent data={data} type={type as 'odt' | 'odp'} title={title} />
+            </Suspense>
+          </div>
+        )}
+        {NOTEBOOK_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <NotebookComponent data={data} />
+            </Suspense>
+          </div>
+        )}
         {EBOOK_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
@@ -378,7 +419,12 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
         {ARCHIVE_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
-              <ArchiveComponent data={data} renderFile={(file, name) => <PreViewFile data={file} title={name} />} />
+              <ArchiveComponent
+                data={data}
+                type={type as 'zip' | 'rar' | '7z' | 'tar' | 'gz' | 'tgz'}
+                fileName={title}
+                renderFile={(file, name) => <PreViewFile data={file} title={name} />}
+              />
             </Suspense>
           </div>
         )}

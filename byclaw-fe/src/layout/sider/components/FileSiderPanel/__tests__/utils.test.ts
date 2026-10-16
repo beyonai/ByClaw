@@ -43,7 +43,7 @@ describe('FileSiderPanel project space paths', () => {
     expect(
       canPreviewFile({ name: '.gitignore', path: '/.gitignore', isDir: false, size: MAX_TEXT_PREVIEW_SIZE + 1 })
     ).toBe(false);
-    expect(canPreviewFile({ name: 'archive.rar', path: '/archive.rar', isDir: false })).toBe(false);
+    expect(canPreviewFile({ name: 'archive.jar', path: '/archive.jar', isDir: false })).toBe(false);
   });
 
   it.each([
@@ -85,8 +85,30 @@ describe('FileSiderPanel project space paths', () => {
     ['pjpeg', 'jpg'],
     ['HIF', 'heif'],
     ['JXL', 'jxl'],
+    ['JP2', 'jp2'],
+    ['PPM', 'ppm'],
+    ['TGA', 'tga'],
+    ['PNG.ALPHA', 'png'],
     ['RTF', 'rtf'],
     ['ODS', 'ods'],
+    ['ODT', 'odt'],
+    ['ODP', 'odp'],
+    ['IPYNB', 'ipynb'],
+    ['DOCM', 'docm'],
+    ['DOTX', 'dotx'],
+    ['XLSM', 'xlsm'],
+    ['XLTX', 'xltx'],
+    ['PPTM', 'pptm'],
+    ['PPSX', 'ppsx'],
+    ['POTX', 'potx'],
+    ['EML', 'eml'],
+    ['MSG', 'msg'],
+    ['RAR', 'rar'],
+    ['7Z', '7z'],
+    ['TAR', 'tar'],
+    ['GZ', 'gz'],
+    ['TGZ', 'tgz'],
+    ['TAR.GZ', 'tgz'],
     ['EPUB', 'epub'],
     ['DB', 'db'],
     ['SQLITE', 'sqlite'],
@@ -117,8 +139,6 @@ describe('FileSiderPanel project space paths', () => {
     'ai',
     'sketch',
     'parquet',
-    'odt',
-    'odp',
     'wps',
     'et',
     'dps',
@@ -128,8 +148,7 @@ describe('FileSiderPanel project space paths', () => {
     'amr',
     'flv',
     '3gp',
-    'tgz',
-    'jp2',
+    'jar',
     'jpx',
     'j2k',
     'jpf',

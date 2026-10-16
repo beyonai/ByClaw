@@ -62,7 +62,6 @@ function FileRender(props: IProps) {
   const previewTitle = name || fileName || '';
 
   const canDownload = downloadRequest || downloadUrl || queryFile?.fileUrl || queryFile?.fileId;
-  const canPreview = PREVIEWABLE.includes(fileType);
 
   const isLoading = status === 'uploading' || previewing || downloading;
 
@@ -85,7 +84,8 @@ function FileRender(props: IProps) {
     <>
       <div className={classnames(styles.fileItem, 'ub ub-ac overflow-hidden')} key={uid}>
         <div className={classnames(styles.actionList, 'full-width full-height ub ub-ac ub-pc gap8')}>
-          {!isLoading && canPreview && (
+          {/* 文件卡片统一提供预览入口，不再按格式清单隐藏按钮。 */}
+          {!isLoading && (
             <div
               className={classnames(styles.fileItemDownload, 'ub ub-ac ub-pc pointer preview')}
               onClick={() => {

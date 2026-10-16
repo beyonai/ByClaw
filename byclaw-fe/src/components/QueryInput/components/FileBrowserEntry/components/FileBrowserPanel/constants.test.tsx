@@ -1,6 +1,16 @@
-import { getMimeType, isPreviewable, isVideo } from './constants';
+import { render, screen } from '@testing-library/react';
+import { getFileIcon, getMimeType, isPreviewable, isVideo } from './constants';
 
 describe('knowledge file preview support', () => {
+  it.each(['backup.tgz', 'backup.tar.gz', 'backup.tar', 'report.csv.gz'])('shows an archive icon for %s', (name) => {
+    render(<>{getFileIcon(name, false)}</>);
+    expect(screen.getByRole('img', { name: 'file-zip' })).toBeInTheDocument();
+  });
+  it.each(['sample.jp2', 'sample.ppm', 'sample.tga', 'sample.png.alpha'])('shows an image icon for %s', (name) => {
+    render(<>{getFileIcon(name, false)}</>);
+    expect(screen.getByRole('img', { name: 'file-image' })).toBeInTheDocument();
+  });
+
   it('recognizes both native PPTX and converted legacy PPT previews', () => {
     expect(isPreviewable('slides.pptx')).toBe(true);
     expect(isPreviewable('slides.ppt')).toBe(true);
@@ -17,6 +27,10 @@ describe('knowledge file preview support', () => {
     'pjpeg',
     'hif',
     'jxl',
+    'jp2',
+    'ppm',
+    'tga',
+    'png.alpha',
     'ico',
     'avif',
     'apng',
@@ -34,8 +48,26 @@ describe('knowledge file preview support', () => {
     'tif',
     'tiff',
     'zip',
+    'rar',
+    '7z',
+    'tar',
+    'gz',
+    'tgz',
+    'tar.gz',
+    'msg',
     'RTF',
     'ODS',
+    'ODT',
+    'ODP',
+    'IPYNB',
+    'DOCM',
+    'DOTX',
+    'XLSM',
+    'XLTX',
+    'PPTM',
+    'PPSX',
+    'POTX',
+    'EML',
     'epub',
     'db',
     'sqlite',

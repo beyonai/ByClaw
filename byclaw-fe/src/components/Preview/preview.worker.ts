@@ -35,8 +35,28 @@ workerScope.onmessage = async ({ data: { id, operation, input } }) => {
         break;
       }
       case 'openZip': {
+        archive = undefined;
         const { openArchive: load } = await import('./archiveDecoder');
         archive = await load(input.buffer);
+        result = archive.entries;
+        break;
+      }
+      case 'openNativeArchive': {
+        archive = undefined;
+        const { openNativeArchive, validateNativeArchive } = await import('./nativeArchiveDecoder');
+        validateNativeArchive(input.buffer, input.type);
+        const { loadArchive } = await import('./loadArchive');
+        archive = openNativeArchive(input.buffer, input.type, await loadArchive());
+        result = archive.entries;
+        break;
+      }
+      case 'openCompressedArchive': {
+        archive = undefined;
+        const { openCompressedArchive } = await import('./compressedArchiveDecoder');
+        archive = await openCompressedArchive(input.buffer, input.type, input.fileName, async () => {
+          const { loadArchive } = await import('./loadArchive');
+          return loadArchive();
+        });
         result = archive.entries;
         break;
       }
@@ -50,6 +70,38 @@ workerScope.onmessage = async ({ data: { id, operation, input } }) => {
       case 'readOds': {
         const { decodeOds } = await import('./odsDecoder');
         result = await decodeOds(input.buffer);
+        break;
+      }
+      case 'readOpenDocument': {
+        const { decodeOpenDocument } = await import('./openDocumentDecoder');
+        result = await decodeOpenDocument(input.buffer, input.type);
+        break;
+      }
+      case 'readNotebook': {
+        const { decodeNotebook } = await import('./notebookDecoder');
+        result = decodeNotebook(input.buffer);
+        break;
+      }
+      case 'readEml': {
+        const { decodeEml } = await import('./emlDecoder');
+        const email = await decodeEml(input.buffer);
+        result = email;
+        email.attachments.forEach((attachment) => transfer.push(attachment.buffer));
+        break;
+      }
+      case 'readMsg': {
+        const { decodeMsg } = await import('./msgDecoder');
+        const email = decodeMsg(input.buffer);
+        result = email;
+        if (email.rtf) transfer.push(email.rtf);
+        email.attachments.forEach((attachment) => transfer.push(attachment.buffer));
+        break;
+      }
+      case 'prepareOfficeVariant': {
+        const { prepareOfficeVariant } = await import('./officeVariantDecoder');
+        const buffer = await prepareOfficeVariant(input.buffer, input.type);
+        result = buffer;
+        transfer.push(buffer);
         break;
       }
       case 'openEpub': {

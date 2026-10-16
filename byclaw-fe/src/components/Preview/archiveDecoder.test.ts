@@ -1,5 +1,6 @@
 import { TextDecoder as NodeTextDecoder } from 'util';
 import JSZip from 'jszip';
+import { OFFICE_VARIANT_PREVIEW_TYPES } from './formats';
 import { openArchive } from './archiveDecoder';
 import { MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_TEXT_BYTES, MAX_BINARY_PREVIEW_BYTES } from './binaryPreview';
 
@@ -16,6 +17,8 @@ describe('ZIP directory and bounded on-demand extraction', () => {
     zip.file('资料/表格.csv', '姓名,数量\n测试,2');
     zip.file('资料/照片.HEIC', new Uint8Array([1, 2, 3]));
     zip.file('nested.zip', 'zip');
+    zip.file('nested.rar', 'rar');
+    zip.file('nested.7z', '7z');
     zip.file('design.psd', 'psd');
     zip.file('link.txt', 'target', { unixPermissions: 0o120777 });
     const archive = await openArchive(await encodeZip(zip, 'UNIX'));
@@ -31,6 +34,8 @@ describe('ZIP directory and bounded on-demand extraction', () => {
     );
     expect(new NodeTextDecoder().decode(await archive.extract('资料/表格.csv'))).toBe('姓名,数量\n测试,2');
     await expect(archive.extract('nested.zip')).rejects.toMatchObject({ code: 'unsupported' });
+    await expect(archive.extract('nested.rar')).rejects.toMatchObject({ code: 'unsupported' });
+    await expect(archive.extract('nested.7z')).rejects.toMatchObject({ code: 'unsupported' });
     await expect(archive.extract('link.txt')).rejects.toMatchObject({ code: 'unsupported' });
   });
 
@@ -92,13 +97,30 @@ describe('ZIP directory and bounded on-demand extraction', () => {
   });
 });
 
-it.each(['book.epub', 'data.sqlite', 'data.db', 'photo.dng', 'photo.CR3'])(
-  'allows %s inside ZIP through the shared renderer',
+it.each([
+  'book.epub',
+  'data.sqlite',
+  'data.db',
+  'photo.dng',
+  'photo.CR3',
+  'report.odt',
+  'slides.ODP',
+  'analysis.ipynb',
+  'mail.EML',
+  ...OFFICE_VARIANT_PREVIEW_TYPES.map((type) => `file.${type}`),
+])('allows %s inside ZIP through the shared renderer', async (name) => {
+  const zip = new JSZip();
+  zip.file(name, new Uint8Array([1, 2, 3]));
+  const archive = await openArchive(await zip.generateAsync({ type: 'arraybuffer' }));
+  expect(archive.entries).toContainEqual({ name, directory: false, previewable: true });
+  expect(new Uint8Array(await archive.extract(name))).toEqual(new Uint8Array([1, 2, 3]));
+});
+
+it.each(['nested.tar', 'nested.tar.gz', 'nested.tgz', 'nested.txt.gz'])(
+  'does not recursively preview %s',
   async (name) => {
-    const zip = new JSZip();
-    zip.file(name, new Uint8Array([1, 2, 3]));
-    const archive = await openArchive(await zip.generateAsync({ type: 'arraybuffer' }));
-    expect(archive.entries).toContainEqual({ name, directory: false, previewable: true });
-    expect(new Uint8Array(await archive.extract(name))).toEqual(new Uint8Array([1, 2, 3]));
+    const archive = await openArchive(await encodeZip(new JSZip().file(name, 'data')));
+    expect(archive.entries[0].previewable).toBe(false);
+    await expect(archive.extract(name)).rejects.toMatchObject({ code: 'unsupported' });
   }
 );

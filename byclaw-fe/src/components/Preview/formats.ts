@@ -1,3 +1,5 @@
+import { OFFICE_VARIANTS } from './officeVariantTypes';
+
 // 预览入口与渲染器共用格式清单，避免列表允许打开但内容区没有对应渲染分支。
 export const CODE_TEXT_EXTENSIONS = [
   'ts',
@@ -59,9 +61,23 @@ export const RAW_PREVIEW_TYPES = [
   'pef',
   'srw',
 ];
-export const DECODED_IMAGE_PREVIEW_TYPES = ['heic', 'heif', 'tif', 'tiff', 'jxl', ...RAW_PREVIEW_TYPES];
-export const ARCHIVE_PREVIEW_TYPES = ['zip'];
+export const DECODED_IMAGE_PREVIEW_TYPES = [
+  'heic',
+  'heif',
+  'tif',
+  'tiff',
+  'jxl',
+  'jp2',
+  'ppm',
+  'tga',
+  ...RAW_PREVIEW_TYPES,
+];
+export const ARCHIVE_PREVIEW_TYPES = ['zip', 'rar', '7z', 'tar', 'gz', 'tgz'];
 export const DOCUMENT_DATA_PREVIEW_TYPES = ['rtf', 'ods'];
+export const OPEN_DOCUMENT_PREVIEW_TYPES = ['odt', 'odp'];
+export const NOTEBOOK_PREVIEW_TYPES = ['ipynb'];
+export const OFFICE_VARIANT_PREVIEW_TYPES = Object.keys(OFFICE_VARIANTS);
+export const EMAIL_PREVIEW_TYPES = ['eml', 'msg'];
 export const EBOOK_PREVIEW_TYPES = ['epub'];
 export const DATABASE_PREVIEW_TYPES = ['sqlite', 'sqlite3', 'db'];
 export const VIDEO_PREVIEW_TYPES = ['video', 'mp4', 'webm', 'mov', 'm4v', 'ogv', 'avi', 'mkv'];
@@ -73,6 +89,7 @@ export const TEXT_PREVIEW_TYPES = ['txt', 'log', 'json', 'jsonl', 'ndjson', 'csv
 export const HTML_PREVIEW_TYPES = ['html', 'h5'];
 
 const TYPE_ALIASES: Record<string, string> = {
+  'png.alpha': 'png',
   jpeg: 'jpg',
   jfif: 'jpg',
   jpe: 'jpg',
@@ -95,6 +112,10 @@ export const PREVIEWABLE_TYPES = [
   ...DECODED_IMAGE_PREVIEW_TYPES,
   ...ARCHIVE_PREVIEW_TYPES,
   ...DOCUMENT_DATA_PREVIEW_TYPES,
+  ...OPEN_DOCUMENT_PREVIEW_TYPES,
+  ...NOTEBOOK_PREVIEW_TYPES,
+  ...OFFICE_VARIANT_PREVIEW_TYPES,
+  ...EMAIL_PREVIEW_TYPES,
   ...EBOOK_PREVIEW_TYPES,
   ...DATABASE_PREVIEW_TYPES,
   ...VIDEO_PREVIEW_TYPES,
@@ -115,6 +136,9 @@ export const PREVIEW_MIME_TYPES: Record<string, string> = {
   h5: 'text/html',
   jpg: 'image/jpeg',
   png: 'image/png',
+  jp2: 'image/jp2',
+  ppm: 'image/x-portable-pixmap',
+  tga: 'image/x-tga',
   gif: 'image/gif',
   bmp: 'image/bmp',
   webp: 'image/webp',
@@ -144,6 +168,11 @@ export const PREVIEW_MIME_TYPES: Record<string, string> = {
   doc: 'application/msword',
   ppt: 'application/vnd.ms-powerpoint',
   zip: 'application/zip',
+  tar: 'application/x-tar',
+  gz: 'application/gzip',
+  tgz: 'application/gzip',
+  rar: 'application/vnd.rar',
+  '7z': 'application/x-7z-compressed',
   tif: 'image/tiff',
   tiff: 'image/tiff',
   heic: 'image/heic',
@@ -151,6 +180,18 @@ export const PREVIEW_MIME_TYPES: Record<string, string> = {
   jxl: 'image/jxl',
   rtf: 'application/rtf',
   ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  odt: 'application/vnd.oasis.opendocument.text',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+  ipynb: 'application/x-ipynb+json',
+  eml: 'message/rfc822',
+  msg: 'application/vnd.ms-outlook',
+  docm: 'application/vnd.ms-word.document.macroEnabled.12',
+  dotx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
+  xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  xltx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
+  pptm: 'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
+  ppsx: 'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+  potx: 'application/vnd.openxmlformats-officedocument.presentationml.template',
   epub: 'application/epub+zip',
   sqlite: 'application/vnd.sqlite3',
   sqlite3: 'application/vnd.sqlite3',
@@ -173,10 +214,13 @@ export const PREVIEW_MIME_TYPES: Record<string, string> = {
 
 export function getPreviewExtension(name: string): string {
   const fileName = name.split(/[\\/]/).pop() || '';
+  // 部分图片样本生成器把透明 PNG 写成 .png.alpha，只匹配这个完整复合后缀。
+  if (/\.png\.alpha$/i.test(fileName)) return 'png';
+  if (/\.tar\.gz$/i.test(fileName)) return 'tgz';
   return fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() || '' : '';
 }
 
-const normalizeType = (type: string) => TYPE_ALIASES[type] || type;
+const normalizeType = (type: string) => (type === 'tar.gz' ? 'tgz' : TYPE_ALIASES[type] || type);
 
 /** 兼容扩展名、MIME 和 image/audio/video 分类；具体扩展名决定渲染分支及 Blob MIME。 */
 export function resolvePreviewType(type?: string, title?: string, mimeType?: string): string {
@@ -185,12 +229,19 @@ export function resolvePreviewType(type?: string, title?: string, mimeType?: str
   const rawMime = (mimeType || value).toLowerCase().split(';')[0];
   const mimeAliases: Record<string, string> = {
     'text/rtf': 'application/rtf',
+    'application/x-rar-compressed': 'application/vnd.rar',
+    'application/x-rar': 'application/vnd.rar',
+    'application/x-gzip': 'application/gzip',
+    'application/x-compressed-tar': 'application/gzip',
     'application/x-sqlite3': 'application/vnd.sqlite3',
   };
   const mime = mimeAliases[rawMime] || rawMime;
-  const mimeExtension = Object.keys(PREVIEW_MIME_TYPES).find((ext) => PREVIEW_MIME_TYPES[ext] === mime);
+  const mimeExtension = Object.keys(PREVIEW_MIME_TYPES).find((ext) => PREVIEW_MIME_TYPES[ext].toLowerCase() === mime);
+  if (value === 'gz' && extension === 'tgz') return 'tgz';
+  if (value === 'alpha' && extension === 'png') return 'png';
   if (['image', 'audio', 'video', 'file', ''].includes(value) || value.includes('/')) {
     if (PREVIEWABLE_TYPES.includes(extension)) return extension;
+    if (rawMime === 'application/x-compressed-tar') return 'tgz';
     return mimeExtension || extension || value || 'txt';
   }
   return normalizeType(value);

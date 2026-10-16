@@ -105,6 +105,12 @@ export default defineConfig({
       .test(/@colorhythm[\\/]libraw-wasm[\\/]dist[\\/]libraw\.mjs$/)
       .set('resolve', { alias: { module: false, fs: false, path: false, url: false } });
 
+    // libarchive 的同一发布包包含 Node 分支，浏览器 Worker 仅通过同源 fetch 加载 WASM。
+    config.module
+      .rule('archive-wasm-browser')
+      .test(/libarchive-wasm[\\/]dist[\\/]libarchive\.js$/)
+      .set('resolve', { alias: { fs: false, path: false, crypto: false } });
+
     // 配置 splitChunks，将 slate 和 katex 打包到同一个文件
     config.optimization.splitChunks.merge({
       cacheGroups: umiConfig.cacheGroups,

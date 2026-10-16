@@ -44,9 +44,9 @@ export function paintDecodedImage(canvas: HTMLCanvasElement, page: DecodedImageP
   oriented.width = oriented.height = 0;
 }
 
-const errorMessage = (error: unknown, raw = false) => {
+const errorMessage = (error: unknown, raw = false, jp2 = false) => {
   if (error instanceof BinaryPreviewError && error.code === 'limit')
-    return raw ? 'fileRender.rawLimit' : 'fileRender.imageLimit';
+    return raw ? 'fileRender.rawLimit' : jp2 ? 'fileRender.jp2Limit' : 'fileRender.imageLimit';
   if (error instanceof BinaryPreviewError && error.code === 'timeout') return 'fileRender.binaryTimeout';
   return 'fileRender.imageDecodeFailed';
 };
@@ -80,7 +80,7 @@ export default function DecodedImage({ data, type, title }: { data?: string | Bl
       const count = await client.request('openImage', { buffer, type }, [buffer]);
       if (active) setSession({ client, count });
     })().catch((error) => {
-      if (active) setErrorId(errorMessage(error, raw));
+      if (active) setErrorId(errorMessage(error, raw, type === 'jp2'));
       client?.dispose();
     });
     return () => {
@@ -102,12 +102,12 @@ export default function DecodedImage({ data, type, title }: { data?: string | Bl
         if (active) setPixels(result);
       })
       .catch((error) => {
-        if (active) setErrorId(errorMessage(error, raw));
+        if (active) setErrorId(errorMessage(error, raw, type === 'jp2'));
       });
     return () => {
       active = false;
     };
-  }, [session, page, raw]);
+  }, [session, page, raw, type]);
 
   useEffect(() => {
     if (!pixels || !canvas.current) return;
@@ -152,6 +152,7 @@ export default function DecodedImage({ data, type, title }: { data?: string | Bl
         </Button>
       </Space>
       {type === 'jxl' && !errorId && <Alert showIcon type="info" message={label('staticPhotoNotice')} />}
+      {type === 'jp2' && !errorId && <Alert showIcon type="info" message={label('jp2Notice')} />}
       {raw && !errorId && <Alert showIcon type="info" message={label('rawNotice')} />}
       {errorId ? (
         <Alert showIcon type="warning" message={intl.formatMessage({ id: errorId })} />

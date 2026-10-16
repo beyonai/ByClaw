@@ -2,6 +2,29 @@ import { getFileIconType } from './icon';
 
 describe('photo file icons', () => {
   it.each([
+    ['docm', 'Word'],
+    ['dotx', 'Word'],
+    ['xlsm', 'Excel'],
+    ['xltx', 'Excel'],
+    ['pptm', 'PPT'],
+    ['ppsx', 'PPT'],
+    ['potx', 'PPT'],
+    ['eml', 'jishiben'],
+    ['msg', 'jishiben'],
+    ['rar', 'a-Data-fileshujuwenjian'],
+    ['7z', 'a-Data-fileshujuwenjian'],
+    ['jp2', 'Image'],
+    ['ppm', 'Image'],
+    ['tga', 'Image'],
+    ['png.alpha', 'Image'],
+    ['tar', 'a-Data-fileshujuwenjian'],
+    ['gz', 'a-Data-fileshujuwenjian'],
+    ['tgz', 'a-Data-fileshujuwenjian'],
+    ['tar.gz', 'a-Data-fileshujuwenjian'],
+  ])('recognizes %s document icons', (type, icon) => {
+    expect(getFileIconType(`file.${type.toUpperCase()}`)).toBe(icon);
+  });
+  it.each([
     'jpg',
     'jpeg',
     'jfif',
@@ -47,5 +70,8 @@ describe('photo file icons', () => {
     expect(getFileIconType('数据.DB')).toBe('sql1');
     expect(getFileIconType('正文.RTF')).toBe('Word');
     expect(getFileIconType('数据.ODS')).toBe('Excel');
+    expect(getFileIconType('文档.ODT')).toBe('Word');
+    expect(getFileIconType('演示.ODP')).toBe('PPT');
+    expect(getFileIconType('分析.IPYNB')).toBe('a-Codedaima');
   });
 });

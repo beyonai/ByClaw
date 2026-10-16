@@ -49,6 +49,9 @@ importers:
       '@jsquash/jxl':
         specifier: 1.3.0
         version: 1.3.0
+      '@kenjiuno/msgreader':
+        specifier: 1.29.0
+        version: 1.29.0
       '@tanstack/react-query':
         specifier: 4.43.0
         version: 4.43.0(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
@@ -115,6 +118,9 @@ importers:
       jest-environment-jsdom:
         specifier: '29'
         version: 29.7.0(canvas@2.11.2(encoding@0.1.13))
+      jpeg2000:
+        specifier: 1.1.1
+        version: 1.1.1
       js-cookie:
         specifier: 3.0.7
         version: 3.0.7
@@ -127,6 +133,9 @@ importers:
       katex:
         specifier: 0.16.44
         version: 0.16.44
+      libarchive-wasm:
+        specifier: 1.2.0
+        version: 1.2.0
       libheif-js:
         specifier: 1.23.5
         version: 1.23.5
@@ -148,6 +157,9 @@ importers:
       pinyin:
         specifier: 4.0.0
         version: 4.0.0
+      postal-mime:
+        specifier: 3.0.1
+        version: 3.0.1
       postcss-less:
         specifier: 6.0.0
         version: 6.0.0(postcss@8.5.8)
@@ -1905,6 +1917,13 @@ packages:
 
   '@juggle/resize-observer@3.4.0':
     resolution: {integrity: sha512-dfLbk+PwWvFzSxwk3n5ySL0hfBog779o8h68wK/7/APo/7cgyWp5jcXockbxdk5kFRkbeXWm4Fbi9FrdN381sA==}
+
+  '@kenjiuno/decompressrtf@0.1.4':
+    resolution: {integrity: sha512-v9c/iFz17jRWyd2cRnrvJg4VOg/4I/VCk+bG8JnoX2gJ9sAesPzo3uTqcmlVXdpasTI8hChpBVw00pghKe3qTQ==}
+
+  '@kenjiuno/msgreader@1.29.0':
+    resolution: {integrity: sha512-03kBR44FIO965Z2s/KpY7y6daBu+GOpK10/AmVEZ4e/iZqSdOfSTI8cfk+DJnO/iTVncUF2Y8j2l1pwJ7ZvEFA==}
+    engines: {node: '>= 10'}
 
   '@keyv/bigmap@1.3.1':
     resolution: {integrity: sha512-WbzE9sdmQtKy8vrNPa9BRnwZh5UF4s1KTmSK0KUVLo3eff5BlQNNWDnFOouNpKfPKDnms9xynJjsMYjMaT/aFQ==}
@@ -5673,6 +5692,9 @@ packages:
       node-notifier:
         optional: true
 
+  jpeg2000@1.1.1:
+    resolution: {integrity: sha512-keyTI3PY83W4AoeAw8aNJp7LUaU+OcZAga7QiUZPF+LtSY721kuIMNBkJmEXem6v7+lR8I85tcJTGEz8dHNIyQ==}
+
   js-cookie@3.0.7:
     resolution: {integrity: sha512-z/wZZgDrkNV1eA0ULjM/F9/50Ya8fbzgKneSpoPsXSGd0KnpdtHfOZWK+GcwLk+EZbS4F9RBhU+K2RgzuDaItw==}
     engines: {node: '>=20'}
@@ -5822,6 +5844,9 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libarchive-wasm@1.2.0:
+    resolution: {integrity: sha512-aunFn8oL9VwGRj+brRvdOv8BRUD4Ea1WxJW45IdiuXE2Vp/m/X+M1UxSU+yPzXfc1mPPC8AARaflg/CtF11u8g==}
 
   libheif-js@1.23.5:
     resolution: {integrity: sha512-umXZPthnWZtF3iG/5mQG+AZ2V6i0UeYpo3z2CkggTEgL8dKmIIwJT6TDuAMuabXa1yTW8uJ1ZAgR+CxNTklYYw==}
@@ -6733,6 +6758,9 @@ packages:
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
     engines: {node: '>= 0.4'}
+
+  postal-mime@3.0.1:
+    resolution: {integrity: sha512-N86EnYOxZjW1uHQIgSXnnRdnJz+wxmtDsnk3C4R/9rQ1utj8A2znauXZ3Q3+stCHxG5ckY4/NrO09WiPU6rcdQ==}
 
   postcss-attribute-case-insensitive@5.0.2:
     resolution: {integrity: sha512-XIidXV8fDr0kKt28vqki84fRK8VW8eTuIa4PChv2MqKuT6C9UjmSKzen6KaWhWEoYvwxFCa7n/tC1SZ3tyq4SQ==}
@@ -11207,6 +11235,13 @@ snapshots:
       wasm-feature-detect: 1.9.0
 
   '@juggle/resize-observer@3.4.0': {}
+
+  '@kenjiuno/decompressrtf@0.1.4': {}
+
+  '@kenjiuno/msgreader@1.29.0':
+    dependencies:
+      '@kenjiuno/decompressrtf': 0.1.4
+      iconv-lite: 0.6.3
 
   '@keyv/bigmap@1.3.1(keyv@5.6.0)':
     dependencies:
@@ -16247,6 +16282,8 @@ snapshots:
       - supports-color
       - ts-node
 
+  jpeg2000@1.1.1: {}
+
   js-cookie@3.0.7: {}
 
   js-sdsl@4.4.2: {}
@@ -16423,6 +16460,8 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libarchive-wasm@1.2.0: {}
 
   libheif-js@1.23.5: {}
 
@@ -17570,6 +17609,8 @@ snapshots:
   popper.js@1.16.1: {}
 
   possible-typed-array-names@1.1.0: {}
+
+  postal-mime@3.0.1: {}
 
   postcss-attribute-case-insensitive@5.0.2(postcss@8.5.8):
     dependencies:
