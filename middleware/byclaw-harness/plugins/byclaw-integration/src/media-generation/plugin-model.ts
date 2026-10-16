@@ -39,6 +39,18 @@ export interface PluginMediaModelOptions {
   projectionPath?: string
 }
 
+class UserConnectorModelError extends Error {
+  readonly source = 'user-connector'
+  readonly connectorCode: string
+
+  constructor(connectorCode: string, cause: unknown) {
+    const message = cause instanceof Error ? cause.message : 'CONNECTOR_CONFIG_INVALID'
+    super(/^[A-Z][A-Z0-9_]*(?:: [A-Za-z0-9_ -]+)?$/u.test(message) ? message : 'CONNECTOR_CONFIG_INVALID')
+    this.name = 'UserConnectorModelError'
+    this.connectorCode = connectorCode
+  }
+}
+
 /** Resolve configuration only. Provider generation and retries are not performed here. */
 export async function resolvePluginMediaModel(
   redis: MediaModelRedis,
@@ -57,13 +69,19 @@ export async function resolvePluginMediaModel(
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
       return resolveMediaModel(redis, type, options)
     }
-    throw error
+    throw new UserConnectorModelError(
+      capability === 'IMAGE' ? 'image-generation-model' : 'speech-generation-model',
+      error,
+    )
   }
 
   const protocol = projected.modelProtocol.trim().toUpperCase()
   const protocols = capability === 'IMAGE' ? IMAGE_PROTOCOL_PROVIDERS : TTS_PROTOCOL_PROVIDERS
   const provider = Object.hasOwn(protocols, protocol) ? protocols[protocol] : undefined
-  if (provider === undefined) throw new Error('MEDIA_ADAPTER_NOT_FOUND')
+  if (provider === undefined) throw new UserConnectorModelError(
+    projected.connectorCode ?? (capability === 'IMAGE' ? 'image-generation-model' : 'speech-generation-model'),
+    new Error('MEDIA_ADAPTER_NOT_FOUND'),
+  )
   const modelOptions = { ...projected.options }
   if (capability === 'TTS' && modelOptions['voice'] === undefined && modelOptions['speaker'] === undefined
       && modelOptions['defaultVoice'] !== undefined) {
@@ -82,6 +100,8 @@ export async function resolvePluginMediaModel(
   }
   return {
     id: `${projected.connectorCode ?? capability}:${projected.revision}`,
+    source: 'user-connector',
+    connectorCode: projected.connectorCode,
     provider,
     protocol,
     model: projected.modelCode,

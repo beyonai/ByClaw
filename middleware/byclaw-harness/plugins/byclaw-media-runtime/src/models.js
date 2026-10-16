@@ -38,7 +38,7 @@ export async function resolveMediaModel(redis, type, { decrypt = value => value,
   } else for (const [key, value] of Object.entries(object(configuredHeaders))) if (typeof value === 'string') headers[key] = decrypt(value)
   const seconds = Number(params.readTimeoutSec ?? 180)
   return {
-    id: String(raw.instanceId ?? modelId ?? ''), provider, protocol, model, endpoint,
+    id: String(raw.instanceId ?? modelId ?? ''), source: 'system-default', provider, protocol, model, endpoint,
     apiKey: decrypt(String(raw.authToken ?? '')), headers,
     options: object(params.extendParam ?? {}), timeoutMs: Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, 600000) : 180000,
   }

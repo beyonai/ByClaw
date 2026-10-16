@@ -52,3 +52,74 @@ test('speech tool treats null and blank voices as unspecified', async () => {
     await assert.rejects(tool.execute({ text: 'hello', voice: 42 }), /MEDIA_INVALID_ARGUMENT: voice/)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+async function mountedTool(kind, { resolveMediaModel, generate }) {
+  const root = await mkdtemp(join(tmpdir(), `media-tools-${kind}-`))
+  let setup, tool
+  const ctx = { on: (_name, handler) => { setup = handler }, effect: fn => fn() }
+  const agentCtx = { tools: { register: value => { tool = value; return () => {} } }, effect: fn => fn() }
+  const host = { userCode: 'test', resolveSessionRoot: () => root, resolveMediaModel }
+  mountMediaPlugin(ctx, { kind, generate })
+  await setup({ agentCtx, host, agent: { id: 'a1' }, command: { header: { userCode: 'test' } } })
+  return { root, tool }
+}
+
+for (const [kind, modelError, connectorCode, connectorName, args] of [
+  ['tts', 'MEDIA_MODEL_NOT_CONFIGURED: TTS', 'speech-generation-model', '语音模型', { text: '你好' }],
+  ['image', 'MEDIA_MODEL_INCOMPLETE', 'image-generation-model', '文生图模型', { prompt: '一只猫' }],
+]) test(`${kind} asks the user to configure a connector when the system model cannot be resolved`, async () => {
+  const mounted = await mountedTool(kind, {
+    resolveMediaModel: async () => { throw new Error(modelError) },
+    generate: async () => { throw new Error('must not generate') },
+  })
+  try {
+    await assert.rejects(mounted.tool.execute(args), error => error.code === 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED'
+      && error.connectorCode === connectorCode
+      && error.source === 'system-default'
+      && error.configurationRequired === true
+      && error.message.includes(connectorName)
+      && error.message.includes('配置并启用个人连接器'))
+  } finally { await rm(mounted.root, { recursive: true, force: true }) }
+})
+
+for (const [kind, generationError, connectorCode, connectorName, args] of [
+  ['tts', Object.assign(new Error('VOICE_NOT_AVAILABLE'), { code: 'TTS_VOICE_NOT_AVAILABLE' }), 'speech-generation-model', '语音模型', { text: '你好' }],
+  ['image', new Error('IMAGE_MODEL_CONFIG_REQUIRED'), 'image-generation-model', '文生图模型', { prompt: '一只猫' }],
+]) test(`${kind} asks the user to repair an active connector when its configuration fails`, async () => {
+  const mounted = await mountedTool(kind, {
+    resolveMediaModel: async () => ({ id: 'connector:1', source: 'user-connector', connectorCode, provider: 'TEST', model: 'test', timeoutMs: 1000 }),
+    generate: async () => { throw generationError },
+  })
+  try {
+    await assert.rejects(mounted.tool.execute(args), error => error.code === 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED'
+      && error.connectorCode === connectorCode
+      && error.source === 'user-connector'
+      && error.message.includes(connectorName)
+      && error.message.includes('检查并重新保存'))
+  } finally { await rm(mounted.root, { recursive: true, force: true }) }
+})
+
+test('input errors do not incorrectly ask the user to change a connector', async () => {
+  const mounted = await mountedTool('image', {
+    resolveMediaModel: async () => ({ id: 'system:1', source: 'system-default', provider: 'TEST', model: 'test', timeoutMs: 1000 }),
+    generate: async () => { throw new Error('IMAGE_INVALID_SIZE') },
+  })
+  try {
+    await assert.rejects(mounted.tool.execute({ prompt: '一只猫' }), error => error.message === 'IMAGE_INVALID_SIZE'
+      && error.code !== 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED')
+  } finally { await rm(mounted.root, { recursive: true, force: true }) }
+})
+
+test('a resolved but unusable system model asks the user to configure a personal connector', async () => {
+  const mounted = await mountedTool('tts', {
+    resolveMediaModel: async () => ({ id: 'system:1', source: 'system-default', provider: 'VOLCENGINE', model: 'test', timeoutMs: 1000 }),
+    generate: async () => { throw Object.assign(new Error('Volcengine speech generation failed'), { code: 'TTS_ERROR' }) },
+  })
+  try {
+    await assert.rejects(mounted.tool.execute({ text: '你好' }), error => error.code === 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED'
+      && error.source === 'system-default'
+      && error.connectorCode === 'speech-generation-model'
+      && error.reason === 'TTS_ERROR'
+      && error.message.includes('配置并启用个人连接器'))
+  } finally { await rm(mounted.root, { recursive: true, force: true }) }
+})

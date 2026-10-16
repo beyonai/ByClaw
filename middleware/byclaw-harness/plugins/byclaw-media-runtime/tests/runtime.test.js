@@ -61,6 +61,7 @@ test('model resolver uses enabled exact type defaults and decrypted credentials'
   const redis = { hget: async (key) => JSON.stringify(key.endsWith('typelist') ? [record] : record) }
   const result = await resolveMediaModel(redis, 'IMAGE_GENERATION', { decrypt: () => 'decrypted' })
   assert.equal(result.apiKey, 'decrypted'); assert.equal(result.provider, 'VOLCENGINE')
+  assert.equal(result.source, 'system-default')
   assert.equal(result.options.watermark, false); assert.equal(result.timeoutMs, 90000)
   record.status = 0
   await assert.rejects(resolveMediaModel(redis, 'IMAGE_GENERATION'), /UNAVAILABLE/)

@@ -74,7 +74,7 @@ SET auth_config =
         jsonb_set(
             jsonb_set(auth_config::jsonb,
                 '{credentialForm,fields,10,placeholder}',
-                '"{\"resourceId\":\"seed-tts-2.0\",\"defaultVoice\":\"zh_female_vv_jupiter_bigtts\",\"voices\":[{\"id\":\"zh_female_vv_jupiter_bigtts\",\"name\":\"Vivi\"}],\"format\":\"mp3\"}"'::jsonb, true),
+                '"{\"resourceId\":\"seed-tts-2.0\",\"defaultVoice\":\"zh_female_vv_uranus_bigtts\",\"voices\":[{\"id\":\"zh_female_vv_uranus_bigtts\",\"name\":\"Vivi 2.0\"},{\"id\":\"zh_male_m191_uranus_bigtts\",\"name\":\"云舟 2.0\"}],\"format\":\"mp3\"}"'::jsonb, true),
             '{credentialForm,fields,10,description}',
             '"resourceId 填写模型资源 ID；defaultVoice 是未指定音色时使用的默认值；voices 是允许用户显式选择的音色列表。voice 为空字符串、空白、null 或省略时不校验 voices，并使用默认音色。示例仅说明格式，请替换为当前账号已授权的音色 ID。"'::jsonb, true)::text,
     update_time = CURRENT_TIMESTAMP

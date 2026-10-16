@@ -1,5 +1,7 @@
 export interface MediaModel {
   id: string
+  source: 'user-connector' | 'system-default'
+  connectorCode?: 'image-generation-model' | 'speech-generation-model' | string
   provider: string
   protocol: string
   model: string

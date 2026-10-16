@@ -30,6 +30,52 @@ function validate(args, fields, required) {
   }
 }
 
+const CONNECTORS = Object.freeze({
+  image: { code: 'image-generation-model', name: '文生图模型' },
+  tts: { code: 'speech-generation-model', name: '语音模型' },
+})
+
+function safeErrorCode(error) {
+  const property = typeof error?.code === 'string' ? error.code : ''
+  if (/^(?:MEDIA|IMAGE|TTS|CONNECTOR)_[A-Z0-9_]+$/u.test(property)) return property
+  const message = error instanceof Error ? error.message : String(error)
+  return /^(?:MEDIA|IMAGE|TTS|CONNECTOR)_[A-Z0-9_]+/u.exec(message)?.[0] ?? 'MEDIA_PROVIDER_UNAVAILABLE'
+}
+
+function isInputFailure(kind, error, args) {
+  const code = safeErrorCode(error)
+  if (code === 'MEDIA_INVALID_ARGUMENT') return true
+  if (kind === 'image') return new Set([
+    'IMAGE_INVALID_PROMPT', 'IMAGE_UNKNOWN_ARGUMENT', 'IMAGE_INVALID_COUNT', 'IMAGE_INVALID_SIZE',
+    'IMAGE_INVALID_ASPECT_RATIO', 'IMAGE_CONFLICTING_SIZE', 'IMAGE_PROMPT_TOO_LONG',
+    'IMAGE_PROVIDER_BLOCKED', 'IMAGE_UNSUPPORTED_OPTION',
+  ]).has(code)
+  const message = error instanceof Error ? error.message : ''
+  return /Speech text|Invalid speech arguments|Speech text exceeds/u.test(message)
+    || (args.voice !== undefined && /Invalid speech voice/u.test(message))
+    || (args.format !== undefined && /Unsupported speech output format/u.test(message))
+    || (args.speed !== undefined && /Unsupported speech speed/u.test(message))
+}
+
+function connectorConfigurationError(kind, source, cause, connectorCode) {
+  const connector = CONNECTORS[kind]
+  const effectiveSource = source === 'user-connector' ? source : 'system-default'
+  const reason = safeErrorCode(cause)
+  const message = effectiveSource === 'user-connector'
+    ? `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: ${connector.name}连接器当前不可用。请前往“连接器配置 → ${connector.name}”检查并重新保存连接信息后重试（连接器代码：${connectorCode ?? connector.code}，原因：${reason}）。`
+    : `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: 系统默认${connector.name}当前不可用。请前往“连接器配置 → ${connector.name}”配置并启用个人连接器后重试（连接器代码：${connector.code}，原因：${reason}）。`
+  const error = new Error(message)
+  error.code = 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED'
+  error.capability = kind === 'image' ? 'IMAGE' : 'TTS'
+  error.connectorCode = connectorCode ?? connector.code
+  error.connectorName = connector.name
+  error.source = effectiveSource
+  error.reason = reason
+  error.configurationRequired = true
+  error.retryable = false
+  return error
+}
+
 /** Bind tools only to authenticated ByClaw sessions; resolve live host state on each call. */
 export function mountMediaPlugin(ctx, { kind, generate, modelId, provider, protocol }) {
   if (!['image', 'tts'].includes(kind)) throw new Error('MEDIA_INVALID_KIND')
@@ -71,12 +117,24 @@ export function mountMediaPlugin(ctx, { kind, generate, modelId, provider, proto
         if (await realpath(directory) !== directory) throw new Error('MEDIA_ARTIFACT_DIRECTORY')
         await access(directory, constants.W_OK)
         exec.signal?.throwIfAborted()
-        const resolved = await current.host.resolveMediaModel(kind === 'image' ? 'IMAGE_GENERATION' : 'TTS', modelId)
+        let resolved
+        try {
+          resolved = await current.host.resolveMediaModel(kind === 'image' ? 'IMAGE_GENERATION' : 'TTS', modelId)
+        } catch (error) {
+          throw connectorConfigurationError(kind, error?.source, error, error?.connectorCode)
+        }
         // Deployment-only compatibility overrides; never accepted from tool arguments.
         const model = { ...resolved, ...(provider ? { provider } : {}), ...(protocol ? { protocol } : {}) }
         const timeout = AbortSignal.timeout(model.timeoutMs)
         const signal = exec.signal ? AbortSignal.any([exec.signal, timeout]) : timeout
-        const assets = await generate(model, normalizedArgs, { signal })
+        let assets
+        try {
+          assets = await generate(model, normalizedArgs, { signal })
+        } catch (error) {
+          if (signal.aborted || error?.name === 'AbortError' || error?.name === 'TimeoutError'
+              || isInputFailure(kind, error, normalizedArgs)) throw error
+          throw connectorConfigurationError(kind, model.source, error, model.connectorCode)
+        }
         signal.throwIfAborted()
         const artifacts = await persistAssets(root, kind, assets)
         return { provider: model.provider, model: model.model, artifacts }

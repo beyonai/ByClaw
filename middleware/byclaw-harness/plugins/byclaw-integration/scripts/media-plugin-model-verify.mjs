@@ -46,6 +46,8 @@ try {
   const projected = await resolvePluginMediaModel(redis, 'IMAGE_GENERATION', {
     projectionPath, decrypt: () => { throw new Error('Projection credentials are already plaintext') },
   })
+  assert.equal(projected.source, 'user-connector', 'Projection must retain user connector source')
+  assert.equal(projected.connectorCode, 'image-generation-model', 'Projection must retain connector code')
   assert.equal(projected.provider, 'OPENAI')
   assert.equal(projected.protocol, 'OPENAI_IMAGE')
   assert.equal(projected.model, connector.modelCode)
@@ -106,6 +108,14 @@ try {
     await save({ ...connector, modelType: 'TTS', modelProtocol: protocol })
     assert.equal((await resolvePluginMediaModel(redis, 'TTS', { projectionPath })).provider, provider)
   }
+  await save({ ...connector, modelProtocol: 'UNKNOWN_IMAGE' })
+  await assert.rejects(
+    resolvePluginMediaModel(redis, 'IMAGE_GENERATION', { projectionPath }),
+    error => error.source === 'user-connector'
+      && error.connectorCode === 'image-generation-model'
+      && /MEDIA_ADAPTER_NOT_FOUND/u.test(error.message),
+    'An invalid projected protocol must tell the tool to repair the active connector',
+  )
   for (const [value, type, expected] of [
     ['{broken-json', 'IMAGE_GENERATION', /CONNECTOR_CONFIG_INVALID/],
     [{ ...connector, modelType: 'TTS' }, 'IMAGE_GENERATION', /CONNECTOR_MODEL_TYPE_MISMATCH/],
