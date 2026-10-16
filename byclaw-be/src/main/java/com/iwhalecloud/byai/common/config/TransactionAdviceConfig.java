@@ -129,6 +129,20 @@ public class TransactionAdviceConfig {
         NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.state.application.service.chat.ChatFileArtifactApplicationService")
+                    && "resolve".equals(method.getName())) {
+                    // A missing candidate is skipped while other owned artifacts remain usable.
+                    // Its storage failure must not poison the request or caller's transaction.
+                    return notSurpportedTx;
+                }
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService")
+                    && "openCommonFileInputStream".equals(method.getName())) {
+                    // Legacy paths may fail before the UserFS fallback succeeds. Suspend the caller's
+                    // database transaction so a recovered storage miss cannot mark a chat rollback-only.
+                    return notSurpportedTx;
+                }
                 // 目录技能同步自行提交保存事务，随后清理文件；清理失败不得被外层事务转为提交失败。
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService")) {

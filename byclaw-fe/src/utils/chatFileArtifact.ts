@@ -65,3 +65,11 @@ export function extractChatFileArtifactPaths(content?: string): string[] {
 
   return Array.from(result).slice(0, MAX_ARTIFACT_PATHS);
 }
+
+/** Convert an executor's absolute file path back to the current session's virtual UserFS path. */
+export function normalizeChatFileArtifactPath(path: string, sessionId: string): string {
+  const marker = `/by/.sessions/${sessionId}/`;
+  const index = path.indexOf(marker);
+  if (index <= 0) return path;
+  return path.slice(index);
+}

@@ -6,7 +6,7 @@ function object(value) {
 }
 
 export async function resolveMediaModel(redis, type, { decrypt = value => value, modelId } = {}) {
-  if (!['IMAGE_GENERATION', 'TTS'].includes(type)) throw new Error('MEDIA_MODEL_INVALID_TYPE')
+  if (!['IMAGE_GENERATION', 'TTS', 'ASR'].includes(type)) throw new Error('MEDIA_MODEL_INVALID_TYPE')
   let raw
   if (modelId) {
     const data = await redis.hget('byai:aimodel:config', modelId)
@@ -19,6 +19,10 @@ export async function resolveMediaModel(redis, type, { decrypt = value => value,
     const candidates = values.filter(value => String(value.modelType).toUpperCase() === type && Number(value.isDefault) === 1)
     if (candidates.length > 1) throw new Error('MEDIA_MODEL_AMBIGUOUS_DEFAULT')
     raw = candidates[0]
+    if (type === 'ASR' && raw?.instanceId) {
+      const config = await redis.hget('byai:aimodel:config', String(raw.instanceId))
+      if (config) raw = { ...raw, ...object(config) }
+    }
   }
   if (!raw) throw new Error(`MEDIA_MODEL_NOT_CONFIGURED: ${type}`)
   if (String(raw.modelType).toUpperCase() !== type || Number(raw.status) !== 1) throw new Error(`MEDIA_MODEL_UNAVAILABLE: ${type}`)

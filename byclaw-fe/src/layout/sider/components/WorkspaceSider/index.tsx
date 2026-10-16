@@ -30,6 +30,7 @@ import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSes
 import WorkspaceSiderHeader from './WorkspaceSiderHeader';
 import WorkspaceProjectActions from './WorkspaceProjectActions';
 import WorkspaceSessionActions from './WorkspaceSessionActions';
+import WorkspaceSessionTitle from './WorkspaceSessionTitle';
 import WorkspaceUserBar from './WorkspaceUserBar';
 import styles from './index.module.less';
 import {
@@ -792,7 +793,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           >
             <button type="button" className={styles.sessionItem} onClick={() => handleOpenSession(project, session)}>
               <span className={styles.sessionName}>
-                {session.sessionName || intl.formatMessage({ id: 'workspaceSider.newSession' })}
+                <WorkspaceSessionTitle
+                  title={session.sessionName}
+                  fallback={intl.formatMessage({ id: 'workspaceSider.newSession' })}
+                  voiceLabel={intl.formatMessage({ id: 'workspaceSider.voiceMessage' })}
+                />
               </span>
               <span className={styles.sessionTime}>
                 {chatSessionRuntimeManager.isSessionWaitingForUserInput(`${session.sessionId}`) ? (

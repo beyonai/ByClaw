@@ -87,3 +87,5 @@ Checked 2026-10-15:
 - [Volcengine HTTP speech](https://docs.volcengine.com/docs/DoubaoVoice/unidirectional-streaming-text-to-speech-http?lang=zh)
 - [Volcengine HTTP/SSE framing and terminal status](https://www.volcengine.com/docs/6561/1598757)
 - [Volcengine legacy authentication](https://docs.volcengine.com/docs/DoubaoVoice/old-version-console-authentication-reference-example?lang=zh)
+
+Model-management debugging is available to the authenticated backend proxy at `POST /api/byclaw/tts/debug`: `{ debug: true, text, model? }`. The route validates the current user's Redis login token and uses the explicit saved/debug model, or the configured default TTS model when omitted. It returns bounded MP3 `{ audioBase64, mimeType, provider, model }` to the BE; the BE reports only diagnostic fields to the model-management UI. This debug call does not create a conversation artifact. Voice conversation summaries continue to save audio in `session_root/tts/`.

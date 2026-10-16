@@ -22,6 +22,8 @@ jest.mock('@/service/common/request', () => ({
 
 import {
   debugModelImageGeneration,
+  debugModelAsr,
+  debugModelTts,
   debugPersonalModelStream,
   debugModelStream,
   deleteModel,
@@ -369,5 +371,21 @@ describe('manager/service/ModelMgr', () => {
         success: true,
       },
     });
+  });
+});
+
+describe('speech model debugging', () => {
+  it.each([
+    [debugModelAsr, 'debugModelAsr', { fileId: '123', sessionId: '88' }],
+    [debugModelTts, 'debugModelTts', { text: '你好' }],
+  ])('sends speech input to its own backend endpoint', async (service, endpoint, input) => {
+    mockPOST.mockClear();
+    const signal = new AbortController().signal;
+    await service({ id: '42', input: JSON.stringify(input), signal });
+    expect(mockPOST).toHaveBeenCalledWith(
+      `/byaiService/new/model/${endpoint}`,
+      { ...input, id: '42' },
+      expect.objectContaining({ timeout: 185000, cancelToken: { signal } })
+    );
   });
 });

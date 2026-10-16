@@ -649,4 +649,8 @@ export default {
   'modelMgr.modal.imageWatermark': '添加水印',
   'modelMgr.modal.seedreamModelPlaceholder': '选择 Seedream 型号或填写模型 / 接入点 ID',
   'modelMgr.modal.generatedImage': '生成图片 {index}',
+  'modelMgr.modal.modelTypeASR': '语音识别（ASR）',
+  'modelMgr.typeName.ASR': '语音识别',
+  'employeeDetail.imageModelGlobalDefault': '使用全局默认模型',
+  'employeeDetail.ttsModelGlobalDefault': '使用全局默认模型',
 };

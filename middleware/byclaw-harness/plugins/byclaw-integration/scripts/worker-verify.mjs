@@ -231,11 +231,11 @@ const resolvedTurn = scopedRuntime.activeTurnFor({ id: 'member', header: { paren
 if (resolvedTurn !== activeTurnMarker) {
   throw new Error('ByClaw session runtime did not resolve nested delegated sessions through the root session store')
 }
-agentStatusListener({ agent: { id: 'root', session: { id: 'root', header: {} } }, status: 'running' })
+agentStatusListener({ agent: { id: 'root', ctx: { on() { return () => undefined } }, session: { id: 'root', header: {} } }, status: 'running' })
 await activeTurnMarker.forwarding
-agentStatusListener({ agent: { id: 'member', session: { id: 'member', header: { parentSession: 'leader' } } }, status: 'running' })
+agentStatusListener({ agent: { id: 'member', ctx: { on() { return () => undefined } }, session: { id: 'member', header: { parentSession: 'leader' } } }, status: 'running' })
 await activeTurnMarker.forwarding
-agentStatusListener({ agent: { id: 'root', session: { id: 'root', header: {} } }, status: 'idle' })
+agentStatusListener({ agent: { id: 'root', ctx: { on() { return () => undefined } }, session: { id: 'root', header: {} } }, status: 'idle' })
 await activeTurnMarker.forwarding
 assert.equal(runtimeEvents.length, 3)
 assert.equal(runtimeEvents[2][2].metadata.event_kind, 'session.runtime')
@@ -247,7 +247,7 @@ assert.deepEqual(scopedRuntime.sandboxBusySnapshot(), {
   activeAgentCount: 1,
   activeChildCount: 1,
 }, 'an idle parent runtime must retain sandbox activity while its child is running')
-agentStatusListener({ agent: { id: 'member', session: { id: 'member', header: { parentSession: 'leader' } } }, status: 'idle' })
+agentStatusListener({ agent: { id: 'member', ctx: { on() { return () => undefined } }, session: { id: 'member', header: { parentSession: 'leader' } } }, status: 'idle' })
 assert.deepEqual(scopedRuntime.sandboxBusySnapshot(), {
   busy: false,
   activeAgentCount: 0,

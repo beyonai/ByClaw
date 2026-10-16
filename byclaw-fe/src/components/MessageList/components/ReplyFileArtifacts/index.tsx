@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
+import VoiceMessage from '../VoiceMessage';
 import FileRender from '@/components/MessageList/components/FileRender';
 import { createRelativePathResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
 import getDisplayAnswer from '@/components/QueryInput/getDisplayAnswer';
 import { ChatFileArtifact, downloadChatFileArtifact, resolveChatFileArtifacts } from '@/service/chatFileArtifact';
+import { transcribeVoice } from '@/service/voice';
 import { IMessageState } from '@/constants/message';
 import type { IFile } from '@/typescript/file';
 import type { IMessage } from '@/typescript/message';
-import { extractChatFileArtifactPaths } from '@/utils/chatFileArtifact';
+import { extractChatFileArtifactPaths, normalizeChatFileArtifactPath } from '@/utils/chatFileArtifact';
 
 const resolveCache = new Map<string, Promise<ChatFileArtifact[]>>();
 
@@ -55,11 +57,15 @@ function ReplyFileArtifacts({
 }) {
   const [artifacts, setArtifacts] = useState<ChatFileArtifact[]>([]);
   const answerText = useMemo(
-    () => [message.text, getDisplayAnswer(message.messageList)].filter(Boolean).join('\n'),
-    [message.messageList, message.text, message.updateKey]
+    () => [message.text, message.finalContent, getDisplayAnswer(message.messageList)].filter(Boolean).join('\n'),
+    [message.finalContent, message.messageList, message.text, message.updateKey]
   );
-  const paths = useMemo(() => extractChatFileArtifactPaths(answerText), [answerText]);
   const resolvedSessionId = message.sessionId || sessionId;
+  const paths = useMemo(() => {
+    const extracted = extractChatFileArtifactPaths(answerText);
+    if (!resolvedSessionId) return extracted;
+    return Array.from(new Set(extracted.map((path) => normalizeChatFileArtifactPath(path, resolvedSessionId))));
+  }, [answerText, resolvedSessionId]);
   const canResolve =
     message.fromBeyond && message.messageState === IMessageState.Done && Boolean(resolvedSessionId) && paths.length > 0;
 
@@ -114,18 +120,44 @@ function ReplyFileArtifacts({
   }, [artifacts, message, resolvedSessionId]);
 
   if (!files.length) return null;
+  const audioFiles = files.filter((file) => /\.(mp3|wav|m4a|ogg)$/i.test(file.queryFile?.fileName || ''));
+  const regularFiles = files.filter((file) => !audioFiles.includes(file));
 
   return (
-    <div className="ub ub-wrap full-width gap8">
-      {files.map((fileItem) => (
-        <FileRender
-          fileItem={fileItem}
-          key={fileItem.uid}
-          message={message}
-          previewInDetailPanel={previewInDetailPanel}
-        />
-      ))}
-    </div>
+    <>
+      {regularFiles.length > 0 && (
+        <div className="ub ub-wrap full-width gap8" data-testid="reply-artifact-files">
+          {regularFiles.map((fileItem) => (
+            <FileRender
+              fileItem={fileItem}
+              key={fileItem.uid}
+              message={message}
+              previewInDetailPanel={previewInDetailPanel}
+            />
+          ))}
+        </div>
+      )}
+      {audioFiles.length > 0 && (
+        <div className="ub ub-ver full-width gap8" data-testid="speech-summary-footer">
+          {audioFiles.map((fileItem) => (
+            <VoiceMessage
+              key={fileItem.uid}
+              voice={{
+                fileName: fileItem.queryFile?.fileName || 'summary.mp3',
+                durationMs: 0,
+                mimeType: fileItem.queryFile?.contentType || 'audio/mpeg',
+              }}
+              label="语音摘要"
+              variant="assistant"
+              loadAudio={async () => (await fileItem.downloadRequest!()).file}
+              transcribeAudio={() =>
+                transcribeVoice({ sessionId: resolvedSessionId!, path: fileItem.queryFile!.filePath! })
+              }
+            />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

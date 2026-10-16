@@ -123,6 +123,7 @@ export type ICollectInfo = {
 }
 
 export type IMessage = {
+  voice?: import('@/utils/voice').VoiceMessage;
   traceId?: string;
   streamId?: string;
   snapshotStreamId?: string;

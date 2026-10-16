@@ -161,6 +161,14 @@ public class MemoryMessageService {
         MessageResourceDto messageResourceDto = new MessageResourceDto();
         // 用户输入的记录用户输入的文件和扩展参数
         if (USER_INPUT.getCode().equals(usage)) {
+            if (assistantChatDto.getExtParams() != null
+                && assistantChatDto.getExtParams().get("voice") instanceof Map<?, ?> voice) {
+                JSONObject metadata = StringUtils.isBlank(byaiMessageHotDto.getMetadata())
+                    ? new JSONObject() : JSON.parseObject(byaiMessageHotDto.getMetadata());
+                metadata.put("voice", voice);
+                metadata.put("messageType", "VOICE");
+                byaiMessageHotDto.setMetadata(metadata.toJSONString());
+            }
             messageResourceDto.setFiles(messageStruct.getUploadFiles());
             messageResourceDto.setExtParams(assistantChatDto.getExtParams());
             messageResourceDto.setResourceList(assistantChatDto.getResourceList());

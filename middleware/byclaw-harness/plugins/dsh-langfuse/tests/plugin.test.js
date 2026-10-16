@@ -57,8 +57,8 @@ test('exports completion start time from the first visible model chunk', () => {
 
 test('isolates turns and parents local child observations', () => {
   const { state, telemetry } = setup(); const parent = agent('parent'); const child = agent('child', 'parent')
-  state.claim({ agent: parent, turn: 1, message: { id: 'p1', source: { kind: 'user' }, content: [] } }); state.startSubagent({ runId: 'child-run', id: 'child', provider: 'spawn' }, parent); state.claim({ agent: child, turn: 1, message: { id: 'c1', source: { kind: 'user' }, content: [] } })
-  assert.equal(telemetry.spans[1].parent.spanId, telemetry.spans[0].spanContext().spanId); assert.equal(telemetry.spans[2].parent.spanId, telemetry.spans[1].spanContext().spanId)
+  state.claim({ agent: parent, turn: 1, message: { id: 'p1', source: { kind: 'user' }, content: [] } }); state.startSubagent({ runId: 'child-run', id: 'child', provider: 'spawn' }, { agents: { get: id => id === child.id ? child : undefined } }); state.claim({ agent: child, turn: 1, message: { id: 'c1', source: { kind: 'user' }, content: [] } })
+  assert.equal(telemetry.spans[1].parent.spanId, telemetry.spans[0].spanContext().spanId); assert.equal(telemetry.spans[2].parent.spanId, telemetry.spans[0].spanContext().spanId)
   state.endSubagent({ runId: 'child-run', stopReason: 'completed' }); state.claim({ agent: parent, turn: 2, message: { id: 'p2', source: { kind: 'user' }, content: [] } }); assert.notEqual(state.runs.get('parent:1').span.spanContext().traceId, state.runs.get('parent:2').span.spanContext().traceId)
 })
 

@@ -4,6 +4,7 @@ import { getModelState } from '@/utils';
 import { answerDeltaHandler, reasoningLogHandler } from '@/hooks/useSseSender/util';
 import { substanceHandler } from '@/hooks/useChat/util';
 import { supportsInPlaceUpdate, updateExistingMessage } from '@/utils/messageItemUpdate';
+import { getVoiceMessage } from '@/utils/voice';
 import { getFinalContent } from '@/utils/finalAnswer';
 
 import { IMessage, IMessageListItem } from '@/typescript/message';
@@ -74,7 +75,7 @@ export const initQueryMessage = (param: Partial<IMessage>): IMessage => {
     text: get(param, 'text', ''),
     fromBeyond: false,
     messageState: IMessageState.Done,
-    ...pick(param, ['msgId', 'messageId', 'agentType', 'agentId', 'sessionId', 'createTime']),
+    ...pick(param, ['msgId', 'messageId', 'agentType', 'agentId', 'sessionId', 'createTime', 'voice', 'metadata']),
   });
 };
 
@@ -375,6 +376,8 @@ export const fetchMessageHandler = (item: any) => {
       text: messageContent,
     });
   }
+
+  myMessage.voice = getVoiceMessage(myMessage);
 
   return myMessage;
 };

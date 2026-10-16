@@ -740,3 +740,68 @@ HACU 工作组列表合并租户 Node 中的新工作组与平台旧库中属于
 点击任务卡片后，前端通过运行状态和快照恢复上下文，再按子会话及 trace 接收增量；
 最终历史由租户 Node 提交。排查空白页面时应先检查 WS 是否收到该子会话的
 `initialization`、`answerDelta`，以及后端是否有“租户子会话投影失败”。
+
+### Voice messages and ASR
+
+Chat clients upload MP3 files with the existing `/chat/uploadFiles` endpoint and send
+`extParams.messageType: "VOICE"` plus `extParams.voice` containing `fileId`, `fileName`,
+`durationMs`, and `mimeType: "audio/mpeg"`. The backend verifies the uploaded file's
+owner and session, retains only voice metadata in history, and supplies the actual
+MP3 bytes to Harness in `extraPayload.ext_params.voice.audioBase64`. Client supplied
+bytes, paths, URLs, and transcripts are not trusted. The raw audio limit is 12 MiB.
+Common file stream reads suspend the caller's database transaction so a missing
+legacy path followed by a successful UserFS `/by` fallback cannot roll back a chat.
+Batch chat artifact resolution also suspends the caller's transaction: unavailable
+or rejected candidates are skipped without discarding other authorized summary audio.
+
+Authenticated clients use `GET /api/asr/audio?fileId=...` for playback and
+`POST /api/asr/transcribe` with `{ "fileId": "...", "sessionId": "..." }` for manual
+transcription. `sessionId` is optional; when supplied it must match the upload.
+For an assistant summary artifact, the same endpoint accepts `{ "sessionId": "...",
+"path": "/by/.sessions/.../tts/summary.mp3" }` instead of `fileId`. The sources are
+mutually exclusive. Artifact reads reuse the session playback authorization and
+accept only session-relative UserFS MP3 paths, never remote URLs or host paths.
+Optional `durationMs` must be an integer from 1 to 300000 for either source.
+The transcription response uses the standard envelope with `data: { "text": "..." }`.
+Silence returns HTTP 422 with `msg: "未识别到语音，请靠近麦克风后重试"`; other upstream
+failures retain a generic service error without exposing provider details.
+Debugging invalid/unowned audio, silence, invalid text, or an unavailable Harness
+does not change a saved model's enabled/default state. Only confirmed provider or
+model connection failures mark that model as failing; successful debugging still enables it.
+Access requires ownership of the uploaded file. Transcription delegates to the
+Harness plugin at `/api/byclaw/asr/transcribe`; the plugin chooses the enabled
+global default ASR model and the provider adapter. The sandbox instance defaults
+to the existing `openclaw` logical endpoint and can be configured with
+`asr.sandbox.instance`. The backend forwards the current shared Redis login token
+and runtime ingress credentials. A running, configured Harness instance is required.
+
+Model defaults are independent for every model type, including `ASR`, `TTS`, and
+future types. `GET /new/model/getDefaultModelId?modelType=ASR` resolves a type's default.
+The first enabled public model of a type becomes its default; personal models do not
+become global defaults. Changing a default uses the existing `/new/model/setDefaultModel`
+endpoint and serializes tag updates with a PostgreSQL transaction advisory lock.
+ASR and other media models do not require an LLM context token window.
+
+`POST /new/model/debugModelAsr` accepts `{ "id": "...", "fileId": "..." }` to debug a
+saved ASR model with an owned uploaded MP3, or accepts an explicit `model` object
+with `provider`, `protocol`, `model`, `endpoint`, `apiKey`, optional `headers` (object)
+and `options` (object). The selected adapter runs inside Harness; Java contains no
+vendor ASR implementation. Successful debugging enables the model and supplies a
+missing default for its type. Neither container health nor a mock test establishes
+that real provider credentials, model calls, and MP3 recognition are configured.
+
+`POST /new/model/debugModelTts` uses the same Harness media adapter bridge and accepts
+`{ "id": "...", "text": "..." }` for a saved TTS model. Text is optional and bounded
+to 1,000 characters. Explicit `model` connection settings are supported as for ASR;
+provider options for saved speech models come from `extendParam` JSON. A successful
+response returns `{ "success": true, "mimeType": "audio/...", "byteLength": 123, "provider": "...", "model": "..." }`
+after validating that the plugin returned non-empty audio. Generated audio bytes are
+omitted from this diagnostic response.
+
+For an isolated local runtime, the trusted process property `media.sandbox.endpoint`
+can override sandbox discovery for the speech bridge (for example,
+`--media.sandbox.endpoint=http://127.0.0.1:8768`). It defaults to empty, accepts only
+HTTP(S) origins/paths, and still forwards the authenticated user's current shared
+token. It is not a request parameter and does not modify user endpoint records.
+
+Management audit records redact credential fields and authorization header values from both request and response JSON. API response payloads are unchanged.

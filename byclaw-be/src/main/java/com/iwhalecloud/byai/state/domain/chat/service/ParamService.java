@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.application.service.asr.VoiceAudioService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -84,6 +85,9 @@ public class ParamService {
     private AiModelService aiModelService;
 
     @Autowired
+    private VoiceAudioService voiceAudioService;
+
+    @Autowired
     private CommonHandler commonHandler;
 
     @Autowired
@@ -158,7 +162,12 @@ public class ParamService {
             params.put("resource_list", resourceList);
         }
         params.put("agent_id", assistantChatDto.getAgentId());
-        params.put("ext_params", assistantChatDto.getExtParams());
+        Map<String, Object> outboundExt = assistantChatDto.getExtParams() == null
+            ? new HashMap<>() : new HashMap<>(assistantChatDto.getExtParams());
+        if (outboundExt.get("voice") instanceof Map<?, ?> voice) {
+            outboundExt.put("voice", voiceAudioService.outbound(voice, assistantChatDto.getSessionId()));
+        }
+        params.put("ext_params", outboundExt);
         params.put("worker_agent_type", resolveWorkerAgentType(assistantChatDto.getAgentId()));
         // 会话级模型选择：透传给 Agent 运行时（BY_SUPER 走 by-framework extraPayload）并便于日志排查。
         putSessionRuntimeParams(params, assistantChatDto);

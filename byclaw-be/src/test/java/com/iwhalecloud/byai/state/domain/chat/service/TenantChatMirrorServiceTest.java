@@ -24,6 +24,26 @@ import com.alibaba.fastjson.JSONObject;
 
 class TenantChatMirrorServiceTest {
     @Test
+    void voiceInputMirrorsTypedMetadataWithoutRawAudio() {
+        var node = mock(TenantNodeClient.class);
+        var service = new TenantChatMirrorService(node, new ObjectMapper(), mock(GroupChatEventPublisher.class));
+        var dto = new AssistantChatDto();
+        dto.setChatContent("[语音消息]");
+        dto.setExtParams(Map.of("voice", Map.of("fileId", "99", "fileName", "voice.mp3", "durationMs", 1234,
+            "audioBase64", "must-not-mirror")));
+        var context = new ChatProcessContext(null, dto);
+        context.tenantContext = new TenantRequestContext(7L, 11L, "MEMBER");
+        context.sessionId = 12L; context.userMessageId = 14L; context.modelAnswerMessageId = 15L;
+        service.input(context);
+        var captured = ArgumentCaptor.forClass(MirrorEvent.class);
+        verify(node).mirror(any(), captured.capture());
+        var payload = (com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorInputPayload) captured.getValue().payload();
+        assertThat(payload.metadata().messageType()).isEqualTo("VOICE");
+        assertThat(payload.metadata().voice().fileId()).isEqualTo("99");
+        assertThat(new ObjectMapper().valueToTree(payload).toString()).doesNotContain("must-not-mirror", "audioBase64");
+    }
+
+    @Test
     void groupReplyExcludesStructuredEventsAndKeepsVisibleText() {
         TenantNodeClient node = mock(TenantNodeClient.class);
         TenantChatMirrorService service = new TenantChatMirrorService(node, new ObjectMapper(),

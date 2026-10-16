@@ -345,3 +345,5 @@ BE 每 5 分钟核对已开通租户的权威配置，在租约剩余不足 12 �
 退群和管理移除同样在成员变更事务内保存 `MEMBER_LEFT` / `MEMBER_REMOVED` 系统消息与姓名快照；BE 使用操作前成员列表广播 `MEMBER_REMOVED` 和 `MESSAGE_CREATED`，离开者不需要再通过操作后的群读取权限。目标已不存在时不重复写提示。
 
 群消息文件接口 `GET /internal/v1/group-chats/{id}/files` 仅返回可见消息的 `related_resources.files`，不读取或返回 `metadata.files`。文件按消息时间倒序分页，同一消息内保持有效附件顺序；时间线仍展示已发布任务结果的附件。
+
+Voice INPUT mirrors preserve `metadata: { messageType: "VOICE", voice: { fileId, fileName, mimeType: "audio/mpeg", durationMs? } }` in the message history JSON. The reference uses an owned positive decimal file ID, an MP3 filename of at most 512 UTF-8 bytes, and an optional integer duration from 1 to 300000 milliseconds. Contract validation and the persistence writer reject extra voice fields, audio base64, provider configuration, and signed URLs. The producer hash includes this metadata; consumers do not rewrite the envelope before checking it. Ordinary INPUT events can omit metadata. The backend mirror/outbox producer must use the same allowlist.
