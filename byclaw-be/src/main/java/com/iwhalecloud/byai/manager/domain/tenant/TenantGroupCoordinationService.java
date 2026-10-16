@@ -74,7 +74,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         var resource = resources.findById(coordinatorId);
         if (resource == null || !Integer.valueOf(2).equals(resource.getResourceStatus())
             || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Group coordinator is unavailable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.group.coordinator.is.unavailable");
         }
         // Default membership is server-managed. Existing group users receive the same grant as new groups.
         if (bound == null && group.get("members") instanceof List<?> members) {
@@ -349,6 +349,6 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
     }
 
     private ResponseStatusException forbidden() {
-        return new ResponseStatusException(HttpStatus.FORBIDDEN, "Group task execution is outside its assigned scope");
+        return new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.group.task.execution.is.outside.its.assigned.scope");
     }
 }

@@ -43,7 +43,7 @@ public class WeixinOpenPlatformEventController {
                 .cacheControl(CacheControl.noStore())
                 .body(response);
         } catch (RuntimeException | IOException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid Weixin callback");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.weixin.callback");
         }
     }
 

@@ -69,7 +69,7 @@ public class TenantAdminOrganizationService {
         List<Long> orgIds = branch(parseId(orgIdText), includeDescendants);
         // This row lock also serializes single-member additions and enforces the package limit.
         String snapshot = memberMapper.selectPackageSnapshotForUpdate(enterpriseId);
-        if (snapshot == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant not found");
+        if (snapshot == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.tenant.not.found");
         int memberLimit = memberLimit(snapshot);
         List<TenantMemberRow> candidates = addMembers
             ? organizationMapper.selectActiveUsersByOrgIds(orgIds) : List.of();
@@ -78,11 +78,11 @@ public class TenantAdminOrganizationService {
         List<TenantMemberRow> toAdd = candidates.stream().filter(row -> !existing.containsKey(row.getUserId())).toList();
         long activeCount = existing.values().stream().filter(row -> "ACTIVE".equals(row.getStatus())).count();
         if (activeCount + toAdd.size() > memberLimit) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "organization members exceed tenant package limit");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.organization.members.exceed.tenant.package.limit");
         }
         if (candidates.stream().anyMatch(row -> existing.containsKey(row.getUserId())
             && !"ACTIVE".equals(existing.get(row.getUserId()).getStatus()))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "organization contains disabled tenant membership");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.organization.contains.disabled.tenant.membership");
         }
 
         Set<Long> attached = new HashSet<>(organizationMapper.selectAttachedOrgIds(enterpriseId));
@@ -102,7 +102,7 @@ public class TenantAdminOrganizationService {
 
     private List<Long> branch(long orgId, boolean includeDescendants) {
         List<Long> branch = organizationMapper.selectBranchOrgIds(orgId);
-        if (branch.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "organization not found");
+        if (branch.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.organization.not.found");
         return includeDescendants ? branch : List.of(orgId);
     }
 
@@ -114,24 +114,24 @@ public class TenantAdminOrganizationService {
         catch (Exception ignored) {
             // Invalid snapshots cannot authorize membership writes.
         }
-        throw new ResponseStatusException(HttpStatus.CONFLICT, "invalid tenant package snapshot");
+        throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.invalid.tenant.package.snapshot");
     }
 
     private long parseId(String text) {
         if (text == null || !text.matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.id");
         }
         try {
             return Long.parseLong(text);
         }
         catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid ID", e);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.id", e);
         }
     }
 
     private void requirePlatformAdmin() {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.platform.administrator.required");
         }
     }
 

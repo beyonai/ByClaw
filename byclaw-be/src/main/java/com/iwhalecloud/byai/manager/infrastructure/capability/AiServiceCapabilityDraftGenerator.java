@@ -39,20 +39,20 @@ public class AiServiceCapabilityDraftGenerator implements AgentCapabilityDraftGe
     public String generate(AgentCapabilityCompileInput input) {
         ModelDto model = aiModelService.getDefaultChatModel();
         if (model == null) {
-            throw new BaseException("No default chat model configured for capability card generation");
+            throw new BaseException("i18n.error.capability.defaultModel.missing");
         }
         String userPrompt = AgentCapabilityCardService.agentSourceForPrompt(input);
         try {
             String json = aiService.generateJsonObject(
                 AgentCapabilityCardService.systemPrompt(), userPrompt, model, MAX_TOKENS);
             if (StringUtils.isBlank(json)) {
-                throw new BaseException("Capability model returned an empty card");
+                throw new BaseException("i18n.error.capability.emptyCard");
             }
             return json;
         } catch (BaseException e) {
             throw e;
         } catch (Exception e) {
-            throw new BaseException("Capability card generation failed", e);
+            throw new BaseException("i18n.error.capability.generation.failed", e);
         }
     }
 }

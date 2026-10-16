@@ -195,12 +195,12 @@ public class TenantGroupChatRoutingAspect {
     private String filePath(String path, Object requestedSize, Object cursor) {
         int pageSize = requestedSize == null ? 20 : requestedSize instanceof Integer size ? size : 0;
         if (pageSize < 1 || pageSize > 50) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pageSize must be between 1 and 50");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.pagesize.must.be.between.1.and.50");
         }
         StringBuilder result = new StringBuilder(path).append("/files?pageSize=").append(pageSize);
         if (cursor != null && !cursor.toString().isBlank()) {
             if (!(cursor instanceof String value) || value.length() > 256 || !value.matches("[A-Za-z0-9_-]+={0,2}")) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid group file cursor");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.group.file.cursor");
             }
             result.append("&cursor=").append(value);
         }
@@ -220,6 +220,6 @@ public class TenantGroupChatRoutingAspect {
     }
 
     private ResponseStatusException unsupported() {
-        return new ResponseStatusException(HttpStatus.CONFLICT, "tenant group operation is not ready");
+        return new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.group.operation.is.not.ready");
     }
 }

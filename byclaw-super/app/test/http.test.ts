@@ -94,7 +94,16 @@ describe("Session / Run HTTP/SSE API", () => {
     });
 
     expect(response.statusCode).toBe(401);
+    expect(response.json().resultMsg).toBe("缺少 Beyond-Token 请求头");
     expect(compile).not.toHaveBeenCalled();
+
+    const english = await app.inject({
+      method: "POST",
+      url: "/byclawSuper/v1/agent-capability-cards/compile",
+      headers: { "Accept-Language": "en-US" },
+      payload: { agent: { name: "Agent", description: "Description" } },
+    });
+    expect(english.json().resultMsg).toBe("Beyond-Token header is required");
     await service.dispose();
   });
 
@@ -124,7 +133,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     expect(response.statusCode).toBe(422);
     expect(response.json()).toEqual({
-      error: "At least one capability source is required",
+      error: "请求失败，请稍后重试",
     });
     await service.dispose();
   });
@@ -857,7 +866,7 @@ describe("Session / Run HTTP/SSE API", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ error: expect.stringMatching(/timezone/) });
+    expect(response.json()).toMatchObject({ error: "请求失败，请稍后重试" });
     await service.dispose();
   });
 

@@ -148,7 +148,7 @@ class TenantNodeClientTest {
             instance.setPathPrefix(prefix);
             assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
                 "987", List.of(instance))).as("pathPrefix %s", prefix)
-                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("registration path invalid");
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("i18n.status.tenant.node.registration.path.invalid");
         }
     }
 
@@ -222,13 +222,13 @@ class TenantNodeClientTest {
     void rejectsCrossTenantAndStaleRegistrations() {
         assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
             "987", List.of(instance("124", "1", "987", "READY"))))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("registration mismatch");
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("i18n.status.tenant.node.registration.mismatch");
         assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
             "987", List.of(instance("123", "2", "987", "READY"))))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("registration mismatch");
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("i18n.status.tenant.node.registration.mismatch");
         assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
             "987", List.of(instance("123", "1", "987", "ADMIN_ONLY"))))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("registration mismatch");
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("i18n.status.tenant.node.registration.mismatch");
     }
 
     @Test

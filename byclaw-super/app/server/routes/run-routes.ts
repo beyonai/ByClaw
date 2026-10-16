@@ -143,7 +143,7 @@ export function registerRunRoutes(
 
       const afterEventId = parseLastEventId(request.headers["last-event-id"]);
       const controller = new AbortController();
-      const serializeSse = createByClawSseSerializer();
+      const serializeSse = createByClawSseSerializer(session.sessionContext.locale);
       reply.hijack();
       reply.raw.once("close", () => controller.abort());
       // hijack 会绕过 Fastify 响应生命周期，因此 SSE 自行补充 CORS 头。

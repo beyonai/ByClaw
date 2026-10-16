@@ -66,7 +66,7 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         String path = StringUtils.defaultIfBlank(request.getPath(), "/");
         // 将排序策略透传给文件浏览服务，由服务统一处理目录和名称排序。
@@ -87,7 +87,7 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (resourceId == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         String defaultPath = fileBrowserService.getDefaultPath(resourceId);
         return ResponseUtil.successResponse(defaultPath);
@@ -111,7 +111,7 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (resourceId == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (files == null || files.length == 0) {
             return ResponseUtil.fail("请选择要上传的文件");
@@ -207,10 +207,10 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (StringUtils.isBlank(sessionId)) {
-            return ResponseUtil.fail("sessionId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.sessionId.required");
         }
         if (StringUtils.isBlank(uuid)) {
-            return ResponseUtil.fail("uuid is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.uuid.required");
         }
         try {
             return ResponseUtil.successResponse(fileBrowserService.getChangedFileDiff(sessionId, uuid));
@@ -233,10 +233,10 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (request.getPaths() == null || request.getPaths().isEmpty()) {
-            return ResponseUtil.fail("paths is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.paths.required");
         }
         try {
             fileBrowserService.delete(userCode, request.getResourceId(), request.getPaths());
@@ -259,13 +259,13 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getSourcePath())) {
-            return ResponseUtil.fail("sourcePath is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.sourcePath.required");
         }
         if (StringUtils.isBlank(request.getNewName())) {
-            return ResponseUtil.fail("newName is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.newName.required");
         }
         try {
             fileBrowserService.rename(userCode, request.getResourceId(), request.getSourcePath(), request.getNewName());
@@ -288,13 +288,13 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (request.getSourcePaths() == null || request.getSourcePaths().isEmpty()) {
-            return ResponseUtil.fail("sourcePaths is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.sourcePaths.required");
         }
         if (StringUtils.isBlank(request.getTargetDirectory())) {
-            return ResponseUtil.fail("targetDirectory is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.targetDirectory.required");
         }
         try {
             fileBrowserService.move(userCode, request.getResourceId(), request.getSourcePaths(),
@@ -318,13 +318,13 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getSourcePath())) {
-            return ResponseUtil.fail("sourcePath is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.sourcePath.required");
         }
         if (StringUtils.isBlank(request.getTargetDirectory())) {
-            return ResponseUtil.fail("targetDirectory is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.targetDirectory.required");
         }
         try {
             fileBrowserService.copy(userCode, request.getResourceId(), request.getSourcePath(),
@@ -348,10 +348,10 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getPath())) {
-            return ResponseUtil.fail("path is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.path.required");
         }
         try {
             fileBrowserService.createFolder(userCode, request.getResourceId(), request.getPath());
@@ -374,10 +374,10 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getPath())) {
-            return ResponseUtil.fail("path is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.path.required");
         }
         try {
             fileBrowserService.ensureFolder(userCode, request.getResourceId(), request.getPath());
@@ -401,10 +401,10 @@ public class FileBrowserController {
             return ResponseUtil.fail("用户未登录");
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getKeyword())) {
-            return ResponseUtil.fail("keyword is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.keyword.required");
         }
         String path = StringUtils.defaultIfBlank(request.getPath(), "/");
         List<FileBrowserItemVo> items = fileBrowserService.search(userCode, request.getResourceId(), path, request.getKeyword());

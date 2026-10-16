@@ -250,7 +250,7 @@ public class AgentCapabilityCardService {
     private void validateInput(AgentCapabilityCompileInput input) {
         AgentCapabilityCompileInput.Agent agent = input.getAgent();
         if (agent == null || StringUtils.isBlank(agent.getName())) {
-            throw new BaseException("Agent name is required");
+            throw new BaseException("i18n.error.capability.agentName.required");
         }
         boolean hasEvidence = StringUtils.isNotBlank(agent.getDescription())
             || StringUtils.isNotBlank(agent.getInstructions())
@@ -259,7 +259,7 @@ public class AgentCapabilityCardService {
             || (agent.getKnowledgeDomains() != null && !agent.getKnowledgeDomains().isEmpty())
             || (agent.getExamples() != null && !agent.getExamples().isEmpty());
         if (!hasEvidence) {
-            throw new BaseException("At least one capability source is required");
+            throw new BaseException("i18n.error.capability.source.required");
         }
     }
 
@@ -558,7 +558,7 @@ public class AgentCapabilityCardService {
             }
             return null;
         } catch (Exception e) {
-            throw new BaseException("Capability model returned invalid JSON", e);
+            throw new BaseException("i18n.error.capability.json.invalid", e);
         }
     }
 
@@ -570,7 +570,7 @@ public class AgentCapabilityCardService {
         int start = withoutFence.indexOf('{');
         int end = withoutFence.lastIndexOf('}');
         if (start < 0 || end <= start) {
-            throw new BaseException("No JSON object found");
+            throw new BaseException("i18n.error.capability.json.notFound");
         }
         return withoutFence.substring(start, end + 1);
     }
@@ -635,7 +635,7 @@ public class AgentCapabilityCardService {
             }
             return hex.toString();
         } catch (Exception e) {
-            throw new BaseException("Failed to compute capability card fingerprint", e);
+            throw new BaseException("i18n.error.capability.fingerprint.failed", e);
         }
     }
 
@@ -660,7 +660,7 @@ public class AgentCapabilityCardService {
                 .replace("<", "&lt;").replace(">", "&gt;");
             return "<agent_source locale=\"" + escapedLocale + "\">\n" + body + "\n</agent_source>";
         } catch (Exception e) {
-            throw new BaseException("Failed to serialize agent source for prompt", e);
+            throw new BaseException("i18n.error.capability.sourceSerialize.failed", e);
         }
     }
 }

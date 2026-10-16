@@ -207,7 +207,7 @@ public class TenantChatRoutingAspect {
                     "/internal/v1/assiman/getMessageByIds", new MessageIds(List.of(Long.valueOf(messageId))),
                     new TypeReference<List<MessageView>>() { });
                 if (messages == null || messages.size() != 1 || !messageId.equals(messages.get(0).messageId())) {
-                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant message not found");
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.tenant.message.not.found");
                 }
                 String sessionId = messages.get(0).sessionId();
                 if (sessionId == null || !sessionId.matches("[1-9][0-9]*")) throw unsupported();
@@ -233,7 +233,7 @@ public class TenantChatRoutingAspect {
         List<MessageView> messages = node.request(context, "POST", "/internal/v1/assiman/getMessageByIds",
             new MessageIds(List.of(Long.valueOf(messageId))), new TypeReference<List<MessageView>>() { });
         if (messages == null || messages.size() != 1 || !messageId.equals(messages.get(0).messageId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant message not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.tenant.message.not.found");
         }
         String sessionId = messages.get(0).sessionId();
         var result = node.command(context, "POST",
@@ -243,10 +243,10 @@ public class TenantChatRoutingAspect {
     }
 
     private ResponseStatusException badRequest() {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant chat request");
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.chat.request");
     }
 
     private ResponseStatusException unsupported() {
-        return new ResponseStatusException(HttpStatus.CONFLICT, "tenant chat operation is not ready");
+        return new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.chat.operation.is.not.ready");
     }
 }

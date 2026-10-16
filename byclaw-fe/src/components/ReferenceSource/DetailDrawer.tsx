@@ -8,6 +8,7 @@ import classnames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AntdIcon from '../AntdIcon';
 import { downloadFile as downloadFileService } from '@/service/workSpace';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 import { RenderSourceIcon } from '@/components/ReferenceSource';
 import styles from './index.module.less';
 
@@ -93,7 +94,13 @@ const DetailDrawer = (props: IProps) => {
     } catch (error: any) {
       if (!abortController.current?.signal.aborted) {
         console.error(error);
-        message.error(error.message || error || intl.formatMessage({ id: 'sourceDrawer.previewFailed' }));
+        message.error(
+          localizeErrorMessage(
+            error?.message || error,
+            intl.formatMessage({ id: 'sourceDrawer.previewFailed' }),
+            intl.locale
+          )
+        );
       }
     } finally {
       setLoading(false);

@@ -33,12 +33,12 @@ public class TenantContextInterceptor implements HandlerInterceptor {
         String contextToken = request.getHeader("X-Tenant-Context");
         if (enterpriseId == null) {
             if (contextToken != null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant identity required");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.tenant.identity.required");
             }
             return true;
         }
         if (contextToken == null || contextToken.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant context token required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "i18n.status.tenant.context.token.required");
         }
         if (!path.startsWith("/tenantContext/") && !path.startsWith("/assiman/")
             && !"/api/v1/sessionResources/query".equals(path)
@@ -47,7 +47,7 @@ public class TenantContextInterceptor implements HandlerInterceptor {
             && !path.equals("/group-chats") && !path.startsWith("/group-chats/")
             && !path.startsWith("/group-chat/tasks/")
             && !CHAT_ROUTES.contains(path)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant route is not ready");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.route.is.not.ready");
         }
         TenantRequestContextHolder.set(tenantContextService.validate(enterpriseId, contextToken));
         return true;

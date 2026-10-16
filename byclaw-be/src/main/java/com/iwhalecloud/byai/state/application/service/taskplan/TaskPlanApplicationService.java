@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.taskplan.ByaiAgentTaskPlan;
@@ -709,7 +710,7 @@ public class TaskPlanApplicationService {
     private void requireOwnedSession(Long sessionId, Long userId) {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || !Objects.equals(session.getCreatorId(), userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Task plan not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.task.plan.not.found");
         }
     }
 
@@ -724,7 +725,8 @@ public class TaskPlanApplicationService {
     private String normalizeRuntime(String value) {
         String runtime = requiredText(value, "sourceRuntime", 32).toUpperCase(Locale.ROOT).replace('-', '_');
         if (!Set.of("BYCLAW_SUPER", "OPENCLAW").contains(runtime)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported sourceRuntime: " + value);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                I18nUtil.get("i18n.status.sourceRuntime.unsupported", value));
         }
         return runtime;
     }

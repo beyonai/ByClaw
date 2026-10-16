@@ -39,6 +39,7 @@ class FileBrowserControllerTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+        org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
     }
 
     @Test
@@ -55,10 +56,13 @@ class FileBrowserControllerTest {
 
     @Test
     void getChangedFileDiffRejectsBlankParameters() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
         ResponseUtil<ChangedFileDiffVo> response = controller.getChangedFileDiff("", "file-1");
 
         assertThat(response.isSuccess()).isFalse();
-        assertThat(response.getMsg()).isEqualTo("sessionId is required");
+        assertThat(response.getMsg()).isEqualTo("sessionId 不能为空");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThat(controller.getChangedFileDiff("", "file-1").getMsg()).isEqualTo("sessionId is required");
         verify(fileBrowserService, never()).getChangedFileDiff("", "file-1");
     }
 }

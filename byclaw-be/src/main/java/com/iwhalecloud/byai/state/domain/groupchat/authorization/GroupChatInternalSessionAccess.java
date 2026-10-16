@@ -16,7 +16,7 @@ public final class GroupChatInternalSessionAccess {
 
     public static void requirePublic(ByaiSession session) {
         if (isInternal(session)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.session.not.found");
         }
     }
 }

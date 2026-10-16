@@ -4,6 +4,7 @@ import KnowledgeTargetSelector from '@/components/KnowledgeTargetSelector';
 import UploadConfirmModal from '@/components/UploadConfirmModal';
 import useSaveToKnowledge from '@/layout/sider/components/FileSiderPanel/hooks/useSaveToKnowledge';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 
 export default function PersonalKnowledgeSaveDialogs({ state }: { state: ReturnType<typeof useSaveToKnowledge> }) {
   const intl = useIntl();
@@ -88,17 +89,23 @@ export default function PersonalKnowledgeSaveDialogs({ state }: { state: ReturnT
             />
             {result.failedItems.map((item, index) => (
               <Typography.Paragraph key={`import-${index}`} type="danger">
-                {text('importFailed')}：{item.filePath} — {item.error}
+                {text('importFailed')}：{item.filePath} —{' '}
+                {localizeErrorMessage(item.error, intl.formatMessage({ id: 'fileBrowser.upload.failed' }), intl.locale)}
               </Typography.Paragraph>
             ))}
             {result.buildFailedItems.map((item, index) => (
               <Typography.Paragraph key={`build-${index}`} type="warning">
-                {text('buildFailed')}：{item.filePath} — {item.error}
+                {text('buildFailed')}：{item.filePath} —{' '}
+                {localizeErrorMessage(item.error, text('buildFailed'), intl.locale)}
               </Typography.Paragraph>
             ))}
             {result.postProcessErrors.map((error, index) => (
               <Typography.Paragraph key={`post-${index}`} type="warning">
-                {error}
+                {localizeErrorMessage(
+                  error,
+                  intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }),
+                  intl.locale
+                )}
               </Typography.Paragraph>
             ))}
           </Space>

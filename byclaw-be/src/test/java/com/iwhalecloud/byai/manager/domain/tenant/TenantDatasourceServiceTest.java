@@ -74,7 +74,7 @@ class TenantDatasourceServiceTest {
         TenantDatasourceService service = new TenantDatasourceService(null, null, null, null);
         assertThatThrownBy(() -> service.execute(1, "DROP TABLE byai.sample", 1, false))
             .isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("SQL requires confirmation");
+            .hasMessageContaining("i18n.status.sql.requires.confirmation");
     }
 
     @Test
@@ -82,10 +82,10 @@ class TenantDatasourceServiceTest {
         TenantDatasourceService service = new TenantDatasourceService(null, null, null, null);
         assertThatThrownBy(() -> service.execute(1, "SELECT 1", 0, false))
             .isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("invalid page");
+            .hasMessageContaining("i18n.status.invalid.page");
         assertThatThrownBy(() -> service.execute(1, "SELECT 1", 10001, false))
             .isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("invalid page");
+            .hasMessageContaining("i18n.status.invalid.page");
     }
 
     @Test

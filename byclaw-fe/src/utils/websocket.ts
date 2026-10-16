@@ -4,7 +4,7 @@
 
 import { isChatTerminal, recordChatChain, flushChatChainLogs, recordChatConnection } from '@/utils/chatChainLog';
 import { clearToken, getToken, loginRedirect } from './auth';
-import { getLocale } from '@umijs/max';
+import { getIntl, getLocale } from '@umijs/max';
 
 import { debugLog } from './debugLog';
 
@@ -255,12 +255,12 @@ class WebSocketManager {
         console.error('WebSocket 连接错误:', error);
         this.isConnecting = false;
         this.stopHeartbeat();
-        this.rejectConnectWaiters(new Error('WebSocket connection error'));
+        this.rejectConnectWaiters(new Error(getIntl().formatMessage({ id: 'websocket.connectionError' })));
       };
     } catch (error) {
       console.error('WebSocket 初始化失败:', error);
       this.isConnecting = false;
-      this.rejectConnectWaiters(error instanceof Error ? error : new Error('WebSocket init failed'));
+      this.rejectConnectWaiters(new Error(getIntl().formatMessage({ id: 'websocket.initFailed' })));
       this.scheduleReconnect();
     }
   }
@@ -330,7 +330,7 @@ class WebSocketManager {
       return Promise.resolve();
     }
     if (!this.getConnectionToken()) {
-      return Promise.reject(new Error('WebSocket token unavailable'));
+      return Promise.reject(new Error(getIntl().formatMessage({ id: 'websocket.tokenUnavailable' })));
     }
     this.init();
     return new Promise((resolve, reject) => {
@@ -346,7 +346,7 @@ class WebSocketManager {
       timer = setTimeout(() => {
         this.connectResolvers = this.connectResolvers.filter((item) => item !== onResolve);
         this.connectRejecters = this.connectRejecters.filter((item) => item !== onReject);
-        reject(new Error('WebSocket connection timeout'));
+        reject(new Error(getIntl().formatMessage({ id: 'websocket.connectionTimeout' })));
       }, timeout);
 
       this.connectResolvers.push(onResolve);
@@ -493,7 +493,7 @@ class WebSocketManager {
     this.redirectedForExpiredToken = true;
     this.manuallyDisconnected = true;
     this.connectionToken = null;
-    this.rejectConnectWaiters(new Error('Token expiration'));
+    this.rejectConnectWaiters(new Error(getIntl().formatMessage({ id: 'websocket.tokenExpired' })));
     clearToken();
     loginRedirect({ openLoginModal: '1' });
   }

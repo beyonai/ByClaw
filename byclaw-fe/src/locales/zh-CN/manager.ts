@@ -141,6 +141,7 @@ export default {
   'orgMgr.members.assignTokenQuota.label': '月度Token限额',
   'orgMgr.members.assignTokenQuota.placeholder': '请输入额度，0表示禁用',
   'orgMgr.members.assignTokenQuota.success': '额度分配成功',
+  'orgMgr.members.assignTokenQuota.failed': '额度分配失败',
   'orgMgr.members.assignTokenQuota.hint': '不设置则使用系统默认值',
   'orgMgr.batchExitOrganization': '批量退出组织',
   'orgMgr.batchExitOrganizationTitle': '批量退出组织',

@@ -68,7 +68,7 @@ public class TenantDatasourceService {
     public QueryResult browse(long enterpriseId, String schema, String table, int page) {
         if (!"byai".equals(schema) || table == null || table.length() > 128
             || page < 1 || page > MAX_PAGE) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid table selection");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.table.selection");
         }
         try (Connection connection = connect(enterpriseId)) {
             try (PreparedStatement check = connection.prepareStatement(
@@ -76,7 +76,7 @@ public class TenantDatasourceService {
                 check.setString(1, schema);
                 check.setString(2, table);
                 if (!check.executeQuery().next()) {
-                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "table not found");
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.table.not.found");
                 }
             }
             String sql = "SELECT * FROM " + quoteIdentifier(schema) + "." + quoteIdentifier(table)
@@ -95,15 +95,15 @@ public class TenantDatasourceService {
     public QueryResult execute(long enterpriseId, String sql, int page, boolean confirmed) {
         String statementSql = singleStatement(sql);
         if (page < 1 || page > MAX_PAGE) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid page");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.page");
         }
         boolean dangerous = requiresConfirmation(statementSql);
         if (dangerous && !confirmed) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "SQL requires confirmation");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.sql.requires.confirmation");
         }
         boolean pageable = !dangerous && pageableQuery(statementSql);
         if (page > 1 && !pageable) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "this SQL result cannot be paged");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.this.sql.result.cannot.be.paged");
         }
         String pagedSql = pageable ? pagedQuery(statementSql, page) : statementSql;
         try (Connection connection = connect(enterpriseId);
@@ -125,10 +125,10 @@ public class TenantDatasourceService {
 
     private Connection connect(long enterpriseId) {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.platform.administrator.required");
         }
         if (enterpriseId <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.enterprise.id");
         }
         String dbName = tenantMapper.selectConfig(enterpriseId, "DB_NAME");
         String dbUser = tenantMapper.selectConfig(enterpriseId, "DB_USER");
@@ -137,7 +137,7 @@ public class TenantDatasourceService {
         if (!("byclaw_t_" + enterpriseId).equals(dbName)
             || !("bc_t_" + enterpriseId + "_admin").equals(dbUser)
             || envelope == null || recordId == null || !recordId.matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database is not provisioned");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.database.is.not.provisioned");
         }
         SsSandboxRecord record = sandboxMapper.selectById(Long.parseLong(recordId));
         if (record == null || !Long.valueOf(enterpriseId).equals(record.getEnterpriseId())
@@ -145,7 +145,7 @@ public class TenantDatasourceService {
             || !"tenant-opengauss".equals(record.getSandboxType())
             || !"RUNNING".equals(record.getStatus())
             || record.getEndpoint() == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database sandbox is not running");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.database.sandbox.is.not.running");
         }
         TenantDbProvisioningService.HostPort endpoint = databaseEndpoint(record);
         String host = dbProbeHost == null || dbProbeHost.isBlank() ? endpoint.host() : dbProbeHost;
@@ -163,7 +163,7 @@ public class TenantDatasourceService {
         try {
             return TenantDbProvisioningService.parseEndpoint(record.getEndpoint(), record.getSandboxId());
         } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database endpoint is invalid");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.database.endpoint.is.invalid");
         }
     }
 
@@ -174,7 +174,7 @@ public class TenantDatasourceService {
     /** Allow one SQL statement, including a trailing semicolon; quoted text is not a delimiter. */
     static String singleStatement(String sql) {
         if (sql == null || sql.isBlank() || sql.length() > 20000) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "SQL must be between 1 and 20000 characters");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.sql.must.be.between.1.and.20000.characters");
         }
         String value = sql.trim();
         boolean single = false;
@@ -190,13 +190,13 @@ public class TenantDatasourceService {
                 else doubleQuoted = !doubleQuoted;
             } else if (c == ';' && !single && !doubleQuoted) {
                 if (terminator >= 0) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "run one SQL statement at a time");
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.run.one.sql.statement.at.a.time");
                 }
                 terminator = i;
             }
         }
         if (single || doubleQuoted || (terminator >= 0 && !value.substring(terminator + 1).isBlank())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "run one SQL statement at a time");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.run.one.sql.statement.at.a.time");
         }
         return terminator >= 0 ? value.substring(0, terminator).trim() : value;
     }
@@ -301,7 +301,7 @@ public class TenantDatasourceService {
     }
 
     private static ResponseStatusException databaseUnavailable(Exception cause) {
-        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant database query failed", cause);
+        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "i18n.status.tenant.database.query.failed", cause);
     }
 
     public record TableInfo(String schema, String name, String type) {}

@@ -39,19 +39,19 @@ public class TenantAdminTenantService {
         TenantListFilter query = filter == null ? new TenantListFilter(null, null, null, null, null) : filter;
         String name = query.name() == null ? null : query.name().trim();
         if (name != null && name.length() > 200) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant name filter is too long");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.tenant.name.filter.is.too.long");
         }
         if (query.sortField() != null && !List.of("createdAt", "openedAt", "enterpriseName")
             .contains(query.sortField())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant sort field");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.sort.field");
         }
         if (query.sortOrder() != null && !List.of("asc", "desc").contains(query.sortOrder())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant sort order");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.sort.order");
         }
         LocalDateTime from = parseTime(query.createdFrom());
         LocalDateTime to = parseTime(query.createdTo());
         if (from != null && to != null && !from.isBefore(to)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant creation time range");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.creation.time.range");
         }
         return tenantMapper.selectTenants(name, from, to, query.sortField(), query.sortOrder())
             .stream().map(this::toView).toList();
@@ -63,7 +63,7 @@ public class TenantAdminTenantService {
             return LocalDateTime.parse(value);
         }
         catch (DateTimeParseException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant creation time", e);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.creation.time", e);
         }
     }
 
@@ -80,24 +80,24 @@ public class TenantAdminTenantService {
         requirePlatformAdmin();
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || userId <= 0) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "i18n.status.login.required");
         }
         if (name == null || name.isBlank() || name.length() > 200 || !name.equals(name.trim())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant name");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.name");
         }
         if (requestId == null || !requestId.matches("[a-zA-Z0-9_-]{8,64}")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid request ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.request.id");
         }
         TenantPackageRow selectedPackage = tenantMapper.selectEnabledPackage(packageId);
         if (selectedPackage == null || !validPackage(selectedPackage.getPackageContent())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant package");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.package");
         }
 
         TenantAdminTenantRow existing = tenantMapper.selectByRequestId(requestId);
         if (existing != null) {
             if (!userId.equals(existing.getCreatedBy()) || !name.equals(existing.getEnterpriseName())
                 || !selectedPackage.getPackageName().equals(existing.getPackageName())) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "request ID already used");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.request.id.already.used");
             }
             return toView(existing);
         }
@@ -156,7 +156,7 @@ public class TenantAdminTenantService {
 
     private void requirePlatformAdmin() {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.platform.administrator.required");
         }
     }
 

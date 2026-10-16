@@ -106,7 +106,7 @@ public class FileBrowserKnowledgeTransferApplicationService {
     private void copyDirectory(String userCode, FileBrowserSaveToKnowledgeRequest request, String sourceDirectoryPath,
         String targetDirectoryPath, FileBrowserSaveToKnowledgeVo result, boolean buildAfterSave) throws IOException {
         if (sourceDirectoryPath.split("/").length > 100) {
-            throw new IllegalArgumentException("Source directory nesting is too deep");
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.source.depth.exceeded"));
         }
         List<FileBrowserItemVo> children = buildAfterSave
             ? fileBrowserService.listForTransfer(userCode, request.getResourceId(), sourceDirectoryPath)
@@ -204,23 +204,23 @@ public class FileBrowserKnowledgeTransferApplicationService {
 
     private void validateRequest(FileBrowserSaveToKnowledgeRequest request) {
         if (request == null) {
-            throw new IllegalArgumentException("请求参数不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.request.required"));
         }
         if (request.getResourceId() == null) {
-            throw new IllegalArgumentException("resourceId is required");
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.resource.required"));
         }
         if (request.getTargetResourceId() == null) {
-            throw new IllegalArgumentException("targetResourceId is required");
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.target.required"));
         }
         if (StringUtils.isBlank(request.getSourcePath())) {
-            throw new IllegalArgumentException("sourcePath is required");
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.source.path.required"));
         }
     }
 
     private String normalizeFileBrowserPath(String path) {
         String normalizedPath = StringUtils.defaultIfBlank(path, "/").trim().replace('\\', '/').replaceAll("/+", "/");
         if (StringUtils.contains(normalizedPath, "..")) {
-            throw new IllegalArgumentException("非法路径: " + path);
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.path.invalid", path));
         }
         if (!normalizedPath.startsWith("/")) {
             normalizedPath = "/" + normalizedPath;
@@ -239,7 +239,7 @@ public class FileBrowserKnowledgeTransferApplicationService {
     private String normalizeKnowledgeDirectoryPath(String path) {
         String normalizedPath = StringUtils.defaultIfBlank(path, "/").trim().replace('\\', '/').replaceAll("/+", "/");
         if (StringUtils.contains(normalizedPath, "..")) {
-            throw new IllegalArgumentException("非法路径: " + path);
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.path.invalid", path));
         }
         if (!normalizedPath.startsWith("/")) {
             normalizedPath = "/" + normalizedPath;
@@ -254,7 +254,7 @@ public class FileBrowserKnowledgeTransferApplicationService {
         String parent = normalizeKnowledgeDirectoryPath(parentDirectoryPath);
         String segment = StringUtils.strip(StringUtils.defaultString(name).replace('\\', '/'), "/");
         if (StringUtils.isBlank(segment) || StringUtils.contains(segment, "..") || StringUtils.contains(segment, "/")) {
-            throw new IllegalArgumentException("非法目录名称: " + name);
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.directory.invalid", name));
         }
         if ("/".equals(parent)) {
             return "/" + segment;

@@ -48,14 +48,14 @@ public class TenantGroupTaskRoutingAspect {
             if (registered != null) {
                 var user = com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.getLoginInfo();
                 if (user == null || !Long.valueOf(registered.userId()).equals(user.getUserId())) {
-                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant task owner required");
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.tenant.task.owner.required");
                 }
                 context = contexts.validate(Long.toString(registered.enterpriseId()));
             }
         }
         if (context == null) return call.proceed();
         if (args.length == 0 || !(args[0] instanceof Long taskId) || taskId <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid group task");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.group.task");
         }
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         String path = "/internal/v1/group-chat/tasks/" + taskId;
@@ -75,7 +75,7 @@ public class TenantGroupTaskRoutingAspect {
                 yield ResponseUtil.successResponse(delivery.currentAuthorized(taskId));
             }
             default -> throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "tenant group task operation is not ready");
+                "i18n.status.tenant.group.task.operation.is.not.ready");
         };
     }
 }

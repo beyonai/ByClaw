@@ -139,6 +139,7 @@ export default {
   'orgMgr.members.assignTokenQuota.label': 'Monthly Token Quota',
   'orgMgr.members.assignTokenQuota.placeholder': 'Enter quota, 0 to disable',
   'orgMgr.members.assignTokenQuota.success': 'Quota assigned successfully',
+  'orgMgr.members.assignTokenQuota.failed': 'Failed to assign quota',
   'orgMgr.members.assignTokenQuota.hint': 'Uses system default if not set',
   'orgMgr.batchExitOrganization': 'Batch Exit Organization',
   'orgMgr.batchExitOrganizationTitle': 'Batch Exit Organization',

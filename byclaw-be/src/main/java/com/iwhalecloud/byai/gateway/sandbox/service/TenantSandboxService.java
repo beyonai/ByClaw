@@ -99,7 +99,7 @@ public class TenantSandboxService {
             || redisHost == null || redisHost.isBlank() || redisPassword == null || redisPassword.isBlank()
             || beInternalUrl == null || !beInternalUrl.startsWith("http://")
             || internalToken == null || internalToken.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node launch configuration is incomplete");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.node.launch.configuration.is.incomplete");
         }
         SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, NODE_TYPE);
         if (active != null) {
@@ -111,14 +111,14 @@ public class TenantSandboxService {
             }
             if (!"RUNNING".equals(active.getStatus()) || recordMapper.updateStatusToFailed(active.getId(),
                     "tenant Node sandbox is no longer reachable", new Date(), active.getLockVersion()) != 1) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node sandbox launch is in progress");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.node.sandbox.launch.is.in.progress");
             }
         }
         SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(NODE_TYPE, profileKey)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node spec unavailable"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.node.spec.unavailable"));
         if (!"TENANT".equals(spec.getOwnerScope()) || spec.getResourceLimits() == null
             || spec.getResourceLimits().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node resource profile is unavailable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.node.resource.profile.is.unavailable");
         }
         Date now = new Date();
         SsSandboxRecord record = new SsSandboxRecord();
@@ -175,7 +175,7 @@ public class TenantSandboxService {
         if (recordMapper.updateLaunchSuccess(record.getId(), data.getSandboxId(), data.getEndpoint(),
                 data.getGatewayToken(), data.getTimeoutSeconds(), data.getRemoteExpiresAt(), null, null,
                 new Date(), 0) != 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node record changed during launch");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.node.record.changed.during.launch");
         }
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
     }
@@ -187,12 +187,12 @@ public class TenantSandboxService {
         if (active != null) {
             if (!"RUNNING".equals(active.getStatus()) || active.getSandboxId() == null
                 || active.getLockVersion() == null) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node replacement is in progress");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.node.replacement.is.in.progress");
             }
             openSandboxClient.deleteSandbox(active.getSandboxId());
             if (recordMapper.updateStatusToReleased(active.getId(), "tenant Node image replacement",
                 new Date(), active.getLockVersion()) != 1) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node record changed during replacement");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.node.record.changed.during.replacement");
             }
         }
         return launchDataNode(enterpriseId, profileKey, dbRecordId, generation);
@@ -237,25 +237,25 @@ public class TenantSandboxService {
         if (latest == null || latest.getId() == null || latest.getId() != recordId
             || !Set.of("RUNNING", "FAILED").contains(latest.getStatus())
             || latest.getLockVersion() == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox is not the current restartable record");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.sandbox.is.not.the.current.restartable.record");
         }
         SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, sandboxType);
         if (active != null && !active.getId().equals(latest.getId())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "another tenant sandbox is active");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.another.tenant.sandbox.is.active");
         }
         if (latest.getSandboxId() != null && !latest.getSandboxId().isBlank()) {
             openSandboxClient.deleteSandbox(latest.getSandboxId());
         }
         if (recordMapper.markReleased(latest.getId(), "tenant sandbox restart", new Date(),
             latest.getLockVersion()) != 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox record changed during restart");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.sandbox.record.changed.during.restart");
         }
     }
 
     /** Remove every provider instance before removing the tenant's private database and Node volumes. */
     public void deleteTenantResources(long enterpriseId) {
         if (enterpriseId <= 0 || volumeRoot == null || volumeRoot.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant resource location");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.resource.location");
         }
         List<SsSandboxRecord> records = recordMapper.selectTenantRecords(enterpriseId);
         for (SsSandboxRecord record : records) {
@@ -263,19 +263,19 @@ public class TenantSandboxService {
                 openSandboxClient.deleteSandbox(record.getSandboxId());
                 if (openSandboxClient.getSandboxIfExists(record.getSandboxId()) != null) {
                     throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "tenant sandbox still exists after delete request");
+                        "i18n.status.tenant.sandbox.still.exists.after.delete.request");
                 }
             }
             if (!"RELEASED".equals(record.getStatus()) && recordMapper.markReleased(record.getId(),
                 "tenant deleted", new Date(), record.getLockVersion()) != 1) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox changed during deletion");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.sandbox.changed.during.deletion");
             }
         }
         Path root = Path.of(volumeRoot).toAbsolutePath().normalize();
         Path tenants = root.resolve("tenants");
         Path tenantDirectory = tenants.resolve(Long.toString(enterpriseId));
         if (!tenantDirectory.startsWith(tenants) || Files.isSymbolicLink(tenants)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "invalid tenant volume path");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.invalid.tenant.volume.path");
         }
         if (!Files.exists(tenantDirectory)) return;
         try {
@@ -295,13 +295,13 @@ public class TenantSandboxService {
             });
         }
         catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant volume deletion failed", e);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "i18n.status.tenant.volume.deletion.failed", e);
         }
     }
 
     private void requireTenantType(String sandboxType) {
         if (!DB_TYPE.equals(sandboxType) && !NODE_TYPE.equals(sandboxType)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant sandbox type");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.sandbox.type");
         }
     }
 
@@ -312,7 +312,7 @@ public class TenantSandboxService {
             || !("bc_t_" + enterpriseId + "_admin").equals(dbUser)
             || dbPassword == null || dbPassword.isBlank()
             || image == null || image.isBlank() || volumeRoot == null || volumeRoot.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox launch configuration is incomplete");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.sandbox.launch.configuration.is.incomplete");
         }
 
         SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, DB_TYPE);
@@ -322,16 +322,16 @@ public class TenantSandboxService {
             }
             if (!"RUNNING".equals(active.getStatus()) || recordMapper.updateStatusToFailed(active.getId(),
                     "tenant database sandbox is no longer reachable", new Date(), active.getLockVersion()) != 1) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database sandbox launch is in progress");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.database.sandbox.launch.is.in.progress");
             }
         }
         SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(DB_TYPE, profileKey)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "tenant OpenGauss spec unavailable"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.opengauss.spec.unavailable"));
         if (!"TENANT".equals(spec.getOwnerScope())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant OpenGauss spec scope mismatch");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.opengauss.spec.scope.mismatch");
         }
         if (spec.getResourceLimits() == null || spec.getResourceLimits().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant OpenGauss resource profile is unavailable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.opengauss.resource.profile.is.unavailable");
         }
         prepareEntrypoint(enterpriseId);
 
@@ -386,7 +386,7 @@ public class TenantSandboxService {
         int updated = recordMapper.updateLaunchSuccess(record.getId(), data.getSandboxId(), data.getEndpoint(),
             data.getGatewayToken(), data.getTimeoutSeconds(), data.getRemoteExpiresAt(), null, null, new Date(), 0);
         if (updated != 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox record changed during launch");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.tenant.sandbox.record.changed.during.launch");
         }
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
     }

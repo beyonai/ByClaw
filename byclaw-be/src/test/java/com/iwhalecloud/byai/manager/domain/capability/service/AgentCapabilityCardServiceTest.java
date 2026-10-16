@@ -144,7 +144,7 @@ class AgentCapabilityCardServiceTest {
         AgentCapabilityCompileInput input = input("  ", "描述");
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
-            .hasMessageContaining("name is required");
+            .hasMessageContaining("i18n.error.capability.agentName.required");
     }
 
     @Test
@@ -156,7 +156,7 @@ class AgentCapabilityCardServiceTest {
 
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
-            .hasMessageContaining("At least one capability source");
+            .hasMessageContaining("i18n.error.capability.source.required");
     }
 
     @Test
@@ -167,7 +167,7 @@ class AgentCapabilityCardServiceTest {
 
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
-            .hasMessageContaining("invalid JSON");
+            .hasMessageContaining("i18n.error.capability.json.invalid");
     }
 
     @Test
@@ -178,7 +178,7 @@ class AgentCapabilityCardServiceTest {
 
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
-            .hasMessageContaining("No JSON object found");
+            .hasMessageContaining("i18n.error.capability.json.notFound");
     }
 
     @Test

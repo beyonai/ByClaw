@@ -19,8 +19,8 @@ describe("createByClawSseSerializer", () => {
     expect(answer).toContain("正文");
   });
 
-  it("returns the provider error when a downstream model call fails", () => {
-    const serialize = createByClawSseSerializer();
+  it("returns the provider error when a downstream model call fails in the user language", () => {
+    const serialize = createByClawSseSerializer("en-US");
     const output = serialize(
       event(1, "run.failed", {
         status: "FAILED",
@@ -35,6 +35,31 @@ describe("createByClawSseSerializer", () => {
     expect(output).toContain("event: answerEnd");
     expect(output).toContain("event: appStreamResponse");
     expect(output).not.toContain("event: error");
+  });
+
+  it("localizes technical run failures for Chinese and English sessions", () => {
+    const failure = event(1, "run.failed", {
+      status: "FAILED",
+      error: "Connection refused: internal service",
+    });
+    const zh = createByClawSseSerializer("zh-CN")(failure);
+    const en = createByClawSseSerializer("en-US")(failure);
+    expect(zh).toContain("任务执行失败，请稍后重试");
+    expect(zh).not.toContain("Connection refused");
+    expect(en).toContain("The task failed. Please try again later");
+    expect(en).not.toContain("Connection refused");
+  });
+
+  it("does not expose an English provider failure to a Chinese session", () => {
+    const output = createByClawSseSerializer("zh-CN")(
+      event(1, "run.failed", {
+        status: "FAILED",
+        error: "Leader model call failed: 403",
+        userMessage: "403: sensitive provider response",
+      }),
+    );
+    expect(output).toContain("任务执行失败，请稍后重试");
+    expect(output).not.toContain("sensitive provider response");
   });
 
   it("serializes child tool events without emitting child lifecycle as outer lifecycle", () => {

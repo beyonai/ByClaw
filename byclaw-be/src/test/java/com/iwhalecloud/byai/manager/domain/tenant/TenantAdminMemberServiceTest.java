@@ -65,7 +65,7 @@ class TenantAdminMemberServiceTest {
 
         assertThatThrownBy(() -> service.add("123", "0027024710"))
             .isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("member limit reached");
+            .hasMessageContaining("i18n.status.tenant.member.limit.reached");
         verify(memberMapper, never()).insertMember(org.mockito.ArgumentMatchers.anyLong(),
             org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(),
             org.mockito.ArgumentMatchers.anyLong());
@@ -101,7 +101,7 @@ class TenantAdminMemberServiceTest {
         disabled.setStatus("DISABLED");
         when(memberMapper.selectMember(123L, 77L)).thenReturn(disabled);
         assertThatThrownBy(() -> service.joinByInvitation(123L, 1L))
-            .hasMessageContaining("explicit re-enable");
+            .hasMessageContaining("i18n.status.disabled.membership.requires.explicit.re.enable");
         verify(memberMapper, never()).insertMember(org.mockito.ArgumentMatchers.anyLong(),
             org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(),
             org.mockito.ArgumentMatchers.anyLong());
@@ -118,7 +118,7 @@ class TenantAdminMemberServiceTest {
         inviter.setStatus("ACTIVE");
         when(memberMapper.selectMember(123L, 1L)).thenReturn(inviter);
         when(memberMapper.countActiveMembers(123L)).thenReturn(10);
-        assertThatThrownBy(() -> service.joinByInvitation(123L, 1L)).hasMessageContaining("member limit reached");
+        assertThatThrownBy(() -> service.joinByInvitation(123L, 1L)).hasMessageContaining("i18n.status.tenant.member.limit.reached");
     }
 
     @Test

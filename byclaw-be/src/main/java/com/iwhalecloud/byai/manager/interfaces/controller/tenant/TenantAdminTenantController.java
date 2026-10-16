@@ -53,10 +53,10 @@ public class TenantAdminTenantController {
     @PostMapping("/provision")
     public ResponseUtil<String> provision(@RequestBody ProvisionTenantRequest request) {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.platform.administrator.required");
         }
         if (request.enterpriseId() == null || !request.enterpriseId().matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.enterprise.id");
         }
         provisioner.request(Long.parseLong(request.enterpriseId()));
         return ResponseUtil.success("ACCEPTED");
@@ -70,10 +70,10 @@ public class TenantAdminTenantController {
     @PostMapping("/recreate-node")
     public ResponseUtil<TenantSandboxView> recreateNode(@RequestBody ProvisionTenantRequest request) {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.platform.administrator.required");
         }
         if (request.enterpriseId() == null || !request.enterpriseId().matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.enterprise.id");
         }
         return ResponseUtil.success(provisioner.recreateNode(Long.parseLong(request.enterpriseId())));
     }
@@ -81,11 +81,11 @@ public class TenantAdminTenantController {
     @PostMapping("/sandboxes/restart")
     public ResponseUtil<String> restartSandbox(@RequestBody RestartTenantSandboxRequest request) {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.platform.administrator.required");
         }
         if (request.enterpriseId() == null || !request.enterpriseId().matches("[1-9][0-9]*")
             || request.recordId() == null || request.recordId() <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant sandbox identity");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.tenant.sandbox.identity");
         }
         provisioner.requestRestart(Long.parseLong(request.enterpriseId()), request.sandboxType(), request.recordId());
         return ResponseUtil.success("ACCEPTED");

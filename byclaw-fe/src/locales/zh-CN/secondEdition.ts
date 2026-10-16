@@ -341,6 +341,8 @@ export default {
   'fileBrowser.move.success': '移动成功',
   'fileBrowser.move.failed': '移动失败',
   'fileBrowser.preview.failed': '预览失败',
+  'fileBrowser.preview.empty': '文件内容为空，无法预览',
+  'fileBrowser.preview.notFound': '文件不存在',
   'fileBrowser.preview.unavailable': '文件不可在线预览，请下载查看',
   'fileBrowser.createFolder.prompt': '请输入文件夹名称',
   'fileBrowser.createFolder.duplicateName': '当前目录下已存在同名文件夹',

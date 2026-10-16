@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { message } from 'antd';
 import { useIntl } from '@umijs/max';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import type { UploadConfirmFile } from '@/components/UploadConfirmModal';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
@@ -111,7 +112,13 @@ export default function useSaveToKnowledge({
         setKnowledgeBases(rows);
       } catch (error: any) {
         if (requestId === knowledgeRequestRef.current) {
-          message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+          message.error(
+            localizeErrorMessage(
+              error?.message,
+              intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }),
+              intl.locale
+            )
+          );
         }
       } finally {
         if (requestId === knowledgeRequestRef.current) setKnowledgeLoading(false);
@@ -137,7 +144,9 @@ export default function useSaveToKnowledge({
         setKnowledgeDirectoryPath(directoryPath);
         return folders;
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        message.error(
+          localizeErrorMessage(error?.message, intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }), intl.locale)
+        );
         return [];
       } finally {
         if (requestId === folderRequestRef.current) setKnowledgeFolderLoading(false);
@@ -155,7 +164,9 @@ export default function useSaveToKnowledge({
         });
         return unwrapListResponse<QueryDirAndFileByLevelItem>(response).filter((item) => item.type === 'directory');
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        message.error(
+          localizeErrorMessage(error?.message, intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }), intl.locale)
+        );
         return [];
       }
     },
@@ -342,7 +353,13 @@ export default function useSaveToKnowledge({
       setSaveModalOpen(false);
       setKnowledgeUploadConfirmOpen(true);
     } catch (error: any) {
-      message.error(error?.message || intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }));
+      message.error(
+        localizeErrorMessage(
+          error?.message,
+          intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }),
+          intl.locale
+        )
+      );
     } finally {
       submitRef.current = false;
       setSavingToKnowledge(false);
@@ -395,7 +412,13 @@ export default function useSaveToKnowledge({
         setSaveModalOpen(false);
         setSaveTarget(null);
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }));
+        message.error(
+          localizeErrorMessage(
+            error?.message,
+            intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }),
+            intl.locale
+          )
+        );
       } finally {
         submitRef.current = false;
         setSavingToKnowledge(false);

@@ -1,4 +1,26 @@
 export default {
+  // Operation failures
+  'sandboxMgr.error.list': 'Failed to fetch sandbox list',
+  'sandboxMgr.error.remove': 'Failed to remove sandbox',
+  'sandboxMgr.error.update': 'Failed to update sandbox',
+  'sandboxMgr.error.specList': 'Failed to fetch service spec list',
+  'sandboxMgr.error.spec': 'Failed to fetch service spec',
+  'sandboxMgr.error.specSave': 'Failed to save service spec',
+  'sandboxMgr.error.specDelete': 'Failed to delete service spec',
+  'sandboxMgr.error.launch': 'Failed to launch sandbox',
+  'sandboxMgr.error.resize': 'Failed to resize sandbox',
+  'sandboxMgr.error.resizeRecords': 'Failed to fetch resize records',
+  'sandboxMgr.error.profiles': 'Failed to fetch service profiles',
+  'sandboxMgr.error.profileSave': 'Failed to save service profile',
+  'sandboxMgr.error.profileDelete': 'Failed to delete service profile',
+  'sandboxMgr.error.healthSwitch': 'Failed to fetch sandbox health switch',
+  'sandboxMgr.error.healthSwitchSave': 'Failed to save sandbox health switch',
+  'sandboxMgr.error.watermarkModels': 'Failed to fetch watermark models',
+  'sandboxMgr.error.watermarkSave': 'Failed to save watermark model',
+  'sandboxMgr.error.watermarkDelete': 'Failed to delete watermark model',
+  'sandboxMgr.error.watermarkUpdate': 'Failed to update watermark model',
+  'sandboxMgr.error.watermarkPreview': 'Failed to preview watermark model',
+
   // Search
   'sandboxMgr.search.placeholder': 'Search by user code, endpoint, chat ID',
 

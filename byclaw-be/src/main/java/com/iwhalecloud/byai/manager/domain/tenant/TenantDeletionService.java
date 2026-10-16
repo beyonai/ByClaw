@@ -46,22 +46,22 @@ public class TenantDeletionService {
 
     public String request(String enterpriseIdText, String confirmedName) {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.platform.administrator.required");
         }
         if (enterpriseIdText == null || !enterpriseIdText.matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.enterprise.id");
         }
         long enterpriseId;
         try {
             enterpriseId = Long.parseLong(enterpriseIdText);
         }
         catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID", e);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.enterprise.id", e);
         }
         String actualName = tenants.selectManagedEnterpriseName(enterpriseId);
-        if (actualName == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant not found");
+        if (actualName == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.tenant.not.found");
         if (!actualName.equals(confirmedName)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant name confirmation does not match");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.tenant.name.confirmation.does.not.match");
         }
         if ("DELETED".equals(status(enterpriseId))) return "COMPLETED";
         upsert(enterpriseId, DELETE_MARKER, "true");

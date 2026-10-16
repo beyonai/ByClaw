@@ -33,7 +33,7 @@ public class SysConfigController {
 
         String standType = MapParamUtil.getStringValue(params, "standType");
         if (StringUtils.isBlank(standType)) {
-            return ResponseUtil.fail("standType is not null");
+            return ResponseUtil.failI18n("i18n.error.sysConfig.standType.required");
         }
 
         List<ByaiSystemConfigList> dcSystemConfigValues = byaiSystemConfigService.findByParamGroupCode(standType);
@@ -50,7 +50,7 @@ public class SysConfigController {
 
         String paramCode = MapParamUtil.getStringValue(params, "paramCode");
         if (StringUtils.isBlank(paramCode)) {
-            return ResponseUtil.fail("paramCode is not null");
+            return ResponseUtil.failI18n("i18n.error.sysConfig.paramCode.required");
         }
 
         return ResponseUtil.successResponse(byaiSystemConfigService.getDcSystemConfigValueByCode(paramCode));
@@ -66,7 +66,7 @@ public class SysConfigController {
     public ResponseUtil<List<ByaiSystemConfig>> getDcSystemConfigValueByCodes(@RequestBody Map<String, Object> params) {
 
         if (MapUtils.isEmpty(params)) {
-            return ResponseUtil.fail("paramCode is not null");
+            return ResponseUtil.failI18n("i18n.error.sysConfig.paramCode.required");
         }
 
         return ResponseUtil.successResponse(byaiSystemConfigService.getDcSystemConfigValueByCodes(params));

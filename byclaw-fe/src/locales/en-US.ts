@@ -5,6 +5,21 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  'ui.employee.notFound': 'The digital employee does not exist',
+  'ui.card.urlRequired': 'A link URL is required',
+  'ui.chat.errorDetails': 'Error details',
+  'openClaw.websocket.invalidUrl': 'Invalid WebSocket URL',
+  'openClaw.websocket.credentialsRequired': 'A token or password is required to connect to WebSocket',
+  'openClaw.websocket.notOpen': 'WebSocket connection is not open',
+  'openClaw.websocket.chatTimeout': 'WebSocket chat timed out',
+  'openClaw.websocket.requestFailed': 'WebSocket request failed',
+  'websocket.tokenUnavailable': 'WebSocket credentials are unavailable',
+  'websocket.connectionTimeout': 'WebSocket connection timed out',
+  'openClaw.websocket.closed': 'WebSocket connection closed',
+  'openClaw.websocket.reconnectFailed': 'WebSocket could not reconnect',
+  'websocket.connectionError': 'WebSocket connection failed',
+  'websocket.initFailed': 'WebSocket could not start',
+  'websocket.tokenExpired': 'WebSocket credentials expired',
   ...employeePublication,
   // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
   'toolCall.defaultTitle': 'Tool call',

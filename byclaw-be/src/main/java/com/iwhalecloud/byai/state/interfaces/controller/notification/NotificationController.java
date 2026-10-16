@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.notification;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.dto.notification.NotificationManageDto;
 import com.iwhalecloud.byai.manager.dto.notification.NotificationQueryDto;
@@ -42,7 +43,7 @@ public class NotificationController {
         }
         catch (Exception e) {
             logger.error("分页查询通知失败", e);
-            return ResponseUtil.fail("Failed to query notification page!" + e.getMessage());
+            return ResponseUtil.failI18n("i18n.error.notification.page.failed");
         }
     }
 
@@ -53,13 +54,13 @@ public class NotificationController {
     public ResponseUtil<ByaiNotification> manageDetail(@RequestBody NotificationManageDto request) {
         try {
             if (request == null || request.getId() == null) {
-                return ResponseUtil.fail("Parameter error: id cannot be empty!");
+                return ResponseUtil.failI18n("i18n.error.notification.id.required");
             }
             return ResponseUtil.successResponse(notificationService.getManageNotification(request.getId()));
         }
         catch (Exception e) {
             logger.error("查询通知详情失败", e);
-            return ResponseUtil.fail("Failed to query notification detail!" + e.getMessage());
+            return ResponseUtil.failI18n("i18n.error.notification.detail.failed");
         }
     }
 
@@ -73,7 +74,7 @@ public class NotificationController {
         }
         catch (Exception e) {
             logger.error("创建通知失败", e);
-            return ResponseUtil.fail("Failed to create notification!" + e.getMessage());
+            return ResponseUtil.failI18n("i18n.error.notification.create.failed");
         }
     }
 
@@ -87,7 +88,7 @@ public class NotificationController {
         }
         catch (Exception e) {
             logger.error("更新通知失败", e);
-            return ResponseUtil.fail("Failed to update notification!" + e.getMessage());
+            return ResponseUtil.failI18n("i18n.error.notification.update.failed");
         }
     }
 
@@ -98,13 +99,13 @@ public class NotificationController {
     public ResponseUtil<Boolean> manageDelete(@RequestBody NotificationManageDto request) {
         try {
             if (request == null || request.getId() == null) {
-                return ResponseUtil.fail("Parameter error: id cannot be empty!");
+                return ResponseUtil.failI18n("i18n.error.notification.id.required");
             }
             return ResponseUtil.successResponse(notificationService.deleteManageNotification(request.getId()));
         }
         catch (Exception e) {
             logger.error("删除通知失败", e);
-            return ResponseUtil.fail("Failed to delete notification!" + e.getMessage());
+            return ResponseUtil.failI18n("i18n.error.notification.delete.failed");
         }
     }
 
@@ -118,7 +119,7 @@ public class NotificationController {
         }
         catch (Exception e) {
             logger.error("查询最新版本通知失败", e);
-            return ResponseUtil.fail("Failed to query latest version notification!" + e.getMessage());
+            return ResponseUtil.failI18n("i18n.error.notification.latest.failed");
         }
     }
 
@@ -135,7 +136,7 @@ public class NotificationController {
             Long currentUserId = CurrentUserHolder.getCurrentUserId();
             if (currentUserId == null) {
                 logger.error("获取当前用户ID失败");
-                return ResponseUtil.fail("Failed to fetch current user information!");
+                return ResponseUtil.failI18n("i18n.error.notification.user.failed");
             }
 
             // 参数验证
@@ -144,7 +145,7 @@ public class NotificationController {
                 // read为空时，判断idList不能为空
                 if (CollectionUtils.isEmpty(notificationReadDto.getIdList())) {
                     logger.error("参数验证失败：read为空时idList不能为空");
-                    return ResponseUtil.fail("Parameter error: When 'read' is empty, 'idList' cannot be empty!");
+                    return ResponseUtil.failI18n("i18n.error.notification.readIds.required");
                 }
             }
 
@@ -157,13 +158,13 @@ public class NotificationController {
 
             ResponseUtil<Integer> resultUtil = new ResponseUtil<Integer>();
             resultUtil.setCode(0);
-            resultUtil.setMsg("更新了" + updateCount + "条记录");
+            resultUtil.setMsg(I18nUtil.get("i18n.notification.updated", updateCount));
             resultUtil.setData(updateCount);
             return resultUtil;
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
-            return ResponseUtil.fail("Failed to mark notification as read!" + e.getMessage());
+            return ResponseUtil.failI18n("i18n.error.notification.markRead.failed");
         }
     }
 

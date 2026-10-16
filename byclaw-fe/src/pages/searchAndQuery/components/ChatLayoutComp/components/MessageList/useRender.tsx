@@ -277,7 +277,7 @@ export default function useRender({
                 <InfoCircleOutlined
                   className={classnames(styles.errorIcon, 'pointer')}
                   onClick={() => {
-                    setMyTitle(traceback ? messageTip : 'Error Tips');
+                    setMyTitle(traceback ? messageTip : intl.formatMessage({ id: 'ui.chat.errorDetails' }));
                     setMyContent(traceback || messageTip);
                     setOpen(true);
                   }}

@@ -28,23 +28,58 @@ export function headerString(value: string | string[] | undefined): string {
 }
 
 /** 返回与 ByClaw 后端 AccessTokenVerifyInterceptor 一致的 401 响应结构。 */
+export function requestLanguage(headers: Record<string, unknown>): "zh" | "en" {
+  const acceptLanguage = headerString(
+    headers["accept-language"] as string | string[] | undefined,
+  );
+  return acceptLanguage.toLowerCase().startsWith("en") ? "en" : "zh";
+}
+
+function publicErrorMessage(
+  message: string,
+  language: "zh" | "en",
+  fallback: { zh: string; en: string },
+): string {
+  const hasChinese = /\p{Script=Han}/u.test(message);
+  const hasEnglish = /[A-Za-z]{3,}/.test(message);
+  if ((language === "zh" && hasEnglish && !hasChinese) || (language === "en" && hasChinese)) {
+    return fallback[language];
+  }
+  return message || fallback[language];
+}
+
 export function authError(reply: FastifyReply, message: string) {
+  const language = requestLanguage(reply.request.headers);
+  const resultMsg =
+    message === "Beyond-Token header is required"
+      ? language === "zh"
+        ? "缺少 Beyond-Token 请求头"
+        : message
+      : publicErrorMessage(message, language, {
+          zh: "身份验证失败，请重新登录",
+          en: "Authentication failed. Please sign in again",
+        });
   return reply.code(401).send({
     resultCode: 401,
-    resultMsg: message,
+    resultMsg,
     type: 1,
   });
 }
 
 /** 将鉴权、资源归属、上游和普通请求异常映射为稳定响应。 */
 export function requestError(reply: FastifyReply, error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
+  const language = requestLanguage(reply.request.headers);
+  const rawMessage = error instanceof Error ? error.message : String(error);
   if (
     error instanceof BeyondTokenAuthError ||
     (error instanceof ByClawBeAgentCatalogError && error.statusCode === 401)
   ) {
-    return authError(reply, message);
+    return authError(reply, rawMessage);
   }
+  const message = publicErrorMessage(rawMessage, language, {
+    zh: "请求失败，请稍后重试",
+    en: "Request failed. Please try again later",
+  });
   if (error instanceof ResourceNotFoundError) {
     return reply.code(404).send({ error: message });
   }

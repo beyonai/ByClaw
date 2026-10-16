@@ -3,6 +3,7 @@ import {
   authError,
   requestAuth,
   requestError,
+  requestLanguage,
 } from "../http-request-utils.js";
 import {
   agentCapabilityCompileBodySchema,
@@ -58,7 +59,10 @@ export function registerCapabilityRoutes(
         }
         if (!auth.systemCode) {
           return reply.code(400).send({
-            error: "System-Code header is required",
+            error:
+              requestLanguage(request.headers) === "zh"
+                ? "缺少 System-Code 请求头"
+                : "System-Code header is required",
           });
         }
         await options.runIngress.authorizeAgent(

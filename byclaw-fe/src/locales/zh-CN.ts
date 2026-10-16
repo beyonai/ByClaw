@@ -5,6 +5,21 @@ import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  'ui.employee.notFound': '数字员工不存在',
+  'ui.card.urlRequired': '缺少链接地址',
+  'ui.chat.errorDetails': '错误详情',
+  'openClaw.websocket.invalidUrl': 'WebSocket 地址无效',
+  'openClaw.websocket.credentialsRequired': '连接 WebSocket 需要令牌或密码',
+  'openClaw.websocket.notOpen': 'WebSocket 连接未建立',
+  'openClaw.websocket.chatTimeout': 'WebSocket 聊天请求超时',
+  'openClaw.websocket.requestFailed': 'WebSocket 请求失败',
+  'websocket.tokenUnavailable': 'WebSocket 凭证不可用',
+  'websocket.connectionTimeout': 'WebSocket 连接超时',
+  'openClaw.websocket.closed': 'WebSocket 连接已关闭',
+  'openClaw.websocket.reconnectFailed': 'WebSocket 重连失败',
+  'websocket.connectionError': 'WebSocket 连接失败',
+  'websocket.initFailed': 'WebSocket 启动失败',
+  'websocket.tokenExpired': 'WebSocket 凭证已过期',
   ...employeePublication,
   // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
   'toolCall.defaultTitle': '工具调用',

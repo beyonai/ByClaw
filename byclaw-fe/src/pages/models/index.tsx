@@ -239,7 +239,7 @@ const ModelsPage: React.FC = () => {
           handleShow('edit', res.data);
         }
       } catch {
-        message.error('Failed to load model detail');
+        message.error(intl.formatMessage({ id: 'personalModel.detail.loadFailed' }));
       }
     },
     [handleShow]
@@ -259,7 +259,7 @@ const ModelsPage: React.FC = () => {
         formAction.handleShow('debug', res.data);
       }
     } catch {
-      message.error('Failed to load model detail');
+      message.error(intl.formatMessage({ id: 'personalModel.detail.loadFailed' }));
     }
   };
 

@@ -14,11 +14,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.support.ResourceBundleMessageSource;
 import org.springframework.context.support.StaticMessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.ByteArrayInputStream;
 import java.util.List;
+import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -51,6 +54,27 @@ class FileBrowserKnowledgeTransferApplicationServiceTest {
     @AfterEach
     void cleanup() {
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", previousMessages);
+    }
+
+    @Test
+    void localizesRequiredSourceResourceForTheRequestLocale() {
+        ResourceBundleMessageSource messages = new ResourceBundleMessageSource();
+        messages.setBasename("i18n.messages");
+        messages.setDefaultEncoding("UTF-8");
+        ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messages);
+        Locale previousLocale = LocaleContextHolder.getLocale();
+        try {
+            var invalid = request("/session/report.md");
+            invalid.setResourceId(null);
+            LocaleContextHolder.setLocale(Locale.US);
+            assertThatThrownBy(() -> service.saveToKnowledge("alice", invalid))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("resourceId is required");
+            LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+            assertThatThrownBy(() -> service.saveToKnowledge("alice", invalid))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("resourceId 不能为空");
+        } finally {
+            LocaleContextHolder.setLocale(previousLocale);
+        }
     }
 
     @Test

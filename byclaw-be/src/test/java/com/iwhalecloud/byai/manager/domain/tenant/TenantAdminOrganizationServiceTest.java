@@ -45,7 +45,7 @@ class TenantAdminOrganizationServiceTest {
         when(memberMapper.selectMembers(123L)).thenReturn(List.of(activeOwner(1L)));
 
         assertThatThrownBy(() -> service.attach("123", "202", true, true))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("package limit");
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("i18n.status.organization.members.exceed.tenant.package.limit");
         verify(organizationMapper, never()).insertAttachment(anyLong(), anyLong(), anyLong());
         verify(memberMapper, never()).insertMember(anyLong(), anyLong(), anyLong(), anyLong());
     }

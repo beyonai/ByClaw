@@ -60,7 +60,7 @@ public class TenantGroupMemberService {
             || request.getId() == null
             || request.getId().isEmpty() || request.getId().size() > 100
             || request.getId().stream().anyMatch(id -> id == null || id <= 0)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid group invitation");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.group.invitation");
         }
         String type = request.getType();
         Map<String, Object> detail = requireInvite(context, sessionId, type);
@@ -107,7 +107,7 @@ public class TenantGroupMemberService {
             if ("USER".equals(type)) {
                 Users user = users.selectById(id);
                 if (user == null || tenantMemberships.selectActiveMembership(id, context.enterpriseId()) == null) {
-                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "user is not an active tenant member");
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.user.is.not.an.active.tenant.member");
                 }
                 return new TenantNodeModels.InvitedMember("USER", id.toString(), user.getUserName(), false);
             }
@@ -117,7 +117,7 @@ public class TenantGroupMemberService {
                 || !("enterprise".equalsIgnoreCase(resource.getOwnerType())
                     && Objects.equals(resource.getComAcctId(), context.enterpriseId())
                     || resourceAuthorization.hasResourceAccessPermission(resource))) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "digital employee is not accessible");
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.digital.employee.is.not.accessible");
             }
             return new TenantNodeModels.InvitedMember("AGENT", id.toString(), resource.getResourceName(), true);
         }).toList();
@@ -128,7 +128,7 @@ public class TenantGroupMemberService {
         SsResource resource = resources.findById(coordinatorId);
         if (resource == null || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())
             || !Objects.equals(resource.getResourceStatus(), 2)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "default group coordinator is unavailable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "i18n.status.default.group.coordinator.is.unavailable");
         }
         return new TenantNodeModels.InvitedMember("AGENT", coordinatorId.toString(), resource.getResourceName(), true);
     }
@@ -136,19 +136,19 @@ public class TenantGroupMemberService {
     /** Validate initial users before the Node's atomic CREATE_GROUP command. */
     public List<TenantNodeModels.GroupMember> initialUsers(TenantRequestContext context, List<Long> ids) {
         if (ids == null || ids.size() > 999 || ids.stream().anyMatch(id -> id == null || id <= 0)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid initial group users");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.initial.group.users");
         }
         return ids.stream().distinct().filter(id -> id != context.userId()).map(id -> {
             requireActiveUser(context, id);
             Users user = users.selectById(id);
-            if (user == null) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "user is unavailable");
+            if (user == null) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.user.is.unavailable");
             return new TenantNodeModels.GroupMember("USER", id.toString(), "MEMBER", user.getUserName());
         }).toList();
     }
 
     public void requireActiveUser(TenantRequestContext context, long userId) {
         if (userId <= 0 || tenantMemberships.selectActiveMembership(userId, context.enterpriseId()) == null) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "user is not an active tenant member");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.user.is.not.an.active.tenant.member");
         }
     }
 
@@ -164,7 +164,7 @@ public class TenantGroupMemberService {
     /** Validate initial digital employees before the Node's atomic CREATE_GROUP command. */
     public List<TenantNodeModels.GroupMember> initialAgents(TenantRequestContext context, List<Long> ids) {
         if (ids == null || ids.size() > 999 || ids.stream().anyMatch(id -> id == null || id <= 0)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid initial digital employees");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.initial.digital.employees");
         }
         return ids.stream().distinct().map(id -> {
             SsResource resource = resources.findById(id);
@@ -174,7 +174,7 @@ public class TenantGroupMemberService {
                 || !("enterprise".equalsIgnoreCase(resource.getOwnerType())
                     && Objects.equals(resource.getComAcctId(), context.enterpriseId())
                     || resourceAuthorization.hasResourceAccessPermission(resource))) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "digital employee is not accessible");
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.digital.employee.is.not.accessible");
             }
             return new TenantNodeModels.GroupMember("AGENT", id.toString(), "MEMBER",
                 resource.getResourceName(), true);
@@ -183,7 +183,7 @@ public class TenantGroupMemberService {
 
     private Map<String, Object> requireInvite(TenantRequestContext context, Long sessionId, String type) {
         if (sessionId == null || sessionId <= 0 || !("AGENT".equals(type) || "USER".equals(type))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid group invitation");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.invalid.group.invitation");
         }
         Map<String, Object> detail = nodeDetail(context, sessionId);
         boolean allowed = rows(detail.get("members")).stream()
@@ -193,7 +193,7 @@ public class TenantGroupMemberService {
                     || detail.get("settings") instanceof Map<?, ?> settings
                         && Boolean.TRUE.equals(settings.get("AGENT".equals(type)
                             ? "allowMemberAddAgent" : "allowMemberInviteUser"))));
-        if (!allowed) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "group member invitation is disabled");
+        if (!allowed) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "i18n.status.group.member.invitation.is.disabled");
         return detail;
     }
 

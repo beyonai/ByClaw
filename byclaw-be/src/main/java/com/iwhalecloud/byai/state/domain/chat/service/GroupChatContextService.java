@@ -179,33 +179,33 @@ public class GroupChatContextService {
     private void requireGroupMember(Long sessionId, GroupChatContextRequest request) {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || GroupChatAuthorizationService.DISSOLVED_STATE.equals(session.getState())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.conversation.not.found");
         }
         String contextToken = request == null ? null : request.getContextToken();
         if (contextToken != null && tokenService != null) {
             Map<String, Object> claims = tokenService.verify(contextToken);
             if (request == null || request.getChildSessionId() == null || request.getInitiatorUserId() == null
                 || request.getTargetAgentId() == null) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.conversation.not.found");
             }
             if (!String.valueOf(sessionId).equals(String.valueOf(claims.get("groupSessionId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.conversation.not.found");
             }
             if (request.getInitiatorUserId() != null
                 && !String.valueOf(request.getInitiatorUserId()).equals(String.valueOf(claims.get("initiatorUserId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.conversation.not.found");
             }
             if (request.getTargetAgentId() != null
                 && !String.valueOf(request.getTargetAgentId()).equals(String.valueOf(claims.get("targetAgentId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.conversation.not.found");
             }
             if (!String.valueOf(request.getChildSessionId()).equals(String.valueOf(claims.get("childSessionId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.conversation.not.found");
             }
             Object boundary = claims.get("boundaryMessageId");
             Long requestedBefore = parseRequiredLong(request.getBeforeMessageId(), "beforeMessageId");
             if (boundary != null && requestedBefore > Long.parseLong(String.valueOf(boundary))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.conversation.not.found");
             }
             return;
         }
@@ -213,7 +213,7 @@ public class GroupChatContextService {
         boolean member = memberService != null
             && memberService.findSessionMember(sessionId, MemObjType.USER.name(), currentUserId) != null;
         if (session == null || (memberService != null && !member)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "i18n.status.conversation.not.found");
         }
     }
 
@@ -661,7 +661,7 @@ public class GroupChatContextService {
             return defaultValue;
         }
         if (value <= 0 || value > maximum) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Requested group chat window is invalid");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "i18n.status.requested.group.chat.window.is.invalid");
         }
         return value;
     }

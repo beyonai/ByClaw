@@ -8,18 +8,18 @@ type SerializerState = {
 };
 
 /** 创建 ByClaw 前端可识别的 thinking/answer SSE 序列化器。 */
-export function createByClawSseSerializer(): (event: RunEvent) => string {
+export function createByClawSseSerializer(locale = "zh-CN"): (event: RunEvent) => string {
   const state: SerializerState = {
     reasoningStarted: false,
     reasoningEnded: false,
     answerStarted: false,
     answerEnded: false,
   };
-  return (event) => serializeByClawSse(event, state);
+  return (event) => serializeByClawSse(event, state, locale);
 }
 
 /** 根据内部 RunEvent 和当前流状态生成一个或多个 ByClaw SSE 帧。 */
-function serializeByClawSse(event: RunEvent, state: SerializerState): string {
+function serializeByClawSse(event: RunEvent, state: SerializerState, locale: string): string {
   const frames: string[] = [];
   appendSubAgentFrames(frames, event);
   appendInteractionFrame(frames, event);
@@ -61,7 +61,7 @@ function serializeByClawSse(event: RunEvent, state: SerializerState): string {
   }
 
   if (event.type === "run.failed" && stringData(event.data.userMessage)) {
-    const userMessage = stringData(event.data.userMessage);
+    const userMessage = localizedFailureMessage(stringData(event.data.userMessage), locale);
     if (state.reasoningStarted && !state.reasoningEnded) {
       frames.push(frame(event, "reasoningLogEnd", messagePayload(event, "reasoningLogEnd", "")));
       state.reasoningEnded = true;
@@ -85,13 +85,36 @@ function serializeByClawSse(event: RunEvent, state: SerializerState): string {
     frames.push(
       frame(event, "error", {
         event: "error",
-        message: stringData(event.data.error) || stringData(event.data.reason) || event.type,
+        message:
+          event.type === "run.failed"
+            ? genericFailureMessage(locale)
+            : locale.toLowerCase().startsWith("zh")
+              ? "任务已取消"
+              : "The task was cancelled",
         traceId: event.runId,
       }),
     );
   }
 
   return frames.join("");
+}
+
+function genericFailureMessage(locale: string): string {
+  return locale.toLowerCase().startsWith("zh")
+    ? "任务执行失败，请稍后重试"
+    : "The task failed. Please try again later";
+}
+
+function localizedFailureMessage(message: string, locale: string): string {
+  const hasChinese = /\p{Script=Han}/u.test(message);
+  const hasEnglish = /[A-Za-z]{3,}/.test(message);
+  if (
+    (locale.toLowerCase().startsWith("zh") && hasEnglish && !hasChinese) ||
+    (locale.toLowerCase().startsWith("en") && hasChinese)
+  ) {
+    return genericFailureMessage(locale);
+  }
+  return message;
 }
 
 /** Leader 自身的结构化提问使用 3014；子 Agent 表单继续兼容 3013。 */

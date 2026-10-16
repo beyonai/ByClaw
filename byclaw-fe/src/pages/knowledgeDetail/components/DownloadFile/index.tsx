@@ -3,6 +3,7 @@ import { DownloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { App, Button, Modal } from 'antd';
 import { downloadResourceFile } from '@/service/file';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 
 interface DownloadFileProps {
   resourceId: string | number;
@@ -23,7 +24,7 @@ const DownloadFile = ({ resourceId, resourceName }: DownloadFileProps) => {
     try {
       // 始终从知识库根目录递归打包，不受当前下钻目录、搜索和勾选项影响。
       const res = await downloadResourceFile({ resourceId, directoryPath: '/' });
-      if (!(res?.file instanceof Blob)) throw new Error('Invalid knowledge archive response');
+      if (!(res?.file instanceof Blob)) throw new Error(intl.formatMessage({ id: 'knowledgeDetail.downloadFailed' }));
       if (res.file.type.includes('json')) {
         const error = JSON.parse(await res.file.text());
         throw new Error(error?.msg || intl.formatMessage({ id: 'knowledgeDetail.downloadFailed' }));
@@ -46,7 +47,11 @@ const DownloadFile = ({ resourceId, resourceName }: DownloadFileProps) => {
       setOpen(false);
     } catch (error) {
       message.error(
-        error instanceof Error ? error.message : intl.formatMessage({ id: 'knowledgeDetail.downloadFailed' })
+        localizeErrorMessage(
+          error instanceof Error ? error.message : '',
+          intl.formatMessage({ id: 'knowledgeDetail.downloadFailed' }),
+          intl.locale
+        )
       );
     } finally {
       downloadingRef.current = false;

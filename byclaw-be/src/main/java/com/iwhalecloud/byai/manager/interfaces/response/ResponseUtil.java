@@ -8,6 +8,10 @@ import com.alibaba.fastjson.annotation.JSONField;
 import com.iwhalecloud.byai.common.feign.response.ConversationResponse;
 import com.iwhalecloud.byai.common.feign.response.KnowledgeResponse;
 import com.iwhalecloud.byai.common.feign.response.ManagerResponse;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.context.support.ResourceBundleMessageSource;
+import java.util.regex.Pattern;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Getter;
 import lombok.Setter;
@@ -17,6 +21,20 @@ import lombok.Setter;
 public class ResponseUtil<T> {
 
     private static final Logger logger = LoggerFactory.getLogger(ResponseUtil.class);
+
+    private static final ResourceBundleMessageSource FALLBACK_MESSAGES = new ResourceBundleMessageSource();
+
+    private static final Pattern HAN_CHARACTER = Pattern.compile("\\p{IsHan}");
+
+    private static final Pattern LATIN_WORD = Pattern.compile("[A-Za-z]{3,}");
+
+    private static final Pattern ENGLISH_AFTER_SEPARATOR = Pattern.compile("[:：]\\s*[A-Za-z]{3,}");
+
+    static {
+        FALLBACK_MESSAGES.setBasename("i18n.messages");
+        FALLBACK_MESSAGES.setDefaultEncoding("UTF-8");
+        FALLBACK_MESSAGES.setFallbackToSystemLocale(false);
+    }
 
 
     public static final int SUCCESS = 0;
@@ -95,7 +113,7 @@ public class ResponseUtil<T> {
      * @return ResponseUtil
      */
     public static <T> ResponseUtil<T> failRes(String resultMsg) {
-        return new ResponseUtil<T>(FAIL, resultMsg, null);
+        return new ResponseUtil<T>(FAIL, localizedFailureText(resultMsg), null);
     }
 
     /**
@@ -105,7 +123,36 @@ public class ResponseUtil<T> {
      * @return ResponseUtil
      */
     public static <T> ResponseUtil<T> fail(String resultMsg) {
-        return new ResponseUtil<T>(FAIL, resultMsg, null);
+        return new ResponseUtil<T>(FAIL, localizedFailureText(resultMsg), null);
+    }
+
+    public static <T> ResponseUtil<T> failI18n(String key, Object... args) {
+        try {
+            return fail(I18nUtil.get(key, args));
+        }
+        catch (NullPointerException e) {
+            // Some direct callers (including tests) do not boot the Spring context.
+            return fail(FALLBACK_MESSAGES.getMessage(key, args, LocaleContextHolder.getLocale()));
+        }
+    }
+
+    private static String localizedFailureText(String resultMsg) {
+        if (resultMsg == null || resultMsg.isBlank()) {
+            return fallbackFailureText();
+        }
+        String language = LocaleContextHolder.getLocale().getLanguage();
+        boolean containsHan = HAN_CHARACTER.matcher(resultMsg).find();
+        boolean containsEnglish = LATIN_WORD.matcher(resultMsg).find();
+        if (("zh".equals(language) && containsEnglish
+            && (!containsHan || ENGLISH_AFTER_SEPARATOR.matcher(resultMsg).find()))
+            || ("en".equals(language) && containsHan)) {
+            return fallbackFailureText();
+        }
+        return resultMsg;
+    }
+
+    private static String fallbackFailureText() {
+        return FALLBACK_MESSAGES.getMessage("i18n.error.system.unexpected", null, LocaleContextHolder.getLocale());
     }
 
     /**
@@ -116,7 +163,7 @@ public class ResponseUtil<T> {
      * @return ResponseUtil
      */
     public static <T> ResponseUtil<T> failResponse(String resultMsg, T data) {
-        return new ResponseUtil<T>(FAIL, resultMsg, data);
+        return new ResponseUtil<T>(FAIL, localizedFailureText(resultMsg), data);
     }
 
     /**
