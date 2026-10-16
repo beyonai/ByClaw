@@ -421,7 +421,8 @@ public class ToolManService {
         enterpriseResourceSyncService.validate(request);
         if ("SKILL".equals(resourceBizType)) enterpriseResourceSyncService.requireSyncPrincipal();
         Long effectiveCatalogId = resolveAddToolFromThirdCatalogId(root);
-        boolean trusted = enterpriseResourceSyncService.hasSyncPrincipal();
+        // Omitted authorization flags retain legacy per-resource management checks; explicit false is still sync.
+        boolean trusted = request.viewAuth() != null || request.autoAuthorize() != null || "SKILL".equals(resourceBizType);
         String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
         String resourceCode = StringUtils.trimToEmpty(root.getString("resourceCode"));
         if (StringUtils.isAnyBlank(systemCode, resourceCode)) {
