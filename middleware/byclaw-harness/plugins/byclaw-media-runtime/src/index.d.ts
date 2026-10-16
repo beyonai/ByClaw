@@ -19,7 +19,7 @@ export interface SpeechOptions {
   voice: { supported: boolean; default?: string; choices: Array<{ id: string; name?: string }>; restricted: boolean; note: string }
   speed: { supported: boolean; min?: number; max?: number; default: number }
 }
-export interface RequestContext { signal?: AbortSignal; fetch?: typeof fetch; onWarning?: (warning: MediaWarning) => void }
+export interface RequestContext { referenceImage?: { bytes: Uint8Array; mimeType: string }; signal?: AbortSignal; fetch?: typeof fetch; onWarning?: (warning: MediaWarning) => void }
 export function resolveMediaModel(redis: { hget(key: string, field: string): Promise<string | null> }, type: 'IMAGE_GENERATION' | 'TTS' | 'ASR', options?: { decrypt?: (value: string) => string; modelId?: string }): Promise<MediaModel>
 export function endpoint(base: string, suffix: string): string
 export function request(url: string, init?: RequestInit, context?: RequestContext, options?: { acceptErrorResponse?: boolean }): Promise<Response>

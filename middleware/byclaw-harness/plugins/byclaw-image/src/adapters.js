@@ -1,3 +1,4 @@
+import { validateImage } from './common.js'
 import { imagesApi } from './providers/images-api.js'
 import { fal, google, minimax, qwen } from './providers/native.js'
 import { comfy, vydra } from './providers/jobs.js'
@@ -38,7 +39,7 @@ async function generateImageRequest(model, args, context) {
   context.signal?.throwIfAborted()
   if (!model || typeof model.endpoint !== 'string' || !model.endpoint || typeof model.model !== 'string' || !model.model.trim()) throw new Error('IMAGE_MODEL_CONFIG_REQUIRED')
   if (!args || typeof args.prompt !== 'string' || !args.prompt.trim() || args.prompt.length > 32000) throw new Error('IMAGE_INVALID_PROMPT')
-  if (Object.keys(args).some(key => !['prompt', 'size', 'aspectRatio', 'count'].includes(key))) throw new Error('IMAGE_UNKNOWN_ARGUMENT')
+  if (Object.keys(args).some(key => !['prompt', 'size', 'aspectRatio', 'count', 'referenceImage'].includes(key))) throw new Error('IMAGE_UNKNOWN_ARGUMENT')
   // Only documented generation controls can provide defaults. Never spread
   // trusted provider options into tool input or allow them to replace a prompt.
   args = { ...args }
@@ -52,6 +53,14 @@ async function generateImageRequest(model, args, context) {
   const raw = normalize(model.provider)
   const provider = aliases[raw] ?? raw
   if (!Object.hasOwn(imageProviders, provider)) throw new Error('IMAGE_UNSUPPORTED_PROVIDER')
+  if (args.referenceImage !== undefined || context.referenceImage !== undefined) {
+    if (typeof args.referenceImage !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,199}\.(png|jpe?g|webp)$/i.test(args.referenceImage)) throw new Error('IMAGE_REFERENCE_INVALID')
+    if (provider !== 'VOLCENGINE' || !/seedream-(?:4-[05]|5-0)/i.test(model.model)) throw new Error('IMAGE_EDIT_UNSUPPORTED')
+    if (!context.referenceImage) throw new Error('IMAGE_REFERENCE_REQUIRED')
+    if (context.referenceImage.bytes?.length > 10 * 1024 * 1024) throw new Error('IMAGE_REFERENCE_INVALID')
+    try { context = { ...context, referenceImage: validateImage(context.referenceImage) } }
+    catch { throw new Error('IMAGE_REFERENCE_INVALID') }
+  }
   const route = imageProviders[provider]
   const configuredProtocol = normalize(model.protocol)
   const protocol = provider === 'QWEN' && configuredProtocol === 'QWEN' ? 'QWEN_IMAGE' : configuredProtocol

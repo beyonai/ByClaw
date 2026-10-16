@@ -316,3 +316,19 @@ test('frontend Qwen protocol selects native multimodal image route', async () =>
     return json({ output: { choices: [{ message: { content: [{ image: `data:image/png;base64,${png}` }] } }] } })
   } })
 })
+
+test('Seedream edits send validated original bytes; unsupported models never silently generate', async () => {
+  let body;
+  const context = { referenceImage: { bytes: Buffer.from(png, 'base64'), mimeType: 'image/png' }, fetch: async (_url, init) => { body = JSON.parse(init.body); return json({ data: [image] }); } };
+  await generateImage(model('VOLCENGINE', { model: 'doubao-seedream-5-0-flash' }), { ...prompt, referenceImage: 'original.png' }, context);
+  assert.equal(body.image, `data:image/png;base64,${png}`);
+  for (const config of [model('OPENAI'), model('VOLCENGINE', { model: 'doubao-seedream-3-0-t2i' })]) {
+    await assert.rejects(generateImage(config, { ...prompt, referenceImage: 'original.png' }, { ...context, fetch: () => { throw new Error('must not call'); } }), /IMAGE_EDIT_UNSUPPORTED/);
+  }
+  await assert.rejects(generateImage(model('VOLCENGINE', { model: 'doubao-seedream-5-0-flash' }), { ...prompt, referenceImage: 'original.png' }), /IMAGE_REFERENCE_REQUIRED/);
+});
+
+test('corrupted originals are rejected as reference input errors before billing', async () => {
+  await assert.rejects(generateImage(model('VOLCENGINE', { model: 'doubao-seedream-5-0-flash' }),
+    { ...prompt, referenceImage: 'broken.png' }, { referenceImage: { bytes: Buffer.alloc(40), mimeType: 'image/png' }, fetch: () => { throw new Error('must not call') } }), /IMAGE_REFERENCE_INVALID/)
+})

@@ -1,9 +1,11 @@
 import { access, mkdir, realpath } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
+import { loadImageReference, describeImageArtifacts, imageReferenceId } from './image-artifacts.js'
 import { persistAssets } from './artifacts.js'
 
 const imageFields = {
+  referenceImage: { type: 'string', minLength: 1, maxLength: 1024, description: '用户要求修改所引用图片时必填：COMMON_FILE 引用的当前会话图片路径 /by/.sessions/<sessionId>/image/<文件名>，也兼容图片文件名；不接受 URL 或跨会话路径。' },
   prompt: { type: 'string', minLength: 1, maxLength: 20000, description: '图片内容、风格和构图要求。' },
   size: { type: 'string', minLength: 1, maxLength: 40, description: '供应商支持的尺寸；省略使用模型配置。' },
   aspectRatio: { type: 'string', minLength: 1, maxLength: 20, description: '宽高比，例如 16:9；省略使用模型配置。' },
@@ -48,7 +50,7 @@ function isInputFailure(kind, error, args) {
   if (kind === 'image') return new Set([
     'IMAGE_INVALID_PROMPT', 'IMAGE_UNKNOWN_ARGUMENT', 'IMAGE_INVALID_COUNT', 'IMAGE_INVALID_SIZE',
     'IMAGE_INVALID_ASPECT_RATIO', 'IMAGE_CONFLICTING_SIZE', 'IMAGE_PROMPT_TOO_LONG',
-    'IMAGE_PROVIDER_BLOCKED', 'IMAGE_UNSUPPORTED_OPTION',
+    'IMAGE_PROVIDER_BLOCKED', 'IMAGE_UNSUPPORTED_OPTION', 'IMAGE_REFERENCE_INVALID', 'IMAGE_REFERENCE_REQUIRED', 'IMAGE_EDIT_UNSUPPORTED',
   ]).has(code)
   const message = error instanceof Error ? error.message : ''
   return /Speech text|Invalid speech arguments|Speech text exceeds/u.test(message)
@@ -98,7 +100,7 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
     const tool = {
       name: kind === 'image' ? 'image_generate' : 'text_to_speech',
       description: kind === 'image'
-        ? '用户要求文生图时，调用已配置的图片模型生成图片。产生供应商调用费用；图片保存到当前会话 session_root/image，返回实际制品路径。供应商不支持的能力会明确报错。'
+        ? '生成或编辑图片。编辑时用 referenceImage 引用当前会话原图文件名；不支持编辑的模型会报错。产生供应商费用。返回图片制品与版本关系，界面直接展示，无需在答复中输出绝对路径。'
         : '用户要求文本转语音时调用。切换音色或语速前可用 text_to_speech_options 查询。产生供应商费用；音频和词码保存到 session_root/tts。须告知用户返回的 warnings；artifacts 为空表示未生成，不可声称成功。',
       parameters: { type: 'object', properties: fields, required, additionalProperties: false },
       output: {
@@ -109,6 +111,7 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
             warnings: { type: 'array', items: { type: 'object', required: ['code', 'parameter', 'message'], additionalProperties: false,
               properties: { code: { type: 'string' }, parameter: { type: 'string', enum: ['voice', 'speed'] }, message: { type: 'string' } } } },
           } : {}),
+          ...(kind === 'image' ? { imageArtifacts: imageArtifactsSchema } : {}),
           artifacts: { type: 'array', items: { type: 'object', required: ['path', 'mimeType', 'bytes'], additionalProperties: false,
             properties: { path: { type: 'string' }, mimeType: { type: 'string' }, bytes: { type: 'integer' } } } },
         } },
@@ -120,6 +123,9 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
           || (typeof normalizedArgs.voice === 'string' && normalizedArgs.voice.trim() === ''))) delete normalizedArgs.voice
         validate(normalizedArgs, fields, required)
         const current = binding.payload
+        if (kind === 'image' && normalizedArgs.referenceImage !== undefined) {
+          normalizedArgs.referenceImage = imageReferenceId(normalizedArgs.referenceImage, current.command.header.sessionId)
+        }
         const root = current.host.resolveSessionRoot(String(current.agent.id))
         if (typeof root !== 'string' || !isAbsolute(root)) throw new Error('MEDIA_SESSION_ROOT_REQUIRED')
         const canonical = await realpath(root)
@@ -134,7 +140,9 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
         const signal = exec.signal ? AbortSignal.any([exec.signal, timeout]) : timeout
         let assets
         try {
-          assets = await generate(model, normalizedArgs, { signal })
+          const referenceImage = kind === 'image' && normalizedArgs.referenceImage !== undefined
+            ? await loadImageReference(root, normalizedArgs.referenceImage) : undefined
+          assets = await generate(model, normalizedArgs, { signal, ...(referenceImage ? { referenceImage } : {}) })
         } catch (error) {
           if (signal.aborted || error?.name === 'AbortError' || error?.name === 'TimeoutError'
               || isInputFailure(kind, error, normalizedArgs)) throw error
@@ -146,7 +154,9 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
         // Only an explicit recoverable control outcome can omit generated files.
         const unsupported = kind === 'tts' && media.length === 0 && warnings.length > 0
         const artifacts = unsupported ? [] : await persistAssets(root, kind, media)
-        return { provider: model.provider, model: model.model, artifacts,
+        const imageArtifacts = kind === 'image' ? await describeImageArtifacts(root, artifacts, normalizedArgs, current.command.header.sessionId) : undefined
+        const publicArtifacts = imageArtifacts ? artifacts.map((artifact, index) => ({ ...artifact, path: imageArtifacts[index].path })) : artifacts
+        return { ...(imageArtifacts ? { imageArtifacts } : {}), provider: model.provider, model: model.model, artifacts: publicArtifacts,
           ...(kind === 'tts' ? { status: unsupported ? 'unsupported' : 'generated', warnings } : {}) }
       },
     }
@@ -184,3 +194,10 @@ const speechOptionsSchema = {
     } },
   },
 }
+
+const imageArtifactsSchema = { type: 'array', items: {
+  type: 'object', required: ['schemaVersion', 'id', 'path', 'title', 'mimeType', 'bytes'], additionalProperties: false,
+  properties: { schemaVersion: { type: 'integer', const: 1 }, id: { type: 'string' }, path: { type: 'string' },
+    title: { type: 'string' }, mimeType: { type: 'string' }, bytes: { type: 'integer' },
+    width: { type: 'integer' }, height: { type: 'integer' }, parentId: { type: 'string' } },
+} }

@@ -43,6 +43,7 @@ export async function imagesApi(model, args, context) {
     delete body.n
     body.response_format = 'b64_json'
     body.stream = false
+    if (context.referenceImage) body.image = `data:${context.referenceImage.mimeType};base64,${Buffer.from(context.referenceImage.bytes).toString('base64')}`
     if (!body.size && /seedream-(?:4-[05]|5-0)/i.test(model.model)) body.size = '2K'
     // Group-image fields are not supported by Seedream 5 Flash/Pro.
     if (/seedream-(?:4-[05]|5-0-lite)/i.test(model.model)) body.sequential_image_generation = 'disabled'

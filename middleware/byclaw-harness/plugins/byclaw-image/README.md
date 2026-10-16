@@ -38,7 +38,7 @@ Aliases: `COMFY`, `GEMINI`, `CHATGPT`, `DOUBAO`, and `ARK`. Names are case-insen
 
 Existing Qwen configurations have two explicit routes: `QWEN_IMAGE` (including the frontend's `Qwen` protocol value) uses DashScope's synchronous multimodal-generation API; `OPENAI_IMAGE` uses the configured Qwen OpenAI-compatible image endpoint. These do not silently substitute another supplier. Native Qwen maps `WIDTHxHEIGHT` to the API's `WIDTH*HEIGHT`. Neither route accepts `aspectRatio`.
 
-The common `count` range is 1–8, matching the artifact persistence limit. Providers may return fewer images. Unsupported count or size controls fail before generation where the route cannot express them. Image editing, references, streaming partial images, Imagen, fal queue submission, and Azure's legacy asynchronous DALL·E 2 endpoint are outside this text-to-image contract.
+The common `count` range is 1–8, matching the artifact persistence limit. Providers may return fewer images. Unsupported count or size controls fail before generation where the route cannot express them. Streaming partial images, Imagen, fal queue submission, and Azure's legacy asynchronous DALL·E 2 endpoint are outside this text-to-image contract.
 
 Trusted `options.size`, `options.aspectRatio`, and `options.count` supply defaults when the corresponding tool argument is omitted. Explicit arguments take precedence. Defaults pass through the same validation and provider capability checks as explicit arguments; for example, a configured count of two is rejected on a single-image route before billing. Other options cannot replace the prompt, selected model, endpoint, or credentials. When size is absent from both places, recognized Seedream 4/5 model codes use `2K`; other routes use their provider's own default.
 
@@ -84,3 +84,13 @@ Checked 2026-10-15:
 - [xAI image API](https://docs.x.ai/developers/model-capabilities/images/generation)
 - [Ark image API](https://docs.volcengine.com/docs/ark/image-generation-api?lang=en)
 - [Qwen image generation API](https://www.alibabacloud.com/help/zh/model-studio/qwen-image-generation-and-editing-api-reference)
+
+## Image canvas and original-image editing
+
+`image_generate` now returns `imageArtifacts` alongside legacy `artifacts`. Each image has a version-1 record (`id`, session-scoped `path`, `title`, `mimeType`, `bytes`, optional dimensions and `parentId`). A bounded `.artifact.json` sidecar persists lineage. ByClaw renders these structured tool results on live completion and history reload; final prose need not contain a filesystem path.
+
+The chat card offers “查看”; the canvas provides fit/zoom, pan, download and ancestor version selection. “引用” uses the existing session-file `COMMON_FILE` reference flow (`queryInput-insert-item` and `resourceList`), with the same `/.sessions/<sessionId>/image/<filename>` file ID as the session file panel. It is an ordinary removable file reference in the rich composer, not an editing mode. Quoting a file alone does not request generation or editing. The user's subsequent message decides what to do with it.
+
+When the user asks to modify a referenced image, recognized Volcengine Seedream 4.0/4.5/5.0 models accept its session-file path in `referenceImage` (both `/by/.sessions/...` and `/.sessions/...`; legacy basenames remain supported). The runtime enforces the current session image directory, rejects traversal, missing files and symlinks, bounds PNG/JPEG/WebP originals to 10 MiB, and supplies the validated original bytes in the native `image` field. Each result is a new file with durable parent metadata; the original is preserved. Unsupported providers/models return `IMAGE_EDIT_UNSUPPORTED` before HTTP, never silently falling back to text-only generation.
+
+There is no separate image-reference API, composer state, or `extParams.imageReference` protocol. The backend's existing authenticated artifact resolution/download returns canonical session file paths, while optional sidecars add display/version metadata only. No server host path or credential is added to image URLs. Masks and brush editing are not implemented.

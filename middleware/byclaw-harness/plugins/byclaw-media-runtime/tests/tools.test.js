@@ -171,3 +171,33 @@ test('positive speeds reach the adapter while malformed and nonpositive speeds r
     for (const speed of [0, -1, NaN, Infinity, '1.2']) await assert.rejects(mounted.tool.execute({ text: 'Hi', speed }), /MEDIA_INVALID_ARGUMENT: speed/);
   } finally { await rm(mounted.root, { recursive: true, force: true }); }
 });
+
+test('image tool resolves ordinary session-file references and returns durable lineage', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'media-image-edit-'))
+  let setup, tool, calls = 0
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=', 'base64')
+  const ctx = { on: (_name, handler) => { setup = handler }, effect: fn => fn() }
+  const agentCtx = { tools: { register: value => { tool = value; return () => {} } }, effect: fn => fn() }
+  const host = { userCode: 'test', resolveSessionRoot: () => root,
+    resolveMediaModel: async () => ({ provider: 'VOLCENGINE', model: 'seedream-5-0', timeoutMs: 1000 }) }
+  try {
+    mountMediaPlugin(ctx, { kind: 'image', generate: async (_model, args, context) => {
+      if (args.referenceImage) assert.deepEqual(context.referenceImage.bytes, png)
+      calls++; return [{ bytes: png, mimeType: 'image/png' }]
+    } })
+    const payload = { agentCtx, host, agent: { id: '100' }, command: { header: { userCode: 'test', sessionId: '100' } } }
+    await setup(payload)
+    const original = (await tool.execute({ prompt: 'whale' })).imageArtifacts[0]
+    await setup({ ...payload, command: { ...payload.command, extraPayload: { resource_list: [{ resourceType: 'COMMON_FILE', resourceId: original.path, resourceName: original.id }] } } })
+    await assert.rejects(tool.execute({ prompt: 'blue', referenceImage: original.path.replace('/100/', '/101/') }), /IMAGE_REFERENCE_INVALID/)
+    await assert.rejects(tool.execute({ prompt: 'blue', referenceImage: '/by/.sessions/100/image/../first.png' }), /IMAGE_REFERENCE_INVALID/)
+    assert.equal(calls, 1)
+    const result = await tool.execute({ prompt: 'blue', referenceImage: original.path })
+    assert.equal(result.imageArtifacts[0].parentId, original.id)
+    assert.ok(result.imageArtifacts[0].path.startsWith('/by/.sessions/100/image/'))
+    assert.equal(result.artifacts[0].path, result.imageArtifacts[0].path)
+    const rendered = JSON.parse(tool.output.render({}, result)[0].text)
+    assert.deepEqual(rendered.imageArtifacts, result.imageArtifacts)
+    assert.equal(tool.output.schema.properties.imageArtifacts.type, 'array')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
