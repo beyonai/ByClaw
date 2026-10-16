@@ -443,9 +443,10 @@ class RouteServiceTest {
     }
 
     @Test
-    void route_sendsActualProjectWorkspaceRelativeToCurrentUserBucket() throws Exception {
+    void route_usesConversationCwdAndPreservesProjectResourceWorkspace() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setProjectId(123L);
+        ctx.getParams().put("cwd", "/by/projects/123");
         Project project = mock(Project.class);
         when(project.getProjectId()).thenReturn(123L);
         when(project.getProjectName()).thenReturn("test-project");
@@ -466,12 +467,37 @@ class RouteServiceTest {
         verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
             anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
         assertThat(paramsCaptor.getValue())
-            .containsEntry("cwd", "/by/projects/123");
+            .containsEntry("cwd", "/by/.sessions/3");
+        assertThat(Files.isDirectory(tempDir.resolve("byclaw-u1/by/.sessions/3"))).isTrue();
         JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
         assertThat(projectInfo)
             .containsEntry("project_id", 123L)
             .containsEntry("workspace", "/by/projects/123");
         verify(projectApplicationService).getProjectWorkspacePath(123L);
+    }
+
+    @Test
+    void route_isolatesConversationOutputsWithinTheSameProject() throws Exception {
+        when(projectApplicationService.getProjectWorkspacePath(123L))
+            .thenReturn(tempDir.resolve("byclaw-u1/by/projects/123"));
+        for (long sessionId : List.of(3L, 4L)) {
+            ChatProcessContext ctx = buildContext();
+            ctx.setSessionId(sessionId);
+            ctx.getAssistantChatDto().setProjectId(123L);
+            when(gatewayClient.sendMessage(anyString(), eq(String.valueOf(sessionId)), any(), anyString(), any(),
+                    anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+            routeService.route(ctx);
+
+            verify(gatewayClient).sendMessage(anyString(), eq(String.valueOf(sessionId)), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(),
+                argThat(params -> ("/by/.sessions/" + sessionId).equals(params.get("cwd"))), any());
+            assertThat(Files.isDirectory(tempDir.resolve("byclaw-u1/by/.sessions/" + sessionId))).isTrue();
+        }
     }
 
     @Test
@@ -523,12 +549,14 @@ class RouteServiceTest {
             argThat(params -> "/by/.sessions/3".equals(params.get("cwd"))), any());
     }
 
-    @Test
-    void route_rejectsMessageWhenConversationWorkspaceCannotBeCreated() throws Exception {
+    @ParameterizedTest
+    @CsvSource(value = { "123", "NULL" }, nullValues = "NULL")
+    void route_rejectsMessageWhenConversationWorkspaceCannotBeCreated(Long projectId) throws Exception {
         Path conversationWorkspace = tempDir.resolve("byclaw-u1/by/.sessions/3");
         Files.createDirectories(conversationWorkspace.getParent());
         Files.createFile(conversationWorkspace);
         ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setProjectId(projectId);
 
         assertThatThrownBy(() -> routeService.route(ctx))
             .isInstanceOf(BdpRuntimeException.class)
@@ -537,9 +565,11 @@ class RouteServiceTest {
         verifyNoInteractions(gatewayClient);
     }
 
-    @Test
-    void route_rejectsMissingSessionIdWhenProjectIsMissing() {
+    @ParameterizedTest
+    @CsvSource(value = { "123", "NULL" }, nullValues = "NULL")
+    void route_rejectsMissingSessionIdWithOrWithoutProject(Long projectId) {
         ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setProjectId(projectId);
         ctx.setSessionId(null);
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any()))

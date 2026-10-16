@@ -25,6 +25,7 @@ public class ResourceFavoriteService {
     private final ResourceFavoriteMapper mapper;
     private final ByaiSystemConfigService systemConfigService;
     private final AuthApplicationService authApplicationService;
+    private final ResourceFavoriteLockService favoriteLockService;
     private volatile boolean schemaReady;
     private volatile long schemaRetryAt;
 
@@ -59,28 +60,42 @@ public class ResourceFavoriteService {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "resource.favorite.notReady");
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
+        // 所有用户对同一企业资源的收藏写入串行执行，锁持续到事务完成。
+        favoriteLockService.acquire(tenantId, qo.getResourceId());
         SsResource resource = mapper.selectResource(qo.getResourceId(), tenantId);
         if (resource == null || resource.getResourceBizType() == null || !SUPPORTED_TYPES.contains(resource.getResourceBizType())
             || !"enterprise".equals(resource.getOwnerType())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "resource.favorite.unavailable");
         }
-        // 允许取消已下架/注销资源的收藏；新增收藏仍遵守上架和黑名单限制。
-        if (Boolean.TRUE.equals(qo.getFavorited())
-            && (!Integer.valueOf(2).equals(resource.getResourceStatus())
-                || authApplicationService.queryCurrentUserUseBlacklistedResourceIds(
-                    List.of(resource.getResourceId()), List.of(resource.getResourceBizType()))
-                    .contains(resource.getResourceId()))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "resource.favorite.unavailable");
+        // Removing an old favorite remains possible after access is revoked.
+        boolean controlled = Boolean.TRUE.equals(resource.getViewAuthControlled()) || Boolean.TRUE.equals(resource.getUseAuthControlled());
+        if (Boolean.TRUE.equals(qo.getFavorited())) {
+            boolean visible = controlled ? authApplicationService.hasResourceViewPermission(resource)
+                : !authApplicationService.queryCurrentUserUseBlacklistedResourceIds(
+                    List.of(resource.getResourceId()), List.of(resource.getResourceBizType())).contains(resource.getResourceId());
+            if (!Integer.valueOf(2).equals(resource.getResourceStatus()) || !visible) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "resource.favorite.unavailable");
+            }
         }
-        mapper.ensureCount(qo.getResourceId(), tenantId);
-        // 仅锁定本资源的计数行，防止并发收藏/取消造成计数与关系不一致。
-        long count = mapper.lockCount(qo.getResourceId(), tenantId);
-        int changed = Boolean.TRUE.equals(qo.getFavorited())
-            ? mapper.insertFavorite(qo.getResourceId(), tenantId, userId)
-            : mapper.deleteFavorite(qo.getResourceId(), tenantId, userId);
+        Long count = mapper.selectCount(qo.getResourceId(), tenantId);
+        if (count == null) {
+            // 历史计数行缺失时按已有收藏关系初始化，取消旧收藏也不会产生负数。
+            count = mapper.countFavorites(qo.getResourceId(), tenantId);
+            if (mapper.insertCount(qo.getResourceId(), tenantId, count) != 1) {
+                throw new IllegalStateException("Resource favorite count initialization failed");
+            }
+        }
+        int changed = 0;
+        if (Boolean.TRUE.equals(qo.getFavorited())) {
+            if (mapper.countUserFavorite(qo.getResourceId(), tenantId, userId) == 0) {
+                changed = mapper.insertFavorite(qo.getResourceId(), tenantId, userId);
+            }
+        } else {
+            changed = mapper.deleteFavorite(qo.getResourceId(), tenantId, userId);
+        }
         int delta = changed == 0 ? 0 : Boolean.TRUE.equals(qo.getFavorited()) ? 1 : -1;
-        if (delta != 0) {
-            mapper.updateCount(qo.getResourceId(), tenantId, delta);
+        if (delta != 0 && mapper.updateCount(qo.getResourceId(), tenantId, delta) != 1) {
+            throw new IllegalStateException("Resource favorite count update failed");
         }
         return new ResourceFavoriteVo(Boolean.TRUE.equals(qo.getFavorited()), count + delta);
     }

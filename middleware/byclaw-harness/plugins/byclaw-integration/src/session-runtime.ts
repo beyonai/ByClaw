@@ -1,6 +1,7 @@
 /** Durable DSH root-session runtime used by the BYCLAW_DSH Worker. */
 
 import { normalizeByClawSessionId } from './session-extensions.ts'
+import { byClawSessionCwd } from './session-cwd.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { sanitizeByClawOperationalLog } from './operational-log.ts'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -30,7 +31,7 @@ import {
   type AgentTeamsModelOverrideService,
 } from '@byclaw/dsh-agent-teams'
 import { mkdir } from 'node:fs/promises'
-import { isAbsolute, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   collectArchivedTeamsActivity,
   collectTeamsActivity,
@@ -63,10 +64,7 @@ import {
   registerByClawAgentWorkspacePolicy,
   type ByClawRootBinding,
 } from './session-workspace.ts'
-import {
-  buildByClawInboundTurnContext,
-  resolveByClawInboundPath,
-} from './inbound-context.ts'
+import { buildByClawInboundTurnContext } from './inbound-context.ts'
 import { ByClawSessionMetadataStore } from './session-metadata.ts'
 import {
   ByClawQuestionBroker,
@@ -469,20 +467,18 @@ export function byClawCommandSessionRoute(
   command: AskAgentCommand,
   byRoot = '/by',
 ): ByClawCommandSessionRoute {
-  const requestedCwd = nonEmptyString(command.extraPayload['cwd'])
-  if (requestedCwd !== undefined && !isAbsolute(requestedCwd)) {
-    throw new Error(`ByClaw inbound cwd must be absolute: "${requestedCwd}"`)
-  }
+  const externalRootSessionId = optionalSessionId(command.extraPayload['byclaw_root_session_id'])
+    ?? normalizeByClawSessionId(command.header.sessionId)
   return {
-    externalRootSessionId: optionalSessionId(command.extraPayload['byclaw_root_session_id'])
-      ?? normalizeByClawSessionId(command.header.sessionId),
+    externalRootSessionId,
     ...optionalSessionId(command.extraPayload['dsh_target_session_id']) === undefined ? {} : {
       targetDshSessionId: optionalSessionId(command.extraPayload['dsh_target_session_id']),
     },
     ...optionalSessionId(command.extraPayload['dsh_parent_session_id']) === undefined ? {} : {
       parentDshSessionId: optionalSessionId(command.extraPayload['dsh_parent_session_id']),
     },
-    ...(requestedCwd === undefined ? {} : { cwd: resolveByClawInboundPath(requestedCwd, byRoot) }),
+    // Old gateways may still send a project cwd; the business conversation owns execution now.
+    cwd: byClawSessionCwd(externalRootSessionId, byRoot),
   }
 }
 
@@ -1649,13 +1645,13 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       semanticProvider?: string
       resolution?: string
     }
+    const byRoot = resolve(this.options.byRoot ?? '/by')
+    const sessionRoot = byClawSessionCwd(route.externalRootSessionId, byRoot)
+    await mkdir(sessionRoot, { recursive: true })
     const entry = await this.handleFor(command, selection, preparedRoot)
     entry.selection.current = selection
     const rootAgent = entry.handle.agent
     const teamModelOverrides = this.ctx.get(AGENT_TEAMS_MODEL_OVERRIDES) as AgentTeamsModelOverrideService | undefined
-    const byRoot = resolve(this.options.byRoot ?? '/by')
-    const sessionRoot = join(byRoot, '.sessions', route.externalRootSessionId)
-    await mkdir(sessionRoot, { recursive: true })
     const sessionWorkspace = this.options.workspaceRegistry.registerRoot(
       rootAgent.session,
       route.externalRootSessionId,
@@ -2084,7 +2080,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         ...(coordination === undefined ? {} : { groupCoordination: coordination }),
         ...(session.header.cwd === undefined ? {} : { cwd: session.header.cwd }),
       },
-      { replaceStaleLifecycle: mode === 'create' },
+      { replaceStaleLifecycle: mode === 'create', byRoot: this.options.byRoot ?? '/by' },
     )
   }
 

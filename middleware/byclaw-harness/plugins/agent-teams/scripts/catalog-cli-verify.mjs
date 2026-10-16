@@ -1,10 +1,11 @@
-import { resolveTeamStateRoot } from '../lib/runtime-state.js'
+import { registerTeamStateWorkspaceAlias, resolveTeamStateRoot } from '../lib/runtime-state.js'
 /** Global expert-template catalog and model-free CLI verification. */
 
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import assert from 'node:assert/strict'
 import {
   listRuntimeInstances,
   listTeamTemplates,
@@ -101,6 +102,22 @@ try {
   await createTeamDir(legacyRoot, legacyTeam)
   await writeFile(join(catalogDir, 'instances', 'legacy-pointer.json'), JSON.stringify({ version: 1, id: 'legacy-pointer', teamId: legacyTeam.id, teamName: legacyTeam.name, workspace: legacyWorkspace, stateRoot: legacyRoot, captainSessionId: legacyTeam.captainSessionId, createdAt: legacyTeam.createdAt }))
   const migratedRoot = resolveTeamStateRoot(legacyWorkspace, '.agent-teams')
+  const conversationWorkspace = join(root, '.sessions', 'conversation')
+  const releaseAlias = registerTeamStateWorkspaceAlias(conversationWorkspace, legacyWorkspace)
+  const releaseSecondAlias = registerTeamStateWorkspaceAlias(conversationWorkspace, legacyWorkspace)
+  try {
+    assert.equal(resolveTeamStateRoot(conversationWorkspace, '.agent-teams'), migratedRoot)
+    assert.equal((await readTeam(resolveTeamStateRoot(conversationWorkspace, '.agent-teams'), legacyTeam.id)).id, legacyTeam.id)
+    assert.throws(() => registerTeamStateWorkspaceAlias(conversationWorkspace, workspace), /Conflicting/)
+    assert.notEqual(resolveTeamStateRoot(join(root, '.sessions', 'new-conversation'), '.agent-teams'), migratedRoot)
+    releaseAlias()
+    releaseAlias()
+    assert.equal(resolveTeamStateRoot(conversationWorkspace, '.agent-teams'), migratedRoot, 'remaining owner retains the alias')
+  } finally {
+    releaseAlias()
+    releaseSecondAlias()
+  }
+  assert.notEqual(resolveTeamStateRoot(conversationWorkspace, '.agent-teams'), migratedRoot)
   const cold = cli('instances', 'show', 'legacy-pointer', '--json')
   if (cold.status !== 0 || JSON.parse(cold.stdout).status !== 'active' || JSON.parse(cold.stdout).stateRoot !== migratedRoot) throw new Error('cold CLI must resolve pre-migration runtime pointer')
   const reRegistered = await registerRuntimeInstance(catalogDir, migratedRoot, legacyWorkspace, legacyTeam)

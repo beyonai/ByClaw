@@ -1,5 +1,5 @@
-import { EyeInvisibleOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Form, Input, InputNumber, Select, Slider, Space, Switch } from 'antd';
+import { DownOutlined, EyeInvisibleOutlined, EyeOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
+import { AutoComplete, Button, Form, Input, InputNumber, Select, Slider, Space, Switch } from 'antd';
 import React, { useMemo } from 'react';
 import { trim } from 'lodash';
 import { useIntl } from '@umijs/max';
@@ -7,7 +7,6 @@ import { getByParamGroupCode } from '@/pages/manager/service/System';
 import ModelFormSection from './ModelFormSection';
 import {
   tokenMarks,
-  DEFAULT_CONTEXT_TOKENS,
   CONTEXT_TOKENS_CONFIG,
   MIN_CONTEXT_TOKENS,
   MIN_MAX_TOKENS,
@@ -18,13 +17,25 @@ import {
   getApiEndpointPlaceholder,
 } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
-import { getImageGenerationProvider, IMAGE_GENERATION_PROVIDER_OPTIONS } from './imageGenerationProviders';
+import {
+  getImageGenerationProvider,
+  getImageGenerationProviderByProtocol,
+  IMAGE_GENERATION_PROVIDER_OPTIONS,
+} from './imageGenerationProviders';
+import VolcengineImageFields from './VolcengineImageFields';
+import { isVolcengineImage, SEEDREAM_MODEL_PRESETS } from './volcengineImageConfig';
+import { findModelFormPreset, getModelPresetLimits, MODEL_FORM_PRESETS } from './modelFormPresets';
+import ModelPresetPicker from './ModelPresetPicker';
 
 const { TextArea } = Input;
 
 type Option = { label: string; value: string };
 
 type Props = {
+  simplified?: boolean;
+  canAutofill?: boolean;
+  onPresetSelect?: (presetId: string) => void;
+  presetId?: string;
   form: any;
   modalTitle: string;
   currentDisplayName?: string;
@@ -45,18 +56,20 @@ type Props = {
 };
 
 const ApiTokenComp = (props: {
+  id?: string;
   value?: string;
   onChange?: (value: string) => void;
   tokenVisible: boolean;
   setTokenVisible: React.Dispatch<React.SetStateAction<boolean>>;
 }) => {
-  const { value, onChange, tokenVisible, setTokenVisible } = props;
+  const { id, value, onChange, tokenVisible, setTokenVisible } = props;
 
   const intl = useIntl();
 
   return (
     <Space.Compact className={styles.apiTokenWrap}>
       <Input
+        id={id}
         type={tokenVisible ? 'text' : 'password'}
         placeholder={intl.formatMessage({ id: 'modelMgr.modal.apiTokenPlaceholder' })}
         className={styles.apiTokenInput}
@@ -86,6 +99,10 @@ const ApiTokenComp = (props: {
 };
 
 const ModelFormFields: React.FC<Props> = ({
+  simplified = false,
+  canAutofill = false,
+  onPresetSelect,
+  presetId,
   form,
   // modalTitle,
   // currentDisplayName,
@@ -107,22 +124,40 @@ const ModelFormFields: React.FC<Props> = ({
   const intl = useIntl();
   const currentModelProtocol = Form.useWatch('modelProtocol', form);
   const currentModelType = Form.useWatch('modelType', form);
+  const currentModelCode = Form.useWatch('modelCode', form);
+  const currentPreset = findModelFormPreset(currentModelCode, presetId);
+  const currentApiEndpoint = Form.useWatch('apiEndpoint', form);
+  const presetLimits = simplified
+    ? getModelPresetLimits(
+        {
+          modelCode: currentModelCode,
+          modelType: currentModelType,
+          modelProtocol: currentModelProtocol,
+          apiEndpoint: currentApiEndpoint,
+        },
+        presetId
+      )
+    : undefined;
+  const isVolcengine = isVolcengineImage({ modelType: currentModelType, modelProtocol: currentModelProtocol });
   const reasoningConfig = Form.useWatch('reasoningConfig', form) || {};
   const apiEndpointPlaceholder = useMemo(() => getApiEndpointPlaceholder(currentModelProtocol), [currentModelProtocol]);
   const isLlmModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'LLM';
   const isImageGenerationModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'IMAGE_GENERATION';
   const modelProtocolOptions = isImageGenerationModel
     ? [
-      ...IMAGE_GENERATION_PROVIDER_OPTIONS.map((item) => {
-        const provider = getImageGenerationProvider(item.value);
-        return {
-          label: provider?.label || item.label,
-          value: provider?.modelProtocol || item.value,
-        };
-      }),
-      { label: 'Qwen', value: 'Qwen' },
-    ]
-    : [...MODEL_PROTOCOL_OPTIONS].filter((item) => item.value !== 'MINIMAX_IMAGE');
+        ...IMAGE_GENERATION_PROVIDER_OPTIONS.map((item) => {
+          const provider = getImageGenerationProvider(item.value);
+          return {
+            label: provider?.label || item.label,
+            value: provider?.modelProtocol || item.value,
+          };
+        }),
+        { label: 'Qwen', value: 'Qwen' },
+      ]
+    : [...MODEL_PROTOCOL_OPTIONS].filter(
+        (item) =>
+          item.value !== 'MINIMAX_IMAGE' && (item.value !== 'Volcengine Multimodal' || currentModelType === 'EMBEDDING')
+      );
   const defaultProviderOptions = useMemo(
     () => [
       { label: 'OpenAI', value: 'OpenAI' },
@@ -153,11 +188,11 @@ const ModelFormFields: React.FC<Props> = ({
         const list = res?.data?.byaiSystemConfigLists;
         const options = Array.isArray(list)
           ? list
-            .map((item: any) => ({
-              label: isEnglish ? item.paramEnName || item.paramName : item.paramName || item.paramEnName,
-              value: item.paramValue,
-            }))
-            .filter((item: Option) => item.value)
+              .map((item: any) => ({
+                label: isEnglish ? item.paramEnName || item.paramName : item.paramName || item.paramEnName,
+                value: item.paramValue,
+              }))
+              .filter((item: Option) => item.value)
           : [];
         setSystemProviderOptions(options.length ? options : fallbackOptions);
       })
@@ -189,12 +224,10 @@ const ModelFormFields: React.FC<Props> = ({
   //   () => [
   //     { key: 'basic', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.basicConfig' }) },
   //     {
-  //       key: 'connection',
+  //       key: 'more',
   //       icon: <RightOutlined />,
-  //       label: intl.formatMessage({ id: 'modelMgr.modal.connectionSecurity' }),
+  //       label: intl.formatMessage({ id: 'modelMgr.modal.moreConfig' }),
   //     },
-  //     { key: 'params', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.paramConfig' }) },
-  //     { key: 'tags', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.tagConfig' }) },
   //   ],
   //   [intl]
   // );
@@ -259,7 +292,21 @@ const ModelFormFields: React.FC<Props> = ({
           open={isSectionOpen('basic')}
           onToggle={() => toggleSection('basic')}
         >
-          <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.identityGroup' })}</div>
+          {canAutofill ? (
+            <>
+              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.quickPreset' })}>
+                <ModelPresetPicker onSelect={onPresetSelect} />
+              </Form.Item>
+              {/* 仅在需要确认实际配置或模板使用限制时展示说明，普通模板不额外占用提示区域。 */}
+              {currentModelCode && (!currentPreset || currentPreset.noticeId) ? (
+                <div className={styles.hintBlock} role="status">
+                  {intl.formatMessage({
+                    id: currentPreset?.noticeId || 'modelMgr.modal.unknownModelHint',
+                  })}
+                </div>
+              ) : null}
+            </>
+          ) : null}
           <div className={styles.grid3}>
             <Form.Item
               label={intl.formatMessage({ id: 'modelMgr.modal.displayName' })}
@@ -284,14 +331,33 @@ const ModelFormFields: React.FC<Props> = ({
                 },
               ]}
             >
-              <Input
-                placeholder={
-                  isImageGenerationModel
-                    ? intl.formatMessage({ id: 'modelMgr.modal.modelCodePlaceholder' })
-                    : 'gpt-4-turbo-preview'
-                }
-                maxLength={100}
-              />
+              {canAutofill ? (
+                <AutoComplete
+                  options={[...new Set(MODEL_FORM_PRESETS.map((preset) => preset.values.modelCode))]
+                    .sort(new Intl.Collator(intl.locale, { numeric: true, sensitivity: 'base' }).compare)
+                    .map((value) => ({ value }))}
+                  filterOption={(input, option) => `${option?.value}`.toLowerCase().includes(input.toLowerCase())}
+                  placeholder={intl.formatMessage({ id: 'modelMgr.modal.modelCodePlaceholder' })}
+                >
+                  <Input maxLength={100} />
+                </AutoComplete>
+              ) : isVolcengine ? (
+                <AutoComplete
+                  options={SEEDREAM_MODEL_PRESETS.map((value) => ({ value }))}
+                  placeholder={intl.formatMessage({ id: 'modelMgr.modal.seedreamModelPlaceholder' })}
+                >
+                  <Input maxLength={100} />
+                </AutoComplete>
+              ) : (
+                <Input
+                  placeholder={
+                    isImageGenerationModel
+                      ? intl.formatMessage({ id: 'modelMgr.modal.modelCodePlaceholder' })
+                      : 'gpt-4-turbo-preview'
+                  }
+                  maxLength={100}
+                />
+              )}
             </Form.Item>
 
             <Form.Item
@@ -302,13 +368,67 @@ const ModelFormFields: React.FC<Props> = ({
               <Select options={modelTypeOptions} />
             </Form.Item>
           </div>
+          {/* 必填凭证直接展示，应用配置集中放在下方可展开的更多基本信息中。 */}
+          <Form.Item
+            label={intl.formatMessage({ id: 'modelMgr.modal.apiToken' })}
+            name="apiToken"
+            rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.apiTokenRequired' }) }]}
+          >
+            <ApiTokenComp tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} />
+          </Form.Item>
+          {/* 可选配置入口用右箭头表示收起、下箭头表示展开，与内容显隐共用状态。 */}
+          {simplified ? (
+            <Button
+              type="link"
+              className={styles.basicExtraToggle}
+              icon={isSectionOpen('basicExtra') ? <DownOutlined aria-hidden /> : <RightOutlined aria-hidden />}
+              onClick={() => toggleSection('basicExtra')}
+              aria-expanded={isSectionOpen('basicExtra')}
+            >
+              {intl.formatMessage({ id: 'modelMgr.modal.moreBasicSettings' })}
+            </Button>
+          ) : null}
+          <div hidden={simplified && !isSectionOpen('basicExtra')}>
+            <div className={styles.grid2}>
+              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.ability' })} name="abilities">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder={intl.formatMessage({ id: 'modelMgr.modal.abilityPlaceholder' })}
+                  options={abilityOptions.filter((item) => item.value !== '1')}
+                />
+              </Form.Item>
+              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.status' })} name="status">
+                <Select options={statusOptions} />
+              </Form.Item>
+            </div>
+            {/* 系统归属属于模型基础信息，与名称、型号和类型集中配置。 */}
+            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.systemTags' })} name="systems">
+              <Select
+                mode="tags"
+                allowClear
+                placeholder={intl.formatMessage({ id: 'modelMgr.modal.systemTagsPlaceholder' })}
+                options={systemOptions}
+                tokenSeparators={[',']}
+              />
+            </Form.Item>
+            <Form.Item
+              label={intl.formatMessage({ id: 'modelMgr.modal.applicabilityScope' })}
+              name="applicabilityScope"
+            >
+              <TextArea
+                placeholder={intl.formatMessage({ id: 'modelMgr.modal.applicabilityScopePlaceholder' })}
+                rows={3}
+              />
+            </Form.Item>
+          </div>
         </ModelFormSection>
 
         <ModelFormSection
-          title={intl.formatMessage({ id: 'modelMgr.modal.connectionSecurity' })}
-          desc={intl.formatMessage({ id: 'modelMgr.modal.connectionSecurityDesc' })}
-          open={isSectionOpen('connection')}
-          onToggle={() => toggleSection('connection')}
+          title={intl.formatMessage({ id: 'modelMgr.modal.moreConfig' })}
+          desc={intl.formatMessage({ id: 'modelMgr.modal.moreConfigDesc' })}
+          open={isSectionOpen('more')}
+          onToggle={() => toggleSection('more')}
         >
           <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.endpointGroup' })}</div>
           <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.modelProtocol' })} name="modelProtocol">
@@ -326,75 +446,75 @@ const ModelFormFields: React.FC<Props> = ({
             <Input placeholder={apiEndpointPlaceholder} />
           </Form.Item>
 
-          <Form.Item
-            label={intl.formatMessage({ id: 'modelMgr.modal.apiToken' })}
-            name="apiToken"
-            rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.apiTokenRequired' }) }]}
-          >
-            <ApiTokenComp tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} />
-          </Form.Item>
-
-          <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.authGroup' })}</div>
-          <Form.List name="headers">
-            {(fields, { add, remove }) => (
-              <>
-                <div className={styles.hintBlock}>
-                  <div className={styles.hintTitle}>{intl.formatMessage({ id: 'modelMgr.modal.headers' })}</div>
-                  <div className={styles.hint}>{intl.formatMessage({ id: 'modelMgr.modal.headersDesc' })}</div>
-                </div>
-                {fields.map((field) => (
-                  <div key={field.key} className={styles.headersRow}>
-                    <Form.Item key={`header_key_${field.key}`} name={[field.name, 'key']} rules={[{ required: false }]}>
-                      <Input placeholder={intl.formatMessage({ id: 'form.input' })} />
-                    </Form.Item>
-                    <Form.Item
-                      key={`header_value_${field.key}`}
-                      name={[field.name, 'value']}
-                      rules={[{ required: false }]}
-                    >
-                      <Input placeholder={intl.formatMessage({ id: 'form.input' })} />
-                    </Form.Item>
-                    <div className={styles.headersAction}>
-                      <Button size="small" type="link" onClick={() => remove(field.name)}>
-                        {intl.formatMessage({ id: 'common.delete' })}
-                      </Button>
-                    </div>
+          <div>
+            <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.authGroup' })}</div>
+            <Form.List name="headers">
+              {(fields, { add, remove }) => (
+                <>
+                  <div className={styles.hintBlock}>
+                    <div className={styles.hintTitle}>{intl.formatMessage({ id: 'modelMgr.modal.headers' })}</div>
+                    <div className={styles.hint}>{intl.formatMessage({ id: 'modelMgr.modal.headersDesc' })}</div>
                   </div>
-                ))}
-                <div className={styles.headersAdd} onClick={() => add({ key: '', value: '' })}>
-                  <PlusOutlined />
-                  <span>{intl.formatMessage({ id: 'modelMgr.modal.addHeader' })}</span>
-                </div>
-              </>
-            )}
-          </Form.List>
+                  {fields.map((field) => (
+                    <div key={field.key} className={styles.headersRow}>
+                      <Form.Item
+                        key={`header_key_${field.key}`}
+                        name={[field.name, 'key']}
+                        rules={[{ required: false }]}
+                      >
+                        <Input placeholder={intl.formatMessage({ id: 'form.input' })} />
+                      </Form.Item>
+                      <Form.Item
+                        key={`header_value_${field.key}`}
+                        name={[field.name, 'value']}
+                        rules={[{ required: false }]}
+                      >
+                        <Input placeholder={intl.formatMessage({ id: 'form.input' })} />
+                      </Form.Item>
+                      <div className={styles.headersAction}>
+                        <Button size="small" type="link" onClick={() => remove(field.name)}>
+                          {intl.formatMessage({ id: 'common.delete' })}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className={styles.headersAdd} onClick={() => add({ key: '', value: '' })}>
+                    <PlusOutlined />
+                    <span>{intl.formatMessage({ id: 'modelMgr.modal.addHeader' })}</span>
+                  </div>
+                </>
+              )}
+            </Form.List>
 
-          <div className={styles.grid2}>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.connectTimeoutSec' })} name="connectTimeoutSec">
-              <InputNumber className={styles.fullWidth} min={0} />
-            </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.readTimeoutSec' })} name="readTimeoutSec">
-              <InputNumber className={styles.fullWidth} min={0} />
-            </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.maxRetries' })} name="maxRetries">
-              <InputNumber className={styles.fullWidth} min={0} />
-            </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.retryIntervalSec' })} name="retryIntervalSec">
-              <InputNumber className={styles.fullWidth} min={0} />
-            </Form.Item>
+            <div className={styles.grid2}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'modelMgr.modal.connectTimeoutSec' })}
+                name="connectTimeoutSec"
+              >
+                <InputNumber className={styles.fullWidth} min={0} />
+              </Form.Item>
+              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.readTimeoutSec' })} name="readTimeoutSec">
+                <InputNumber className={styles.fullWidth} min={0} />
+              </Form.Item>
+              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.maxRetries' })} name="maxRetries">
+                <InputNumber className={styles.fullWidth} min={0} />
+              </Form.Item>
+              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.retryIntervalSec' })} name="retryIntervalSec">
+                <InputNumber className={styles.fullWidth} min={0} />
+              </Form.Item>
+            </div>
           </div>
-        </ModelFormSection>
-
-        <ModelFormSection
-          title={intl.formatMessage({ id: 'modelMgr.modal.paramConfig' })}
-          desc={intl.formatMessage({ id: 'modelMgr.modal.paramConfigDesc' })}
-          open={isSectionOpen('params')}
-          onToggle={() => toggleSection('params')}
-        >
+          <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.paramConfig' })}</div>
+          <div className={styles.hintBlock}>
+            {intl.formatMessage({
+              id: simplified ? 'modelMgr.modal.automaticParamsHint' : 'modelMgr.modal.paramConfigDesc',
+            })}
+          </div>
           {!isImageGenerationModel ? (
             <>
               <Form.Item
                 label={intl.formatMessage({ id: 'modelMgr.modal.contextTokens' })}
+                htmlFor="contextTokens"
                 required
                 tooltip={intl.formatMessage({ id: 'modelMgr.modal.contextTokensTooltip' })}
               >
@@ -408,28 +528,41 @@ const ModelFormFields: React.FC<Props> = ({
                         message: intl.formatMessage({ id: 'modelMgr.modal.contextTokensPlaceholder' }),
                       },
                       {
-                        type: 'number',
+                        type: 'integer',
                         min: MIN_CONTEXT_TOKENS,
                         message: intl.formatMessage(
                           { id: 'modelMgr.modal.contextTokensMin' },
                           { min: MIN_CONTEXT_TOKENS.toLocaleString() }
                         ),
                       },
+                      {
+                        type: 'integer',
+                        max: presetLimits?.contextTokens,
+                        message: intl.formatMessage(
+                          { id: 'modelMgr.modal.contextTokensMax' },
+                          { max: presetLimits?.contextTokens }
+                        ),
+                      },
                     ]}
                   >
-                    <InputNumber {...CONTEXT_TOKENS_CONFIG} className={styles.tokenInput} />
+                    <InputNumber min={MIN_CONTEXT_TOKENS} precision={0} className={styles.tokenInput} />
                   </Form.Item>
                   <span className={styles.hint}>tokens</span>
                   <div className={styles.sliderWrap}>
                     <Form.Item shouldUpdate noStyle>
                       {() => {
-                        const v = form.getFieldValue('contextTokens') || DEFAULT_CONTEXT_TOKENS;
+                        const v = form.getFieldValue('contextTokens');
                         return (
                           <Slider
                             {...CONTEXT_TOKENS_CONFIG}
                             marks={tokenMarks as any}
-                            value={v}
-                            onChange={(val) => form.setFieldsValue({ contextTokens: val })}
+                            disabled={!v}
+                            value={v || MIN_CONTEXT_TOKENS}
+                            onChange={(val) => {
+                              form.setFieldsValue({ contextTokens: val });
+                              // 滑块也属于手动修改，必须通知自动填充入口保护该值。
+                              if (simplified) onValuesChange({ contextTokens: val }, form.getFieldsValue(true));
+                            }}
                           />
                         );
                       }}
@@ -458,34 +591,43 @@ const ModelFormFields: React.FC<Props> = ({
                     rows={3}
                   />
                 </Form.Item>
-                <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.aspectRatio' })} name="aspectRatio">
-                  <Select
-                    options={['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16'].map((value) => ({
-                      label: value,
-                      value,
-                    }))}
-                  />
-                </Form.Item>
-                <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.imageCount' })} name="imageCount">
-                  <InputNumber className={styles.fullWidth} min={1} max={9} precision={0} />
-                </Form.Item>
-                <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.responseFormat' })} name="responseFormat">
-                  <Select
-                    options={[
-                      { label: 'URL', value: 'url' },
-                      { label: 'Base64', value: 'base64' },
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item
-                  label={intl.formatMessage({ id: 'modelMgr.modal.promptOptimizer' })}
-                  name="promptOptimizer"
-                  valuePropName="checked"
-                >
-                  <Switch />
-                </Form.Item>
+                {isVolcengine ? (
+                  <VolcengineImageFields modelCode={currentModelCode} />
+                ) : ['BAILIAN_IMAGE', 'TOKENHUB_IMAGE'].includes(currentModelProtocol) ? null : (
+                  <>
+                    <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.aspectRatio' })} name="aspectRatio">
+                      <Select
+                        options={['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16'].map((value) => ({
+                          label: value,
+                          value,
+                        }))}
+                      />
+                    </Form.Item>
+                    <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.imageCount' })} name="imageCount">
+                      <InputNumber className={styles.fullWidth} min={1} max={9} precision={0} />
+                    </Form.Item>
+                    <Form.Item
+                      label={intl.formatMessage({ id: 'modelMgr.modal.responseFormat' })}
+                      name="responseFormat"
+                    >
+                      <Select
+                        options={[
+                          { label: 'URL', value: 'url' },
+                          { label: 'Base64', value: 'base64' },
+                        ]}
+                      />
+                    </Form.Item>
+                    <Form.Item
+                      label={intl.formatMessage({ id: 'modelMgr.modal.promptOptimizer' })}
+                      name="promptOptimizer"
+                      valuePropName="checked"
+                    >
+                      <Switch />
+                    </Form.Item>
+                  </>
+                )}
               </>
-            ) : (
+            ) : !simplified || isLlmModel ? (
               <>
                 <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.temperature' })} name="temperature">
                   <InputNumber className={styles.fullWidth} min={0} max={2} step={0.1} />
@@ -498,16 +640,24 @@ const ModelFormFields: React.FC<Props> = ({
                   name="maxTokens"
                   rules={[
                     {
-                      type: 'number',
+                      type: 'integer',
                       min: MIN_MAX_TOKENS,
                       message: intl.formatMessage(
                         { id: 'modelMgr.modal.maxTokensMin' },
                         { min: MIN_MAX_TOKENS.toLocaleString() }
                       ),
                     },
+                    {
+                      type: 'integer',
+                      max: presetLimits?.maxTokens,
+                      message: intl.formatMessage(
+                        { id: 'modelMgr.modal.outputTokensMax' },
+                        { max: presetLimits?.maxTokens }
+                      ),
+                    },
                   ]}
                 >
-                  <InputNumber className={styles.fullWidth} min={MIN_MAX_TOKENS} />
+                  <InputNumber className={styles.fullWidth} min={MIN_MAX_TOKENS} precision={0} />
                 </Form.Item>
                 <Form.Item
                   label={intl.formatMessage({ id: 'modelMgr.modal.frequencyPenalty' })}
@@ -519,13 +669,24 @@ const ModelFormFields: React.FC<Props> = ({
                   <InputNumber className={styles.fullWidth} min={-2} max={2} step={0.1} />
                 </Form.Item>
               </>
-            )}
+            ) : null}
             <Form.Item
               label={intl.formatMessage({ id: 'modelMgr.modal.provider' })}
               name="providerName"
-              rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.providerRequired' }) }]}
+              dependencies={['modelType', 'modelProtocol']}
+              extra={intl.formatMessage({
+                id: isImageGenerationModel ? 'modelMgr.modal.imageProviderHint' : 'modelMgr.modal.providerOptionalHint',
+              })}
+              rules={[
+                {
+                  required: isImageGenerationModel && !getImageGenerationProviderByProtocol(currentModelProtocol),
+                  whitespace: true,
+                  message: intl.formatMessage({ id: 'modelMgr.modal.imageProviderRequired' }),
+                },
+              ]}
             >
               <Select
+                allowClear
                 placeholder={intl.formatMessage({ id: 'modelMgr.modal.providerPlaceholder' })}
                 options={providerOptions}
               />
@@ -543,6 +704,8 @@ const ModelFormFields: React.FC<Props> = ({
                 >
                   <Switch
                     onChange={(checked) => {
+                      // 新增表单由统一变更入口同步 Thinking 默认程度和调试参数。
+                      if (simplified) return;
                       if (!checked) {
                         form.setFieldsValue({
                           reasoningConfig: {
@@ -637,37 +800,6 @@ const ModelFormFields: React.FC<Props> = ({
                 rows={4}
                 className={styles.fullWidth}
               />
-            </Form.Item>
-          </div>
-        </ModelFormSection>
-
-        <ModelFormSection
-          title={intl.formatMessage({ id: 'modelMgr.modal.tagConfig' })}
-          desc={intl.formatMessage({ id: 'modelMgr.modal.tagConfigDesc' })}
-          open={isSectionOpen('tags')}
-          onToggle={() => toggleSection('tags')}
-        >
-          <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.systemTags' })} name="systems">
-            <Select
-              mode="tags"
-              allowClear
-              placeholder={intl.formatMessage({ id: 'modelMgr.modal.systemTagsPlaceholder' })}
-              options={systemOptions}
-              tokenSeparators={[',']}
-            />
-          </Form.Item>
-
-          <div className={styles.grid2}>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.ability' })} name="abilities">
-              <Select
-                mode="multiple"
-                allowClear
-                placeholder={intl.formatMessage({ id: 'modelMgr.modal.abilityPlaceholder' })}
-                options={abilityOptions.filter((item) => item.value !== '1')}
-              />
-            </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.status' })} name="status">
-              <Select options={statusOptions} />
             </Form.Item>
           </div>
         </ModelFormSection>

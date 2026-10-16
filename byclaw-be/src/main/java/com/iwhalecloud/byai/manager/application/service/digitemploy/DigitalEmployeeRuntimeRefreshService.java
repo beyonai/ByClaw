@@ -37,6 +37,15 @@ public class DigitalEmployeeRuntimeRefreshService {
     @Autowired
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
 
+    /** Durable sync jobs must observe refresh failures rather than acknowledge them as complete. */
+    public void refreshForResourceSync(Long employeeId) {
+        if (!postCommitRefreshExecutor.refresh(employeeId, null)) {
+            throw new IllegalStateException("数字员工运行态刷新未完成");
+        }
+        digEmployeeChangeEventPublisher.publishNowQuietly(DigEmployeeChangeEventType.DIG_EMPLOYEE_SKILLS_SYNCED,
+            employeeId, "enterprise-resource-sync");
+    }
+
     public void scheduleSkillRuntimeRefreshAfterCommit(Collection<Long> digitalEmployeeIds) {
         if (digitalEmployeeIds == null) {
             return;

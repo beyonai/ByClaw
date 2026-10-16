@@ -58,35 +58,57 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, onSaved, ...props }) => {
     [intl]
   );
 
-  const runDebugRequest = useCallback(async ({ modelId, input, signal, onDelta }: any) => {
-    const response = await fetch('/byaiService/personal/model/debug', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: `${modelId}`, input }),
-      signal,
-    });
+  const runDebugRequest = useCallback(
+    async ({ modelId, input, modelType, signal, onDelta }: any) => {
+      if (modelType === 'IMAGE_GENERATION') {
+        // 图片调试为 JSON 响应；文本模型继续使用下方既有 SSE 路径。
+        const response = await fetch('/byaiService/personal/model/debugImageGeneration', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: `${modelId}`, input }),
+          signal,
+        });
+        if (!response.ok) {
+          throw new Error(
+            `${intl.formatMessage({ id: 'modelMgr.error.debugModelImageGenerationFail' })} (HTTP ${response.status})`
+          );
+        }
+        const result = await response.json();
+        if (result?.code !== 0) {
+          throw new Error(result?.msg || intl.formatMessage({ id: 'modelMgr.error.debugModelImageGenerationFail' }));
+        }
+        return { output: JSON.stringify(result.data, null, 2) };
+      }
+      const response = await fetch('/byaiService/personal/model/debug', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: `${modelId}`, input }),
+        signal,
+      });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
 
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('No reader');
-    }
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader');
+      }
 
-    const decoder = new TextDecoder();
-    let content = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      content += chunk;
-      onDelta?.(chunk);
-    }
+      const decoder = new TextDecoder();
+      let content = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        content += chunk;
+        onDelta?.(chunk);
+      }
 
-    return { output: content };
-  }, []);
+      return { output: content };
+    },
+    [intl]
+  );
 
   const extractModelIdFromSave = useCallback((res: any) => res?.data?.id ?? res?.data, []);
   // 资源中心与模型管理共用能力字典，并兼容不同版本的字典字段。

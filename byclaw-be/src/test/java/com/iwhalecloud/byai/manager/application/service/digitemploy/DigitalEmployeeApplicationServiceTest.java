@@ -98,6 +98,21 @@ import org.mockito.InOrder;
 
 class DigitalEmployeeApplicationServiceTest {
 
+    @Test
+    void editorRejectsNewControlledResourceWithoutUsePermissionButRetainsExistingBinding() {
+        SsResource employee = new SsResource(); employee.setResourceId(100L);
+        SsResource child = new SsResource(); child.setResourceId(200L); child.setResourceBizType("TOOLKIT");
+        child.setUseAuthControlled(true);
+        when(ssResourceService.findByIdList(List.of(200L))).thenReturn(List.of(child));
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service, "reconcileDigitalEmployeeUpdateRelations",
+            employee, List.of(200L), List.of(), List.of())).isInstanceOf(BaseException.class);
+        verify(ssResourceRelDetailService, never()).save(any());
+        SsResourceRelDetail relation = new SsResourceRelDetail(); relation.setRelResourceId(200L);
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(service, "reconcileDigitalEmployeeUpdateRelations",
+            employee, List.of(200L), List.of(relation), List.of())).doesNotThrowAnyException();
+        verify(ssResourceRelDetailService).updateById(relation);
+    }
+
     private SsResourceService ssResourceService;
     private SsResExtDigEmployeeService ssResExtDigEmployeeService;
     private SsResExtSkillService ssResExtSkillService;
@@ -157,6 +172,8 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", mockMessageSource);
 
         service = new DigitalEmployeeApplicationService();
+        ReflectionTestUtils.setField(service, "resourceBindingSourceService",
+            mock(com.iwhalecloud.byai.manager.application.service.resource.ResourceBindingSourceService.class));
         ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "ssResExtDigEmployeeService", ssResExtDigEmployeeService);
@@ -615,6 +632,45 @@ class DigitalEmployeeApplicationServiceTest {
         List<SsResExtDigEmployee> savedExtList = extCaptor.getAllValues();
         assertThat(savedExtList).extracting(SsResExtDigEmployee::getTagName)
             .containsExactly(null, null, null, null, null);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {""})
+    void saveDigitalEmployee_allowsEmptyOptionalModels(String imageModelId) {
+        DigitalEmployeeDTO dto = createDto();
+        dto.setImageModelId(imageModelId);
+        dto.setTtsModelId(null);
+        when(sequenceService.nextVal()).thenReturn(100L);
+
+        // 模型列表可能为空，创建员工不能依赖文生图或语音模型已配置。
+        SsResource created = service.saveDigitalEmployee(dto);
+
+        assertThat(created.getResourceId()).isEqualTo(100L);
+        ArgumentCaptor<SsResExtDigEmployee> extCaptor = ArgumentCaptor.forClass(SsResExtDigEmployee.class);
+        verify(ssResExtDigEmployeeService).save(extCaptor.capture());
+        assertThat(extCaptor.getValue().getTtsModelId()).isNull();
+        verifyNoInteractions(aiModelService);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {""})
+    void updateDigitalEmployee_allowsEmptyOptionalModels(String imageModelId) {
+        DigitalEmployeeApplicationService updater = updateServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        prepareFullUpdate(employee, List.of(), List.of());
+        DigitalEmployeeDTO dto = updateDto();
+        dto.setImageModelId(imageModelId);
+        dto.setTtsModelId(null);
+
+        updater.updateDigitalEmployee(dto);
+
+        ArgumentCaptor<SsResExtDigEmployee> extCaptor = ArgumentCaptor.forClass(SsResExtDigEmployee.class);
+        verify(ssResExtDigEmployeeService).update(extCaptor.capture());
+        assertThat(extCaptor.getValue().getTtsModelId()).isNull();
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, dto);
+        verifyNoInteractions(aiModelService);
     }
 
     @Test

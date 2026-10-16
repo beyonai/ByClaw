@@ -196,6 +196,31 @@ describe("createAgentWatchdog", () => {
             "10863049",
             "10863050",
         ]);
+        expect(loaded[0]?.contentHash).toBe(entries.get("10863047")?.hash);
+    });
+
+    it("filters shared employee resources before adapting and changes the hash when user use rights change", async () => {
+        vi.stubEnv("USER_CODE", "scope-user");
+        const content = JSON.stringify({
+            resourceId: "10863047", resourceName: "Shared employee",
+            controlledResources: [{ resourceId: "10", resourceCode: "private-skill", resourceBizType: "SKILL", createBy: "1" }],
+            relSkills: [{ resourceId: "10", skillCode: "private-skill", skillUrl: "private.zip" }],
+            relTools: ["native-tool"],
+            relResourceList: [{ resourceId: "10", targetContent: "private definition" }],
+        });
+        const store = createMemoryRedisJsonStore(new Map([["10863047", payloadFromContent("DIG_EMPLOYEE_10863047", content)]]));
+        store.getStringByKey = vi.fn(async () => "2");
+        store.getHashByKey = vi.fn(async () => ({}));
+        const params = { redisJsonStore: store, authorizedSourceKeys: new Set(["10863047"]),
+            embedApiKeysFromJson: true, log: { warn: vi.fn() } };
+        const denied = await loadManagedAgentsFromRedis(params);
+        expect(denied[0]?.sourceJson).toMatchObject({ relSkills: [], relResourceList: [], relTools: ["native-tool"] });
+        store.getHashByKey = vi.fn(async () => ({ "10": "SKILL" }));
+        const allowed = await loadManagedAgentsFromRedis(params);
+        expect(allowed[0]?.sourceJson).toMatchObject({ relSkills: [{ resourceId: "10", skillCode: "private-skill" }] });
+        expect(allowed[0]?.contentHash).not.toBe(denied[0]?.contentHash);
+        expect(store.getStringByKey).toHaveBeenCalledWith("SHARE_BFM_USER_CODE_scope-user");
+        expect(store.getHashByKey).toHaveBeenCalledWith("USER:RESOURCES:AUTH:2");
     });
 
     it("attaches Redis AI model config from prologue.modelId", async () => {

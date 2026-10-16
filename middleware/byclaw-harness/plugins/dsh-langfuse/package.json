@@ -6,7 +6,13 @@
   "type": "module",
   "main": "src/index.js",
   "exports": { ".": "./src/index.js", "./cordis.patch.yml": "./cordis.patch.yml", "./package.json": "./package.json" },
-  "files": ["src", "cordis.patch.yml", "README.md", "README.zh.md"],
+  "files": ["src", "cordis.patch.yml", "README.md", "README.zh.md", "MAPPING.zh.md", "VALIDATION.zh.md"],
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "scripts": { "test": "node --test tests/*.test.js" }
+  "scripts": { "test": "node --test tests/*.test.js" },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.220.0",
+    "@opentelemetry/resources": "2.12.0",
+    "@opentelemetry/sdk-trace-base": "2.12.0"
+  }
 }

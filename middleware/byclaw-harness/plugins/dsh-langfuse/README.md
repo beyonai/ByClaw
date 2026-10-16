@@ -1,5 +1,7 @@
-# DSH Langfuse
+# DSH Langfuse plugin
 
-Server-side Langfuse observability plugin for DSH `0.1.5-rc.2`. It observes session, tool, agent and subagent lifecycle events and exports redacted observations through Langfuse public ingestion.
+Server-side Langfuse tracing for `beyonai/byclaw-harness` branch `2026.9.8` and DSH `0.2.0-rc.2`. It exports request, model, tool, and subagent observations through OpenTelemetry OTLP HTTP/protobuf. Langfuse public ingestion is used only to backfill final root-trace input/output and session/user identity.
 
-Configure `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`, then add the plugin to a DSH profile with `dsh plugin --profile web add /path/to/plugins/dsh-langfuse`.
+Required environment variables are `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `LANGFUSE_ENABLED`, `LANGFUSE_SERVICE_NAME`, `LANGFUSE_SAMPLE_RATE`, and `BYCLAW_LANGFUSE_OBSERVATION_BRIDGE_FILE` are optional. Credentials and authorization headers are never logged.
+
+Install dependencies with `npm install`, add the package to the DSH profile, and restart DSH after source changes. Run `npm test` for the behavior tests. See [MAPPING.zh.md](MAPPING.zh.md) for the DSH-to-Langfuse mapping and known platform differences.

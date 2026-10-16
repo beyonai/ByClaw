@@ -229,6 +229,9 @@ public class DigitalEmployeeApplicationService {
     private SsResourceRelDetailService ssResourceRelDetailService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourceBindingSourceService resourceBindingSourceService;
+
+    @Autowired
     private SkillGroupMapper skillGroupMapper;
 
     @Autowired
@@ -1373,6 +1376,7 @@ public class DigitalEmployeeApplicationService {
 
         this.compareSsResourceRelDetail(ssResource, new ArrayList<>(mergedRelIds), resourceRelDetails, null);
         this.canonicalizeManualSkillRelations(digitalEmployeeId, installRelResources);
+        resourceBindingSourceService.markManual(ssResource, installRelResources);
         authApplicationService.synchronizeDigitalEmployeeResourceUsers(ssResource, null);
         this.refreshRuntimeAfterSnapshotMutation(ssResource);
 
@@ -1507,6 +1511,7 @@ public class DigitalEmployeeApplicationService {
                 source.getSourceGroupIds().stream()
                     .filter(sourceGroupId -> !Objects.equals(sourceGroupId, groupId))
                     .forEach(affectedOtherGroupIds::add);
+                resourceBindingSourceService.clear(digitalEmployee.getComAcctId(), digitalEmployee.getResourceId(), skillId);
                 if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
                     throw new BaseException("数字员工技能关系删除失败");
                 }
@@ -1515,7 +1520,8 @@ public class DigitalEmployeeApplicationService {
                 continue;
             }
             source.removeGroup(groupId);
-            if (source.hasAnySource()) {
+            if (source.hasAnySource() || resourceBindingSourceService.hasAutomatic(digitalEmployee.getComAcctId(),
+                digitalEmployee.getResourceId(), skillId)) {
                 this.canonicalizeRelation(relation, source, currentUserId, now);
                 if (!ssResourceRelDetailService.updateById(relation)) {
                     throw new BaseException("数字员工技能关系更新失败");
@@ -1588,6 +1594,8 @@ public class DigitalEmployeeApplicationService {
                 return value;
             });
             skill.setManualSource(Boolean.TRUE.equals(skill.getManualSource()) || source.isManual());
+            skill.setAutomaticSource(Boolean.TRUE.equals(skill.getAutomaticSource()) || resourceBindingSourceService.hasAutomatic(
+                relation.getComAcctId(), relation.getResourceId(), relation.getRelResourceId()));
             LinkedHashSet<Long> otherGroupIds = otherGroupsBySkillId.computeIfAbsent(
                 skillId, ignored -> new LinkedHashSet<>());
             source.getSourceGroupIds().stream()
@@ -1601,7 +1609,7 @@ public class DigitalEmployeeApplicationService {
             skill.setOtherGroupIds(otherGroupIds);
             skill.setOtherGroupNames(otherGroupIds.stream().map(resourceNames::get)
                 .filter(Objects::nonNull).toList());
-            if (Boolean.TRUE.equals(skill.getManualSource()) || !otherGroupIds.isEmpty()) {
+            if (Boolean.TRUE.equals(skill.getManualSource()) || Boolean.TRUE.equals(skill.getAutomaticSource()) || !otherGroupIds.isEmpty()) {
                 preview.getSharedSkills().add(skill);
             } else {
                 preview.getExclusiveSkills().add(skill);
@@ -1624,7 +1632,10 @@ public class DigitalEmployeeApplicationService {
             return String.valueOf(relation.getResourceRelDetailId()) + "|"
                 + relation.getRelResourceId() + "|"
                 + (updateTime == null ? "" : updateTime.getTime()) + "|"
-                + SkillRelationSource.parse(relation.getRelResourceInfo()).toJson();
+                + SkillRelationSource.parse(relation.getRelResourceInfo()).toJson() + "|"
+                + resourceBindingSourceService.sources(relation.getComAcctId(), relation.getResourceId(), relation.getRelResourceId())
+                    .stream().filter(row -> "A".equals(row.getStatusCd()))
+                    .map(row -> row.getSourceType() + ":" + row.getSourceKey()).sorted().collect(Collectors.joining(","));
         }).collect(Collectors.joining("\n"));
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8));
@@ -1725,7 +1736,8 @@ public class DigitalEmployeeApplicationService {
                 continue;
             }
             SkillRelationSource remainingSource = source.withoutManual();
-            if (remainingSource.hasAnySource()) {
+            if (remainingSource.hasAnySource() || resourceBindingSourceService.hasAutomatic(digitalEmployee.getComAcctId(),
+                digitalEmployee.getResourceId(), relation.getRelResourceId())) {
                 this.canonicalizeRelation(relation, remainingSource, currentUserId, now);
                 relation.setComAcctId(digitalEmployee.getComAcctId());
                 if (!ssResourceRelDetailService.updateById(relation)) {
@@ -1742,9 +1754,14 @@ public class DigitalEmployeeApplicationService {
             List<SsResourceRelDetail> allRelations = ssResourceRelDetailService.findByResourceId(
                 digitalEmployee.getResourceId());
             for (SsResourceRelDetail relation : this.safeRelations(allRelations)) {
-                if (nonSkillIds.contains(relation.getRelResourceId())
-                    && !ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
-                    throw new BaseException("数字员工关联资源删除失败");
+                if (nonSkillIds.contains(relation.getRelResourceId())) {
+                    resourceBindingSourceService.removeManual(digitalEmployee.getComAcctId(), digitalEmployee.getResourceId(),
+                        relation.getRelResourceId());
+                    if (resourceBindingSourceService.hasAutomatic(digitalEmployee.getComAcctId(), digitalEmployee.getResourceId(),
+                        relation.getRelResourceId())) continue;
+                    if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
+                        throw new BaseException("数字员工关联资源删除失败");
+                    }
                 }
             }
         }
@@ -2680,7 +2697,7 @@ public class DigitalEmployeeApplicationService {
         this.fillDigitalEmployeeSyncRuntimeFields(details, resourceId);
         // target_content 只是上一次同步快照,不能再作为当前标准 JSON 的一个字段递归写回.
         details.setTargetContent(null);
-        return com.alibaba.fastjson.JSON.toJSONString(details);
+        return this.serializeEmployeeRuntime(details);
     }
 
     /** 恢复发布事务回滚后的已提交运行配置。 */
@@ -2697,6 +2714,29 @@ public class DigitalEmployeeApplicationService {
     /**
      * 同步数字员工配置到开放资源目录与 Redis。
      */
+    private String serializeEmployeeRuntime(DigitalEmployeeDetailsDTO details) {
+        List<Long> childIds = ssResourceRelDetailService.findByResourceId(details.getResourceId()).stream()
+            .map(SsResourceRelDetail::getRelResourceId).filter(Objects::nonNull).distinct().toList();
+        List<SsResource> bound = ssResourceService.findByIdList(childIds);
+        // Commercial API/MCP resources are invoked through baiying_call from relResourceList.
+        // relTools is the native OpenClaw allowlist; associating a resource must not rewrite that policy.
+        com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSON.parseObject(com.alibaba.fastjson.JSON.toJSONString(details));
+        List<Map<String, Object>> controlled = new ArrayList<>();
+        for (SsResource resource : bound) {
+            if (Boolean.TRUE.equals(resource.getViewAuthControlled()) || Boolean.TRUE.equals(resource.getUseAuthControlled())) {
+                Map<String, Object> policy = new LinkedHashMap<>();
+                policy.put("resourceId", String.valueOf(resource.getResourceId()));
+                policy.put("resourceCode", resource.getResourceCode());
+                policy.put("resourceBizType", resource.getResourceBizType());
+                policy.put("createBy", resource.getCreateBy() == null ? "" : String.valueOf(resource.getCreateBy()));
+                policy.put("active", Objects.equals(resource.getResourceStatus(), 2));
+                controlled.add(policy);
+            }
+        }
+        json.put("controlledResources", controlled);
+        return json.toJSONString();
+    }
+
     private boolean doSyncOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto, boolean publication) {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(resourceId);
@@ -2709,7 +2749,7 @@ public class DigitalEmployeeApplicationService {
         // target_content 只是镜像快照,不能参与本次 JSON 序列化,否则会出现 JSON 套 JSON 的递归膨胀.
         details.setTargetContent(null);
 
-        String jsonContent = com.alibaba.fastjson.JSON.toJSONString(details);
+        String jsonContent = this.serializeEmployeeRuntime(details);
         String fileName = this.buildDigEmployeeJsonFileName(resourceId);
         String effectiveStorageType = StringUtils.defaultIfBlank(storageType, "minio");
         String resourceDir = ResourceBizTypeEnum.DIG_EMPLOYEE.name().toLowerCase();
@@ -3548,11 +3588,14 @@ public class DigitalEmployeeApplicationService {
                 ssResourceRelDetail.setCreateBy(CurrentUserHolder.getCurrentUserId());
                 ssResourceRelDetail.setComAcctId(CurrentUserHolder.getEnterpriseId());
                 ssResourceRelDetailService.save(ssResourceRelDetail);
+                SsResource child = ssResourceService.findById(relResourceId);
+                if (child != null) resourceBindingSourceService.markManual(ssResource, List.of(child));
             }
         }
 
         // 删除当前没有关联对象
         for (SsResourceRelDetail ssResourceRelDetail : resourceRelDetailMap.values()) {
+            resourceBindingSourceService.clear(ssResource.getComAcctId(), ssResource.getResourceId(), ssResourceRelDetail.getRelResourceId());
             ssResourceRelDetailService.removeById(ssResourceRelDetail.getResourceRelDetailId());
         }
     }
@@ -3570,8 +3613,19 @@ public class DigitalEmployeeApplicationService {
         Set<Long> existingSkillIds = skillRelations.stream().map(SsResourceRelDetail::getRelResourceId)
             .filter(Objects::nonNull).collect(Collectors.toSet());
 
-        Set<Long> requestedSkillResourceIds = requestedRelIds.isEmpty() ? Collections.emptySet()
-            : this.safeResources(ssResourceService.findByIdList(requestedRelIds)).stream()
+        List<SsResource> requestedResources = requestedRelIds.isEmpty() ? Collections.emptyList()
+            : this.safeResources(ssResourceService.findByIdList(requestedRelIds));
+        Set<Long> existingIds = this.safeRelations(allRelations).stream().map(SsResourceRelDetail::getRelResourceId)
+            .collect(Collectors.toSet());
+        existingIds.addAll(existingSkillIds);
+        for (SsResource requested : requestedResources) {
+            if (!existingIds.contains(requested.getResourceId())
+                && (Boolean.TRUE.equals(requested.getViewAuthControlled()) || Boolean.TRUE.equals(requested.getUseAuthControlled()))
+                && !authApplicationService.hasResourceUsePermission(requested, CurrentUserHolder.getCurrentUserId())) {
+                throw new BaseException("无权限关联该资源");
+            }
+        }
+        Set<Long> requestedSkillResourceIds = requestedResources.stream()
             .filter(resource -> StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType()))
             .map(SsResource::getResourceId).filter(Objects::nonNull).collect(Collectors.toSet());
         LinkedHashSet<Long> requestedSkillIds = requestedRelIds.stream()
@@ -3607,12 +3661,14 @@ public class DigitalEmployeeApplicationService {
             existingSkillIds.add(skillId);
             SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
             if (requestedSkillIds.contains(skillId)) {
-                SkillRelationSource manualSource = source.withManual();
+                SkillRelationSource manualSource = resourceBindingSourceService.hasAutomatic(digitalEmployee.getComAcctId(),
+                    digitalEmployee.getResourceId(), skillId) ? source : source.withManual();
                 this.updateCanonicalSkillRelation(digitalEmployee, relation, manualSource, currentUserId, now);
                 continue;
             }
             // 编辑页删除的是该员工的技能配置，必须同时移除手工和技能组来源（包括历史异常元数据）。
             // 技能组的按来源卸载仍由独立接口处理，不改变技能资源本身或其他员工的关联。
+            resourceBindingSourceService.clear(digitalEmployee.getComAcctId(), digitalEmployee.getResourceId(), skillId);
             if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
                 throw new BaseException("数字员工技能关系删除失败");
             }

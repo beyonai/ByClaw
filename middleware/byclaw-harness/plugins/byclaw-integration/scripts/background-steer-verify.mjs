@@ -12,7 +12,7 @@ const listeners = new Map()
 const output = []
 const input = []
 const frames = liveStreamFrames()
-const rootSession = { id: 'root', header: { cwd: '/tmp' }, ...sessionLog() }
+const rootSession = { id: 'root', header: { cwd: '/tmp/.sessions/root' }, ...sessionLog() }
 const rootAgentCtx = {}
 let setupCount = 0
 let finishCurrentTurn
@@ -48,7 +48,7 @@ const runtime = new ByClawDshSessionRuntime({
 })
 const owner = {
   rootSessionId: 'root', responseSessionId: 'root', rootMessageId: 'original-task', rootLabel: '队长',
-  userCode: 'user', direct: false, workspace: '/tmp',
+  userCode: 'user', direct: false, workspace: '/tmp/.sessions/root',
   context: { sessionId: 'root', traceId: 'original-trace', isCancelRequested: () => false },
   teamGate: new ByClawAsyncTeamGate(), runtime: new ByClawSessionActivityTracker('root'),
   forwarding: Promise.resolve(), answer: '', childTurns: new Map(), announcedChildren: new Set(),

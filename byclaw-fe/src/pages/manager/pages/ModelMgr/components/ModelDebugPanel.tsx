@@ -1,10 +1,11 @@
 import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
-import { Button, Input, Segmented, Space, Spin, Table } from 'antd';
+import { Button, Image, Input, Segmented, Space, Spin, Table } from 'antd';
 import React, { useState, useMemo } from 'react';
 import { debounce } from 'lodash';
 import { useIntl } from '@umijs/max';
 import type { DebugInputMode } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
+import { getVolcengineImagePreviews } from './volcengineImageConfig';
 
 type Props = {
   debugInputMode: DebugInputMode;
@@ -19,6 +20,7 @@ type Props = {
   rerankView: 'table' | 'json';
   setRerankView: (value: 'table' | 'json') => void;
   rerankTableData: any[];
+  showImagePreview?: boolean;
 };
 
 const ModelDebugPanel: React.FC<Props> = ({
@@ -34,9 +36,14 @@ const ModelDebugPanel: React.FC<Props> = ({
   rerankView,
   setRerankView,
   rerankTableData,
+  showImagePreview = false,
 }) => {
   const intl = useIntl();
   const [isRunning, setIsRunning] = useState(false);
+  const imagePreviews = useMemo(
+    () => (showImagePreview ? getVolcengineImagePreviews(debugOutput) : []),
+    [debugOutput, showImagePreview]
+  );
 
   const debouncedRunDebug = useMemo(
     () =>
@@ -135,6 +142,20 @@ const ModelDebugPanel: React.FC<Props> = ({
             </Space>
           </div>
           <div className={styles.codeAreaRelative}>
+            {imagePreviews.length ? (
+              <Space wrap>
+                <Image.PreviewGroup>
+                  {imagePreviews.map((src, index) => (
+                    <Image
+                      key={`${index}-${src.slice(0, 80)}`}
+                      src={src}
+                      width={160}
+                      alt={intl.formatMessage({ id: 'modelMgr.modal.generatedImage' }, { index: index + 1 })}
+                    />
+                  ))}
+                </Image.PreviewGroup>
+              </Space>
+            ) : null}
             {debugOutputLoading ? (
               <div className={styles.outputLoading}>
                 <Spin tip={intl.formatMessage({ id: 'modelMgr.modal.debugLoading' })} />

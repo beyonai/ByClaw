@@ -48,6 +48,7 @@ import {
   DEFAULT_BYCLAW_BE_BASE_URL,
 } from './protocol.ts'
 import { ByClawDshSessionRuntime } from './session-runtime.ts'
+import { installByClawSessionCwdCompatibility } from './session-cwd-compat.ts'
 import { registerAgentTemplateRuntime } from './template-runtime.ts'
 import { resolveByClawInboundTarget } from './inbound-routing.ts'
 import {
@@ -557,6 +558,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   // AgentTeams reads this service while the provider fiber is unloading, so
   // one composite effect drains runtime work before removing the registration.
   const lifecycle = ctx.effect(function* () {
+    yield installByClawSessionCwdCompatibility(ctx.get('sessionPersistence') as typeof ctx.sessionPersistence, sessionMetadata, byRoot)
     yield ctx.provide('byclawGenerationLease', generationLease)
     yield ctx.provide('byclawSkills', skillRuntime)
     yield () => disposeAgentShellEnv()

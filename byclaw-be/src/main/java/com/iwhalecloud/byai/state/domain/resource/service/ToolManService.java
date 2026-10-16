@@ -112,6 +112,9 @@ public class ToolManService {
     private SsResourceService ssResourceService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncService enterpriseResourceSyncService;
+
+    @Autowired
     private SsResExtToolService ssResExtToolService;
 
     @Autowired
@@ -414,13 +417,36 @@ public class ToolManService {
         if (StringUtils.isBlank(resourceBizType)) {
             throw new IllegalArgumentException(I18nUtil.get("tool.json.resource.biz.type.missing"));
         }
+        var request = com.iwhalecloud.byai.manager.dto.resource.EnterpriseResourceSyncRequest.parse(root);
+        enterpriseResourceSyncService.validate(request);
+        if ("SKILL".equals(resourceBizType)) enterpriseResourceSyncService.requireSyncPrincipal();
         Long effectiveCatalogId = resolveAddToolFromThirdCatalogId(root);
-
-        byte[] content = jsonContent.getBytes(StandardCharsets.UTF_8);
-        MultipartFile multipartFile = new MultipartFileUtil("file", "tool.json", "application/json", content);
-
-        return executeWithOpenApiImportLoginContext(
-            () -> addToolFromThirdByBizType(multipartFile, root, resourceBizType, effectiveCatalogId));
+        boolean trusted = request.viewAuth() != null || request.autoAuthorize() != null || "SKILL".equals(resourceBizType);
+        return executeWithOpenApiImportLoginContext(() ->
+            com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.execute(trusted, () -> {
+            String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
+            String resourceCode = StringUtils.trimToEmpty(root.getString("resourceCode"));
+            if (StringUtils.isAnyBlank(systemCode, resourceCode)) {
+                throw new IllegalArgumentException("systemCode、resourceCode 不能为空");
+            }
+            ssResourceService.lockSkillImport("THIRD_SYNC:" + CurrentUserHolder.getEnterpriseId() + ":"
+                + systemCode + ":" + resourceBizType + ":" + resourceCode);
+            enterpriseResourceSyncService.validateExisting(
+                ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode));
+            Map<String, Object> result;
+            boolean packageChanged = false;
+            if ("SKILL".equals(resourceBizType)) {
+                result = byClawSkillResourceApplicationService.syncEnterpriseSkill(root, effectiveCatalogId);
+                packageChanged = Boolean.TRUE.equals(result.remove("packageChanged"));
+            } else {
+                byte[] content = root.toJSONString().getBytes(StandardCharsets.UTF_8);
+                MultipartFile file = new MultipartFileUtil("file", "tool.json", "application/json", content);
+                result = addToolFromThirdByBizType(file, root, resourceBizType, effectiveCatalogId);
+            }
+            enterpriseResourceSyncService.completeImport(Long.valueOf(result.get("resourceId").toString()),
+                request, packageChanged, result);
+            return result;
+        }));
     }
 
     /**

@@ -18,6 +18,7 @@ import {
 } from "./image-model-selector.js";
 import type { ResolvedImageModel } from "./types.js";
 import { buildVolcengineImageGenerationProvider } from "./volcengine-image-provider.js";
+import { buildDomesticImageProvider } from "./domestic-image-provider.js";
 
 export const BAIYING_IMAGE_PROVIDER_ID = "baiying-redis-image";
 export const BAIYING_IMAGE_MODEL_REF = `${BAIYING_IMAGE_PROVIDER_ID}/dynamic`;
@@ -40,6 +41,8 @@ const NATIVE_IMAGE_ROUTES: Record<
   string,
   { provider: string; protocols: readonly string[] }
 > = {
+  BAILIAN: { provider: "bailian", protocols: ["BAILIAN_IMAGE"] },
+  TOKENHUB: { provider: "tokenhub", protocols: ["TOKENHUB_IMAGE"] },
   CHATGPT: { provider: "openai", protocols: ["OPENAI_IMAGE"] },
   COMFY: { provider: "comfy", protocols: ["COMFY_IMAGE"] },
   COMFYUI: { provider: "comfy", protocols: ["COMFY_IMAGE"] },
@@ -336,6 +339,8 @@ export function registerBaiyingNativeImageRouting(params: {
   params.api.registerImageGenerationProvider(
     buildVolcengineImageGenerationProvider(),
   );
+  params.api.registerImageGenerationProvider(buildDomesticImageProvider("bailian"));
+  params.api.registerImageGenerationProvider(buildDomesticImageProvider("tokenhub"));
   params.api.on(
     "before_tool_call",
     createManagedImageToolRoutingHook({ registry: params.registry }),

@@ -295,6 +295,7 @@ const ResourceList = (props: Props) => {
           }
         } else {
           const response = await listResourceUseAuth({
+            availableOnly: true,
             pageSize,
             pageNum: currentPage,
             keyword: searchValue.current.trim(),

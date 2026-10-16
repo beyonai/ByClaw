@@ -5,6 +5,7 @@ import { Dropdown, Button } from 'antd';
 import { isEmpty, pullAllBy, head, debounce, size } from 'lodash';
 import { CloseCircleOutlined, DownOutlined, UpOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import FittingPreview from './FittingPreview';
 
 import styles from './index.module.less';
 
@@ -22,6 +23,9 @@ type IProps = {
   selectedList?: ITreeData[];
   onOk: (selectList: ITreeData[]) => void;
   mode?: 'radio' | 'checkbox';
+  // 按实际文字宽度展示完整预览项；未传入时保留原有前三项预览。
+  previewMaxWidth?: number;
+  previewItemMaxWidth?: number;
 };
 
 const emptyArr: ITreeData[] = [];
@@ -29,7 +33,7 @@ const emptyArr: ITreeData[] = [];
 // 受控组件
 function TreeFilter(props: IProps) {
   const intl = useIntl();
-  const { title, treeData, selectedList, onOk, mode } = props;
+  const { title, treeData, selectedList, onOk, mode, previewMaxWidth, previewItemMaxWidth = 140 } = props;
 
   const [open, setOpen] = React.useState(false);
   const [controlList, setControlList] = React.useState<ITreeData[]>(selectedList || emptyArr);
@@ -252,7 +256,19 @@ function TreeFilter(props: IProps) {
           {open && <UpOutlined style={{ fontSize: '10px' }} />}
         </div>
         <div className={styles.body}>
+          {isEmpty(controlList) && previewMaxWidth !== undefined && (
+            <FittingPreview
+              items={treeData.slice(0, 3)}
+              maxWidth={previewMaxWidth}
+              itemMaxWidth={previewItemMaxWidth}
+              onSelect={(item) => {
+                onSelect(item);
+                if (hasChildItem) onOk?.([item]);
+              }}
+            />
+          )}
           {isEmpty(controlList) &&
+            previewMaxWidth === undefined &&
             treeData.slice(0, 3).map((item) => {
               return (
                 <span

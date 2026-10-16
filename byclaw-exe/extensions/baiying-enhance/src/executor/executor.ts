@@ -1,3 +1,7 @@
+import { validateRemoteResourceUse } from "../resource-use-guard.js";
+import { discoverBackendBaseUrl } from "../backend-service-discovery.js";
+import { buildHubSkillAuthHeaders } from "../hub-skill-sync.js";
+import { getSharedRedisJsonStore } from "../redis-json-store.js";
 import path from "node:path";
 import type { Dict, ExecutorResponse } from "./types.js";
 import { isRecord } from "./types.js";
@@ -10,7 +14,7 @@ import {
 import { logChannelDebug, registerPrivateParamLogRedactions, type BaiyingEnhanceLogger } from "./debug-channel.js";
 import { resolveCapability } from "./capability-resolver.js";
 import { describeResource } from "./describe.js";
-import { normalizeResourceType } from "./resource-type.js";
+import { normalizeResourceId, normalizeResourceType } from "./resource-type.js";
 import { extractBackendParameters } from "./schema.js";
 import { executeAgent } from "./resource-types/agent.js";
 import { executeDoc } from "./resource-types/doc.js";
@@ -85,6 +89,15 @@ export class BaiyingExecutor {
     const resourceContext = getResourceContext(params.payload ?? {});
     logChannelDebug(`describe(${params.capabilityId})`, { resourceContext, logger: params.logger });
     const authContext = await this.getAuthContext();
+    if (process.env.USER_CODE?.trim() || authContext.userId) {
+      try {
+        const baseUrl = process.env.BYAI_SERVICE_BASE_URL?.trim() || await discoverBackendBaseUrl({ logger: params.logger });
+        const headers = await buildHubSkillAuthHeaders({ authFilePath: this.authFilePath, redisJsonStore: getSharedRedisJsonStore() });
+        await validateRemoteResourceUse({ baseUrl, resourceId: normalizeResourceId(params.capabilityId), headers });
+      } catch {
+        return makeError("RESOURCE_USE_DENIED", "Resource use authorization could not be verified");
+      }
+    }
     const { capability, resolvedType } = await resolveCapability({
       resourcesDir: this.resourcesDir,
       capabilityId: params.capabilityId,
@@ -129,6 +142,15 @@ export class BaiyingExecutor {
     const mcpForwardHeaders = extractOpenclawMcpForwardHeaders(resourceContext);
 
     const authContext = await this.getAuthContext();
+    if (process.env.USER_CODE?.trim() || authContext.userId) {
+      try {
+        const baseUrl = process.env.BYAI_SERVICE_BASE_URL?.trim() || await discoverBackendBaseUrl({ logger: params.logger });
+        const headers = await buildHubSkillAuthHeaders({ authFilePath: this.authFilePath, redisJsonStore: getSharedRedisJsonStore() });
+        await validateRemoteResourceUse({ baseUrl, resourceId: normalizeResourceId(params.capabilityId), headers });
+      } catch {
+        return makeError("RESOURCE_USE_DENIED", "Resource use authorization could not be verified");
+      }
+    }
     const { capability, resolvedType } = await resolveCapability({
       resourcesDir: this.resourcesDir,
       capabilityId: params.capabilityId,
