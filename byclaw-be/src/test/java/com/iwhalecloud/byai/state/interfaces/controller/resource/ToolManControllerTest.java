@@ -14,27 +14,29 @@ class ToolManControllerTest {
 
     @Test
     void workspaceCenterEndpointsReturnStatusAndSeparateCleanupFailureFromSaveFailure() {
-        var controller = new ToolManController();
-        var service = org.mockito.Mockito.mock(
-            com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(controller, "workspaceSkillCenterApplicationService", service);
-        var request = new com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo();
-        request.setResourceId(10L);
-        request.setSkillPath("/workspace/skills/demo");
-        request.setRevision("revision");
-        var status = new com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService
-            .Status("UPDATE", "enterprise", 20L, "revision");
-        var result = new com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService
-            .Result(20L, "UPDATE", false);
-        org.mockito.Mockito.when(service.preview(request)).thenReturn(status);
-        org.mockito.Mockito.when(service.sync(request)).thenReturn(result);
-        assertThat(controller.queryWorkspaceSkillCenterStatus(request).getData()).isEqualTo(status);
-        var response = controller.syncWorkspaceSkillToCenter(request);
-        assertThat(response.getCode()).isZero();
-        assertThat(response.getData().sourceDeleted()).isFalse();
-        org.mockito.Mockito.when(service.sync(request)).thenThrow(new IllegalArgumentException("changed"));
-        assertThat(controller.syncWorkspaceSkillToCenter(request).getCode()).isEqualTo(-1);
-        assertThat(controller.syncWorkspaceSkillToCenter(request).getMsg()).isEqualTo("changed");
+        try (var messages = new com.iwhalecloud.byai.common.i18n.I18nTestScope(java.util.Locale.US)) {
+            var controller = new ToolManController();
+            var service = org.mockito.Mockito.mock(
+                com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(controller, "workspaceSkillCenterApplicationService", service);
+            var request = new com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo();
+            request.setResourceId(10L);
+            request.setSkillPath("/workspace/skills/demo");
+            request.setRevision("revision");
+            var status = new com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService
+                .Status("UPDATE", "enterprise", 20L, "revision");
+            var result = new com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService
+                .Result(20L, "UPDATE", false);
+            org.mockito.Mockito.when(service.preview(request)).thenReturn(status);
+            org.mockito.Mockito.when(service.sync(request)).thenReturn(result);
+            assertThat(controller.queryWorkspaceSkillCenterStatus(request).getData()).isEqualTo(status);
+            var response = controller.syncWorkspaceSkillToCenter(request);
+            assertThat(response.getCode()).isZero();
+            assertThat(response.getData().sourceDeleted()).isFalse();
+            org.mockito.Mockito.when(service.sync(request)).thenThrow(new IllegalArgumentException("changed"));
+            assertThat(controller.syncWorkspaceSkillToCenter(request).getCode()).isEqualTo(-1);
+            assertThat(controller.syncWorkspaceSkillToCenter(request).getMsg()).isEqualTo("changed");
+        }
     }
 
     @Test
@@ -87,24 +89,26 @@ class ToolManControllerTest {
 
     @Test
     void enterprisePublicationReturnsCopyAndPropagatesPermissionDenial() {
-        ToolManController controller = new ToolManController();
-        var service = org.mockito.Mockito.mock(
-            com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillResourceApplicationService", service);
-        var request = new com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto();
-        request.setResourceId(10L);
-        var target = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
-        target.setResourceId(11L);
-        var result = new com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService
-            .EnterpriseSkillPublishResult(target, false);
-        org.mockito.Mockito.when(service.publishSkillToEnterprise(10L)).thenReturn(result);
-        var response = controller.publishSkillToEnterprise(request);
-        assertThat(response.getCode()).isZero();
-        assertThat(response.getData().resource().getResourceId()).isEqualTo(11L);
-        org.mockito.Mockito.when(service.publishSkillToEnterprise(10L))
-            .thenThrow(new IllegalArgumentException("Permission denied"));
-        assertThat(controller.publishSkillToEnterprise(request).getCode()).isEqualTo(-1);
-        assertThat(controller.publishSkillToEnterprise(request).getMsg()).isEqualTo("Permission denied");
+        try (var messages = new com.iwhalecloud.byai.common.i18n.I18nTestScope(java.util.Locale.US)) {
+            ToolManController controller = new ToolManController();
+            var service = org.mockito.Mockito.mock(
+                com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillResourceApplicationService", service);
+            var request = new com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto();
+            request.setResourceId(10L);
+            var target = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+            target.setResourceId(11L);
+            var result = new com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService
+                .EnterpriseSkillPublishResult(target, false);
+            org.mockito.Mockito.when(service.publishSkillToEnterprise(10L)).thenReturn(result);
+            var response = controller.publishSkillToEnterprise(request);
+            assertThat(response.getCode()).isZero();
+            assertThat(response.getData().resource().getResourceId()).isEqualTo(11L);
+            org.mockito.Mockito.when(service.publishSkillToEnterprise(10L))
+                .thenThrow(new IllegalArgumentException("Permission denied"));
+            assertThat(controller.publishSkillToEnterprise(request).getCode()).isEqualTo(-1);
+            assertThat(controller.publishSkillToEnterprise(request).getMsg()).isEqualTo("Permission denied");
+        }
     }
 
     @Test

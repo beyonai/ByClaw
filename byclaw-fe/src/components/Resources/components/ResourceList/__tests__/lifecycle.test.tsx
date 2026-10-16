@@ -550,7 +550,7 @@ it('keeps the list interactive while a lifecycle operation is pending', async ()
 
 // 同时覆盖浏览/管理及个人/企业，避免把后端权限当成浏览页展示条件。
 it.each(
-  ['KG_DOC', 'SKILL', 'TOOL'].flatMap((resourceType) =>
+  ['KG_DOC', 'KG_QA', 'KG_TERM', 'SKILL', 'TOOL'].flatMap((resourceType) =>
     ['personal', 'enterprise'].flatMap((activeTab) =>
       [false, true].map((myResourcesOnly) => ({ resourceType, activeTab, myResourcesOnly }))
     )
@@ -564,7 +564,9 @@ it.each(
     expect(hiddenKeys).not.toContain('authorize');
     expect(hiddenKeys).not.toContain('use');
     for (const key of ['shelfData', 'unShelfData', 'deleteData', 'delete']) {
-      expect(hiddenKeys.includes(key)).toBe(!props.myResourcesOnly);
+      expect(hiddenKeys.includes(key)).toBe(
+        !props.myResourcesOnly && !['KG_DOC', 'KG_QA', 'KG_TERM'].includes(props.resourceType)
+      );
     }
     // 仅我可用的技能允许展示发布入口，其他浏览场景继续隐藏。
     expect(hiddenKeys.includes('publishToEnterprise')).toBe(

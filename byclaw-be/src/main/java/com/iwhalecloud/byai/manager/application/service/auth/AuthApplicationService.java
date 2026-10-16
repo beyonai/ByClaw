@@ -3735,19 +3735,19 @@ public class AuthApplicationService {
         boolean isDigitalEmployee = ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType());
         boolean isPersonalAssistantResource = isPersonalAssistantResource(ssResource);
         boolean isPersonalResourceUseApplyUnsupported = isPersonalResourceUseApplyUnsupported(ssResource);
-        boolean isWhaleAgentExternalKnowledgeOrToolResource = isWhaleAgentExternalKnowledgeOrToolResource(ssResource);
+        boolean isWhaleAgentExternalToolResource = isWhaleAgentExternalToolResource(ssResource);
         boolean isInnerSkillResource = innerSkillResourceIds.contains(resourceId);
 
         boolean canEdit = isDigitalEmployee
             ? (canManage || isBoundDefaultDigEmployee)
             : (canManage && !isDefaultResource);
         // adminvip 可维护内置技能的展示信息，删除和上下架仍保留内置技能只读限制。
-        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource
+        vo.setCanEdit(canEdit && !isWhaleAgentExternalToolResource
             && (!isInnerSkillResource || CurrentUserHolder.isAdminVip()));
         vo.setCanManageAuth(canManage && !isDefaultResource && !isPersonalAssistantResource);
         vo.setCanUseAuth(canSetUse);
         vo.setCanDelete(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
-            && !isWhaleAgentExternalKnowledgeOrToolResource && !isInnerSkillResource);
+            && !isWhaleAgentExternalToolResource && !isInnerSkillResource);
         vo.setCanApplyUse(!hasUsePermission && !isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource, currentUserId, useBlacklistedIds, usePermittedIds, pendingUseApplyIds));
 
@@ -3953,7 +3953,7 @@ public class AuthApplicationService {
         // 个人助理类资源只作为个人空间资源使用，不开放管理授权、使用申请与使用申请审核入口。
         boolean isPersonalAssistantResource = isPersonalAssistantResource(ssResource);
         boolean isPersonalResourceUseApplyUnsupported = isPersonalResourceUseApplyUnsupported(ssResource);
-        boolean isWhaleAgentExternalKnowledgeOrToolResource = isWhaleAgentExternalKnowledgeOrToolResource(ssResource);
+        boolean isWhaleAgentExternalToolResource = isWhaleAgentExternalToolResource(ssResource);
         boolean isInnerSkillResource = isInnerSkillResource(ssResource);
 
         // 数字员工：默认助理本人豁免可编辑；其它资源：默认资源不可编辑/管理授权/注销
@@ -3963,13 +3963,13 @@ public class AuthApplicationService {
         // 默认超级助手是登录初始化的个人底座资源，即使当前用户绑定为默认助理，也不开放编辑入口。
 
         // 与列表权限一致：内置技能仅向 adminvip 开放基础信息编辑。
-        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource
+        vo.setCanEdit(canEdit && !isWhaleAgentExternalToolResource
             && (!isInnerSkillResource || CurrentUserHolder.isAdminVip()));
         vo.setCanManageAuth(canManage && !isDefaultResource
             && !isPersonalAssistantResource); // 移除 !isDefaultSuperAssistantResource
         vo.setCanUseAuth(canSetUse); // 移除 !isDefaultSuperAssistantResource
         vo.setCanDelete(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
-            && !isWhaleAgentExternalKnowledgeOrToolResource && !isInnerSkillResource); // _main 结尾的资源禁止删除
+            && !isWhaleAgentExternalToolResource && !isInnerSkillResource); // _main 结尾的资源禁止删除
         vo.setCanApplyUse(!hasUsePermission && !isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource)); // 移除 !isDefaultSuperAssistantResource
 
@@ -4086,7 +4086,7 @@ public class AuthApplicationService {
                 || Objects.equals(resource.getResourceStatus(), ResourceStatus.AUDIT_REJECT.getNum()));
     }
 
-    /** 列表与详情共享生命周期权限，保留内置资源和外部托管资源的只读限制。 */
+    /** 列表与详情共享生命周期权限；知识库按管理权限维护，不受部署模式限制。 */
     private void applyResourceCenterLifecyclePermissions(SsResource resource, ResourceOperationPermissionsVo vo,
                                                          Long currentUserId) {
         if (!ResourceLifecyclePolicy.supports(resource)) {
@@ -4098,13 +4098,14 @@ public class AuthApplicationService {
             vo.setCanManageAuth(false);
             vo.setCanUseAuth(false);
         }
-        boolean writable = vo.isCanDelete()
-            && !(StringUtils.startsWith(resource.getResourceBizType(), "KG_") && StringUtils.isNotBlank(datasetSystem));
+        boolean writable = vo.isCanDelete();
         boolean ownerOrAdmin = (currentUserId != null && currentUserId.equals(resource.getCreateBy()))
             || CurrentUserHolder.isAdminVip();
         vo.setCanOnShelf(writable && ResourceLifecyclePolicy.canShelf(resource));
         vo.setCanOffShelf(writable && ResourceLifecyclePolicy.canUnShelf(resource));
-        vo.setCanDelete(writable && ownerOrAdmin && ResourceLifecyclePolicy.canDeregister(resource));
+        // 知识库管理授权包含删除能力；其他资源保留创建者/管理员限制。
+        boolean canDeregister = isKnowledgeBizType(resource.getResourceBizType()) || ownerOrAdmin;
+        vo.setCanDelete(writable && canDeregister && ResourceLifecyclePolicy.canDeregister(resource));
         // canRestore 仅兼容旧客户端的上架入口，注销记录永远不会进入此分支。
         vo.setCanRestore(vo.isCanOnShelf());
         if (!Objects.equals(resource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum())) {
@@ -4214,14 +4215,14 @@ public class AuthApplicationService {
     }
 
     /**
-     * WHALE_AGENT 模式下，知识/工具由外部智能体体系发布，本系统不允许编辑基础信息或注销。
+     * WHALE_AGENT 模式下的工具仍由外部智能体体系维护；知识库统一按资源管理权限维护。
      */
-    private boolean isWhaleAgentExternalKnowledgeOrToolResource(SsResource ssResource) {
+    private boolean isWhaleAgentExternalToolResource(SsResource ssResource) {
         if (ssResource == null
             || !SystemCode.WHAGE_AGENT.getCode().equalsIgnoreCase(StringUtils.trimToEmpty(datasetSystem))) {
             return false;
         }
-        return isKnowledgeBizType(ssResource.getResourceBizType()) || isToolBizType(ssResource.getResourceBizType());
+        return isToolBizType(ssResource.getResourceBizType());
     }
 
     private boolean isKnowledgeBizType(String resourceBizType) {

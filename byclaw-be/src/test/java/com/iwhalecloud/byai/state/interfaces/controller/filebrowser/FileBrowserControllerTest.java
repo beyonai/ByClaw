@@ -56,13 +56,15 @@ class FileBrowserControllerTest {
 
     @Test
     void getChangedFileDiffRejectsBlankParameters() {
-        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
-        ResponseUtil<ChangedFileDiffVo> response = controller.getChangedFileDiff("", "file-1");
+        try (var messages = new com.iwhalecloud.byai.common.i18n.I18nTestScope(java.util.Locale.SIMPLIFIED_CHINESE)) {
+            org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+            ResponseUtil<ChangedFileDiffVo> response = controller.getChangedFileDiff("", "file-1");
 
-        assertThat(response.isSuccess()).isFalse();
-        assertThat(response.getMsg()).isEqualTo("sessionId 不能为空");
-        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
-        assertThat(controller.getChangedFileDiff("", "file-1").getMsg()).isEqualTo("sessionId is required");
-        verify(fileBrowserService, never()).getChangedFileDiff("", "file-1");
+            assertThat(response.isSuccess()).isFalse();
+            assertThat(response.getMsg()).isEqualTo("sessionId 不能为空");
+            org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+            assertThat(controller.getChangedFileDiff("", "file-1").getMsg()).isEqualTo("sessionId is required");
+            verify(fileBrowserService, never()).getChangedFileDiff("", "file-1");
+        }
     }
 }

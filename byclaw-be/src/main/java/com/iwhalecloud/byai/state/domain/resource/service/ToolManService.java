@@ -103,7 +103,7 @@ public class ToolManService {
     public static final Logger LOGGER = LoggerFactory.getLogger(ToolManService.class);
 
     /**
-     * 知识库/数字员工系统来源配置；配置为 WHALE_AGENT 时表示接入老智能体商业版本， 知识/工具资源由外部智能体体系发布，本系统不允许编辑基础信息或注销。
+     * 知识库系统来源配置；配置为 WHALE_AGENT 时表示接入老智能体商业版本， 工具资源由外部智能体体系发布，本系统不允许编辑基础信息或注销。
      */
     @Value("${dataset.system:}")
     private String datasetSystem;
@@ -751,11 +751,7 @@ public class ToolManService {
         }
         validateResourceManagePermission(resource);
         validateInnerSkillReadonly(resource);
-        validateCommercialEditionKnowledgeOrToolWritable(resource);
-        // 任意第三方知识库模式都由外部系统维护，不能通过通用工具接口绕过限制。
-        if (isKnowledgeBizType(resource.getResourceBizType()) && StringUtils.isNotBlank(datasetSystem)) {
-            throw new IllegalArgumentException(I18nUtil.get("commercial.not.support.knowledge.operation"));
-        }
+        validateCommercialEditionToolWritable(resource);
         boolean validStatus = switch (targetStatus) {
             case ON_SHELF -> ResourceLifecyclePolicy.canShelf(resource);
             case OFF_SHELF -> ResourceLifecyclePolicy.canUnShelf(resource);
@@ -876,8 +872,8 @@ public class ToolManService {
             deleteResourceAndAllRel(resourceId);
             return;
         }
-        // 商业版本（dataset.system=WHALE_AGENT）下，知识/工具由智能体门户发布，本系统不允许注销。
-        validateCommercialEditionKnowledgeOrToolWritable(resource);
+        // 商业版本（dataset.system=WHALE_AGENT）下，工具由智能体门户发布，本系统不允许注销。
+        validateCommercialEditionToolWritable(resource);
         String targetContent = findTargetContentByBizType(resourceBizType, resourceId);
 
         if (!forceDelete) {
@@ -1020,8 +1016,8 @@ public class ToolManService {
         }
         validateResourceManagePermission(resource);
         String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
-        // 商业版本（dataset.system=WHALE_AGENT）下，知识/工具由智能体门户发布，本系统不允许恢复。
-        validateCommercialEditionKnowledgeOrToolWritable(resource);
+        // 商业版本（dataset.system=WHALE_AGENT）下，工具由智能体门户发布，本系统不允许恢复。
+        validateCommercialEditionToolWritable(resource);
         String targetContent = findTargetContentByBizType(resourceBizType, resourceId);
 
         if (!forceRestore) {
@@ -1085,8 +1081,8 @@ public class ToolManService {
         if (resource == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
-        // 商业版本（dataset.system=WHALE_AGENT）下，知识/工具由智能体门户发布，本系统不允许编辑。
-        validateCommercialEditionKnowledgeOrToolWritable(resource);
+        // 商业版本（dataset.system=WHALE_AGENT）下，工具由智能体门户发布，本系统不允许编辑。
+        validateCommercialEditionToolWritable(resource);
         validateResourceManagePermission(resource);
         // 豁免仅限本入口的名称、描述、图片和分类；共享只读校验继续保护删除和上下架。
         if (!CurrentUserHolder.isAdminVip()) {
@@ -1117,19 +1113,19 @@ public class ToolManService {
     // ==================== 权限与业务校验 ====================
 
     /**
-     * 商业版本（dataset.system=WHALE_AGENT）下，知识/工具的编辑/注销需走智能体门户， 在本系统拦截并提示用户。对象、视图、数字员工和非商业版本不受限。
+     * 商业版本（dataset.system=WHALE_AGENT）下，工具的编辑/注销需走智能体门户， 在本系统拦截并提示用户。对象、视图、数字员工和非商业版本不受限。
      *
      * @author qin.guoquan
      * @date 2026-05-11
      */
-    void validateCommercialEditionKnowledgeOrToolWritable(SsResource resource) {
+    void validateCommercialEditionToolWritable(SsResource resource) {
         if (resource == null) {
             return;
         }
         if (!SystemCode.WHAGE_AGENT.getCode().equalsIgnoreCase(StringUtils.trimToEmpty(datasetSystem))) {
             return;
         }
-        if (!isKnowledgeBizType(resource.getResourceBizType()) && !isToolBizType(resource.getResourceBizType())) {
+        if (!isToolBizType(resource.getResourceBizType())) {
             return;
         }
         throw new IllegalArgumentException(I18nUtil.get("commercial.not.support.knowledge.operation"));

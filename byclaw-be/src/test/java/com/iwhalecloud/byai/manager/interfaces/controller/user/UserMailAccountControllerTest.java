@@ -94,21 +94,25 @@ class UserMailAccountControllerTest {
     }
 
     @Test
-    void nonCheckEndpointRetainsEstablishedExceptionContract() throws Exception {
-        UserMailAccountApplicationService service = mock(UserMailAccountApplicationService.class);
-        UserMailAccountController controller = new UserMailAccountController();
-        ReflectionTestUtils.setField(controller, "userMailAccountApplicationService", service);
-        when(service.list()).thenThrow(new RuntimeException("non-check-established-error"));
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new MailConnectionCheckExceptionHandler(), new GlobalExceptionHandler())
-            .build();
+    void nonCheckEndpointUsesGlobalErrorContractWithoutLeakingInternalMessage() throws Exception {
+        try (var messages = new com.iwhalecloud.byai.common.i18n.I18nTestScope(java.util.Locale.US)) {
+            UserMailAccountApplicationService service = mock(UserMailAccountApplicationService.class);
+            UserMailAccountController controller = new UserMailAccountController();
+            ReflectionTestUtils.setField(controller, "userMailAccountApplicationService", service);
+            when(service.list()).thenThrow(new RuntimeException("non-check-established-error"));
+            MockMvc mvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new MailConnectionCheckExceptionHandler(), new GlobalExceptionHandler())
+                .build();
 
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
-                "/userMailAccount/list"))
-            .andExpect(status().isInternalServerError())
-            .andExpect(jsonPath("$.msg").value("non-check-established-error"))
-            .andExpect(content().string(org.hamcrest.Matchers.not(
-                org.hamcrest.Matchers.containsString("Mail connection check"))));
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+                    "/userMailAccount/list").locale(java.util.Locale.US))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.msg").value("An unexpected system error occurred. Please try again later"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                    org.hamcrest.Matchers.containsString("non-check-established-error"))))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                    org.hamcrest.Matchers.containsString("Mail connection check"))));
+        }
     }
 
     @Test

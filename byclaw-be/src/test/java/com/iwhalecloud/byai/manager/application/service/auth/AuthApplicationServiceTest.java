@@ -757,11 +757,54 @@ class AuthApplicationServiceTest {
         }
     }
 
+    /** 部署模式不改变知识库的管理权：单条详情和批量列表必须一致。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void knowledgeMaintenanceUsesResourcePermissionAcrossDeploymentModes(String mode) {
+        for (String bizType : List.of("KG_DOC", "KG_QA", "KG_TERM")) {
+            for (String identity : List.of("creator", "manager", "useOnly", "none", "blocked", "inactive")) {
+                List<PrivilegeGrant> grants = new ArrayList<>();
+                if (List.of("manager", "blocked", "inactive").contains(identity)) {
+                    grants.add(manageGrant(620L, 2L, GrantToObjType.USER, Color.RED,
+                        "inactive".equals(identity) ? "P" : "A"));
+                }
+                if ("blocked".equals(identity)) {
+                    grants.add(manageGrant(620L, 2L, GrantToObjType.USER, Color.BLACK, "A"));
+                }
+                if ("useOnly".equals(identity)) {
+                    grants.add(useGrant(620L, 2L, GrantToObjType.USER, Color.RED, "A"));
+                }
+                grants.forEach(grant -> grant.setGrantObjType(bizType));
+                AuthApplicationService service = newExplicitUserPermissionService(grants);
+                ReflectionTestUtils.setField(service, "datasetSystem", mode);
+                CurrentUserHolder.setLoginInfo(loginInfo(2L));
+                SsResource resource = enterpriseResource(620L, "creator".equals(identity) ? 2L : 1L);
+                resource.setResourceBizType(bizType);
+                prepareOperationPermissionQueries(service, resource);
+                boolean manageable = List.of("creator", "manager").contains(identity);
+                for (String owner : List.of(OwnerType.PERSONAL, OwnerType.ENTERPRISE, OwnerType.PERSONAL_DEFAULT)) {
+                    resource.setOwnerType(owner);
+                    for (int status : List.of(0, 2, 3, -1)) {
+                        resource.setResourceStatus(status);
+                        var detail = service.queryResourceOperationPermissions(620L);
+                        var row = service.queryResourceOperationPermissionsBatch(List.of(620L)).get(620L);
+                        assertThat(row).as("%s/%s/%s/%s/%s", mode, bizType, identity, owner, status)
+                            .usingRecursiveComparison().isEqualTo(detail);
+                        boolean editable = manageable && status != -1 && !OwnerType.PERSONAL_DEFAULT.equals(owner);
+                        assertThat(detail.isCanEdit()).isEqualTo(editable);
+                        assertThat(detail.isCanDelete()).isEqualTo(editable
+                            && (OwnerType.PERSONAL.equals(owner) || status == 0 || status == 3));
+                    }
+                }
+            }
+        }
+    }
+
     /**
-     * WHALE_AGENT 模式下知识/工具由外部智能体发布，本系统不允许编辑基础信息或注销。
+     * WHALE_AGENT 模式下工具仍由外部智能体发布，知识库权限调整不能放开工具维护。
      */
     @Test
-    void queryResourceOperationPermissions_rejectsWhaleAgentKnowledgeAndToolEditDeleteActions() {
+    void queryResourceOperationPermissions_rejectsWhaleAgentToolEditDeleteActions() {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);

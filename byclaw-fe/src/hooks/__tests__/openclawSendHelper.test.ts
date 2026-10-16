@@ -1,3 +1,7 @@
+jest.mock('@umijs/max', () => ({
+  getIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
+}));
+
 jest.mock('@/utils/openClaw/openclawWebSocket', () => ({
   getOpenClawWebSocket: jest.fn(),
   OpenClawWebSocketClient: {
@@ -18,10 +22,7 @@ jest.mock('@/service/common/request', () => ({
 
 import { POST } from '@/service/common/request';
 import { generateFilePrompt } from '@/utils/openClaw/utils';
-import {
-  getOpenClawWebSocket,
-  OpenClawWebSocketClient,
-} from '@/utils/openClaw/openclawWebSocket';
+import { getOpenClawWebSocket, OpenClawWebSocketClient } from '@/utils/openClaw/openclawWebSocket';
 
 import OpenclawSendHelper from '../useSseSender/openclaw/sendHelper';
 
@@ -97,6 +98,6 @@ describe('hooks/useSseSender/openclaw/sendHelper', () => {
       updateSession: { current: jest.fn() } as any,
     });
 
-    await expect(helper.send({ chatContent: 'hello' }, {}).promise).rejects.toThrow('OpenClaw WebSocket not connected');
+    await expect(helper.send({ chatContent: 'hello' }, {}).promise).rejects.toThrow('openClaw.websocket.notOpen');
   });
 });
