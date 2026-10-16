@@ -9,7 +9,12 @@ import { copyWithMessage } from '@/utils/copy';
 import { BundledLanguage } from 'shiki';
 import {
   AUDIO_PREVIEW_TYPES,
+  ARCHIVE_PREVIEW_TYPES,
+  DECODED_IMAGE_PREVIEW_TYPES,
   DELIMITED_PREVIEW_TYPES,
+  DOCUMENT_DATA_PREVIEW_TYPES,
+  EBOOK_PREVIEW_TYPES,
+  DATABASE_PREVIEW_TYPES,
   HTML_PREVIEW_TYPES,
   IMAGE_PREVIEW_TYPES,
   OFFICE_PREVIEW_TYPES,
@@ -41,6 +46,12 @@ const OfficeComponent = React.lazy(() =>
 
 const MediaPreviewComponent = React.lazy(() => import('@/components/Preview/Media'));
 const DelimitedPreviewComponent = React.lazy(() => import('@/components/Preview/Delimited'));
+const DecodedImageComponent = React.lazy(() => import('@/components/Preview/DecodedImage'));
+const ArchiveComponent = React.lazy(() => import('@/components/Preview/Archive'));
+const RtfComponent = React.lazy(() => import('@/components/Preview/Rtf'));
+const OdsComponent = React.lazy(() => import('@/components/Preview/Ods'));
+const EpubComponent = React.lazy(() => import('@/components/Preview/Epub'));
+const SqliteComponent = React.lazy(() => import('@/components/Preview/Sqlite'));
 
 // 文件扩展名 -> shiki 语言。仅收录 shiki/bundle-web 实际打包的语言;传入未打包的 lang 会让 codeToHtml 抛错致预览白屏。
 // 未命中的代码/配置类型(如 go/rust/kotlin)仍按纯文本展示(见 isTextLike + TextHighlight 默认 lang)。
@@ -85,10 +96,15 @@ const visualTypes = [
   'pdf',
   ...HTML_PREVIEW_TYPES,
   ...IMAGE_PREVIEW_TYPES,
+  ...DECODED_IMAGE_PREVIEW_TYPES,
+  ...ARCHIVE_PREVIEW_TYPES,
   ...VIDEO_PREVIEW_TYPES,
   ...AUDIO_PREVIEW_TYPES,
   ...officeTypes,
   ...DELIMITED_PREVIEW_TYPES,
+  ...DOCUMENT_DATA_PREVIEW_TYPES,
+  ...EBOOK_PREVIEW_TYPES,
+  ...DATABASE_PREVIEW_TYPES,
 ];
 
 const createPreviewBlob = (blob: Blob, type: string, title?: string) => {
@@ -106,7 +122,9 @@ export interface TwinsProps {
   onHtmlLinkClick?: (href: string) => void;
 }
 
-export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.ReactNode; className?: string }) => {
+type PreviewFileProps = TwinsProps & { extra?: React.ReactNode; className?: string };
+
+export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElement => {
   const {
     data,
     type: providedType,
@@ -326,9 +344,44 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            <OfficeComponent data={data} type={type} fileName={title} />
+            {officeTypes.includes(type) && <OfficeComponent data={data} type={type} fileName={title} />}
           </Suspense>
         </div>
+        {DECODED_IMAGE_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <DecodedImageComponent data={data} type={type} title={title} />
+            </Suspense>
+          </div>
+        )}
+        {DOCUMENT_DATA_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              {type === 'rtf' ? <RtfComponent data={data} title={title} /> : <OdsComponent data={data} />}
+            </Suspense>
+          </div>
+        )}
+        {EBOOK_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <EpubComponent data={data} title={title} />
+            </Suspense>
+          </div>
+        )}
+        {DATABASE_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <SqliteComponent data={data} />
+            </Suspense>
+          </div>
+        )}
+        {ARCHIVE_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <ArchiveComponent data={data} renderFile={(file, name) => <PreViewFile data={file} title={name} />} />
+            </Suspense>
+          </div>
+        )}
       </div>
     </section>
   );

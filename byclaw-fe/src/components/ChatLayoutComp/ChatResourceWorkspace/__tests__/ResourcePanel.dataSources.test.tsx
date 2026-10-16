@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import { querySessionDataSources } from '@/service/projectDataSources';
+import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
 import ResourcePanel from '../ResourcePanel';
 import { DetailPanelContent, useDetailPanelState } from '@/layout/pcLayout/useDetailPanelState';
 
@@ -22,7 +23,7 @@ jest.mock('@/layout/sider/components/ResourceSiderPanel', () => () => {
   const [keyword, setKeyword] = require('react').useState('');
   return <input aria-label="skill search" value={keyword} onChange={(event) => setKeyword(event.target.value)} />;
 });
-jest.mock('@/layout/sider/components/ProjectSpaceList/CodesTab', () => () => null);
+jest.mock('@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab', () => jest.fn(() => null));
 jest.mock('../FileResourcePanel', () => () => <div>files</div>);
 jest.mock('@/components/ProjectDataSources', () => () => <div>datasource content</div>);
 
@@ -39,6 +40,19 @@ beforeEach(() => {
   mockActiveEmployeeId = undefined;
   // 清除上一用例未消费的一次性响应，避免延迟请求污染后续会话测试。
   query.mockReset();
+});
+
+it.each(['', 'session-1'])('hides project space and keeps the file tabs for session %s', async (sessionId) => {
+  query.mockResolvedValue(page(0));
+  await act(async () => {
+    render(panel(sessionId));
+  });
+  const sessionNav = screen.getByRole('complementary', { name: 'chatResource.currentSession' });
+  expect(within(sessionNav).queryByRole('tab', { name: 'chatResource.projectSpace' })).not.toBeInTheDocument();
+  expect(ProjectSpaceTab).not.toHaveBeenCalled();
+  expect(within(sessionNav).getByRole('tab', { name: 'chatResource.processFile' })).toBeInTheDocument();
+  expect(within(sessionNav).getByRole('tab', { name: 'chatResource.localSharedFile' })).toBeInTheDocument();
+  expect(within(sessionNav).getByRole('tab', { name: 'chatResource.projectCloudDrive' })).toBeInTheDocument();
 });
 
 it('hides the project data tab when the session has no data', async () => {

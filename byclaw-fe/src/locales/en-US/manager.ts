@@ -374,6 +374,12 @@ export default {
   'modelMgr.default': 'Default',
   'modelMgr.setDefault': 'Set as default',
   'modelMgr.defaultModel': 'Default',
+  'modelMgr.typeName.LLM': 'Large language model',
+  'modelMgr.typeName.RERANK': 'Reranking model',
+  'modelMgr.typeName.EMBEDDING': 'Embedding model',
+  'modelMgr.typeName.TTS': 'Text to speech',
+  'modelMgr.typeName.IMAGE_GENERATION': 'Image generation',
+  'modelMgr.typeName.unknown': 'Unknown type',
   'modelMgr.operationSuccess': 'Operation succeeded',
   'modelMgr.debug': 'Debug',
   'modelMgr.heroDesc':
@@ -546,6 +552,12 @@ export default {
   'modelMgr.modal.presetContextUnspecifiedHint':
     'The API does not specify a uniform input limit. Context length defaults to 202752; adjust it to your service limits.',
   'modelMgr.modal.presetChannel.bailian': 'Alibaba Cloud Model Studio',
+  'modelMgr.modal.presetChannel.bailianSiliconflow': 'Alibaba Cloud Model Studio / SiliconFlow',
+  'modelMgr.modal.presetChannel.bailianVanchin': 'Alibaba Cloud Model Studio / Vanchin',
+  'modelMgr.modal.deepseekBailianPresetHint':
+    'Activate this channel model in Model Studio, use a Beijing-region Model Studio API key, and replace the WorkspaceId placeholder in the endpoint with your workspace ID. Check context length and Max Tokens against the channel console; no official capacity limits are registered in this template.',
+  'modelMgr.modal.deepseekBailianOcrPresetHint':
+    'Activate Vanchin OCR in Model Studio, use a Beijing-region Model Studio API key, and replace the WorkspaceId placeholder in the endpoint with your workspace ID. Check capacities in the channel console. For OCR debugging, supply image_url and text instructions in the message content; the default text-only example cannot verify OCR.',
   'modelMgr.modal.presetChannel.kimiCode': 'Kimi Code',
   'modelMgr.modal.presetChannel.volcengine': 'Volcengine Ark',
   'modelMgr.modal.presetThinkingRequiredHint':

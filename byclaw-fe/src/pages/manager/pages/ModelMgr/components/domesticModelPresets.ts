@@ -1,4 +1,5 @@
 import type { ModelFormPreset } from './modelFormPresets';
+import { DEEPSEEK_CHANNEL_PRESETS } from './deepseekChannelPresets';
 
 const BAILIAN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const TOKENHUB_BASE = 'https://tokenhub.tencentmaas.com/v1';
@@ -8,6 +9,7 @@ const TOKENHUB_MODELS = 'https://cloud.tencent.com/document/product/1823/130051'
 // 按实际接入渠道登记容量和型号；不把聚合渠道的参数或 Key 当成原厂直连配置。
 // 未明确的 limits.maxTokens 留空，由统一模板逻辑补系统预算；思考和采样沿用上游默认值。
 export const DOMESTIC_MODEL_PRESETS: ModelFormPreset[] = [
+  ...DEEPSEEK_CHANNEL_PRESETS,
   ...['Baichuan4-Turbo', 'Baichuan4-Air'].map((modelCode) => ({
     id: `baichuan:${modelCode}`,
     label: modelCode,
@@ -120,17 +122,10 @@ export const DOMESTIC_MODEL_PRESETS: ModelFormPreset[] = [
     },
     {
       modelCode: 'kimi-k2.7-code-highspeed',
-      label: 'Kimi K2.7 Code HighSpeed',
+      label: 'Kimi-K2.7-Code-HighSpeed',
       developer: 'moonshot',
       contextTokens: 262144,
       maxTokens: 262144,
-    },
-    {
-      modelCode: 'kimi-k2.8-preview',
-      label: 'Kimi K2.8 Preview',
-      developer: 'moonshot',
-      contextTokens: 1048576,
-      maxTokens: 1048576,
     },
   ].map(({ modelCode, label, developer, contextTokens, maxTokens }) => ({
     id: `tokenhub:${modelCode}`,
@@ -234,7 +229,7 @@ export const DOMESTIC_MODEL_PRESETS: ModelFormPreset[] = [
     },
   },
   ...[
-    { modelCode: 'BAAI/bge-m3', label: 'BGE-M3', developer: 'baai', contextTokens: 8192 },
+    { modelCode: 'BAAI/bge-m3', label: 'bge-m3', developer: 'baai', contextTokens: 8192 },
     { modelCode: 'BAAI/bge-large-zh-v1.5', label: 'bge-large-zh-v1.5', developer: 'baai', contextTokens: 512 },
     {
       modelCode: 'netease-youdao/bce-embedding-base_v1',

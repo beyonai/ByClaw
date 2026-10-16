@@ -176,7 +176,7 @@ describe('new model quick setup', () => {
     });
     expect(abilitySelect).not.toBeVisible();
     await change('modelCode', 'MiniMax-M3');
-    await change('modelCode', 'deepseek-v4-pro');
+    await change('modelCode', 'deepseek-flash');
     await change('apiToken', 'test-token');
     await clickSave('modelMgr.modal.saveAndContinue');
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
@@ -345,14 +345,14 @@ describe('new model quick setup', () => {
     await change('apiEndpoint', 'https://proxy.example/v1');
     await change('apiToken', 'test-token');
     await change('modelCode', 'MiniMax-M3');
-    await change('modelCode', 'deepseek-v4-pro');
+    await change('modelCode', 'deepseek-flash');
     await clickSave();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save.mock.calls[0][0]).toMatchObject({
       displayName: 'Private gateway',
       apiEndpoint: 'https://proxy.example/v1',
       apiToken: 'test-token',
-      modelCode: 'deepseek-v4-pro',
+      modelCode: 'deepseek-flash',
       contextTokens: 1048576,
       maxTokens: 393216,
     });
@@ -380,7 +380,7 @@ describe('new model quick setup', () => {
 
   it('synchronizes thinking toggles and keeps a manual context slider value across model switches', async () => {
     const save = await renderForm();
-    await change('modelCode', 'deepseek-v4-pro');
+    await change('modelCode', 'deepseek-flash');
     await change('apiToken', 'test-token');
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));

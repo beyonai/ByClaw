@@ -213,7 +213,7 @@ public class ModelManagementController {
      * @param modelDefault 默认模型
      * @return ResponseUtil
      */
-    @ManageLogAnnotation(name = "模型管理", description = "设置默认对话模型")
+    @ManageLogAnnotation(name = "模型管理", description = "设置类型默认模型")
     @PostMapping(value = "/setDefaultModel", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseUtil<String> setDefaultModel(@RequestBody @Valid ModelDefault modelDefault) {
         modelManagementApplicationService.setDefaultModel(modelDefault);

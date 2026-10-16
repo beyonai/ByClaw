@@ -3,11 +3,13 @@ import en from '@/locales/en-US/manager';
 import {
   applyModelAutofill,
   createModelAutofillState,
+  findModelFormPreset,
   getModelPresetLimits,
   getNewModelFormValues,
   MODEL_FORM_PRESETS,
 } from '../modelFormPresets';
 import { buildAutoDebugRequestText, buildDebugPayload, buildModelUpsertPayload } from '../modelFormUtils';
+import { getVisiblePresetOptions } from '../modelPresetCatalog';
 
 function select(id: string): Record<string, any> {
   const preset = MODEL_FORM_PRESETS.find((item) => item.id === id)!;
@@ -27,6 +29,100 @@ function debug(id: string) {
 }
 
 describe('domestic official templates', () => {
+  it.each([
+    ['deepseek-v4-flash-0731', 'bailian'],
+    ['siliconflow/deepseek-v3.1-terminus', 'bailianSiliconflow'],
+    ['siliconflow/deepseek-v3-0324', 'bailianSiliconflow'],
+    ['vanchin/deepseek-v3.2-think', 'bailianVanchin'],
+    ['vanchin/deepseek-ocr', 'bailianVanchin'],
+  ])('keeps the active DeepSeek channel contract for %s', (modelCode, channel) => {
+    const id = `bailian:${modelCode}`;
+    const preset = MODEL_FORM_PRESETS.find((item) => item.id === id)!;
+    expect(preset).toMatchObject({ developer: 'deepseek', channel });
+    expect(preset.label).toMatch(/^DeepSeek-/);
+    expect(preset.limits).toBeUndefined();
+    expect(getVisiblePresetOptions({ search: 'dee' }).map((option) => option.value)).toContain(id);
+    expect(getVisiblePresetOptions({ search: '深度求索' }).map((option) => option.value)).toContain(id);
+    const values = select(id);
+    expect(buildModelUpsertPayload({ values })).toMatchObject({ modelCode, providerName: 'Bailian' });
+    expect(values.apiEndpoint).toContain('{WorkspaceId}.cn-beijing.maas.aliyuncs.com');
+    // 用户按提示替换业务空间后，调试仍须保留供应商前缀和百炼 Bearer 认证。
+    const request = JSON.parse(
+      buildAutoDebugRequestText({
+        formValues: { ...values, apiEndpoint: values.apiEndpoint.replace('{WorkspaceId}', 'workspace-fixture') },
+        syncFormParameters: true,
+      })
+    );
+    expect(request).toMatchObject({
+      model: modelCode,
+      url: 'https://workspace-fixture.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions',
+      headers: { Authorization: 'Bearer fixture-token' },
+    });
+    expect(request).not.toHaveProperty('thinking');
+    expect(request).not.toHaveProperty('enable_thinking');
+    expect(preset.noticeId).toBe(
+      modelCode === 'vanchin/deepseek-ocr'
+        ? 'modelMgr.modal.deepseekBailianOcrPresetHint'
+        : 'modelMgr.modal.deepseekBailianPresetHint'
+    );
+  });
+
+  it('keeps one entry per DeepSeek version and prefers direct access', () => {
+    const presets = MODEL_FORM_PRESETS.filter((preset) => preset.developer === 'deepseek');
+    // Flash 的原厂 API 别名仍保留在展示名中，比较版本时仅去掉该后缀。
+    const names = presets.map((preset) => preset.label.replace(/ \(.*\)$/, ''));
+    expect(names).toHaveLength(7);
+    expect(new Set(names).size).toBe(names.length);
+    expect(findModelFormPreset('deepseek-v4-pro')?.id).toBe('deepseek:deepseek-v4-pro');
+    expect(findModelFormPreset('deepseek-flash')?.id).toBe('deepseek:deepseek-flash');
+    expect(findModelFormPreset('deepseek-v4-pro-0813')).toBeUndefined();
+    const ids = MODEL_FORM_PRESETS.map((preset) => preset.id);
+    [
+      'deepseek-v4-pro-0813',
+      'deepseek-v4.1-flash',
+      'deepseek-v4-pro',
+      'vanchin/deepseek-v4.1-flash',
+      'vanchin/deepseek-v4-pro',
+      'vanchin/deepseek-v4-pro-0813',
+      'vanchin/deepseek-v3.1-terminus',
+      'deepseek-v3',
+      'deepseek-v3.1',
+      'deepseek-v3.2',
+      'deepseek-v3.2-exp',
+      'deepseek-r1',
+      'deepseek-r1-0528',
+      'siliconflow/deepseek-v3.2',
+      'siliconflow/deepseek-r1-0528',
+      'vanchin/deepseek-r1',
+      'vanchin/deepseek-v3',
+    ].forEach((modelCode) => expect(ids).not.toContain(`bailian:${modelCode}`));
+  });
+
+  it.each([
+    ['tokenhub:kimi-k2.7-code-highspeed', 'Kimi-K2.7-Code-HighSpeed', 'kimi-k2.7-code-highspeed'],
+    ['bailian:kimi-k2.6', 'Kimi-K2.6', 'kimi-k2.6'],
+    ['bailian:kimi-k2.7-code', 'Kimi-K2.7-Code', 'kimi-k2.7-code'],
+    ['kimi-code:kimi-for-coding', 'Kimi-K2.8-Preview (kimi-for-coding)', 'kimi-for-coding'],
+    ['bailian:kimi-k3', 'Kimi-K3', 'kimi-k3'],
+  ])('uses consistent Kimi display separators without changing the API model: %s', (id, label, modelCode) => {
+    // 各渠道统一展示连字符，但保留独立的接口型号（包括 Kimi Code 专用型号）。
+    expect(MODEL_FORM_PRESETS.find((preset) => preset.id === id)?.label).toBe(label);
+    const values = select(id);
+    expect(values.modelCode).toBe(modelCode);
+    expect(buildModelUpsertPayload({ values }).modelCode).toBe(modelCode);
+    expect(debug(id).model).toBe(modelCode);
+  });
+
+  it('displays bge-m3 in lowercase while preserving the API model code', () => {
+    const id = 'siliconflow:BAAI/bge-m3';
+    // 展示名称与同系列模板保持一致，自动填充和提交仍使用渠道要求的完整型号。
+    expect(MODEL_FORM_PRESETS.find((preset) => preset.id === id)?.label).toBe('bge-m3');
+    const values = select(id);
+    expect(values.modelCode).toBe('BAAI/bge-m3');
+    expect(buildModelUpsertPayload({ values }).modelCode).toBe('BAAI/bge-m3');
+    expect(debug(id).model).toBe('BAAI/bge-m3');
+  });
+
   it.each([
     ['baichuan:Baichuan4-Turbo', 'https://api.baichuan-ai.com/v1/chat/completions', 32768, 32768],
     ['baichuan:Baichuan4-Air', 'https://api.baichuan-ai.com/v1/chat/completions', 32768, 32768],
@@ -51,7 +147,6 @@ describe('domestic official templates', () => {
     ['tokenhub:mimo-v2.6-pro', 1048576, 131072, 'https://tokenhub.tencentmaas.com/v1'],
     ['tokenhub:step-5-preview', 1048576, 65536, 'https://tokenhub.tencentmaas.com/v1'],
     ['tokenhub:glm-5.3-flashx', 1048576, 131072, 'https://tokenhub.tencentmaas.com/v1'],
-    ['tokenhub:kimi-k2.8-preview', 1048576, 1048576, 'https://tokenhub.tencentmaas.com/v1'],
     ['aistudio:ernie-5.1', 131072, 65536, 'https://aistudio.baidu.com/llm/lmapi/v3'],
     ['aistudio:ernie-x1.1-preview', 65536, 65536, 'https://aistudio.baidu.com/llm/lmapi/v3'],
     ['bailian:stepfun/step-3.7-flash', 262144, 262144, 'https://dashscope.aliyuncs.com/compatible-mode/v1'],

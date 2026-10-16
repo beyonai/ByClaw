@@ -336,6 +336,7 @@ const MODEL_PRESET_DEFINITIONS: ModelFormPreset[] = [
   },
   {
     id: 'kimi-code:kimi-for-coding',
+    // 同一 K2.8 Preview 版本只保留 Kimi 官方入口，不再重复登记 TokenHub 渠道。
     label: 'Kimi-K2.8-Preview (kimi-for-coding)',
     developer: 'moonshot',
     channel: 'kimiCode',
