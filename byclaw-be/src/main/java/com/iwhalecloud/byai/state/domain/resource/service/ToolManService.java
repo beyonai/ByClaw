@@ -421,16 +421,17 @@ public class ToolManService {
         enterpriseResourceSyncService.validate(request);
         if ("SKILL".equals(resourceBizType)) enterpriseResourceSyncService.requireSyncPrincipal();
         Long effectiveCatalogId = resolveAddToolFromThirdCatalogId(root);
-        boolean trusted = request.viewAuth() != null || request.autoAuthorize() != null || "SKILL".equals(resourceBizType);
+        boolean trusted = enterpriseResourceSyncService.hasSyncPrincipal();
+        String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
+        String resourceCode = StringUtils.trimToEmpty(root.getString("resourceCode"));
+        if (StringUtils.isAnyBlank(systemCode, resourceCode)) {
+            throw new IllegalArgumentException("systemCode、resourceCode 不能为空");
+        }
         return executeWithOpenApiImportLoginContext(() ->
-            com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.execute(trusted, () -> {
-            String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
-            String resourceCode = StringUtils.trimToEmpty(root.getString("resourceCode"));
-            if (StringUtils.isAnyBlank(systemCode, resourceCode)) {
-                throw new IllegalArgumentException("systemCode、resourceCode 不能为空");
-            }
-            ssResourceService.lockSkillImport("THIRD_SYNC:" + CurrentUserHolder.getEnterpriseId() + ":"
-                + systemCode + ":" + resourceBizType + ":" + resourceCode);
+            com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.execute(trusted,
+                systemCode, resourceBizType, resourceCode, () -> {
+            // Match the global import identity so enterprise metadata cannot split synchronization locks.
+            ssResourceService.lockSkillImport("THIRD_SYNC:" + systemCode + ":" + resourceBizType + ":" + resourceCode);
             enterpriseResourceSyncService.validateExisting(
                 ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode));
             Map<String, Object> result;

@@ -49,11 +49,11 @@ public class EnterpriseResourceSyncService {
         if (request.viewAuth() != null || request.autoAuthorize() != null) requireSyncPrincipal();
         Scope scope = request.scope();
         if (scope == null) return;
-        if (!activeTenantUsers(scope.userIds(), CurrentUserHolder.getEnterpriseId()).containsAll(scope.userIds())) {
-            throw new IllegalArgumentException("授权用户不存在、已停用或不属于当前企业");
+        if (!activeUsers(scope.userIds()).containsAll(scope.userIds())) {
+            throw new IllegalArgumentException("授权用户不存在或已停用");
         }
         for (Long id : scope.orgIds()) {
-            if (scopeMapper.organization(id) != 1 || scopeMapper.tenantOrganization(id, CurrentUserHolder.getEnterpriseId()) != 1) throw new IllegalArgumentException("授权组织不存在: " + id);
+            if (scopeMapper.organization(id) != 1) throw new IllegalArgumentException("授权组织不存在: " + id);
         }
         for (Long id : scope.postIds()) {
             if (scopeMapper.ordinaryPost(id) != 1) throw new IllegalArgumentException("授权岗位不存在或属于数字岗位: " + id);
@@ -61,19 +61,20 @@ public class EnterpriseResourceSyncService {
     }
 
     public void requireSyncPrincipal() {
-        Long userId = CurrentUserHolder.getCurrentUserId();
-        Long tenantId = CurrentUserHolder.getEnterpriseId();
-        if (userId == null || userId <= 0 || tenantId == null || tenantId <= 0
-            || !auth.isCurrentUserGlobalResourceManager()) {
-            throw new IllegalArgumentException("资源授权同步需要当前企业资源管理员的有效登录身份");
+        if (!hasSyncPrincipal()) {
+            throw new IllegalArgumentException("资源授权同步需要资源管理员的有效登录身份");
         }
+    }
+
+    public boolean hasSyncPrincipal() {
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        return userId != null && userId > 0 && auth.isCurrentUserGlobalResourceManager();
     }
 
     public void validateExisting(SsResource resource) {
         if (resource == null) return;
-        if (!"enterprise".equals(resource.getOwnerType())
-            || !Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) {
-            throw new IllegalArgumentException("同编码资源的企业或归属与本次同步不一致");
+        if (!"enterprise".equals(resource.getOwnerType())) {
+            throw new IllegalArgumentException("同编码资源必须归属企业 tab");
         }
         if (Objects.equals(resource.getResourceStatus(), -1)) {
             throw new IllegalArgumentException("已注销资源不能通过同步恢复");
@@ -90,11 +91,11 @@ public class EnterpriseResourceSyncService {
         return result;
     }
 
-    public Set<Long> activeTenantUsers(java.util.Collection<Long> userIds, Long tenant) {
+    public Set<Long> activeUsers(java.util.Collection<Long> userIds) {
         List<Long> ids = new ArrayList<>(userIds);
         Set<Long> result = new LinkedHashSet<>();
         for (int offset = 0; offset < ids.size(); offset += 500) {
-            result.addAll(scopeMapper.activeTenantUsers(ids.subList(offset, Math.min(offset + 500, ids.size())), tenant));
+            result.addAll(scopeMapper.activeUsers(ids.subList(offset, Math.min(offset + 500, ids.size()))));
         }
         return result;
     }
@@ -107,7 +108,7 @@ public class EnterpriseResourceSyncService {
         resource.setThirdSyncRevision(revision);
         Set<Long> affected = new LinkedHashSet<>();
         Set<Long> scopeUsers = expand(request.scope());
-        scopeUsers = activeTenantUsers(scopeUsers, resource.getComAcctId());
+        scopeUsers = activeUsers(scopeUsers);
         if (request.viewAuth() != null) {
             replace(resource, List.of(GrantType.ALLOW_VIEW),
                 Boolean.TRUE.equals(request.viewAuth()) ? request.scope() : null, GrantType.ALLOW_VIEW, affected);
@@ -149,7 +150,7 @@ public class EnterpriseResourceSyncService {
         // Every revision inherits pending runtime refreshes; only omitted autoAuthorize inherits association intent.
         {
             List<ResourceSyncJob> previousJobs = jobs.selectList(new LambdaQueryWrapper<ResourceSyncJob>()
-                .eq(ResourceSyncJob::getResourceId, resourceId).eq(ResourceSyncJob::getComAcctId, resource.getComAcctId())
+                .eq(ResourceSyncJob::getResourceId, resourceId)
                 .orderByDesc(ResourceSyncJob::getSyncRevision).last("LIMIT 1"));
             if (!previousJobs.isEmpty() && !List.of("COMPLETED", "SUPERSEDED").contains(previousJobs.get(0).getStatus())) {
                 ResourceSyncJob previous = previousJobs.get(0);
@@ -178,7 +179,8 @@ public class EnterpriseResourceSyncService {
         if (!"NONE".equals(mode) || refreshRequired) {
             ResourceSyncJob job = new ResourceSyncJob();
             job.setSyncJobId(sequence.nextVal());
-            job.setComAcctId(resource.getComAcctId());
+            // Enterprise metadata remains bookkeeping only; legacy resources may not have it populated.
+            job.setComAcctId(Objects.requireNonNullElse(resource.getComAcctId(), 0L));
             job.setResourceId(resourceId);
             job.setSyncRevision(revision);
             job.setOperatorUserId(CurrentUserHolder.getCurrentUserId());

@@ -123,14 +123,14 @@ public class ResourceSyncReconcileService {
             wrapper.put("autoAuthorize", true);
             wrapper.put("authScope", input);
             Set<Long> expanded = sync.expand(EnterpriseResourceSyncRequest.parse(wrapper).scope());
-            Set<Long> active = sync.activeTenantUsers(expanded, job.getComAcctId());
+            Set<Long> active = sync.activeUsers(expanded);
             skipped += expanded.size() - active.size();
-            if (skipped > 0) skipReasons.put("INACTIVE_OR_NON_TENANT_USER", skipped);
+            if (skipped > 0) skipReasons.put("INACTIVE_USER", skipped);
             Map<Long, List<Long>> defaultsByUser = new LinkedHashMap<>();
             List<Long> activeIds = new java.util.ArrayList<>(active);
             for (int offset = 0; offset < activeIds.size(); offset += 500) {
                 for (var row : scopeMapper.defaultEmployeesBatch(
-                    activeIds.subList(offset, Math.min(offset + 500, activeIds.size())), job.getComAcctId())) {
+                    activeIds.subList(offset, Math.min(offset + 500, activeIds.size())))) {
                     defaultsByUser.computeIfAbsent(row.userId(), ignored -> new java.util.ArrayList<>()).add(row.employeeId());
                 }
             }
@@ -139,7 +139,7 @@ public class ResourceSyncReconcileService {
                 String reason = defaults.size() > 1 ? "AMBIGUOUS_DEFAULT"
                     : defaults.isEmpty() || defaults.get(0) == null ? "NO_DEFAULT" : null;
                 SsResource employee = reason == null ? resources.findById(defaults.get(0)) : null;
-                if (reason == null && !eligible(employee, resource, job, userId)) reason = "INELIGIBLE_DEFAULT_OR_RESOURCE";
+                if (reason == null && !eligible(employee, resource, userId)) reason = "INELIGIBLE_DEFAULT_OR_RESOURCE";
                 if (reason != null) {
                     skipped++;
                     skipReasons.merge(reason, 1, Integer::sum);
@@ -149,11 +149,10 @@ public class ResourceSyncReconcileService {
             }
         }
         Set<Long> targets = new LinkedHashSet<>(desired.keySet());
-        sources.automaticSources(job.getComAcctId(), job.getResourceId()).forEach(source -> targets.add(source.getDigitalEmployeeId()));
+        sources.automaticSourcesForSynchronization(job.getResourceId()).forEach(source -> targets.add(source.getDigitalEmployeeId()));
         if (Boolean.TRUE.equals(job.getPackageChanged())) {
             relations.list(new LambdaQueryWrapper<SsResourceRelDetail>()
-                .eq(SsResourceRelDetail::getRelResourceId, job.getResourceId())
-                .eq(SsResourceRelDetail::getComAcctId, job.getComAcctId()))
+                .eq(SsResourceRelDetail::getRelResourceId, job.getResourceId()))
                 .forEach(relation -> targets.add(relation.getResourceId()));
         }
         // Persist refresh targets before mutating relations, so the next revision can inherit committed work.
@@ -196,15 +195,16 @@ public class ResourceSyncReconcileService {
         finish(job, failures.isEmpty() ? "COMPLETED" : "PARTIAL", result);
     }
 
-    private boolean eligible(SsResource employee, SsResource resource, ResourceSyncJob job, Long userId) {
+    private boolean eligible(SsResource employee, SsResource resource, Long userId) {
         if (employee == null || !"DIG_EMPLOYEE".equals(employee.getResourceBizType())
-            || !"enterprise".equals(employee.getOwnerType()) || !Objects.equals(employee.getComAcctId(), job.getComAcctId())
+            || !"enterprise".equals(employee.getOwnerType())
             || !Objects.equals(employee.getResourceStatus(), 2) || !Objects.equals(resource.getResourceStatus(), 2)
             || "BY_SUPER".equals(employee.getWorkerAgentType())
             || employee.getResourceCode() != null && employee.getResourceCode().endsWith("_main")) return false;
         var extension = employeeExt.findById(employee.getResourceId());
         if (extension == null || "017".equals(extension.getAgentType())) return false;
-        return auth.hasResourceUsePermission(employee, userId) && auth.hasResourceUsePermission(resource, userId);
+        return EnterpriseResourceSyncContext.checkUsePermission(employee, () -> auth.hasResourceUsePermission(employee, userId))
+            && EnterpriseResourceSyncContext.checkUsePermission(resource, () -> auth.hasResourceUsePermission(resource, userId));
     }
 
     private Map<String, Integer> reconcileEmployee(ResourceSyncJob job, Long employeeId, Set<Long> desiredUsers) {
@@ -212,26 +212,23 @@ public class ResourceSyncReconcileService {
         SsResource resource = resources.findByIdForUpdate(job.getResourceId());
         if (!current(resource, job)) throw new IllegalStateException("同步版本已失效");
         SsResource employee = resources.findByIdForUpdate(employeeId);
-        if (employee != null && !Objects.equals(employee.getComAcctId(), job.getComAcctId())) {
-            throw new IllegalStateException("员工企业不匹配");
-        }
         List<SsResourceRelDetail> existing = relations.list(new LambdaQueryWrapper<SsResourceRelDetail>()
             .eq(SsResourceRelDetail::getResourceId, employeeId).eq(SsResourceRelDetail::getRelResourceId, resource.getResourceId()));
-        List<ResourceBindingSource> ledger = sources.sources(job.getComAcctId(), employeeId, resource.getResourceId());
+        List<ResourceBindingSource> ledger = sources.sourcesForSynchronization(employeeId, resource.getResourceId());
         Set<Long> validUsers = new LinkedHashSet<>();
         if (!"NONE".equals(job.getAssociationMode())) {
             for (Long user : desiredUsers) {
                 if ("CLEANUP_ONLY".equals(job.getAssociationMode()) && ledger.stream().noneMatch(source ->
                     ResourceBindingSourceService.SYNC.equals(source.getSourceType()) && "A".equals(source.getStatusCd())
                     && Objects.equals(user, source.getSourceUserId()))) continue;
-                if (!scopeMapper.activeTenantUsers(List.of(user), job.getComAcctId()).contains(user)) continue;
-                List<Long> defaults = scopeMapper.defaultEmployeesForUpdate(user, job.getComAcctId());
+                if (!scopeMapper.activeUsers(List.of(user)).contains(user)) continue;
+                List<Long> defaults = scopeMapper.defaultEmployeesForUpdate(user);
                 if (defaults.size() == 1 && Objects.equals(defaults.get(0), employeeId)
-                    && eligible(employee, resource, job, user)) validUsers.add(user);
+                    && eligible(employee, resource, user)) validUsers.add(user);
             }
         }
         if (!existing.isEmpty() && ledger.isEmpty() && !"SKILL".equals(resource.getResourceBizType())) {
-            sources.retain(job.getComAcctId(), employeeId, resource.getResourceId(), "LEGACY", null, null);
+            sources.retainForSynchronization(job.getComAcctId(), employeeId, resource.getResourceId(), "LEGACY", null, null);
         }
         for (ResourceBindingSource source : ledger) {
             if (!ResourceBindingSourceService.SYNC.equals(source.getSourceType()) || !"A".equals(source.getStatusCd())) continue;
@@ -244,14 +241,17 @@ public class ResourceSyncReconcileService {
             for (Long user : validUsers) {
                 boolean active = ledger.stream().anyMatch(source -> ResourceBindingSourceService.SYNC.equals(source.getSourceType())
                     && "A".equals(source.getStatusCd()) && Objects.equals(user, source.getSourceUserId()));
-                sources.retain(job.getComAcctId(), employeeId, resource.getResourceId(), ResourceBindingSourceService.SYNC,
+                sources.retainForSynchronization(job.getComAcctId(), employeeId, resource.getResourceId(), ResourceBindingSourceService.SYNC,
                     user, job.getSyncRevision());
                 if (!active) counts.merge("addedSourceCount", 1, Integer::sum);
             }
         }
-        boolean hasLedger = sources.hasActive(job.getComAcctId(), employeeId, resource.getResourceId());
+        List<ResourceBindingSource> activeSources = sources.sourcesForSynchronization(employeeId, resource.getResourceId())
+            .stream().filter(source -> "A".equals(source.getStatusCd())).toList();
+        boolean hasLedger = !activeSources.isEmpty();
         if (existing.isEmpty() && "RECONCILE".equals(job.getAssociationMode()) && !validUsers.isEmpty()
-            && sources.hasAutomatic(job.getComAcctId(), employeeId, resource.getResourceId()) && employee != null) {
+            && activeSources.stream().anyMatch(source -> ResourceBindingSourceService.SYNC.equals(source.getSourceType()))
+            && employee != null) {
             SsResourceRelDetail relation = new SsResourceRelDetail();
             relation.setResourceRelDetailId(sequence.nextVal());
             relation.setResourceId(employeeId);
@@ -280,8 +280,8 @@ public class ResourceSyncReconcileService {
     }
 
     private boolean current(SsResource resource, ResourceSyncJob job) {
-        return resource != null && "enterprise".equals(resource.getOwnerType())
-            && !Objects.equals(resource.getResourceStatus(), -1) && Objects.equals(resource.getComAcctId(), job.getComAcctId())
+        return resource != null && Objects.equals(resource.getResourceId(), job.getResourceId())
+            && "enterprise".equals(resource.getOwnerType()) && !Objects.equals(resource.getResourceStatus(), -1)
             && Objects.equals(resource.getThirdSyncRevision(), job.getSyncRevision());
     }
 

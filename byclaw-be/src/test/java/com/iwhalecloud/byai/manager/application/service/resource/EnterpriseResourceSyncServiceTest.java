@@ -88,13 +88,81 @@ class EnterpriseResourceSyncServiceTest {
         verify(writes, never()).save(any());
     }
 
-    @Test void crossTenantResourcesAndDigitalPostsFailBeforeClearingAnything() {
+    @Test void enterpriseMetadataDoesNotRejectAnExistingEnterpriseResource() {
         resource.setComAcctId(2L);
+        service.validateExisting(resource);
+        resource.setComAcctId(null);
+        service.validateExisting(resource);
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void personalAndDeletedResourcesAndDigitalPostsStillFailBeforeClearingAnything() {
+        resource.setOwnerType("personal");
+        assertThatThrownBy(() -> service.validateExisting(resource)).isInstanceOf(IllegalArgumentException.class);
+        resource.setOwnerType("enterprise"); resource.setResourceStatus(-1);
         assertThatThrownBy(() -> service.validateExisting(resource)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, null,
             new EnterpriseResourceSyncRequest.Scope(List.of(), List.of(), List.of(8L)))))
             .isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(grants, writes);
+    }
+
+    @Test void activeUsersAndExistingOrganizationsDoNotRequireTenantMappings() {
+        when(subjects.activeUsers(List.of(5L))).thenReturn(List.of(5L));
+        when(subjects.organization(20L)).thenReturn(1);
+        when(subjects.ordinaryPost(30L)).thenReturn(1);
+        service.validate(new EnterpriseResourceSyncRequest(true, true,
+            new EnterpriseResourceSyncRequest.Scope(List.of(5L), List.of(20L), List.of(30L))));
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void missingOrInactiveDirectUsersStillFailBeforeReplacingGrants() {
+        when(subjects.activeUsers(List.of(5L, 6L))).thenReturn(List.of(5L));
+        assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, true,
+            new EnterpriseResourceSyncRequest.Scope(List.of(5L, 6L), List.of(), List.of()))))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("授权用户不存在或已停用");
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void nonexistentOrganizationsStillFailBeforeReplacingGrants() {
+        assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, null,
+            new EnterpriseResourceSyncRequest.Scope(List.of(), List.of(20L), List.of()))))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("授权组织不存在");
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void scopeExpansionCountsActiveUsersWithoutTenantMembership() {
+        var userQueries = mock(UsersMapper.class);
+        ReflectionTestUtils.setField(service, "users", userQueries);
+        when(userQueries.findUserIdsByOrgIdListIncludingChildren(List.of(20L))).thenReturn(List.of(5L, 6L));
+        when(userQueries.findUserIdsByPostId(30L)).thenReturn(List.of(6L, 7L));
+        when(subjects.activeUsers(List.of(5L, 6L, 7L))).thenReturn(List.of(5L, 7L));
+        var response = new HashMap<String, Object>();
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(true, false,
+            new EnterpriseResourceSyncRequest.Scope(List.of(5L), List.of(20L), List.of(30L))), false, response);
+        assertThat(((java.util.Map<?, ?>) response.get("authorization")).get("scopeUserCount")).isEqualTo(2);
+        verify(writes, times(3)).save(any());
+    }
+
+    @Test void principalRequiresAnAuthenticatedAdministratorButNoEnterpriseMetadata() {
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(null);
+        service.requireSyncPrincipal();
+        var auth = (AuthApplicationService) ReflectionTestUtils.getField(service, "auth");
+        when(auth.isCurrentUserGlobalResourceManager()).thenReturn(false);
+        assertThatThrownBy(service::requireSyncPrincipal).isInstanceOf(IllegalArgumentException.class);
+        when(auth.isCurrentUserGlobalResourceManager()).thenReturn(true);
+        CurrentUserHolder.getLoginInfo().setUserId(0L);
+        assertThatThrownBy(service::requireSyncPrincipal).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void missingResourceEnterpriseMetadataUsesLegacyBookkeepingWithoutRewritingOwnership() {
+        resource.setComAcctId(null);
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(false, null, null), false, new HashMap<>());
+        var jobs = (ResourceSyncJobMapper) ReflectionTestUtils.getField(service, "jobs");
+        var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
+        verify(jobs).insert(saved.capture());
+        assertThat(saved.getValue().getComAcctId()).isZero();
+        assertThat(resource.getComAcctId()).isNull();
     }
 
     @Test void explicitFalseCarriesPendingRefreshesWithoutInheritingAutomaticAdditions() {

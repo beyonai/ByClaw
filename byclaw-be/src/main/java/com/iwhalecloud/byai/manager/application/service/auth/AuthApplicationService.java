@@ -1476,12 +1476,13 @@ public class AuthApplicationService {
      * @date 2026-04-24 18:08:00
      */
     public boolean hasResourceManagePermission(SsResource ssResource) {
-        if (ssResource != null && (Boolean.TRUE.equals(ssResource.getViewAuthControlled())
+        boolean synchronizedResource = com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.canUpdate(ssResource);
+        if (!synchronizedResource && ssResource != null && (Boolean.TRUE.equals(ssResource.getViewAuthControlled())
             || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
             && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         // 审核快照保持只读，防止审核期间修改内容或通过导入覆盖直接变为已上架。
         if (isSkillPublicationUnderReview(ssResource)) return false;
-        if (com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.canUpdate(ssResource)) return true;
+        if (synchronizedResource) return true;
         if (ssResource == null) {
             return false;
         }
@@ -1536,7 +1537,8 @@ public class AuthApplicationService {
      * 判断指定用户是否具备资源使用权限，不修改当前登录用户上下文。
      */
     public boolean hasResourceUsePermission(SsResource ssResource, Long userId) {
-        if (ssResource != null && userId != null && userId.equals(CurrentUserHolder.getCurrentUserId())
+        if (!com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.skipsUseEnterpriseCheck(ssResource)
+            && ssResource != null && userId != null && userId.equals(CurrentUserHolder.getCurrentUserId())
             && (Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
             && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         if (ssResource == null || ssResource.getResourceId() == null

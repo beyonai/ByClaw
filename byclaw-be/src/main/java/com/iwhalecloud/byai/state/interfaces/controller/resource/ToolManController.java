@@ -1892,7 +1892,7 @@ public class ToolManController {
             enterpriseResourceSyncService.requireSyncPrincipal();
             Long id = Long.valueOf(request.get("jobId"));
             var job = resourceSyncJobMapper.selectById(id);
-            if (job == null || !Objects.equals(job.getComAcctId(), CurrentUserHolder.getEnterpriseId())) {
+            if (job == null) {
                 return ResponseUtil.fail("同步任务不存在");
             }
             Map<String, Object> data = new LinkedHashMap<>();

@@ -29,6 +29,11 @@ public class TenantContextInterceptor implements HandlerInterceptor {
             return true;
         }
         String path = request.getRequestURI().substring(request.getContextPath().length());
+        // These authenticated integration routes rely on the development platform's enterprise checks.
+        if ("POST".equalsIgnoreCase(request.getMethod())
+            && ("/tool/addToolFromThird".equals(path) || "/tool/queryResourceSyncJob".equals(path))) {
+            return true;
+        }
         String enterpriseId = request.getHeader("X-Enterprise-Id");
         String contextToken = request.getHeader("X-Tenant-Context");
         if (enterpriseId == null) {

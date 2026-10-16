@@ -32,6 +32,7 @@ class ResourceSyncReconcileServiceTest {
     private ResourceSyncJob job;
     private SsResource resource;
     private SsResourceRelDetail relation;
+    private SsResource employee;
 
     @BeforeEach void setup() {
         LoginInfo login = new LoginInfo(); login.setUserId(9L); login.setEnterpriseId(1L);
@@ -39,7 +40,7 @@ class ResourceSyncReconcileServiceTest {
         service = new ResourceSyncReconcileService();
         relations = mock(SsResourceRelDetailService.class);
         defaults = mock(ResourceSyncScopeMapper.class);
-        when(defaults.activeTenantUsers(any(), any())).thenAnswer(call -> call.getArgument(0));
+        when(defaults.activeUsers(any())).thenAnswer(call -> call.getArgument(0));
         sources = new MemorySources();
         var resources = mock(SsResourceService.class);
         var auth = mock(AuthApplicationService.class);
@@ -49,7 +50,7 @@ class ResourceSyncReconcileServiceTest {
         when(extensions.findById(20L)).thenReturn(extension);
         resource = new SsResource(); resource.setResourceId(10L); resource.setResourceBizType("SKILL");
         resource.setResourceStatus(2); resource.setOwnerType("enterprise"); resource.setComAcctId(1L); resource.setThirdSyncRevision(2L);
-        SsResource employee = new SsResource(); employee.setResourceId(20L); employee.setResourceBizType("DIG_EMPLOYEE");
+        employee = new SsResource(); employee.setResourceId(20L); employee.setResourceBizType("DIG_EMPLOYEE");
         employee.setOwnerType("enterprise"); employee.setResourceStatus(2); employee.setComAcctId(1L);
         when(resources.findByIdForUpdate(10L)).thenReturn(resource);
         when(resources.findByIdForUpdate(20L)).thenReturn(employee);
@@ -76,7 +77,7 @@ class ResourceSyncReconcileServiceTest {
     @Test void shrinkingScopeKeepsTheOtherUsersSourceAndPhysicalRelation() {
         sources.retain(1L, 20L, 10L, ResourceBindingSourceService.SYNC, 5L, 1L);
         sources.retain(1L, 20L, 10L, ResourceBindingSourceService.SYNC, 6L, 1L);
-        when(defaults.defaultEmployeesForUpdate(6L, 1L)).thenReturn(List.of(20L));
+        when(defaults.defaultEmployeesForUpdate(6L)).thenReturn(List.of(20L));
         mutate(Set.of(6L));
         assertThat(sources.activeUsers()).containsExactly(6L);
         verify(relations, never()).removeById(any(java.io.Serializable.class));
@@ -102,17 +103,41 @@ class ResourceSyncReconcileServiceTest {
 
     @Test void cleanupOnlyNeverAddsASourceForNewUsers() {
         job.setAssociationMode("CLEANUP_ONLY");
-        when(defaults.defaultEmployeesForUpdate(5L, 1L)).thenReturn(List.of(20L));
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
         sources.retain(1L, 20L, 10L, ResourceBindingSourceService.SYNC, 5L, 1L);
         mutate(Set.of(5L, 6L));
         assertThat(sources.activeUsers()).containsExactly(5L);
-        verify(defaults, never()).defaultEmployees(6L, 1L);
+        verify(defaults, never()).defaultEmployeesForUpdate(6L);
+    }
+
+    @Test void activeUserWithoutTenantMembershipCanRetainAutomaticBinding() {
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
+        mutate(Set.of(5L));
+        assertThat(sources.activeUsers()).containsExactly(5L);
+        verify(defaults).activeUsers(List.of(5L));
+        verify(relations, never()).removeById(any(java.io.Serializable.class));
+    }
+
+    @Test void inactiveUserCannotKeepAnAutomaticBinding() {
+        sources.retain(1L, 20L, 10L, ResourceBindingSourceService.SYNC, 5L, 1L);
+        when(defaults.activeUsers(List.of(5L))).thenReturn(List.of());
+        mutate(Set.of(5L));
+        assertThat(sources.activeUsers()).isEmpty();
+        verify(defaults, never()).defaultEmployeesForUpdate(any());
+        verify(relations).removeById(30L);
+    }
+
+    @Test void ambiguousDefaultEmployeesNeverCreateAutomaticBindings() {
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L, 21L));
+        mutate(Set.of(5L));
+        assertThat(sources.activeUsers()).isEmpty();
+        verify(relations, never()).save(any());
     }
 
     @Test void cleanupAndRefreshNeverRecreateMissingPhysicalRelations() {
         when(relations.list(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of());
         sources.retain(1L, 20L, 10L, ResourceBindingSourceService.SYNC, 5L, 1L);
-        when(defaults.defaultEmployeesForUpdate(5L, 1L)).thenReturn(List.of(20L));
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
         job.setAssociationMode("CLEANUP_ONLY");
         mutate(Set.of(5L));
         job.setAssociationMode("NONE");
@@ -127,11 +152,109 @@ class ResourceSyncReconcileServiceTest {
         verifyNoInteractions(relations);
     }
 
+    @Test void enterpriseMetadataDoesNotPreventBindingTheUniqueAuthorizedDefault() {
+        resource.setComAcctId(2L); employee.setComAcctId(3L);
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
+        when(relations.list(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of());
+        when(relations.save(any())).thenReturn(true);
+        Map<String, Integer> result = mutate(Set.of(5L));
+        assertThat(sources.activeUsers()).containsExactly(5L);
+        assertThat(result).containsEntry("addedSourceCount", 1).containsEntry("addedRelationCount", 1);
+    }
+
+    @Test void missingEnterpriseMetadataDoesNotInvalidateAResourceRevision() {
+        resource.setComAcctId(null); job.setComAcctId(0L);
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
+        mutate(Set.of(5L));
+        assertThat(sources.activeUsers()).containsExactly(5L);
+    }
+
+    @Test void manualToolSourceWithDifferentBookkeepingOwnershipSurvivesAutomaticCleanup() {
+        resource.setResourceBizType("TOOLKIT");
+        sources.retain(2L, 20L, 10L, "MANUAL", null, null);
+        sources.retain(1L, 20L, 10L, ResourceBindingSourceService.SYNC, 5L, 1L);
+        mutate(Set.of());
+        assertThat(sources.rows).filteredOn(source -> "A".equals(source.getStatusCd()))
+            .extracting(ResourceBindingSource::getSourceType).containsExactly("MANUAL");
+        verify(relations, never()).removeById(any(java.io.Serializable.class));
+    }
+
+    @Test void privateEmployeesAndSuperAssistantsRemainIneligible() {
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
+        employee.setOwnerType("personal");
+        mutate(Set.of(5L));
+        assertThat(sources.activeUsers()).isEmpty();
+        employee.setOwnerType("enterprise"); employee.setWorkerAgentType("BY_SUPER");
+        mutate(Set.of(5L));
+        assertThat(sources.activeUsers()).isEmpty();
+        verify(relations, never()).save(any());
+    }
+
     @Test void historicalToolRelationIsProtectedOnFirstTouch() {
         resource.setResourceBizType("TOOLKIT");
         mutate(Set.of());
         assertThat(sources.rows).extracting(ResourceBindingSource::getSourceType).containsExactly("LEGACY");
         verify(relations, never()).removeById(any(java.io.Serializable.class));
+    }
+
+    @Test void fullSkillReconciliationPublishesAssociatesAndRefreshesWithoutEnterpriseMatching() {
+        prepareFullReconciliation();
+        resource.setComAcctId(2L); employee.setComAcctId(3L);
+        when(defaults.defaultEmployeesBatch(List.of(5L))).thenReturn(List.of(new ResourceSyncScopeMapper.UserDefaultRow(5L, 20L)));
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
+        service.reconcile(job);
+        assertThat(job.getStatus()).isEqualTo("COMPLETED");
+        assertThat(sources.activeUsers()).containsExactly(5L);
+        var created = org.mockito.ArgumentCaptor.forClass(SsResourceRelDetail.class);
+        verify(relations).save(created.capture());
+        assertThat(created.getValue().getResourceId()).isEqualTo(20L);
+        assertThat(created.getValue().getRelResourceId()).isEqualTo(10L);
+        assertThat(created.getValue().getRelTypeName()).isEqualTo("DIG_EMPLOYEE_SKILL");
+        var skills = (com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService)
+            ReflectionTestUtils.getField(service, "skills");
+        verify(skills).publishEnterpriseSyncArtifacts(10L);
+        var runtime = (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeRuntimeRefreshService)
+            ReflectionTestUtils.getField(service, "runtime");
+        verify(runtime).refreshForResourceSync(20L);
+    }
+
+    @Test void fullReconciliationSkipsAmbiguousDefaultsBeforeChangingAnyEmployee() {
+        prepareFullReconciliation();
+        when(defaults.defaultEmployeesBatch(List.of(5L))).thenReturn(List.of(
+            new ResourceSyncScopeMapper.UserDefaultRow(5L, 20L), new ResourceSyncScopeMapper.UserDefaultRow(5L, 21L)));
+        service.reconcile(job);
+        assertThat(job.getStatus()).isEqualTo("COMPLETED");
+        assertThat(job.getResultSummary()).contains("AMBIGUOUS_DEFAULT");
+        assertThat(sources.activeUsers()).isEmpty();
+        verify(relations, never()).save(any());
+        verify(defaults, never()).defaultEmployeesForUpdate(any());
+    }
+
+    private void prepareFullReconciliation() {
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+            new org.apache.ibatis.builder.MapperBuilderAssistant(new org.apache.ibatis.session.Configuration(), "sync-test"),
+            ResourceSyncJob.class);
+        var resources = (SsResourceService) ReflectionTestUtils.getField(service, "resources");
+        when(resources.findById(10L)).thenReturn(resource);
+        when(resources.findById(20L)).thenReturn(employee);
+        var sync = mock(EnterpriseResourceSyncService.class);
+        when(sync.expand(any())).thenReturn(Set.of(5L));
+        when(sync.activeUsers(any())).thenReturn(Set.of(5L));
+        ReflectionTestUtils.setField(service, "sync", sync);
+        var transactions = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(transactions.getTransaction(any())).thenAnswer(call -> mock(org.springframework.transaction.TransactionStatus.class));
+        ReflectionTestUtils.setField(service, "transactionManager", transactions);
+        var jobs = mock(com.iwhalecloud.byai.manager.mapper.resource.ResourceSyncJobMapper.class);
+        when(jobs.update(isNull(), any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(1);
+        ReflectionTestUtils.setField(service, "jobs", jobs);
+        ReflectionTestUtils.setField(service, "skills", mock(
+            com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class));
+        ReflectionTestUtils.setField(service, "runtime", mock(
+            com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeRuntimeRefreshService.class));
+        when(relations.list(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of());
+        when(relations.save(any())).thenReturn(true);
+        job.setSyncJobId(100L); job.setRetryCount(0); job.setStatus("RUNNING");
+        job.setAuthScope("{\"userIds\":[\"5\"],\"orgIds\":[],\"postIds\":[]}");
     }
 
     @Test void refreshTargetsArePersistedBeforeMutationsAndStaleRevisionCannotPublishThem() {
@@ -163,6 +286,13 @@ class ResourceSyncReconcileServiceTest {
     static class MemorySources extends ResourceBindingSourceService {
         final List<ResourceBindingSource> rows = new ArrayList<>();
         @Override public List<ResourceBindingSource> sources(Long tenant, Long employee, Long resource) { return rows; }
+        @Override public List<ResourceBindingSource> sourcesForSynchronization(Long employee, Long resource) { return rows; }
+        @Override public List<ResourceBindingSource> automaticSourcesForSynchronization(Long resource) {
+            return rows.stream().filter(row -> SYNC.equals(row.getSourceType()) && "A".equals(row.getStatusCd())).toList();
+        }
+        @Override public void retainForSynchronization(Long tenant, Long employee, Long resource, String type, Long user, Long revision) {
+            retain(tenant, employee, resource, type, user, revision);
+        }
         @Override public void retain(Long tenant, Long employee, Long resource, String type, Long user, Long revision) {
             ResourceBindingSource row = rows.stream().filter(source -> type.equals(source.getSourceType())
                 && Objects.equals(user, source.getSourceUserId())).findFirst().orElse(null);

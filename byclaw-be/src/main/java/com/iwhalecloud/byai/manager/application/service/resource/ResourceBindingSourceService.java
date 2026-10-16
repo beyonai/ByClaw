@@ -33,6 +33,19 @@ public class ResourceBindingSourceService {
             .eq(ResourceBindingSource::getSourceType, SYNC).eq(ResourceBindingSource::getStatusCd, "A"));
     }
 
+    /** Synchronization uses globally unique resource IDs; enterprise metadata is not a selection boundary. */
+    public List<ResourceBindingSource> sourcesForSynchronization(Long employee, Long resource) {
+        return mapper.selectList(new LambdaQueryWrapper<ResourceBindingSource>()
+            .eq(ResourceBindingSource::getDigitalEmployeeId, employee)
+            .eq(ResourceBindingSource::getResourceId, resource));
+    }
+
+    public List<ResourceBindingSource> automaticSourcesForSynchronization(Long resource) {
+        return mapper.selectList(new LambdaQueryWrapper<ResourceBindingSource>()
+            .eq(ResourceBindingSource::getResourceId, resource)
+            .eq(ResourceBindingSource::getSourceType, SYNC).eq(ResourceBindingSource::getStatusCd, "A"));
+    }
+
     public boolean hasAutomatic(Long tenant, Long employee, Long resource) {
         return sources(tenant, employee, resource).stream()
             .anyMatch(source -> SYNC.equals(source.getSourceType()) && "A".equals(source.getStatusCd()));
@@ -43,8 +56,17 @@ public class ResourceBindingSourceService {
     }
 
     public void retain(Long tenant, Long employee, Long resource, String type, Long user, Long revision) {
+        retain(tenant, employee, resource, type, user, revision, sources(tenant, employee, resource));
+    }
+
+    public void retainForSynchronization(Long tenant, Long employee, Long resource, String type, Long user, Long revision) {
+        retain(tenant, employee, resource, type, user, revision, sourcesForSynchronization(employee, resource));
+    }
+
+    private void retain(Long tenant, Long employee, Long resource, String type, Long user, Long revision,
+                        List<ResourceBindingSource> existing) {
         String key = SYNC.equals(type) ? "USER:" + user : type;
-        ResourceBindingSource source = sources(tenant, employee, resource).stream()
+        ResourceBindingSource source = existing.stream()
             .filter(row -> type.equals(row.getSourceType()) && key.equals(row.getSourceKey())).findFirst().orElse(null);
         boolean insert = source == null;
         if (insert) {

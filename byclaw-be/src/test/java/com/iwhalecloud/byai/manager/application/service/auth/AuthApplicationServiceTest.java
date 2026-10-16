@@ -88,6 +88,25 @@ import org.mockito.InOrder;
 class AuthApplicationServiceTest {
 
     @Test
+    void synchronizationUseCheckKeepsGrantRequirementsAndRestoresOrdinaryEnterpriseIsolation() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = enterpriseResource(607L, 1L);
+        resource.setComAcctId(2L); resource.setUseAuthControlled(true);
+        var granted = newExplicitUserPermissionService(List.of(useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A")));
+        var ungranted = newExplicitUserPermissionService(List.of());
+        assertThat(granted.hasResourceUsePermission(resource, 3L)).isFalse();
+        assertThat(com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext
+            .checkUsePermission(resource, () -> granted.hasResourceUsePermission(resource, 3L))).isTrue();
+        assertThat(com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext
+            .checkUsePermission(resource, () -> ungranted.hasResourceUsePermission(resource, 3L))).isFalse();
+        resource.setResourceStatus(3);
+        assertThat(com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext
+            .checkUsePermission(resource, () -> granted.hasResourceUsePermission(resource, 3L))).isFalse();
+        resource.setResourceStatus(2);
+        assertThat(granted.hasResourceUsePermission(resource, 3L)).isFalse();
+    }
+
+    @Test
     void pendingEnterpriseSkillCannotBeManagedToBypassPublicationReview() {
         var service = new AuthApplicationService();
         SsResource skill = new SsResource();

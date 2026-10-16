@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,31 @@ class TenantContextInterceptorTest {
     @AfterEach
     void clearContext() {
         TenantRequestContextHolder.clear();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/tool/addToolFromThird", "/tool/queryResourceSyncJob"})
+    void synchronizationRoutesIgnoreTenantSelectors(String path) {
+        for (int headers = 1; headers <= 3; headers++) {
+            var request = new MockHttpServletRequest("POST", "/byaiService" + path);
+            request.setContextPath("/byaiService");
+            if ((headers & 1) != 0) request.addHeader("X-Enterprise-Id", "not-a-tenant-id");
+            if ((headers & 2) != 0) request.addHeader("X-Tenant-Context", "unused-context");
+            assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+            assertThat(TenantRequestContextHolder.get()).isNull();
+        }
+        verifyNoInteractions(service);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/tool/addToolFromThird/other", "/tool/queryResourceDetail"})
+    void synchronizationExceptionDoesNotExtendToOtherResourceRoutes(String path) {
+        var request = request("/byaiService" + path, "123");
+        request.setMethod("POST");
+        request.addHeader("X-Tenant-Context", "context-token");
+        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(ResponseStatusException.class);
+        verifyNoInteractions(service);
     }
 
     @ParameterizedTest
