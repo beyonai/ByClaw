@@ -12,6 +12,7 @@ import { ByClawSessionWorkspaceRegistry } from '../lib/session-workspace.js'
 
 const workspace = await mkdtemp(join(tmpdir(), 'byclaw-final-answer-runtime-'))
 const listeners = new Map()
+const requestErrorListeners = new Map()
 const output = []
 const warnings = []
 const root = Session.create(SessionId('final-root'))
@@ -35,10 +36,10 @@ function assistant(target, turn, step, content) {
   })
 }
 const agent = {
-  id: session.id, ctx: { get() {} }, session, status: 'idle',
+  id: session.id, ctx: { get() {}, on(name, listener) { requestErrorListeners.set(name, listener); return () => requestErrorListeners.delete(name) } }, session, status: 'idle',
   followup() {
     this.status = 'running'
-    idle = new Promise(resolve => { queueMicrotask(() => {
+    idle = new Promise(resolve => { queueMicrotask(async () => {
       const turn = ++turnNumber
       commit(session, 'turn/start', { turn })
       commit(session, 'step/start', { turn, step: 0 })
@@ -50,6 +51,7 @@ const agent = {
         assistant(child, turn, 0, [{ type: 'text', text: '子 Agent 正文' }])
         commit(child, 'turn/end', { turn, reason: { kind: 'completed' } })
       } else if (mode === 'error') {
+        await requestErrorListeners.get('agent/request-error')({ agent: this, failure: { code: 'AUTH', message: 'model failed mid-turn' } }, async () => undefined)
         assistant(session, turn, 0, [{ type: 'text', text: '报错前部分正文' }])
       }
       commit(session, 'turn/end', { turn, reason: mode === 'error'
@@ -78,6 +80,7 @@ const runtime = new ByClawDshSessionRuntime({
   emitter: { async emitChunk(...args) { output.push(args) } },
 })
 // Agent creation is the model-facing operation; the command lifecycle and output routing stay real.
+runtime.installModelFailureCapture(agent)
 runtime.handleFor = async () => ({ handle: { agent }, selection: { current: { provider: 'test', model: 'test' } }, mode: 'reuse' })
 function command(messageId) {
   return new AskAgentCommand(new MessageHeader(messageId, 'final-root', 'final-trace', { userCode: 'user' }), '检查问题')
@@ -95,7 +98,8 @@ try {
   assert.equal(empty.answer, '最终正文', 'the historical-text fallback remains available to legacy consumers')
   mode = 'error'
   await assert.rejects(runtime.ask(command('failed-answer'), context), /model failed mid-turn/)
-  assert.ok(output.some(([, , event, options]) => options.status === '_ERROR_' && event.content))
+  assert.ok(output.some(([, , event, options]) => options.status === '_ERROR_' && event.content
+    && event.metadata.error_domain === 'MODEL' && event.metadata.error_code === 'AUTH'))
   assert.deepEqual(warnings, [])
 } finally {
   await runtime.close()

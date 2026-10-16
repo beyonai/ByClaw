@@ -206,9 +206,7 @@ const SharedModelFormModal: React.FC<Props> = ({
             apiEndpoint: detail.apiEndpoint || imageDefaults.apiEndpoint || '',
             apiToken: detail.apiToken || '',
             extendParam:
-              typeof detail.extendParam === 'object'
-                ? JSON.stringify(detail.extendParam, null, 2)
-                : detail.extendParam,
+              typeof detail.extendParam === 'object' ? JSON.stringify(detail.extendParam, null, 2) : detail.extendParam,
             headers: Array.isArray(detail.headers) && detail.headers.length ? detail.headers : [{ key: '', value: '' }],
             connectTimeoutSec: detail.connectTimeoutSec ?? 32,
             readTimeoutSec: detail.readTimeoutSec ?? 60,

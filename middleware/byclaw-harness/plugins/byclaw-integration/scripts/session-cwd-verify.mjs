@@ -87,7 +87,10 @@ try {
   assert.equal(resumed.header.cwd, cwd, 'the actual immutable Session must be restored with the new execution cwd')
   assert.equal(resumed.id, 'conversation')
   assert.equal(resumed.header.createdAt, rootHeader.createdAt)
-  assert.deepEqual(resumed.snapshotEvents(), seed.snapshotEvents(), 'history is preserved exactly')
+  const restored = resumed.snapshotEvents()
+  assert.deepEqual(restored.slice(0, seed.snapshotEvents().length), seed.snapshotEvents(), 'all historical events are preserved exactly')
+  assert.deepEqual(restored.slice(seed.snapshotEvents().length).map(event => event.type), ['session/end-seed'],
+    'rc.2 appends only its restore boundary, without inventing business history')
   assert.equal(records.get('conversation').header, rootHeader, 'the physical legacy header is not rewritten')
   await assert.rejects(backend.open('conversation', 'write'), /already owned/)
   await writeFile(join(resumed.header.cwd, 'output.txt'), 'process file')
@@ -97,7 +100,8 @@ try {
   const nextEvent = resumed.append('user/message', createUserMessage({
     content: [{ type: 'text', text: 'continue the same conversation' }], source: { kind: 'user' },
   }), { surfaceOp: 'append' })
-  await handle.append([nextEvent])
+  assert.equal(nextEvent.type, 'user/message')
+  await handle.append(resumed.snapshotEvents().slice(result.events.length))
   assert.deepEqual(records.get('conversation').events, resumed.snapshotEvents(), 'new events append to the original log')
   await handle.flush()
   await handle.close()
