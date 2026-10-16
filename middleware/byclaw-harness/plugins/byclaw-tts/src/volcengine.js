@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { audioAsset, formatFor, MAX_AUDIO_BYTES, post, speechError, speedFor, voiceFor } from './common.js';
+import { audioAsset, availableVoices, formatFor, MAX_AUDIO_BYTES, post, speechError, speedFor, voiceFor, voiceNotAvailable } from './common.js';
 
 function decodeAudio(value) {
   if (typeof value !== 'string' || !value.length || value.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) throw speechError('Malformed Volcengine base64 audio');
@@ -8,7 +8,47 @@ function decodeAudio(value) {
 
 // HTTP chunks are transport fragments, not JSON frame boundaries. A string-aware
 // object scanner accepts newline-delimited and directly concatenated JSON objects.
-async function readVolcStream(response, context, format, sampleRate) {
+function wordTimingAsset(text, words) {
+  return {
+    artifactType: 'word-timing',
+    mimeType: 'application/json',
+    bytes: Buffer.from(`${JSON.stringify({
+      schemaVersion: 1,
+      unit: 'second',
+      granularity: 'provider-word',
+      text,
+      words,
+    }, null, 2)}\n`),
+  };
+}
+
+function appendWordTimings(event, words) {
+  if (event.sentence === undefined) return;
+  if (!event.sentence || typeof event.sentence !== 'object' || !Array.isArray(event.sentence.words)) throw speechError('Malformed Volcengine word timings');
+  for (const value of event.sentence.words) {
+    if (!value || typeof value !== 'object' || typeof value.word !== 'string' || !value.word
+      || !Number.isFinite(value.startTime) || value.startTime < 0
+      || !Number.isFinite(value.endTime) || value.endTime < value.startTime
+      || (value.confidence !== undefined && (!Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1))) {
+      throw speechError('Malformed Volcengine word timings');
+    }
+    if (words.length >= 100000) throw speechError('Oversized Volcengine word timings');
+    words.push({
+      word: value.word,
+      startTime: value.startTime,
+      endTime: value.endTime,
+      ...(value.confidence === undefined ? {} : { confidence: value.confidence }),
+    });
+  }
+}
+
+function voiceFailure(event) {
+  const message = typeof event.message === 'string' ? event.message : '';
+  return event.code === 45001115 || event.code === 45002000
+    || ([45000000, 45000001].includes(event.code) && /speaker|resource\s*id.*mismatch/i.test(message));
+}
+
+async function readVolcStream(response, context, format, sampleRate, text, speaker, voiceChoices) {
   if (!response.body) throw speechError('Empty Volcengine speech stream');
   if (Number(response.headers.get('content-length')) > MAX_AUDIO_BYTES * 2) {
     await response.body.cancel();
@@ -20,6 +60,7 @@ async function readVolcStream(response, context, format, sampleRate) {
   const sse = /text\/event-stream/i.test(response.headers.get('content-type') || '');
   let buffer = '', frame = '', depth = 0, inString = false, escaped = false;
   let total = 0, wireBytes = 0, terminal = false;
+  const words = [];
   const consume = (raw) => {
     let event;
     try { event = JSON.parse(raw); } catch { throw speechError('Malformed Volcengine speech frame'); }
@@ -27,13 +68,18 @@ async function readVolcStream(response, context, format, sampleRate) {
     if (event.code === 20000000) {
       if (event.data) throw speechError('Unexpected audio in terminal speech frame');
       terminal = true;
+    } else if (voiceFailure(event)) {
+      throw voiceNotAvailable(speaker, voiceChoices);
     } else if (event.code !== 0) {
       throw speechError('Volcengine speech generation failed');
-    } else if (event.data) {
-      const bytes = decodeAudio(event.data);
-      total += bytes.length;
-      if (total > MAX_AUDIO_BYTES) throw speechError('Oversized speech audio');
-      chunks.push(bytes);
+    } else {
+      appendWordTimings(event, words);
+      if (event.data) {
+        const bytes = decodeAudio(event.data);
+        total += bytes.length;
+        if (total > MAX_AUDIO_BYTES) throw speechError('Oversized speech audio');
+        chunks.push(bytes);
+      }
     }
   };
   const parseText = (text) => {
@@ -78,7 +124,10 @@ async function readVolcStream(response, context, format, sampleRate) {
     }
     parseText(decoder.decode());
     if (frame || buffer.trim() || !terminal) throw speechError('Truncated Volcengine speech stream: terminal success missing');
-    return audioAsset(Buffer.concat(chunks, total), format, { sampleRate });
+    return [
+      audioAsset(Buffer.concat(chunks, total), format, { sampleRate }),
+      wordTimingAsset(text, words),
+    ];
   } finally {
     context.signal?.removeEventListener('abort', abort);
     await reader.cancel().catch(() => {});
@@ -112,11 +161,11 @@ export async function volcengineSpeech(model, args, context) {
   }
   const sampleRate = options.sampleRate ?? 24000;
   if (![8000, 16000, 22050, 24000, 32000, 44100, 48000].includes(sampleRate)) throw speechError('Unsupported Volcengine speech sample rate');
-  const req = { text: args.text, speaker, audio_params: { format, sample_rate: sampleRate } };
+  const req = { text: args.text, speaker, audio_params: { format, sample_rate: sampleRate, enable_subtitle: true } };
   if (speed !== undefined) req.audio_params.speech_rate = Math.round((speed - 1) * 100);
   if (options.modelVersion) req.model = options.modelVersion;
   if (options.additions) req.additions = typeof options.additions === 'string' ? options.additions : JSON.stringify(options.additions);
   const suffix = model.endpoint && new URL(model.endpoint).pathname.replace(/\/$/, '').endsWith('/api/v3/tts/unidirectional/sse') ? '/api/v3/tts/unidirectional/sse' : '/api/v3/tts/unidirectional';
-  const response = await post({ ...model, headers }, 'https://openspeech.bytedance.com', suffix, { req_params: req }, context, auth);
-  return [await readVolcStream(response, context, format, sampleRate)];
+  const response = await post({ ...model, headers }, 'https://openspeech.bytedance.com', suffix, { req_params: req }, context, auth, { acceptErrorResponse: true });
+  return readVolcStream(response, context, format, sampleRate, args.text, speaker, availableVoices(options).values);
 }

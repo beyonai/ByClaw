@@ -51,6 +51,15 @@ test('configured full endpoint is not appended twice', async () => {
   await generateSpeech(model('OPENAI', { endpoint: 'https://gateway.example/v1/audio/speech' }), { text: 'Hi', format: 'wav' }, t);
   assert.equal(t.calls[0].url, 'https://gateway.example/v1/audio/speech');
 });
+for (const emptyVoice of [null, '', '   ']) test(`empty voice ${JSON.stringify(emptyVoice)} uses the configured default voice`, async () => {
+  const t = capture(() => binary(mp3));
+  await generateSpeech(model('OPENAI', {
+    model: 'gpt-4o-mini-tts',
+    protocol: 'OpenAI',
+    options: { defaultVoice: 'alloy', voices: ['alloy'] },
+  }), { text: 'Hi', voice: emptyVoice, format: 'mp3' }, t);
+  assert.equal(t.calls[0].body.voice, 'alloy');
+});
 test('Qwen uses native multimodal speech contract and strips credentials on download', async () => {
   const calls = [];
   const result = await generateSpeech(model('QWEN', { model: 'qwen3-tts-flash', protocol: 'Qwen', options: { voice: 'Cherry', languageType: 'Chinese' } }), { text: '你好' }, {
@@ -68,16 +77,29 @@ test('MiniMax uses native hex payload and requires completed status', async () =
   assert.deepEqual(t.calls[0].body, { model: 'speech-2.8-hd', text: 'Hi', stream: false, output_format: 'hex', voice_setting: { voice_id: 'test-voice', speed: 1.2 }, audio_setting: { format: 'mp3' } });
   assert.deepEqual(result[0].bytes, mp3);
 });
-for (const sse of [false, true]) test(`Volcengine ${sse ? 'SSE' : 'chunked JSON'} handles fragmented frames and exact Seed resource`, async () => {
-  const t = capture(() => volcResponse([chunk, done], sse));
+for (const sse of [false, true]) test(`Volcengine ${sse ? 'SSE' : 'chunked JSON'} handles fragmented frames, timestamps, and exact Seed resource`, async () => {
+  const timestampedChunk = { ...chunk, sentence: { text: '你好', words: [
+    { word: '你', startTime: 0.1, endTime: 0.3, confidence: 0.9 },
+    { word: '好', startTime: 0.3, endTime: 0.6, confidence: 0.8 },
+  ] } };
+  const t = capture(() => volcResponse([timestampedChunk, done], sse));
   const result = await generateSpeech(volc({ protocol: 'OpenAI' }), { text: '你好', speed: 1.2 }, t);
   assert.equal(t.calls[0].url, 'https://openspeech.bytedance.com/api/v3/tts/unidirectional');
   assert.equal(t.calls[0].headers.get('x-api-resource-id'), 'seed-tts-2.0');
   assert.equal(t.calls[0].headers.get('x-api-key'), 'test-key');
   assert.equal(t.calls[0].headers.get('authorization'), null);
   assert.match(t.calls[0].headers.get('x-api-request-id'), /^[a-f0-9-]{36}$/);
-  assert.deepEqual(t.calls[0].body.req_params, { text: '你好', speaker: 'zh_female_vv_uranus_bigtts', audio_params: { format: 'mp3', sample_rate: 24000, speech_rate: 20 } });
+  assert.deepEqual(t.calls[0].body.req_params, { text: '你好', speaker: 'zh_female_vv_uranus_bigtts', audio_params: { format: 'mp3', sample_rate: 24000, speech_rate: 20, enable_subtitle: true } });
   assert.deepEqual(result[0].bytes, mp3);
+  assert.equal(result[1].mimeType, 'application/json');
+  assert.equal(result[1].artifactType, 'word-timing');
+  assert.deepEqual(JSON.parse(Buffer.from(result[1].bytes).toString('utf8')), {
+    schemaVersion: 1,
+    unit: 'second',
+    granularity: 'provider-word',
+    text: '你好',
+    words: timestampedChunk.sentence.words,
+  });
 });
 test('Volcengine accepts legacy configured auth headers and clone version', async () => {
   const t = capture(() => volcResponse([chunk, done]));
@@ -94,6 +116,41 @@ test('Volcengine missing voice rejects before HTTP', async () => {
   const t = capture(() => volcResponse([chunk, done]));
   await assert.rejects(generateSpeech(volc({ options: {} }), { text: 'Hi' }, t), /voice|speaker/);
   assert.equal(t.calls.length, 0);
+});
+test('configured voice allowlist rejects an unavailable voice and returns choices before HTTP', async () => {
+  const t = capture(() => volcResponse([chunk, done]));
+  await assert.rejects(
+    generateSpeech(volc({ options: {
+      speaker: 'zh_female_vv_uranus_bigtts',
+      voices: ['zh_female_vv_uranus_bigtts', { id: 'zh_male_beijingxiaoye_moon_bigtts', name: '北京小爷' }],
+    } }), { text: '你好', voice: 'not-a-voice' }, t),
+    error => error.code === 'TTS_VOICE_NOT_AVAILABLE'
+      && /not-a-voice/u.test(error.message)
+      && /zh_female_vv_uranus_bigtts/u.test(error.message)
+      && /zh_male_beijingxiaoye_moon_bigtts/u.test(error.message),
+  );
+  assert.equal(t.calls.length, 0);
+});
+test('Volcengine speaker failure returns configured voice choices', async () => {
+  const t = capture(() => volcResponse([{ code: 45000001, message: '[Invalid argument] speaker not found' }]));
+  await assert.rejects(
+    generateSpeech(volc(), { text: '你好', voice: 'not-a-voice' }, t),
+    error => error.code === 'TTS_VOICE_NOT_AVAILABLE'
+      && /not-a-voice/u.test(error.message)
+      && /zh_female_vv_uranus_bigtts/u.test(error.message),
+  );
+});
+test('Volcengine HTTP error body can identify an unavailable voice without exposing provider text', async () => {
+  const t = capture(() => new Response(JSON.stringify({ code: 45001115, message: 'speaker not found: secret-provider-detail' }), {
+    status: 400,
+    headers: { 'content-type': 'application/json' },
+  }));
+  await assert.rejects(
+    generateSpeech(volc(), { text: '你好', voice: 'not-a-voice' }, t),
+    error => error.code === 'TTS_VOICE_NOT_AVAILABLE'
+      && /zh_female_vv_uranus_bigtts/u.test(error.message)
+      && !/secret-provider-detail/u.test(error.message),
+  );
 });
 for (const [provider, args, override] of [
   ['OPENAI', { text: '' }, {}], ['OPENAI', { text: 'Hi', apiKey: 'injected' }, {}],

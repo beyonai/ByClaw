@@ -14,7 +14,7 @@ export function endpoint(base, suffix) {
   return url.toString()
 }
 
-export async function request(url, init = {}, context = {}) {
+export async function request(url, init = {}, context = {}, options = {}) {
   const parsed = new URL(url)
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('MEDIA_INVALID_ENDPOINT')
   context.signal?.throwIfAborted()
@@ -25,7 +25,7 @@ export async function request(url, init = {}, context = {}) {
     context.signal?.throwIfAborted()
     throw new Error('MEDIA_TRANSPORT_FAILED')
   }
-  if (!response.ok) {
+  if (!response.ok && options.acceptErrorResponse !== true) {
     await response.body?.cancel().catch(() => {})
     throw new Error(`MEDIA_HTTP_${response.status}`)
   }

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, realpath, writeFile, rm } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
-import { MAX_MEDIA_BYTES } from './http.js'
+
+const MAX_ARTIFACT_BYTES = 50 * 1024 * 1024
 
 function mediaExtension(bytes, mimeType, kind) {
   const b = Buffer.from(bytes)
@@ -20,6 +21,23 @@ function mediaExtension(bytes, mimeType, kind) {
   throw new Error(`MEDIA_INVALID_ARTIFACT: unsupported ${kind} bytes (${String(mimeType).slice(0, 40)})`)
 }
 
+function validateWordTiming(bytes) {
+  let value
+  try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) } catch { throw new Error('MEDIA_INVALID_WORD_TIMING') }
+  if (!value || typeof value !== 'object' || value.schemaVersion !== 1 || value.unit !== 'second'
+    || value.granularity !== 'provider-word' || typeof value.text !== 'string' || !Array.isArray(value.words)) {
+    throw new Error('MEDIA_INVALID_WORD_TIMING')
+  }
+  for (const item of value.words) {
+    if (!item || typeof item !== 'object' || typeof item.word !== 'string' || !item.word
+      || !Number.isFinite(item.startTime) || item.startTime < 0
+      || !Number.isFinite(item.endTime) || item.endTime < item.startTime
+      || (item.confidence !== undefined && (!Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1))) {
+      throw new Error('MEDIA_INVALID_WORD_TIMING')
+    }
+  }
+}
+
 export async function persistAssets(sessionRoot, kind, assets) {
   if (typeof sessionRoot !== 'string' || !isAbsolute(sessionRoot)) throw new Error('MEDIA_SESSION_ROOT_REQUIRED: missing authoritative session_root')
   if (!['image', 'tts'].includes(kind)) throw new Error('MEDIA_INVALID_KIND')
@@ -31,8 +49,12 @@ export async function persistAssets(sessionRoot, kind, assets) {
   const results = []
   try {
     for (const asset of assets) {
-      if (!(asset.bytes instanceof Uint8Array) || !asset.bytes.length || asset.bytes.length > MAX_MEDIA_BYTES) throw new Error('MEDIA_INVALID_ARTIFACT_SIZE')
-      const [extension, mimeType] = mediaExtension(asset.bytes, asset.mimeType, kind)
+      if (!(asset.bytes instanceof Uint8Array) || !asset.bytes.length || asset.bytes.length > MAX_ARTIFACT_BYTES) throw new Error('MEDIA_INVALID_ARTIFACT_SIZE')
+      const wordTiming = kind === 'tts' && asset.artifactType === 'word-timing'
+      if (asset.artifactType !== undefined && !wordTiming) throw new Error('MEDIA_INVALID_ARTIFACT_TYPE')
+      if (wordTiming && asset.mimeType !== 'application/json') throw new Error('MEDIA_INVALID_WORD_TIMING')
+      if (wordTiming) validateWordTiming(asset.bytes)
+      const [extension, mimeType] = wordTiming ? ['json', 'application/json'] : mediaExtension(asset.bytes, asset.mimeType, kind)
       const filename = `${randomUUID()}.${extension}`
       const file = join(directory, filename)
       if (relative(root, file).startsWith('..' + sep)) throw new Error('MEDIA_ARTIFACT_DIRECTORY')

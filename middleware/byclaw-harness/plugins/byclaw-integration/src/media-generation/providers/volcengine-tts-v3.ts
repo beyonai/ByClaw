@@ -12,7 +12,15 @@ export interface SpeechGenerationRequest {
 export interface GeneratedAudio {
   bytes: Buffer
   mimeType: string
+  wordTimings: SpeechWordTiming[]
   providerRequestId?: string
+}
+
+export interface SpeechWordTiming {
+  word: string
+  startTime: number
+  endTime: number
+  confidence?: number
 }
 
 function textOption(options: Readonly<Record<string, unknown>>, key: string, fallback: string): string {
@@ -111,6 +119,7 @@ export async function generateVolcengineTtsV3(options: {
           format,
           sample_rate: integerOption(options.model.options, 'sampleRate', 24_000),
           speech_rate: speechRate(options.request.speed ?? 1),
+          enable_subtitle: true,
         },
       },
     }),
@@ -123,15 +132,35 @@ export async function generateVolcengineTtsV3(options: {
     throw new Error(`${code}: HTTP ${response.status}; requestId=${providerRequestId}`)
   }
   const chunks: Buffer[] = []
+  const wordTimings: SpeechWordTiming[] = []
   const errors: string[] = []
   for (const entry of concatenatedJson(raw)) {
     if (typeof entry['data'] === 'string' && entry['data'] !== '') {
       chunks.push(Buffer.from(entry['data'], 'base64'))
+    }
+    const sentence = entry['sentence']
+    if (typeof sentence === 'object' && sentence !== null && !Array.isArray(sentence)) {
+      const words = (sentence as Record<string, unknown>)['words']
+      if (Array.isArray(words)) {
+        for (const value of words) {
+          if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
+          const item = value as Record<string, unknown>
+          if (typeof item['word'] !== 'string'
+            || !Number.isFinite(item['startTime'])
+            || !Number.isFinite(item['endTime'])) continue
+          wordTimings.push({
+            word: item['word'],
+            startTime: item['startTime'] as number,
+            endTime: item['endTime'] as number,
+            ...(Number.isFinite(item['confidence']) ? { confidence: item['confidence'] as number } : {}),
+          })
+        }
+      }
     }
     const code = Number(entry['code'])
     if (Number.isFinite(code) && code !== 0 && code !== 20_000_000) errors.push(String(code))
   }
   if (errors.length > 0) throw new Error(`MEDIA_PROVIDER_ERROR: code=${errors.join(',')}; requestId=${providerRequestId}`)
   if (chunks.length === 0) throw new Error(`MEDIA_PROVIDER_PROTOCOL_ERROR: no audio; requestId=${providerRequestId}`)
-  return { bytes: Buffer.concat(chunks), mimeType: mimeType(format), providerRequestId }
+  return { bytes: Buffer.concat(chunks), mimeType: mimeType(format), wordTimings, providerRequestId }
 }

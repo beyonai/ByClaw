@@ -1,0 +1,11 @@
+# Report whether this sandbox is busy or releasable to the shared Redis Stream
+# read by the platform's release consumer. A host row, so it observes every
+# Agent of every session, subagents included. Redis uses the same REDIS_* env
+# as the ByClaw integration. Disable with `disabled: true` on this row.
+- insert:
+    - id: byclaw-idle-reporter
+      name: '@byclaw/dsh-idle-reporter'
+      inject: [agents]
+      config:
+        streamKey: !!js process.env.BYCLAW_DSH_ACTIVITY_STREAM || 'byclaw:dsh:sandbox:activity'
+        idleTimeoutMs: !!js "process.env.BYCLAW_DSH_IDLE_TIMEOUT_MS ? Number(process.env.BYCLAW_DSH_IDLE_TIMEOUT_MS) : 1800000"
