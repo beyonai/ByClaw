@@ -1,4 +1,4 @@
-import { resolvePreviewType, TEXT_PREVIEW_TYPES } from '@/components/Preview/formats';
+import { getPreviewExtension, resolvePreviewType, TEXT_PREVIEW_TYPES } from '@/components/Preview/formats';
 import { isPreviewable } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import { getFileIconType } from '@/constants/icon';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
@@ -34,6 +34,8 @@ const TEXT_FILE_NAMES = new Set([
 ]);
 
 const BINARY_EXTENSIONS = new Set([
+  'ppm',
+  'tga',
   '7z',
   // 尚无解码器的常见二进制文件必须阻止文本兜底，避免预览乱码。
   'ai',
@@ -49,6 +51,18 @@ const BINARY_EXTENSIONS = new Set([
   'ods',
   'rtf',
   'odt',
+  // 笔记本走专用结构化预览；即使文件名只有 .ipynb，也不能退回 2 MiB 纯文本路径。
+  'ipynb',
+  // 邮件与 Office 变体由专用预览器解析，包含隐藏文件名场景，不能按源码兜底。
+  'eml',
+  'msg',
+  'docm',
+  'dotx',
+  'xlsm',
+  'xltx',
+  'pptm',
+  'ppsx',
+  'potx',
   'pages',
   'parquet',
   'psd',
@@ -148,10 +162,10 @@ export function isTextFallbackFile(name: string) {
   const fileName = getLowerFileName(name);
   if (TEXT_FILE_NAMES.has(fileName)) return true;
   if (fileName.startsWith('.')) {
-    return !BINARY_EXTENSIONS.has(fileName.split('.').pop() || '');
+    return !BINARY_EXTENSIONS.has(getPreviewExtension(fileName));
   }
   if (!fileName.includes('.')) return !BINARY_EXTENSIONS.has(fileName);
-  return !BINARY_EXTENSIONS.has(fileName.split('.').pop() || '') && !isPreviewable(fileName);
+  return !BINARY_EXTENSIONS.has(getPreviewExtension(fileName)) && !isPreviewable(fileName);
 }
 
 export function isTextPreviewFile(name: string) {

@@ -6,11 +6,14 @@ import { BinaryPreviewError, MAX_BINARY_PREVIEW_BYTES, type ArchiveEntry } from 
 import { createPreviewWorker } from './createPreviewWorker';
 import { HTML_PREVIEW_TYPES, getPreviewMimeType, resolvePreviewType } from './formats';
 import type { PreviewWorkerClient } from './previewWorkerClient';
+import type { NativeArchiveType } from './nativeArchiveDecoder';
+import type { CompressedArchiveType } from './compressedArchiveDecoder';
 import styles from './BinaryPreview.module.less';
 
 const errorMessage = (error: unknown) => {
   if (error instanceof BinaryPreviewError && error.code === 'limit') return 'fileRender.archiveLimit';
   if (error instanceof BinaryPreviewError && error.code === 'timeout') return 'fileRender.binaryTimeout';
+  if (error instanceof BinaryPreviewError && error.code === 'unsupported') return 'fileRender.archiveUnsupportedFile';
   return 'fileRender.archiveFailed';
 };
 
@@ -49,9 +52,13 @@ function ArchiveHtml({ file, name }: { file: Blob; name: string }) {
 
 export default function Archive({
   data,
+  type = 'zip',
+  fileName,
   renderFile,
 }: {
   data?: string | Blob;
+  type?: 'zip' | NativeArchiveType | CompressedArchiveType;
+  fileName?: string;
   renderFile: (file: Blob, name: string) => ReactNode;
 }) {
   const intl = useIntl();
@@ -77,7 +84,11 @@ export default function Archive({
       if (revision.current !== version) return;
       const worker = createPreviewWorker();
       client.current = worker;
-      const files = await worker.request('openZip', { buffer }, [buffer]);
+      let files: ArchiveEntry[];
+      if (type === 'zip') files = await worker.request('openZip', { buffer }, [buffer]);
+      else if (type === 'gz' || type === 'tgz')
+        files = await worker.request('openCompressedArchive', { buffer, type, fileName }, [buffer]);
+      else files = await worker.request('openNativeArchive', { buffer, type }, [buffer]);
       if (revision.current === version) setEntries(files);
     })().catch((error) => {
       if (revision.current === version) {
@@ -90,7 +101,7 @@ export default function Archive({
       client.current?.dispose();
       client.current = undefined;
     };
-  }, [data]);
+  }, [data, type, fileName]);
 
   const openFile = async (entry: ArchiveEntry) => {
     if (!client.current || !entry.previewable || opening) return;

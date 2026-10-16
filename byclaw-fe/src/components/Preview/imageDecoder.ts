@@ -25,6 +25,26 @@ export async function openImageDocument(buffer: ArrayBuffer, type: string): Prom
   if (!buffer.byteLength) throw new BinaryPreviewError('invalid');
   if (buffer.byteLength > MAX_BINARY_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
 
+  if (type === 'jp2') {
+    const { openJp2Document } = await import('./jp2Decoder');
+    return openJp2Document(buffer);
+  }
+  if (type === 'ppm' || type === 'tga') {
+    const { decodePpm, decodeTga } = await import('./rasterDecoder');
+    let disposed = false;
+    return {
+      count: 1,
+      async render(page) {
+        if (disposed) throw new BinaryPreviewError('closed');
+        checkPage(page, 1);
+        return type === 'ppm' ? decodePpm(buffer) : decodeTga(buffer);
+      },
+      dispose() {
+        disposed = true;
+      },
+    };
+  }
+
   if (type === 'jxl') {
     const { openJxlDocument } = await import('./jxlDecoder');
     return openJxlDocument(buffer);

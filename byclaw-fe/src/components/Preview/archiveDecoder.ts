@@ -7,23 +7,35 @@ import {
   MAX_BINARY_PREVIEW_BYTES,
   type ArchiveEntry,
 } from './binaryPreview';
-import { HTML_PREVIEW_TYPES, TEXT_PREVIEW_TYPES, isPreviewableName, resolvePreviewType } from './formats';
+import {
+  ARCHIVE_PREVIEW_TYPES,
+  HTML_PREVIEW_TYPES,
+  TEXT_PREVIEW_TYPES,
+  isPreviewableName,
+  resolvePreviewType,
+} from './formats';
 
-const isSafePath = (name: string) =>
+export const isSafeArchivePath = (name: string) =>
   !!name &&
   !/[\x00-\x1f\\]/.test(name) &&
   !name.startsWith('/') &&
   !/^[a-z]:/i.test(name) &&
   !name.split('/').some((part) => part === '..' || part === '.');
 
+// 所有压缩格式共享嵌套限制，避免新增 RAR/7z 后从 ZIP 子文件入口递归解压。
+export const canPreviewArchiveName = (name: string) =>
+  isPreviewableName(name) && !ARCHIVE_PREVIEW_TYPES.includes(resolvePreviewType(undefined, name));
+
+export function archiveEntryLimit(name: string) {
+  const type = resolvePreviewType(undefined, name);
+  return [...TEXT_PREVIEW_TYPES, ...HTML_PREVIEW_TYPES, 'md', 'svg'].includes(type)
+    ? MAX_ARCHIVE_TEXT_BYTES
+    : MAX_BINARY_PREVIEW_BYTES;
+}
+
 export function canPreviewArchiveEntry(entry: JSZip.JSZipObject) {
   const permissions = Number(entry.unixPermissions || 0);
-  return (
-    !entry.dir &&
-    (permissions & 0xf000) !== 0xa000 &&
-    isPreviewableName(entry.name) &&
-    resolvePreviewType(undefined, entry.name) !== 'zip'
-  );
+  return !entry.dir && (permissions & 0xf000) !== 0xa000 && canPreviewArchiveName(entry.name);
 }
 
 /** 旧 Windows ZIP 未设置 UTF-8 标记时，用 GB18030 保留中文文件名。 */
@@ -43,7 +55,9 @@ export async function openArchive(buffer: ArrayBuffer) {
   const zip = await JSZip.loadAsync(buffer, { decodeFileName });
   const files = Object.values(zip.files);
   if (files.length > MAX_ARCHIVE_ENTRIES) throw new BinaryPreviewError('limit');
-  if (files.some((entry) => !isSafePath(entry.name) || !isSafePath(entry.unsafeOriginalName || entry.name))) {
+  if (
+    files.some((entry) => !isSafeArchivePath(entry.name) || !isSafeArchivePath(entry.unsafeOriginalName || entry.name))
+  ) {
     throw new BinaryPreviewError('invalid');
   }
   const entries: ArchiveEntry[] = files.map((entry) => ({
@@ -57,10 +71,7 @@ export async function openArchive(buffer: ArrayBuffer) {
     async extract(name: string): Promise<ArrayBuffer> {
       const entry = zip.files[name];
       if (!entry || !canPreviewArchiveEntry(entry)) throw new BinaryPreviewError('unsupported');
-      const type = resolvePreviewType(undefined, name);
-      const isText = [...TEXT_PREVIEW_TYPES, ...HTML_PREVIEW_TYPES, 'md', 'svg'].includes(type);
-      const limit = isText ? MAX_ARCHIVE_TEXT_BYTES : MAX_BINARY_PREVIEW_BYTES;
-      return readZipEntry(entry, limit);
+      return readZipEntry(entry, archiveEntryLimit(name));
     },
   };
 }

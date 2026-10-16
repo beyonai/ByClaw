@@ -29,8 +29,27 @@ export interface PreviewOperations {
   openImage: { input: { buffer: ArrayBuffer; type: string }; output: number };
   imagePage: { input: { page: number }; output: DecodedImagePage };
   openZip: { input: { buffer: ArrayBuffer }; output: ArchiveEntry[] };
+  openNativeArchive: {
+    input: { buffer: ArrayBuffer; type: import('./nativeArchiveDecoder').NativeArchiveType };
+    output: ArchiveEntry[];
+  };
+  openCompressedArchive: {
+    input: { buffer: ArrayBuffer; type: import('./compressedArchiveDecoder').CompressedArchiveType; fileName?: string };
+    output: ArchiveEntry[];
+  };
   zipEntry: { input: { name: string }; output: ArrayBuffer };
   readOds: { input: { buffer: ArrayBuffer }; output: import('./odsTypes').OdsSheet[] };
+  readOpenDocument: {
+    input: { buffer: ArrayBuffer; type: import('./openDocumentTypes').OpenDocumentType };
+    output: import('./openDocumentTypes').OpenDocumentContent;
+  };
+  readNotebook: { input: { buffer: ArrayBuffer }; output: import('./notebookTypes').NotebookContent };
+  readEml: { input: { buffer: ArrayBuffer }; output: import('./emlTypes').EmlContent };
+  readMsg: { input: { buffer: ArrayBuffer }; output: import('./emlTypes').EmlContent };
+  prepareOfficeVariant: {
+    input: { buffer: ArrayBuffer; type: import('./officeVariantTypes').OfficeVariantType };
+    output: ArrayBuffer;
+  };
   openEpub: { input: { buffer: ArrayBuffer }; output: import('./epubTypes').EpubInfo };
   epubChapter: { input: { chapter: number }; output: string };
   epubImages: { input: { chapter: number; sources: string[] }; output: import('./epubTypes').EpubImage[] };

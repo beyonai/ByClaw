@@ -1,5 +1,6 @@
 import {
   getPreviewMimeType,
+  getPreviewExtension,
   isPreviewableName,
   resolvePreviewType,
   VIDEO_PREVIEW_TYPES,
@@ -28,6 +29,18 @@ const EXT_ICON_MAP: Record<string, React.ReactNode> = {
     RAW_PREVIEW_TYPES.map((type) => [type, <FileImageOutlined key={type} style={{ color: '#13c2c2' }} />])
   ),
   epub: <FileTextOutlined />,
+  odt: <FileWordOutlined style={{ color: '#1677ff' }} />,
+  odp: <FilePptOutlined style={{ color: '#fa8c16' }} />,
+  ipynb: <FileTextOutlined />,
+  eml: <FileTextOutlined />,
+  msg: <FileTextOutlined />,
+  docm: <FileWordOutlined style={{ color: '#1677ff' }} />,
+  dotx: <FileWordOutlined style={{ color: '#1677ff' }} />,
+  xlsm: <FileExcelOutlined style={{ color: '#52c41a' }} />,
+  xltx: <FileExcelOutlined style={{ color: '#52c41a' }} />,
+  pptm: <FilePptOutlined style={{ color: '#fa8c16' }} />,
+  ppsx: <FilePptOutlined style={{ color: '#fa8c16' }} />,
+  potx: <FilePptOutlined style={{ color: '#fa8c16' }} />,
   db: <DatabaseOutlined />,
   sqlite: <DatabaseOutlined />,
   sqlite3: <DatabaseOutlined />,
@@ -44,6 +57,9 @@ const EXT_ICON_MAP: Record<string, React.ReactNode> = {
   log: <FileTextOutlined />,
   json: <FileTextOutlined style={{ color: '#faad14' }} />,
   png: <FileImageOutlined style={{ color: '#13c2c2' }} />,
+  jp2: <FileImageOutlined style={{ color: '#13c2c2' }} />,
+  ppm: <FileImageOutlined style={{ color: '#13c2c2' }} />,
+  tga: <FileImageOutlined style={{ color: '#13c2c2' }} />,
   jpg: <FileImageOutlined style={{ color: '#13c2c2' }} />,
   jpeg: <FileImageOutlined style={{ color: '#13c2c2' }} />,
   gif: <FileImageOutlined style={{ color: '#13c2c2' }} />,
@@ -62,13 +78,14 @@ const EXT_ICON_MAP: Record<string, React.ReactNode> = {
   '7z': <FileZipOutlined style={{ color: '#8c8c8c' }} />,
   tar: <FileZipOutlined style={{ color: '#8c8c8c' }} />,
   gz: <FileZipOutlined style={{ color: '#8c8c8c' }} />,
+  tgz: <FileZipOutlined style={{ color: '#8c8c8c' }} />,
   html: <FileTextOutlined style={{ color: '#fa541c' }} />,
   xml: <FileTextOutlined style={{ color: '#fa541c' }} />,
 };
 
 export function getFileIcon(name: string, isDir: boolean): React.ReactNode {
   if (isDir) return <FolderOutlined style={{ color: '#faad14' }} />;
-  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
+  const ext = getPreviewExtension(name);
   return EXT_ICON_MAP[ext] || <FileOutlined />;
 }
 

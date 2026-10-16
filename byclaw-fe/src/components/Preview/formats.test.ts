@@ -2,6 +2,26 @@ import { getPreviewMimeType, isPreviewableName, PREVIEWABLE_TYPES, resolvePrevie
 
 describe('shared file preview formats', () => {
   it.each([
+    ['docm', 'application/vnd.ms-word.document.macroEnabled.12'],
+    ['dotx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.template'],
+    ['xlsm', 'application/vnd.ms-excel.sheet.macroEnabled.12'],
+    ['xltx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.template'],
+    ['pptm', 'application/vnd.ms-powerpoint.presentation.macroEnabled.12'],
+    ['ppsx', 'application/vnd.openxmlformats-officedocument.presentationml.slideshow'],
+    ['potx', 'application/vnd.openxmlformats-officedocument.presentationml.template'],
+    ['eml', 'message/rfc822'],
+    ['msg', 'application/vnd.ms-outlook'],
+    ['rar', 'application/vnd.rar'],
+    ['7z', 'application/x-7z-compressed'],
+    ['tar', 'application/x-tar'],
+    ['gz', 'application/gzip'],
+  ])('recognizes %s by filename and case-insensitive MIME', (type, mime) => {
+    expect(isPreviewableName(`文件.${type.toUpperCase()}`)).toBe(true);
+    expect(resolvePreviewType('file', `文件.${type.toUpperCase()}`)).toBe(type);
+    expect(resolvePreviewType(undefined, undefined, mime.toUpperCase() + '; charset=utf-8')).toBe(type);
+    expect(getPreviewMimeType(`文件.${type}`)).toBe(mime);
+  });
+  it.each([
     ['book.EPUB', 'epub', 'application/epub+zip'],
     ['data.DB', 'db', 'application/vnd.sqlite3'],
     ['data.sqlite', 'sqlite', 'application/vnd.sqlite3'],
@@ -12,9 +32,15 @@ describe('shared file preview formats', () => {
     ['photo.heif', 'heif', 'image/heif'],
     ['camera.HIF', 'heif', 'image/heif'],
     ['photo.JXL', 'jxl', 'image/jxl'],
+    ['photo.JP2', 'jp2', 'image/jp2'],
+    ['photo.PPM', 'ppm', 'image/x-portable-pixmap'],
+    ['photo.TGA', 'tga', 'image/x-tga'],
+    ['sample.PNG.ALPHA', 'png', 'image/png'],
     ['scan.TIF', 'tif', 'image/tiff'],
     ['scan.tiff', 'tiff', 'image/tiff'],
     ['资料.ZIP', 'zip', 'application/zip'],
+    ['资料.TGZ', 'tgz', 'application/gzip'],
+    ['资料.TAR.GZ', 'tgz', 'application/gzip'],
     ['picture.SVG', 'svg', 'image/svg+xml'],
     ['picture.JPEG', 'jpg', 'image/jpeg'],
     ['picture.JFIF', 'jpg', 'image/jpeg'],
@@ -32,6 +58,9 @@ describe('shared file preview formats', () => {
     ['report.xls', 'xls', 'application/vnd.ms-excel'],
     ['report.RTF', 'rtf', 'application/rtf'],
     ['report.ODS', 'ods', 'application/vnd.oasis.opendocument.spreadsheet'],
+    ['report.ODT', 'odt', 'application/vnd.oasis.opendocument.text'],
+    ['slides.ODP', 'odp', 'application/vnd.oasis.opendocument.presentation'],
+    ['analysis.IPYNB', 'ipynb', 'application/x-ipynb+json'],
     ['report.DOC', 'doc', 'application/msword'],
     ['slides.PPT', 'ppt', 'application/vnd.ms-powerpoint'],
     ['clip.webm', 'webm', 'video/webm'],
@@ -69,10 +98,20 @@ describe('shared file preview formats', () => {
     expect(resolvePreviewType('file', 'download.bin', 'application/vnd.oasis.opendocument.spreadsheet')).toBe('ods');
     expect(resolvePreviewType('application/x-sqlite3')).toBe('sqlite');
     expect(resolvePreviewType('image', 'camera.NEF')).toBe('nef');
+    expect(resolvePreviewType('application/x-rar-compressed')).toBe('rar');
+    expect(resolvePreviewType(undefined, undefined, 'application/x-rar')).toBe('rar');
+    expect(resolvePreviewType('gz', 'archive.TAR.GZ')).toBe('tgz');
+    expect(resolvePreviewType('.tar.gz')).toBe('tgz');
+    expect(resolvePreviewType('application/x-gzip', 'archive.tgz')).toBe('tgz');
+    expect(resolvePreviewType('application/x-gzip')).toBe('gz');
+    expect(resolvePreviewType('application/x-compressed-tar')).toBe('tgz');
+    expect(resolvePreviewType('alpha', 'sample.png.alpha')).toBe('png');
+    expect(resolvePreviewType('png.alpha')).toBe('png');
+    expect(isPreviewableName('sample.alpha')).toBe(false);
     expect(resolvePreviewType()).toBe('txt');
   });
 
-  it.each(['archive.rar', 'scan.psd', 'photo.jp2', 'program.exe', 'README'])(
+  it.each(['archive.bz2', 'scan.psd', 'photo.jpx', 'program.exe', 'README'])(
     'does not advertise an unavailable decoder for %s',
     (name) => expect(isPreviewableName(name)).toBe(false)
   );

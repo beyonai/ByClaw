@@ -107,6 +107,24 @@ describe('decoded image preview', () => {
     expect(screen.queryByTitle('Next Page')).not.toBeInTheDocument();
   });
 
+  it.each(['jp2', 'ppm', 'tga'])('renders %s in the existing zoom/rotation viewer', async (type) => {
+    worker.request.mockImplementation(async (operation) => (operation === 'openImage' ? 1 : pixels));
+    render(<DecodedImage data={blob()} type={type} title={`sample.${type}`} />);
+    await waitFor(() => expect(context.putImageData).toHaveBeenCalled());
+    expect(worker.request).toHaveBeenCalledWith('openImage', { buffer: expect.any(ArrayBuffer), type }, [
+      expect.any(ArrayBuffer),
+    ]);
+    fireEvent.click(screen.getByText('fileRender.rotate'));
+    expect(screen.getByRole('img', { name: `sample.${type}` })).toHaveAttribute('height', '2');
+    expect(screen.queryByTitle('Next Page')).not.toBeInTheDocument();
+  });
+  it('explains JP2 limits separately from ordinary photos', async () => {
+    worker.request.mockRejectedValue(new BinaryPreviewError('limit'));
+    render(<DecodedImage data={blob()} type="jp2" />);
+    expect(await screen.findByText('fileRender.jp2Limit')).toBeVisible();
+    expect(screen.queryByText('fileRender.imageLimit')).not.toBeInTheDocument();
+  });
+
   it.each([1, 2, 3, 4, 5, 6, 7, 8])('applies TIFF orientation %s without clipping rotated pages', (orientation) => {
     const canvas = document.createElement('canvas');
     paintDecodedImage(canvas, { ...pixels, orientation });

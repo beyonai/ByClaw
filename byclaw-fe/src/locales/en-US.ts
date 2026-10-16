@@ -1024,6 +1024,59 @@ export default {
     'This EPUB exceeds preview limits (20 MiB, 500 chapters, 2 MiB of text per chapter). Download it to read.',
   'fileRender.epubFailed':
     'Unable to preview this ebook. Use a complete, unencrypted EPUB file, or download it to read.',
+  'fileRender.openDocumentNotice':
+    'Shows text, headings, lists, basic tables and embedded PNG/JPEG images. Presentations can be read slide by slide; original layout, fonts, shapes and animations are not reproduced.',
+  'fileRender.openDocumentOmitted':
+    'Some images, objects, annotations or complex table structures are omitted. Download the file for full content.',
+  'fileRender.openDocumentLimit':
+    'Document exceeds preview limits (20 MiB, 200 slides or expanded content too large). Download to view.',
+  'fileRender.openDocumentFailed':
+    'Unable to preview this document. Use a complete, unencrypted ODT/ODP file or download to view.',
+  'fileRender.openDocumentTitle': 'OpenDocument preview',
+  'fileRender.openDocumentPage': 'Slide',
+  'fileRender.notebookNotice':
+    'Read-only Markdown, code and saved text/PNG/JPEG outputs. Code is never run. HTML, interactive charts and Markdown images are not displayed.',
+  'fileRender.notebookOmitted':
+    'Long text was truncated or unsupported outputs/attachments were omitted. Download for full content.',
+  'fileRender.notebookLimit':
+    'Notebook exceeds preview limits (20 MiB, 1,000 cells/outputs or content too large). Download to view.',
+  'fileRender.notebookFailed':
+    'Unable to preview this notebook. Use a valid nbformat 4 IPYNB file or download to view.',
+  'fileRender.notebookCell.markdown': 'Markdown',
+  'fileRender.notebookCell.code': 'Code',
+  'fileRender.notebookCell.raw': 'Raw text',
+  'fileRender.notebookImageOmitted': 'Image omitted',
+  'fileRender.notebookOutput': 'Saved output image',
+  'fileRender.officeVariantNotice':
+    'Shows saved static content without macros, external resources or embedded objects. Complex layouts may differ. Downloads keep the original file.',
+  'fileRender.officeVariantLimit':
+    'Office file exceeds preview limits (20 MiB, 1,000 internal entries or expanded content too large). Download to view.',
+  'fileRender.officeVariantFailed':
+    'Preview failed. The file may be encrypted, damaged or inconsistent with its extension. Download to view.',
+  'fileRender.emlNotice':
+    'Shows the email body and attachments, including embedded bitmap images. External images, links, scripts and forms are disabled. Complex layouts may differ.',
+  'fileRender.emlLimit':
+    'Email exceeds preview limits (20 MiB, 2 MiB body, 100 attachments or excessive message complexity). Download to view.',
+  'fileRender.emlFailed': 'Unable to preview this email. Use a valid, unencrypted EML file or download to view.',
+  'fileRender.msgFailed': 'Unable to preview this MSG. Use a valid, unencrypted email or download to view in Outlook.',
+  'fileRender.msgRtfBody':
+    'The RTF body is damaged, unsupported or exceeds preview limits. Message details and attachments remain available; download to read in Outlook.',
+  'fileRender.msgLinkedAttachment': 'Linked attachment; content not included',
+  'fileRender.archiveUnsupportedFile':
+    'Your browser may not support this archive format, or it contains encrypted, multi-volume or unsupported content. Download to view.',
+  'fileRender.emlSubject': 'Subject',
+  'fileRender.emlNoSubject': 'No subject',
+  'fileRender.emlFrom': 'From',
+  'fileRender.emlTo': 'To',
+  'fileRender.emlCc': 'Cc',
+  'fileRender.emlDate': 'Message date',
+  'fileRender.emlHtml': 'Formatted body',
+  'fileRender.emlText': 'Plain text',
+  'fileRender.emlBody': 'Email body',
+  'fileRender.emlEmptyBody': 'This message has no displayable body',
+  'fileRender.emlAttachments': 'Attachments',
+  'fileRender.emlSize': 'Size',
+  'fileRender.emlUnnamedAttachment': 'Attachment {number}',
   'fileRender.epubChapter': 'Chapter',
   'fileRender.epubChapterNumber': 'Chapter {number}',
   'fileRender.epubReader': 'Ebook reader',
@@ -1060,6 +1113,10 @@ export default {
   'fileRender.legacyTooLarge': 'This legacy Office file exceeds 20 MiB. Download it to view.',
   'fileRender.imageLimit':
     'Image preview limits exceeded: 20 MiB, 100 pages, or 50 million pixels per page. Download to view.',
+  'fileRender.jp2Notice':
+    'JPEG 2000 is shown as a static image. Common 8-bit RGB/grayscale images are supported; special color spaces, alpha channels and complex encodings may be unsupported.',
+  'fileRender.jp2Limit':
+    'JPEG 2000 preview limits: 20 MiB, 8 million pixels and bounded tile complexity. Download larger files to view.',
   'fileRender.imageDecodeFailed':
     'Unable to decode this image. It may be damaged or use an unsupported encoding. Download to view.',
   'fileRender.binaryTimeout': 'Preview processing timed out. Reopen the file or download it to view.',
@@ -1090,9 +1147,9 @@ export default {
   'fileRender.rotate': 'Rotate',
   'fileRender.resetImage': 'Reset',
   'fileRender.archiveLimit':
-    'ZIP preview limits: 20 MiB per archive, 1000 entries; 20 MiB per extracted file, or 2 MiB for text.',
+    'Archive preview limits: 20 MiB, 1000 entries; 20 MiB per extracted file, or 2 MiB for text; 50 MiB total declared size for RAR/7z/TAR and actual decompressed size for TGZ.',
   'fileRender.archiveFailed':
-    'Unable to open the ZIP or file. It may be encrypted, damaged, or contain invalid paths. Download to view.',
+    'Unable to open the archive or file. It may be encrypted, damaged, missing volumes, or contain invalid paths. Download to view.',
   'fileRender.archiveNotice':
     'Click supported files to preview. Nested archives and symbolic links are unsupported. HTML is displayed as static content.',
   'fileRender.archiveBack': 'Back to file list',
