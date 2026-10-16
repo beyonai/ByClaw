@@ -62,14 +62,15 @@ function isInputFailure(kind, error, args) {
 function connectorConfigurationError(kind, source, cause, connectorCode) {
   const connector = CONNECTORS[kind]
   const effectiveSource = source === 'user-connector' ? source : 'system-default'
+  const effectiveConnectorCode = connectorCode ?? connector.code
   const reason = safeErrorCode(cause)
   const message = effectiveSource === 'user-connector'
-    ? `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: ${connector.name}连接器当前不可用。请前往“连接器配置 → ${connector.name}”检查并重新保存连接信息后重试（连接器代码：${connectorCode ?? connector.code}，原因：${reason}）。`
-    : `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: 系统默认${connector.name}当前不可用。请前往“连接器配置 → ${connector.name}”配置并启用个人连接器后重试（连接器代码：${connector.code}，原因：${reason}）。`
+    ? `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; ${connector.name}连接器当前不可用。请打开连接器授权页面，检查并重新保存连接信息后重试（原因：${reason}）。`
+    : `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; 系统默认${connector.name}当前不可用。请打开连接器授权页面，配置并启用个人连接器后重试（原因：${reason}）。`
   const error = new Error(message)
   error.code = 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED'
   error.capability = kind === 'image' ? 'IMAGE' : 'TTS'
-  error.connectorCode = connectorCode ?? connector.code
+  error.connectorCode = effectiveConnectorCode
   error.connectorName = connector.name
   error.source = effectiveSource
   error.reason = reason

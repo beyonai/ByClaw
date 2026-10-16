@@ -129,3 +129,32 @@ it('renders connector field examples and descriptions', () => {
   );
   expect(screen.getByText('填写完整 HTTPS 请求地址，不是账号、应用 ID 或 Endpoint ID。')).toBeInTheDocument();
 });
+
+it('keeps advanced defaults submitted while showing only the token initially', async () => {
+  const submit = jest.fn();
+  render(
+    <Form onFinish={submit}>
+      <CredentialFields
+        fields={[
+          { key: 'apiToken', label: 'API Token', inputType: 'password', maxLength: 2048 },
+          {
+            key: 'modelProtocol',
+            label: '模型协议',
+            inputType: 'text',
+            maxLength: 128,
+            defaultValue: 'VOLCENGINE_IMAGE',
+            advanced: true,
+          },
+        ]}
+      />
+      <Button htmlType="submit">保存并连接</Button>
+    </Form>
+  );
+
+  expect(screen.getByText('高级配置').closest('details')).not.toHaveAttribute('open');
+  fireEvent.change(screen.getByLabelText('API Token'), { target: { value: 'test-token' } });
+  fireEvent.click(screen.getByText('保存并连接'));
+  await waitFor(() =>
+    expect(submit).toHaveBeenCalledWith({ apiToken: 'test-token', modelProtocol: 'VOLCENGINE_IMAGE' })
+  );
+});

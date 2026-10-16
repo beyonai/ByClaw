@@ -49,7 +49,21 @@ export default function CredentialFields({ fields, customImap = false }: Props) 
     </Form.Item>
   );
 
-  if (!customImap) return <>{fields.map(renderField)}</>;
+  if (!customImap) {
+    const basicFields = fields.filter((field) => !field.advanced);
+    const advancedFields = fields.filter((field) => field.advanced);
+    return (
+      <>
+        {basicFields.map(renderField)}
+        {advancedFields.length > 0 && (
+          <details className={styles.credentialAdvanced}>
+            <summary>高级配置</summary>
+            <div className={styles.credentialAdvancedFields}>{advancedFields.map(renderField)}</div>
+          </details>
+        )}
+      </>
+    );
+  }
 
   const groups = [
     { title: '账号信息', fields: fields.filter((field) => !/^(imap|smtp)/.test(field.key)) },

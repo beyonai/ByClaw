@@ -9,7 +9,8 @@ public class OpenAiImageConfigurationVerifier implements MediaConnectorProtocolV
 
     @Override
     public boolean supports(MediaModelType modelType, String modelProtocol) {
-        return modelType == MediaModelType.IMAGE && "OPENAI_IMAGE".equals(modelProtocol);
+        return modelType == MediaModelType.IMAGE
+            && ("OPENAI_IMAGE".equals(modelProtocol) || "VOLCENGINE_IMAGE".equals(modelProtocol));
     }
 
     @Override

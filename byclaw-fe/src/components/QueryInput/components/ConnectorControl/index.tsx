@@ -21,6 +21,7 @@ import utc from 'dayjs/plugin/utc';
 import { getIntl, useIntl, useSelector } from '@umijs/max';
 
 import { OVERLAY_DRAWER_WIDTH } from '@/components/MainDrawer/constants';
+import { CONNECTOR_AUTHORIZATION_REQUEST_EVENT } from '@/utils/connectorAuthorization';
 import {
   getConnectorAuthorization,
   cancelConnectorAuthorization,
@@ -257,10 +258,15 @@ const hasValidCredentialForm = (
           field.defaultValue.length <= field.maxLength)) &&
       (field.placeholder === undefined ||
         field.placeholder === null ||
-        (typeof field.placeholder === 'string' && field.placeholder.trim().length > 0 && field.placeholder.length <= 2048)) &&
+        (typeof field.placeholder === 'string' &&
+          field.placeholder.trim().length > 0 &&
+          field.placeholder.length <= 2048)) &&
       (field.description === undefined ||
         field.description === null ||
-        (typeof field.description === 'string' && field.description.trim().length > 0 && field.description.length <= 500));
+        (typeof field.description === 'string' &&
+          field.description.trim().length > 0 &&
+          field.description.length <= 500)) &&
+      (field.advanced === undefined || typeof field.advanced === 'boolean');
     if (valid) keys.add(field.key);
     return valid;
   });
@@ -656,17 +662,20 @@ const ConnectorControl = ({
   };
 
   const confirmRevokeAuthorization = (connector: Connector) => {
+    let revokeDescription = '当前 CLI 登录凭证将被清除，再次使用时需要重新授权。';
+    if (connector.authMode === 'AK_SK') {
+      revokeDescription = '仅移除 ByClaw 保存的凭据，第三方平台上的凭据仍保持有效。';
+    }
+    if (connector.code === 'ima-openapi' && connector.authMode === 'AK_SK') {
+      revokeDescription = '仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。';
+    }
+    if (connector.code === 'weixin-official-api' && connector.authMode === 'AK_SK') {
+      revokeDescription = '仅移除 ByClaw 保存的凭据，微信公众平台上的 AppSecret 仍保持有效';
+    }
     setRevokeConfirmationOpen(true);
     Modal.confirm({
       title: `取消${connector.name}授权？`,
-      content:
-        connector.code === 'weixin-official-api' && connector.authMode === 'AK_SK'
-          ? '仅移除 ByClaw 保存的凭据，微信公众平台上的 AppSecret 仍保持有效'
-          : connector.code === 'ima-openapi' && connector.authMode === 'AK_SK'
-            ? '仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。'
-            : connector.authMode === 'AK_SK'
-              ? '仅移除 ByClaw 保存的凭据，第三方平台上的凭据仍保持有效。'
-              : '当前 CLI 登录凭证将被清除，再次使用时需要重新授权。',
+      content: revokeDescription,
       okText: '确认取消授权',
       okButtonProps: { danger: true },
       cancelText: '暂不取消',
@@ -703,28 +712,55 @@ const ConnectorControl = ({
     });
   };
 
-  const beginAuthorization = async (connector: Connector) => {
-    let connectorForAuthorization = connector;
+  const beginAuthorization = useCallback(
+    async (connector: Connector) => {
+      let connectorForAuthorization = connector;
 
-    if (connector.authMode === 'AK_SK' && !hasValidCredentialForm(connector)) {
-      const refreshedConnectors = await loadAuthorizedConnectors();
-      const refreshedConnector = refreshedConnectors?.find((item) => item.id === connector.id);
+      if (connector.authMode === 'AK_SK' && !hasValidCredentialForm(connector)) {
+        const refreshedConnectors = await loadAuthorizedConnectors();
+        const refreshedConnector = refreshedConnectors?.find((item) => item.id === connector.id);
 
-      if (!hasValidCredentialForm(refreshedConnector)) {
-        message.error(`${connector.name} 连接配置暂不可用，请稍后重试`);
-        return;
+        if (!hasValidCredentialForm(refreshedConnector)) {
+          message.error(`${connector.name} 连接配置暂不可用，请稍后重试`);
+          return;
+        }
+
+        connectorForAuthorization = refreshedConnector;
       }
 
-      connectorForAuthorization = refreshedConnector;
-    }
+      // 先展示权限说明，再进入对应平台的授权步骤。
+      abortCredentialVerification();
+      invalidateAuthorizationRequests();
+      setStartingAuthorization(false);
+      setAuthorizingConnector(connectorForAuthorization);
+      setAuthorizationSession(undefined);
+    },
+    [abortCredentialVerification, invalidateAuthorizationRequests, loadAuthorizedConnectors]
+  );
 
-    // 先展示权限说明，再进入对应平台的授权步骤。
-    abortCredentialVerification();
-    invalidateAuthorizationRequests();
-    setStartingAuthorization(false);
-    setAuthorizingConnector(connectorForAuthorization);
-    setAuthorizationSession(undefined);
-  };
+  useEffect(() => {
+    if (!outside || !canAuthorize) return undefined;
+
+    const openRequestedConnector = (event: Event) => {
+      const connectorCode = (event as CustomEvent<{ connectorCode?: string }>).detail?.connectorCode;
+      if (!connectorCode) return;
+
+      void (async () => {
+        const connectorList = await loadAuthorizedConnectors();
+        const connector = connectorList?.find((item) => item.code === connectorCode);
+        if (!connector) {
+          message.error('对应的连接器配置暂不可用，请稍后重试');
+          return;
+        }
+        setSettingsOpen(false);
+        setConfigurationOpen(false);
+        await beginAuthorization(connector);
+      })();
+    };
+
+    window.addEventListener(CONNECTOR_AUTHORIZATION_REQUEST_EVENT, openRequestedConnector);
+    return () => window.removeEventListener(CONNECTOR_AUTHORIZATION_REQUEST_EVENT, openRequestedConnector);
+  }, [beginAuthorization, canAuthorize, loadAuthorizedConnectors, outside]);
 
   const updateConnectorEnableFlag = async (connector: Connector, enabled: boolean) => {
     setUpdatingConnectorIds((ids) => new Set([...ids, connector.id]));
@@ -1305,14 +1341,10 @@ const ConnectorControl = ({
       >
         <Spin spinning={loadingConnectors}>
           <div className={styles.configurationGrid}>
-            {connectors.length
-              ? connectors.map((connector) => renderConnectorItem(connector, true))
-              : !loadingConnectors && (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={intl.formatMessage({ id: 'connector.empty' })}
-                />
-              )}
+            {connectors.map((connector) => renderConnectorItem(connector, true))}
+            {!connectors.length && !loadingConnectors && (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'connector.empty' })} />
+            )}
             <GlobalAccountSection onToolbarChange={setAccountToolbar} />
           </div>
         </Spin>

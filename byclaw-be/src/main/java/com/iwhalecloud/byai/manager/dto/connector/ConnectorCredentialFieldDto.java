@@ -21,4 +21,6 @@ public class ConnectorCredentialFieldDto {
     private String placeholder;
 
     private String description;
+
+    private Boolean advanced = false;
 }
