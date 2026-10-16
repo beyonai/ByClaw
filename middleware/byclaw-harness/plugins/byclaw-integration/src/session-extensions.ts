@@ -17,7 +17,7 @@ export interface ByClawSessionHost {
   /** Authoritative byclaw-context workspace for this Agent. */
   resolveSessionRoot?(agentId: string): string | undefined
   /** Resolve enabled media configuration without exposing credentials to tools. */
-  resolveMediaModel?(type: 'IMAGE_GENERATION' | 'TTS', modelId?: string): Promise<MediaModel>
+  resolveMediaModel?(type: 'IMAGE_GENERATION' | 'TTS' | 'ASR', modelId?: string): Promise<MediaModel>
 }
 
 /** Trusted command and Agent context supplied before input admission. */

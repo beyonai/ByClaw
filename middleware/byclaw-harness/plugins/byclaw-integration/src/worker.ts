@@ -12,6 +12,7 @@ import {
   ResumeCommand,
   type GatewayCommand,
 } from '@byclaw/by-framework'
+import { byClawVoicePayload } from './voice-runtime.ts'
 import { extractByClawUserText } from './protocol.ts'
 
 /** Result of one ByClaw request after its DSH work and output have settled. */
@@ -45,7 +46,7 @@ export class ByClawDshCommandHandler {
       return new AgentTaskResult({ status: AgentState.COMPLETED, content: '', replyData: null })
     }
     if (!(command instanceof AskAgentCommand)) throw new Error(`Unsupported BYCLAW_DSH command: ${command.actionType}`)
-    if (extractByClawUserText(command.content) === '') throw new Error('BYCLAW_DSH AskAgent content is empty')
+    if (extractByClawUserText(command.content) === '' && byClawVoicePayload(command) === undefined) throw new Error('BYCLAW_DSH AskAgent content is empty')
     let result: ByClawDshAskResult
     try {
       result = await this.sessions.ask(command, context)

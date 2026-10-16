@@ -97,7 +97,10 @@ function ATag({ domNode }: { domNode: any }) {
   };
 
   // 会话产物由消息级组件统一校验并渲染，避免这里用原始路径再生成一张不可鉴权的重复卡片。
-  if (isManagedChatFileArtifactPath(href)) return <>{domToReact(domNode.children || [])}</>;
+  if (isManagedChatFileArtifactPath(href)) {
+    if (/^(?:🔊\s*)?播放语音摘要$/.test(name.trim()) && ['mp3', 'wav', 'm4a', 'ogg'].includes(fileType)) return null;
+    return <>{domToReact(domNode.children || [])}</>;
+  }
   if (!href || !canPreview) return <>{domToReact([domNode])}</>;
 
   return (

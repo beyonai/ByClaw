@@ -319,3 +319,5 @@ INFO 日志 `[byclaw-super-assistant] bound` 显示会话和工具白名单；�
 媒体连接器与独立插件：用户连接器投影（`/by/.connector-auth/.model/image.json`、`tts.json`）优先于系统默认模型；仅文件不存在时回退 Redis，损坏或不匹配的配置直接报错。显式部署 modelId 可选择测试/指定模型。连接器协议明确映射到真实供应商适配器，不根据端点猜测。旧 `media-generation` 注册入口不再全局挂载，启用 `byclaw-image` 与 `byclaw-tts` bundle 后，分别使用会话级 `image_generate` 和 `text_to_speech`；旧 `speech_generate` 名称不再自动注册。连接器既有校验及测试保留，生成不会自动重试。
 
 连接器迁移约定：旧 `options.defaultVoice` 在没有显式 `voice`/`speaker` 时映射为默认音色；原 OpenAI 图片显式 Authorization 和火山 TTS 显式 X-Api-Key / X-Api-Resource-Id 保留优先级。新插件将 `readTimeoutSeconds` 作为整个生成调用的总时间预算，最多 30 分钟（更大配置归一到 30 分钟）；不再分别应用旧连接器的 connectTimeoutSeconds / readTimeoutSeconds，也不采用 maxRetryCount 自动重试，避免重复计费。
+
+语音交互：`byclaw-asr` 使用系统启用的全局默认 `ASR` 模型，在主 Agent 接收输入之前固定识别 MP3，保留 `voiceInteraction` 标记并将识别结果作为 `userInput`。SDK/前端的 `VOICE` 消息携带后端已验证归属的音频，原始音频保存在 `session_root/asr/`；重复消息复用识别缓存。by-framework 1.6.0 要求 wire content 非空，纯语音桥接使用 `[语音消息]` 占位，识别后替换成真实文本。正常文字回复之后，运行时使用现有 TTS 默认模型合成口语摘要，保存到 `session_root/tts/` 并追加可播放的受管制品链接；TTS 失败仍保留完整文字回复。手动转写由登录后的后端代理至 `POST /api/byclaw/asr/transcribe`，用户浏览器不持有供应商密钥。协议与接口约束见 `../byclaw-asr/README.md`。

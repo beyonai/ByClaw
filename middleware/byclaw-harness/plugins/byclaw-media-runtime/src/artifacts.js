@@ -40,7 +40,7 @@ function validateWordTiming(bytes) {
 
 export async function persistAssets(sessionRoot, kind, assets) {
   if (typeof sessionRoot !== 'string' || !isAbsolute(sessionRoot)) throw new Error('MEDIA_SESSION_ROOT_REQUIRED: missing authoritative session_root')
-  if (!['image', 'tts'].includes(kind)) throw new Error('MEDIA_INVALID_KIND')
+  if (!['image', 'tts', 'asr'].includes(kind)) throw new Error('MEDIA_INVALID_KIND')
   if (!Array.isArray(assets) || !assets.length || assets.length > 8) throw new Error('MEDIA_EMPTY_ARTIFACTS')
   const root = await realpath(sessionRoot)
   const directory = join(root, kind)

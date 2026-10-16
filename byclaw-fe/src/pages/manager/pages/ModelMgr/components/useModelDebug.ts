@@ -249,7 +249,7 @@ const useModelDebug = ({
         }
 
         const text = `${res?.output ?? ''}`;
-        if (currentType === 'IMAGE_GENERATION') {
+        if (['IMAGE_GENERATION', 'ASR', 'TTS'].includes(currentType)) {
           streamDoneRef.current = true;
           setDebugOutput(text);
           return;

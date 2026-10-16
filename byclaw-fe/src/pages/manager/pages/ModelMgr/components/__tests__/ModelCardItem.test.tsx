@@ -58,7 +58,7 @@ describe('model card display', () => {
 });
 
 describe('model defaults by type', () => {
-  const modelTypes = ['LLM', 'EMBEDDING', 'RERANK', 'TTS', 'IMAGE_GENERATION', 'CUSTOM_TYPE'];
+  const modelTypes = ['LLM', 'EMBEDDING', 'RERANK', 'TTS', 'ASR', 'IMAGE_GENERATION', 'CUSTOM_TYPE'];
 
   const renderCard = (
     overrides: Record<string, unknown> = {},
@@ -98,6 +98,7 @@ describe('model defaults by type', () => {
     ['RERANK', '重排模型', 'Reranking model'],
     ['EMBEDDING', '向量模型', 'Embedding model'],
     ['TTS', '语音模型', 'Text to speech'],
+    ['ASR', '语音识别', 'Speech recognition'],
     ['IMAGE_GENERATION', '文生图', 'Image generation'],
   ])('renders translated names for %s without exposing the code', (modelType, chinese, english) => {
     const { unmount } = renderCard({ modelType }, zhMessages);
@@ -126,15 +127,12 @@ describe('model defaults by type', () => {
     }
   );
 
-  it.each(modelTypes)(
-    'allows an enabled %s model without conversation abilities to become default',
-    (modelType) => {
-      renderCard({ modelType });
+  it.each(modelTypes)('allows an enabled %s model without conversation abilities to become default', (modelType) => {
+    renderCard({ modelType });
 
-      expect(screen.getByRole('button', { name: 'modelMgr.setDefault' })).toBeInTheDocument();
-      expect(screen.queryByText('modelMgr.defaultModel')).not.toBeInTheDocument();
-    }
-  );
+    expect(screen.getByRole('button', { name: 'modelMgr.setDefault' })).toBeInTheDocument();
+    expect(screen.queryByText('modelMgr.defaultModel')).not.toBeInTheDocument();
+  });
 
   it.each(modelTypes)('marks the current %s default and hides its set-default action', (modelType) => {
     renderCard({ modelType, isDefault: 1 });
@@ -143,8 +141,8 @@ describe('model defaults by type', () => {
     expect(screen.queryByRole('button', { name: 'modelMgr.setDefault' })).not.toBeInTheDocument();
   });
 
-  it('accepts the boolean default flag', () => {
-    renderCard({ isDefault: true });
+  it.each([true, '1'])('accepts the backend default flag %s', (isDefault) => {
+    renderCard({ isDefault });
 
     expect(screen.getByText('modelMgr.defaultModel')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'modelMgr.setDefault' })).not.toBeInTheDocument();
@@ -168,6 +166,12 @@ describe('model defaults by type', () => {
 
     expect(screen.getByRole('button', { name: 'modelMgr.setDefault' })).toBeInTheDocument();
     expect(screen.queryByText('modelMgr.defaultModel')).not.toBeInTheDocument();
+  });
+
+  it('does not treat the legacy conversation ability as an ASR default', () => {
+    renderCard({ modelType: 'ASR', abilities: ['1'] });
+    expect(screen.queryByText('modelMgr.defaultModel')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'modelMgr.setDefault' })).toBeInTheDocument();
   });
 
   it('passes the selected model to the callback only after confirmation', async () => {

@@ -666,4 +666,8 @@ export default {
   'modelMgr.modal.imageWatermark': 'Add watermark',
   'modelMgr.modal.seedreamModelPlaceholder': 'Select a Seedream model or enter a model / endpoint ID',
   'modelMgr.modal.generatedImage': 'Generated image {index}',
+  'modelMgr.modal.modelTypeASR': 'Speech recognition (ASR)',
+  'modelMgr.typeName.ASR': 'Speech recognition',
+  'employeeDetail.imageModelGlobalDefault': 'Use global default',
+  'employeeDetail.ttsModelGlobalDefault': 'Use global default',
 };

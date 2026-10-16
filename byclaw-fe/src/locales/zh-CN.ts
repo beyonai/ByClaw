@@ -1425,6 +1425,7 @@ export default {
   'sider.automation': '定时任务',
   'sider.projectSpace': '项目',
   'workspaceSider.primaryNavigation': '主导航',
+  'workspaceSider.voiceMessage': '语音消息',
   'workspaceSider.newSession': '新建会话',
   'workspaceSider.newTask': '新建任务',
   'workspaceSider.scheduledTasks': '定时任务',

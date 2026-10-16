@@ -24,6 +24,8 @@ import MsgRenderer from './components/MsgRenderer';
 import UsedModelBadge from './components/UsedModelBadge';
 import MsgRendererV2 from './components/MsgRendererV2';
 import { isV2Message } from './components/MsgRendererV2/ordered';
+import VoiceMessage from './components/VoiceMessage';
+import { getVoiceMessage } from '@/utils/voice';
 import FinalAnswerLayout from './components/MsgRendererV2/FinalAnswerLayout';
 import UserInfoModal from '@/components/OrgUserSelector/components/UserInfoModal';
 // import Memory from './components/Memory';
@@ -406,6 +408,7 @@ export default function useRender({
       const { showRelatedQuestions = false, hideAction } = param || {};
       const agentInfo = getResponseAgentInfoByMessage({ employeesList, agentList }, msg);
       const isLeftSide = fromBeyond || fromOtherUser;
+      const voice = !fromBeyond ? getVoiceMessage(msg) : undefined;
       const isSuperAssistant = fromBeyond && !!agentInfo?.isSuperAssistant;
       const isEmployeeGroup =
         `${messageAgentType || ''}` === agentTypeMap.employeeGroup ||
@@ -542,7 +545,14 @@ export default function useRender({
                 [styles.pureText]: fromOtherUser && usage !== '4',
               })}
             >
-              {isV2Message(msg) ? (
+              {voice ? (
+                <VoiceMessage
+                  key={`${msgId}_voice`}
+                  voice={voice}
+                  sessionId={msg.sessionId || sessionId}
+                  onTranscript={(transcript) => updateMessage({ ...msg, voice: { ...voice, transcript } })}
+                />
+              ) : isV2Message(msg) ? (
                 <MsgRendererV2 msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
               ) : (
                 <FinalAnswerLayout msg={msg}>
@@ -596,8 +606,8 @@ export default function useRender({
               <WaveBallLoading style={{ width: 20, height: 20, opacity: 0.6 }} />
             </div>
           )}
-          <ReplyFileArtifacts message={msg} sessionId={sessionId} previewInDetailPanel={previewInDetailPanel} />
           {attachmentListRender(msg, !hideAction)}
+          <ReplyFileArtifacts message={msg} sessionId={sessionId} previewInDetailPanel={previewInDetailPanel} />
           {!hideAction && [IMessageState.Done, IMessageState.Cancel, IMessageState.Error].includes(messageState) && (
             <div className={styles.actionsBar}>
               {isLeftSide && beyondAnswerActions(msg)}

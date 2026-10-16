@@ -25,6 +25,19 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 class TransactionAdviceConfigTest {
 
     @Test
+    void commonFileFallbackCannotMarkTheCallingChatRollbackOnly() throws Exception {
+        TransactionAdviceConfig config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));
+        var source = config.getAdvisor().getTransactionAttributeSource();
+        var service = com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService.class;
+        Method read = service.getMethod("openCommonFileInputStream", String.class, String.class);
+        assertThat(source.getTransactionAttribute(read, service).getPropagationBehavior())
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(source.getTransactionAttribute(TxMethodSamples.class.getMethod("openCommonFileInputStream"),
+            TxMethodSamples.class).getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+    }
+
+    @Test
     void workspaceSkillCenterOwnsItsCommitBeforeFileCleanup() throws Exception {
         TransactionAdviceConfig config = new TransactionAdviceConfig();
         ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));
@@ -148,6 +161,9 @@ class TransactionAdviceConfigTest {
     }
 
     static class TxMethodSamples {
+
+        public void openCommonFileInputStream() {
+        }
 
         public void createDatasetIfNotExists() {
         }

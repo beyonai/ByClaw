@@ -1,3 +1,6 @@
+import { createTtsDebugHttpHandler } from './tts-http.ts'
+import { ByClawVoiceRuntime } from './voice-runtime.ts'
+import { createVoiceHttpHandler, type VoiceWebHost } from './voice-http.ts'
 import { installBrowserText } from './browser-text.ts'
 import { agentRouterEnabled, agentRoutingDecision, agentRouterBlocksDelegationTool, enforceAgentDelegation, isSuperAssistantRoot, AgentRoutingSelections } from '@byclaw/byclaw-agent-router'
 import { installByClawModelCatalog, installByClawModelRouting, resolveByClawModelRouting, type ByClawModelRoutingBinding } from './model-routing.ts'
@@ -960,8 +963,35 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       resolveSessionRoot: agentId => workspaceRegistry.get(agentId)?.sessionRoot,
       resolveMediaModel: (type, modelId) => resolvePluginMediaModel(redis, type, { modelId, decrypt: decryptByClawAuthToken }),
     }
+    const voiceRuntime = new ByClawVoiceRuntime({
+      byRoot, userCode,
+      resolveModel: type => resolvePluginMediaModel(redis, type, { decrypt: decryptByClawAuthToken }),
+    })
+    const mountVoiceHttp = () => {
+      const web = (ctx.get('webServer') ?? ctx.get('httpServer')) as VoiceWebHost | undefined
+      if (!web) return
+      return ctx.effect(() => {
+        const authHeaders = async () => (await resolveByClawAuthorization(redis, userCode)).authHeaders
+        const disposeAsr = web.register({ kind: 'exact', path: '/api/byclaw/asr/transcribe', handler: createVoiceHttpHandler({
+          byRoot, authHeaders,
+          resolveModel: () => resolvePluginMediaModel(redis, 'ASR', { decrypt: decryptByClawAuthToken }),
+        }) })
+        const disposeTts = web.register({ kind: 'exact', path: '/api/byclaw/tts/debug', handler: createTtsDebugHttpHandler({
+          authHeaders,
+          resolveModel: () => resolvePluginMediaModel(redis, 'TTS', { decrypt: decryptByClawAuthToken }),
+        }) })
+        return () => { disposeAsr(); disposeTts() }
+      })
+    }
+    let disposeVoiceHttp = mountVoiceHttp()
+    ctx.on('internal/service', (name: string) => {
+      if (name !== 'webServer' && name !== 'httpServer') return
+      disposeVoiceHttp?.()
+      disposeVoiceHttp = mountVoiceHttp()
+    })
     sessions = new ByClawDshSessionRuntime(ctx, {
       workspace,
+      voiceRuntime,
       byRoot,
       stateDir: config.stateDir ?? '.agent-teams',
       agentTemplateDir,

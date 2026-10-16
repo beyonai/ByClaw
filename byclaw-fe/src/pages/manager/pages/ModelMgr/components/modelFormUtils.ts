@@ -173,7 +173,7 @@ export function getDefaultFormValues() {
 export function normalizeModelType(v: any) {
   if (v === 1 || v === '1') return 'LLM';
   if (v === 2 || v === '2') return 'RERANK';
-  if (typeof v === 'string' && v.trim()) return v.trim();
+  if (typeof v === 'string' && v.trim()) return v.trim().toUpperCase();
   return 'LLM';
 }
 
@@ -197,6 +197,7 @@ export function getModelTypeSwitchFormValues(modelType: any) {
     // 非文生图类型不预填示例地址，由 placeholder 按协议提示。
     apiEndpoint: '',
     modelCode: '',
+    extendParam: '',
     apiToken: '',
     headers: [{ key: '', value: '' }],
     prompt: undefined,
@@ -212,7 +213,7 @@ export function getModelTypeSwitchFormValues(modelType: any) {
 export function getModelTypeTransitionFormValues(previousModelType: any, nextModelType: any) {
   const previousType = normalizeModelType(previousModelType);
   const nextType = normalizeModelType(nextModelType);
-  if (previousType !== 'IMAGE_GENERATION' && nextType !== 'IMAGE_GENERATION') {
+  if ([previousType, nextType].every((type) => ['LLM', 'RERANK', 'EMBEDDING'].includes(type))) {
     return { modelType: nextType };
   }
   return getModelTypeSwitchFormValues(nextType);
@@ -306,11 +307,11 @@ export function buildDebugPayload(values: any) {
     const prompt = `${values?.prompt ?? ''}`;
     const bailian = values.modelProtocol === 'BAILIAN_IMAGE';
     // 专用图片协议使用各自的消息结构，不发送 MiniMax 的 aspect_ratio/response_format。
-    const param = bailian
-      ? { model, input: { messages: [{ role: 'user', content: [{ text: prompt }] }] }, parameters: { n: 1 } }
-      : model === 'hy-image-v3.5-preview'
-      ? { model, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }] }
-      : { model, prompt };
+    let param: Record<string, any> = { model, prompt };
+    if (bailian)
+      param = { model, input: { messages: [{ role: 'user', content: [{ text: prompt }] }] }, parameters: { n: 1 } };
+    else if (model === 'hy-image-v3.5-preview')
+      param = { model, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }] };
     return {
       input: {
         providerName: values.providerName,
@@ -464,12 +465,9 @@ export function buildModelUpsertPayload(options: {
   if (imageConfig) restValues.imageGenerationConfig = imageConfig;
   else delete restValues.imageGenerationConfig;
 
-  const id =
-    type === 'edit' || type === 'debug'
-      ? dataId
-      : type === 'add' && savedNewId !== null && savedNewId !== undefined
-      ? savedNewId
-      : undefined;
+  let id: string | number | undefined;
+  if (type === 'edit' || type === 'debug') id = dataId;
+  else if (type === 'add' && savedNewId !== null && savedNewId !== undefined) id = savedNewId;
 
   return {
     ...(id !== null && id !== undefined ? { id } : {}),
@@ -581,6 +579,13 @@ export function buildAutoDebugRequestText(options: {
   const modelType = normalizeModelType(formValues?.modelType);
   const isTypeSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelType');
   const isProtocolSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelProtocol');
+  if (modelType === 'ASR') return JSON.stringify({ fileId: !isTypeSwitch ? prevObj?.fileId || '' : '' }, null, 2);
+  if (modelType === 'TTS')
+    return JSON.stringify(
+      { text: !isTypeSwitch ? prevObj?.text || '你好，欢迎使用 ByClaw。' : '你好，欢迎使用 ByClaw。' },
+      null,
+      2
+    );
   if (modelType === 'IMAGE_GENERATION') {
     return JSON.stringify(
       buildDebugPayload({
@@ -623,22 +628,17 @@ export function buildAutoDebugRequestText(options: {
     }
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
     const defaultMessages = [{ role: 'user', content: defaultUserMessage ?? "How's the weather today?" }];
-    const messages =
-      !isTypeSwitch && isResponses && (typeof prevObj?.input === 'string' || Array.isArray(prevObj?.input))
-        ? prevObj.input
-        : !isTypeSwitch && Array.isArray(prevObj?.messages) && prevObj.messages.length
-        ? prevObj.messages
-        : prevText && `${prevText}`.trim() && !prevObj
-        ? [{ role: 'user', content: `${prevText}` }]
-        : defaultMessages;
-
-    const temperature = syncFormParameters
-      ? formValues?.temperature
-      : !isTypeSwitch && typeof prevObj?.temperature === 'number'
-      ? prevObj.temperature
-      : isResponses
-      ? undefined
-      : 0.1;
+    let messages = defaultMessages;
+    if (!isTypeSwitch && isResponses && (typeof prevObj?.input === 'string' || Array.isArray(prevObj?.input))) {
+      messages = prevObj.input;
+    } else if (!isTypeSwitch && Array.isArray(prevObj?.messages) && prevObj.messages.length) {
+      messages = prevObj.messages;
+    } else if (prevText && `${prevText}`.trim() && !prevObj) {
+      messages = [{ role: 'user', content: `${prevText}` }];
+    }
+    let temperature = isResponses ? undefined : 0.1;
+    if (syncFormParameters) temperature = formValues?.temperature;
+    else if (!isTypeSwitch && typeof prevObj?.temperature === 'number') temperature = prevObj.temperature;
     const stream = !isTypeSwitch && typeof prevObj?.stream === 'boolean' ? prevObj.stream : true;
     // 调试请求 max_tokens 跟左侧高级参数「Max Tokens」对齐：填多少就同步多少。
     const maxTokensChanged = Array.isArray(changedKeys) && changedKeys.includes('maxTokens');
@@ -738,15 +738,13 @@ export function buildAutoDebugRequestText(options: {
     });
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
     const defaultQuery = defaultRerankQuery ?? 'Beijing travel guide';
-    const defaultDocs =
-      defaultRerankDocs && defaultRerankDocs.length >= 4
-        ? defaultRerankDocs
-        : [
-            { text: 'Beijing food recommendation', metadata: { id: 0 }, score: 0 },
-            { text: 'Tianjin travel guide', metadata: { id: 1 }, score: 0 },
-            { text: 'Beginner dev tutorial', metadata: { id: 2 }, score: 0 },
-            { text: 'Forbidden City travel guide', metadata: { id: 3 }, score: 0 },
-          ];
+    let defaultDocs = [
+      { text: 'Beijing food recommendation', metadata: { id: 0 }, score: 0 },
+      { text: 'Tianjin travel guide', metadata: { id: 1 }, score: 0 },
+      { text: 'Beginner dev tutorial', metadata: { id: 2 }, score: 0 },
+      { text: 'Forbidden City travel guide', metadata: { id: 3 }, score: 0 },
+    ];
+    if (defaultRerankDocs && defaultRerankDocs.length >= 4) defaultDocs = defaultRerankDocs;
 
     const query =
       !isTypeSwitch && typeof prevObj?.query === 'string' && prevObj.query.trim() ? prevObj.query : defaultQuery;
@@ -838,11 +836,9 @@ export function buildAutoDebugRequestText(options: {
       // 原生多模态地址已经包含完整路径，切换协议时不追加 /embeddings，也不复用旧结构。
       const previousInput = !isTypeSwitch && !isProtocolSwitch ? prevObj?.input : undefined;
       const text = typeof previousInput === 'string' ? previousInput : defaultUserMessage ?? "How's the weather today?";
-      const input = isBailianMultimodal
-        ? { contents: Array.isArray(previousInput?.contents) ? previousInput.contents : [{ text }] }
-        : Array.isArray(previousInput)
-        ? previousInput
-        : [{ type: 'text', text }];
+      let input: any = Array.isArray(previousInput) ? previousInput : [{ type: 'text', text }];
+      if (isBailianMultimodal)
+        input = { contents: Array.isArray(previousInput?.contents) ? previousInput.contents : [{ text }] };
       return JSON.stringify(
         {
           url: apiEndpoint,
@@ -934,7 +930,9 @@ export function extractModelId(res: any) {
 }
 
 export function getModelDebugDispatchTimeoutMs(modelType: any) {
-  return normalizeModelType(modelType) === 'IMAGE_GENERATION' ? 130000 : 15000;
+  const type = normalizeModelType(modelType);
+  if (type === 'IMAGE_GENERATION') return 130000;
+  return ['TTS', 'ASR'].includes(type) ? 190000 : 15000;
 }
 
 export function dispatchModelActionWithResult(

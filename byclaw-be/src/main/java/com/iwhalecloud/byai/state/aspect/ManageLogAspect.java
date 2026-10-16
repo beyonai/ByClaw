@@ -7,7 +7,6 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.manager.entity.log.ManageLog;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.common.util.IpUtil;
@@ -117,11 +116,11 @@ public class ManageLogAspect {
 
         // 入参记录
         if (args != null && args.length > 0) {
-            manageLog.setOperatorParam(JSON.toJSONString(this.filter(args)));
+            manageLog.setOperatorParam(AuditLogSanitizer.serialize(this.filter(args)));
         }
         // 出参记录
         if (reposeParameters != null) {
-            manageLog.setOperatorResponse(JSON.toJSONString(reposeParameters));
+            manageLog.setOperatorResponse(AuditLogSanitizer.serialize(reposeParameters));
         }
 
         // 保存日志

@@ -8,6 +8,7 @@ import java.util.List;
 import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 /**
  * 模型定义表 Mapper
@@ -16,6 +17,10 @@ import org.apache.ibatis.annotations.Param;
  */
 @Mapper
 public interface ByaiAimodelMapper extends BaseMapper<ByaiAimodel> {
+
+    /** Serialize global default-tag mutations across backend instances until transaction completion. */
+    @Select("SELECT 1 FROM pg_advisory_xact_lock(73592368124601)")
+    Integer lockDefaultModels();
 
     /**
      * 按条件查询模型列表（不分页；配合 PageHelper.startPage 使用，由 PageHelper 自动分页）

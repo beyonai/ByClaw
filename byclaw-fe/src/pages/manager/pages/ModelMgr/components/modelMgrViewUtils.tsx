@@ -9,7 +9,7 @@ type IntlShape = {
 
 export type ModelStatus = 'ENABLED' | 'DISABLED' | 'TESTING';
 
-const MODEL_TYPE_CODES = new Set(['LLM', 'RERANK', 'EMBEDDING', 'TTS', 'IMAGE_GENERATION']);
+const MODEL_TYPE_CODES = new Set(['LLM', 'RERANK', 'EMBEDDING', 'TTS', 'ASR', 'IMAGE_GENERATION']);
 
 export const getModelTypeName = (intl: IntlShape, value?: string | null, labels: Record<string, string> = {}) => {
   const code = value?.trim().toUpperCase() || '';

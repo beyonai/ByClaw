@@ -248,10 +248,10 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
   };
 
   // @ts-ignore
-  getSendPayload = () => {
+  getSendPayload = (textOverride?: string) => {
     const currentInputPayload = this.getCurrentInputPayload();
     const { fileList, deepThink, chatSettings, connectNet } = this.state;
-    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
+    const inputValue = textOverride ?? currentInputPayload?.text ?? this.state.inputValue;
     const resourceList = currentInputPayload?.resourceList ?? this.state.resourceList;
     const { userInfo, chatMode, myAgentType } = this.props;
     const { agentId } = this.props.globalContext;
@@ -589,7 +589,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             level={this.state.selectedThinkingLevel}
             onLevelChange={this.onThinkingLevelChange}
           />
-          {this.STTRender()}
         </Space>
       </>
     );

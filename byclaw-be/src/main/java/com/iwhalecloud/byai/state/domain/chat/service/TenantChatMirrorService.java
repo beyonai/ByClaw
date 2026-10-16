@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorVoiceMetadata;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorVoice;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,8 +65,18 @@ public class TenantChatMirrorService {
         String userMessageId = context.userMessageId.toString();
         node.mirror(context.tenantContext, event(context, "INPUT", "0", "input-" + userMessageId,
             new MirrorInputPayload(userMessageId, Long.toString(context.tenantContext.userId()), null,
-                context.assistantChatDto.getChatContent())));
+                context.assistantChatDto.getChatContent(), voiceMetadata(context))));
         if (candidate(context) != null) observations.putIfAbsent(context, new Observation());
+    }
+
+    private MirrorVoiceMetadata voiceMetadata(
+        ChatProcessContext context) {
+        var ext = context.assistantChatDto.getExtParams();
+        if (ext == null || !(ext.get("voice") instanceof Map<?, ?> voice)) return null;
+        var duration = voice.get("durationMs") instanceof Number value ? value.longValue() : null;
+        var metadata = new MirrorVoice(
+            String.valueOf(voice.get("fileId")), String.valueOf(voice.get("fileName")), "audio/mpeg", duration);
+        return new MirrorVoiceMetadata("VOICE", metadata);
     }
 
     public void terminal(ChatProcessContext context) {

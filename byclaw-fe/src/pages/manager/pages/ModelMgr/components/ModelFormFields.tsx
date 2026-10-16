@@ -27,6 +27,13 @@ import { isVolcengineImage, SEEDREAM_MODEL_PRESETS } from './volcengineImageConf
 import { findModelFormPreset, getModelPresetLimits, MODEL_FORM_PRESETS } from './modelFormPresets';
 import ModelPresetPicker from './ModelPresetPicker';
 
+import {
+  catalogProtocolOptions,
+  providerParamGroup,
+  registerProviderCatalog,
+  ProviderLabel,
+} from './mediaProviderCatalog';
+
 const { TextArea } = Input;
 
 type Option = { label: string; value: string };
@@ -127,37 +134,32 @@ const ModelFormFields: React.FC<Props> = ({
   const currentModelCode = Form.useWatch('modelCode', form);
   const currentPreset = findModelFormPreset(currentModelCode, presetId);
   const currentApiEndpoint = Form.useWatch('apiEndpoint', form);
-  const presetLimits = simplified
-    ? getModelPresetLimits(
-        {
-          modelCode: currentModelCode,
-          modelType: currentModelType,
-          modelProtocol: currentModelProtocol,
-          apiEndpoint: currentApiEndpoint,
-        },
-        presetId
-      )
-    : undefined;
+  const presetValues = {
+    modelCode: currentModelCode,
+    modelType: currentModelType,
+    modelProtocol: currentModelProtocol,
+    apiEndpoint: currentApiEndpoint,
+  };
+  const presetLimits = simplified ? getModelPresetLimits(presetValues, presetId) : undefined;
   const isVolcengine = isVolcengineImage({ modelType: currentModelType, modelProtocol: currentModelProtocol });
   const reasoningConfig = Form.useWatch('reasoningConfig', form) || {};
   const apiEndpointPlaceholder = useMemo(() => getApiEndpointPlaceholder(currentModelProtocol), [currentModelProtocol]);
   const isLlmModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'LLM';
+  const isAudioModel = ['ASR', 'TTS'].includes(`${currentModelType || ''}`.toUpperCase());
   const isImageGenerationModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'IMAGE_GENERATION';
-  const modelProtocolOptions = isImageGenerationModel
-    ? [
-        ...IMAGE_GENERATION_PROVIDER_OPTIONS.map((item) => {
-          const provider = getImageGenerationProvider(item.value);
-          return {
-            label: provider?.label || item.label,
-            value: provider?.modelProtocol || item.value,
-          };
-        }),
-        { label: 'Qwen', value: 'Qwen' },
-      ]
-    : [...MODEL_PROTOCOL_OPTIONS].filter(
-        (item) =>
-          item.value !== 'MINIMAX_IMAGE' && (item.value !== 'Volcengine Multimodal' || currentModelType === 'EMBEDDING')
-      );
+  let legacyProtocolOptions: Option[] = [...MODEL_PROTOCOL_OPTIONS].filter(
+    (item) =>
+      item.value !== 'MINIMAX_IMAGE' && (item.value !== 'Volcengine Multimodal' || currentModelType === 'EMBEDDING')
+  );
+  if (isImageGenerationModel) {
+    legacyProtocolOptions = [
+      ...IMAGE_GENERATION_PROVIDER_OPTIONS.map((item) => {
+        const provider = getImageGenerationProvider(item.value);
+        return { label: provider?.label || item.label, value: provider?.modelProtocol || item.value };
+      }),
+      { label: 'Qwen', value: 'Qwen' },
+    ];
+  }
   const defaultProviderOptions = useMemo(
     () => [
       { label: 'OpenAI', value: 'OpenAI' },
@@ -178,22 +180,28 @@ const ModelFormFields: React.FC<Props> = ({
   React.useEffect(() => {
     let cancelled = false;
     const modelType = `${currentModelType || 'LLM'}`.trim().toUpperCase();
-    const fallbackOptions =
-      modelType === 'IMAGE_GENERATION' ? IMAGE_GENERATION_PROVIDER_OPTIONS : defaultProviderOptions;
-    const paramGroupCode =
-      modelType === 'IMAGE_GENERATION' ? 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME' : 'SYSTEM_MODEL_PROVIDER_NAME';
+    let fallbackOptions: Option[] = [];
+    if (modelType === 'IMAGE_GENERATION') fallbackOptions = IMAGE_GENERATION_PROVIDER_OPTIONS;
+    else if (['LLM', 'RERANK', 'EMBEDDING'].includes(modelType)) fallbackOptions = defaultProviderOptions;
+    setSystemProviderOptions(fallbackOptions);
+    const paramGroupCode = providerParamGroup(modelType);
     getByParamGroupCode({ paramGroupCode })
       .then((res: any) => {
         if (cancelled) return;
         const list = res?.data?.byaiSystemConfigLists;
-        const options = Array.isArray(list)
-          ? list
-              .map((item: any) => ({
-                label: isEnglish ? item.paramEnName || item.paramName : item.paramName || item.paramEnName,
-                value: item.paramValue,
-              }))
-              .filter((item: Option) => item.value)
-          : [];
+        if (Array.isArray(list)) registerProviderCatalog(modelType, list);
+        const options: Option[] = [];
+        if (Array.isArray(list)) {
+          for (const item of list) {
+            if (typeof item?.paramValue !== 'string' || !item.paramValue.trim()) continue;
+            options.push({
+              label:
+                (isEnglish ? item.paramEnName || item.paramName : item.paramName || item.paramEnName) ||
+                item.paramValue,
+              value: item.paramValue,
+            });
+          }
+        }
         setSystemProviderOptions(options.length ? options : fallbackOptions);
       })
       .catch(() => {
@@ -204,7 +212,13 @@ const ModelFormFields: React.FC<Props> = ({
     };
   }, [currentModelType, defaultProviderOptions, isEnglish]);
 
-  const providerOptions = isImageGenerationModel ? IMAGE_GENERATION_PROVIDER_OPTIONS : systemProviderOptions;
+  const typeKey = `${currentModelType || 'LLM'}`.trim().toUpperCase();
+  const providerOptions = systemProviderOptions.map((item) => ({
+    ...item,
+    label: <ProviderLabel type={typeKey} provider={item.value} name={item.label} />,
+  }));
+  const pluginProtocols = catalogProtocolOptions(typeKey);
+  const modelProtocolOptions = pluginProtocols.length ? pluginProtocols : isAudioModel ? [] : legacyProtocolOptions;
   const reasoningEnabled = Boolean(reasoningConfig?.enabled);
   const reasoningCapability = `${reasoningConfig?.capability ?? 'unsupported'}`;
   const thinkingLevelOptions = THINKING_LEVEL_OPTIONS.map((value) => ({ label: value, value }));
@@ -510,7 +524,7 @@ const ModelFormFields: React.FC<Props> = ({
               id: simplified ? 'modelMgr.modal.automaticParamsHint' : 'modelMgr.modal.paramConfigDesc',
             })}
           </div>
-          {!isImageGenerationModel ? (
+          {!isImageGenerationModel && !isAudioModel ? (
             <>
               <Form.Item
                 label={intl.formatMessage({ id: 'modelMgr.modal.contextTokens' })}
@@ -627,7 +641,7 @@ const ModelFormFields: React.FC<Props> = ({
                   </>
                 )}
               </>
-            ) : !simplified || isLlmModel ? (
+            ) : !isAudioModel && (!simplified || isLlmModel) ? (
               <>
                 <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.temperature' })} name="temperature">
                   <InputNumber className={styles.fullWidth} min={0} max={2} step={0.1} />

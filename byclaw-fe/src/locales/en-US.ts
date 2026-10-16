@@ -1492,6 +1492,7 @@ export default {
   'sider.automation': 'Scheduled Tasks',
   'sider.projectSpace': 'Project',
   'workspaceSider.primaryNavigation': 'Primary navigation',
+  'workspaceSider.voiceMessage': 'Voice message',
   'workspaceSider.newSession': 'New Session',
   'workspaceSider.newTask': 'New',
   'workspaceSider.scheduledTasks': 'Schedule',

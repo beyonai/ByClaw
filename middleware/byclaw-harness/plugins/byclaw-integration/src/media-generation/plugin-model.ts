@@ -54,11 +54,11 @@ class UserConnectorModelError extends Error {
 /** Resolve configuration only. Provider generation and retries are not performed here. */
 export async function resolvePluginMediaModel(
   redis: MediaModelRedis,
-  type: 'IMAGE_GENERATION' | 'TTS',
+  type: 'IMAGE_GENERATION' | 'TTS' | 'ASR',
   options: PluginMediaModelOptions = {},
 ): Promise<MediaModel> {
-  if (type !== 'IMAGE_GENERATION' && type !== 'TTS') throw new Error('MEDIA_MODEL_INVALID_TYPE')
-  if (options.modelId) return resolveMediaModel(redis, type, options)
+  if (type !== 'IMAGE_GENERATION' && type !== 'TTS' && type !== 'ASR') throw new Error('MEDIA_MODEL_INVALID_TYPE')
+  if (type === 'ASR' || options.modelId) return resolveMediaModel(redis, type, options)
 
   const capability: MediaCapability = type === 'IMAGE_GENERATION' ? 'IMAGE' : 'TTS'
   const projectionPath = options.projectionPath ?? resolveMediaProjectionPath(capability)

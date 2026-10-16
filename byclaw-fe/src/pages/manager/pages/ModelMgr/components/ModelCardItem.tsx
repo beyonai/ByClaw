@@ -39,7 +39,7 @@ const ModelCardItem: React.FC<Props> = ({
     updatedAt,
     isDefault,
   } = record || {};
-  const isBackendDefaultModel = isDefault === 1 || isDefault === true;
+  const isBackendDefaultModel = isDefault === 1 || isDefault === true || isDefault === '1';
   // 所有类型均可设置默认，以后端默认标记为准，不依赖对话能力标签。
   const canSetDefault = recordStatus === 'ENABLED' && !isBackendDefaultModel;
 

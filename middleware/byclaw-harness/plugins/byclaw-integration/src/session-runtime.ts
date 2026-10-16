@@ -1,5 +1,6 @@
 /** Durable DSH root-session runtime used by the BYCLAW_DSH Worker. */
 
+import { ASR_NO_SPEECH_MESSAGE, ByClawVoiceRuntime, VoiceSummaryStreamFilter, byClawVoicePayload, voiceRequestFingerprint, withVoiceCancellation } from './voice-runtime.ts'
 import { normalizeByClawSessionId } from './session-extensions.ts'
 import { byClawSessionCwd } from './session-cwd.ts'
 import type { Context } from '@deepseek-ai/cordis'
@@ -127,10 +128,12 @@ export interface ByClawDshSessionRuntimeOptions {
   workspaceRegistry: ByClawSessionWorkspaceRegistry
   resolveInboundTarget?: (command: AskAgentCommand, text: string) => ByClawInboundTarget | undefined
   templateRuntime?: ByClawTemplateInstanceRuntime
+  voiceRuntime?: ByClawVoiceRuntime
   onActivityChange?: () => void
 }
 
 interface ActiveTurn {
+  voiceInteraction?: boolean
   owner?: ActiveTurn
   steeredCurrentTurn?: boolean
   foregroundEnded?: (event: Extract<SessionEvent, { type: 'turn/end' }>) => void
@@ -395,13 +398,27 @@ export async function resolveByClawTurnModelSelection(params: {
   )
 }
 
+export interface ByClawVoiceError {
+  schemaVersion: 1
+  domain: 'VOICE'
+  code: 'VOICE_TRANSCRIPTION_FAILED' | 'ASR_SPEECH_NOT_DETECTED'
+  retryable: boolean
+  httpStatus?: number
+  providerCode?: string
+  providerMessage?: string
+}
+
 export interface ByClawTurnFailurePresentation {
-  code: ByClawModelError['code']
+  code: ByClawModelError['code'] | ByClawVoiceError['code']
   message: string
 }
 
-/** DSH deliberately emits only a safe fallback; Java owns user-facing presentation. */
-export function byClawTurnFailurePresentation(error: ByClawModelError): ByClawTurnFailurePresentation {
+/** Preserve the structured MODEL fallback; voice input failures have separate safe guidance. */
+export function byClawTurnFailurePresentation(error: ByClawModelError | ByClawVoiceError): ByClawTurnFailurePresentation {
+  if (error.domain === 'VOICE') {
+    return { code: error.code, message: error.code === 'ASR_SPEECH_NOT_DETECTED'
+      ? ASR_NO_SPEECH_MESSAGE : '语音转文字失败，请检查 ASR 模型配置或重新录制后重试。' }
+  }
   return { code: error.code, message: '模型服务请求失败，请稍后重试或联系管理员。' }
 }
 
@@ -420,7 +437,7 @@ export async function emitByClawTurnFailure(params: {
   rootSessionId: string
   messageId: string
   sourceAgentType: string
-  error: ByClawModelError
+  error: ByClawModelError | ByClawVoiceError
 }): Promise<ByClawTurnFailurePresentation> {
   const failure = byClawTurnFailurePresentation(params.error)
   await params.emitter.emitChunk(params.sessionId, params.traceId, {
@@ -440,7 +457,7 @@ export async function emitByClawTurnFailure(params: {
       ...(params.error.providerCode === undefined ? {} : { provider_code: params.error.providerCode }),
       ...(params.error.providerMessage === undefined ? {} : { provider_message: params.error.providerMessage }),
       retryable: params.error.retryable,
-      diagnostic_id: `${params.traceId}:model`,
+      diagnostic_id: `${params.traceId}:${params.error.domain.toLowerCase()}`,
     },
   }, {
     eventType: EventType.ANSWER_DELTA,
@@ -1339,7 +1356,57 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     })
   }
 
+  private readonly voiceRequests = new Map<string, { fingerprint: string; promise: Promise<ByClawDshAskResult> }>()
+  private readonly voiceControllers = new Map<string, AbortController>()
+  private readonly voiceSummaryStreams = new WeakMap<ActiveTurn, Map<string, VoiceSummaryStreamFilter>>()
+
   async ask(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
+    const payload = byClawVoicePayload(command)
+    if (!payload) return this.askPrepared(command, context)
+    const voice = this.options.voiceRuntime
+    if (!voice) throw new Error('ASR_RUNTIME_UNAVAILABLE')
+    const route = byClawCommandSessionRoute(command, this.options.byRoot)
+    const key = `${command.header.userCode}\0${route.externalRootSessionId}\0${command.header.messageId}`
+    const fingerprint = voiceRequestFingerprint(payload)
+    const previous = this.voiceRequests.get(key)
+    if (previous) {
+      if (previous.fingerprint !== fingerprint) throw new Error('ASR_IDEMPOTENCY_CONFLICT')
+      return previous.promise
+    }
+    const controller = new AbortController()
+    this.voiceControllers.set(command.header.messageId, controller)
+    const operation = withVoiceCancellation(context, async cancellation => {
+      const signal = AbortSignal.any([cancellation, controller.signal])
+      let admitted = false
+      try {
+        const prepared = await voice.prepare(command, route.externalRootSessionId, signal)
+        if (!prepared) throw new Error('ASR_AUDIO_REQUIRED')
+        admitted = true
+        const result = await this.askPrepared(prepared.command, context)
+        signal.throwIfAborted()
+        const finalAnswer = await voice.finish(result.finalAnswer ?? result.answer, prepared, signal)
+        return { ...result, finalAnswer }
+      } catch (error) {
+        if (context.isCancelRequested() || controller.signal.aborted) throw new TaskCancelledError('ByClaw task cancelled')
+        if (!admitted) {
+          await emitByClawTurnFailure({ emitter: this.options.emitter, sessionId: normalizeByClawSessionId(context.sessionId),
+            traceId: context.traceId, rootSessionId: route.externalRootSessionId, messageId: command.header.messageId,
+            sourceAgentType: this.options.sourceAgentType,
+            error: { schemaVersion: 1, domain: 'VOICE', retryable: false,
+              code: error instanceof Error && error.message === 'ASR_SPEECH_NOT_DETECTED' ? 'ASR_SPEECH_NOT_DETECTED' : 'VOICE_TRANSCRIPTION_FAILED' } }).catch(() => undefined)
+        }
+        throw error
+      } finally {
+        this.voiceControllers.delete(command.header.messageId)
+      }
+    })
+    this.voiceRequests.set(key, { fingerprint, promise: operation })
+    // Bound retained delivery results; repeated deliveries do not repeat ASR, Agent or TTS.
+    if (this.voiceRequests.size > 256) this.voiceRequests.delete(this.voiceRequests.keys().next().value as string)
+    try { return await operation } catch (error) { this.voiceRequests.delete(key); throw error }
+  }
+
+  private async askPrepared(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
     const route = byClawCommandSessionRoute(command, this.options.byRoot)
     const key = `${command.header.userCode}\0${route.externalRootSessionId}`
     try {
@@ -1459,6 +1526,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
     const turn: ActiveTurn = {
       ...owner, owner, steeredCurrentTurn: steerWhileBusy,
+      voiceInteraction: command.extraPayload['voiceInteraction'] === true,
       context, rootMessageId: command.header.messageId, answer: '', forwarding: Promise.resolve(),
       // Foreground requests must not inherit the retained command's final answer.
       finalAnswerTracker: new ByClawFinalAnswerTracker(),
@@ -1553,6 +1621,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }
 
   async cancel(messageId: string, reason: string): Promise<void> {
+    this.voiceControllers.get(messageId)?.abort()
     const agent = this.messageAgents.get(messageId)
     if (agent === undefined) return // Preparing/queued commands observe the Gateway cancellation signal.
     const turn = this.owningTurnFor(agent.session)
@@ -1581,6 +1650,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }
 
   async close(): Promise<void> {
+    for (const controller of this.voiceControllers.values()) controller.abort()
+    this.voiceControllers.clear()
+    this.voiceRequests.clear()
     this.disposeSessionEvents()
     this.disposeAssistantStreamEvents()
     this.disposeAgentStatusEvents()
@@ -1689,6 +1761,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       )
     }
     const turn: ActiveTurn = {
+      voiceInteraction: command.extraPayload['voiceInteraction'] === true,
       userCode: command.header.userCode,
       ...entry.templateId === undefined ? {} : { templateId: entry.templateId },
       context,
@@ -2106,6 +2179,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const sessionId = String(session.id)
     if (frame.type === 'start') {
       await this.flushSessionBuffers(turn, session)
+      this.voiceSummaryStreams.get(turn)?.delete(`${session.id}:${frame.turn}:${frame.step}`)
       state.attempts.set(sessionId, { id: String(frame.attemptId), turn: frame.turn, step: frame.step, indexes: new Set(), blocks: new Map() })
       return
     }
@@ -2156,6 +2230,13 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       }
     }
     await this.flushStepBuffers(turn, session, event.data.turn, event.data.step)
+    if (event.type === 'assistant/message' && turn.voiceInteraction && sessionId === turn.responseSessionId) {
+      const key = `${session.id}:${event.data.turn}:${event.data.step}`
+      const filter = this.voiceSummaryStreams.get(turn)?.get(key)
+      const tail = filter?.finish()
+      this.voiceSummaryStreams.get(turn)?.delete(key)
+      if (tail) await this.emitAnswerChunk(turn, session, `${event.seq}:voice-tail`, tail, event.data.turn)
+    }
     if (attempt !== undefined) state.attempts.delete(sessionId)
   }
 
@@ -2519,6 +2600,14 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     keyParts.pop()
     const childTurn = Number(keyParts.pop())
     if (String(session.id) === turn.responseSessionId) {
+      if (turn.voiceInteraction) {
+        let filters = this.voiceSummaryStreams.get(turn)
+        if (!filters) { filters = new Map(); this.voiceSummaryStreams.set(turn, filters) }
+        let filter = filters.get(key)
+        if (!filter) { filter = new VoiceSummaryStreamFilter(); filters.set(key, filter) }
+        content = filter.write(content)
+      }
+      if (!content) return
       await this.emitAnswerChunk(turn, session, sequence, content, childTurn)
       return
     }
