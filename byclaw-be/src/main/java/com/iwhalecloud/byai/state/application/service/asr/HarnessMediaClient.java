@@ -87,6 +87,11 @@ public class HarnessMediaClient {
         try {
             String endpoint = resolveEndpoint(login.getUserCode());
             var runtime = runtimes.resolve();
+            // Sandbox discovery can return the console entry /chat?token=... .
+            // Media APIs are siblings of /chat; retain any gateway prefix and query.
+            var base = runtime.buildTargetUrl(endpoint, "", null);
+            String apiPath = base.encodedPath().replaceFirst("/chat/?$", "");
+            endpoint = base.newBuilder().encodedPath(apiPath.isEmpty() ? "/" : apiPath).build().toString();
             var target = runtime.buildTargetUrl(endpoint, path, null);
             Request.Builder builder = new Request.Builder().url(target).header("Beyond-Token", token)
                 .post(RequestBody.create(mapper.writeValueAsBytes(body), MediaType.get("application/json")));
