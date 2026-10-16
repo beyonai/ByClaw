@@ -28,7 +28,7 @@ async function renderEdit(fields: Record<string, any>) {
   const saveModelRequest = jest.fn().mockResolvedValue({ data: { id: '42' } });
   await act(async () => {
     render(
-      <ConfigProvider theme={{ token: { motion: false } }}>
+      <ConfigProvider virtual={false} theme={{ token: { motion: false } }}>
         <SharedModelFormModal
           open
           type="edit"
@@ -63,7 +63,7 @@ describe('optional model provider compatibility', () => {
     const TestForm = () => {
       [form] = Form.useForm();
       return (
-        <ConfigProvider theme={{ token: { motion: false } }}>
+        <ConfigProvider virtual={false} theme={{ token: { motion: false } }}>
           <ModelFormFields
             form={form}
             modalTitle="model"
@@ -155,9 +155,12 @@ describe('optional model provider compatibility', () => {
       modelProtocol: 'MINIMAX_IMAGE',
       providerName: 'MINIMAX',
     });
-    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelProtocol'));
     await act(async () => {
-      fireEvent.click(await screen.findByText('Volcengine Ark'));
+      fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelProtocol'));
+    });
+    const option = await screen.findByText('Volcengine Ark');
+    await act(async () => {
+      fireEvent.click(option);
     });
     const payload = await saveEdit(save);
     expect(payload).toMatchObject({
@@ -170,9 +173,12 @@ describe('optional model provider compatibility', () => {
 
   it('fills an empty provider when a known image protocol is selected without changing custom connection fields', async () => {
     const save = await renderEdit({ modelType: 'IMAGE_GENERATION', modelProtocol: 'Qwen', providerName: undefined });
-    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelProtocol'));
     await act(async () => {
-      fireEvent.click(await screen.findByText('Volcengine Ark'));
+      fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelProtocol'));
+    });
+    const option = await screen.findByText('Volcengine Ark');
+    await act(async () => {
+      fireEvent.click(option);
     });
     const payload = await saveEdit(save);
     expect(payload).toMatchObject({

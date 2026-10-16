@@ -22,6 +22,25 @@ const flattenMessages = (messages: Record<string, any>, prefix = ''): Record<str
     })
   );
 
+// 文案描述对象只有 id/defaultMessage/description；模型模板也有 id，但不是国际化引用。
+const isMessageDescriptor = (node: any) =>
+  node?.type === 'ObjectExpression' &&
+  node.properties.length > 0 &&
+  node.properties.every(
+    (property: any) =>
+      property.type === 'ObjectProperty' &&
+      ['id', 'defaultMessage', 'description'].includes(property.key.name || property.key.value)
+  );
+
+it('distinguishes message descriptors from model preset IDs', () => {
+  const objects = parse(
+    `const message = { id: 'missing.message', defaultMessage: 'Missing' };
+    const preset = { id: 'vendor:model.1', label: 'Model', values: {} };`,
+    { sourceType: 'module' }
+  ).program.body.map((statement: any) => statement.declarations[0].init);
+  expect(objects.map(isMessageDescriptor)).toEqual([true, false]);
+});
+
 it('provides both languages for all directly referenced message IDs in active frontend code', () => {
   const files = sourceFiles(sourceRoot);
   const messages: Record<string, Record<string, string>> = { 'zh-CN': { ...zhCN }, 'en-US': { ...enUS } };
@@ -34,9 +53,10 @@ it('provides both languages for all directly referenced message IDs in active fr
     }
   }
   const missing: string[] = [];
-  const visit = (node: any, file: string) => {
+  const visit = (node: any, file: string, parent?: any) => {
     if (!node || typeof node !== 'object') return;
     if (
+      isMessageDescriptor(parent) &&
       node.type === 'ObjectProperty' &&
       (node.key.name || node.key.value) === 'id' &&
       node.value.type === 'StringLiteral' &&
@@ -49,8 +69,8 @@ it('provides both languages for all directly referenced message IDs in active fr
       }
     }
     for (const value of Object.values(node)) {
-      if (Array.isArray(value)) value.forEach((child) => visit(child, file));
-      else if (value && typeof value === 'object') visit(value, file);
+      if (Array.isArray(value)) value.forEach((child) => visit(child, file, node));
+      else if (value && typeof value === 'object') visit(value, file, node);
     }
   };
   for (const file of files) {

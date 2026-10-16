@@ -194,9 +194,9 @@ const SharedModelFormModal: React.FC<Props> = ({
             providerName:
               modelType === 'IMAGE_GENERATION'
                 ? resolveImageGenerationProviderName(
-                    detail.providerName,
-                    detail.modelProtocol || imageDefaults.modelProtocol
-                  )
+                  detail.providerName,
+                  detail.modelProtocol || imageDefaults.modelProtocol
+                )
                 : detail.providerName,
             modelProtocol: detail.modelProtocol || imageDefaults.modelProtocol || 'OpenAI',
             modelCode: detail.modelCode || imageDefaults.modelCode,
@@ -331,8 +331,8 @@ const SharedModelFormModal: React.FC<Props> = ({
         extractedModelId !== null && extractedModelId !== undefined
           ? extractedModelId
           : querySavedModelId
-          ? await querySavedModelId(values, res)
-          : undefined;
+            ? await querySavedModelId(values, res)
+            : undefined;
 
       if (mode === 'save_continue') {
         if (resolvedModelId !== null && resolvedModelId !== undefined) {
@@ -368,7 +368,10 @@ const SharedModelFormModal: React.FC<Props> = ({
     }
   };
 
-  const handleValuesChange = (changedValues: any, allValues: any, fromPreset = false) => {
+  const handleValuesChange = (changedValues: any, _allValues: any, fromPreset = false) => {
+    // onValuesChange 只返回已注册字段，会丢掉未挂载的 budgets 等默认值，误判为用户修改。
+    // 使用完整表单存储比较自动填充值，保留隐藏配置并继续保护用户手填值。
+    const allValues = form.getFieldsValue(true);
     const changedKeys = Object.keys(changedValues || {});
     let syncedValues = allValues;
     if (type === 'add' && typeof changedValues?.reasoningConfig?.enabled === 'boolean') {
@@ -377,10 +380,10 @@ const SharedModelFormModal: React.FC<Props> = ({
       const defaultLevel = !config.enabled
         ? 'off'
         : config.defaultLevel && config.defaultLevel !== 'off'
-        ? config.defaultLevel
-        : capability === 'adaptive'
-        ? 'adaptive'
-        : 'high';
+          ? config.defaultLevel
+          : capability === 'adaptive'
+            ? 'adaptive'
+            : 'high';
       const reasoningConfig = { ...config, capability, defaultLevel };
       form.setFieldValue('reasoningConfig', reasoningConfig);
       syncedValues = { ...allValues, reasoningConfig };

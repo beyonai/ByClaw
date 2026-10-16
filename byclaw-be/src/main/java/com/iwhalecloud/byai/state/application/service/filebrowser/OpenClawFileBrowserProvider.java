@@ -67,6 +67,15 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
     }
 
     @Override
+    public List<FileBrowserItemVo> listForTransfer(String userCode, Long resourceId, String relativePath) {
+        try {
+            return requestItemList(userCode, relativePath);
+        } catch (Exception e) {
+            throw new IllegalStateException("Cannot read source directory: " + relativePath, e);
+        }
+    }
+
+    @Override
     public void upload(String userCode, Long resourceId, String relativePath, MultipartFile[] files) throws Exception {
         String path = resolvePath(relativePath);
         HttpUrl targetUrl;

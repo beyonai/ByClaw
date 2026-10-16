@@ -16,6 +16,7 @@ export interface KnowledgeTargetItem {
 
 export interface KnowledgeTargetSelectorProps {
   open: boolean;
+  title?: React.ReactNode;
   onOk: () => void;
   onCancel: () => void;
   confirmLoading?: boolean;
@@ -43,7 +44,16 @@ export interface KnowledgeTargetSelectorProps {
 
 type KnowledgeTargetSelectorContentProps = Omit<
   KnowledgeTargetSelectorProps,
-  'open' | 'onOk' | 'onCancel' | 'confirmLoading' | 'okDisabled' | 'width' | 'zIndex' | 'destroyOnClose' | 'footerExtra'
+  | 'open'
+  | 'title'
+  | 'onOk'
+  | 'onCancel'
+  | 'confirmLoading'
+  | 'okDisabled'
+  | 'width'
+  | 'zIndex'
+  | 'destroyOnClose'
+  | 'footerExtra'
 >;
 
 function normalizeDirectoryPath(path?: string) {
@@ -284,6 +294,7 @@ const KnowledgeTargetSelectorContent: React.FC<KnowledgeTargetSelectorContentPro
 const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) => {
   const {
     open,
+    title,
     onOk,
     onCancel,
     confirmLoading,
@@ -299,7 +310,7 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
   return (
     <Modal
       open={open}
-      title={intl.formatMessage({ id: 'fileSider.saveToKnowledge' })}
+      title={title ?? intl.formatMessage({ id: 'fileSider.saveToKnowledge' })}
       okText={intl.formatMessage({ id: 'common.confirm' })}
       cancelText={intl.formatMessage({ id: 'common.cancel' })}
       confirmLoading={confirmLoading}
@@ -310,7 +321,10 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
       zIndex={zIndex}
       destroyOnClose={destroyOnClose}
     >
-      <KnowledgeTargetSelectorContent {...selectorProps} />
+      <KnowledgeTargetSelectorContent
+        key={String(getKnowledgeBaseId(selectorProps.selectedKnowledgeBase || {}))}
+        {...selectorProps}
+      />
       {footerExtra}
     </Modal>
   );

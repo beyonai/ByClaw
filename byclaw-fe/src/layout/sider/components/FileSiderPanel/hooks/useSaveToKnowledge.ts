@@ -1,18 +1,25 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { message } from 'antd';
 import { useIntl } from '@umijs/max';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import type { UploadConfirmFile } from '@/components/UploadConfirmModal';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
-import { queryDigEmployeeManageKnowledgeResourceAuth } from '@/pages/manager/service/resources';
+import { listResourceUseAuth, queryDigEmployeeManageKnowledgeResourceAuth } from '@/pages/manager/service/resources';
 import {
+  buildDataset,
   checkUploadFileConflicts,
   createFolder as createKnowledgeFolder,
   queryDirAndFileByLevel,
   uploadFiles as uploadKnowledgeFiles,
   type QueryDirAndFileByLevelItem,
 } from '@/service/knowledgeCenter';
-import { downloadFile, listFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import {
+  downloadFile,
+  listFiles,
+  saveToPersonalKnowledge,
+  type FileBrowserItem,
+  type FileBrowserKnowledgeSaveResult,
+} from '@/service/fileBrowser';
 import { ensureDirectoryPath, getRawBlob, isDirectory, joinKnowledgeDirectoryPath, unwrapListResponse } from '../utils';
 
 interface PendingKnowledgeUpload extends UploadConfirmFile {
@@ -22,11 +29,21 @@ interface PendingKnowledgeUpload extends UploadConfirmFile {
 
 interface UseSaveToKnowledgeOptions {
   resourceId: string;
+  personalOnly?: boolean;
   clearClickTimer: () => void;
 }
 
-export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseSaveToKnowledgeOptions) {
+export default function useSaveToKnowledge({
+  resourceId,
+  clearClickTimer,
+  personalOnly = false,
+}: UseSaveToKnowledgeOptions) {
   const intl = useIntl();
+  const knowledgeRequestRef = useRef(0);
+  const submitRef = useRef(false);
+  const folderRequestRef = useRef(0);
+  const [saveResult, setSaveResult] = useState<FileBrowserKnowledgeSaveResult | null>(null);
+  const [retryingBuild, setRetryingBuild] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveTarget, setSaveTarget] = useState<FileBrowserItem | null>(null);
   const [knowledgeKeyword, setKnowledgeKeyword] = useState('');
@@ -45,30 +62,67 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
 
   const loadKnowledgeBases = useCallback(
     async (keyword = knowledgeKeyword) => {
+      const requestId = ++knowledgeRequestRef.current;
       setKnowledgeLoading(true);
+      setKnowledgeBases([]);
       try {
-        const response = await queryDigEmployeeManageKnowledgeResourceAuth({
-          resourceId,
-          pageNum: 1,
-          pageSize: 30,
-          keyword: keyword.trim(),
-        });
-        const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
-        setKnowledgeBases(rows);
-        if (!rows.length) {
-          message.warning(intl.formatMessage({ id: 'fileSider.saveToKnowledge.noManagePermission' }));
+        const rows: IKnowledgeBaseItem[] = [];
+        let pageNum = 1;
+        while (true) {
+          let response;
+          if (personalOnly) {
+            response = await listResourceUseAuth({
+              ownerType: 'personal',
+              permission: 'MANAGEABLE_BY_ME',
+              resourceBizTypeList: ['KG_DOC', 'KG_QA', 'KG_TERM'],
+              resourceStatus: '',
+              excludeDeleted: true,
+              pageNum,
+              pageSize: 100,
+              keyword: keyword.trim(),
+            });
+          } else {
+            response = await queryDigEmployeeManageKnowledgeResourceAuth({
+              resourceId,
+              pageNum,
+              pageSize: 30,
+              keyword: keyword.trim(),
+            });
+          }
+          if (requestId !== knowledgeRequestRef.current) return;
+          const data = response?.data || response;
+          const page = Array.isArray(data?.rows) ? data.rows : Array.isArray(data?.list) ? data.list : [];
+          rows.push(
+            ...page.filter(
+              (item: IKnowledgeBaseItem & { hasManagePermission?: boolean }) =>
+                !personalOnly ||
+                (['personal', 'personal_default'].includes(item.ownerType || '') && item.hasManagePermission === true)
+            )
+          );
+          // 个人知识库需覆盖所有分页，不能只显示前 30 个；旧员工入口保持原行为。
+          if (
+            !personalOnly ||
+            !page.length ||
+            (pageNum >= Number(data?.totalPages || 0) && pageNum * 100 >= Number(data?.total || 0))
+          )
+            break;
+          pageNum += 1;
         }
+        setKnowledgeBases(rows);
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        if (requestId === knowledgeRequestRef.current) {
+          message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        }
       } finally {
-        setKnowledgeLoading(false);
+        if (requestId === knowledgeRequestRef.current) setKnowledgeLoading(false);
       }
     },
-    [intl, knowledgeKeyword, resourceId]
+    [intl, knowledgeKeyword, personalOnly, resourceId]
   );
 
   const loadKnowledgeFolders = useCallback(
     async (kb: IKnowledgeBaseItem, directoryPath: string) => {
+      const requestId = ++folderRequestRef.current;
       setKnowledgeFolderLoading(true);
       try {
         const response = await queryDirAndFileByLevel({
@@ -78,6 +132,7 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
         const folders = unwrapListResponse<QueryDirAndFileByLevelItem>(response).filter(
           (item) => item.type === 'directory'
         );
+        if (requestId !== folderRequestRef.current) return [];
         setKnowledgeFolders(folders);
         setKnowledgeDirectoryPath(directoryPath);
         return folders;
@@ -85,7 +140,7 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
         return [];
       } finally {
-        setKnowledgeFolderLoading(false);
+        if (requestId === folderRequestRef.current) setKnowledgeFolderLoading(false);
       }
     },
     [intl]
@@ -109,7 +164,10 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
 
   const openSaveToKnowledge = useCallback(
     (item: FileBrowserItem) => {
+      if (submitRef.current) return;
       clearClickTimer();
+      folderRequestRef.current += 1;
+      setKnowledgeFolderLoading(false);
       setSaveTarget(item);
       setKnowledgeKeyword('');
       setSelectedKnowledgeBase(null);
@@ -124,6 +182,8 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
   const handleSelectKnowledgeBase = useCallback(
     (kb: IKnowledgeBaseItem) => {
       setSelectedKnowledgeBase(kb);
+      setKnowledgeDirectoryPath('/');
+      setKnowledgeFolders([]);
       void loadKnowledgeFolders(kb, '/');
     },
     [loadKnowledgeFolders]
@@ -264,12 +324,13 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
   );
 
   const handleConfirmSaveToKnowledge = useCallback(async () => {
-    if (!saveTarget) return;
+    if (!saveTarget || submitRef.current || knowledgeFolderLoading) return;
     if (!selectedKnowledgeBase) {
       message.warning(intl.formatMessage({ id: 'multiChoices.saveToKnowledge.selectKb' }));
       return;
     }
 
+    submitRef.current = true;
     setSavingToKnowledge(true);
     try {
       const uploads = await collectKnowledgeUploads(saveTarget, knowledgeDirectoryPath);
@@ -283,9 +344,11 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
     } catch (error: any) {
       message.error(error?.message || intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }));
     } finally {
+      submitRef.current = false;
       setSavingToKnowledge(false);
     }
   }, [
+    knowledgeFolderLoading,
     checkKnowledgeUploadConflicts,
     collectKnowledgeUploads,
     intl,
@@ -296,11 +359,23 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
 
   const handleConfirmKnowledgeUpload = useCallback(
     async (processFrontMatter: boolean) => {
-      if (!saveTarget || !pendingKnowledgeBase) return;
+      if (!saveTarget || !pendingKnowledgeBase || submitRef.current) return;
+      submitRef.current = true;
       const overwrite = pendingKnowledgeConflicts.length > 0;
       setSavingToKnowledge(true);
       try {
-        if (isDirectory(saveTarget)) {
+        if (personalOnly) {
+          const result = await saveToPersonalKnowledge({
+            resourceId,
+            sourcePath: saveTarget.path,
+            sourceDir: isDirectory(saveTarget),
+            targetResourceId: pendingKnowledgeBase.resourceId,
+            targetDirectoryPath: pendingKnowledgeDirectoryPath,
+            processFrontMatter,
+            overwrite,
+          });
+          setSaveResult(result);
+        } else if (isDirectory(saveTarget)) {
           await copyFileBrowserDirectoryToKnowledge(saveTarget, pendingKnowledgeBase, pendingKnowledgeDirectoryPath, {
             processFrontMatter,
             overwrite,
@@ -311,7 +386,7 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
             overwrite,
           });
         }
-        message.success(intl.formatMessage({ id: 'multiChoices.saveToKnowledge.success' }));
+        if (!personalOnly) message.success(intl.formatMessage({ id: 'multiChoices.saveToKnowledge.success' }));
         setKnowledgeUploadConfirmOpen(false);
         setPendingKnowledgeUploads([]);
         setPendingKnowledgeConflicts([]);
@@ -322,10 +397,13 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }));
       } finally {
+        submitRef.current = false;
         setSavingToKnowledge(false);
       }
     },
     [
+      personalOnly,
+      resourceId,
       copyFileBrowserDirectoryToKnowledge,
       intl,
       pendingKnowledgeBase,
@@ -352,7 +430,41 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
     setSaveTarget(null);
   }, [savingToKnowledge]);
 
+  const retryFailedBuilds = useCallback(async () => {
+    if (!saveResult || submitRef.current) return;
+    submitRef.current = true;
+    setRetryingBuild(true);
+    const failures = [];
+    let submitted = 0;
+    try {
+      for (const item of saveResult.buildFailedItems) {
+        if (!item.filePath) {
+          failures.push(item);
+          continue;
+        }
+        try {
+          await buildDataset({ resourceId: String(saveResult.targetResourceId), directoryPath: item.filePath });
+          submitted += 1;
+        } catch (error: any) {
+          failures.push({ ...item, error: error?.msg || error?.message || String(error) });
+        }
+      }
+      setSaveResult({
+        ...saveResult,
+        buildSubmittedCount: saveResult.buildSubmittedCount + submitted,
+        buildFailedItems: failures,
+      });
+    } finally {
+      submitRef.current = false;
+      setRetryingBuild(false);
+    }
+  }, [saveResult]);
+
   return {
+    saveResult,
+    setSaveResult,
+    retryingBuild,
+    retryFailedBuilds,
     saveModalOpen,
     knowledgeKeyword,
     knowledgeBases,

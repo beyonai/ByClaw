@@ -38,7 +38,7 @@ describe('achievement file tree preview actions', () => {
     (getCatalogsByTaskId as jest.Mock).mockResolvedValue([]);
   });
 
-  it.each(['SVG', 'jpeg', 'avif', 'csv', 'xls', 'webm', 'mp3', 'pdf', 'docx', 'pptx'])(
+  it.each(['SVG', 'jpeg', 'avif', 'csv', 'xls', 'webm', 'mp3', 'pdf', 'docx', 'pptx', 'zip'])(
     'opens %s from the file tree',
     async (type) => {
       const fileName = `report.${type}`;
@@ -53,10 +53,10 @@ describe('achievement file tree preview actions', () => {
 
   it('keeps downloads for binary formats without an online decoder', async () => {
     (getWorkSpaceFile as jest.Mock).mockResolvedValue({
-      files: [{ fileId: '1', fileName: 'archive.zip', fileUrl: '/files/archive.zip' }],
+      files: [{ fileId: '1', fileName: 'design.psd', fileUrl: '/files/design.psd' }],
     });
     render(<FileView />);
-    await waitFor(() => expect(screen.getByText('archive.zip')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('design.psd')).toBeInTheDocument());
     expect(screen.queryByRole('img', { name: 'eye' })).not.toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'download' })).toBeInTheDocument();
   });

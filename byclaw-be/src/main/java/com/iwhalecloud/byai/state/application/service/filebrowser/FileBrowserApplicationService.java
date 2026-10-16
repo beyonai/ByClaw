@@ -68,6 +68,14 @@ public class FileBrowserApplicationService {
         return items;
     }
 
+    public List<FileBrowserItemVo> listForTransfer(String userCode, Long resourceId, String relativePath) {
+        FileBrowserPathPolicy.assertBrowsable(relativePath);
+        return providerFactory.getProvider().listForTransfer(userCode, resourceId, toProviderPath(relativePath)).stream()
+            .filter(item -> !FileBrowserPathPolicy.isProtected(item.getPath()))
+            .map(this::toExternalItem)
+            .collect(java.util.stream.Collectors.toList());
+    }
+
     public void upload(String userCode, Long resourceId, String relativePath, MultipartFile[] files) throws Exception {
         FileBrowserPathPolicy.assertBrowsable(relativePath);
         String providerPath = toProviderPath(relativePath);

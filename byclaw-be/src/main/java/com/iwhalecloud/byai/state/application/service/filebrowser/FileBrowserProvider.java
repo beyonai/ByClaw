@@ -13,6 +13,11 @@ public interface FileBrowserProvider {
 
     List<FileBrowserItemVo> list(String userCode, Long resourceId, String relativePath);
 
+    /** 复制时读取失败必须抛错，不能被当作空目录保存成功。 */
+    default List<FileBrowserItemVo> listForTransfer(String userCode, Long resourceId, String relativePath) {
+        return list(userCode, resourceId, relativePath);
+    }
+
     void upload(String userCode, Long resourceId, String relativePath, MultipartFile[] files) throws Exception;
 
     InputStream download(String userCode, Long resourceId, String relativePath);

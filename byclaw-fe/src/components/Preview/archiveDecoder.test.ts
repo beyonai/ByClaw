@@ -44,15 +44,15 @@ describe('ZIP directory and bounded on-demand extraction', () => {
   it('recognizes photo aliases inside ZIP and preserves the extracted bytes', async () => {
     const zip = new JSZip();
     const bytes = new Uint8Array([0xff, 0x0a, 0, 0]);
-    const names = ['照片.JFIF', '照片.jpe', '照片.HIF', '照片.JXL'];
+    const names = ['照片.JFIF', '照片.jpe', '照片.HIF', '照片.JXL', '原片.CR3'];
     names.forEach((name) => zip.file(name, bytes));
-    zip.file('原片.CR3', bytes);
+    zip.file('原片.psd', bytes);
     const archive = await openArchive(await encodeZip(zip));
     for (const name of names) {
       expect(archive.entries).toContainEqual({ name, directory: false, previewable: true });
       expect(new Uint8Array(await archive.extract(name))).toEqual(bytes);
     }
-    await expect(archive.extract('原片.CR3')).rejects.toMatchObject({ code: 'unsupported' });
+    await expect(archive.extract('原片.psd')).rejects.toMatchObject({ code: 'unsupported' });
   });
 
   it('opens RTF and ODS children while preserving their original bytes', async () => {

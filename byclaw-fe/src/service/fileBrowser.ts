@@ -1,3 +1,4 @@
+import type { KnowledgeUploadItem } from '@/service/knowledgeCenter';
 import { GET, POST } from '@/service/common/request';
 import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 
@@ -185,4 +186,19 @@ export function downloadFolder(resourceId: string | number, path: string) {
 
 export function saveToKnowledge(params: FileBrowserSaveToKnowledgeParams) {
   return POST('/byaiService/fileBrowser/saveToKnowledge', params);
+}
+
+export interface FileBrowserKnowledgeSaveResult {
+  targetResourceId: string | number;
+  targetDirectoryPath: string;
+  createdFolderCount: number;
+  uploadedFileCount: number;
+  buildSubmittedCount: number;
+  failedItems: KnowledgeUploadItem[];
+  buildFailedItems: KnowledgeUploadItem[];
+  postProcessErrors: string[];
+}
+
+export function saveToPersonalKnowledge(params: FileBrowserSaveToKnowledgeParams) {
+  return POST<FileBrowserKnowledgeSaveResult>('/byaiService/fileBrowser/saveToPersonalKnowledge', params);
 }

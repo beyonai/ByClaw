@@ -27,5 +27,14 @@ public class FileBrowserSaveToKnowledgeVo {
 
     private int uploadedFileCount;
 
+    /** 已受理构建请求的文件数，不表示构建已完成。 */
+    private int buildSubmittedCount;
+
+    private List<UploadItem> failedItems = new ArrayList<>();
+
+    private List<UploadItem> buildFailedItems = new ArrayList<>();
+
+    private List<String> postProcessErrors = new ArrayList<>();
+
     private List<UploadItem> uploadItems = new ArrayList<>();
 }

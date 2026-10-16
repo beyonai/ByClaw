@@ -387,7 +387,8 @@ describe('deterministic model form presets', () => {
     values = { ...values, ...applyModelAutofill(state, {}, values) };
     expect(values).toMatchObject(manual);
     expect(values.contextTokens).toBe(202745);
-    expect(values.reasoningEffortMapText).toBeUndefined();
+    expect(values.reasoningEffortMapText).toBe('');
+    expect(buildModelUpsertPayload({ values }).reasoningConfig).not.toHaveProperty('effortMap');
     expect(values.reasoningConfig).toMatchObject({ enabled: false, compatFormat: 'bailian' });
   });
 

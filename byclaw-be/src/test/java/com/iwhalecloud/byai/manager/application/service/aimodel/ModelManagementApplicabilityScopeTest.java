@@ -52,7 +52,9 @@ class ModelManagementApplicabilityScopeTest {
         when(byaiAimodelDomainService.upsert(any(ByaiAimodel.class))).thenAnswer(invocation -> {
             ByaiAimodel saved = invocation.getArgument(0);
             saved.setModelId(901L);
-            assertThat(JSONObject.parseObject(saved.getInParams()).getString("applicabilityScope")).isEqualTo(scope);
+            JSONObject inParams = JSONObject.parseObject(saved.getInParams());
+            // 新增模型未提供任何可选参数时，in_params 可以为空；仍验证适用范围往返保持为空。
+            assertThat(inParams == null ? null : inParams.getString("applicabilityScope")).isEqualTo(scope);
             when(byaiAimodelDomainService.getById(901L)).thenReturn(saved);
             return 901L;
         });

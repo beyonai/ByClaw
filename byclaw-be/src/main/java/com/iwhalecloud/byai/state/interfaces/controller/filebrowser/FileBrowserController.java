@@ -130,6 +130,21 @@ public class FileBrowserController {
      * @param request 源文件模块路径与目标知识库目录
      * @return 保存结果
      */
+    @PostMapping("/saveToPersonalKnowledge")
+    public ResponseUtil<FileBrowserSaveToKnowledgeVo> saveToPersonalKnowledge(
+        @RequestBody FileBrowserSaveToKnowledgeRequest request) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail("用户未登录");
+        }
+        try {
+            return ResponseUtil.successResponse(
+                knowledgeTransferApplicationService.saveToPersonalKnowledge(userCode, request));
+        } catch (Exception e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+    }
+
     @PostMapping("/saveToKnowledge")
     public ResponseUtil<FileBrowserSaveToKnowledgeVo> saveToKnowledge(
         @RequestBody FileBrowserSaveToKnowledgeRequest request) {

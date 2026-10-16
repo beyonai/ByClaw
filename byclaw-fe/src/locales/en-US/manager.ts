@@ -289,6 +289,20 @@ export default {
 
   // Position Member List
   'postList.searchPlaceholder': 'Search by name, employee ID',
+  'postList.batchActions': 'Batch Actions',
+  'postList.operation': 'Actions',
+  'postList.batchAdd': 'Add Users in Bulk',
+  'postList.batchRemove': 'Remove Users in Bulk',
+  'postList.addSearchPlaceholder': 'Search by user code or name',
+  'postList.userCode': 'User Code',
+  'postList.selectedCount': '{count} users selected',
+  'postList.removeTitle': 'Delete Position Membership',
+  'postList.removeConfirm':
+    'Remove the selected {count} users from this position? Their organization memberships and roles will be retained.',
+  'postList.addSuccess': 'Users added to the position',
+  'postList.removeSuccess': 'Users removed from the position',
+  'postList.updateFailed': 'Failed to update position memberships. Please try again.',
+  'postList.loadUsersFailed': 'Failed to load users. Please try again.',
   'postList.userName': 'Username',
   'postList.phone': 'Phone Number',
   'postList.userNumber': 'ID',

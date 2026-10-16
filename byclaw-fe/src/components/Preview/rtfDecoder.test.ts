@@ -14,9 +14,9 @@ describe('RTF real parser and isolated static output', () => {
     );
     expect(result.body.textContent).toContain('中文');
     expect(result.body.textContent).not.toContain('\\u20013');
-    expect(result.querySelector('[style*="font-weight: bold"]')).toHaveTextContent('Bold');
-    expect(result.querySelector('[style*="font-style: italic"]')).toHaveTextContent('Italic');
-    expect(result.querySelector('[style*="text-decoration: underline"]')).toHaveTextContent('Underline');
+    expect(result.querySelector('[style*="font-weight: bold"]')?.textContent).toContain('Bold');
+    expect(result.querySelector('[style*="font-style: italic"]')?.textContent).toContain('Italic');
+    expect(result.querySelector('[style*="text-decoration: underline"]')?.textContent).toContain('Underline');
   });
 
   it('decodes ANSI Chinese bytes using the declared code page', async () => {

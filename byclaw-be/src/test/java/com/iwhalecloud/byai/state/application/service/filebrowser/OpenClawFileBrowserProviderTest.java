@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.filebrowser;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,12 @@ class OpenClawFileBrowserProviderTest {
         assertThat(invokeResolvePath(null)).isEqualTo("/");
         assertThat(invokeResolvePath("")).isEqualTo("/");
         assertThat(invokeResolvePath("/")).isEqualTo("/");
+    }
+
+    @Test
+    void transferPropagatesUnavailableSandboxInsteadOfReturningAnEmptyDirectory() {
+        assertThatThrownBy(() -> provider.listForTransfer("alice", 1L, "/session/"))
+            .isInstanceOf(IllegalStateException.class);
     }
 
     private String invokeResolvePath(String relativePath) {
