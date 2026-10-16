@@ -210,3 +210,15 @@ const target = 'http://your-api-server:8569';
 本项目基于 [Apache License 2.0](LICENSE) 开源。
 
 Copyright 2026 beyondAI
+
+
+## 语音偏好与语音消息
+
+个人「常规」设置提供「语音自动播报」与「输入语音自动转文字」两个 Ant Design Switch，默认开启。偏好按账号保存在当前浏览器，刷新后保留，不跨设备同步。
+
+- 自动播报只适用于当前页面收到并完成的数字员工实时回复；同一回复的多个语音片段按展示顺序播放。历史加载、返回已完成的缓存会话、重新打开开关不会补播旧语音。
+- 切换会话会取消待播片段。手动播放优先，并使尚未解析完成的旧自动播报失效。浏览器阻止自动播放时仍可点击气泡播放。
+- 新输入语音自动展开 ASR 文字；关闭后保留「语音转文字」菜单。自动识别失败不循环重试，用户可手动重试；历史消息不会批量请求 ASR。
+- 语音制品同时从正文路径和结构化工具结果提取，规范化路径后去重；即使最终正文只列文件名，多段语音仍展示各自可播放、可转写的气泡。
+
+回归测试：`pnpm exec jest src/components/MessageList/components/VoiceMessage src/components/MessageList/components/ReplyFileArtifacts src/pages/settings/__tests__/index.test.tsx src/utils/__tests__/imageArtifacts.test.ts --runInBand`。

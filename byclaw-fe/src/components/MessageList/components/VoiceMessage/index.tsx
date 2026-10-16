@@ -1,3 +1,4 @@
+import { cancelVoicePlayback, enqueueVoicePlayback, skipVoicePlayback } from '@/utils/voicePlayback';
 import { loadVoiceAudio, transcribeVoice } from '@/service/voice';
 import { getVoiceDurationSeconds, type VoiceMessage as VoiceData } from '@/utils/voice';
 import { DownOutlined, LoadingOutlined } from '@ant-design/icons';
@@ -8,6 +9,10 @@ import styles from './index.module.less';
 
 type Props = {
   sessionId?: string;
+  autoPlayKey?: string;
+  autoPlayEpoch?: number;
+  autoPlay?: boolean;
+  autoTranscribe?: boolean;
   onTranscript?: (text: string) => void;
   showTranscribe?: boolean;
   label?: string;
@@ -33,10 +38,16 @@ export default function VoiceMessage({
   label,
   variant = 'user',
   transcribeAudio,
+  autoPlayKey,
+  autoPlayEpoch,
+  autoPlay = false,
+  autoTranscribe = false,
 }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const sourceRef = useRef('');
   const blobRequestRef = useRef<Promise<Blob> | undefined>(undefined);
+  const autoTranscribedRef = useRef(false);
+  const transcribingRef = useRef(false);
   const aliveRef = useRef(true);
   const [loading, setLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -94,10 +105,64 @@ export default function VoiceMessage({
     };
   }, [ensureAudioSource, voice.durationMs]);
 
+  const sourceLoaderRef = useRef(ensureAudioSource);
+  sourceLoaderRef.current = ensureAudioSource;
+
+  useEffect(() => {
+    if (!autoPlayKey) return;
+    if (!autoPlay) {
+      skipVoicePlayback(autoPlayKey);
+      return;
+    }
+    return enqueueVoicePlayback(
+      autoPlayKey,
+      (signal) =>
+        new Promise<void>((resolve) => {
+          const audio = audioRef.current;
+          if (!audio || signal.aborted) {
+            resolve();
+            return;
+          }
+          let abort: () => void;
+          const finish = () => {
+            audio.removeEventListener('ended', finish);
+            audio.removeEventListener('error', finish);
+            signal.removeEventListener('abort', abort);
+            resolve();
+          };
+          abort = () => {
+            audio.pause();
+            finish();
+          };
+          signal.addEventListener('abort', abort, { once: true });
+          audio.addEventListener('ended', finish, { once: true });
+          audio.addEventListener('error', finish, { once: true });
+          void sourceLoaderRef
+            .current()
+            .then(async () => {
+              if (signal.aborted || !aliveRef.current) {
+                finish();
+                return;
+              }
+              window.dispatchEvent(new CustomEvent(PLAY_EVENT, { detail: audio }));
+              await audio.play();
+            })
+            .catch((error) => {
+              // Autoplay restrictions require a user gesture; leave the bubbles playable manually.
+              if (error?.name === 'NotAllowedError') cancelVoicePlayback();
+              finish();
+            });
+        }),
+      autoPlayEpoch
+    );
+  }, [autoPlayKey, autoPlay, autoPlayEpoch]);
+
   const togglePlay = async () => {
     const audio = audioRef.current;
     if (!audio || loading) return;
-    if (!audio.paused) {
+    const wasPlaying = !audio.paused;
+    cancelVoicePlayback();
+    if (wasPlaying) {
       audio.pause();
       return;
     }
@@ -115,7 +180,8 @@ export default function VoiceMessage({
   };
 
   const transcribe = async () => {
-    if (transcribing) return;
+    if (transcribingRef.current) return;
+    transcribingRef.current = true;
     setTranscribing(true);
     try {
       if (!transcribeAudio && fileId === undefined) throw new Error('语音来源不可用');
@@ -132,9 +198,18 @@ export default function VoiceMessage({
     } catch (error) {
       if (aliveRef.current) message.error(typeof error === 'string' ? error : '转文字失败，请重试');
     } finally {
+      transcribingRef.current = false;
       if (aliveRef.current) setTranscribing(false);
     }
   };
+
+  const transcribeRef = useRef(transcribe);
+  transcribeRef.current = transcribe;
+  useEffect(() => {
+    if (!autoTranscribe || variant !== 'user' || transcript || autoTranscribedRef.current) return;
+    autoTranscribedRef.current = true;
+    void transcribeRef.current();
+  }, [autoTranscribe, transcript, variant]);
 
   const transcriptMenu = {
     items: [{ key: 'transcript', label: transcriptExpanded ? '收起文字' : '语音转文字', disabled: transcribing }],

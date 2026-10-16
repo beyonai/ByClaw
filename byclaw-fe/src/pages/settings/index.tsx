@@ -10,12 +10,15 @@ import {
   RightOutlined,
   SettingOutlined,
   SkinOutlined,
+  SoundOutlined,
+  AudioOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
 import { getLocale, setLocale, useIntl, useLocation, useSelector } from '@umijs/max';
-import { Avatar, Button, Card, Collapse, Descriptions, Menu, Modal, Select, Space, Typography } from 'antd';
+import { Avatar, Button, Card, Collapse, Descriptions, Menu, Modal, Select, Space, Switch, Typography } from 'antd';
 
+import useVoicePreferences from '@/hooks/useVoicePreferences';
 import useAppStore from '@/models/common/useAppStore';
 import AntdIcon from '@/components/AntdIcon';
 import { globalLogout } from '@/service/common/request';
@@ -76,6 +79,8 @@ const Settings: React.FC = () => {
 
   // 获取用户信息
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
+
+  const voicePreferences = useVoicePreferences(userInfo.userId || userInfo.userCode);
 
   useEffect(() => {
     if (userInfo && !versionInfo) {
@@ -149,6 +154,30 @@ const Settings: React.FC = () => {
             <Option value="en-US">English</Option>
           </Select>
         </div>
+      </div>
+
+      <div className={classNames(styles.settingBox, 'ub ub-ver')}>
+        {(
+          [
+            ['autoPlay', 'settings.voiceAutoPlay', 'settings.voiceAutoPlayHint', SoundOutlined],
+            ['autoTranscribe', 'settings.voiceAutoTranscribe', 'settings.voiceAutoTranscribeHint', AudioOutlined],
+          ] as const
+        ).map(([key, label, hint, Icon]) => (
+          <div className={styles.settingItem} key={key}>
+            <div className={styles.settingLabel}>
+              <Icon className={styles.settingIcon} />
+              <div>
+                <div>{intl.formatMessage({ id: label })}</div>
+                <Text type="secondary">{intl.formatMessage({ id: hint })}</Text>
+              </div>
+            </div>
+            <Switch
+              aria-label={intl.formatMessage({ id: label })}
+              checked={voicePreferences[key]}
+              onChange={(checked) => voicePreferences.update({ [key]: checked })}
+            />
+          </div>
+        ))}
       </div>
 
       <div className={classNames(styles.settingBox, styles.canClick, 'ub ub-ver')}>
