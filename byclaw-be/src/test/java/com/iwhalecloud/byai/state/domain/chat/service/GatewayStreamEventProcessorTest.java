@@ -2,6 +2,8 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
@@ -9,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class GatewayStreamEventProcessorTest {
+class GatewayStreamEventProcessorTest extends I18nTestSupport {
 
     private final GatewayStreamEventProcessor processor = new GatewayStreamEventProcessor();
 
@@ -138,6 +140,62 @@ class GatewayStreamEventProcessorTest {
             .containsEntry("clientRequestId", "client-a")
             .containsEntry("agentName", "Agent A")
             .containsEntry("traceId", traceId);
+    }
+
+    @Test
+    void buildEventData_presentsStructuredModelErrorWithoutExposingProviderPayload() {
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.setSessionId(3L);
+        ctx.setUserMessageId(11L);
+
+        JSONObject metadata = new JSONObject();
+        metadata.put("event_kind", "assistant.error");
+        metadata.put("error_domain", "MODEL");
+        metadata.put("error_code", "AUTH");
+        metadata.put("provider_code", "invalid_api_key");
+        metadata.put("provider_message", "Incorrect API key provided");
+
+        JSONObject delta = new JSONObject();
+        delta.put("content", "fallback");
+        JSONObject choice = new JSONObject();
+        choice.put("delta", delta);
+        JSONObject eventPayload = answerDelta();
+        eventPayload.put("choices", JSON.parseArray("[" + choice.toJSONString() + "]"));
+
+        JSONObject dataJson = new JSONObject();
+        dataJson.put("trace_id", "trace-model-error");
+        dataJson.put("stream_id", "stream-model-error");
+        dataJson.put("data", eventPayload.toJSONString());
+
+        JSONObject payload = JSON.parseObject(processor.buildEventData(ctx, dataJson, metadata));
+        String content = payload.getJSONArray("choices").getJSONObject(0).getJSONObject("delta").getString("content");
+
+        assertThat(content).isEqualTo(I18nUtil.get("model.request.error.auth"));
+        assertThat(content).doesNotContain("Incorrect API key", "invalid_api_key", "{");
+        assertThat(payload.getString("metadata"))
+            .doesNotContain("provider_code", "provider_message", "invalid_api_key", "Incorrect API key");
+    }
+
+    @Test
+    void buildEventData_doesNotRewriteNonModelErrors() {
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.setSessionId(3L);
+        ctx.setUserMessageId(11L);
+
+        JSONObject metadata = new JSONObject();
+        metadata.put("error_domain", "BUSINESS");
+        metadata.put("error_code", "MEMBERSHIP_REQUIRED");
+        JSONObject eventPayload = answerDelta();
+        eventPayload.put("choices", JSON.parseArray("[{\"delta\":{\"content\":\"tenant membership required\"}}]"));
+        JSONObject dataJson = new JSONObject();
+        dataJson.put("trace_id", "trace-business-error");
+        dataJson.put("stream_id", "stream-business-error");
+        dataJson.put("data", eventPayload.toJSONString());
+
+        JSONObject payload = JSON.parseObject(processor.buildEventData(ctx, dataJson, metadata));
+
+        assertThat(payload.getJSONArray("choices").getJSONObject(0).getJSONObject("delta").getString("content"))
+            .isEqualTo("tenant membership required");
     }
 
     private JSONObject answerDelta() {

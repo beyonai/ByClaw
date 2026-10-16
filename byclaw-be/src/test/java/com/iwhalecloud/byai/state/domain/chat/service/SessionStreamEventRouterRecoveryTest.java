@@ -7,9 +7,13 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Locale;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.context.i18n.LocaleContext;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.alibaba.fastjson.JSONObject;
@@ -98,6 +102,28 @@ class SessionStreamEventRouterRecoveryTest {
         recoveryCtx(null);
         router.dispatch(event("1-0"));
         verify(pythonSseService, times(1)).accumulateEvent(anyString(), any());
+    }
+
+    @Test
+    void appliesRequestLocaleAndRestoresConsumerThreadLocale() {
+        LocaleContext previousLocaleContext = LocaleContextHolder.getLocaleContext();
+        try {
+            LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+            ChatProcessContext ctx = recoveryCtx(null);
+            ctx.language = "en-US";
+            when(gatewayStreamEventProcessor.buildEventData(any(), any(), any())).thenAnswer(invocation -> {
+                org.junit.jupiter.api.Assertions.assertEquals(Locale.US, LocaleContextHolder.getLocale());
+                return "{\"text\":\"x\"}";
+            });
+
+            router.dispatch(event("1-0"));
+
+            org.junit.jupiter.api.Assertions.assertEquals(Locale.SIMPLIFIED_CHINESE,
+                LocaleContextHolder.getLocale());
+        }
+        finally {
+            LocaleContextHolder.setLocaleContext(previousLocaleContext);
+        }
     }
 
     @Test

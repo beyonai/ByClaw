@@ -102,6 +102,10 @@ import {
   aggregateByClawSandboxActivity,
   type ByClawSandboxActivity,
 } from './sandbox-busy.ts'
+import {
+  terminalByClawModelError,
+  type ByClawModelError,
+} from './model-error.ts'
 
 export interface ByClawDshSessionRuntimeOptions {
   workspace: string
@@ -164,6 +168,8 @@ interface ActiveTurn {
   fileChangesEmitted: boolean
   childTurns: Map<string, number>
   recoveryNotifiedAgents: Set<string>
+  /** Set only after DSH exhausts retries for an actual agent/request-error. */
+  modelError?: { sessionId: string; error: ByClawModelError }
 }
 
 function editDiffOperation(toolName: string): ByClawEditDiffOperation | undefined {
@@ -392,34 +398,20 @@ export async function resolveByClawTurnModelSelection(params: {
 }
 
 export interface ByClawTurnFailurePresentation {
-  code: 'MODEL_QUOTA_EXHAUSTED'
-    | 'MODEL_AUTH_FAILED'
-    | 'MODEL_ACCESS_DENIED'
-    | 'MODEL_TIMEOUT'
-    | 'MODEL_CONFIG_INVALID'
-    | 'MODEL_REQUEST_FAILED'
+  code: ByClawModelError['code']
   message: string
 }
 
-/** Convert an upstream failure into a stable, non-sensitive message suitable for the chat UI. */
-export function byClawTurnFailurePresentation(error: unknown): ByClawTurnFailurePresentation {
-  const detail = (error instanceof Error ? error.message : String(error)).toLowerCase()
-  if (/\b429\b|insufficient_quota|quota (?:has been )?exhausted|额度/u.test(detail)) {
-    return { code: 'MODEL_QUOTA_EXHAUSTED', message: '模型服务额度不足，请切换模型或联系管理员。' }
+/** DSH deliberately emits only a safe fallback; Java owns user-facing presentation. */
+export function byClawTurnFailurePresentation(error: ByClawModelError): ByClawTurnFailurePresentation {
+  return { code: error.code, message: '模型服务请求失败，请稍后重试或联系管理员。' }
+}
+
+class ByClawModelRequestError extends Error {
+  constructor(readonly modelError: ByClawModelError, cause: string) {
+    super(`DSH model request failed: ${cause}`)
+    this.name = 'ByClawModelRequestError'
   }
-  if (/\b401\b|unauthori[sz]ed|authentication|invalid api[-_ ]?key|invalid token/u.test(detail)) {
-    return { code: 'MODEL_AUTH_FAILED', message: '模型服务鉴权失败，请联系管理员检查模型凭证。' }
-  }
-  if (/\b403\b|forbidden|access denied/u.test(detail)) {
-    return { code: 'MODEL_ACCESS_DENIED', message: '模型服务拒绝访问，请切换模型或联系管理员。' }
-  }
-  if (/timeout|timed out|connect_timeout|read_timeout/u.test(detail)) {
-    return { code: 'MODEL_TIMEOUT', message: '模型服务响应超时，请稍后重试或切换模型。' }
-  }
-  if (/byclaw_(?:provider_adapter_not_found|reasoning_config_invalid|unsupported_reasoning_effort|model_override_unresolvable)/u.test(detail)) {
-    return { code: 'MODEL_CONFIG_INVALID', message: '当前模型配置不可用，请切换模型或联系管理员。' }
-  }
-  return { code: 'MODEL_REQUEST_FAILED', message: '模型服务请求失败，请稍后重试或切换模型。' }
 }
 
 /** Emit exactly one assistant-visible error chunk while keeping raw upstream details server-side. */
@@ -430,7 +422,7 @@ export async function emitByClawTurnFailure(params: {
   rootSessionId: string
   messageId: string
   sourceAgentType: string
-  error: unknown
+  error: ByClawModelError
 }): Promise<ByClawTurnFailurePresentation> {
   const failure = byClawTurnFailurePresentation(params.error)
   await params.emitter.emitChunk(params.sessionId, params.traceId, {
@@ -443,7 +435,14 @@ export async function emitByClawTurnFailure(params: {
       external_root_session_id: params.rootSessionId,
       host_session_id: params.sessionId,
       session_status: 'failed',
+      error_schema_version: params.error.schemaVersion,
+      error_domain: params.error.domain,
       error_code: failure.code,
+      ...(params.error.httpStatus === undefined ? {} : { http_status: params.error.httpStatus }),
+      ...(params.error.providerCode === undefined ? {} : { provider_code: params.error.providerCode }),
+      ...(params.error.providerMessage === undefined ? {} : { provider_message: params.error.providerMessage }),
+      retryable: params.error.retryable,
+      diagnostic_id: `${params.traceId}:model`,
     },
   }, {
     eventType: EventType.ANSWER_DELTA,
@@ -1272,6 +1271,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private readonly disposeSessionEvents: () => void
   private readonly disposeAgentStatusEvents: () => void
   private readonly disposeAssistantStreamEvents: () => void
+  private readonly modelFailureCaptureInstalled = new WeakSet<object>()
   private readonly streams = new WeakMap<ActiveTurn, {
     attempts: Map<string, { id: string; turn: number; step: number; indexes: Set<number>; blocks: Map<number, ProjectedAssistantBlock> }>
     settled: Set<string>
@@ -1293,6 +1293,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       }
       const turn = this.activeTurnFor(session)
       if (turn === undefined) return
+      if (event.type === 'turn/start' && turn.modelError?.sessionId === String(session.id)) {
+        turn.modelError = undefined
+      }
       // Observe activity before projection I/O. The projection queue can be
       // delayed while the underlying agent is still making real progress.
       turn.teamGate.recordActivity()
@@ -1319,12 +1322,16 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.disposeAssistantStreamEvents = ctx.root.on('agent/assistant-stream', ({ agent, frame }) => {
       const turn = this.activeTurnFor(agent.session)
       if (turn === undefined) return
+      if (frame.type === 'start' && turn.modelError?.sessionId === String(agent.session.id)) {
+        turn.modelError = undefined
+      }
       turn.teamGate.recordActivity()
       this.queueForwarding(turn, 'assistant stream projection', () => this.forwardAssistantStream(turn, agent.session, frame))
     })
     this.disposeAgentStatusEvents = ctx.root.on('agent/status', ({ agent, status }) => {
       const turn = this.activeTurnFor(agent.session)
       if (turn === undefined) return
+      this.installModelFailureCapture(agent)
       const cancelReason = (turn.owner ?? turn).cancelReason
       if (cancelReason !== undefined && status === 'running') {
         agent.cancel({ kind: 'hook', reason: cancelReason })
@@ -1356,7 +1363,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       }
       return await this.queueAsk(command, context, key)
     } catch (error: unknown) {
-      if (!(error instanceof TaskCancelledError) && !context.isCancelRequested()) {
+      if (error instanceof ByClawModelRequestError && !context.isCancelRequested()) {
         try {
           await emitByClawTurnFailure({
             emitter: this.options.emitter,
@@ -1365,7 +1372,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
             rootSessionId: route.externalRootSessionId,
             messageId: command.header.messageId,
             sourceAgentType: this.options.sourceAgentType,
-            error,
+            error: error.modelError,
           })
         } catch (emitError: unknown) {
           this.ctx.logger.warn(
@@ -1459,6 +1466,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       context, rootMessageId: command.header.messageId, answer: '', forwarding: Promise.resolve(),
       // Foreground requests must not inherit the retained command's final answer.
       finalAnswerTracker: new ByClawFinalAnswerTracker(),
+      modelError: undefined,
       reasoningChunks: new TimedChunkBatcher(), answerChunks: new TimedChunkBatcher(),
       reasoningChunkSequences: new Map(), chunkSequences: new Map(), chunkFlushTimer: undefined, chunkFlushQueued: false,
       fileChanges: new ByClawFileChangeAccumulator(), fileChangesEmitted: false,
@@ -1506,7 +1514,12 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
       await this.emitFileChangesSummary(turn)
       const failure = foregroundFailure
-      if (failure !== undefined) throw new Error(`DSH turn failed: ${failure}`)
+      if (failure !== undefined) {
+        if (turn.modelError?.sessionId === owner.responseSessionId) {
+          throw new ByClawModelRequestError(turn.modelError.error, failure)
+        }
+        throw new Error(`DSH turn failed: ${failure}`)
+      }
       const finalAnswer = turn.finalAnswerTracker?.value
       return {
         answer: turn.answer, dshSessionId: route.externalRootSessionId,
@@ -1737,7 +1750,12 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
       await this.emitFileChangesSummary(turn)
       const failure = turnFailureMessage(agent.session.snapshotEvents())
-      if (failure !== undefined) throw new Error(`DSH turn failed: ${failure}`)
+      if (failure !== undefined) {
+        if (turn.modelError?.sessionId === String(agent.id)) {
+          throw new ByClawModelRequestError(turn.modelError.error, failure)
+        }
+        throw new Error(`DSH turn failed: ${failure}`)
+      }
       const finalAnswer = turn.finalAnswerTracker?.value
       return {
         answer: turn.answer || this.lastAssistantText(agent),
@@ -1855,6 +1873,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       await this.ensureRootMetadata(existing.handle.agent.session, externalRootSessionId, requestedBinding, 'reuse', coordination)
       preparedRoot?.bindLiveGroupScope?.(existing.handle.agent)
       this.options.rootSetup?.(existing.handle.agent.ctx, existing.handle.agent, requestedBinding)
+      this.installModelFailureCapture(existing.handle.agent)
       await this.options.sessionSetup?.(existing.handle.agent.ctx, command, existing.handle.agent)
       return { ...existing, mode: 'reuse' }
     }
@@ -1866,6 +1885,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         registerByClawAgentWorkspacePolicy(agentCtx, agent, this.options.workspaceRegistry)
         preparedRoot?.setup(agentCtx, agent)
         this.options.rootSetup?.(agentCtx, agent, requestedBinding)
+        this.installModelFailureCapture(agent)
         await this.options.sessionSetup?.(agentCtx, command, agent)
         if (preparedRoot === undefined) {
           agentCtx.systemPrompt.section({
@@ -2346,6 +2366,26 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       cursor = parentId === undefined ? undefined : this.ctx.root.sessions.get(parentId)
     }
     return undefined
+  }
+
+  /** Capture only terminal model-request failures after provider retries and model failover decline recovery. */
+  private installModelFailureCapture(agent: Agent): void {
+    if (this.modelFailureCaptureInstalled.has(agent)) return
+    this.modelFailureCaptureInstalled.add(agent)
+    agent.ctx.on('agent/request-error', async (payload, next) => {
+      const decision = await next()
+      const modelError = terminalByClawModelError(payload.failure, decision)
+      if (modelError !== undefined) {
+        const turn = this.activeTurnFor(payload.agent.session)
+        if (turn !== undefined) {
+          turn.modelError = {
+            sessionId: String(payload.agent.session.id),
+            error: modelError,
+          }
+        }
+      }
+      return decision
+    }, { prepend: true })
   }
 
   private owningTurnFor(session: Session): ActiveTurn | undefined {

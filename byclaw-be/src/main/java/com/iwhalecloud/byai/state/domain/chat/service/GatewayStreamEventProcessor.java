@@ -44,6 +44,9 @@ public class GatewayStreamEventProcessor {
     @Autowired
     private RunningChatSnapshotService runningChatSnapshotService;
 
+    @Autowired(required = false)
+    private ModelErrorPresentationService modelErrorPresentationService = new ModelErrorPresentationService();
+
     private final Map<String, HistoryBatch> historyBatchMap = new ConcurrentHashMap<>();
 
     /**
@@ -104,6 +107,7 @@ public class GatewayStreamEventProcessor {
     }
 
     public String buildEventData(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
+        JSONObject clientMetadata = clientSafeMetadata(metadata);
         // Normalize before stripping the Gateway envelope: final_content can live at its top level.
         if (FinalAnswerContent.isFinalEvent(dataJson.getString("event_type"))) {
             JSONObject finalPayload = new JSONObject();
@@ -123,8 +127,8 @@ public class GatewayStreamEventProcessor {
             eventPayload.remove("stream_id");
             eventPayload.put("sessionId", sessionId);
             eventPayload.put("streamId", streamId);
-            if (metadata != null && !metadata.isEmpty()) {
-                eventPayload.put("metadata", metadata.toJSONString());
+            if (clientMetadata != null && !clientMetadata.isEmpty()) {
+                eventPayload.put("metadata", clientMetadata.toJSONString());
             }
             enrichLaneMetadata(ctx, dataJson, metadata, eventPayload);
             return eventPayload.toJSONString();
@@ -132,12 +136,13 @@ public class GatewayStreamEventProcessor {
         try {
             JSONObject dataObj = JSON.parseObject(eventData);
             if (dataObj != null) {
+                applyModelErrorPresentation(dataObj, metadata);
                 dataObj.put("sourceAgentType", sourceAgentType);
                 dataObj.put("sessionId", sessionId);
                 dataObj.put("traceId", traceId);
                 dataObj.put("streamId", streamId);
-                if (metadata != null && !metadata.isEmpty()) {
-                    dataObj.put("metadata", metadata.toJSONString());
+                if (clientMetadata != null && !clientMetadata.isEmpty()) {
+                    dataObj.put("metadata", clientMetadata.toJSONString());
                 }
                 enrichLaneMetadata(ctx, dataJson, metadata, dataObj);
                 if (StringUtils.isNotBlank(dataObj.getString("parentOrderId"))
@@ -151,6 +156,39 @@ public class GatewayStreamEventProcessor {
         catch (Exception e) {
             return eventData;
         }
+    }
+
+    public String presentErrorMessage(JSONObject metadata, String fallback) {
+        return modelErrorPresentationService == null
+            ? fallback
+            : modelErrorPresentationService.present(metadata, fallback);
+    }
+
+    private JSONObject clientSafeMetadata(JSONObject metadata) {
+        if (metadata == null || !"MODEL".equals(metadata.getString("error_domain"))) {
+            return metadata;
+        }
+        JSONObject safe = new JSONObject(metadata);
+        safe.remove("provider_code");
+        safe.remove("provider_message");
+        return safe;
+    }
+
+    private void applyModelErrorPresentation(JSONObject dataObj, JSONObject metadata) {
+        if (dataObj == null || metadata == null || modelErrorPresentationService == null
+            || !"MODEL".equals(metadata.getString("error_domain")) || dataObj.getJSONArray("choices") == null) {
+            return;
+        }
+        dataObj.getJSONArray("choices").forEach(item -> {
+            if (!(item instanceof JSONObject choice)) {
+                return;
+            }
+            JSONObject delta = choice.getJSONObject("delta");
+            if (delta == null || !delta.containsKey("content")) {
+                return;
+            }
+            delta.put("content", modelErrorPresentationService.present(metadata, delta.getString("content")));
+        });
     }
 
     public String normalizeEventType(ChatProcessContext ctx, JSONObject dataJson) {

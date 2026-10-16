@@ -21,6 +21,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.i18n.LocaleContextHolder;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatGatewayRequestDecorator;
@@ -211,6 +212,7 @@ public class RouteService {
         }
 
         ctx.loginInfo = CurrentUserHolder.getLoginInfo();
+        ctx.language = LocaleContextHolder.getLocale().toLanguageTag();
 
         String sessionId = ctx.sessionId == null ? null : String.valueOf(ctx.sessionId);
         String userCode = (ctx.loginInfo != null && ctx.loginInfo.getUserCode() != null)
@@ -353,6 +355,7 @@ public class RouteService {
                 if (metadata == null) {
                     metadata = new JSONObject();
                 }
+                errorMsg = gatewayStreamEventProcessor.presentErrorMessage(metadata, errorMsg);
                 // 错误事件：写出错误消息，标记 gatewayError，退出循环
                 if (SseResponseEventEnum.error.equals(eventType)) {
                     JSONObject errorPayload = new JSONObject();

@@ -21,6 +21,11 @@ import {
   emitByClawTurnFailure,
   resolveByClawTurnModelSelection,
 } from '../lib/session-runtime.js'
+import {
+  byClawModelErrorFromRequestFailure,
+  sanitizeProviderErrorText,
+  terminalByClawModelError,
+} from '../lib/model-error.js'
 import * as dshSession from '@deepseek-ai/dsh-session'
 import * as integration from '../lib/index.js'
 
@@ -73,14 +78,43 @@ assert.deepEqual(await resolveByClawTurnModelSelection({
 }), { provider: 'baiying-m-10014488', model: '10014488', reasoningEffort: 'low' })
 assert.deepEqual(modelResolutionCalls.pop(), ['root:user:session', '10014488', 'low'])
 
+const authFailure = byClawModelErrorFromRequestFailure({
+  code: 'AUTH',
+  status: 401,
+  message: '401: {"message":"Incorrect API key provided: sk-secret123456","type":"invalid_request_error","code":"invalid_api_key"}',
+})
+assert.deepEqual(authFailure, {
+  schemaVersion: 1,
+  domain: 'MODEL',
+  code: 'AUTH',
+  httpStatus: 401,
+  providerCode: 'invalid_api_key',
+  providerMessage: 'Incorrect API key provided: [redacted]',
+  retryable: false,
+})
 assert.deepEqual(
-  byClawTurnFailurePresentation(new Error('DSH turn failed: 429 insufficient_quota; private upstream detail')),
-  { code: 'MODEL_QUOTA_EXHAUSTED', message: '模型服务额度不足，请切换模型或联系管理员。' },
+  byClawTurnFailurePresentation(authFailure),
+  { code: 'AUTH', message: '模型服务请求失败，请稍后重试或联系管理员。' },
 )
-assert.deepEqual(
-  byClawTurnFailurePresentation(new Error('BYCLAW_PROVIDER_ADAPTER_NOT_FOUND: private adapter detail')),
-  { code: 'MODEL_CONFIG_INVALID', message: '当前模型配置不可用，请切换模型或联系管理员。' },
+assert.equal(sanitizeProviderErrorText('Authorization: Bearer token-value Cookie=session-secret'),
+  'Authorization: [redacted] Cookie=[redacted]')
+assert.equal(
+  sanitizeProviderErrorText('{"api_key":"plain-secret","token":"another-secret","message":"failed"}'),
+  '{"api_key":"[redacted]","token":"[redacted]","message":"failed"}',
 )
+assert.deepEqual(byClawModelErrorFromRequestFailure({
+  code: 'RATE_LIMIT', status: 429, message: 'Too many requests',
+}), {
+  schemaVersion: 1, domain: 'MODEL', code: 'RATE_LIMIT', httpStatus: 429,
+  providerMessage: 'Too many requests', retryable: true,
+})
+assert.equal(byClawModelErrorFromRequestFailure({ code: 'UNKNOWN', status: 403, message: 'Forbidden' }).code, 'AUTH')
+assert.equal(byClawModelErrorFromRequestFailure({ code: 'UNKNOWN', status: 400, message: 'bad payload' }).code, 'INVALID_REQUEST')
+assert.equal(byClawModelErrorFromRequestFailure({ code: 'UNKNOWN', message: 'socket ECONNRESET' }).code, 'TRANSPORT')
+assert.equal(byClawModelErrorFromRequestFailure({ code: 'UNKNOWN', message: 'maximum context window exceeded' }).code, 'CONTEXT_LENGTH')
+assert.equal(terminalByClawModelError({ code: 'AUTH' }, { kind: 'retry' }), undefined,
+  'a model attempt recovered by provider retry or failover must remain invisible')
+assert.equal(terminalByClawModelError({ code: 'AUTH' }, undefined)?.code, 'AUTH')
 const failureChunks = []
 await emitByClawTurnFailure({
   emitter: { async emitChunk(...args) { failureChunks.push(args) } },
@@ -89,12 +123,16 @@ await emitByClawTurnFailure({
   rootSessionId: '20087515',
   messageId: '20087521',
   sourceAgentType: 'BYCLAW_DSH',
-  error: new Error('429 insufficient_quota with private upstream detail'),
+  error: authFailure,
 })
 assert.equal(failureChunks.length, 1)
-assert.equal(failureChunks[0][2].content, '模型服务额度不足，请切换模型或联系管理员。')
-assert.equal(failureChunks[0][2].metadata.error_code, 'MODEL_QUOTA_EXHAUSTED')
-assert.equal(failureChunks[0][2].content.includes('private upstream detail'), false)
+assert.equal(failureChunks[0][2].content, '模型服务请求失败，请稍后重试或联系管理员。')
+assert.equal(failureChunks[0][2].metadata.error_domain, 'MODEL')
+assert.equal(failureChunks[0][2].metadata.error_code, 'AUTH')
+assert.equal(failureChunks[0][2].metadata.http_status, 401)
+assert.equal(failureChunks[0][2].metadata.provider_code, 'invalid_api_key')
+assert.equal(failureChunks[0][2].metadata.provider_message.includes('sk-secret'), false)
+assert.equal(failureChunks[0][2].metadata.diagnostic_id, 'trace-error:model')
 assert.equal(failureChunks[0][3].eventType, EventType.ANSWER_DELTA)
 assert.equal(failureChunks[0][3].status, '_ERROR_')
 

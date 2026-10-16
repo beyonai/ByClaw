@@ -211,6 +211,7 @@ RUN set -eux; \
     grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+devflow-artifact-gate[[:space:]]*$' /tmp/dsh-web-config.yml; \
     grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+devflow-agent-gate[[:space:]]*$' /tmp/dsh-web-config.yml; \
     grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+byclaw-browser-use[[:space:]]*$' /tmp/dsh-web-config.yml; \
+    grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+byclaw-idle-reporter[[:space:]]*$' /tmp/dsh-web-config.yml; \
     ! grep -q -- "baseUrl:" /tmp/dsh-web-config.yml; \
     rm -f /tmp/dsh-web-config.yml
 
