@@ -15,3 +15,18 @@ integration 先读取有效的用户媒体连接器投影，缺失时读取 Redi
 真实主 agent 验证脚本：`BYCLAW_INTEGRATION_ROOT=/path/to/built/byclaw-integration node --env-file=/path/to/dsh/.env scripts/live-main-e2e.mjs image`（或 `tts`）。被测实例应配置专属 `agentTypes: [BYCLAW_DSH_MEDIA_E2E_<USER_CODE>]`，避免与线上同账号容器竞争；也可通过 `E2E_TARGET_AGENT_TYPE` 指定。终态响应本身不是供应商成功证据，验收还应核对 DSH 持久化工具事件与真实可解码文件。
 
 Voice admission also resolves the enabled system-default `ASR` configuration. It stores original MP3 input under the current authoritative `session_root/asr/`; this does not alter the `image/` and `tts/` output directories. Provider ASR and TTS credentials/entitlements are configured independently.
+
+
+### Speech capability feedback
+
+`mountMediaPlugin` accepts an optional `describe(model)` for TTS. It registers the
+session-scoped, read-only `text_to_speech_options` tool using the same live model
+resolution and deployment overrides as synthesis. The query does not need a session
+artifact directory. Registration, identity checks, disposal, and session restore
+apply to both speech tools.
+
+Generators may return the existing `MediaAsset[]` or `{ assets, warnings }`.
+TTS outputs include `status` and `warnings`; an explicit limitation with no assets
+returns `unsupported` without persisting files or disguising it as a connector error.
+Image output remains unchanged. Keep speech controls in provider adapters rather
+than adding provider-specific request logic to this shared runtime.

@@ -11,9 +11,9 @@ const imageFields = {
 }
 const speechFields = {
   text: { type: 'string', minLength: 1, maxLength: 20000, description: '需要转换成语音的完整文本。' },
-  voice: { type: ['string', 'null'], maxLength: 200, description: '连接器允许的音色 ID；空值或省略时使用默认音色，不可用时返回可选音色提示。' },
+  voice: { type: ['string', 'null'], maxLength: 200, description: '音色 ID 或查询结果中的名称；空值或省略使用默认音色。先用 text_to_speech_options 查询。' },
   format: { type: 'string', enum: ['mp3', 'wav', 'ogg', 'opus', 'flac', 'pcm', 'aac'], description: '音频格式；省略使用模型配置。PCM 会封装为 WAV 制品。' },
-  speed: { type: 'number', minimum: 0.25, maximum: 4, description: '语速倍率；省略使用模型配置，供应商可能有更严格限制。' },
+  speed: { type: 'number', exclusiveMinimum: 0, description: '语速倍率，1 为正常；省略使用模型配置。不支持的调整会返回提示并使用默认语速。' },
 }
 function validate(args, fields, required) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('MEDIA_INVALID_ARGUMENT')
@@ -25,7 +25,7 @@ function validate(args, fields, required) {
       : type === 'integer' ? Number.isInteger(value) : typeof value === type)
     if (!f || !validType
       || (typeof value === 'string' && ((f.minLength ?? 0) > 0 && !value.trim() || value.length < (f.minLength ?? 0) || value.length > (f.maxLength ?? Infinity)))
-      || (typeof value === 'number' && (!Number.isFinite(value) || value < (f.minimum ?? -Infinity) || value > (f.maximum ?? Infinity)))
+      || (typeof value === 'number' && (!Number.isFinite(value) || value < (f.minimum ?? -Infinity) || value > (f.maximum ?? Infinity) || value <= (f.exclusiveMinimum ?? -Infinity)))
       || (f.enum && !f.enum.includes(value))) throw new Error(`MEDIA_INVALID_ARGUMENT: ${key}`)
   }
 }
@@ -77,7 +77,7 @@ function connectorConfigurationError(kind, source, cause, connectorCode) {
 }
 
 /** Bind tools only to authenticated ByClaw sessions; resolve live host state on each call. */
-export function mountMediaPlugin(ctx, { kind, generate, modelId, provider, protocol }) {
+export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provider, protocol }) {
   if (!['image', 'tts'].includes(kind)) throw new Error('MEDIA_INVALID_KIND')
   const bindings = new WeakMap()
   ctx.on('byclaw/session-setup', async payload => {
@@ -87,17 +87,28 @@ export function mountMediaPlugin(ctx, { kind, generate, modelId, provider, proto
     const mounted = bindings.get(agentCtx)
     if (mounted) { mounted.payload = payload; return }
     const binding = { payload }
+    const resolveModel = async () => {
+      let resolved
+      try { resolved = await binding.payload.host.resolveMediaModel(kind === 'image' ? 'IMAGE_GENERATION' : 'TTS', modelId) }
+      catch (error) { throw connectorConfigurationError(kind, error?.source, error, error?.connectorCode) }
+      return { ...resolved, ...(provider ? { provider } : {}), ...(protocol ? { protocol } : {}) }
+    }
     const fields = kind === 'image' ? imageFields : speechFields
     const required = [kind === 'image' ? 'prompt' : 'text']
     const tool = {
       name: kind === 'image' ? 'image_generate' : 'text_to_speech',
       description: kind === 'image'
         ? '用户要求文生图时，调用已配置的图片模型生成图片。产生供应商调用费用；图片保存到当前会话 session_root/image，返回实际制品路径。供应商不支持的能力会明确报错。'
-        : '用户要求文本转语音时，调用已配置的语音模型生成音频。产生供应商调用费用；音频及供应商支持的词码文件保存到当前会话 session_root/tts，返回实际制品路径。供应商不支持的能力会明确报错。',
+        : '用户要求文本转语音时调用。切换音色或语速前可用 text_to_speech_options 查询。产生供应商费用；音频和词码保存到 session_root/tts。须告知用户返回的 warnings；artifacts 为空表示未生成，不可声称成功。',
       parameters: { type: 'object', properties: fields, required, additionalProperties: false },
       output: {
         schema: { type: 'object', required: ['provider', 'model', 'artifacts'], additionalProperties: false, properties: {
           provider: { type: 'string' }, model: { type: 'string' },
+          ...(kind === 'tts' ? {
+            status: { type: 'string', enum: ['generated', 'unsupported'] },
+            warnings: { type: 'array', items: { type: 'object', required: ['code', 'parameter', 'message'], additionalProperties: false,
+              properties: { code: { type: 'string' }, parameter: { type: 'string', enum: ['voice', 'speed'] }, message: { type: 'string' } } } },
+          } : {}),
           artifacts: { type: 'array', items: { type: 'object', required: ['path', 'mimeType', 'bytes'], additionalProperties: false,
             properties: { path: { type: 'string' }, mimeType: { type: 'string' }, bytes: { type: 'integer' } } } },
         } },
@@ -117,14 +128,8 @@ export function mountMediaPlugin(ctx, { kind, generate, modelId, provider, proto
         if (await realpath(directory) !== directory) throw new Error('MEDIA_ARTIFACT_DIRECTORY')
         await access(directory, constants.W_OK)
         exec.signal?.throwIfAborted()
-        let resolved
-        try {
-          resolved = await current.host.resolveMediaModel(kind === 'image' ? 'IMAGE_GENERATION' : 'TTS', modelId)
-        } catch (error) {
-          throw connectorConfigurationError(kind, error?.source, error, error?.connectorCode)
-        }
         // Deployment-only compatibility overrides; never accepted from tool arguments.
-        const model = { ...resolved, ...(provider ? { provider } : {}), ...(protocol ? { protocol } : {}) }
+        const model = await resolveModel()
         const timeout = AbortSignal.timeout(model.timeoutMs)
         const signal = exec.signal ? AbortSignal.any([exec.signal, timeout]) : timeout
         let assets
@@ -136,15 +141,46 @@ export function mountMediaPlugin(ctx, { kind, generate, modelId, provider, proto
           throw connectorConfigurationError(kind, model.source, error, model.connectorCode)
         }
         signal.throwIfAborted()
-        const artifacts = await persistAssets(root, kind, assets)
-        return { provider: model.provider, model: model.model, artifacts }
+        const warnings = kind === 'tts' && !Array.isArray(assets) ? assets.warnings : []
+        const media = kind === 'tts' && !Array.isArray(assets) ? assets.assets : assets
+        // Only an explicit recoverable control outcome can omit generated files.
+        const unsupported = kind === 'tts' && media.length === 0 && warnings.length > 0
+        const artifacts = unsupported ? [] : await persistAssets(root, kind, media)
+        return { provider: model.provider, model: model.model, artifacts,
+          ...(kind === 'tts' ? { status: unsupported ? 'unsupported' : 'generated', warnings } : {}) }
       },
     }
     const dispose = ctx.effect(() => {
       const unregister = agentCtx.tools.register(tool)
-      return () => { unregister(); bindings.delete(agentCtx) }
+      const unregisterOptions = kind === 'tts' && describe ? agentCtx.tools.register({
+        name: 'text_to_speech_options',
+        description: '查询当前语音模型支持的音色名称和 ID、默认音色及语速范围。切换音色或语速前调用；不生成音频、不修改配置。候选音色的最终权限由供应商验证。',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        output: { schema: speechOptionsSchema, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+        async execute(args, exec = {}) {
+          validate(args, {}, [])
+          exec.signal?.throwIfAborted()
+          return describe(await resolveModel())
+        },
+      }) : undefined
+      return () => { unregisterOptions?.(); unregister(); bindings.delete(agentCtx) }
     })
     agentCtx.effect(() => () => dispose())
     bindings.set(agentCtx, binding)
   })
+}
+
+const speechOptionsSchema = {
+  type: 'object', required: ['provider', 'model', 'voice', 'speed'], additionalProperties: false,
+  properties: {
+    provider: { type: 'string' }, model: { type: 'string' },
+    voice: { type: 'object', required: ['supported', 'choices', 'restricted', 'note'], additionalProperties: false, properties: {
+      supported: { type: 'boolean' }, default: { type: 'string' }, restricted: { type: 'boolean' }, note: { type: 'string' },
+      choices: { type: 'array', items: { type: 'object', required: ['id'], additionalProperties: false,
+        properties: { id: { type: 'string' }, name: { type: 'string' } } } },
+    } },
+    speed: { type: 'object', required: ['supported', 'default'], additionalProperties: false, properties: {
+      supported: { type: 'boolean' }, min: { type: 'number' }, max: { type: 'number' }, default: { type: 'number' },
+    } },
+  },
 }

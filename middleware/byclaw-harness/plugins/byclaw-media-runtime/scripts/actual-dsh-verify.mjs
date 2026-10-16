@@ -12,7 +12,7 @@ export const inject = ['agents', 'llm', 'sessions', 'sessionPersistence', 'tools
 const here = dirname(fileURLToPath(import.meta.url))
 const plugins = resolve(here, '../..')
 const sessionId = 'byclaw-media-lifecycle-probe'
-const toolNames = ['image_generate', 'text_to_speech']
+const toolNames = ['image_generate', 'text_to_speech', 'text_to_speech_options']
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=', 'base64')
 
 function wavFixture() {
@@ -80,7 +80,7 @@ async function runProbe(ctx) {
         assert.equal(modelId, type === 'TTS' ? 'fixture-tts' : 'fixture-image')
         return { id: modelId, provider: 'OPENAI', protocol: type === 'TTS' ? 'OPENAI_TTS' : 'OPENAI_IMAGE',
           model: type === 'TTS' ? 'tts-1' : 'gpt-image-1', endpoint: 'https://media-fixture.invalid/v1',
-          apiKey: 'fixture-secret', headers: {}, options: {}, timeoutMs: 5000 }
+          apiKey: 'fixture-secret', headers: {}, options: type === 'TTS' ? { voices: ['alloy', 'nova'] } : {}, timeoutMs: 5000 }
       },
     }
     const payload = { agent, agentCtx: agent.ctx, host, command: { header: { userCode: 'media-user', sessionId } } }
@@ -89,23 +89,37 @@ async function runProbe(ctx) {
     await ctx.serial('byclaw/session-setup', payload)
     await ctx.serial('byclaw/session-setup', payload)
     const schemas = ctx.tools.schemas(agent).filter(tool => toolNames.includes(tool.name))
-    assert.equal(schemas.length, 2, 'Repeated setup must register one copy of each tool')
+    assert.equal(schemas.length, 3, 'Repeated setup must register one copy of each tool')
     for (const schema of schemas) {
       assert.equal(schema.parameters.additionalProperties, false)
-      assert.deepEqual(schema.parameters.required, [schema.name === 'image_generate' ? 'prompt' : 'text'])
+      assert.deepEqual(schema.parameters.required, schema.name === 'text_to_speech_options' ? [] : [schema.name === 'image_generate' ? 'prompt' : 'text'])
       assert.ok(schema.description.length <= 250)
       assert.doesNotMatch(JSON.stringify(schema), /fixture-secret|media-fixture\.invalid|apiKey|endpoint/)
     }
     await assert.rejects(ctx.serial('byclaw/session-setup', { ...payload, host: { ...host, userCode: 'other' } }), /MEDIA_SESSION_IDENTITY/)
     const signal = new AbortController().signal
     const dispatch = (name, args) => ctx.tools.execute({ name, arguments: args, agent, signal, callId: `${phase}-${name}-${requests.length}` })
+    const optionsOutcome = await dispatch('text_to_speech_options', {})
+    assert.equal(optionsOutcome.isError, false)
+    const optionsValue = JSON.parse(optionsOutcome.content.find(block => block.type === 'text').text)
+    assert.equal(optionsValue.voice.default, 'alloy')
+    assert.equal(optionsValue.speed.min, 0.25)
+    assert.equal(optionsValue.speed.max, 4)
+    assert.equal(requests.length, 0, 'Capability query must not generate audio')
     const invalid = await dispatch('image_generate', { prompt: 'test', endpoint: 'https://elsewhere.invalid' })
     assert.equal(invalid.isError, true)
     assert.equal(requests.length, 0, 'Invalid arguments must not reach the provider')
+    const unsupported = await dispatch('text_to_speech', { text: 'Test', voice: 'unavailable' })
+    assert.equal(unsupported.isError, false)
+    const feedback = JSON.parse(unsupported.content.find(block => block.type === 'text').text)
+    assert.equal(feedback.status, 'unsupported')
+    assert.deepEqual(feedback.artifacts, [])
+    assert.equal(feedback.warnings[0].code, 'TTS_VOICE_NOT_AVAILABLE')
+    assert.equal(requests.length, 0)
     const results = []
     for (const [name, args, kind, expected] of [
       ['image_generate', { prompt: 'a small blue dot' }, 'image', png],
-      ['text_to_speech', { text: '验证音频。', format: 'wav' }, 'tts', wavFixture()],
+      ['text_to_speech', { text: '验证音频。', voice: 'nova', speed: 1.5, format: 'wav' }, 'tts', wavFixture()],
     ]) {
       const outcome = await dispatch(name, args)
       assert.equal(outcome.isError, false, JSON.stringify(outcome))
@@ -117,6 +131,8 @@ async function runProbe(ctx) {
       results.push({ name, path: result.artifacts[0].path, bytes: result.artifacts[0].bytes })
     }
     assert.equal(requests.length, 2)
+    assert.equal(requests[1].body.voice, 'nova')
+    assert.equal(requests[1].body.speed, 1.5)
     await ctx.sessions.flush(agent.session)
     await fibers[0].dispose()
     assert.equal(ctx.tools.get('image_generate', agent), undefined, 'Plugin unload removes scoped image tool')

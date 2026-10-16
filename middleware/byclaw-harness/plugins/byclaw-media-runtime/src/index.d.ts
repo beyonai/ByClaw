@@ -12,7 +12,14 @@ export interface MediaModel {
   timeoutMs: number
 }
 export interface MediaAsset { bytes: Uint8Array; mimeType: string; artifactType?: 'word-timing' }
-export interface RequestContext { signal?: AbortSignal; fetch?: typeof fetch }
+export interface MediaWarning { code: string; parameter: 'voice' | 'speed'; message: string }
+export interface MediaGenerationResult { assets: MediaAsset[]; warnings: MediaWarning[] }
+export interface SpeechOptions {
+  provider: string; model: string
+  voice: { supported: boolean; default?: string; choices: Array<{ id: string; name?: string }>; restricted: boolean; note: string }
+  speed: { supported: boolean; min?: number; max?: number; default: number }
+}
+export interface RequestContext { signal?: AbortSignal; fetch?: typeof fetch; onWarning?: (warning: MediaWarning) => void }
 export function resolveMediaModel(redis: { hget(key: string, field: string): Promise<string | null> }, type: 'IMAGE_GENERATION' | 'TTS' | 'ASR', options?: { decrypt?: (value: string) => string; modelId?: string }): Promise<MediaModel>
 export function endpoint(base: string, suffix: string): string
 export function request(url: string, init?: RequestInit, context?: RequestContext, options?: { acceptErrorResponse?: boolean }): Promise<Response>
@@ -25,4 +32,4 @@ export function resolveDownloadLookup(hostname: string, resolver?: (hostname: st
 export function pollDelay(ms: number, signal?: AbortSignal): Promise<void>
 export const MAX_MEDIA_BYTES: number
 export function persistAssets(root: string, kind: 'image' | 'tts' | 'asr', assets: MediaAsset[]): Promise<Array<{ path: string; mimeType: string; bytes: number }>>
-export function mountMediaPlugin(ctx: any, options: { kind: 'image' | 'tts'; generate: (model: MediaModel, args: any, context: RequestContext) => Promise<MediaAsset[]>; modelId?: string; provider?: string; protocol?: string }): void
+export function mountMediaPlugin(ctx: any, options: { kind: 'image' | 'tts'; generate: (model: MediaModel, args: any, context: RequestContext) => Promise<MediaAsset[] | MediaGenerationResult>; describe?: (model: MediaModel) => SpeechOptions; modelId?: string; provider?: string; protocol?: string }): void

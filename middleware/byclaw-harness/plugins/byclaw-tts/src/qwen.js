@@ -1,12 +1,16 @@
 import { downloadAsset, readJson } from '@byclaw/media-runtime';
-import { audioAsset, formatFor, post, requireTextLimit, speechError, voiceFor } from './common.js';
+import { audioAsset, formatFor, post, requireTextLimit, speechError, speedFor, voiceFor } from './common.js';
+
+export function qwenSpeechOptions() {
+  return { defaultVoice: 'Cherry', speed: { supported: false } };
+}
 
 export async function qwenSpeech(model, args, context) {
   if (!/^qwen(?:3)?-tts-(?:flash|instruct-flash|latest|20\d{2}-\d{2}-\d{2}|vc-|vd-)/.test(model.model) || model.model.includes('realtime')) throw speechError('Unsupported Qwen HTTP speech model; configure a Qwen-TTS HTTP model');
   requireTextLimit(args.text, 600);
   const options = model.options;
   formatFor(args, options, ['wav'], 'wav');
-  if (args.speed !== undefined || options.speed !== undefined) throw speechError('Qwen HTTP speech speed parameter is unsupported');
+  speedFor(args, options, null, undefined, context);
   const input = { text: args.text, voice: voiceFor(args, options, 'Cherry'), language_type: options.languageType ?? 'Auto' };
   if (options.instructions) input.instructions = options.instructions;
   const response = await readJson(await post(model, 'https://dashscope.aliyuncs.com/api/v1', '/services/aigc/multimodal-generation/generation', { model: model.model, input }, context));

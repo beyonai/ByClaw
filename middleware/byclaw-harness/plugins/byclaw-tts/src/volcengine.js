@@ -1,6 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { audioAsset, availableVoices, formatFor, MAX_AUDIO_BYTES, post, speechError, speedFor, voiceFor, voiceNotAvailable } from './common.js';
 
+// Selected standard 2.0 voices, not an authorization list. Verified 2026-10-16:
+// https://docs.volcengine.com/docs/DoubaoVoice/Tonelist-1?lang=zh
+const seed2Voices = [
+  { id: 'zh_female_vv_uranus_bigtts', name: 'Vivi 2.0' },
+  { id: 'zh_female_xiaohe_uranus_bigtts', name: '小何 2.0' },
+  { id: 'zh_male_m191_uranus_bigtts', name: '云舟 2.0' },
+  { id: 'zh_male_taocheng_uranus_bigtts', name: '小天 2.0' },
+];
+
+export function volcengineSpeechOptions(model) {
+  const resource = model.options.resourceId ?? new Headers(model.headers).get('x-api-resource-id') ?? model.model.replace(/^doubao-/, '');
+  return { voices: resource === 'seed-tts-2.0' ? seed2Voices : [], speed: { supported: true, min: 0.5, max: 2 } };
+}
+
 function decodeAudio(value) {
   if (typeof value !== 'string' || !value.length || value.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) throw speechError('Malformed Volcengine base64 audio');
   return Buffer.from(value, 'base64');
@@ -45,6 +59,7 @@ function appendWordTimings(event, words) {
 function voiceFailure(event) {
   const message = typeof event.message === 'string' ? event.message : '';
   return event.code === 45001115 || event.code === 45002000
+    || (event.code === 55000000 && /resource\s*id\s+is\s+mismatched\s+with\s+speaker/i.test(message))
     || ([45000000, 45000001].includes(event.code) && /speaker|resource\s*id.*mismatch/i.test(message));
 }
 
@@ -138,9 +153,10 @@ async function readVolcStream(response, context, format, sampleRate, text, speak
 export async function volcengineSpeech(model, args, context) {
   const options = model.options;
   const headers = new Headers(model.headers);
-  const speaker = voiceFor(args, options);
+  const catalog = volcengineSpeechOptions(model).voices;
+  const speaker = voiceFor(args, options, undefined, catalog);
   const format = formatFor(args, options, ['mp3', 'wav', 'pcm'], 'mp3');
-  const speed = speedFor(args, options);
+  const speed = speedFor(args, options, 0.5, 2, context);
   const resourceId = options.resourceId ?? headers.get('x-api-resource-id') ?? ({
     'doubao-seed-tts-2.0': 'seed-tts-2.0', 'seed-tts-2.0': 'seed-tts-2.0',
     'seed-icl-2.0': 'seed-icl-2.0', 'seed-tts-1.0': 'seed-tts-1.0',
@@ -167,5 +183,5 @@ export async function volcengineSpeech(model, args, context) {
   if (options.additions) req.additions = typeof options.additions === 'string' ? options.additions : JSON.stringify(options.additions);
   const suffix = model.endpoint && new URL(model.endpoint).pathname.replace(/\/$/, '').endsWith('/api/v3/tts/unidirectional/sse') ? '/api/v3/tts/unidirectional/sse' : '/api/v3/tts/unidirectional';
   const response = await post({ ...model, headers }, 'https://openspeech.bytedance.com', suffix, { req_params: req }, context, auth, { acceptErrorResponse: true });
-  return readVolcStream(response, context, format, sampleRate, args.text, speaker, availableVoices(options).values);
+  return readVolcStream(response, context, format, sampleRate, args.text, speaker, availableVoices(options, undefined, catalog).values);
 }
