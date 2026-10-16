@@ -8,6 +8,7 @@ import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/messa
 
 import { initAnswerMessage, initQueryMessage } from '@/utils/messgae';
 import { isVncToolMessage } from '@/utils/chatVnc';
+import { isSameSessionId } from '@/utils/sessionId';
 import { isTextContentType } from '@/utils/messgae';
 
 import { substanceHandler } from '@/hooks/useChat/util';
@@ -558,7 +559,7 @@ function useHandler(props: IProps) {
   const browserHandler = useCallback(
     (onionsProps: IOnionsProps) => {
       const { sseRes, newAnswerMsg } = onionsProps;
-      if (newAnswerMsg?.sessionId !== curSessioneRef.current) return onionsProps;
+      if (!isSameSessionId(newAnswerMsg?.sessionId, curSessioneRef.current)) return onionsProps;
       const incomingMessage = sseRes?.message;
       let mergedMessage: IMessageListItem | undefined;
       if (`${incomingMessage?.contentType}` === `${SSEMessageType.toolCall}`) {

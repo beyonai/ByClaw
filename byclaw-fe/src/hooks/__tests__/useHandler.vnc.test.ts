@@ -1,5 +1,5 @@
 const mockOpenVnc = jest.fn();
-let mockSessionId = 'session-a';
+let mockSessionId: string | number = 'session-a';
 
 jest.mock('@umijs/max', () => ({ useDispatch: () => jest.fn() }));
 jest.mock('../useGlobal', () => ({
@@ -15,7 +15,12 @@ import { renderHook } from '@testing-library/react';
 import { formatStreamPayload } from '../useSseSender/chatStream';
 import useHandler from '../useChat/useHandler';
 
-const streamProps = (title: string | undefined, input: unknown, sessionId = 'session-a', output?: unknown) => ({
+const streamProps = (
+  title: string | undefined,
+  input: unknown,
+  sessionId: string | number = 'session-a',
+  output?: unknown
+) => ({
   sseRes: formatStreamPayload('reasoningLogDelta', {
     contentType: '3015',
     objectType: 'tool_call',
@@ -49,6 +54,31 @@ describe('useHandler VNC stream integration', () => {
     result.current.browserHandler(
       streamProps('bash', { command: 'echo "bycli browser main open example.test"' }) as any
     );
+    expect(mockOpenVnc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [11273519, '11273519'],
+    ['11273519', 11273519],
+  ])('opens for the same uploaded session across API ID types (%p, %p)', (sessionId, answerSessionId) => {
+    mockSessionId = sessionId;
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+
+    result.current.browserHandler(
+      streamProps('bash', { command: 'bycli list -f json 2>&1 | head -100' }, answerSessionId) as any
+    );
+
+    expect(mockOpenVnc).toHaveBeenCalledWith({ key: 'answer-a:tool-a' });
+  });
+
+  it('does not open another numeric session', () => {
+    mockSessionId = 11273519;
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+
+    result.current.browserHandler(
+      streamProps('bash', { command: 'bycli browser open https://example.test/' }, '11273520') as any
+    );
+
     expect(mockOpenVnc).not.toHaveBeenCalled();
   });
 

@@ -237,6 +237,16 @@ describe('getLatestDigitalEmployeeMessage', () => {
     expect(getLatestDigitalEmployeeMessage([current, other], 'session-a')).toBe(current);
   });
 
+  it.each([
+    [11273519, '11273519'],
+    ['11273519', 11273519],
+  ])('selects the latest answer for equivalent API session IDs (%p, %p)', (sessionId, messageSessionId) => {
+    const current = answer({ sessionId: messageSessionId as string });
+    const other = answer({ sessionId: '11273520' });
+
+    expect(getLatestDigitalEmployeeMessage([current, other], sessionId)).toBe(current);
+  });
+
   it.each(['1', '3', '4', '5'] as const)('skips usage %s even when fromBeyond is set', (usage) => {
     const current = answer();
 

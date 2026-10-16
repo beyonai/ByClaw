@@ -29,6 +29,7 @@ const mockState = {
     sessionList: [
       { sessionId: 'session-1', sessionName: '当前会话' },
       { sessionId: 'session-2', sessionName: '另一个会话' },
+      { sessionId: '11273519', sessionName: '上传会话' },
     ],
   },
   user: { userInfo: null },
@@ -135,6 +136,27 @@ describe('chat remote computer entry', () => {
     expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
     expect(mockOpenVnc).not.toHaveBeenCalled();
     expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('restores the browser entry when upload returned a numeric session ID', () => {
+    mockMessages = [employeeMessage('answer-1', true, '11273519')];
+
+    render(renderChat(11273519 as unknown as string));
+
+    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
+    expect(mockOpenVnc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [11273519, '11273519'],
+    ['11273519', 11273519],
+  ])('retains an opened entry across equivalent session event ID types (%p, %p)', (sessionId, eventSessionId) => {
+    const view = render(renderChat(sessionId as string));
+    act(() => mockEventEmitter.emit('beyond-chat-vnc-opened', { sessionId: eventSessionId }));
+    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
+
+    view.rerender(renderChat(String(sessionId)));
+    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
   });
 
   it('hides an older browser entry when the latest employee message has no browser activity', () => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import useAppStore from '@/models/common/useAppStore';
 import { getVNCUrl, resolveSandboxesInfo } from '@/utils/chat';
+import { normalizeSessionId, type SessionIdInput } from '@/utils/sessionId';
 import useGlobal from './useGlobal';
 
 export type VncOpenOptions = {
@@ -17,16 +18,17 @@ type OpenRequest = VncOpenOptions & {
 const MAX_REFRESHES = 5;
 const RETRY_DELAY_MS = 2000;
 
-export default function useVncOpener(sessionId?: string) {
+export default function useVncOpener(sessionId?: SessionIdInput) {
+  const normalizedSessionId = normalizeSessionId(sessionId);
   const { EventEmitter } = useGlobal();
   const emitterRef = useRef(EventEmitter);
   emitterRef.current = EventEmitter;
   const requestRef = useRef<OpenRequest | undefined>(undefined);
-  const viewRef = useRef({ sessionId, openedKeys: new Set<string>() });
+  const viewRef = useRef({ sessionId: normalizedSessionId, openedKeys: new Set<string>() });
 
   // A new object also invalidates requests from an earlier A -> B -> A visit.
-  if (viewRef.current.sessionId !== sessionId) {
-    viewRef.current = { sessionId, openedKeys: new Set<string>() };
+  if (viewRef.current.sessionId !== normalizedSessionId) {
+    viewRef.current = { sessionId: normalizedSessionId, openedKeys: new Set<string>() };
   }
 
   const cancelRequest = useCallback(() => {
@@ -37,7 +39,7 @@ export default function useVncOpener(sessionId?: string) {
     requestRef.current = undefined;
   }, []);
 
-  useEffect(() => cancelRequest, [sessionId, cancelRequest]);
+  useEffect(() => cancelRequest, [normalizedSessionId, cancelRequest]);
 
   return useCallback(
     (options: VncOpenOptions = {}) => {

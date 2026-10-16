@@ -1,5 +1,6 @@
 import { IObjectType, SSEMessageType } from '@/constants/message';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
+import { isSameSessionId, type SessionIdInput } from '@/utils/sessionId';
 
 const legacyScripts = new Set([
   'web-acquirer.mjs',
@@ -238,12 +239,15 @@ export function hasVncActivity(message?: Partial<IMessage> | null): boolean {
   );
 }
 
-export function getLatestDigitalEmployeeMessage(messages: IMessage[], sessionId?: string): IMessage | undefined {
+export function getLatestDigitalEmployeeMessage(
+  messages: IMessage[],
+  sessionId?: SessionIdInput
+): IMessage | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (
       message.fromBeyond &&
-      (sessionId === undefined || message.sessionId === sessionId) &&
+      (sessionId === undefined || isSameSessionId(message.sessionId, sessionId)) &&
       (message.usage === undefined || String(message.usage) === '2')
     ) {
       return message;

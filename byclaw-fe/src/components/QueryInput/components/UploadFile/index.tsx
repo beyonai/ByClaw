@@ -11,6 +11,8 @@ import styles from '@/components/QueryInput/Chat/index.module.less';
 import { uploadFiles } from '@/service/file';
 import { IFile, IQueryFile } from '@/typescript/file';
 import { validateAccept } from '@/utils/file';
+import { normalizeSessionId } from '@/utils/sessionId';
+import type { SessionIdInput } from '@/utils/sessionId';
 import { useIntl } from '@umijs/max';
 
 type IProps = {
@@ -90,7 +92,7 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
 
     try {
       const data: {
-        sessionId?: string;
+        sessionId?: SessionIdInput;
         sessionName?: string;
         sessionDatasetid?: string;
         rebuildFileList?: IQueryFile[];
@@ -100,8 +102,9 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
       const { rebuildFileList = [], uploadItems: responseUploadItems = [], sessionId, sessionName } = data || {};
       const uploadedFileList = !isEmpty(rebuildFileList) ? rebuildFileList : responseUploadItems;
 
-      if (sessionId && setSessionId) {
-        setSessionId(sessionId, sessionName);
+      const normalizedSessionId = normalizeSessionId(sessionId);
+      if (normalizedSessionId && setSessionId) {
+        setSessionId(normalizedSessionId, sessionName);
       }
 
       if (!isEmpty(uploadedFileList)) {

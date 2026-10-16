@@ -134,6 +134,27 @@ describe('useVncOpener', () => {
     expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: 'session-a' });
   });
 
+  it('keeps pending opening and deduplication when only the session ID type changes', async () => {
+    let resolveSandboxes: (value: any) => void = () => {};
+    mockAppState.sandboxesInfo = new Promise((resolve) => {
+      resolveSandboxes = resolve;
+    });
+    const { result, rerender } = renderHook(({ sessionId }) => useVncOpener(sessionId), {
+      initialProps: { sessionId: 11273519 as string | number },
+    });
+    act(() => result.current({ key: 'answer-a:tool-a' }));
+    rerender({ sessionId: '11273519' });
+    await act(async () => resolveSandboxes(readySandboxes));
+
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
+    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: '11273519' });
+
+    rerender({ sessionId: 11273519 });
+    act(() => result.current({ key: 'answer-a:tool-a' }));
+    await flush();
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
+  });
+
   it('allows a manual reopen after the desktop was closed', async () => {
     const { result } = renderHook(() => useVncOpener('session-a'));
     act(() => result.current());
