@@ -250,8 +250,16 @@ public class SandboxService {
     @Value("${byclaw.sandbox.dsh-activity.enabled:true}")
     private boolean dshActivityEnabled;
 
-    @Value("${byclaw.sandbox.dsh-activity.silent-seconds:90}")
+    /** 曾上报的 DSH 沙箱超过该时长没有新上报视为静默；默认 4 个 30 秒心跳，与 running-state 的 dsh-max-age-seconds 对齐。 */
+    @Value("${byclaw.sandbox.dsh-activity.silent-seconds:120}")
     private long dshActivitySilentSeconds;
+
+    /**
+     * 单轮静默释放的熔断阈值：一轮里静默的沙箱超过该数量，更可能是容器到 Redis 的上报链路整体中断而不是沙箱都死了，
+     * 本轮跳过并告警。被跳过的沙箱仍按前端空闲规则释放。
+     */
+    @Value("${byclaw.sandbox.dsh-activity.silent-max-per-round:10}")
+    private int dshActivitySilentMaxPerRound = 10;
 
     @Lazy
     @Autowired
@@ -994,8 +1002,9 @@ public class SandboxService {
         for (SsSandboxRecord record : records) {
             if (isDshStreamManaged(record)) {
                 // 已通过活动 Stream 上报的 DSH 沙箱由 Stream 状态决定释放，旧 busy 心跳不再刷新前端访问时间，
-                // 健康观测仍按忙碌心跳保持
+                // 健康观测仍按忙碌心跳保持；心跳时间另行记录，Stream 静默时用它证明容器仍活着
                 sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(record));
+                touchDshBusyHeartbeat(record, now.getTime());
                 streamManagedCount++;
                 continue;
             }
@@ -1493,6 +1502,8 @@ public class SandboxService {
     /**
      * 释放曾通过活动 Stream 上报、但超过静默阈值未再上报的 byclaw-dsh 沙箱（不看前端是否活跃）。
      * 仅在本实例已连续正常消费 Stream 至少一个静默阈值后执行；没有对应运行中记录的状态直接清理。
+     * 一轮静默沙箱超过 silent-max-per-round 时整轮跳过：后端只能看到自己读 Redis 是否正常，
+     * 容器到 Redis 的写链路整体中断时 Stream 同样安静，不能把这当成所有沙箱都死了。
      *
      * @return 静默释放报告
      */
@@ -1507,23 +1518,30 @@ public class SandboxService {
             return report;
         }
         long silentMillis = dshSilentMillis();
-        int candidates = 0;
-        for (Map.Entry<String, DshActivity> entry : dshActivityStateStore.entries().entrySet()) {
-            DshActivity activity = entry.getValue();
-            if (activity.isFresh(now, silentMillis)) {
-                continue;
+        Map<String, DshActivity> entries = dshActivityStateStore.entries();
+        Map<String, DshActivity> silentEntries = new LinkedHashMap<>();
+        entries.forEach((workerId, activity) -> {
+            if (!activity.isFresh(now, silentMillis)) {
+                silentEntries.put(workerId, activity);
             }
-            candidates++;
+        });
+        report.addScannedCount(entries.size());
+        report.setTotalCandidates(silentEntries.size());
+        if (dshActivitySilentMaxPerRound > 0 && silentEntries.size() > dshActivitySilentMaxPerRound) {
+            silentEntries.keySet().forEach(workerId -> report.addSkippedSandbox("workerId=" + workerId));
+            LOGGER.warn("DSH 静默沙箱 {} 个超过单轮熔断阈值 {}，疑似上报链路整体中断，本轮不按静默释放，workerIds：{}",
+                silentEntries.size(), dshActivitySilentMaxPerRound, silentEntries.keySet());
+            return report;
+        }
+        for (Map.Entry<String, DshActivity> entry : silentEntries.entrySet()) {
             try {
-                releaseSilentDshSandbox(entry.getKey(), activity, report);
+                releaseSilentDshSandbox(entry.getKey(), entry.getValue(), report);
             }
             catch (Exception e) {
                 report.addFailedSandbox("workerId=" + entry.getKey());
-                LOGGER.error("DSH 静默释放失败，workerId：{}，userCode：{}", entry.getKey(), activity.userCode(), e);
+                LOGGER.error("DSH 静默释放失败，workerId：{}，userCode：{}", entry.getKey(), entry.getValue().userCode(), e);
             }
         }
-        report.setTotalCandidates(candidates);
-        report.addScannedCount(candidates);
         return report;
     }
 
@@ -1551,10 +1569,8 @@ public class SandboxService {
                 report.addSkippedSandbox(sandboxRef(record));
                 continue;
             }
-            if (isDshSilenceSuspendedByResize(record, System.currentTimeMillis())) {
+            if (isDshSilenceSuspended(workerId, record, System.currentTimeMillis())) {
                 report.addSkippedSandbox(sandboxRef(record));
-                LOGGER.info("DSH 沙箱变配中或刚完成变配，暂不按静默释放：{}，resizeStatus：{}，lastResizeAt：{}",
-                    sandboxRef(record), record.getResizeStatus(), record.getLastResizeAt());
                 continue;
             }
             // 释放前复核最新状态，避免与刚到达的上报竞争
@@ -1604,21 +1620,61 @@ public class SandboxService {
         if (activity.isFresh(nowMillis, dshSilentMillis())) {
             return activity.isReleasable() ? RELEASE_REASON_DSH_RELEASABLE : null;
         }
-        if (isDshSilenceSuspendedByResize(record, nowMillis)) {
+        String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
+        if (isDshSilenceSuspended(workerId, record, nowMillis)) {
             return null;
         }
         return isDshSilentCheckReady(nowMillis) ? RELEASE_REASON_DSH_SILENT : null;
     }
 
     /**
-     * 变配会重启容器，期间及完成后一个静默阈值内 DSH 停止上报属于预期，不按静默释放。
+     * Stream 静默但有其他证据说明容器仍在运行或正在重启时，不按静默释放：
+     * 变配会重启容器，期间及完成后一个静默阈值内停止上报属于预期；
+     * 同一容器的 {@code worker:stats:dsh} busy 心跳仍在一个静默阈值内到达，说明只是上报插件出了问题，容器本身活着。
      */
-    private boolean isDshSilenceSuspendedByResize(SsSandboxRecord record, long nowMillis) {
-        if (StringUtils.equalsIgnoreCase(record.getResizeStatus(), RESIZE_STATUS_PROCESSING)) {
+    private boolean isDshSilenceSuspended(String workerId, SsSandboxRecord record, long nowMillis) {
+        if (StringUtils.equalsIgnoreCase(record.getResizeStatus(), RESIZE_STATUS_PROCESSING)
+            || (record.getLastResizeAt() != null
+            && nowMillis - record.getLastResizeAt().getTime() <= dshSilentMillis())) {
+            LOGGER.info("DSH 沙箱变配中或刚完成变配，暂不按静默释放：{}，resizeStatus：{}，lastResizeAt：{}",
+                sandboxRef(record), record.getResizeStatus(), record.getLastResizeAt());
             return true;
         }
-        Date lastResizeAt = record.getLastResizeAt();
-        return lastResizeAt != null && nowMillis - lastResizeAt.getTime() <= dshSilentMillis();
+        long busyHeartbeatAt = dshBusyHeartbeatAt(workerId);
+        if (busyHeartbeatAt > 0 && nowMillis - busyHeartbeatAt <= dshSilentMillis()) {
+            LOGGER.warn("DSH 沙箱活动 Stream 静默但 busy 心跳仍在到达，疑似上报插件异常，暂不按静默释放：{}，busyHeartbeatAt：{}",
+                sandboxRef(record), new Date(busyHeartbeatAt));
+            return true;
+        }
+        return false;
+    }
+
+    /** 读取失败时按未收到心跳处理，不阻止静默判断。 */
+    private long dshBusyHeartbeatAt(String workerId) {
+        if (workerId == null) {
+            return 0L;
+        }
+        try {
+            return dshActivityStateStore.busyHeartbeatAt(workerId);
+        }
+        catch (Exception e) {
+            LOGGER.warn("读取 DSH busy 心跳时间失败，按未收到处理，workerId：{}，原因：{}", workerId, e.getMessage());
+            return 0L;
+        }
+    }
+
+    /** 记录失败只影响静默判断的一个旁证，不影响心跳本身。 */
+    private void touchDshBusyHeartbeat(SsSandboxRecord record, long nowMillis) {
+        String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
+        if (workerId == null) {
+            return;
+        }
+        try {
+            dshActivityStateStore.touchBusyHeartbeat(workerId, nowMillis);
+        }
+        catch (Exception e) {
+            LOGGER.warn("记录 DSH busy 心跳时间失败，workerId：{}，原因：{}", workerId, e.getMessage());
+        }
     }
 
     /** 已上报且最新状态为新鲜 busy 的 DSH 沙箱，前端空闲时仍需续约；读取失败时按原规则处理。 */

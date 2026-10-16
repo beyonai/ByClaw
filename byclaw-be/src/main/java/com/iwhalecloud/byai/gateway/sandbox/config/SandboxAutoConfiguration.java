@@ -74,13 +74,17 @@ public class SandboxAutoConfiguration {
         return executor;
     }
 
-    /** DSH 活动 Stream 的轮询任务长期占用一个线程，与唤醒 Stream 分开。 */
+    /**
+     * DSH 活动 Stream 的轮询任务长期占用一个线程。必须与 sandboxWakeupStreamExecutor 分开：ThreadPoolTaskExecutor
+     * 只在队列满时才扩线程，共用一个 core=1 且带队列的池时，第二个轮询任务会一直排队得不到线程。这里只有一个订阅，
+     * 按单线程、无队列配置，再注册订阅会直接被拒绝而不是静默排队。
+     */
     @Bean(name = "dshActivityStreamExecutor")
     public ThreadPoolTaskExecutor dshActivityStreamExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(2);
-        executor.setQueueCapacity(8);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(0);
         executor.setKeepAliveSeconds(60);
         executor.setThreadNamePrefix("dsh-activity-stream-");
         executor.setWaitForTasksToCompleteOnShutdown(true);

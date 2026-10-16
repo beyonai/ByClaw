@@ -15,8 +15,12 @@ import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * DSH 活动状态存储：Redis Hash，field 为沙箱 workerId（{@code byclaw-dsh-<userCode>}），value 为
- * {@link DshActivity} 的 JSON。所有后端实例共享同一份状态。
+ * DSH 活动状态存储，所有后端实例共享。两个 Redis Hash，field 都是沙箱 workerId（{@code byclaw-dsh-<userCode>}）：
+ * <ul>
+ * <li>state：value 为 {@link DshActivity} 的 JSON，来自活动 Stream；</li>
+ * <li>busy-heartbeat：value 为后端最近一次收到该沙箱 {@code worker:stats:dsh} busy 心跳的毫秒时间，
+ * 用于在 Stream 静默时证明容器仍然活着。</li>
+ * </ul>
  */
 @Component
 public class DshActivityStateStore {
@@ -25,11 +29,13 @@ public class DshActivityStateStore {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    static final String DEFAULT_STATE_KEY = "byclaw:dsh:sandbox:activity:state";
+    static final String DEFAULT_STATE_KEY = "byclaw:sandbox:dsh-activity:state";
+
+    static final String DEFAULT_BUSY_HEARTBEAT_KEY = "byclaw:sandbox:dsh-activity:busy-heartbeat";
 
     /**
      * 比较 Stream ID 后写入，单 key 原子执行：多实例并发消费同一沙箱相邻两条上报时，旧的 releasable
-     * 不能覆盖新的 busy。任一 ID 无法解析时照常写入（与 {@link DshActivity#isOlderThan} 一致）。
+     * 不能覆盖新的 busy。任一 ID 无法解析时照常写入。
      */
     private static final DefaultRedisScript<Long> RECORD_SCRIPT = new DefaultRedisScript<>("""
         local current = redis.call('hget', KEYS[1], ARGV[1])
@@ -63,6 +69,9 @@ public class DshActivityStateStore {
 
     @Value("${byclaw.sandbox.dsh-activity.state-key:" + DEFAULT_STATE_KEY + "}")
     private String stateKey = DEFAULT_STATE_KEY;
+
+    @Value("${byclaw.sandbox.dsh-activity.busy-heartbeat-key:" + DEFAULT_BUSY_HEARTBEAT_KEY + "}")
+    private String busyHeartbeatKey = DEFAULT_BUSY_HEARTBEAT_KEY;
 
     public DshActivityStateStore(StringRedisTemplate stringRedisTemplate) {
         this.stringRedisTemplate = stringRedisTemplate;
@@ -109,11 +118,43 @@ public class DshActivityStateStore {
         return result;
     }
 
+    /** 沙箱释放后清理该 workerId 的活动状态和 busy 心跳时间。 */
     public void remove(String workerId) {
         if (StringUtils.isBlank(workerId)) {
             return;
         }
         stringRedisTemplate.opsForHash().delete(stateKey, workerId);
+        stringRedisTemplate.opsForHash().delete(busyHeartbeatKey, workerId);
+    }
+
+    /** 记录后端收到该沙箱 {@code worker:stats:dsh} busy 心跳的时间。 */
+    public void touchBusyHeartbeat(String workerId, long nowMillis) {
+        if (StringUtils.isBlank(workerId)) {
+            return;
+        }
+        stringRedisTemplate.opsForHash().put(busyHeartbeatKey, workerId, Long.toString(nowMillis));
+    }
+
+    /**
+     * 后端最近一次收到该沙箱 busy 心跳的时间。
+     *
+     * @return 毫秒时间戳；从未收到或无法解析时返回 0
+     */
+    public long busyHeartbeatAt(String workerId) {
+        if (StringUtils.isBlank(workerId)) {
+            return 0L;
+        }
+        Object value = stringRedisTemplate.opsForHash().get(busyHeartbeatKey, workerId);
+        if (value == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(value.toString());
+        }
+        catch (NumberFormatException e) {
+            LOGGER.warn("DSH busy 心跳时间无法解析，按未收到处理，workerId={}，value={}", workerId, value);
+            return 0L;
+        }
     }
 
     /**

@@ -57,10 +57,13 @@ public class DshActivityStreamListener
     @Value("${byclaw.sandbox.dsh-activity.consumer-group:" + DEFAULT_CONSUMER_GROUP + "}")
     private String consumerGroup = DEFAULT_CONSUMER_GROUP;
 
-    @Value("${byclaw.sandbox.dsh-activity.silent-seconds:90}")
-    private long silentSeconds = 90L;
+    @Value("${byclaw.sandbox.dsh-activity.silent-seconds:120}")
+    private long silentSeconds = 120L;
 
     private StreamMessageListenerContainer<String, MapRecord<String, String, String>> container;
+
+    /** 本次启动使用的消费者名；停止时从消费者组删除，避免每次重启留下一个带 pending 的孤儿消费者。 */
+    private String consumerName;
 
     /** 本实例连续正常消费的起点（毫秒）；0 表示未在消费。启动及每次读取 / 写入异常都会重置。 */
     private volatile long consumingSince;
@@ -98,11 +101,12 @@ public class DshActivityStreamListener
                 .executor(dshActivityStreamExecutor)
                 .build();
         container = StreamMessageListenerContainer.create(redisConnectionFactory, options);
+        consumerName = buildConsumerName();
         // 读取异常不取消订阅：Redis 短暂故障后继续消费，异常期间由 consumingSince 推迟静默释放。
         container.register(
             StreamMessageListenerContainer.StreamReadRequest
                 .builder(StreamOffset.create(streamKey, ReadOffset.lastConsumed()))
-                .consumer(Consumer.from(consumerGroup, buildConsumerName()))
+                .consumer(Consumer.from(consumerGroup, consumerName))
                 .autoAcknowledge(false)
                 .cancelOnError(e -> false)
                 .errorHandler(this::handleReadError)
@@ -133,11 +137,12 @@ public class DshActivityStreamListener
     }
 
     /**
-     * 校验并记录一条上报；格式不合法的记录忽略（调用方照常 ack）。
+     * 校验并记录一条上报；格式不合法的记录忽略（调用方照常 ack）。记录时间取 Stream ID 的毫秒部分（Redis 服务器时钟），
+     * 多实例消费时不受后端实例之间时钟偏差影响；ID 无法解析时退回后端收到时间。
      *
      * @return 是否写入状态
      */
-    boolean handle(Map<String, String> values, String streamId, long receivedAt) {
+    boolean handle(Map<String, String> values, String streamId, long fallbackReceivedAt) {
         String sandboxId = values == null ? null : StringUtils.trimToNull(values.get("sandboxId"));
         String userCode = values == null ? null : StringUtils.trimToNull(values.get("userCode"));
         String state = values == null ? null : StringUtils.trimToNull(values.get("state"));
@@ -146,6 +151,8 @@ public class DshActivityStreamListener
             LOGGER.debug("忽略不合法的 DSH 活动记录，streamId={}，value={}", streamId, values);
             return false;
         }
+        long entryMillis = DshActivity.streamIdMillis(streamId);
+        long receivedAt = entryMillis > 0 ? entryMillis : fallbackReceivedAt;
         DshActivity activity = new DshActivity(userCode, state, receivedAt, streamId,
             values.get("at"), values.get("lastActiveAt"));
         return stateStore.record(sandboxId, activity);
@@ -176,6 +183,28 @@ public class DshActivityStreamListener
         finally {
             container = null;
             consumingSince = 0L;
+        }
+        deleteConsumer();
+    }
+
+    /**
+     * 从消费者组删除本次启动的消费者。未 ack 的条目随之丢弃：下一条心跳会覆盖它们，而保留只会让孤儿消费者和
+     * pending 列表随每次重启增长。
+     */
+    private void deleteConsumer() {
+        if (consumerName == null) {
+            return;
+        }
+        try {
+            redisTemplate.opsForStream().deleteConsumer(streamKey, Consumer.from(consumerGroup, consumerName));
+            LOGGER.info("已删除 DSH 活动 Stream 消费者，consumerGroup={}，consumer={}", consumerGroup, consumerName);
+        }
+        catch (Exception e) {
+            LOGGER.warn("删除 DSH 活动 Stream 消费者失败，consumerGroup={}，consumer={}，reason={}", consumerGroup,
+                consumerName, e.getMessage());
+        }
+        finally {
+            consumerName = null;
         }
     }
 

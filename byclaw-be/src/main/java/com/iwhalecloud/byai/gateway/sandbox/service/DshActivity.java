@@ -10,7 +10,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  *
  * @param userCode 沙箱所属用户
  * @param state busy 或 releasable
- * @param receivedAt 后端收到该条记录的时间（后端时钟，毫秒）
+ * @param receivedAt 该条记录进入 Redis 的时间（取自 Stream ID 的毫秒部分，即 Redis 服务器时钟；无法解析时为后端收到时间）
  * @param streamId Redis Stream 记录 ID，用于丢弃乱序到达的旧记录
  * @param at 容器侧生成时间，仅供排查
  * @param lastActiveAt 容器侧最后忙碌时间，仅供排查
@@ -39,30 +39,23 @@ public record DshActivity(String userCode, String state, long receivedAt, String
         return nowMillis - receivedAt <= silentMillis;
     }
 
-    /** 当前记录的 Stream ID 是否严格早于另一条记录；无法解析时不视为更早。 */
-    @JsonIgnore
-    public boolean isOlderThan(DshActivity other) {
-        if (other == null) {
-            return false;
+    /**
+     * Stream ID 的毫秒部分（{@code <millis>-<seq>}），即 Redis 服务器写入该条记录的时间。多实例消费时所有实例看到
+     * 同一时钟，静默判断不受后端实例之间的时钟偏差影响。
+     *
+     * @return 毫秒时间戳；无法解析时返回 -1
+     */
+    public static long streamIdMillis(String streamId) {
+        if (StringUtils.isBlank(streamId)) {
+            return -1L;
         }
-        long[] mine = parseStreamId(streamId);
-        long[] theirs = parseStreamId(other.streamId());
-        if (mine == null || theirs == null) {
-            return false;
-        }
-        return mine[0] < theirs[0] || (mine[0] == theirs[0] && mine[1] < theirs[1]);
-    }
-
-    private static long[] parseStreamId(String id) {
-        if (StringUtils.isBlank(id)) {
-            return null;
-        }
-        String[] parts = id.split("-", 2);
+        String millis = StringUtils.substringBefore(streamId, "-");
         try {
-            return new long[] {Long.parseLong(parts[0]), parts.length > 1 ? Long.parseLong(parts[1]) : 0L};
+            long value = Long.parseLong(millis);
+            return value > 0 ? value : -1L;
         }
         catch (NumberFormatException e) {
-            return null;
+            return -1L;
         }
     }
 }

@@ -84,7 +84,7 @@ The consumer is `byclaw-be` (consumer group `byclaw_dsh_activity_group`). It kee
 
 - releases it when the latest entry is `releasable` **and** the user's page has been idle for the platform idle timeout. An open page counts as work. A window remains between the read and the release in which new work may start; this is accepted because the sandbox has been idle for `idleTimeoutMs` and its sessions survive;
 - keeps renewing it while the latest entry is `busy`, even when the page is idle;
-- treats a sandbox that has reported before but sent no entry within `3 × heartbeatMs` (90 s by default) as dead and releases it; the next message relaunches it. Silence is the only shutdown signal, so a supervisor restart inside that window is not mistaken for death;
+- treats a sandbox that has reported before but sent no entry within `4 × heartbeatMs` (120 s by default) as dead and releases it; the next message relaunches it. Silence is the only shutdown signal, so a supervisor restart inside that window is not mistaken for death. Two guards remain on the platform side: a container whose busy heartbeat (`worker:stats:dsh`) still arrives is kept, and a round with too many silent sandboxes is skipped as a whole;
 - ignores entries received before the sandbox record was created, so state from a user's previous sandbox never affects a new one. Sandboxes that never report keep the platform's page-only idle rule.
 
 ## Verification

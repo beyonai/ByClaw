@@ -16,7 +16,10 @@ import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.RecordId;
@@ -45,12 +48,12 @@ class DshActivityStreamListenerTest {
         listener = new DshActivityStreamListener(mock(RedisConnectionFactory.class), redisTemplate, store,
             mock(Executor.class));
         ReflectionTestUtils.setField(listener, "enabled", true);
+        ReflectionTestUtils.setField(listener, "silentSeconds", 90L);
     }
 
     @Test
-    void validEntryIsRecordedWithBackendReceiveTimeAndAcked() {
+    void validEntryIsRecordedWithTheStreamEntryTimeAndAcked() {
         when(store.record(anyString(), any(DshActivity.class))).thenReturn(true);
-        long before = System.currentTimeMillis();
 
         listener.onMessage(message("1700000000000-2", entry("byclaw-dsh-user001", "user001", "releasable")));
 
@@ -59,9 +62,36 @@ class DshActivityStreamListenerTest {
         assertThat(recorded.getValue().userCode()).isEqualTo("user001");
         assertThat(recorded.getValue().state()).isEqualTo("releasable");
         assertThat(recorded.getValue().streamId()).isEqualTo("1700000000000-2");
-        assertThat(recorded.getValue().receivedAt()).isBetween(before, System.currentTimeMillis());
+        // the entry time comes from the Redis server clock embedded in the stream id, not from this instance
+        assertThat(recorded.getValue().receivedAt()).isEqualTo(1_700_000_000_000L);
         assertThat(recorded.getValue().at()).isEqualTo("2026-10-15T08:00:00.000Z");
         verify(streams).acknowledge(STREAM, GROUP, RecordId.of("1700000000000-2"));
+    }
+
+    @Test
+    void unparsableStreamIdFallsBackToTheBackendReceiveTime() {
+        long before = System.currentTimeMillis();
+
+        assertThat(listener.handle(entry("byclaw-dsh-user001", "user001", "busy"), "garbage", before)).isFalse();
+
+        ArgumentCaptor<DshActivity> recorded = ArgumentCaptor.forClass(DshActivity.class);
+        verify(store).record(org.mockito.ArgumentMatchers.eq("byclaw-dsh-user001"), recorded.capture());
+        assertThat(recorded.getValue().receivedAt()).isEqualTo(before);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void stoppingDeletesThisStartsConsumerFromTheGroup() {
+        StreamMessageListenerContainer<String, MapRecord<String, String, String>> container =
+            mock(StreamMessageListenerContainer.class);
+        ReflectionTestUtils.setField(listener, "container", container);
+        ReflectionTestUtils.setField(listener, "consumerName", "byclaw-dsh-activity:host:abc");
+
+        listener.onApplicationEvent(new ContextClosedEvent(mock(ApplicationContext.class)));
+
+        verify(container).stop();
+        verify(streams).deleteConsumer(STREAM, Consumer.from(GROUP, "byclaw-dsh-activity:host:abc"));
+        assertThat(listener.isSilentCheckReady(System.currentTimeMillis())).isFalse();
     }
 
     @Test

@@ -308,6 +308,55 @@ class DshActivitySandboxServiceTest {
         verify(mapper).updateLastAccessTime(anyLong(), any(Date.class), anyInt());
         // health watch keeps following the busy signal for both
         verify(health, times(2)).touch(eq("user001"), anyString());
+        // the busy heartbeat time is kept only for the reporting sandbox, as evidence of life during stream silence
+        verify(store, times(1)).touchBusyHeartbeat(eq(WORKER_ID), anyLong());
+    }
+
+    @Test
+    void busyHeartbeatStillArrivingSuspendsSilentRelease() {
+        SsSandboxRecord record = dshRecord(10 * MINUTE);
+        DshActivity silent = activity("busy", 5 * MINUTE, 1);
+        when(store.entries()).thenReturn(Map.of(WORKER_ID, silent));
+        reported(silent);
+        when(mapper.selectRunningByUserAndSandboxType("user001", "byclaw-dsh")).thenReturn(List.of(record));
+        frontendIdleCandidates(record);
+        when(store.busyHeartbeatAt(WORKER_ID)).thenReturn(System.currentTimeMillis() - 30_000L);
+
+        SandboxLifecycleJobReport silentReport = service.releaseSilentDshSandboxes();
+        service.cleanupExpiredSandboxes();
+
+        assertThat(silentReport.getSkippedCount()).isEqualTo(1);
+        verify(mapper, never()).markReleasing(anyLong(), anyString(), any(Date.class), anyInt());
+
+        when(store.busyHeartbeatAt(WORKER_ID)).thenReturn(System.currentTimeMillis() - 2 * MINUTE);
+        service.releaseSilentDshSandboxes();
+        verify(mapper).markReleasing(eq(7L), eq("release.dsh.silent"), any(Date.class), eq(3));
+    }
+
+    @Test
+    void tooManySilentSandboxesInOneRoundTripTheBreaker() {
+        ReflectionTestUtils.setField(service, "dshActivitySilentMaxPerRound", 1);
+        Map<String, DshActivity> entries = new LinkedHashMap<>();
+        entries.put(WORKER_ID, activity("busy", 5 * MINUTE, 1));
+        entries.put("byclaw-dsh-user002", new DshActivity("user002", "busy", System.currentTimeMillis() - 5 * MINUTE,
+            "1700000000000-1", null, null));
+        entries.put("byclaw-dsh-user003", new DshActivity("user003", "releasable", System.currentTimeMillis() - 1_000L,
+            "1700000000000-1", null, null));
+        when(store.entries()).thenReturn(entries);
+
+        SandboxLifecycleJobReport report = service.releaseSilentDshSandboxes();
+
+        assertThat(report.getScannedCount()).isEqualTo(3);
+        assertThat(report.getTotalCandidates()).isEqualTo(2);
+        assertThat(report.getSkippedCount()).isEqualTo(2);
+        assertThat(report.getAffectedCount()).isZero();
+        verify(mapper, never()).selectRunningByUserAndSandboxType(anyString(), anyString());
+        verify(store, never()).removeIfUnchanged(anyString(), any(DshActivity.class));
+
+        ReflectionTestUtils.setField(service, "dshActivitySilentMaxPerRound", 2);
+        service.releaseSilentDshSandboxes();
+        verify(mapper).selectRunningByUserAndSandboxType("user001", "byclaw-dsh");
+        verify(mapper).selectRunningByUserAndSandboxType("user002", "byclaw-dsh");
     }
 
     @Test

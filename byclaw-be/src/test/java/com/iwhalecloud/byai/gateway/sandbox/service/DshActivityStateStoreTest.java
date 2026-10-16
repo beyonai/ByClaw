@@ -93,17 +93,37 @@ class DshActivityStateStoreTest {
     }
 
     @Test
-    void freshnessAndStreamOrder() {
+    void freshnessAndStreamIdTime() {
         DshActivity activity = new DshActivity("u1", "releasable", 10_000L, "5-3", null, null);
 
         assertThat(activity.isFresh(100_000L, 90_000L)).isTrue();
         assertThat(activity.isFresh(100_001L, 90_000L)).isFalse();
         assertThat(activity.isReleasable()).isTrue();
         assertThat(activity.isBusy()).isFalse();
-        assertThat(activity.isOlderThan(new DshActivity("u1", "busy", 0L, "5-4", null, null))).isTrue();
-        assertThat(activity.isOlderThan(new DshActivity("u1", "busy", 0L, "6", null, null))).isTrue();
-        assertThat(activity.isOlderThan(new DshActivity("u1", "busy", 0L, "5-3", null, null))).isFalse();
-        assertThat(activity.isOlderThan(new DshActivity("u1", "busy", 0L, "garbage", null, null))).isFalse();
+        assertThat(DshActivity.streamIdMillis("1700000000000-7")).isEqualTo(1_700_000_000_000L);
+        assertThat(DshActivity.streamIdMillis("1700000000000")).isEqualTo(1_700_000_000_000L);
+        assertThat(DshActivity.streamIdMillis("garbage")).isEqualTo(-1L);
+        assertThat(DshActivity.streamIdMillis("0-0")).isEqualTo(-1L);
+        assertThat(DshActivity.streamIdMillis(" ")).isEqualTo(-1L);
+    }
+
+    @Test
+    void busyHeartbeatTimeIsKeptBesideTheStateAndRemovedWithIt() {
+        String busyKey = DshActivityStateStore.DEFAULT_BUSY_HEARTBEAT_KEY;
+
+        store.touchBusyHeartbeat("w", 1_234L);
+        verify(hash).put(busyKey, "w", "1234");
+
+        when(hash.get(busyKey, "w")).thenReturn("1234");
+        assertThat(store.busyHeartbeatAt("w")).isEqualTo(1_234L);
+        when(hash.get(busyKey, "w")).thenReturn("x");
+        assertThat(store.busyHeartbeatAt("w")).isZero();
+        assertThat(store.busyHeartbeatAt("never")).isZero();
+        assertThat(store.busyHeartbeatAt(" ")).isZero();
+
+        store.remove("w");
+        verify(hash).delete(KEY, "w");
+        verify(hash).delete(busyKey, "w");
     }
 
     private static String json(DshActivity activity) {
