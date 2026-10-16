@@ -22,6 +22,7 @@ test('session tool binding is idempotent and validates before generation', async
     assert.deepEqual(tool.parameters.required, ['prompt'])
     assert.equal(tool.parameters.additionalProperties, false)
     assert.ok(tool.description.length <= 250)
+    assert.match(tool.description, /配置连接器.*不要再次调用/u)
     for (const field of Object.values(tool.parameters.properties)) assert.ok((field.description?.length ?? 0) <= 150)
     await assert.rejects(tool.execute({ prompt: ' ', endpoint: 'https://attacker.example' }, {}), /INVALID_ARGUMENT/)
     assert.equal(calls, 0)
@@ -47,6 +48,7 @@ test('speech tool treats null and blank voices as unspecified', async () => {
   try {
     mountMediaPlugin(ctx, { kind: 'tts', generate })
     await setup({ agentCtx, host, agent: { id: 'a1' }, command: { header: { userCode: 'test' } } })
+    assert.match(tool.description, /配置连接器.*不要再次调用/u)
     for (const voice of [null, '', '   ']) await tool.execute({ text: 'hello', voice })
     assert.deepEqual(calls, [{ text: 'hello' }, { text: 'hello' }, { text: 'hello' }])
     await assert.rejects(tool.execute({ text: 'hello', voice: 42 }), /MEDIA_INVALID_ARGUMENT: voice/)
@@ -78,7 +80,8 @@ for (const [kind, modelError, connectorCode, connectorName, args] of [
       && error.source === 'system-default'
       && error.configurationRequired === true
       && error.message.includes(connectorName)
-      && error.message.includes('配置并启用个人连接器'))
+      && error.message.includes('配置并启用个人连接器')
+      && error.message.includes('不要再次调用当前工具'))
   } finally { await rm(mounted.root, { recursive: true, force: true }) }
 })
 
@@ -95,7 +98,8 @@ for (const [kind, generationError, connectorCode, connectorName, args] of [
       && error.connectorCode === connectorCode
       && error.source === 'user-connector'
       && error.message.includes(connectorName)
-      && error.message.includes('检查并重新保存'))
+      && error.message.includes('检查并重新保存')
+      && error.message.includes('不要再次调用当前工具'))
   } finally { await rm(mounted.root, { recursive: true, force: true }) }
 })
 
@@ -120,7 +124,8 @@ test('a resolved but unusable system model asks the user to configure a personal
       && error.source === 'system-default'
       && error.connectorCode === 'speech-generation-model'
       && error.reason === 'TTS_ERROR'
-      && error.message.includes('配置并启用个人连接器'))
+      && error.message.includes('配置并启用个人连接器')
+      && error.message.includes('不要再次调用当前工具'))
   } finally { await rm(mounted.root, { recursive: true, force: true }) }
 })
 

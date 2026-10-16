@@ -97,7 +97,9 @@ const ToolCall: ToolCallComponent = (props) => {
 
   const inputText = formatDetail(input);
   const outputText = formatDetail(output);
-  const connectorAction = status === '_ERROR_' ? parseConnectorAction(outputText) : undefined;
+  // 工具错误在不同流式协议中可能先被归并成 _DONE_，因此以稳定错误码判断用户动作，
+  // 不依赖传输层状态是否已经规范化为 _ERROR_。
+  const connectorAction = parseConnectorAction(outputText);
   const hasDetail = Boolean(inputText || outputText);
   const isContextEvent = typeof substance !== 'string' && substance?.eventKind === 'context';
 

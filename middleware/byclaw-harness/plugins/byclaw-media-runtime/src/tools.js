@@ -65,8 +65,8 @@ function connectorConfigurationError(kind, source, cause, connectorCode) {
   const effectiveConnectorCode = connectorCode ?? connector.code
   const reason = safeErrorCode(cause)
   const message = effectiveSource === 'user-connector'
-    ? `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; ${connector.name}连接器当前不可用。请打开连接器授权页面，检查并重新保存连接信息后重试（原因：${reason}）。`
-    : `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; 系统默认${connector.name}当前不可用。请打开连接器授权页面，配置并启用个人连接器后重试（原因：${reason}）。`
+    ? `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; ${connector.name}连接器当前不可用。请停止重试并告知用户点击工具结果中的“配置${connector.name}”按钮，检查并重新保存连接信息；配置完成前不要再次调用当前工具（原因：${reason}）。`
+    : `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; 系统默认${connector.name}当前不可用。请停止重试并告知用户点击工具结果中的“配置${connector.name}”按钮，配置并启用个人连接器；配置完成前不要再次调用当前工具（原因：${reason}）。`
   const error = new Error(message)
   error.code = 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED'
   error.capability = kind === 'image' ? 'IMAGE' : 'TTS'
@@ -101,8 +101,8 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
     const tool = {
       name: kind === 'image' ? 'image_generate' : 'text_to_speech',
       description: kind === 'image'
-        ? '生成或编辑图片。编辑时用 referenceImage 引用当前会话原图文件名；不支持编辑的模型会报错。产生供应商费用。返回图片制品与版本关系，界面直接展示，无需在答复中输出绝对路径。'
-        : '用户要求文本转语音时调用。切换音色或语速前可用 text_to_speech_options 查询。产生供应商费用；音频和词码保存到 session_root/tts。须告知用户返回的 warnings；artifacts 为空表示未生成，不可声称成功。',
+        ? '生成或编辑图片。编辑时用 referenceImage 引用当前会话原图文件名；不支持编辑的模型会报错。产生供应商费用。返回图片制品与版本关系，界面直接展示。若要求配置连接器，告知用户点击配置按钮，配置完成前不要再次调用。'
+        : '用户要求文本转语音时调用。切换音色或语速前可用 text_to_speech_options 查询。产生供应商费用；音频和词码保存到 session_root/tts。须告知用户 warnings；artifacts 为空不可声称成功。若要求配置连接器，告知用户点击配置按钮，配置完成前不要再次调用。',
       parameters: { type: 'object', properties: fields, required, additionalProperties: false },
       output: {
         schema: { type: 'object', required: ['provider', 'model', 'artifacts'], additionalProperties: false, properties: {

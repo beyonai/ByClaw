@@ -54,4 +54,23 @@ describe('ToolCall connector recovery action', () => {
     });
     window.removeEventListener(CONNECTOR_AUTHORIZATION_REQUEST_EVENT, listener);
   });
+
+  it('shows the connector action when the streamed status was not normalized to _ERROR_', () => {
+    render(
+      <ToolCall
+        messageListItemContent={{
+          substance: {
+            title: 'image_generate',
+            output:
+              'Error: MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=image-generation-model; 系统默认文生图模型当前不可用。请打开连接器授权页面，配置并启用个人连接器后重试（原因：MEDIA_HTTP_401）。',
+            status: '_DONE_',
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByText('image_generate'));
+
+    expect(screen.getByRole('button', { name: '配置文生图模型' })).toBeInTheDocument();
+  });
 });
