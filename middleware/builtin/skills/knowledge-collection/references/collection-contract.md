@@ -1,5 +1,7 @@
 # Collection Contract
 
+本文件约束文章/文档正文分支。网页截图归档使用 [screenshot-collection.md](screenshot-collection.md) 的独立 `capture-manifest.json`，不扩展本文的 `session.json`、collect payload 或 `downstreamInput`。
+
 ## 单一状态文件 `session.json`
 
 会话的权威状态是 `<session-dir>/session.json`（`schemaVersion: "2.0"`），由 `scripts/knowledge-collection.mjs` 统一读写。采集状态描述任务、研究过程、来源 inventory 与正文物化；可选的顶层 `delivery` 只记录本次用户文件交付的校验回执，不追踪下游业务动作。

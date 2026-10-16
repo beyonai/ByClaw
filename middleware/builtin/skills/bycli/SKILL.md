@@ -36,6 +36,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 - 角色名称固定为：采集编排器 `knowledge-collection`（含内置公共互联网路由层）、网站执行器 `bycli`、站点 Adapter、直接查询所有者（根 Agent）。
 - 采集编排器委派时，`knowledge-collection` 只负责统一持久化、产物协议与采集交付；任何下游处理由根 Agent 另行委派。
+- 用户要求网页截图素材归档时，由 `knowledge-collection` 的独立 `screenshot-collection` 入口持有目标、预算、审查与 ZIP；byCLI 只提供已有授权 TAB 的 URL 读取和 PNG 截图。直接查询所有者先选择该采集工作流再委派；网站执行器不反向加载编排 skill，不自建另一份 manifest。不得为补齐截图触发分析、解包、创作或视频生成。
 - 网站执行器只执行或发现、修复 Adapter，并把结构化记录、正文或文件元数据返回采集编排器，不规定统一产物名称或目录。
 - 网站执行器不得反向加载 `knowledge-collection`。是否处于委派模式不改变 byCLI 的命令、授权、浏览器生命周期或 Adapter 验证规则。
 - 委派模式下若浏览器降级过程值得复用，返回 `adapterCandidate` 与判断依据给采集编排器，不得直接询问用户是否保存 Adapter。
@@ -95,6 +96,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 | 微信公众号账号/文章搜索、历史文章、批量保存或认证失败 | weixin 检索、认证与凭据 | [references/weixin.md](./references/weixin.md) |
 | 抖音作品、分享链接或视频文件归档 | 现成 douyin Adapter；委派采集由 `acquire-douyin` 持有 | 下方「抖音作品读取与下载」 |
 | 驱动浏览器完成一次性任务 / 填表 / 爬数据 | Browser 驱动 | [browser.md](./references/browser.md) |
+| 截图素材归档 / 章节截图加说明 ZIP | 编排器的独立 screenshot-collection；byCLI 只读执行 | [browser.md 的截图素材委派](./references/browser.md#截图素材委派) |
 | bycli 命令报错 / adapter 坏了 / 网站改版 | AutoFix 修复 | [autofix.md](./references/autofix.md) |
 | 给新站点写 adapter / 新增命令 | Adapter 编写 | [adapter-author.md](./references/adapter-author.md) |
 
