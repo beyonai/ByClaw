@@ -1,7 +1,9 @@
 import type { IMessage } from '@/typescript/message';
 
-/** Tool results are durable message segments; final prose is not the image contract. */
-export function structuredImagePaths(message: IMessage): string[] {
+export const isSpeechArtifactPath = (path: string) => /\.(mp3|wav|m4a|ogg|opus|flac|aac)$/i.test(path);
+
+/** Tool results are durable message segments; final prose is not the media contract. */
+function structuredPaths(message: IMessage, kind: 'image' | 'audio'): string[] {
   const paths = new Set<string>();
   let budget = 1000;
   const visit = (value: unknown, depth: number) => {
@@ -21,7 +23,7 @@ export function structuredImagePaths(message: IMessage): string[] {
     }
     if (typeof value !== 'object') return;
     const object = value as Record<string, unknown>;
-    if (Array.isArray(object.imageArtifacts)) {
+    if (kind === 'image' && Array.isArray(object.imageArtifacts)) {
       object.imageArtifacts.forEach((item) => {
         if (
           item?.schemaVersion === 1 &&
@@ -29,6 +31,21 @@ export function structuredImagePaths(message: IMessage): string[] {
           typeof item.id === 'string' &&
           /\.(png|jpe?g|webp)$/i.test(item.id) &&
           item.path.endsWith(`/image/${item.id}`)
+        )
+          paths.add(item.path);
+      });
+    }
+    if (kind === 'audio' && Array.isArray(object.artifacts)) {
+      object.artifacts.forEach((item) => {
+        if (
+          item &&
+          typeof item.path === 'string' &&
+          item.path.length <= 2048 &&
+          item.path.startsWith('/') &&
+          !item.path.startsWith('//') &&
+          isSpeechArtifactPath(item.path) &&
+          typeof item.mimeType === 'string' &&
+          item.mimeType.startsWith('audio/')
         )
           paths.add(item.path);
       });
@@ -43,4 +60,12 @@ export function structuredImagePaths(message: IMessage): string[] {
     visit(segment, 0);
   });
   return Array.from(paths);
+}
+
+export function structuredImagePaths(message: IMessage): string[] {
+  return structuredPaths(message, 'image');
+}
+
+export function structuredAudioPaths(message: IMessage): string[] {
+  return structuredPaths(message, 'audio');
 }

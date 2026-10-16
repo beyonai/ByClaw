@@ -26,10 +26,12 @@ import org.junit.jupiter.api.Test;
 class HarnessMediaClientTest {
     private HttpServer server;
     private HarnessMediaClient client;
+    private SandboxIngressEndpointResolver endpoints;
     private final ObjectMapper mapper = new ObjectMapper();
     private final AtomicReference<JsonNode> requestBody = new AtomicReference<>();
     private final AtomicReference<String> token = new AtomicReference<>();
     private final AtomicReference<String> runtimeKey = new AtomicReference<>();
+    private final AtomicReference<String> requestUri = new AtomicReference<>();
     private String response = "{\"text\":\"识别后的语音\",\"provider\":\"TEST\",\"model\":\"test\"}";
     private int status = 200;
 
@@ -41,6 +43,7 @@ class HarnessMediaClientTest {
         CurrentUserHolder.setLoginInfo(login);
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/sandbox/api/byclaw/", exchange -> {
+            requestUri.set(exchange.getRequestURI().toString());
             requestBody.set(mapper.readTree(exchange.getRequestBody()));
             token.set(exchange.getRequestHeaders().getFirst("Beyond-Token"));
             runtimeKey.set(exchange.getRequestHeaders().getFirst("OPEN-SANDBOX-API-KEY"));
@@ -51,7 +54,7 @@ class HarnessMediaClientTest {
         });
         server.start();
         var endpoint = "http://127.0.0.1:" + server.getAddress().getPort() + "/sandbox";
-        var endpoints = mock(SandboxIngressEndpointResolver.class);
+        endpoints = mock(SandboxIngressEndpointResolver.class);
         when(endpoints.resolveRequiredEndpoint("user42", "openclaw")).thenReturn(endpoint);
         var runtimes = mock(SandboxIngressRuntimeResolver.class);
         when(runtimes.resolve()).thenReturn(new SandboxIngressRuntimeSupport() {
@@ -89,6 +92,28 @@ class HarnessMediaClientTest {
         client.transcribe(audio(), Map.of("provider", "TEST", "model", "test"));
         assertThat(requestBody.get().path("debug").asBoolean()).isTrue();
         assertThat(requestBody.get().path("model").path("provider").asText()).isEqualTo("TEST");
+    }
+
+    @Test
+    void transcriptionUsesApiBesideChatPageAndPreservesProxyPrefixAndQuery() {
+        when(endpoints.resolveRequiredEndpoint("user42", "openclaw")).thenReturn(
+            "http://127.0.0.1:" + server.getAddress().getPort() + "/sandbox/chat?token=gateway%2Btoken");
+        assertThat(client.transcribe(audio(), null)).containsEntry("text", "识别后的语音");
+        assertThat(requestUri.get()).isEqualTo("/sandbox/api/byclaw/asr/transcribe?token=gateway%2Btoken");
+        assertThat(token.get()).isEqualTo("user-session-token");
+        assertThat(runtimeKey.get()).isEqualTo("runtime-test-key");
+    }
+
+    @Test
+    void speechDebugUsesApiBesideChatPageWithTrailingSlash() {
+        when(endpoints.resolveRequiredEndpoint("user42", "openclaw")).thenReturn(
+            "http://127.0.0.1:" + server.getAddress().getPort() + "/sandbox/chat/?token=gateway-token");
+        client.transcribe(audio(), Map.of("provider", "TEST", "model", "test"));
+        assertThat(requestBody.get().path("debug").asBoolean()).isTrue();
+        assertThat(requestUri.get()).isEqualTo("/sandbox/api/byclaw/asr/transcribe?token=gateway-token");
+        response = "{\"audioBase64\":\"SUQz\",\"mimeType\":\"audio/mpeg\",\"provider\":\"TEST\",\"model\":\"test\"}";
+        assertThat(client.debugTts("hello", Map.of("provider", "TEST"))).containsEntry("success", true);
+        assertThat(requestUri.get()).isEqualTo("/sandbox/api/byclaw/tts/debug?token=gateway-token");
     }
 
     @Test

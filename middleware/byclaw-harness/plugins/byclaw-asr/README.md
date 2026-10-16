@@ -20,6 +20,8 @@ After a voice turn, the Agent's normal response is retained and its `<voice_summ
 
 For manual transcription, the authenticated BE proxies `POST /api/byclaw/asr/transcribe` to the user's Harness instance. Body: `{ audioBase64, mimeType: 'audio/mpeg', fileName?, sessionId? }`; result: `{ text, provider, model }`. The route compares `Beyond-Token` against the current user's Redis login token. Model-management debug requests may additionally pass `{ debug: true, model: MediaModel }`; the BE must authorize model-management access before forwarding explicit credentials. No credential or endpoint is accepted through an LLM tool.
 
+Sandbox discovery may return a console entry such as `/chat?token=...`, rather than an API base. The BE removes only the terminal `/chat` (including an optional trailing slash) before appending ASR/TTS API paths, preserving gateway path prefixes and authentication query parameters. Appending the API to the console path returns HTTP 405 and must not be interpreted as a provider outage.
+
 Local checks: `pnpm test` for adapter protocol tests. In the DSH workspace, run `pnpm --filter @byclaw/dsh-integration build` and `node --import tsx/esm plugins/byclaw-integration/scripts/voice-runtime-verify.mjs`. Provider network calls and entitlements require separate live verification.
 
 VolcEngine no-speech statuses `20000003` and `45000002` produce `ASR_SPEECH_NOT_DETECTED`, including when paired with HTTP 4xx. The proxy returns HTTP 422 with “未识别到语音，请靠近麦克风后重试”; voice-message processing emits the same user guidance before Agent admission. Other vendor rejection details remain redacted.

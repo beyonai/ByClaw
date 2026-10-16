@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { loadVoiceAudio, transcribeVoice } from '@/service/voice';
 import VoiceMessage from './index';
@@ -113,5 +114,94 @@ describe('VoiceMessage', () => {
     fireEvent.click(screen.getByRole('button', { name: '播放语音摘要' }));
     await waitFor(() => expect(loadAudio).toHaveBeenCalledTimes(1));
     expect(loadVoiceAudio).not.toHaveBeenCalled();
+  });
+  it('automatically transcribes a new user voice once and retains manual retry on failure', async () => {
+    (transcribeVoice as jest.Mock).mockRejectedValueOnce(new Error('temporary'));
+    const view = render(<VoiceMessage voice={voice} autoTranscribe />);
+    await waitFor(() => expect(transcribeVoice).toHaveBeenCalledTimes(1));
+    view.rerender(<VoiceMessage voice={{ ...voice }} autoTranscribe />);
+    fireEvent.click(screen.getByRole('button', { name: '语音消息菜单' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '语音转文字' }));
+    expect(await screen.findByText('这是一条语音消息')).toBeInTheDocument();
+    expect(transcribeVoice).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses an existing transcript without automatically calling ASR', async () => {
+    render(<VoiceMessage voice={{ ...voice, transcript: '已有文字' }} autoTranscribe />);
+    expect(screen.getByText('已有文字')).toBeInTheDocument();
+    await act(async () => {});
+    expect(transcribeVoice).not.toHaveBeenCalled();
+  });
+
+  it('plays realtime segments sequentially and never replays them on remount', async () => {
+    const bubbles = () => (
+      <>
+        {[1, 2, 3].map((n) => (
+          <VoiceMessage key={n} voice={{ ...voice, fileId: String(n) }} autoPlayKey={`sequence:${n}`} autoPlay />
+        ))}
+      </>
+    );
+    const view = render(bubbles());
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+    const audios = view.container.querySelectorAll('audio');
+    expect(play.mock.instances[0]).toBe(audios[0]);
+    fireEvent.ended(audios[0]);
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(2));
+    expect(play.mock.instances[1]).toBe(audios[1]);
+    fireEvent.ended(audios[1]);
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(3));
+    expect(play.mock.instances[2]).toBe(audios[2]);
+    fireEvent.ended(audios[2]);
+    view.unmount();
+    render(bubbles());
+    await act(async () => {});
+    expect(play).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not catch up old speech when auto playback is enabled later', async () => {
+    const view = render(<VoiceMessage voice={voice} autoPlayKey="disabled-first" autoPlay={false} />);
+    view.rerender(<VoiceMessage voice={voice} autoPlayKey="disabled-first" autoPlay />);
+    await act(async () => {});
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('cancels pending playback on unmount even when the download completes later', async () => {
+    let resolve!: (blob: Blob) => void;
+    const loadAudio = () =>
+      new Promise<Blob>((done) => {
+        resolve = done;
+      });
+    const view = render(<VoiceMessage voice={voice} loadAudio={loadAudio} autoPlayKey="unmounted" autoPlay />);
+    await waitFor(() => expect(resolve).toBeDefined());
+    view.unmount();
+    await act(async () => resolve(new Blob(['mp3'])));
+    expect(play).not.toHaveBeenCalled();
+  });
+  it('drops queued segments when leaving during playback and returning', async () => {
+    const bubbles = () => (
+      <>
+        {[1, 2].map((n) => (
+          <VoiceMessage key={n} voice={voice} autoPlayKey={`leave:${n}`} autoPlay />
+        ))}
+      </>
+    );
+    const view = render(bubbles());
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+    view.unmount();
+    await act(async () => {});
+    render(bubbles());
+    await act(async () => {});
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+  it('keeps one ordered playback registration through StrictMode effect replay', async () => {
+    const view = render(
+      <StrictMode>
+        <VoiceMessage voice={voice} autoPlayKey="strict" autoPlay />
+      </StrictMode>
+    );
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+    fireEvent.ended(view.container.querySelector('audio')!);
+    await act(async () => {});
+    expect(play).toHaveBeenCalledTimes(1);
   });
 });

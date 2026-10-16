@@ -1,6 +1,7 @@
+import { getVoicePlaybackEpoch } from '@/utils/voicePlayback';
 import ImageArtifactGallery from '../ImageArtifactGallery';
-import { structuredImagePaths } from '@/utils/imageArtifacts';
-import React, { useEffect, useMemo, useState } from 'react';
+import { isSpeechArtifactPath, structuredAudioPaths, structuredImagePaths } from '@/utils/imageArtifacts';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import VoiceMessage from '../VoiceMessage';
 import FileRender from '@/components/MessageList/components/FileRender';
@@ -52,10 +53,14 @@ function ReplyFileArtifacts({
   message,
   sessionId,
   previewInDetailPanel = false,
+  autoPlay = false,
+  userId,
 }: {
   message: IMessage;
   sessionId?: string;
   previewInDetailPanel?: boolean;
+  autoPlay?: boolean;
+  userId?: string | number;
 }) {
   const [artifacts, setArtifacts] = useState<ChatFileArtifact[]>([]);
   const answerText = useMemo(
@@ -63,8 +68,32 @@ function ReplyFileArtifacts({
     [message.finalContent, message.messageList, message.text, message.updateKey]
   );
   const resolvedSessionId = message.sessionId || sessionId;
+  const liveTurn = useRef({ id: '', pending: false, done: false, suppressed: false, epoch: 0 });
+  const [playbackEpoch, setPlaybackEpoch] = useState<number>();
+  useEffect(() => {
+    const id = `${resolvedSessionId}:${message.msgId}`;
+    if (liveTurn.current.id !== id) {
+      liveTurn.current = { id, pending: false, done: false, suppressed: false, epoch: getVoicePlaybackEpoch() };
+      setPlaybackEpoch(undefined);
+    }
+    const turn = liveTurn.current;
+    if (message.isHistoryMsg || !autoPlay) {
+      turn.suppressed = true;
+      setPlaybackEpoch(undefined);
+    }
+    if ([IMessageState.Query, IMessageState.Answer].includes(message.messageState)) turn.pending = true;
+    if (message.messageState === IMessageState.Done && !turn.done) {
+      turn.done = true;
+      if (turn.pending && !turn.suppressed) setPlaybackEpoch(turn.epoch);
+    }
+  }, [resolvedSessionId, message.msgId, message.messageState, message.isHistoryMsg, autoPlay]);
+
   const paths = useMemo(() => {
-    const extracted = [...structuredImagePaths(message), ...extractChatFileArtifactPaths(answerText)];
+    const extracted = [
+      ...structuredImagePaths(message),
+      ...structuredAudioPaths(message),
+      ...extractChatFileArtifactPaths(answerText),
+    ];
     if (!resolvedSessionId) return extracted;
     return Array.from(new Set(extracted.map((path) => normalizeChatFileArtifactPath(path, resolvedSessionId))));
   }, [answerText, resolvedSessionId, message.messageList, message.thinkList, message.updateKey]);
@@ -122,7 +151,7 @@ function ReplyFileArtifacts({
   }, [artifacts, message, resolvedSessionId]);
 
   if (!files.length) return null;
-  const audioFiles = files.filter((file) => /\.(mp3|wav|m4a|ogg)$/i.test(file.queryFile?.fileName || ''));
+  const audioFiles = files.filter((file) => isSpeechArtifactPath(file.queryFile?.fileName || ''));
   const imageArtifacts = artifacts.filter((artifact) => /\.(png|jpe?g|webp)$/i.test(artifact.fileName));
   const regularFiles = files.filter(
     (file) => !audioFiles.includes(file) && !/\.(png|jpe?g|webp)$/i.test(file.queryFile?.fileName || '')
@@ -157,6 +186,13 @@ function ReplyFileArtifacts({
                 durationMs: 0,
                 mimeType: fileItem.queryFile?.contentType || 'audio/mpeg',
               }}
+              autoPlayKey={
+                playbackEpoch === undefined
+                  ? undefined
+                  : `${userId}:${resolvedSessionId}:${message.msgId}:${fileItem.queryFile?.filePath}`
+              }
+              autoPlayEpoch={playbackEpoch}
+              autoPlay={autoPlay}
               label="语音摘要"
               variant="assistant"
               loadAudio={async () => (await fileItem.downloadRequest!()).file}

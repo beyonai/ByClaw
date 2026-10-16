@@ -31,6 +31,7 @@ import UserInfoModal from '@/components/OrgUserSelector/components/UserInfoModal
 // import Memory from './components/Memory';
 
 import useModal from '@/hooks/useModal';
+import useVoicePreferences from '@/hooks/useVoicePreferences';
 import useGlobal from '@/hooks/useGlobal';
 import useCanRefrence from '@/components/ChatLayoutComp/components/MultiChoices/hooks/useCanRefrence';
 
@@ -88,6 +89,7 @@ export default function useRender({
   const { canRefrence } = useCanRefrence();
 
   const { userId } = userInfo || {};
+  const voicePreferences = useVoicePreferences(userId || userInfo?.userCode);
 
   const insertAgentMention = useCallback(
     (agentInfo: ReturnType<typeof getResponseAgentInfoByMessage>) => {
@@ -549,6 +551,7 @@ export default function useRender({
                 <VoiceMessage
                   key={`${msgId}_voice`}
                   voice={voice}
+                  autoTranscribe={voicePreferences.autoTranscribe && !msg.isHistoryMsg}
                   sessionId={msg.sessionId || sessionId}
                   onTranscript={(transcript) => updateMessage({ ...msg, voice: { ...voice, transcript } })}
                 />
@@ -607,7 +610,13 @@ export default function useRender({
             </div>
           )}
           {attachmentListRender(msg, !hideAction)}
-          <ReplyFileArtifacts message={msg} sessionId={sessionId} previewInDetailPanel={previewInDetailPanel} />
+          <ReplyFileArtifacts
+            message={msg}
+            sessionId={sessionId}
+            previewInDetailPanel={previewInDetailPanel}
+            userId={userId}
+            autoPlay={voicePreferences.autoPlay}
+          />
           {!hideAction && [IMessageState.Done, IMessageState.Cancel, IMessageState.Error].includes(messageState) && (
             <div className={styles.actionsBar}>
               {isLeftSide && beyondAnswerActions(msg)}
@@ -621,6 +630,8 @@ export default function useRender({
     [
       agentList,
       userId,
+      voicePreferences.autoPlay,
+      voicePreferences.autoTranscribe,
       employeesList,
       intl,
       attachmentListRender,
