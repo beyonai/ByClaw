@@ -601,8 +601,8 @@ const ConfigForm = (props) => {
     agentType,
     employeeGroupMembers = [],
     setEmployeeGroupMembers,
-    imageModelSelect,
-    ttsModelSelect,
+    // imageModelSelect,
+    // ttsModelSelect,
   } = props;
 
   const intl = useIntl();
@@ -618,7 +618,7 @@ const ConfigForm = (props) => {
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [robotModalOpen, setRobotModalOpen] = useState(false);
   const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
-  const [moreModelsOpen, setMoreModelsOpen] = useState(false);
+  // const [moreModelsOpen, setMoreModelsOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
   const [robotEditingIndex, setRobotEditingIndex] = useState<number | null>(null);
   const [templateData, setTemplateData] = useState([]);
@@ -2503,7 +2503,8 @@ const ConfigForm = (props) => {
                   </button>
                 </Popover>
               </div>
-              {!moreModelsOpen && (
+              {/* 暂时隐藏文生图、语音模型及展开/收起入口，保留已有模型配置的读取与保存逻辑。 */}
+              {/* {!moreModelsOpen && (
                 <button type="button" className={styles.moreModelsButton} onClick={() => setMoreModelsOpen(true)}>
                   <span>{intl.formatMessage({ id: 'employeeDetail.moreModels' })}</span>
                 </button>
@@ -2516,7 +2517,7 @@ const ConfigForm = (props) => {
                     <span>{intl.formatMessage({ id: 'employeeDetail.collapseMoreModels' })}</span>
                   </button>
                 </>
-              )}
+              )} */}
             </div>
 
             {/* 数字员工/数字员工组类型 */}
