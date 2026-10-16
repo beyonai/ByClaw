@@ -138,7 +138,7 @@ export async function debugModelImageGeneration(params: any) {
   );
 }
 
-export async function debugModelStream(params: any) {
+async function requestModelDebugStream(endpoint: string, params: any) {
   const { signal, onDelta, ...payload } = params || {};
   const finalPayload = {
     ...payload,
@@ -154,7 +154,7 @@ export async function debugModelStream(params: any) {
     ...generateSignature('POST', finalPayload),
   };
 
-  const response = await fetch('/byaiService/new/model/debugModelStream', {
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers,
     body: JSON.stringify(finalPayload),
@@ -252,4 +252,12 @@ export async function debugModelStream(params: any) {
       success: true,
     },
   };
+}
+
+export async function debugModelStream(params: any) {
+  return requestModelDebugStream('/byaiService/new/model/debugModelStream', params);
+}
+
+export async function debugPersonalModelStream(params: any) {
+  return requestModelDebugStream('/byaiService/personal/model/debug', params);
 }

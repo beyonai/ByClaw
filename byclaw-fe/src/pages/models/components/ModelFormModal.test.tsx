@@ -7,7 +7,20 @@ const mockGetDcSystemConfigListByStandType = jest.fn();
 let mockSharedModelFormProps: any;
 
 jest.mock('@umijs/max', () => ({
+  getLocale: () => 'zh-CN',
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
+}));
+
+jest.mock('@/pages/manager/utils/auth', () => ({
+  getSessionKey: () => 'session-1',
+  getssoToken: () => 'sso-token',
+  getToken: () => 'token-1',
+  ssotokenKey: 'SSO-TOKEN',
+  tokenKey: 'Beyond-Token',
+}));
+
+jest.mock('@/pages/manager/utils/signature', () => ({
+  generateSignature: () => ({ 'x-signature': 'signed' }),
 }));
 
 jest.mock('@/pages/manager/service/OrgMgr', () => ({
@@ -75,11 +88,13 @@ describe('models/components/ModelFormModal', () => {
   });
 
   it('keeps the existing LLM stream endpoint and delta behavior', async () => {
-    const read = jest
-      .fn()
-      .mockResolvedValueOnce({ done: false, value: new Uint8Array([111, 107]) })
-      .mockResolvedValueOnce({ done: true });
-    global.fetch = jest.fn().mockResolvedValue({ ok: true, body: { getReader: () => ({ read }) } });
+    const chunk = new TextEncoder().encode('data:{"choices":[{"delta":{"content":"ok"}}]}\n\ndata:[DONE]\n\n');
+    const read = jest.fn().mockResolvedValueOnce({ done: false, value: chunk }).mockResolvedValueOnce({ done: true });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: { getReader: () => ({ read }) },
+    });
     const props = renderForm();
     const onDelta = jest.fn();
     await expect(props.runDebugRequest({ modelId: 42, modelType: 'LLM', input: '{}', onDelta })).resolves.toEqual({

@@ -22,6 +22,7 @@ jest.mock('@/service/common/request', () => ({
 
 import {
   debugModelImageGeneration,
+  debugPersonalModelStream,
   debugModelStream,
   deleteModel,
   getModelDetail,
@@ -191,6 +192,43 @@ describe('manager/service/ModelMgr', () => {
     });
     expect(onDelta).toHaveBeenNthCalledWith(1, 'Hello');
     expect(onDelta).toHaveBeenNthCalledWith(2, ' World');
+  });
+
+  it('debugPersonalModelStream parses SSE and emits only assistant text', async () => {
+    const onDelta = jest.fn();
+    const encoder = new TextEncoder();
+    const chunks = [
+      encoder.encode('data:{"choices":[{"delta":{"role":"assistant","content":null}}]}\n\n'),
+      encoder.encode('data:{"choices":[{"delta":{"content":"天气"}}]}\n\n'),
+      encoder.encode('data:{"choices":[{"delta":{"content":"很好"}}]}\n\n'),
+      encoder.encode('data:[DONE]\n\n'),
+    ];
+
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: jest.fn(() => 'text/event-stream') },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: chunks[0], done: false })
+            .mockResolvedValueOnce({ value: chunks[1], done: false })
+            .mockResolvedValueOnce({ value: chunks[2], done: false })
+            .mockResolvedValueOnce({ value: chunks[3], done: false })
+            .mockResolvedValueOnce({ value: undefined, done: true }),
+        }),
+      },
+    });
+
+    await expect(debugPersonalModelStream({ id: '42', input: '{}', onDelta })).resolves.toEqual({
+      code: 0,
+      data: { output: '天气很好', success: true },
+    });
+    expect(onDelta.mock.calls).toEqual([['天气'], ['很好']]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/byaiService/personal/model/debug',
+      expect.objectContaining({ method: 'POST' })
+    );
   });
 
   it('renders Responses text deltas once and ignores completion snapshots', async () => {
