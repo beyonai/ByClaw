@@ -1,3 +1,4 @@
+import imageCanvas from './zh-CN/imageCanvas';
 import employeePublication from './zh-CN/employeePublication';
 import dataSource from './zh-CN/dataSource';
 import secondEdition from './zh-CN/secondEdition';
@@ -5,6 +6,7 @@ import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  ...imageCanvas,
   ...employeePublication,
   // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
   'toolCall.defaultTitle': '工具调用',

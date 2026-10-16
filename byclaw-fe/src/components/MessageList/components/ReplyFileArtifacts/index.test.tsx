@@ -12,6 +12,13 @@ jest.mock('@/service/chatFileArtifact', () => ({
   resolveChatFileArtifacts: jest.fn(),
 }));
 
+jest.mock('../ImageArtifactGallery', () => ({
+  __esModule: true,
+  default: ({ artifacts }: any) => (
+    <div data-testid="image-artifact-gallery">{artifacts.map((item: any) => item.fileName).join(',')}</div>
+  ),
+}));
+
 jest.mock('@/components/MessageList/components/FileRender', () => ({
   __esModule: true,
   default: ({ fileItem }: any) => (
@@ -210,4 +217,37 @@ describe('ReplyFileArtifacts', () => {
     await waitFor(() => expect(mockResolve).toHaveBeenCalled());
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
+});
+
+test('renders a structured image result when final prose has no path', async () => {
+  mockResolve.mockResolvedValueOnce([
+    {
+      sourcePath: '/by/.sessions/101/image/structured.png',
+      path: '/.sessions/101/image/structured.png',
+      fileName: 'structured.png',
+      contentType: 'image/png',
+    },
+  ]);
+  render(
+    <ReplyFileArtifacts
+      message={message({
+        messageId: 'structured-result',
+        text: '完成',
+        messageList: [
+          {
+            content: {
+              substance: JSON.stringify({
+                output: JSON.stringify({
+                  imageArtifacts: [
+                    { schemaVersion: 1, id: 'structured.png', path: '/by/.sessions/101/image/structured.png' },
+                  ],
+                }),
+              }),
+            },
+          },
+        ] as any,
+      })}
+    />
+  );
+  expect(await screen.findByTestId('image-artifact-gallery')).toHaveTextContent('structured.png');
 });

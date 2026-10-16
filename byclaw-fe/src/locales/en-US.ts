@@ -1,3 +1,4 @@
+import imageCanvas from './en-US/imageCanvas';
 import employeePublication from './en-US/employeePublication';
 import dataSource from './en-US/dataSource';
 import secondEdition from './en-US/secondEdition';
@@ -5,6 +6,7 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  ...imageCanvas,
   ...employeePublication,
   // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
   'toolCall.defaultTitle': 'Tool call',

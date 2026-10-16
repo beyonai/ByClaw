@@ -1,3 +1,5 @@
+import ImageArtifactGallery from '../ImageArtifactGallery';
+import { structuredImagePaths } from '@/utils/imageArtifacts';
 import React, { useEffect, useMemo, useState } from 'react';
 
 import VoiceMessage from '../VoiceMessage';
@@ -62,10 +64,10 @@ function ReplyFileArtifacts({
   );
   const resolvedSessionId = message.sessionId || sessionId;
   const paths = useMemo(() => {
-    const extracted = extractChatFileArtifactPaths(answerText);
+    const extracted = [...structuredImagePaths(message), ...extractChatFileArtifactPaths(answerText)];
     if (!resolvedSessionId) return extracted;
     return Array.from(new Set(extracted.map((path) => normalizeChatFileArtifactPath(path, resolvedSessionId))));
-  }, [answerText, resolvedSessionId]);
+  }, [answerText, resolvedSessionId, message.messageList, message.thinkList, message.updateKey]);
   const canResolve =
     message.fromBeyond && message.messageState === IMessageState.Done && Boolean(resolvedSessionId) && paths.length > 0;
 
@@ -121,10 +123,18 @@ function ReplyFileArtifacts({
 
   if (!files.length) return null;
   const audioFiles = files.filter((file) => /\.(mp3|wav|m4a|ogg)$/i.test(file.queryFile?.fileName || ''));
-  const regularFiles = files.filter((file) => !audioFiles.includes(file));
+  const imageArtifacts = artifacts.filter((artifact) => /\.(png|jpe?g|webp)$/i.test(artifact.fileName));
+  const regularFiles = files.filter(
+    (file) => !audioFiles.includes(file) && !/\.(png|jpe?g|webp)$/i.test(file.queryFile?.fileName || '')
+  );
 
   return (
     <>
+      {imageArtifacts.length > 0 && resolvedSessionId && (
+        <div data-testid="reply-artifact-files">
+          <ImageArtifactGallery artifacts={imageArtifacts} sessionId={resolvedSessionId} />
+        </div>
+      )}
       {regularFiles.length > 0 && (
         <div className="ub ub-wrap full-width gap8" data-testid="reply-artifact-files">
           {regularFiles.map((fileItem) => (
