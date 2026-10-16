@@ -46,7 +46,25 @@ New authentication uses `apiKey` as `X-Api-Key`. Legacy authentication accepts e
 
 `options.resourceId` explicitly selects another supported resource. For the exact business model `doubao-seed-tts-2.0`, only `seed-tts-2.0` and clone resource `seed-icl-2.0` are accepted. A cloned voice may require `options.modelVersion` (for example `seed-tts-2.0-standard`), which maps to `req_params.model`. Standard voices omit it and use the provider default. `sampleRate` defaults to 24,000; speed maps to the documented integer `speech_rate` scale. Trusted `options.additions` is serialized as the provider's JSON string field.
 
-The parser handles JSON frames fragmented across HTTP chunks, concatenated JSON objects, and SSE records. Code `0` contributes audio or metadata; **only terminal `20000000` establishes complete success**. EOF without that frame, provider errors, malformed base64, audio after terminal success, oversized output, and cancellation reject the entire result. No partial file is returned.
+## Voice choices
+
+Set `options.voices` when callers may select a voice. It is the connector's trusted allowlist and may contain IDs or ID/name objects:
+
+```json
+{
+  "speaker": "zh_female_vv_uranus_bigtts",
+  "voices": [
+    "zh_female_vv_uranus_bigtts",
+    { "id": "zh_male_beijingxiaoye_moon_bigtts", "name": "北京小爷" }
+  ]
+}
+```
+
+An explicitly requested voice outside this list fails locally with `TTS_VOICE_NOT_AVAILABLE` and includes the available IDs, without sending a provider request. If no allowlist is configured, provider-supported overrides remain allowed. A Volcengine response that explicitly identifies a missing, unauthorized, invalid, or resource-mismatched speaker is converted to the same safe error and lists the connector's configured `voice`, `speaker`, or `defaultVoice`. Other provider and authentication failures remain generic and do not expose upstream response bodies.
+
+The parser handles JSON frames fragmented across HTTP chunks, concatenated JSON objects, and SSE records. Requests enable the provider subtitle response. Valid `sentence.words` entries are collected without semantic re-segmentation and returned as a second `application/json` asset with `artifactType: word-timing`; the shared runtime writes it beside the audio under `<session_root>/tts/`. The JSON schema uses seconds and `provider-word` granularity. When the provider returns no timing entries, the file contains `words: []`.
+
+Code `0` contributes audio or metadata; **only terminal `20000000` establishes complete success**. EOF without that frame, provider errors, malformed base64 or word timing data, audio after terminal success, oversized output, and cancellation reject the entire result. No partial file is returned.
 
 ## Validation and limits
 

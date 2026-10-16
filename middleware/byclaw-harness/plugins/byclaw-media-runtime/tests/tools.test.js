@@ -31,3 +31,24 @@ test('session tool binding is idempotent and validates before generation', async
     await assert.rejects(setup({ ...payload, host: { ...host, userCode: 'other' } }), /IDENTITY/)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+test('speech tool treats null and blank voices as unspecified', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'media-tools-tts-'))
+  let setup, tool
+  const calls = []
+  const ctx = { on: (_name, handler) => { setup = handler }, effect: fn => fn() }
+  const agentCtx = { tools: { register: value => { tool = value; return () => {} } }, effect: fn => fn() }
+  const host = { userCode: 'test', resolveSessionRoot: () => root,
+    resolveMediaModel: async () => ({ id: 'm1', provider: 'OPENAI', model: 'tts', timeoutMs: 1000 }) }
+  const generate = async (_model, args) => {
+    calls.push(args)
+    return [{ mimeType: 'audio/mpeg', bytes: Buffer.from([0xff, 0xfb, 0x90, 0x00]) }]
+  }
+  try {
+    mountMediaPlugin(ctx, { kind: 'tts', generate })
+    await setup({ agentCtx, host, agent: { id: 'a1' }, command: { header: { userCode: 'test' } } })
+    for (const voice of [null, '', '   ']) await tool.execute({ text: 'hello', voice })
+    assert.deepEqual(calls, [{ text: 'hello' }, { text: 'hello' }, { text: 'hello' }])
+    await assert.rejects(tool.execute({ text: 'hello', voice: 42 }), /MEDIA_INVALID_ARGUMENT: voice/)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

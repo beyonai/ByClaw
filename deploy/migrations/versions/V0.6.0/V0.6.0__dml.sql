@@ -66,6 +66,20 @@ SET connector_name = CASE connector_code
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code IN ('image-generation-model', 'speech-generation-model');
 
+-- 语音高级参数保留空对象作为安全默认值，并给出默认音色与可选音色的填写示例。
+-- voices 是用户显式传入 voice 时的允许列表；voice 为空字符串、空白、null 或省略时，
+-- DSH 不校验 voices，而是依次使用 defaultVoice、voice、speaker 中配置的默认音色。
+UPDATE byai.byai_connector_info
+SET auth_config =
+        jsonb_set(
+            jsonb_set(auth_config::jsonb,
+                '{credentialForm,fields,10,placeholder}',
+                '"{\"resourceId\":\"seed-tts-2.0\",\"defaultVoice\":\"zh_female_vv_jupiter_bigtts\",\"voices\":[{\"id\":\"zh_female_vv_jupiter_bigtts\",\"name\":\"Vivi\"}],\"format\":\"mp3\"}"'::jsonb, true),
+            '{credentialForm,fields,10,description}',
+            '"resourceId 填写模型资源 ID；defaultVoice 是未指定音色时使用的默认值；voices 是允许用户显式选择的音色列表。voice 为空字符串、空白、null 或省略时不校验 voices，并使用默认音色。示例仅说明格式，请替换为当前账号已授权的音色 ID。"'::jsonb, true)::text,
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'speech-generation-model';
+
 -- 在协议和 Endpoint 字段旁展示可直接照填的示例与说明，避免把账号或 Endpoint ID 误填为 URL。
 UPDATE byai.byai_connector_info
 SET auth_config = CASE connector_code

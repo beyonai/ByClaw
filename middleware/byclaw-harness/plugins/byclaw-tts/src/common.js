@@ -3,10 +3,35 @@ import { endpoint, request, readBytes } from '@byclaw/media-runtime';
 export const MAX_AUDIO_BYTES = 50 * 1024 * 1024;
 export const MIME = Object.freeze({ mp3: 'audio/mpeg', wav: 'audio/wav', aac: 'audio/aac' });
 
-export function speechError(message) {
+export function speechError(message, code = 'TTS_ERROR') {
   const error = new Error(message);
-  error.code = 'TTS_ERROR';
+  error.code = code;
   return error;
+}
+
+export function availableVoices(options, fallback) {
+  const configured = options.voices !== undefined;
+  if (configured && (!Array.isArray(options.voices) || options.voices.length === 0 || options.voices.length > 100)) {
+    throw speechError('Configure voices as a nonempty array with at most 100 entries');
+  }
+  const values = [];
+  for (const item of options.voices ?? []) {
+    const id = typeof item === 'string' ? item.trim() : typeof item?.id === 'string' ? item.id.trim() : '';
+    const name = typeof item === 'object' && item !== null && typeof item.name === 'string' ? item.name.trim() : '';
+    if (!id || id.length > 256 || name.length > 100) throw speechError('Configure valid speech voice choices');
+    values.push({ id, ...(name ? { name } : {}) });
+  }
+  for (const value of [options.voice, options.speaker, options.defaultVoice, fallback]) {
+    if (typeof value === 'string' && value.trim() && value.trim().length <= 256) values.push({ id: value.trim() });
+  }
+  return { configured, values: values.filter((item, index) => values.findIndex(other => other.id === item.id) === index) };
+}
+
+export function voiceNotAvailable(requested, choices) {
+  const shown = choices.slice(0, 20).map(item => item.name ? `${item.id}（${item.name}）` : item.id);
+  const available = shown.length ? shown.join('、') : '请前往供应商控制台音色库查看当前账号已授权的音色 ID';
+  const more = choices.length > shown.length ? `，另有 ${choices.length - shown.length} 个` : '';
+  return speechError(`VOICE_NOT_AVAILABLE: 音色“${requested}”不存在、未授权或与当前模型不匹配。可选音色：${available}${more}`, 'TTS_VOICE_NOT_AVAILABLE');
 }
 
 export function formatFor(args, options, supported, fallback) {
@@ -18,7 +43,11 @@ export function formatFor(args, options, supported, fallback) {
 export function voiceFor(args, options, fallback) {
   const voice = args.voice ?? options.voice ?? options.speaker ?? fallback;
   if (typeof voice !== 'string' || !voice.trim() || voice.length > 256) throw speechError('Configure a valid speech voice / speaker in the selected model');
-  return voice;
+  const choices = availableVoices(options, fallback);
+  if (args.voice !== undefined && choices.configured && !choices.values.some(item => item.id === voice.trim())) {
+    throw voiceNotAvailable(voice.trim(), choices.values);
+  }
+  return voice.trim();
 }
 
 export function speedFor(args, options, min = 0.5, max = 2) {
@@ -31,7 +60,7 @@ export function requireTextLimit(text, limit) {
   if ([...text].length > limit) throw speechError(`Speech text exceeds provider limit of ${limit} characters`);
 }
 
-export async function post(model, base, suffix, body, context, authHeaders) {
+export async function post(model, base, suffix, body, context, authHeaders, requestOptions) {
   const headers = new Headers(model.headers);
   headers.set('content-type', 'application/json');
   if (authHeaders) {
@@ -41,7 +70,7 @@ export async function post(model, base, suffix, body, context, authHeaders) {
     if (!model.apiKey) throw speechError('Configure the speech provider API key');
     headers.set('authorization', `Bearer ${model.apiKey}`);
   }
-  return request(endpoint(model.endpoint || base, suffix), { method: 'POST', headers, body: JSON.stringify(body) }, context);
+  return request(endpoint(model.endpoint || base, suffix), { method: 'POST', headers, body: JSON.stringify(body) }, context, requestOptions);
 }
 
 // Check the container as well as MIME so an upstream JSON error cannot be persisted as audio.

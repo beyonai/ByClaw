@@ -9,11 +9,11 @@ export interface MediaModel {
   options: Record<string, any>
   timeoutMs: number
 }
-export interface MediaAsset { bytes: Uint8Array; mimeType: string }
+export interface MediaAsset { bytes: Uint8Array; mimeType: string; artifactType?: 'word-timing' }
 export interface RequestContext { signal?: AbortSignal; fetch?: typeof fetch }
 export function resolveMediaModel(redis: { hget(key: string, field: string): Promise<string | null> }, type: 'IMAGE_GENERATION' | 'TTS', options?: { decrypt?: (value: string) => string; modelId?: string }): Promise<MediaModel>
 export function endpoint(base: string, suffix: string): string
-export function request(url: string, init?: RequestInit, context?: RequestContext): Promise<Response>
+export function request(url: string, init?: RequestInit, context?: RequestContext, options?: { acceptErrorResponse?: boolean }): Promise<Response>
 export function readBytes(response: Response, maxBytes?: number, signal?: AbortSignal): Promise<Buffer>
 export function readJson(response: Response, maxBytes?: number): Promise<any>
 export function assetFromBase64(value: string, mimeType: string): MediaAsset

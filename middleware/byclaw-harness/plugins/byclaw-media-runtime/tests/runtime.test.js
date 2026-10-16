@@ -18,6 +18,14 @@ test('artifacts use session_root/image or session_root/tts with unique names', a
     const audio = Buffer.from('RIFF0000WAVEfmt ')
     const speech = await persistAssets(root, 'tts', [{ bytes: audio, mimeType: 'audio/wav' }])
     assert.equal(speech[0].path.startsWith(join(root, 'tts') + '/'), true)
+    const timing = Buffer.from(JSON.stringify({ schemaVersion: 1, unit: 'second', granularity: 'provider-word', text: '你好', words: [] }))
+    const timedSpeech = await persistAssets(root, 'tts', [
+      { bytes: audio, mimeType: 'audio/wav' },
+      { bytes: timing, mimeType: 'application/json', artifactType: 'word-timing' },
+    ])
+    assert.equal(timedSpeech[1].path.endsWith('.json'), true)
+    assert.equal(timedSpeech[1].mimeType, 'application/json')
+    assert.deepEqual(JSON.parse(await readFile(timedSpeech[1].path, 'utf8')), JSON.parse(timing.toString('utf8')))
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
