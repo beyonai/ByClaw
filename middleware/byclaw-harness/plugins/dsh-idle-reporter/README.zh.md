@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个 DSH profile bundle 上报所在沙箱是否在干活。它把快照追加到所有沙箱共用的一个 Redis Stream；平台侧消费程序读取该 Stream，并释放上报 `releasable` 的沙箱。释放沙箱由平台负责；`DSH_HOME` 下的 DSH 会话在释放后保留。
+这个 DSH profile bundle 上报所在沙箱是否在干活。它把快照追加到所有沙箱共用的一个 Redis Stream；ByClaw 后端（`byclaw-be`）读取该 Stream，在用户页面也空闲时释放上报 `releasable` 的沙箱。释放沙箱由平台负责；`DSH_HOME` 下的 DSH 会话在释放后保留。
 
 ## 什么算忙
 
@@ -44,19 +44,23 @@ patch 插入 host 行 `byclaw-idle-reporter`。在该行设置 `disabled: true` 
 
 | 配置项 | 默认值 | patch 中的环境变量 | 含义 |
 |---|---|---|---|
-| `sandboxId` | `os.hostname()` | — | 写入每条记录的沙箱标识 |
+| `sandboxId` | `os.hostname()` | `BYAI_WORKER_ID` | 写入每条记录的沙箱标识 |
+| `userCode` | 空 | `USER_CODE` | 写入每条记录的沙箱所属用户 |
 | `streamKey` | `byclaw:dsh:sandbox:activity` | `BYCLAW_DSH_ACTIVITY_STREAM` | 所有沙箱共用的 Stream |
 | `maxLen` | `10000` | — | Stream 近似上限（`MAXLEN ~`） |
 | `idleTimeoutMs` | `1800000`（30 分钟） | `BYCLAW_DSH_IDLE_TIMEOUT_MS` | 变为 `releasable` 前的空闲时长 |
 | `heartbeatMs` | `30000` | — | 快照记录的间隔 |
 
-数值必须是正整数，字符串不能为空。配置非法，或 Redis 客户端无法创建（例如 `REDIS_MODE` 非法）时，插件记录一条错误并保持不工作；DSH 照常启动。
+`byclaw-be` 启动沙箱时注入 `BYAI_WORKER_ID`（`byclaw-dsh-<userCode>`）和 `USER_CODE`，因此同一用户的沙箱重新拉起后标识不变；在 ByClaw 之外，标识回退为主机名，`userCode` 为空。
+
+数值必须是正整数，除 `userCode` 外的字符串不能为空。配置非法，或 Redis 客户端无法创建（例如 `REDIS_MODE` 非法）时，插件记录一条错误并保持不工作；DSH 照常启动。
 
 ## Stream 记录
 
 ```text
 XADD <streamKey> MAXLEN ~ <maxLen> * \
   sandboxId     <id>
+  userCode      所属用户编码，未知时为空
   state         busy | releasable
   lastActiveAt  RFC 3339，沙箱最后一次忙的时间
   waitingUser   整数：阻塞在审批或 ask-user 上的 Agent 数
@@ -76,11 +80,12 @@ XADD <streamKey> MAXLEN ~ <maxLen> * \
 
 ## 消费方约定
 
-平台消费程序（建议使用 consumer group 以获得至少一次投递）应当：
+消费方是 `byclaw-be`（consumer group `byclaw_dsh_activity_group`）。它按 `sandboxId` 保留最新一条记录及其收到时间，忽略不带 `userCode` 的记录，并对该用户的 `byclaw-dsh` 沙箱：
 
-- 每个 `sandboxId` 只保留最新一条记录，并且读到 Stream 末尾后才行动；
-- 最新记录为 `releasable` 时释放沙箱（随后 SIGTERM）。读取与 SIGTERM 之间仍存在新工作开始的窗口；这是可接受的，因为沙箱已空闲 `idleTimeoutMs`，且会话会保留；
-- 启动宽限期过后，若某沙箱在 `3 × heartbeatMs`（默认 90 秒）内没有任何记录，视为已死并释放。静默是唯一的关闭信号，因此在该窗口内被 supervisor 重启的进程不会被误判为死亡。
+- 最新记录为 `releasable` **且**用户页面已超过平台空闲超时未活动时释放。打开的页面算作在用。读取与释放之间仍存在新工作开始的窗口；这是可接受的，因为沙箱已空闲 `idleTimeoutMs`，且会话会保留；
+- 最新记录为 `busy` 时持续续约，即使页面已空闲；
+- 曾经上报过、但 `3 × heartbeatMs`（默认 90 秒）内没有任何记录的沙箱视为已死并释放；下一条消息会重新拉起。静默是唯一的关闭信号，因此在该窗口内被 supervisor 重启的进程不会被误判为死亡；
+- 忽略沙箱记录创建之前收到的记录，用户上一个沙箱的状态不会影响新沙箱。从未上报的沙箱沿用平台仅看页面的空闲规则。
 
 ## 验证
 

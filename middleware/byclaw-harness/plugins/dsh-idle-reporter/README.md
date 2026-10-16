@@ -2,7 +2,7 @@
 
 [中文](README.zh.md) | English
 
-This DSH profile bundle reports whether its sandbox is doing work. It appends snapshots to one Redis Stream shared by every sandbox; a platform consumer reads the stream and releases sandboxes that report `releasable`. Releasing the sandbox is the platform's job; DSH sessions under `DSH_HOME` survive it.
+This DSH profile bundle reports whether its sandbox is doing work. It appends snapshots to one Redis Stream shared by every sandbox; the ByClaw backend (`byclaw-be`) reads the stream and releases sandboxes that report `releasable` once the user's page is idle too. Releasing the sandbox is the platform's job; DSH sessions under `DSH_HOME` survive it.
 
 ## What counts as busy
 
@@ -44,19 +44,23 @@ The patch inserts the host row `byclaw-idle-reporter`. Disable it with `disabled
 
 | Key | Default | Environment in the patch | Meaning |
 |---|---|---|---|
-| `sandboxId` | `os.hostname()` | — | Sandbox identity written to every entry |
+| `sandboxId` | `os.hostname()` | `BYAI_WORKER_ID` | Sandbox identity written to every entry |
+| `userCode` | empty | `USER_CODE` | Owner of the sandbox written to every entry |
 | `streamKey` | `byclaw:dsh:sandbox:activity` | `BYCLAW_DSH_ACTIVITY_STREAM` | Stream shared by all sandboxes |
 | `maxLen` | `10000` | — | Approximate stream cap (`MAXLEN ~`) |
 | `idleTimeoutMs` | `1800000` (30 min) | `BYCLAW_DSH_IDLE_TIMEOUT_MS` | Idle time before `releasable` |
 | `heartbeatMs` | `30000` | — | Interval between snapshot entries |
 
-Every numeric value must be a positive integer and every string non-empty. An invalid value, or a Redis client that cannot be constructed (for example an invalid `REDIS_MODE`), logs one error and leaves the plugin inert; DSH still starts.
+`byclaw-be` injects `BYAI_WORKER_ID` (`byclaw-dsh-<userCode>`) and `USER_CODE` into every sandbox it launches, so the identity is stable across relaunches of the same user's sandbox; outside ByClaw the identity falls back to the hostname and `userCode` is empty.
+
+Every numeric value must be a positive integer and every string except `userCode` non-empty. An invalid value, or a Redis client that cannot be constructed (for example an invalid `REDIS_MODE`), logs one error and leaves the plugin inert; DSH still starts.
 
 ## Stream entries
 
 ```text
 XADD <streamKey> MAXLEN ~ <maxLen> * \
   sandboxId     <id>
+  userCode      owner user code, empty when unknown
   state         busy | releasable
   lastActiveAt  RFC 3339 time the sandbox was last busy
   waitingUser   integer: Agents blocked on approval or ask-user
@@ -76,11 +80,12 @@ At most one append is in flight; while it is pending only the newest snapshot wa
 
 ## Consumer contract
 
-The platform's consumer (a consumer group is recommended for at-least-once delivery) is expected to:
+The consumer is `byclaw-be` (consumer group `byclaw_dsh_activity_group`). It keeps the latest entry per `sandboxId` with the time it received it, ignores entries without `userCode`, and for the user's `byclaw-dsh` sandbox:
 
-- keep only the latest entry per `sandboxId`, and act only after reading to the end of the stream;
-- release the sandbox (then SIGTERM) when that latest entry is `releasable`. A window remains between the read and the SIGTERM in which new work may start; this is accepted because the sandbox has been idle for `idleTimeoutMs` and its sessions survive;
-- treat a sandbox with no entry within `3 × heartbeatMs` (90 s by default), after a boot grace period, as dead and release it. Silence is the only shutdown signal, so a supervisor restart inside that window is not mistaken for death.
+- releases it when the latest entry is `releasable` **and** the user's page has been idle for the platform idle timeout. An open page counts as work. A window remains between the read and the release in which new work may start; this is accepted because the sandbox has been idle for `idleTimeoutMs` and its sessions survive;
+- keeps renewing it while the latest entry is `busy`, even when the page is idle;
+- treats a sandbox that has reported before but sent no entry within `3 × heartbeatMs` (90 s by default) as dead and releases it; the next message relaunches it. Silence is the only shutdown signal, so a supervisor restart inside that window is not mistaken for death;
+- ignores entries received before the sandbox record was created, so state from a user's previous sandbox never affects a new one. Sandboxes that never report keep the platform's page-only idle rule.
 
 ## Verification
 

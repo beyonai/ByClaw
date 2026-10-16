@@ -74,4 +74,19 @@ public class SandboxAutoConfiguration {
         return executor;
     }
 
+    /** DSH 活动 Stream 的轮询任务长期占用一个线程，与唤醒 Stream 分开。 */
+    @Bean(name = "dshActivityStreamExecutor")
+    public ThreadPoolTaskExecutor dshActivityStreamExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(8);
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("dsh-activity-stream-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(10);
+        executor.initialize();
+        return executor;
+    }
+
 }

@@ -24,6 +24,8 @@ export interface ReporterLogger {
 export interface IdleReporterOptions {
   redis: StreamClient
   sandboxId: string
+  /** Owner of the sandbox; written as-is, empty when unknown. */
+  userCode: string
   streamKey: string
   /** Approximate stream cap (`MAXLEN ~`). */
   maxLen: number
@@ -213,6 +215,7 @@ export class IdleReporter {
     if (this.closed) return
     this.pending = [
       'sandboxId', this.options.sandboxId,
+      'userCode', this.options.userCode,
       'state', this.stateValue,
       'lastActiveAt', new Date(this.lastActiveAt).toISOString(),
       'waitingUser', activity.waitingUser,

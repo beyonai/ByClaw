@@ -28,11 +28,21 @@ describe('resolveConfig', () => {
   it('fills every default, with the hostname as identity', () => {
     expect(resolveConfig({}, 'host-1')).toEqual({
       sandboxId: 'host-1',
+      userCode: '',
       streamKey: DEFAULT_STREAM_KEY,
       maxLen: 10_000,
       idleTimeoutMs: 1_800_000,
       heartbeatMs: 30_000,
     })
+  })
+
+  it('takes the configured identity and owner over the defaults', () => {
+    expect(resolveConfig({ sandboxId: 'byclaw-dsh-user001', userCode: ' user001 ' }, 'host-1')).toEqual(
+      expect.objectContaining({ sandboxId: 'byclaw-dsh-user001', userCode: 'user001' }),
+    )
+    expect(resolveConfig({ sandboxId: undefined, userCode: '' }, 'host-1')).toEqual(
+      expect.objectContaining({ sandboxId: 'host-1', userCode: '' }),
+    )
   })
 
   it('names the offending key', () => {
@@ -41,6 +51,7 @@ describe('resolveConfig', () => {
     expect(() => resolveConfig({ maxLen: 1.5 }, 'h')).toThrow('config.maxLen')
     expect(() => resolveConfig({ streamKey: ' ' }, 'h')).toThrow('config.streamKey must be a non-empty string')
     expect(() => resolveConfig({ sandboxId: '' }, 'h')).toThrow('config.sandboxId')
+    expect(() => resolveConfig({ userCode: 7 }, 'h')).toThrow('config.userCode must be a string')
   })
 })
 
@@ -69,9 +80,9 @@ describe('apply', () => {
 
   it('appends the boot entry, survives a Redis outage, and closes the connection on dispose', async () => {
     const host = new FakeHost()
-    apply(host.ctx, { sandboxId: 'sbx-9', streamKey: 'stream' })
+    apply(host.ctx, { sandboxId: 'sbx-9', userCode: 'user009', streamKey: 'stream' })
     await settle()
-    expect(redis.entries).toEqual([expect.objectContaining({ sandboxId: 'sbx-9', state: 'busy' })])
+    expect(redis.entries).toEqual([expect.objectContaining({ sandboxId: 'sbx-9', userCode: 'user009', state: 'busy' })])
     expect(redis.calls[0]?.slice(0, 5)).toEqual(['stream', 'MAXLEN', '~', 10_000, '*'])
 
     const onError = redis.handlers.get('error')
