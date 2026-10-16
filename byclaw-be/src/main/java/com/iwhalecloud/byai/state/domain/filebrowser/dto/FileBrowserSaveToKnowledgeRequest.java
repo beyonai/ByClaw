@@ -28,6 +28,9 @@ public class FileBrowserSaveToKnowledgeRequest {
     /** 是否解析 Markdown YAML Front Matter。 */
     private Boolean processFrontMatter;
 
+    /** 个人知识库保存后是否构建；未传时沿用自动构建，通用保存接口忽略此参数。 */
+    private Boolean buildAfterSave;
+
     /** 同路径同名文件存在时是否覆盖。 */
     private Boolean overwrite;
 }

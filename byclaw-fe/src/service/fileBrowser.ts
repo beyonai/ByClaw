@@ -78,6 +78,9 @@ export interface FileBrowserCreateFolderParams {
 }
 
 export interface FileBrowserSaveToKnowledgeParams {
+
+  /** Personal knowledge saves build by default; false imports without building. */
+  buildAfterSave?: boolean;
   resourceId: string | number;
   sourcePath: string;
   sourceDir: boolean;

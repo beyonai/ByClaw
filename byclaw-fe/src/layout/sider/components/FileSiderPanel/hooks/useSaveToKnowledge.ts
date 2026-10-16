@@ -44,6 +44,8 @@ export default function useSaveToKnowledge({
   const submitRef = useRef(false);
   const folderRequestRef = useRef(0);
   const [saveResult, setSaveResult] = useState<FileBrowserKnowledgeSaveResult | null>(null);
+  const [saveResultBuildRequested, setSaveResultBuildRequested] = useState(true);
+  const [pendingBuildAfterSave, setPendingBuildAfterSave] = useState(true);
   const [retryingBuild, setRetryingBuild] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveTarget, setSaveTarget] = useState<FileBrowserItem | null>(null);
@@ -54,6 +56,7 @@ export default function useSaveToKnowledge({
   const [knowledgeDirectoryPath, setKnowledgeDirectoryPath] = useState('/');
   const [knowledgeFolders, setKnowledgeFolders] = useState<QueryDirAndFileByLevelItem[]>([]);
   const [knowledgeFolderLoading, setKnowledgeFolderLoading] = useState(false);
+  const [knowledgeFolderReady, setKnowledgeFolderReady] = useState(false);
   const [savingToKnowledge, setSavingToKnowledge] = useState(false);
   const [knowledgeUploadConfirmOpen, setKnowledgeUploadConfirmOpen] = useState(false);
   const [pendingKnowledgeUploads, setPendingKnowledgeUploads] = useState<PendingKnowledgeUpload[]>([]);
@@ -131,6 +134,7 @@ export default function useSaveToKnowledge({
     async (kb: IKnowledgeBaseItem, directoryPath: string) => {
       const requestId = ++folderRequestRef.current;
       setKnowledgeFolderLoading(true);
+      setKnowledgeFolderReady(false);
       try {
         const response = await queryDirAndFileByLevel({
           resourceId: Number(kb.resourceId),
@@ -142,6 +146,7 @@ export default function useSaveToKnowledge({
         if (requestId !== folderRequestRef.current) return [];
         setKnowledgeFolders(folders);
         setKnowledgeDirectoryPath(directoryPath);
+        setKnowledgeFolderReady(true);
         return folders;
       } catch (error: any) {
         message.error(
@@ -179,6 +184,7 @@ export default function useSaveToKnowledge({
       clearClickTimer();
       folderRequestRef.current += 1;
       setKnowledgeFolderLoading(false);
+      setKnowledgeFolderReady(false);
       setSaveTarget(item);
       setKnowledgeKeyword('');
       setSelectedKnowledgeBase(null);
@@ -334,45 +340,51 @@ export default function useSaveToKnowledge({
     []
   );
 
-  const handleConfirmSaveToKnowledge = useCallback(async () => {
-    if (!saveTarget || submitRef.current || knowledgeFolderLoading) return;
-    if (!selectedKnowledgeBase) {
-      message.warning(intl.formatMessage({ id: 'multiChoices.saveToKnowledge.selectKb' }));
-      return;
-    }
+  const handleConfirmSaveToKnowledge = useCallback(
+    async (buildAfterSave = true) => {
+      if (!saveTarget || submitRef.current || knowledgeFolderLoading || (personalOnly && !knowledgeFolderReady)) return;
+      if (!selectedKnowledgeBase) {
+        message.warning(intl.formatMessage({ id: 'multiChoices.saveToKnowledge.selectKb' }));
+        return;
+      }
 
-    submitRef.current = true;
-    setSavingToKnowledge(true);
-    try {
-      const uploads = await collectKnowledgeUploads(saveTarget, knowledgeDirectoryPath);
-      const conflicts = await checkKnowledgeUploadConflicts(selectedKnowledgeBase, uploads);
-      setPendingKnowledgeBase(selectedKnowledgeBase);
-      setPendingKnowledgeDirectoryPath(knowledgeDirectoryPath);
-      setPendingKnowledgeUploads(uploads);
-      setPendingKnowledgeConflicts(conflicts);
-      setSaveModalOpen(false);
-      setKnowledgeUploadConfirmOpen(true);
-    } catch (error: any) {
-      message.error(
-        localizeErrorMessage(
-          error?.message,
-          intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }),
-          intl.locale
-        )
-      );
-    } finally {
-      submitRef.current = false;
-      setSavingToKnowledge(false);
-    }
-  }, [
-    knowledgeFolderLoading,
-    checkKnowledgeUploadConflicts,
-    collectKnowledgeUploads,
-    intl,
-    knowledgeDirectoryPath,
-    saveTarget,
-    selectedKnowledgeBase,
-  ]);
+      submitRef.current = true;
+      setSavingToKnowledge(true);
+      setPendingBuildAfterSave(buildAfterSave);
+      try {
+        const uploads = await collectKnowledgeUploads(saveTarget, knowledgeDirectoryPath);
+        const conflicts = await checkKnowledgeUploadConflicts(selectedKnowledgeBase, uploads);
+        setPendingKnowledgeBase(selectedKnowledgeBase);
+        setPendingKnowledgeDirectoryPath(knowledgeDirectoryPath);
+        setPendingKnowledgeUploads(uploads);
+        setPendingKnowledgeConflicts(conflicts);
+        setSaveModalOpen(false);
+        setKnowledgeUploadConfirmOpen(true);
+      } catch (error: any) {
+        message.error(
+          localizeErrorMessage(
+            error?.message,
+            intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }),
+            intl.locale
+          )
+        );
+      } finally {
+        submitRef.current = false;
+        setSavingToKnowledge(false);
+      }
+    },
+    [
+      personalOnly,
+      knowledgeFolderReady,
+      knowledgeFolderLoading,
+      checkKnowledgeUploadConflicts,
+      collectKnowledgeUploads,
+      intl,
+      knowledgeDirectoryPath,
+      saveTarget,
+      selectedKnowledgeBase,
+    ]
+  );
 
   const handleConfirmKnowledgeUpload = useCallback(
     async (processFrontMatter: boolean) => {
@@ -388,10 +400,12 @@ export default function useSaveToKnowledge({
             sourceDir: isDirectory(saveTarget),
             targetResourceId: pendingKnowledgeBase.resourceId,
             targetDirectoryPath: pendingKnowledgeDirectoryPath,
+            buildAfterSave: pendingBuildAfterSave,
             processFrontMatter,
             overwrite,
           });
           setSaveResult(result);
+          setSaveResultBuildRequested(pendingBuildAfterSave);
         } else if (isDirectory(saveTarget)) {
           await copyFileBrowserDirectoryToKnowledge(saveTarget, pendingKnowledgeBase, pendingKnowledgeDirectoryPath, {
             processFrontMatter,
@@ -430,6 +444,7 @@ export default function useSaveToKnowledge({
       copyFileBrowserDirectoryToKnowledge,
       intl,
       pendingKnowledgeBase,
+      pendingBuildAfterSave,
       pendingKnowledgeConflicts.length,
       pendingKnowledgeDirectoryPath,
       saveTarget,
@@ -485,6 +500,8 @@ export default function useSaveToKnowledge({
 
   return {
     saveResult,
+    saveResultBuildRequested,
+    pendingBuildAfterSave,
     setSaveResult,
     retryingBuild,
     retryFailedBuilds,
@@ -496,6 +513,7 @@ export default function useSaveToKnowledge({
     knowledgeDirectoryPath,
     knowledgeFolders,
     knowledgeFolderLoading,
+    knowledgeFolderReady,
     savingToKnowledge,
     knowledgeUploadConfirmOpen,
     pendingKnowledgeUploads,

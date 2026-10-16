@@ -13,6 +13,8 @@ import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserItemVo;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.support.ResourceBundleMessageSource;
 import org.springframework.context.support.StaticMessageSource;
@@ -118,8 +120,9 @@ class FileBrowserKnowledgeTransferApplicationServiceTest {
         assertThat(build.getValue().getResourceId()).isEqualTo(20L);
     }
 
-    @Test
-    void preservesNestedAndEmptyFoldersAndContinuesAfterAFileFails() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void preservesNestedAndEmptyFoldersAndContinuesAfterAFileFails(boolean buildAfterSave) throws Exception {
         source("/session/reports", true);
         when(files.listForTransfer("alice", 10L, "/session/reports/"))
             .thenReturn(List.of(item("/session/reports/bad.md", false), item("/session/reports/sub", true)));
@@ -131,10 +134,14 @@ class FileBrowserKnowledgeTransferApplicationServiceTest {
             .thenReturn(new ByteArrayInputStream(new byte[]{1}));
         when(datasets.uploadFiles(any(), eq(20L), eq("/chosen/reports/sub"), anyString(), anyBoolean(), anyBoolean(), eq(false), anyMap()))
             .thenReturn(imported("/chosen/reports/sub/good.md"));
-        var result = service.saveToPersonalKnowledge("alice", request("/session/reports"));
+        var request = request("/session/reports");
+        request.setBuildAfterSave(buildAfterSave);
+        var result = service.saveToPersonalKnowledge("alice", request);
         assertThat(result.getCreatedFolderCount()).isEqualTo(3);
         assertThat(result.getUploadedFileCount()).isEqualTo(1);
-        assertThat(result.getBuildSubmittedCount()).isEqualTo(1);
+        assertThat(result.getBuildSubmittedCount()).isEqualTo(buildAfterSave ? 1 : 0);
+        verify(datasets, times(buildAfterSave ? 1 : 0)).build(any(), anyMap());
+        verify(files, never()).list(anyString(), anyLong(), anyString());
         assertThat(result.getFailedItems()).extracting(UploadItem::getFilePath).containsExactly("/session/reports/bad.md");
     }
 
@@ -168,14 +175,46 @@ class FileBrowserKnowledgeTransferApplicationServiceTest {
         verifyNoInteractions(datasets);
     }
 
-    @Test
-    void directoryReadFailuresAreNotReportedAsEmptyFolderSuccess() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void directoryReadFailuresAreNotReportedAsEmptyFolderSuccess(boolean buildAfterSave) {
         source("/session/reports", true);
         when(files.listForTransfer("alice", 10L, "/session/reports/"))
             .thenThrow(new IllegalStateException("sandbox unavailable"));
-        assertThatThrownBy(() -> service.saveToPersonalKnowledge("alice", request("/session/reports")))
+        var request = request("/session/reports");
+        request.setBuildAfterSave(buildAfterSave);
+        assertThatThrownBy(() -> service.saveToPersonalKnowledge("alice", request))
             .isInstanceOf(IllegalStateException.class);
         verify(datasets, never()).build(any(), anyMap());
+    }
+
+    @Test
+    void saveOnlyImportsAllReturnedFilesWithoutBuilding() throws Exception {
+        source("/session/bundle.zip", false);
+        UploadResult imported = imported("/chosen/a.md");
+        imported.getUploadItems().addAll(imported("/chosen/b.md").getUploadItems());
+        when(datasets.uploadFiles(any(), eq(20L), eq("/chosen"), eq("bundle.zip"), eq(false), eq(true), eq(false), anyMap()))
+            .thenReturn(imported);
+        var request = request("/session/bundle.zip");
+        request.setOverwrite(true);
+        request.setBuildAfterSave(false);
+        var result = service.saveToPersonalKnowledge("alice", request);
+        assertThat(result.getUploadedFileCount()).isEqualTo(2);
+        assertThat(result.getUploadItems()).extracting(UploadItem::getFilePath)
+            .containsExactly("/chosen/a.md", "/chosen/b.md");
+        assertThat(result.getBuildSubmittedCount()).isZero();
+        assertThat(result.getBuildFailedItems()).isEmpty();
+        verify(datasets, never()).build(any(), anyMap());
+    }
+
+    @Test
+    void saveOnlyStillRejectsUnmanagedTargetsBeforeReadingSource() {
+        var request = request("/session/report.md");
+        request.setBuildAfterSave(false);
+        when(auth.hasResourceManagePermission(target)).thenReturn(false);
+        assertThatThrownBy(() -> service.saveToPersonalKnowledge("alice", request))
+            .isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(files, datasets);
     }
 
     @Test
@@ -184,7 +223,9 @@ class FileBrowserKnowledgeTransferApplicationServiceTest {
             .thenReturn(new ByteArrayInputStream(new byte[]{1}));
         when(datasets.uploadFiles(any(), anyLong(), anyString(), anyString(), anyBoolean(), anyBoolean(), eq(false), anyMap()))
             .thenReturn(imported("/chosen/report.md"));
-        service.saveToKnowledge("alice", request("/session/report.md"));
+        var request = request("/session/report.md");
+        request.setBuildAfterSave(true);
+        service.saveToKnowledge("alice", request);
         verify(datasets, never()).build(any(), anyMap());
     }
 

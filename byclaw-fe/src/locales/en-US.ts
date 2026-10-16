@@ -812,7 +812,12 @@ export default {
   'chatResource.saveToProject': 'Save to project drive',
   'chatResource.personalKnowledge.save': 'Save to Personal Knowledge Base',
   'chatResource.personalKnowledge.empty': 'No personal knowledge bases you can manage',
+  'chatResource.personalKnowledge.saveOnly': 'Save Only',
   'chatResource.personalKnowledge.confirm': 'Save and Build',
+  'chatResource.personalKnowledge.overwriteOnly': 'Confirm Overwrite and Save',
+  'chatResource.personalKnowledge.savedSummary': 'Saved {files} files and created {folders} folders',
+  'chatResource.personalKnowledge.saveOnlyTip':
+    'No document builds were submitted. You can build them from the knowledge base later.',
   'chatResource.personalKnowledge.overwrite': 'Confirm Overwrite and Build',
   'chatResource.personalKnowledge.result': 'Save Results',
   'chatResource.personalKnowledge.retryBuild': 'Retry Build',

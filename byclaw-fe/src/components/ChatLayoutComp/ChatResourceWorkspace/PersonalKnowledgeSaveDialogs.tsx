@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Alert, Button, Modal, Space, Typography } from 'antd';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { useIntl } from '@umijs/max';
 import KnowledgeTargetSelector from '@/components/KnowledgeTargetSelector';
 import UploadConfirmModal from '@/components/UploadConfirmModal';
@@ -10,15 +12,61 @@ export default function PersonalKnowledgeSaveDialogs({ state }: { state: ReturnT
   const intl = useIntl();
   const text = (key: string) => intl.formatMessage({ id: `chatResource.personalKnowledge.${key}` });
   const result = state.saveResult;
+  const [isCommercial, setIsCommercial] = useState<boolean | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((result) => {
+        if (!disposed) setIsCommercial((result?.paramValue ?? result?.data?.paramValue) === 'commercial');
+      })
+      .catch(() => {
+        if (!disposed) setIsCommercial(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+  const saveDisabled = !state.knowledgeFolderReady || state.knowledgeFolderLoading || state.savingToKnowledge;
+  const confirmationKey = state.pendingKnowledgeConflicts.length
+    ? state.pendingBuildAfterSave
+      ? 'overwrite'
+      : 'overwriteOnly'
+    : state.pendingBuildAfterSave
+      ? 'confirm'
+      : 'saveOnly';
   return (
     <>
       <KnowledgeTargetSelector
         title={text('save')}
         open={state.saveModalOpen}
-        onOk={state.handleConfirmSaveToKnowledge}
+        onOk={() => state.handleConfirmSaveToKnowledge(true)}
         onCancel={state.handleCancelSaveToKnowledge}
-        confirmLoading={state.savingToKnowledge}
-        okDisabled={!state.selectedKnowledgeBase || state.knowledgeFolderLoading || state.savingToKnowledge}
+        footer={
+          <Space>
+            <Button disabled={state.savingToKnowledge} onClick={state.handleCancelSaveToKnowledge}>
+              {intl.formatMessage({ id: 'common.cancel' })}
+            </Button>
+            {state.selectedKnowledgeBase && (
+              <>
+                <Button
+                  disabled={saveDisabled}
+                  loading={state.savingToKnowledge && !state.pendingBuildAfterSave}
+                  onClick={() => state.handleConfirmSaveToKnowledge(false)}
+                >
+                  {text('saveOnly')}
+                </Button>
+                <Button
+                  type="primary"
+                  disabled={saveDisabled}
+                  loading={state.savingToKnowledge && state.pendingBuildAfterSave}
+                  onClick={() => state.handleConfirmSaveToKnowledge(true)}
+                >
+                  {text('confirm')}
+                </Button>
+              </>
+            )}
+          </Space>
+        }
         keyword={state.knowledgeKeyword}
         onKeywordChange={state.setKnowledgeKeyword}
         onSearch={state.loadKnowledgeBases}
@@ -45,9 +93,9 @@ export default function PersonalKnowledgeSaveDialogs({ state }: { state: ReturnT
         directoryPath={state.pendingKnowledgeDirectoryPath}
         conflicts={state.pendingKnowledgeConflicts}
         loading={state.savingToKnowledge}
-        showProcessFrontMatter
-        okText={text(state.pendingKnowledgeConflicts.length ? 'overwrite' : 'confirm')}
-        onOk={state.handleConfirmKnowledgeUpload}
+        showProcessFrontMatter={isCommercial === false}
+        okText={text(confirmationKey)}
+        onOk={(processFrontMatter) => state.handleConfirmKnowledgeUpload(isCommercial === false && processFrontMatter)}
         onCancel={state.handleCancelKnowledgeUpload}
       />
       <Modal
@@ -78,14 +126,14 @@ export default function PersonalKnowledgeSaveDialogs({ state }: { state: ReturnT
                   : 'success'
               }
               message={intl.formatMessage(
-                { id: 'chatResource.personalKnowledge.summary' },
+                { id: `chatResource.personalKnowledge.${state.saveResultBuildRequested ? 'summary' : 'savedSummary'}` },
                 {
                   files: result.uploadedFileCount,
                   folders: result.createdFolderCount,
                   builds: result.buildSubmittedCount,
                 }
               )}
-              description={text('buildTip')}
+              description={text(state.saveResultBuildRequested ? 'buildTip' : 'saveOnlyTip')}
             />
             {result.failedItems.map((item, index) => (
               <Typography.Paragraph key={`import-${index}`} type="danger">

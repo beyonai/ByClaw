@@ -4,7 +4,7 @@ import { buildDataset, checkUploadFileConflicts, queryDirAndFileByLevel } from '
 import { downloadFile, listFiles, saveToPersonalKnowledge } from '@/service/fileBrowser';
 import useSaveToKnowledge from '../useSaveToKnowledge';
 
-const mockIntl = { formatMessage: ({ id }: { id: string }) => id };
+const mockIntl = { locale: 'zh-CN', formatMessage: ({ id }: { id: string }) => id };
 jest.mock('@umijs/max', () => ({ useIntl: () => mockIntl }));
 jest.mock('@/pages/manager/service/resources', () => ({
   listResourceUseAuth: jest.fn(),
@@ -82,14 +82,14 @@ test('loads every page of manageable personal knowledge including the default, i
   expect(queryDigEmployeeManageKnowledgeResourceAuth).not.toHaveBeenCalled();
 });
 
-test('checks conflicts before server-side save and forwards the confirmed overwrite and directory', async () => {
+test.each([false, true])('preserves buildAfterSave=%s through overwrite confirmation', async (buildAfterSave) => {
   mocked(checkUploadFileConflicts).mockResolvedValue({ overwritePaths: ['/chosen/report.md'] });
   const { result } = hook();
   act(() => result.current.openSaveToKnowledge(file));
   act(() => result.current.handleSelectKnowledgeBase(kb));
   await waitFor(() => expect(result.current.knowledgeFolderLoading).toBe(false));
   await act(async () => result.current.loadKnowledgeFolders(kb, '/chosen'));
-  await act(async () => result.current.handleConfirmSaveToKnowledge());
+  await act(async () => result.current.handleConfirmSaveToKnowledge(buildAfterSave));
   expect(result.current.pendingKnowledgeConflicts).toEqual(['/chosen/report.md']);
   expect(saveToPersonalKnowledge).not.toHaveBeenCalled();
   await act(async () => result.current.handleConfirmKnowledgeUpload(false));
@@ -100,39 +100,44 @@ test('checks conflicts before server-side save and forwards the confirmed overwr
       targetResourceId: '20',
       targetDirectoryPath: '/chosen',
       overwrite: true,
+      buildAfterSave,
     })
   );
   expect(downloadFile).not.toHaveBeenCalled();
   expect(result.current.saveResult).toEqual(saved);
+  expect(result.current.saveResultBuildRequested).toBe(buildAfterSave);
 });
 
-test('checks nested folder conflicts using preserved paths and lets the server preserve empty folders', async () => {
-  const folder = { name: 'reports', path: '/session/reports/', isDir: true };
-  mocked(listFiles).mockImplementation(({ path }) =>
-    Promise.resolve(
-      path === folder.path
-        ? [
-            { ...file, path: '/session/reports/report.md' },
-            { name: 'empty', path: '/session/reports/empty/', isDir: true },
-          ]
-        : []
-    )
-  );
-  const { result } = hook();
-  act(() => result.current.openSaveToKnowledge(folder));
-  act(() => result.current.handleSelectKnowledgeBase(kb));
-  await waitFor(() => expect(result.current.knowledgeFolderLoading).toBe(false));
-  await act(async () => result.current.handleConfirmSaveToKnowledge());
-  expect(checkUploadFileConflicts).toHaveBeenCalledWith({
-    resourceId: '20',
-    directoryPath: '/reports/',
-    fileNames: ['report.md'],
-  });
-  await act(async () => result.current.handleConfirmKnowledgeUpload(false));
-  expect(saveToPersonalKnowledge).toHaveBeenCalledWith(
-    expect.objectContaining({ sourceDir: true, sourcePath: folder.path })
-  );
-});
+test.each([false, true])(
+  'preserves folder paths and buildAfterSave=%s including empty folders',
+  async (buildAfterSave) => {
+    const folder = { name: 'reports', path: '/session/reports/', isDir: true };
+    mocked(listFiles).mockImplementation(({ path }) =>
+      Promise.resolve(
+        path === folder.path
+          ? [
+              { ...file, path: '/session/reports/report.md' },
+              { name: 'empty', path: '/session/reports/empty/', isDir: true },
+            ]
+          : []
+      )
+    );
+    const { result } = hook();
+    act(() => result.current.openSaveToKnowledge(folder));
+    act(() => result.current.handleSelectKnowledgeBase(kb));
+    await waitFor(() => expect(result.current.knowledgeFolderLoading).toBe(false));
+    await act(async () => result.current.handleConfirmSaveToKnowledge(buildAfterSave));
+    expect(checkUploadFileConflicts).toHaveBeenCalledWith({
+      resourceId: '20',
+      directoryPath: '/reports/',
+      fileNames: ['report.md'],
+    });
+    await act(async () => result.current.handleConfirmKnowledgeUpload(false));
+    expect(saveToPersonalKnowledge).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceDir: true, sourcePath: folder.path, buildAfterSave })
+    );
+  }
+);
 
 test('retries only failed build submissions without importing files again', async () => {
   const { result } = hook();
@@ -158,4 +163,38 @@ test('retains the employee-scoped query for existing generic save dialogs', asyn
     expect.objectContaining({ resourceId: '10' })
   );
   expect(listResourceUseAuth).not.toHaveBeenCalled();
+});
+
+test('does not save to the previous directory when loading a newly selected directory fails', async () => {
+  const { result } = hook();
+  act(() => result.current.openSaveToKnowledge(file));
+  act(() => result.current.handleSelectKnowledgeBase(kb));
+  await waitFor(() => expect(result.current.knowledgeFolderReady).toBe(true));
+  mocked(queryDirAndFileByLevel).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => result.current.loadKnowledgeFolders(kb, '/unavailable'));
+  expect(result.current.knowledgeFolderReady).toBe(false);
+  await act(async () => result.current.handleConfirmSaveToKnowledge(false));
+  expect(checkUploadFileConflicts).not.toHaveBeenCalled();
+  expect(result.current.knowledgeUploadConfirmOpen).toBe(false);
+});
+
+test('keeps save-only mode after a failed upload and prevents duplicate submissions', async () => {
+  const { result } = hook();
+  act(() => result.current.openSaveToKnowledge(file));
+  act(() => result.current.handleSelectKnowledgeBase(kb));
+  await waitFor(() => expect(result.current.knowledgeFolderReady).toBe(true));
+  await act(async () => {
+    await Promise.all([
+      result.current.handleConfirmSaveToKnowledge(false),
+      result.current.handleConfirmSaveToKnowledge(true),
+    ]);
+  });
+  expect(result.current.pendingBuildAfterSave).toBe(false);
+  expect(checkUploadFileConflicts).toHaveBeenCalledTimes(1);
+  mocked(saveToPersonalKnowledge).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => result.current.handleConfirmKnowledgeUpload(false));
+  expect(result.current.knowledgeUploadConfirmOpen).toBe(true);
+  await act(async () => result.current.handleConfirmKnowledgeUpload(false));
+  expect(saveToPersonalKnowledge).toHaveBeenLastCalledWith(expect.objectContaining({ buildAfterSave: false }));
+  expect(result.current.knowledgeUploadConfirmOpen).toBe(false);
 });

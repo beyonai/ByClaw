@@ -50,10 +50,10 @@ public class FileBrowserKnowledgeTransferApplicationService {
 
     public FileBrowserSaveToKnowledgeVo saveToKnowledge(String userCode, FileBrowserSaveToKnowledgeRequest request)
         throws IOException {
-        return transfer(userCode, request, false);
+        return transfer(userCode, request, false, false);
     }
 
-    /** 个人知识库入口：校验归属和管理权限，导入后只构建本次成功的文件。 */
+    /** 个人知识库入口：校验归属和管理权限，按需构建本次成功导入的文件。 */
     public FileBrowserSaveToKnowledgeVo saveToPersonalKnowledge(String userCode,
         FileBrowserSaveToKnowledgeRequest request) throws IOException {
         validateRequest(request);
@@ -73,11 +73,11 @@ public class FileBrowserKnowledgeTransferApplicationService {
             .findFirst().orElseThrow(() -> new IllegalArgumentException(
                 I18nUtil.get("filebrowser.personal.source.unavailable")));
         request.setSourceDir(source.isDir());
-        return transfer(userCode, request, true);
+        return transfer(userCode, request, true, !Boolean.FALSE.equals(request.getBuildAfterSave()));
     }
 
     private FileBrowserSaveToKnowledgeVo transfer(String userCode, FileBrowserSaveToKnowledgeRequest request,
-        boolean buildAfterSave) throws IOException {
+        boolean personalKnowledge, boolean buildAfterSave) throws IOException {
         validateRequest(request);
 
         FileBrowserSaveToKnowledgeVo result = new FileBrowserSaveToKnowledgeVo();
@@ -94,7 +94,7 @@ public class FileBrowserKnowledgeTransferApplicationService {
                 result.setCreatedFolderCount(result.getCreatedFolderCount() + 1);
             }
             copyDirectory(userCode, request, ensureFileBrowserDirectoryPath(result.getSourcePath()),
-                targetDirectoryPath, result, buildAfterSave);
+                targetDirectoryPath, result, personalKnowledge, buildAfterSave);
         }
         else {
             copyFile(userCode, request, result.getSourcePath(), targetDirectoryPath, result, buildAfterSave);
@@ -104,11 +104,12 @@ public class FileBrowserKnowledgeTransferApplicationService {
     }
 
     private void copyDirectory(String userCode, FileBrowserSaveToKnowledgeRequest request, String sourceDirectoryPath,
-        String targetDirectoryPath, FileBrowserSaveToKnowledgeVo result, boolean buildAfterSave) throws IOException {
+        String targetDirectoryPath, FileBrowserSaveToKnowledgeVo result, boolean personalKnowledge,
+        boolean buildAfterSave) throws IOException {
         if (sourceDirectoryPath.split("/").length > 100) {
             throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.source.depth.exceeded"));
         }
-        List<FileBrowserItemVo> children = buildAfterSave
+        List<FileBrowserItemVo> children = personalKnowledge
             ? fileBrowserService.listForTransfer(userCode, request.getResourceId(), sourceDirectoryPath)
             : fileBrowserService.list(userCode, request.getResourceId(), sourceDirectoryPath);
         for (FileBrowserItemVo child : children) {
@@ -119,13 +120,13 @@ public class FileBrowserKnowledgeTransferApplicationService {
                         result.setCreatedFolderCount(result.getCreatedFolderCount() + 1);
                     }
                     copyDirectory(userCode, request, ensureFileBrowserDirectoryPath(child.getPath()),
-                        childTargetDirectoryPath, result, buildAfterSave);
+                        childTargetDirectoryPath, result, personalKnowledge, buildAfterSave);
                 }
                 else {
                     copyFile(userCode, request, normalizeFileBrowserPath(child.getPath()), targetDirectoryPath, result, buildAfterSave);
                 }
             } catch (IOException | RuntimeException ex) {
-                if (!buildAfterSave) throw ex;
+                if (!personalKnowledge) throw ex;
                 result.getFailedItems().add(failedItem(child.getPath(), ex));
             }
         }

@@ -38,6 +38,7 @@ export interface KnowledgeTargetSelectorProps {
   onLoadFolderChildren?: (directoryPath: string) => Promise<QueryDirAndFileByLevelItem[] | void>;
   emptyText?: React.ReactNode;
   folderEmptyText?: React.ReactNode;
+  footer?: React.ReactNode;
   footerExtra?: React.ReactNode;
   className?: string;
 }
@@ -53,6 +54,7 @@ type KnowledgeTargetSelectorContentProps = Omit<
   | 'width'
   | 'zIndex'
   | 'destroyOnClose'
+  | 'footer'
   | 'footerExtra'
 >;
 
@@ -302,6 +304,7 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
     width = 900,
     zIndex,
     destroyOnClose = true,
+    footer,
     footerExtra,
     ...selectorProps
   } = props;
@@ -313,6 +316,7 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
       title={title ?? intl.formatMessage({ id: 'fileSider.saveToKnowledge' })}
       okText={intl.formatMessage({ id: 'common.confirm' })}
       cancelText={intl.formatMessage({ id: 'common.cancel' })}
+      footer={footer}
       confirmLoading={confirmLoading}
       okButtonProps={{ disabled: okDisabled }}
       onOk={onOk}
