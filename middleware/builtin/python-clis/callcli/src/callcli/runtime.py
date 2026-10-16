@@ -45,7 +45,6 @@ class CapabilityRuntime:
                      action: str = "", query: str = "", arguments: dict | None = None,
                      trace_id: str = "") -> dict:
         started = time.monotonic()
-        await self.catalog.find_authorized(session_id, resource_id, resource_type)
         raw = await self.provider.resolve(resource_id, resource_type)
         capability = build_capability(raw, resource_id, resource_type)
         data = await self.executor.execute(capability, action=action, query=query,

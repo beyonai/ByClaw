@@ -61,8 +61,8 @@ CLI 不接受 `resource_name` 作为执行标识，不选择“第一个绑定�
 资源 ID 在输入输出中始终作为字符串处理。
 
 `resource list` 用于获得当前会话可使用的资源；`resource describe` 和 `invoke` 仍必须传精确 ID。
-CLI 不允许仅凭名称直接执行。调用前运行时必须再次确认精确资源仍在当前会话授权目录中，避免使用
-过期的开发期授权结果。
+CLI 不允许仅凭名称直接执行。`resource describe` 校验当前会话授权；`invoke` 跳过完整授权目录查询，
+直接按精确类型和 ID 从 Redis 加载资源详情。
 
 ## 3. 运行时架构
 
@@ -367,21 +367,21 @@ interface CapabilityProvider {
 }
 ```
 
-生产环境使用组合 Provider。授权目录是“能否使用”的权威来源，Redis/资源详情是“如何执行”的
+生产环境使用组合 Provider。资源发现和描述使用授权目录，执行则直接使用 Redis/资源详情作为
 Capability 来源：
 
 ```text
-listResourceUseAuth 精确授权确认
-  -> Redis/资源详情加载 Capability
+invoke(resource_id, resource_type)
+  -> Redis/资源详情加载精确 Capability
   -> 校验 ID 与 resourceBizType 一致
   -> 执行
 ```
 
 其职责是：
 
-1. 通过服务发现调用授权目录并精确确认 ID；
-2. 使用精确 `<PREFIX>_<resource_id>` 查找资源执行详情；
-3. 校验详情的资源 ID、类型与授权目录一致；
+1. `resource list` 和 `resource describe` 通过服务发现调用授权目录；
+2. `invoke` 使用精确 `<PREFIX>_<resource_id>` 查找资源执行详情，不调用授权目录；
+3. 校验详情的资源 ID、类型与请求一致；
 4. 将原始资源转换为内部 Capability；
 5. 解析 Header 中的凭证占位符；
 6. 返回 `RESOURCE_NOT_FOUND`、`RESOURCE_FORBIDDEN`、`RESOURCE_DETAILS_NOT_FOUND` 或
@@ -580,7 +580,7 @@ JSON fixture 和协议测试数据，而不是建立跨语言源码依赖。
 - `describe` 无网络执行；
 - `resource list` 通过服务发现访问授权接口，不接受原始 endpoint；
 - 只使用 `resourceBizType` 进行执行路由；
-- `invoke` 会重新确认当前会话对精确资源的授权；
+- `invoke` 不访问授权列表，并按精确类型和 ID 加载 Redis 资源详情；
 - stdout 严格为单 JSON 或 NDJSON，不混入日志；
 - 所有失败都有稳定错误码和退出码；
 - 精确资源 ID/type 校验；

@@ -413,15 +413,14 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["tools"][0]["name"], "bing_search")
         executor.describe.assert_awaited_once()
 
-    async def test_runtime_reauthorizes_then_executes(self) -> None:
+    async def test_runtime_invokes_from_snapshot_without_loading_authorized_resources(self) -> None:
         catalog = AsyncMock()
-        catalog.find_authorized.return_value = {"resourceId": "1", "routeType": "TOOL"}
         executor = AsyncMock()
         executor.execute.return_value = {"answer": 42}
         runtime = CapabilityRuntime(catalog, FakeProvider({"resourceId": "1", "resourceBizType": "TOOL"}), executor)
         result = await runtime.invoke("s", "1", "TOOL", arguments={"x": 1})
         self.assertEqual(result["data"], {"answer": 42})
-        catalog.find_authorized.assert_awaited_once_with("s", "1", "TOOL")
+        catalog.find_authorized.assert_not_awaited()
 
 
 class SnapshotTests(unittest.IsolatedAsyncioTestCase):

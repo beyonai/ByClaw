@@ -1,7 +1,8 @@
 # callcli
 
-`callcli` 是供业务 Skill 脚本调用百应平台能力的纯 Python CLI。它通过平台服务发现查询当前会话
-可使用资源，调用前再次校验授权，然后按精确类型执行 TOOL、TOOLKIT、MCP 或远程 AGENT。
+`callcli` 是供业务 Skill 脚本调用百应平台能力的纯 Python CLI。资源发现和描述通过平台服务查询
+当前会话可使用资源；`invoke` 按精确类型和 ID 直接从 Redis 加载资源详情，然后执行 TOOL、
+TOOLKIT、MCP 或远程 AGENT。
 
 第一版明确不支持 PAGE、DOC、OBJECT、VIEW 和 ASK_PERSONAL。
 
@@ -54,6 +55,9 @@ callcli invoke \
 中选择精确名称，并依据对应的 `inputSchema` 构造参数。`invoke` 必须显式传入
 `--action`，即使资源当前只有一个工具也不会自动选择。`--query` 仅适用于 `AGENT`；
 `TOOL`、`TOOLKIT` 和 `MCP` 使用 `--arguments`。
+
+`invoke` 不调用 `listResourceUseAuth`；Redis 中不存在精确的 `<RESOURCE_TYPE>_<resourceId>`
+详情时返回 `RESOURCE_DETAILS_NOT_FOUND`。调用方负责只传入其业务流程已确认可使用的资源 ID。
 
 所有正常输出和错误均为机器可读 JSON；`--stream` 使用 NDJSON 事件。业务 Skill 的开发约束和
 完整示例见 [AGENT_SKILL_DEVELOPMENT.md](AGENT_SKILL_DEVELOPMENT.md) 与

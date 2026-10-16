@@ -113,7 +113,8 @@ callcli resource list \
 工具通常作为 TOOLKIT 的 action 使用。列表返回零条时停止；返回多条时必须用业务约束继续缩小，
 或向用户询问，禁止选择第一条。
 
-固定资源 Skill 也必须在运行时由 `callcli invoke` 重新校验当前会话授权；开发期查询结果不代表永久授权。
+固定资源 Skill 的 `callcli invoke` 会直接从 Redis 加载精确资源详情，不再查询完整授权目录；Skill
+只能使用业务流程已确认可用的资源 ID。需要动态选资源时，仍须通过 `callcli resource list` 获取候选。
 
 ### 3.4 查看目标资源契约
 
