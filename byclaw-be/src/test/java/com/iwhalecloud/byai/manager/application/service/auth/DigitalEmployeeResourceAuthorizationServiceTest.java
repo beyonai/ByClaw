@@ -102,6 +102,16 @@ class DigitalEmployeeResourceAuthorizationServiceTest {
     }
 
     @Test
+    void synchronizedUseScopeIsNeverExpandedToOtherSharedEmployeeUsers() {
+        SsResource bound = bind(200L, "SKILL"); bound.setUseAuthControlled(true);
+        when(grants.listActiveRedGrantsForGrantObject(100L, "DIG_EMPLOYEE"))
+            .thenReturn(List.of(grant("USER", 2L, GrantType.FORCE_USE)));
+        service.synchronize(employee, List.of());
+        verify(auth, never()).validateDigitalEmployeeResourceUseGrant(eq(bound), any());
+        verify(auth, never()).appendDigitalEmployeeResourceUsePrivileges(eq(bound), any());
+    }
+
+    @Test
     void repeatedSaveDoesNotRegrantExistingResourcePermissions() {
         SsResource bound = bind(200L, "SKILL");
         when(grants.listActiveRedGrantsForGrantObject(100L, "DIG_EMPLOYEE"))

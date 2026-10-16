@@ -26,7 +26,8 @@ class ResourceFavoriteServiceTest {
     private final ResourceFavoriteMapper mapper = mock(ResourceFavoriteMapper.class);
     private final ByaiSystemConfigService config = mock(ByaiSystemConfigService.class);
     private final AuthApplicationService auth = mock(AuthApplicationService.class);
-    private final ResourceFavoriteService service = new ResourceFavoriteService(mapper, config, auth);
+    private final ResourceFavoriteLockService locks = mock(ResourceFavoriteLockService.class);
+    private final ResourceFavoriteService service = new ResourceFavoriteService(mapper, config, auth, locks);
 
     @BeforeEach
     void login() {
@@ -101,7 +102,7 @@ class ResourceFavoriteServiceTest {
         assertThatThrownBy(() -> service.setFavorite(request(true)))
             .isInstanceOf(ResponseStatusException.class)
             .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
-        verify(mapper, never()).ensureCount(any(), any());
+        verify(mapper, never()).insertCount(any(), any(), anyLong());
     }
 
     @Test
@@ -119,7 +120,7 @@ class ResourceFavoriteServiceTest {
     void favoritesSupportedResourceTypesWithoutGrantingUse(String type) {
         commercial();
         resource(type, "enterprise", 2);
-        when(mapper.lockCount(33L, 22L)).thenReturn(7L);
+        when(mapper.selectCount(33L, 22L)).thenReturn(7L);
         when(mapper.insertFavorite(33L, 22L, 11L)).thenReturn(1);
 
         var result = service.setFavorite(request(true));
@@ -128,8 +129,7 @@ class ResourceFavoriteServiceTest {
         assertThat(result.favoriteCount()).isEqualTo(8);
         var order = inOrder(mapper);
         order.verify(mapper).selectResource(33L, 22L);
-        order.verify(mapper).ensureCount(33L, 22L);
-        order.verify(mapper).lockCount(33L, 22L);
+        order.verify(mapper).selectCount(33L, 22L);
         order.verify(mapper).insertFavorite(33L, 22L, 11L);
         order.verify(mapper).updateCount(33L, 22L, 1);
         verify(auth).queryCurrentUserUseBlacklistedResourceIds(List.of(33L), List.of(type));
@@ -140,8 +140,8 @@ class ResourceFavoriteServiceTest {
     void repeatedFavoriteDoesNotIncrementCount() {
         commercial();
         resource("SKILL", "enterprise", 2);
-        when(mapper.lockCount(33L, 22L)).thenReturn(7L);
-        when(mapper.insertFavorite(33L, 22L, 11L)).thenReturn(0);
+        when(mapper.selectCount(33L, 22L)).thenReturn(7L);
+        when(mapper.countUserFavorite(33L, 22L, 11L)).thenReturn(1);
         assertThat(service.setFavorite(request(true)).favoriteCount()).isEqualTo(7L);
         verify(mapper, never()).updateCount(any(), any(), anyInt());
     }
@@ -150,7 +150,7 @@ class ResourceFavoriteServiceTest {
     void cancellationWorksForOffShelfResourceAndIsIdempotent() {
         commercial();
         resource("SKILL", "enterprise", 3);
-        when(mapper.lockCount(33L, 22L)).thenReturn(7L, 6L);
+        when(mapper.selectCount(33L, 22L)).thenReturn(7L, 6L);
         when(mapper.deleteFavorite(33L, 22L, 11L)).thenReturn(1, 0);
         assertThat(service.setFavorite(request(false)).favoriteCount()).isEqualTo(6L);
         assertThat(service.setFavorite(request(false)).favoriteCount()).isEqualTo(6L);
@@ -167,7 +167,7 @@ class ResourceFavoriteServiceTest {
         assertThatThrownBy(() -> service.setFavorite(request(true))).isInstanceOf(ResponseStatusException.class);
         when(mapper.selectResource(33L, 22L)).thenReturn(null);
         assertThatThrownBy(() -> service.setFavorite(request(true))).isInstanceOf(ResponseStatusException.class);
-        verify(mapper, never()).ensureCount(any(), any());
+        verify(mapper, never()).insertCount(any(), any(), anyLong());
     }
 
     @Test
@@ -178,10 +178,12 @@ class ResourceFavoriteServiceTest {
         resource("SKILL", "enterprise", 2);
         when(auth.queryCurrentUserUseBlacklistedResourceIds(any(), any())).thenReturn(Set.of(33L));
         assertThatThrownBy(() -> service.setFavorite(request(true))).isInstanceOf(ResponseStatusException.class);
-        verify(mapper, never()).ensureCount(any(), any());
+        verify(mapper, never()).insertCount(any(), any(), anyLong());
     }
 
     private void commercial() {
+        when(mapper.selectCount(any(), any())).thenReturn(0L);
+        when(mapper.updateCount(any(), any(), anyInt())).thenReturn(1);
         when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn("commercial");
         when(mapper.isSchemaReady()).thenReturn(true);
     }

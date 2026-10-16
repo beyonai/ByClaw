@@ -99,6 +99,12 @@ export default defineConfig({
     // 关键修复：强制设置模块解析条件顺序
     config.resolve.conditionNames = ['import', 'node', 'default'];
 
+    // LibRaw 的通用加载器同时包含 Node 分支；仅在该模块中忽略浏览器不会使用的 Node 导入。
+    config.module
+      .rule('camera-raw-browser')
+      .test(/@colorhythm[\\/]libraw-wasm[\\/]dist[\\/]libraw\.mjs$/)
+      .set('resolve', { alias: { module: false, fs: false, path: false, url: false } });
+
     // 配置 splitChunks，将 slate 和 katex 打包到同一个文件
     config.optimization.splitChunks.merge({
       cacheGroups: umiConfig.cacheGroups,

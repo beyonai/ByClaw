@@ -18,6 +18,7 @@ export const DEFAULT_AIMODEL_TYPELIST_REDIS_KEY = "byai:aimodel:typelist";
 export const DEFAULT_AIMODEL_TYPELIST_FIELD = "LLM";
 export const DEFAULT_AIMODEL_SECRET_PROVIDER_NAME = "baiying-aimodel-redis";
 export const DEFAULT_AIMODEL_TIMEOUT_SECONDS = 600;
+export const DEFAULT_AIMODEL_MAX_TOKENS = 65536;
 export const AIMODEL_TIMEOUT_ENV = "BYCLAW_LLM_IDLE_TIME";
 export const AIMODEL_ABILITY_TEXT = "3";
 export const AIMODEL_ABILITY_MULTIMODAL = "7";
@@ -79,6 +80,11 @@ function positiveInt(value: unknown): number | undefined {
               ? Number(value.trim())
               : NaN;
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+}
+
+/** 与模型表单保持一致：缺省输出预算为 64K，且不超过已知窗口；不覆盖显式配置。 */
+export function resolveDefaultAimodelMaxTokens(contextWindow?: unknown): number {
+    return Math.min(DEFAULT_AIMODEL_MAX_TOKENS, positiveInt(contextWindow) ?? DEFAULT_AIMODEL_MAX_TOKENS);
 }
 
 export function resolveAimodelTimeoutSeconds(): number {
@@ -463,7 +469,7 @@ function parseBaiyingAimodelProviderBundleFromRecord(params: {
         modelId: modelCode,
         modelName: nonEmptyString(raw.modelName) || modelCode,
         contextWindow: positiveInt(raw.maxContentToken) ?? 128000,
-        maxTokens: positiveInt(instanceParam.maxTokens) ?? 8192,
+        maxTokens: positiveInt(instanceParam.maxTokens) ?? resolveDefaultAimodelMaxTokens(raw.maxContentToken),
         input: resolveAimodelModelInputFromAbilities(abilities),
         ...resolveReasoningModelOptions({
             api,

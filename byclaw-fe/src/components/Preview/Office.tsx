@@ -7,6 +7,7 @@ import type { JsDocxPreview } from '@js-preview/docx';
 import type { JsExcelPreview } from '@js-preview/excel';
 import ss from './Office.module.less';
 import { preparePptxPreview } from './preparePptxPreview';
+import LegacyOffice from './LegacyOffice';
 
 type PdfInit = (el: HTMLElement, opts?: any) => JsPdfPreview;
 type DocxInit = (el: HTMLElement, opts?: any) => JsDocxPreview;
@@ -72,6 +73,9 @@ const blobToArrayBuffer = (blob: Blob) => {
 export const Office: Offices = (props: any) => {
   const { type, data, fileName, ...rest } = props;
 
+  if (type === 'doc' || type === 'ppt') {
+    return <LegacyOffice data={data} type={type} fileName={fileName} />;
+  }
   if (type === 'pdf' || fileName?.endsWith('.pdf')) {
     return <Office.Pdf data={data} {...rest} />;
   }

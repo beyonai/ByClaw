@@ -67,6 +67,7 @@ export interface SkillGroupUninstallSkill {
   resourceId: string;
   resourceName?: string;
   manualSource: boolean;
+  automaticSource?: boolean;
   otherGroupIds: string[];
   otherGroupNames: string[];
 }
@@ -637,6 +638,8 @@ export interface ResourceOperationPermissions {
   resourceBizType: string; // 资源业务类型
   hasManagePermission?: boolean; // 是否具备资源管理权限
   hasUsePermission?: boolean; // 是否具备资源使用权限
+  canViewBasicInfo?: boolean; // 是否可查看基础信息
+  hasViewPermission?: boolean; // 独立查看、使用或管理权限
   canViewDetail?: boolean; // 是否允许进入资源详情
   canEdit: boolean; // 是否有编辑权限
   canManageAuth: boolean; // 是否有管理权限权限

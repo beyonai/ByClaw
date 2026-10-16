@@ -15,6 +15,31 @@ import { message } from 'antd';
 import useModelDebug from '../useModelDebug';
 
 describe('useModelDebug image generation validation', () => {
+  it.each(['VOLCENGINE', undefined])(
+    'dispatches the Volcengine image protocol with provider %s',
+    async (providerName) => {
+      const output = '{"data":[{"url":"https://example.test/image.jpeg"}]}';
+      const runDebugRequest = jest.fn().mockResolvedValue({ output });
+      const { result } = renderHook(() =>
+        useModelDebug({
+          intl: { formatMessage: ({ id }) => id },
+          open: true,
+          currentModelType: 'IMAGE_GENERATION',
+          currentProviderName: providerName,
+          currentModelProtocol: 'VOLCENGINE_IMAGE',
+          getCurrentModelId: () => '42',
+          runDebugRequest,
+        })
+      );
+      act(() => result.current.setDebugInput('{"param":{"prompt":"whale"}}'));
+      await act(async () => result.current.runDebug());
+      expect(runDebugRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ modelId: '42', modelType: 'IMAGE_GENERATION' })
+      );
+      expect(result.current.debugOutput).toBe(output);
+    }
+  );
+
   it('does not dispatch a non-MiniMax model into the MiniMax-only manager debug endpoint', () => {
     const runDebugRequest = jest.fn().mockResolvedValue({});
     const { result } = renderHook(() =>
@@ -76,6 +101,7 @@ describe('useModelDebug image generation validation', () => {
           },
           open,
           currentModelType: 'IMAGE_GENERATION',
+          currentModelProtocol: 'MINIMAX_IMAGE',
           getCurrentModelId: () => 'image-model-1',
           runDebugRequest,
         }),
@@ -107,6 +133,7 @@ describe('useModelDebug image generation validation', () => {
         },
         open: true,
         currentModelType: 'IMAGE_GENERATION',
+        currentModelProtocol: 'MINIMAX_IMAGE',
         getCurrentModelId: () => 'image-model-1',
         runDebugRequest,
       })
@@ -123,5 +150,23 @@ describe('useModelDebug image generation validation', () => {
     expect(result.current.debugOutput).toHaveLength(largeBase64.length);
     expect(result.current.debugOutput.slice(0, 16)).toBe('A'.repeat(16));
     expect(result.current.debugOutputLoading).toBe(false);
+  });
+
+  it('asks for an unresolved image provider before sending a debug request', async () => {
+    const runDebugRequest = jest.fn();
+    const { result } = renderHook(() =>
+      useModelDebug({
+        intl: { formatMessage: ({ id }) => id },
+        open: true,
+        currentModelType: 'IMAGE_GENERATION',
+        currentModelProtocol: 'Qwen',
+        getCurrentModelId: () => '42',
+        runDebugRequest,
+      })
+    );
+    act(() => result.current.setDebugInput('{"param":{"prompt":"whale"}}'));
+    await act(async () => result.current.runDebug());
+    expect(runDebugRequest).not.toHaveBeenCalled();
+    expect(message.warning).toHaveBeenCalledWith('modelMgr.modal.imageProviderRequired');
   });
 });

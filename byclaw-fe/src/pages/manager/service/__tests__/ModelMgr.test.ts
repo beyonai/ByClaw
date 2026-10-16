@@ -193,6 +193,56 @@ describe('manager/service/ModelMgr', () => {
     expect(onDelta).toHaveBeenNthCalledWith(2, ' World');
   });
 
+  it('renders Responses text deltas once and ignores completion snapshots', async () => {
+    const onDelta = jest.fn();
+    const encoder = new TextEncoder();
+    const data = [
+      { type: 'response.created', response: { output: [] } },
+      { type: 'response.output_text.delta', delta: 'Hello' },
+      { type: 'response.output_text.delta', delta: ' GPT' },
+      { type: 'response.output_text.done', text: 'Hello GPT' },
+      { type: 'response.completed', response: { output: [{ content: [{ text: 'Hello GPT' }] }] } },
+    ]
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+      .join('');
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: encoder.encode(data), done: false })
+            .mockResolvedValue({ done: true }),
+        }),
+      },
+    });
+    await expect(debugModelStream({ onDelta })).resolves.toMatchObject({
+      data: { output: 'Hello GPT', success: true },
+    });
+    expect(onDelta.mock.calls).toEqual([['Hello'], [' GPT']]);
+  });
+
+  it.each([
+    { type: 'response.failed', response: { error: { message: 'upstream failed' } } },
+    { type: 'error', message: 'upstream failed' },
+  ])('rejects an upstream stream error instead of reporting empty success: $type', async (event) => {
+    const encoder = new TextEncoder();
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: encoder.encode(`data: ${JSON.stringify(event)}\n\n`), done: false })
+            .mockResolvedValue({ done: true }),
+        }),
+      },
+    });
+    await expect(debugModelStream({})).rejects.toThrow('upstream failed');
+  });
+
   it('debugModelStream parses Anthropic content_block_delta events', async () => {
     const onDelta = jest.fn();
     const encoder = new TextEncoder();

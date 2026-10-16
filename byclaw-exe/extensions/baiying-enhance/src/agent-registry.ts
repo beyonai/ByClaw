@@ -7,6 +7,7 @@ import {
   resolveAimodelConfigRedisKey,
   resolveAimodelTypeListRedisKey,
   resolveAimodelSecretProviderName,
+  resolveDefaultAimodelMaxTokens,
 } from "./aimodel-config.js";
 import { MANAGED_MODEL_STREAMING_USAGE_COMPAT } from "./config-write.js";
 import { MANAGED_AGENT_PREFIX, MANAGED_PROVIDER_PREFIX } from "./types.js";
@@ -62,7 +63,7 @@ export function defaultModelDefinition(provider: ProviderBundle) {
       cacheWrite: 0,
     },
     contextWindow: provider.contextWindow ?? 128000,
-    maxTokens: provider.maxTokens ?? 8192,
+    maxTokens: provider.maxTokens ?? resolveDefaultAimodelMaxTokens(provider.contextWindow),
   };
 }
 

@@ -103,6 +103,7 @@ public class DigitalEmployeeResourceAuthorizationService {
         Set<Long> userIds = effectiveUsers(employee);
         Map<SsResource, List<Long>> missing = new LinkedHashMap<>();
         for (SsResource resource : boundResources.values()) {
+            if (Boolean.TRUE.equals(resource.getUseAuthControlled()) || Boolean.TRUE.equals(resource.getViewAuthControlled())) continue;
             for (Long userId : userIds) {
                 if (auth.hasResourceUsePermission(resource, userId)) continue;
                 // 员工管理权限不能替代资源授权维护权限；黑名单也不能被自动授权覆盖。

@@ -3,6 +3,7 @@ jest.mock('@/pages/manager/service/session', () => ({
 }));
 
 import { getDcSystemConfig } from '@/pages/manager/service/session';
+import { RobotOutlined } from '@ant-design/icons';
 import { filterRoutesByBlockedPaths } from '@/pages/manager/utils/menu';
 import {
   FILE_MANAGEMENT_MENU,
@@ -24,6 +25,15 @@ describe('manager/layout/sider/menuConfig', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetManagerMenuConfigCache();
+  });
+
+  it('uses the robot icon for both configured and fallback model menus', () => {
+    const path = '/manager/systemParams/modal';
+    const [configuredMenu] = normalizeManagerMenuConfig([{ path, menuCode: 'menu_model_config' }]);
+    const fallbackMenu = fallbackMenuConfig.find((item) => item.path === path);
+
+    expect(configuredMenu.icon).toBe(RobotOutlined);
+    expect(fallbackMenu?.icon).toBe(RobotOutlined);
   });
 
   it.each([

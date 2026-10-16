@@ -14,6 +14,8 @@ public final class GrantType {
     /**
      * 使用授权
      */
+    public static final String ALLOW_VIEW = "ALLOW_VIEW";
+
     public static final String AVAILABLE_USE = "AVAILABLE_USE";
 
     /**
