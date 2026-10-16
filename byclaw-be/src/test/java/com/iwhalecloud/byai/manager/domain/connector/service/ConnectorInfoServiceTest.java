@@ -135,7 +135,7 @@ class ConnectorInfoServiceTest {
             {"credentialForm":{"helpUrl":"https://docs.example.com/models","fields":[
               {"key":"modelProtocol","label":"模型协议","inputType":"text","maxLength":64,
                "defaultValue":"OPENAI_IMAGE","placeholder":"OPENAI_IMAGE",
-               "description":"当前仅支持 OPENAI_IMAGE。"},
+               "description":"当前仅支持 OPENAI_IMAGE。","advanced":true},
               {"key":"apiToken","label":"API Token","inputType":"password","maxLength":2048,
                "defaultValue":"must-not-leak"},
               {"key":"connectTimeoutSeconds","label":"连接超时（秒）","inputType":"number","maxLength":4,
@@ -152,6 +152,8 @@ class ConnectorInfoServiceTest {
         assertThat(dto.getCredentialForm().getFields().get(0).getPlaceholder()).isEqualTo("OPENAI_IMAGE");
         assertThat(dto.getCredentialForm().getFields().get(0).getDescription())
             .isEqualTo("当前仅支持 OPENAI_IMAGE。");
+        assertThat(dto.getCredentialForm().getFields().get(0).getAdvanced()).isTrue();
+        assertThat(dto.getCredentialForm().getFields().get(1).getAdvanced()).isFalse();
         assertThat(JSON.toJSONString(dto)).doesNotContain("must-not-leak", "authConfig");
     }
 

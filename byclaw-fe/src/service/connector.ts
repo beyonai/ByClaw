@@ -17,6 +17,7 @@ export interface ConnectorCredentialField {
   defaultValue?: string | null;
   placeholder?: string | null;
   description?: string | null;
+  advanced?: boolean;
 }
 
 export interface ConnectorCredentialForm {

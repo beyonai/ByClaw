@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.media;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
@@ -13,6 +14,12 @@ class OpenAiImageConfigurationVerifierTest {
     @Test
     void acceptsOpenAiCompatibleImageEndpoint() {
         verifier.verify(config("https://api.example.com/v1/images/generations"));
+    }
+
+    @Test
+    void supportsVolcengineImageProtocolUsingTheCompatibleGenerationRoute() {
+        assertThat(verifier.supports(MediaModelType.IMAGE, "VOLCENGINE_IMAGE")).isTrue();
+        verifier.verify(config("https://ark.cn-beijing.volces.com/api/v3/images/generations"));
     }
 
     @Test

@@ -199,6 +199,7 @@ public class ConnectorInfoService {
         result.setDefaultValue(sanitizeDefaultValue(field, inputType, maxLength));
         result.setPlaceholder(sanitizeOptionalFieldText(field, "placeholder", 2048));
         result.setDescription(sanitizeOptionalFieldText(field, "description", 500));
+        result.setAdvanced(Boolean.TRUE.equals(field.getBoolean("advanced")));
         return result;
     }
 
