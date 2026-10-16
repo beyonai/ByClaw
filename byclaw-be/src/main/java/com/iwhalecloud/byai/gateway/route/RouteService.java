@@ -739,9 +739,10 @@ public class RouteService {
 
         // 构建项目信息
         Long projectId = chatDto.getProjectId();
-        String workspace = resolveSandboxWorkspace(projectId, sessionId);
+        String workspace = resolveSandboxWorkspace(sessionId);
         if (projectId != null) {
-            JSONObject projectInfo = this.buildProjectInfo(projectId, workspace);
+            // 项目空间仍作为资源地址提供；会话执行和过程文件不再共享项目 cwd。
+            JSONObject projectInfo = this.buildProjectInfo(projectId, resolveSandboxProjectWorkspace(projectId));
             metadata.put("project_info", projectInfo);
         }
 
@@ -859,12 +860,9 @@ public class RouteService {
     }
 
     /**
-     * 解析沙箱内会话工作目录。项目会话使用项目工作区，普通会话使用会话私有工作区。
+     * 所有会话均在当前会话的过程文件目录执行，避免同一项目下的会话互相覆盖产物。
      */
-    private String resolveSandboxWorkspace(Long projectId, String sessionId) {
-        if (projectId != null) {
-            return resolveSandboxProjectWorkspace(projectId);
-        }
+    private String resolveSandboxWorkspace(String sessionId) {
         if (StringUtils.isBlank(sessionId)) {
             throw new BdpRuntimeException("会话工作目录解析失败：缺少会话 ID");
         }

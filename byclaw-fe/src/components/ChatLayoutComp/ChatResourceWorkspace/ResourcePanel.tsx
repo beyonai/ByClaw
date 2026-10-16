@@ -10,7 +10,8 @@ import ResourceSiderPanel from '@/layout/sider/components/ResourceSiderPanel';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FileResourcePanel from './FileResourcePanel';
-import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
+// 暂停聊天右侧的项目空间模块，保留实现以便恢复。
+// import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
 import { useSessionDataSourcesVisible } from './useSessionDataSourcesVisible';
 import { useChatResourceProject } from './useChatResourceProject';
 import { getSessionResourceTabKeys, type SessionFileTabKey } from './resourceTabUtils';
@@ -61,8 +62,9 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const rawProjectCloudResourceId = cloudResourceId ?? project?.cloudResourceId;
   const projectCloudResourceId = rawProjectCloudResourceId ? `${rawProjectCloudResourceId}` : undefined;
 
-  // 项目空间展示项目目录本身，项目尚未配置仓库时也可以浏览普通文件。
-  const showCode = sessionResourceTabKeys.includes('code');
+  // 禁用期间同步回退已选中的项目空间，避免保留不可见的活动页签。
+  // const showCode = sessionResourceTabKeys.includes('code');
+  const showCode = false;
 
   useEffect(() => {
     if (!showCode && secondaryState.session === 'code') {
@@ -91,9 +93,9 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     return [
       ...sessionFileTabKeys.map((key) => ({ key, label: label(SESSION_FILE_TAB_LABEL_IDS[key]) })),
       ...(showDataSources ? [{ key: 'dataSources', label: label('dataSource.title') }] : []),
-      ...(showCode ? [{ key: 'code', label: label('chatResource.projectSpace') }] : []),
+      // ...(showCode ? [{ key: 'code', label: label('chatResource.projectSpace') }] : []),
     ];
-  }, [intl, sessionFileTabKeys, showCode, showDataSources, upperScopeKey]);
+  }, [intl, sessionFileTabKeys, showDataSources, upperScopeKey]);
 
   const upperSecondaryKey = secondaryState[upperScopeKey];
   const showSecondaryRefresh =
@@ -149,18 +151,18 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
           />
         );
       }
-      if (upperSecondaryKey === 'code' && showCode) {
-        return (
-          <ProjectSpaceTab
-            projectId={Number(project?.projectId || projectId)}
-            resourceId={resourceId}
-            projectCloudResourceId={projectCloudResourceId}
-            sessionId={sessionId}
-            refreshKey={sessionResourceRefreshKey}
-            onOpenDetail={onOpenDetail}
-          />
-        );
-      }
+      // if (upperSecondaryKey === 'code' && showCode) {
+      //   return (
+      //     <ProjectSpaceTab
+      //       projectId={Number(project?.projectId || projectId)}
+      //       resourceId={resourceId}
+      //       projectCloudResourceId={projectCloudResourceId}
+      //       sessionId={sessionId}
+      //       refreshKey={sessionResourceRefreshKey}
+      //       onOpenDetail={onOpenDetail}
+      //     />
+      //   );
+      // }
       return empty;
     }
 
@@ -188,7 +190,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     resourceId,
     sessionResourceRefreshKey,
     sessionId,
-    showCode,
     showDataSources,
     upperScopeKey,
     upperSecondaryKey,

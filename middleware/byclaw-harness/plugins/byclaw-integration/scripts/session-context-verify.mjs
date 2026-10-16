@@ -394,7 +394,7 @@ assert.deepEqual(first[1].source, { kind: 'plugin', plugin: 'byclaw-context' })
 assert.match(first[1].content[0].text, /session_id: 350860623218590448/u)
 assert.match(first[1].content[0].text, /cwd: \/workspace\/byclaw/u)
 assert.match(first[1].content[0].text, /default_output_root: \/srv\/byclaw\/by\/\.sessions\/350860623218590448/u)
-assert.match(first[1].content[0].text, /默认落盘/u)
+assert.match(first[1].content[0].text, /默认使用当前会话的过程文件目录/u)
 assert.match(first[2].content[0].text, /需求说明\.pdf/u)
 assert.match(first[2].content[0].text, /研发知识库/u)
 assert.match(first[2].content[0].text, /测试研发项目/u)
@@ -418,6 +418,15 @@ const resumed = appendByClawContext({
   ]),
 }, [userMessage], workspace, inboundTurn)
 assert.deepEqual(resumed, [userMessage])
+
+const processWorkspace = { ...workspace, cwd: workspace.sessionRoot }
+const oldContextLog = sessionLog([persistedContextEvent])
+const updatedContext = appendByClawContext(oldContextLog, [userMessage], processWorkspace)
+assert.equal(updatedContext.length, 2, 'a restored project context must receive the new cwd')
+assert.ok(updatedContext[1].content[0].text.includes(`cwd: ${workspace.sessionRoot}`))
+oldContextLog.appendEvent({ type: 'user/message', data: updatedContext[1] })
+assert.deepEqual(appendByClawContext(oldContextLog, [userMessage], processWorkspace), [userMessage],
+  'the new workspace declaration must be injected only once')
 
 const delegated = appendByClawContext({
   header: { parentSession: 'parent' },

@@ -1,4 +1,9 @@
-import { getImageGenerationProviderByProtocol, getImageProviderFormValues } from './imageGenerationProviders';
+import {
+  getImageGenerationProviderByProtocol,
+  getImageProviderFormValues,
+  resolveImageGenerationProviderName,
+} from './imageGenerationProviders';
+import { buildVolcengineImageParam, compactImageGenerationConfig, isVolcengineImage } from './volcengineImageConfig';
 
 export type DebugInputMode = 'template' | 'auto';
 
@@ -11,16 +16,24 @@ export type ModelTagItem = {
 };
 
 export const SYSTEM_SOURCE_TYPES = ['DIG_EMPLOYEE'];
-export const DEFAULT_CONTEXT_TOKENS = 1024 * 198;
+// 前端缺少官方上下文上限时的配置默认值，不作为官方容量校验依据。
+export const DEFAULT_CONTEXT_TOKENS = 202752;
 export const MAX_CONTEXT_TOKENS = 2000 * 1000;
-export const MIN_CONTEXT_TOKENS = 200000;
+export const MIN_CONTEXT_TOKENS = 1;
 export const CONTEXT_TOKENS_CONFIG = {
   min: MIN_CONTEXT_TOKENS,
   max: MAX_CONTEXT_TOKENS,
   step: 1000,
 };
 export const DEFAULT_MAX_TOKENS = 1024 * 64;
-export const MIN_MAX_TOKENS = 65536;
+export const MIN_MAX_TOKENS = 1;
+
+/** 缺少输出配置时使用系统预算；已知窗口较小时收窄默认值，不将预算当作官方上限。 */
+export function getDefaultMaxTokens(contextTokens?: number | string) {
+  const context = Number(contextTokens);
+  return Number.isInteger(context) && context > 0 ? Math.min(DEFAULT_MAX_TOKENS, context) : DEFAULT_MAX_TOKENS;
+}
+
 export const IMAGE_GENERATION_DEFAULTS = {
   ...getImageProviderFormValues('MINIMAX'),
   prompt: '',
@@ -78,12 +91,14 @@ export const MODEL_PROTOCOL_OPTIONS = [
   { label: 'OpenAI Responses', value: 'OpenAI Responses' },
   { label: 'Anthropic', value: 'Anthropic' },
   { label: 'Qwen', value: 'Qwen' },
+  { label: 'Volcengine Multimodal', value: 'Volcengine Multimodal' },
   { label: 'MiniMax Image', value: 'MINIMAX_IMAGE' },
 ] as const;
 
 export function getDefaultLlmDebugSuffix(modelProtocol?: any) {
   const protocol = `${modelProtocol ?? 'OpenAI'}`.trim().toLowerCase();
   if (protocol === 'anthropic') return '/v1/messages';
+  if (protocol === 'openai responses') return '/responses';
   return '/chat/completions';
 }
 
@@ -102,8 +117,27 @@ export function isExampleApiEndpointPlaceholder(value?: any) {
   return normalized === 'https://api.example.com/v1' || normalized === 'https://api.example.com/anthropic';
 }
 
-export function getImageProviderTransitionFormValues(providerName?: any) {
-  return getImageProviderFormValues(providerName);
+export function getImageProviderTransitionFormValues(providerName?: any, currentValues?: any) {
+  // 清空提供商只按现有协议补全，不能触发 MiniMax 预设覆盖自定义地址、型号和协议。
+  if (!`${providerName ?? ''}`.trim()) {
+    return { providerName: resolveImageGenerationProviderName(undefined, currentValues?.modelProtocol) };
+  }
+  const next = getImageProviderFormValues(providerName);
+  const previous = getImageGenerationProviderByProtocol(currentValues?.modelProtocol);
+  if (!currentValues || (next.providerName !== 'VOLCENGINE' && previous?.providerName !== 'VOLCENGINE')) return next;
+  // 新火山分支只替换空值或上一提供商预设值，保留用户填写的型号和代理地址。
+  return {
+    providerName: next.providerName,
+    modelProtocol: next.modelProtocol,
+    apiEndpoint:
+      !currentValues.apiEndpoint || currentValues.apiEndpoint === previous?.apiEndpoint
+        ? next.apiEndpoint
+        : currentValues.apiEndpoint,
+    modelCode:
+      !currentValues.modelCode || currentValues.modelCode === previous?.modelCode
+        ? next.modelCode
+        : currentValues.modelCode,
+  };
 }
 
 export function getImageGenerationDefaultFormValues() {
@@ -115,6 +149,7 @@ export function getDefaultFormValues() {
     status: 'ENABLED',
     abilities: [],
     systems: [],
+    applicabilityScope: '',
     modelType: 'LLM',
     modelProtocol: 'OpenAI',
     // 仅靠 placeholder 展示样例，不预填实际默认值。
@@ -148,6 +183,7 @@ export function getModelTypeSwitchFormValues(modelType: any) {
     return {
       ...getImageGenerationDefaultFormValues(),
       modelType: normalizedType,
+      imageGenerationConfig: undefined,
       apiToken: '',
       headers: [{ key: '', value: '' }],
     };
@@ -164,6 +200,7 @@ export function getModelTypeSwitchFormValues(modelType: any) {
     apiToken: '',
     headers: [{ key: '', value: '' }],
     prompt: undefined,
+    imageGenerationConfig: undefined,
     aspectRatio: undefined,
     imageCount: undefined,
     responseFormat: undefined,
@@ -264,6 +301,41 @@ export function buildRerankHeaders(options: { formApiToken?: any; formHeaders?: 
 }
 
 export function buildDebugPayload(values: any) {
+  if (values?.modelProtocol === 'BAILIAN_IMAGE' || values?.modelProtocol === 'TOKENHUB_IMAGE') {
+    const model = `${values?.modelCode || ''}`.trim();
+    const prompt = `${values?.prompt ?? ''}`;
+    const bailian = values.modelProtocol === 'BAILIAN_IMAGE';
+    // 专用图片协议使用各自的消息结构，不发送 MiniMax 的 aspect_ratio/response_format。
+    const param = bailian
+      ? { model, input: { messages: [{ role: 'user', content: [{ text: prompt }] }] }, parameters: { n: 1 } }
+      : model === 'hy-image-v3.5-preview'
+      ? { model, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }] }
+      : { model, prompt };
+    return {
+      input: {
+        providerName: values.providerName,
+        modelProtocol: values.modelProtocol,
+        url: `${values?.apiEndpoint || ''}`.trim(),
+        headers: buildLlmHeaders({ formApiToken: values.apiToken, formHeaders: values.headers }),
+        param,
+      },
+    };
+  }
+  if (isVolcengineImage(values)) {
+    return {
+      input: {
+        providerName: 'VOLCENGINE',
+        modelProtocol: 'VOLCENGINE_IMAGE',
+        url: `${values?.apiEndpoint || ''}`.trim(),
+        headers: buildLlmHeaders({
+          formApiToken: values?.apiToken,
+          formHeaders: values?.headers,
+          prevHeaders: values?.prevHeaders,
+        }),
+        param: buildVolcengineImageParam(values),
+      },
+    };
+  }
   const imageCount = Number(values?.imageCount ?? values?.n);
   const seed = Number(values?.seed);
   const param: Record<string, any> = {
@@ -376,6 +448,9 @@ export function buildModelUpsertPayload(options: {
 }) {
   const { values, type, dataId, savedNewId } = options;
   const restValues = { ...(values || {}) };
+  if (normalizeModelType(values?.modelType) === 'IMAGE_GENERATION') {
+    restValues.providerName = resolveImageGenerationProviderName(values?.providerName, values?.modelProtocol);
+  }
   [
     'reasoningEffortMapText',
     'prompt',
@@ -385,13 +460,16 @@ export function buildModelUpsertPayload(options: {
     'promptOptimizer',
     'seed',
   ].forEach((key) => delete restValues[key]);
+  const imageConfig = compactImageGenerationConfig(restValues.imageGenerationConfig);
+  if (imageConfig) restValues.imageGenerationConfig = imageConfig;
+  else delete restValues.imageGenerationConfig;
 
   const id =
     type === 'edit' || type === 'debug'
       ? dataId
       : type === 'add' && savedNewId !== null && savedNewId !== undefined
-        ? savedNewId
-        : undefined;
+      ? savedNewId
+      : undefined;
 
   return {
     ...(id !== null && id !== undefined ? { id } : {}),
@@ -483,6 +561,7 @@ export function buildAutoDebugRequestText(options: {
   prevText?: string;
   changedKeys?: string[];
   previousApiEndpoint?: string;
+  syncFormParameters?: boolean;
   defaultUserMessage?: string;
   defaultRerankQuery?: string;
   defaultRerankDocs?: Array<{ text: string; metadata: { id: number }; score: number }>;
@@ -493,6 +572,7 @@ export function buildAutoDebugRequestText(options: {
     prevText,
     changedKeys,
     previousApiEndpoint,
+    syncFormParameters = false,
     defaultUserMessage,
     defaultRerankQuery,
     defaultRerankDocs,
@@ -500,11 +580,12 @@ export function buildAutoDebugRequestText(options: {
   const prevObj = prevText ? safeParseJsonObject(prevText) : null;
   const modelType = normalizeModelType(formValues?.modelType);
   const isTypeSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelType');
+  const isProtocolSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelProtocol');
   if (modelType === 'IMAGE_GENERATION') {
     return JSON.stringify(
       buildDebugPayload({
         ...formValues,
-        prevHeaders: !isTypeSwitch ? prevObj?.headers : undefined,
+        prevHeaders: !isTypeSwitch && !syncFormParameters ? prevObj?.headers : undefined,
       }).input,
       null,
       2
@@ -512,9 +593,10 @@ export function buildAutoDebugRequestText(options: {
   }
 
   if (modelType === 'LLM') {
+    const protocol = `${formValues?.modelProtocol ?? 'OpenAI'}`.trim().toLowerCase();
+    const isResponses = protocol === 'openai responses';
     const apiEndpoint = `${formValues?.apiEndpoint ?? ''}`.trim();
     const prevUrl = typeof prevObj?.url === 'string' ? prevObj.url.trim() : '';
-    const isProtocolSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelProtocol');
     let suffix = getDefaultLlmDebugSuffix(formValues?.modelProtocol);
     const endpointNotShortened = !previousApiEndpoint || apiEndpoint.length >= previousApiEndpoint.length;
     if (
@@ -532,31 +614,47 @@ export function buildAutoDebugRequestText(options: {
     const headersObj = buildLlmHeaders({
       formApiToken: formValues?.apiToken,
       formHeaders: formValues?.headers,
-      prevHeaders: prevObj?.headers,
+      prevHeaders: syncFormParameters ? undefined : prevObj?.headers,
     });
+    if (protocol === 'anthropic') {
+      // 官方 Messages API 还需要版本头；显式自定义版本仍优先，认证沿用既有 Bearer/Header 逻辑。
+      const hasVersion = Object.keys(headersObj).some((key) => key.toLowerCase() === 'anthropic-version');
+      if (!hasVersion) headersObj['anthropic-version'] = '2023-06-01';
+    }
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
     const defaultMessages = [{ role: 'user', content: defaultUserMessage ?? "How's the weather today?" }];
     const messages =
-      !isTypeSwitch && Array.isArray(prevObj?.messages) && prevObj.messages.length
+      !isTypeSwitch && isResponses && (typeof prevObj?.input === 'string' || Array.isArray(prevObj?.input))
+        ? prevObj.input
+        : !isTypeSwitch && Array.isArray(prevObj?.messages) && prevObj.messages.length
         ? prevObj.messages
         : prevText && `${prevText}`.trim() && !prevObj
-          ? [{ role: 'user', content: `${prevText}` }]
-          : defaultMessages;
+        ? [{ role: 'user', content: `${prevText}` }]
+        : defaultMessages;
 
-    const temperature = !isTypeSwitch && typeof prevObj?.temperature === 'number' ? prevObj.temperature : 0.1;
+    const temperature = syncFormParameters
+      ? formValues?.temperature
+      : !isTypeSwitch && typeof prevObj?.temperature === 'number'
+      ? prevObj.temperature
+      : isResponses
+      ? undefined
+      : 0.1;
     const stream = !isTypeSwitch && typeof prevObj?.stream === 'boolean' ? prevObj.stream : true;
     // 调试请求 max_tokens 跟左侧高级参数「Max Tokens」对齐：填多少就同步多少。
     const maxTokensChanged = Array.isArray(changedKeys) && changedKeys.includes('maxTokens');
     const formMaxTokens = Number(formValues?.maxTokens);
+    const outputTokenKey = isResponses ? 'max_output_tokens' : 'max_tokens';
+    const previousMaxTokens = prevObj?.[outputTokenKey];
     let maxTokens: number | undefined;
     if (
+      !syncFormParameters &&
       !isTypeSwitch &&
       !maxTokensChanged &&
-      typeof prevObj?.max_tokens === 'number' &&
-      Number.isFinite(prevObj.max_tokens) &&
-      prevObj.max_tokens > 0
+      typeof previousMaxTokens === 'number' &&
+      Number.isFinite(previousMaxTokens) &&
+      previousMaxTokens > 0
     ) {
-      maxTokens = Math.floor(prevObj.max_tokens);
+      maxTokens = Math.floor(previousMaxTokens);
     } else if (Number.isFinite(formMaxTokens) && formMaxTokens > 0) {
       maxTokens = Math.floor(formMaxTokens);
     }
@@ -565,12 +663,52 @@ export function buildAutoDebugRequestText(options: {
       url,
       headers: Object.keys(headersObj).length ? headersObj : {},
       model: modelNoOrCode,
-      ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
-      messages,
-      temperature,
+      ...(maxTokens !== undefined ? { [outputTokenKey]: maxTokens } : {}),
+      [isResponses ? 'input' : 'messages']: messages,
+      ...(temperature !== undefined && temperature !== null ? { temperature } : {}),
       stream,
     };
-    applyReasoningDebugParams(req, formValues);
+    if (syncFormParameters) {
+      // 新增表单的自动请求使用同一份配置；留空的采样参数交给上游默认策略。
+      [
+        ['topP', 'top_p'],
+        ['frequencyPenalty', 'frequency_penalty'],
+        ['presencePenalty', 'presence_penalty'],
+      ].forEach(([field, param]) => {
+        if (typeof formValues?.[field] === 'number' && (!isResponses || field === 'topP'))
+          req[param] = formValues[field];
+      });
+    }
+    if (isResponses) {
+      // Responses 的思考参数放入 reasoning，不发送 Chat Completions 的开关或扁平 effort。
+      const reasoning = buildReasoningConfigPayload(formValues);
+      if (reasoning.enabled) {
+        req.reasoning = { effort: reasoning.effortMap?.[reasoning.defaultLevel] || reasoning.defaultLevel };
+      }
+    } else if (syncFormParameters) {
+      const reasoning = formValues?.reasoningConfig;
+      if (reasoning?.compatFormat === 'deepseek' && formValues?.modelProtocol === 'OpenAI') {
+        req.thinking = { type: reasoning.enabled ? 'enabled' : 'disabled' };
+        if (reasoning.enabled) {
+          applyReasoningDebugParams(req, formValues);
+          // 新模板声明支持的程度直接使用；历史配置仍沿用原来的兼容映射。
+          const effortMap = safeParseReasoningEffortMap(formValues?.reasoningEffortMapText);
+          if (!effortMap?.[reasoning.defaultLevel] && reasoning.supportedEfforts?.includes(reasoning.defaultLevel)) {
+            req.reasoning_effort = reasoning.defaultLevel;
+          }
+        }
+      } else if (
+        formValues?.providerName === 'MINIMAX' &&
+        formValues?.modelCode === 'MiniMax-M3' &&
+        formValues?.modelProtocol === 'OpenAI'
+      ) {
+        req.thinking = { type: reasoning?.enabled ? 'adaptive' : 'disabled' };
+      } else if (reasoning?.capability && reasoning.capability !== 'unsupported') {
+        applyReasoningDebugParams(req, formValues);
+      }
+    } else {
+      applyReasoningDebugParams(req, formValues);
+    }
     return JSON.stringify(req, null, 2);
   }
 
@@ -580,7 +718,14 @@ export function buildAutoDebugRequestText(options: {
     const prevUrl = typeof prevObj?.url === 'string' ? prevObj.url.trim() : '';
     let suffix = '/rerank';
     const endpointNotShortened = !previousApiEndpoint || apiEndpoint.length >= previousApiEndpoint.length;
-    if (!isTypeSwitch && endpointNotShortened && prevUrl && apiEndpoint && prevUrl.startsWith(apiEndpoint)) {
+    if (
+      !isTypeSwitch &&
+      !isProtocolSwitch &&
+      endpointNotShortened &&
+      prevUrl &&
+      apiEndpoint &&
+      prevUrl.startsWith(apiEndpoint)
+    ) {
       suffix = prevUrl.slice(apiEndpoint.length) || '';
     }
     suffix = normalizeRerankSuffix(suffix);
@@ -597,15 +742,70 @@ export function buildAutoDebugRequestText(options: {
       defaultRerankDocs && defaultRerankDocs.length >= 4
         ? defaultRerankDocs
         : [
-          { text: 'Beijing food recommendation', metadata: { id: 0 }, score: 0 },
-          { text: 'Tianjin travel guide', metadata: { id: 1 }, score: 0 },
-          { text: 'Beginner dev tutorial', metadata: { id: 2 }, score: 0 },
-          { text: 'Forbidden City travel guide', metadata: { id: 3 }, score: 0 },
-        ];
+            { text: 'Beijing food recommendation', metadata: { id: 0 }, score: 0 },
+            { text: 'Tianjin travel guide', metadata: { id: 1 }, score: 0 },
+            { text: 'Beginner dev tutorial', metadata: { id: 2 }, score: 0 },
+            { text: 'Forbidden City travel guide', metadata: { id: 3 }, score: 0 },
+          ];
 
     const query =
       !isTypeSwitch && typeof prevObj?.query === 'string' && prevObj.query.trim() ? prevObj.query : defaultQuery;
     const docs = !isTypeSwitch && Array.isArray(prevObj?.docs) && prevObj.docs.length ? prevObj.docs : defaultDocs;
+
+    if (formValues?.providerName === 'Bailian' && formValues?.modelProtocol === 'Qwen') {
+      // 百炼原生重排与历史 docs/X-Api-Key 协议分开生成，避免把 UI 文档元数据传给上游。
+      const previousInput = !isTypeSwitch && prevObj?.input;
+      return JSON.stringify(
+        {
+          url: apiEndpointRaw,
+          headers: buildLlmHeaders({
+            formApiToken: formValues?.apiToken,
+            formHeaders: formValues?.headers,
+            prevHeaders: !isTypeSwitch && !syncFormParameters ? prevObj?.headers : undefined,
+          }),
+          model: modelNoOrCode,
+          input: {
+            query:
+              previousInput?.query &&
+              (typeof previousInput.query === 'string' || typeof previousInput.query === 'object')
+                ? previousInput.query
+                : query,
+            documents: Array.isArray(previousInput?.documents)
+              ? previousInput.documents
+              : docs.map((doc: any) => (typeof doc === 'string' ? doc : doc.text)),
+          },
+          ...(!isTypeSwitch && prevObj?.parameters ? { parameters: prevObj.parameters } : {}),
+        },
+        null,
+        2
+      );
+    }
+
+    if (formValues?.providerName === 'SiliconFlow' && formValues?.modelProtocol === 'OpenAI') {
+      // 硅基流动采用 Bearer 和 documents，不能继承历史重排模板的 docs/X-Api-Key。
+      return JSON.stringify(
+        {
+          url,
+          headers: buildLlmHeaders({
+            formApiToken: formValues.apiToken,
+            formHeaders: formValues.headers,
+            prevHeaders: !isTypeSwitch && !syncFormParameters ? prevObj?.headers : undefined,
+          }),
+          model: modelNoOrCode,
+          query,
+          documents:
+            !isTypeSwitch && Array.isArray(prevObj?.documents)
+              ? prevObj.documents
+              : docs.map((doc: any) => (typeof doc === 'string' ? doc : doc.text)),
+          ...(!isTypeSwitch && typeof prevObj?.top_n === 'number' ? { top_n: prevObj.top_n } : {}),
+          ...(!isTypeSwitch && typeof prevObj?.return_documents === 'boolean'
+            ? { return_documents: prevObj.return_documents }
+            : {}),
+        },
+        null,
+        2
+      );
+    }
 
     const req: Record<string, any> = {
       url,
@@ -615,7 +815,7 @@ export function buildAutoDebugRequestText(options: {
       docs,
     };
 
-    if (!isTypeSwitch && prevObj) {
+    if (!isTypeSwitch && !isProtocolSwitch && prevObj) {
       const knownKeys = Object.keys(req);
       Object.keys(prevObj)
         .filter((k) => !knownKeys.includes(k))
@@ -631,10 +831,42 @@ export function buildAutoDebugRequestText(options: {
 
   if (modelType === 'EMBEDDING') {
     const apiEndpoint = `${formValues?.apiEndpoint ?? ''}`.trim();
+    const isBailianMultimodal = formValues?.providerName === 'Bailian' && formValues?.modelProtocol === 'Qwen';
+    const isArkMultimodal =
+      formValues?.providerName === 'Volcengine' && formValues?.modelProtocol === 'Volcengine Multimodal';
+    if (isBailianMultimodal || isArkMultimodal) {
+      // 原生多模态地址已经包含完整路径，切换协议时不追加 /embeddings，也不复用旧结构。
+      const previousInput = !isTypeSwitch && !isProtocolSwitch ? prevObj?.input : undefined;
+      const text = typeof previousInput === 'string' ? previousInput : defaultUserMessage ?? "How's the weather today?";
+      const input = isBailianMultimodal
+        ? { contents: Array.isArray(previousInput?.contents) ? previousInput.contents : [{ text }] }
+        : Array.isArray(previousInput)
+        ? previousInput
+        : [{ type: 'text', text }];
+      return JSON.stringify(
+        {
+          url: apiEndpoint,
+          headers: buildLlmHeaders({ formApiToken: formValues.apiToken, formHeaders: formValues.headers }),
+          model: formValues.modelCode,
+          input,
+          ...(isArkMultimodal ? { encoding_format: 'float' } : {}),
+          ...(!isTypeSwitch && !isProtocolSwitch && prevObj?.parameters ? { parameters: prevObj.parameters } : {}),
+        },
+        null,
+        2
+      );
+    }
     const prevUrl = typeof prevObj?.url === 'string' ? prevObj.url.trim() : '';
     let suffix = '/embeddings';
     const endpointNotShortened = !previousApiEndpoint || apiEndpoint.length >= previousApiEndpoint.length;
-    if (!isTypeSwitch && endpointNotShortened && prevUrl && apiEndpoint && prevUrl.startsWith(apiEndpoint)) {
+    if (
+      !isTypeSwitch &&
+      !isProtocolSwitch &&
+      endpointNotShortened &&
+      prevUrl &&
+      apiEndpoint &&
+      prevUrl.startsWith(apiEndpoint)
+    ) {
       suffix = prevUrl.slice(apiEndpoint.length) || '';
     }
     const url = joinUrl(apiEndpoint, suffix);

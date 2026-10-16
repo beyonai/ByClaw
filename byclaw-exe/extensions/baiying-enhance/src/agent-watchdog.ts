@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { filterControlledResources } from "./resource-access-filter.js";
+import { parseAuthorizedIds } from "./resource-authorization.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { loadAgentContentIndex, saveAgentContentIndex } from "./agent-content-index.js";
 import {
@@ -298,6 +301,21 @@ export async function loadManagedAgentsFromRedis(params: {
     const out: Array<LoadedManagedAgent | null> = new Array(authorizedIds.length).fill(null);
     let nextIndex = 0;
 
+    let resourceIds = new Set<string>();
+    let currentUserId = "";
+    const userCode = process.env.USER_CODE?.trim() || "";
+    try {
+        if (userCode && params.redisJsonStore.getStringByKey && params.redisJsonStore.getHashByKey) {
+            currentUserId = (await params.redisJsonStore.getStringByKey(`SHARE_BFM_USER_CODE_${userCode}`))?.trim() || "";
+            if (currentUserId) {
+                const payload = await params.redisJsonStore.getHashByKey(`USER:RESOURCES:AUTH:${currentUserId}`);
+                resourceIds = parseAuthorizedIds(payload ?? {}, true);
+            }
+        }
+    } catch {
+        params.log.warn("baiying-enhance: resource-use authorization unavailable; controlled resources omitted");
+    }
+
     const loadOne = async (index: number): Promise<void> => {
         const sourceKey = authorizedIds[index]!;
         const result = await params.redisJsonStore.getDigEmployeeJson(sourceKey);
@@ -307,8 +325,9 @@ export async function loadManagedAgentsFromRedis(params: {
             );
             return;
         }
+        const filteredRaw = filterControlledResources(result.raw, resourceIds, currentUserId);
         const res = adaptAgentJson({
-            raw: result.raw,
+            raw: filteredRaw,
             fileName: `${result.key}.json`,
             embedApiKeysFromJson: params.embedApiKeysFromJson,
             envApiKeyTemplate: params.envApiKeyTemplate,
@@ -327,9 +346,10 @@ export async function loadManagedAgentsFromRedis(params: {
         }
         let next: LoadedManagedAgent = {
             ...res,
-            sourceJson: result.raw,
+            sourceJson: filteredRaw,
             sourceRedisKey: result.key,
-            contentHash: result.hash,
+            contentHash: filteredRaw === result.raw ? result.hash
+                : createHash("sha256").update(JSON.stringify(filteredRaw)).digest("hex"),
         };
         if (res.baiyingModelId) {
             const resolvedModel = await resolveBaiyingAimodelProviderBundle({

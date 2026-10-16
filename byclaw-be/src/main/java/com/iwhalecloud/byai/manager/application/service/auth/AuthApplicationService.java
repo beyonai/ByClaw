@@ -257,9 +257,9 @@ public class AuthApplicationService {
         List<PrivilegeGrant> authList = listAuthPrivilegeGrant(null, null, GrantToObjType.USER, userId, grantTypes);
         authList = filterEffectiveResourceGrants(authList);
 
-        if (CollectionUtils.isEmpty(authList)) {
-            return new HashMap<>();
-        }
+        // Controlled resources additionally retain creator and effective explicit manager use rights.
+        List<PrivilegeGrant> manageAuths = filterEffectiveResourceGrants(listAuthPrivilegeGrant(null, null,
+            GrantToObjType.USER, userId, List.of(GrantType.ALLOW_MANAGE)));
 
         // 按resourceId分组处理权限
         Map<Long, List<PrivilegeGrant>> authByResource = authList.stream().filter(item -> null != item.getGrantObjId())
@@ -289,6 +289,30 @@ public class AuthApplicationService {
         }
 
 
+        Set<Long> candidateIds = new HashSet<>(authByResource.keySet());
+        manageAuths.stream().map(PrivilegeGrant::getGrantObjId).filter(Objects::nonNull).forEach(candidateIds::add);
+        List<SsResource> controlled = ssResourceMapper.selectList(new LambdaQueryWrapper<SsResource>()
+            .and(flags -> flags.eq(SsResource::getUseAuthControlled, true).or().eq(SsResource::getViewAuthControlled, true))
+            .and(subject -> {
+                subject.eq(SsResource::getCreateBy, userId);
+                if (!candidateIds.isEmpty()) subject.or().in(SsResource::getResourceId, candidateIds);
+            }));
+        for (SsResource resource : controlled) {
+            List<PrivilegeGrant> matching = manageAuths.stream()
+                .filter(grant -> Objects.equals(resource.getResourceId(), grant.getGrantObjId())
+                    && Objects.equals(resource.getResourceBizType(), grant.getGrantObjType())).toList();
+            boolean manager = matching.stream().anyMatch(grant -> Color.RED.equalsIgnoreCase(grant.getGrantToType()))
+                && matching.stream().noneMatch(grant -> Color.BLACK.equalsIgnoreCase(grant.getGrantToType()));
+            List<PrivilegeGrant> useGrants = authByResource.getOrDefault(resource.getResourceId(), List.of()).stream()
+                .filter(grant -> Objects.equals(resource.getResourceBizType(), grant.getGrantObjType())).toList();
+            boolean usable = useGrants.stream().anyMatch(grant -> Color.RED.equalsIgnoreCase(grant.getGrantToType()))
+                && useGrants.stream().noneMatch(grant -> Color.BLACK.equalsIgnoreCase(grant.getGrantToType()));
+            if (Objects.equals(resource.getResourceStatus(), 2) && (usable || manager || userId.equals(resource.getCreateBy()))) {
+                result.put(String.valueOf(resource.getResourceId()), resource.getResourceBizType());
+            } else {
+                result.remove(String.valueOf(resource.getResourceId()));
+            }
+        }
         long endTime = System.currentTimeMillis();
 
         logger.debug("AuthApplicationService buildUserAuthResources cost time:{}", endTime - startTime);
@@ -599,6 +623,10 @@ public class AuthApplicationService {
         ResourceMemberQueryResultVo result = new ResourceMemberQueryResultVo();
         result.setResourceName(ssResource.getResourceName());
         result.setResourceBizType(ssResource.getResourceBizType());
+        if ((Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
+            && !hasResourceAccessPermission(ssResource)) {
+            throw new BaseException("无权查看资源内容及成员配置");
+        }
         result.setExtInfo(buildResourceExtInfo(ssResource));
 
         // 第二步：查询管理授权(ALLOW_MANAGE)的全部授权对象。
@@ -1376,6 +1404,9 @@ public class AuthApplicationService {
      * 判断当前用户是否具备资源成员设置权限。
      */
     private boolean hasResourceMemberSettingPermission(SsResource ssResource) {
+        if (ssResource == null || ((Boolean.TRUE.equals(ssResource.getViewAuthControlled())
+            || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
+            && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId()))) return false;
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(ssResource)) return false;
         if (employeeGovernance != null && employeeGovernance.isProtected(ssResource)) return false;
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
@@ -1445,8 +1476,12 @@ public class AuthApplicationService {
      * @date 2026-04-24 18:08:00
      */
     public boolean hasResourceManagePermission(SsResource ssResource) {
+        if (ssResource != null && (Boolean.TRUE.equals(ssResource.getViewAuthControlled())
+            || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
+            && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         // 审核快照保持只读，防止审核期间修改内容或通过导入覆盖直接变为已上架。
         if (isSkillPublicationUnderReview(ssResource)) return false;
+        if (com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.canUpdate(ssResource)) return true;
         if (ssResource == null) {
             return false;
         }
@@ -1501,6 +1536,9 @@ public class AuthApplicationService {
      * 判断指定用户是否具备资源使用权限，不修改当前登录用户上下文。
      */
     public boolean hasResourceUsePermission(SsResource ssResource, Long userId) {
+        if (ssResource != null && userId != null && userId.equals(CurrentUserHolder.getCurrentUserId())
+            && (Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
+            && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         if (ssResource == null || ssResource.getResourceId() == null
             || StringUtils.isBlank(ssResource.getResourceBizType())
             || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
@@ -1552,7 +1590,27 @@ public class AuthApplicationService {
     /**
      * 判断当前登录用户是否可访问资源详情：管理权限或使用权限任一满足即可。
      */
+    /** Independent viewing grants expose metadata only and never enter the resource-use Redis set. */
+    public boolean hasResourceViewPermission(SsResource resource) {
+        if (resource == null || Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())) return false;
+        if ((Boolean.TRUE.equals(resource.getViewAuthControlled()) || Boolean.TRUE.equals(resource.getUseAuthControlled()))
+            && !Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
+        if (hasResourceAccessPermission(resource)) return true;
+        if (isCurrentUserGlobalResourceManager() && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return true;
+        if (!Boolean.TRUE.equals(resource.getViewAuthControlled())) return "enterprise".equals(resource.getOwnerType());
+        if (!Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
+        List<PrivilegeGrant> grants = listAuthPrivilegeGrant(null, List.of(resource.getResourceBizType()),
+            GrantToObjType.USER, CurrentUserHolder.getCurrentUserId(), List.of(GrantType.ALLOW_VIEW)).stream()
+            .filter(grant -> Objects.equals(resource.getResourceId(), grant.getGrantObjId()))
+            .filter(grant -> isEffectiveResourceUseGrant(grant, new Date())).toList();
+        return grants.stream().anyMatch(grant -> Color.RED.equalsIgnoreCase(grant.getGrantToType()))
+            && grants.stream().noneMatch(grant -> Color.BLACK.equalsIgnoreCase(grant.getGrantToType()));
+    }
+
     public boolean hasResourceAccessPermission(SsResource ssResource) {
+        if (ssResource != null && (Boolean.TRUE.equals(ssResource.getViewAuthControlled())
+            || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
+            && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         // 云盘读取统一按绑定项目授权，目录、下载以及 QA 回调 FS 都经过此入口。
         // 必须在普通资源管理员兜底之前分流，项目外用户不能通过资源授权绕过成员关系。
         if (ssResource != null && ResourceBizTypeEnum.KG_CLOUD.name().equals(ssResource.getResourceBizType())) {
@@ -1878,6 +1936,11 @@ public class AuthApplicationService {
      *
      * @param userIds 用户标识集合
      */
+    /** Durable sync jobs retry cache failures; do not use the best-effort asynchronous wrapper here. */
+    public void refreshResourceSyncAuth(Collection<Long> userIds) {
+        for (Long userId : userIds) authRedisApplicationService.writeUserAuth(userId, buildUserAuthResources(userId));
+    }
+
     @Async
     public void syncUsersAuthToRedis(Collection<Long> userIds) {
         if (CollectionUtils.isEmpty(userIds)) {
@@ -3566,6 +3629,8 @@ public class AuthApplicationService {
 
         // 当前页授权只读取一次；用户组织、岗位、驻地也只在本次调用内解析，不缓存跨请求权限。
         List<PrivilegeGrant> grants = queryBatchOperationGrants(existingResourceIds, resourceBizTypes, currentUserId);
+        Set<Long> viewPrivilegeIds = collectBatchGrantIds(grants, List.of(GrantType.ALLOW_VIEW), Color.RED);
+        viewPrivilegeIds.removeAll(collectBatchGrantIds(grants, List.of(GrantType.ALLOW_VIEW), Color.BLACK));
         Set<Long> managePrivilegeIds = collectBatchGrantIds(grants, List.of(GrantType.ALLOW_MANAGE), Color.RED);
         managePrivilegeIds.removeAll(collectBatchGrantIds(grants, List.of(GrantType.ALLOW_MANAGE), Color.BLACK));
         List<String> useGrantTypes = List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE);
@@ -3597,6 +3662,13 @@ public class AuthApplicationService {
                 managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds,
                 innerSkillResourceIds, employeePublishPermissions.getOrDefault(resource.getResourceId(), false)));
             ResourceOperationPermissionsVo permission = result.get(resource.getResourceId());
+            boolean visible = !Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())
+                && (permission.isCanViewDetail()
+                    || !Boolean.TRUE.equals(resource.getViewAuthControlled()) && "enterprise".equals(resource.getOwnerType())
+                    || Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
+                        && (viewPrivilegeIds.contains(resource.getResourceId()) || isCurrentUserGlobalResourceManager()));
+            permission.setHasViewPermission(visible);
+            permission.setCanViewBasicInfo(visible);
             if (permission.isCanPublishToEnterprise()) {
                 permission.setSkillPublication(skillPublications.get(resource.getResourceId()));
             }
@@ -3634,6 +3706,7 @@ public class AuthApplicationService {
         vo.setHasUsePermission(hasUsePermission);
         vo.setUseApplyPending(useApplyPending);
         vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
+
 
         // 使用已批量计算的管理授权；平台管理员代发布与单资源接口保持相同的企业范围。
         vo.setCanPublishToEnterprise(isPersonalSkillPublishSource(ssResource)
@@ -3697,6 +3770,9 @@ public class AuthApplicationService {
 
     private boolean hasResourceMemberSettingPermission(SsResource ssResource, Long currentUserId,
                                                        Set<Long> managePrivilegeIds) {
+        if (ssResource == null || ((Boolean.TRUE.equals(ssResource.getViewAuthControlled())
+            || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
+            && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId()))) return false;
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(ssResource)) return false;
         if (employeeGovernance != null && employeeGovernance.isProtected(ssResource)) return false;
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)) {
@@ -3719,6 +3795,9 @@ public class AuthApplicationService {
 
     private boolean hasResourceUsePermission(SsResource ssResource, Long currentUserId, Set<Long> managePrivilegeIds,
                                              Set<Long> useBlacklistedIds, Set<Long> usePermittedIds) {
+        if (ssResource != null && (Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
+            && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
+
         if (ssResource == null || ssResource.getResourceId() == null
             || StringUtils.isBlank(ssResource.getResourceBizType())
             || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
@@ -3766,7 +3845,7 @@ public class AuthApplicationService {
                 return;
             }
             PrivilegeGrantQo qo = new PrivilegeGrantQo();
-            qo.setGrantTypes(List.of(GrantType.ALLOW_MANAGE, GrantType.AVAILABLE_USE, GrantType.FORCE_USE));
+            qo.setGrantTypes(List.of(GrantType.ALLOW_MANAGE, GrantType.AVAILABLE_USE, GrantType.FORCE_USE, GrantType.ALLOW_VIEW));
             qo.setGrantObjTypes(new ArrayList<>(resourceBizTypes));
             // 复用既有 IN 条件，将分页范围下推 SQL，避免加载该用户全部资源授权。
             qo.setGrantObjIds(resourceIds);
@@ -3844,6 +3923,8 @@ public class AuthApplicationService {
         vo.setHasUsePermission(hasUsePermission);
         vo.setUseApplyPending(useApplyPending);
         vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
+        vo.setHasViewPermission(!isResourceRemoved && hasResourceViewPermission(ssResource));
+        vo.setCanViewBasicInfo(vo.isHasViewPermission());
         // 入口权限与发布资格一致，已有副本通过状态摘要切换为查看操作。
         vo.setCanPublishToEnterprise(canPublishSkillToEnterprise(ssResource));
         if (vo.isCanPublishToEnterprise()) {

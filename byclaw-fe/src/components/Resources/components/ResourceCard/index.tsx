@@ -70,6 +70,8 @@ export interface IResourceCardItem {
   hasManagePermission?: boolean;
   hasUsePermission?: boolean;
   canViewDetail?: boolean;
+  canViewBasicInfo?: boolean;
+  hasViewPermission?: boolean;
   canEdit?: boolean;
   officialPublication?: boolean;
   canPublishEmployee?: boolean;
@@ -1870,7 +1872,9 @@ function ResourceCard(props: ResourceCardProps) {
     ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES.includes(displayResource.resourceBizType || props.resourceType || '');
   // 知识详情包含实际内容，必须取得使用权限；统一传递禁用状态，保持鼠标样式与点击拦截一致。
   const isCardClickDisabled =
-    (isKnowledgeResource && !isTruthyFlag(displayResource.hasUsePermission)) ||
+    (isKnowledgeResource &&
+      !isTruthyFlag(displayResource.hasUsePermission) &&
+      !isTruthyFlag(displayResource.canViewBasicInfo)) ||
     (typeof props.cardClickDisabled === 'function'
       ? props.cardClickDisabled(displayResource)
       : !!props.cardClickDisabled);

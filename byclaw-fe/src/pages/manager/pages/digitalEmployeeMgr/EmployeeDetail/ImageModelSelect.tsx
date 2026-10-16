@@ -46,15 +46,12 @@ const ImageModelSelect = ({
 }: ImageModelSelectProps) => {
   const intl = useIntl();
   const isTtsModel = `${modelType}`.trim().toUpperCase() === 'TTS';
-  const globalDefaultLabel = intl.formatMessage({
-    id: isTtsModel ? 'employeeDetail.ttsModelGlobalDefault' : 'employeeDetail.imageModelGlobalDefault',
-  });
   const displayLabel =
     label ||
     intl.formatMessage({
       id: isTtsModel ? 'employeeDetail.ttsModel' : 'employeeDetail.imageModel',
     });
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [activeScope, setActiveScope] = useState<ModelScope>('public');
@@ -79,8 +76,8 @@ const ImageModelSelect = ({
         }
         if (!mountedRef.current) return;
         setModelGroups({
-          mine: buildImageModelOptions(getImageModelRows(personalResponse), globalDefaultLabel, false, modelType),
-          public: buildImageModelOptions(getImageModelRows(publicResponse), globalDefaultLabel, false, modelType),
+          mine: buildImageModelOptions(getImageModelRows(personalResponse), modelType),
+          public: buildImageModelOptions(getImageModelRows(publicResponse), modelType),
         });
       })
       .catch(() => {
@@ -91,7 +88,7 @@ const ImageModelSelect = ({
       .finally(() => {
         if (mountedRef.current) setLoading(false);
       });
-  }, [globalDefaultLabel, modelType]);
+  }, [modelType]);
 
   useEffect(() => {
     loadModels();
@@ -102,8 +99,19 @@ const ImageModelSelect = ({
     () => [...modelGroups.mine, ...modelGroups.public].find((option) => option.value === selectedValue),
     [modelGroups, selectedValue]
   );
-  const selectedLabel = selectedOption?.label || selectedValue || globalDefaultLabel;
+  const selectedLabel = selectedOption?.label || selectedValue;
   const currentModels = modelGroups[activeScope];
+
+  useEffect(() => {
+    if (disabled || loading || loadFailed || selectedValue) return;
+
+    // 仅为尚未配置的员工补选：优先公共列表，公共为空时取我的列表；无可选模型则保持空值，允许保存。
+    const defaultScope = modelGroups.public.length > 0 ? 'public' : 'mine';
+    const firstModel = modelGroups[defaultScope][0];
+    if (!firstModel) return;
+    setActiveScope(defaultScope);
+    onChange(firstModel.value);
+  }, [disabled, loading, loadFailed, selectedValue, modelGroups, onChange]);
 
   const popoverContent = (
     <div className={styles.modelPopover}>
@@ -129,9 +137,6 @@ const ImageModelSelect = ({
           value={selectedValue}
           onChange={(event) => onChange(normalizeImageModelId(event.target.value))}
         >
-          <div className={styles.modelItem}>
-            <Radio value="">{globalDefaultLabel}</Radio>
-          </div>
           {currentModels.map((model) => (
             <div key={model.value} className={styles.modelItem}>
               <Radio value={model.value}>

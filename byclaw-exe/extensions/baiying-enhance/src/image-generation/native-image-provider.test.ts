@@ -129,6 +129,8 @@ describe("Baiying native image provider", () => {
     expect(registeredProviders.map((provider) => provider.id)).toEqual([
       BAIYING_IMAGE_PROVIDER_ID,
       "volcengine",
+      "bailian",
+      "tokenhub",
     ]);
     expect(registeredHooks.map((hook) => hook.name)).toEqual(["before_tool_call"]);
   });
@@ -213,6 +215,8 @@ describe("Baiying native image provider", () => {
   });
 
   it.each([
+    ["BAILIAN", "BAILIAN_IMAGE", "bailian"],
+    ["TOKENHUB", "TOKENHUB_IMAGE", "tokenhub"],
     ["COMFYUI", "COMFY_IMAGE", "comfy"],
     ["DEEPINFRA", "DEEPINFRA_IMAGE", "deepinfra"],
     ["FAL", "FAL_IMAGE", "fal"],

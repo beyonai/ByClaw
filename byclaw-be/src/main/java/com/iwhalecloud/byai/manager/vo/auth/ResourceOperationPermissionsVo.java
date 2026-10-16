@@ -57,6 +57,10 @@ public class ResourceOperationPermissionsVo {
      */
     private boolean canViewDetail;
 
+    private boolean hasViewPermission;
+
+    private boolean canViewBasicInfo;
+
     /**
      * 是否可编辑信息。
      */

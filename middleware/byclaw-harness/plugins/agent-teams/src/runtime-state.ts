@@ -4,6 +4,26 @@ import { cpSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync } from 
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
+const workspaceStateAliases = new Map<string, { target: string; owners: number }>()
+
+/** Preserve existing task bookkeeping when a trusted host changes a conversation's execution cwd. */
+export function registerTeamStateWorkspaceAlias(workspace: string, previousWorkspace: string): () => void {
+  const key = canonicalRuntimePath(workspace)
+  const target = canonicalRuntimePath(previousWorkspace)
+  if (key === target) return () => undefined
+  const current = workspaceStateAliases.get(key)
+  if (current !== undefined && current.target !== target) throw new Error('Conflicting team state workspace aliases')
+  const entry = current ?? { target, owners: 0 }
+  entry.owners += 1
+  workspaceStateAliases.set(key, entry)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    if (--entry.owners === 0) workspaceStateAliases.delete(key)
+  }
+}
+
 export function canonicalRuntimePath(path: string): string {
   let current = resolve(path)
   const suffix: string[] = []
@@ -28,7 +48,8 @@ export function isPathWithin(path: string, root: string): boolean {
 
 /** Deterministic across restarts; migrate the old bookkeeping directory out of the workspace once. */
 export function resolveTeamStateRoot(workspace: string, stateDir: string): string {
-  const cwd = canonicalRuntimePath(workspace)
+  const executionCwd = canonicalRuntimePath(workspace)
+  const cwd = workspaceStateAliases.get(executionCwd)?.target ?? executionCwd
   const base = agentTeamsRuntimeRoot()
   // Broad native workspaces such as the user's home or / still contain a private
   // host-runtime subtree. The member capability boundary hides that subtree.

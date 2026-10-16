@@ -3,10 +3,12 @@ import {
   isPreviewableName,
   resolvePreviewType,
   VIDEO_PREVIEW_TYPES,
+  RAW_PREVIEW_TYPES,
 } from '@/components/Preview/formats';
 
 import {
   FileExcelOutlined,
+  DatabaseOutlined,
   FileImageOutlined,
   FileMarkdownOutlined,
   FileOutlined,
@@ -22,6 +24,13 @@ import {
 import React from 'react';
 
 const EXT_ICON_MAP: Record<string, React.ReactNode> = {
+  ...Object.fromEntries(
+    RAW_PREVIEW_TYPES.map((type) => [type, <FileImageOutlined key={type} style={{ color: '#13c2c2' }} />])
+  ),
+  epub: <FileTextOutlined />,
+  db: <DatabaseOutlined />,
+  sqlite: <DatabaseOutlined />,
+  sqlite3: <DatabaseOutlined />,
   pdf: <FilePdfOutlined style={{ color: '#ff4d4f' }} />,
   doc: <FileWordOutlined style={{ color: '#1677ff' }} />,
   docx: <FileWordOutlined style={{ color: '#1677ff' }} />,

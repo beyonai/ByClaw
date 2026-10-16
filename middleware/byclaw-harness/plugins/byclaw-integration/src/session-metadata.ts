@@ -11,6 +11,7 @@ import {
 import { resolve } from 'node:path'
 import { z } from 'zod'
 import { byClawBoundRootSessionId, type ByClawRootBinding } from './session-workspace.ts'
+import { isLegacyProjectWorkspaceTransition } from './session-cwd.ts'
 
 const byClawRootBindingSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('main') }),
@@ -106,7 +107,7 @@ export class ByClawSessionMetadataStore {
   ensureRoot(
     rootSessionId: string,
     requestedValue: EnsureByClawRootMetadata,
-    options: { replaceStaleLifecycle?: boolean } = {},
+    options: { replaceStaleLifecycle?: boolean; byRoot?: string } = {},
   ): Promise<ByClawRootSessionRecord> {
     const requested = normalizedRequested(requestedValue)
     const operation = this.writes.then(async () => {
@@ -144,14 +145,24 @@ export class ByClawSessionMetadataStore {
               `ByClaw session ${rootSessionId} is already bound to template "${bindingLabel(current.binding)}"`,
             )
           }
-          if (requested.cwd !== undefined
+          // Only the known project-to-own-session transition may update an existing identity.
+          const workspaceUpgrade = options.byRoot !== undefined && isLegacyProjectWorkspaceTransition(
+            current.identity.cwd, requested.cwd, current.externalSessionId, options.byRoot,
+          )
+          if (!workspaceUpgrade && requested.cwd !== undefined
             && (current.identity.cwd === undefined || resolve(current.identity.cwd) !== requested.cwd)) {
             throw new Error(
               `ByClaw session ${rootSessionId} cannot change cwd from "${current.identity.cwd ?? '<unset>'}" to "${requested.cwd}"`,
             )
           }
-          if (upgrade !== undefined || routeUpgrade !== undefined) {
-            const scoped = { ...current, groupCoordination: structuredClone((upgrade ?? routeUpgrade)!) }
+          if (upgrade !== undefined || routeUpgrade !== undefined || workspaceUpgrade) {
+            const scoped = {
+              ...current,
+              ...(workspaceUpgrade ? { identity: { ...current.identity, cwd: requested.cwd! } } : {}),
+              ...(upgrade === undefined && routeUpgrade === undefined ? {} : {
+                groupCoordination: structuredClone((upgrade ?? routeUpgrade)!),
+              }),
+            }
             await this.table.put(rootSessionId, scoped)
             return scoped
           }

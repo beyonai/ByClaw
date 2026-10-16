@@ -8,7 +8,7 @@ import {
   // DashboardOutlined,
   ExperimentOutlined,
   FolderOutlined,
-  // RobotOutlined,
+  RobotOutlined,
   SafetyCertificateOutlined,
   TeamOutlined,
   RadarChartOutlined,
@@ -69,7 +69,8 @@ const iconByMenuCode: Record<string, any> = {
   menu_role_permission: SafetyCertificateOutlined,
   menu_asset_catalog: AppstoreOutlined,
   menu_param_config: ControlOutlined,
-  menu_model_config: ExperimentOutlined,
+  // 使用机器人图标表达 AI 模型配置，与备用菜单保持一致。
+  menu_model_config: RobotOutlined,
   menu_sandbox_config: CodeSandboxOutlined,
   menu_ui_agent: RadarChartOutlined,
   menu_system_feedback: CommentOutlined,
@@ -125,7 +126,7 @@ export const fallbackMenuConfig = [
     path: '/manager/systemParams/modal',
     name: '模型配置管理',
     localeId: 'menu.systemParams.modal',
-    icon: ExperimentOutlined,
+    icon: RobotOutlined,
   },
   {
     path: '/manager/systemParams/sandbox',

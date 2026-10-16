@@ -70,6 +70,12 @@ public class ResourceUseAuthQo extends AuthQo implements Serializable {
     @ApiModelProperty(value = "是否仅查询当前用户可用资源", required = false)
     private Boolean availableOnly;
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Boolean viewGlobalManager;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long viewTenantId;
+
     /** 配置技能弹窗按卡片添加人数排序，其他列表未指定时沿用原有排序。 */
     @ApiModelProperty(value = "是否按添加人数降序排序，仅技能查询生效", required = false)
     private Boolean sortByUseCount;

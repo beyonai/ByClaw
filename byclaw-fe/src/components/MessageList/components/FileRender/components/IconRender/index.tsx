@@ -2,6 +2,7 @@ import classnames from 'classnames';
 import React, { useMemo } from 'react';
 
 import AntdIcon from '@/components/AntdIcon';
+import { getFileIconType } from '@/constants/icon';
 
 import styles from './index.module.less';
 
@@ -13,13 +14,15 @@ function IconRender(props: { fileType: string; style?: React.CSSProperties }) {
     if (['html'].includes(fileType)) {
       return 'icon-html';
     }
-    if (['xls', 'xlsx'].includes(fileType)) {
+    if (['xls', 'xlsx', 'ods'].includes(fileType.toLowerCase())) {
       return 'icon-Excel';
     }
-    if (['doc', 'docs'].includes(fileType)) {
+    if (['doc', 'docs', 'rtf', 'epub'].includes(fileType.toLowerCase())) {
       return 'icon-Word';
     }
-    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'ico', 'svg'].includes(fileType)) {
+    if (['db', 'sqlite', 'sqlite3'].includes(fileType.toLowerCase())) return 'icon-sql1';
+    // 照片与文件列表共用图标识别，避免新格式仍显示成文本附件。
+    if (getFileIconType(fileType) === 'Image') {
       return 'icon-Image';
     }
     if (['pdf'].includes(fileType)) {

@@ -212,7 +212,7 @@ function FileRender(props: IProps) {
           previewInfo={previewInfo}
           onClosePreviewModal={onClosePreviewModal}
           fileType={fileType}
-          fileName={fileName}
+          fileName={previewTitle}
         />
       )}
     </>

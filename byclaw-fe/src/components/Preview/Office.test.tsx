@@ -9,6 +9,12 @@ const mockInit = jest.fn();
 const mockPrepare = jest.fn();
 const mockExcelInit = jest.fn();
 const mockRenderExcel = jest.fn();
+const mockLegacyRender = jest.fn();
+
+jest.mock('./LegacyOffice', () => (props: any) => {
+  mockLegacyRender(props);
+  return <div data-testid="legacy-preview" />;
+});
 
 jest.mock('./preparePptxPreview', () => ({
   preparePptxPreview: (source: ArrayBuffer) => mockPrepare(source),
@@ -121,6 +127,18 @@ describe('Office PPTX preview', () => {
     } finally {
       viewer.mockRestore();
     }
+  });
+});
+
+describe('Office legacy document routing', () => {
+  it.each(['doc', 'ppt'])('uses conversion for %s without the PPTX renderer', (type) => {
+    jest.clearAllMocks();
+    const source = new Blob(['original']);
+    render(<Office data={source} type={type} fileName={`report.${type}`} />);
+    expect(screen.getByTestId('legacy-preview')).toBeVisible();
+    expect(mockLegacyRender).toHaveBeenCalledWith({ data: source, type, fileName: `report.${type}` });
+    expect(mockInit).not.toHaveBeenCalled();
+    expect(mockPrepare).not.toHaveBeenCalled();
   });
 });
 

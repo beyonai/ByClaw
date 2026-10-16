@@ -11,6 +11,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.MessageSource;
+import org.springframework.context.MessageSourceAware;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -41,8 +44,15 @@ import jakarta.validation.ConstraintViolationException;
 @RestControllerAdvice(annotations = {
     RestController.class, Controller.class
 })
-public class GlobalExceptionHandler {
+public class GlobalExceptionHandler implements MessageSourceAware {
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    private MessageSource messageSource;
+
+    @Override
+    public void setMessageSource(MessageSource messageSource) {
+        this.messageSource = messageSource;
+    }
 
     public static final int NO_FOUND_ERROR_CODE = 404;
 
@@ -102,7 +112,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ResponseUtil<Object>> handleResponseStatusException(ResponseStatusException e) {
         logger.warn("ResponseStatusException occurred: status={}, reason={}", e.getStatusCode(), e.getReason());
-        String msg = dealMessage(StringUtils.defaultIfBlank(e.getReason(), e.getMessage()));
+        String reason = StringUtils.defaultIfBlank(e.getReason(), e.getMessage());
+        String msg = dealMessage(messageSource == null ? reason
+            : messageSource.getMessage(reason, null, reason, LocaleContextHolder.getLocale()));
         ResponseUtil<Object> body = ResponseUtil.fail(msg);
         if (e.getStatusCode().value() == HttpStatus.FORBIDDEN.value()) {
             body.setData(Map.of("errorType", "PERMISSION_DENIED"));

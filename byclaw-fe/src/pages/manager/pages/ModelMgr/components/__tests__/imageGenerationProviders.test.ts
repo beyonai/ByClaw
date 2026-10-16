@@ -2,12 +2,15 @@ import {
   getImageGenerationProvider,
   getImageProviderFormValues,
   IMAGE_GENERATION_PROVIDER_OPTIONS,
+  resolveImageGenerationProviderName,
   supportsManagerImageDebug,
 } from '../imageGenerationProviders';
 
 describe('image generation provider catalog', () => {
   it('matches the OpenClaw native providers and the ByClaw Volcengine extension', () => {
     expect(IMAGE_GENERATION_PROVIDER_OPTIONS.map((item) => item.value)).toEqual([
+      'BAILIAN',
+      'TOKENHUB',
       'COMFYUI',
       'DEEPINFRA',
       'FAL',
@@ -47,9 +50,47 @@ describe('image generation provider catalog', () => {
     expect(getImageGenerationProvider('unknown')).toBeUndefined();
   });
 
-  it('does not route non-MiniMax providers into the MiniMax-only manager debug endpoint', () => {
+  it('enables only the new explicit Volcengine protocol alongside existing MiniMax debug', () => {
     expect(supportsManagerImageDebug('MINIMAX')).toBe(true);
     expect(supportsManagerImageDebug('OPENAI')).toBe(false);
     expect(supportsManagerImageDebug('VOLCENGINE')).toBe(false);
+    expect(supportsManagerImageDebug('VOLCENGINE', 'VOLCENGINE_IMAGE')).toBe(true);
+    expect(supportsManagerImageDebug('OPENAI', 'VOLCENGINE_IMAGE')).toBe(false);
+    expect(supportsManagerImageDebug('VOLCENGINE', 'OpenAI')).toBe(false);
+    expect(supportsManagerImageDebug(undefined, 'VOLCENGINE_IMAGE')).toBe(true);
+    expect(supportsManagerImageDebug(undefined, 'MINIMAX_IMAGE')).toBe(true);
+    expect(supportsManagerImageDebug(undefined, 'UNKNOWN_IMAGE')).toBe(false);
+    expect(supportsManagerImageDebug(undefined, 'OPENAI_IMAGE')).toBe(false);
+    expect(supportsManagerImageDebug('BAILIAN', 'BAILIAN_IMAGE')).toBe(false);
+    expect(supportsManagerImageDebug('TOKENHUB', 'TOKENHUB_IMAGE')).toBe(false);
+  });
+
+  it.each([
+    ['BAILIAN_IMAGE', 'BAILIAN'],
+    ['TOKENHUB_IMAGE', 'TOKENHUB'],
+    ['COMFY_IMAGE', 'COMFYUI'],
+    ['DEEPINFRA_IMAGE', 'DEEPINFRA'],
+    ['FAL_IMAGE', 'FAL'],
+    ['GOOGLE_IMAGE', 'GOOGLE'],
+    ['LITELLM_IMAGE', 'LITELLM'],
+    ['MICROSOFT_FOUNDRY_IMAGE', 'MICROSOFT_FOUNDRY'],
+    ['MINIMAX_IMAGE', 'MINIMAX'],
+    ['OPENAI_IMAGE', 'OPENAI'],
+    ['OPENROUTER_IMAGE', 'OPENROUTER'],
+    ['VYDRA_IMAGE', 'VYDRA'],
+    ['XAI_IMAGE', 'XAI'],
+    ['VOLCENGINE_IMAGE', 'VOLCENGINE'],
+  ])('infers the missing provider from %s', (protocol, provider) => {
+    expect(resolveImageGenerationProviderName(undefined, protocol)).toBe(provider);
+    expect(resolveImageGenerationProviderName(' ', protocol)).toBe(provider);
+  });
+
+  it('preserves explicit providers and does not guess generic or unknown protocols', () => {
+    expect(resolveImageGenerationProviderName('DOUBAO', 'VOLCENGINE_IMAGE')).toBe('DOUBAO');
+    expect(resolveImageGenerationProviderName('custom-provider', 'VOLCENGINE_IMAGE')).toBe('custom-provider');
+    expect(resolveImageGenerationProviderName('MINIMAX', 'VOLCENGINE_IMAGE')).toBe('MINIMAX');
+    for (const protocol of [undefined, 'OpenAI', 'Qwen', 'OPENAI_COMPATIBLE_IMAGE', 'UNKNOWN_IMAGE']) {
+      expect(resolveImageGenerationProviderName(undefined, protocol)).toBeUndefined();
+    }
   });
 });

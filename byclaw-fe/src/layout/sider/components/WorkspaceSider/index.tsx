@@ -9,7 +9,7 @@ import {
   AuditOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
-import { useDispatch, useIntl, useLocation, useNavigate } from '@umijs/max';
+import { useDispatch, useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
 import { Badge, Tag } from 'antd';
@@ -19,6 +19,7 @@ import { hydrateRunningSessions } from '@/hooks/useChat/chatRuntime';
 import useGlobal from '@/hooks/useGlobal';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import useAppStore from '@/models/common/useAppStore';
+import type { ISessionState } from '@/models/session';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
@@ -31,7 +32,12 @@ import WorkspaceProjectActions from './WorkspaceProjectActions';
 import WorkspaceSessionActions from './WorkspaceSessionActions';
 import WorkspaceUserBar from './WorkspaceUserBar';
 import styles from './index.module.less';
-import { DESKTOP_UNASSIGNED_SESSION_SCOPE, hasDesktopTaskSessions } from './workspaceSiderState';
+import {
+  DESKTOP_UNASSIGNED_SESSION_SCOPE,
+  hasDesktopTaskSessions,
+  sortWorkspaceSessions as sortSessions,
+  syncWorkspaceSessionActivity,
+} from './workspaceSiderState';
 
 const PROJECT_SESSION_PAGE_SIZE = 5;
 const EXPANDED_PROJECTS_STORAGE_KEY = 'byclaw.workspaceSider.expandedProjectIds';
@@ -102,13 +108,6 @@ const hasStoredExpandedProjectIds = () => {
 
 const normalizeProjectId = (projectId?: string | number) => `${projectId ?? ''}`.trim();
 
-const sortSessions = (sessions: ProjectSession[]) =>
-  [...sessions].sort((left, right) => {
-    const leftTime = dayjs(left.updateTime || left.createTime || 0).valueOf();
-    const rightTime = dayjs(right.updateTime || right.createTime || 0).valueOf();
-    return rightTime - leftTime;
-  });
-
 const mergeSessions = (currentSessions: ProjectSession[], nextSessions: ProjectSession[]) => {
   const sessionMap = new Map(currentSessions.map((session) => [`${session.sessionId}`, session]));
   nextSessions.forEach((session) => {
@@ -163,6 +162,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const location = useLocation();
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const liveSessions = useSelector((state: { session: ISessionState }) => state.session.sessionList);
   const { EventEmitter, sessionId, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = useContext(SiderContentContext);
   const { projects, loading, fetchProjects } = useProjectList();
@@ -740,7 +740,12 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
   const renderProjectSessions = (project?: ProjectSpace) => {
     const sessionScope = project ? normalizeProjectId(project.projectId) : DESKTOP_UNASSIGNED_SESSION_SCOPE;
-    const sessionState = sessionStateMap[sessionScope] || createEmptySessionState();
+    const cachedState = sessionStateMap[sessionScope] || createEmptySessionState();
+    // 新消息会更新聊天 store；渲染时合并摘要，历史会话无需重新请求即可按最近活动排序。
+    const sessionState = {
+      ...cachedState,
+      sessions: syncWorkspaceSessionActivity(cachedState.sessions, liveSessions),
+    };
     const hasMoreSessions = sessionState.loaded && sessionState.total > sessionState.sessions.length;
     const canCollapseSessions =
       sessionState.loaded && !hasMoreSessions && sessionState.sessions.length > PROJECT_SESSION_PAGE_SIZE;
