@@ -1,4 +1,4 @@
-import { endpoint, request, readBytes } from '@byclaw/media-runtime';
+import { endpoint, request, readBytes, readJson } from '@byclaw/media-runtime';
 
 export const MAX_AUDIO_BYTES = 50 * 1024 * 1024;
 export const MIME = Object.freeze({ mp3: 'audio/mpeg', wav: 'audio/wav', aac: 'audio/aac' });
@@ -9,12 +9,13 @@ export function speechError(message, code = 'TTS_ERROR') {
   return error;
 }
 
-export function availableVoices(options, fallback) {
+export function availableVoices(options, fallback, catalog = []) {
   const configured = options.voices !== undefined;
   if (configured && (!Array.isArray(options.voices) || options.voices.length === 0 || options.voices.length > 100)) {
     throw speechError('Configure voices as a nonempty array with at most 100 entries');
   }
   const values = [];
+  if (!configured) values.push(...catalog);
   for (const item of options.voices ?? []) {
     const id = typeof item === 'string' ? item.trim() : typeof item?.id === 'string' ? item.id.trim() : '';
     const name = typeof item === 'object' && item !== null && typeof item.name === 'string' ? item.name.trim() : '';
@@ -40,20 +41,27 @@ export function formatFor(args, options, supported, fallback) {
   return format;
 }
 
-export function voiceFor(args, options, fallback) {
-  const voice = args.voice ?? options.voice ?? options.speaker ?? fallback;
+export function voiceFor(args, options, fallback, catalog = []) {
+  let voice = args.voice ?? options.voice ?? options.speaker ?? options.defaultVoice ?? fallback;
   if (typeof voice !== 'string' || !voice.trim() || voice.length > 256) throw speechError('Configure a valid speech voice / speaker in the selected model');
-  const choices = availableVoices(options, fallback);
+  const choices = availableVoices(options, fallback, catalog);
+  const named = choices.values.filter(item => item.name === voice.trim());
+  if (!choices.values.some(item => item.id === voice.trim()) && named.length === 1) voice = named[0].id;
   if (args.voice !== undefined && choices.configured && !choices.values.some(item => item.id === voice.trim())) {
     throw voiceNotAvailable(voice.trim(), choices.values);
   }
   return voice.trim();
 }
 
-export function speedFor(args, options, min = 0.5, max = 2) {
+export function speedFor(args, options, min = 0.5, max = 2, context = {}) {
   const speed = args.speed ?? options.speed;
-  if (speed !== undefined && (!Number.isFinite(speed) || speed < min || speed > max)) throw speechError('Unsupported speech speed for this provider');
-  return speed;
+  if (speed === undefined) return undefined;
+  if (min !== null && Number.isFinite(speed) && speed >= min && speed <= max) return speed;
+  const fallback = min !== null && Number.isFinite(options.speed) && options.speed >= min && options.speed <= max ? options.speed : undefined;
+  context.onWarning?.({ code: 'TTS_SPEED_UNSUPPORTED', parameter: 'speed', message: min === null
+    ? '当前模型不支持调整语速，已使用默认语速生成。'
+    : `当前模型不支持所请求的语速（支持 ${min}–${max} 倍），已使用${fallback ?? 1}倍语速生成。` });
+  return fallback;
 }
 
 export function requireTextLimit(text, limit) {
@@ -70,7 +78,21 @@ export async function post(model, base, suffix, body, context, authHeaders, requ
     if (!model.apiKey) throw speechError('Configure the speech provider API key');
     headers.set('authorization', `Bearer ${model.apiKey}`);
   }
-  return request(endpoint(model.endpoint || base, suffix), { method: 'POST', headers, body: JSON.stringify(body) }, context, requestOptions);
+  const response = await request(endpoint(model.endpoint || base, suffix), { method: 'POST', headers, body: JSON.stringify(body) }, context, { ...requestOptions, acceptErrorResponse: true });
+  // Native streaming adapters inspect their own error envelope. For JSON APIs,
+  // only explicit voice parameter failures are recoverable; auth and transport
+  // failures must retain their existing error semantics and never leak bodies.
+  if (response.ok || requestOptions?.acceptErrorResponse === true) return response;
+  if ([400, 422].includes(response.status)) {
+    let errorBody;
+    try { errorBody = await readJson(response, 64 * 1024); } catch { context.signal?.throwIfAborted(); }
+    const param = errorBody?.error?.param ?? errorBody?.param;
+    const voice = body.voice ?? body.input?.voice ?? body.voice_setting?.voice_id;
+    if (['voice', 'voice_id', 'input.voice', 'voice_setting.voice_id'].includes(param) && typeof voice === 'string') {
+      throw voiceNotAvailable(voice, availableVoices(model.options).values);
+    }
+  } else await response.body?.cancel().catch(() => {});
+  throw speechError('Speech provider request failed');
 }
 
 // Check the container as well as MIME so an upstream JSON error cannot be persisted as audio.

@@ -18,9 +18,9 @@ const assets = await generateSpeech(model, { text, voice, format, speed }, { sig
 | --- | --- | --- |
 | OPENAI | `/v1/audio/speech`, `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` | MP3 default; WAV/PCM/AAC; `options.voice` (default alloy), speed 0.25–4; optional instructions |
 | OPENROUTER | `/api/v1/audio/speech`, routed TTS model slug such as `openai/gpt-4o-mini-tts` | MP3 default; PCM only for documented OpenAI / Microsoft MAI Voice model families; voice required; speed only for a model that supports it; optional trusted `options.routing` and instructions |
-| TOGETHER | `/v1/audio/speech`, Cartesia Sonic, Kokoro, Orpheus | WAV default or MP3; model-specific voice required; optional language/sampleRate/bitRate; speed rejected |
+| TOGETHER | `/v1/audio/speech`, Cartesia Sonic, Kokoro, Orpheus | WAV default or MP3; model-specific voice required; optional language/sampleRate/bitRate; speed adjustments return a warning and use the provider default |
 | ZAI | Bigmodel `/api/paas/v4/audio/speech`, `glm-tts` | WAV default or PCM; tongtong default voice; speed 0.5–2, optional volume; 1,024 characters |
-| QWEN | DashScope `/api/v1/services/aigc/multimodal-generation/generation`, HTTP Qwen-TTS and Qwen3-TTS | WAV; Cherry default voice; `languageType` defaults Auto; 600 characters; speed rejected; realtime WebSocket models explicitly rejected |
+| QWEN | DashScope `/api/v1/services/aigc/multimodal-generation/generation`, HTTP Qwen-TTS and Qwen3-TTS | WAV; Cherry default voice; `languageType` defaults Auto; 600 characters; speed adjustments return a warning and use the provider default; realtime WebSocket models explicitly rejected |
 | MINIMAX | `/v1/t2a_v2`, `speech-*` | MP3 default, WAV/PCM; voice required; speed 0.5–2; optional vol/pitch/emotion/sampleRate/bitrate/channel/languageBoost |
 | VOLCENGINE | `/api/v3/tts/unidirectional` or explicitly configured `/sse` | MP3 default, WAV/PCM; configured speaker required; resource/version mapping below |
 
@@ -55,12 +55,12 @@ Set `options.voices` when callers may select a voice. It is the connector's trus
   "speaker": "zh_female_vv_uranus_bigtts",
   "voices": [
     "zh_female_vv_uranus_bigtts",
-    { "id": "zh_male_beijingxiaoye_moon_bigtts", "name": "北京小爷" }
+    { "id": "zh_male_m191_uranus_bigtts", "name": "云舟 2.0" }
   ]
 }
 ```
 
-An explicitly requested voice outside this list fails locally with `TTS_VOICE_NOT_AVAILABLE` and includes the available IDs, without sending a provider request. If no allowlist is configured, provider-supported overrides remain allowed. A Volcengine response that explicitly identifies a missing, unauthorized, invalid, or resource-mismatched speaker is converted to the same safe error and lists the connector's configured `voice`, `speaker`, or `defaultVoice`. Other provider and authentication failures remain generic and do not expose upstream response bodies.
+An explicitly requested voice outside this list produces `status: unsupported`, no artifacts, and a `TTS_VOICE_NOT_AVAILABLE` warning containing available IDs, without sending a provider request. If no allowlist is configured, provider-supported overrides remain allowed. A Volcengine response that explicitly identifies a missing, unauthorized, invalid, or resource-mismatched speaker is converted to the same safe warning for an explicit voice override and lists configured or adapter-known candidate voices. JSON APIs also recognize HTTP 400/422 errors with an explicit voice parameter (`voice`, `voice_id`, `input.voice`, or `voice_setting.voice_id`). Unknown business errors and authentication failures remain errors; upstream response bodies are never exposed.
 
 The parser handles JSON frames fragmented across HTTP chunks, concatenated JSON objects, and SSE records. Requests enable the provider subtitle response. Valid `sentence.words` entries are collected without semantic re-segmentation and returned as a second `application/json` asset with `artifactType: word-timing`; the shared runtime writes it beside the audio under `<session_root>/tts/`. The JSON schema uses seconds and `provider-word` granularity. When the provider returns no timing entries, the file contains `words: []`.
 
@@ -89,3 +89,51 @@ Checked 2026-10-15:
 - [Volcengine legacy authentication](https://docs.volcengine.com/docs/DoubaoVoice/old-version-console-authentication-reference-example?lang=zh)
 
 Model-management debugging is available to the authenticated backend proxy at `POST /api/byclaw/tts/debug`: `{ debug: true, text, model? }`. The route validates the current user's Redis login token and uses the explicit saved/debug model, or the configured default TTS model when omitted. It returns bounded MP3 `{ audioBase64, mimeType, provider, model }` to the BE; the BE reports only diagnostic fields to the model-management UI. This debug call does not create a conversation artifact. Voice conversation summaries continue to save audio in `session_root/tts/`.
+
+
+## Querying and changing speech controls
+
+The session-scoped `text_to_speech_options({})` tool resolves the same current model as
+`text_to_speech` (personal connector first, otherwise system default). It returns:
+
+- `voice`: `supported`, `default`, `choices: [{ id, name? }]`, `restricted`, and `note`.
+- `speed`: `supported`, `default`, and `min` / `max` when supported. Values are multipliers; 1 is normal.
+
+Each provider adapter owns its capability description. The query reads the current
+configuration on every call, creates no files, does not synthesize audio, and does not
+ask the Agent to browse documentation. This version uses adapter-maintained catalogs
+and configured voice choices; it does **not** claim a live account-entitlement lookup.
+Seed TTS 2.0 includes four documented standard candidates: Vivi 2.0, 小何 2.0,
+云舟 2.0, and 小天 2.0. Clone/1.0 resources do not inherit the 2.0 catalog.
+A configured `options.voices` list takes precedence; without it the candidate list is
+non-exhaustive and other explicit provider IDs are still allowed. Providers ultimately
+validate voice permissions. Unique configured/catalog names resolve to IDs; ambiguous
+names are not guessed. Omitted voice uses `voice`, `speaker`, `defaultVoice`, then
+an adapter default, in that order.
+
+Call `text_to_speech` with `text`, `voice`, and `speed` after querying. Overrides apply
+to that invocation and do not modify saved defaults. Unsupported/out-of-range speeds
+fall back to a valid configured speed or the provider default and return a
+`TTS_SPEED_UNSUPPORTED` warning. Any finite positive multiplier reaches this adapter
+check; zero, negative, nonfinite, and nonnumeric values remain invalid input.
+Qwen HTTP and Together currently advertise no numeric
+speed control; unknown OpenRouter model families do not advertise unverified speed
+support. OpenAI TTS routes support 0.25–4; ZAI, MiniMax, and Volcengine support 0.5–2.
+Volcengine maps the multiplier to integer `speech_rate = round((speed - 1) * 100)`.
+
+Generation results contain `status: generated | unsupported`, `warnings`, and
+`artifacts`. An unavailable explicit voice returns `unsupported` with no files and
+available choices; it does not ask for a new connector and does not automatically
+retry a billable generation with another voice. Agents must disclose warnings and
+must not claim audio exists when artifacts are empty. Credential, transport,
+malformed/truncated audio, and cancellation failures remain errors.
+
+Adapter consumers can call `getSpeechOptions(model)` and
+`generateSpeechResult(model, args, context)` for `{ assets, warnings }`. The existing
+`generateSpeech` byte-array API remains available; callers using it should subscribe
+to `context.onWarning` for nonfatal speed feedback. It retains typed voice errors;
+the result API converts explicit-override voice errors into nonfatal outcomes.
+
+References checked 2026-10-16: [Volcengine voice list](https://docs.volcengine.com/docs/DoubaoVoice/Tonelist-1?lang=zh),
+[Volcengine speed mapping](https://docs.volcengine.com/docs/DoubaoVoice/HTTPChunkedSSEUnidirectionalStreaming-V3?lang=zh),
+[OpenRouter model-specific speed support](https://openrouter.ai/docs/guides/overview/multimodal/tts).

@@ -123,3 +123,51 @@ test('a resolved but unusable system model asks the user to configure a personal
       && error.message.includes('配置并启用个人连接器'))
   } finally { await rm(mounted.root, { recursive: true, force: true }) }
 })
+
+test('speech query uses live model binding without generation and survives repeated setup', async () => {
+  let setup, generationCalls = 0;
+  const registered = new Map();
+  const ctx = { on: (_name, handler) => { setup = handler }, effect: fn => fn() };
+  const agentCtx = { tools: { register: tool => { assert.ok(!registered.has(tool.name)); registered.set(tool.name, tool); return () => registered.delete(tool.name) } }, effect: fn => fn() };
+  const host = { userCode: 'test', resolveSessionRoot: () => { throw new Error('query must not require files') },
+    resolveMediaModel: async () => ({ provider: 'VOLCENGINE', model: 'seed-tts-2.0' }) };
+  mountMediaPlugin(ctx, { kind: 'tts', generate: async () => { generationCalls++; }, describe: model => ({ provider: model.provider, model: model.model, voice: { supported: true, choices: [], restricted: false, note: 'test' }, speed: { supported: true, min: 0.5, max: 2, default: 1 } }) });
+  const payload = { agentCtx, host, agent: { id: 'a1' }, command: { header: { userCode: 'test' } } };
+  await setup(payload); await setup(payload);
+  assert.equal(registered.size, 2);
+  const query = registered.get('text_to_speech_options');
+  assert.ok(query.description.length <= 250);
+  assert.equal(query.parameters.additionalProperties, false);
+  assert.equal((await query.execute({})).speed.max, 2);
+  await setup({ ...payload, host: { ...host, resolveMediaModel: async () => ({ provider: 'OPENAI', model: 'tts-1' }) } });
+  assert.equal((await query.execute({})).provider, 'OPENAI');
+  await assert.rejects(query.execute({ apiKey: 'untrusted' }), /MEDIA_INVALID_ARGUMENT/);
+  assert.equal(generationCalls, 0);
+});
+
+test('speech limitations render as normal tool feedback with no fabricated audio', async () => {
+  const mounted = await mountedTool('tts', {
+    resolveMediaModel: async () => ({ provider: 'VOLCENGINE', model: 'seed-tts-2.0', timeoutMs: 1000 }),
+    generate: async () => ({ assets: [], warnings: [{ code: 'TTS_VOICE_NOT_AVAILABLE', parameter: 'voice', message: '音色不支持，请选择 v1。' }] }),
+  });
+  try {
+    const result = await mounted.tool.execute({ text: '你好', voice: 'bad' });
+    assert.equal(result.status, 'unsupported');
+    assert.deepEqual(result.artifacts, []);
+    assert.equal(result.warnings[0].code, 'TTS_VOICE_NOT_AVAILABLE');
+    assert.doesNotMatch(JSON.stringify(mounted.tool.output.render({}, result)), /MEDIA_CONNECTOR_CONFIGURATION_REQUIRED/);
+  } finally { await rm(mounted.root, { recursive: true, force: true }); }
+});
+
+test('positive speeds reach the adapter while malformed and nonpositive speeds remain invalid', async () => {
+  const speeds = [];
+  const mounted = await mountedTool('tts', {
+    resolveMediaModel: async () => ({ provider: 'OPENAI', model: 'tts-1', timeoutMs: 1000 }),
+    generate: async (_model, args) => { speeds.push(args.speed); return { assets: [], warnings: [{ code: 'TTS_SPEED_UNSUPPORTED', parameter: 'speed', message: 'unsupported speed' }] }; },
+  });
+  try {
+    for (const speed of [0.1, 5]) await mounted.tool.execute({ text: 'Hi', speed });
+    assert.deepEqual(speeds, [0.1, 5]);
+    for (const speed of [0, -1, NaN, Infinity, '1.2']) await assert.rejects(mounted.tool.execute({ text: 'Hi', speed }), /MEDIA_INVALID_ARGUMENT: speed/);
+  } finally { await rm(mounted.root, { recursive: true, force: true }); }
+});

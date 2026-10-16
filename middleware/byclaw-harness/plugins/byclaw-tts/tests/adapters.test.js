@@ -155,8 +155,7 @@ test('Volcengine HTTP error body can identify an unavailable voice without expos
 for (const [provider, args, override] of [
   ['OPENAI', { text: '' }, {}], ['OPENAI', { text: 'Hi', apiKey: 'injected' }, {}],
   ['OPENAI', { text: 'Hi', speed: 0 }, {}], ['OPENROUTER', { text: 'Hi', format: 'wav' }, {}],
-  ['TOGETHER', { text: 'Hi', speed: 1.2 }, {}], ['ZAI', { text: 'Hi', format: 'mp3' }, { model: 'glm-tts' }],
-  ['QWEN', { text: 'Hi', speed: 1.2 }, { model: 'qwen3-tts-flash' }],
+  ['ZAI', { text: 'Hi', format: 'mp3' }, { model: 'glm-tts' }],
   ['QWEN', { text: 'Hi' }, { model: 'qwen3-tts-flash-realtime' }],
   ['OPENAI', { text: 'Hi' }, { protocol: 'VOLCENGINE_TTS' }],
 ]) test(`${provider} invalid parameters/protocol fail before HTTP`, async () => {
@@ -333,5 +332,118 @@ test('frontend LLM-only protocols and cross-provider Qwen labels never issue spe
       await assert.rejects(generateSpeech(model(provider, { protocol }), { text: 'Hi' }, t), /mismatch/);
       assert.equal(t.calls.length, 0);
     }
+  }
+});
+
+// Regression: unsupported controls must remain a usable, explicit tool outcome.
+test('Together unsupported speed generates audio with feedback instead of throwing', async () => {
+  const warnings = [];
+  const t = capture(binary);
+  const assets = await generateSpeech(model('TOGETHER'), { text: 'Hi', speed: 1.2 }, { ...t, onWarning: w => warnings.push(w) });
+  assert.equal(assets[0].mimeType, 'audio/wav');
+  assert.equal(t.calls[0].body.speed, undefined);
+  assert.equal(warnings[0].code, 'TTS_SPEED_UNSUPPORTED');
+});
+test('Volcengine out-of-range speed uses configured speed and explains the limitation', async () => {
+  const warnings = [];
+  const t = capture(() => volcResponse([chunk, done]));
+  await generateSpeech(volc({ options: { speaker: 'voice', speed: 0.8 } }), { text: 'Hi', speed: 3 }, { ...t, onWarning: w => warnings.push(w) });
+  assert.equal(t.calls[0].body.req_params.audio_params.speech_rate, -20);
+  assert.equal(warnings[0].code, 'TTS_SPEED_UNSUPPORTED');
+});
+test('configured defaultVoice is honored instead of provider fallback', async () => {
+  const t = capture(binary);
+  await generateSpeech(model('OPENAI', { options: { defaultVoice: 'nova' } }), { text: 'Hi', format: 'wav' }, t);
+  assert.equal(t.calls[0].body.voice, 'nova');
+});
+
+test('speech options expose configured voice names and provider-specific speed limits without credentials', async () => {
+  const { getSpeechOptions } = await import('../src/adapters.js');
+  const info = getSpeechOptions(volc({ options: { speaker: 'v1', voices: [{ id: 'v1', name: '女声' }, { id: 'v2', name: '男声' }] } }));
+  assert.deepEqual(info.voice.choices, [{ id: 'v1', name: '女声' }, { id: 'v2', name: '男声' }]);
+  assert.equal(info.voice.default, 'v1');
+  assert.equal(info.voice.restricted, true);
+  assert.deepEqual(info.speed, { supported: true, min: 0.5, max: 2, default: 1 });
+  assert.doesNotMatch(JSON.stringify(info), /test-key|apiKey|endpoint/);
+  assert.equal(getSpeechOptions(model('TOGETHER')).speed.supported, false);
+  assert.equal(getSpeechOptions(model('OPENROUTER', { model: 'mistralai/voxtral-mini-tts-2603' })).speed.supported, false);
+});
+test('unavailable voice yields actionable feedback without generation or connector error', async () => {
+  const { generateSpeechResult } = await import('../src/adapters.js');
+  const t = capture(() => volcResponse([chunk, done]));
+  const result = await generateSpeechResult(volc({ options: { speaker: 'v1', voices: ['v1', 'v2'] } }), { text: 'Hi', voice: 'missing' }, t);
+  assert.deepEqual(result.assets, []);
+  assert.equal(result.warnings[0].code, 'TTS_VOICE_NOT_AVAILABLE');
+  assert.match(result.warnings[0].message, /v1.*v2/u);
+  assert.equal(t.calls.length, 0);
+});
+test('supported voice name resolves to configured id and caller override wins', async () => {
+  const t = capture(() => volcResponse([chunk, done]));
+  await generateSpeech(volc({ options: { speaker: 'v1', voices: [{ id: 'v1', name: '女声' }, { id: 'v2', name: '男声' }] } }), { text: 'Hi', voice: '男声', speed: 1.5 }, t);
+  assert.equal(t.calls[0].body.req_params.speaker, 'v2');
+  assert.equal(t.calls[0].body.req_params.audio_params.speech_rate, 50);
+});
+
+test('Qwen unsupported speed returns audio and explicit feedback without a speed field', async () => {
+  const { generateSpeechResult } = await import('../src/adapters.js');
+  const calls = [];
+  const result = await generateSpeechResult(model('QWEN', { model: 'qwen3-tts-flash' }), { text: '你好', speed: 1.5 }, {
+    fetch: async (_url, init) => { calls.push(init); return calls.length === 1 ? json({ output: { finish_reason: 'stop', audio: { url: 'https://media.example/a.wav' } } }) : binary(); },
+  });
+  assert.equal(result.assets[0].mimeType, 'audio/wav');
+  assert.equal(result.warnings[0].code, 'TTS_SPEED_UNSUPPORTED');
+  assert.equal(JSON.parse(calls[0].body).input.speed, undefined);
+});
+test('unknown OpenRouter model does not pretend that speed was applied', async () => {
+  const { generateSpeechResult } = await import('../src/adapters.js');
+  const t = capture(() => binary(mp3));
+  const result = await generateSpeechResult(model('OPENROUTER', { model: 'mistralai/voxtral-mini-tts-2603' }), { text: 'Hi', speed: 1.4 }, t);
+  assert.equal(t.calls[0].body.speed, undefined);
+  assert.equal(result.warnings[0].code, 'TTS_SPEED_UNSUPPORTED');
+});
+test('Seed 2 voice discovery honors resource and allowlist without advertising authorization', async () => {
+  const { getSpeechOptions } = await import('../src/adapters.js');
+  const info = getSpeechOptions(volc());
+  assert.ok(info.voice.choices.some(v => v.id === 'zh_male_m191_uranus_bigtts' && v.name === '云舟 2.0'));
+  assert.equal(info.voice.restricted, false);
+  const clone = getSpeechOptions(volc({ options: { speaker: 'S_clone', resourceId: 'seed-icl-2.0' } }));
+  assert.deepEqual(clone.voice.choices, [{ id: 'S_clone' }]);
+  const restricted = getSpeechOptions(volc({ options: { speaker: 'v1', voices: ['v1'] } }));
+  assert.deepEqual(restricted.voice.choices, [{ id: 'v1' }]);
+});
+test('upstream voice rejection is nonfatal but auth, cancellation and malformed media stay failures', async () => {
+  const { generateSpeechResult } = await import('../src/adapters.js');
+  const t = capture(() => volcResponse([{ code: 45001115, message: 'secret-provider-text' }]));
+  const result = await generateSpeechResult(volc(), { text: 'Hi', voice: 'unknown' }, t);
+  assert.deepEqual(result.assets, []);
+  assert.equal(t.calls.length, 1);
+  assert.doesNotMatch(JSON.stringify(result), /secret-provider-text/);
+  for (const response of [() => new Response('secret', { status: 401 }), () => volcResponse([chunk])]) {
+    await assert.rejects(generateSpeechResult(volc(), { text: 'Hi', voice: 'v1' }, capture(response)));
+  }
+  await assert.rejects(generateSpeechResult(volc(), { text: 'Hi', voice: 'v1' }, { signal: AbortSignal.abort() }));
+});
+
+test('Volcengine real 55000000 resource/speaker mismatch is a voice limitation, not connector failure', async () => {
+  const { generateSpeechResult } = await import('../src/adapters.js');
+  const t = capture(() => volcResponse([{ code: 55000000, message: 'resource ID is mismatched with speaker related resource' }]));
+  const result = await generateSpeechResult(volc(), { text: 'Hi', voice: 'unavailable' }, t);
+  assert.equal(result.warnings[0].code, 'TTS_VOICE_NOT_AVAILABLE');
+  assert.deepEqual(result.assets, []);
+  assert.equal(t.calls.length, 1);
+});
+
+test('explicit upstream voice parameter errors are nonfatal without leaking provider bodies', async () => {
+  const { generateSpeechResult } = await import('../src/adapters.js');
+  for (const status of [400, 422]) {
+    const t = capture(() => new Response(JSON.stringify({ error: { param: 'voice', message: 'secret-provider-body' } }), { status }));
+    const result = await generateSpeechResult(model('OPENAI'), { text: 'Hi', voice: 'missing' }, t);
+    assert.deepEqual(result.assets, []);
+    assert.equal(result.warnings[0].code, 'TTS_VOICE_NOT_AVAILABLE');
+    assert.doesNotMatch(JSON.stringify(result), /secret-provider-body/);
+    assert.equal(t.calls.length, 1);
+  }
+  for (const [status, param] of [[401, 'voice'], [403, 'voice'], [429, 'voice'], [500, 'voice'], [400, 'model']]) {
+    await assert.rejects(generateSpeechResult(model('OPENAI'), { text: 'Hi', voice: 'missing' }, capture(() => new Response(JSON.stringify({ error: { param } }), { status }))), error => error.code !== 'TTS_VOICE_NOT_AVAILABLE');
   }
 });

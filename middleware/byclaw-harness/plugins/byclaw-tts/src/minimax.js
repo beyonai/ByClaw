@@ -1,13 +1,17 @@
 import { readJson } from '@byclaw/media-runtime';
 import { audioAsset, formatFor, post, requireTextLimit, speechError, speedFor, voiceFor } from './common.js';
 
+export function minimaxSpeechOptions() {
+  return { speed: { supported: true, min: 0.5, max: 2 } };
+}
+
 export async function minimaxSpeech(model, args, context) {
   if (!/^speech-/.test(model.model)) throw speechError('Unsupported MiniMax speech model');
   requireTextLimit(args.text, 9999);
   const options = model.options;
   const format = formatFor(args, options, ['mp3', 'wav', 'pcm'], 'mp3');
   const voiceSetting = { voice_id: voiceFor(args, options) };
-  const speed = speedFor(args, options);
+  const speed = speedFor(args, options, 0.5, 2, context);
   if (speed !== undefined) voiceSetting.speed = speed;
   for (const key of ['vol', 'pitch', 'emotion']) if (options[key] !== undefined) voiceSetting[key] = options[key];
   const audioSetting = { format };

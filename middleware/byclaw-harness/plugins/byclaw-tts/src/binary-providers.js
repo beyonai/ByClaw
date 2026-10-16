@@ -15,8 +15,8 @@ export async function binarySpeech(model, args, context) {
   const format = formatFor(args, options, contract.formats, contract.format);
   if (model.provider === 'OPENROUTER' && format === 'pcm' && !/^(?:openai\/(?:tts-1(?:-hd)?|gpt-4o-mini-tts)(?:$|-)|microsoft\/mai-voice-)/.test(model.model)) throw speechError('OpenRouter PCM sample metadata is unknown for this model; use mp3');
   const voice = voiceFor(args, options, contract.voice);
-  const speed = speedFor(args, options, contract.minSpeed, contract.maxSpeed);
-  if (model.provider === 'TOGETHER' && speed !== undefined) throw speechError('Together speech speed parameter is unsupported');
+  const range = binarySpeechOptions(model).speed;
+  const speed = speedFor(args, options, range.supported ? range.min : null, range.max, context);
   const body = { model: model.model, input: args.text, voice, response_format: format };
   if (speed !== undefined) body.speed = speed;
   if (model.provider === 'TOGETHER' || model.provider === 'ZAI') body.stream = false;
@@ -30,4 +30,12 @@ export async function binarySpeech(model, args, context) {
   }
   if (model.provider === 'ZAI' && options.volume !== undefined) body.volume = options.volume;
   return [await binaryAsset(await post(model, contract.base, '/audio/speech', body, context), format)];
+}
+
+export function binarySpeechOptions(model) {
+  const contract = contracts[model.provider];
+  const supported = model.provider !== 'TOGETHER' && (model.provider !== 'OPENROUTER' || /^openai\/(?:tts-1(?:-hd)?|gpt-4o-mini-tts)(?:$|-)/.test(model.model));
+  return { defaultVoice: contract.voice, speed: supported
+    ? { supported: true, min: model.provider === 'OPENROUTER' ? 0.25 : contract.minSpeed ?? 0.5, max: model.provider === 'OPENROUTER' ? 4 : contract.maxSpeed ?? 2 }
+    : { supported: false } };
 }

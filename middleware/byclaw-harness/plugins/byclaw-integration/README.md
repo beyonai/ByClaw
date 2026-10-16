@@ -251,3 +251,12 @@ Integration now requires `@byclaw/dsh-todo-execution`. Ordinary employee Agent r
 INFO 日志 `[byclaw-super-assistant] bound` 显示会话和工具白名单；禁止调用返回 `SUPER_ASSISTANT_EXECUTION_DENIED`。本地验证：`node --import tsx/esm plugins/byclaw-integration/scripts/super-assistant-policy-verify.mjs`。
 
 With Jev enabled, the super assistant first calls `byclaw_route_task(task)`, then dispatches through `byclaw_instantiate_template` using the returned ID and the same task. Dispatch validates the latest agent-bound, single-use selection without requesting Jev again. Re-route after a failure or restart.
+
+
+### Super-assistant speech control discovery
+
+The super assistant may directly call `text_to_speech_options` before switching
+voice or speed with `text_to_speech`. Both the final prompt tool filter and execution
+guard allow this read-only query. Unsupported control warnings must be relayed to
+the user; empty artifacts are not a successful synthesis and must not be described
+as requiring a personal connector. Other super-assistant execution limits remain in force.
