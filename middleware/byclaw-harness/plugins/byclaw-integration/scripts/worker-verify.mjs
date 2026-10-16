@@ -533,6 +533,7 @@ for (const sessionId of [20071499, '20071499']) {
   numericCommand.extraPayload.dsh_parent_session_id = 20071001
   assert.deepEqual(byClawCommandSessionRoute(numericCommand), {
     externalRootSessionId: '20071000', targetDshSessionId: '20071499', parentDshSessionId: '20071001',
+    cwd: '/by/.sessions/20071000',
   })
 }
 
@@ -544,8 +545,8 @@ const localWorkspaceCommand = new AskAgentCommand(new MessageHeader('local-route
 })
 assert.equal(
   byClawCommandSessionRoute(localWorkspaceCommand, localByRoot).cwd,
-  `${localByRoot}/projects/20014944`,
-  'ByClaw virtual project cwd must be localized under the configured DSH workspace',
+  `${localByRoot}/.sessions/local-session`,
+  'Old gateway project cwd must resolve to the current conversation process-file directory',
 )
 const externalWorkspaceCommand = new AskAgentCommand(new MessageHeader('external-route-message', 'external-session', 'external-route-trace', {
   userCode: 'adminvip',
@@ -554,9 +555,14 @@ const externalWorkspaceCommand = new AskAgentCommand(new MessageHeader('external
 })
 assert.equal(
   byClawCommandSessionRoute(externalWorkspaceCommand, localByRoot).cwd,
-  '/srv/external-project',
-  'absolute cwd values outside the ByClaw virtual project root must remain unchanged',
+  `${localByRoot}/.sessions/external-session`,
+  'Gateway cwd overrides must not replace the conversation process-file directory',
 )
+assert.equal(commandRoute.cwd, '/by/.sessions/root-session', 'child continuation uses the external root conversation')
+for (const invalid of ['../another', '/absolute', 'a/b', '.', '..']) {
+  const invalidCommand = new AskAgentCommand(new MessageHeader('invalid-path', invalid, 'trace'), 'message')
+  assert.throws(() => byClawCommandSessionRoute(invalidCommand), /Invalid ByClaw workspace session id/)
+}
 if (turnFailureMessage([{ type: 'turn/end', data: { turn: 1, reason: {
   kind: 'error', error: { message: 'route failed', code: 'UNKNOWN' },
 } } }]) !== 'route failed') throw new Error('DSH turn errors are not propagated to ByClaw')

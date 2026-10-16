@@ -15,8 +15,8 @@ function emitLive(session, turn, step, text) {
     listeners.get('agent/assistant-stream')({ agent: { id: session.id, session }, frame })
   }
 }
-const rootSession = { id: 'root', header: { cwd: '/tmp' }, ...sessionLog() }
-const childSession = { id: 'child', header: { cwd: '/tmp', parentSession: 'root' }, ...sessionLog() }
+const rootSession = { id: 'root', header: { cwd: '/tmp/.sessions/root' }, ...sessionLog() }
+const childSession = { id: 'child', header: { cwd: '/tmp/.sessions/root', parentSession: 'root' }, ...sessionLog() }
 const sessions = new Map([['root', rootSession], ['child', childSession]])
 let idle = Promise.resolve()
 const input = []
@@ -57,7 +57,7 @@ const runtime = new ByClawDshSessionRuntime({
 }, { byRoot: '/tmp', sourceAgentType: 'BYCLAW_DSH', agentTemplateDir: '', workspaceRegistry: registry,
   emitter: { async emitChunk(...args) { output.push(args) } } })
 const owner = { rootSessionId: 'root', responseSessionId: 'root', rootMessageId: 'original-task', rootLabel: '队长',
-  userCode: 'user', direct: false, workspace: '/tmp',
+  userCode: 'user', direct: false, workspace: '/tmp/.sessions/root',
   context: { sessionId: 'root', traceId: 'original-trace', isCancelRequested: () => false },
   teamGate: new ByClawAsyncTeamGate(), runtime: new ByClawSessionActivityTracker('root'),
   forwarding: Promise.resolve(), answer: '', childTurns: new Map(), announcedChildren: new Set(),

@@ -173,7 +173,9 @@ export default defineConfig({
     safari: 12,
   },
   // legacy: {},
-  esbuildMinifyIIFE: true,
+  // 文件预览依赖含 BigInt 字面量；Terser 可保留该语法，避免 esbuild 的旧目标压缩报错。
+  // 此配置不提供 BigInt polyfill，相关解码能力仍要求浏览器原生支持。
+  jsMinifier: 'terser',
   metas: [
     { 'http-equiv': 'Pragma', content: 'no-cache' },
     {

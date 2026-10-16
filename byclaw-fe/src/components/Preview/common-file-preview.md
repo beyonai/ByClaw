@@ -73,6 +73,8 @@
   使用已完成写入/检查点的独立文件；不会合并 `-wal`/`-shm`，SQLCipher/其他加密数据库不支持。
 - RAW 按需加载固定版本 [@colorhythm/libraw-wasm@1.1.1](https://github.com/colorhythm/libraw-wasm) 的单线程 LibRaw 构建（绑定 MIT，LibRaw 使用其 LGPL/CDDL 双许可）。
   webpack 输出同源 WASM；仅对该依赖加载器使用局部 Node 模块别名，不添加跨源隔离配置或 CDN 请求。
+  生产 JavaScript 使用 Terser 压缩，避免依赖中的 BigInt 字面量被 esbuild 的旧目标配置拒绝。
+  切换压缩器不提供 BigInt polyfill；RAW 解码仍要求浏览器原生支持 BigInt、相关类型化数组及所需 WASM 能力。
   在 unpack 前校验传感器尺寸，使用 half-size、相机白平衡、8 位 sRGB 生成预览，再将显示长边限制为 4096。
   LibRaw 的 processed image 已应用相机方向，不再次旋转；完成/失败释放句柄，关闭面板释放 WASM 内存。
   RAW 显色与相机软件可能不同，不做 RAW 编辑，不承诺所有相机/压缩组合可读。

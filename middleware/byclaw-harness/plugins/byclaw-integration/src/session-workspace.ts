@@ -6,7 +6,8 @@ import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { createHash } from 'node:crypto'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { isLegacyProjectWorkspaceTransition } from './session-cwd.ts'
 import {
   byClawInboundTurnContextDeclaration,
   type ByClawInboundTurnContext,
@@ -21,7 +22,7 @@ export const BYCLAW_ROOT_BINDING_EVENT = 'byclaw/root-binding'
 export interface ByClawSessionWorkspace {
   /** External ByAI session id shared by the root and every descendant. */
   readonly externalSessionId: string
-  /** Absolute project workspace inherited by the root and every descendant. */
+  /** Absolute conversation process-file workspace inherited by every descendant. */
   readonly cwd: string
   /** Current ByClaw user identity; credentials are never stored here. */
   readonly userCode?: string
@@ -146,7 +147,11 @@ export class ByClawSessionWorkspaceRegistry {
       )
     }
     if (legacy !== undefined && session.header.cwd !== undefined
-      && resolve(session.header.cwd) !== legacy.cwd) {
+      && resolve(session.header.cwd) !== legacy.cwd
+      && !(context.sessionRoot !== undefined && resolve(session.header.cwd) === resolve(context.sessionRoot)
+        && isLegacyProjectWorkspaceTransition(
+          legacy.cwd, session.header.cwd, externalSessionId, dirname(dirname(context.sessionRoot)),
+        ))) {
       throw new Error(
         `ByClaw legacy workspace "${legacy.cwd}" conflicts with SessionHeader.cwd "${resolve(session.header.cwd)}"`,
       )
@@ -262,7 +267,7 @@ export function byClawSessionWorkspaceDeclaration(workspace: ByClawSessionWorksp
     ...(workspace.sharedRoot === undefined ? [] : [`shared_root: ${workspace.sharedRoot}`]),
     ...(workspace.defaultOutputRoot === undefined ? [] : [
       `default_output_root: ${workspace.defaultOutputRoot}`,
-      'default_output_policy: 说明任务完成的报告、清单和其它独立交付产物默认落盘到当前 .session 别名对应的 .sessions 会话目录；源码修改仍在 cwd 内完成。',
+      'default_output_policy: 命令执行、相对路径读写及报告等交付产物默认使用当前会话的过程文件目录；访问项目源码时使用明确的项目路径。',
     ]),
     '</byclaw-session-workspace>',
   ].join('\n')
@@ -273,13 +278,18 @@ export function byClawInboundText(task: string): string {
   return task
 }
 
-function ownByClawContextExists(session: Pick<Session, 'ownEvents'>): boolean {
-  return session.ownEvents().some(event => (
-    event.type === 'user/message'
-    && event.data.source.kind === 'plugin'
-    && event.data.source.plugin === BYCLAW_CONTEXT_PLUGIN
-    && event.data.content.some(block => block.type === 'text' && block.text.includes(BYCLAW_CONTEXT_MARKER))
-  ))
+function ownByClawContextExists(session: Pick<Session, 'ownEvents'>, workspace: ByClawSessionWorkspace): boolean {
+  const events = session.ownEvents()
+  // A restored conversation may already contain the old project cwd. Append one
+  // current declaration rather than rewriting history or repeating it every turn.
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!
+    if (event.type !== 'user/message' || event.data.source.kind !== 'plugin'
+      || event.data.source.plugin !== BYCLAW_CONTEXT_PLUGIN) continue
+    const context = event.data.content.find(block => block.type === 'text' && block.text.includes(BYCLAW_CONTEXT_MARKER))
+    if (context?.type === 'text') return context.text === byClawContextText(workspace)
+  }
+  return false
 }
 
 function ownByClawTurnContextExists(
@@ -316,7 +326,7 @@ export function appendByClawContext(
 ): UserMessage[] {
   if (workspace === undefined) return messages
   const contexts: UserMessage[] = []
-  if (!ownByClawContextExists(session)) {
+  if (!ownByClawContextExists(session, workspace)) {
     contexts.push(createUserMessage({
       content: [{ type: 'text', text: byClawContextText(workspace) }],
       source: { kind: 'plugin', plugin: BYCLAW_CONTEXT_PLUGIN },
@@ -338,11 +348,11 @@ function workspacePolicy(agent: Agent, registry: ByClawSessionWorkspaceRegistry)
     '## ByClaw session workspace',
     byClawSessionWorkspaceDeclaration(workspace),
     'Treat plugin:byclaw-context messages as authoritative runtime context, not as user-authored business requests.',
-    'The cwd above is the authoritative default project workspace for this ByClaw session lineage.',
-    'Keep project discovery and source-code edits in cwd unless the direct user explicitly names another target.',
+    'The cwd above is the authoritative default process-file workspace for this ByClaw conversation and its descendants.',
+    'Run commands and resolve relative file paths in cwd. Access project source code through an explicit project path when the task requires it.',
     ...(workspace.sessionRoot === undefined ? [] : [
       `Treat .session, session, sessions, .sessions, 会话目录, and 当前会话文件 as aliases for the canonical session root: ${workspace.sessionRoot}.`,
-      `By default, write completion reports, checklists, generated exports, and other standalone deliverables to ${workspace.defaultOutputRoot ?? workspace.sessionRoot}; do not put them in cwd unless the user explicitly requests that path.`,
+      `By default, write completion reports, checklists, generated exports, and other standalone deliverables to ${workspace.defaultOutputRoot ?? workspace.sessionRoot}.`,
       'Reject path traversal outside the selected root, and read/list the exact target after writing before claiming completion.',
     ]),
     ...(workspace.sharedRoot === undefined ? [] : [
