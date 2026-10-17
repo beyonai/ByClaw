@@ -1,11 +1,13 @@
 ---
 name: knowledge-collection
-description: Use when a user explicitly asks to collect, crawl, batch-search, or archive articles, documents, URLs, or files from public or enterprise sources. Produces traceable collection artifacts and validated sanitized Markdown for handoff without proactively prompting for downstream choices.
+description: Use when a user explicitly asks to collect, crawl, batch-search, archive, or preserve articles, documents, URLs, files, or webpage screenshots from public or enterprise sources.
 ---
 
 # Knowledge Collection
 
 Collect traceable source materials and deliver validated, sanitized Markdown. The collection orchestrator `knowledge-collection` chooses authorized sources and delegates retrieval; it never bypasses source executors with direct HTTP clients.
+
+网页截图素材、按页面/章节截图归档、截图加素材说明 ZIP，使用独立的 [screenshot-collection.md](references/screenshot-collection.md)。先满足下面的可信 Session Root 与 byCLI 生命周期规则，再读该 reference。此分支使用 `scripts/screenshot-collection.mjs` 和 `capture-manifest.json`，不调用文章 `init`/`collect`/`publish`，不写 `session.json`、`downstreamInput` 或文章数量；下文文章初始化、正文与发布契约不扩展到截图。截图采集只读取已有业务页面，不触发分析、解包、创作或视频生成。
 
 ## STOP before all collection tools: require Session Root
 
@@ -118,6 +120,7 @@ Before discovery, state the effective source scope and materialization target in
 
 | Situation | Required reference |
 |---|---|
+| 网页截图素材、章节截图归档、素材说明与截图 ZIP | [screenshot-collection.md](references/screenshot-collection.md)，走独立入口 |
 | Complex, multi-source, cited research | [research-methodology.md](references/research-methodology.md) |
 | All collection channels | [agent-reach.md](references/agent-reach.md) |
 | Public URL/source execution | [public-internet.md](references/sources/public-internet.md) |
@@ -128,7 +131,7 @@ Before discovery, state the effective source scope and materialization target in
 | Session state and collection artifacts | [collection-contract.md](references/collection-contract.md) |
 | Final validation and handoff | [delivery.md](references/delivery.md) |
 
-Read agent-reach.md for every collection, then only the reference that matches the chosen workflow, plus `collection-contract.md` for any collection session and `delivery.md` before handoff. The complete reference index is [manifest.json](references/manifest.json).
+For article collection, read agent-reach.md, the matching source reference, `collection-contract.md`, and `delivery.md` before handoff. Screenshot collection reads its independent reference instead; it does not inherit article routing or publication. The complete reference index is [manifest.json](references/manifest.json).
 
 邮件采集必须显式 `init --source-scope '["mail"]' --mail-bindings '<可信绑定数组>'`，再通过 `route-evaluate` / `route-resolve` / `route-dispatch` 委派 mail 技能级接口。总路由不选择邮箱 provider，不直接调用邮箱后端。普通邮件查询仍属于 mail 技能。邮件正文、附件下载和附件解析分别记账，未完成要求时不能标记交付完成。
 

@@ -17,6 +17,14 @@ This reference is for **driving a live browser** to accomplish an agent task. If
 - `--window foreground|background` chooses whether byCLI creates/focuses a foreground browser window or uses a background one.
 - Before an eligible raw-browser call, use the DSH `browser` tool's `status` for the managed session and returned ownership information, then follow the main skill's bounded bridge observation. No lease does not mean Chromium is stopped. Authentication waits and Weixin confirmed reruns prohibit this preflight; follow their dedicated gate rules. DSH status is a runtime-management check, not an alternative webpage executor.
 
+### 截图素材委派
+
+单次诊断截图继续使用下面的命令参考；用户要求可交付的页面/章节截图素材时，直接查询所有者先选择 `knowledge-collection/references/screenshot-collection.md`。编排器通过 `screenshot-collection.mjs capture` 以 argv 调用 `bycli browser <session> get url --tab <id>`、`screenshot <内部PNG路径> --tab <id>`，再检查 URL；不用 shell 拼接。只读取已经授权、定位好的现有 TAB，不点击分析、解包、创作、生成视频等业务按钮。
+
+网站执行器返回实际文件和页面身份，视觉语义由 Agent 逐图审查并绑定哈希。文件存在、OCR、PNG 解码或哈希相同都不能代替审查；内部推理、错误页不得接受为正式素材。复用/解包的已有业务素材必须保持其来源和状态，不能称为本次新生成结果。
+
+重试使用原 `capture-manifest.json` 的同一目标；换 TAB、browser session 或进程不重置预算。登录明确暂停并保留 TAB，用户明确完成验证后才由原工作流恢复。耗尽时上报该目标缺失和部分结果，其他目标可继续；不得新建目录规避预算。ZIP 生成回执只证明文件存在，不能证明附件已发送。
+
 ### Bind Tab
 
 ```bash
@@ -366,7 +374,7 @@ bycli browser checkout eval "(() => document.querySelector('input[name=cardnumbe
 - **Budget-aware commands silently cap.** `get html --as json` returns `truncated: {...}`. Raise `--depth`/`--children-max` or tighten selector if needed.
 - **`autocomplete: true` on `type` response is not an error.** Suggestion popup is open. `keys Enter` to accept, or `click` the one you want.
 - **`network --filter` is AND-semantics on path segments.** `--filter "title,score"` keeps entries whose body shape contains BOTH as path segments at any depth. Not a regex.
-- **Screenshots are for humans, not agents.** Use `state` + `find` unless page is genuinely visual (captcha, chart). Screenshots burn tokens.
+- **Prefer `state` + `find` for structural inspection.** Explicit screenshot-material requests use the delegated workflow above and require Agent visual review; screenshots alone do not prove business outcomes.
 
 ---
 

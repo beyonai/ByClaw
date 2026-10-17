@@ -17,6 +17,9 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(prefix = "sandbox.cleanup", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SandboxCleanupJob {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution platformExecution;
+
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxCleanupJob.class);
 
     @Autowired
@@ -29,6 +32,7 @@ public class SandboxCleanupJob {
         initialDelayString = "${sandbox.cleanup.initial-delay:35000}",
         scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
     public void cleanupExpiredSandboxes() {
+        if (!platformExecution.isLegacyExecutor()) return;
         LOGGER.debug("开始执行沙箱清理任务");
         try {
             SandboxLifecycleJobReport report = sandboxService.cleanupExpiredSandboxes();

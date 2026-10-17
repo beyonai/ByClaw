@@ -10,6 +10,11 @@
   ],
   "references": [
     {
+      "name": "screenshot-collection",
+      "path": "screenshot-collection.md",
+      "description": "独立截图素材闭环：显式目标、只读 byCLI 采集、持久预算、Agent 哈希绑定审查、完整 PNG 校验与 ZIP 白名单。"
+    },
+    {
       "name": "agent-reach",
       "path": "agent-reach.md",
       "description": "统一渠道选路、能力协商、执行计划、邮件接口与兼容工作流边界。"

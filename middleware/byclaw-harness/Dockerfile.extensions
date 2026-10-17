@@ -112,7 +112,8 @@ USER root
 # Keep bubblewrap available for optional DSH sandbox backends; group members do not require it.
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/*
 
-ARG BYCLI_VERSION=2.1.61
+ARG BYCLI_VERSION=2.1.69
+ARG BYCLI_EXTENSION_VERSION=2.1.25
 
 ENV DSH_HOME=/home/byclaw/.dsh \
     BYCLAW_DSH_MANAGED_HOME=/opt/byclaw/dsh-managed \
@@ -240,6 +241,7 @@ RUN python -m pip install --no-cache-dir \
 RUN npm install --global --ignore-scripts "@sovovs/bycli@${BYCLI_VERSION}" \
     && test "$(bycli --version)" = "${BYCLI_VERSION}" \
     && test -f /opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json \
+    && node -e 'const manifest = require("/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json"); if (manifest.version !== process.argv[1] || !manifest.permissions?.includes("system.display")) process.exit(1)' "${BYCLI_EXTENSION_VERSION}" \
     && npm cache clean --force
 RUN ln -sf /usr/local/bin/byclaw-bycli-managed /opt/nvm/current/bin/bycli
 

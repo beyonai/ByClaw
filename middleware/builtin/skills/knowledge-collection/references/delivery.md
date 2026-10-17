@@ -2,6 +2,8 @@
 
 本文件定义采集编排器 `knowledge-collection` 的终点。采集完成后停止；根 Agent 或其他下游 Agent 决定是否继续执行其他任务。
 
+本文的 Markdown、`deliveryComplete` 和 `publish` 仅适用于文章/文档正文。截图 ZIP 交付遵守 [screenshot-collection.md](screenshot-collection.md)：只生成内部会话文件和生成回执；不调用文章发布器，不探测用户指定外部路径，不凭回执声称附件已发送。用户指定保存位置仍受本文的发布前不可探测规则约束；截图 helper 没有外部发布能力。
+
 ## 内部校验输入
 
 `status.downstreamInput.files` 是发布前的唯一权威正文清单。每个文件必须同时满足：
