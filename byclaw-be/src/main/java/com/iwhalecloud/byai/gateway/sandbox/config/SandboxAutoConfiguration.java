@@ -44,15 +44,16 @@ public class SandboxAutoConfiguration {
         SandboxServiceSpecRepository sandboxServiceSpecRepository,
         FeignWhaleAgentService feignWhaleAgentService,
         OpenSandboxClient openSandboxClient,
-        @Value("${file.storage.type:minio}") String storageType) {
+        @Value("${file.storage.type:minio}") String storageType,
+        com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformGateway) {
         SandboxRuntimeProvider provider;
         if (StorageType.WHALE_AGENT.equalsIgnoreCase(storageType)) {
             provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
         } else {
             provider = new OpenSandboxRuntimeProvider(openSandboxClient, properties);
         }
-        return new StandardSandboxLifecycleService(properties, stringRedisTemplate,
-            sandboxServiceSpecRepository, specProcessor, provider);
+        return com.iwhalecloud.byai.gateway.sandbox.platform.PlatformInterfaceRouting.create(SandboxLifecycleFacade.class,
+            new StandardSandboxLifecycleService(properties, stringRedisTemplate, sandboxServiceSpecRepository, specProcessor, provider), platformGateway, true);
     }
 
     @Bean

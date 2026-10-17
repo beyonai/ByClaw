@@ -1,19 +1,11 @@
 package com.iwhalecloud.byai.gateway.sandbox.controller;
 
-import jakarta.servlet.http.HttpServletResponse;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.common.constants.Constants;
-import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
-import com.iwhalecloud.byai.gateway.sandbox.service.ingress.openclaw.OpenClawUiProxyPaths;
-import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,12 +14,17 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
@@ -35,26 +32,29 @@ import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceProfileEntity;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxBrowserNavigationService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthConfigService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthWatermarkModelService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthWatermarkService;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxBrowserNavigationService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxResizeService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
-import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.ingress.openclaw.OpenClawUiProxyPaths;
 import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxResizeRecordMapper;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -66,6 +66,15 @@ import lombok.extern.slf4j.Slf4j;
 @Tag(name = "沙箱管理", description = "提供沙箱心跳保活、状态查询等功能")
 @Slf4j
 public class SandboxController {
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformRemote;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution platformBackgroundExecution;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.iwhalecloud.byai.gateway.sandbox.platform.PlatformAlertForwarder> platformAlertForwarder;
+
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -560,6 +569,10 @@ public class SandboxController {
     @Operation(summary = "动态调整沙箱资源规格", description = "通过 OpenSandbox 执行沙箱扩缩容，并记录审计流水")
     public ResponseUtil resizeSandbox(@RequestBody Map<String, Object> params) {
         try {
+            if (platformRemote != null && platformRemote.isRemote()) {
+                ResponseUtil result = platformRemote.controller("resize", params);
+                return result.isSuccess() ? result : ResponseUtil.fail("沙箱扩缩容处理失败: " + result.getMsg());
+            }
             SsSandboxResizeRecord record = sandboxResizeService.handleResizeRequest(params);
             return ResponseUtil.successResponse(record);
         }
@@ -570,8 +583,12 @@ public class SandboxController {
 
     @PostMapping("/autoscale/alerts")
     @Operation(summary = "Prometheus 沙箱扩缩容告警入口", description = "接收 Alertmanager webhook，生成动态扩缩容审计记录并按目标规格调用 OpenSandbox")
-    public ResponseUtil handleAutoscaleAlert(@RequestBody Map<String, Object> payload, HttpServletResponse response) {
+    public ResponseUtil handleAutoscaleAlert(@RequestBody Map<String, Object> payload, HttpServletResponse response,
+        @RequestHeader(value="beyond-token", required=false) String platformToken) {
         try {
+            if (!platformBackgroundExecution.isLegacyExecutor()) {
+                return platformAlertForwarder.getObject().forward(payload, platformToken);
+            }
             SsSandboxResizeRecord record = sandboxResizeService.handlePrometheusAlert(payload);
             if (record != null && "FAILED".equals(record.getStatus())) {
                 response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -581,25 +598,29 @@ public class SandboxController {
         }
         catch (Exception e) {
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return ResponseUtil.fail("沙箱扩缩容告警处理失败: " + e.getMessage());
+            return ResponseUtil.fail(platformBackgroundExecution.isLegacyExecutor()
+                ? "沙箱扩缩容告警处理失败: " + e.getMessage() : "沙箱扩缩容告警远程处理失败");
         }
     }
 
     @GetMapping(value = "/autoscale/boundary-blacklist/metrics", produces = MediaType.TEXT_PLAIN_VALUE)
     @Operation(summary = "Prometheus 沙箱扩缩容边界黑名单指标", description = "输出已达到最高/最低规格的运行中沙箱，用于 Prometheus 过滤无意义的同方向告警")
     public String getAutoscaleBoundaryBlacklistMetrics() {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.metrics();
         return sandboxResizeService.buildBoundaryBlacklistMetrics();
     }
 
     @PostMapping("/health/config/getGlobalSwitch")
     @Operation(summary = "查询沙箱健康检测全局开关", description = "查询硬开关和管理端运行期开关状态")
     public ResponseUtil getSandboxHealthGlobalSwitch() {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/config/getGlobalSwitch",java.util.Collections.emptyMap());
         return ResponseUtil.successResponse(sandboxHealthConfigService.getGlobalSwitch());
     }
 
     @PostMapping("/health/config/saveGlobalSwitch")
     @Operation(summary = "保存沙箱健康检测全局开关", description = "保存管理端运行期开关；硬开关仍由配置文件控制")
     public ResponseUtil saveSandboxHealthGlobalSwitch(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/config/saveGlobalSwitch",params);
         Object enabledObj = params.get("enabled");
         boolean enabled = enabledObj instanceof Boolean
             ? (Boolean) enabledObj
@@ -611,6 +632,7 @@ public class SandboxController {
     @PostMapping("/health/watermark/list")
     @Operation(summary = "查询沙箱健康水位模型", description = "按服务类型、规格和启用状态查询水位模型")
     public ResponseUtil listSandboxHealthWatermarkModels(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/list",params);
         String serviceType = stringParam(params.get("serviceType"));
         String profileKey = stringParam(params.get("profileKey"));
         Integer enabled = params.containsKey("enabled") && params.get("enabled") != null
@@ -622,6 +644,7 @@ public class SandboxController {
     @PostMapping("/health/watermark/save")
     @Operation(summary = "保存沙箱健康水位模型", description = "新增或更新沙箱健康水位模型")
     public ResponseUtil saveSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/save",params);
         try {
             return ResponseUtil.successResponse(
                 sandboxHealthWatermarkModelService.save(sandboxHealthWatermarkModelService.fromParams(params)));
@@ -634,6 +657,7 @@ public class SandboxController {
     @PostMapping("/health/watermark/delete")
     @Operation(summary = "删除沙箱健康水位模型", description = "物理删除指定水位模型")
     public ResponseUtil deleteSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/delete",params);
         Long id = parseLongParam(params.get("id"));
         if (id == null) {
             return ResponseUtil.fail("id is required");
@@ -645,6 +669,7 @@ public class SandboxController {
     @PostMapping("/health/watermark/enable")
     @Operation(summary = "启停沙箱健康水位模型", description = "启用或停用指定水位模型")
     public ResponseUtil enableSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/enable",params);
         Long id = parseLongParam(params.get("id"));
         if (id == null) {
             return ResponseUtil.fail("id is required");
@@ -665,6 +690,7 @@ public class SandboxController {
     @PostMapping("/health/watermark/preview")
     @Operation(summary = "预览沙箱健康水位判定", description = "输入 CPU/内存水位，按生效模型返回健康级别")
     public ResponseUtil previewSandboxHealthWatermark(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/preview",params);
         String serviceType = stringParam(params.get("serviceType"));
         String profileKey = stringParam(params.get("profileKey"));
         Double cpuRequestRatio = parseDoubleParam(params.get("cpuRequestRatio"));
@@ -676,6 +702,7 @@ public class SandboxController {
     @PostMapping("/listResizeRecords")
     @Operation(summary = "查询沙箱扩缩容记录", description = "按沙箱记录ID、用户编码或 sandboxId 查询扩缩容审计流水")
     public ResponseUtil listResizeRecords(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("listResizeRecords",params);
         Long sandboxRecordId = parseLongParam(params.get("sandboxRecordId"));
         if (sandboxRecordId == null) {
             sandboxRecordId = parseLongParam(params.get("recordId"));
@@ -701,6 +728,7 @@ public class SandboxController {
     @PostMapping("/listServiceProfiles")
     @Operation(summary = "查询沙箱规格分层", description = "查询同一沙箱类型下可用的资源规格分层")
     public ResponseUtil listServiceProfiles(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("listServiceProfiles",params);
         String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
             SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
         boolean enabledOnly = !"false".equalsIgnoreCase(String.valueOf(params.getOrDefault("enabledOnly", "true")));
@@ -712,6 +740,7 @@ public class SandboxController {
     @PostMapping("/saveServiceProfile")
     @Operation(summary = "保存沙箱服务规格档位", description = "新增或更新同一沙箱服务类型下的规格档位配置")
     public ResponseUtil saveServiceProfile(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("saveServiceProfile",params);
         String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
             SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
         String profileKey = stringParam(params.get("profileKey"));
@@ -769,6 +798,7 @@ public class SandboxController {
     @PostMapping("/deleteServiceProfile")
     @Operation(summary = "禁用沙箱服务规格档位", description = "禁用指定规格档位，避免影响历史扩缩容记录")
     public ResponseUtil deleteServiceProfile(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("deleteServiceProfile",params);
         Long id = parseLongParam(params.get("id"));
         if (id == null) {
             String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
@@ -800,6 +830,7 @@ public class SandboxController {
     @PostMapping("/listServiceSpec")
     @Operation(summary = "查询沙箱服务规格配置列表", description = "查询所有沙箱服务规格配置")
     public ResponseUtil listServiceSpec() {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("listServiceSpec",java.util.Collections.emptyMap());
         List<SandboxServiceSpecEntity> list = sandboxServiceSpecEntityMapper.selectList(null);
         List<Map<String, String>> result = list.stream().map(entity -> {
             Map<String, String> map = new HashMap<>();
@@ -825,6 +856,7 @@ public class SandboxController {
     @PostMapping("/getServiceSpec")
     @Operation(summary = "查询沙箱服务规格配置", description = "根据 serviceKey 查询沙箱服务规格配置")
     public ResponseUtil getServiceSpec(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("getServiceSpec",params);
         String serviceKey = (String) params.get("serviceKey");
         if (serviceKey == null || serviceKey.trim().isEmpty()) {
             return ResponseUtil.fail("serviceKey is required");
@@ -856,6 +888,7 @@ public class SandboxController {
     @PostMapping("/saveServiceSpec")
     @Operation(summary = "保存或更新沙箱服务规格配置", description = "保存或更新沙箱服务规格配置，serviceKey 不存在则新增，存在则更新")
     public ResponseUtil saveServiceSpec(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("saveServiceSpec",params);
         String serviceKey = (String) params.get("serviceKey");
         String specJson = (String) params.get("specJson");
         String templateJson = (String) params.get("templateJson");
@@ -910,6 +943,7 @@ public class SandboxController {
     @PostMapping("/deleteServiceSpec")
     @Operation(summary = "删除沙箱服务规格配置", description = "根据 serviceKey 删除沙箱服务规格配置")
     public ResponseUtil deleteServiceSpec(@RequestBody Map<String, Object> params) {
+        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("deleteServiceSpec",params);
         String serviceKey = (String) params.get("serviceKey");
         if (serviceKey == null || serviceKey.trim().isEmpty()) {
             return ResponseUtil.fail("serviceKey is required");

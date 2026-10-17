@@ -17,6 +17,9 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 @ConditionalOnProperty(prefix = "sandbox.renew", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SandboxRenewJob {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution platformExecution;
+
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxRenewJob.class);
 
     private final SandboxService sandboxService;
@@ -29,6 +32,7 @@ public class SandboxRenewJob {
         initialDelayString = "${sandbox.renew.initial-delay:20000}",
         scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
     public void renewDueSandboxes() {
+        if (!platformExecution.isLegacyExecutor()) return;
         try {
             SandboxLifecycleJobReport report = sandboxService.renewDueSandboxes();
             LOGGER.debug("沙箱续约任务执行完成，候选 {} 个，扫描 {} 个，续约 {} 个，跳过 {} 个，失败 {} 个，成功记录：{}，跳过记录：{}，失败记录：{}",

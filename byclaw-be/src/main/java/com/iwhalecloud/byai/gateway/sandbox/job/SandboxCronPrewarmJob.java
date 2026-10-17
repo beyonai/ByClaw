@@ -21,6 +21,9 @@ import com.iwhalecloud.byai.gateway.sandbox.service.cronprewarm.SandboxCronPrewa
 @ConditionalOnProperty(prefix = "sandbox.cron-prewarm", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SandboxCronPrewarmJob {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution platformExecution;
+
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxCronPrewarmJob.class);
 
     private static final String SCAN_LOCK_KEY = "sandbox:cron-prewarm:scan-lock";
@@ -39,6 +42,7 @@ public class SandboxCronPrewarmJob {
         initialDelayString = "${sandbox.cron-prewarm.initial-delay:5000}",
         scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
     public void prewarmDueCronSandboxes() {
+        if (!platformExecution.isLegacyExecutor()) return;
         String lockValue = UUID.randomUUID().toString();
         boolean locked = false;
         try {

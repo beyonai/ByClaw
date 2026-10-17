@@ -77,6 +77,11 @@ import redis.clients.jedis.Jedis;
  */
 @Service
 public class SandboxService {
+    @Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway> platformGatewayProvider;
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformGateway() { return platformGatewayProvider.getObject(); }
+    private boolean platformRemote() { return platformGatewayProvider != null && platformGateway().isRemote(); }
+
 
     private static final String GATEWAY_TOKEN_METADATA_KEY = "gateway_token";
 
@@ -362,6 +367,7 @@ public class SandboxService {
 
     private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
         String serviceType, boolean waitForWorkerReady, SsSandboxRecord recoveryTarget) {
+        if (platformRemote()) return platformGateway().convert(platformGateway().service("restart",platformGateway().params("userCode",userCode,"resourceId",resourceId,"targetAgentType",targetAgentType,"serviceType",serviceType,"waitForWorkerReady",waitForWorkerReady,"recoveryTarget",recoveryTarget)),SandboxLaunchData.class);
         SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
@@ -448,6 +454,7 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing) {
+        if (platformRemote()) return platformGateway().convert(platformGateway().service("launch", platformGateway().params("userCode",userCode,"resourceId",resourceId,"routing",platformGateway().route(routing))),SandboxLaunchData.class);
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
         boolean locked = false;
@@ -519,6 +526,7 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     public SandboxLaunchData launchSandboxAwait(String userCode, Long resourceId) {
+        if (platformRemote()) return platformGateway().convert(platformGateway().service("launch-await",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxLaunchData.class);
         SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
 
         // 1. 查询DB是否已有运行中的沙箱记录
@@ -954,6 +962,7 @@ public class SandboxService {
     }
 
     private boolean heartbeatRunningSandboxType(String userCode, String sandboxType) {
+        if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode,"sandboxType",sandboxType)));
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("running-state 心跳失败：无法获取用户编码");
             return false;
@@ -990,6 +999,7 @@ public class SandboxService {
     }
 
     private boolean heartbeatRunningSandboxesByUser(String userCode, Long resourceId) {
+        if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode)));
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
         if (records == null || records.isEmpty()) {
             LOGGER.debug("心跳跳过：未找到运行中的沙箱记录，用户编码：{}，资源ID：{}", userCode, resourceId);
@@ -1115,6 +1125,7 @@ public class SandboxService {
      * @return 最新沙箱信息；未命中运行中沙箱时返回 null
      */
     public SandboxInfo renewSandbox(String userCode, Long resourceId) {
+        if (platformRemote()) return platformGateway().convert(platformGateway().service("renew",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxInfo.class);
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("沙箱续约失败：无法获取用户编码，资源ID：{}", resourceId);
             return null;
@@ -1166,6 +1177,7 @@ public class SandboxService {
      * @return 沙箱信息，不存在时返回 null
      */
     public List<SandboxInfo> sandboxInfo(String userCode) {
+        if (platformRemote()) return (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info",platformGateway().params("userCode",userCode)),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
         if (StringUtils.isBlank(userCode)) {
             return null;
         }
@@ -1197,6 +1209,7 @@ public class SandboxService {
      * 释放指定用户的沙箱；未指定资源时可按沙箱服务类型精确释放。
      */
     public void removeSandbox(String userCode, Long resourceId, String requestedSandboxType) {
+        if (platformRemote()) { platformGateway().service("remove",platformGateway().params("userCode",userCode,"resourceId",resourceId,"sandboxType",requestedSandboxType));return; }
         String releaseReason = manualReleaseReason(userCode);
         String sandboxType = StringUtils.trimToNull(requestedSandboxType);
         List<Long> effectiveResourceIds = new ArrayList<>();
@@ -1221,6 +1234,7 @@ public class SandboxService {
     }
 
     public void removeSandboxById(Long id) {
+        if (platformRemote()) { platformGateway().service("remove-id",platformGateway().params("id",id));return; }
         if (id == null) {
             throw new BdpRuntimeException("sandbox record id is required");
         }
@@ -1255,6 +1269,7 @@ public class SandboxService {
     }
 
     public void updateSandboxById(Long id, Integer autoRelease) {
+        if (platformRemote()) { platformGateway().service("update-id",platformGateway().params("id",id,"autoRelease",autoRelease));return; }
         SsSandboxRecord record = sandboxRecordMapper.selectById(id);
         if (record == null) {
             throw new BdpRuntimeException("sandbox record not found");
@@ -1994,6 +2009,7 @@ public class SandboxService {
      * @param record 沙箱记录
      */
     private void doRemoveSandbox(SsSandboxRecord record, String releaseReason) {
+        if (platformRemote()) { platformGateway().service("remove-record",platformGateway().params("record",record,"reason",releaseReason));return; }
         Date now = new Date();
         int marked = sandboxRecordMapper.markReleasing(record.getId(), releaseReason, now, record.getLockVersion());
         if (marked == 0 && STATUS_RUNNING.equals(record.getStatus())) {
@@ -2038,6 +2054,7 @@ public class SandboxService {
     }
 
     private boolean markStartingSandboxReleased(SsSandboxRecord record, String releaseReason) {
+        if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("remove-starting",platformGateway().params("record",record,"reason",releaseReason)));
         Date now = new Date();
         int marked = sandboxRecordMapper.markStartingReleased(record.getId(), releaseReason, now,
             record.getLockVersion());
@@ -2707,4 +2724,6 @@ public class SandboxService {
             + ", version=" + record.getVersion()
             + ", lockVersion=" + record.getLockVersion();
     }
+
+
 }

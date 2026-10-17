@@ -40,6 +40,9 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 public class OpenSandboxClient {
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway> platformGateway;
+
 
     private static final Logger log = LoggerFactory.getLogger(OpenSandboxClient.class);
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
@@ -191,6 +194,8 @@ public class OpenSandboxClient {
     }
 
     public SandboxDetail getSandboxIfExists(String sandboxId) {
+        com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway gateway = platformGateway == null ? null : platformGateway.getObject();
+        if (gateway != null && gateway.isRemote()) return gateway.convert(gateway.call("providers", "opensandbox/detail", gateway.params("sandboxId", sandboxId)), SandboxDetail.class);
         SandboxDetail detail = getSandboxIfExistsByUrl(baseUrl + "/v1/sandboxes/" + sandboxId);
         if (detail != null) {
             return detail;
@@ -219,6 +224,8 @@ public class OpenSandboxClient {
     }
 
     public void deleteSandbox(String sandboxId) {
+        com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway gateway = platformGateway == null ? null : platformGateway.getObject();
+        if (gateway != null && gateway.isRemote()) { gateway.call("providers", "opensandbox/delete", gateway.params("sandboxId", sandboxId)); return; }
         String url = baseUrl + "/v1/sandboxes/" + sandboxId;
         log.debug("OpenSandbox沙箱 DELETE {}", url);
         Request httpRequest = newRequestBuilder(url).delete().build();
