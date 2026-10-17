@@ -933,7 +933,7 @@ public class RouteService {
 
         SandboxLaunchData launchData;
         try {
-            launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(userCode, agentId, targetAgentType);
+            launchData = sandboxService.restartSandboxForTargetWithoutWait(userCode, agentId, targetAgentType);
         } catch (Exception e) {
             String failureMessage = resolveSandboxLaunchFailureMessage(e);
             sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd, failureMessage);

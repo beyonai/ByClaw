@@ -195,7 +195,7 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "sendGuardProvider", provider);
         doNothing().doThrow(new IllegalStateException("recalled")).when(guard).beforeSend(ctx);
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
             .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
@@ -228,7 +228,7 @@ class RouteServiceTest {
     void route_retriesOnceAfterSandboxReady_whenGatewaySendFailsWithRetriableError() throws Exception {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
@@ -244,12 +244,12 @@ class RouteServiceTest {
         InOrder inOrder = inOrder(gatewayClient, sandboxService);
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        inOrder.verify(sandboxService).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
+        inOrder.verify(sandboxService).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
         inOrder.verify(sandboxService).waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
-        verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService, times(1)).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
@@ -269,7 +269,7 @@ class RouteServiceTest {
     void route_throwsAfterSingleRetry_whenGatewaySendStillFails() {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
@@ -281,7 +281,7 @@ class RouteServiceTest {
                 .isInstanceOf(BdpRuntimeException.class)
                 .hasMessage("Gateway SDK 消息发送失败: agent unavailable");
 
-        verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService, times(1)).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
         verify(chatStreamRuntimeCoordinator, times(1)).stopIfStarted(ctx, true);
@@ -291,7 +291,7 @@ class RouteServiceTest {
     void route_emitsFailureThought_whenSandboxNeverBecomesReady() {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L, 101L, 102L, 103L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(false, false, false);
 
@@ -317,7 +317,7 @@ class RouteServiceTest {
     void route_emitsModelConfigMessage_whenSandboxRestartFailsWithBusinessException() {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenThrow(new BdpRuntimeException(I18nUtil.get("sandbox.launch.model.config.required")));
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
@@ -342,7 +342,7 @@ class RouteServiceTest {
     void route_retriesByclawCodeSandboxWithUserScopedTargetAgentType() throws Exception {
         ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", 123L, "BYCLAW_CODE_u1"))
                 .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
@@ -361,7 +361,7 @@ class RouteServiceTest {
 
         assertThat(targetAgentTypeCaptor.getAllValues())
                 .containsExactly("BYCLAW_CODE_u1", "BYCLAW_CODE_u1");
-        verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
+        verify(sandboxService, times(1)).restartSandboxForTargetWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
     }
 
     @ParameterizedTest

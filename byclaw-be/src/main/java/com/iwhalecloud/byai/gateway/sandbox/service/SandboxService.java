@@ -345,6 +345,14 @@ public class SandboxService {
         return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, null, false);
     }
 
+    /** 对话入口：启动类型与已经解析的目标 Worker 一致，legacy/remote 共用同一路由。 */
+    public SandboxLaunchData restartSandboxForTargetWithoutWait(String userCode, Long resourceId,
+        String targetAgentType) {
+        SandboxLaunchRouting routing = SandboxTargetRouting.resolve(userCode, targetAgentType,
+            () -> sandboxLaunchContextFactory.resolveRouting(resourceId, userCode));
+        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, null, false, null, routing);
+    }
+
     public SandboxLaunchData restartSandboxAfterRemoteExitWithoutWait(String userCode, Long resourceId,
         String targetAgentType, String serviceType) {
         return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, serviceType, false);
@@ -367,8 +375,22 @@ public class SandboxService {
 
     private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
         String serviceType, boolean waitForWorkerReady, SsSandboxRecord recoveryTarget) {
-        if (platformRemote()) return platformGateway().convert(platformGateway().service("restart",platformGateway().params("userCode",userCode,"resourceId",resourceId,"targetAgentType",targetAgentType,"serviceType",serviceType,"waitForWorkerReady",waitForWorkerReady,"recoveryTarget",recoveryTarget)),SandboxLaunchData.class);
-        SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
+        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, serviceType,
+            waitForWorkerReady, recoveryTarget, null);
+    }
+
+    private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
+        String serviceType, boolean waitForWorkerReady, SsSandboxRecord recoveryTarget,
+        SandboxLaunchRouting resolvedRouting) {
+        if (platformRemote()) {
+            Map<String, Object> params = platformGateway().params("userCode", userCode, "resourceId", resourceId,
+                "targetAgentType", targetAgentType, "serviceType", serviceType,
+                "waitForWorkerReady", waitForWorkerReady, "recoveryTarget", recoveryTarget);
+            if (resolvedRouting != null) params.put("routing", platformGateway().route(resolvedRouting));
+            return platformGateway().convert(platformGateway().service("restart", params), SandboxLaunchData.class);
+        }
+        SandboxLaunchRouting routing = resolvedRouting != null ? resolvedRouting
+            : sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
         boolean locked = false;
@@ -1083,14 +1105,10 @@ public class SandboxService {
         catch (Exception exception) {
             LOGGER.warn("读取沙箱 worker lease 失败，workerId={}，recordId={}", workerId, record.getId(), exception);
         }
-        try (Jedis jedis = redisClient.getResource()) {
-            long ttl = jedis.ttl(Constants.RegistryKeys.workerOnlineLease(workerId));
-            if (ttl >= 0) {
-                view.setWorkerLeaseTtlSeconds(ttl);
-            }
-            else if (ttl == -2L && Boolean.FALSE.equals(view.getWorkerOnline())) {
-                view.setWorkerLeaseTtlSeconds(0L);
-            }
+        try {
+            Long ttl = WorkerLeaseTtlSupport.read(redisClient.getCommands(),
+                Constants.RegistryKeys.workerOnlineLease(workerId), view.getWorkerOnline());
+            if (ttl != null) view.setWorkerLeaseTtlSeconds(ttl);
         }
         catch (Exception exception) {
             LOGGER.warn("读取沙箱 worker lease TTL 失败，workerId={}，recordId={}", workerId, record.getId(), exception);

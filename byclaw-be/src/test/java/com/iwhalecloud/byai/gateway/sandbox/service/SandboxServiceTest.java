@@ -422,6 +422,7 @@ class SandboxServiceTest {
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "gatewayWorkerRegistry", workerRegistry);
         ReflectionTestUtils.setField(sandboxService, "redisClient", redisClient);
+        when(redisClient.getCommands()).thenReturn(jedis);
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(9L);
         record.setUserCode("user001");
@@ -431,10 +432,12 @@ class SandboxServiceTest {
         record.setLastAccessTime(lastAccess);
         when(workerRegistry.getWorker("byclaw-dsh-user001"))
             .thenReturn(Map.of("last_seen", 2_000L, "agent_types", List.of("BYCLAW_DSH_user001")));
-        when(redisClient.getResource()).thenReturn(jedis);
         when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease("byclaw-dsh-user001"))).thenReturn(13L);
 
         SandboxRecordView view = sandboxService.buildRecordView(record);
+        verify(redisClient, never()).getResource();
+        verify(redisClient).getCommands();
+        verify(jedis).close();
 
         assertThat(view.getStatus()).isEqualTo("RUNNING");
         assertThat(view.getLastAccessTime()).isEqualTo(lastAccess);
@@ -446,6 +449,7 @@ class SandboxServiceTest {
 
     @Test
     void buildRecordViewSkipsWorkerLookupsForTenantAndHistoricalRecords() {
+        Jedis jedis = mock(Jedis.class);
         WorkerRegistry workerRegistry = mock(WorkerRegistry.class);
         RedisClient redisClient = mock(RedisClient.class);
         SandboxService sandboxService = new SandboxService();
@@ -464,7 +468,7 @@ class SandboxServiceTest {
 
         assertThat(sandboxService.buildRecordView(tenantRecord).getStatus()).isEqualTo("RUNNING");
         assertThat(sandboxService.buildRecordView(releasedRecord).getStatus()).isEqualTo("RELEASED");
-        verifyNoInteractions(workerRegistry, redisClient);
+        verifyNoInteractions(workerRegistry, redisClient, jedis);
     }
 
     @Test
@@ -475,6 +479,7 @@ class SandboxServiceTest {
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "gatewayWorkerRegistry", workerRegistry);
         ReflectionTestUtils.setField(sandboxService, "redisClient", redisClient);
+        when(redisClient.getCommands()).thenReturn(jedis);
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(10L);
         record.setUserCode("user001");
@@ -486,10 +491,12 @@ class SandboxServiceTest {
             .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(true, List.of(dynamicWorkerId)));
         when(workerRegistry.getWorker(dynamicWorkerId))
             .thenReturn(Map.of("last_seen", 3_000L, "agent_types", List.of("BYCLAW_DSH_user001")));
-        when(redisClient.getResource()).thenReturn(jedis);
         when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease(dynamicWorkerId))).thenReturn(11L);
 
         SandboxRecordView view = sandboxService.buildRecordView(record);
+        verify(redisClient, never()).getResource();
+        verify(redisClient).getCommands();
+        verify(jedis).close();
 
         assertThat(view.getWorkerId()).isEqualTo(dynamicWorkerId);
         assertThat(view.getWorkerOnline()).isTrue();
@@ -506,6 +513,7 @@ class SandboxServiceTest {
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "gatewayWorkerRegistry", workerRegistry);
         ReflectionTestUtils.setField(sandboxService, "redisClient", redisClient);
+        when(redisClient.getCommands()).thenReturn(jedis);
         ReflectionTestUtils.setField(sandboxService, "sandboxServiceSpecRepository", specRepository);
         SandboxServiceSpec spec = new SandboxServiceSpec();
         spec.setEnv(Map.of("BYAI_WORKER_AGENT_TYPE", "CUSTOM_RUNTIME"));
@@ -523,10 +531,12 @@ class SandboxServiceTest {
             .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(true, List.of(dynamicWorkerId)));
         when(workerRegistry.getWorker(dynamicWorkerId))
             .thenReturn(Map.of("last_seen", 4_000L, "agent_types", List.of("CUSTOM_RUNTIME_user001")));
-        when(redisClient.getResource()).thenReturn(jedis);
         when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease(dynamicWorkerId))).thenReturn(9L);
 
         SandboxRecordView view = sandboxService.buildRecordView(record);
+        verify(redisClient, never()).getResource();
+        verify(redisClient).getCommands();
+        verify(jedis).close();
 
         assertThat(view.getWorkerId()).isEqualTo(dynamicWorkerId);
         assertThat(view.getWorkerOnline()).isTrue();

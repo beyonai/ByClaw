@@ -40,7 +40,7 @@ class WorkerRouteReadinessServiceTest {
 
         service.ensureReady("u1", null, "BYCLAW_EXE_u1", phase -> { });
 
-        verify(sandboxService, never()).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService, never()).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(sandboxService, never()).waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
     }
 
@@ -49,14 +49,14 @@ class WorkerRouteReadinessServiceTest {
         when(targetAgentResolver.isUserSandboxAgentType("BYCLAW_EXE_u1", "u1")).thenReturn(true);
         when(workerRegistry.hasOnlineAgentType("BYCLAW_EXE_u1", true))
             .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(false, Collections.emptyList()));
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
             .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS))
             .thenReturn(true);
 
         service.ensureReady("u1", null, "BYCLAW_EXE_u1", phase -> { });
 
-        verify(sandboxService).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(sandboxService).waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
     }
 
@@ -67,7 +67,7 @@ class WorkerRouteReadinessServiceTest {
         service.ensureReady("u1", 123L, "BY_SUPER", phase -> { });
 
         verify(workerRegistry, never()).hasOnlineAgentType("BY_SUPER", true);
-        verify(sandboxService, never()).restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BY_SUPER");
+        verify(sandboxService, never()).restartSandboxForTargetWithoutWait("u1", 123L, "BY_SUPER");
     }
 
     @Test
@@ -78,7 +78,7 @@ class WorkerRouteReadinessServiceTest {
         CountDownLatch launchEntered = new CountDownLatch(1);
         CountDownLatch allowLaunchToFinish = new CountDownLatch(1);
         CountDownLatch secondJoinedExistingStart = new CountDownLatch(1);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", 123L, "BYCLAW_CODE_u1"))
             .thenAnswer(invocation -> {
                 launchEntered.countDown();
                 allowLaunchToFinish.await(5, TimeUnit.SECONDS);
@@ -108,7 +108,7 @@ class WorkerRouteReadinessServiceTest {
         }
 
         verify(sandboxService, times(1))
-            .restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
+            .restartSandboxForTargetWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
         verify(sandboxService, times(1))
             .waitWorkerReadySync("BYCLAW_CODE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
     }
@@ -118,7 +118,7 @@ class WorkerRouteReadinessServiceTest {
         when(targetAgentResolver.isUserSandboxAgentType("BYCLAW_EXE_u1", "u1")).thenReturn(true);
         when(workerRegistry.hasOnlineAgentType("BYCLAW_EXE_u1", true))
             .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(false, Collections.emptyList()));
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
             .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS))
             .thenReturn(false);
