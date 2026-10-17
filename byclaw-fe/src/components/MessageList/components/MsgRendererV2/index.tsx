@@ -10,6 +10,7 @@ import ThinkingBlock from './ThinkingBlock';
 import { groupOrderedItems, isThinkingGroupEnded, mergeOrderedItems, validateOrderedItems } from './ordered';
 import MsgRenderer from '@/components/MessageList/components/MsgRenderer';
 import FinalAnswerLayout from './FinalAnswerLayout';
+import ConnectorAuthorizationActions from './ConnectorAuthorizationActions';
 
 type Props = {
   msg: IMessage;
@@ -31,62 +32,65 @@ export default function MsgRendererV2({ msg, updateMessage, hideThinking }: Prop
   }
 
   return (
-    <FinalAnswerLayout msg={msg}>
-      {({ hiddenAnswerItems, hideText }) =>
-        !valid ? (
-          <MsgRenderer
-            msg={msg}
-            updateMessage={updateMessage}
-            hideThinking={hideThinking}
-            hiddenAnswerItems={hiddenAnswerItems}
-            hideText={hideText}
-          />
-        ) : (
-          <>
-            {msg.text && !hideText && <Markdown msg={msg} text={displayTextMarkdown} />}
-            {groups.map((group, groupIndex) => {
-              if (group.channel === 'think') {
-                if (hideThinking) return null;
-                const hasNextGroup = groupIndex < groups.length - 1;
-                const ended = isThinkingGroupEnded(hasNextGroup, msg.messageState, Boolean(msg.thinkDone));
-                return (
-                  <ThinkingBlock
-                    key={`${msg.msgId}_${group.blockId}`}
-                    blockId={group.blockId}
-                    items={group.items}
-                    message={msg}
-                    ended={ended}
-                    updateMessage={updateMessage}
-                  />
-                );
-              }
-              return group.items.map((item: IMessageListItem) => {
-                if (hiddenAnswerItems.has(item)) return null;
-                const Comp = lazyHandler.lazyComp(`${item.contentType}`) as React.ComponentType<any> | null;
-                if (!Comp) return <NotSupport key={`${msg.msgId}_${item.seq}`} />;
-                return (
-                  <Suspense key={`${msg.msgId}_${item.seq}`}>
-                    <Comp
+    <>
+      <FinalAnswerLayout msg={msg}>
+        {({ hiddenAnswerItems, hideText }) =>
+          !valid ? (
+            <MsgRenderer
+              msg={msg}
+              updateMessage={updateMessage}
+              hideThinking={hideThinking}
+              hiddenAnswerItems={hiddenAnswerItems}
+              hideText={hideText}
+            />
+          ) : (
+            <>
+              {msg.text && !hideText && <Markdown msg={msg} text={displayTextMarkdown} />}
+              {groups.map((group, groupIndex) => {
+                if (group.channel === 'think') {
+                  if (hideThinking) return null;
+                  const hasNextGroup = groupIndex < groups.length - 1;
+                  const ended = isThinkingGroupEnded(hasNextGroup, msg.messageState, Boolean(msg.thinkDone));
+                  return (
+                    <ThinkingBlock
+                      key={`${msg.msgId}_${group.blockId}`}
+                      blockId={group.blockId}
+                      items={group.items}
                       message={msg}
-                      messageListItem={item}
-                      thinkListItem={item}
-                      messageListItemContent={item.content}
-                      updateMessageListItemContent={(content: IMessageListItem['content']) => {
-                        const index = msg.messageList?.findIndex((sourceItem) => sourceItem.seq === item.seq) ?? -1;
-                        if (index < 0) return msg;
-                        const next = { ...msg };
-                        set(next, `messageList.${index}.content`, content);
-                        updateMessage(next);
-                        return next;
-                      }}
+                      ended={ended}
+                      updateMessage={updateMessage}
                     />
-                  </Suspense>
-                );
-              });
-            })}
-          </>
-        )
-      }
-    </FinalAnswerLayout>
+                  );
+                }
+                return group.items.map((item: IMessageListItem) => {
+                  if (hiddenAnswerItems.has(item)) return null;
+                  const Comp = lazyHandler.lazyComp(`${item.contentType}`) as React.ComponentType<any> | null;
+                  if (!Comp) return <NotSupport key={`${msg.msgId}_${item.seq}`} />;
+                  return (
+                    <Suspense key={`${msg.msgId}_${item.seq}`}>
+                      <Comp
+                        message={msg}
+                        messageListItem={item}
+                        thinkListItem={item}
+                        messageListItemContent={item.content}
+                        updateMessageListItemContent={(content: IMessageListItem['content']) => {
+                          const index = msg.messageList?.findIndex((sourceItem) => sourceItem.seq === item.seq) ?? -1;
+                          if (index < 0) return msg;
+                          const next = { ...msg };
+                          set(next, `messageList.${index}.content`, content);
+                          updateMessage(next);
+                          return next;
+                        }}
+                      />
+                    </Suspense>
+                  );
+                });
+              })}
+            </>
+          )
+        }
+      </FinalAnswerLayout>
+      <ConnectorAuthorizationActions msg={msg} />
+    </>
   );
 }
