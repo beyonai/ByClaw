@@ -396,4 +396,7 @@ USER appuser
 
 EXPOSE 8081
 
+HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
+  CMD node -e "const ports=[process.env.OPENCLAW_GATEWAY_PORT,'8080','18789'].filter((port,index,all)=>port&&all.indexOf(port)===index);Promise.any(ports.map(async(port)=>{const response=await fetch('http://127.0.0.1:'+port+'/healthz');if(!response.ok)throw new Error('unhealthy')})).then(()=>process.exit(0)).catch(()=>process.exit(1))"
+
 ENTRYPOINT ["/usr/local/bin/startAll.sh"]
