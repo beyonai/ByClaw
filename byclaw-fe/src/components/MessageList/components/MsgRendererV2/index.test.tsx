@@ -1,6 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
+import { CONNECTOR_AUTHORIZATION_REQUEST_EVENT } from '@/utils/connectorAuthorization';
 import MsgRendererV2 from './index';
 
 jest.mock('@umijs/max', () => ({
@@ -48,6 +51,11 @@ const message = (fields: Partial<IMessage> = {}): IMessage => ({
 });
 
 describe('MsgRendererV2 final answer presentation', () => {
+  it('keeps connector actions visible while the process summary is collapsed', () => {
+    const styles = readFileSync(join(__dirname, 'index.module.less'), 'utf8');
+    expect(styles).toContain(':not(.finalContent):not(.finalDivider):not(.connectorActions)');
+  });
+
   it('inserts a flat summary on final arrival and retains process nodes when toggled', () => {
     const msg = message({
       thinkList: [item(1, '开始分析', SSEMessageType.thinkText), item(3, '继续分析', SSEMessageType.thinkText)],
@@ -227,5 +235,69 @@ describe('MsgRendererV2 final answer presentation', () => {
     );
     expect(screen.queryByRole('button', { name: '任务已结束' })).not.toBeInTheDocument();
     expect(screen.getByText('过程答复')).toBeInTheDocument();
+  });
+
+  it('renders deduplicated connector actions after the complete conversation content', () => {
+    const connectorError = (seq: number, connectorCode: string): IMessageListItem => ({
+      ...item(seq, '', SSEMessageType.toolCall),
+      content: {
+        substance: {
+          title: 'media_tool',
+          output: `Error: MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${connectorCode}; 请配置连接器。`,
+          status: '_ERROR_',
+        },
+      },
+    });
+    const listener = jest.fn();
+    window.addEventListener(CONNECTOR_AUTHORIZATION_REQUEST_EVENT, listener);
+
+    render(
+      <MsgRendererV2
+        msg={message({
+          messageState: IMessageState.Error,
+          thinkList: [
+            connectorError(1, 'image-generation-model'),
+            connectorError(2, 'image-generation-model'),
+            connectorError(3, 'speech-generation-model'),
+          ],
+          messageList: [item(4, '最后一条对话内容')],
+        })}
+        updateMessage={(value) => value}
+      />
+    );
+
+    expect(screen.getAllByRole('button', { name: '配置文生图模型连接器' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '配置语音模型连接器' })).toHaveLength(1);
+    const conversation = screen.getByText('最后一条对话内容');
+    const actions = screen.getByRole('group', { name: '需要配置的连接器' });
+    expect(conversation.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '配置文生图模型连接器' }));
+    expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({ connectorCode: 'image-generation-model' });
+    window.removeEventListener(CONNECTOR_AUTHORIZATION_REQUEST_EVENT, listener);
+  });
+
+  it('waits until the conversation turn ends before showing connector actions', () => {
+    render(
+      <MsgRendererV2
+        msg={message({
+          messageState: IMessageState.Answer,
+          thinkList: [
+            {
+              ...item(1, '', SSEMessageType.toolCall),
+              content: {
+                substance: {
+                  output:
+                    'Error: MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=image-generation-model; 请配置连接器。',
+                },
+              },
+            },
+          ],
+        })}
+        updateMessage={(value) => value}
+      />
+    );
+
+    expect(screen.queryByRole('group', { name: '需要配置的连接器' })).not.toBeInTheDocument();
   });
 });

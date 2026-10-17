@@ -14,11 +14,7 @@ import classnames from 'classnames';
 import { get, isNil } from 'lodash';
 import { SSEEventStatus } from '@/constants/message';
 import { copyTextToClipboard } from '@/utils/copy';
-import {
-  CONNECTOR_AUTHORIZATION_REQUEST_EVENT,
-  parseConnectorAction,
-  requestConnectorAuthorization,
-} from '@/utils/connectorAuthorization';
+import { CONNECTOR_AUTHORIZATION_REQUEST_EVENT, parseConnectorAction } from '@/utils/connectorAuthorization';
 
 import AgentTeamsActivity, { isAgentTeamsSnapshot, type AgentTeamsSnapshot } from './AgentTeamsActivity';
 import styles from './index.module.less';
@@ -97,9 +93,6 @@ const ToolCall: ToolCallComponent = (props) => {
 
   const inputText = formatDetail(input);
   const outputText = formatDetail(output);
-  // 工具错误在不同流式协议中可能先被归并成 _DONE_，因此以稳定错误码判断用户动作，
-  // 不依赖传输层状态是否已经规范化为 _ERROR_。
-  const connectorAction = parseConnectorAction(outputText);
   const hasDetail = Boolean(inputText || outputText);
   const isContextEvent = typeof substance !== 'string' && substance?.eventKind === 'context';
 
@@ -194,17 +187,6 @@ const ToolCall: ToolCallComponent = (props) => {
         <div className={styles.detail}>
           {inputText && renderSection('input', inputText, isContextEvent ? 'contextEvent.input' : undefined)}
           {outputText && renderSection('output', outputText, isContextEvent ? 'contextEvent.input' : undefined)}
-          {connectorAction && (
-            <div className={styles.connectorAction}>
-              <button
-                type="button"
-                className={styles.connectorActionButton}
-                onClick={() => requestConnectorAuthorization(connectorAction.connectorCode)}
-              >
-                {connectorAction.label}
-              </button>
-            </div>
-          )}
           <button type="button" className={styles.collapseButton} onClick={() => setExpanded(false)}>
             {intl.formatMessage({ id: 'toolCall.collapse' })}
             <DownOutlined className={styles.collapseButtonIcon} />

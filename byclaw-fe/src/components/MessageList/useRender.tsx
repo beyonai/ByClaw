@@ -27,6 +27,7 @@ import { isV2Message } from './components/MsgRendererV2/ordered';
 import VoiceMessage from './components/VoiceMessage';
 import { getVoiceMessage } from '@/utils/voice';
 import FinalAnswerLayout from './components/MsgRendererV2/FinalAnswerLayout';
+import ConnectorAuthorizationActions from './components/MsgRendererV2/ConnectorAuthorizationActions';
 import UserInfoModal from '@/components/OrgUserSelector/components/UserInfoModal';
 // import Memory from './components/Memory';
 
@@ -558,17 +559,20 @@ export default function useRender({
               ) : isV2Message(msg) ? (
                 <MsgRendererV2 msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
               ) : (
-                <FinalAnswerLayout msg={msg}>
-                  {({ hiddenAnswerItems, hideText }) => (
-                    <MsgRenderer
-                      msg={msg}
-                      updateMessage={updateMessage}
-                      hideThinking={param?.hideThinking}
-                      hiddenAnswerItems={hiddenAnswerItems}
-                      hideText={hideText}
-                    />
-                  )}
-                </FinalAnswerLayout>
+                <>
+                  <FinalAnswerLayout msg={msg}>
+                    {({ hiddenAnswerItems, hideText }) => (
+                      <MsgRenderer
+                        msg={msg}
+                        updateMessage={updateMessage}
+                        hideThinking={param?.hideThinking}
+                        hiddenAnswerItems={hiddenAnswerItems}
+                        hideText={hideText}
+                      />
+                    )}
+                  </FinalAnswerLayout>
+                  <ConnectorAuthorizationActions msg={msg} />
+                </>
               )}
               {messageState === IMessageState.Query && <DualBallLoading style={{ width: 32, height: 32 }} />}
             </div>
