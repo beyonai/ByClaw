@@ -197,6 +197,7 @@ describe('observation driving the reporter', () => {
     reporter = new IdleReporter({
       redis,
       sandboxId: 'sbx',
+      userCode: 'u1',
       streamKey: 'stream',
       maxLen: 100,
       idleTimeoutMs: 60_000,

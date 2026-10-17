@@ -32,8 +32,10 @@ export const name = 'byclaw-idle-reporter'
 export const inject = ['agents']
 
 export interface Config {
-  /** Sandbox identity; defaults to `os.hostname()`. */
+  /** Sandbox identity; the patch passes `BYAI_WORKER_ID`, falling back to `os.hostname()`. */
   sandboxId?: string
+  /** Owner of the sandbox (`USER_CODE`); empty when unknown. */
+  userCode?: string
   streamKey?: string
   /** Approximate Stream cap (`XADD MAXLEN ~`). */
   maxLen?: number
@@ -44,6 +46,7 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   sandboxId: z.string(),
+  userCode: z.string().default(''),
   streamKey: z.string().default(DEFAULT_STREAM_KEY),
   maxLen: z.number().default(DEFAULT_MAX_LEN),
   idleTimeoutMs: z.number().default(DEFAULT_IDLE_TIMEOUT_MS),
@@ -52,6 +55,7 @@ export const Config: z<Config> = z.object({
 
 export interface ResolvedConfig {
   sandboxId: string
+  userCode: string
   streamKey: string
   maxLen: number
   idleTimeoutMs: number
@@ -79,6 +83,13 @@ export function resolveConfig(raw: unknown, defaultSandboxId: string = hostname(
     }
     return value
   }
+  const optionalText = (key: string): string => {
+    const value = config[key] ?? ''
+    if (typeof value !== 'string') {
+      throw new Error(`${name}: config.${key} must be a string, got ${JSON.stringify(value)}`)
+    }
+    return value.trim()
+  }
   const positive = (key: string, fallback: number): number => {
     const value = config[key] ?? fallback
     if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
@@ -88,6 +99,7 @@ export function resolveConfig(raw: unknown, defaultSandboxId: string = hostname(
   }
   return {
     sandboxId: text('sandboxId', defaultSandboxId),
+    userCode: optionalText('userCode'),
     streamKey: text('streamKey', DEFAULT_STREAM_KEY),
     maxLen: positive('maxLen', DEFAULT_MAX_LEN),
     idleTimeoutMs: positive('idleTimeoutMs', DEFAULT_IDLE_TIMEOUT_MS),
