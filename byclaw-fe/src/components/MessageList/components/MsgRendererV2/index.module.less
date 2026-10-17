@@ -15,8 +15,8 @@
     outline-offset: 2px;
   }
 
-  // 只隐藏同级过程节点，保持卡片挂载状态；最终正文与分隔线一直可见。
-  &[data-collapsed='true'] ~ :not(.finalContent):not(.finalDivider) {
+  // 只隐藏同级过程节点；最终正文、分隔线和需要用户处理的连接器操作始终可见。
+  &[data-collapsed='true'] ~ :not(.finalContent):not(.finalDivider):not(.connectorActions) {
     display: none;
   }
 }

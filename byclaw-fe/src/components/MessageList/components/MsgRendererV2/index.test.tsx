@@ -1,4 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
 import { CONNECTOR_AUTHORIZATION_REQUEST_EVENT } from '@/utils/connectorAuthorization';
@@ -49,6 +51,11 @@ const message = (fields: Partial<IMessage> = {}): IMessage => ({
 });
 
 describe('MsgRendererV2 final answer presentation', () => {
+  it('keeps connector actions visible while the process summary is collapsed', () => {
+    const styles = readFileSync(join(__dirname, 'index.module.less'), 'utf8');
+    expect(styles).toContain(':not(.finalContent):not(.finalDivider):not(.connectorActions)');
+  });
+
   it('inserts a flat summary on final arrival and retains process nodes when toggled', () => {
     const msg = message({
       thinkList: [item(1, '开始分析', SSEMessageType.thinkText), item(3, '继续分析', SSEMessageType.thinkText)],
