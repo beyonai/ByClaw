@@ -23,7 +23,7 @@
     "@deepseek-ai/dsh-tool-todo": "0.1.5-rc.2"
   },
   "devDependencies": {
-    "typescript": "^5.9.3", "tsx": "^4.22.4", "@types/node": "^24.13.3",
+    "typescript": "5.9.3", "tsx": "4.22.4", "@types/node": "24.13.3",
     "@deepseek-ai/dsh-agent-loop": "workspace:*",
     "@deepseek-ai/dsh-agent-loop-testkit": "workspace:*"
   },

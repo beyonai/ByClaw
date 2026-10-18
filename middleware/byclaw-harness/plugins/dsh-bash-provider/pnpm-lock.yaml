@@ -13,7 +13,7 @@ importers:
         version: 1.5.1
     devDependencies:
       '@deepseek-ai/cordis':
-        specifier: ^4.0.1
+        specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
       '@deepseek-ai/dsh-app-boot':
         specifier: 0.1.5-rc.2
@@ -61,16 +61,16 @@ importers:
         specifier: 0.1.5-rc.2
         version: 0.1.5-rc.2(daecc96b90f0bc19173b1f397ba86317)
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.2
+        specifier: 3.18.2
         version: 3.18.2
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 24.13.3
         version: 24.13.3
       typescript:
-        specifier: ^5.9.3
+        specifier: 5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^4.1.8
+        specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(yaml@2.9.0))
 
 packages:

@@ -56,10 +56,10 @@
     "@byclaw/by-framework": "1.6.0",
     "@byclaw/dsh-agent-teams": "workspace:*",
     "@byclaw/dsh-diff-viewer": "workspace:*",
-    "@deepseek-ai/cordis-plugin-logger-console": "^1.0.2",
-    "zod": "^4.4.3",
-    "js-yaml": "^4.2.0",
-    "undici": "^7.28.0",
+    "@deepseek-ai/cordis-plugin-logger-console": "1.0.2",
+    "zod": "4.4.3",
+    "js-yaml": "4.2.0",
+    "undici": "7.28.0",
     "@byclaw/dsh-browser-use": "workspace:*",
     "@byclaw/byclaw-asr": "workspace:*",
     "@byclaw/byclaw-tts": "workspace:*"
@@ -85,8 +85,8 @@
   },
   "devDependencies": {
     "@deepseek-ai/dsh-scope": "workspace:^",
-    "@earendil-works/pi-ai": "^0.85.1",
-    "@deepseek-ai/cordis": "^4.0.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-presets": "workspace:^",
     "@deepseek-ai/dsh-api-session-controller": "workspace:^",
@@ -101,11 +101,11 @@
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tool-todo": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/schemastery": "^3.18.1",
-    "@types/node": "^24.13.3",
-    "typescript": "^5.9.3",
-    "tsx": "^4.22.4",
-    "@types/js-yaml": "^4.0.9"
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3",
+    "tsx": "4.22.4",
+    "@types/js-yaml": "4.0.9"
   },
   "dsh": {
     "bundle": {

@@ -43,7 +43,7 @@
     "@zhchxiao123/dsh-devflow": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/schemastery": "3.18.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",

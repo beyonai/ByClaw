@@ -34,8 +34,8 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1",
-    "yaml": "^2.4.2"
+    "@deepseek-ai/schemastery": "3.18.2",
+    "yaml": "2.9.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.2",

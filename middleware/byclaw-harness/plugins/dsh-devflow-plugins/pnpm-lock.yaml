@@ -100,85 +100,85 @@ importers:
         specifier: 0.1.5-rc.2
         version: 0.1.5-rc.2(2faf0849fbdc6ac5919de8226950d80c)
       '@shikijs/langs':
-        specifier: ^4.3.1
+        specifier: 4.4.3
         version: 4.4.3
       '@stylistic/eslint-plugin':
-        specifier: ^5.10.0
+        specifier: 5.10.0
         version: 5.10.0(eslint@10.10.0(supports-color@7.2.0))
       '@testing-library/react':
-        specifier: ^16.3.2
+        specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@types/js-yaml':
-        specifier: ^4.0.9
+        specifier: 4.0.9
         version: 4.0.9
       '@types/node':
-        specifier: ^24.0.0
+        specifier: 24.13.3
         version: 24.13.3
       '@types/react':
-        specifier: ^18.3.31
+        specifier: 18.3.31
         version: 18.3.31
       '@types/react-dom':
-        specifier: ^18.3.7
+        specifier: 18.3.7
         version: 18.3.7(@types/react@18.3.31)
       '@vitest/coverage-v8':
-        specifier: ^4.1.8
+        specifier: 4.1.11
         version: 4.1.11(vitest@4.1.11)
       anser:
-        specifier: ^2.3.5
+        specifier: 2.3.5
         version: 2.3.5
       clsx:
-        specifier: ^2.0.0
+        specifier: 2.1.1
         version: 2.1.1
       eslint-plugin-sonarjs:
-        specifier: ^4.2.0
+        specifier: 4.2.0
         version: 4.2.0(eslint@10.10.0(supports-color@7.2.0))
       immer:
-        specifier: ^10.1.1
+        specifier: 10.2.0
         version: 10.2.0
       js-yaml:
         specifier: 4.2.0
         version: 4.2.0
       jsdom:
-        specifier: ^29.1.1
+        specifier: 29.1.1
         version: 29.1.1
       katex:
-        specifier: ^0.16.47
+        specifier: 0.16.47
         version: 0.16.47
       lightningcss:
-        specifier: ^1.33.0
+        specifier: 1.33.0
         version: 1.33.0
       mdast-util-from-markdown:
-        specifier: ^2.0.3
+        specifier: 2.0.3
         version: 2.0.3(supports-color@7.2.0)
       mdast-util-gfm:
-        specifier: ^3.1.0
+        specifier: 3.1.0
         version: 3.1.0(supports-color@7.2.0)
       mdast-util-math:
-        specifier: ^3.0.0
+        specifier: 3.0.0
         version: 3.0.0(supports-color@7.2.0)
       micromark-core-commonmark:
-        specifier: ^2.0.3
+        specifier: 2.0.3
         version: 2.0.3
       micromark-extension-gfm:
-        specifier: ^3.0.0
+        specifier: 3.0.0
         version: 3.0.0
       micromark-extension-math:
-        specifier: ^3.1.0
+        specifier: 3.1.0
         version: 3.1.0
       micromark-factory-space:
-        specifier: ^2.0.1
+        specifier: 2.0.1
         version: 2.0.1
       micromark-util-character:
-        specifier: ^2.1.1
+        specifier: 2.1.1
         version: 2.1.1
       micromark-util-classify-character:
-        specifier: ^2.0.1
+        specifier: 2.0.1
         version: 2.0.1
       micromark-util-sanitize-uri:
-        specifier: ^2.0.1
+        specifier: 2.0.1
         version: 2.0.1
       micromark-util-symbol:
-        specifier: ^2.0.1
+        specifier: 2.0.1
         version: 2.0.1
       oxlint:
         specifier: 1.76.0
@@ -187,40 +187,40 @@ importers:
         specifier: 7.0.2001
         version: 7.0.2001
       react:
-        specifier: ^18.3.1
+        specifier: 18.3.1
         version: 18.3.1
       react-dom:
-        specifier: ^18.3.1
+        specifier: 18.3.1
         version: 18.3.1(react@18.3.1)
       shiki:
-        specifier: ^4.3.1
+        specifier: 4.4.3
         version: 4.4.3
       tsdown:
-        specifier: ^0.22.14
+        specifier: 0.22.14
         version: 0.22.14(tsx@4.23.13)(typescript@5.9.3)
       tsx:
-        specifier: ^4.23.12
+        specifier: 4.23.13
         version: 4.23.13
       typescript:
-        specifier: ^5.9.0
+        specifier: 5.9.3
         version: 5.9.3
       vite:
-        specifier: ^8.2.2
+        specifier: 8.2.2
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0)
       vite-tsconfig-paths:
-        specifier: ^6.0.0
+        specifier: 6.1.1
         version: 6.1.1(supports-color@7.2.0)(typescript@5.9.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
       vitest:
-        specifier: ^4.1.8
+        specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@4.1.11)(jsdom@29.1.1)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
       zustand:
-        specifier: ~4.4.7
+        specifier: 4.4.7
         version: 4.4.7(@types/react@18.3.31)(immer@10.2.0)(react@18.3.1)
 
   packages/devflow:
     dependencies:
       zod:
-        specifier: ^4.4.3
+        specifier: 4.5.4
         version: 4.5.4
     devDependencies:
       '@deepseek-ai/cordis':
@@ -242,7 +242,7 @@ importers:
   packages/devflow-agent-gate:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
     devDependencies:
       '@deepseek-ai/cordis':
@@ -285,10 +285,10 @@ importers:
   packages/devflow-artifact-gate:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
       yaml:
-        specifier: ^2.4.2
+        specifier: 2.9.0
         version: 2.9.0
     devDependencies:
       '@deepseek-ai/cordis':
@@ -374,7 +374,7 @@ importers:
   packages/devflow-business:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
     devDependencies:
       '@deepseek-ai/cordis':
@@ -411,7 +411,7 @@ importers:
   packages/devflow-command:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
       '@zhchxiao123/dsh-devflow-worktree':
         specifier: workspace:^
@@ -451,10 +451,10 @@ importers:
   packages/devflow-filesystem:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
       yaml:
-        specifier: ^2.4.2
+        specifier: 2.9.0
         version: 2.9.0
     devDependencies:
       '@deepseek-ai/cordis':
@@ -470,7 +470,7 @@ importers:
   packages/devflow-fs-guard:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
     devDependencies:
       '@deepseek-ai/cordis':
@@ -516,7 +516,7 @@ importers:
   packages/devflow-gates:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
     devDependencies:
       '@deepseek-ai/cordis':
@@ -553,7 +553,7 @@ importers:
   packages/devflow-guidance:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
     devDependencies:
       '@deepseek-ai/cordis':
@@ -590,7 +590,7 @@ importers:
   packages/devflow-iron-rules:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
     devDependencies:
       '@deepseek-ai/cordis':
@@ -642,17 +642,17 @@ importers:
   packages/devflow-review-gate:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
       '@deepseek-ai/cordis-plugin-include':
-        specifier: ^1.0.7
+        specifier: 1.0.7
         version: 1.0.7(@deepseek-ai/cordis-plugin-loader@1.0.3)(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/cordis-plugin-loader':
-        specifier: ^1.0.3
+        specifier: 1.0.3
         version: 1.0.3(@deepseek-ai/cordis@4.0.2)(node-addon-require-builtin@0.1.5)
       '@deepseek-ai/dsh-agent':
         specifier: 0.1.5-rc.2
@@ -706,7 +706,7 @@ importers:
   packages/devflow-spec-filesystem:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
       tree-sitter-go:
         specifier: 0.25.0
@@ -727,7 +727,7 @@ importers:
         specifier: 0.27.0
         version: 0.27.0
       yaml:
-        specifier: ^2.4.2
+        specifier: 2.9.0
         version: 2.9.0
     devDependencies:
       '@deepseek-ai/cordis':
@@ -743,13 +743,13 @@ importers:
   packages/devflow-spec-sentinel:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
       smol-toml:
-        specifier: ^1.8.0
+        specifier: 1.8.0
         version: 1.8.0
       yaml:
-        specifier: ^2.4.2
+        specifier: 2.9.0
         version: 2.9.0
     devDependencies:
       '@deepseek-ai/cordis':
@@ -810,7 +810,7 @@ importers:
   packages/devflow-testenv:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
     devDependencies:
       '@deepseek-ai/cordis':
@@ -892,16 +892,16 @@ importers:
         specifier: 0.1.5-rc.2
         version: 0.1.5-rc.2(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-scope@0.1.5-rc.2(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.5-rc.2(@deepseek-ai/cordis@4.0.2)))
       '@shikijs/langs':
-        specifier: ^4.3.1
+        specifier: 4.4.3
         version: 4.4.3
       '@types/mdast':
-        specifier: ^4.0.4
+        specifier: 4.0.4
         version: 4.0.4
       '@types/react':
-        specifier: ^18.2.0
+        specifier: 18.3.31
         version: 18.3.31
       '@types/react-dom':
-        specifier: ^18.2.0
+        specifier: 18.3.7
         version: 18.3.7(@types/react@18.3.31)
       '@zhchxiao123/dsh-devflow':
         specifier: workspace:^
@@ -910,76 +910,76 @@ importers:
         specifier: workspace:^
         version: link:../devflow-web
       anser:
-        specifier: ^2.3.5
+        specifier: 2.3.5
         version: 2.3.5
       clsx:
-        specifier: ^2.0.0
+        specifier: 2.1.1
         version: 2.1.1
       immer:
-        specifier: ^10.1.1
+        specifier: 10.2.0
         version: 10.2.0
       katex:
-        specifier: ^0.16.47
+        specifier: 0.16.47
         version: 0.16.47
       mdast-util-from-markdown:
-        specifier: ^2.0.3
+        specifier: 2.0.3
         version: 2.0.3(supports-color@7.2.0)
       mdast-util-gfm:
-        specifier: ^3.1.0
+        specifier: 3.1.0
         version: 3.1.0(supports-color@7.2.0)
       mdast-util-math:
-        specifier: ^3.0.0
+        specifier: 3.0.0
         version: 3.0.0(supports-color@7.2.0)
       micromark-core-commonmark:
-        specifier: ^2.0.3
+        specifier: 2.0.3
         version: 2.0.3
       micromark-extension-gfm:
-        specifier: ^3.0.0
+        specifier: 3.0.0
         version: 3.0.0
       micromark-extension-math:
-        specifier: ^3.1.0
+        specifier: 3.1.0
         version: 3.1.0
       micromark-factory-space:
-        specifier: ^2.0.1
+        specifier: 2.0.1
         version: 2.0.1
       micromark-util-character:
-        specifier: ^2.1.1
+        specifier: 2.1.1
         version: 2.1.1
       micromark-util-classify-character:
-        specifier: ^2.0.1
+        specifier: 2.0.1
         version: 2.0.1
       micromark-util-sanitize-uri:
-        specifier: ^2.0.1
+        specifier: 2.0.1
         version: 2.0.1
       micromark-util-symbol:
-        specifier: ^2.0.1
+        specifier: 2.0.1
         version: 2.0.1
       micromark-util-types:
-        specifier: ^2.0.2
+        specifier: 2.0.2
         version: 2.0.2
       react:
-        specifier: ^18.2.0
+        specifier: 18.3.1
         version: 18.3.1
       react-dom:
-        specifier: ^18.2.0
+        specifier: 18.3.1
         version: 18.3.1(react@18.3.1)
       shiki:
-        specifier: ^4.3.1
+        specifier: 4.4.3
         version: 4.4.3
       use-sync-external-store:
         specifier: 1.2.0
         version: 1.2.0(react@18.3.1)
       zustand:
-        specifier: ~4.4.7
+        specifier: 4.4.7
         version: 4.4.7(@types/react@18.3.31)(immer@10.2.0)(react@18.3.1)
 
   packages/devflow-web:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
       ws:
-        specifier: ^8.21.0
+        specifier: 8.21.3
         version: 8.21.3
     devDependencies:
       '@deepseek-ai/cordis':
@@ -998,7 +998,7 @@ importers:
         specifier: 0.1.5-rc.2
         version: 0.1.5-rc.2(@deepseek-ai/cordis@4.0.2)
       '@types/ws':
-        specifier: ^8.5.12
+        specifier: 8.18.1
         version: 8.18.1
       '@zhchxiao123/dsh-devflow':
         specifier: workspace:^
@@ -1010,7 +1010,7 @@ importers:
   packages/devflow-worktree:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: ^3.18.1
+        specifier: 3.18.2
         version: 3.18.2
     devDependencies:
       '@deepseek-ai/cordis':

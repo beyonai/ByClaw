@@ -173,7 +173,7 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-api-session-controller": "workspace:^",
     "@deepseek-ai/dsh-client-locale": "workspace:^",
@@ -189,14 +189,14 @@
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/dsh-workspace": "workspace:^",
-    "@deepseek-ai/schemastery": "^3.18.1",
-    "@types/node": "^24.13.3",
-    "@types/react": "~18.3.1",
-    "@types/react-dom": "^18.3.7",
-    "lightningcss": "^1.33.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@types/node": "24.13.3",
+    "@types/react": "18.3.1",
+    "@types/react-dom": "18.3.7",
+    "lightningcss": "1.33.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
     "tsdown": "0.22.2",
-    "typescript": "^5.9.3"
+    "typescript": "5.9.3"
   }
 }

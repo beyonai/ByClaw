@@ -34,7 +34,7 @@
     "verify": "pnpm test && pnpm typecheck && pnpm build"
   },
   "dependencies": {
-    "commander": "^15.0.0"
+    "commander": "15.0.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1-rc.1",
@@ -42,14 +42,14 @@
     "@deepseek-ai/dsh-web-app": "0.1.5-rc.2"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh-app-boot": "0.1.5-rc.2",
     "@deepseek-ai/dsh-base": "0.1.5-rc.2",
     "@deepseek-ai/dsh-cmdline": "0.1.5-rc.2",
     "@deepseek-ai/dsh-web-app": "0.1.5-rc.2",
-    "@types/node": "^24.13.3",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.8"
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3",
+    "vitest": "4.1.8"
   },
   "dsh": {
     "bundle": {

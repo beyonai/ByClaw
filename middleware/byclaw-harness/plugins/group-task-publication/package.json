@@ -29,9 +29,9 @@
     "verify": "pnpm build && node scripts/verify.mjs && node scripts/session-verify.mjs"
   },
   "dependencies": {
-    "zod": "^4.4.3",
+    "zod": "4.4.3",
     "@byclaw/dsh-integration": "workspace:*",
-    "@deepseek-ai/schemastery": "^3.18.1-rc.1"
+    "@deepseek-ai/schemastery": "3.18.1-rc.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1-rc.1",
@@ -45,9 +45,9 @@
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-scope": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@types/node": "^24.13.3",
-    "typescript": "^5.9.3",
-    "js-yaml": "^4.2.0",
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3",
+    "js-yaml": "4.2.0",
     "@deepseek-ai/dsh-storage-domain": "workspace:^",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^"

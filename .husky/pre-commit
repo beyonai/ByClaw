@@ -39,11 +39,7 @@ check_version_pinning() {
 
   for pkg_file in $(echo "$STAGED_FILES" | grep -E '(^|/)package\.json$'); do
     if [ -f "$REPO_ROOT/$pkg_file" ]; then
-      unpinned=$(grep -nE '"[^"]+"\s*:\s*"[\^~]' "$REPO_ROOT/$pkg_file" | grep -v '"name"\|"version"\|"description"' || true)
-      if [ -n "$unpinned" ]; then
-        echo "❌ [pre-commit] Unpinned dependencies in $pkg_file:"
-        echo "$unpinned" | head -10
-        echo "   Remove ^ or ~ prefix to pin exact versions"
+      if ! python3 "$REPO_ROOT/scripts/check-package-version-pinning.py" "$REPO_ROOT/$pkg_file"; then
         has_unpinned=true
       fi
     fi
