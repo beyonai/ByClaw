@@ -39,7 +39,7 @@ check_version_pinning() {
 
   for pkg_file in $(echo "$STAGED_FILES" | grep -E '(^|/)package\.json$'); do
     if [ -f "$REPO_ROOT/$pkg_file" ]; then
-      if ! python3 "$REPO_ROOT/scripts/check-package-version-pinning.py" "$REPO_ROOT/$pkg_file"; then
+      if ! node "$REPO_ROOT/scripts/check-package-version-pinning.mjs" "$REPO_ROOT/$pkg_file"; then
         has_unpinned=true
       fi
     fi

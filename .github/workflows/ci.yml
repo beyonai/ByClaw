@@ -127,13 +127,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Check dependency version pinning
         run: |
           EXIT_CODE=0
 
           echo "── Checking package.json files ──"
-          python3 scripts/test_package_version_pinning.py || EXIT_CODE=1
-          python3 scripts/check-package-version-pinning.py || EXIT_CODE=1
+          node --test scripts/check-package-version-pinning.test.mjs || EXIT_CODE=1
+          node scripts/check-package-version-pinning.mjs || EXIT_CODE=1
 
           echo "── Checking pyproject.toml files ──"
           while IFS= read -r f; do
