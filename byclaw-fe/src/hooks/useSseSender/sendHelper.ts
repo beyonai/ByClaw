@@ -209,6 +209,7 @@ export default class SendHelper {
               break;
           }
 
+          Object.assign(payload, pick(res, ['reasoningTranslations', 'messageRenderVersion', 'seq']));
           if (!isEmpty(payload)) {
             callback?.(payload, msg);
           }

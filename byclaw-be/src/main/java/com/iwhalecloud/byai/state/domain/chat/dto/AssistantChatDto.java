@@ -84,6 +84,12 @@ public class AssistantChatDto {
     @Schema(description = "思考强度(用户选择)；-1=跟随默认", example = "high")
     private String relThinkingLevel;
 
+    @Schema(description = "将自然语言思考过程翻译为中文，仅影响展示")
+    private Boolean translateReasoning = false;
+
+    @Schema(description = "思考翻译使用的已启用 LLM 模型主键")
+    private String reasoningTranslationModelId;
+
     /**
      * 本轮实际使用的模型（服务端解析结果，含回退），仅进程内传递，不参与序列化。
      */

@@ -18,6 +18,9 @@ public class AnswerDelta {
     /** Cross-channel sequence of the coalesced rendering segment. */
     private Long seq;
 
+    /** Chinese display projection; never used as tool input or model history. */
+    private ReasoningTranslation reasoningTranslation;
+
     /** Source stream event used to keep adjacent rendering segments distinct. */
     private String eventType;
 

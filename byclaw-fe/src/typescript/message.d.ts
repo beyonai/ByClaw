@@ -6,6 +6,7 @@ import {
 
 import type { IAgentType } from '@/typescript/agent';
 import type { IFile } from './file';
+import type { ReasoningTranslation } from '@/utils/reasoningTranslation';
 import { RichInputResourceList } from '@/components/QueryInput/RichInput';
 
 // type IChatBI = {
@@ -54,6 +55,7 @@ export type TaskPlanSnapshot = {
 };
 
 export type IMessageListItem = {
+  reasoningTranslation?: ReasoningTranslation;
   content: {
     substance: unknown;
     text?: string;
@@ -92,6 +94,7 @@ export type NewIMessageListItem = {
 } & IMessageListItem;
 
 type IThink = {
+  reasoningTranslations?: Record<number, ReasoningTranslation>;
   thinkList?: IMessageListItem[]; // 思考过程
   thinkDone?: boolean;
   thinkCollapse?: boolean;

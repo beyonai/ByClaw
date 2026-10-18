@@ -35,6 +35,18 @@ const mockUseSelector = useSelector as jest.Mock;
 const mockUseGlobal = useGlobal as jest.MockedFunction<typeof useGlobal>;
 
 describe('hooks/useChat/useHandler', () => {
+  it('applies standalone translation snapshots without appending another thinking item', () => {
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+    const answer = { thinkList: [{ seq: 1, content: { substance: 'Raw thought' } }] } as any;
+    const update = { seq: 1, text: '中文思考', sourceLength: 11, revision: 1, status: 'done' };
+    result.current.messageHandler({
+      sseRes: { reasoningTranslations: [update] },
+      sseMsg: { event: 'reasoningTranslation' },
+      newAnswerMsg: answer,
+    } as any);
+    expect(answer.reasoningTranslations[1]).toEqual(update);
+    expect(answer.thinkList).toEqual([{ seq: 1, content: { substance: 'Raw thought' } }]);
+  });
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseDispatch.mockReturnValue(jest.fn());

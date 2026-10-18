@@ -323,6 +323,15 @@ public class MessageContext {
             boolean ifMerge = StringUtils.equals(answerDelta.getContentType(), lastAnswerDelta.getContentType())
                 && StringUtils.equals(answerDelta.getEventType(), lastAnswerDelta.getEventType())
                 && StringUtils.equals(answerDelta.getOrderId(), lastAnswerDelta.getOrderId());
+            if ("reasoningLogDelta".equals(eventType)) {
+                // Translation context must never join different agents, lanes or runs.
+                ifMerge = ifMerge
+                    && StringUtils.equals(answerDelta.getSourceAgentType(), lastAnswerDelta.getSourceAgentType())
+                    && StringUtils.equals(answerDelta.getAgentId(), lastAnswerDelta.getAgentId())
+                    && StringUtils.equals(answerDelta.getTraceId(), lastAnswerDelta.getTraceId())
+                    && StringUtils.equals(answerDelta.getLaneId(), lastAnswerDelta.getLaneId())
+                    && StringUtils.equals(answerDelta.getTurnId(), lastAnswerDelta.getTurnId());
+            }
             if (assignGlobalSeq) {
                 ifMerge = ifMerge
                     && StringUtils.equals(eventType, lastSegmentEventType)

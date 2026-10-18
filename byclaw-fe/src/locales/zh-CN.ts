@@ -5,6 +5,10 @@ import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  'reasoningTranslation.label': '中文思考',
+  'reasoningTranslation.model': '选择翻译模型',
+  'reasoningTranslation.hint': '仅翻译自然语言思考；工具参数和代码保持原样。下一轮生效。',
+  'reasoningTranslation.loadFailed': '模型加载失败，请重新打开重试。',
   ...employeePublication,
   // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
   'toolCall.defaultTitle': '工具调用',

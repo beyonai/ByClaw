@@ -32,6 +32,8 @@ import com.iwhalecloud.byai.state.application.service.chat.PythonWebService;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
+import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 import com.iwhalecloud.byai.state.domain.chat.dto.SuggestionQuestionVo;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatRelatedResource;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -62,6 +64,12 @@ public class PythonSseService {
     @Autowired
     private MenResComService menResComService;
 
+    @Autowired
+    private ReasoningTranslationService reasoningTranslationService;
+
+    @Autowired
+    private MultiDeviceBroadcastService multiDeviceBroadcastService;
+
     /**
      * 处理Python SSE流：请求Python服务，处理流式响应，增量写入客户端。
      */
@@ -91,6 +99,7 @@ public class PythonSseService {
                 }
 
             }
+            flushReasoningTranslations(ctx);
             ctx.messageContext.setComplete(true);
             // 2010 动态卡片放在循环外面最后才获取吧
             if (StringUtils.isNotEmpty(setMenResCom(ctx.assistantChatDto, ctx.messageContext, null,
@@ -112,6 +121,7 @@ public class PythonSseService {
         if (FinalAnswerContent.isFinalEvent(key)) {
             if (matchesFinalIdentity(jsonObject, ctx)) {
                 recordFinalAnswer(jsonObject, messageContext);
+                broadcastTranslatedHttpEvent(ctx, key, value);
             }
             return;
         }
@@ -127,6 +137,17 @@ public class PythonSseService {
             messageContext.recordAnswerText(value);
             messageContext.recordStreamAnswerText(value);
             value = messageContext.recordAnswerStruct(value);
+        }
+
+        if (SseResponseEventEnum.reasoningLogDelta.equals(key)) {
+            value = messageContext.recordInferLog(value);
+        }
+        if (reasoningTranslationService != null) {
+            value = reasoningTranslationService.project(key, value, messageContext,
+                ctx == null ? null : ctx.assistantChatDto);
+            if (SseResponseEventEnum.appStreamResponse.equals(key)) {
+                writeTranslationUpdates(res, value, ctx == null ? null : ctx.sessionId);
+            }
         }
 
         if (SseResponseEventEnum.answerDelta.equals(key)) {
@@ -147,7 +168,6 @@ public class PythonSseService {
             CompletionsUtils.responseWrite(res, key, value, ctx != null ? ctx.sessionId : null);
         }
         else if (SseResponseEventEnum.reasoningLogDelta.equals(key)) {
-            value = messageContext.recordInferLog(value);
             CompletionsUtils.responseWrite(res, key, value, ctx != null ? ctx.sessionId : null);
         }
         else if (SseResponseEventEnum.reasoningLogEnd.equals(key)) {
@@ -179,6 +199,51 @@ public class PythonSseService {
         // 添加推荐问题
         this.appendRelatedQuestions(ctx, value);
 
+        broadcastTranslatedHttpEvent(ctx, key, value);
+
+    }
+
+    /** Flush an unterminated sentence before EOF, cancellation or an error closes the stream. */
+    public void flushReasoningTranslations(ChatProcessContext ctx) {
+        if (ctx == null || reasoningTranslationService == null) return;
+        String value = reasoningTranslationService.project("reasoningLogEnd", "{}", ctx.messageContext,
+            ctx.assistantChatDto);
+        writeTranslationUpdates(ctx.res, value, ctx.sessionId);
+        if (value.contains("\"reasoningTranslations\"")) {
+            broadcastTranslatedHttpEvent(ctx, "reasoningTranslation", value);
+        }
+    }
+
+    /** HTTP passive subscribers receive the same projected payload as the initiating device. */
+    public void broadcastTranslatedHttpEvent(ChatProcessContext ctx, String event, String value) {
+        if (ctx == null || ctx.suppressUserEvents || ctx.assistantChatDto == null
+            || !Boolean.TRUE.equals(ctx.assistantChatDto.getTranslateReasoning())
+            || ChatTransport.WEBSOCKET.equals(ctx.transport) || multiDeviceBroadcastService == null) return;
+        try {
+            JSONObject payload = JSON.parseObject(value);
+            JSONObject envelope = new JSONObject();
+            envelope.put("event_type", event);
+            envelope.put("data", value);
+            envelope.put("trace_id", payload == null ? ctx.traceId : payload.getString("traceId"));
+            envelope.put("stream_id", payload == null ? null : payload.getString("streamId"));
+            if (ctx.tenantContext != null) {
+                multiDeviceBroadcastService.broadcastTenantRawEvent(ctx.tenantContext, ctx.sessionId, envelope,
+                    ctx.senderChannel, ctx.getClientRequestId());
+            }
+            else {
+                multiDeviceBroadcastService.broadcastRawEvent(ctx.userId, ctx.sessionId, envelope,
+                    ctx.senderChannel, ctx.getClientRequestId());
+            }
+        }
+        catch (RuntimeException error) {
+            log.warn("中文思考多端广播失败, errorType={}", error.getClass().getSimpleName());
+        }
+    }
+
+    private void writeTranslationUpdates(OutputStream res, String value, Long sessionId) {
+        if (value != null && value.contains("\"reasoningTranslations\"")) {
+            CompletionsUtils.responseWrite(res, "reasoningTranslation", value, sessionId);
+        }
     }
 
     /** Direct Python SSE can carry identity too; Gateway events have already passed routing checks. */
@@ -251,6 +316,16 @@ public class PythonSseService {
         else if (SseResponseEventEnum.appStreamResponse.equals(key)) {
             messageContext.recordChatRelatedResource(getRelateResource(value));
         }
+    }
+
+    /** Recovery follows the same display policy while retaining the no-OutputStream-write contract. */
+    public void accumulateTranslatedEvent(String line, MessageContext messageContext, AssistantChatDto dto) {
+        accumulateEvent(line, messageContext);
+        if (reasoningTranslationService == null || messageContext == null) return;
+        JSONObject event = JSON.parseObject(line);
+        String value = messageContext.getRecordedStreamEventData();
+        if (value == null) value = event.getString("data");
+        reasoningTranslationService.project(event.getString("event"), value, messageContext, dto);
     }
 
     /**

@@ -15,6 +15,7 @@ import { substanceHandler } from '@/hooks/useChat/util';
 import { updateExistingMessage } from '@/utils/messageItemUpdate';
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFinalContent } from '@/utils/finalAnswer';
+import { applyReasoningTranslations } from '@/utils/reasoningTranslation';
 import useGlobal from '@/hooks/useGlobal';
 
 import { IMessageListItem } from '@/typescript/message';
@@ -353,6 +354,8 @@ function useHandler(props: IProps) {
   const messageHandler = useCallback(
     (onionsProps: IOnionsProps) => {
       const { sseRes, sseMsg, newAnswerMsg } = onionsProps;
+
+      applyReasoningTranslations(newAnswerMsg, sseRes.reasoningTranslations);
 
       latchV2Metadata(sseRes, newAnswerMsg);
 

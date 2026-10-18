@@ -13,6 +13,8 @@ import { THINKING_LEVEL_DEFAULT_SIGNAL } from '@/utils/thinkingLevel';
 import UploadFile from '../components/UploadFile';
 import ConnectorControl from '../components/ConnectorControl';
 import ModelSelect from '../components/ModelSelect';
+import ReasoningTranslationSelect from '../components/ReasoningTranslationSelect';
+import { readReasoningTranslationSettings } from '@/utils/reasoningTranslationSettings';
 
 import type { UserState } from '@/models/common/user';
 import type { IAgentCache } from '@/typescript/agent';
@@ -236,6 +238,7 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
         // 思考强度同理：'-1' = 跟随默认（清除档位覆盖），其余为档位值。
         ...(this.state.selectedThinkingLevel ? { relThinkingLevel: this.state.selectedThinkingLevel } : {}),
         ...chatSettings,
+        ...readReasoningTranslationSettings(this.props.sessionId),
       },
       msgOpt: {
         queryMsg: {
@@ -497,6 +500,10 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
             onLevelChange={this.onThinkingLevelChange}
             value={this.state.selectedModelId}
             onChange={this.onModelSelectChange}
+          />
+          <ReasoningTranslationSelect
+            key={`translation-${this.props.sessionId || 'new'}`}
+            sessionId={this.props.sessionId}
           />
           {this.STTRender()}
         </Space>

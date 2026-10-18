@@ -167,7 +167,11 @@ public class SessionStreamEventRouter {
                     return StreamDispatchResult.ERROR;
                 }
             }
-            broadcastToOtherDevices(ctx, dataJson);
+            // Translation is produced on the HTTP request thread, after sentence buffering.
+            // Broadcasting the original event here would briefly expose English on other devices.
+            if (ctx.assistantChatDto == null || !Boolean.TRUE.equals(ctx.assistantChatDto.getTranslateReasoning())) {
+                broadcastToOtherDevices(ctx, dataJson);
+            }
             return StreamDispatchResult.HANDLED;
         }
 
@@ -231,7 +235,12 @@ public class SessionStreamEventRouter {
         if (ctx.recoveryOnly) {
             boolean alreadyHydrated = StreamIdUtil.isProcessedByWatermark(ctx.currentStreamId, ctx.hydratedStreamId);
             if (!alreadyHydrated) {
-                pythonSseService.accumulateEvent(lineJson.toJSONString(), ctx.messageContext);
+                if (ctx.assistantChatDto != null && Boolean.TRUE.equals(ctx.assistantChatDto.getTranslateReasoning())) {
+                    pythonSseService.accumulateTranslatedEvent(lineJson.toJSONString(), ctx.messageContext, ctx.assistantChatDto);
+                }
+                else {
+                    pythonSseService.accumulateEvent(lineJson.toJSONString(), ctx.messageContext);
+                }
             }
             else {
                 log.info("恢复事件已计入快照，跳过续聚合, sessionId: {}, traceId: {}, streamId: {}", ctx.sessionId,
@@ -312,6 +321,7 @@ public class SessionStreamEventRouter {
     }
 
     private boolean handleWebSocketError(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
+        pythonSseService.flushReasoningTranslations(ctx);
         String errorMsg = metadata != null ? metadata.getString("error") : "unknown gateway error";
         if (ctx.recoveryOnly) {
             ctx.gatewayError = true;
@@ -391,10 +401,19 @@ public class SessionStreamEventRouter {
         MessageContext messageContext = ctx.resolveMessageContext(dataJson.getString("trace_id"));
         // WebSocket 增量已经完成聚合，广播直接复用与发起端相同的输出，不从原始事件重建而丢失 v2/seq。
         if (ChatTransport.WEBSOCKET.equals(ctx.transport)
-            && (SseResponseEventEnum.answerDelta.equals(eventType)
-                || SseResponseEventEnum.reasoningLogDelta.equals(eventType))
             && messageContext != null && messageContext.getRecordedStreamEventData() != null) {
-            broadcastJson.put("data", messageContext.getRecordedStreamEventData());
+            if (SseResponseEventEnum.answerDelta.equals(eventType)
+                || SseResponseEventEnum.reasoningLogDelta.equals(eventType)) {
+                broadcastJson.put("data", messageContext.getRecordedStreamEventData());
+            }
+            else {
+                JSONObject output = JSON.parseObject(gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));
+                JSONObject recorded = JSON.parseObject(messageContext.getRecordedStreamEventData());
+                if (recorded.containsKey("reasoningTranslations")) {
+                    output.put("reasoningTranslations", recorded.get("reasoningTranslations"));
+                }
+                broadcastJson.put("data", output.toJSONString());
+            }
         }
         else {
             broadcastJson.put("data", gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));

@@ -355,12 +355,14 @@ public class RouteService {
                 }
                 // 错误事件：写出错误消息，标记 gatewayError，退出循环
                 if (SseResponseEventEnum.error.equals(eventType)) {
+                    pythonSseService.flushReasoningTranslations(ctx);
                     JSONObject errorPayload = new JSONObject();
                     errorPayload.put("message", errorMsg);
                     errorPayload.put("traceback", errorMsg);
                     errorPayload.put("sessionId", sessionId);
                     gatewayStreamEventProcessor.enrichLaneMetadata(ctx, dataJson, metadata, errorPayload);
                     CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.error, errorPayload.toJSONString());
+                    pythonSseService.broadcastTranslatedHttpEvent(ctx, eventType, errorPayload.toJSONString());
                     ctx.gatewayError = !ctx.isMultiAgentRequest() || ctx.getMultiAgentTraceIds().size() == 1;
                     log.error("收到 Gateway error 事件, sessionId: {}, traceId: {}", sessionId,
                         dataJson.getString("trace_id"));

@@ -378,6 +378,9 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
   }
 
   const payload = answerDeltaHandler(mySseDataObj, msgEvent);
+  if (sseDataObj.reasoningTranslation) {
+    set(payload, 'message.reasoningTranslation', sseDataObj.reasoningTranslation);
+  }
 
   switch (msgEvent) {
     case 'reasoningLogStart':

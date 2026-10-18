@@ -139,6 +139,7 @@ export function formatStreamPayload(eventName: string, res: any) {
       break;
   }
 
+  Object.assign(payload, pick(res, ['reasoningTranslations']));
   return payload;
 }
 

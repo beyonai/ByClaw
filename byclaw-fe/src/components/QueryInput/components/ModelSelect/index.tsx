@@ -29,7 +29,7 @@ type Props = {
   onLevelChange?: (level?: string) => void;
 };
 
-const rowsOf = (response: any) => {
+export const rowsOf = (response: any) => {
   const data = response?.data ?? response ?? {};
   const rows = Array.isArray(data)
     ? data

@@ -113,6 +113,15 @@ public class AIService {
         return generateText(systemPrompt, userPrompt, model, null, maxTokens, true);
     }
 
+    /** Bounded auxiliary calls must not indefinitely hold an agent's stream open. */
+    public GeneratedText generateJsonObjectWithMetadata(String systemPrompt, String userPrompt, ModelDto model,
+        int maxTokens, int timeoutMillis) {
+        var factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(timeoutMillis);
+        factory.setReadTimeout(timeoutMillis);
+        return generateText(systemPrompt, userPrompt, model, null, maxTokens, true, new RestTemplate(factory));
+    }
+
     private String generateText(
         String systemPrompt,
         String userPrompt,
@@ -131,6 +140,11 @@ public class AIService {
         int maxTokens,
         boolean jsonObject
     ) {
+        return generateText(systemPrompt, userPrompt, defaultModel, modelCode, maxTokens, jsonObject, restTemplate);
+    }
+
+    private GeneratedText generateText(String systemPrompt, String userPrompt, ModelDto defaultModel,
+        String modelCode, int maxTokens, boolean jsonObject, RestTemplate client) {
         ModelConfigurationValidator.validate(defaultModel);
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
@@ -175,7 +189,7 @@ public class AIService {
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
 
             // 发送请求
-            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl, entity, String.class);
+            ResponseEntity<String> response = client.postForEntity(apiUrl, entity, String.class);
 
             // 解析响应
             if (response.getStatusCode() == HttpStatus.OK) {

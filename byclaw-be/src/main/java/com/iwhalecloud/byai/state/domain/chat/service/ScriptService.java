@@ -472,6 +472,9 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void storeMessage(ChatProcessContext ctx) {
+        if (ctx.assistantChatDto != null && Boolean.TRUE.equals(ctx.assistantChatDto.getTranslateReasoning())) {
+            pythonSseService.flushReasoningTranslations(ctx);
+        }
         if (ctx.tenantContext != null) {
             if (!ctx.tryBeginPersist()) return;
             try {

@@ -16,6 +16,14 @@ import { compareStreamId, parseChatStreamMessage } from '../useSseSender/chatStr
 import { answerDeltaHandler, reasoningLogHandler, resComIdsHandler } from '../useSseSender/util';
 
 describe('hooks/useSseSender/util', () => {
+  it.each(['reasoningTranslation', 'reasoningLogDelta', 'appStreamResponse'])(
+    'preserves translation snapshots on %s events',
+    (event) => {
+      const updates = [{ seq: 1, text: '中文', revision: 2, sourceLength: 5, status: 'done' }];
+      const parsed = parseChatStreamMessage({ event, data: { reasoningTranslations: updates } });
+      expect(parsed?.formattedPayload.reasoningTranslations).toEqual(updates);
+    }
+  );
   it('formats text answer deltas and preserves message metadata', () => {
     expect(
       answerDeltaHandler(

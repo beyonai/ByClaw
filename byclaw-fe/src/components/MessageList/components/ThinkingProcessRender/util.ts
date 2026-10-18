@@ -4,6 +4,7 @@ import type { IMessage, IMessageListItem } from '@/typescript/message';
 import type { TreeNode } from './typescript';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 import { isPendingEasyConfirmListItem } from '@/components/MessagesComp/easyConfirm';
+import { translatedThinkingItems } from '@/utils/reasoningTranslation';
 
 const ROOT_ORDER_ID = '-1';
 const TERMINAL_THINK_STATUS_TITLE_STATUSES = new Set(['_DONE_', '_ERROR_']);
@@ -126,7 +127,7 @@ export const transformList = (
 
   const groupNodes = new Map<string, TreeNode>();
 
-  sortParentsBeforeChildren(flatList).forEach((item, messageIdx) => {
+  sortParentsBeforeChildren(translatedThinkingItems(flatList, message)).forEach((item, messageIdx) => {
     const newNode: TreeNode = {
       messageIdx,
       ...item,

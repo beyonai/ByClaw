@@ -165,6 +165,9 @@ public class AssistantChatService {
     private AIService aiService;
 
     @Autowired
+    private ReasoningTranslationService reasoningTranslationService;
+
+    @Autowired
     private AiPromptService aiPromptService;
 
 
@@ -237,6 +240,10 @@ public class AssistantChatService {
                     sessionModelSelectionService.resolveSelection(assistantChatDto);
                     sessionModelSelectionService.applySessionOverride(assistantChatDto);
                 }
+            }
+
+            if (Boolean.TRUE.equals(assistantChatDto.getTranslateReasoning())) {
+                reasoningTranslationService.validate(assistantChatDto);
             }
 
             // 在解析实际执行 Agent 后校验接续权限，再原子占用任务 turn。

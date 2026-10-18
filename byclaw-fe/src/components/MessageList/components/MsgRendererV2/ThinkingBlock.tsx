@@ -11,6 +11,7 @@ import type { TreeNode } from '@/components/MessageList/components/ThinkingProce
 import { hasPendingEasyConfirmItem } from '@/components/MessagesComp/easyConfirm';
 import styles from '@/components/MessageList/components/ThinkingProcessRender/index.module.less';
 import { loadThinkingPreviewGetter } from './thinkingPreviewHandler';
+import { translatedThinkingItems } from '@/utils/reasoningTranslation';
 
 type Props = {
   blockId: string;
@@ -40,6 +41,7 @@ const getPreviewItem = (items: IMessageListItem[], ended: boolean) => {
 
 export default function ThinkingBlock({ blockId, items, message, ended, updateMessage }: Props) {
   const intl = useIntl();
+  const displayItems = useMemo(() => translatedThinkingItems(items, message), [items, message]);
   const [collapsed, setCollapsed] = useState(true);
   const transformedList = useMemo(
     () => transformList(items, ended, message.messageId, message),
@@ -47,8 +49,8 @@ export default function ThinkingBlock({ blockId, items, message, ended, updateMe
   );
   const hasPendingInteraction = hasPendingEasyConfirmItem(message, items);
   const effectiveCollapsed = collapsed && !hasPendingInteraction;
-  const defaultPreview = useMemo(() => getThinkingPreview(items, ended), [ended, items]);
-  const previewItem = useMemo(() => getPreviewItem(items, ended), [ended, items]);
+  const defaultPreview = useMemo(() => getThinkingPreview(displayItems, ended), [ended, displayItems]);
+  const previewItem = useMemo(() => getPreviewItem(displayItems, ended), [ended, displayItems]);
   const [preview, setPreview] = useState<ReactNode>(defaultPreview);
   const hasPreview = preview !== null && preview !== undefined && preview !== '';
 

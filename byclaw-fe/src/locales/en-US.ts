@@ -5,6 +5,10 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  'reasoningTranslation.label': 'Chinese reasoning',
+  'reasoningTranslation.model': 'Select translation model',
+  'reasoningTranslation.hint': 'Translate reasoning prose only. Tool arguments and code stay unchanged. Applies to the next turn.',
+  'reasoningTranslation.loadFailed': 'Could not load models. Reopen to retry.',
   ...employeePublication,
   // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
   'toolCall.defaultTitle': 'Tool call',
