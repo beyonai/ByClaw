@@ -1,5 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
-import { Button, Drawer, Input, Modal, Spin, Tooltip, Tree, Upload, message, type MenuProps } from 'antd';
+import {
+  Button,
+  Drawer,
+  Input,
+  Modal,
+  Spin,
+  Tooltip,
+  Tree,
+  Upload,
+  message,
+  type MenuProps,
+  type TreeDataNode,
+} from 'antd';
 import { FolderAddOutlined, GithubOutlined, UploadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
@@ -106,11 +118,23 @@ const ProjectSpaceTab: React.FC<Props> = ({
   const [renameLoading, setRenameLoading] = useState(false);
   const [saveTarget, setSaveTarget] = useState<SpaceItem | null>(null);
   const [savePath, setSavePath] = useState('/');
-  const [saveFolders, setSaveFolders] = useState<{ title: string; key: string; isLeaf: boolean }[]>([]);
+  const [saveFolders, setSaveFolders] = useState<TreeDataNode[]>([]);
+  const [saveExpandedKeys, setSaveExpandedKeys] = useState<Key[]>(['/']);
+  const [saveTreeKey, setSaveTreeKey] = useState(0);
+  const saveRequest = useRef(0);
   const [saveLoading, setSaveLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const clickTimer = useRef<number | null>(null);
   const rootPath = `/by/projects/${projectId}/`;
+
+  useEffect(() => {
+    saveRequest.current += 1;
+    setSaveTarget(null);
+    setSaveFolders([]);
+    return () => {
+      saveRequest.current += 1;
+    };
+  }, [projectId, projectCloudResourceId]);
 
   const load = useCallback(
     async (relativePath?: string) => {
@@ -308,27 +332,57 @@ const ProjectSpaceTab: React.FC<Props> = ({
   const openSaveToProject = useCallback(
     async (item: SpaceItem) => {
       if (!projectCloudResourceId || !resourceId || item.isDir) return;
+      const request = ++saveRequest.current;
+      setSaveTreeKey(request);
       setSaveTarget(item);
       setSavePath('/');
+      setSaveFolders([]);
+      setSaveExpandedKeys(['/']);
       setSaveLoading(true);
       try {
         const folders = await queryProjectCloudDrive(projectCloudResourceId, '/');
+        if (request !== saveRequest.current) return;
         setSaveFolders(
           folders
             .filter((folder) => folder.isDir)
             .map((folder) => ({ title: folder.name, key: ensureDirectoryPath(folder.path), isLeaf: false }))
         );
       } catch (error: any) {
+        if (request !== saveRequest.current) return;
         setSaveFolders([]);
         message.error(
           error?.message || error?.msg || intl.formatMessage({ id: 'projectSpace.projectDrive.loadFailed' })
         );
       } finally {
-        setSaveLoading(false);
+        if (request === saveRequest.current) setSaveLoading(false);
       }
     },
     [intl, projectCloudResourceId, resourceId]
   );
+
+  const loadSaveDirectory = async (node: TreeDataNode) => {
+    const { key } = node;
+    if (key === '/' || node.children || !projectCloudResourceId) return;
+    const request = saveRequest.current;
+    try {
+      const folders = await queryProjectCloudDrive(projectCloudResourceId, String(key));
+      if (request !== saveRequest.current) return;
+      const children: TreeDataNode[] = folders
+        .filter((folder) => folder.isDir)
+        .map((folder) => ({ title: folder.name, key: ensureDirectoryPath(folder.path), isLeaf: false }));
+      const update = (nodes: TreeDataNode[]): TreeDataNode[] =>
+        nodes.map((item) => {
+          if (item.key === key) return { ...item, children, isLeaf: !children.length };
+          return item.children ? { ...item, children: update(item.children) } : item;
+        });
+      setSaveFolders(update);
+    } catch (error: any) {
+      if (request !== saveRequest.current) return;
+      setSaveExpandedKeys((keys) => keys.filter((expandedKey) => expandedKey !== key));
+      message.error(error?.message || error?.msg || intl.formatMessage({ id: 'projectSpace.projectDrive.loadFailed' }));
+      throw error;
+    }
+  };
 
   const saveToProject = useCallback(async () => {
     if (!saveTarget || !projectCloudResourceId || !resourceId) return;
@@ -503,12 +557,17 @@ const ProjectSpaceTab: React.FC<Props> = ({
         okText={intl.formatMessage({ id: 'common.save' })}
         cancelText={intl.formatMessage({ id: 'common.cancel' })}
         confirmLoading={saving}
-        onCancel={() => !saving && setSaveTarget(null)}
+        onCancel={() => {
+          if (saving) return;
+          saveRequest.current += 1;
+          setSaveTarget(null);
+        }}
         onOk={() => void saveToProject()}
         destroyOnClose
       >
         <Spin spinning={saveLoading}>
           <Tree
+            key={saveTreeKey}
             treeData={[
               {
                 title: intl.formatMessage({ id: 'fileBrowser.root' }),
@@ -517,7 +576,9 @@ const ProjectSpaceTab: React.FC<Props> = ({
                 isLeaf: !saveFolders.length,
               },
             ]}
-            expandedKeys={['/']}
+            expandedKeys={saveExpandedKeys}
+            onExpand={setSaveExpandedKeys}
+            loadData={loadSaveDirectory}
             selectedKeys={[savePath]}
             onSelect={(keys) => keys.length && setSavePath(String(keys[0]))}
           />
