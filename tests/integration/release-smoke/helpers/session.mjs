@@ -29,7 +29,7 @@ export function watchTurn(page, tracker) {
   });
 }
 
-export async function sendToEmployee(page, config, employee) {
+export async function chooseEmployee(page, employee) {
   const editor = await clearMentions(page);
   const panel = await openEmployees(page);
   const search = panel.locator('input').first();
@@ -52,6 +52,11 @@ export async function sendToEmployee(page, config, employee) {
   // Click the title, never the avatar (which opens an employee drawer).
   await title.click();
   await expect(panel).toBeHidden({ timeout: 10000 });
+  return editor;
+}
+
+export async function sendToEmployee(page, config, employee) {
+  const editor = await chooseEmployee(page, employee);
   await editor.click();
   await editor.press('End');
   await editor.pressSequentially(config.prompt, { delay: 5 });
@@ -69,8 +74,10 @@ export async function checkReply(page, tracker, config) {
   await answer.waitFor({ state: 'visible', timeout: 15000 });
   const detail = await api(page, '/byaiService/chat/getMessageById', { data: { messageId: tracker.messageId } });
   const text = validateReply(detail, tracker);
+  tracker.observeStored?.(detail);
   const visible = await answer.innerText();
   if (!normalizedText(visible).includes(normalizedText(text).slice(0, 24))) throw new Error('网页未显示最终回答正文');
+  return text;
 }
 
 export async function deleteSuccessfulSession(page, tracker) {

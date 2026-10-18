@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { businessData } from './protocol.mjs';
 import { employeeName, visibleCandidates } from './candidates.mjs';
 
-export async function api(page, endpoint, { method = 'GET', data = {} } = {}) {
+export async function apiResponse(page, endpoint, { method = 'GET', data = {} } = {}) {
   const auth = await page.evaluate(() => ({ userCode: localStorage.getItem('uc') || '',
     token: localStorage.getItem('Beyond-Token') || '', sso: localStorage.getItem('SSO-TOKEN') || '' }));
   const nonce = randomUUID();
@@ -20,7 +20,11 @@ export async function api(page, endpoint, { method = 'GET', data = {} } = {}) {
     ? await page.request.post(url, { headers, data, timeout: 15000 })
     : await page.request.get(url, { headers, params: data, timeout: 15000 });
   if (!response.ok()) throw new Error(`接口 HTTP ${response.status()}`);
-  return businessData(await response.json());
+  return response;
+}
+
+export async function api(page, endpoint, options = {}) {
+  return businessData(await (await apiResponse(page, endpoint, options)).json());
 }
 
 export async function verifyIdentity(page, config) {

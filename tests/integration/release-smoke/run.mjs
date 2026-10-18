@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, validateConfig, validateNotification, notificationTargets, safeText } from './config.mjs';
 import { waitReady } from './helpers/readiness.mjs';
-import { outcome, renderText, saveSummary } from './report/summary.mjs';
+import { outcome, renderText, saveSummary, groupStats } from './report/summary.mjs';
 import { notify } from './report/dingtalk.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +42,8 @@ async function main() {
   fs.mkdirSync(path.join(dir, 'artifacts'), { recursive: true, mode: 0o700 });
   let summary = { runId, environment: safeText(config.environment, config, 100), userCode: config.userCode,
     expectedVersion: safeText(config.expectedVersion, config, 100), actualVersion: '',
-    startedAt: new Date().toISOString(), status: 'running', cases: [], error: '' };
+    startedAt: new Date().toISOString(), status: 'running', cases: [], error: '',
+    groups: [{ kind: 'employee', label: '数字员工', expected: 5 }, { kind: 'skill', label: '技能', expected: 5 }] };
   saveSummary(dir, summary);
   let child;
   let interrupted = false;
@@ -55,11 +56,12 @@ async function main() {
     saveSummary(dir, summary);
     if (interrupted) throw new Error('运行已取消');
     const childEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-      /^(PATH|HOME|USER|SHELL|TMPDIR|TEMP|TMP|LANG|LC_.*|SystemRoot|DISPLAY|XAUTHORITY|PLAYWRIGHT_BROWSERS_PATH|BYCLAW_SMOKE_BROWSER_CHANNEL|BYCLAW_SMOKE_HEADLESS|BYCLAW_SMOKE_PROMPT|BYCLAW_SMOKE_REPLY_TIMEOUT_SEC)$/.test(key)));
+      /^(PATH|HOME|USER|SHELL|TMPDIR|TEMP|TMP|LANG|LC_.*|SystemRoot|DISPLAY|XAUTHORITY|PLAYWRIGHT_BROWSERS_PATH|BYCLAW_SMOKE_BROWSER_CHANNEL|BYCLAW_SMOKE_HEADLESS|BYCLAW_SMOKE_PROMPT|BYCLAW_SMOKE_REPLY_TIMEOUT_SEC|BYCLAW_SMOKE_SKILL_AGENT_ID|BYCLAW_SMOKE_SKILL_CASES_FILE|BYCLAW_SMOKE_SKILL_TIMEOUT_SEC)$/.test(key)));
     Object.assign(childEnv, { BYCLAW_SMOKE_RUN_DIR: dir,
       BYCLAW_SMOKE_ENV: config.environment, BYCLAW_SMOKE_BASE_URL: config.baseUrl,
       BYCLAW_SMOKE_USER_CODE: config.userCode, BYCLAW_SMOKE_EXPECTED_VERSION: config.expectedVersion,
       BYCLAW_SMOKE_PASSWORD: config.password, PLAYWRIGHT_NO_COPY_PROMPT: '1' });
+    if (config.skillCasesFile) childEnv.BYCLAW_SMOKE_SKILL_CASES_FILE = path.resolve(config.skillCasesFile);
     const code = await new Promise((resolve, reject) => {
       child = spawn(process.execPath, [path.join(root, 'node_modules/@playwright/test/cli.js'), 'test'], {
         cwd: root, env: childEnv, stdio: 'inherit',
@@ -69,9 +71,9 @@ async function main() {
     });
     summary = JSON.parse(fs.readFileSync(path.join(dir, 'summary.json'), 'utf8'));
     if (interrupted) summary.error = '运行已取消，已创建的会话保留供排查';
-    else if (code !== 0 && !summary.error && !summary.cases.some((item) => item.status !== 'passed' || item.cleanup === 'failed') && summary.cases.length >= 5) {
+    else if (code !== 0 && !summary.error && outcome(summary) === 'passed') {
       summary.error = '浏览器执行异常，详见执行日志';
-    } else if (code !== 0 && !summary.error && !summary.selected) summary.error = '浏览器未完成初始化，请检查依赖和登录环境';
+    } else if (code !== 0 && !summary.error && !summary.selected && !groupStats(summary).some((group) => group.error)) summary.error = '浏览器未完成初始化，请检查依赖和登录环境';
   } catch (error) { summary.error = safeText(error.message, config); }
   summary.finishedAt = new Date().toISOString();
   summary.status = outcome(summary);

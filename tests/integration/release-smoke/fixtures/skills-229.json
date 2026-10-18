@@ -1,0 +1,42 @@
+[
+  {
+    "resourceId": "11231017",
+    "agentId": "11227803",
+    "packageHash": "ec6a2ed3dff4a026a582c7c6dc2234e1686ddcb1ba8918d157edf89ed32ca353",
+    "directory": "tax-policy-knowledge-20261008",
+    "documentContains": ["财税政策知识库 v3.14.9", "建筑施工行业财税合规专题"],
+    "scope": "读取技能并执行矩阵归口；不验证实时财税政策或税额",
+    "prompt": "仅根据所选技能文档中的16包矩阵归口说明，判断‘建筑项目异地预缴’问题应该路由到哪个专题技能。不要进行财税政策查询、不要联网、不要注册或调用外部MCP服务、不要安装其他技能。最终只返回JSON对象，字段topic为该专题的完整名称，mode固定为routing_only。",
+    "checks": { "json": { "topic": "建筑施工行业财税合规专题", "mode": "routing_only" } }
+  },
+  {
+    "resourceId": "11226333",
+    "agentId": "11227803",
+    "directory": "holiday-query",
+    "documentContains": ["scripts/holiday.py", "调休补班"],
+    "scope": "运行技能脚本查询固定日期类型",
+    "prompt": "请执行所选技能自带的holiday.py脚本，查询2026-10-10属于holiday、makeup、weekend还是workday。不得凭常识回答，不修改外部业务数据。最终只返回JSON：字段date为日期字符串，kind为脚本查得的类型。",
+    "toolChecks": [{ "id": "holiday-script", "commandIncludes": ["holiday.py", "check", "2026-10-10"] }],
+    "checks": { "json": { "date": "2026-10-10", "kind": "makeup" } }
+  },
+  {
+    "resourceId": "11105826",
+    "agentId": "11227803",
+    "packageHash": "5af99262136eca5fad75ddfb055cb353efa98204c07400295fcc6be33b7b7d11",
+    "directory": "ppt-master",
+    "documentContains": ["PPT Master"],
+    "scope": "技能加载与三页汇报规划；不验证成品PPT文件",
+    "prompt": "仅进行PPT制作前的规划，不生成文件、不安装依赖、不发布网页。请按所选技能的规划要求，为主题‘自动化测试周报’设计3页16:9汇报大纲，三页依次覆盖测试范围、测试结果、下一步计划。最终只返回JSON：slideCount为3，aspectRatio为16:9字符串，titles为这三个中文页标题的数组。",
+    "checks": { "json": { "slideCount": 3, "aspectRatio": "16:9", "titles": ["测试范围", "测试结果", "下一步计划"] } }
+  },
+  {
+    "resourceId": "11000880",
+    "agentId": "11227803",
+    "packageHash": "7661f1ae6a3ca322b2fc96ada76cc82407f36f43b95fd70e82583d13b1c80cab",
+    "directory": "subtitle-generator",
+    "documentContains": ["字幕", "scripts/slide_scripts.json"],
+    "scope": "技能加载与确定时间轴的SRT格式转换；不验证音频识别",
+    "prompt": "使用所选技能，把以下已确认文案和音频时间轴转换为SRT字幕。第1条从0.000秒到1.200秒，文案‘你好，ByClaw。’；第2条从1.200秒到2.500秒，文案‘自动测试完成。’。不调用语音识别、不生成音视频、不写入业务数据。最终只输出完整SRT文本。",
+    "checks": { "all": ["00:00:00,000 --> 00:00:01,200", "00:00:01,200 --> 00:00:02,500", "你好，ByClaw。", "自动测试完成。"] }
+  }
+]

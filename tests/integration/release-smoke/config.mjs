@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 export function loadConfig(args = [], env = process.env) {
   const { values } = parseArgs({ args, options: {
@@ -36,6 +37,9 @@ export function loadConfig(args = [], env = process.env) {
     replyTimeoutMs: integer('BYCLAW_SMOKE_REPLY_TIMEOUT_SEC', 120, 600) * 1000,
     readyTimeoutMs: integer('BYCLAW_SMOKE_READY_TIMEOUT_SEC', 180, 900) * 1000,
     prompt: env.BYCLAW_SMOKE_PROMPT || '你好，这是发布后对话可用性测试。请用一句简短的话打个招呼，不调用工具，不执行其他操作。',
+    skillAgentId: env.BYCLAW_SMOKE_SKILL_AGENT_ID || '',
+    skillCasesFile: env.BYCLAW_SMOKE_SKILL_CASES_FILE || fileURLToPath(new URL('./fixtures/skills-229.json', import.meta.url)),
+    skillTimeoutMs: integer('BYCLAW_SMOKE_SKILL_TIMEOUT_SEC', 240, 900) * 1000,
   };
 }
 

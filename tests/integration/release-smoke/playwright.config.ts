@@ -1,7 +1,8 @@
 import { defineConfig } from '@playwright/test';
 import path from 'node:path';
 
-const timeout = 90000 + 5 * ((Number(process.env.BYCLAW_SMOKE_REPLY_TIMEOUT_SEC) || 120) + 120) * 1000;
+const timeout = 120000 + 5 * ((Number(process.env.BYCLAW_SMOKE_REPLY_TIMEOUT_SEC) || 120) +
+  (Number(process.env.BYCLAW_SMOKE_SKILL_TIMEOUT_SEC) || 240) + 240) * 1000;
 export default defineConfig({
   testDir: './cases',
   workers: 1,

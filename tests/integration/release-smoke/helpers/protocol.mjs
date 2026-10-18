@@ -5,8 +5,10 @@ const object = (value) => {
 const id = (value) => value === undefined || value === null ? '' : String(value);
 
 export class TurnTracker {
-  constructor(employee) {
+  constructor(employee, { skill, expectedPrompt } = {}) {
     this.employee = employee;
+    this.skill = skill;
+    this.expectedPrompt = expectedPrompt;
     this.requestIds = new Set();
     this.sessionId = '';
     this.messageId = '';
@@ -25,10 +27,18 @@ export class TurnTracker {
     this.sent = true;
     this.clientMessageId = id(data.clientRequestId).split('_')[1] || '';
     if (data.sessionId || data.chatId) this.error = '请求复用了已有会话，未清理该会话';
+    const normalizePrompt = (value) => String(value).replace(/\\n/g, '\n').replace(/\s+/g, ' ');
+    if (this.expectedPrompt && !normalizePrompt(data.chatContent).includes(normalizePrompt(this.expectedPrompt))) {
+      this.error = '实际发送的内容缺少技能测试任务';
+    }
     const agents = (data.resourceList || []).filter((item) => item.resourceType === 'DIG_EMPLOYEE');
     if (agents.length !== 1 || !this.employee.ids.some((key) => [agents[0]?.id, agents[0]?.resourceId, agents[0]?.resourceCode].map(id).includes(key))) {
       this.error = '本轮请求没有准确且唯一地 @ 目标员工';
     }
+    const skills = (data.resourceList || []).filter((item) => item.resourceType === 'SKILL');
+    if (this.skill && (skills.length !== 1 || ![skills[0]?.id, skills[0]?.resourceId].map(id).includes(this.skill.resourceId))) {
+      this.error = '本轮请求没有准确且唯一地引用目标技能';
+    } else if (!this.skill && skills.length) this.error = '员工对话测试意外引用了技能';
     for (const key of [data.clientRequestId, data.extParams?.requestId]) if (key) this.requestIds.add(id(key));
     for (const lane of data.extParams?.multiAgent?.lanes || []) {
       if (lane.clientRequestId) this.requestIds.add(id(lane.clientRequestId));
@@ -62,6 +72,7 @@ export class TurnTracker {
       else this.observedAgent = true;
     }
     if (this.events.length < 100) this.events.push({ event, sessionId, requestId, agentId: agent });
+    this.observe?.({ event, outer, data, metadata });
     if (event === 'error' || outer.type === 'ERROR') this.error = '对话流返回执行或权限错误';
     if (event === 'appStreamResponse') {
       this.done = true;
