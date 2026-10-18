@@ -90,10 +90,10 @@ export const createRelativeResourceResolver = (fileUrl?: string): MarkdownImageR
 export const createRelativePathResourceResolver = (
   filePath: string,
   downloadResource: (resolvedPath: string) => Promise<Blob>
-): MarkdownImageResolver => {
+) => {
   const resourceCache = new Map<string, Promise<Blob>>();
 
-  return async (resourcePath) => {
+  return async (resourcePath: string) => {
     if (isExternalResourcePath(resourcePath)) return resourcePath;
 
     const resolvedPath = resolveRelativeFilePath(filePath, resourcePath);

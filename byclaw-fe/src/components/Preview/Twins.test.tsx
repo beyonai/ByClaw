@@ -374,6 +374,41 @@ describe('PreViewFile binary and relative resource handling', () => {
   });
 });
 
+describe('PreViewFile text validation', () => {
+  beforeEach(() => {
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: jest.fn(() => 'blob:text-preview') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
+  });
+
+  it('keeps download available but does not read oversized text files', async () => {
+    const read = jest.fn();
+    const file = new Blob(['a'.repeat(2 * 1024 * 1024 + 1)]);
+    Object.defineProperty(file, 'text', { value: read });
+    render(<PreViewFile data={file} title="large.md" />);
+    expect(await screen.findByText('preview.tooLarge')).toBeVisible();
+    expect(read).not.toHaveBeenCalled();
+    expect(screen.getByTestId('icon-a-Downloadxiazai')).toBeVisible();
+  });
+
+  it('never starts the HTML renderer or its resource loading for oversized HTML', async () => {
+    mockHtmlRender.mockClear();
+    const file = new Blob(['a'.repeat(2 * 1024 * 1024 + 1)]);
+    const read = jest.fn();
+    Object.defineProperty(file, 'text', { value: read });
+    render(<PreViewFile data={file} title="large.html" resolveHtmlResource={jest.fn()} />);
+    expect(await screen.findByText('preview.tooLarge')).toBeVisible();
+    expect(read).not.toHaveBeenCalled();
+    expect(mockHtmlRender).not.toHaveBeenCalled();
+  });
+
+  it('rejects disguised binary content instead of showing garbled source', async () => {
+    const file = new Blob(['PK']);
+    Object.defineProperty(file, 'text', { value: async () => 'PK\u0003\u0004binary' });
+    render(<PreViewFile data={file} title="custom.unknown" />);
+    expect(await screen.findByText('preview.binaryText')).toBeVisible();
+  });
+});
+
 describe('PreViewFile Markdown data handling', () => {
   it('shows the Markdown preview when data is a string', async () => {
     render(<PreViewFile data="# Markdown content" type="md" />);

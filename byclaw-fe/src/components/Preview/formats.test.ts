@@ -72,7 +72,7 @@ describe('shared file preview formats', () => {
     expect(resolvePreviewType()).toBe('txt');
   });
 
-  it.each(['archive.rar', 'scan.psd', 'photo.jp2', 'program.exe', 'README'])(
+  it.each(['archive.rar', 'scan.psd', 'photo.jp2', 'program.exe'])(
     'does not advertise an unavailable decoder for %s',
     (name) => expect(isPreviewableName(name)).toBe(false)
   );

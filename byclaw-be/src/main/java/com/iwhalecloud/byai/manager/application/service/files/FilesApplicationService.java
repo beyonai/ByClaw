@@ -416,6 +416,14 @@ public class FilesApplicationService {
         }
         try (InputStream inputStream = openCommonFileInputStream(bucketName, filePath);) {
 
+            int firstByte = inputStream.read();
+            if (firstByte == -1) {
+                response.setStatus(422);
+                return;
+            }
+            response.setHeader("Cache-Control", "no-store");
+            response.setHeader("X-Content-Type-Options", "nosniff");
+
             // 设置ContentType，响应内容为二进制数据流，编码为utf-8，此处设定的编码是文件内容的编码
             response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
 
@@ -427,10 +435,16 @@ public class FilesApplicationService {
 
             String contentDisposition = "attachment;filename=" + URLEncoder.encode(fileName, StandardCharsets.UTF_8);
             response.setHeader("Content-Disposition", contentDisposition);
+            response.getOutputStream().write(firstByte);
             IOUtils.copy(inputStream, response.getOutputStream());
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
+            if (!response.isCommitted()) {
+                response.reset();
+                response.setStatus(e instanceof java.io.FileNotFoundException
+                    ? HttpServletResponse.SC_NOT_FOUND : HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            }
         }
     }
 

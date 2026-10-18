@@ -3432,6 +3432,14 @@ export default {
   'chatSettings.memoryDesc': '百应问答信息记忆',
 
   // Preview Html组件
+  'preview.source': '源码',
+  'preview.expand': '放大查看',
+  'preview.mermaidFailed': '图形解析失败，请检查 Mermaid 语法或查看源码',
+  'preview.textMode': '文本 / 源码',
+  'preview.resourceFailed': '部分预览资源加载失败：{resources}',
+  'preview.binaryText': '该文件不是可读取的文本，请下载查看',
+  'preview.empty': '文件内容为空，无法预览',
+  'preview.tooLarge': '文本文件超过 2 MiB，请下载查看',
   'preview.htmlPreview': 'HTML预览',
 
   // PersonnelModel组件

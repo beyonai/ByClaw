@@ -3549,6 +3549,14 @@ export default {
   'chatSettings.memoryDesc': 'Beyond Q&A information memory',
 
   // Preview Html Component
+  'preview.source': 'Source',
+  'preview.expand': 'Expand',
+  'preview.mermaidFailed': 'Unable to render the diagram. Check the Mermaid syntax or view the source.',
+  'preview.textMode': 'Text / source',
+  'preview.resourceFailed': 'Some preview resources failed to load: {resources}',
+  'preview.binaryText': 'This file is not readable text. Download it to view.',
+  'preview.empty': 'The file is empty and cannot be previewed.',
+  'preview.tooLarge': 'Text files over 2 MiB must be downloaded.',
   'preview.htmlPreview': 'HTML Preview',
 
   // PersonnelModel Component

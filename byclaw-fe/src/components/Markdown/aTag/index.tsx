@@ -10,13 +10,12 @@ import IconRender from '@/components/MessageList/components/FileRender/component
 
 import { downloadFile, getFileUrl } from '@/utils/file';
 import { isManagedChatFileArtifactPath } from '@/utils/chatFileArtifact';
+import { resolvePreviewType } from '@/components/Preview/formats';
 import { PREVIEWABLE } from '@/components/MessageList/components/FileRender';
 import { createRelativeResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
 
 import previewStyle from '@/components/MessageList/components/FileRender/components/Previewer/index.module.less';
 import styles from './index.module.less';
-
-const previewCaches: Record<string, Blob> = {};
 
 const getFileTypeFromUrl = (href?: string) => {
   if (!href) return '';
@@ -40,7 +39,7 @@ function ATag({ domNode }: { domNode: any }) {
   const [previewing, setPreviewing] = useState(false);
 
   const nameArr = name?.split('.');
-  const fileType = ((nameArr?.length > 1 ? nameArr?.pop() : '') || getFileTypeFromUrl(href)).toLowerCase();
+  const fileType = resolvePreviewType((nameArr?.length > 1 ? nameArr?.pop() : '') || getFileTypeFromUrl(href), name);
 
   const canPreview = !!href && PREVIEWABLE.includes(fileType.toLowerCase());
   const canDownload = !!href;
@@ -75,16 +74,14 @@ function ATag({ domNode }: { domNode: any }) {
     if (!href) return;
     const url = getFileUrl(href);
 
-    if (previewCaches[url]) {
-      openOnDrawer({ blob: previewCaches[url], resourceUrl: url });
-      return;
-    }
-
     setPreviewing(true);
-    fetch(url)
-      .then((res) => res.blob())
+    fetch(url, { cache: 'no-store' })
+      .then((res) => {
+        if (!res.ok) throw new Error(res.statusText);
+        return res.blob();
+      })
       .then((blob) => {
-        previewCaches[url] = blob;
+        if (!blob.size) throw new Error('Empty file');
         openOnDrawer({ blob, resourceUrl: url });
       })
       .catch((error) => {

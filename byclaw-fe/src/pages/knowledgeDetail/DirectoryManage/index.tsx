@@ -1,3 +1,5 @@
+import { createRelativePathResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
+import MessageFilePreviewPanel from '@/components/MessageList/components/FileRender/components/Previewer/MessageFilePreviewPanel';
 import {
   ForwardedRef,
   forwardRef,
@@ -6,10 +8,8 @@ import {
   useImperativeHandle,
   useMemo,
   useContext,
-  lazy,
   useRef,
   useState,
-  Suspense,
 } from 'react';
 
 // @ts-ignore
@@ -38,20 +38,13 @@ import {
 } from '@/service/knowledgeCenter';
 import { downloadFile } from '@/utils/file';
 import { getFileIconType } from '@/constants/icon';
-import {
-  getMimeType,
-  isPreviewable,
-} from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
+import { isPreviewable } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import DirectoryEmpty from '../components/DirectoryEmpty';
 import BuildResultPanel from './BuildResultPanel';
 import MoveModal from '../components/MoveModal';
 import RenameModal from '../components/RenameModal';
 import { collapseNestedMoveSources, type MoveSource } from './moveUtils';
 import styles from './index.module.less';
-
-const PreViewFile = lazy(() =>
-  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
-);
 
 export interface DirectoryManageRef {
   getDirectoryList: (params: Record<string, any>) => void;
@@ -94,14 +87,6 @@ type IFileBuildStatus = {
   statusDict?: IBuildStatusItem[];
   stepDict?: IBuildStatusItem[];
 };
-
-interface FilePreviewPanelProps {
-  data: string | Blob | null;
-  fileName: string;
-  fileType: string;
-  loading: boolean;
-  onClose: () => void;
-}
 
 function normalizeDirectoryPath(path?: string) {
   const normalizedPath = `${path || '/'}`.trim().replace(/\\/g, '/').replace(/\/+/g, '/');
@@ -149,10 +134,6 @@ function getFileType(name: string): string {
   return ext;
 }
 
-function getRawBlob(res: any) {
-  return res?.file instanceof Blob ? res.file : res instanceof Blob ? res : new Blob([res?.file || res]);
-}
-
 function canPreviewRecord(record: any) {
   return record?.type === 'file' && isPreviewable(getDirectoryRowName(record));
 }
@@ -165,26 +146,6 @@ function isBuildNotStartedRecord(record: any) {
 // function hasRunningBuildTask(record: any) {
 //   return `${record?.fileUploadState ?? ''}` === '2';
 // }
-
-const FilePreviewPanel = ({ data, fileName, fileType, loading, onClose }: FilePreviewPanelProps) => (
-  <div className={styles.previewPanel}>
-    <div className={styles.previewHeader}>
-      <span className={styles.previewTitle}>{fileName}</span>
-      <span className={styles.previewClose} onClick={onClose}>
-        <AntdIcon type="icon-a-Closeguanbi1" />
-      </span>
-    </div>
-    <div className={styles.previewBody}>
-      <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
-        {data && (
-          <Suspense fallback={null}>
-            <PreViewFile data={data} type={fileType} title={fileName} className={styles.previewContent} />
-          </Suspense>
-        )}
-      </Spin>
-    </div>
-  </div>
-);
 
 function getPathSegments(path?: string) {
   return normalizeDirectoryPath(path).split('/').filter(Boolean);
@@ -1108,20 +1069,31 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   );
 
   const renderPreviewPanel = useCallback(
-    (record: any, options: { data?: string | Blob | null; fileType?: string; loading: boolean }) => {
+    (record: any) => {
       const fileName = getDirectoryRowName(record);
+      const directoryPath = getBuildDirectoryPath(record);
+      const resourceId = baseInfo.resourceId;
       setDetailPanel?.(
-        <FilePreviewPanel
-          data={options.data ?? null}
+        <MessageFilePreviewPanel
+          fileItem={{
+            uid: directoryPath,
+            fileType: 'file',
+            status: 'done',
+            queryFile: { fileName, filePath: directoryPath },
+            downloadRequest: () => downloadResourceFile({ resourceId, directoryPath }),
+            resolvePreviewResource: createRelativePathResourceResolver(
+              directoryPath,
+              async (path) => (await downloadResourceFile({ resourceId, directoryPath: path })).file
+            ),
+          }}
           fileName={fileName}
-          fileType={options.fileType || getFileType(fileName)}
-          loading={options.loading}
+          fileType={getFileType(fileName)}
           onClose={() => clearDetailPanel?.()}
         />,
         { overlay: true }
       );
     },
-    [clearDetailPanel, setDetailPanel]
+    [clearDetailPanel, setDetailPanel, getBuildDirectoryPath, baseInfo?.resourceId]
   );
 
   const handlePreviewFile = useCallback(
@@ -1138,21 +1110,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         return;
       }
 
-      const fileName = getDirectoryRowName(record);
-      renderPreviewPanel(record, { loading: true });
-      try {
-        const res: any = await downloadResourceFile({
-          resourceId: rid,
-          directoryPath,
-        });
-        const rawBlob = getRawBlob(res);
-        const mimeType = getMimeType(fileName);
-        const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
-        renderPreviewPanel(record, { data: blob, loading: false });
-      } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
-        clearDetailPanel?.();
-      }
+      renderPreviewPanel(record);
     },
     [baseInfo?.resourceId, clearDetailPanel, getBuildDirectoryPath, intl, message, renderPreviewPanel]
   );

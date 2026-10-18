@@ -1,0 +1,42 @@
+.diagram {
+  min-width: 0;
+  margin: 12px 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+}
+
+.canvas,
+.expanded {
+  overflow: auto;
+  padding: 16px;
+  text-align: center;
+
+  svg {
+    height: auto;
+    max-width: 100%;
+  }
+}
+
+.expanded {
+  max-height: 80vh;
+
+  svg {
+    max-width: none;
+  }
+}
+
+.source {
+  max-height: 480px;
+  overflow: auto !important;
+  padding: 12px !important;
+  white-space: pre;
+}

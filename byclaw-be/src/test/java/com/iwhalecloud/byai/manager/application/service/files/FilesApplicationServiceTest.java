@@ -94,6 +94,29 @@ class FilesApplicationServiceTest {
         assertThat(response.getContentAsByteArray()).isEqualTo(content);
     }
 
+    @Test
+    void previewReturnsErrorInsteadOfSuccessfulEmptyResponseWhenStorageFails() {
+        doThrow(new IllegalStateException("storage unavailable")).when(commonFileStorage).read(any());
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filesApplicationService.preview(response, "minio", BUCKET_NAME, SESSION_FILE_PATH);
+        assertThat(response.getStatus()).isEqualTo(500);
+        assertThat(response.getContentAsByteArray()).isEmpty();
+    }
+
+    @Test
+    void previewRejectsEmptyContentAndDisablesCachingForValidContent() throws Exception {
+        when(commonFileStorage.read(any())).thenReturn(new ByteArrayInputStream(new byte[0]));
+        MockHttpServletResponse empty = new MockHttpServletResponse();
+        filesApplicationService.preview(empty, "minio", BUCKET_NAME, SESSION_FILE_PATH);
+        assertThat(empty.getStatus()).isEqualTo(422);
+
+        when(commonFileStorage.read(any())).thenReturn(new ByteArrayInputStream(new byte[] {1, 2, 3}));
+        MockHttpServletResponse valid = new MockHttpServletResponse();
+        filesApplicationService.preview(valid, "minio", BUCKET_NAME, SESSION_FILE_PATH);
+        assertThat(valid.getContentAsByteArray()).containsExactly(1, 2, 3);
+        assertThat(valid.getHeader("Cache-Control")).isEqualTo("no-store");
+    }
+
     private static ArgumentMatcher<StorageLocation> userFsLocation(String shareType) {
         return location -> BUCKET_NAME.equals(location.getBucketOrRoot())
             && (ByClawUserWorkspacePaths.USER_FS_OBJECT_KEY_ROOT_PREFIX + SESSION_FILE_PATH).equals(location.getPath())

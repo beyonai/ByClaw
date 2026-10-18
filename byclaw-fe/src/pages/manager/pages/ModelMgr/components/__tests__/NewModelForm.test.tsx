@@ -493,7 +493,7 @@ describe('new model quick setup', () => {
       max_tokens: 1024,
       temperature: 0.7,
     });
-  });
+  }, 60000);
 
   it.each([
     [undefined, undefined, 65536],

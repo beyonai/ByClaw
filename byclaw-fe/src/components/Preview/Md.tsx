@@ -4,6 +4,8 @@ import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ss from './Md.module.less';
 
+const Mermaid = React.lazy(() => import('@/components/Diagrams/Mermaid'));
+
 interface MdPreviewProps {
   content?: string;
   resolveImage?: MarkdownImageResolver;
@@ -87,9 +89,22 @@ function remarkSoftBreaks() {
 
 export default React.memo(function MdPreview({ content, resolveImage }: MdPreviewProps) {
   const components = React.useMemo<Components | undefined>(() => {
-    if (!resolveImage) return undefined;
-
     return {
+      pre: ({ children }) => {
+        const child = React.Children.toArray(children)[0];
+        if (
+          React.isValidElement<{ className?: string; children?: React.ReactNode }>(child) &&
+          /\blanguage-(mermaid|mmd)\b/i.test(child.props.className || '')
+        ) {
+          const source = String(child.props.children || '').replace(/\n$/, '');
+          return (
+            <React.Suspense fallback={<pre>{source}</pre>}>
+              <Mermaid source={source} />
+            </React.Suspense>
+          );
+        }
+        return <pre>{children}</pre>;
+      },
       img: (props) => {
         const imageProps = { ...props };
         delete imageProps.node;

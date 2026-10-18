@@ -1,4 +1,4 @@
-import { PREVIEWABLE_TYPES, resolvePreviewType } from '@/components/Preview/formats';
+import { PREVIEWABLE_TYPES, canPreviewName, resolvePreviewType } from '@/components/Preview/formats';
 import { formatBytes } from '@/utils/file';
 import { Popconfirm } from 'antd';
 import { useIntl } from '@umijs/max';
@@ -62,7 +62,7 @@ function FileRender(props: IProps) {
   const previewTitle = name || fileName || '';
 
   const canDownload = downloadRequest || downloadUrl || queryFile?.fileUrl || queryFile?.fileId;
-  const canPreview = PREVIEWABLE.includes(fileType);
+  const canPreview = PREVIEWABLE.includes(fileType) && (!name || canPreviewName(name, size));
 
   const isLoading = status === 'uploading' || previewing || downloading;
 

@@ -14,6 +14,9 @@ import useGlobal from '@/hooks/useGlobal';
 import { LayoutMode } from '@/constants/system';
 import { IMessage } from '@/typescript/message';
 import ATag from './aTag';
+import { mermaidFences } from '@/components/Diagrams/mermaidFences';
+
+const Mermaid = React.lazy(() => import('@/components/Diagrams/Mermaid'));
 
 // import createImageCollectorExtension, { addImageCollectedIds } from './imageExtension';
 import createTableExtension from './tableExtension';
@@ -100,8 +103,23 @@ const MarkdownRender = React.memo(
     }, [text]);
 
     const parsedComponents = useMemo(() => {
+      const diagrams = mermaidFences(text);
+      let diagramIndex = 0;
       const options = {
         replace: (domNode: any) => {
+          if (domNode.name === 'pre') {
+            const code = domNode.children?.find((child: any) => child.name === 'code');
+            if (/\blanguage-(mermaid|mmd)\b/i.test(code?.attribs?.class || '')) {
+              const diagram = diagrams[diagramIndex++];
+              if (diagram) {
+                return (
+                  <React.Suspense fallback={<pre>{diagram.source}</pre>}>
+                    <Mermaid source={diagram.source} complete={diagram.complete} />
+                  </React.Suspense>
+                );
+              }
+            }
+          }
           if (domNode.name === 'img') {
             const { src, alt } = domNode.attribs;
             // 使用src作为key，确保相同src的图片不会重新渲染
@@ -115,7 +133,7 @@ const MarkdownRender = React.memo(
         },
       };
       return parse(desc, options);
-    }, [desc]);
+    }, [desc, text]);
 
     return (
       <div

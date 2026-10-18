@@ -40,6 +40,7 @@ describe('Markdown ATag file actions', () => {
     jest.clearAllMocks();
     global.fetch = jest.fn(() =>
       Promise.resolve({
+        ok: true,
         blob: () => Promise.resolve(new Blob(['excel content'])),
       })
     ) as jest.Mock;
@@ -64,7 +65,7 @@ describe('Markdown ATag file actions', () => {
 
     expect(outerClick).not.toHaveBeenCalled();
     expect(downloadFile).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith('/files/report.xlsx');
+    expect(fetch).toHaveBeenCalledWith('/files/report.xlsx', { cache: 'no-store' });
 
     await waitFor(() => {
       expect(mockEmit).toHaveBeenCalledWith(
