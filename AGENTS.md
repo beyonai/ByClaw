@@ -131,6 +131,7 @@ SQL files under `deploy/middleware/initdb/`.
 4. **Do not recreate a `.ai/` directory.** Agent rules live here and in [CLAUDE.md](CLAUDE.md).
 5. **Confirm before committing documentation.** Before staging or committing any file under `docs/`, obtain the user's explicit approval for that documentation change.
 6. **Design documents are uncommitted by default.** Write requested design documents to the agreed project location, but do not stage or commit them and do not ask whether to commit them unless the user explicitly requests a commit.
+7. **Do not use `SELECT ... FOR UPDATE`.** SELECT queries must not include a `FOR UPDATE` clause, whether written directly in SQL or generated through an ORM or query builder.
 
 ## Pull requests
 
