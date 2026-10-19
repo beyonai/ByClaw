@@ -16,6 +16,7 @@ This repository maintains the ByClaw plugin suite for [DeepSeek Harness (DSH)](h
 | Diff Viewer | `@byclaw/dsh-diff-viewer` | Replaces write/edit diff cards with a scalable unified or split visual diff | [README](./plugins/dsh-diff-viewer/README.md) |
 | CodeGraph | `@byclaw/dsh-codegraph` | Composes the CodeGraph MCP server and registers CodeGraph usage policy for root and delegated Agents | [中文](./plugins/dsh-codegraph/README.zh.md) · [English](./plugins/dsh-codegraph/README.md) |
 | LAN Web | `@byclaw/dsh-lan-web` | Enables the explicit `dsh web --host 0.0.0.0` LAN bind; ByClaw integration can optionally disable Web token authentication | [中文](./plugins/dsh-lan-web/README.zh.md) · [English](./plugins/dsh-lan-web/README.md) |
+| Tool environment | `@byclaw/dsh-tool-env` | Opt-in: runs DSH's files, processes, terminals, PTC and sandbox in a separate tool sandbox over SSH, leased, paused and resumed through OpenSandbox (`BYCLAW_DSH_TOOL_ENV`) | [中文](./plugins/dsh-tool-env/README.zh.md) · [English](./plugins/dsh-tool-env/README.md) |
 | Iron Rules | `@byclaw/dsh-iron-rules` | Carries a repository's development rules into the model context and runs each rule's check script when a turn that touched files stops | [中文](./plugins/iron-rules/README.zh.md) · [English](./plugins/iron-rules/README.md) |
 | Environment Forwarding | `@byclaw/dsh-bash-provider` | Forwards every host environment variable, including credential-shaped names, to model-facing Bash commands; also routes eligible commands through rtk (Rust Token Killer) to compress tool output and save tokens | [中文](./plugins/dsh-bash-provider/README.zh.md) · [English](./plugins/dsh-bash-provider/README.md) |
 | Browser Use | `@byclaw/dsh-browser-use` | Exposes one stateful `browser` tool with one owner per session and optional fully isolated per-session Chromium/noVNC desktops | [中文](./plugins/dsh-browser-use/README.zh.md) · [English](./plugins/dsh-browser-use/README.md) |
@@ -44,6 +45,8 @@ DSH profile
 │   └── codegraph:usage-policy：根与委派 Agent 继承的系统提示词
 ├── @byclaw/dsh-lan-web
 │   └── 替换 Web startup provider，保留 DSH 原生安全链
+├── @byclaw/dsh-tool-env
+│   └── 可选：fs/subprocess/sandbox/PTC 改走 SSH 到独立工具沙箱（OpenSandbox 租约、空闲暂停、恢复）
 ├── @byclaw/dsh-bash-provider
 │   ├── 替换 sandboxed Bash provider，显式透传宿主环境
 │   ├── 叠加把符合条件的 Bash 命令路由给 rtk 压缩输出（合并自原 dsh-bash-rtk 插件）

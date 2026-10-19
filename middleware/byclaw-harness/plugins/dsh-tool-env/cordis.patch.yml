@@ -1,0 +1,50 @@
+# Split tool execution into a separate sandbox (B) when BYCLAW_DSH_TOOL_ENV is
+# `static` or `opensandbox`. Unset (the default) leaves every row below inert
+# and the base local providers in place, so existing deployments are unchanged.
+#
+# Split mode replaces the base local filesystem, subprocess, sandbox and PTC rows
+# with DSH's SSH providers. They all reach B through `ctx.ssh`, which this plugin
+# provides as a reconnecting lease over B (see src/connection.ts).
+- id: fs-sandbox
+  disabled: !!js "['static', 'opensandbox'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+- id: subprocess
+  disabled: !!js "['static', 'opensandbox'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+- id: sandbox
+  disabled: !!js "['static', 'opensandbox'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+- id: ptc-runtime
+  disabled: !!js "['static', 'opensandbox'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+- insert:
+    - id: byclaw-tool-env
+      name: '@byclaw/dsh-tool-env'
+      disabled: !!js "!['static', 'opensandbox'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+      config:
+        backend: !!js "process.env.BYCLAW_DSH_TOOL_ENV || 'static'"
+        stateDir: !!js dshHomePath('byclaw-tool-env')
+        workspace: !!js "process.env.BYCLAW_TOOL_ENV_WORKSPACE || '/by'"
+        idleMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_IDLE_MS || 600000)"
+        host: !!js "process.env.BYCLAW_TOOL_ENV_HOST || '127.0.0.1'"
+        port: !!js "Number(process.env.BYCLAW_TOOL_ENV_PORT || 22)"
+        openSandbox: !!js "JSON.parse(process.env.BYCLAW_TOOL_ENV_OPENSANDBOX || '{}')"
+
+    - id: byclaw-tool-env-fs
+      name: '@deepseek-ai/dsh-fs-ssh'
+      disabled: !!js "!['static', 'opensandbox'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+    - id: byclaw-tool-env-subprocess
+      name: '@deepseek-ai/dsh-subprocess-ssh'
+      disabled: !!js "!['static', 'opensandbox'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+    - id: byclaw-tool-env-sandbox
+      name: '@deepseek-ai/dsh-sandbox-ssh'
+      disabled: !!js "!['static', 'opensandbox'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+    - id: byclaw-tool-env-ptc
+      name: '@deepseek-ai/dsh-ptc-runtime-node'
+      disabled: !!js "!['static', 'opensandbox'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+      inject: [ssh]
+      config:
+        launch: !!js ctx.ssh.ptcLaunch

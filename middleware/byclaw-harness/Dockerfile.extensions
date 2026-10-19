@@ -66,6 +66,11 @@ RUN set -eux; \
     mkdir -p /tmp/byclaw-plugin-packs; \
     node scripts/docker-plugin-layout.mjs packages plugins >/tmp/byclaw-package-manifests; \
     node scripts/prepare-dsh-model-routing-runtime.mjs --workspace /workspace --manifests >>/tmp/byclaw-package-manifests; \
+    # DSH's SSH provider family is outside the CLI installation table; pack it
+    # from this workspace so @byclaw/dsh-tool-env installs the same build.
+    for ssh_package in ssh fs-ssh subprocess-ssh sandbox-ssh; do \
+        printf '%s\n' "/workspace/packages/ssh/${ssh_package}/package.json" >>/tmp/byclaw-package-manifests; \
+    done; \
     package_count=0; \
     while IFS= read -r manifest; do \
         package_name="$(jq -er '.name | select(type == "string" and length > 0)' "${manifest}")"; \
@@ -276,6 +281,15 @@ RUN set -eux; \
         python3 /tmp/docker-entrypoint-fd-verify.py; \
     rm -f /tmp/browser-download-permissions-verify.py \
         /tmp/browser-supervisor-verify.py /tmp/docker-entrypoint-fd-verify.py
+
+# Tool environment (B) of the opt-in split deployment (plugins/dsh-tool-env):
+# `byclaw-dsh-entrypoint tools` runs this sshd for DSH's SSH helper. The
+# package's generated host keys are removed; B serves the key its runtime (A)
+# hands it at creation.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server \
+    && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
+    && test -x /usr/sbin/sshd
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
 
 ENV BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
     BYCLAW_BROWSER_NOVNC_DIR=/opt/byclaw/novnc

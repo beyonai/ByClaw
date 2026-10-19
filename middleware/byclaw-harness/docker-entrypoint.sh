@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Tool environment (B) of a split deployment: serve DSH's SSH helper only. The
+# runtime (A) that started this sandbox owns the browser, Web UI and sessions.
+if [[ "${1:-}" == tools ]]; then
+    exec /usr/local/bin/byclaw-tool-env-sshd
+fi
+
 if [[ "${BYCLAW_DSH_PREPARED:-0}" != 1 && "${BYCLAW_DSH_PREPARE_ONLY:-0}" != 1 ]]; then
     if ((EUID != 0)); then
         printf 'byclaw-dsh: root entrypoint required for private browser runtime\n' >&2
@@ -95,6 +101,17 @@ fi
 fi
 
 cd "${DSH_ROOT:-/workspace}"
+
+# Split tool environment (plugins/dsh-tool-env): commands run in the separate
+# tool sandbox B, which holds only the user's workspace. B is the isolation
+# boundary; per-command bwrap/Landlock confinement inside it is unavailable on
+# container hosts that block user namespaces, where workspace-write would refuse
+# every command. An explicit DSH_PERMISSION_MODE still wins.
+case "${BYCLAW_DSH_TOOL_ENV:-}" in
+    static|opensandbox)
+        export DSH_PERMISSION_MODE="${DSH_PERMISSION_MODE:-${BYCLAW_TOOL_ENV_PERMISSION_MODE:-danger-full-access}}"
+        ;;
+esac
 
 # 默认启动 web profile；传入参数时允许覆盖为 headless 或其他 dsh 命令参数。
 if (($# == 0)); then
