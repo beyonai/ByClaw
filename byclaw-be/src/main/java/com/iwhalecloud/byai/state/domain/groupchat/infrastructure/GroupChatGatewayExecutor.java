@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.ArrayList;
 import java.util.Date;
@@ -161,6 +162,8 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         if (metadata != null && metadata.getJSONArray("resourceList") != null) {
             dto.setResourceList(metadata.getJSONArray("resourceList").toJavaList(ResourceVo.class));
         }
+        ByaiMessage original = messageMapper.selectByMessageId(execution.getSourceMessageId());
+        passiveInput(dto, child, original, execution.getGroupSessionId());
         // Bind before registering the listener or sending, so immediate events and recovery use the same trace.
         String traceId = ScriptService.getTraceId(child.getMessageId(), dto.getLlmMessageId());
         if (executionMapper.bindRuntime(execution.getExecutionId(), traceId) != 1) {
@@ -281,6 +284,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         if (metadata != null && metadata.getJSONArray("resourceList") != null) {
             dto.setResourceList(metadata.getJSONArray("resourceList").toJavaList(ResourceVo.class));
         }
+        passiveInput(dto, child, source, turn.getGroupSessionId());
         String traceId = ScriptService.getTraceId(child.getMessageId(), dto.getLlmMessageId());
         if (turnMapper.bindRuntime(turn.getExecutionId(), traceId) != 1) {
             throw new IllegalStateException(I18nUtil.get("groupchat.turn.slotLost"));
@@ -289,6 +293,18 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             throw new IllegalStateException(I18nUtil.get("groupchat.turn.ownershipChanged"));
         }
         return new PreparedTurn(dto, existing, initiator.getUserCode());
+    }
+
+    /** The source link repairs legacy candidate wrappers without classifying active resources by ID. */
+    private void passiveInput(AssistantChatDto dto, ByaiMessage child, ByaiMessage original, Long group) {
+        ByaiMessage passive = ForwardRuntimeProjection.isSnapshotOnly(child.getMetadata()) ? child
+            : original != null && Objects.equals(group, original.getSessionId())
+                && Objects.equals(child.getMessageContent(), original.getMessageContent())
+                && ForwardRuntimeProjection.isSnapshotOnly(original.getMetadata()) ? original : null;
+        if (passive == null) return;
+        dto.setChatContent(ForwardRuntimeProjection.projectMetadata(child.getMessageContent(), passive.getMetadata()));
+        dto.setResourceList(List.of());
+        dto.setFiles(null);
     }
 
     private record PreparedTurn(AssistantChatDto request, ByaiMessageHotDtoDto message, String userCode) {

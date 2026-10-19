@@ -1536,7 +1536,11 @@ public class AuthApplicationService {
      * 判断指定用户是否具备资源使用权限，不修改当前登录用户上下文。
      */
     public boolean hasResourceUsePermission(SsResource ssResource, Long userId) {
-        if (ssResource != null && userId != null && userId.equals(CurrentUserHolder.getCurrentUserId())
+        return hasResourceUsePermission(ssResource, userId, true);
+    }
+
+    private boolean hasResourceUsePermission(SsResource ssResource, Long userId, boolean ambientDefaults) {
+        if (ambientDefaults && ssResource != null && userId != null && userId.equals(CurrentUserHolder.getCurrentUserId())
             && (Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
             && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         if (ssResource == null || ssResource.getResourceId() == null
@@ -1548,7 +1552,7 @@ public class AuthApplicationService {
             return false;
         }
         if (userId.equals(ssResource.getCreateBy())
-            || (userId.equals(CurrentUserHolder.getCurrentUserId())
+            || (ambientDefaults && userId.equals(CurrentUserHolder.getCurrentUserId())
             && isCurrentUserBoundDefaultPersonalResource(ssResource))) {
             return true;
         }
@@ -1605,6 +1609,23 @@ public class AuthApplicationService {
             .filter(grant -> isEffectiveResourceUseGrant(grant, new Date())).toList();
         return grants.stream().anyMatch(grant -> Color.RED.equalsIgnoreCase(grant.getGrantToType()))
             && grants.stream().noneMatch(grant -> Color.BLACK.equalsIgnoreCase(grant.getGrantToType()));
+    }
+
+    /** Forwarding always requires exact tenant scope and uses the persisted actor, not ambient request defaults. */
+    public boolean hasResourceForwardReadPermission(SsResource resource, Long userId, Long enterpriseId) {
+        if (resource == null || userId == null || enterpriseId == null || !Objects.equals(resource.getComAcctId(), enterpriseId)
+            || Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())) return false;
+        if (ResourceBizTypeEnum.KG_CLOUD.name().equals(resource.getResourceBizType())) {
+            return projectService.findByCloudResourceId(resource.getResourceId()).stream()
+                .filter(project -> !"1".equals(project.getDeleteFlag()) && Objects.equals(project.getEnterpriseId(), enterpriseId))
+                .anyMatch(project -> {
+                    Boolean tenant = tenantProjectCloudAccessService.canRead(project, userId, enterpriseId);
+                    return tenant != null ? tenant : Objects.equals(project.getCreateBy(), userId)
+                        || projectMemberService.isMember(project.getProjectId(), userId);
+                });
+        }
+        return hasResourceUsePermission(resource, userId, false)
+            || isGlobalResourceManagerByUserId(userId);
     }
 
     public boolean hasResourceAccessPermission(SsResource ssResource) {

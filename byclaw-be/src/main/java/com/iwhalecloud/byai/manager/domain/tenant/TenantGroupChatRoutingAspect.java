@@ -53,8 +53,11 @@ public class TenantGroupChatRoutingAspect {
 
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController.*(..))"
         + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTopicController.*(..))"
-        + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController.*(..))")
+        + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController.*(..))"
+        + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatForwardController.*(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
+        // Forwarding owns its typed, strict routing boundary; generic create/list branches have legacy development exceptions.
+        if (call.getTarget() instanceof com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatForwardController) return call.proceed();
         TenantRequestContext context = TenantRequestContextHolder.get();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();

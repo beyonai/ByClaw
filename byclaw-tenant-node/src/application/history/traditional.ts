@@ -1,3 +1,5 @@
+import { relatedResourceAttachments } from "./attachments.js";
+import { isSnapshotOnly, forwardResources, publicForward } from "./forward-projection.js";
 import { bounded } from "./paging.js";
 import { DomainError } from "../../domain/errors.js";
 import { opaqueId, requireId } from "../../domain/values.js";
@@ -45,6 +47,21 @@ export class TraditionalHistory extends HistoryAccess {
     const result: Row[] = [];
     for (const row of rows) {
       const projected = safeMessage(row);
+      if (!recalled(row) && isSnapshotOnly(row.metadata)) {
+        const meta = objectJson(row.metadata);
+        projected.metadata = JSON.stringify({
+          scene: meta.scene,
+          kind: meta.kind,
+          forward: publicForward(meta),
+          resourceList: forwardResources(meta),
+        });
+        projected.relatedResources = JSON.stringify({
+          files: relatedResourceAttachments(row),
+          resourceList: forwardResources(meta),
+        });
+        result.push(projected);
+        continue;
+      }
       if (recalled(row) || row.usage !== 1 || !String(row.messageContent).includes("{{")) {
         result.push(projected);
         continue;
@@ -84,11 +101,23 @@ export class TraditionalHistory extends HistoryAccess {
         const original = arrayJson(objectJson(source.metadata).resourceList).length
           ? arrayJson(objectJson(source.metadata).resourceList)
           : arrayJson(objectJson(source.relatedResources).resourceList);
-        const resources = existing.length ? existing : original;
+        const resources = isSnapshotOnly(source.metadata)
+          ? forwardResources(objectJson(source.metadata))
+          : existing.length
+            ? existing
+            : original;
+        if (isSnapshotOnly(source.metadata)) {
+          metadata.forward = publicForward(source.metadata);
+          projected.metadata = JSON.stringify({ ...metadata, resourceList: resources });
+          projected.relatedResources = JSON.stringify({
+            files: relatedResourceAttachments(source),
+            resourceList: resources,
+          });
+        }
         if (resources.length) {
           if (!arrayJson(metadata.resourceList).length)
             projected.metadata = JSON.stringify({ ...metadata, resourceList: resources });
-          if (!arrayJson(related.resourceList).length)
+          if (!isSnapshotOnly(source.metadata) && !arrayJson(related.resourceList).length)
             projected.relatedResources = JSON.stringify({ ...related, resourceList: resources });
         }
       }

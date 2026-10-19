@@ -17,11 +17,14 @@ public class ResourceVo {
      */
     private AgentMetaEnum resourceType;
 
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     private String resourceCode;
 
     /**
      * 不同 resourceType 的补充数据（JSON 字符串）。
      * 例如 SKILL 类型存储 skillType、skillUrl、version 等扩展信息。
      */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     private String extData;
+
 }

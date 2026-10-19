@@ -29,7 +29,9 @@ export function errorStatus(error: DomainError): number {
   )
     return 503;
   if (
+    error.code === "FORWARD_INVALID_REQUEST" ||
     error.code.startsWith("INVALID_") ||
+    error.code === "FORWARD_INVALID_REQUEST" ||
     error.code.endsWith("_DIGEST_MISMATCH") ||
     error.code === "HASH_MISMATCH"
   )

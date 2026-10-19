@@ -72,6 +72,20 @@ public class TenantNodeClient {
 
     public <I, O> O request(TenantRequestContext context, String method, String path, I body,
                              TypeReference<O> responseType) {
+        if (context == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant context required");
+        return requestBound(new ServiceIdentity(context.enterpriseId(), context.userId()), method, path, body, responseType);
+    }
+
+    /** Service discovery is operation-scoped and has no fabricated user or ambient login. */
+    public <I, O> O serviceRequest(long enterpriseId, String method, String path, I body, TypeReference<O> responseType) {
+        if (enterpriseId <= 0 || !(path.matches("/internal/v1/forward-work(?:\\?limit=(?:[1-9]|1[0-9]|20)(?:&afterTargetId=[1-9][0-9]*)?|/[1-9][0-9]*(?:/targets/[1-9][0-9]*)?/binding)") || path.matches("/internal/v1/forward-maintenance/(scan|delivery/(claim|read|mark|renew)|cleanup/(collect|claim|renew|complete)|failure|request-failure)")))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid forward service request");
+        return requestBound(new ServiceIdentity(enterpriseId, null), method, path, body, responseType);
+    }
+
+    private record ServiceIdentity(long enterpriseId, Long userId) { }
+
+    private <I, O> O requestBound(ServiceIdentity context, String method, String path, I body, TypeReference<O> responseType) {
         if (context == null || !path.startsWith("/internal/v1/") || path.contains("..")
             || !("GET".equals(method) || "POST".equals(method) || "PATCH".equals(method)
                 || "DELETE".equals(method))) {
@@ -204,7 +218,7 @@ public class TenantNodeClient {
         return value;
     }
 
-    private URI discover(TenantRequestContext context, long generation, String dbRecordId) {
+    private URI discover(ServiceIdentity context, long generation, String dbRecordId) {
         String name = "TENANT_DATA_" + context.enterpriseId();
         List<ServiceInstance> instances = discovery.getInstances(name);
         return registeredEndpoint(name, context.enterpriseId(), generation, dbRecordId, instances);
@@ -244,7 +258,7 @@ public class TenantNodeClient {
         return URI.create("http://" + instance.getHost() + ":" + instance.getPort() + pathPrefix);
     }
 
-    private <I, O> O send(URI base, String path, String method, I body, TenantRequestContext context,
+    private <I, O> O send(URI base, String path, String method, I body, ServiceIdentity context,
                           long generation, TypeReference<O> responseType) throws Exception {
         long enterpriseId = context.enterpriseId();
         URI target = base.resolve(base.getRawPath().replaceAll("/+$", "") + path);
@@ -256,7 +270,8 @@ public class TenantNodeClient {
             .header("X-Byclaw-Internal-Token", internalToken)
             .header("X-Enterprise-Id", Long.toString(enterpriseId))
             .header("X-Tenant-Generation", Long.toString(generation))
-            .header("X-Actor-User-Id", Long.toString(context.userId()));
+            ;
+        if (context.userId() != null) request.header("X-Actor-User-Id", Long.toString(context.userId()));
         if (content != null) request.header("Content-Type", "application/json");
         request.method(method, content == null ? HttpRequest.BodyPublishers.noBody()
             : HttpRequest.BodyPublishers.ofByteArray(content));
@@ -272,10 +287,7 @@ public class TenantNodeClient {
                 throw e;
             }
             String code = error == null || error.error() == null ? "UNKNOWN" : error.error().code();
-            throw new ResponseStatusException(response.statusCode() == 404 ? HttpStatus.NOT_FOUND
-                : response.statusCode() == 403 ? HttpStatus.FORBIDDEN
-                    : response.statusCode() == 400 ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY,
-                "tenant Node rejected request: " + code);
+            throw new NodeRejection(response.statusCode(), code);
         }
         try {
             return mapper.readValue(response.body(), responseType);
@@ -286,4 +298,22 @@ public class TenantNodeClient {
             throw e;
         }
     }
+    /** Preserve the Node rejection for typed adapters without changing generic HTTP error mapping. */
+    static final class NodeRejection extends ResponseStatusException {
+        private final int nodeStatus;
+        private final String code;
+
+        NodeRejection(int nodeStatus, String code) {
+            super(nodeStatus == 404 ? HttpStatus.NOT_FOUND
+                : nodeStatus == 403 ? HttpStatus.FORBIDDEN
+                    : nodeStatus == 400 ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY,
+                "tenant Node rejected request: " + code);
+            this.nodeStatus = nodeStatus;
+            this.code = code;
+        }
+
+        int nodeStatus() { return nodeStatus; }
+        String code() { return code; }
+    }
+
 }

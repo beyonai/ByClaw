@@ -1,3 +1,4 @@
+import { isSnapshotOnly, forwardResources, publicForward } from "./forward-projection.js";
 import { messageAttachments } from "./attachments.js";
 import type { HistoryRepository, Row } from "./contracts.js";
 import { safeMessage, objectJson, arrayJson, recalled, time } from "./message-format.js";
@@ -47,17 +48,24 @@ export async function displayMessages(
         : undefined;
     const attachments = messageAttachments(source);
     const task = tasks.get(String(meta.taskId ?? ""));
-    const messageAcks = recalled(source)
+    const passive = isSnapshotOnly(meta);
+    const resources = recalled(source)
       ? []
-      : acknowledgements.filter((ack) => ack.messageId === source.messageId);
-    const reply = withReply ? byId.get(source.messageRef) : undefined;
+      : passive
+        ? forwardResources(meta)
+        : arrayJson(meta.resourceList);
+    const messageAcks =
+      recalled(source) || passive
+        ? []
+        : acknowledgements.filter((ack) => ack.messageId === source.messageId);
+    const reply = withReply && !passive ? byId.get(source.messageRef) : undefined;
     return {
       messageId: row.messageId,
       clientRequestId: meta.clientRequestId,
       topicId: row.topicId,
-      taskId: meta.taskId,
-      groupCoordination: meta.groupCoordination,
-      initiatorUserId: task?.initiatorUserId,
+      taskId: passive ? undefined : meta.taskId,
+      groupCoordination: passive ? undefined : meta.groupCoordination,
+      initiatorUserId: passive ? undefined : task?.initiatorUserId,
       // Older automatic replies omitted kind but already recorded their published message ID.
       // Repair the read projection, preserving task ACKs and stored history.
       kind:
@@ -76,7 +84,7 @@ export async function displayMessages(
       content: row.messageContent ?? "",
       creatorId: row.creatorId,
       creatorName: row.creatorName,
-      sourceMessageId: row.messageRef,
+      sourceMessageId: passive ? undefined : row.messageRef,
       speaker: {
         type: row.usage === 1 ? "user" : row.usage === 5 ? "system" : "agent",
         displayName: row.usage === 5 ? "系统" : row.creatorName,
@@ -84,13 +92,16 @@ export async function displayMessages(
         agentId,
         agentName: row.usage === 2 ? row.creatorName || "Assistant" : undefined,
       },
-      target: meta.targetAgentId
-        ? { type: "agent", agentId: String(meta.targetAgentId) }
-        : undefined,
-      resourceList: recalled(source) ? [] : arrayJson(meta.resourceList),
+      target:
+        !passive && meta.targetAgentId
+          ? { type: "agent", agentId: String(meta.targetAgentId) }
+          : undefined,
+      resourceList: resources,
+      forward: recalled(source) ? undefined : publicForward(meta),
       acknowledgements: messageAcks,
       canAcknowledge:
         !recalled(source) &&
+        !passive &&
         actor !== undefined &&
         actor !== String(source.creatorId) &&
         arrayJson(meta.resourceList).some(
@@ -103,12 +114,17 @@ export async function displayMessages(
       replyTo: reply
         ? {
             ...projection(reply, false),
+            ...(recalled(source) || recalled(reply)
+              ? { attachments: [], forward: undefined, acknowledgements: [], canAcknowledge: false }
+              : {}),
             content:
               recalled(source) || recalled(reply) ? "消息已撤回" : (reply.messageContent ?? ""),
             resourceList:
               recalled(source) || recalled(reply)
                 ? []
-                : arrayJson(objectJson(reply.metadata).resourceList),
+                : isSnapshotOnly(reply.metadata)
+                  ? forwardResources(objectJson(reply.metadata))
+                  : arrayJson(objectJson(reply.metadata).resourceList),
           }
         : undefined,
     };

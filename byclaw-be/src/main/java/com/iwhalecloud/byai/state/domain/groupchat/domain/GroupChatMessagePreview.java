@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.domain;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +54,7 @@ public final class GroupChatMessagePreview {
         if (metadata == null || metadata.isBlank()) {
             return format(content, null);
         }
+        if (ForwardRuntimeProjection.isSnapshotOnly(metadata)) return ForwardRuntimeProjection.projectMetadata(content, metadata);
         try {
             JSONObject object = JSON.parseObject(metadata);
             if (object == null) {

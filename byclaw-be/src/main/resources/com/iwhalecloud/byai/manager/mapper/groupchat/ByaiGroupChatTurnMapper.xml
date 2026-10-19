@@ -127,7 +127,7 @@
             OR trigger_message_id = #{messageId} ORDER BY execution_id LIMIT 1
     </select>
     <select id="lockGroup" resultType="java.lang.Long">
-        SELECT session_id FROM byai_session WHERE session_id = #{groupId}
+        SELECT session_id FROM byai_session WHERE session_id = #{groupId} FOR UPDATE
     </select>
     <select id="selectAnchor" resultMap="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper.BaseResultMap">
         SELECT * FROM byai_group_chat_execution WHERE root_message_id = #{rootId}

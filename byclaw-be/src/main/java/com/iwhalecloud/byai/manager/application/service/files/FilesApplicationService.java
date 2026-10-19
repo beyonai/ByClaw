@@ -455,7 +455,7 @@ public class FilesApplicationService {
      * @param shareType 分享类型，为空时使用存储后端默认值
      * @return 输入流
      */
-    private InputStream openCommonFileInputStream(String bucketName, String filePath, String shareType) {
+    public InputStream openCommonFileInputStream(String bucketName, String filePath, String shareType) {
         try {
             return readCommonFile(bucketName, filePath, shareType);
         }

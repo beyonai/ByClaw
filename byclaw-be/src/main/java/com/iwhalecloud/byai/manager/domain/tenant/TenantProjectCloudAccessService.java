@@ -24,12 +24,17 @@ public class TenantProjectCloudAccessService {
 
     /** null 表示非租户群项目，继续原项目鉴权；明确拒绝或 Node 故障不得回退旧成员表。 */
     public Boolean canRead(Project project) {
+        return canRead(project, CurrentUserHolder.getCurrentUserId(), project.getEnterpriseId());
+    }
+
+    /** Explicit operation identity for asynchronous authorized reads, without installing HTTP thread state. */
+    public Boolean canRead(Project project, Long userId, Long expectedEnterpriseId) {
         Long enterpriseId = project.getEnterpriseId();
+        if (expectedEnterpriseId != null && !java.util.Objects.equals(enterpriseId, expectedEnterpriseId)) return false;
         if (enterpriseId == null || enterpriseId <= 1
             || tenants.selectConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID") == null) {
             return null;
         }
-        Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null) return false;
         var membership = memberships.selectActiveMembership(userId, enterpriseId);
         if (membership == null) return false;

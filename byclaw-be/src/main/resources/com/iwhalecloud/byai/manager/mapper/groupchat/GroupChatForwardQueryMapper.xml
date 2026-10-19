@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.GroupChatForwardQueryMapper">
+    <resultMap id="TargetItem" type="com.iwhalecloud.byai.state.domain.groupchat.forward.dto.ForwardDtos$TargetItem">
+        <constructor>
+            <idArg column="session_id" javaType="java.lang.String" />
+            <arg column="session_name" javaType="java.lang.String" />
+            <arg column="enterprise_id" javaType="java.lang.String" />
+            <arg column="project_id" javaType="java.lang.String" />
+            <arg column="user_role" javaType="java.lang.String" />
+        </constructor>
+    </resultMap>
+
+    <!-- Java historic member rows may lack com_acct_id; actual session ownership remains mandatory. -->
+    <sql id="EligibleTargets">
+        FROM byai_session s
+        JOIN byai_session_member u ON u.session_id = s.session_id
+        WHERE s.enterprise_id = #{enterpriseId}
+          AND s.session_type = 'hs_as'
+          AND s.session_id != #{sourceId}
+          AND u.mem_obj_type = 'USER' AND u.mem_obj_id = #{userId}
+          AND (s.state IS NULL OR s.state NOT IN ('GROUP_DISSOLVED', 'CLOSED', 'GROUP_CHAT_ROUTING', 'GROUP_CHAT_DISPATCH'))
+        <if test="keyword != null">
+          AND LOWER(s.session_name) LIKE #{keyword} ESCAPE '\'
+        </if>
+    </sql>
+
+    <select id="selectTargets" resultMap="TargetItem">
+        SELECT s.session_id, s.session_name, s.enterprise_id, s.project_id, u.user_role
+        <include refid="EligibleTargets" />
+        ORDER BY COALESCE((SELECT MAX(m.create_time) FROM byai_message m
+            WHERE m.session_id = s.session_id AND m.archived_at IS NULL), s.update_time, s.create_time) DESC,
+            s.session_id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countTargets" resultType="long">
+        SELECT COUNT(*) <include refid="EligibleTargets" />
+    </select>
+</mapper>

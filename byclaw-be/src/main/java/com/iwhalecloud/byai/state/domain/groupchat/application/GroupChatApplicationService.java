@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
@@ -467,6 +468,12 @@ public class GroupChatApplicationService {
         speaker.put("type", systemEvent ? "system" : Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "AGENT");
         speaker.put("displayName", systemEvent ? I18nUtil.get("groupchat.system") : referenced.getCreatorName());
         reply.put("speaker", speaker);
+        if (!referenced.isRecalled() && ForwardRuntimeProjection.isSnapshotOnly(referenced.getMetadata())) {
+            reply.put("resourceList", ForwardRuntimeProjection.displayResources(ForwardRuntimeProjection.metadata(referenced.getMetadata())));
+            reply.put("forward", ForwardRuntimeProjection.publicForward(ForwardRuntimeProjection.metadata(referenced.getMetadata())));
+            reply.put("acknowledgements", java.util.List.of());
+            reply.put("canAcknowledge", false);
+        }
         return reply;
     }
 

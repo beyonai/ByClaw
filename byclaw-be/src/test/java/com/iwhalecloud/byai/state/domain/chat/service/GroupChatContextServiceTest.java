@@ -312,6 +312,20 @@ class GroupChatContextServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void missingMetadataKindPreservesOrdinaryAttachmentsInGroupList() {
+        ByaiMessage source = message(20L, 1, "正文", 200L);
+        for (String metadata : List.of("{\"scene\":\"GROUP_CHAT\"}",
+            "{\"scene\":\"GROUP_CHAT\",\"kind\":null,\"files\":[]}")) {
+            source.setMetadata(metadata);
+            source.setRelatedResources("{\"files\":[{\"fileId\":\"10\",\"fileName\":\"input.pdf\"}]}");
+            assertThat(service.attachmentsForMessages(List.of(source)).get(source.getMessageId()))
+                .singleElement().satisfies(file -> assertThat(file.getFileId()).isEqualTo("10"));
+            source.setRelatedResources(null);
+            assertThat(service.attachmentsForMessages(List.of(source)).get(source.getMessageId())).isEmpty();
+        }
+    }
+
+    @Test
     void malformedMetadataAndNonPublicationFilesDoNotBreakOrdinaryAttachments() {
         ByaiMessage source = message(20L, 1, "正文", 200L);
         source.setRelatedResources("{\"files\":[{\"fileId\":\"10\",\"fileName\":\"input.pdf\"}]}");
@@ -425,4 +439,52 @@ class GroupChatContextServiceTest extends I18nTestSupport {
         message.setCreateTime(new Date(createdAt));
         return message;
     }
+
+    @Test
+    void historyAndEventPreserveTokenAttachmentMapping() throws Exception {
+        ByaiMessage source = message(10L, 1, "{{opaque}} {{普通文本}}", 20L);
+        source.setMetadata("""
+            {"scene":"GROUP_CHAT","kind":"FORWARD_SINGLE","forward":{"forwardId":"9007199254740993","mode":"SINGLE","resourceMode":"SNAPSHOT_ONLY","itemCount":1},
+             "resourceList":[{"id":"opaque","resourceId":"/original/private","resourceName":"需求说明","resourceType":"COMMON_FILE"}]}
+            """);
+        source.setRelatedResources("{\"files\":[{\"fileId\":\"88\",\"fileName\":\"需求说明.pdf\",\"mediaType\":\"application/pdf\",\"size\":42,\"fileUrl\":\"/commonFile/preview?filePath=%2F.sessions%2F3%2Fcopy.pdf\"}]}");
+        var projected = service.toMessages(List.of(source)).get(0);
+        assertThat(projected.getContent()).isEqualTo("{{opaque}} {{普通文本}}");
+        assertThat(projected.getResourceList()).singleElement().satisfies(ref -> {
+            assertThat(ref.getId()).isEqualTo("opaque");
+            assertThat(ref.getResourceCode()).isNull();
+            assertThat(ref.getExtData()).isNull();
+        });
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(projected);
+        assertThat(json.path("resourceList").get(0).has("targetAttachmentId")).isFalse();
+        assertThat(json.path("resourceList").get(0).has("resourceCode")).isFalse();
+        assertThat(json.path("forward").path("forwardId").asText()).isEqualTo("9007199254740993");
+        assertThat(projected.getAttachments()).singleElement().satisfies(file -> assertThat(file.getMediaType()).isEqualTo("application/pdf"));
+        ByaiMessage activeReply = message(11L, 1, "请看引用", 100L); activeReply.setMessageRef(10L);
+        var reply = service.toMessages(List.of(activeReply), Map.of(10L, source)).get(0).getReplyTo();
+        assertThat(reply.getAcknowledgements()).isEmpty(); assertThat(reply.getCanAcknowledge()).isFalse();
+        var event = com.alibaba.fastjson.JSON.parseObject(com.alibaba.fastjson.JSON.toJSONString(projected));
+        assertThat(event.getJSONArray("resourceList").getJSONObject(0).containsKey("targetAttachmentId")).isFalse();
+        assertThat(event.getJSONArray("resourceList").getJSONObject(0).containsKey("extData")).isFalse();
+        source.setRecalledAt(new Date());
+        var recalled = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(service.toMessages(List.of(source)).get(0));
+        assertThat(recalled.path("resourceList").isEmpty()).isTrue();
+        assertThat(recalled.path("attachments").isEmpty()).isTrue();
+        assertThat(recalled.path("forward").isMissingNode() || recalled.path("forward").isNull()).isTrue();
+    }
+
+    @Test
+    void forwardAlwaysHasNoAcknowledgements() {
+        var acks = mock(ByaiGroupChatMessageAckMapper.class);
+        service = new GroupChatContextService(messageMapper, sessionService, resourceService, null, null, acks);
+        ReflectionTestUtils.setField(service, "taskMapper", tasks);
+        ByaiMessage source = message(10L, 1, "{{HUMAN_100}}", 20L);
+        source.setMetadata("{\"kind\":\"FORWARD_SINGLE\",\"resourceList\":[{\"id\":\"HUMAN_100\",\"resourceId\":\"100\",\"resourceType\":\"HUMAN\",\"resourceName\":\"张三\"}]}");
+        var ack = new ByaiGroupChatMessageAck(); ack.setUserId(100L); ack.setMessageId(10L); ack.setUserName("张三");
+        when(acks.selectByMessageIds(3L, List.of(10L))).thenReturn(List.of(ack));
+        var result = service.toMessages(List.of(source)).get(0);
+        assertThat(result.getAcknowledgements()).isEmpty();
+        assertThat(result.isCanAcknowledge()).isFalse();
+    }
+
 }

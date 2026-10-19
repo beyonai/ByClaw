@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import java.util.Date;
@@ -89,7 +90,11 @@ public class GroupChatCandidateSessionService {
         // 子会话保留原文中的成员占位符，必须同时保留完整资源列表供历史消息渲染。
         JSONObject sourceMetadata = StringUtils.isBlank(source.getMetadata())
             ? null : JSON.parseObject(source.getMetadata());
-        if (sourceMetadata != null && sourceMetadata.containsKey("resourceList")) {
+        if (ForwardRuntimeProjection.isSnapshotOnly(source.getMetadata())) {
+            metadata.put("forward", ForwardRuntimeProjection.publicForward(ForwardRuntimeProjection.metadata(source.getMetadata())));
+            metadata.put("resourceList", ForwardRuntimeProjection.displayResources(ForwardRuntimeProjection.metadata(source.getMetadata())));
+        }
+        else if (sourceMetadata != null && sourceMetadata.containsKey("resourceList")) {
             metadata.put("resourceList", sourceMetadata.get("resourceList"));
         }
         childMessage.setMetadata(metadata.toJSONString());

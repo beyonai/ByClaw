@@ -925,6 +925,58 @@ public class DatasetApplicationService {
         downloadResourceContent(ssResource, resourceId, directoryPath, response);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.domain.users.service.UserService forwardUserService;
+
+    /** Exact QA item metadata for an explicitly authorized forwarding actor. */
+    public record ForwardDatasetFile(long resourceId, String knowledgeCode, String path, String name, String type, Long size) { }
+
+    public ForwardDatasetFile forwardMetadata(com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor actor,
+            long resourceId, String filePath) {
+        SsResource resource = forwardResource(actor, resourceId);
+        String path = com.iwhalecloud.byai.state.domain.groupchat.forward.infrastructure.source.ForwardSourceFacts.path(filePath);
+        KbListDir query = new KbListDir(); query.setKnCode(resource.getResourceCode());
+        query.setDirectoryPath(path.substring(0, path.lastIndexOf('/') + 1));
+        var response = feignPythonBuildService.listDirForActor(query, resourceId, forwardLogin(actor));
+        assertPythonBuildSuccess(response, "FORWARD_SOURCE_UNAVAILABLE");
+        if (response.getResultObject() == null || response.getResultObject().getData() == null) throw new IllegalArgumentException("FORWARD_RESOURCE_UNRESOLVABLE");
+        var matches = response.getResultObject().getData().stream().filter(item -> {
+            try { return item != null && path.equals(com.iwhalecloud.byai.state.domain.groupchat.forward.infrastructure.source.ForwardSourceFacts.path(item.getName().replaceAll("/+$", ""))); }
+            catch (RuntimeException error) { return false; }
+        }).toList();
+        if (matches.size() != 1) throw new IllegalArgumentException("FORWARD_RESOURCE_UNRESOLVABLE");
+        var item = matches.getFirst();
+        return new ForwardDatasetFile(resourceId, resource.getResourceCode(), path, path.substring(path.lastIndexOf('/')+1), item.getType(), item.getSize());
+    }
+
+    public com.iwhalecloud.byai.state.domain.groupchat.forward.attachment.ForwardSourceRead forwardOpen(
+            com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor actor, ForwardDatasetFile file) {
+        SsResource resource = forwardResource(actor, file.resourceId());
+        if (!Objects.equals(resource.getResourceCode(), file.knowledgeCode()) || !"file".equalsIgnoreCase(file.type())) throw new IllegalArgumentException("FORWARD_RESOURCE_UNRESOLVABLE");
+        KbFileDownload request = new KbFileDownload(); request.setKnCode(file.knowledgeCode()); request.setFilePath(file.path());
+        var metadata = new com.iwhalecloud.byai.common.storage.model.FileMetadata();
+        metadata.setFileName(file.name()); metadata.setFileSize(file.size()); metadata.setContentType("application/octet-stream");
+        return new com.iwhalecloud.byai.state.domain.groupchat.forward.attachment.ForwardSourceRead(
+            feignPythonBuildService.fileDownloadForActor(request, file.resourceId(), forwardLogin(actor)), metadata);
+    }
+
+    private SsResource forwardResource(com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor actor, long id) {
+        SsResource resource = ssResourceService.findById(id);
+        if (resource == null || !Objects.equals(resource.getComAcctId(), actor.enterpriseId())
+            || !java.util.Set.of("KG_DOC", "KG_CLOUD").contains(resource.getResourceBizType())
+            || !authApplicationService.hasResourceForwardReadPermission(resource, actor.userId(), actor.enterpriseId()))
+            throw new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE");
+        return resource;
+    }
+
+    private com.iwhalecloud.byai.common.login.bean.LoginInfo forwardLogin(com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor actor) {
+        var user = forwardUserService.findById(actor.userId());
+        if (user == null || "X".equalsIgnoreCase(user.getState()) || user.getUserCode() == null) throw new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE");
+        var login = new com.iwhalecloud.byai.common.login.bean.LoginInfo();
+        login.setUserId(actor.userId()); login.setEnterpriseId(actor.enterpriseId()); login.setUserCode(user.getUserCode());
+        return login;
+    }
+
     private void downloadResourceContent(SsResource ssResource, Long resourceId, String directoryPath,
                                          HttpServletResponse response) {
 

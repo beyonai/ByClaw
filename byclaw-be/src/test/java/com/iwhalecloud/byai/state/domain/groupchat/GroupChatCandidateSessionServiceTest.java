@@ -96,4 +96,16 @@ class GroupChatCandidateSessionServiceTest extends I18nTestSupport {
         verify(messageMapper).insert(captor.capture());
         return captor.getValue();
     }
+
+    @Test
+    void wrapperRetainsPassiveProvenanceAndOnlyDisplayReferences() {
+        ByaiMessage original = source("{\"kind\":\"FORWARD_SINGLE\",\"resourceList\":[{\"id\":\"opaque\",\"resourceType\":\"COMMON_FILE\",\"resourceId\":\"/private/path\",\"resourceName\":\"需求说明\",\"resourceCode\":\"secret\",\"extData\":\"secret-ext\"}]}");
+        var child = createChild(original);
+        var metadata = JSON.parseObject(child.getMetadata());
+        assertThat(metadata.getJSONObject("forward").getString("resourceMode")).isEqualTo("SNAPSHOT_ONLY");
+        assertThat(metadata.getJSONArray("resourceList").getJSONObject(0).getString("id")).isEqualTo("opaque");
+        assertThat(child.getMetadata()).doesNotContain("resourceCode", "extData", "secret");
+        assertThat(original.getMetadata()).contains("secret");
+    }
+
 }

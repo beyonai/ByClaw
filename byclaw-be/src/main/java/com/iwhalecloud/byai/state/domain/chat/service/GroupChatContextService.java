@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
@@ -264,16 +265,18 @@ public class GroupChatContextService {
             message.setCreatedAt(source.getCreateTime() == null ? 0L : source.getCreateTime().getTime());
             message.setContent(StringUtils.defaultString(source.getMessageContent()));
             message.setResourceList(toMemberResources(source.getMetadata()));
-            List<ByaiGroupChatMessageAck> messageAcks = acknowledgements.getOrDefault(source.getMessageId(), List.of());
+            boolean passive = ForwardRuntimeProjection.isSnapshotOnly(source.getMetadata());
+            message.setForward(source.isRecalled() ? null : ForwardRuntimeProjection.publicForward(ForwardRuntimeProjection.metadata(source.getMetadata())));
+            List<ByaiGroupChatMessageAck> messageAcks = passive || source.isRecalled() ? List.of() : acknowledgements.getOrDefault(source.getMessageId(), List.of());
             message.setAcknowledgements(messageAcks.stream().map(this::toAcknowledgement).toList());
-            message.setCanAcknowledge(currentUserId != null
+            message.setCanAcknowledge(!passive && currentUserId != null
                 && !currentUserId.equals(source.getCreatorId())
                 && message.getResourceList().stream().anyMatch(resource -> "HUMAN".equals(resource.getResourceType())
                     && String.valueOf(currentUserId).equals(String.valueOf(resource.getResourceId())))
                 && messageAcks.stream().noneMatch(ack -> currentUserId.equals(ack.getUserId())));
             message.setClientRequestId(toClientRequestId(source.getMetadata()));
-            message.setGroupCoordination(toCoordination(source.getMetadata()));
-            message.setTaskId(toMetadataString(source.getMetadata(), "taskId"));
+            message.setGroupCoordination(passive ? null : toCoordination(source.getMetadata()));
+            message.setTaskId(passive ? null : toMetadataString(source.getMetadata(), "taskId"));
             message.setUsage(source.getUsage());
             message.setKind(Integer.valueOf(5).equals(source.getUsage()) ? "SYSTEM_EVENT"
                 : toMetadataString(source.getMetadata(), "kind"));
@@ -282,15 +285,15 @@ public class GroupChatContextService {
             }
             ByaiGroupChatTask task = tasks.get(messageTaskId(source));
             // 归属以任务记录为准，不使用发言 Agent、发布人或客户端 metadata 中的用户 ID。
-            if (task != null && Objects.equals(task.getGroupSessionId(), source.getSessionId())
+            if (!passive && task != null && Objects.equals(task.getGroupSessionId(), source.getSessionId())
                 && task.getInitiatorUserId() != null) {
                 message.setInitiatorUserId(String.valueOf(task.getInitiatorUserId()));
             }
-            message.setTarget(toTarget(source));
+            message.setTarget(passive ? null : toTarget(source));
             message.setRole(toRole(source.getUsage()));
             message.setSpeaker(toSpeaker(source, resources));
             message.setAttachments(source.isRecalled() ? List.of() : toAttachments(source, cloudResources));
-            if (source.getMessageRef() != null) {
+            if (!passive && source.getMessageRef() != null) {
                 ByaiMessage referenced = visibleReferences == null ? messageMapper.selectByMessageId(source.getMessageRef())
                     : visibleReferences.get(source.getMessageRef());
                 if (referenced != null && Objects.equals(source.getSessionId(), referenced.getSessionId())) {
@@ -301,6 +304,10 @@ public class GroupChatContextService {
                     reply.setContent(hidden ? I18nUtil.get(GroupChatRecallProjection.RECALLED_REFERENCE)
                         : StringUtils.defaultString(referenced.getMessageContent()));
                     reply.setResourceList(hidden ? List.of() : toMemberResources(referenced.getMetadata()));
+                    reply.setForward(hidden ? null : ForwardRuntimeProjection.publicForward(ForwardRuntimeProjection.metadata(referenced.getMetadata())));
+                    if (ForwardRuntimeProjection.isSnapshotOnly(referenced.getMetadata())) {
+                        reply.setAcknowledgements(List.of()); reply.setCanAcknowledge(false);
+                    }
                     reply.setUsage(referenced.getUsage());
                     reply.setRole(toRole(referenced.getUsage()));
                     reply.setSpeaker(toSpeaker(referenced, resources));
@@ -431,6 +438,7 @@ public class GroupChatContextService {
         if (StringUtils.isBlank(metadata)) {
             return Collections.emptyList();
         }
+        if (ForwardRuntimeProjection.isSnapshotOnly(metadata)) return ForwardRuntimeProjection.displayResources(ForwardRuntimeProjection.metadata(metadata));
         try {
             JSONObject object = JSON.parseObject(metadata);
             JSONArray resourceList = object == null ? null : object.getJSONArray("resourceList");
@@ -557,6 +565,7 @@ public class GroupChatContextService {
 
     private List<GroupChatContextResponse.Attachment> toAttachments(ByaiMessage source,
         Map<Long, String> cloudResources) {
+        if ("FORWARD_MERGED".equals(ForwardRuntimeProjection.metadata(source.getMetadata()).path("kind").asText())) return List.of();
         List<GroupChatContextResponse.Attachment> legacy = toAttachments(source.getRelatedResources());
         List<GroupChatContextResponse.Attachment> result = legacy == null ? new ArrayList<>() : new ArrayList<>(legacy);
         JSONObject metadata;
@@ -567,8 +576,11 @@ public class GroupChatContextService {
             // 历史元数据损坏时仍返回普通附件，不影响整页消息。
             return legacy;
         }
+        // 普通群消息可能没有 kind，使用空值安全的比较保留原有附件。
+        String kind = metadata == null ? null : metadata.getString("kind");
         if (metadata == null || !"GROUP_CHAT".equals(metadata.getString("scene"))
-            || !"TASK_RESULT".equals(metadata.getString("kind")) || !(metadata.get("files") instanceof JSONArray)) {
+            || !("TASK_RESULT".equals(kind) || "FORWARD_SINGLE".equals(kind))
+            || !(metadata.get("files") instanceof JSONArray)) {
             return legacy;
         }
         for (Object value : metadata.getJSONArray("files")) {
@@ -604,27 +616,23 @@ public class GroupChatContextService {
     }
 
     private List<GroupChatContextResponse.Attachment> toAttachments(String relatedResources) {
-        if (StringUtils.isBlank(relatedResources)) {
-            return null;
-        }
+        if (StringUtils.isBlank(relatedResources)) return null;
         try {
-            MessageResourceDto resources = JSON.parseObject(relatedResources, MessageResourceDto.class);
-            if (resources == null || CollectionUtils.isEmpty(resources.getFiles())) {
-                return null;
-            }
+            JSONObject resources = JSON.parseObject(relatedResources);
+            JSONArray files = resources == null ? null : resources.getJSONArray("files");
+            if (files == null || files.isEmpty()) return null;
             List<GroupChatContextResponse.Attachment> result = new ArrayList<>();
-            for (MessageFileDto file : resources.getFiles()) {
-                if (file == null || StringUtils.isBlank(file.getFileId()) || StringUtils.isBlank(file.getFileName())) {
-                    continue;
-                }
-                GroupChatContextResponse.Attachment attachment = new GroupChatContextResponse.Attachment();
-                attachment.setFileId(file.getFileId());
-                attachment.setFileName(file.getFileName());
-                attachment.setFilePath(file.getFilePath());
-                attachment.setFileUrl(file.getFileUrl());
-                if (StringUtils.isNotBlank(file.getFileType())) {
-                    attachment.setMediaType(file.getFileType());
-                }
+            for (Object value : files) {
+                if (!(value instanceof JSONObject file) || StringUtils.isBlank(file.getString("fileId"))
+                    || StringUtils.isBlank(file.getString("fileName"))) continue;
+                var attachment = new GroupChatContextResponse.Attachment();
+                attachment.setFileId(file.getString("fileId"));
+                attachment.setFileName(file.getString("fileName"));
+                attachment.setFilePath(file.getString("filePath"));
+                attachment.setFileUrl(file.getString("fileUrl"));
+                // Forward descriptors use mediaType/size; ordinary uploads retain fileType compatibility.
+                attachment.setMediaType(StringUtils.defaultIfBlank(file.getString("fileType"), file.getString("mediaType")));
+                if (file.get("size") instanceof Number size && size.longValue() >= 0) attachment.setSize(size.longValue());
                 result.add(attachment);
             }
             return result.isEmpty() ? null : result;

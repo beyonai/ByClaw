@@ -75,7 +75,12 @@ public class GroupChatContextResponse {
         private String content;
 
         /** 与实时群消息一致的成员引用，用于还原正文中的占位符。 */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private List<ResourceVo> resourceList = new ArrayList<>();
+
+        /** Persisted public forwarding envelope; it carries no resource execution capability. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private java.util.Map<String, Object> forward;
 
         /** 被@真人用户的确认状态；确认不会创建新的消息。 */
         private List<MessageAcknowledgement> acknowledgements = new ArrayList<>();
@@ -104,7 +109,16 @@ public class GroupChatContextResponse {
         private String content;
 
         /** 与实时群消息一致的成员引用，用于还原正文中的占位符。 */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private List<ResourceVo> resourceList = new ArrayList<>();
+
+        /** Persisted public forwarding envelope; it carries no resource execution capability. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private java.util.Map<String, Object> forward;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private List<MessageAcknowledgement> acknowledgements;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private Boolean canAcknowledge;
         private String role;
         private Speaker speaker;
     }
@@ -153,7 +167,10 @@ public class GroupChatContextResponse {
     }
 
     @Data
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     public static class Attachment {
+
+        private Long size;
 
         private String fileId;
 

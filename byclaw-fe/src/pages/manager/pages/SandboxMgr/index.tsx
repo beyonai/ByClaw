@@ -44,6 +44,7 @@ import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } from '@/pages/manager/service/TenantMgr';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { getMultiTenancyRevision, useMultiTenancy } from '@/utils/multiTenancy';
 import { hasAnyUserRole } from '@/utils/userRole';
@@ -55,6 +56,7 @@ import {
 } from './serviceSpecUtils';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 
+import RecoveryPanel from './RecoveryPanel';
 import styles from './index.module.less';
 
 const { Option } = Select;
@@ -241,6 +243,22 @@ const SandboxMgr = () => {
   const dispatch = useDispatch();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const showLaunchButton = isAdminVip(userInfo);
+  const [brandVersion, setBrandVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((response) => {
+        if (active) setBrandVersion(response?.paramValue ?? null);
+      })
+      .catch(() => {
+        if (active) setBrandVersion(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const canManageRecovery = isAdminVip(userInfo) || brandVersion === 'openSource';
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const canViewTenantResources =
     multiTenancyEnabled &&
     hasAnyUserRole(
@@ -2017,23 +2035,38 @@ const SandboxMgr = () => {
       ? columns.filter((column) => tenantColumnKeys.has(String(column.dataIndex)))
       : columns.filter((column) => !['ownerScope', 'enterpriseId'].includes(String(column.dataIndex)));
 
+  const scopeTabs = (
+    <Tabs
+      activeKey={recoveryOpen && canManageRecovery ? 'RECOVERY' : ownerScope}
+      items={[
+        ...(canViewTenantResources
+          ? [{ key: 'TENANT', label: intl.formatMessage({ id: 'sandbox.tenantResources' }) }]
+          : []),
+        { key: 'USER', label: intl.formatMessage({ id: 'sandbox.userResources' }) },
+        ...(canManageRecovery ? [{ key: 'RECOVERY', label: '恢复任务' }] : []),
+      ]}
+      onChange={(key) => {
+        setRecoveryOpen(key === 'RECOVERY');
+        if (key === 'RECOVERY') return;
+        const scope = key as 'TENANT' | 'USER';
+        setOwnerScope(scope);
+        setEnterpriseId(undefined);
+        loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, scope, undefined);
+      }}
+    />
+  );
+  if (recoveryOpen && canManageRecovery) {
+    return (
+      <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
+        {scopeTabs}
+        <RecoveryPanel />
+      </div>
+    );
+  }
+
   return (
     <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
-      <Tabs
-        activeKey={ownerScope}
-        items={[
-          ...(canViewTenantResources
-            ? [{ key: 'TENANT', label: intl.formatMessage({ id: 'sandbox.tenantResources' }) }]
-            : []),
-          { key: 'USER', label: intl.formatMessage({ id: 'sandbox.userResources' }) },
-        ]}
-        onChange={(key) => {
-          const scope = key as 'TENANT' | 'USER';
-          setOwnerScope(scope);
-          setEnterpriseId(undefined);
-          loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, scope, undefined);
-        }}
-      />
+      {scopeTabs}
       <Row gutter={16} align="middle">
         <Col flex="auto">
           <Space size="middle">

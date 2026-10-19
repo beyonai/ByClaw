@@ -1,3 +1,4 @@
+import { SqlForwardSourceAuthorityReader } from "./infrastructure/persistence/group-forward-source-authority.js";
 import { join } from "node:path";
 import { Redis } from "ioredis";
 import type { Config } from "./config.js";
@@ -24,6 +25,7 @@ import { SchemaReadiness } from "./infrastructure/schema/readiness.js";
 import { StreamSupervisor } from "./infrastructure/stream/stream-supervisor.js";
 import { Discovery } from "./infrastructure/discovery/by-framework-discovery.js";
 import { TenantWorker } from "./infrastructure/discovery/tenant-worker.js";
+import { SqlGroupForwardStore } from "./infrastructure/persistence/group-forward-prepare.js";
 import { createApp } from "./interfaces/http/app.js";
 
 /** 组装应用端口与基础设施；连接池、Redis、HTTPS 客户端的关闭由这里统一负责。 */
@@ -87,8 +89,26 @@ export async function bootstrap(config: Config) {
     config,
     {
       commands,
+      forwards: new SqlGroupForwardStore(connection, config.enterpriseId),
       mirror,
       history,
+      forwardSources: {
+        readMessage: (actor, group, message) =>
+          connection.write((db) =>
+            new SqlForwardSourceAuthorityReader(db, config.enterpriseId).readMessage(
+              actor,
+              group,
+              message,
+            ),
+          ),
+        requireUploadSession: (actor, session) =>
+          connection.write((db) =>
+            new SqlForwardSourceAuthorityReader(db, config.enterpriseId).requireUploadSession(
+              actor,
+              session,
+            ),
+          ),
+      },
       schema,
       sessions: new SessionQueries(new SqlSessionRepository(read, config.enterpriseId)),
       connected: () => connection.connected,

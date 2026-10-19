@@ -576,4 +576,24 @@ class GroupChatSessionContextFileServiceTest extends I18nTestSupport {
         message.setMessageStruct("SECRET_TOOL");
         return message;
     }
+
+    @Test
+    void passiveGroupAndReplyExportsOmitCapabilitiesWithoutRecursiveExpansion() throws Exception {
+        ResourceVo resource = member(AgentMetaEnum.COMMON_FILE, "/private/path", "需求{{HUMAN_30}}");
+        resource.setId("opaque"); resource.setResourceCode("secret");
+        var snapshot = new GroupChatContextResponse();
+        var message = new GroupChatContextResponse.Message(); message.setKind("FORWARD_SINGLE");
+        message.setForward(Map.of("resourceMode", "SNAPSHOT_ONLY"));
+        message.setContent("{{opaque}}"); message.setResourceList(List.of(resource, member(AgentMetaEnum.HUMAN, "30", "不应展开")));
+        var file = new GroupChatContextResponse.Attachment(); file.setFileId("88"); file.setFileName("需求.pdf"); file.setFileUrl("/download"); file.setMediaType("application/pdf"); file.setSize(42L);
+        message.setAttachments(List.of(file));
+        var reply = new GroupChatContextResponse.ReplyReference(); reply.setForward(message.getForward());
+        reply.setContent("{{opaque}}"); reply.setResourceList(List.of(resource)); message.setReplyTo(reply);
+        snapshot.setMessages(List.of(message)); when(groupContext.load(request)).thenReturn(snapshot);
+        String exported = body(prepare("passive-export", false).get(0));
+        assertThat(exported).contains("需求{{HUMAN_30}}", "需求.pdf").doesNotContain("resourceList", "secret", "/private/path", "/download", "不应展开");
+        assertThat(message.getResourceList()).hasSize(2);
+        assertThat(message.getContent()).isEqualTo("{{opaque}}");
+    }
+
 }
