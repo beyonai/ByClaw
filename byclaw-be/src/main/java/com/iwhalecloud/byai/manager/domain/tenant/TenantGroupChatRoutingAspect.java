@@ -220,6 +220,6 @@ public class TenantGroupChatRoutingAspect {
     }
 
     private ResponseStatusException unsupported() {
-        return new ResponseStatusException(HttpStatus.CONFLICT, "tenant group operation is not ready");
+        return new ResponseStatusException(HttpStatus.CONFLICT, "tenant.group.notReady");
     }
 }

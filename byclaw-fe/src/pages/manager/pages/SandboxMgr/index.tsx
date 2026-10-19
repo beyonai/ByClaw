@@ -1373,14 +1373,19 @@ const SandboxMgr = () => {
       width: 90,
     },
     {
-      title: '归属维度',
+      title: intl.formatMessage({ id: 'sandbox.ownerScope' }),
       dataIndex: 'ownerScope',
       align: 'center' as const,
       width: 110,
-      render: (value: string) => (value === 'TENANT' ? <Tag color="blue">租户</Tag> : <Tag>用户</Tag>),
+      render: (value: string) =>
+        value === 'TENANT' ? (
+          <Tag color="blue">{intl.formatMessage({ id: 'sandbox.ownerTenant' })}</Tag>
+        ) : (
+          <Tag>{intl.formatMessage({ id: 'sandbox.ownerUser' })}</Tag>
+        ),
     },
     {
-      title: '租户',
+      title: intl.formatMessage({ id: 'sandbox.ownerTenant' }),
       dataIndex: 'enterpriseId',
       align: 'center' as const,
       width: 180,
@@ -2017,8 +2022,10 @@ const SandboxMgr = () => {
       <Tabs
         activeKey={ownerScope}
         items={[
-          ...(canViewTenantResources ? [{ key: 'TENANT', label: '租户资源' }] : []),
-          { key: 'USER', label: '用户资源' },
+          ...(canViewTenantResources
+            ? [{ key: 'TENANT', label: intl.formatMessage({ id: 'sandbox.tenantResources' }) }]
+            : []),
+          { key: 'USER', label: intl.formatMessage({ id: 'sandbox.userResources' }) },
         ]}
         onChange={(key) => {
           const scope = key as 'TENANT' | 'USER';
@@ -2033,7 +2040,7 @@ const SandboxMgr = () => {
             <Input.Search
               placeholder={
                 ownerScope === 'TENANT'
-                  ? '按租户名称 / 编码搜索'
+                  ? intl.formatMessage({ id: 'sandbox.tenantSearch' })
                   : intl.formatMessage({ id: 'sandboxMgr.search.placeholder' })
               }
               value={keyword}
@@ -2060,7 +2067,7 @@ const SandboxMgr = () => {
                 allowClear
                 showSearch
                 optionFilterProp="label"
-                placeholder="筛选租户"
+                placeholder={intl.formatMessage({ id: 'sandbox.filterTenant' })}
                 value={enterpriseId}
                 style={{ width: 220 }}
                 onChange={(value?: string) => {

@@ -1168,10 +1168,17 @@ const RenderContent = (props: ResourceCardProps) => {
       if (resource.employeePublicationStatus === 'PUBLISHED') {
         items.push({
           key: 'viewEmployeePublication',
-          label: <BuildMenuLabel icon="icon-a-Uploadshangchuan" text="查看发布记录" />,
+          label: (
+            <BuildMenuLabel
+              icon="icon-a-Uploadshangchuan"
+              text={intl.formatMessage({ id: 'resource.publication.viewHistory' })}
+            />
+          ),
           onClick: () =>
             openEmployeePublication(String(resource.resourceId || resource.id || resource.agentId)).catch((error) =>
-              message.error(publicationErrorMessage(error, '无法查看发布记录'))
+              message.error(
+                publicationErrorMessage(error, intl.formatMessage({ id: 'resource.publication.historyFailed' }))
+              )
             ),
         });
       }

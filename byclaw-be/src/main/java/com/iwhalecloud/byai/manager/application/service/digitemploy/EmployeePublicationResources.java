@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -41,7 +42,7 @@ import org.springframework.beans.factory.ObjectProvider;
 @lombok.extern.slf4j.Slf4j
 public class EmployeePublicationResources {
     private static final int MAX_SKILL_BYTES = 100 * 1024 * 1024;
-    private static final String TENANT_MISMATCH_REASON = "资源所属企业与原数字员工所属企业不一致";
+    private static final String TENANT_MISMATCH_REASON = "employee.publication.dependencyTenantMismatch";
     private final SsResourceService resources;
     private final SsResExtSkillService skills;
     private final ResourceArtifactStorageService storage;
@@ -93,7 +94,7 @@ public class EmployeePublicationResources {
         // 发布归属沿用源员工，并与当前登录企业一致，不以企业信息表的最大 ID 推断归属。
         // 当前组织模型是部署级组织树；这里继续沿用既有根组织授权。
         if (tenantId == null || !Objects.equals(tenantId, CurrentUserHolder.getEnterpriseId())) {
-            throw new BaseException("发布企业与当前登录企业不一致");
+            throw new BaseException("employee.publication.loginTenantMismatch");
         }
         List<Long> roots = organizations.getTopOrgList();
         if (roots == null || roots.isEmpty()) throw new BaseException("企业尚未配置根组织，无法建立全员使用授权");
@@ -223,7 +224,7 @@ public class EmployeePublicationResources {
                     SsResource current = resources.findById(dependency.getResource().getResourceId());
                     requireAvailable(current, tenantId);
                     if (!auth.hasResourceUsePermission(current, authorId)) throw new BaseException("创建者已无关联资源使用权限");
-                    if (!Objects.equals(current.getCreateBy(), dependency.getResource().getCreateBy())) throw new BaseException("个人技能所有权已变更");
+                    if (!Objects.equals(current.getCreateBy(), dependency.getResource().getCreateBy())) throw new BaseException("employee.publication.skillOwnerChanged");
                     byte[] bytes = snapshotBytes(dependency);
                     checkSkill(dependency, bytes, authorId, tenantId);
                 } catch (Exception error) {
@@ -357,7 +358,7 @@ public class EmployeePublicationResources {
 
     public void grantAudience(SsResource resource, Long tenantId) {
         if (resource == null || tenantId == null || !Objects.equals(resource.getComAcctId(), tenantId)) {
-            throw new BaseException("发布资源与原员工的企业归属不一致");
+            throw new BaseException("employee.publication.resourceTenantMismatch");
         }
         List<AuthDTO> subjects = audienceRoots(tenantId).stream().map(id -> {
             AuthDTO dto = new AuthDTO();
@@ -413,7 +414,7 @@ public class EmployeePublicationResources {
             if (!Objects.equals(current.getComAcctId(), tenantId)) {
                 dependency.setResource(null); dependency.setTargetId(id);
                 setUnavailableDisplayMetadata(dependency, current);
-                omit(dependency, TENANT_MISMATCH_REASON); return;
+                omit(dependency, I18nUtil.get("employee.publication.dependencyTenantMismatch")); return;
             }
             dependency.setResource(current);
             dependency.setTargetId(id);
@@ -452,7 +453,7 @@ public class EmployeePublicationResources {
                 log.warn("读取发布资源展示信息失败，resourceId={}", dependency.getTargetId(), error);
                 redactUnavailableDisplayMetadata(dependency);
             }
-            if ("资源不属于当前企业".equals(dependency.getWarning())) dependency.setWarning(TENANT_MISMATCH_REASON);
+            if ("资源不属于当前企业".equals(dependency.getWarning())) dependency.setWarning(I18nUtil.get(TENANT_MISMATCH_REASON));
         }
     }
 
@@ -467,7 +468,7 @@ public class EmployeePublicationResources {
     }
 
     private void redactUnavailableDisplayMetadata(Dependency dependency) {
-        dependency.setLabel("关联资源 " + dependency.getTargetId());
+        dependency.setLabel(I18nUtil.get("employee.publication.linkedResource", String.valueOf(dependency.getTargetId())));
         dependency.setResourceType(null);
     }
 
@@ -493,8 +494,8 @@ public class EmployeePublicationResources {
         if ("COPY_SKILL".equals(dependency.getAction())) {
             String name = StringUtils.defaultIfBlank(dependency.getCopyName(),
                 EmployeePublicationNames.enterpriseName(dependency.getResource().getResourceName(), null));
-            return new Availability("SKILL", "当前企业全员（发布成功后）", "个人技能将生成独立副本",
-                "生成企业技能副本「" + name + "」，不依赖原技能的私有权限");
+            return new Availability("SKILL", I18nUtil.get("employee.publication.allMembersAfterPublish"), I18nUtil.get("employee.publication.independentSkillCopy"),
+                I18nUtil.get("employee.publication.skillCopyImpact", name));
         }
         if ("BUILTIN_TOOL".equals(dependency.getAction())) {
             return new Availability("TOOL", "当前企业全员", "平台内置工具", "发布后全员可使用，仍需运行环境正常");

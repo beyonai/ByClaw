@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
@@ -35,12 +36,12 @@ public class SkillImportLockService {
         Lock lock = lockRegistry.obtain(resourceCode);
         try {
             if (!lock.tryLock(30, TimeUnit.SECONDS)) {
-                throw new CannotAcquireLockException("Timed out waiting for skill import lock: " + resourceCode);
+                throw new CannotAcquireLockException(I18nUtil.get("skill.import.lock.timeout", resourceCode));
             }
         }
         catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new CannotAcquireLockException("Interrupted waiting for skill import lock", exception);
+            throw new CannotAcquireLockException(I18nUtil.get("skill.import.lock.interrupted"), exception);
         }
         try {
             TransactionSynchronizationManager.registerSynchronization(new SkillLockSynchronization(resourceCode, lock, lockRegistry));

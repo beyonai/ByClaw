@@ -53,7 +53,7 @@ public class TenantContextService {
         TenantMembershipRow membership = requireReadyMembership(userId, enterpriseId);
         log.info("tenant switch membership ready: enterpriseId={}, userId={}", enterpriseId, userId);
         if (login.getSessionId() == null || login.getSessionId().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login session required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.login.sessionRequired");
         }
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
@@ -66,7 +66,7 @@ public class TenantContextService {
         }
         catch (Exception e) {
             log.warn("tenant switch context storage failed: enterpriseId={}, userId={}", enterpriseId, userId, e);
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant context unavailable");
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.context.unavailable");
         }
         log.info("tenant switch context issued: enterpriseId={}, userId={}", enterpriseId, userId);
         return new TenantSwitchView(enterpriseIdText, membership.getRole(), token,
@@ -84,7 +84,7 @@ public class TenantContextService {
         long enterpriseId = parseEnterpriseId(enterpriseIdText);
         LoginInfo login = requireLogin();
         if (contextToken == null || !contextToken.matches("[A-Za-z0-9_-]{43}")) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant context token required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.context.token.required");
         }
         TokenBinding binding;
         try {
@@ -92,7 +92,7 @@ public class TenantContextService {
             binding = value == null ? null : objectMapper.readValue(value, TokenBinding.class);
         }
         catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid tenant context");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.context.invalid");
         }
         boolean valid;
         try {
@@ -105,7 +105,7 @@ public class TenantContextService {
             valid = false;
         }
         if (!valid) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid tenant context");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.context.invalid");
         }
         TenantMembershipRow membership = requireReadyMembership(login.getUserId(), enterpriseId);
         return new TenantRequestContext(login.getUserId(), enterpriseId, membership.getRole());
@@ -114,13 +114,13 @@ public class TenantContextService {
     private TenantMembershipRow requireReadyMembership(long userId, long enterpriseId) {
         TenantMembershipRow membership = membershipMapper.selectActiveMembership(userId, enterpriseId);
         if (membership == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant membership required");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.membership.required");
         }
         if (RuntimeEnvironment.isDevelopment()) {
             return membership;
         }
         if (!"READY".equals(provisionState(membership))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant is not ready");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.notReady");
         }
         return membership;
     }
@@ -132,7 +132,7 @@ public class TenantContextService {
     private LoginInfo requireLogin() {
         LoginInfo login = CurrentUserHolder.getLoginInfo();
         if (login == null || login.getUserId() == null || login.getUserId() <= 0) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.login.required");
         }
         return login;
     }
@@ -153,20 +153,20 @@ public class TenantContextService {
 
     private long parseEnterpriseId(String text) {
         if (text == null || !text.matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid");
         }
         try {
             return Long.parseLong(text);
         }
         catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid");
         }
     }
 
     public List<TenantAvailableView> available() {
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || userId <= 0) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.login.required");
         }
         return membershipMapper.selectAvailableForUser(userId).stream()
             .map(row -> new TenantAvailableView(row.getEnterpriseId(), row.getEnterpriseName(),

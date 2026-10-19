@@ -55,7 +55,7 @@ public class TenantGroupTaskRoutingAspect {
         }
         if (context == null) return call.proceed();
         if (args.length == 0 || !(args[0] instanceof Long taskId) || taskId <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid group task");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.group.task.invalid");
         }
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         String path = "/internal/v1/group-chat/tasks/" + taskId;

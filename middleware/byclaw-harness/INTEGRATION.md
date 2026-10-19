@@ -36,6 +36,19 @@ docker build -f middleware/byclaw-harness/Dockerfile \
 
 本次接入仅纳入源码及原有构建入口；未注册新的部署服务或修改现有中间件镜像流水线。
 
+## 飞书与企业微信 CLI
+
+两个业务 Dockerfile 在最终运行阶段通过 npm 安装 `@wecom/cli@0.1.9` 和
+`@larksuite/cli@1.0.85`，默认版本与 OpenClaw 主 Dockerfile 对齐。构建时检查 CLI 版本，
+并以 `byclaw` 用户执行帮助命令；安装或检查失败会中断构建。共享技能继续使用
+`middleware/builtin/skills`，授权文件仍由运行时的用户私有目录提供。
+
+回归测试入口为 `python3 -m unittest discover -s middleware/tests -p 'test_harness_connector_cli.py'`。
+测试提取实际安装指令并使用本地桩覆盖成功、安装失败、命令缺失、版本错误和帮助命令失败；
+不下载 npm 包，也不验证真实容器权限。交付前还需构建目标架构镜像，并从 DSH 执行入口验证
+`LARK_HOME`、`WECOM_HOME` 与用户凭证挂载一致，完成测试账号的授权及只读业务验收。
+版本和帮助命令通过只表明 CLI 可执行，不能据此认定连接器已经授权或业务可用。
+
 ## 后续同步
 
 在独立工作副本获取指定上游分支，确认提交后，将已提交源码同步到本目录，排除 Git 元数据、

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.ws.handler;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -27,7 +28,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
-class TenantWebSocketStopTest {
+class TenantWebSocketStopTest extends I18nTestSupport {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final RunningOutputStreamRegistry running = mock(RunningOutputStreamRegistry.class);
     private final AssistantChatApplicationService application = mock(AssistantChatApplicationService.class);

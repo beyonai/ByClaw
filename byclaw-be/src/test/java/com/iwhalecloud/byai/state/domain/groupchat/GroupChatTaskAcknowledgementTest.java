@@ -36,7 +36,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 @ExtendWith(MockitoExtension.class)
-class GroupChatTaskAcknowledgementTest {
+class GroupChatTaskAcknowledgementTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     @Mock private ByaiGroupChatTaskMapper tasks;
     @Mock private ByaiGroupChatTurnMapper turns;
     @Mock private ByaiGroupChatExecutionMapper executions;
@@ -104,5 +104,17 @@ class GroupChatTaskAcknowledgementTest {
         assertThat(acknowledgement.getString("taskId")).isEqualTo("60");
         assertThat(acknowledgement.get("initiatorUserId")).isEqualTo("10");
         assertThat(acknowledgement.getJSONArray("attachments")).isEmpty();
+    }
+
+    @Test
+    void unavailableTenantCloudDriveIsLocalizedBeforeReturningAResourceId() {
+        var projects = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService.class);
+        ReflectionTestUtils.setField(service, "projectService", projects);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.tenantProjectCloudResourceId(100L))
+            .hasMessage("Group project cloud drive is unavailable");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.tenantProjectCloudResourceId(100L))
+            .hasMessage("群项目云盘不可用");
     }
 }

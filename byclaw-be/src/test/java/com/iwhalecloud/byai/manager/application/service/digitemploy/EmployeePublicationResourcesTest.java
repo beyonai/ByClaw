@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
@@ -23,7 +24,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-class EmployeePublicationResourcesTest {
+class EmployeePublicationResourcesTest extends I18nTestSupport {
     SsResourceService resources = mock(SsResourceService.class);
     SsResExtSkillService skills = mock(SsResExtSkillService.class);
     ResourceArtifactStorageService storage = mock(ResourceArtifactStorageService.class);
@@ -343,4 +344,17 @@ class EmployeePublicationResourcesTest {
         assertThat(description.reason()).contains("无法随员工发布");
         assertThat(description.impact()).contains("不会出现", "原个人员工保持不变");
     }
+
+    @Test
+    void personalDependencyReasonUsesCurrentLanguageWithoutChangingItsClassification() {
+        var issue = new EmployeePublicationSkillBridge.Issue("9007199254740993", "TOOL", "查询工具",
+            EmployeePublicationSkillBridge.Issue.PERSONAL_RESOURCE_REASON);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThat(issue.displayReason()).isEqualTo(
+            "The skill depends on the personal tool \"查询工具\" and will not be included in this employee publication");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThat(issue.displayReason()).isEqualTo("技能依赖了个人工具「查询工具」，因此本次不会随员工发布");
+        assertThat(issue.reason()).isEqualTo(EmployeePublicationSkillBridge.Issue.PERSONAL_RESOURCE_REASON);
+    }
+
 }

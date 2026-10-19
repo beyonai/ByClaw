@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -50,7 +51,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 /** Tests queue outcomes across polls with retained rows; Gateway and DB transport stay outside this unit boundary. */
-class GroupChatTurnQueueTest {
+class GroupChatTurnQueueTest extends I18nTestSupport {
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
     private final ByaiGroupChatExecutionMapper anchors = mock(ByaiGroupChatExecutionMapper.class);
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);

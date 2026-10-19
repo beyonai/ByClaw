@@ -1,3 +1,4 @@
+let mockLocale = 'zh-CN';
 jest.mock('@/service/employeePublication', () => ({
   ...jest.requireActual('@/service/employeePublication'),
   openEmployeePublication: jest.fn(),
@@ -5,15 +6,19 @@ jest.mock('@/service/employeePublication', () => ({
 import { openEmployeePublication } from '@/service/employeePublication';
 jest.mock('@umijs/max', () => ({
   getIntl: () => {
-    const messages = jest.requireActual('@/locales/zh-CN/employeePublication').default;
+    const messages = (
+      mockLocale === 'en-US' ? jest.requireActual('@/locales/en-US') : jest.requireActual('@/locales/zh-CN')
+    ).default;
     return {
       formatMessage: ({ id }: { id: string }) =>
         messages[id as keyof typeof messages] || (id === 'resource.publishToEnterprise' ? '发布到企业' : id),
     };
   },
-  getLocale: () => 'zh-CN',
+  getLocale: () => mockLocale,
   useIntl: () => {
-    const messages = jest.requireActual('@/locales/zh-CN/employeePublication').default;
+    const messages = (
+      mockLocale === 'en-US' ? jest.requireActual('@/locales/en-US') : jest.requireActual('@/locales/zh-CN')
+    ).default;
     return {
       formatMessage: ({ id }: { id: string }) =>
         messages[id as keyof typeof messages] || (id === 'resource.publishToEnterprise' ? '发布到企业' : id),
@@ -184,12 +189,14 @@ describe('digital employee publication entry', () => {
       />
     );
     fireEvent.click(screen.getByText(label!));
-    await waitFor(() => {
-      if (status === 'PUBLISHED') expect(openEmployeePublication).toHaveBeenCalledWith('10', 'publishUpdate');
-      else expect(openEmployeePublication).toHaveBeenCalledWith('10');
-    });
+    const expectedArgs = status === 'PUBLISHED' ? ['10', 'publishUpdate'] : ['10'];
+    await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith(...expectedArgs));
   });
-  it('views a published record without preparing another update', async () => {
+  it.each([
+    ['zh-CN', '查看发布记录'],
+    ['en-US', 'View publication history'],
+  ])('views a published record in %s without preparing another update', async (locale, label) => {
+    mockLocale = locale;
     (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
     renderWithQueryClient(
       <ResourceCard
@@ -202,7 +209,7 @@ describe('digital employee publication entry', () => {
         }}
       />
     );
-    fireEvent.click(screen.getByText('查看发布记录'));
+    fireEvent.click(screen.getByText(label));
     await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('10'));
     expect(openEmployeePublication).toHaveBeenCalledTimes(1);
   });
@@ -256,4 +263,8 @@ describe('digital employee publication entry', () => {
     expect(onEdit).toHaveBeenCalledTimes(1);
     expect(openEmployeePublication).not.toHaveBeenCalled();
   });
+});
+
+afterEach(() => {
+  mockLocale = 'zh-CN';
 });

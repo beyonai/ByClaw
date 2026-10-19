@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -172,7 +173,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                 scriptService.startExistingMessageTurn(dto, existing);
             }
             catch (Exception error) {
-                throw new IllegalStateException("Unable to start group candidate turn", error);
+                throw new IllegalStateException(I18nUtil.get("groupchat.turn.candidateFailed"), error);
             }
         });
     }
@@ -193,12 +194,12 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                     scriptService.startExistingMessageTurn(prepared.request(), prepared.message());
                 }
                 catch (Exception error) {
-                    throw new IllegalStateException("Unable to start queued group turn", error);
+                    throw new IllegalStateException(I18nUtil.get("groupchat.turn.startFailed"), error);
                 }
             });
         }
         catch (RuntimeException error) {
-            if (!enteredScript.get()) throw new ChatTurnPreparationException("身份上下文准备失败，请重试", error);
+            if (!enteredScript.get()) throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.identityFailed"), error);
             throw error;
         }
     }
@@ -285,7 +286,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             throw new IllegalStateException("Queued turn no longer owns its runtime slot");
         }
         if (coordinatedInitial && taskMapper.bindTurn(task.getTaskSessionId(), turn.getExecutionId(), traceId, new Date()) != 1) {
-            throw new IllegalStateException("Coordinated task no longer owns its initial turn");
+            throw new IllegalStateException(I18nUtil.get("groupchat.turn.ownershipChanged"));
         }
         return new PreparedTurn(dto, existing, initiator.getUserCode());
     }
@@ -343,7 +344,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         // 续聊可看到此轮之前的新群消息，同一输入重试不会纳入后续消息。
         if (task != null) {
             if (context.userMessageId == null || context.userMessageId <= 0) {
-                throw new ChatTurnPreparationException("历史上下文准备失败，请重试",
+                throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.historyFailed"),
                     new IllegalArgumentException("Missing task input boundary"));
             }
             boundary = context.userMessageId;
@@ -367,7 +368,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                 context.assistantChatDto, scope, gatewayParams);
             String coordinatorId = scope.get("coordinatorAgentId").toString();
             SsResource coordinator = resourceService.findById(Long.valueOf(coordinatorId));
-            if (coordinator == null) throw new IllegalArgumentException("Group work assistant is unavailable");
+            if (coordinator == null) throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.assistantUnavailable"));
             Map<String, Object> coordinatorMetadata = new HashMap<>();
             coordinatorMetadata.put("id", coordinatorId);
             coordinatorMetadata.put("name", coordinator.getResourceName());
@@ -389,7 +390,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         boolean agentChanged = task != null && hasAgentChanged(context, execution.getTargetAgentId());
         Users initiator = userService.findById(execution.getInitiatorUserId());
         if (initiator == null) {
-            throw new IllegalArgumentException("Group execution initiator is unavailable");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.initiatorUnavailable"));
         }
         GroupChatSessionContextFileService.ContextFile groupHistory;
         if (agentChanged) {
@@ -461,7 +462,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             }
         }
         catch (RuntimeException error) {
-            throw new ChatTurnPreparationException("历史上下文准备失败，请重试", error);
+            throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.historyFailed"), error);
         }
     }
 

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -23,7 +24,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
 
-class SkillImportLockServiceTest {
+class SkillImportLockServiceTest extends I18nTestSupport {
 
     private final ExecutorService workers = Executors.newFixedThreadPool(2);
     private SkillImportLockService locks;
@@ -150,5 +151,21 @@ class SkillImportLockServiceTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(exception);
         }
+    }
+
+    @Test
+    void lockTimeoutIsLocalizedAndRetainsTheResourceCode() throws Exception {
+        Lock lock = mock(Lock.class);
+        when(lock.tryLock(30, TimeUnit.SECONDS)).thenReturn(false);
+        locks = new SkillImportLockService(key -> lock);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> transaction.executeWithoutResult(status -> locks.acquire("demo-技能")))
+            .isInstanceOf(CannotAcquireLockException.class)
+            .hasMessage("Timed out waiting for skill import lock: demo-技能");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThatThrownBy(() -> transaction.executeWithoutResult(status -> locks.acquire("demo-技能")))
+            .isInstanceOf(CannotAcquireLockException.class)
+            .hasMessage("等待技能导入锁超时：demo-技能");
+        org.mockito.Mockito.verify(lock, org.mockito.Mockito.never()).unlock();
     }
 }

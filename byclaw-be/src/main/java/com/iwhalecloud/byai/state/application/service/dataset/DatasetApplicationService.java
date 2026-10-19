@@ -705,7 +705,7 @@ public class DatasetApplicationService {
             if (!zipUpload && existingFilePaths.contains(filePath)) {
                 // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
                 validateDatasetItemPermission(ssResource, filePath);
-                deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件", forwardedHeaders);
+                deleteKnowledgeFile(ssResource, filePath, I18nUtil.get("dataset.operation.removeBeforeOverwrite"), forwardedHeaders);
             }
             kbFileImport.setFilePath(filePath);
             kbFileImport
@@ -716,7 +716,7 @@ public class DatasetApplicationService {
             PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport,
                 forwardedHeaders);
             logger.info("导入文件:{}", JSON.toJSONString(importRet));
-            assertPythonBuildSuccess(importRet, "上传知识库文件");
+            assertPythonBuildSuccess(importRet, I18nUtil.get("dataset.operation.upload"));
 
             appendImportResult(uploadResult, importRet.getResultObject(), multipartFile, kbFileImport.getFilePath());
         }
@@ -768,7 +768,7 @@ public class DatasetApplicationService {
                 : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
             if (!zipUpload && existingFilePaths.contains(filePath)) {
                 // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
-                deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件", forwardedHeaders);
+                deleteKnowledgeFile(ssResource, filePath, I18nUtil.get("dataset.operation.removeBeforeOverwrite"), forwardedHeaders);
             }
             kbFileImport.setFilePath(filePath);
             kbFileImport
@@ -779,7 +779,7 @@ public class DatasetApplicationService {
             PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport,
                 forwardedHeaders);
             logger.info("直接导入文件:{}", JSON.toJSONString(importRet));
-            assertPythonBuildSuccess(importRet, "上传知识库文件");
+            assertPythonBuildSuccess(importRet, I18nUtil.get("dataset.operation.upload"));
 
             appendImportResult(uploadResult, importRet.getResultObject(), multipartFile, kbFileImport.getFilePath());
         }

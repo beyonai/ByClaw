@@ -851,7 +851,7 @@ public class SandboxService {
     private void rejectTenantSpecFromUserLaunch(String sandboxType, SandboxServiceSpec spec) {
         if ("tenant-opengauss".equals(sandboxType) || "tenant-data-node".equals(sandboxType)
             || (spec != null && "TENANT".equals(spec.getOwnerScope()))) {
-            throw new BdpRuntimeException("租户沙箱只能由租户开通流程创建");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.tenant.createOnly"));
         }
     }
 
@@ -1305,7 +1305,7 @@ public class SandboxService {
             throw new BdpRuntimeException("sandbox record not found");
         }
         if ("TENANT".equals(record.getOwnerScope())) {
-            throw new BdpRuntimeException("租户沙箱只能由租户开通流程管理");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.tenant.manageOnly"));
         }
         String releaseReason = manualReleaseReason(record.getUserCode());
         if (STATUS_STARTING.equals(record.getStatus())) {
@@ -1337,7 +1337,7 @@ public class SandboxService {
             throw new BdpRuntimeException("sandbox record not found");
         }
         if ("TENANT".equals(record.getOwnerScope())) {
-            throw new BdpRuntimeException("租户沙箱只能由租户开通流程管理");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.tenant.manageOnly"));
         }
         int updated = sandboxRecordMapper.updateAutoRelease(id, autoRelease, record.getLockVersion());
         if (updated == 0) {

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -32,7 +33,7 @@ import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
  * byclaw-dsh 沙箱按 DSH 活动 Stream 状态释放 / 续约的决策。markReleasing 返回 0 让 doRemoveSandbox 在远端调用前退出，
  * 只断言释放原因。
  */
-class DshActivitySandboxServiceTest {
+class DshActivitySandboxServiceTest extends I18nTestSupport {
 
     private static final String WORKER_ID = "byclaw-dsh-user001";
     private static final long MINUTE = 60_000L;

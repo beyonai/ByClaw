@@ -122,4 +122,27 @@ class GlobalExceptionHandlerTest {
             assertThat(response.getBody().getMsg()).isEqualTo("该资源不可收藏或已不可用");
         }
     }
+
+    @ParameterizedTest
+    @CsvSource(value = {
+        "zh-CN|403|tenant.admin.required|需要平台管理员权限",
+        "en-US|403|tenant.admin.required|platform administrator required",
+        "zh-CN|409|tenant.node.launch.incomplete|租户 Node 启动配置不完整",
+        "en-US|409|tenant.node.launch.incomplete|tenant Node launch configuration is incomplete",
+        "zh-CN|400|tenant.datasource.sql.confirmation|该 SQL 需要确认后执行",
+        "en-US|400|tenant.datasource.sql.confirmation|SQL requires confirmation",
+        "zh-CN|400|tenant.delete.nameMismatch|确认输入的租户名称不匹配",
+        "en-US|400|tenant.delete.nameMismatch|tenant name confirmation does not match",
+        "zh-CN|400|conversation.search.timeRange.invalid|开始时间不能晚于结束时间",
+        "en-US|400|conversation.search.timeRange.invalid|The start time cannot be later than the end time"
+    }, delimiter = '|')
+    void monthlyTenantAndSearchErrorsPreserveHttpStatusAndTranslateTheBody(
+        String language, int status, String key, String expected) {
+        LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        var response = handlerWithMessages().handleResponseStatusException(
+            new ResponseStatusException(HttpStatus.valueOf(status), key));
+        assertThat(response.getStatusCode().value()).isEqualTo(status);
+        assertThat(response.getBody().getMsg()).isEqualTo(expected);
+    }
+
 }

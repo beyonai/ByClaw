@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,7 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockMultipartFile;
 
-class UserProfileApplicationServiceTest {
+class UserProfileApplicationServiceTest extends I18nTestSupport {
 
     private final UsersMapper mapper = mock(UsersMapper.class);
     private final UserAvatarApplicationService avatarService = mock(UserAvatarApplicationService.class);
@@ -301,4 +302,17 @@ class UserProfileApplicationServiceTest {
         verify(mapper).update(isNull(), captor.capture());
         return captor.getValue();
     }
+
+    @Test
+    void invalidProfileRoleIsLocalizedWithoutChangingStoredOptionValues() {
+        activeUser();
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", null);
+        request.setProfileRole("unknown");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> service.updateProfile(request)).hasMessage("Select a valid role");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThatThrownBy(() -> service.updateProfile(request)).hasMessage("请选择有效的岗位");
+        verify(mapper, never()).update(isNull(), any());
+    }
+
 }

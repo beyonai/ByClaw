@@ -110,6 +110,11 @@ class DatasetApplicationServiceTest {
     @BeforeAll
     static void initI18n() {
         StaticMessageSource messageSource = new StaticMessageSource();
+        var bundle = new org.springframework.context.support.ResourceBundleMessageSource();
+        bundle.setBasename("i18n/messages");
+        bundle.setDefaultEncoding("UTF-8");
+        bundle.setFallbackToSystemLocale(false);
+        messageSource.setParentMessageSource(bundle);
         messageSource.addMessage("dataset.default.personal.delete.not.allowed", TEST_LOCALE,
             "dataset.default.personal.delete.not.allowed");
         messageSource.addMessage("dataset.metadata.search.resource.id.list.notempty", TEST_LOCALE,

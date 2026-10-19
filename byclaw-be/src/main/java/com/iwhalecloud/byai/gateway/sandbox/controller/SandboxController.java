@@ -448,7 +448,7 @@ public class SandboxController {
 
         enterpriseId = userResourceEnterpriseScope(enterpriseId);
         if (!CurrentUserHolder.isPlatformManager() && !"USER".equals(ownerScope)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "user sandbox scope required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.userScope.required");
         }
 
         int offset = (pageIndex - 1) * pageSize;
@@ -553,7 +553,7 @@ public class SandboxController {
         Long enterpriseId = CurrentUserHolder.getEnterpriseId();
         if (!CurrentUserHolder.isBusinessAdmin() || enterpriseId == null || enterpriseId <= 0
             || (requestedEnterpriseId != null && !enterpriseId.equals(requestedEnterpriseId))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "enterprise access denied");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.enterprise.denied");
         }
         return enterpriseId;
     }
@@ -561,7 +561,7 @@ public class SandboxController {
     private void requireUserSandboxRecordAccess(Long id) {
         Long enterpriseId = userResourceEnterpriseScope(null);
         if (enterpriseId != null && sandboxRecordMapper.countEnterpriseUserSandbox(id, enterpriseId) != 1) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "enterprise access denied");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.enterprise.denied");
         }
     }
 
