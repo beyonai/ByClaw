@@ -2,7 +2,10 @@ package com.iwhalecloud.byai.state.application.service.dataset;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URLEncoder;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -76,6 +79,8 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCopyRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCopyResult;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
@@ -130,10 +135,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.util.unit.DataSize;
+import com.iwhalecloud.byai.state.common.util.PathMultipartFile;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 
@@ -193,6 +201,9 @@ public class DatasetApplicationService {
 
     @Value("${dataset.system:}")
     private String datasetSystem;
+
+    @Value("${spring.servlet.multipart.max-file-size:2048MB}")
+    private String maxCopyFileSize = "2048MB";
 
     /**
      * ownerType 允许值：enterprise-企业，personal-个人
@@ -1132,6 +1143,190 @@ public class DatasetApplicationService {
         logger.info("删除目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "删除知识库目录");
 
+    }
+
+    /**
+     * 读取源原文，在目标知识库导入独立文档。只复制单文件，不覆盖、解压或复用索引及创建人元数据。
+     */
+    public KnowledgeFileCopyResult copyKnowledgeFile(KnowledgeFileCopyRequest request, Map<String, String> headers) {
+        if (CurrentUserHolder.getLoginInfo() == null || CurrentUserHolder.getCurrentUserId() == null
+            || CurrentUserHolder.getCurrentUserId() <= 0 || StringUtils.isBlank(CurrentUserHolder.getCurrentUserCode())) {
+            throw new IllegalArgumentException(I18nUtil.get("user.session.invalid"));
+        }
+        if (request == null || request.getSourceResourceId() == null || request.getSourceResourceId() <= 0
+            || request.getTargetResourceId() == null || request.getTargetResourceId() <= 0) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.copy.request.invalid"));
+        }
+        String sourcePath = normalizeCopyPath(request.getSourceFilePath(), false);
+        String targetDirectory = normalizeCopyPath(request.getTargetDirectoryPath(), true);
+        String fileName = normalizeCopyFileName(request.getTargetFileName() == null ? getLastSplitName(sourcePath)
+            : request.getTargetFileName());
+        normalizeCopyFileName(getLastSplitName(sourcePath));
+        String targetPath = buildKnowledgeFilePath(targetDirectory, fileName);
+        if (Objects.equals(request.getSourceResourceId(), request.getTargetResourceId())
+            && sourcePath.equals(targetPath)) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.copy.same.path"));
+        }
+
+        SsResource source = loadCopyDatasetResource(request.getSourceResourceId());
+        SsResource target = loadCopyDatasetResource(request.getTargetResourceId());
+        // 校验两端权限后才调用知识服务，复制不需要源条目的改名/删除权限。
+        validateDatasetReadablePermission(source);
+        validateDatasetContentPermission(target);
+
+        String sourceParent = normalizeKnowledgeDirectoryPath(sourcePath.substring(0, sourcePath.lastIndexOf('/')));
+        DirOrFile sourceFile = listCopyDirectory(source, sourceParent).stream()
+            .filter(item -> item != null && "file".equalsIgnoreCase(item.getType()))
+            .filter(item -> sourcePath.equals(copyDirectoryEntryPath(sourceParent, item)))
+            .findFirst().orElseThrow(() -> new IllegalArgumentException(
+                I18nUtil.get("dataset.file.copy.source.notfound")));
+        // 对所有库都预检文件与目录重名；并发冲突仍由知识服务的非覆盖导入拒绝。
+        if (listCopyDirectory(target, targetDirectory).stream().filter(Objects::nonNull)
+            .anyMatch(item -> targetPath.equals(copyDirectoryEntryPath(targetDirectory, item)))) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.exists"));
+        }
+        long maxBytes = DataSize.parse(maxCopyFileSize).toBytes();
+        if (maxBytes >= 0 && sourceFile.getSize() != null && sourceFile.getSize() > maxBytes) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.copy.size.exceeded", maxCopyFileSize));
+        }
+
+        Path stagedFile = null;
+        try {
+            stagedFile = Files.createTempFile("byclaw-knowledge-copy-", ".tmp");
+            KbFileDownload download = new KbFileDownload();
+            download.setKnCode(source.getResourceCode());
+            download.setFilePath(sourcePath);
+            try (InputStream input = feignPythonBuildService.fileDownload(download, source.getResourceId());
+                 OutputStream output = Files.newOutputStream(stagedFile)) {
+                if (input == null) {
+                    throw new BaseException(I18nUtil.get("dataset.file.copy.response.invalid"));
+                }
+                byte[] buffer = new byte[64 * 1024];
+                long copied = 0;
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    copied += read;
+                    if (maxBytes >= 0 && copied > maxBytes) {
+                        throw new IllegalArgumentException(
+                            I18nUtil.get("dataset.file.copy.size.exceeded", maxCopyFileSize));
+                    }
+                    output.write(buffer, 0, read);
+                }
+            }
+
+            MultipartFile file = new PathMultipartFile(stagedFile, "fileContent", fileName,
+                MediaTypeFactory.getMediaType(fileName).orElse(MediaType.APPLICATION_OCTET_STREAM).toString());
+            KbFileImport upload = new KbFileImport();
+            upload.setKnCode(target.getResourceCode());
+            upload.setFilePath(targetPath);
+            upload.setFileDescription(fileName);
+            upload.setProcessFrontMatter(false);
+            upload.setSkipIfDuplicate(false);
+            upload.setMultipartFile(file);
+            PythonBuildResponse<KbImportResult> response = feignPythonBuildService.importKnowledgeItem(upload,
+                forwardKnowledgeHeaders(headers, target.getResourceId()));
+            assertPythonBuildSuccess(response, I18nUtil.get("dataset.file.copy.operation"));
+            KbImportResult imported = response.getResultObject();
+            validateCopiedFileResult(imported, targetPath);
+
+            KnowledgeFileCopyResult result = new KnowledgeFileCopyResult();
+            result.setSourceResourceId(source.getResourceId());
+            result.setSourceFilePath(sourcePath);
+            result.setTargetResourceId(target.getResourceId());
+            result.setTargetFilePath(targetPath);
+            result.setFileName(fileName);
+            result.setFileSize(file.getSize());
+            result.setSuccess(true);
+            if (imported.getPostProcessErrors() != null) {
+                result.setPostProcessErrors(new ArrayList<>(imported.getPostProcessErrors()));
+            }
+            return result;
+        } catch (IOException e) {
+            throw new BaseException(I18nUtil.get("dataset.file.copy.failed", e.getMessage()), e);
+        } finally {
+            if (stagedFile != null) {
+                try {
+                    Files.deleteIfExists(stagedFile);
+                } catch (IOException e) {
+                    logger.warn("清理知识库复制临时文件失败 path={}", stagedFile, e);
+                }
+            }
+        }
+    }
+
+    private SsResource loadCopyDatasetResource(Long resourceId) {
+        SsResource resource = loadDatasetResource(resourceId);
+        if (StringUtils.isBlank(resource.getResourceBizType())
+            || !Set.of("KG_DOC", "KG_QA", "KG_TERM", "KG_CLOUD").contains(resource.getResourceBizType())
+            || Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())
+            || StringUtils.isBlank(resource.getResourceCode())) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.copy.resource.invalid"));
+        }
+        return resource;
+    }
+
+    private String normalizeCopyPath(String path, boolean directory) {
+        String raw = StringUtils.defaultString(path);
+        String value = raw.trim().replace('\\', '/');
+        if (raw.chars().anyMatch(character -> character < 32 || character == 127)
+            || Arrays.stream(value.split("/")).anyMatch(part -> ".".equals(part) || "..".equals(part))
+            || (!directory && (value.isEmpty() || value.endsWith("/")))) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.copy.path.invalid"));
+        }
+        return directory ? normalizeKnowledgeDirectoryPath(value) : normalizeKnowledgeFilePath(value);
+    }
+
+    private String normalizeCopyFileName(String raw) {
+        String name = StringUtils.trimToEmpty(raw);
+        if (StringUtils.isBlank(name) || name.contains("/") || name.contains("\\")
+            || ".".equals(name) || "..".equals(name)
+            || (raw != null && raw.chars().anyMatch(character -> character < 32 || character == 127))) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.copy.path.invalid"));
+        }
+        // 上传接口将 ZIP 识别为批量解压；复制不能悄悄改变为解压多个文件。
+        if (StringUtils.endsWithIgnoreCase(name, ".zip")) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.file.copy.archive.unsupported"));
+        }
+        return name;
+    }
+
+    private List<DirOrFile> listCopyDirectory(SsResource resource, String path) {
+        KbListDir query = new KbListDir();
+        query.setKnCode(resource.getResourceCode());
+        query.setDirectoryPath(path);
+        PythonBuildResponse<Data> response = feignPythonBuildService.listDir(query, resource.getResourceId());
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.file.copy.operation"));
+        if (response.getResultObject() == null || response.getResultObject().getData() == null) {
+            throw new BaseException(I18nUtil.get("dataset.file.copy.response.invalid"));
+        }
+        return response.getResultObject().getData();
+    }
+
+    private String copyDirectoryEntryPath(String directory, DirOrFile entry) {
+        if (StringUtils.isBlank(entry.getName())) return null;
+        String name = entry.getName().replace('\\', '/');
+        return normalizeCopyPath(name.contains("/") ? name : buildKnowledgeFilePath(directory, name),
+            "directory".equalsIgnoreCase(entry.getType()));
+    }
+
+    private void validateCopiedFileResult(KbImportResult result, String expectedPath) {
+        if (result == null || result.getData() == null || result.getData().size() != 1
+            || result.getData().get(0) == null) {
+            throw new BaseException(I18nUtil.get("dataset.file.copy.response.invalid"));
+        }
+        KbImportResult.Item item = result.getData().get(0);
+        if (!Boolean.TRUE.equals(item.getSuccess())) {
+            throw new BaseException(I18nUtil.get("dataset.file.copy.failed",
+                StringUtils.defaultIfBlank(item.getError(), I18nUtil.get("dataset.file.copy.response.invalid"))));
+        }
+        KbImportResult.Summary summary = result.getSummary();
+        boolean inconsistentSummary = summary != null && ((summary.getFailed() != null && summary.getFailed() != 0)
+            || (summary.getSucceeded() != null && summary.getSucceeded() != 1)
+            || (summary.getTotal() != null && summary.getTotal() != 1));
+        if (StringUtils.isBlank(item.getFilePath()) || !expectedPath.equals(normalizeCopyPath(item.getFilePath(), false))
+            || inconsistentSummary) {
+            throw new BaseException(I18nUtil.get("dataset.file.copy.response.invalid"));
+        }
     }
 
     /**
