@@ -12,10 +12,25 @@ import redis.clients.jedis.params.*;
 /** Run only against a disposable Redis: -Drecovery.test.redis.port=16389. Never uses application credentials. */
 @EnabledIfSystemProperty(named = "recovery.test.redis.port", matches = "[0-9]+")
 class SandboxRecoveryRedisTest {
+    @Test @org.junit.jupiter.api.Timeout(20)
+    void repeatedRefreshDoesNotExhaustStandalonePool() {
+        RedisClient redis = new RedisClient("127.0.0.1", Integer.parseInt(System.getProperty("recovery.test.redis.port")));
+        try {
+            var store = new SandboxRecoveryStore(redis);
+            for (int i = 0; i < 100; i++) {
+                store.queues("0");
+                store.history();
+                store.workerOnline("nonexistent-recovery-test-worker");
+            }
+            try (var connection = redis.getResource()) {
+                assertThat(connection.ping()).isEqualTo("PONG");
+            }
+        } finally { redis.close(); }
+    }
     @Test void actualRedisPaginationAndStaleAckProtection() {
         RedisClient redis = new RedisClient("127.0.0.1", Integer.parseInt(System.getProperty("recovery.test.redis.port")));
         String stream = Constants.QueueNames.ctrlStream("BYCLAW_DSH_recovery-test-" + UUID.randomUUID());
-        var commands = redis.getCommands();
+        var commands = redis.getResource();
         try {
             var store = new SandboxRecoveryStore(redis);
             var first = commands.xadd(stream, StreamEntryID.NEW_ENTRY, Map.of("data", "{}"));
@@ -34,6 +49,6 @@ class SandboxRecoveryRedisTest {
             assertThat(store.acknowledge(stream, "test-group", current)).isTrue();
             assertThat(commands.xlen(stream)).isEqualTo(2); // ACK did not delete original payload.
             assertThat(commands.xpending(stream, "test-group").getTotal()).isZero();
-        } finally { commands.del(stream); redis.close(); }
+        } finally { commands.del(stream); commands.close(); redis.close(); }
     }
 }

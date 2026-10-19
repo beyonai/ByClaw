@@ -20,7 +20,15 @@ import redis.clients.jedis.resps.StreamPendingEntry;
 public class SandboxRecoveryStore {
     private final RedisClient redis;
     public SandboxRecoveryStore(RedisClient redis) { this.redis = redis; }
-    private JedisCommands commands() { return redis.getCommands(); }
+    private <T> T execute(java.util.function.Function<JedisCommands, T> operation) {
+        JedisCommands commands = redis.getCommands();
+        try {
+            return operation.apply(commands);
+        } finally {
+            // Standalone getCommands() borrows a pooled Jedis. The cluster client is shared.
+            if (commands instanceof Jedis jedis) jedis.close();
+        }
+    }
 
     public record Queue(String stream, String group, String kind, long pending, Long waiting) {}
     public record QueuePage(List<Queue> items, String nextCursor) {}
@@ -54,10 +62,10 @@ public class SandboxRecoveryStore {
         for (String stream : streams) {
             String type;
             try { type = kind(stream); } catch (IllegalArgumentException ignored) { continue; }
-            if (!"stream".equals(commands().type(stream))) continue;
-            List<StreamGroupInfo> groups = commands().xinfoGroups(stream);
+            if (!"stream".equals(execute(commands -> commands.type(stream)))) continue;
+            List<StreamGroupInfo> groups = execute(commands -> commands.xinfoGroups(stream));
             if (groups.isEmpty() || "DEADLETTER".equals(type) || "DELIVERY".equals(type)) {
-                long count = commands().xlen(stream);
+                long count = execute(commands -> commands.xlen(stream));
                 if (count > 0) result.add(new Queue(stream, "", type, 0, count));
                 continue;
             }
@@ -76,7 +84,7 @@ public class SandboxRecoveryStore {
         var params = new ScanParams().match("*ctrl:*").count(200);
         if (cluster == null) {
             if (cursor == null || !cursor.matches("[0-9]{1,20}")) throw new IllegalArgumentException("无效查询游标");
-            return commands().scan(cursor, params);
+            return execute(commands -> commands.scan(cursor, params));
         }
         var nodes = new TreeMap<>(cluster.getClusterNodes());
         if (nodes.isEmpty()) throw new IllegalStateException("Redis cluster nodes unavailable");
@@ -92,7 +100,8 @@ public class SandboxRecoveryStore {
                 throw new IllegalArgumentException("Redis 集群拓扑已变化，请重新刷新队列");
         }
         var pools = new ArrayList<>(nodes.values());
-        try (Jedis node = new Jedis(pools.get(index).getResource())) {
+        try (var connection = pools.get(index).getResource()) {
+            Jedis node = new Jedis(connection);
             Object role = node.role().getFirst();
             String roleName = role instanceof byte[] bytes ? new String(bytes, java.nio.charset.StandardCharsets.UTF_8)
                 : String.valueOf(role);
@@ -110,8 +119,8 @@ public class SandboxRecoveryStore {
         List<Message> result = new ArrayList<>();
         if ("PENDING".equals(state)) {
             requireGroup(stream, group);
-            var pending = commands().xpending(stream, group,
-                new XPendingParams(after == null || after.isEmpty() ? "-" : "(" + after, "+", 51));
+            var pending = execute(commands -> commands.xpending(stream, group,
+                new XPendingParams(after == null || after.isEmpty() ? "-" : "(" + after, "+", 51)));
             for (var p : pending.subList(0, Math.min(50, pending.size()))) result.add(message(stream, p));
             return new MessagePage(result, pending.size() > 50 ? result.getLast().id() : null);
         }
@@ -124,14 +133,15 @@ public class SandboxRecoveryStore {
         } else if (!"RECORD".equals(state) || (!group.isEmpty())) {
             throw new IllegalArgumentException("无效队列状态");
         }
-        var entries = commands().xrange(stream, start, "+", 51);
+        String rangeStart = start;
+        var entries = execute(commands -> commands.xrange(stream, rangeStart, "+", 51));
         for (var e : entries.subList(0, Math.min(50, entries.size())))
             result.add(new Message(e.getID().toString(), null, 0, 0, state, e.getFields()));
         return new MessagePage(result, entries.size() > 50 ? result.getLast().id() : null);
     }
 
     private StreamGroupInfo requireGroup(String stream, String group) {
-        return commands().xinfoGroups(stream).stream().filter(g -> g.getName().equals(group)).findFirst()
+        return execute(commands -> commands.xinfoGroups(stream)).stream().filter(g -> g.getName().equals(group)).findFirst()
             .orElseThrow(() -> new IllegalArgumentException("消费组已不存在，请刷新"));
     }
 
@@ -139,30 +149,30 @@ public class SandboxRecoveryStore {
         kind(stream);
         if (id == null || !id.matches("[0-9]+-[0-9]+")) throw new IllegalArgumentException("无效消息 ID");
         requireGroup(stream, group);
-        var items = commands().xpending(stream, group, new XPendingParams(id, id, 1));
+        var items = execute(commands -> commands.xpending(stream, group, new XPendingParams(id, id, 1)));
         if (items.isEmpty()) throw new IllegalArgumentException("消息已被处理，请刷新列表");
         return message(stream, items.getFirst());
     }
 
     private Message message(String stream, StreamPendingEntry p) {
-        var entries = commands().xrange(stream, p.getID(), p.getID(), 1);
+        var entries = execute(commands -> commands.xrange(stream, p.getID(), p.getID(), 1));
         return new Message(p.getID().toString(), p.getConsumerName(), p.getIdleTime(), p.getDeliveredTimes(),
             "PENDING", entries.isEmpty() ? Map.of() : entries.getFirst().getFields());
     }
 
     public boolean workerOnline(String worker) {
-        return worker != null && commands().exists(Constants.RegistryKeys.workerOnlineLease(worker));
+        return worker != null && execute(commands -> commands.exists(Constants.RegistryKeys.workerOnlineLease(worker)));
     }
 
     // Compare the current consumer/delivery generation atomically with ACK. A newly reclaimed
     // message must never be acknowledged by a stale administration page. Do not XDEL the payload.
     public boolean acknowledge(String stream, String group, Message expected) {
-        Object result = commands().eval("""
+        Object result = execute(commands -> commands.eval("""
             local p = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1)
             if #p == 0 then return 0 end
             if p[1][2] ~= ARGV[3] or tostring(p[1][4]) ~= ARGV[4] or p[1][3] < 60000 then return 0 end
             return redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
-            """, List.of(stream), List.of(group, expected.id(), expected.consumer(), Long.toString(expected.deliveries())));
+            """, List.of(stream), List.of(group, expected.id(), expected.consumer(), Long.toString(expected.deliveries()))));
         return result instanceof Number n && n.longValue() == 1;
     }
 
@@ -171,31 +181,31 @@ public class SandboxRecoveryStore {
             (stream + "\n" + group + "\n" + id).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
     public Map<String, String> audit(String stream, String group, String id) {
-        return commands().hgetAll(auditKey(stream, group, id));
+        return execute(commands -> commands.hgetAll(auditKey(stream, group, id)));
     }
     public void audit(String stream, String group, String id, Map<String, String> values) {
         String key = auditKey(stream, group, id);
         Map<String, String> latest = new LinkedHashMap<>(values);
         latest.putIfAbsent("error", "");
-        commands().hset(key, latest);
-        commands().expire(key, 30 * 24 * 3600);
+        execute(commands -> commands.hset(key, latest));
+        execute(commands -> commands.expire(key, 30 * 24 * 3600));
         Map<String, String> event = new LinkedHashMap<>(values);
         event.put("messageId", id);
         event.put("stream", stream);
         event.put("group", group);
-        commands().xadd("byclaw:sandbox:recovery:history", new XAddParams().maxLen(10000).approximateTrimming(), event);
+        execute(commands -> commands.xadd("byclaw:sandbox:recovery:history", new XAddParams().maxLen(10000).approximateTrimming(), event));
     }
     public List<Map<String, String>> history() {
-        return commands().xrevrange("byclaw:sandbox:recovery:history", "+", "-", 100).stream()
+        return execute(commands -> commands.xrevrange("byclaw:sandbox:recovery:history", "+", "-", 100)).stream()
             .map(e -> { Map<String, String> value = new LinkedHashMap<>(e.getFields());
                 value.put("eventId", e.getID().toString()); return value; }).toList();
     }
     public boolean lock(String identity, String token) {
-        return "OK".equals(commands().set("byclaw:sandbox:recovery:lock:" + identity, token,
-            new SetParams().nx().ex(300)));
+        return "OK".equals(execute(commands -> commands.set("byclaw:sandbox:recovery:lock:" + identity, token,
+            new SetParams().nx().ex(300))));
     }
     public void unlock(String identity, String token) {
-        commands().eval("if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0",
-            List.of("byclaw:sandbox:recovery:lock:" + identity), List.of(token));
+        execute(commands -> commands.eval("if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0",
+            List.of("byclaw:sandbox:recovery:lock:" + identity), List.of(token)));
     }
 }

@@ -18,6 +18,21 @@ class SandboxRecoveryStoreTest {
     final SandboxRecoveryStore store = new SandboxRecoveryStore(redis);
     final String stream = Constants.QueueNames.ctrlStream("BYCLAW_DSH_test-user");
     SandboxRecoveryStoreTest() { when(redis.getCommands()).thenReturn(commands); }
+    @Test void returnsStandaloneConnectionAfterSuccessAndFailure() {
+        var pooled = mock(redis.clients.jedis.Jedis.class);
+        when(redis.getCommands()).thenReturn(pooled);
+        when(pooled.exists(anyString())).thenReturn(true).thenThrow(new IllegalStateException("redis unavailable"));
+        assertThat(store.workerOnline("worker")).isTrue();
+        verify(pooled).close();
+        assertThatThrownBy(() -> store.workerOnline("worker")).isInstanceOf(IllegalStateException.class);
+        verify(pooled, times(2)).close();
+    }
+    @Test void doesNotCloseSharedClusterClient() {
+        var cluster = mock(redis.clients.jedis.JedisCluster.class);
+        when(redis.getCommands()).thenReturn(cluster);
+        store.workerOnline("worker");
+        verify(cluster, never()).close();
+    }
     @Test void rejectsArbitraryRedisKeysBeforeAccess() {
         assertThatThrownBy(() -> store.pending("some-secret", "g", "1-0")).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(commands);

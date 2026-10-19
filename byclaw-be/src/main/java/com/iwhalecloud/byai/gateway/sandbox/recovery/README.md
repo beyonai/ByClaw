@@ -30,3 +30,5 @@
 后端需重新启动才能加载新接口，前端需更新构建。无需重建 Harness 镜像。
 
 验证：`mvn -B -f byclaw-be/pom.xml verify`；前端 RecoveryPanel 交互测试；隔离 Redis 可使用 `-Dtest=SandboxRecoveryRedisTest -Drecovery.test.redis.port=<专用端口> test` 验证真实 reclaim/ACK 竞争。不要把该测试端口指向业务 Redis。
+
+Redis 连接管理：单机模式每次命令执行后（包括异常）归还借出的 Jedis；集群模式不关闭共享客户端，节点扫描单独归还节点连接。避免刷新列表耗尽框架连接池、阻塞沙箱列表与恢复操作。
