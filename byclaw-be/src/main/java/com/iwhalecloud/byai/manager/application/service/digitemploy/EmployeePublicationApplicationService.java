@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -91,7 +93,7 @@ public class EmployeePublicationApplicationService {
 
     public Page list(boolean review, int page, int size) {
         Long tenant = requireEnabled();
-        if (review && !DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("仅官方管理员可审核发布申请");
+        if (review && !DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("employee.publication.reviewAdminOnly");
         var query = new LambdaQueryWrapper<DigitalEmployeePublication>().eq(DigitalEmployeePublication::getTenantId, tenant);
         if (!review) query.eq(DigitalEmployeePublication::getAuthorId, CurrentUserHolder.getCurrentUserId());
         long total = publications.selectCount(query);
@@ -130,7 +132,7 @@ public class EmployeePublicationApplicationService {
             if ("DRAFT".equals(stored.getStatus())) requireEditable(stored);
             else {
                 requireReviewer(stored);
-                if (!canReview(stored)) throw new BaseException("当前申请状态不允许发布，请刷新后再操作");
+                if (!canReview(stored)) throw new BaseException("employee.publication.notPublishable");
             }
             boolean sourceChanged = refreshSourceResources(stored);
             DigitalEmployeePublication candidate = new DigitalEmployeePublication();
@@ -154,15 +156,15 @@ public class EmployeePublicationApplicationService {
 
     private SsResource requireEntryResource(Long resourceId, Long tenant) {
         SsResource requested = resources.selectById(resourceId);
-        if (requested == null || !Objects.equals(tenant, requested.getComAcctId())) throw new BaseException("数字员工不存在");
+        if (requested == null || !Objects.equals(tenant, requested.getComAcctId())) throw new BaseException("employee.publication.employeeMissing");
         requireEmployee(requested);
         boolean official = DigitalEmployeeGovernanceService.isOfficialCopy(requested);
         if (official ? !governance.canMaintainOfficial(requested)
             : !Objects.equals(requested.getCreateBy(), CurrentUserHolder.getCurrentUserId())
                 && !DigitalEmployeeGovernanceService.isAdministrator()) {
-            throw new BaseException("只能发布自己创建的个人数字员工，或维护有权限的官方副本");
+            throw new BaseException("employee.publication.ownerRequired");
         }
-        if (!official && !"personal".equals(requested.getOwnerType())) throw new BaseException("仅个人数字员工支持发布");
+        if (!official && !"personal".equals(requested.getOwnerType())) throw new BaseException("employee.publication.personalOnly");
         return requested;
     }
 
@@ -189,7 +191,7 @@ public class EmployeePublicationApplicationService {
             boolean official = DigitalEmployeeGovernanceService.isOfficialCopy(requested);
             if (fromPersonalUpdate && official) throw new BaseException("employee.publication.updateFromPersonal");
             Long sourceId = official ? requested.getPublicationSourceId() : resourceId;
-            if (!Objects.equals(requested.getResourceStatus(), 2)) throw new BaseException("仅在用数字员工支持发起发布或更新");
+            if (!Objects.equals(requested.getResourceStatus(), 2)) throw new BaseException("employee.publication.activeRequired");
             // A stable source row serializes initial publication and official-update requests.
             publications.lockResource(sourceId, tenant);
             requested = publications.lockResource(resourceId, tenant);
@@ -241,7 +243,7 @@ public class EmployeePublicationApplicationService {
             if (active != null) { requireView(active); return view(active); }
             DigitalEmployeePublication current = publications.current(previous.getSourceId(), tenant);
             if (current == null || !Objects.equals(current.getRequestId(), previous.getRequestId())) {
-                throw new BaseException("该申请已有后续记录，请从员工列表查看最新申请");
+                throw new BaseException("employee.publication.superseded");
             }
             DigitalEmployeePublication next = new DigitalEmployeePublication();
             next.setRequestId(sequence.nextVal());
@@ -326,7 +328,7 @@ public class EmployeePublicationApplicationService {
             EmployeePublicationRequest auto = new EmployeePublicationRequest();
             auto.setRequestId(result.publication().getRequestId());
             auto.setRevision(result.publication().getRevision());
-            auto.setComment("管理员发布，免人工审核");
+            auto.setComment(I18nUtil.get("employee.publication.autoReview"));
             return approve(auto);
         }
         return result;
@@ -338,7 +340,7 @@ public class EmployeePublicationApplicationService {
             DigitalEmployeePublication publication = locked(request);
             requireState(publication, "DRAFT", "PENDING", "FAILED");
             if (!Objects.equals(publication.getAuthorId(), CurrentUserHolder.getCurrentUserId())
-                && !DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("无权撤回此申请");
+                && !DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("employee.publication.withdrawDenied");
             publication.setStatus("WITHDRAWN");
             advance(publication);
             return view(publication);
@@ -351,7 +353,7 @@ public class EmployeePublicationApplicationService {
             DigitalEmployeePublication publication = locked(request);
             requireReviewer(publication);
             requireState(publication, "PENDING", "FAILED");
-            if (StringUtils.isBlank(request.getComment())) throw new BaseException("请填写驳回原因");
+            if (StringUtils.isBlank(request.getComment())) throw new BaseException("employee.publication.rejectionRequired");
             reviewStamp(publication, request.getComment());
             publication.setStatus("REJECTED");
             advance(publication);
@@ -427,7 +429,7 @@ public class EmployeePublicationApplicationService {
                     .eq(SsResource::getOwnerType, "enterprise").eq(SsResource::getResourceBizType, "DIG_EMPLOYEE")
                     .eq(SsResource::getResourceName, snapshot.getResourceName()).ne(SsResource::getResourceStatus, -1)
                     .ne(SsResource::getResourceId, official.getResourceId());
-                if (resources.selectCount(nameQuery) > 0) throw new BaseException("官方推荐中已存在同名员工，请修改待发布名称");
+                if (resources.selectCount(nameQuery) > 0) throw new BaseException("employee.publication.nameConflict");
                 applyBasic(snapshot, official);
                 official.setResourceStatus(2);
                 official.setPublishType("publish");
@@ -463,7 +465,7 @@ public class EmployeePublicationApplicationService {
                 // 只在审核通过的配置落地时补权限；草稿保存不会提前授权绑定资源。
                 auth.synchronizeDigitalEmployeeResourceUsers(official, snapshot.getRelTools());
                 runtimeAttempted[0] = true;
-                if (!employees.syncPublicationOpenClawWorkSpace(official.getResourceId(), snapshot)) throw new BaseException("官方员工运行配置同步失败，请重试发布");
+                if (!employees.syncPublicationOpenClawWorkSpace(official.getResourceId(), snapshot)) throw new BaseException("employee.publication.runtimeSyncFailed");
                 publication.setOfficialId(official.getResourceId());
                 publication.setStatus("PUBLISHED");
                 publication.setPublishError(null);
@@ -488,7 +490,7 @@ public class EmployeePublicationApplicationService {
                     }
                 }
                 publication.setStatus("FAILED");
-                publication.setPublishError(StringUtils.left(failure instanceof BaseException ? failure.getMessage() : "发布执行失败，请联系管理员检查服务日志后重试", 1800));
+                publication.setPublishError(StringUtils.left(failure instanceof BaseException ? failure.getMessage() : I18nUtil.get("employee.publication.executionFailed"), 1800));
                 reviewStamp(publication, request.getComment());
                 advance(publication);
                 return view(publication);
@@ -526,7 +528,7 @@ public class EmployeePublicationApplicationService {
         if (publication.getOfficialId() == null) snapshot.setResourceName(EmployeePublicationNames.enterpriseName(snapshot.getResourceName(), publication.getEmployeeName()));
         List<Dependency> captured = new java.util.ArrayList<>(dependencies.capture(snapshot, publication.getAuthorId(), publication.getTenantId(), publication.getRequestId()));
         if (StringUtils.isBlank(snapshot.getResourceName()) || snapshot.getResourceName().length() > 300) {
-            captured.add(EmployeePublicationResources.blocker("员工名称", "员工名称必填且不能超过 300 个字符"));
+            captured.add(EmployeePublicationResources.blocker(I18nUtil.get("employee.publication.employeeName"), I18nUtil.get("employee.publication.nameInvalid")));
         }
         publication.setEmployeeName(StringUtils.left(StringUtils.defaultString(snapshot.getResourceName()), 512));
         storeSnapshot(publication, snapshot);
@@ -549,24 +551,24 @@ public class EmployeePublicationApplicationService {
     private void validateCandidate(DigitalEmployeePublication publication) {
         SsResource basis = basis(publication);
         requireEmployee(basis);
-        if (!Objects.equals(basis.getResourceStatus(), 2)) throw new BaseException("来源员工已下架或注销");
+        if (!Objects.equals(basis.getResourceStatus(), 2)) throw new BaseException("employee.publication.sourceEmployeeInactive");
         DigitalEmployeeDTO snapshot = sanitize(JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class), basis);
         if (publication.getOfficialId() == null) {
             snapshot.setResourceName(EmployeePublicationNames.enterpriseName(snapshot.getResourceName(), publication.getEmployeeName()));
             publication.setEmployeeName(snapshot.getResourceName());
             storeSnapshot(publication, snapshot);
         }
-        if (StringUtils.isBlank(snapshot.getResourceName()) || snapshot.getResourceName().length() > 300) throw new BaseException("员工名称必填且不能超过 300 个字符");
+        if (StringUtils.isBlank(snapshot.getResourceName()) || snapshot.getResourceName().length() > 300) throw new BaseException("employee.publication.nameInvalid");
         List<Dependency> captured = dependencyList(publication);
         dependencies.validate(captured, publication.getAuthorId(), publication.getTenantId());
         publication.setDependenciesJson(JSON.toJSONString(captured));
     }
 
     static DigitalEmployeeDTO sanitize(DigitalEmployeeDTO input, SsResource basis) {
-        if (input == null) throw new BaseException("请提供员工配置");
-        if (StringUtils.endsWithIgnoreCase(basis.getResourceCode(), "_main") || "personal_default".equals(basis.getOwnerType())) throw new BaseException("超级助手不允许发布");
-        if (!DigitalEmployType.isValid(input.getAgentType()) || "017".equals(input.getAgentType())) throw new BaseException("当前仅支持普通数字员工发布，不支持员工组");
-        if ("FROM_THIRD".equals(input.getCreateType()) || (StringUtils.isNotBlank(input.getAgentDevType()) && !"byai".equals(input.getAgentDevType()))) throw new BaseException("第三方接入员工请先完成企业接入配置，当前不支持个人发布");
+        if (input == null) throw new BaseException("employee.publication.configRequired");
+        if (StringUtils.endsWithIgnoreCase(basis.getResourceCode(), "_main") || "personal_default".equals(basis.getOwnerType())) throw new BaseException("employee.publication.superAssistantDenied");
+        if (!DigitalEmployType.isValid(input.getAgentType()) || "017".equals(input.getAgentType())) throw new BaseException("employee.publication.regularOnly");
+        if ("FROM_THIRD".equals(input.getCreateType()) || (StringUtils.isNotBlank(input.getAgentDevType()) && !"byai".equals(input.getAgentDevType()))) throw new BaseException("employee.publication.thirdPartyDenied");
         JSONObject raw = (JSONObject) JSON.toJSON(input);
         JSONObject safe = new JSONObject();
         // Explicit transferable fields. Personal channels, memory, credentials, URLs and runtime mirrors are excluded.
@@ -643,11 +645,13 @@ public class EmployeePublicationApplicationService {
             if (previous != null) previousReview = new ReviewResult(String.valueOf(previous.getRequestId()), previous.getReviewerName(),
                 previous.getReviewedAt(), previous.getComment());
         }
+        publication.setPublishError(EmployeePublicationMessages.localize(publication.getPublishError()));
         return new Detail(publication, employee, deps.stream().map(d -> {
             EmployeePublicationResources.Availability availability = EmployeePublicationResources.describe(d);
             return new DependencyView(d.getResource() == null ? StringUtils.defaultIfBlank(d.getToolCode(), d.getTargetId() == null ? "" : String.valueOf(d.getTargetId())) : String.valueOf(d.getResource().getResourceId()),
-                d.getResource() == null ? StringUtils.defaultIfBlank(d.getLabel(), "资源 " + d.getTargetId()) : d.getResource().getResourceName(), d.getAction(), d.getError(), d.getWarning(),
-                availability.resourceType(), availability.scope(), availability.reason(), availability.impact());
+                d.getResource() == null ? StringUtils.defaultIfBlank(d.getLabel(), I18nUtil.get("employee.publication.resourceFallback", String.valueOf(d.getTargetId()))) : d.getResource().getResourceName(), d.getAction(), EmployeePublicationMessages.localize(d.getError()), EmployeePublicationMessages.localize(d.getWarning()),
+                availability.resourceType(), EmployeePublicationMessages.localize(availability.scope()),
+                EmployeePublicationMessages.localize(availability.reason()), EmployeePublicationMessages.localize(availability.impact()));
         }).toList(),
             editable, "DRAFT".equals(publication.getStatus()), canReview(publication), active, canRevise, previousReview,
             updateTarget(publication), sourceResourcesChanged);
@@ -843,34 +847,34 @@ public class EmployeePublicationApplicationService {
                 d.setAction(EmployeePublicationResources.isTool(d.getResource()) ? "REFERENCE_TOOL" : "REFERENCE_RESOURCE");
             }
             if (d.getError() != null) {
-                d.setWarning("资源将按当前发布规则重新检查，不可携带的资源不会带入企业员工");
+                d.setWarning(I18nUtil.get("employee.publication.resourcesRechecked"));
                 d.setError(null);
             }
         });
         return captured;
     }
     private Long requireEnabled() {
-        if (CurrentUserHolder.getCurrentUserId() == null || CurrentUserHolder.getEnterpriseId() == null) throw new BaseException("请先登录当前企业");
+        if (CurrentUserHolder.getCurrentUserId() == null || CurrentUserHolder.getEnterpriseId() == null) throw new BaseException("employee.publication.loginRequired");
         return CurrentUserHolder.getEnterpriseId();
     }
     private void requireEmployee(SsResource resource) {
-        if (!DigitalEmployeeGovernanceService.isEmployee(resource)) throw new BaseException("数字员工不存在");
+        if (!DigitalEmployeeGovernanceService.isEmployee(resource)) throw new BaseException("employee.publication.employeeMissing");
     }
     private SsResource basis(DigitalEmployeePublication publication) {
         SsResource resource = resources.selectById(publication.getOfficialId() == null ? publication.getSourceId() : publication.getOfficialId());
         requireEmployee(resource);
-        if (!Objects.equals(publication.getTenantId(), resource.getComAcctId()) || !Objects.equals(publication.getAuthorId(), resource.getCreateBy())) throw new BaseException("员工归属已变更");
+        if (!Objects.equals(publication.getTenantId(), resource.getComAcctId()) || !Objects.equals(publication.getAuthorId(), resource.getCreateBy())) throw new BaseException("employee.publication.ownerChanged");
         return resource;
     }
     private void requireView(DigitalEmployeePublication publication) {
         if (publication == null || !Objects.equals(publication.getTenantId(), CurrentUserHolder.getEnterpriseId())
-            || (!DigitalEmployeeGovernanceService.isAdministrator() && !Objects.equals(publication.getAuthorId(), CurrentUserHolder.getCurrentUserId()))) throw new BaseException("发布申请不存在或无权访问");
+            || (!DigitalEmployeeGovernanceService.isAdministrator() && !Objects.equals(publication.getAuthorId(), CurrentUserHolder.getCurrentUserId()))) throw new BaseException("employee.publication.requestUnavailable");
         basis(publication);
     }
     private DigitalEmployeePublication locked(EmployeePublicationRequest request) {
         DigitalEmployeePublication publication = publications.lock(request.getRequestId(), CurrentUserHolder.getEnterpriseId());
         requireView(publication);
-        if (!Objects.equals(publication.getRevision(), request.getRevision())) throw new BaseException("申请已被修改，请刷新后再操作");
+        if (!Objects.equals(publication.getRevision(), request.getRevision())) throw new BaseException("employee.publication.revisionChanged");
         return publication;
     }
     private void requireEditable(DigitalEmployeePublication publication) {
@@ -878,7 +882,7 @@ public class EmployeePublicationApplicationService {
         if ("PENDING".equals(publication.getStatus()) && !canReview(publication)) throw new BaseException("employee.publication.pendingEdit");
     }
     private void requireReviewer(DigitalEmployeePublication publication) {
-        if (!DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("仅 adminvip 和平台管理员可以审核");
+        if (!DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("employee.publication.platformReviewerOnly");
         basis(publication);
         if (!CurrentUserHolder.isAdminVip() && requiresAdminVipReview(publication)) {
             // throw new BaseException("申请包含 adminvip 创建的员工或个人技能，仅允许 adminvip 审核");
@@ -886,7 +890,7 @@ public class EmployeePublicationApplicationService {
         }
     }
     private void requireState(DigitalEmployeePublication publication, String... states) {
-        if (!List.of(states).contains(publication.getStatus())) throw new BaseException("当前申请状态不允许此操作");
+        if (!List.of(states).contains(publication.getStatus())) throw new BaseException("employee.publication.invalidState");
     }
     private void reviewStamp(DigitalEmployeePublication publication, String comment) {
         publication.setReviewerId(CurrentUserHolder.getCurrentUserId());

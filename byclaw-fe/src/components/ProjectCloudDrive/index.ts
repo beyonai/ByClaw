@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 import { ensureDirectoryPath, normalizeFileBrowserPath } from '@/layout/sider/components/FileSiderPanel/utils';
 import { queryDirAndFileByLevel } from '@/service/knowledgeCenter';
 
@@ -37,7 +38,8 @@ export const normalizeProjectCloudDriveItem = (item: any, fallbackDirectoryPath 
     itemType === 'folder' ||
     itemType === 'dir';
   return {
-    name,
+    // 缺失名称的历史路径保持稳定，只有列表展示的兜底名称随语言变化。
+    name: item?.fileName || item?.name ? name : getIntl().formatMessage({ id: 'common.file' }),
     path: isDir ? ensureDirectoryPath(path) : path,
     isDir,
     fileId: item?.fileId ?? item?.id,

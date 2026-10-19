@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 
 import java.util.ArrayList;
@@ -179,33 +181,33 @@ public class GroupChatContextService {
     private void requireGroupMember(Long sessionId, GroupChatContextRequest request) {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || GroupChatAuthorizationService.DISSOLVED_STATE.equals(session.getState())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
         }
         String contextToken = request == null ? null : request.getContextToken();
         if (contextToken != null && tokenService != null) {
             Map<String, Object> claims = tokenService.verify(contextToken);
             if (request == null || request.getChildSessionId() == null || request.getInitiatorUserId() == null
                 || request.getTargetAgentId() == null) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             if (!String.valueOf(sessionId).equals(String.valueOf(claims.get("groupSessionId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             if (request.getInitiatorUserId() != null
                 && !String.valueOf(request.getInitiatorUserId()).equals(String.valueOf(claims.get("initiatorUserId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             if (request.getTargetAgentId() != null
                 && !String.valueOf(request.getTargetAgentId()).equals(String.valueOf(claims.get("targetAgentId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             if (!String.valueOf(request.getChildSessionId()).equals(String.valueOf(claims.get("childSessionId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             Object boundary = claims.get("boundaryMessageId");
             Long requestedBefore = parseRequiredLong(request.getBeforeMessageId(), "beforeMessageId");
             if (boundary != null && requestedBefore > Long.parseLong(String.valueOf(boundary))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             return;
         }
@@ -213,7 +215,7 @@ public class GroupChatContextService {
         boolean member = memberService != null
             && memberService.findSessionMember(sessionId, MemObjType.USER.name(), currentUserId) != null;
         if (session == null || (memberService != null && !member)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
         }
     }
 
@@ -296,7 +298,7 @@ public class GroupChatContextService {
                     reply.setMessageId(String.valueOf(referenced.getMessageId()));
                     boolean hidden = source.isRecalled() || referenced.isRecalled();
                     reply.setRecalled(referenced.isRecalled());
-                    reply.setContent(hidden ? GroupChatRecallProjection.RECALLED_REFERENCE
+                    reply.setContent(hidden ? I18nUtil.get(GroupChatRecallProjection.RECALLED_REFERENCE)
                         : StringUtils.defaultString(referenced.getMessageContent()));
                     reply.setResourceList(hidden ? List.of() : toMemberResources(referenced.getMetadata()));
                     reply.setUsage(referenced.getUsage());
@@ -349,7 +351,7 @@ public class GroupChatContextService {
         result.setUserId(String.valueOf(ack.getUserId()));
         String userName = ack.getUserName();
         result.setUserName(userName == null || userName.isBlank() || userName.equals(String.valueOf(ack.getUserId()))
-            ? "群成员" : userName);
+            ? I18nUtil.get("groupchat.memberFallback") : userName);
         result.setAcknowledgedAt(ack.getAcknowledgedAt() == null ? null : ack.getAcknowledgedAt().getTime());
         return result;
     }
@@ -462,7 +464,7 @@ public class GroupChatContextService {
         GroupChatContextResponse.Speaker speaker = new GroupChatContextResponse.Speaker();
         if (Integer.valueOf(5).equals(message.getUsage())) {
             speaker.setType("system");
-            speaker.setDisplayName("系统");
+            speaker.setDisplayName(I18nUtil.get("groupchat.system"));
             return speaker;
         }
         if (Integer.valueOf(1).equals(message.getUsage())) {
@@ -652,7 +654,7 @@ public class GroupChatContextService {
             return Long.valueOf(value);
         }
         catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("Invalid beforeMessageId");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.context.cursorInvalid"));
         }
     }
 
@@ -661,7 +663,7 @@ public class GroupChatContextService {
             return defaultValue;
         }
         if (value <= 0 || value > maximum) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Requested group chat window is invalid");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("groupchat.window.invalid"));
         }
         return value;
     }

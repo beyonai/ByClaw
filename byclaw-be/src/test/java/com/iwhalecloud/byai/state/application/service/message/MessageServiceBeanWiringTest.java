@@ -25,7 +25,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
-class MessageServiceBeanWiringTest {
+class MessageServiceBeanWiringTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void createsMessageAndShowcaseServicesWithoutCircularReferences() {

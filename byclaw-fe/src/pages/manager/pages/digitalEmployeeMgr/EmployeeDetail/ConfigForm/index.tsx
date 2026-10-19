@@ -71,6 +71,7 @@ import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constan
 import Ellipsis from '@/pages/manager/components/Ellipsis';
 import {
   DEFAULT_DIGITAL_EMPLOYEE_GROUP_TEMPLATES,
+  localizeDefaultTemplateTip,
   DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES,
   getDigitalEmployeeTemplateParamCode,
 } from '@/pages/manager/constants/digitalResource';
@@ -1900,7 +1901,7 @@ const ConfigForm = (props) => {
         <span className={styles.customPromptTabLabel}>
           <span className={styles.promptFieldLabel}>{item.name}</span>
           {item.tip && (
-            <Tooltip title={item.tip}>
+            <Tooltip title={localizeDefaultTemplateTip(item.tip)}>
               <ExclamationCircleOutlined className={styles.promptFieldTipIcon} onClick={(e) => e.stopPropagation()} />
             </Tooltip>
           )}

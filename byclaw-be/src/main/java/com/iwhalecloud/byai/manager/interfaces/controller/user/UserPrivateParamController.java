@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.Map;
 
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
@@ -27,21 +28,21 @@ public class UserPrivateParamController {
 
     @GetMapping("/list")
     public ResponseUtil<Map<String, Object>> list(UserPrivateParamDTO request) {
-        return ResponseUtil.successResponse("个人参数查询成功", userPrivateParamApplicationService.list(request));
+        return ResponseUtil.successResponse(I18nUtil.get("user.param.querySuccess"), userPrivateParamApplicationService.list(request));
     }
 
     @PostMapping("/save")
     public ResponseUtil<UserPrivateParamVO> save(@RequestBody UserPrivateParamDTO request) {
-        return ResponseUtil.successResponse("个人参数保存成功", userPrivateParamApplicationService.save(request));
+        return ResponseUtil.successResponse(I18nUtil.get("user.param.saveSuccess"), userPrivateParamApplicationService.save(request));
     }
 
     @PostMapping("/delete")
     public ResponseUtil<Boolean> delete(@RequestBody UserPrivateParamDTO request) {
-        return ResponseUtil.successResponse("个人参数删除成功", userPrivateParamApplicationService.delete(request));
+        return ResponseUtil.successResponse(I18nUtil.get("user.param.deleteSuccess"), userPrivateParamApplicationService.delete(request));
     }
 
     @PostMapping("/enable")
     public ResponseUtil<UserPrivateParamVO> enable(@RequestBody UserPrivateParamDTO request) {
-        return ResponseUtil.successResponse("个人参数状态更新成功", userPrivateParamApplicationService.enable(request));
+        return ResponseUtil.successResponse(I18nUtil.get("user.param.statusSuccess"), userPrivateParamApplicationService.enable(request));
     }
 }

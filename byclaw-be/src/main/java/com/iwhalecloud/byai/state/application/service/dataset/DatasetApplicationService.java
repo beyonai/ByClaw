@@ -344,7 +344,7 @@ public class DatasetApplicationService {
             true);
         logger.info("创建知识库返回:{}", JSON.toJSONString(ret));
 
-        assertPythonBuildSuccess(ret, "创建知识库");
+        assertPythonBuildSuccess(ret, I18nUtil.get("dataset.operation.create"));
         return ret.getResultObject();
     }
 
@@ -523,7 +523,7 @@ public class DatasetApplicationService {
         query.setKnCode(resource.getResourceCode());
         query.setDirectoryPath(parentPath);
         PythonBuildResponse<Data> response = feignPythonBuildService.listDir(query, resource.getResourceId());
-        assertPythonBuildSuccess(response, "查询知识库目录");
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.listDirectory"));
         Data data = response.getResultObject();
         if (data != null && data.getData() != null && data.getData().stream().filter(Objects::nonNull)
             .anyMatch(item -> StringUtils.isNotBlank(item.getName())
@@ -806,7 +806,7 @@ public class DatasetApplicationService {
      */
     public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(KnowledgeUploadConflictCheckRequest request) {
         if (request == null || request.getResourceId() == null) {
-            throw new BaseException("知识库资源标识不能为空");
+            throw new BaseException(I18nUtil.get("knowledge.resourceId.required"));
         }
         SsResource ssResource = loadDatasetResource(request.getResourceId());
         validateDatasetContentPermission(ssResource);
@@ -894,7 +894,7 @@ public class DatasetApplicationService {
         PythonBuildResponse<Void> buildRet = feignPythonBuildService.fileToMarkdownIndex(kbFileToMarkdownIndex,
             forwardedHeaders);
         logger.info("构建结果是:{}", JSON.toJSONString(buildRet));
-        assertPythonBuildSuccess(buildRet, "构建知识库文件");
+        assertPythonBuildSuccess(buildRet, I18nUtil.get("dataset.operation.buildFile"));
 
     }
 
@@ -950,7 +950,7 @@ public class DatasetApplicationService {
             response.setHeader("Content-Disposition", contentDisposition);
             IOUtils.copy(inputStream, response.getOutputStream());
         } catch (IOException e) {
-            throw new BaseException("下载知识库文件失败：" + e.getMessage(), e);
+            throw new BaseException(I18nUtil.get("dataset.download.fileFailed", e.getMessage()), e);
         }
     }
 
@@ -973,7 +973,7 @@ public class DatasetApplicationService {
             addKnowledgeDirectoryToZip(ssResource.getResourceId(), ssResource.getResourceCode(),
                 normalizedDirectoryPath, "", zipOutputStream);
         } catch (IOException e) {
-            throw new BaseException("下载知识库目录失败：" + e.getMessage(), e);
+            throw new BaseException(I18nUtil.get("dataset.download.directoryFailed", e.getMessage()), e);
         }
     }
 
@@ -1044,7 +1044,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<KbFileUpdateResult> response = feignPythonBuildService.updateKnowledgeItem(kbFileUpdate,
             forwardedHeaders);
-        assertPythonBuildSuccess(response, "更新知识库文件");
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.updateFile"));
 
         KbFileUpdateResult result = response.getResultObject();
         if (result == null) {
@@ -1100,7 +1100,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<Void> ret = feignPythonBuildService.createDirectory(kbDirectoryCreate, forwardedHeaders);
         logger.info("创建目录:{}", JsonUtil.toJSONString(ret));
-        assertPythonBuildSuccess(ret, "创建知识库目录");
+        assertPythonBuildSuccess(ret, I18nUtil.get("dataset.operation.createDirectory"));
 
         return kbDirectoryCreate;
     }
@@ -1123,7 +1123,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<Void> ret = feignPythonBuildService.updateDirectory(kbDirectoryUpdate, forwardedHeaders);
         logger.info("修改目录:{}", JsonUtil.toJSONString(ret));
-        assertPythonBuildSuccess(ret, "重命名知识库目录");
+        assertPythonBuildSuccess(ret, I18nUtil.get("dataset.operation.renameDirectory"));
 
         return kbDirectoryUpdate;
     }
@@ -1145,7 +1145,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<Void> ret = feignPythonBuildService.deleteDirectory(kbDirectoryDelete, forwardedHeaders);
         logger.info("删除目录:{}", JsonUtil.toJSONString(ret));
-        assertPythonBuildSuccess(ret, "删除知识库目录");
+        assertPythonBuildSuccess(ret, I18nUtil.get("dataset.operation.deleteDirectory"));
 
     }
 
@@ -1376,10 +1376,10 @@ public class DatasetApplicationService {
         boolean hasTargetDirectory = StringUtils.isNotBlank(request.getTargetDirectoryPath());
         boolean hasTargetFile = StringUtils.isNotBlank(request.getTargetFilePath());
         if (hasTargetDirectory == hasTargetFile) {
-            throw new BaseException("目标目录路径和目标文件路径必须且只能填写一个");
+            throw new BaseException(I18nUtil.get("dataset.move.targetExclusive"));
         }
         if (Boolean.TRUE.equals(request.getOverwrite())) {
-            throw new BaseException("当前版本暂不支持覆盖已存在的目标路径");
+            throw new BaseException(I18nUtil.get("dataset.move.overwriteUnsupported"));
         }
 
         KbKnowledgeItemsMove qaRequest = new KbKnowledgeItemsMove();
@@ -1392,7 +1392,7 @@ public class DatasetApplicationService {
         PythonBuildResponse<KnowledgeItemsMoveResult> response = feignPythonBuildService.moveKnowledgeItems(qaRequest,
             forwardedHeaders);
         logger.info("移动知识库文件或目录:{}", JsonUtil.toJSONString(response));
-        assertPythonBuildSuccess(response, "移动知识库文件或目录");
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.move"));
         return response.getResultObject() == null ? new KnowledgeItemsMoveResult() : response.getResultObject();
     }
 
@@ -1410,7 +1410,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<KnowledgeItemReferencesResult> response = feignPythonBuildService
             .knowledgeItemReferences(qaRequest, request.getResourceId());
-        assertPythonBuildSuccess(response, "查询知识库文件引用关系");
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.references"));
         return response.getResultObject() == null ? new KnowledgeItemReferencesResult() : response.getResultObject();
     }
 
@@ -1478,7 +1478,7 @@ public class DatasetApplicationService {
         qaRequest.setPathRule(normalizeKnowledgeGlobRule(request.getPathRule()));
 
         PythonBuildResponse<Data> response = feignPythonBuildService.glob(qaRequest, request.getResourceId());
-        assertPythonBuildSuccess(response, "按路径匹配知识库文件或目录");
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.glob"));
         return mapKnowledgeDirItems(response.getResultObject(), request.getResourceId());
     }
 
@@ -1558,7 +1558,7 @@ public class DatasetApplicationService {
         kbListDir.setKnCode(knCode);
         kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
         PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir, resourceId);
-        assertPythonBuildSuccess(response, "查询知识库目录");
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.listDirectory"));
         return mapKnowledgeDirItems(response.getResultObject(), resourceId);
     }
 
@@ -1668,7 +1668,7 @@ public class DatasetApplicationService {
             logger.info("检查知识库同名文件时目录不存在，按无冲突处理 directoryPath={}", normalizedDirectoryPath);
             return new ArrayList<>();
         }
-        assertPythonBuildSuccess(response, "检查知识库同名文件");
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.checkConflict"));
 
         List<String> existingFilePaths = new ArrayList<>();
         Data resultObject = response.getResultObject();
@@ -1986,7 +1986,7 @@ public class DatasetApplicationService {
         fileBuildStatus.setKnCode(ssResource.getResourceCode());
         fileBuildStatus.setFilePath(directoryPath);
         PythonBuildResponse<ProcessStatus> ret = feignPythonBuildService.fileBuildStatus(fileBuildStatus, resourceId);
-        assertPythonBuildSuccess(ret, "查询知识库文件构建状态");
+        assertPythonBuildSuccess(ret, I18nUtil.get("dataset.operation.buildStatus"));
         return ret.getResultObject();
 
     }
@@ -1996,7 +1996,7 @@ public class DatasetApplicationService {
      */
     public KbFileReadResult readFile(KnowledgeReadFileRequest request) {
         if (request == null || request.getResourceId() == null) {
-            throw new BaseException("知识库资源标识不能为空");
+            throw new BaseException(I18nUtil.get("knowledge.resourceId.required"));
         }
 
         SsResource ssResource = loadDatasetResource(request.getResourceId());
@@ -2010,7 +2010,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<KbFileReadResult> ret = feignPythonBuildService.readFile(kbFileRead,
             request.getResourceId());
-        assertPythonBuildSuccess(ret, "读取知识库文件内容");
+        assertPythonBuildSuccess(ret, I18nUtil.get("dataset.operation.readFile"));
 
         KbFileReadResult result = ret.getResultObject();
         if (result != null) {
@@ -2024,7 +2024,7 @@ public class DatasetApplicationService {
      */
     public KnowledgeBuildResult buildResult(KnowledgeBuildResultRequest request) {
         if (request == null || request.getResourceId() == null) {
-            throw new BaseException("知识库资源标识不能为空");
+            throw new BaseException(I18nUtil.get("knowledge.resourceId.required"));
         }
 
         SsResource ssResource = loadDatasetResource(request.getResourceId());
@@ -2062,7 +2062,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<KbFileMetadataResult> response = feignPythonBuildService.getKnowledgeFileMetadata(qaRequest,
             request.getResourceId());
-        assertPythonBuildSuccess(response, "查询知识库文件元数据");
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.metadata"));
         return response.getResultObject() == null ? new KbFileMetadataResult() : response.getResultObject();
     }
 
@@ -2108,14 +2108,14 @@ public class DatasetApplicationService {
      */
     public KnowledgeSearchResult searchKnowledgeItems(KnowledgeSearchRequest request) {
         if (request == null || request.getResourceIdList() == null || request.getResourceIdList().isEmpty()) {
-            throw new BaseException("知识库资源标识列表不能为空");
+            throw new BaseException(I18nUtil.get("knowledge.resourceIds.required"));
         }
 
         List<String> knCodeList = new ArrayList<>();
         Map<String, Long> codeToResourceId = new HashMap<>();
         for (Long resourceId : request.getResourceIdList()) {
             if (resourceId == null) {
-                throw new BaseException("知识库资源标识不能为空");
+                throw new BaseException(I18nUtil.get("knowledge.resourceId.required"));
             }
             SsResource ssResource = loadDatasetResource(resourceId);
             validateDatasetReadablePermission(ssResource);
@@ -2134,7 +2134,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<KnowledgeSearchResult> ret = feignPythonBuildService
             .searchKnowledgeItems(kbKnowledgeSearch);
-        assertPythonBuildSuccess(ret, "检索知识库内容");
+        assertPythonBuildSuccess(ret, I18nUtil.get("dataset.operation.search"));
 
         KnowledgeSearchResult result = ret.getResultObject();
         if (result == null) {
@@ -2159,14 +2159,14 @@ public class DatasetApplicationService {
      */
     public KnowledgeFileSearchResult searchKnowledgeFiles(KnowledgeFileSearchRequest request) {
         if (request == null || request.getResourceIdList() == null || request.getResourceIdList().isEmpty()) {
-            throw new BaseException("知识库资源标识列表不能为空");
+            throw new BaseException(I18nUtil.get("knowledge.resourceIds.required"));
         }
 
         List<String> knCodeList = new ArrayList<>();
         Map<String, Long> codeToResourceId = new HashMap<>();
         for (Long resourceId : request.getResourceIdList()) {
             if (resourceId == null) {
-                throw new BaseException("知识库资源标识不能为空");
+                throw new BaseException(I18nUtil.get("knowledge.resourceId.required"));
             }
             SsResource ssResource = loadDatasetResource(resourceId);
             validateDatasetReadablePermission(ssResource);
@@ -2184,7 +2184,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<KnowledgeFileSearchResult> ret = feignPythonBuildService
             .searchKnowledgeFiles(kbKnowledgeFileSearch);
-        assertPythonBuildSuccess(ret, "检索知识库文件");
+        assertPythonBuildSuccess(ret, I18nUtil.get("dataset.operation.searchFiles"));
 
         KnowledgeFileSearchResult result = ret.getResultObject();
         if (result == null) {
@@ -2281,7 +2281,7 @@ public class DatasetApplicationService {
         String normalizedDirectoryPath = normalizeKnowledgeDirectoryPath(directoryPath);
         String normalizedFileName = StringUtils.trimToEmpty(fileName).replace('\\', '/');
         if (StringUtils.isBlank(normalizedFileName) || normalizedFileName.contains("/")) {
-            throw new BaseException("知识库文件名不合法");
+            throw new BaseException(I18nUtil.get("knowledge.fileName.invalid"));
         }
         return "/".equals(normalizedDirectoryPath) ? "/" + normalizedFileName
             : normalizedDirectoryPath + "/" + normalizedFileName;
@@ -2293,14 +2293,14 @@ public class DatasetApplicationService {
     private String normalizeKnowledgeFilePath(String filePath) {
         String normalizedPath = StringUtils.trimToEmpty(filePath).replace('\\', '/').replaceAll("/+", "/");
         if (StringUtils.isBlank(normalizedPath)) {
-            throw new BaseException("知识库文件路径不合法");
+            throw new BaseException(I18nUtil.get("knowledge.filePath.invalid"));
         }
         if (!normalizedPath.startsWith("/")) {
             normalizedPath = "/" + normalizedPath;
         }
         for (String pathPart : normalizedPath.split("/")) {
             if ("..".equals(pathPart)) {
-                throw new BaseException("知识库文件路径不合法");
+                throw new BaseException(I18nUtil.get("knowledge.filePath.invalid"));
             }
         }
         return normalizedPath;
@@ -2324,7 +2324,7 @@ public class DatasetApplicationService {
     private String normalizeKnowledgeGlobRule(String pathRule) {
         String normalizedRule = normalizeKnowledgeFilePath(pathRule);
         if (normalizedRule.contains("**")) {
-            throw new BaseException("知识库路径匹配暂不支持 ** 多层通配符");
+            throw new BaseException(I18nUtil.get("knowledge.glob.recursiveUnsupported"));
         }
         return normalizedRule;
     }
@@ -2343,7 +2343,7 @@ public class DatasetApplicationService {
         normalizedPath = StringUtils.removeEnd(normalizedPath, "/");
         for (String pathPart : normalizedPath.split("/")) {
             if ("..".equals(pathPart)) {
-                throw new BaseException("知识库目录路径不合法");
+                throw new BaseException(I18nUtil.get("knowledge.directoryPath.invalid"));
             }
         }
         return normalizedPath;

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.nullValue;
@@ -43,7 +45,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileContr
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
 /** 使用真实附件投影验证文件分页，Mapper 排序及可见条件另由 SQL 集成测试覆盖。 */
-class GroupChatFileQueryServiceTest {
+class GroupChatFileQueryServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final GroupChatAuthorizationService authorization = mock(GroupChatAuthorizationService.class);
     private final GroupChatContextService context = new GroupChatContextService(messages,

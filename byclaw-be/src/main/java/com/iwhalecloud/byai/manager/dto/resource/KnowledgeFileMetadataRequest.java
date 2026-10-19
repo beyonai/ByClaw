@@ -13,10 +13,10 @@ import lombok.Setter;
 @Setter
 public class KnowledgeFileMetadataRequest {
 
-    @NotNull(message = "知识库资源标识不能为空")
+    @NotNull(message = "{knowledge.resourceId.required}")
     private Long resourceId;
 
-    @NotBlank(message = "知识库文件路径不能为空")
+    @NotBlank(message = "{knowledge.filePath.required}")
     private String filePath;
 
     /** 不传时返回文件全部元数据；传空数组时语义由 QA 服务决定。 */

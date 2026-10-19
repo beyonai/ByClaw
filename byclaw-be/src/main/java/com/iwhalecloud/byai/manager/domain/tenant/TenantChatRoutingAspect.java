@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.List;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -239,7 +241,7 @@ public class TenantChatRoutingAspect {
         var result = node.command(context, "POST",
             "/internal/v1/sessions/" + sessionId + "/messages/" + messageId + "/feedback", sessionId,
             "UPDATE_FEEDBACK", new TenantNodeModels.MessageFeedback(messageId, type.toLowerCase(java.util.Locale.ROOT), mode, details));
-        return ResponseUtil.successResponse("update message success", result.metadata());
+        return ResponseUtil.successResponse(I18nUtil.get("chat.message.updated"), result.metadata());
     }
 
     private ResponseStatusException badRequest() {

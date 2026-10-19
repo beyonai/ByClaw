@@ -16,7 +16,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.entity.users.UserMailAccount;
 
-class MailCredentialResolverTest {
+class MailCredentialResolverTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void resolvesPasswordOnlyAtProjectionTime() {

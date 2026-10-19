@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 import React, { useEffect, useMemo } from 'react';
 import { CloseOutlined } from '@ant-design/icons';
 import { Spin } from 'antd';
@@ -19,6 +20,7 @@ interface MessageFilePreviewPanelProps {
 }
 
 const MessageFilePreviewPanel: React.FC<MessageFilePreviewPanelProps> = ({ fileItem, fileType, fileName, onClose }) => {
+  const intl = useIntl();
   const { onPreview, previewInfo, previewing } = usePreview();
   const resolveRelativeResource = useMemo(
     () => previewInfo.resolvePreviewResource || createRelativeResourceResolver(previewInfo.resourceUrl),
@@ -35,7 +37,12 @@ const MessageFilePreviewPanel: React.FC<MessageFilePreviewPanelProps> = ({ fileI
         <span className={fileSiderStyles.previewTitle} title={fileName}>
           {fileName}
         </span>
-        <button type="button" className={fileSiderStyles.previewClose} onClick={onClose} aria-label="关闭文件预览">
+        <button
+          type="button"
+          className={fileSiderStyles.previewClose}
+          onClick={onClose}
+          aria-label={intl.formatMessage({ id: 'file.preview.close' })}
+        >
           <CloseOutlined />
         </button>
       </div>

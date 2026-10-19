@@ -97,7 +97,7 @@ public class EmployeePublicationResources {
             throw new BaseException("employee.publication.loginTenantMismatch");
         }
         List<Long> roots = organizations.getTopOrgList();
-        if (roots == null || roots.isEmpty()) throw new BaseException("企业尚未配置根组织，无法建立全员使用授权");
+        if (roots == null || roots.isEmpty()) throw new BaseException("employee.publication.rootMissing");
         return roots;
     }
 
@@ -107,23 +107,23 @@ public class EmployeePublicationResources {
         try {
             roots = audienceRoots(tenantId);
         } catch (BaseException error) {
-            result.add(blocker("发布范围", error.getMessage()));
+            result.add(blocker(I18nUtil.get("employee.publication.scope"), error.getMessage()));
         }
         LinkedHashSet<Long> ids = new LinkedHashSet<>(employee.getRelIds() == null ? List.of() : employee.getRelIds());
         if (employee.getRelSkills() != null) {
             for (Object raw : employee.getRelSkills()) {
                 try {
-                    if (!(raw instanceof Map<?, ?> map)) throw new BaseException("请重新关联技能，补齐技能资源标识");
+                    if (!(raw instanceof Map<?, ?> map)) throw new BaseException("employee.publication.relinkSkill");
                     Object id = map.get("resourceId");
                     if (id == null) id = map.get("skillId");
-                    if (id == null) throw new BaseException("技能缺少资源标识，请重新关联技能");
+                    if (id == null) throw new BaseException("employee.publication.skillIdMissing");
                     ids.add(Long.valueOf(String.valueOf(id)));
                 } catch (BaseException | NumberFormatException error) {
                     Dependency unresolved = new Dependency();
-                    unresolved.setLabel("技能配置");
+                    unresolved.setLabel(I18nUtil.get("employee.publication.skillConfig"));
                     unresolved.setResourceType("SKILL");
                     unresolved.setAction("OMIT_RESOURCE");
-                    unresolved.setWarning(error instanceof BaseException ? error.getMessage() : "技能资源标识无效，此技能可能不可用");
+                    unresolved.setWarning(error instanceof BaseException ? error.getMessage() : I18nUtil.get("employee.publication.skillIdInvalid"));
                     result.add(unresolved);
                 }
             }
@@ -133,7 +133,7 @@ public class EmployeePublicationResources {
                 Dependency tool = new Dependency();
                 tool.setAction("OMIT_RESOURCE");
                 tool.setToolCode(code);
-                tool.setLabel("*".equals(code) ? "全部工具" : code);
+                tool.setLabel("*".equals(code) ? I18nUtil.get("employee.publication.allTools") : code);
                 tool.setResourceType("TOOL");
                 try {
                     if ("*".equals(code) || builtInTools().contains(code)) {
@@ -147,19 +147,19 @@ public class EmployeePublicationResources {
                             tool.setToolCodes(List.of(code));
                             inspectReference(tool, authorId, tenantId, roots);
                         } else {
-                            omit(tool, "当前无法唯一识别此工具或工具已下架");
+                            omit(tool, I18nUtil.get("employee.publication.toolUnresolved"));
                         }
 
                     }
                 } catch (RuntimeException error) {
                     log.warn("检查发布工具失败，toolCode={}", code, error);
-                    omit(tool, "暂时无法检查此工具的可用性");
+                    omit(tool, I18nUtil.get("employee.publication.toolCheckFailed"));
                 }
                 result.add(tool);
             }
         }
         ids.remove(null);
-        if (ids.size() > 200) result.add(blocker("关联资源数量", "一次发布最多关联 200 个资源，请调整后提交"));
+        if (ids.size() > 200) result.add(blocker(I18nUtil.get("employee.publication.resourceCount"), I18nUtil.get("employee.publication.tooManyResources")));
         for (Long id : ids) {
             if (result.stream().anyMatch(d -> d.getResource() != null && Objects.equals(id, d.getResource().getResourceId()))) continue;
             SsResource resource = resources.findById(id);
@@ -176,20 +176,20 @@ public class EmployeePublicationResources {
                 continue;
             }
             try {
-                if (skillBridge.getIfAvailable() == null) throw new BaseException("技能校验和发布服务尚未接入，本次不复制此技能");
+                if (skillBridge.getIfAvailable() == null) throw new BaseException("employee.publication.skillBridgeMissing");
                 requireAvailable(resource, tenantId);
-                if (!auth.hasResourceUsePermission(resource, authorId)) throw new BaseException("创建者已无资源使用权限");
+                if (!auth.hasResourceUsePermission(resource, authorId)) throw new BaseException("employee.publication.authorUseDenied");
                 SsResExtSkill skill = skills.findById(id);
                 if (skill == null || !"hub".equalsIgnoreCase(skill.getSkillType()) || StringUtils.isBlank(skill.getSkillUrl())) {
-                    throw new BaseException("个人技能必须先上传为具有独立 ZIP 文件的技能资源");
+                    throw new BaseException("employee.publication.skillZipRequired");
                 }
                 String sourcePath = normalizePath(skill.getSkillUrl());
                 byte[] bytes;
                 try (InputStream input = storage.readWithinResourceRoot(sourcePath)) {
-                    if (input == null) throw new BaseException("技能文件不存在");
+                    if (input == null) throw new BaseException("employee.publication.skillFileMissing");
                     bytes = input.readNBytes(MAX_SKILL_BYTES + 1);
                 }
-                if (bytes.length == 0 || bytes.length > MAX_SKILL_BYTES) throw new BaseException("技能文件为空或超过 100 MB");
+                if (bytes.length == 0 || bytes.length > MAX_SKILL_BYTES) throw new BaseException("employee.publication.skillSizeInvalid");
                 String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
                 String directory = "skill/official-publications/" + requestId + "/" + id;
                 storage.uploadToSubdirectory(bytes, directory, hash + ".zip", "application/zip");
@@ -204,7 +204,7 @@ public class EmployeePublicationResources {
                 dependency.setCopyName(EmployeePublicationNames.enterpriseName(resource.getResourceName(), null));
                 checkSkill(dependency, bytes, authorId, tenantId);
             } catch (Exception error) {
-                omit(dependency, error instanceof BaseException ? error.getMessage() : "技能文件读取或校验失败");
+                omit(dependency, error instanceof BaseException ? error.getMessage() : I18nUtil.get("employee.publication.skillReadFailed"));
             }
             result.add(dependency);
         }
@@ -223,12 +223,12 @@ public class EmployeePublicationResources {
                 try {
                     SsResource current = resources.findById(dependency.getResource().getResourceId());
                     requireAvailable(current, tenantId);
-                    if (!auth.hasResourceUsePermission(current, authorId)) throw new BaseException("创建者已无关联资源使用权限");
+                    if (!auth.hasResourceUsePermission(current, authorId)) throw new BaseException("employee.publication.authorLinkedUseDenied");
                     if (!Objects.equals(current.getCreateBy(), dependency.getResource().getCreateBy())) throw new BaseException("employee.publication.skillOwnerChanged");
                     byte[] bytes = snapshotBytes(dependency);
                     checkSkill(dependency, bytes, authorId, tenantId);
                 } catch (Exception error) {
-                    omit(dependency, error instanceof BaseException ? error.getMessage() : "技能文件读取或校验失败");
+                    omit(dependency, error instanceof BaseException ? error.getMessage() : I18nUtil.get("employee.publication.skillReadFailed"));
                 }
             } else if ("OMIT_RESOURCE".equals(dependency.getAction()) && dependency.getSkill() != null) {
                 // 保留已审核版本的排除结果；重新保存草稿才能重新捕获个人技能。
@@ -243,14 +243,14 @@ public class EmployeePublicationResources {
 
     private byte[] snapshotBytes(Dependency dependency) throws Exception {
         if (dependency.getSkill() == null || StringUtils.isBlank(dependency.getSkill().getSkillUrl())) {
-            throw new BaseException("待发布技能快照不存在");
+            throw new BaseException("employee.publication.snapshotMissing");
         }
         try (InputStream input = storage.readWithinResourceRoot(normalizePath(dependency.getSkill().getSkillUrl()))) {
-            if (input == null) throw new BaseException("待发布技能快照文件不存在");
+            if (input == null) throw new BaseException("employee.publication.snapshotFileMissing");
             byte[] bytes = input.readNBytes(MAX_SKILL_BYTES + 1);
             String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
             if (bytes.length == 0 || bytes.length > MAX_SKILL_BYTES || !hash.equals(dependency.getSkill().getSkillPackageHash())) {
-                throw new BaseException("技能快照已变更，请重新保存待发布配置");
+                throw new BaseException("employee.publication.snapshotChanged");
             }
             return bytes;
         }
@@ -259,16 +259,16 @@ public class EmployeePublicationResources {
     private void checkSkill(Dependency dependency, byte[] bytes, Long authorId, Long tenantId) {
         EmployeePublicationSkillBridge bridge = skillBridge.getIfAvailable();
         if (bridge == null) {
-            omit(dependency, "技能校验和发布服务尚未接入，本次不复制此技能");
+            omit(dependency, I18nUtil.get("employee.publication.skillBridgeMissing"));
             return;
         }
         var checked = bridge.check(dependency.getResource(), dependency.getSkill(), bytes,
             context(dependency, tenantId, authorId));
         if (checked == null || !checked.copyAllowed()) {
-            String reasons = checked == null || checked.issues() == null ? "技能依赖校验未通过"
+            String reasons = checked == null || checked.issues() == null ? I18nUtil.get("employee.publication.dependenciesInvalid")
                 : checked.issues().stream().map(EmployeePublicationSkillBridge.Issue::displayReason)
                     .collect(java.util.stream.Collectors.joining("；"));
-            omit(dependency, StringUtils.defaultIfBlank(reasons, "技能依赖校验未通过"));
+            omit(dependency, StringUtils.defaultIfBlank(reasons, I18nUtil.get("employee.publication.dependenciesInvalid")));
         }
     }
 
@@ -284,7 +284,7 @@ public class EmployeePublicationResources {
     public InputStream openSnapshot(List<Dependency> dependencies, Long resourceId) {
         Dependency dependency = dependencies.stream().filter(d -> d.getResource() != null
             && Objects.equals(d.getResource().getResourceId(), resourceId) && "COPY_SKILL".equals(d.getAction())).findFirst()
-            .orElseThrow(() -> new BaseException("申请中不存在此技能快照"));
+            .orElseThrow(() -> new BaseException("employee.publication.snapshotNotInRequest"));
         return storage.readWithinResourceRoot(normalizePath(dependency.getSkill().getSkillUrl()));
     }
 
@@ -304,13 +304,13 @@ public class EmployeePublicationResources {
             }
             try {
                 EmployeePublicationSkillBridge bridge = skillBridge.getIfAvailable();
-                if (bridge == null) throw new BaseException("技能发布服务暂不可用，请稍后重试");
+                if (bridge == null) throw new BaseException("employee.publication.skillServiceUnavailable");
                 Long targetId = bridge.publish(source, dependency.getSkill(), snapshotBytes(dependency),
                     officialEmployeeId, context(dependency, tenantId, source.getCreateBy()));
                 SsResource target = targetId == null ? null : resources.findById(targetId);
                 requireAvailable(target, tenantId);
                 if (Objects.equals(sourceId, targetId) || !"SKILL".equals(target.getResourceBizType())
-                    || !"enterprise".equals(target.getOwnerType())) throw new BaseException("技能发布未返回有效的企业副本");
+                    || !"enterprise".equals(target.getOwnerType())) throw new BaseException("employee.publication.skillCopyInvalid");
                 dependency.setTargetId(targetId);
                 auth.ensureCreatorDefaultPrivileges(target);
                 grantAudience(target, tenantId);
@@ -318,7 +318,7 @@ public class EmployeePublicationResources {
             } catch (Exception error) {
                 // B 已开始写入时必须回滚，不能留下未完成的企业资源并声称发布成功。
                 log.error("发布企业技能失败，officialEmployeeId={}, sourceSkillId={}", officialEmployeeId, sourceId, error);
-                throw new BaseException("企业技能生成失败，请重试发布：" + source.getResourceName());
+                throw new BaseException(I18nUtil.get("employee.publication.skillCopyFailed", source.getResourceName()));
             }
         }
         return mapping;
@@ -377,7 +377,7 @@ public class EmployeePublicationResources {
 
     private void requireAvailable(SsResource resource, Long tenantId) {
         if (resource == null || !Objects.equals(resource.getComAcctId(), tenantId) || !Objects.equals(resource.getResourceStatus(), 2)) {
-            throw new BaseException("关联资源不存在、不属于当前企业或未上架");
+            throw new BaseException("employee.publication.linkedResourceUnavailable");
         }
     }
 
@@ -410,7 +410,7 @@ public class EmployeePublicationResources {
         Long id = dependency.getResource() == null ? dependency.getTargetId() : dependency.getResource().getResourceId();
         try {
             SsResource current = resources.findById(id);
-            if (current == null) { omit(dependency, "资源不存在或已失效"); return; }
+            if (current == null) { omit(dependency, I18nUtil.get("employee.publication.resourceUnavailable")); return; }
             if (!Objects.equals(current.getComAcctId(), tenantId)) {
                 dependency.setResource(null); dependency.setTargetId(id);
                 setUnavailableDisplayMetadata(dependency, current);
@@ -419,27 +419,27 @@ public class EmployeePublicationResources {
             dependency.setResource(current);
             dependency.setTargetId(id);
             dependency.setResourceType(current.getResourceBizType());
-            if (!Objects.equals(current.getResourceStatus(), 2)) { omit(dependency, "资源已下架或注销"); return; }
+            if (!Objects.equals(current.getResourceStatus(), 2)) { omit(dependency, I18nUtil.get("employee.publication.resourceInactive")); return; }
             if (isPersonal(current)) {
-                omit(dependency, "SKILL".equals(current.getResourceBizType()) ? StringUtils.defaultIfBlank(previousWarning, "个人技能未生成企业副本") : "个人资源不带入企业员工");
+                omit(dependency, "SKILL".equals(current.getResourceBizType()) ? StringUtils.defaultIfBlank(previousWarning, I18nUtil.get("employee.publication.skillNotCopied")) : I18nUtil.get("employee.publication.personalResourceExcluded"));
                 return;
             }
-            if (!"enterprise".equals(current.getOwnerType())) { omit(dependency, "尚未确认资源的企业归属"); return; }
+            if (!"enterprise".equals(current.getOwnerType())) { omit(dependency, I18nUtil.get("employee.publication.ownerUnconfirmed")); return; }
             dependency.setAction(isTool(current) ? "REFERENCE_TOOL" : "REFERENCE_RESOURCE");
-            dependency.setAvailabilityScope("原有授权用户");
-            dependency.setImpact("保留原资源关联和权限，未获授权的用户无法使用此资源");
+            dependency.setAvailabilityScope(I18nUtil.get("employee.publication.originalUsers"));
+            dependency.setImpact(I18nUtil.get("employee.publication.preservePermissions"));
             if (!auth.hasResourceUsePermission(current, authorId)) {
-                dependency.setWarning("创建者当前无此资源的使用权限；其他使用者仍按各自权限使用");
+                dependency.setWarning(I18nUtil.get("employee.publication.authorNoAccess"));
                 return;
             }
             try {
                 requirePublic(current, roots);
-                dependency.setAvailabilityScope("当前企业全员");
-                dependency.setImpact("保留企业资源关联，运行配置及服务状态仍需有效");
+                dependency.setAvailabilityScope(I18nUtil.get("employee.publication.allMembers"));
+                dependency.setImpact(I18nUtil.get("employee.publication.enterpriseResourceImpact"));
             } catch (BaseException warning) { dependency.setWarning(warning.getMessage()); }
         } catch (RuntimeException error) {
             log.warn("检查发布资源失败，resourceId={}", id, error);
-            omit(dependency, "暂时无法确认此资源的归属或可用性");
+            omit(dependency, I18nUtil.get("employee.publication.availabilityUnknown"));
         }
     }
 
@@ -475,9 +475,9 @@ public class EmployeePublicationResources {
     private void omit(Dependency dependency, String reason) {
         dependency.setAction("OMIT_RESOURCE");
         dependency.setError(null);
-        dependency.setWarning(StringUtils.defaultIfBlank(reason, "此资源无法随员工发布"));
-        dependency.setAvailabilityScope("不带入企业员工");
-        dependency.setImpact("新企业员工中不会出现此资源，依赖它的能力不可用；原个人员工保持不变");
+        dependency.setWarning(StringUtils.defaultIfBlank(reason, I18nUtil.get("employee.publication.resourceExcluded")));
+        dependency.setAvailabilityScope(I18nUtil.get("employee.publication.excludedScope"));
+        dependency.setImpact(I18nUtil.get("employee.publication.excludedImpact"));
     }
 
     public record Availability(String resourceType, String scope, String reason, String impact) { }
@@ -487,9 +487,9 @@ public class EmployeePublicationResources {
         String type = dependency.getResource() == null ? dependency.getResourceType() : dependency.getResource().getResourceBizType();
         if ("BUILTIN_TOOL".equals(dependency.getAction()) || "REFERENCE_TOOL".equals(dependency.getAction())) type = "TOOL";
         if (isOmitted(dependency)) {
-            return new Availability(StringUtils.defaultIfBlank(type, "UNKNOWN"), "不带入企业员工",
-                StringUtils.defaultIfBlank(dependency.getWarning(), "此资源无法随员工发布"),
-                "新企业员工中不会出现此资源，依赖它的能力不可用；原个人员工保持不变");
+            return new Availability(StringUtils.defaultIfBlank(type, "UNKNOWN"), I18nUtil.get("employee.publication.excludedScope"),
+                StringUtils.defaultIfBlank(dependency.getWarning(), I18nUtil.get("employee.publication.resourceExcluded")),
+                I18nUtil.get("employee.publication.excludedImpact"));
         }
         if ("COPY_SKILL".equals(dependency.getAction())) {
             String name = StringUtils.defaultIfBlank(dependency.getCopyName(),
@@ -498,11 +498,11 @@ public class EmployeePublicationResources {
                 I18nUtil.get("employee.publication.skillCopyImpact", name));
         }
         if ("BUILTIN_TOOL".equals(dependency.getAction())) {
-            return new Availability("TOOL", "当前企业全员", "平台内置工具", "发布后全员可使用，仍需运行环境正常");
+            return new Availability("TOOL", I18nUtil.get("employee.publication.allMembers"), I18nUtil.get("employee.publication.builtinTool"), I18nUtil.get("employee.publication.builtinToolImpact"));
         }
-        String scope = StringUtils.defaultIfBlank(dependency.getAvailabilityScope(), "尚未确认，沿用原授权范围");
-        String reason = StringUtils.defaultIfBlank(dependency.getWarning(), StringUtils.defaultIfBlank(dependency.getError(), "保留原资源关联与权限"));
-        String impact = StringUtils.defaultIfBlank(dependency.getImpact(), "未获授权或资源不可用时，用户无法使用此资源；不影响员工发布");
+        String scope = StringUtils.defaultIfBlank(dependency.getAvailabilityScope(), I18nUtil.get("employee.publication.scopeUnknown"));
+        String reason = StringUtils.defaultIfBlank(dependency.getWarning(), StringUtils.defaultIfBlank(dependency.getError(), I18nUtil.get("employee.publication.preserveAssociation")));
+        String impact = StringUtils.defaultIfBlank(dependency.getImpact(), I18nUtil.get("employee.publication.referenceImpact"));
         return new Availability(StringUtils.defaultIfBlank(type, "UNKNOWN"), scope, reason, impact);
     }
 
@@ -518,16 +518,16 @@ public class EmployeePublicationResources {
                     dependency.setTargetId(matches.getFirst().getResourceId());
                     dependency.setToolCodes(List.of(dependency.getToolCode()));
                     inspectReference(dependency, authorId, tenantId, audienceRoots(tenantId));
-                } else omit(dependency, "当前无法唯一识别此工具或工具已下架");
+                } else omit(dependency, I18nUtil.get("employee.publication.toolUnresolved"));
             }
-        } catch (RuntimeException error) { omit(dependency, "暂时无法检查此工具的可用性"); }
+        } catch (RuntimeException error) { omit(dependency, I18nUtil.get("employee.publication.toolCheckFailed")); }
     }
 
     private void requirePublic(SsResource resource, List<Long> roots) {
         if (!isTool(resource) && !List.of("SKILL", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "KG_CLOUD").contains(resource.getResourceBizType())) {
-            throw new BaseException("当前资源类型可能不受运行环境支持");
+            throw new BaseException("employee.publication.typeUnsupported");
         }
-        if (!"enterprise".equals(resource.getOwnerType())) throw new BaseException("私有资源未向全员开放");
+        if (!"enterprise".equals(resource.getOwnerType())) throw new BaseException("employee.publication.privateNotShared");
         List<PrivilegeGrant> permissions = grants.selectList(new LambdaQueryWrapper<PrivilegeGrant>()
             .eq(PrivilegeGrant::getGrantObjId, resource.getResourceId())
             .eq(PrivilegeGrant::getGrantObjType, resource.getResourceBizType())
@@ -537,12 +537,12 @@ public class EmployeePublicationResources {
         permissions = permissions.stream().filter(g -> (g.getEffDate() == null || !g.getEffDate().after(now))
             && (g.getExpDate() == null || g.getExpDate().after(now))).toList();
         if (permissions.stream().anyMatch(g -> "BLACK".equals(g.getGrantToType()))) {
-            throw new BaseException("资源存在使用黑名单，部分使用者无法使用");
+            throw new BaseException("employee.publication.blacklisted");
         }
         List<Long> sharedRoots = permissions.stream()
             .filter(g -> "RED".equals(g.getGrantToType()) && "ORG".equals(g.getGrantToObjType()))
             .map(PrivilegeGrant::getGrantToObjId).toList();
-        if (!sharedRoots.containsAll(roots)) throw new BaseException("资源尚未向当前企业全员开放使用");
+        if (!sharedRoots.containsAll(roots)) throw new BaseException("employee.publication.notSharedWithAll");
     }
 
     private String normalizePath(String path) {
@@ -550,7 +550,7 @@ public class EmployeePublicationResources {
         String value = StringUtils.trimToEmpty(path).replace('\\', '/').replaceFirst("^/?(?:byclaw/)?resource/", "");
         if (StringUtils.isBlank(value) || value.startsWith("/") || value.contains(":")
             || List.of(value.split("/")).contains("..")) {
-            throw new BaseException("技能文件不是平台资源目录中的有效文件");
+            throw new BaseException("employee.publication.skillPathInvalid");
         }
         return value;
     }

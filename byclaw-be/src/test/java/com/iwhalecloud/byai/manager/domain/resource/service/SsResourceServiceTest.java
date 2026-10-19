@@ -36,7 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-class SsResourceServiceTest {
+class SsResourceServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private SequenceService sequenceService;
     private SsResourceMapper ssResourceMapper;

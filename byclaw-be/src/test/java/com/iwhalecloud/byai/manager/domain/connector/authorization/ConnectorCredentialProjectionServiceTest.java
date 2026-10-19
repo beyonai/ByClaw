@@ -25,7 +25,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
 
-class ConnectorCredentialProjectionServiceTest {
+class ConnectorCredentialProjectionServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final Long USER_ID = 1001L;
     private static final Long CONNECTOR_ID = 2001L;

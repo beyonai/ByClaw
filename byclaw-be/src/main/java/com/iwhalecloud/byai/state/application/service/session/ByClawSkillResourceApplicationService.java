@@ -1055,7 +1055,7 @@ public class ByClawSkillResourceApplicationService {
         Long resolved = digitalEmployeeResourceId != null ? digitalEmployeeResourceId
             : CurrentUserHolder.getDefaultDigEmployeeId();
         if (resolved == null) {
-            throw new IllegalArgumentException("数字员工资源ID不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("employee.resourceId.required"));
         }
         return resolved;
     }

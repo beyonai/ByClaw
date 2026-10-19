@@ -1,42 +1,39 @@
-let mockLocale = 'zh-CN';
+import { getLocale } from '@umijs/max';
 jest.mock('@/service/employeePublication', () => ({
   ...jest.requireActual('@/service/employeePublication'),
   openEmployeePublication: jest.fn(),
 }));
 import { openEmployeePublication } from '@/service/employeePublication';
-jest.mock('@umijs/max', () => ({
-  getIntl: () => {
+jest.mock('@umijs/max', () => {
+  // 导入 PersonnelModel 常量时就会调用 getIntl，状态必须在 mock 工厂内初始化。
+  const getLocale = jest.fn(() => 'zh-CN');
+  const getIntl = () => {
     const messages = (
-      mockLocale === 'en-US' ? jest.requireActual('@/locales/en-US') : jest.requireActual('@/locales/zh-CN')
+      getLocale() === 'en-US' ? jest.requireActual('@/locales/en-US') : jest.requireActual('@/locales/zh-CN')
     ).default;
     return {
       formatMessage: ({ id }: { id: string }) =>
         messages[id as keyof typeof messages] || (id === 'resource.publishToEnterprise' ? '发布到企业' : id),
     };
-  },
-  getLocale: () => mockLocale,
-  useIntl: () => {
-    const messages = (
-      mockLocale === 'en-US' ? jest.requireActual('@/locales/en-US') : jest.requireActual('@/locales/zh-CN')
-    ).default;
-    return {
-      formatMessage: ({ id }: { id: string }) =>
-        messages[id as keyof typeof messages] || (id === 'resource.publishToEnterprise' ? '发布到企业' : id),
-    };
-  },
-  useDispatch: () => jest.fn(),
-  useSelector: (selector: any) =>
-    selector({
-      user: {
-        userInfo: {
+  };
+  return {
+    getIntl,
+    getLocale,
+    useIntl: getIntl,
+    useDispatch: () => jest.fn(),
+    useSelector: (selector: any) =>
+      selector({
+        user: {
+          userInfo: {
+            defaultDigEmployeeId: 'default-agent-1',
+          },
+        },
+        employees: {
           defaultDigEmployeeId: 'default-agent-1',
         },
-      },
-      employees: {
-        defaultDigEmployeeId: 'default-agent-1',
-      },
-    }),
-}));
+      }),
+  };
+});
 
 jest.mock('antd', () => {
   const actual = jest.requireActual('antd');
@@ -108,47 +105,55 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
 };
 
 afterEach(async () => {
+  // 即使断言提前失败，也要恢复 message 的 spy，保证真正执行全局消息清理。
+  jest.restoreAllMocks();
   // 全局 message 不属于 render 容器，必须单独清理，避免提示和计时器跨用例残留。
   await act(async () => {
     message.destroy();
   });
+  (getLocale as jest.Mock).mockReturnValue('zh-CN');
 });
 
 describe('digital employee publication entry', () => {
-  it('keeps preparation feedback visible and blocks duplicate clicks until navigation is ready', async () => {
-    let finish!: () => void;
-    (openEmployeePublication as jest.Mock).mockClear().mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        finish = resolve;
-      })
-    );
-    const loading = jest.spyOn(message, 'loading').mockImplementation(jest.fn());
-    const destroy = jest.spyOn(message, 'destroy').mockImplementation(jest.fn());
-    renderWithQueryClient(
-      <ResourceCard
-        resource={{
-          resourceId: '10',
-          resourceBizType: 'DIG_EMPLOYEE',
-          ownerType: 'personal',
-          canPublishEmployee: true,
-        }}
-      />
-    );
-    const entry = screen.getByText('发布到企业');
-    fireEvent.click(entry);
-    fireEvent.click(entry);
-    expect(openEmployeePublication).toHaveBeenCalledTimes(1);
-    expect(loading).toHaveBeenCalledWith(
-      expect.objectContaining({ content: '正在准备发布申请，请稍候…', duration: 0 })
-    );
-    expect(destroy).not.toHaveBeenCalled();
-    await act(async () => {
-      finish();
-    });
-    expect(destroy).toHaveBeenCalledWith('employee-publication-open-10');
-    loading.mockRestore();
-    destroy.mockRestore();
-  });
+  it.each([
+    ['zh-CN', '发布到企业', '正在准备发布申请，请稍候…'],
+    ['en-US', 'Publish to enterprise', 'Preparing the publication request. Please wait…'],
+  ])(
+    'localizes preparation feedback in %s and blocks duplicate clicks until navigation is ready',
+    async (locale, label, feedback) => {
+      (getLocale as jest.Mock).mockReturnValue(locale);
+      let finish!: () => void;
+      (openEmployeePublication as jest.Mock).mockClear().mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+      );
+      const loading = jest.spyOn(message, 'loading').mockImplementation(jest.fn());
+      const destroy = jest.spyOn(message, 'destroy').mockImplementation(jest.fn());
+      renderWithQueryClient(
+        <ResourceCard
+          resource={{
+            resourceId: '10',
+            resourceBizType: 'DIG_EMPLOYEE',
+            ownerType: 'personal',
+            canPublishEmployee: true,
+          }}
+        />
+      );
+      const entry = screen.getByText(label);
+      fireEvent.click(entry);
+      fireEvent.click(entry);
+      expect(openEmployeePublication).toHaveBeenCalledTimes(1);
+      expect(loading).toHaveBeenCalledWith(expect.objectContaining({ content: feedback, duration: 0 }));
+      expect(destroy).not.toHaveBeenCalled();
+      await act(async () => {
+        finish();
+      });
+      expect(destroy).toHaveBeenCalledWith('employee-publication-open-10');
+      loading.mockRestore();
+      destroy.mockRestore();
+    }
+  );
   it('displays the concrete server message when draft preparation rejects a string', async () => {
     (openEmployeePublication as jest.Mock).mockRejectedValueOnce('仅在用数字员工支持发起发布或更新');
     const error = jest.spyOn(message, 'error').mockImplementation(jest.fn());
@@ -196,7 +201,7 @@ describe('digital employee publication entry', () => {
     ['zh-CN', '查看发布记录'],
     ['en-US', 'View publication history'],
   ])('views a published record in %s without preparing another update', async (locale, label) => {
-    mockLocale = locale;
+    (getLocale as jest.Mock).mockReturnValue(locale);
     (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
     renderWithQueryClient(
       <ResourceCard
@@ -244,7 +249,11 @@ describe('digital employee publication entry', () => {
     );
     expect(screen.queryByText('发布到企业')).not.toBeInTheDocument();
   });
-  it('opens an official copy in its ordinary editor without preparing a publication', async () => {
+  it.each([
+    ['zh-CN', '编辑信息'],
+    ['en-US', 'Edit Info'],
+  ])('opens an official copy in its ordinary editor in %s without preparing a publication', (locale, label) => {
+    (getLocale as jest.Mock).mockReturnValue(locale);
     (openEmployeePublication as jest.Mock).mockReset();
     const onEdit = jest.fn();
     renderWithQueryClient(
@@ -259,12 +268,8 @@ describe('digital employee publication entry', () => {
         actionConfig={{ onEdit }}
       />
     );
-    fireEvent.click(screen.getByText('common.editInfo'));
+    fireEvent.click(screen.getByText(label));
     expect(onEdit).toHaveBeenCalledTimes(1);
     expect(openEmployeePublication).not.toHaveBeenCalled();
   });
-});
-
-afterEach(() => {
-  mockLocale = 'zh-CN';
 });

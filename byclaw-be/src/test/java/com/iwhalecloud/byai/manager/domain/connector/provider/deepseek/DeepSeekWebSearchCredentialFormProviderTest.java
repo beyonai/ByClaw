@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.deepseek;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -12,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-class DeepSeekWebSearchCredentialFormProviderTest {
+class DeepSeekWebSearchCredentialFormProviderTest extends I18nTestSupport {
 
     private final DeepSeekWebSearchClient client = mock(DeepSeekWebSearchClient.class);
     private final ConnectorManifestService manifestService = mock(ConnectorManifestService.class);

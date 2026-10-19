@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 /** A group turn must enter its owner's active task through the private task entry. */
 public class GroupChatActiveTaskException extends IllegalArgumentException {
     public static final String CODE = "ACTIVE_TASK_REQUIRES_TASK_ENTRY";
@@ -7,7 +9,7 @@ public class GroupChatActiveTaskException extends IllegalArgumentException {
     private final Long agentId;
 
     public GroupChatActiveTaskException(Long taskId, Long agentId) {
-        super("当前话题下已有未完成任务，请进入任务继续。");
+        super(I18nUtil.get("groupchat.task.activeInTopic"));
         this.taskId = taskId;
         this.agentId = agentId;
     }

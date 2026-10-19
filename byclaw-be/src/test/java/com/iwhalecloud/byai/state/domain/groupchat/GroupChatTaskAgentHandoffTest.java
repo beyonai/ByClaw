@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -31,7 +33,12 @@ import com.iwhalecloud.byai.state.domain.resource.bo.AuthContextBo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 
-class GroupChatTaskAgentHandoffTest {
+class GroupChatTaskAgentHandoffTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
     private final GroupChatAuthorizationService groups = mock(GroupChatAuthorizationService.class);
     private final SessionMemberService members = mock(SessionMemberService.class);

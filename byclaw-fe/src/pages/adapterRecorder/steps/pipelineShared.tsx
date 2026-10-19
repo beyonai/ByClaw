@@ -1,3 +1,4 @@
+import { useIntl, getIntl } from '@umijs/max';
 /* eslint-disable indent */
 // PipelineStep 三子页(评分候选 / 生成脚本 / 测试保存)共享的展示小组件:
 // CandidateTable(候选表)、ProgressPanel(阶段进度)、DraftCard(脚本卡)、seedHit。
@@ -21,7 +22,7 @@ export function seedHit(c: RankCandidate): { hit: boolean; label: string } {
     : sig
     ? sig.signal
     : c.responseShape?.echoesSeedArg
-    ? '响应回显'
+    ? getIntl().formatMessage({ id: 'adapterRecorder.candidate.responseEcho' })
     : '—';
   return { hit, label };
 }
@@ -46,6 +47,7 @@ export function CandidateTable({
   locked?: boolean;
   llmSynthesis?: boolean;
 }) {
+  const intl = useIntl();
   const { token } = theme.useToken();
   const rows = [...candidates].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const hasAppliedLlmUtility = rows.some(
@@ -55,7 +57,7 @@ export function CandidateTable({
   const sentSet = new Set(selectedIds);
   const columns: ColumnsType<RankCandidate> = [
     {
-      title: '接口',
+      title: intl.formatMessage({ id: 'adapterRecorder.candidate.api' }),
       key: 'endpoint',
       render: (_, c) => {
         const qp = c.endpoint?.queryParams ? Object.entries(c.endpoint.queryParams) : [];
@@ -76,15 +78,21 @@ export function CandidateTable({
               <Tag
                 color={token.colorInfo}
                 style={{ marginInlineStart: 4, fontSize: 10 }}
-                title="同一接口被多次调用,已按 endpoint 聚拢,参数取并集"
+                title={intl.formatMessage({ id: 'adapterRecorder.candidate.groupedHint' })}
               >
-                聚合 {mergedCount} 次调用
+                {intl.formatMessage({ id: 'adapterRecorder.candidate.merged' })}
+                {mergedCount}
+                {intl.formatMessage({ id: 'adapterRecorder.candidate.calls' })}
               </Tag>
             )}
             {/* LLM 接口功能推断:模型对该接口「做什么/返回什么」的一句话判断(rank 阶段 LLM 产出)。 */}
             {c.inferredFunction && (
               <div style={{ marginTop: 4 }}>
-                <Text type="secondary" style={{ fontSize: 11 }} title="LLM 对该接口用途的推断(供理解,非 verify 结果)">
+                <Text
+                  type="secondary"
+                  style={{ fontSize: 11 }}
+                  title={intl.formatMessage({ id: 'adapterRecorder.candidate.purposeHint' })}
+                >
                   🤖 {c.inferredFunction}
                 </Text>
               </div>
@@ -102,7 +110,7 @@ export function CandidateTable({
                       key={p}
                       className="code"
                       style={{ fontSize: 11 }}
-                      title="动态参数(时间戳/缓存破坏等,已排除出稳定 endpoint)"
+                      title={intl.formatMessage({ id: 'adapterRecorder.candidate.dynamicSummary' })}
                     >
                       {p}
                     </Tag>
@@ -115,16 +123,20 @@ export function CandidateTable({
                 <Space size={[4, 4]} wrap>
                   {params.map((p) => {
                     const tags: string[] = [];
-                    if (p.dynamicLike) tags.push('动态');
-                    if (p.cursorLike) tags.push('翻页');
-                    if (p.observedVariation === true) tags.push('变');
+                    if (p.dynamicLike) tags.push(intl.formatMessage({ id: 'adapterRecorder.parameter.dynamic' }));
+                    if (p.cursorLike) tags.push(intl.formatMessage({ id: 'adapterRecorder.parameter.pagination' }));
+                    if (p.observedVariation === true)
+                      tags.push(intl.formatMessage({ id: 'adapterRecorder.parameter.changedShort' }));
                     const suffix = tags.length ? ` (${tags.join('/')})` : '';
                     return (
                       <Tag
                         key={`${p.in}:${p.name}`}
                         className="code"
                         style={{ fontSize: 10 }}
-                        title={`并集参数 · ${p.in} · 出现 ${p.observedCount}/${p.totalCalls} 次`}
+                        title={intl.formatMessage(
+                          { id: 'adapterRecorder.parameter.summary' },
+                          { v0: p.in, v1: p.observedCount, v2: p.totalCalls }
+                        )}
                       >
                         {p.name}
                         {suffix}
@@ -139,7 +151,7 @@ export function CandidateTable({
       },
     },
     {
-      title: 'Rank 置信',
+      title: intl.formatMessage({ id: 'adapterRecorder.candidate.rankConfidence' }),
       key: 'score',
       width: 150,
       render: (_, c) => {
@@ -155,11 +167,11 @@ export function CandidateTable({
               style={{ fontSize: 10 }}
               title={
                 c.scoredBy === 'llm'
-                  ? 'LLM 评分(模型判定信号成立性,录制阶段证据置信,非 verify 结果)'
-                  : '规则评分(LLM 不可用时的启发式兜底,非 verify 结果)'
+                  ? intl.formatMessage({ id: 'adapterRecorder.score.modelHint' })
+                  : intl.formatMessage({ id: 'adapterRecorder.score.ruleHint' })
               }
             >
-              {c.scoredBy === 'llm' ? 'LLM' : '规则'}
+              {c.scoredBy === 'llm' ? 'LLM' : intl.formatMessage({ id: 'adapterRecorder.candidate.rules' })}
             </Tag>
           </Space>
         );
@@ -168,7 +180,7 @@ export function CandidateTable({
     ...(hasAppliedLlmUtility
       ? [
           {
-            title: 'LLM 效用',
+            title: intl.formatMessage({ id: 'adapterRecorder.candidate.utility' }),
             key: 'llmUtility',
             width: 130,
             render: (_: unknown, c: RankCandidate) => {
@@ -180,7 +192,7 @@ export function CandidateTable({
                     color={
                       utility.band === 'high' ? 'success' : utility.band === 'medium' ? token.colorPrimary : 'default'
                     }
-                    title="模型对『做成数据命令是否有用』的语义判断；仅在评分响应成功解析并合并后显示"
+                    title={intl.formatMessage({ id: 'adapterRecorder.score.utilityHint' })}
                   >
                     {utility.band}
                   </Tag>
@@ -193,7 +205,7 @@ export function CandidateTable({
         ]
       : []),
     {
-      title: 'seed→参数',
+      title: intl.formatMessage({ id: 'adapterRecorder.candidate.seedMapping' }),
       key: 'seed',
       width: 120,
       render: (_, c) => {
@@ -201,7 +213,7 @@ export function CandidateTable({
         return hit ? (
           <Tag
             color={token.colorPrimary}
-            title={`本次录制关键词映射到参数:${label}`}
+            title={intl.formatMessage({ id: 'adapterRecorder.candidate.seedMatched' }, { v0: label })}
             className="code"
             style={{ fontSize: 12 }}
           >
@@ -211,9 +223,9 @@ export function CandidateTable({
           <Text
             type="secondary"
             style={{ fontSize: 12 }}
-            title="未检测到录制关键词映射到该接口参数(无参数据接口或未命中)"
+            title={intl.formatMessage({ id: 'adapterRecorder.candidate.seedUnmatchedHint' })}
           >
-            未命中
+            {intl.formatMessage({ id: 'adapterRecorder.candidate.seedUnmatched' })}
           </Text>
         );
       },
@@ -222,17 +234,21 @@ export function CandidateTable({
   // 运行后(locked):无 checkbox,改用「送 AI」列标注每个候选是否被送模型(未送 ≠ 被拒)。
   if (locked) {
     columns.push({
-      title: '送 AI',
+      title: intl.formatMessage({ id: 'adapterRecorder.score.sendToAi' }),
       key: 'sent',
       width: 88,
       render: (_, c) =>
         sentSet.has(c.id) ? (
-          <Tag icon={<CheckCircleFilled />} color="success" title="本轮已把该接口元数据发送给 LLM 评分">
-            已送
+          <Tag
+            icon={<CheckCircleFilled />}
+            color="success"
+            title={intl.formatMessage({ id: 'adapterRecorder.score.sentHint' })}
+          >
+            {intl.formatMessage({ id: 'adapterRecorder.score.sent' })}
           </Tag>
         ) : (
-          <Tag color="default" title="本轮未把该接口发送给 LLM(未勾选或超出 cap);未送 ≠ 被拒">
-            未送 AI
+          <Tag color="default" title={intl.formatMessage({ id: 'adapterRecorder.score.notSentHint' })}>
+            {intl.formatMessage({ id: 'adapterRecorder.score.notSent' })}
           </Tag>
         ),
     });
@@ -256,14 +272,21 @@ export function CandidateTable({
       title={() => (
         <Text type="secondary" style={{ fontSize: 12 }}>
           {locked
-            ? `候选接口(已勾选的${llmSynthesis ? '参与 AI 评分' : '生成本地脚本'})`
+            ? intl.formatMessage(
+                { id: 'adapterRecorder.candidate.selectedCount' },
+                {
+                  v0: llmSynthesis
+                    ? intl.formatMessage({ id: 'adapterRecorder.score.include' })
+                    : intl.formatMessage({ id: 'adapterRecorder.generate.localScripts' }),
+                }
+              )
             : llmSynthesis
-            ? '勾选要交给 LLM 评审的接口（默认按评分选前若干；勾越多越慢）'
-            : '勾选要生成本地脚本的接口'}
+            ? intl.formatMessage({ id: 'adapterRecorder.score.selectionHint' })
+            : intl.formatMessage({ id: 'adapterRecorder.generate.selectionHint' })}
           {seeds.length ? (
             <>
               {' '}
-              · 本次录制关键词:
+              {intl.formatMessage({ id: 'adapterRecorder.capture.keywords' })}
               {seeds.map((s) => (
                 <Tag key={s} className="code" style={{ fontSize: 12, marginInlineStart: 4 }}>
                   {s}
@@ -283,9 +306,19 @@ export function CandidateTable({
       items={[
         {
           key: 'cands',
-          label: `候选接口(${rows.length} 个${
-            locked ? `,${llmSynthesis ? '已送 AI' : '已选择'} ${sentSet.size}` : `,已选 ${selectedIds.length}`
-          })`,
+          label: intl.formatMessage(
+            { id: 'adapterRecorder.candidate.count' },
+            {
+              v0: rows.length,
+              v1: locked
+                ? `,${
+                    llmSynthesis
+                      ? intl.formatMessage({ id: 'adapterRecorder.score.sentToAi' })
+                      : intl.formatMessage({ id: 'multiChoices.saveToKnowledge.selected' })
+                  } ${sentSet.size}`
+                : intl.formatMessage({ id: 'adapterRecorder.candidate.selectedSuffix' }, { v0: selectedIds.length }),
+            }
+          ),
           children: table,
         },
       ]}
@@ -295,9 +328,15 @@ export function CandidateTable({
 
 /** pipeline 阶段进度:运行中实时展示 score/generate/verify 各阶段是否结束 + 耗时。 */
 const STAGE_LABEL: Record<string, string> = {
-  score: 'LLM 评分接口',
-  generate: '生成 cli 脚本',
-  verify: '验证脚本(verify)',
+  get score() {
+    return getIntl().formatMessage({ id: 'adapterRecorder.score.apiStage' });
+  },
+  get generate() {
+    return getIntl().formatMessage({ id: 'adapterRecorder.generate.action' });
+  },
+  get verify() {
+    return getIntl().formatMessage({ id: 'adapterRecorder.verify.scriptStage' });
+  },
 };
 export function ProgressPanel({
   phases,
@@ -306,6 +345,7 @@ export function ProgressPanel({
   phases?: Array<{ stage: string; status: 'running' | 'done'; durationMs?: number; detail?: string }>;
   loading: boolean;
 }) {
+  const intl = useIntl();
   const { token } = theme.useToken();
   if (!phases?.length && !loading) return null;
   const list = phases ?? [];
@@ -315,7 +355,7 @@ export function ProgressPanel({
       style={{ marginBottom: 12 }}
       title={
         <Text strong style={{ fontSize: 13 }}>
-          生成进度
+          {intl.formatMessage({ id: 'adapterRecorder.generate.progress' })}
         </Text>
       }
     >
@@ -340,7 +380,7 @@ export function ProgressPanel({
               </Text>
             ) : (
               <Text type="secondary" style={{ fontSize: 12 }}>
-                进行中…
+                {intl.formatMessage({ id: 'adapterRecorder.progress.running' })}
               </Text>
             )}
           </div>
@@ -348,7 +388,7 @@ export function ProgressPanel({
         {loading && !list.some((p) => p.status === 'running') && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <LoadingOutlined style={{ color: token.colorPrimary }} />
-            <Text type="secondary">准备中…</Text>
+            <Text type="secondary">{intl.formatMessage({ id: 'adapterRecorder.progress.preparing' })}</Text>
           </div>
         )}
       </Space>
@@ -371,8 +411,10 @@ export function DraftCard({
   /** 卡片底部操作区(测试/保存按钮 + 状态);由调用方注入。 */
   actions?: React.ReactNode;
 }) {
+  const intl = useIntl();
   const { token } = theme.useToken();
   const v = draft.verify;
+  // 保留新旧接口的待验证标记，状态判断不能依赖当前显示语言。
   const untested = !draft.usable && (v.reasons?.includes('尚未测试') || v.reasons?.includes('pending verification'));
   return (
     <Card
@@ -387,21 +429,29 @@ export function DraftCard({
             color={
               draft.confidence === 'high' ? 'success' : draft.confidence === 'medium' ? token.colorPrimary : 'default'
             }
-            title="Rank 置信(录制阶段评分,非 verify 结果)"
+            title={intl.formatMessage({ id: 'adapterRecorder.score.confidenceHint' })}
           >
             Rank {draft.score} · {draft.confidence}
           </Tag>
           {untested ? (
-            <Tag color="default" title="尚未测试(点「测试」跑 verify)">
-              未测试
+            <Tag color="default" title={intl.formatMessage({ id: 'adapterRecorder.verify.notTestedHint' })}>
+              {intl.formatMessage({ id: 'adapterRecorder.verify.untested' })}
             </Tag>
           ) : draft.usable ? (
-            <Tag icon={<CheckCircleFilled />} color="success" title="Verify 状态(脚本实跑结果)">
-              Verify ✓ {v.rows} 行 / {v.fieldCount} 字段
+            <Tag
+              icon={<CheckCircleFilled />}
+              color="success"
+              title={intl.formatMessage({ id: 'adapterRecorder.verify.statusHint' })}
+            >
+              {intl.formatMessage({ id: 'adapterRecorder.verify.summary' }, { rows: v.rows, fields: v.fieldCount })}
             </Tag>
           ) : (
-            <Tag icon={<CloseCircleFilled />} color={token.colorWarning} title="Verify 状态(脚本实跑结果)">
-              Verify 未通过
+            <Tag
+              icon={<CloseCircleFilled />}
+              color={token.colorWarning}
+              title={intl.formatMessage({ id: 'adapterRecorder.verify.statusHint' })}
+            >
+              {intl.formatMessage({ id: 'adapterRecorder.verify.notPassed' })}
             </Tag>
           )}
         </Space>
@@ -417,15 +467,20 @@ export function DraftCard({
           type="warning"
           showIcon
           style={{ marginBottom: 8 }}
-          message="verify 未达标(静态检查或抽取不符),仍可保存,但建议修改后再存"
+          message={intl.formatMessage({ id: 'adapterRecorder.verify.belowStandard' })}
           description={[...draft.staticViolations, ...v.reasons].join(';') || undefined}
         />
       )}
       {!!draft.risks.length && (
-        <Alert type="info" showIcon style={{ marginBottom: 8 }} message={`风险:${draft.risks.join(';')}`} />
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 8 }}
+          message={intl.formatMessage({ id: 'adapterRecorder.candidate.risks' }, { v0: draft.risks.join(';') })}
+        />
       )}
       <Text type="secondary" style={{ fontSize: 12 }}>
-        adapter 源码(可编辑后保存):
+        {intl.formatMessage({ id: 'adapterRecorder.scripts.source' })}
       </Text>
       <Input.TextArea
         className="code"

@@ -12,16 +12,8 @@ const mockEventEmitter = {
 };
 jest.mock('@umijs/max', () => ({
   getLocale: () => 'zh-CN',
-  useIntl: () => ({
-    formatMessage: ({ id }: { id: string }) =>
-      ({
-        'projectSpace.createProject': '新建项目',
-        'projectSpace.selectProject': '请选择项目',
-        'projectSpace.unnamedProject': '未命名项目',
-        'projectSpace.message.createSuccess': '项目空间创建成功',
-        'projectSpace.message.createFailed': '项目空间创建失败',
-      }[id] || id),
-  }),
+  useIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(),
+  getIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(),
   useNavigate: () => jest.fn(),
 }));
 

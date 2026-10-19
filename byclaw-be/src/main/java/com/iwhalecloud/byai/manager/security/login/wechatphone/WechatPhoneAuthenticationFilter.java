@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.security.login.wechatphone;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -40,21 +42,21 @@ public class WechatPhoneAuthenticationFilter extends AbstractAuthenticationProce
         throws AuthenticationException {
         String contentType = request.getContentType();
         if (!"POST".equals(request.getMethod()) || contentType == null) {
-            throw new BadCredentialsException("微信手机号授权请求无效");
+            throw new BadCredentialsException(I18nUtil.get("login.wechat.requestInvalid"));
         }
         try {
             if (!MediaType.APPLICATION_JSON.isCompatibleWith(MediaType.parseMediaType(contentType))) {
-                throw new BadCredentialsException("微信手机号授权请求无效");
+                throw new BadCredentialsException(I18nUtil.get("login.wechat.requestInvalid"));
             }
             byte[] body = request.getInputStream().readNBytes(MAX_REQUEST_BYTES + 1);
             if (body.length > MAX_REQUEST_BYTES) {
-                throw new BadCredentialsException("微信手机号授权请求无效");
+                throw new BadCredentialsException(I18nUtil.get("login.wechat.requestInvalid"));
             }
             JsonNode root = mapper.readTree(body);
             // 公共请求层会附带 language；除此之外不接受客户端自报的身份字段。
             if (root == null || !root.isObject() || root.size() > 2
                 || (root.size() == 2 && !root.has("language"))) {
-                throw new BadCredentialsException("微信手机号授权请求无效");
+                throw new BadCredentialsException(I18nUtil.get("login.wechat.requestInvalid"));
             }
             JsonNode code = root.get("phoneCode");
             JsonNode language = root.get("language");
@@ -62,13 +64,13 @@ public class WechatPhoneAuthenticationFilter extends AbstractAuthenticationProce
                 || code.textValue().length() > 512
                 || (language != null && (!language.isTextual() || language.textValue().isBlank()
                     || language.textValue().length() > 32))) {
-                throw new BadCredentialsException("微信手机号授权请求无效");
+                throw new BadCredentialsException(I18nUtil.get("login.wechat.requestInvalid"));
             }
             // 只使用连接地址，避免未经网关净化的转发头绕过匿名入口限流。
             rateLimiter.check(request.getRemoteAddr());
             return getAuthenticationManager().authenticate(new WechatPhoneAuthentication(code.textValue()));
         } catch (IOException | IllegalArgumentException e) {
-            throw new BadCredentialsException("微信手机号授权请求无效");
+            throw new BadCredentialsException(I18nUtil.get("login.wechat.requestInvalid"));
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.common.feign.client;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -237,7 +239,7 @@ public class FeignPythonBuildService {
             throw e;
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
-            throw new BaseException("调用 Python 构建服务失败: ", e);
+            throw new BaseException(I18nUtil.get("pythonBuild.failed"), e);
         }
     }
 
@@ -275,7 +277,7 @@ public class FeignPythonBuildService {
             throw e;
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
-            throw new BaseException("调用 Python 构建服务失败: ", e);
+            throw new BaseException(I18nUtil.get("pythonBuild.failed"), e);
         }
     }
 
@@ -390,7 +392,7 @@ public class FeignPythonBuildService {
             throw e;
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
-            throw new BaseException("调用 Python 构建服务文件转Markdown接口失败", e);
+            throw new BaseException(I18nUtil.get("pythonBuild.markdown.failed"), e);
         }
     }
 
@@ -424,7 +426,7 @@ public class FeignPythonBuildService {
             throw e;
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
-            throw new BaseException("调用 Python 构建服务文件流接口失败", e);
+            throw new BaseException(I18nUtil.get("pythonBuild.fileStreamFailed"), e);
         }
     }
 
@@ -433,7 +435,7 @@ public class FeignPythonBuildService {
      */
     private InputStream validateDownloadResponse(InputStream inputStream, String requestPath) {
         if (inputStream == null) {
-            throw new BaseException("调用 Python 构建服务下载接口失败，响应体为空: " + requestPath);
+            throw new BaseException(I18nUtil.get("pythonBuild.download.empty", requestPath));
         }
         try {
             byte[] prefix = inputStream.readNBytes(MAX_DOWNLOAD_ERROR_BODY_BYTES + 1);
@@ -451,7 +453,7 @@ public class FeignPythonBuildService {
                         inputStream.close();
                         String resultMsg = responseJson.getString("resultMsg");
                         throw new BaseException(
-                            StringUtil.isEmpty(resultMsg) ? "调用 Python 构建服务下载接口失败: " + requestPath : resultMsg);
+                            StringUtil.isEmpty(resultMsg) ? I18nUtil.get("pythonBuild.download.failed", requestPath) : resultMsg);
                     }
                 }
                 inputStream.close();
@@ -466,7 +468,7 @@ public class FeignPythonBuildService {
             } catch (IOException closeException) {
                 logger.debug("关闭知识库下载流失败: {}", requestPath, closeException);
             }
-            throw new BaseException("校验 Python 构建服务下载响应失败: " + requestPath, e);
+            throw new BaseException(I18nUtil.get("pythonBuild.download.validationFailed", requestPath), e);
         }
     }
 
@@ -498,7 +500,7 @@ public class FeignPythonBuildService {
         } catch (BaseException e) {
             throw e;
         } catch (Exception e) {
-            throw new BaseException("调用 Python 构建服务失败: " + operation.getOperationId(), e);
+            throw new BaseException(I18nUtil.get("pythonBuild.operationFailed", operation.getOperationId()), e);
         }
     }
 
@@ -520,7 +522,7 @@ public class FeignPythonBuildService {
         } catch (BaseException e) {
             throw e;
         } catch (Exception e) {
-            throw new BaseException("调用 Python 构建服务失败: " + operation.getOperationId(), e);
+            throw new BaseException(I18nUtil.get("pythonBuild.operationFailed", operation.getOperationId()), e);
         }
     }
 
@@ -564,7 +566,7 @@ public class FeignPythonBuildService {
             return fallback;
         } catch (Exception e) {
             if (throwExceptions) {
-                throw new BaseException("调用 Python 构建服务失败: " + operation.getOperationId(), e);
+                throw new BaseException(I18nUtil.get("pythonBuild.operationFailed", operation.getOperationId()), e);
             }
             logger.error("调用 Python 构建服务失败: {}", operation.getOperationId(), e);
             PythonBuildResponse<T> fallback = new PythonBuildResponse<>();
@@ -604,11 +606,11 @@ public class FeignPythonBuildService {
                                                      String path) {
         String body = response == null ? null : JSON.toJSONString(response.getData());
         if (response == null) {
-            throw new BaseException("调用 Python 构建服务失败，响应为空: " + path);
+            throw new BaseException(I18nUtil.get("pythonBuild.response.empty", path));
         }
         if (!response.isSuccess()) {
             throw new BaseException(
-                String.format("调用 Python 构建服务失败: %s, status=%s, body=%s", path, response.getStatusCode(), body));
+                I18nUtil.get("pythonBuild.response.failed", path, String.valueOf(response.getStatusCode()), body));
         }
         if (type != null && type.getType() != null && type.getType().getTypeName().contains("java.lang.Void")) {
             JSONObject bodyJson = JSON.parseObject(body);
@@ -713,7 +715,7 @@ public class FeignPythonBuildService {
         try (Response response = OkHttpUtil.getHttpClient().newCall(builder.build()).execute()) {
             return parseDirectResponse(response, type, path);
         } catch (IOException e) {
-            throw new BaseException("调用第三方知识库服务失败: " + path, e);
+            throw new BaseException(I18nUtil.get("pythonBuild.external.failed", path), e);
         }
     }
 
@@ -729,7 +731,7 @@ public class FeignPythonBuildService {
             bodyBuilder.addFormDataPart("fileContent", fileName,
                 RequestBody.create(multipartFile.getBytes(), MediaType.parse(multipartFile.getContentType())));
         } catch (IOException e) {
-            throw new BaseException("读取上传文件失败", e);
+            throw new BaseException(I18nUtil.get("pythonBuild.uploadReadFailed"), e);
         }
 
         Request.Builder builder = new Request.Builder().url(requestUrl).post(bodyBuilder.build());
@@ -737,7 +739,7 @@ public class FeignPythonBuildService {
         try (Response response = OkHttpUtil.getHttpClient().newCall(builder.build()).execute()) {
             return parseDirectResponse(response, type, path);
         } catch (IOException e) {
-            throw new BaseException("调用第三方知识库上传服务失败: " + path, e);
+            throw new BaseException(I18nUtil.get("pythonBuild.external.uploadFailed", path), e);
         }
     }
 
@@ -755,16 +757,16 @@ public class FeignPythonBuildService {
                 String errorText = errorBody == null ? null : errorBody.string();
                 String resultMsg = extractQaResultMessage(errorText);
                 throw new BaseException(
-                    StringUtil.isEmpty(resultMsg) ? "调用第三方知识库下载接口失败: " + path + ", status=" + response.code()
+                    StringUtil.isEmpty(resultMsg) ? I18nUtil.get("pythonBuild.external.downloadStatus", path, String.valueOf(response.code()))
                         : resultMsg);
             }
             ResponseBody body = response.body();
             if (body == null) {
-                throw new BaseException("调用第三方知识库下载接口失败，响应体为空: " + path);
+                throw new BaseException(I18nUtil.get("pythonBuild.external.downloadEmpty", path));
             }
             return new ByteArrayInputStream(body.bytes());
         } catch (IOException e) {
-            throw new BaseException("调用第三方知识库下载接口失败", e);
+            throw new BaseException(I18nUtil.get("pythonBuild.external.downloadFailed"), e);
         }
     }
 
@@ -782,7 +784,7 @@ public class FeignPythonBuildService {
 
     private FileToMarkdownResult uploadFileToMarkdown(String baseUrl, String path, MultipartFile multipartFile) {
         if (multipartFile == null || multipartFile.isEmpty()) {
-            throw new BaseException("待转换文件不能为空");
+            throw new BaseException(I18nUtil.get("pythonBuild.markdown.fileRequired"));
         }
         String requestUrl = concatUrl(baseUrl, path);
         String originalFilename = multipartFile.getOriginalFilename();
@@ -793,7 +795,7 @@ public class FeignPythonBuildService {
             bodyBuilder.addFormDataPart("fileContent", originalFilename,
                 RequestBody.create(multipartFile.getBytes(), MediaType.parse(contentType)));
         } catch (IOException e) {
-            throw new BaseException("读取待转换文件失败", e);
+            throw new BaseException(I18nUtil.get("pythonBuild.markdown.readFailed"), e);
         }
 
         Request.Builder builder = new Request.Builder().url(requestUrl).post(bodyBuilder.build());
@@ -803,11 +805,10 @@ public class FeignPythonBuildService {
             byte[] bytes = body == null ? new byte[0] : body.bytes();
             if (!response.isSuccessful()) {
                 String errorBody = new String(bytes, StandardCharsets.UTF_8);
-                throw new BaseException(String.format("调用 Python 构建服务文件转Markdown接口失败: %s, status=%s, body=%s", path,
-                    response.code(), errorBody));
+                throw new BaseException(I18nUtil.get("pythonBuild.markdown.responseFailed", path, String.valueOf(response.code()), errorBody));
             }
             if (bytes.length == 0) {
-                throw new BaseException("调用 Python 构建服务文件转Markdown接口失败，响应体为空: " + path);
+                throw new BaseException(I18nUtil.get("pythonBuild.markdown.empty", path));
             }
             String markdownFileName = resolveMarkdownFileName(response.header("Content-Disposition"), originalFilename);
             String responseContentType = StringUtil.isEmpty(response.header("Content-Type"))
@@ -815,14 +816,14 @@ public class FeignPythonBuildService {
                 : response.header("Content-Type");
             return new FileToMarkdownResult(markdownFileName, responseContentType, bytes);
         } catch (IOException e) {
-            throw new BaseException("调用 Python 构建服务文件转Markdown接口失败", e);
+            throw new BaseException(I18nUtil.get("pythonBuild.markdown.failed"), e);
         }
     }
 
     private String resolveDiscoveryBaseUrl(String serviceName) {
         Optional<ServiceInstance> instance = discoveryClient.discover(serviceName);
         if (instance.isEmpty()) {
-            throw new BaseException("未找到 Python 构建服务实例: " + serviceName);
+            throw new BaseException(I18nUtil.get("pythonBuild.instanceMissing", serviceName));
         }
         ServiceInstance serviceInstance = instance.get();
         String protocol = serviceInstance.getProtocol() == null ? "http" : serviceInstance.getProtocol();
@@ -911,12 +912,12 @@ public class FeignPythonBuildService {
     private <T> PythonBuildResponse<T> parseDirectResponse(Response response,
                                                            TypeReference<PythonBuildResponse<T>> type, String path) throws IOException {
         if (response == null) {
-            throw new BaseException("调用第三方知识库服务失败，响应为空: " + path);
+            throw new BaseException(I18nUtil.get("pythonBuild.external.empty", path));
         }
         ResponseBody responseBody = response.body();
         String body = responseBody == null ? null : responseBody.string();
         if (!response.isSuccessful()) {
-            throw new BaseException(String.format("调用第三方知识库服务失败: %s, status=%s, body=%s", path, response.code(), body));
+            throw new BaseException(I18nUtil.get("pythonBuild.external.responseFailed", path, String.valueOf(response.code()), body));
         }
         if (type != null && type.getType() != null && type.getType().getTypeName().contains("java.lang.Void")) {
             JSONObject bodyJson = JSON.parseObject(body);

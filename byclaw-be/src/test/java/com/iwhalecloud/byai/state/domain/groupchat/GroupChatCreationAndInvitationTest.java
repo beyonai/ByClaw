@@ -72,6 +72,11 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class GroupChatCreationAndInvitationTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final AuthApplicationService authService = mock(AuthApplicationService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
     private final ProjectApplicationService projects = mock(ProjectApplicationService.class);

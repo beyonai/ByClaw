@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 
@@ -127,7 +129,7 @@ public class GroupChatApplicationService {
     public GroupChatDetailResponse create(GroupChatCreateRequest request) {
         Long operatorId = CurrentUserHolder.getCurrentUserId();
         if (operatorId == null || operatorId <= 0) {
-            throw new IllegalArgumentException("Login required");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.loginRequired"));
         }
         Set<Long> agentIds = new LinkedHashSet<>();
         if (request.getAgentIds() != null) agentIds.addAll(request.getAgentIds());
@@ -397,7 +399,7 @@ public class GroupChatApplicationService {
         }
         for (ResourceVo resource : resourceList) {
             if (resource == null || resource.getResourceType() == null) {
-                throw new GroupChatMessageRejectedException("Invalid group member resource");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceInvalid"));
             }
             String memberType;
             if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
@@ -410,15 +412,15 @@ public class GroupChatApplicationService {
                 continue;
             }
             else {
-                throw new GroupChatMessageRejectedException("Unsupported group member resource type");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceTypeUnsupported"));
             }
             Long memberId = parseResourceId(resource.getResourceId());
             String existingMemberType = referencedMemberTypes.putIfAbsent(memberId, memberType);
             if (existingMemberType != null && !existingMemberType.equals(memberType)) {
-                throw new GroupChatMessageRejectedException("Conflicting group member resource types");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceTypeConflict"));
             }
             if (memberService.findSessionMember(sessionId, memberType, memberId) == null) {
-                throw new GroupChatMessageRejectedException("Referenced resource is not a group member");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceNotMember"));
             }
             if (MemObjType.AGENT.name().equals(memberType)) {
                 agentIds.add(memberId);
@@ -436,13 +438,13 @@ public class GroupChatApplicationService {
 
     private Long parseResourceId(String resourceId) {
         if (resourceId == null || resourceId.isBlank()) {
-            throw new GroupChatMessageRejectedException("Invalid group member resource ID");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceIdInvalid"));
         }
         try {
             return Long.valueOf(resourceId);
         }
         catch (NumberFormatException exception) {
-            throw new GroupChatMessageRejectedException("Invalid group member resource ID", exception);
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceIdInvalid"), exception);
         }
     }
 
@@ -463,7 +465,7 @@ public class GroupChatApplicationService {
         reply.put("role", systemEvent ? "event" : Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "ASSISTANT");
         Map<String, Object> speaker = new HashMap<>();
         speaker.put("type", systemEvent ? "system" : Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "AGENT");
-        speaker.put("displayName", systemEvent ? "系统" : referenced.getCreatorName());
+        speaker.put("displayName", systemEvent ? I18nUtil.get("groupchat.system") : referenced.getCreatorName());
         reply.put("speaker", speaker);
         return reply;
     }
@@ -489,10 +491,10 @@ public class GroupChatApplicationService {
         authorizationService.requireInvite(sessionId, type);
         ByaiSession session = authorizationService.requireGroup(sessionId);
         if (!MemObjType.isValid(type) || memberId == null) {
-            throw new IllegalArgumentException("Invalid group member");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.invalid"));
         }
         if (memberService.findSessionMember(sessionId, type, memberId) != null) {
-            throw new IllegalArgumentException("Member already exists");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.exists"));
         }
         ByaiSessionMember member = insertMember(session, type, memberId);
         recordMemberEvent(session, member, CurrentUserHolder.getCurrentUserId(), "MEMBER_INVITED");
@@ -507,13 +509,13 @@ public class GroupChatApplicationService {
         ByaiSession session = authorizationService.requireGroup(sessionId);
         if (!MemObjType.isValid(type) || memberIds == null || memberIds.isEmpty()
             || memberIds.stream().anyMatch(id -> id == null || id <= 0)) {
-            throw new IllegalArgumentException("Invalid group member");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.invalid"));
         }
         List<Long> distinctIds = memberIds.stream().distinct().toList();
         // 全部检查通过后才开始写入，保持与原单成员接口相同的重复成员规则。
         for (Long memberId : distinctIds) {
             if (memberService.findSessionMember(sessionId, type, memberId) != null) {
-                throw new IllegalArgumentException("Member already exists");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.member.exists"));
             }
         }
         List<ByaiSessionMember> result = new ArrayList<>();
@@ -635,7 +637,7 @@ public class GroupChatApplicationService {
         authorizationService.requireAdmin(sessionId);
         ByaiSessionMember target = memberService.findSessionMember(sessionId, type, memberId);
         if (target == null || UserRole.OWNER.name().equals(target.getUserRole())) {
-            throw new IllegalArgumentException("Group member cannot be removed");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.removeDenied"));
         }
         ByaiSession group = authorizationService.requireGroup(sessionId);
         memberService.deleteMember(target.getByaiSessionMemberId());
@@ -648,11 +650,11 @@ public class GroupChatApplicationService {
         authorizationService.requireOwner(sessionId);
         if (!MemObjType.USER.name().equals(type) || memberId == null || (!UserRole.ADMIN.name().equals(role)
             && !UserRole.MEMBER.name().equals(role))) {
-            throw new IllegalArgumentException("Invalid member role");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.roleInvalid"));
         }
         ByaiSessionMember target = memberService.findSessionMember(sessionId, type, memberId);
         if (target == null || UserRole.OWNER.name().equals(target.getUserRole())) {
-            throw new IllegalArgumentException("Member cannot be assigned this role");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.roleDenied"));
         }
         if (UserRole.ADMIN.name().equals(role) && !role.equals(target.getUserRole())) {
             recordAdminAppointment(sessionId, target);
@@ -668,7 +670,7 @@ public class GroupChatApplicationService {
         ByaiSessionMember current = authorizationService.requireCurrentUserMember(sessionId);
         ByaiSessionMember target = memberService.findSessionMember(sessionId, MemObjType.USER.name(), newOwnerUserId);
         if (target == null || Objects.equals(current.getMemObjId(), newOwnerUserId)) {
-            throw new IllegalArgumentException("New owner must be another group member");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.ownerInvalid"));
         }
         recordAdminAppointment(sessionId, current);
         current.setUserRole(UserRole.ADMIN.name());
@@ -749,7 +751,7 @@ public class GroupChatApplicationService {
             ownershipEvent.put("eventId", String.valueOf(sequenceService.nextVal()));
             ownershipEvent.put("sessionId", String.valueOf(sessionId));
             ownershipEvent.put("recipientUserId", String.valueOf(successor.getMemObjId()));
-            ownershipEvent.put("groupName", group == null ? "工作组" : group.getSessionName());
+            ownershipEvent.put("groupName", group == null ? I18nUtil.get("groupchat.workgroup") : group.getSessionName());
         }
         ByaiSession group = authorizationService.requireGroup(sessionId);
         memberService.deleteMember(current.getByaiSessionMemberId());
@@ -772,10 +774,10 @@ public class GroupChatApplicationService {
         }
         String operatorName = memberDisplayName(operator);
         String content = switch (eventType) {
-            case "MEMBER_INVITED" -> operatorName + " 邀请 " + memberName + " 加入工作组";
-            case "MEMBER_LEFT" -> memberName + " 离开了工作组";
-            case "MEMBER_REMOVED" -> operatorName + " 将 " + memberName + " 移出工作组";
-            default -> throw new IllegalArgumentException("Unsupported membership event");
+            case "MEMBER_INVITED" -> I18nUtil.get("groupchat.memberInvited", operatorName, memberName);
+            case "MEMBER_LEFT" -> I18nUtil.get("groupchat.memberLeft", memberName);
+            case "MEMBER_REMOVED" -> I18nUtil.get("groupchat.memberRemoved", operatorName, memberName);
+            default -> throw new IllegalArgumentException(I18nUtil.get("groupchat.member.eventUnsupported"));
         };
         JSONObject detail = new JSONObject();
         detail.put("eventType", eventType);
@@ -824,7 +826,7 @@ public class GroupChatApplicationService {
         event.put("createdAt", now.getTime());
         event.put("creatorId", String.valueOf(operatorId));
         event.put("creatorName", operatorName);
-        event.put("speaker", Map.of("type", "system", "displayName", "系统"));
+        event.put("speaker", Map.of("type", "system", "displayName", I18nUtil.get("groupchat.system")));
         event.put("systemEvent", detail);
         publishAfterCommit(group.getSessionId(), event);
     }
@@ -864,7 +866,7 @@ public class GroupChatApplicationService {
         ByaiSession group = authorizationService.requireGroup(groupSessionId);
         authorizationService.requireCurrentUserMember(groupSessionId);
         if (memberService.findSessionMember(groupSessionId, MemObjType.AGENT.name(), agentId) == null) {
-            throw new IllegalArgumentException("Agent is not a group member");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.agentMissing"));
         }
         ByaiSession direct = new ByaiSession();
         direct.setSessionId(sequenceService.nextVal());

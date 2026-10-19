@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 // Step 6 · 执行 Verify —— runner 子进程隔离执行 adapter。
 // 安全(M7c redaction):仅返回脱敏 VerifySummary(行数 + 字段**数**〔非列名,列名可能是 seed 值〕+
 // fixture/trace 状态),不回原始行数据,故展示为摘要而非数据表。
@@ -17,12 +18,12 @@ interface Props {
 }
 
 export default function VerifyStep({ loading, draft, result, onVerify }: Props) {
+  const intl = useIntl();
   const { token } = theme.useToken();
   return (
-    <Card title="执行 Verify" variant="borderless">
+    <Card title={intl.formatMessage({ id: 'adapterRecorder.verify.run' })} variant="borderless">
       <Paragraph type="secondary" style={{ lineHeight: 1.6 }}>
-        通过 async runner 子进程隔离执行 adapter,返回脱敏后的结构摘要(行数 + 字段 shape,不含原始数据)。 成功推进到
-        done,超时或运行错误转 failed。
+        {intl.formatMessage({ id: 'adapterRecorder.verify.description' })}
       </Paragraph>
 
       {draft && (
@@ -35,7 +36,9 @@ export default function VerifyStep({ loading, draft, result, onVerify }: Props) 
       )}
 
       <Button type="primary" icon={<PlayCircleOutlined />} loading={loading} disabled={!!result} onClick={onVerify}>
-        {result ? 'Verify 已完成' : '执行 Verify'}
+        {result
+          ? intl.formatMessage({ id: 'adapterRecorder.verify.complete' })
+          : intl.formatMessage({ id: 'adapterRecorder.verify.run' })}
       </Button>
 
       {result && (
@@ -47,20 +50,23 @@ export default function VerifyStep({ loading, draft, result, onVerify }: Props) 
             style={{ marginBottom: 12 }}
             message={
               result.ok
-                ? `结构校验通过,命中 ${result.rows ?? 0} 行`
-                : `Verify 失败${result.error ? `:${result.error.code}` : ''}`
+                ? intl.formatMessage({ id: 'adapterRecorder.verify.shapePassed' }, { v0: result.rows ?? 0 })
+                : intl.formatMessage(
+                  { id: 'adapterRecorder.verify.failedWithDetail' },
+                  { v0: result.error ? `:${result.error.code}` : '' }
+                )
             }
             description={!result.ok && result.error ? result.error.message : undefined}
           />
 
           <Descriptions size="small" column={1} colon={false} styles={{ label: { width: 96 } }} bordered>
-            <Descriptions.Item label="阶段">
+            <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.verify.phase' })}>
               <Text className="code">{result.stage ?? '—'}</Text>
             </Descriptions.Item>
-            <Descriptions.Item label="行数">
+            <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.verify.rowCount' })}>
               <Text className="code">{result.rows ?? 0}</Text>
             </Descriptions.Item>
-            <Descriptions.Item label="字段数">
+            <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.verify.fieldCount' })}>
               {typeof result.fieldCount === 'number' ? (
                 <Text className="code">{result.fieldCount}</Text>
               ) : (

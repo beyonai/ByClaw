@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.message;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -31,7 +33,7 @@ public class ConversationOutlineDisplayService {
 
     private static final String DIGITAL_EMPLOYEE_PREFIX = "DIG_EMPLOYEE_";
 
-    private static final String DIGITAL_EMPLOYEE_FALLBACK_NAME = "数字员工";
+    private static final String DIGITAL_EMPLOYEE_FALLBACK_NAME = "message.employeeFallback";
 
     private static final Pattern DIGITAL_EMPLOYEE_PLACEHOLDER = Pattern.compile(
         "\\{\\{(DIG_EMPLOYEE_([^}#]+))(?:#([^}]+))?}}"
@@ -146,7 +148,7 @@ public class ConversationOutlineDisplayService {
         StringBuffer result = new StringBuffer();
         while (matcher.find()) {
             String employeeName = firstNonBlank(resourceNames.get(matcher.group(1)),
-                resourceNames.get(matcher.group(2)), DIGITAL_EMPLOYEE_FALLBACK_NAME);
+                resourceNames.get(matcher.group(2)), I18nUtil.get(DIGITAL_EMPLOYEE_FALLBACK_NAME));
             String skillName = resourceNames.get(matcher.group(3));
             String replacement = StringUtils.isBlank(skillName)
                 ? "@" + employeeName + " "
@@ -163,7 +165,7 @@ public class ConversationOutlineDisplayService {
                 return value;
             }
         }
-        return DIGITAL_EMPLOYEE_FALLBACK_NAME;
+        return I18nUtil.get(DIGITAL_EMPLOYEE_FALLBACK_NAME);
     }
 
     private void putResourceName(Map<String, String> resourceNames, String key, String name) {

@@ -1187,7 +1187,7 @@ public class DigitalEmployeeApplicationService {
             && digitalEmployeeGroupApplicationService.isGroup(originalExt.getAgentType());
         boolean isEmployeeGroup = digitalEmployeeGroupApplicationService.isGroup(digitalEmployeeDTO.getAgentType());
         if (wasEmployeeGroup != isEmployeeGroup) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "不允许变更数字员工组资源类型");
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("employee.group.typeImmutable"));
         }
         if (this.isDefaultPersonalResource(ssResource)) {
             // 默认个人助理始终按助手型运行,避免前端旧参数把 worker_agent_type 覆盖成编码型等其他类型.
@@ -1350,7 +1350,7 @@ public class DigitalEmployeeApplicationService {
                 I18nUtil.get("digemployee.processor.param.notnull"));
         }
         if (digitalEmployeeGroupApplicationService.isGroup(digitalEmployeeId)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "数字员工组不支持安装普通关联资源");
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("employee.group.installUnsupported"));
         }
 
         List<SsResource> installRelResources = this.findInstallRelResources(installRelIds);
@@ -1424,12 +1424,12 @@ public class DigitalEmployeeApplicationService {
                     continue;
                 }
                 if (inserted != 0) {
-                    throw new BaseException("数字员工技能关系新增数量异常");
+                    throw new BaseException(I18nUtil.get("employee.skill.insertCountInvalid"));
                 }
                 skillRelations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
                     digitalEmployee.getResourceId(), List.of(skillId));
                 if (CollectionUtils.isEmpty(skillRelations)) {
-                    throw new BaseException("数字员工技能关系并发新增失败，请重试");
+                    throw new BaseException(I18nUtil.get("employee.skill.concurrentInsert"));
                 }
             }
 
@@ -1513,7 +1513,7 @@ public class DigitalEmployeeApplicationService {
                     .forEach(affectedOtherGroupIds::add);
                 resourceBindingSourceService.clear(digitalEmployee.getComAcctId(), digitalEmployee.getResourceId(), skillId);
                 if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
-                    throw new BaseException("数字员工技能关系删除失败");
+                    throw new BaseException(I18nUtil.get("employee.skill.deleteFailed"));
                 }
                 removedSkillIds.add(skillId);
                 changed = true;
@@ -1524,13 +1524,13 @@ public class DigitalEmployeeApplicationService {
                 digitalEmployee.getResourceId(), skillId)) {
                 this.canonicalizeRelation(relation, source, currentUserId, now);
                 if (!ssResourceRelDetailService.updateById(relation)) {
-                    throw new BaseException("数字员工技能关系更新失败");
+                    throw new BaseException(I18nUtil.get("employee.skill.updateFailed"));
                 }
                 retainedSkillIds.add(skillId);
                 removedSkillIds.remove(skillId);
             } else {
                 if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
-                    throw new BaseException("数字员工技能关系删除失败");
+                    throw new BaseException(I18nUtil.get("employee.skill.deleteFailed"));
                 }
                 if (!retainedSkillIds.contains(skillId)) {
                     removedSkillIds.add(skillId);
@@ -1563,7 +1563,7 @@ public class DigitalEmployeeApplicationService {
             .toList();
         for (SsResourceRelDetail relation : affectedRelations) {
             if (SkillRelationSource.parse(relation.getRelResourceInfo()).isMalformed()) {
-                throw new BaseException("技能来源数据异常，请修复后重试");
+                throw new BaseException(I18nUtil.get("employee.skill.sourceInvalid"));
             }
         }
 
@@ -1660,7 +1660,7 @@ public class DigitalEmployeeApplicationService {
                 I18nUtil.get("digemployee.processor.param.notnull"));
         }
         if (digitalEmployeeGroupApplicationService.isGroup(digitalEmployeeId)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "数字员工组不支持卸载普通关联资源");
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("employee.group.uninstallUnsupported"));
         }
 
         List<SsResource> uninstallRelResources = this.findInstallRelResources(uninstallRelIds);
@@ -1741,11 +1741,11 @@ public class DigitalEmployeeApplicationService {
                 this.canonicalizeRelation(relation, remainingSource, currentUserId, now);
                 relation.setComAcctId(digitalEmployee.getComAcctId());
                 if (!ssResourceRelDetailService.updateById(relation)) {
-                    throw new BaseException("数字员工技能关系更新失败");
+                    throw new BaseException(I18nUtil.get("employee.skill.updateFailed"));
                 }
             } else {
                 if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
-                    throw new BaseException("数字员工技能关系删除失败");
+                    throw new BaseException(I18nUtil.get("employee.skill.deleteFailed"));
                 }
             }
         }
@@ -1889,7 +1889,7 @@ public class DigitalEmployeeApplicationService {
         SsResource digitalEmployee, Long groupId, List<Long> skillIds) {
         this.validateSnapshotContext(digitalEmployee, groupId);
         if (CollectionUtils.isEmpty(skillIds) || skillIds.stream().anyMatch(Objects::isNull)) {
-            throw new BaseException("技能组安装快照不能为空");
+            throw new BaseException(I18nUtil.get("skillgroup.install.snapshotRequired"));
         }
         return new ArrayList<>(new LinkedHashSet<>(skillIds));
     }
@@ -1899,7 +1899,7 @@ public class DigitalEmployeeApplicationService {
      */
     private void validateSnapshotContext(SsResource digitalEmployee, Long groupId) {
         if (digitalEmployee == null || digitalEmployee.getResourceId() == null || groupId == null) {
-            throw new BaseException("技能组快照参数不能为空");
+            throw new BaseException(I18nUtil.get("skillgroup.install.snapshotParamsRequired"));
         }
     }
 
@@ -1957,7 +1957,7 @@ public class DigitalEmployeeApplicationService {
         }
         this.canonicalizeRelation(relation, source, currentUserId, now);
         if (!ssResourceRelDetailService.updateById(relation)) {
-            throw new BaseException("数字员工技能关系更新失败");
+            throw new BaseException(I18nUtil.get("employee.skill.updateFailed"));
         }
         return true;
     }
@@ -2005,7 +2005,7 @@ public class DigitalEmployeeApplicationService {
             }
             this.canonicalizeRelation(relation, manualSource, currentUserId, now);
             if (!ssResourceRelDetailService.updateById(relation)) {
-                throw new BaseException("数字员工技能关系更新失败");
+                throw new BaseException(I18nUtil.get("employee.skill.updateFailed"));
             }
         }
     }
@@ -3670,7 +3670,7 @@ public class DigitalEmployeeApplicationService {
             // 技能组的按来源卸载仍由独立接口处理，不改变技能资源本身或其他员工的关联。
             resourceBindingSourceService.clear(digitalEmployee.getComAcctId(), digitalEmployee.getResourceId(), skillId);
             if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
-                throw new BaseException("数字员工技能关系删除失败");
+                throw new BaseException(I18nUtil.get("employee.skill.deleteFailed"));
             }
         }
 
@@ -3681,7 +3681,7 @@ public class DigitalEmployeeApplicationService {
             SsResourceRelDetail relation = this.newDirectSkillRelation(digitalEmployee, skillId, currentUserId, now);
             relation.setRelResourceInfo(SkillRelationSource.manual().toJson());
             if (skillGroupMapper.insertDigitalEmployeeSkillIfAbsent(relation) != 1) {
-                throw new BaseException("数字员工技能关系新增失败");
+                throw new BaseException(I18nUtil.get("employee.skill.insertFailed"));
             }
         }
     }
@@ -3694,7 +3694,7 @@ public class DigitalEmployeeApplicationService {
         this.canonicalizeRelation(relation, source, currentUserId, now);
         relation.setComAcctId(digitalEmployee.getComAcctId());
         if (!ssResourceRelDetailService.updateById(relation)) {
-            throw new BaseException("数字员工技能关系更新失败");
+            throw new BaseException(I18nUtil.get("employee.skill.updateFailed"));
         }
     }
 

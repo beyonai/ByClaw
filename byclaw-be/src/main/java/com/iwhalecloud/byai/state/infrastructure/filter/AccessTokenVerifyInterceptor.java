@@ -194,19 +194,19 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                     return true;
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request,
-                    this.isThirdPartySkillInstallRequest(request) ? "第三方技能安装" : "第三方技能可管理数字员工查询");
+                    this.isThirdPartySkillInstallRequest(request) ? I18nUtil.get("access.operation.skillInstall") : I18nUtil.get("access.operation.employeeQuery"));
             }
             if (this.isConnectorSkillCompleteRequest(request)) {
                 if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                     return true;
                 }
-                return this.authenticateBeyondTokenOnlyRequest(request, "连接器技能授权同步");
+                return this.authenticateBeyondTokenOnlyRequest(request, I18nUtil.get("access.operation.connectorSync"));
             }
             if (this.isOrchestratorRuntimeRequest(request)) {
                 if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                     return true;
                 }
-                return this.authenticateBeyondTokenOnlyRequest(request, "数字员工组运行时解析");
+                return this.authenticateBeyondTokenOnlyRequest(request, I18nUtil.get("access.operation.groupRuntime"));
             }
             // These three callbacks authenticate their own narrow tenant Node token in the controller.
             if (this.isTenantNodeInternalRequest(request)) {
@@ -221,7 +221,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                     return true;
                 }
-                return this.authenticateBeyondTokenOnlyRequest(request, "Artifact发布");
+                return this.authenticateBeyondTokenOnlyRequest(request, I18nUtil.get("access.operation.artifactPublish"));
             }
             if (this.isPublicAppVersionRequest(request)) {
                 return true;
@@ -308,7 +308,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         String systemCode = request.getHeader("system-code");
         String beyondToken = request.getHeader("Beyond-Token");
         if (StringUtils.isBlank(beyondToken)) {
-            throw new RuntimeException(operationName + "接口必须通过 Beyond-Token 鉴权");
+            throw new RuntimeException(I18nUtil.get("access.beyondToken.required", operationName));
         }
         logger.info(
             "{}接口强制Beyond-Token鉴权，requestUri={}, systemCode={}",
@@ -320,7 +320,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
         LoginInfo tokenLoginInfo = CurrentUserHolder.getLoginInfo();
         if (tokenLoginInfo == null || StringUtils.isBlank(tokenLoginInfo.getUserCode())) {
-            throw new RuntimeException("Beyond-Token中缺少用户编码");
+            throw new RuntimeException(I18nUtil.get("auth.token.userCodeMissing"));
         }
         Long tokenUserId = tokenLoginInfo.getUserId();
         String tokenUserCode = tokenLoginInfo.getUserCode();
@@ -329,7 +329,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         // 这里按 Token 中的 userCode 重新加载完整 LoginInfo，不依赖对端 system-code，也不回退到 Cookie/Session。
         LoginInfo localLoginInfo = loginApplicationService.getLoginInfo(tokenUserCode);
         if (localLoginInfo == null || localLoginInfo.getUserId() == null) {
-            throw new RuntimeException("Beyond-Token对应的门户用户不存在");
+            throw new RuntimeException(I18nUtil.get("auth.token.portalUserMissing"));
         }
         CurrentUserHolder.setLoginInfo(localLoginInfo);
         logger.info(

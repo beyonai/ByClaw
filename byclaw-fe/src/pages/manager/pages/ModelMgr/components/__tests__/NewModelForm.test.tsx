@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider, message } from 'antd';
 import SharedModelFormModal from '../SharedModelFormModal';
 
@@ -15,6 +15,14 @@ const mockIntl = {
   },
 };
 jest.mock('@umijs/max', () => ({ useIntl: () => mockIntl }));
+jest.mock('antd', () => {
+  const actual = jest.requireActual('antd');
+  return {
+    ...actual,
+    // 保留真实弹层和表单，取消弹层首次打开时的动画准备帧，避免断言命中隐藏节点。
+    Modal: (props: import('antd').ModalProps) => <actual.Modal {...props} transitionName="" maskTransitionName="" />,
+  };
+});
 jest.mock('@/pages/manager/service/System', () => ({
   getByParamGroupCode: jest.fn().mockResolvedValue({ data: { byaiSystemConfigLists: [] } }),
 }));
@@ -55,6 +63,7 @@ async function renderForm(type: 'add' | 'edit' = 'add', detail: Record<string, a
       </ConfigProvider>
     );
   });
+  await waitFor(() => expect(screen.getByLabelText('modelMgr.modal.apiToken')).toBeVisible());
   return saveModelRequest;
 }
 
@@ -75,9 +84,22 @@ async function clickSave(name = 'modelMgr.modal.saveAndClose') {
   });
 }
 
+async function selectOption(label: string) {
+  // 先等待选项提交到 DOM，再进入点击的 act；不要在未结束的 act 中等待它自己的渲染结果。
+  const option = await screen.findByText(label);
+  await act(async () => {
+    fireEvent.click(option);
+  });
+}
+
 describe('new model quick setup', () => {
+  // 用例覆盖真实表单、多次预设切换和保存；仅为本套件预留 CI 并发下的完整交互时间。
+  jest.setTimeout(15000);
   afterEach(async () => {
-    await act(async () => message.destroy());
+    await act(async () => {
+      cleanup();
+      message.destroy();
+    });
     mockIntl.locale = 'zh-CN';
   });
 
@@ -252,15 +274,16 @@ describe('new model quick setup', () => {
       const save = await renderForm();
       fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.quickPreset'));
       await change('quickPreset', search);
-      await act(async () => {
-        fireEvent.click(await screen.findByText(label));
-      });
+      await selectOption(label);
       await change('apiToken', 'test-token');
-      if (modelCode === 'kimi-for-coding') {
-        expect(screen.getByText('modelMgr.modal.kimiCodePresetHint')).toBeVisible();
-      }
-      if (['glm-5.3', 'ZHIPU/GLM-5.3-Flash', 'kimi-k2.7-code'].includes(modelCode)) {
-        expect(screen.getByText('modelMgr.modal.presetThinkingRequiredHint')).toBeVisible();
+      const expectedHints = [
+        ...(modelCode === 'kimi-for-coding' ? ['modelMgr.modal.kimiCodePresetHint'] : []),
+        ...(['glm-5.3', 'ZHIPU/GLM-5.3-Flash', 'kimi-k2.7-code'].includes(modelCode)
+          ? ['modelMgr.modal.presetThinkingRequiredHint']
+          : []),
+      ];
+      for (const hint of expectedHints) {
+        expect(screen.getByText(hint)).toBeVisible();
       }
       const debug = JSON.parse(screen.getByTestId('debug-input').textContent || '{}');
       expect(debug.model).toBe(modelCode);
@@ -317,9 +340,7 @@ describe('new model quick setup', () => {
     expect(screen.getByLabelText('modelMgr.modal.systemTags')).not.toBeVisible();
     fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.quickPreset'));
     await change('quickPreset', 'doubao-seedream-4-0-250828');
-    await act(async () => {
-      fireEvent.click(await screen.findByText('doubao-seedream-4-0-250828 · 字节跳动（火山方舟接入）'));
-    });
+    await selectOption('doubao-seedream-4-0-250828 · 字节跳动（火山方舟接入）');
     await change('apiToken', 'test-token');
     await clickSave();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
@@ -363,9 +384,7 @@ describe('new model quick setup', () => {
     await change('apiToken', 'test-token');
     await change('apiEndpoint', 'https://proxy.example/images');
     fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelType'));
-    await act(async () => {
-      fireEvent.click(await screen.findByText('Image'));
-    });
+    await selectOption('Image');
     await clickSave();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save.mock.calls[0][0]).toMatchObject({

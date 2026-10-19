@@ -52,7 +52,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 
 @ExtendWith(MockitoExtension.class)
-class DevloopApplicationServiceTaskQueryTest {
+class DevloopApplicationServiceTaskQueryTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Mock
     private ByaiSessionMapper byaiSessionMapper;

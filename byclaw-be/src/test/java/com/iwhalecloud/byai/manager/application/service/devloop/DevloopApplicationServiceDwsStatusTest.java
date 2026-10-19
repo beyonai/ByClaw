@@ -23,7 +23,7 @@ import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoServic
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 
-class DevloopApplicationServiceDwsStatusTest {
+class DevloopApplicationServiceDwsStatusTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private DwsAuthService dwsAuthService;
     private DevloopApplicationService service;

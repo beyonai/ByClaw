@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.connector;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -43,7 +45,7 @@ public class WeixinOpenPlatformEventController {
                 .cacheControl(CacheControl.noStore())
                 .body(response);
         } catch (RuntimeException | IOException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid Weixin callback");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("connector.weixin.callbackInvalid"));
         }
     }
 

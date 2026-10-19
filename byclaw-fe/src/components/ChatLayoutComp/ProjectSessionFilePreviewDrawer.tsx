@@ -1,3 +1,4 @@
+import { getIntl, useIntl } from '@umijs/max';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Drawer, Spin, message } from 'antd';
 import { createRelativePathResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
@@ -23,6 +24,7 @@ const ProjectSessionFilePreviewDrawer: React.FC<ProjectSessionFilePreviewDrawerP
   file,
   onClose,
 }) => {
+  const intl = useIntl();
   const [blob, setBlob] = useState<Blob | null>(null);
   const [loading, setLoading] = useState(false);
   const fileType = file ? getFileType(file.name) : 'txt';
@@ -58,7 +60,7 @@ const ProjectSessionFilePreviewDrawer: React.FC<ProjectSessionFilePreviewDrawerP
       })
       .catch((error: any) => {
         if (!cancelled) {
-          message.error(error?.message || '文件预览失败');
+          message.error(error?.message || getIntl().formatMessage({ id: 'ui.task.previewFailed' }));
         }
       })
       .finally(() => {
@@ -74,7 +76,7 @@ const ProjectSessionFilePreviewDrawer: React.FC<ProjectSessionFilePreviewDrawerP
 
   return (
     <Drawer
-      title={file?.name || '文件预览'}
+      title={file?.name || intl.formatMessage({ id: 'sourceDrawer.filePreview' })}
       open={open && !!file}
       onClose={onClose}
       placement="right"

@@ -18,7 +18,7 @@ import com.iwhalecloud.byai.manager.dto.capability.AgentCapabilityCompileResult;
  *
  * @author tangs
  */
-class AgentCapabilityCardServiceTest {
+class AgentCapabilityCardServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private AgentCapabilityCardService service;
 
@@ -178,7 +178,7 @@ class AgentCapabilityCardServiceTest {
 
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
-            .hasMessageContaining("No JSON object found");
+            .hasMessageContaining("未找到 JSON 对象");
     }
 
     @Test

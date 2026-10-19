@@ -1,3 +1,8 @@
+let mockLocale = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  getIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
+
 import type { ConversationOutlineItem } from '@/service/message';
 import type { IMessage } from '@/typescript/message';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
@@ -117,4 +122,11 @@ describe('ConversationNavigator utils', () => {
       })
     ).toBe(0);
   });
+});
+
+it('localizes unresolved employee mentions at call time without changing named resources', () => {
+  mockLocale = 'en-US';
+  expect(normalizeConversationSummary('Ask {{DIG_EMPLOYEE_11105921}} now')).toBe('Ask @Digital employee now');
+  expect(normalizeConversationSummary('Ask @覃小迪 now')).toBe('Ask @覃小迪 now');
+  mockLocale = 'zh-CN';
 });

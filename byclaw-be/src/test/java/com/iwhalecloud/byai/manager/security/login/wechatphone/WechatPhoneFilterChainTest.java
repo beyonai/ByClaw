@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.security.login.wechatphone;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -15,7 +17,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
-class WechatPhoneFilterChainTest {
+class WechatPhoneFilterChainTest extends I18nTestSupport {
 
     @Test
     void exactAnonymousPostReachesAuthenticationAndSharedSuccessHandler() throws Exception {

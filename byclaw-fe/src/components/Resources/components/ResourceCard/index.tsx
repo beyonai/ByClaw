@@ -887,11 +887,15 @@ const RenderContent = (props: ResourceCardProps) => {
     publishToEnterpriseLock.current = true;
     setOpeningPublication(true);
     const messageKey = `employee-publication-open-${resource.resourceId || resource.id || resource.agentId}`;
-    message.loading({ key: messageKey, content: '正在准备发布申请，请稍候…', duration: 0 });
+    message.loading({
+      key: messageKey,
+      content: intl.formatMessage({ id: 'employeePublication.preparing' }),
+      duration: 0,
+    });
     const timer = setTimeout(() => {
       message.loading({
         key: messageKey,
-        content: '仍在准备发布配置，关联资源较多时可能需要更久，请勿重复点击。',
+        content: intl.formatMessage({ id: 'employeePublication.preparingSlow' }),
         duration: 0,
       });
     }, 8000);
@@ -908,14 +912,14 @@ const RenderContent = (props: ResourceCardProps) => {
         await openEmployeePublication(resourceId);
       }
     } catch (error: any) {
-      message.error(publicationErrorMessage(error, '无法发起发布申请'));
+      message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.prepareFailed' })));
     } finally {
       clearFeedback();
       publicationFeedbackCleanup.current = undefined;
       publishToEnterpriseLock.current = false;
       setOpeningPublication(false);
     }
-  }, [resource.resourceId, resource.id, resource.agentId, resource.employeePublicationStatus]);
+  }, [resource.resourceId, resource.id, resource.agentId, resource.employeePublicationStatus, intl]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const { canEdit, canManageAuth, canUseAuth, canApplyUse, canDelete, canOnShelf, canOffShelf, canRestore } =

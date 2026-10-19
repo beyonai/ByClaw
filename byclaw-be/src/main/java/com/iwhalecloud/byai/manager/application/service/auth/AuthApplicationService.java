@@ -2518,7 +2518,7 @@ public class AuthApplicationService {
     public void grantDigitalEmployeesToUser(Collection<Long> resourceIds, Long userId) {
         if (CollectionUtils.isEmpty(resourceIds)) return;
         if (userId == null || userId <= 0 || resourceIds.stream().anyMatch(id -> id == null || id <= 0)) {
-            throw new IllegalArgumentException("Invalid digital employee grant target");
+            throw new IllegalArgumentException(I18nUtil.get("employee.grant.targetInvalid"));
         }
         Set<Long> distinctIds = new LinkedHashSet<>(resourceIds);
         LambdaQueryWrapper<PrivilegeGrant> query = new LambdaQueryWrapper<>();
@@ -4032,7 +4032,7 @@ public class AuthApplicationService {
     private void validateEmployeeAuthorizationTarget(SsResource resource) {
         if (employeeGovernance == null) return;
         employeeGovernance.requireNotProtected(resource);
-        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) throw new BaseException("发布技能为固定快照，请通过员工发布流程更新");
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) throw new BaseException("employee.publication.fixedSkillSnapshot");
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(resource)
             && !hasResourceManagePermission(resource)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));

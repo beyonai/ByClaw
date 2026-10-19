@@ -92,7 +92,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 @DisabledOnOs(OS.WINDOWS)
 @ExtendWith(MockitoExtension.class)
-class DatasetApplicationServiceTest {
+class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final Locale TEST_LOCALE = new Locale("zh", "CN");
 

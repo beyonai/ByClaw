@@ -169,9 +169,9 @@ export const prioritizeEnabledConnectors = (items: Connector[]) => [
 ];
 
 const authorizationTerminalMessages: Partial<Record<ConnectorAuthorization['status'], string>> = {
-  failed: '授权未完成，请重新发起连接',
-  expired: '授权任务已失效，请重新发起连接',
-  cancelled: '授权已取消，请重新发起连接',
+  failed: 'connector.authorization.incomplete',
+  expired: 'connector.authorization.expired',
+  cancelled: 'connector.authorization.cancelled',
 };
 
 export const getConnectorAuthorizationTerminalError = (
@@ -179,7 +179,8 @@ export const getConnectorAuthorizationTerminalError = (
 ) => {
   const fallbackMessage = authorizationTerminalMessages[authorization.status];
   if (!fallbackMessage) return undefined;
-  return authorization.errorMessage || fallbackMessage;
+  // 授权状态保留协议值，兜底文案在读取时按当前语言解析。
+  return authorization.errorMessage || getIntl().formatMessage({ id: fallbackMessage });
 };
 
 const isSafeAuthorizationUrl = (authorizationUrl: string) => {
@@ -298,17 +299,17 @@ export const getCredentialAuthorizationError = (connector: Connector, errorCode?
   }
   if (connector.code === 'weixin-official-api') {
     if (errorCode === 'CONNECTOR_CREDENTIAL_INVALID') {
-      return 'AppID 或 AppSecret 无效，请检查后重试';
+      return getIntl().formatMessage({ id: 'connector.credential.invalidAppSecret' });
     }
     if (errorCode === 'WEIXIN_IP_NOT_ALLOWLISTED') {
-      return '请将 ByClaw 后端出口 IP 加入公众号 IP 白名单后重试';
+      return getIntl().formatMessage({ id: 'connector.credential.ipWhitelist' });
     }
     if (errorCode === 'CONNECTOR_VERIFICATION_TIMEOUT' || errorCode === 'CONNECTOR_VERIFICATION_FAILED') {
-      return '微信接口暂时不可用，凭据未保存，请稍后重试';
+      return getIntl().formatMessage({ id: 'connector.credential.wechatUnavailable' });
     }
-    return '微信公众号 API 凭据验证失败，请检查后重试';
+    return getIntl().formatMessage({ id: 'connector.credential.wechatVerificationFailed' });
   }
-  return `${connector.name} 凭据验证失败，请检查后重试`;
+  return getIntl().formatMessage({ id: 'connector.credential.verificationFailed' }, { v0: connector.name });
 };
 
 const ConnectorIcon = ({ connector }: { connector: Connector }) => (
@@ -438,17 +439,20 @@ const ConnectorControl = ({
     setAuthorizingConnector(undefined);
   }, [abortCredentialVerification, authorizingConnector, clearCredentialValues, invalidateAuthorizationRequests]);
 
-  const cancelAuthorizationInBackground = useCallback((authorizationId: string, reportFailure = true) => {
-    if (cancelledAuthorizationIdsRef.current.has(authorizationId)) return;
+  const cancelAuthorizationInBackground = useCallback(
+    (authorizationId: string, reportFailure = true) => {
+      if (cancelledAuthorizationIdsRef.current.has(authorizationId)) return;
 
-    cancelledAuthorizationIdsRef.current.add(authorizationId);
-    const cancellationGeneration = startAuthorizationGenerationRef.current;
-    void cancelConnectorAuthorization(authorizationId).catch(() => {
-      if (reportFailure && startAuthorizationGenerationRef.current === cancellationGeneration) {
-        message.error('后台授权取消失败，请稍后重试');
-      }
-    });
-  }, []);
+      cancelledAuthorizationIdsRef.current.add(authorizationId);
+      const cancellationGeneration = startAuthorizationGenerationRef.current;
+      void cancelConnectorAuthorization(authorizationId).catch(() => {
+        if (reportFailure && startAuthorizationGenerationRef.current === cancellationGeneration) {
+          message.error(intl.formatMessage({ id: 'connector.authorization.cancelFailed' }));
+        }
+      });
+    },
+    [intl]
+  );
 
   useEffect(
     () => () => {
@@ -502,9 +506,9 @@ const ConnectorControl = ({
       } catch {
         if (connectorLoadGenerationRef.current !== requestGeneration) return;
         if (reportAuthorizationRefreshFailure) {
-          message.warning('连接器已授权，但有效期刷新失败，请稍后重试');
+          message.warning(intl.formatMessage({ id: 'connector.authorization.expiryRefreshFailed' }));
         } else if (!hasCachedConnectors) {
-          message.error('连接器列表加载失败，请稍后重试');
+          message.error(intl.formatMessage({ id: 'connector.authorization.listFailed' }));
         }
       } finally {
         if (connectorLoadGenerationRef.current === requestGeneration) {
@@ -513,7 +517,7 @@ const ConnectorControl = ({
         }
       }
     },
-    [connectors.length]
+    [connectors.length, intl]
   );
 
   const completeAuthorization = useCallback(
@@ -540,10 +544,10 @@ const ConnectorControl = ({
       setAuthorizingConnector(undefined);
       credentialVerificationInFlightRef.current = false;
       clearCredentialValues();
-      message.success(`${connector.name} 已连接`);
+      message.success(intl.formatMessage({ id: 'connector.authorization.connected' }, { v0: connector.name }));
       void loadAuthorizedConnectors(true);
     },
-    [clearAuthorizationTimer, clearCredentialValues, connectors, loadAuthorizedConnectors]
+    [clearAuthorizationTimer, clearCredentialValues, connectors, loadAuthorizedConnectors, intl]
   );
 
   const tryOpenAuthorizationUrl = useCallback((authorization: ConnectorAuthorization, blockedMessage: string) => {
@@ -595,15 +599,15 @@ const ConnectorControl = ({
         }
         if (authorization.authorizationUrl && !isSafeAuthorizationUrl(authorization.authorizationUrl)) {
           clearAuthorizationTimer();
-          message.error('授权服务返回了无效的授权链接');
+          message.error(intl.formatMessage({ id: 'connector.authorization.invalidUrl' }));
           return;
         }
         setAuthorizationSession(authorization);
-        tryOpenAuthorizationUrl(authorization, '浏览器已阻止自动打开，请点击“继续授权”');
-        if (!silently) message.info('尚未检测到授权完成，请完成授权后重试');
+        tryOpenAuthorizationUrl(authorization, intl.formatMessage({ id: 'connector.authorization.popupBlocked' }));
+        if (!silently) message.info(intl.formatMessage({ id: 'connector.authorization.notComplete' }));
       } catch {
         if (activeAuthorizationIdRef.current === authorizationId && !silently) {
-          message.error('授权状态查询失败，请稍后重试');
+          message.error(intl.formatMessage({ id: 'connector.authorization.statusFailed' }));
         }
       } finally {
         if (checkingAuthorizationIdRef.current === authorizationId) {
@@ -612,7 +616,7 @@ const ConnectorControl = ({
         }
       }
     },
-    [authorizationSession, clearAuthorizationTimer, completeAuthorization, tryOpenAuthorizationUrl]
+    [authorizationSession, clearAuthorizationTimer, completeAuthorization, tryOpenAuthorizationUrl, intl]
   );
 
   useEffect(() => {
@@ -737,7 +741,7 @@ const ConnectorControl = ({
       setAuthorizingConnector(connectorForAuthorization);
       setAuthorizationSession(undefined);
     },
-    [abortCredentialVerification, invalidateAuthorizationRequests, loadAuthorizedConnectors]
+    [abortCredentialVerification, invalidateAuthorizationRequests, loadAuthorizedConnectors, intl]
   );
 
   useEffect(() => {
@@ -777,7 +781,7 @@ const ConnectorControl = ({
         })
       );
     } catch {
-      message.error('连接器启用状态更新失败，请稍后重试');
+      message.error(intl.formatMessage({ id: 'connector.authorization.toggleFailed' }));
     } finally {
       setUpdatingConnectorIds((ids) => {
         const nextIds = new Set(ids);
@@ -818,20 +822,22 @@ const ConnectorControl = ({
         return;
       }
       if (!authorization.authorizationUrl && !authorization.qrCodeUrl) {
-        throw new Error('授权服务未返回授权链接或二维码');
+        throw new Error(intl.formatMessage({ id: 'connector.authorization.missingUrl' }));
       }
       if (authorization.authorizationUrl && !isSafeAuthorizationUrl(authorization.authorizationUrl)) {
-        throw new Error('授权服务返回了无效的授权链接');
+        throw new Error(intl.formatMessage({ id: 'connector.authorization.invalidUrl' }));
       }
       activeAuthorizationIdRef.current = authorization.authorizationId;
       setAuthorizationSession(authorization);
       tryOpenAuthorizationUrl(
         authorization,
-        `浏览器已阻止自动打开，请点击“打开${authorizingConnector.name}授权页”继续`
+        intl.formatMessage({ id: 'connector.authorization.openPopupBlocked' }, { v0: authorizingConnector.name })
       );
     } catch (error) {
       if (startAuthorizationGenerationRef.current !== requestGeneration) return;
-      message.error(error instanceof Error ? error.message : '发起授权失败，请稍后重试');
+      message.error(
+        error instanceof Error ? error.message : intl.formatMessage({ id: 'connector.authorization.startFailed' })
+      );
     } finally {
       if (startAuthorizationGenerationRef.current === requestGeneration) {
         setStartingAuthorization(false);
@@ -924,13 +930,20 @@ const ConnectorControl = ({
   const renderConnectorAction = (connector: Connector) => {
     if (catalogRefreshing) {
       return (
-        <span aria-label={`${connector.name}状态刷新中`} className={styles.refreshingIcon} role="status">
+        <span
+          aria-label={intl.formatMessage({ id: 'connector.authorization.refreshing' }, { v0: connector.name })}
+          className={styles.refreshingIcon}
+          role="status"
+        >
           <LoadingOutlined />
         </span>
       );
     }
     if (connector.enableFlag === 'Y' || connector.enableFlag === 'N') {
-      const switchLabel = connector.enableFlag === 'Y' ? `停用${connector.name}` : `启用${connector.name}`;
+      const switchLabel =
+        connector.enableFlag === 'Y'
+          ? intl.formatMessage({ id: 'connector.authorization.disable' }, { v0: connector.name })
+          : intl.formatMessage({ id: 'connector.authorization.enable' }, { v0: connector.name });
       return (
         <>
           {(connector.enableFlag === 'Y' || connector.enableFlag === 'N') && (
@@ -967,7 +980,7 @@ const ConnectorControl = ({
             trigger={['hover', 'click']}
           >
             <Button
-              aria-label={`更多${connector.name}操作`}
+              aria-label={intl.formatMessage({ id: 'connector.moreActions' }, { name: connector.name })}
               className={`${styles.moreActionButton} ${inline ? styles.inlineMoreActionButton : ''}`}
               disabled={revokingConnectorIds.has(connector.id)}
               loading={revokingConnectorIds.has(connector.id)}
@@ -1010,28 +1023,42 @@ const ConnectorControl = ({
     let credentialLifecycleExpired = false;
 
     if (connector.credentialState === 'REAUTH_REQUIRED') {
-      credentialLifecycleText = '授权已失效，请重新连接';
+      credentialLifecycleText = intl.formatMessage({ id: 'connector.authorization.reconnect' });
       credentialLifecycleExpired = true;
     } else if (connector.credentialState === 'UNKNOWN') {
       credentialLifecycleText =
-        connector.renewalMode === 'REFRESH_TOKEN' ? '自动续期，授权有效期同步中' : '授权状态待同步';
+        connector.renewalMode === 'REFRESH_TOKEN'
+          ? intl.formatMessage({ id: 'connector.authorization.syncingExpiry' })
+          : intl.formatMessage({ id: 'connector.authorization.pendingSync' });
     } else if (connector.credentialState === 'REFRESH_NEEDED') {
       credentialLifecycleText = credentialExpiration
-        ? `将在下次使用时自动续期，预计授权有效至 ${credentialExpiration.formattedTime}`
-        : '将在下次使用时自动续期';
+        ? intl.formatMessage(
+          { id: 'connector.authorization.renewOnUseUntil' },
+          { v0: credentialExpiration.formattedTime }
+        )
+        : intl.formatMessage({ id: 'connector.authorization.renewOnUse' });
     } else if (usesLifecycleMetadata && credentialExpiration) {
       credentialLifecycleText =
         connector.credentialState === 'EXPIRING'
-          ? `授权即将失效，预计有效至 ${credentialExpiration.formattedTime}`
-          : `预计授权有效至 ${credentialExpiration.formattedTime}`;
+          ? intl.formatMessage(
+            { id: 'connector.authorization.expiringUntil' },
+            { v0: credentialExpiration.formattedTime }
+          )
+          : intl.formatMessage(
+            { id: 'connector.authorization.expectedUntil' },
+            { v0: credentialExpiration.formattedTime }
+          );
     } else if (usesLifecycleMetadata && connector.renewalMode === 'REFRESH_TOKEN') {
-      credentialLifecycleText = '自动续期';
+      credentialLifecycleText = intl.formatMessage({ id: 'connector.authorization.autoRenew' });
     } else if (usesLifecycleMetadata && connector.renewalMode === 'PROBE_ONLY' && lastVerifiedAt) {
-      credentialLifecycleText = `最近验证于 ${lastVerifiedAt.formattedTime}`;
+      credentialLifecycleText = intl.formatMessage(
+        { id: 'connector.authorization.lastVerified' },
+        { v0: lastVerifiedAt.formattedTime }
+      );
     } else if (credentialExpiration) {
       credentialLifecycleText = credentialExpiration.expired
-        ? `授权已于 ${credentialExpiration.formattedTime} 过期`
-        : `授权有效期至 ${credentialExpiration.formattedTime}`;
+        ? intl.formatMessage({ id: 'connector.authorization.expiredAt' }, { v0: credentialExpiration.formattedTime })
+        : intl.formatMessage({ id: 'connector.authorization.validUntil' }, { v0: credentialExpiration.formattedTime });
       credentialLifecycleExpired = credentialExpiration.expired;
     }
 
@@ -1098,8 +1125,13 @@ const ConnectorControl = ({
           interactive={!outside || !!onOpenResourcePicker}
         />
       ) : outside ? null : (
-        <Tooltip title="连接器">
-          <span aria-label="连接器设置" className={styles.trigger} role="button" onClick={openSettings}>
+        <Tooltip title={intl.formatMessage({ id: 'queryInput.tools.connector' })}>
+          <span
+            aria-label={intl.formatMessage({ id: 'connector.settings.title' })}
+            className={styles.trigger}
+            role="button"
+            onClick={openSettings}
+          >
             <LinkOutlined />
           </span>
         </Tooltip>
@@ -1122,7 +1154,7 @@ const ConnectorControl = ({
             <span className={styles.modalTitleIcon} aria-hidden="true">
               <DatabaseOutlined />
             </span>
-            <span>连接器设置</span>
+            <span>{intl.formatMessage({ id: 'connector.settings.title' })}</span>
           </span>
         }
         onCancel={() => setSettingsOpen(false)}
@@ -1131,7 +1163,12 @@ const ConnectorControl = ({
           <div className={styles.connectorList}>
             {previewConnectors.length
               ? previewConnectors.map((connector) => renderConnectorItem(connector))
-              : !loadingConnectors && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />}
+              : !loadingConnectors && (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={intl.formatMessage({ id: 'connector.empty' })}
+                />
+              )}
           </div>
         </Spin>
         {connectors.length > 0 && (
@@ -1144,7 +1181,7 @@ const ConnectorControl = ({
             }}
           >
             <SettingOutlined />
-            查看全部连接器
+            {intl.formatMessage({ id: 'connector.viewAll' })}
           </button>
         )}
       </Modal>
@@ -1169,7 +1206,7 @@ const ConnectorControl = ({
             </div>
             {oauthHelp ? (
               <>
-                <h2>连接 {authorizingConnector.name}</h2>
+                <h2>{intl.formatMessage({ id: 'connector.connectNamed' }, { name: authorizingConnector.name })}</h2>
                 <CredentialHelpCard helpText={oauthHelp.helpText!} />
                 <a
                   className={styles.credentialHelpLink}
@@ -1177,37 +1214,38 @@ const ConnectorControl = ({
                   rel="noopener noreferrer"
                   target="_blank"
                 >
-                  {oauthHelp.helpLinkText || '查看授权说明'}
+                  {oauthHelp.helpLinkText || intl.formatMessage({ id: 'connector.authorizationHelp' })}
                 </a>
               </>
             ) : (
               <>
-                <h2>连接 {authorizingConnector.name} 作为 AI 知识库</h2>
-                <p>授权后，助手将能读取你有权限访问的内容，为你提供总结、智能问答和检索服务。</p>
+                <h2>{intl.formatMessage({ id: 'connector.connectKnowledge' }, { name: authorizingConnector.name })}</h2>
+                <p>{intl.formatMessage({ id: 'connector.authorizationDescription' })}</p>
                 <div className={styles.permissionBlock}>
-                  <strong>即将获取以下权限</strong>
+                  <strong>{intl.formatMessage({ id: 'connector.requestedPermissions' })}</strong>
                   <div>
                     <GlobalOutlined />
                     <span>
-                      <b>读取知识库与内容</b>
-                      <small>读取你有权限访问的内容</small>
+                      <b>{intl.formatMessage({ id: 'connector.readContent' })}</b>
+                      <small>{intl.formatMessage({ id: 'connector.readContentDescription' })}</small>
                     </span>
                   </div>
                   <div>
                     <FileTextOutlined />
                     <span>
-                      <b>编辑与管理内容</b>
-                      <small>用于整理、创建和管理授权范围内的内容</small>
+                      <b>{intl.formatMessage({ id: 'connector.manageContent' })}</b>
+                      <small>{intl.formatMessage({ id: 'connector.manageContentDescription' })}</small>
                     </span>
                   </div>
                 </div>
               </>
             )}
             <Button type="primary" block loading={startingAuthorization} size="large" onClick={startAuthorization}>
-              立即前往授权
+              {intl.formatMessage({ id: 'connector.authorizeNow' })}
             </Button>
             <small className={styles.privacyTip}>
-              <CheckCircleFilled /> 仅在执行 AI 任务时调用数据，严格保护隐私
+              <CheckCircleFilled />
+              {intl.formatMessage({ id: 'connector.privacyHint' })}
             </small>
           </div>
         )}
@@ -1235,8 +1273,8 @@ const ConnectorControl = ({
             <header className={styles.credentialHeader}>
               <ConnectorIcon connector={authorizingConnector} />
               <div>
-                <h2>连接 {authorizingConnector.name}</h2>
-                <p>凭据将加密保存，仅在连接器启用时使用。</p>
+                <h2>{intl.formatMessage({ id: 'connector.connectNamed' }, { name: authorizingConnector.name })}</h2>
+                <p>{intl.formatMessage({ id: 'connector.credentialSecurity' })}</p>
               </div>
             </header>
             <Form<CredentialValues>
@@ -1256,7 +1294,8 @@ const ConnectorControl = ({
                     rel="noopener noreferrer"
                     target="_blank"
                   >
-                    {credentialSchema.helpLinkText?.trim() || `前往${authorizingConnector.name}获取凭据`}
+                    {credentialSchema.helpLinkText?.trim() ||
+                      intl.formatMessage({ id: 'connector.getCredentials' }, { name: authorizingConnector.name })}
                   </a>
                 )}
                 <CredentialFields
@@ -1266,10 +1305,10 @@ const ConnectorControl = ({
               </div>
               <div className={styles.credentialActions}>
                 <Button disabled={startingAuthorization} onClick={() => void cancelAuthorization()}>
-                  取消
+                  {intl.formatMessage({ id: 'common.cancel' })}
                 </Button>
                 <Button htmlType="submit" loading={startingAuthorization} type="primary">
-                  保存并连接
+                  {intl.formatMessage({ id: 'connector.saveAndConnect' })}
                 </Button>
               </div>
             </Form>
@@ -1290,22 +1329,27 @@ const ConnectorControl = ({
         {authorizingConnector && authorizationSession && (
           <div className={styles.qrContent}>
             <ConnectorIcon connector={authorizingConnector} />
-            <h2>授权 {authorizingConnector.name}</h2>
+            <h2>
+              {intl.formatMessage(
+                { id: 'connector.authorization.authorizeNamed' },
+                { name: authorizingConnector.name }
+              )}
+            </h2>
             <p>
               {authorizationSession.phase === 'app_initialization'
-                ? '请在飞书页面创建并初始化应用，完成后将继续账号授权。'
-                : '完成平台授权后，本窗口会自动同步授权结果。'}
+                ? intl.formatMessage({ id: 'connector.authorization.feishuSetup' })
+                : intl.formatMessage({ id: 'connector.authorization.syncHint' })}
             </p>
             {authorizationSession.qrCodeUrl ? (
               <img
-                alt={`${authorizingConnector.name}授权二维码`}
+                alt={intl.formatMessage({ id: 'connector.authorization.qrCode' }, { v0: authorizingConnector.name })}
                 className={styles.qrCodeImage}
                 src={authorizationSession.qrCodeUrl}
               />
             ) : (
               <div className={styles.authorizationLinkTip}>
                 <QrcodeOutlined />
-                <span>请在新窗口完成授权</span>
+                <span>{intl.formatMessage({ id: 'connector.authorization.newWindowHint' })}</span>
               </div>
             )}
             {authorizationSession.authorizationUrl && (
@@ -1316,15 +1360,15 @@ const ConnectorControl = ({
                 type="primary"
               >
                 {authorizationSession.phase === 'user_authorization'
-                  ? '继续授权'
-                  : `打开 ${authorizingConnector.name} 授权页`}
+                  ? intl.formatMessage({ id: 'connector.authorization.continue' })
+                  : intl.formatMessage({ id: 'connector.authorization.openPage' }, { v0: authorizingConnector.name })}
               </Button>
             )}
             <Button block loading={checkingAuthorization} type="link" onClick={() => void checkAuthorizationStatus()}>
-              我已完成授权，立即检查
+              {intl.formatMessage({ id: 'connector.authorization.checkNow' })}
             </Button>
             <Button type="link" onClick={() => void cancelAuthorization()}>
-              取消连接
+              {intl.formatMessage({ id: 'connector.authorization.disconnect' })}
             </Button>
           </div>
         )}

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.capability.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -250,7 +252,7 @@ public class AgentCapabilityCardService {
     private void validateInput(AgentCapabilityCompileInput input) {
         AgentCapabilityCompileInput.Agent agent = input.getAgent();
         if (agent == null || StringUtils.isBlank(agent.getName())) {
-            throw new BaseException("Agent name is required");
+            throw new BaseException(I18nUtil.get("capability.agentName.required"));
         }
         boolean hasEvidence = StringUtils.isNotBlank(agent.getDescription())
             || StringUtils.isNotBlank(agent.getInstructions())
@@ -259,7 +261,7 @@ public class AgentCapabilityCardService {
             || (agent.getKnowledgeDomains() != null && !agent.getKnowledgeDomains().isEmpty())
             || (agent.getExamples() != null && !agent.getExamples().isEmpty());
         if (!hasEvidence) {
-            throw new BaseException("At least one capability source is required");
+            throw new BaseException(I18nUtil.get("capability.source.required"));
         }
     }
 
@@ -558,7 +560,7 @@ public class AgentCapabilityCardService {
             }
             return null;
         } catch (Exception e) {
-            throw new BaseException("Capability model returned invalid JSON", e);
+            throw new BaseException(I18nUtil.get("capability.model.invalidJson"), e);
         }
     }
 
@@ -570,7 +572,7 @@ public class AgentCapabilityCardService {
         int start = withoutFence.indexOf('{');
         int end = withoutFence.lastIndexOf('}');
         if (start < 0 || end <= start) {
-            throw new BaseException("No JSON object found");
+            throw new BaseException(I18nUtil.get("capability.model.noObject"));
         }
         return withoutFence.substring(start, end + 1);
     }

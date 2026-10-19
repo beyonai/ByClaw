@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -51,7 +53,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-class UserMailAccountApplicationServiceTest {
+class UserMailAccountApplicationServiceTest extends I18nTestSupport {
 
     private MailPrivateParamStore mapper;
     private UserMailAccountApplicationService service;

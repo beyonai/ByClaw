@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -7,7 +9,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import org.junit.jupiter.api.Test;
 
-class TenantGroupManagementRecallTest {
+class TenantGroupManagementRecallTest extends I18nTestSupport {
     @Test
     void forwardsRecallIdentityAndContentToTheResponseAndOnlineMembers() throws Exception {
         var mapper = new ObjectMapper();

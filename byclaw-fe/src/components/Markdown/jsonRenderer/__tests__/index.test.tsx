@@ -4,9 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import JsonRenderer from '..';
 
 jest.mock('@umijs/max', () => ({
-  useIntl: () => ({
-    formatMessage: ({ id }: { id: string }) => id,
-  }),
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
 }));
 
 describe('JsonRenderer', () => {

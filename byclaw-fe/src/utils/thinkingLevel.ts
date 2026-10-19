@@ -1,3 +1,5 @@
+import { getIntl } from '@umijs/max';
+
 /**
  * 会话级「思考强度」前端单一事实来源。
  *
@@ -10,16 +12,16 @@ export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhig
 
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
-/** 档位展示名（仅 UI 文案，不参与传输）。 */
-export const THINKING_LEVEL_LABELS: Record<string, string> = {
-  off: '关闭',
-  minimal: '极简',
-  low: '简略',
-  medium: '适中',
-  high: '深入',
-  xhigh: '极深',
-  adaptive: '自动',
-  max: '极效',
+/** 档位仅保存消息键，展示时再按当前语言翻译，不参与传输。 */
+const THINKING_LEVEL_MESSAGE_IDS: Record<ThinkingLevel, string> = {
+  off: 'thinking.level.off',
+  minimal: 'thinking.level.minimal',
+  low: 'thinking.level.low',
+  medium: 'thinking.level.medium',
+  high: 'thinking.level.high',
+  xhigh: 'thinking.level.xhigh',
+  adaptive: 'thinking.level.adaptive',
+  max: 'thinking.level.max',
 };
 
 /** 模型列表接口返回的 reasoningConfig 子集。 */
@@ -41,7 +43,7 @@ export function normalizeThinkingLevel(value?: string | null): ThinkingLevel | u
 }
 export function thinkingLevelLabel(value?: string | null): string {
   const level = normalizeThinkingLevel(value);
-  return level ? THINKING_LEVEL_LABELS[level] || level : '';
+  return level ? getIntl().formatMessage({ id: THINKING_LEVEL_MESSAGE_IDS[level] }) : '';
 }
 
 /** 该模型是否支持会话级思考强度控制（capability 缺省或 unsupported 时不可控）。 */
@@ -71,12 +73,12 @@ export function thinkingLevelsFor(reasoning?: ModelReasoningConfig): ThinkingLev
 /** 所有可调模型统一显示为分档能力。 */
 export function thinkingCapabilityTag(reasoning?: ModelReasoningConfig): string | undefined {
   if (!isReasoningSelectable(reasoning)) return undefined;
-  return '支持分档';
+  return getIntl().formatMessage({ id: 'thinking.capability' });
 }
 
 /** 所有能力类型共用同一个面板标题。 */
 export function thinkingPanelTitle(): string {
-  return '推理强度';
+  return getIntl().formatMessage({ id: 'thinking.title' });
 }
 
 /** 该模型在当前选择下的默认档位（「跟随默认」时展示的位置）。 */
@@ -94,9 +96,9 @@ export function thinkingPanelHint(params: {
   preview: boolean;
   explicitLevel?: string;
 }): string {
-  if (params.preview) return '悬停预览，点击模型后可调整';
-  if (params.explicitLevel) return '已应用，从下一条消息生效';
-  return '当前跟随模型默认档位';
+  if (params.preview) return getIntl().formatMessage({ id: 'thinking.previewHint' });
+  if (params.explicitLevel) return getIntl().formatMessage({ id: 'thinking.appliedHint' });
+  return getIntl().formatMessage({ id: 'thinking.defaultHint' });
 }
 
 /**

@@ -357,7 +357,7 @@ public class ResourceApplicationService {
 
             ByaiSession session = sessionService.findById(Long.valueOf(sessionId));
             if (Objects.isNull(session)) {
-                return ResponseUtil.fail("会话不存在");
+                return ResponseUtil.fail(I18nUtil.get("groupchat.context.notFound"));
             }
 
             List<String> tagList = buildSearchTags(session, sessionId, taskId);

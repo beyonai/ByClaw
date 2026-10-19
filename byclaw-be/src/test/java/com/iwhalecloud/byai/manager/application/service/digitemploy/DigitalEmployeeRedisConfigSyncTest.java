@@ -29,7 +29,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class DigitalEmployeeRedisConfigSyncTest {
+class DigitalEmployeeRedisConfigSyncTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private DigitalEmployeeApplicationService service;
 

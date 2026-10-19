@@ -26,7 +26,7 @@ import { Alert, Button, Divider, Form, message, Modal, Result, Space, Spin, Tool
 import classnames from 'classnames';
 import dayjs from 'dayjs';
 import { debounce, isEmpty, set, noop, isString, omit } from 'lodash';
-import { connect, history, useDispatch, useIntl, useLocation, getLocale } from '@umijs/max';
+import { getIntl, connect, history, useDispatch, useIntl, useLocation, getLocale } from '@umijs/max';
 import { agentHandler } from '@/pages/manager/utils/agent';
 import useGlobal from '@/pages/manager/hooks/useGlobal';
 import BaseListModal from '../components/BaseListModal';
@@ -1199,7 +1199,7 @@ const EmployeeDetail = ({ loading }) => {
               .filter(Boolean)
               .map((toolCode) => ({
                 resourceId: toolCode,
-                resourceName: toolCode === '*' ? '全部工具' : toolCode,
+                resourceName: toolCode === '*' ? getIntl().formatMessage({ id: 'ui.employee.tools.all' }) : toolCode,
                 grantResourceType: 'TOOLKIT',
                 description: '',
                 relTools: toolCode,
@@ -1275,7 +1275,7 @@ const EmployeeDetail = ({ loading }) => {
       relTools.forEach((toolCode) => {
         defaultSkills.push({
           resourceId: toolCode,
-          resourceName: toolCode === '*' ? '全部工具' : toolCode,
+          resourceName: toolCode === '*' ? getIntl().formatMessage({ id: 'ui.employee.tools.all' }) : toolCode,
           grantResourceType: 'TOOLKIT',
           description: '',
           relTools: toolCode,
@@ -1624,16 +1624,18 @@ const EmployeeDetail = ({ loading }) => {
           try {
             const outcome = await officialUpdate.save(String(currentResourceId), savePayload);
             if (outcome === 'submitted') {
-              setOfficialUpdateNotice(intl.formatMessage({ id: 'approvalCenter.employeeUpdatePending' }));
+              setOfficialUpdateNotice('approvalCenter.employeeUpdatePending');
               setIsConfigChanged(false);
               getCompositeAppInfo('reload');
               EventEmitter?.emit('digitalEmployees-refresh-list', { refresh: true });
-              message.success('更新申请已提交，等待管理员审核');
+              message.success(intl.formatMessage({ id: 'employeePublication.updateSubmitted' }));
             } else if (outcome === 'draft') {
-              setOfficialUpdateNotice('修改已存为更新草稿，尚未提交审核，在用版本保持不变。');
+              setOfficialUpdateNotice('employeePublication.updateDraftNotice');
             }
           } catch (error) {
-            message.error(publicationErrorMessage(error, '无法提交员工更新，请稍后重试'));
+            message.error(
+              publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.updateSubmitFailed' }))
+            );
           } finally {
             setSubmitLoading(false);
             setAuditLoading(false);
@@ -2045,19 +2047,22 @@ const EmployeeDetail = ({ loading }) => {
         {publicationLoadError ? (
           <Result
             status="warning"
-            title="发布配置加载失败"
+            title={intl.formatMessage({ id: 'employeePublication.configLoadFailed' })}
             subTitle={publicationLoadError}
             extra={[
               <Button key="retry" type="primary" onClick={retryPublication}>
-                重新加载
+                {intl.formatMessage({ id: 'employeePublication.reload' })}
               </Button>,
               <Button key="back" onClick={() => history.replace('/myEmployees')}>
-                返回员工列表
+                {intl.formatMessage({ id: 'employeePublication.backToList' })}
               </Button>,
             ]}
           />
         ) : (
-          <PublicationLoading title="正在加载待发布配置" onBack={() => history.replace('/myEmployees')} />
+          <PublicationLoading
+            title={intl.formatMessage({ id: 'employeePublication.loadingConfig' })}
+            onBack={() => history.replace('/myEmployees')}
+          />
         )}
       </Modal>
       {renderHeader}
@@ -2067,9 +2072,7 @@ const EmployeeDetail = ({ loading }) => {
           showIcon
           type="info"
           style={{ margin: '8px 24px' }}
-          message={
-            officialUpdateNotice || '你正在编辑官方员工的在用配置。保存后需提交更新审核，通过前不影响大家使用当前版本。'
-          }
+          message={intl.formatMessage({ id: officialUpdateNotice || 'employeePublication.editOfficialNotice' })}
         />
       )}
       {publicationId && publicationDetail && (

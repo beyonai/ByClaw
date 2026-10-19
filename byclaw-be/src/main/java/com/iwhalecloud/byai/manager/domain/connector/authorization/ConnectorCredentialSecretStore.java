@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.authorization;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 import java.util.Optional;
 
@@ -27,7 +29,7 @@ public class ConnectorCredentialSecretStore {
     @Transactional(rollbackFor = Exception.class)
     public String save(ConnectorCredentialSecret secret) {
         if (secret == null || !StringUtils.hasText(secret.accessToken())) {
-            throw new IllegalArgumentException("OAuth2 access token不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.accessTokenRequired"));
         }
         mapper.update(null, new UpdateWrapper<ConnectorCredentialSecretEntity>()
             .eq("user_id", secret.userId())
@@ -53,7 +55,7 @@ public class ConnectorCredentialSecretStore {
         row.setStatusCd("00A");
         row.setCreateTime(new Date());
         if (mapper.insert(row) != 1) {
-            throw new IllegalStateException("OAuth2凭证保存失败");
+            throw new IllegalStateException(I18nUtil.get("connector.oauth.saveFailed"));
         }
         return row.getCredentialReference();
     }
@@ -101,7 +103,7 @@ public class ConnectorCredentialSecretStore {
                 || !StringUtils.hasText(replacement.userId())
                 || replacement.connectorId() == null
                 || !StringUtils.hasText(replacement.accessToken())) {
-            throw new IllegalArgumentException("OAuth2替换凭证无效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.replacementInvalid"));
         }
         UpdateWrapper<ConnectorCredentialSecretEntity> update = new UpdateWrapper<ConnectorCredentialSecretEntity>()
             .eq("credential_reference", credentialReference)
@@ -136,7 +138,7 @@ public class ConnectorCredentialSecretStore {
             .set("status_cd", "00X")
             .set("update_time", new Date()));
         if (updated != 1) {
-            throw new IllegalStateException("OAuth2凭证撤销失败");
+            throw new IllegalStateException(I18nUtil.get("connector.oauth.revokeFailed"));
         }
     }
 }

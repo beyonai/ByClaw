@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.message;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomWsClient;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomReplyDispatcher;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.model.WecomEventMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,7 +64,7 @@ public class WecomEventService {
         // synchronously on the callback path rather than deferring to the
         // business executor.
         logger.info("WeCom enter_chat, replying welcome. reqId={}", event.getReqId());
-        dispatcher.replyWelcomeText(event.getReqId(), "您好，我是您的智能助手，请问有什么可以帮您？")
+        dispatcher.replyWelcomeText(event.getReqId(), I18nUtil.get("channel.message.greeting"))
                 .exceptionally(ex -> {
                     logger.warn("WeCom welcome reply failed. reqId={}", event.getReqId(), ex);
                     return null;

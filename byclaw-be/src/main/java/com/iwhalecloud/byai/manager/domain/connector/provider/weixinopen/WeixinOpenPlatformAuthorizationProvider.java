@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.weixinopen;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -70,21 +72,21 @@ public class WeixinOpenPlatformAuthorizationProvider implements ConnectorAuthori
             ticket = ticketStore.findCurrent(config.componentAppid())
                 .orElseThrow(() -> new MissingTicketException());
         } catch (MissingTicketException e) {
-            return failureStart("WEIXIN_COMPONENT_TICKET_UNAVAILABLE", "尚未收到微信平台票据，请稍后重试");
+            return failureStart("WEIXIN_COMPONENT_TICKET_UNAVAILABLE", I18nUtil.get("connector.weixin.ticketUnavailable"));
         } catch (RuntimeException e) {
-            return failureStart("WEIXIN_COMPONENT_CONFIG_INVALID", "第三方平台配置不完整，请联系管理员");
+            return failureStart("WEIXIN_COMPONENT_CONFIG_INVALID", I18nUtil.get("connector.weixin.configIncomplete"));
         }
         String token;
         try {
             token = client.componentToken(config.componentAppid(), config.componentAppsecret(), ticket);
         } catch (WeixinOpenPlatformClientException e) {
-            return providerFailureStart(e, "WEIXIN_COMPONENT_TOKEN_FAILED", "第三方平台令牌获取失败");
+            return providerFailureStart(e, "WEIXIN_COMPONENT_TOKEN_FAILED", I18nUtil.get("connector.weixin.tokenFailed"));
         }
         String preAuthCode;
         try {
             preAuthCode = client.createPreAuthCode(token, config.componentAppid());
         } catch (WeixinOpenPlatformClientException e) {
-            return providerFailureStart(e, "WEIXIN_PREAUTH_CODE_FAILED", "微信预授权码获取失败");
+            return providerFailureStart(e, "WEIXIN_PREAUTH_CODE_FAILED", I18nUtil.get("connector.weixin.preauthFailed"));
         }
         String state = OAuth2State.create(context.authorizationId());
         String redirectUri = appendState(config.redirectUri(), state);
@@ -108,14 +110,14 @@ public class WeixinOpenPlatformAuthorizationProvider implements ConnectorAuthori
     public AuthorizationStatusResult handleCallback(
             AuthorizationSessionContext session, AuthorizationCallback callback) {
         if (callback == null || StringUtils.hasText(callback.error())) {
-            return failure("WEIXIN_AUTHORIZATION_CODE_INVALID", "授权已失效，请重新扫码");
+            return failure("WEIXIN_AUTHORIZATION_CODE_INVALID", I18nUtil.get("connector.weixin.rescan"));
         }
         try {
             String expectedState = readState(session.providerState());
             if (!StringUtils.hasText(callback.code()) || !expectedState.equals(callback.state())
                     || !session.authorizationId().equals(OAuth2State.authorizationId(callback.state()))
                     || session.expiresAt() == null || session.expiresAt().before(new Date())) {
-                return failure("WEIXIN_AUTHORIZATION_CODE_INVALID", "授权已失效，请重新扫码");
+                return failure("WEIXIN_AUTHORIZATION_CODE_INVALID", I18nUtil.get("connector.weixin.rescan"));
             }
             WeixinOpenPlatformConfig config = configResolver.resolveDefault();
             String ticket = ticketStore.findCurrent(config.componentAppid())
@@ -134,15 +136,15 @@ public class WeixinOpenPlatformAuthorizationProvider implements ConnectorAuthori
                 token.accessExpiresAt(), null, new Date(), reference,
                 Map.of("username", profile.username(), "principalName", profile.principalName()));
         } catch (MissingTicketException e) {
-            return failure("WEIXIN_COMPONENT_TICKET_UNAVAILABLE", "尚未收到微信平台票据，请稍后重试");
+            return failure("WEIXIN_COMPONENT_TICKET_UNAVAILABLE", I18nUtil.get("connector.weixin.ticketUnavailable"));
         } catch (WeixinOpenPlatformClientException e) {
             return failure(e.isTimeout() ? "CONNECTOR_VERIFICATION_TIMEOUT" : "WEIXIN_AUTHORIZATION_CODE_INVALID",
-                e.isTimeout() ? "微信接口暂时超时，请稍后重试" : "授权已失效，请重新扫码");
+                e.isTimeout() ? I18nUtil.get("connector.weixin.timeout") : I18nUtil.get("connector.weixin.rescan"));
         } catch (WeixinAuthorizerProfileException e) {
             return failure(e.isTimeout() ? "CONNECTOR_VERIFICATION_TIMEOUT" : "WEIXIN_AUTHORIZER_INFO_INVALID",
-                e.isTimeout() ? "微信接口暂时超时，请稍后重试" : "微信返回的公众号资料不完整");
+                e.isTimeout() ? I18nUtil.get("connector.weixin.timeout") : I18nUtil.get("connector.weixin.infoIncomplete"));
         } catch (RuntimeException e) {
-            return failure("WEIXIN_AUTHORIZER_INFO_INVALID", "微信返回的公众号资料不完整");
+            return failure("WEIXIN_AUTHORIZER_INFO_INVALID", I18nUtil.get("connector.weixin.infoIncomplete"));
         }
     }
 
@@ -180,10 +182,10 @@ public class WeixinOpenPlatformAuthorizationProvider implements ConnectorAuthori
             }
             return connected(binding, secret.accessExpiresAt(), secret.credentialReference());
         } catch (MissingTicketException e) {
-            return failure("WEIXIN_COMPONENT_TICKET_UNAVAILABLE", "尚未收到微信平台票据，请稍后重试");
+            return failure("WEIXIN_COMPONENT_TICKET_UNAVAILABLE", I18nUtil.get("connector.weixin.ticketUnavailable"));
         } catch (WeixinOpenPlatformClientException e) {
             return failure(e.isTimeout() ? "CONNECTOR_VERIFICATION_TIMEOUT" : "WEIXIN_COMPONENT_TOKEN_FAILED",
-                e.isTimeout() ? "微信接口暂时超时，请稍后重试" : "微信授权状态验证失败，请稍后重试");
+                e.isTimeout() ? I18nUtil.get("connector.weixin.timeout") : I18nUtil.get("connector.weixin.verificationFailed"));
         } catch (RuntimeException e) {
             return verificationUnavailable();
         }
@@ -248,7 +250,7 @@ public class WeixinOpenPlatformAuthorizationProvider implements ConnectorAuthori
     private AuthorizationStartResult providerFailureStart(
             WeixinOpenPlatformClientException error, String code, String message) {
         return error.isTimeout()
-            ? failureStart("CONNECTOR_VERIFICATION_TIMEOUT", "微信接口暂时超时，请稍后重试")
+            ? failureStart("CONNECTOR_VERIFICATION_TIMEOUT", I18nUtil.get("connector.weixin.timeout"))
             : failureStart(code, message);
     }
 
@@ -257,11 +259,11 @@ public class WeixinOpenPlatformAuthorizationProvider implements ConnectorAuthori
     }
 
     private AuthorizationStatusResult revoked() {
-        return failure("WEIXIN_AUTHORIZATION_REVOKED", "公众号已取消授权，请重新连接");
+        return failure("WEIXIN_AUTHORIZATION_REVOKED", I18nUtil.get("connector.weixin.revoked"));
     }
 
     private AuthorizationStatusResult verificationUnavailable() {
-        return failure("WEIXIN_COMPONENT_TOKEN_FAILED", "微信授权状态验证失败，请稍后重试");
+        return failure("WEIXIN_COMPONENT_TOKEN_FAILED", I18nUtil.get("connector.weixin.verificationFailed"));
     }
 
     private static final class MissingTicketException extends RuntimeException {

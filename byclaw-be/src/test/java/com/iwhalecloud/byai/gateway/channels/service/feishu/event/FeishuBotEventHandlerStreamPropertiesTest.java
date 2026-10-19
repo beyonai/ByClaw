@@ -27,7 +27,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class FeishuBotEventHandlerStreamPropertiesTest {
+class FeishuBotEventHandlerStreamPropertiesTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ChannelService previousFeishuChannelService;

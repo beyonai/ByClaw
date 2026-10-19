@@ -3,21 +3,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Anchor, Button, Card, Tag, Tooltip, message } from 'antd';
 import { CheckOutlined, CloudDownloadOutlined, CopyOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useIntl } from '@umijs/max';
+import { getLocale, useIntl } from '@umijs/max';
 
 import { getRuntimeActualUrl } from '@/utils';
 import { copyTextToClipboard } from '@/utils/copy';
-import {
-  E2E_DEMO_DIR,
-  E2E_DEMOS,
-  E2E_RESULT_DIR_TREE,
-  E2E_SCRIPT_SKELETON,
-  E2E_SPEC_SECTIONS,
-  E2E_STATUS_ENUM,
-  E2E_STATUS_JSON,
-  E2E_SUITE_CONTRACT,
-  type E2eDemoKind,
-} from './contracts';
+import { E2E_DEMO_DIR, getE2eContractExamples, E2E_DEMOS, E2E_SPEC_SECTIONS, type E2eDemoKind } from './contracts';
 import styles from './index.module.less';
 
 /** 三方职责:规范最大的认知负担是「我是哪类人、该读哪份」,先用一张图分流。 */
@@ -35,6 +25,7 @@ const SCROLL_OFFSET = 24;
 
 const SpecPage: React.FC = () => {
   const intl = useIntl();
+  const examples = getE2eContractExamples(getLocale());
   // 复制成功后短暂回显对勾,避免用户不确定有没有复制上。
   const [copiedKey, setCopiedKey] = useState<string>('');
   // 滚动发生在本页容器上而非 window。Anchor 必须拿到它才能定位,
@@ -89,12 +80,9 @@ const SpecPage: React.FC = () => {
 
   const anchorItems = useMemo(
     () =>
-      [
-        E2E_SPEC_SECTIONS.roles,
-        E2E_SPEC_SECTIONS.demo,
-        E2E_SPEC_SECTIONS.suite,
-        E2E_SPEC_SECTIONS.orchestrator,
-      ].map((key) => ({ key, href: `#${key}`, title: t(`anchor.${key}`) })),
+      [E2E_SPEC_SECTIONS.roles, E2E_SPEC_SECTIONS.demo, E2E_SPEC_SECTIONS.suite, E2E_SPEC_SECTIONS.orchestrator].map(
+        (key) => ({ key, href: `#${key}`, title: t(`anchor.${key}`) })
+      ),
     [intl]
   );
 
@@ -179,21 +167,21 @@ const SpecPage: React.FC = () => {
         {/* ③ 用例集作者:只需产 JUnit + 退出码 + 失败证据,不碰整轮状态机。 */}
         {renderSectionTitle(E2E_SPEC_SECTIONS.suite, '③')}
         <p className={styles.sectionIntro}>{t('suite.intro')}</p>
-        {renderCode('suite', E2E_SUITE_CONTRACT)}
+        {renderCode('suite', examples.suiteContract)}
 
         {/* ④ 编排层:目录 + status.json 契约 + 状态枚举 + 脚本骨架。 */}
         {renderSectionTitle(E2E_SPEC_SECTIONS.orchestrator, '④')}
         <p className={styles.sectionIntro}>{t('orchestrator.intro')}</p>
 
         <h3 className={styles.subTitle}>{t('orchestrator.treeTitle')}</h3>
-        {renderCode('tree', E2E_RESULT_DIR_TREE)}
+        {renderCode('tree', examples.resultDirTree)}
 
         <h3 className={styles.subTitle}>{t('orchestrator.statusTitle')}</h3>
-        {renderCode('status', E2E_STATUS_JSON)}
+        {renderCode('status', examples.statusJson)}
 
         <h3 className={styles.subTitle}>{t('orchestrator.enumTitle')}</h3>
         <div className={styles.enumList}>
-          {E2E_STATUS_ENUM.map((item) => (
+          {examples.statuses.map((item) => (
             <div className={styles.enumRow} key={item.code}>
               <Tag className={styles.enumCode}>{item.code}</Tag>
               <span>{item.meaning}</span>
@@ -202,7 +190,7 @@ const SpecPage: React.FC = () => {
         </div>
 
         <h3 className={styles.subTitle}>{t('orchestrator.scriptTitle')}</h3>
-        {renderCode('script', E2E_SCRIPT_SKELETON)}
+        {renderCode('script', examples.scriptSkeleton)}
       </div>
 
       {/* 长页必备:右侧锚点导航。

@@ -13,16 +13,10 @@ import WorkgroupTemplateMgr from '..';
 
 let mockLanguage = 'zh-CN';
 
-jest.mock('@umijs/max', () => {
-  const messages: Record<string, Record<string, string>> = {
-    'zh-CN': jest.requireActual('@/locales/zh-CN/manager').default,
-    'en-US': jest.requireActual('@/locales/en-US/manager').default,
-  };
-  return {
-    useSelector: (selector: (state: unknown) => unknown) => selector({ user: { userInfo: { userCode: 'adminvip' } } }),
-    useIntl: () => ({ formatMessage: ({ id }: { id: string }) => messages[mockLanguage][id] || id }),
-  };
-});
+jest.mock('@umijs/max', () => ({
+  useSelector: (selector: (state: unknown) => unknown) => selector({ user: { userInfo: { userCode: 'adminvip' } } }),
+  useIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLanguage),
+}));
 
 jest.mock('antd', () => {
   const actual = jest.requireActual('antd');
@@ -89,7 +83,9 @@ const openNewTemplate = async (catalogId = '54') => {
     render(<WorkgroupTemplateMgr />);
   });
   // 通过唯一文案定位入口，避免每次交互都计算整张 AntD 表格的可访问名称和可见性。
-  const createButton = await screen.findByText('新建模板');
+  const t = (id: string) =>
+    jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLanguage).formatMessage({ id });
+  const createButton = await screen.findByText(t('workgroupTemplate.create'));
   await act(async () => {
     fireEvent.click(createButton);
   });
@@ -99,11 +95,11 @@ const openNewTemplate = async (catalogId = '54') => {
   const dialog = within(dialogElement);
   await dialog.findByText('市场营销', { selector: 'option' });
   await act(async () => {
-    fireEvent.change(dialog.getByLabelText('模板名称'), { target: { value: '测试模板' } });
-    fireEvent.change(dialog.getByLabelText('资产目录'), { target: { value: catalogId } });
-    fireEvent.change(dialog.getByLabelText('模板摘要'), { target: { value: '测试摘要' } });
-    fireEvent.change(dialog.getByLabelText('默认工作组名称'), { target: { value: '测试工作组' } });
-    fireEvent.change(dialog.getByLabelText('默认工作目标'), { target: { value: '测试目标' } });
+    fireEvent.change(dialog.getByLabelText(t('workgroupTemplate.name')), { target: { value: '测试模板' } });
+    fireEvent.change(dialog.getByLabelText(t('workgroupTemplate.catalog')), { target: { value: catalogId } });
+    fireEvent.change(dialog.getByLabelText(t('workgroupTemplate.summary')), { target: { value: '测试摘要' } });
+    fireEvent.change(dialog.getByLabelText(t('workgroupTemplate.groupName')), { target: { value: '测试工作组' } });
+    fireEvent.change(dialog.getByLabelText(t('workgroupTemplate.goal')), { target: { value: '测试目标' } });
     fireEvent.click(dialog.getByText('选择测试员工'));
   });
   return dialog;
@@ -182,7 +178,7 @@ describe('workgroup template saving', () => {
     const dialog = await openNewTemplate();
 
     await act(async () => {
-      fireEvent.click(dialog.getByText('保存模板'));
+      fireEvent.click(dialog.getByText('Save template'));
     });
 
     await waitFor(() => expect(message.error).toHaveBeenCalledWith('Failed to save template'));
@@ -241,5 +237,24 @@ describe('workgroup template saving', () => {
     expect(deleteManagedWorkgroupTemplate).toHaveBeenCalledWith('200', 3);
     expect(screen.getByText('测试模板')).toBeInTheDocument();
     expect(message.success).not.toHaveBeenCalled();
+  });
+  it('refreshes labels after a language switch while preserving template content and IDs', async () => {
+    jest.mocked(listManagedWorkgroupTemplates).mockResolvedValue([storedTemplate]);
+    const view = render(<WorkgroupTemplateMgr />);
+    await screen.findByText('测试模板');
+    mockLanguage = 'en-US';
+    view.rerender(<WorkgroupTemplateMgr />);
+    expect(screen.getByRole('heading', { name: 'Workgroup templates' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Edit'));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByLabelText('Template name')).toHaveValue('测试模板');
+    expect(dialog.getByLabelText('Asset catalog')).toHaveValue('54');
+    fireEvent.click(dialog.getByText('Save template'));
+    await waitFor(() =>
+      expect(updateManagedWorkgroupTemplate).toHaveBeenCalledWith(
+        '200',
+        expect.objectContaining({ templateName: '测试模板', catalogId: '54', expectedVersion: 3 })
+      )
+    );
   });
 });

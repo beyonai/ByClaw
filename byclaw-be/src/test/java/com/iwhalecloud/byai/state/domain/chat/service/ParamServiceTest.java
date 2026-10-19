@@ -20,7 +20,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class ParamServiceTest {
+class ParamServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private ParamService service;
     private SsResourceService ssResourceService;

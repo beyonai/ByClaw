@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.controller;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;

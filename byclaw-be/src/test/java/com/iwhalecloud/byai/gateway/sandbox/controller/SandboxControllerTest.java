@@ -38,7 +38,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
-class SandboxControllerTest {
+class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @AfterEach
     void tearDown() {

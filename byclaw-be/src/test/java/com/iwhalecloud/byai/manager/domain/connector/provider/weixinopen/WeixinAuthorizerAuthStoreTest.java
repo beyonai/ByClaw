@@ -20,7 +20,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthoriz
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 
-class WeixinAuthorizerAuthStoreTest {
+class WeixinAuthorizerAuthStoreTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void unauthorizedEventIsTransactional() throws NoSuchMethodException {

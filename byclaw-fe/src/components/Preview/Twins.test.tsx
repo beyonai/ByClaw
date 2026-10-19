@@ -402,7 +402,8 @@ describe('PreViewFile binary and relative resource handling', () => {
     expect(screen.getByTestId('source-preview')).not.toHaveTextContent('old content');
   });
 
-  it.each(['tar', 'heics', 'psd'])('shows an explicit fallback for %s and preserves download', async (type) => {
+  // TAR 已由上方归档预览用例覆盖；仅未接入解码器的格式使用不支持提示。
+  it.each(['heics', 'psd'])('shows an explicit fallback for %s and preserves download', async (type) => {
     render(<PreViewFile data={new Blob(['binary content'])} type={type} title={`file.${type}`} />);
     expect(screen.getByText('fileRender.formatUnsupported')).toBeVisible();
     fireEvent.click(screen.getByTestId('icon-a-Downloadxiazai'));

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
@@ -52,7 +54,7 @@ public class GroupChatTaskDeliveryService {
         }
         catch (IOException | RuntimeException error) {
             // 存储异常不能伪装成尚未交付；调用方可保留上次成功状态并重试。
-            throw new IllegalStateException("交付状态读取失败，请重试", error);
+            throw new IllegalStateException(I18nUtil.get("groupchat.deliveryReadFailed"), error);
         }
         return new GroupChatTaskDeliveryResponse(taskId.toString(), valid(bytes, taskId));
     }

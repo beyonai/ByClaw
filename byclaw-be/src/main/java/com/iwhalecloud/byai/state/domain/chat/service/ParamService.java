@@ -176,7 +176,7 @@ public class ParamService {
             && digitalEmployeeGroupApplicationService.isGroup(assistantChatDto.getAgentId())) {
             SsResource group = ssResourceService.findById(assistantChatDto.getAgentId());
             if (group == null) {
-                throw new ManagerRuntimeException("数字员工组不存在或已停用");
+                throw new ManagerRuntimeException(I18nUtil.get("employee.group.inactive"));
             }
             validateOrchestratorRef(assistantChatDto.getOrchestrator(), group.getResourceId());
             Map<String, Object> orchestrator = new HashMap<>();
@@ -273,7 +273,7 @@ public class ParamService {
         String id = String.valueOf(orchestrator.get("id"));
         if (!"byclaw.orchestrator-ref/v1".equals(schemaVersion) || !"EXPERT_TEAM".equals(kind)
             || !String.valueOf(groupId).equals(id)) {
-            throw new ManagerRuntimeException("orchestrator 与当前数字员工组不一致");
+            throw new ManagerRuntimeException(I18nUtil.get("employee.group.orchestratorMismatch"));
         }
     }
 

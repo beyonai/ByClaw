@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -102,7 +104,7 @@ public class TenantGroupMemberService {
 
     public List<TenantNodeModels.InvitedMember> prepareMembers(TenantRequestContext context, String type, List<Long> ids) {
         if (ids == null || ids.size() > 100 || ids.stream().anyMatch(id -> id == null || id <= 0))
-            throw new IllegalArgumentException("Invalid group members");
+            throw new IllegalArgumentException(I18nUtil.get("tenant.group.membersInvalid"));
         return ids.stream().distinct().map(id -> {
             if ("USER".equals(type)) {
                 Users user = users.selectById(id);

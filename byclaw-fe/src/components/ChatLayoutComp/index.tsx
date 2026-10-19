@@ -191,14 +191,17 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [dispatch]
   );
 
-  const openDrawerSourceFromInfo = useCallback((infoList: IResourceFromItem[]) => {
-    EventEmitter.emit('beyond-main-driver-open-type', {
-      width: '25vw',
-      title: intl.formatMessage({ id: 'sourceDrawer.title' }),
-      canClose: true,
-      drawerType: <ReferenceSource drawerSourceFromInfo={infoList} />,
-    });
-  }, []);
+  const openDrawerSourceFromInfo = useCallback(
+    (infoList: IResourceFromItem[]) => {
+      EventEmitter.emit('beyond-main-driver-open-type', {
+        width: '25vw',
+        title: intl.formatMessage({ id: 'sourceDrawer.title' }),
+        canClose: true,
+        drawerType: <ReferenceSource drawerSourceFromInfo={infoList} />,
+      });
+    },
+    [intl]
+  );
 
   const onBeforeSend = useCallback(async (param = {}) => {
     void getSandboxesInfoUrl();
@@ -727,7 +730,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
               <div className={classnames(styles.messageList, 'ub-f1 overflow-hidden')}>
                 {sessionMessageLoadState === 'loading' && (
                   <div className={styles.sessionMessageLoadNotice} role="status">
-                    <Spin size="small" /> 正在同步会话消息…
+                    <Spin size="small" />
+                    {intl.formatMessage({ id: 'chatLayout.syncing' })}
                   </div>
                 )}
                 {sessionMessageLoadState === 'error' && (
@@ -736,7 +740,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                     className={styles.sessionMessageLoadError}
                     onClick={() => void retrySessionMessageLoad()}
                   >
-                    会话消息加载失败，点击重试
+                    {intl.formatMessage({ id: 'chatLayout.loadFailedRetry' })}
                   </button>
                 )}
                 <MessageList
@@ -802,11 +806,12 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
             {externalChildSession && (
               <div className={styles.childSessionReadOnlyNotice}>
                 <span className={styles.childSessionReadOnlyCopy}>
-                  <LockOutlined />子 Agent 会话为只读，消息由外部执行器持续同步
+                  <LockOutlined />
+                  {intl.formatMessage({ id: 'chat.childSessionReadOnly' })}
                 </span>
                 <button type="button" onClick={() => setGlobalSessionId?.(`${currentSession?.parentSessionId || ''}`)}>
                   <ArrowLeftOutlined />
-                  返回主会话继续任务
+                  {intl.formatMessage({ id: 'chat.returnToParent' })}
                 </button>
               </div>
             )}

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.taskplan;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -35,7 +37,7 @@ import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanUpdateRequest;
 import com.iwhalecloud.byai.state.domain.taskplan.exception.TaskPlanCommandException;
 
-class TaskPlanApplicationServiceTest {
+class TaskPlanApplicationServiceTest extends I18nTestSupport {
 
     private ByaiAgentTaskPlanMapper planMapper;
 
@@ -64,6 +66,39 @@ class TaskPlanApplicationServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    @Test
+    void snapshotLocalizesStatusReasonsWithoutMutatingSourceTasks() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        TaskPlanSnapshot.TaskSnapshot task = new TaskPlanSnapshot.TaskSnapshot();
+        task.setTaskId("9007199254740993");
+        task.setTitle("用户任务");
+        task.setStatus("SKIPPED");
+        task.setStatusReason(new TaskPlanSnapshot.StatusReason("BLOCKED_BY_PREVIOUS_FAILURE", "前序任务失败，后续任务已跳过"));
+        TaskPlanSnapshot snapshot = org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+            service, "snapshot", new ByaiAgentTaskPlan(), List.of(task));
+        assertThat(snapshot.getTasks().get(0)).isNotSameAs(task);
+        assertThat(snapshot.getTasks().get(0).getTaskId()).isEqualTo("9007199254740993");
+        assertThat(snapshot.getTasks().get(0).getTitle()).isEqualTo("用户任务");
+        assertThat(snapshot.getTasks().get(0).getStatus()).isEqualTo("SKIPPED");
+        assertThat(snapshot.getTasks().get(0).getStatusReason().getCode()).isEqualTo("BLOCKED_BY_PREVIOUS_FAILURE");
+        assertThat(snapshot.getTasks().get(0).getStatusReason().getMessage())
+            .isEqualTo("Previous task failed; subsequent tasks were skipped");
+        assertThat(task.getStatusReason().getMessage()).isEqualTo("前序任务失败，后续任务已跳过");
+    }
+
+    @Test
+    void invalidCommandsTranslateWithoutChangingMachineReadableErrorCodes() {
+        assertThatThrownBy(() -> service.update(null)).isInstanceOf(TaskPlanCommandException.class)
+            .hasMessage("request 不能为空");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> service.update(null)).isInstanceOf(TaskPlanCommandException.class)
+            .hasMessage("request must not be null")
+            .satisfies(error -> assertThat(((TaskPlanCommandException) error).getCode()).isEqualTo("INVALID_REQUEST"));
+        assertThat(TaskPlanMessages.localize("前序任务失败，后续任务已跳过"))
+            .isEqualTo("Previous task failed; subsequent tasks were skipped");
+        assertThat(TaskPlanMessages.localize("用户取消原因")).isEqualTo("用户取消原因");
     }
 
     @Test

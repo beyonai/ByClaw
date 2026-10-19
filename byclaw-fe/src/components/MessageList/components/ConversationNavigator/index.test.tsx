@@ -9,6 +9,7 @@ const mockGetMessageOutline = jest.fn();
 
 jest.mock('@umijs/max', () => ({
   useDispatch: () => mockDispatch,
+  getIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(),
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),

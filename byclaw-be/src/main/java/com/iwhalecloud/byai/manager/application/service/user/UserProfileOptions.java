@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import java.util.List;
@@ -32,7 +34,7 @@ final class UserProfileOptions {
             List<String> interests = JSON.parseArray(value, String.class);
             if (interests == null || interests.size() > INTERESTS.size()
                 || interests.stream().anyMatch(item -> item == null || !INTERESTS.contains(item))) {
-                throw new IllegalArgumentException("invalid interests");
+                throw new IllegalArgumentException(I18nUtil.get("user.profile.interestsInvalid"));
             }
             return interests.stream().distinct().toList();
         }

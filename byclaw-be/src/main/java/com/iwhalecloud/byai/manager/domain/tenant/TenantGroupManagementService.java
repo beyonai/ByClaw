@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSONObject;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -51,7 +53,7 @@ public class TenantGroupManagementService {
                 Long target = transfer ? ((GroupChatTransferOwnershipRequest) args[1]).getUserId() : (Long) args[2];
                 if ((!transfer && !"USER".equals(args[1])) || target == null
                     || memberships.selectActiveMembership(target, tenant.enterpriseId()) == null)
-                    throw new IllegalArgumentException("Target must be an active tenant user");
+                    throw new IllegalArgumentException(I18nUtil.get("tenant.group.activeUserRequired"));
                 Map<String, Object> payload = new HashMap<>();
                 payload.put("userId", target.toString());
                 if (!transfer) payload.put("role", ((Map<?, ?>) args[3]).get("role"));
@@ -83,7 +85,7 @@ public class TenantGroupManagementService {
                 return data.write(tenant, "POST", "/direct-sessions", id, "CREATE_DIRECT_SESSION",
                     Map.of("agentId", ((DirectSessionCreateRequest) args[1]).getAgentId().toString())).data();
             }
-            default -> throw new IllegalArgumentException("Unknown tenant group operation");
+            default -> throw new IllegalArgumentException(I18nUtil.get("tenant.group.operationUnknown"));
         }
         if ("leave".equals(method) || "remove".equals(method)) {
             TenantGroupMembershipEvents.publish(events, tenant, groupId, result, "MEMBER_REMOVED",

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
@@ -122,21 +124,21 @@ public class ConnectorSkillAuthorizationSyncService {
         Long numericUserId = requireUser(userId);
         String expectedProviderCode = SKILL_CONNECTOR_PROVIDERS.get(normalizedCode);
         if (expectedProviderCode == null) {
-            throw failure("CONNECTOR_NOT_FOUND", "Connector is unavailable", false);
+            throw failure("CONNECTOR_NOT_FOUND", I18nUtil.get("connector.sync.unavailable"), false);
         }
         ConnectorInfo connector = connectorInfoService.findByCode(resolveConnectorCode(normalizedCode));
         if (connector == null || !"00A".equals(connector.getStatusCd())) {
-            throw failure("CONNECTOR_NOT_FOUND", "Connector is unavailable", false);
+            throw failure("CONNECTOR_NOT_FOUND", I18nUtil.get("connector.sync.unavailable"), false);
         }
         if (!expectedProviderCode.equals(connector.getProviderCode())) {
-            throw failure("CONNECTOR_VERIFIER_NOT_FOUND", "Connector verifier is unavailable", false);
+            throw failure("CONNECTOR_VERIFIER_NOT_FOUND", I18nUtil.get("connector.sync.verifierMissing"), false);
         }
 
         ConnectorCredentialVerifier verifier;
         try {
             verifier = verifierRegistry.get(expectedProviderCode);
         } catch (IllegalArgumentException e) {
-            throw failure("CONNECTOR_VERIFIER_NOT_FOUND", "Connector verifier is unavailable", false);
+            throw failure("CONNECTOR_VERIFIER_NOT_FOUND", I18nUtil.get("connector.sync.verifierMissing"), false);
         }
 
         Optional<String> operationLock = acquireOperationLock(userId, connector.getConnectorId());
@@ -152,9 +154,9 @@ public class ConnectorSkillAuthorizationSyncService {
             } catch (ConnectorSkillAuthorizationSyncException e) {
                 throw e;
             } catch (InvalidConnectorManifestException e) {
-                throw failure("CONNECTOR_MANIFEST_INVALID", "Connector runtime configuration is invalid", false);
+                throw failure("CONNECTOR_MANIFEST_INVALID", I18nUtil.get("connector.sync.runtimeInvalid"), false);
             } catch (RuntimeException e) {
-                throw failure("AUTH_BINDING_FAILED", "Unable to synchronize connector state", true);
+                throw failure("AUTH_BINDING_FAILED", I18nUtil.get("connector.sync.stateFailed"), true);
             }
             return ConnectorSkillAuthorizationSyncDto.connected(normalizedCode);
         } finally {
@@ -190,7 +192,7 @@ public class ConnectorSkillAuthorizationSyncService {
         try {
             return verifier.verify(userId, connector);
         } catch (RuntimeException e) {
-            throw failure("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential", true);
+            throw failure("CONNECTOR_VERIFICATION_FAILED", I18nUtil.get("connector.sync.verificationFailed"), true);
         }
     }
 
@@ -206,7 +208,7 @@ public class ConnectorSkillAuthorizationSyncService {
 
     private String normalizeConnectorCode(String connectorCode) {
         if (!StringUtils.hasText(connectorCode)) {
-            throw failure("CONNECTOR_NOT_FOUND", "Connector is unavailable", false);
+            throw failure("CONNECTOR_NOT_FOUND", I18nUtil.get("connector.sync.unavailable"), false);
         }
         return connectorCode.trim();
     }
@@ -219,7 +221,7 @@ public class ConnectorSkillAuthorizationSyncService {
 
     private Long requireUser(String userId) {
         if (!StringUtils.hasText(userId)) {
-            throw failure("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential", false);
+            throw failure("CONNECTOR_VERIFICATION_FAILED", I18nUtil.get("connector.sync.verificationFailed"), false);
         }
         try {
             Long numericUserId = Long.parseLong(userId.trim());
@@ -228,7 +230,7 @@ public class ConnectorSkillAuthorizationSyncService {
             }
             return numericUserId;
         } catch (NumberFormatException e) {
-            throw failure("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential", false);
+            throw failure("CONNECTOR_VERIFICATION_FAILED", I18nUtil.get("connector.sync.verificationFailed"), false);
         }
     }
 
@@ -299,7 +301,7 @@ public class ConnectorSkillAuthorizationSyncService {
             String errorCode,
             String message,
             boolean retryable) {
-        return new ConnectorSkillAuthorizationSyncException(errorCode, message, retryable);
+        return new ConnectorSkillAuthorizationSyncException(errorCode, ConnectorMessages.localize(message), retryable);
     }
 
 }

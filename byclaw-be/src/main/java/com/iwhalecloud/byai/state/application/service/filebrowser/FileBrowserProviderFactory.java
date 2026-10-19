@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.application.service.filebrowser;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.Map;
 
 import org.springframework.stereotype.Component;
@@ -44,7 +45,7 @@ public class FileBrowserProviderFactory {
     public FileBrowserProvider getProvider(FileBrowserType type) {
         FileBrowserProvider provider = providers.get(type);
         if (provider == null) {
-            throw new IllegalArgumentException("不支持的文件浏览器类型: " + type);
+            throw new IllegalArgumentException(I18nUtil.get("fileBrowser.provider.unsupported", type));
         }
         return provider;
     }

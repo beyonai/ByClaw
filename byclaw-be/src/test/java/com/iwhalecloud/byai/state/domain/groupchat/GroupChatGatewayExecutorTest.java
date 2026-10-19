@@ -459,7 +459,7 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         context.traceId = execution.getTraceId();
         context.assistantChatDto.setAgentId(41L);
         assertThatThrownBy(() -> executor.decorate(context, "继续", new HashMap<>()))
-            .hasMessageContaining("identity does not match");
+            .hasMessageContaining("运行身份与派发任务不匹配");
         verifyNoInteractions(historyFiles);
     }
 

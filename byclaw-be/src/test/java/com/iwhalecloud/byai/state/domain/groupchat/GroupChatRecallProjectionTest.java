@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
@@ -28,7 +30,7 @@ import com.iwhalecloud.byai.common.message.qo.MessageHotQo;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
-class GroupChatRecallProjectionTest {
+class GroupChatRecallProjectionTest extends I18nTestSupport {
     private Object previousRedis;
     private ValueOperations<String, String> values;
 
@@ -157,5 +159,18 @@ class GroupChatRecallProjectionTest {
         message.setRecalledAt(new Date(100));
         message.setRecalledBy(8L);
         return message;
+    }
+
+    @org.junit.jupiter.api.Test
+    void localizesRecalledReferencesWithoutExposingOriginalContentOrFormattingIds() {
+        com.iwhalecloud.byai.common.message.entity.ByaiMessage source = new com.iwhalecloud.byai.common.message.entity.ByaiMessage();
+        source.setMessageContent("private original content");
+        source.setRecalledAt(new java.util.Date());
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThat(GroupChatRecallProjection.referenceContent(source)).isEqualTo("Message recalled");
+        assertThat(new GroupChatRecallProjection().operatorName(9007199254740993L)).isEqualTo("User (9007199254740993)");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThat(GroupChatRecallProjection.referenceContent(source)).isEqualTo("消息已撤回");
+        assertThat(source.getMessageContent()).isEqualTo("private original content");
     }
 }

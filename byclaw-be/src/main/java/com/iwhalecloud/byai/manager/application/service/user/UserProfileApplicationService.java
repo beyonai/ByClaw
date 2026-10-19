@@ -53,7 +53,7 @@ public class UserProfileApplicationService {
         }
         Users user = usersMapper.selectById(loginInfo.getUserId());
         if (user == null || !UserState.ACTIVE.equals(user.getState())) {
-            throw new BaseException("用户不存在或已禁用");
+            throw new BaseException("user.profile.accountUnavailable");
         }
         return user;
     }
@@ -124,7 +124,7 @@ public class UserProfileApplicationService {
             update.set(Users::getAvatar, avatar);
         }
         if (usersMapper.update(null, update) != 1) {
-            throw new BaseException("个人信息保存失败");
+            throw new BaseException("user.profile.saveFailed");
         }
 
         ByaiCustomerLeads lead = saveLead(user, request);

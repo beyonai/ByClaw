@@ -13,7 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.iwhalecloud.byai.manager.domain.connector.provider.weixinopen.WeixinOpenPlatformEventService;
 
-class WeixinOpenPlatformEventControllerTest {
+class WeixinOpenPlatformEventControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     private final WeixinOpenPlatformEventService service = mock(WeixinOpenPlatformEventService.class);
     private final WeixinOpenPlatformEventController controller = new WeixinOpenPlatformEventController(service);
 

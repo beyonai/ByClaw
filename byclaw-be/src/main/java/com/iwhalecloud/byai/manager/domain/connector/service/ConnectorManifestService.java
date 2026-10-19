@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -90,7 +92,7 @@ public class ConnectorManifestService {
         List<String> managedKeys = managedEnvironmentKeys(connector);
         if (managedKeys.isEmpty()) {
             if (credentials != null && !credentials.isEmpty()) {
-                throw new IllegalArgumentException("Connector has no managed credential keys");
+                throw new IllegalArgumentException(I18nUtil.get("connector.managed.noManagedKeys"));
             }
             return upsertAndEnable(userId, connector);
         }
@@ -100,7 +102,7 @@ public class ConnectorManifestService {
             return updateManagedEnvironmentStatus(userId, connector, managedKeys, NORMAL);
         }
         if (!credentials.keySet().equals(allowedKeys) || credentials.values().stream().anyMatch(Objects::isNull)) {
-            throw new IllegalArgumentException("Managed connector credentials must exactly match the manifest allowlist");
+            throw new IllegalArgumentException(I18nUtil.get("connector.managed.credentialKeysMismatch"));
         }
         List<UserPrivateParam> currentParams = findUserParams(userId);
         Map<String, UserPrivateParam> currentByKey = indexByKey(currentParams);
@@ -127,7 +129,7 @@ public class ConnectorManifestService {
         requireUserAndConnector(userId, connector);
         Set<String> allowedKeys = Set.copyOf(managedEnvironmentKeys(connector));
         if (!allowedKeys.equals(requestedKeys)) {
-            throw new IllegalArgumentException("Requested credential keys must exactly match the manifest allowlist");
+            throw new IllegalArgumentException(I18nUtil.get("connector.managed.requestedKeysMismatch"));
         }
         Map<String, String> credentials = new HashMap<>();
         for (UserPrivateParam param : userPrivateParamMapper.selectList(new LambdaQueryWrapper<UserPrivateParam>()
@@ -159,7 +161,7 @@ public class ConnectorManifestService {
         requireUserAndConnector(userId, connector);
         Set<String> allowedKeys = Set.copyOf(managedEnvironmentKeys(connector));
         if (!allowedKeys.equals(requestedKeys)) {
-            throw new IllegalArgumentException("Requested credential keys must exactly match the manifest allowlist");
+            throw new IllegalArgumentException(I18nUtil.get("connector.managed.requestedKeysMismatch"));
         }
         Map<String, String> credentials = new HashMap<>();
         Set<String> statuses = new java.util.HashSet<>();
@@ -173,16 +175,16 @@ public class ConnectorManifestService {
             }
             if (!allowedKeys.contains(param.getParamKey())
                     || (!NORMAL.equals(param.getStatus()) && !DISABLED.equals(param.getStatus()))) {
-                throw new IllegalStateException("Managed connector credential set is invalid");
+                throw new IllegalStateException(I18nUtil.get("connector.managed.credentialSetInvalid"));
             }
             String value = decryptBestEffort(param.getParamValueCipher());
             if (!StringUtils.hasText(value) || credentials.putIfAbsent(param.getParamKey(), value) != null) {
-                throw new IllegalStateException("Managed connector credential set is invalid");
+                throw new IllegalStateException(I18nUtil.get("connector.managed.credentialSetInvalid"));
             }
             statuses.add(param.getStatus());
         }
         if (!credentials.keySet().equals(allowedKeys) || statuses.size() != 1) {
-            throw new IllegalStateException("Managed connector credential set is invalid");
+            throw new IllegalStateException(I18nUtil.get("connector.managed.credentialSetInvalid"));
         }
         return Map.copyOf(credentials);
     }
@@ -309,7 +311,7 @@ public class ConnectorManifestService {
             return true;
         }
         if (inserted != 0) {
-            throw new IllegalStateException("Connector environment parameter insert returned an unexpected row count");
+            throw new IllegalStateException(I18nUtil.get("connector.managed.insertCountInvalid"));
         }
         UserPrivateParam winner = findByKey(userId, key);
         if (!ownedByConnector(winner, connector.getConnectorCode())) {
@@ -366,13 +368,13 @@ public class ConnectorManifestService {
                 if (!allowedKeys.contains(param.getParamKey()) || !storedKeys.add(param.getParamKey())
                         || (!NORMAL.equals(param.getStatus()) && !DISABLED.equals(param.getStatus()))
                         || !StringUtils.hasText(decryptBestEffort(param.getParamValueCipher()))) {
-                    throw new IllegalStateException("Managed connector credential rows are incomplete");
+                    throw new IllegalStateException(I18nUtil.get("connector.managed.credentialsIncomplete"));
                 }
                 statuses.add(param.getStatus());
             }
         }
         if (!storedKeys.equals(allowedKeys) || statuses.size() != 1) {
-            throw new IllegalStateException("Managed connector credential rows are incomplete");
+            throw new IllegalStateException(I18nUtil.get("connector.managed.credentialsIncomplete"));
         }
     }
 
@@ -448,20 +450,20 @@ public class ConnectorManifestService {
 
     private void requireUserAndConnector(Long userId, ConnectorInfo connector) {
         if (userId == null || userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
+            throw new IllegalArgumentException(I18nUtil.get("connector.managed.userIdInvalid"));
         }
         requireConnector(connector);
     }
 
     private void requireConnector(ConnectorInfo connector) {
         if (connector == null || !StringUtils.hasText(connector.getConnectorCode())) {
-            throw new IllegalArgumentException("connectorCode must not be blank");
+            throw new IllegalArgumentException(I18nUtil.get("connector.managed.connectorCodeRequired"));
         }
     }
 
     private void requireSingleAffectedRow(int affectedRows) {
         if (affectedRows != 1) {
-            throw new IllegalStateException("Connector environment parameter write did not affect exactly one row");
+            throw new IllegalStateException(I18nUtil.get("connector.managed.writeCountInvalid"));
         }
     }
 }

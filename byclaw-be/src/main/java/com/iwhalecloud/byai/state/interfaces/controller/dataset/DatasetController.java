@@ -268,7 +268,7 @@ public class DatasetController {
         Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
 
         KnowledgeEntityBatchResult knowledgeEntityBatchResult = datasetApplicationService.entityDiscovery(requestParam, headers);
-        return ResponseUtil.successResponse("知识实体发现任务已受理", knowledgeEntityBatchResult);
+        return ResponseUtil.successResponse(I18nUtil.get("knowledge.discovery.accepted"), knowledgeEntityBatchResult);
     }
 
 
@@ -282,7 +282,7 @@ public class DatasetController {
 
         KnowledgeEntityBatchResult responseResult = datasetApplicationService.entityEnrich(requestParam, headers);
 
-        return ResponseUtil.successResponse("知识实体补全任务已受理", responseResult);
+        return ResponseUtil.successResponse(I18nUtil.get("knowledge.enrichment.accepted"), responseResult);
     }
 
     /**
@@ -412,8 +412,8 @@ public class DatasetController {
             return ResponseEntity.ok().contentType(MediaType.parseMediaType(result.getContentType()))
                 .header("Content-Disposition", buildContentDisposition(result.getFileName())).body(responseBody);
         } catch (Exception e) {
-            logger.error("文件转Markdown失败", e);
-            String errorMessage = e.getMessage() == null ? "文件转Markdown失败" : e.getMessage();
+            logger.error(I18nUtil.get("knowledge.markdown.failed"), e);
+            String errorMessage = e.getMessage() == null ? I18nUtil.get("knowledge.markdown.failed") : e.getMessage();
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
                 .body(outputStream -> outputStream.write(errorMessage.getBytes(StandardCharsets.UTF_8)));
         }

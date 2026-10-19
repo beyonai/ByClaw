@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.filebrowser;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -74,7 +76,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             targetUrl = buildTargetUrl(userCode, API_PREFIX + "/upload", null);
         } catch (Exception e) {
             LOGGER.warn("OpenClaw文件上传失败（沙箱不可用）: userCode={}, error={}", userCode, e.getMessage());
-            throw new RuntimeException("文件上传失败：沙箱环境不可用", e);
+            throw new RuntimeException(I18nUtil.get("fileBrowser.upload.sandboxUnavailable"), e);
         }
 
         for (MultipartFile file : files) {
@@ -105,17 +107,17 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             targetUrl = buildTargetUrl(userCode, API_PREFIX + "/download", "path=" + encode(path));
         } catch (Exception e) {
             LOGGER.warn("OpenClaw文件下载失败（沙箱不可用）: userCode={}, error={}", userCode, e.getMessage());
-            throw new RuntimeException("文件下载失败：沙箱环境不可用", e);
+            throw new RuntimeException(I18nUtil.get("fileBrowser.download.sandboxUnavailable"), e);
         }
         Request request = new Request.Builder().url(targetUrl).get().build();
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
-                throw new RuntimeException("下载文件失败: " + path + ", status=" + response.code());
+                throw new RuntimeException(I18nUtil.get("fileBrowser.download.statusFailed", path, String.valueOf(response.code())));
             }
             byte[] bytes = response.body().bytes();
             return new ByteArrayInputStream(bytes);
         } catch (IOException e) {
-            throw new RuntimeException("文件下载失败: " + path, e);
+            throw new RuntimeException(I18nUtil.get("fileBrowser.download.failedWithPath", path), e);
         }
     }
 
@@ -146,13 +148,13 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             LOGGER.info("OpenClaw文件重命名成功: path={}, newName={}", path, newName);
         } catch (Exception e) {
             LOGGER.warn("OpenClaw文件重命名失败: userCode={}, path={}, error={}", userCode, sourcePath, e.getMessage());
-            throw new RuntimeException("文件重命名失败：沙箱环境不可用", e);
+            throw new RuntimeException(I18nUtil.get("fileBrowser.rename.sandboxUnavailable"), e);
         }
     }
 
     @Override
     public void move(String userCode, Long resourceId, List<String> sourcePaths, String targetDirectory) {
-        throw new UnsupportedOperationException("OpenClaw FileBrowser 暂不支持移动操作");
+        throw new UnsupportedOperationException(I18nUtil.get("fileBrowser.openclaw.moveUnsupported"));
     }
 
     @Override
@@ -192,7 +194,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             LOGGER.info("OpenClaw文件夹创建成功: path={}, name={}", parentPath, folderName);
         } catch (Exception e) {
             LOGGER.warn("OpenClaw文件夹创建失败: userCode={}, path={}, error={}", userCode, relativePath, e.getMessage());
-            throw new RuntimeException("文件夹创建失败：沙箱环境不可用", e);
+            throw new RuntimeException(I18nUtil.get("fileBrowser.mkdir.sandboxUnavailable"), e);
         }
     }
 
@@ -233,11 +235,11 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
         try (Response response = httpClient.newCall(request).execute()) {
             String body = response.body() != null ? response.body().string() : "";
             if (!response.isSuccessful()) {
-                throw new RuntimeException("OpenClaw请求失败: " + request.url() + ", status=" + response.code() + ", body=" + body);
+                throw new RuntimeException(I18nUtil.get("fileBrowser.openclaw.requestFailed", request.url().toString(), String.valueOf(response.code()), body));
             }
             return body;
         } catch (IOException e) {
-            throw new RuntimeException("OpenClaw请求异常: " + request.url(), e);
+            throw new RuntimeException(I18nUtil.get("fileBrowser.openclaw.requestError", request.url().toString()), e);
         }
     }
 
@@ -254,12 +256,12 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             return ROOT_PREFIX;
         }
         if (relativePath.contains("..")) {
-            throw new IllegalArgumentException("非法路径: " + relativePath);
+            throw new IllegalArgumentException(I18nUtil.get("fileBrowser.path.invalid", relativePath));
         }
         String normalized = relativePath.trim().replace('\\', '/');
         normalized = ROOT_PREFIX + normalized.replaceFirst("^/+", "");
         if (!normalized.startsWith(ROOT_PREFIX)) {
-            throw new IllegalArgumentException("非法路径: " + relativePath);
+            throw new IllegalArgumentException(I18nUtil.get("fileBrowser.path.invalid", relativePath));
         }
         return normalized;
     }
@@ -270,14 +272,14 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             JsonNode root = objectMapper.readTree(json);
             JsonNode items = root.get("items");
             if (items == null || !items.isArray()) {
-                throw new IllegalStateException("OpenClaw响应缺少items数组");
+                throw new IllegalStateException(I18nUtil.get("filebrowser.openclaw.itemsMissing"));
             }
             for (JsonNode node : items) {
                 JsonNode name = node.get("name");
                 JsonNode path = node.get("path");
                 JsonNode isDir = node.get("isDir");
                 if (name == null || path == null || isDir == null) {
-                    throw new IllegalStateException("OpenClaw文件项字段不完整");
+                    throw new IllegalStateException(I18nUtil.get("filebrowser.openclaw.itemIncomplete"));
                 }
                 FileBrowserItemVo vo = new FileBrowserItemVo();
                 vo.setName(name.asText());
@@ -294,7 +296,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
                 if (!vo.isDir()) {
                     JsonNode size = node.get("size");
                     if (size == null || modified == null) {
-                        throw new IllegalStateException("OpenClaw文件项缺少大小或修改时间");
+                        throw new IllegalStateException(I18nUtil.get("filebrowser.openclaw.metadataMissing"));
                     }
                     vo.setSize(size.asLong());
                     vo.setLastModified(
@@ -306,7 +308,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
                 result.add(vo);
             }
         } catch (Exception e) {
-            throw new IllegalStateException("解析OpenClaw响应失败", e);
+            throw new IllegalStateException(I18nUtil.get("filebrowser.openclaw.parseFailed"), e);
         }
         return result;
     }
@@ -316,7 +318,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
         String dirName = extractName(normalizedSourcePath);
         String targetPath = ensureDirectoryPath(targetDirectory) + dirName + "/";
         if (targetPath.startsWith(normalizedSourcePath)) {
-            throw new IllegalArgumentException("不能复制文件夹到自身或其子目录下");
+            throw new IllegalArgumentException(I18nUtil.get("fileBrowser.copy.self"));
         }
         createFolder(userCode, resourceId, targetPath);
         for (FileBrowserItemVo child : list(userCode, resourceId, normalizedSourcePath)) {
@@ -334,7 +336,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
         try {
             targetUrl = buildTargetUrl(userCode, API_PREFIX + "/upload", null);
         } catch (Exception e) {
-            throw new RuntimeException("文件复制失败：沙箱环境不可用", e);
+            throw new RuntimeException(I18nUtil.get("fileBrowser.copy.sandboxUnavailable"), e);
         }
 
         try (InputStream inputStream = download(userCode, resourceId, sourcePath)) {
@@ -349,7 +351,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             executeForString(request);
             LOGGER.info("OpenClaw文件复制成功: {} -> {}", sourcePath, targetDirectory);
         } catch (IOException e) {
-            throw new RuntimeException("文件复制失败: " + sourcePath, e);
+            throw new RuntimeException(I18nUtil.get("fileBrowser.copy.failedWithPath", sourcePath), e);
         }
     }
 
@@ -361,7 +363,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
                 try {
                     children = requestItemList(userCode, ensureDirectoryPath(item.getPath()));
                 } catch (RuntimeException e) {
-                    throw new IOException("获取文件夹内容失败: " + item.getPath(), e);
+                    throw new IOException(I18nUtil.get("filebrowser.folder.loadFailed", item.getPath()), e);
                 }
                 writeZipEntries(userCode, resourceId, rootPath, children, zos, buffer);
                 continue;
@@ -373,7 +375,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             try (InputStream in = download(userCode, resourceId, item.getPath())) {
                 FileBrowserZipSupport.writeEntry(zos, entryName, in, buffer, item.getSize());
             } catch (RuntimeException e) {
-                throw new IOException("下载文件失败: " + item.getPath(), e);
+                throw new IOException(I18nUtil.get("filebrowser.download.failed", item.getPath()), e);
             }
         }
     }

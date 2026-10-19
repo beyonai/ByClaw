@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
@@ -66,6 +68,6 @@ public class GroupChatRecallSendGuard implements ChatGatewaySendGuard {
     }
 
     private IllegalStateException recalled() {
-        return new IllegalStateException("原消息已撤回，相关执行已取消");
+        return new IllegalStateException(I18nUtil.get("groupchat.recall.executionCancelled"));
     }
 }

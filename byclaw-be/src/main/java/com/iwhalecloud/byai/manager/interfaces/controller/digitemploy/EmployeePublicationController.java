@@ -57,7 +57,7 @@ public class EmployeePublicationController {
     public void skillSnapshot(@RequestParam Long requestId, @RequestParam Long resourceId,
         jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
         try (java.io.InputStream input = publication.skillSnapshot(requestId, resourceId)) {
-            if (input == null) throw new com.iwhalecloud.byai.common.exception.BaseException("技能快照文件不存在");
+            if (input == null) throw new com.iwhalecloud.byai.common.exception.BaseException("employee.publication.skillSnapshotFileMissing");
             response.setContentType("application/zip");
             response.setHeader("Content-Disposition", "attachment; filename=skill-" + resourceId + ".zip");
             input.transferTo(response.getOutputStream());

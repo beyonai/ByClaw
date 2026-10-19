@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 /* eslint-disable lines-around-comment */
 // vnc 录制模式的画面区域:iframe 直连容器宿主映射的 noVNC 端口(autoconnect + scale 自适应)。
 // 用户在该画面里直接操作容器内 Chromium;停止/状态由 dashboard 自己的 toolbar 驱动(走 useRecorderSession),
@@ -23,6 +24,7 @@ export function buildVncFrameSrc(vncUrl: string): string {
 }
 
 export default function VncFrame({ vncUrl }: Props) {
+  const intl = useIntl();
   const { token } = theme.useToken();
   if (!vncUrl) {
     return (
@@ -37,7 +39,10 @@ export default function VncFrame({ vncUrl }: Props) {
           borderRadius: token.borderRadius,
         }}
       >
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="VNC 容器画面未就绪" />
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={intl.formatMessage({ id: 'adapterRecorder.vnc.notReady' })}
+        />
       </div>
     );
   }

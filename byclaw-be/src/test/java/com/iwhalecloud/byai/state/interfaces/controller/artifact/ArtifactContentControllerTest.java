@@ -18,7 +18,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-class ArtifactContentControllerTest {
+class ArtifactContentControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void servesSingleByteRangeWithPreviewSecurityHeaders() throws Exception {

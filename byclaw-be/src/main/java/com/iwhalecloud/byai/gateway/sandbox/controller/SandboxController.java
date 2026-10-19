@@ -434,16 +434,16 @@ public class SandboxController {
         if (params.get("ownerScope") != null) {
             ownerScope = params.get("ownerScope").toString().trim();
             if (!List.of("USER", "TENANT", "ALL").contains(ownerScope)) {
-                return ResponseUtil.fail("invalid sandbox owner scope");
+                return ResponseUtil.fail(I18nUtil.get("sandbox.ownerScopeInvalid"));
             }
         }
         if (params.get("enterpriseId") != null && !params.get("enterpriseId").toString().isBlank()) {
             String text = params.get("enterpriseId").toString();
-            if (!text.matches("[1-9][0-9]*")) return ResponseUtil.fail("invalid enterprise ID");
+            if (!text.matches("[1-9][0-9]*")) return ResponseUtil.fail(I18nUtil.get("sandbox.enterpriseIdInvalid"));
             enterpriseId = Long.parseLong(text);
         }
         if (pageIndex < 1 || pageSize < 1 || pageSize > 100) {
-            return ResponseUtil.fail("invalid sandbox page");
+            return ResponseUtil.fail(I18nUtil.get("sandbox.pageInvalid"));
         }
 
         enterpriseId = userResourceEnterpriseScope(enterpriseId);

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -45,7 +47,7 @@ import org.springframework.web.multipart.MultipartFile;
  * 验证头像必须写入登录用户记录，且失败不能返回成功地址。
  */
 @ExtendWith(MockitoExtension.class)
-class UserAvatarApplicationServiceTest {
+class UserAvatarApplicationServiceTest extends I18nTestSupport {
 
     private static final String URL = "/commonFile/preview?style=minio&bucketName=byai-icon&filePath=/tester/avatar.png";
 

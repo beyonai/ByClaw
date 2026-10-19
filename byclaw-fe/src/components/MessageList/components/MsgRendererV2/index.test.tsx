@@ -102,7 +102,8 @@ describe('MsgRendererV2 final answer presentation', () => {
 
       expect(screen.queryByRole('button', { name: '任务已结束' })).not.toBeInTheDocument();
       expect(screen.queryByRole('separator')).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /thinkingProcess.done/ })).toBeInTheDocument();
+      // 本套件使用真实中文语言包，按钮名称还包含思考摘要和展开图标。
+      expect(screen.getByRole('button', { name: /已思考结束/ })).toHaveAttribute('aria-expanded', 'false');
       expect(screen.getByText('过程答复')).toBeInTheDocument();
       expect(screen.getAllByText('最终答复')).toHaveLength(1);
       expect(msg.messageList?.map(({ seq }) => seq)).toEqual([4, 3]);

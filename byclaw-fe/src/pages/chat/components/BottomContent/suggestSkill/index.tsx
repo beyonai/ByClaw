@@ -249,9 +249,9 @@ export default function SuggestSkill({ agentId }: { agentId?: string }) {
       }
 
       messageApi.destroy();
-      messageApi.error('请先到数字员工管理页配置该技能');
+      messageApi.error(intl.formatMessage({ id: 'ui.skill.configureFirst' }));
     },
-    [emitSkill, messageApi, selectedSkills]
+    [intl, emitSkill, messageApi, selectedSkills]
   );
 
   const handleInstallSkill = useCallback(

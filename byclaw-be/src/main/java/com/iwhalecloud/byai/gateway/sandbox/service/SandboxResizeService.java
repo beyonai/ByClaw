@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -99,11 +100,11 @@ public class SandboxResizeService {
     public SsSandboxResizeRecord handleResizeRequest(Map<String, Object> params) {
         if (sandboxProperties == null || sandboxProperties.getTierAutoscale() == null
             || !sandboxProperties.getTierAutoscale().isEnabled()) {
-            throw new IllegalStateException("sandbox tier autoscale is disabled");
+            throw new IllegalStateException(I18nUtil.get("sandbox.autoscale.disabled"));
         }
         SsSandboxRecord record = resolveRecord(params);
         if (record == null || StringUtils.isBlank(record.getSandboxId())) {
-            throw new IllegalArgumentException("running sandbox record not found");
+            throw new IllegalArgumentException(I18nUtil.get("sandbox.running.notFound"));
         }
 
         String toProfileKey = firstNonBlank(params, "toProfileKey", "targetProfileKey", "to_profile_key",
@@ -389,7 +390,7 @@ public class SandboxResizeService {
     private SsSandboxResizeRecord handleAbnormalRecoveryRequest(Map<String, Object> params) {
         if (sandboxProperties == null || sandboxProperties.getTierAutoscale() == null
             || !sandboxProperties.getTierAutoscale().isEnabled()) {
-            throw new IllegalStateException("sandbox tier autoscale is disabled");
+            throw new IllegalStateException(I18nUtil.get("sandbox.autoscale.disabled"));
         }
         SsSandboxRecord record = resolveRecord(params);
         if (record == null || StringUtils.isBlank(record.getSandboxId())) {
@@ -443,7 +444,7 @@ public class SandboxResizeService {
     private SsSandboxResizeRecord recordOpsIncident(Map<String, Object> params) {
         if (sandboxProperties == null || sandboxProperties.getTierAutoscale() == null
             || !sandboxProperties.getTierAutoscale().isEnabled()) {
-            throw new IllegalStateException("sandbox tier autoscale is disabled");
+            throw new IllegalStateException(I18nUtil.get("sandbox.autoscale.disabled"));
         }
         SsSandboxRecord record = resolveRecord(params);
         if (record == null || StringUtils.isBlank(record.getSandboxId())) {

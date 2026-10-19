@@ -120,7 +120,7 @@ public class GroupChatTurnCoordinator {
             if (reply != null) {
                 ByaiMessage reference = messages.selectByMessageId(reply);
                 if (reference == null || !Objects.equals(group, reference.getSessionId())) {
-                    throw new GroupChatMessageRejectedException("Invalid group reply reference");
+                    throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.reply.invalid"));
                 }
                 ByaiGroupChatTurn origin = turns.selectByTriggerAndAgent(reply, agent);
                 if (origin == null) {
@@ -146,7 +146,7 @@ public class GroupChatTurnCoordinator {
                     if (anchor == null) {
                         ByaiMessage visible = messages.selectVisibleGroupMessage(group, reply);
                         if (visible == null || !Integer.valueOf(1).equals(visible.getUsage())) {
-                            throw new GroupChatMessageRejectedException("Reply cannot resolve an authorized conversation");
+                            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.reply.unauthorized"));
                         }
                         // 普通群消息尚无 Agent 会话；撤回后不能把旧正文作为新会话的原始需求。
                         root = visible.isRecalled() ? source : reply;
@@ -525,7 +525,7 @@ public class GroupChatTurnCoordinator {
     private void requireMembers(Long group, Long user, Long agent) {
         if (members.findSessionMember(group, "USER", user) == null
             || members.findSessionMember(group, "AGENT", agent) == null) {
-            throw new GroupChatMessageRejectedException("Conversation participants are no longer group members");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.reply.participantsRemoved"));
         }
     }
 

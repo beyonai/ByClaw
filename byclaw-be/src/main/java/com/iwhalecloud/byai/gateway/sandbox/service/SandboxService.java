@@ -786,7 +786,7 @@ public class SandboxService {
         SandboxResponse<SandboxLaunchData> response = sandboxLifecycleFacade.launchSandbox(request);
 
         if (response == null || !response.isSuccess() || response.getData() == null) {
-            String errorMsg = response != null ? StringUtils.defaultIfBlank(response.getMessage(), "启动失败") : "响应为空";
+            String errorMsg = response != null ? StringUtils.defaultIfBlank(response.getMessage(), I18nUtil.get("sandbox.start.failed")) : I18nUtil.get("service.response.empty");
             LOGGER.error("启动沙箱失败，记录：{}，原因：{}", sandboxRef(record), errorMsg);
             int failed = sandboxRecordMapper.updateStatusToFailed(record.getId(), errorMsg, new Date(),
                 record.getLockVersion());
@@ -1217,7 +1217,7 @@ public class SandboxService {
             remoteExpiresAt, touchedRecord.getTimeoutSeconds());
         SandboxResponse<Void> response = sandboxLifecycleFacade.renewSandbox(info);
         if (response == null || !response.isSuccess()) {
-            String errorMsg = response != null ? response.getMessage() : "响应为空";
+            String errorMsg = response != null ? response.getMessage() : I18nUtil.get("service.response.empty");
             LOGGER.warn("沙箱手动续约失败：{}，原因：{}", sandboxRef(touchedRecord), errorMsg);
             throw new BdpRuntimeException(StringUtils.defaultIfBlank(errorMsg, "sandbox renew failed"));
         }
@@ -2539,7 +2539,7 @@ public class SandboxService {
 
         SandboxResponse<Void> response = sandboxLifecycleFacade.removeSandbox(toSandboxInfo(record));
         if (response == null || !response.isSuccess()) {
-            String message = response != null ? response.getMessage() : "响应为空";
+            String message = response != null ? response.getMessage() : I18nUtil.get("service.response.empty");
             LOGGER.warn("清理远端沙箱返回失败：{}，reason={}，state={}，stateReason={}，原因：{}",
                 sandboxRef(record), reason, state, stateReason, message);
             throw new IllegalStateException("failed to cleanup remote sandbox before restart: " + message);
@@ -2557,7 +2557,7 @@ public class SandboxService {
         SandboxResponse<SandboxRuntimePage<SandboxRuntimeInstance>> response =
             sandboxLifecycleFacade.listSandboxesByMetadata(metadata, 1, Math.max(1, reconcileRemotePageSize));
         if (response == null || !response.isSuccess()) {
-            String message = response != null ? response.getMessage() : "响应为空";
+            String message = response != null ? response.getMessage() : I18nUtil.get("service.response.empty");
             throw new IllegalStateException("failed to list remote sandboxes before restart: " + message);
         }
         SandboxRuntimePage<SandboxRuntimeInstance> page = response.getData();

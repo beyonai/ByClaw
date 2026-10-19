@@ -28,7 +28,7 @@ import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourc
 import com.iwhalecloud.byai.state.domain.filebrowser.vo.ChangedFileDiffVo;
 
 @ExtendWith(MockitoExtension.class)
-class FileBrowserApplicationServiceTest {
+class FileBrowserApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Mock
     private FileBrowserProviderFactory providerFactory;

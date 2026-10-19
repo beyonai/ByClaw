@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.alibaba.fastjson.JSONArray;
@@ -197,7 +199,7 @@ public class IntegrationRunExecutor {
             // 安全:reason 会落库并回显前端,绝不能带出任何凭据原值;缺失/解密失败只给通用提示。
             String connSecret = decryptSecret(env.getConnCredentialRef());
             if (StringUtils.isBlank(connSecret)) {
-                finishError(run, "连接凭据缺失或解密失败:请在环境配置中重新填写 SSH 密码/私钥后重试", startMs);
+                finishError(run, I18nUtil.get("devloop.integration.credentialsMissing"), startMs);
                 return;
             }
 
@@ -209,7 +211,7 @@ public class IntegrationRunExecutor {
             for (StageDef stage : stages) {
                 StepOutcome outcome = runStage(run, env, connSecret, injectedEnv, stage, seq++);
                 if (!STATUS_PASSED.equals(outcome.status) && !stage.continueOnError) {
-                    finishByStepFailure(run, outcome, "环境阶段失败: " + stage.name, startMs);
+                    finishByStepFailure(run, outcome, I18nUtil.get("devloop.integration.stageFailed", stage.name), startMs);
                     return;
                 }
             }
@@ -224,7 +226,7 @@ public class IntegrationRunExecutor {
             }
         } catch (Exception e) {
             log.error("Integration run execution failed, runId={}", run.getRunId(), e);
-            finishError(run, "执行异常: " + rootMessage(e), startMs);
+            finishError(run, I18nUtil.get("devloop.integration.executionError", rootMessage(e)), startMs);
         }
     }
 
@@ -260,7 +262,7 @@ public class IntegrationRunExecutor {
         CaseCheckout checkout = resolveCaseCheckout(run, env, suite);
         if (checkout.error != null) {
             // 配置缺失是 error 而非用例失败;仍落一条 step 让前端日志弹窗能看到具体原因。
-            recordBlockedStep(run, seq, STEP_CLONE, "准备用例代码", checkout.error);
+            recordBlockedStep(run, seq, STEP_CLONE, I18nUtil.get("devloop.integration.prepareCode"), checkout.error);
             finishError(run, checkout.error, startMs);
             return;
         }
@@ -292,20 +294,19 @@ public class IntegrationRunExecutor {
             checkout.onEnv = true;
             checkout.caseDir = StringUtils.defaultString(env.getConnWorkdir()).trim();
             if (checkout.caseDir.isEmpty()) {
-                checkout.error = "用例在环境机上,但该集成测试环境未配置工作目录:请先在环境配置里填写工作目录后重试";
+                checkout.error = I18nUtil.get("devloop.integration.workdirMissing");
             }
             return checkout;
         }
         ProjectRepo repo = findWorkspaceRepo(env.getProjectId());
         if (repo == null) {
-            checkout.error = "项目没有工作区仓库:测试用例按约定放在工作区仓库的 " + WORKSPACE_ENTRY_SCRIPT
-                + ",请先为项目配置工作区仓库,或把环境的用例来源改为「用例已在环境机上」";
+            checkout.error = I18nUtil.get("devloop.integration.workspaceRepoRequired", WORKSPACE_ENTRY_SCRIPT);
             return checkout;
         }
         checkout.provider = repo.getProvider();
         checkout.repoUrl = resolveRepoUrl(repo);
         if (StringUtils.isBlank(checkout.repoUrl)) {
-            checkout.error = "工作区仓库地址缺失:请在项目仓库配置里补全工作区仓库地址后重试";
+            checkout.error = I18nUtil.get("devloop.integration.repoUrlMissing");
             return checkout;
         }
         // 工作区仓库跟自己的默认分支,不再让用户在用例集里另填分支:两处分支不一致时没人能说清跑的是哪份用例。
@@ -352,7 +353,7 @@ public class IntegrationRunExecutor {
         String runDir = sessionWorkspacePathResolver.resolveSessionDir(run.getCreateBy(),
             RUN_SESSION_KEY_PREFIX + run.getRunId());
         if (runDir == null) {
-            checkout.error = "无法解析用例工作区目录:请确认触发用户已初始化个人存储桶后重试";
+            checkout.error = I18nUtil.get("devloop.integration.directoryUnresolved");
             return;
         }
         checkout.parentDir = runDir;
@@ -433,7 +434,7 @@ public class IntegrationRunExecutor {
         spec.setWorkdir(null);
         spec.setCommand(command);
         spec.setTimeoutSec(CLONE_TIMEOUT_SEC);
-        return execAndRecord(run, seq, STEP_CLONE, "克隆用例仓库 " + checkout.repoName, spec);
+        return execAndRecord(run, seq, STEP_CLONE, I18nUtil.get("devloop.integration.clone", checkout.repoName), spec);
     }
 
     /**
@@ -490,7 +491,7 @@ public class IntegrationRunExecutor {
                                         Map<String, String> injectedEnv, IntegrationSuite suite,
                                         String workdir, int seq) throws Exception {
         String runCommand = resolveRunCommand(env, suite);
-        String blocked = dangerousScriptGuard.detect("套件命令", runCommand);
+        String blocked = dangerousScriptGuard.detect(I18nUtil.get("devloop.script.suiteCommand"), runCommand);
         if (blocked != null) {
             return recordBlockedStep(run, seq, STEP_SUITE, suite.getSuiteName(), blocked);
         }
@@ -521,15 +522,15 @@ public class IntegrationRunExecutor {
 
     /** 免克隆场景的步骤名/失败原因分开写,让前端一眼看出这条 run 走的是哪种用例来源。 */
     private static String caseDirStepName(CaseCheckout checkout) {
-        return checkout.onEnv ? "校验环境机用例目录" : "沿用开发检出 " + checkout.repoName;
+        return checkout.onEnv ? I18nUtil.get("devloop.integration.verifyDirectory") : I18nUtil.get("devloop.integration.reuseCheckout", checkout.repoName);
     }
 
     private static String prepareFailureReason(CaseCheckout checkout) {
         if (checkout.onEnv) {
-            return "环境机用例目录不可用: " + checkout.caseDir;
+            return I18nUtil.get("devloop.integration.directoryUnavailable", checkout.caseDir);
         }
         return checkout.reuseCoderCheckout
-            ? "沿用开发检出目录失败: " + checkout.repoName : "克隆用例仓库失败: " + checkout.repoName;
+            ? I18nUtil.get("devloop.integration.reuseFailed", checkout.repoName) : I18nUtil.get("devloop.integration.cloneFailed", checkout.repoName);
     }
 
     /**
@@ -580,12 +581,12 @@ public class IntegrationRunExecutor {
         // DefaultAgent 的 testerAgentId 是字符串存储,下发/落库都要 Long;空或非法都按未配置处理。
         Long testerAgentId = parseAgentId(agent == null ? null : agent.getTesterAgentId());
         if (testerAgentId == null) {
-            finishError(run, "未配置测试数字员工:请在项目「默认数字员工」中设置测试员工后重试", startMs);
+            finishError(run, I18nUtil.get("devloop.integration.employeeMissing"), startMs);
             return;
         }
         LoginInfo loginInfo = loginApplicationService.getLoginInfo(run.getCreateBy());
         if (loginInfo == null) {
-            finishError(run, "无法解析触发用户身份:请重新登录后重试", startMs);
+            finishError(run, I18nUtil.get("devloop.integration.userUnresolved"), startMs);
             return;
         }
 
@@ -608,7 +609,7 @@ public class IntegrationRunExecutor {
         boolean onEnv = casesOnEnvMachine(env);
         boolean keyAuth = !"password".equalsIgnoreCase(StringUtils.defaultString(env.getConnAuth()));
         if (onEnv && !writeTesterSshCredential(loginInfo.getUserCode(), sessionId, connSecret, keyAuth)) {
-            finishError(run, "无法向沙箱下发环境机登录凭据:请重试,或改用后端直跑模式执行本套件", startMs);
+            finishError(run, I18nUtil.get("devloop.integration.credentialsDeliveryFailed"), startMs);
             return;
         }
         chatDto.setChatContent(buildTesterPrompt(sessionId, env, suite, caseSource, keyAuth));
@@ -797,11 +798,11 @@ public class IntegrationRunExecutor {
      */
     private CoderSession findCoderSession(IntegrationRun run, Long suiteRepoId) {
         if (run.getRequirementId() == null) {
-            return CoderSession.missing("本次执行未关联需求(手动触发),没有开发环节可沿用");
+            return CoderSession.missing(I18nUtil.get("devloop.integration.noRequirement"));
         }
         List<ScanItemTask> tasks = scanItemTaskService.listByRequirement(run.getRequirementId());
         if (tasks == null || tasks.isEmpty()) {
-            return CoderSession.missing("需求下没有开发子任务");
+            return CoderSession.missing(I18nUtil.get("devloop.integration.noDevelopmentTask"));
         }
         List<ScanItemTask> started = new ArrayList<>();
         for (ScanItemTask task : tasks) {
@@ -810,7 +811,7 @@ public class IntegrationRunExecutor {
             }
         }
         if (started.isEmpty()) {
-            return CoderSession.missing("需求下的开发子任务都还没启动会话,尚无检出目录");
+            return CoderSession.missing(I18nUtil.get("devloop.integration.noDevelopmentSession"));
         }
         for (ScanItemTask task : started) {
             if (suiteRepoId != null && suiteRepoId.equals(task.getRepoId())) {
@@ -821,7 +822,7 @@ public class IntegrationRunExecutor {
         if (started.size() == 1) {
             return CoderSession.of(started.get(0).getSessionId());
         }
-        return CoderSession.missing("需求下有 " + started.size() + " 个开发会话,没有一个匹配套件配置的用例仓库,无法确定沿用哪个检出目录");
+        return CoderSession.missing(I18nUtil.get("devloop.integration.checkoutAmbiguous", started.size()));
     }
 
     /**
@@ -1087,11 +1088,11 @@ public class IntegrationRunExecutor {
     public ReportContent readSuiteReport(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite) {
         String reportPath = StringUtils.trimToNull(suite.getReportPath());
         if (reportPath == null) {
-            return ReportContent.error("该测试用例集没有配置报告路径");
+            return ReportContent.error(I18nUtil.get("devloop.integration.reportPathMissing"));
         }
         String connSecret = decryptSecret(env.getConnCredentialRef());
         if (StringUtils.isBlank(connSecret)) {
-            return ReportContent.error("连接凭据缺失或解密失败:请在环境配置中重新填写 SSH 密码/私钥后重试");
+            return ReportContent.error(I18nUtil.get("devloop.integration.credentialsMissing"));
         }
         CaseCheckout checkout = resolveCaseCheckout(run, env, suite);
         if (checkout.error != null) {
@@ -1109,7 +1110,7 @@ public class IntegrationRunExecutor {
         } catch (Exception e) {
             log.warn("Failed to read suite report on demand, runId={}, suiteId={}",
                 run.getRunId(), suite.getSuiteId(), e);
-            return ReportContent.error("报告读取异常: " + rootMessage(e));
+            return ReportContent.error(I18nUtil.get("devloop.integration.reportReadFailed", rootMessage(e)));
         }
     }
 
@@ -1164,7 +1165,7 @@ public class IntegrationRunExecutor {
         } catch (Exception e) {
             // 解析失败的具体原因(prolog 位置、非法字符)只有异常里有,带回 run.reason 才能定位,
             // 否则前端只能看到一句「不可解析」,和「报告没生成」无法区分。
-            summary.reportError = "报告解析失败:" + suite.getReportPath() + " (" + rootMessage(e) + ")";
+            summary.reportError = I18nUtil.get("devloop.integration.reportParseFailed", suite.getReportPath(), rootMessage(e));
             log.warn("Failed to fetch/parse JUnit report, suiteId={}, reportPath={}",
                 suite.getSuiteId(), suite.getReportPath(), e);
         }
@@ -1209,22 +1210,21 @@ public class IntegrationRunExecutor {
     /** 把标记翻译成可回显的原因;非标记即读取成功。返回 null 表示内容可用。 */
     private static String reportReadError(String reportPath, SshExecResult result) {
         if (result.isTimedOut()) {
-            return "报告读取超时:" + reportPath + " 所在环境机 " + VERIFY_TIMEOUT_SEC + "s 内无响应";
+            return I18nUtil.get("devloop.integration.reportTimeout", reportPath, VERIFY_TIMEOUT_SEC);
         }
         String out = StringUtils.trimToEmpty(result.getOutput());
         if (out.startsWith(RPT_MISSING)) {
-            return "报告文件不存在:" + reportPath + "(套件命令没有生成报告,或生成到了别的路径)";
+            return I18nUtil.get("devloop.integration.reportMissing", reportPath);
         }
         if (out.startsWith(RPT_DENIED)) {
-            return "报告文件无读取权限:" + reportPath;
+            return I18nUtil.get("devloop.integration.reportDenied", reportPath);
         }
         if (out.startsWith(RPT_TOO_BIG)) {
-            return "报告体积超过 " + (REPORT_MAX_BYTES / 1024 / 1024) + "MB 上限:" + reportPath
-                + "(实际 " + StringUtils.trimToEmpty(StringUtils.removeStart(out, RPT_TOO_BIG)) + " 字节)";
+            return I18nUtil.get("devloop.integration.reportTooLarge", REPORT_MAX_BYTES / 1024 / 1024, reportPath, StringUtils.trimToEmpty(StringUtils.removeStart(out, RPT_TOO_BIG)));
         }
         if (!result.isSuccess() || out.isEmpty()) {
             // 不带 stderr:注入的 export 里有测试账号口令,原文进 reason 会落库。排查看步骤日志。
-            return "报告读取命令执行失败:" + reportPath + "(exitCode=" + result.getExitCode() + ")";
+            return I18nUtil.get("devloop.integration.reportCommandFailed", reportPath, result.getExitCode());
         }
         return null;
     }
@@ -1316,21 +1316,21 @@ public class IntegrationRunExecutor {
      */
     static RunVerdict decideVerdict(IntegrationSuite suite, String suiteStatus, JunitSummary summary) {
         if (STATUS_TIMEOUT.equals(suiteStatus)) {
-            return new RunVerdict(STATUS_TIMEOUT, "套件执行超时: " + suite.getSuiteName());
+            return new RunVerdict(STATUS_TIMEOUT, I18nUtil.get("devloop.integration.suiteTimeout", suite.getSuiteName()));
         }
         if (summary.failed > 0) {
-            return new RunVerdict(STATUS_FAILED, "存在失败用例: failed=" + summary.failed);
+            return new RunVerdict(STATUS_FAILED, I18nUtil.get("devloop.integration.failedCases", summary.failed));
         }
         // 配了报告路径就必须拿到可解析且有用例的报告:退出码 0 不代表用例真跑了,
         // 报告没取到时 total=0/failed=0 会和「全通过」撞成同一个 passed,必须判失败。
         if (StringUtils.isNotBlank(suite.getReportPath()) && (!summary.reportResolved || summary.total <= 0)) {
             String detail = StringUtils.defaultIfBlank(summary.reportError,
-                "报告缺失或不可解析: " + suite.getReportPath());
-            return new RunVerdict(STATUS_FAILED, detail + ",无法确认用例是否执行");
+                I18nUtil.get("devloop.integration.reportUnavailable", suite.getReportPath()));
+            return new RunVerdict(STATUS_FAILED, I18nUtil.get("devloop.integration.executionUnconfirmed", detail));
         }
         if (!STATUS_PASSED.equals(suiteStatus)) {
             // 命令非零退出但报告无失败用例(或没配报告):按失败处理,原因取命令结论。
-            return new RunVerdict(STATUS_FAILED, "套件命令未成功: " + suite.getSuiteName());
+            return new RunVerdict(STATUS_FAILED, I18nUtil.get("devloop.integration.suiteCommandFailed", suite.getSuiteName()));
         }
         return new RunVerdict(STATUS_PASSED, null);
     }

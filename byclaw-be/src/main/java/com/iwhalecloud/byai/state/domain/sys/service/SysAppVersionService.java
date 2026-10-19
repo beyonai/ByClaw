@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.sys.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLEncoder;
@@ -140,7 +142,7 @@ public class SysAppVersionService {
         else {
             entity = sysAppVersionMapper.selectById(versionId);
             if (entity == null) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "应用版本不存在");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("app.version.notFound"));
             }
         }
 
@@ -206,13 +208,13 @@ public class SysAppVersionService {
     public AppVersionUploadResult uploadPackage(MultipartFile file) {
         guard();
         if (file == null || file.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "安装包不能为空");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("app.version.packageRequired"));
         }
         String sha256 = sha256Hex(file);
         FileStorageContext context = FileStorageContext.file(CurrentUserHolder.getCurrentUserId());
         FileMetadata metadata = fileIngressService.uploadFile(file, context, Constants.BUCKET_NAME_PACKAGE);
         if (StringUtils.isBlank(metadata.getFileUrl())) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "安装包存储未返回有效地址");
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, I18nUtil.get("app.version.storageFailed"));
         }
         AppVersionUploadResult result = new AppVersionUploadResult();
         result.setFileName(StringUtils.defaultIfBlank(file.getOriginalFilename(), metadata.getFileName()));
@@ -229,7 +231,7 @@ public class SysAppVersionService {
         SysAppVersion entity = sysAppVersionMapper.selectById(versionId);
         String url = entity == null ? null : entity.getUrl();
         if (StringUtils.isBlank(url)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "安装包不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("app.version.packageMissing"));
         }
         if (url.startsWith("http://") || url.startsWith("https://")) {
             response.sendRedirect(url);
@@ -238,7 +240,7 @@ public class SysAppVersionService {
         ParsedFileInfo fileInfo = FileUtil.parseFileUrl(url);
         if (StringUtils.isNotBlank(fileInfo.getBucketName())
             && !Constants.BUCKET_NAME_PACKAGE.equals(fileInfo.getBucketName())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "安装包不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("app.version.packageMissing"));
         }
         String storageUrl = url;
         if (StringUtils.isBlank(fileInfo.getFilePath())) {
@@ -276,7 +278,7 @@ public class SysAppVersionService {
     private SysAppVersion requireVersion(Long versionId) {
         SysAppVersion entity = sysAppVersionMapper.selectById(versionId);
         if (entity == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "应用版本不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("app.version.notFound"));
         }
         return entity;
     }
@@ -298,13 +300,13 @@ public class SysAppVersionService {
             return HexFormat.of().formatHex(digestInputStream.getMessageDigest().digest());
         }
         catch (IOException | NoSuchAlgorithmException exception) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "安装包校验和计算失败");
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, I18nUtil.get("app.version.checksumFailed"));
         }
     }
 
     private void guard() {
         if (!canManage()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "仅开源版 adminvip 可管理应用版本");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, I18nUtil.get("app.version.adminOnly"));
         }
     }
 }
