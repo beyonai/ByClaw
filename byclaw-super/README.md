@@ -672,3 +672,7 @@ Redis 属于投递恢复所需的共享状态，生产须配置持久化，不�
 - Artifact 内容持久化和本地 Spawn Connector 尚未实现；
 - HTTP 不接 ByClaw Java session；Agent 使用权限以 ByClaw BE `discover` 返回的
   `usesPermissions` 为准。
+
+## 查询 SQL 的并发约定
+
+持久化查询不附加 `FOR UPDATE` 或其 `SKIP LOCKED` / `OF` 变体。Run 领取、回调状态变更与租约校验继续使用事件及会话 advisory lock；上下文版本读取使用独立的会话上下文 advisory lock。超时回调 outbox 先普通查询候选，再以未送达且未被有效租约占用为条件更新；只有更新成功的候选才返回给工作进程。

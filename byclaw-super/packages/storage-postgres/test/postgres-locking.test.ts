@@ -11,7 +11,7 @@ describe("Postgres Run callback locking", () => {
       if (sql.includes("SELECT run_id") && sql.includes("delegations")) {
         return result([{ run_id: "run-1" }]);
       }
-      if (sql.includes("FOR UPDATE OF d, r")) {
+      if (sql.includes("WHERE d.id = $1")) {
         return result([
           {
             delegation_id: "delegation-1",
@@ -65,7 +65,7 @@ describe("Postgres Run callback locking", () => {
       if (sql.includes("SELECT run_id") && sql.includes("delegations")) {
         return result([{ run_id: "run-1" }]);
       }
-      if (sql.includes("FOR UPDATE OF d, r")) {
+      if (sql.includes("WHERE d.id = $1")) {
         return result([
           {
             delegation_id: "delegation-1",
@@ -98,7 +98,7 @@ describe("Postgres Run callback locking", () => {
       if (sql.includes("SELECT run_id") && sql.includes("delegations")) {
         return result([{ run_id: "run-1" }]);
       }
-      if (sql.includes("FOR UPDATE OF d, r")) {
+      if (sql.includes("WHERE d.id = $1")) {
         return result([
           {
             delegation_id: "delegation-1",
@@ -137,7 +137,7 @@ describe("Postgres Run callback locking", () => {
       if (sql.includes("SELECT run_id") && sql.includes("delegations")) {
         return result([{ run_id: "run-1" }]);
       }
-      if (sql.includes("FOR UPDATE OF d, r")) {
+      if (sql.includes("WHERE d.id = $1")) {
         return result([
           {
             delegation_id: "delegation-1",
@@ -187,7 +187,7 @@ describe("Postgres Run callback locking", () => {
     let nextEventId = 1;
     const client = fakeClient(async (sql, params = []) => {
       statements.push(sql);
-      if (sql.includes("FOR UPDATE OF d, r")) {
+      if (sql.includes("WHERE d.id = $1")) {
         return result([
           {
             delegation_status: "RUNNING",
@@ -224,8 +224,8 @@ describe("Postgres Run callback locking", () => {
     ).resolves.toEqual({ runStatus: "WAITING_AGENT", suspended: true });
 
     const eventLockIndex = statements.findIndex((sql) => sql.includes("pg_advisory_xact_lock"));
-    const rowLockIndex = statements.findIndex((sql) => sql.includes("FOR UPDATE OF d, r"));
-    expect(rowLockIndex).toBeGreaterThan(eventLockIndex);
+    const stateReadIndex = statements.findIndex((sql) => sql.includes("WHERE d.id = $1"));
+    expect(stateReadIndex).toBeGreaterThan(eventLockIndex);
     expect(
       statements.filter((sql) => sql.includes("INSERT INTO") && sql.includes("run_events")),
     ).toHaveLength(2);
@@ -238,7 +238,7 @@ describe("Postgres Run callback locking", () => {
       if (sql.includes("SELECT run_id") && sql.includes("delegations")) {
         return result([{ run_id: "run-1" }]);
       }
-      if (sql.includes("FOR UPDATE OF d, r")) {
+      if (sql.includes("WHERE d.id = $1")) {
         return result([{ delegation_status: "COMPLETED", run_id: "run-1" }]);
       }
       return result([]);
@@ -258,9 +258,9 @@ describe("Postgres Run callback locking", () => {
     });
 
     const eventLockIndex = statements.findIndex((sql) => sql.includes("pg_advisory_xact_lock"));
-    const rowLockIndex = statements.findIndex((sql) => sql.includes("FOR UPDATE OF d, r"));
+    const stateReadIndex = statements.findIndex((sql) => sql.includes("WHERE d.id = $1"));
     expect(eventLockIndex).toBeGreaterThanOrEqual(0);
-    expect(rowLockIndex).toBeGreaterThan(eventLockIndex);
+    expect(stateReadIndex).toBeGreaterThan(eventLockIndex);
   });
 
   it("terminally fails an expired callback before publishing its timeout outbox", async () => {
@@ -271,11 +271,11 @@ describe("Postgres Run callback locking", () => {
       statements.push(sql);
       if (
         sql.includes("SELECT d.id AS delegation_id, d.run_id") &&
-        !sql.includes("FOR UPDATE OF d, r")
+        !sql.includes("WHERE d.id = $1")
       ) {
         return result([{ delegation_id: "delegation-1", run_id: "run-1" }]);
       }
-      if (sql.includes("FOR UPDATE OF d, r")) {
+      if (sql.includes("WHERE d.id = $1")) {
         return result([
           {
             delegation_id: "delegation-1",
@@ -310,11 +310,11 @@ describe("Postgres Run callback locking", () => {
     ]);
 
     const eventLockIndex = statements.findIndex((sql) => sql.includes("pg_advisory_xact_lock"));
-    const rowLockIndex = statements.findIndex((sql) => sql.includes("FOR UPDATE OF d, r"));
+    const stateReadIndex = statements.findIndex((sql) => sql.includes("WHERE d.id = $1"));
     const terminalRunUpdate = statements.find(
       (sql) => sql.includes("UPDATE") && sql.includes("status = 'FAILED'"),
     );
-    expect(rowLockIndex).toBeGreaterThan(eventLockIndex);
+    expect(stateReadIndex).toBeGreaterThan(eventLockIndex);
     expect(terminalRunUpdate).toContain("execution_stage = 'SETTLED'");
     expect(statements.some((sql) => sql.includes("SET status = 'QUEUED'"))).toBe(false);
     expect(
@@ -339,7 +339,7 @@ describe("Postgres Run callback locking", () => {
       if (sql.includes("SELECT run_id") && sql.includes("delegations")) {
         return result([{ run_id: "run-1" }]);
       }
-      if (sql.includes("FOR UPDATE OF d, r")) {
+      if (sql.includes("WHERE d.id = $1")) {
         return result([{ delegation_status: "COMPLETED", run_id: "run-1" }]);
       }
       return result([]);

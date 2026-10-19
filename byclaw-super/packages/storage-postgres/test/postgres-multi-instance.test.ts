@@ -37,7 +37,7 @@ describe("Postgres multi-instance ownership", () => {
     const events = new PostgresRunEventStore(db.pool, "byai");
 
     await expect(events.appendForClaim(event, claim)).rejects.toBeInstanceOf(ExecutionOwnershipLostError);
-    const leaseRead = db.calls.find((call) => call.sql.includes("FOR UPDATE OF l"));
+    const leaseRead = db.calls.find((call) => call.sql.includes("l.lease_expires_at > clock_timestamp()"));
     expect(leaseRead?.sql).toContain("l.attempt_no = $5");
     expect(leaseRead?.params).toEqual([
       claim.sessionId, claim.runId, claim.ownerInstanceId, claim.fencingToken, claim.attemptNo,
@@ -48,7 +48,7 @@ describe("Postgres multi-instance ownership", () => {
 
   it("holds lease ownership before replacing pending checkpoint entries", async () => {
     const db = fakeDatabase((sql) => {
-      if (sql.includes("FOR UPDATE OF l") || sql.includes("status NOT IN")) return rows([{}]);
+      if (sql.includes("l.lease_expires_at > clock_timestamp()") || sql.includes("status NOT IN")) return rows([{}]);
       if (sql.includes("SELECT context_revision")) return rows([{ context_revision: 0 }]);
       return rows([]);
     });
@@ -65,7 +65,7 @@ describe("Postgres multi-instance ownership", () => {
       baseRevision: 0, checkpoint, now: 1, claim,
     });
     const eventLock = db.calls.findIndex((call) => call.params?.[0] === `byclaw-run-event:${claim.runId}`);
-    const leaseLock = db.calls.findIndex((call) => call.sql.includes("FOR UPDATE OF l"));
+    const leaseLock = db.calls.findIndex((call) => call.sql.includes("l.lease_expires_at > clock_timestamp()"));
     const pendingDelete = db.calls.findIndex((call) => call.sql.includes("DELETE FROM"));
     expect(eventLock).toBeGreaterThanOrEqual(0);
     expect(leaseLock).toBeGreaterThan(eventLock);
@@ -100,9 +100,9 @@ describe("Postgres multi-instance ownership", () => {
     await expect(queue.claimNext("instance-b", 30_000)).resolves.toBeUndefined();
     const selectionsWithLocks = db.calls.filter((call) => call.sql.includes("SELECT r.id, r.session_id"));
     expect(selectionsWithLocks[0]?.sql).not.toContain("FOR UPDATE");
-    expect(selectionsWithLocks[1]?.sql).toContain("FOR UPDATE OF r SKIP LOCKED");
+    expect(selectionsWithLocks[1]?.sql).not.toContain("FOR UPDATE");
     expect(selectionsWithLocks[1]?.sql).toContain("earlier.status = ANY");
-    expect(db.calls.some((call) => call.sql.includes("UPDATE") && !call.sql.includes("FOR UPDATE"))).toBe(false);
+    expect(db.calls.some((call) => /^UPDATE\b/.test(call.sql.trim()))).toBe(false);
   });
 
   it("retains the fencing counter and requires the entire claim to renew or release", async () => {
@@ -151,7 +151,7 @@ describe("Postgres multi-instance ownership", () => {
         return rows([{ locked: params?.[0] !== "byclaw-run-event:busy-run" }]);
       }
       if (sql.includes("SELECT r.id, r.session_id, r.attempt_no")) {
-        return rows(sql.includes("FOR UPDATE")
+        return rows(sql.includes("WHERE r.id = $1")
           ? [{ id: "other-run", session_id: "other-session", attempt_no: 0 }]
           : [{ id: "busy-run", session_id: "busy-session", attempt_no: 0 },
             { id: "other-run", session_id: "other-session", attempt_no: 0 }]);
@@ -165,7 +165,7 @@ describe("Postgres multi-instance ownership", () => {
 
   it("orders locks consistently when a timeout sweep handles multiple Runs", async () => {
     const db = fakeDatabase((sql) => {
-      if (sql.includes("SELECT d.id AS delegation_id, d.run_id") && !sql.includes("FOR UPDATE")) {
+      if (sql.includes("SELECT d.id AS delegation_id, d.run_id") && !sql.includes("WHERE d.id = $1")) {
         return rows([{ delegation_id: "d-b", run_id: "run-b" }, { delegation_id: "d-a", run_id: "run-a" }]);
       }
       return rows([]);
@@ -174,6 +174,49 @@ describe("Postgres multi-instance ownership", () => {
     const lockKeys = db.calls.filter((call) => call.sql.includes("pg_advisory_xact_lock"))
       .map((call) => call.params?.[0]);
     expect(lockKeys).toEqual(["byclaw-run-event:run-a", "byclaw-run-event:run-b"]);
+  });
+});
+
+describe("Postgres callback timeout delivery claims", () => {
+  it("skips a candidate claimed by another worker after the ordinary read", async () => {
+    const db = fakeDatabase((sql, params) => {
+      if (sql.includes("SELECT o.run_id")) {
+        return rows(["already-claimed", "available"].map((runId) => ({
+          run_id: runId, external_session_id: "external-1", trace_id: "trace-1",
+          parent_message_id: "message-1", run_status: "FAILED", final_answer: null,
+          error_message: "callback timed out",
+        })));
+      }
+      if (sql.includes("SET claimed_by")) return rows(params?.[0] === "available" ? [{}] : []);
+      return rows([]);
+    });
+    const queue = new PostgresRunExecutionQueue(db.pool, "byai");
+    const deliveries = await queue.claimCallbackTimeoutDeliveries({
+      instanceId: "worker-1", leaseMs: 30_000, limit: 10,
+    });
+    expect(deliveries.map((delivery) => delivery.runId)).toEqual(["available"]);
+    const writes = db.calls.filter((call) => call.sql.includes("SET claimed_by"));
+    expect(writes).toHaveLength(2);
+    for (const write of writes) {
+      expect(write.sql).toContain("AND delivered_at IS NULL");
+      expect(write.sql).toContain("claim_expires_at <= clock_timestamp()");
+    }
+    expect(db.calls.every((call) => !/FOR\s+UPDATE/i.test(call.sql))).toBe(true);
+  });
+
+  it("does not acknowledge an unrouted candidate when its conditional claim fails", async () => {
+    const db = fakeDatabase((sql) => {
+      if (sql.includes("SELECT o.run_id")) return rows([{
+        run_id: "run-1", external_session_id: null, trace_id: null,
+        parent_message_id: null, run_status: "FAILED", final_answer: null, error_message: null,
+      }]);
+      return rows([]);
+    });
+    const queue = new PostgresRunExecutionQueue(db.pool, "byai");
+    await expect(queue.claimCallbackTimeoutDeliveries({
+      instanceId: "worker-1", leaseMs: 30_000, limit: 10,
+    })).resolves.toEqual([]);
+    expect(db.calls.some((call) => call.sql.includes("SET delivered_at"))).toBe(false);
   });
 });
 

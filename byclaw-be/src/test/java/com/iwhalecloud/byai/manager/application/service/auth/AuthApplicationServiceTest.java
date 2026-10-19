@@ -1935,7 +1935,7 @@ class AuthApplicationServiceTest {
     }
 
     @Test
-    void applyUseIfNeeded_locksBeforePendingCheck() {
+    void applyUseIfNeeded_readsResourceWithoutQueryLockBeforePendingCheck() {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
@@ -1956,7 +1956,7 @@ class AuthApplicationServiceTest {
         order.verify(ssResourceMapper).selectOne(lockCaptor.capture());
         order.verify(privilegeGrantMapper).selectOne(any());
         assertThat(String.valueOf(ReflectionTestUtils.getField(lockCaptor.getValue(), "lastSql")))
-            .containsIgnoringCase("FOR UPDATE");
+            .doesNotContainIgnoringCase("FOR UPDATE");
         verify(privilegeGrantService, never()).save(any());
     }
 

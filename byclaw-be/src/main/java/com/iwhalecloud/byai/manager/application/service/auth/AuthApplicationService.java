@@ -959,7 +959,7 @@ public class AuthApplicationService {
 
     private SsResource getRequiredResourceForUpdate(Long resourceId) {
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(SsResource::getResourceId, resourceId).last("FOR UPDATE");
+        queryWrapper.eq(SsResource::getResourceId, resourceId);
         SsResource ssResource = ssResourceMapper.selectOne(queryWrapper);
         if (ssResource == null) {
             throw new BaseException(I18nUtil.get("resource.not.found"));

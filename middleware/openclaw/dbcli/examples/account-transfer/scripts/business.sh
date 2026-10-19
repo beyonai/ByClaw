@@ -65,7 +65,7 @@ if [[ "$(jq -r '.rowCount' <<<"$claim")" == "0" ]]; then
   exit 30
 fi
 
-# Lock in stable order to reduce deadlock risk and verify both accounts exist and are active.
+# Verify both accounts exist and are active; the debit update checks the current balance.
 locked=$(dbcli_json sql "${common_args[@]}" \
   --file "${SKILL_DIR}/sql/lock-accounts.sql" \
   --params "$params")

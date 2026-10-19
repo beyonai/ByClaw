@@ -74,7 +74,7 @@ export async function changeTask(context: CommandContext): Promise<void> {
     taskId = requireId(p.taskSessionId);
   const task = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2",
     [taskId, command.sessionId],
   );
   if (!task && command.operation === "UPDATE_TASK" && p.turnStatus === "FAILED") {

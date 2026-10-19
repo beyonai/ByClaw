@@ -15,11 +15,9 @@ export async function projectGroupTaskAnswer(
   answer: AnswerState,
 ): Promise<void> {
   if (await projectGroupCandidateAnswer(db, enterpriseId, event, answer)) return;
-  const task = await first(
-    db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 FOR UPDATE",
-    [event.sessionId],
-  );
+  const task = await first(db, "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1", [
+    event.sessionId,
+  ]);
   if (!task || task.status !== "ACTIVE" || task.turnStatus !== "RUNNING" || task.publishMessageId)
     return;
   const marker = await first(

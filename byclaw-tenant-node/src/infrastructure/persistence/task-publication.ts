@@ -12,7 +12,7 @@ export async function publishTask(context: CommandContext): Promise<Record<strin
     taskId = requireId(p.taskSessionId);
   const task = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2",
     [taskId, command.sessionId],
   );
   if (!task || task.initiatorUserId !== command.userId)
@@ -44,7 +44,7 @@ export async function publishTask(context: CommandContext): Promise<Record<strin
   if (p.pendingPublicationId !== undefined) {
     const pending = await first(
       db,
-      "SELECT pending_publication_id FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1 FOR UPDATE",
+      "SELECT pending_publication_id FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1",
       [taskId],
     );
     if (pending?.pendingPublicationId !== requireId(p.pendingPublicationId))

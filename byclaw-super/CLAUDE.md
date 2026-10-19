@@ -129,7 +129,7 @@ INBOUND (two paths, same ingress chain)
                                 keep only usesPermissions=true agents (refreshed every turn)
     → RunService.createRun      (transactional snapshot of agentList; credential stored in same txn)
         ↓ enqueued via RunExecutionQueue (Postgres NOTIFY)
-  RunService claim loop (FOR UPDATE SKIP LOCKED)
+  RunService claim loop (non-blocking advisory locks)
     → claims earliest non-terminal Run per Session (per-Session FIFO, cross-Session parallel)
     → acquires Session lease + monotonic fencing token; bumps attemptNo; emits run.attempt
     → restores a fresh Pi LeaderSession from the committed PostgreSQL checkpoint for each attempt
@@ -189,7 +189,7 @@ OUT (two paths, same RunEvent stream, both DB-backed)
 Schema lives in `packages/storage-postgres/src/migrations.ts` (prefix `byai_super_`, tracked via `byai_super_schema_migrations`). Tables: `sessions`, `runs`, `delegations`, `run_events`, `pi_sessions`, `pi_session_entries`, `ingress_session_bindings`, `session_execution_leases`, `run_execution_credentials`. Startup validates the schema version against `LATEST_POSTGRES_SCHEMA_VERSION` in code.
 
 - **Migrations do not auto-run in production.** Use `pnpm db:migrate` (recommended: a separate release job). `DB_MIGRATE_ON_START=true` is for controlled environments only.
-- **Run queue**: `FOR UPDATE SKIP LOCKED` claims the earliest non-terminal Run whose Session has no earlier non-terminal Run. Claim writes instance ID, lease expiry, attempt, and a monotonic fencing token.
+- **Run queue**: Non-blocking event and Session advisory locks protect candidate rechecks and claim the earliest non-terminal Run whose Session has no earlier non-terminal Run. Claim writes instance ID, lease expiry, attempt, and a monotonic fencing token.
 - **Pi context**: stored as native Pi header + append-only entries (not flattened messages). New entries are staged `PENDING` for the current Run/attempt and promoted to `COMMITTED` in the Run's success transaction; failed/canceled attempts discard `PENDING`. The local JSONL is an attempt-private SDK working file, rebuilt from PostgreSQL via `SessionManager.open()` on every attempt and removed on disposal. It is never used as a cross-run cache.
 - **Recovery by `executionStage`** (`QUEUED` / Leader running / Connector waiting / Leader synthesizing) re-derives work from committed Pi context + persisted Delegation `externalRef`/cursor. The code paths exist; production sign-off still requires actually killing an instance in each stage and proving takeover (see `.dev/progress/CURRENT.md`).
 - **Compatibility note**: SQL upserts use an advisory-lock + update/insert pattern that works on both standard PostgreSQL and the local openGauss test env (which lacks `LISTEN` — tests set `DB_EVENT_LISTEN_ENABLED=false` and poll). Standard PostgreSQL keeps `LISTEN/NOTIFY` on by default.

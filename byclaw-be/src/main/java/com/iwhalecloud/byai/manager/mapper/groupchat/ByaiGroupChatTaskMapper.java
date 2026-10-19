@@ -13,9 +13,9 @@ import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 
 @Mapper
 public interface ByaiGroupChatTaskMapper extends BaseMapper<ByaiGroupChatTask> {
-    /** 与继续对话、取消及待发布替换共用任务行锁，避免上传期间内容发生变化。 */
+    /** 读取任务的最新状态，禁用缓存。方法名保留兼容，不附加查询锁。 */
     @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
-    @Select("SELECT * FROM byai_group_chat_task WHERE task_session_id = #{taskId} FOR UPDATE")
+    @Select("SELECT * FROM byai_group_chat_task WHERE task_session_id = #{taskId}")
     ByaiGroupChatTask selectForUpdate(@Param("taskId") Long taskId);
 
     List<ByaiGroupChatTask> selectByGroup(@Param("groupSessionId") Long groupSessionId);

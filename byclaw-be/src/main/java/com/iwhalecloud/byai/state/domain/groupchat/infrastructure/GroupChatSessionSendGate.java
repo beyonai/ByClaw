@@ -2,7 +2,6 @@ package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import javax.sql.DataSource;
 import org.springframework.stereotype.Component;
@@ -37,13 +36,12 @@ public class GroupChatSessionSendGate {
                 connection.rollback();
                 if (!"23505".equals(error.getSQLState())) throw error;
             }
+            // 互斥由显式写操作持有到租约释放，普通查询不再承担加锁职责。
             try (PreparedStatement lock = connection.prepareStatement(
-                "SELECT session_id FROM byai_group_chat_send_gate WHERE session_id = ? FOR UPDATE")) {
+                "UPDATE byai_group_chat_send_gate SET session_id = session_id WHERE session_id = ?")) {
                 lock.setLong(1, sessionId);
                 lock.setQueryTimeout(30);
-                try (ResultSet result = lock.executeQuery()) {
-                    if (!result.next()) throw new SQLException("Group send gate is missing");
-                }
+                if (lock.executeUpdate() != 1) throw new SQLException("Group send gate is missing");
             }
             return () -> {
                 try { connection.rollback(); }

@@ -42,7 +42,7 @@ class SqlMirrorTransaction implements MirrorTransaction {
     await this.db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`session:${sessionId}`]);
     const session = await first(
       this.db,
-      "SELECT enterprise_id FROM byai.byai_session WHERE session_id=$1 FOR UPDATE",
+      "SELECT enterprise_id FROM byai.byai_session WHERE session_id=$1",
       [sessionId],
     );
     if (!session) throw new DomainError("SESSION_NOT_COMMITTED");

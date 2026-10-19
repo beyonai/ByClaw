@@ -116,7 +116,7 @@ export async function saveExternalChild(context: CommandContext) {
   );
   const message = await first(
     db,
-    "SELECT * FROM byai.byai_message WHERE message_id=$1 AND enterprise_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_message WHERE message_id=$1 AND enterprise_id=$2",
     [messageId, command.enterpriseId],
   );
   if (

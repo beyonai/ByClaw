@@ -966,7 +966,7 @@ implements IngressSessionBindingRepository {
 }
 
 /**
- * `FOR UPDATE SKIP LOCKED` 领取全局工作；NOT EXISTS 保证只考虑同 Session 最早的非终态 Run。
+ * 通过非阻塞 advisory lock 领取全局工作；NOT EXISTS 保证只考虑同 Session 最早的非终态 Run。
  * lease upsert 每次接管递增 fencing_token，旧实例后续续约/释放都会失败。
  */
 export class PostgresRunExecutionQueue implements RunExecutionQueue {
@@ -1013,8 +1013,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         [CLAIMABLE_RUN_STATUSES, NON_TERMINAL_RUN_STATUSES],
       );
       for (const proposed of candidate.rows) {
-        // All execution writes take the event lock, then the Session lease lock, before
-        // row locks. Recheck the optimistic candidate only after holding both locks.
+        // Recheck the optimistic candidate after acquiring the event and Session lease advisory locks.
         if (!await tryAdvisoryLock(client, `byclaw-run-event:${proposed.id}`)) {
           continue;
         }
@@ -1040,8 +1039,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
                 SELECT 1 FROM ${table(this.schema, "session_execution_leases")} active
                  WHERE active.session_id = r.session_id
                    AND active.lease_expires_at > clock_timestamp()
-              )
-            FOR UPDATE OF r SKIP LOCKED`,
+              )`,
           [proposed.id, CLAIMABLE_RUN_STATUSES, NON_TERMINAL_RUN_STATUSES],
         );
         const row = selected.rows[0];
@@ -1174,7 +1172,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
       if (input.claim) {
         await assertLease(client, this.schema, input.claim);
       }
-      // settleWaitingCallback 也采用 event lock -> Delegation/Run row locks，顺序必须一致。
+      // 与 settleWaitingCallback 共用 event advisory lock，在事务内读取最新状态。
       const selected = await client.query<{
         delegation_status: string;
         run_status: Run["status"];
@@ -1185,8 +1183,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
                 r.version AS run_version, clock_timestamp() AS suspended_at
            FROM ${table(this.schema, "delegations")} d
            JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
-          WHERE d.id = $1 AND d.run_id = $2
-          FOR UPDATE OF d, r`,
+          WHERE d.id = $1 AND d.run_id = $2`,
         [input.delegationId, input.runId],
       );
       const row = selected.rows[0];
@@ -1264,8 +1261,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         left.run_id < right.run_id ? -1 : left.run_id > right.run_id ? 1 : 0,
       );
       for (const candidateRef of orderedRefs) {
-        // Resume/suspend/timeout 统一使用 event lock -> Delegation/Run row locks。
-        // 先无锁找候选，再在锁内重查，避免旧实现 row lock -> event lock 的死锁窗口。
+        // Resume/suspend/timeout 共用 event advisory lock，先找候选，再在锁内重查。
         await lockRunEventSequence(client, candidateRef.run_id);
         const selected = await client.query<{
           delegation_id: string;
@@ -1285,8 +1281,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
             AND d.callback_deadline_at IS NOT NULL
             AND d.callback_deadline_at <= clock_timestamp()
             AND r.status = 'WAITING_AGENT'
-            AND r.execution_stage = 'CONNECTOR_WAITING'
-          FOR UPDATE OF d, r`,
+            AND r.execution_stage = 'CONNECTOR_WAITING'`,
           [candidateRef.delegation_id, candidateRef.run_id],
         );
         const candidate = selected.rows[0];
@@ -1417,8 +1412,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
            FROM ${table(this.schema, "delegations")} d
            JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
           WHERE d.id = $1
-            AND d.run_id = $2
-          FOR UPDATE OF d, r`,
+            AND d.run_id = $2`,
         [input.delegationId, locatedRunId],
       );
       const row = selected.rows[0];
@@ -1548,21 +1542,25 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
             AND (o.claim_expires_at IS NULL OR o.claim_expires_at <= clock_timestamp())
             AND r.status IN ('COMPLETED', 'FAILED', 'CANCELLED')
           ORDER BY o.created_at, o.run_id
-          FOR UPDATE OF o SKIP LOCKED
           LIMIT $1`,
         [input.limit],
       );
       const deliveries: CallbackTimeoutDelivery[] = [];
       for (const row of selected.rows) {
-        await client.query(
+        const claimed = await client.query(
           `UPDATE ${table(this.schema, "callback_timeout_outbox")}
               SET claimed_by = $2,
                   claim_expires_at = clock_timestamp() + ($3 * interval '1 millisecond'),
                   attempt_count = attempt_count + 1,
                   updated_at = clock_timestamp()
-            WHERE run_id = $1`,
+            WHERE run_id = $1
+              AND delivered_at IS NULL
+              AND (claim_expires_at IS NULL OR claim_expires_at <= clock_timestamp())`,
           [row.run_id, input.instanceId, input.leaseMs],
         );
+        if (claimed.rowCount !== 1) {
+          continue;
+        }
         const hasAnyExternalRoute = Boolean(
           row.external_session_id || row.trace_id || row.parent_message_id,
         );
@@ -2193,11 +2191,11 @@ async function lockSessionRevision(
   schema: string,
   sessionId: string,
 ): Promise<number> {
+  await advisoryLock(client, `context:${sessionId}`);
   const result = await client.query<{ context_revision: number | string }>(
     `SELECT context_revision
        FROM ${table(schema, "sessions")}
-      WHERE id = $1
-      FOR UPDATE`,
+      WHERE id = $1`,
     [sessionId],
   );
   if (!result.rows[0]) {
@@ -2766,8 +2764,7 @@ async function assertLease(
         AND l.owner_instance_id = $3
         AND l.fencing_token = $4
         AND l.attempt_no = $5
-        AND l.lease_expires_at > clock_timestamp()
-      FOR UPDATE OF l`,
+        AND l.lease_expires_at > clock_timestamp()`,
     [
       claim.sessionId,
       claim.runId,

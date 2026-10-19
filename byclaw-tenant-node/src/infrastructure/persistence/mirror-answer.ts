@@ -15,7 +15,7 @@ export class MirrorAnswerWriter {
   async answer(event: MirrorEnvelope): Promise<AnswerState | null> {
     const row = await first(
       this.db,
-      "SELECT * FROM byai.byai_message WHERE message_id=$1 AND enterprise_id=$2 FOR UPDATE",
+      "SELECT * FROM byai.byai_message WHERE message_id=$1 AND enterprise_id=$2",
       [event.answerMessageId, this.enterpriseId],
     );
     if (!row) return null;

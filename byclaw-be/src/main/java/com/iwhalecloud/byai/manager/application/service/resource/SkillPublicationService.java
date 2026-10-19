@@ -99,7 +99,7 @@ public class SkillPublicationService {
             .eq(PrivilegeGrant::getGrantToObjType, "USER")
             .eq(PrivilegeGrant::getGrantToType, "RED")
             .eq(PrivilegeGrant::getOperType, "READ")
-            .eq(PrivilegeGrant::getStatusCd, "P").last("FOR UPDATE"));
+            .eq(PrivilegeGrant::getStatusCd, "P"));
         if (request == null) {
             throw new IllegalArgumentException(I18nUtil.get("skill.publication.review.processed"));
         }

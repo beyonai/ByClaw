@@ -345,3 +345,7 @@ BE 每 5 分钟核对已开通租户的权威配置，在租约剩余不足 12 �
 退群和管理移除同样在成员变更事务内保存 `MEMBER_LEFT` / `MEMBER_REMOVED` 系统消息与姓名快照；BE 使用操作前成员列表广播 `MEMBER_REMOVED` 和 `MESSAGE_CREATED`，离开者不需要再通过操作后的群读取权限。目标已不存在时不重复写提示。
 
 群消息文件接口 `GET /internal/v1/group-chats/{id}/files` 仅返回可见消息的 `related_resources.files`，不读取或返回 `metadata.files`。文件按消息时间倒序分页，同一消息内保持有效附件顺序；时间线仍展示已发布任务结果的附件。
+
+## 查询 SQL 的并发约定
+
+持久化查询不附加 `FOR UPDATE`；候选任务查询也不再接受加锁开关。命令和镜像写入继续使用既有会话 advisory lock、事务和条件更新，调用方不能将普通 SELECT 当作行锁。

@@ -8,7 +8,7 @@ export async function cancelTask(context: CommandContext) {
   const { db, command } = context;
   const task = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2",
     [requireId(command.payload.taskSessionId), command.sessionId],
   );
   if (!task) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
@@ -31,14 +31,14 @@ export async function checkpointPublication(context: CommandContext) {
   const taskId = requireId(p.taskSessionId);
   const task = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2",
     [taskId, command.sessionId],
   );
   if (!task || task.initiatorUserId !== command.userId || task.status !== "ACTIVE")
     throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
   const pending = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1",
     [taskId],
   );
   if (!pending || pending.pendingPublicationId !== requireId(p.pendingPublicationId))

@@ -166,10 +166,10 @@ public class SsResourceService {
         skillImportLockService.acquire(resourceCode);
     }
 
-    /** 生命周期事务先锁定资源，防止并发上架覆盖已经提交的注销状态。 */
+    /** 生命周期事务读取当前资源。方法名保留兼容，不附加查询锁。 */
     public SsResource findByIdForUpdate(Long resourceId) {
         return ssResourceMapper.selectOne(new LambdaQueryWrapper<SsResource>()
-            .eq(SsResource::getResourceId, resourceId).last("FOR UPDATE"));
+            .eq(SsResource::getResourceId, resourceId));
     }
 
     /**

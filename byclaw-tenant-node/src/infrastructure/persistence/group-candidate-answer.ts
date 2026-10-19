@@ -14,7 +14,7 @@ export async function projectGroupCandidateAnswer(
   event: MirrorEnvelope,
   answer: AnswerState,
 ): Promise<boolean> {
-  const candidate = await readGroupCandidate(db, event.sessionId, true);
+  const candidate = await readGroupCandidate(db, event.sessionId);
   if (!candidate) return false;
   if (
     candidate.disposition === "TASK" &&

@@ -39,7 +39,7 @@ public interface ResourceSyncScopeMapper {
 
     @Select("""
         SELECT default_dig_employee_id FROM byai.suas_superassist
-        WHERE create_user = #{userId} AND status = '00' FOR UPDATE
+        WHERE create_user = #{userId} AND status = '00'
         """)
     List<Long> defaultEmployeesForUpdate(@Param("userId") Long userId);
 

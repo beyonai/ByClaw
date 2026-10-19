@@ -98,11 +98,11 @@ class SsResourceServiceTest {
     }
 
     @Test
-    void lifecycleReadLocksTheRequestedResource() {
+    void lifecycleReadFiltersTheRequestedResourceWithoutQueryLock() {
         service.findByIdForUpdate(100L);
         ArgumentCaptor<LambdaQueryWrapper<SsResource>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(ssResourceMapper).selectOne(captor.capture());
-        assertThat(captor.getValue().getSqlSegment()).contains("resource_id", "FOR UPDATE");
+        assertThat(captor.getValue().getSqlSegment()).contains("resource_id").doesNotContainIgnoringCase("FOR UPDATE");
         assertThat(captor.getValue().getParamNameValuePairs().values()).containsExactly(100L);
     }
 

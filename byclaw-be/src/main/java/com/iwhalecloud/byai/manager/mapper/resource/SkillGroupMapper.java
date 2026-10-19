@@ -14,8 +14,8 @@ import org.apache.ibatis.annotations.Param;
 public interface SkillGroupMapper {
 
     /**
-     * Locks one tenant-owned skill-group row for update. Task 5 install/uninstall operations must acquire this same
-     * database row lock before reading or changing installed group sources.
+     * Reads one tenant-owned skill-group row. The legacy method name is retained for compatibility;
+     * this query does not acquire a row lock.
      *
      * @param groupId skill-group resource ID
      * @param comAcctId current tenant ID
